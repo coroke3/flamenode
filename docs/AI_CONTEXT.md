@@ -129,11 +129,13 @@ Loading/error/empty/forbidden/pending/degraded/retry/query/history/responsive/a1
 
 詳細は `docs/migration/AGENT_PROTOCOL.md`。
 
-- 1 iteration = 1 MIG task
+Checkpoint policy: WORK_ITEM_ONLY
+
+- 1 wake = `AGENT_PROTOCOL.md` のWake decisionが選んだ1 action（1 micro-unit / merge統合 / 独立レビュー / 何もしない）
 - 1 task = 1 short-lived branch = 1 PR = 1 squash mergeを原則にする
-- live claim/owner/checkpointはowner PR branchの `work-items/MIG-XXXX.md` に記録（STATUSは実装中に更新しない）
-- 終了はDONE/REVIEW/BLOCKED（work-itemに証跡を残す）
-- work-item・inventory/matrix更新なしで次へ進まない（STATUSはpre-merge integrationでのみ更新）
+- writerのlive claim/owner/checkpointはowner PR branchの `work-items/MIG-XXXX.md` に記録（STATUSは実装中に更新しない）。同じowner PRを次wakeで再開し、再claimしない
+- 終了はIN_PROGRESS/REVIEW/BLOCKED/DONE。unitが残る正常な途中経過はIN_PROGRESS、全unit合格後はREVIEW、DONEは必要なレビュー/CIを満たしたmerge統合時だけ
+- writerはwork-item・該当inventory/matrixと実検証の証跡を更新。reviewerはPRコメントだけを残し、他ownerのwork-itemを編集しない（STATUSはpre-merge integrationでのみ更新）
 - Phase Gateを自動承認しない
 - production操作が必要なら停止
 - Git運用は `docs/migration/GIT_WORKFLOW.md`

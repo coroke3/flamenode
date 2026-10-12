@@ -42,6 +42,8 @@ const ACTIVE = new Set(["READY", "IN_PROGRESS", "REVIEW", "DONE"]);
 const STATES = new Set(["READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "SKIPPED"]);
 
 export const CHECKPOINT_POLICY_FILES = Object.freeze([
+  "docs/AI_CONTEXT.md",
+  "docs/migration/IMPLEMENTATION_RUNBOOK.md",
   "docs/migration/AGENT_PROTOCOL.md",
   ".claude/skills/flamenode-migration/SKILL.md",
   ".claude/loop.md",
@@ -58,6 +60,13 @@ export function validateCheckpointPolicy(documents) {
   for (const [file, text] of Object.entries(documents)) {
     if (!text.includes("Checkpoint policy: WORK_ITEM_ONLY")) errors.push(file + ": missing work-item checkpoint policy");
     if (!text.includes("work-item") && !text.includes("work-items/")) errors.push(file + ": missing live checkpoint source");
+    // Report templates must not force unfinished, healthy work into REVIEW or BLOCKED.
+    for (const match of text.matchAll(/(?:^(?:State|Status):\s*|終了は)([A-Z_]+(?:\s*[|/]\s*[A-Z_]+)+)/gm)) {
+      const choices = new Set(match[1].split(/[|/]/).map(state => state.trim()));
+      if (choices.has("REVIEW") && choices.has("BLOCKED") && !choices.has("IN_PROGRESS")) {
+        errors.push(file + ": wake report state choices missing IN_PROGRESS");
+      }
+    }
     for (const pattern of [
       /`?STATUS\.md`?が唯一のtask進捗正本/,
       /branch\s+`?STATUS(?:\.md)?`?のcheckpoint/,

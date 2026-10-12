@@ -54,7 +54,7 @@ export function validateTaskCards({status, fileContents, runbook, protocol, deci
   for (const [id] of cards) {
     if(!tasks.has(id)) errors.push(id + ": card has no STATUS task (register dependency and status first)");
   }
-  if (!runbook?.includes("1 wake = 1 task")) errors.push("runbook: one-wake-one-task execution contract missing");
+  if (!/1 wake = 1 (?:task|action)\b/.test(runbook || "")) errors.push("runbook: one-wake-one-action execution contract missing");
   if (!protocol?.includes("IMPLEMENTATION_RUNBOOK.md")) errors.push("AGENT_PROTOCOL: IMPLEMENTATION_RUNBOOK.md not in mandatory read order");
   if (!protocol?.includes("TASK_CARDS_")) errors.push("AGENT_PROTOCOL: task cards not referenced");
   if(!decisions?.includes("MIG-0308") || !tasks.has("MIG-0308")) errors.push("D-01 packages/db migration task missing");

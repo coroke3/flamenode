@@ -12,4 +12,4 @@ Use the Codex host's supported repetition feature if available; otherwise a user
 
 Invoke `.codex/skills/flamenode-migration/SKILL.md` and obey `docs/migration/AGENT_PROTOCOL.md` § `/loop` / continuous execution (Wake decision, Independent review evidence, Pacing). 1 invocation = at most one action: one micro-unit of an owned MIG task, one merge integration, one independent review of another agent's PR, or nothing.
 
-Every wake updates the owner PR's `work-items/MIG-XXXX.md`; STATUS is merged-only. Without a real host repetition mechanism, end after one wake.
+Writer wakes update only their own PR's `work-items/MIG-XXXX.md`; STATUS is merged-only. Review-only wakes leave evidence in the reviewed PR without branch/checkpoint edits. Wait/no-action wakes report the gate without a checkpoint-only push. Without a real host repetition mechanism, end after one wake.

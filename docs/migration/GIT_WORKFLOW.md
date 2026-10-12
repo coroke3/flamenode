@@ -264,7 +264,7 @@ Rules:
 - An agent must not be the only reviewer of its own migration PR.
 - Claude, Codex, and Antigravity may rotate Builder/Reviewer roles.
 - Review findings are written to the PR/repository, not left only in chat.
-- The reviewer checks CURRENT parity, not only code style. **Review must come from a separate reviewer identity/process**; builder's self-review/CIだけで独立レビューと称しない。レビュー対象のcommit SHAを記録し、レビュー後に変更した場合は再レビューとCIを要求する。
+- The reviewer checks CURRENT parity, not only code style. Independent reviewer eligibility follows [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) §Independent review evidence (a different agent family or a human); builder's self-review/same-family subagent/CIだけで独立レビューと称しない。レビュー対象のcommit SHAを記録し、レビュー後に変更した場合は再レビューとCIを要求する。
 
 ### High-risk two/three-party rule
 

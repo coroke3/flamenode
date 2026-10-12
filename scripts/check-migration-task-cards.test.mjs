@@ -44,6 +44,11 @@ test("small-model work card contract accepts complete fixtures", () => {
   assert.deepEqual(validateTaskCards(base),[]);
 });
 
+test("one wake permits one action and still rejects an unbounded work cycle", () => {
+  assert.deepEqual(validateTaskCards({...base,runbook:base.runbook.replace("1 task", "1 action")}),[]);
+  assert.match(validateTaskCards({...base,runbook:base.runbook.replace("1 task", "2 actions")}).join(" "), /one-wake/);
+});
+
 test("missing task, duplicate task, orphan task all fail", () => {
   const missing={...cards, "docs/migration/TASK_CARDS_2_3.md":cards["docs/migration/TASK_CARDS_2_3.md"].replace(/### MIG-0308[\s\S]*/,"")};
   assert.match(validateTaskCards({...base,fileContents:missing}).join(" "),/MIG-0308: STATUS task without executable/);

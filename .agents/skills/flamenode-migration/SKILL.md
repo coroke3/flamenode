@@ -32,10 +32,10 @@ Mandatory concepts:
 
 毎回まず `docs/migration/FEATURE_CATALOG.md` で対象機能と隣接機能を確認する。
 
-Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
+Follow AGENT_PROTOCOL's Wake decision: resume your own PR, perform one eligible independent review, claim at most one unowned dependency-ready MIG / bounded micro-unit, or stop. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
 
 Do not remove or change user-visible behavior merely to simplify the backend. Do not optimize for line count. Prefer explicit, readable, framework-neutral domain code and well-defined permission/transaction/side-effect boundaries.
 
-Checkpoint policy: WORK_ITEM_ONLY. Checkpoint the task-specific work-item every wake. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI. Update affected ledgers/matrices and real validation evidence.
+Checkpoint policy: WORK_ITEM_ONLY. Writer wakes checkpoint only their own task-specific work-item, affected ledgers/matrices and real validation evidence. Review-only wakes leave evidence in the reviewed PR without branch/checkpoint edits; wait/no-action wakes report the gate without a checkpoint-only push. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI.
 
 Never auto-cross Phase Gates or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.

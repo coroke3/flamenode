@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "AGENTS.md"
+      - "CLAUDE.md"
+      - "docs/AI_CONTEXT.md"
       - "docs/migration/**"
       - "scripts/check-migration*.mjs"
       - "scripts/print-migration-task-context*.mjs"
