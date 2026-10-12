@@ -9,7 +9,7 @@ test("MIG-0401 packet shows READY, direct dependency and no unrelated cards",()=
  assert.match(r.output,/MIG-0105:DONE/);
  assert.match(r.output,/public snapshot loader PoC/);
  assert.doesNotMatch(r.output,/### MIG-0405/);
- assert.doesNotMatch(r.output,/^\\| D-08 \\|/m);
+ assert.doesNotMatch(r.output,/^\| D-08 \|/m);
  assert.match(r.output,/D-08 visual HTML remains a gate for later visual work/);
  assert.ok(r.chars<12000,"single PoC context should be compact");
 });
