@@ -241,7 +241,6 @@
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
 
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
-| `scripts/migration-public-snapshot.test.mjs` | TEST | synthetic public/private/stale/broken snapshot regression for loader | MIG-0401 | SAME (Node strip-types test) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 
 ## Future files requiring source/target registration
 
