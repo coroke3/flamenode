@@ -1,13 +1,16 @@
 # FlameNode 要求カバレッジマップ
 
-> Status: Active
+> Status: Historical
 > Last verified: 2026-07-21
 > Verified against commit: `47e6cee`
-> Source of truth: `設計/`, `src/lib/db/schema.ts`, `docs/implementation-backlog.md`
+> Snapshot sources: `設計/`, `src/lib/db/schema.ts`, `docs/implementation-backlog.md`
+> Current requirements: `docs/migration/PRODUCT_REQUIREMENTS.md` and CURRENT code/test/config
 
 このファイルは `flamenode_revision_instructions_answered.md` の内容を、Claude Codeが実装時に照合しやすい形へ変換した要求マップである。
 
-## 現行統合状況
+2026-07-21時点の旧キャンペーン資料として保存する。以下の統合状況・未実施作業・モデル指定は当時の記録であり、現在の移行手順や本番操作の許可ではない。CURRENTとの差分は`docs/migration/PRODUCT_REQUIREMENTS.md`で照合する。
+
+## 2026-07-21時点の統合状況
 
 - 01〜07 統合仕様の schema、認証・権限、原子性、監査・復元、owner 保護、Cloudflare Workers / OpenNext / Workers Builds、主要 UX、文書検査はコードへ反映済み。
 - この表はプロダクト要求の判断根拠であり、各行を一律に「実装済み」と宣言する一覧ではない。保留中のプロダクト判断と将来拡張はそのまま明示する。
