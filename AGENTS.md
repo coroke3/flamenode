@@ -26,7 +26,7 @@ Do not bulk-load the repository, Historical/archive material, completed migratio
 
 Migration work must distinguish **CURRENT** production behavior from **TARGET** architecture.
 
-`docs/design-redesign/` is obsolete and must not be used. New visual design remains pending until the user supplies an HTML mock and it is registered in `docs/migration/UI_REFERENCE.md`.
+`docs/design-redesign/` is obsolete and must not be used. The registered HTML mock in `docs/migration/UI_REFERENCE.md` (`docs/migration/mock/`) is the authoritative visual design source (D-08 DECIDED).
 
 ## Sources of truth
 
@@ -128,13 +128,9 @@ Visual completion alone is never functional completion.
 
 `docs/design-redesign/` is not a valid source and is removed from the migration workflow.
 
-Until `docs/migration/UI_REFERENCE.md` changes from `PENDING_HTML`:
+The approved HTML mock is registered in `docs/migration/UI_REFERENCE.md` (`REGISTERED_HTML`) and mapped to CURRENT routes and `UX-*` capabilities.
 
-- do not infer the target visual design from `app/(redesign)`
-- do not finalize a new visual hierarchy on your own
-- continue CURRENT route/UX/requirement auditing
-
-After the user supplies an HTML mock, register it in `UI_REFERENCE.md` and map it to CURRENT routes and `UX-*` capabilities.
+Do not infer the target visual design from `app/(redesign)`.
 
 The HTML mock governs visual/IA intent only. It does not by itself override permissions, business rules, visibility, data ownership, API semantics, audit, notifications, retry/idempotency, URL compatibility, or destructive-operation semantics.
 
