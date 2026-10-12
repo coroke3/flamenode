@@ -26,6 +26,20 @@ export function gitCommitExists(root, value) {
   }
 }
 
+// Squash merges do not retain every source commit in main's ancestry.
+// Network access is explicit; ordinary validation remains local/offline.
+export function fetchMissingSourceHistory(root, entries) {
+  const fetched = new Set();
+  for (const body of Object.values(entries)) {
+    const head = body.match(/^Head:\s*([0-9a-f]{40})\s*$/m)?.[1];
+    const pr = body.match(/^PR:\s*#(\d+)\s*$/m)?.[1];
+    if (!head || !pr || gitCommitExists(root, head) || fetched.has(pr)) continue;
+    execFileSync("git", ["fetch", "--no-tags", "origin", "refs/pull/" + pr + "/head"], { cwd: root, stdio: "ignore" });
+    fetched.add(pr);
+  }
+  return [...fetched];
+}
+
 export function validateWorkItems({statusText,entries,commitExists}) {
   const errors=[], ids=new Set([...statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map(m=>m[1])), claimed=new Map(), prs=new Map(), branches=new Map();
   for(const [filename,body] of Object.entries(entries)) {
@@ -46,7 +60,7 @@ export function validateWorkItems({statusText,entries,commitExists}) {
       if(!new RegExp("^migration/"+id.toLowerCase()+"-[a-z0-9][a-z0-9-]*$").test(map.Branch||""))errors.push(filename+": invalid task branch");
       if(!/^#\d+$/.test(map.PR||""))errors.push(filename+": invalid real PR number");
       if(!sha.test(map.Head||""))errors.push(filename+": missing previous source SHA");
-      else if(commitExists && !commitExists(map.Head))errors.push(filename+": source SHA is not an available Git commit (fetch full history): "+map.Head);
+      else if(commitExists && !commitExists(map.Head))errors.push(filename+": source SHA is not an available Git commit: "+map.Head+"; fetch full history / node scripts/check-migration-work-items.mjs --fetch-pr-history");
       if(!map["Owned paths"]||map["Owned paths"]==="none")errors.push(filename+": missing owned paths");
       if(!map["Current unit"]||map["Current unit"]==="none")errors.push(filename+": missing micro-unit");
       for(const [label,value,seen] of [["PR",map.PR,prs],["Branch",map.Branch,branches]]) {
@@ -68,7 +82,12 @@ export function validateWorkItems({statusText,entries,commitExists}) {
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
   const statusText=fs.readFileSync(path.join(root,"docs/migration/STATUS.md"),"utf8"),entries=readWorkItems(root);
-  const errors=validateWorkItems({statusText,entries,commitExists: value => gitCommitExists(root,value)});
+  const errors=validateWorkItems({statusText,entries});
+  if(!errors.length && process.argv.includes("--fetch-pr-history")) {
+    try { fetchMissingSourceHistory(root,entries); }
+    catch { errors.push("could not fetch required PR history from origin; verify repository access and recorded PR numbers"); }
+  }
+  errors.push(...validateWorkItems({statusText,entries,commitExists: value => gitCommitExists(root,value)}).filter(error=>!errors.includes(error)));
   if(errors.length){errors.forEach(x=>console.error("[migration:work-items] "+x));process.exitCode=1;}
   else{
     console.log("[migration:work-items] OK: "+Object.keys(entries).length+" checkpoints");

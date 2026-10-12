@@ -38,4 +38,6 @@ Timestamp, actual tested commit/commands/results, blockers, handoff.
 
 For `READY` (unclaimed), Owner/Branch/PR/Head/Owned paths/Current unit may be `none`. Never invent a future SHA/PR/CI result. `Head` is the last real source commit **before** the checkpoint commit, not the self-referential commit SHA.
 
-`node scripts/check-migration-work-items.mjs` validates local checkpoint structure and duplicate declared ownership. It cannot inspect remote PRs, CI or reviews.
+`node scripts/check-migration-work-items.mjs` validates local checkpoint structure, duplicate declared ownership and source commit existence. Normal validation is offline and does not inspect live PR state, CI or reviews.
+
+Squash merge後の新しいcloneには元PRのsource commitが含まれない場合がある。full historyを取得してもHeadが見つからない場合、`node scripts/check-migration-work-items.mjs --fetch-pr-history`で記録済みPRの不足する`refs/pull/<number>/head`だけをoriginから取得し、再検証する。CIも文書チェック前にこの手順を行う。履歴取得は本番変更を行わず、取得後もSHAが実在しなければ失敗する。取得成功だけでレビュー/CI完了とは判断しない。
