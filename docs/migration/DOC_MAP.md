@@ -1,9 +1,9 @@
 # FlameNode Migration Documentation Map
 
 > Status: Active / source-of-truth map
-> Last verified: 2026-10-07
+> Last verified: 2026-10-09
 
-移行で同じ仕様を複数Markdownへ複製しないための正本マップ。
+移行で同じ仕様を複数Markdownへ複製しないための正本マップ。**全表を毎回読むためのリストではない**。実装時の対象MIGと参照範囲は[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)を利用する。
 
 ## Canonical sources
 
@@ -13,6 +13,10 @@
 | task routing | `docs/AI_CONTEXT.md` |
 | migration architecture / invariants / phases | `docs/migration/README.md` |
 | cross-agent execution / loop semantics | `docs/migration/AGENT_PROTOCOL.md` |
+| **small-context one-task entry** | `docs/migration/MIGRATION_START_HERE.md` |
+| 1102 performance work order and dual-track Gate | `docs/migration/PERFORMANCE_IMPLEMENTATION_PLAN.md` |
+| normalized route hot-path CPU evidence and migration owner | `docs/migration/PERF_HOTPATH_MATRIX.md` |
+| document volume / sufficiency audit | `docs/migration/DOC_CONTEXT_AUDIT.md` |
 | small-model single-task procedures | `docs/migration/IMPLEMENTATION_RUNBOOK.md` |
 | large task resumable micro-unit work packet and PR checkpoints | `docs/migration/TASK_MICRO_UNITS.md` |
 | per-file source/target progress and ownership | `docs/migration/FILE_MIGRATION_MATRIX.md` |
@@ -24,7 +28,7 @@
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
 | current phase / merged task / dependency state | `docs/migration/STATUS.md` |
-| active PR owner / per-wake checkpoints | `docs/migration/work-items/MIG-XXXX.md`（format: `work-items/README.md`） |
+| active owner / per-wake checkpoint on task PR | `docs/migration/work-items/MIG-XXXX.md`（format: `work-items/README.md`） |
 | CURRENT page route実装・分類 | `docs/migration/CURRENT_ROUTES.md` |
 | 既存機能の全件一覧（人間向け派生ビュー） | `docs/migration/FEATURE_CATALOG.md` |
 | frontend observable capabilities | `docs/migration/FRONTEND_FEATURES.md` + `docs/migration/frontend/*.md` |
@@ -83,7 +87,7 @@
 - `auth/README.md` owns CURRENT Auth.js/session/linking/terms/Active X/event-video authorization/owner-invariant semantics.
 - `background-jobs/README.md` owns CURRENT Queue doorbell/Cron/D1 work-state/retry/DLQ/recovery/idempotency/async-state semantics.
 - `CODE_QUALITY.md` owns implementation quality standards.
-- `STATUS.md` is the only **merged** task/Phase/dependency source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`. Live per-wake ownership is isolated in the task PR's `work-items/MIG-XXXX.md` and does not substitute for the merged graph.
+- `STATUS.md` is the only **merged** task/Phase/dependency source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`. In-flight task checkpoints are isolated in the owner PR's `work-items/MIG-XXXX.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
 - Do not duplicate exact schema columns, binding IDs, API fields, or long command lists across docs.
 - If migration changes CURRENT production behavior, update the relevant Active CURRENT document in the same change before task DONE.

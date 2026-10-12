@@ -1,7 +1,7 @@
 # FlameNode Migration Agent Protocol
 
 > Status: Active / mandatory execution contract
-> Last verified: 2026-10-12
+> Last verified: 2026-10-09
 > Applies to: Claude Code / OpenAI Codex / Google Antigravity / generic coding agents
 
 ツール固有command/skill/workflowは薄いadapterであり、この文書が共通実行契約。
@@ -18,7 +18,7 @@
 ### OpenAI Codex
 
 `.codex/skills/flamenode-migration/SKILL.md` を利用する。
-継続実行では`STATUS.md`をmainにmerge済みのtask/Phase/依存関係正本、open PR branchの`work-items/MIG-XXXX.md`を作業中のcheckpoint正本として扱う。
+継続実行でもrepositoryの`STATUS.md`を進捗正本にする。
 
 ### Google Antigravity
 
@@ -38,30 +38,16 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 ---
 
-# Mandatory read order
+# Per-wake required read contract (targeted, not full-file bulk import)
 
-毎iteration:
+1. Read root `AGENTS.md` scope and [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md) and use `npm run migration:next` for an advisory READY selection. The quick entry is an **index**, not a replacement for this protocol or `GIT_WORKFLOW.md`.
+2. Read **the one relevant MIG row and its dependency rows** in `STATUS.md`, the related `OPEN_DECISIONS.md` decision, the `IMPLEMENTATION_RUNBOOK.md` current-workflow section, and **one** corresponding `TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` `### MIG-XXXX` block. Check owner PR before claiming.
+3. Filter `FILE_MIGRATION_MATRIX.md` to **owned source/target rows**, then consult relevant `FILE_PROGRESS_PROTOCOL.md` state transitions and `TASK_MICRO_UNITS.md` (large tasks only). Open CURRENT code and tests before writing.
+4. Read only the necessary **portions** of `CURRENT_ROUTES.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `PRODUCT_REQUIREMENTS.md`, `CODE_QUALITY.md`, `ROUTE_MATRIX.md` or `API_MATRIX.md`. Use `GIT_WORKFLOW.md` for PR/merge/approval stages and `UI_REFERENCE.md` when work is visual.
+5. Subsystem baselines **only when touched**: `server-actions/README.md` (SA), `route-handlers/README.md` (RH), `cloudflare/TOPOLOGY.md` (deployment), `cloudflare/PERFORMANCE_BASELINE.md` + `PERF_HOTPATH_MATRIX.md` (1102), `static-delivery/README.md` (public), `auth/README.md` (security), `background-jobs/README.md` (Queue), `screen-mapping/README.md` (UI parity).
+6. Full `README.md`, `FEATURE_CATALOG.md` and `BACKEND_OPTIMIZATION.md` are **on-demand references**, not full-file mandatory context for every wake. Read `DOC_MAP.md` only if source-of-truth ownership is unclear.
 
-1. `AGENTS.md`
-2. `docs/AI_CONTEXT.md` のmigration entry
-3. `docs/migration/STATUS.md`（main） + open migration PR + 該当PR branchの`docs/migration/work-items/MIG-XXXX.md`
-3a. `docs/migration/OPEN_DECISIONS.md`（対象taskに紐づくDecision状態を必ず確認）
-3b. **`docs/migration/IMPLEMENTATION_RUNBOOK.md`**（Luna/Haiku含む全agent必読）
-3b1. **`docs/migration/FILE_PROGRESS_PROTOCOL.md` と `FILE_MIGRATION_MATRIX.md` の現在のMIGに属するファイル行だけ**（source→target→consumerと各ファイル状態を記録する）
-3c. **`docs/migration/TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` の該当MIG 1件だけ**。大型MIGは `docs/migration/TASK_MICRO_UNITS.md` の該当micro-unitだけ読む。全55件を一度に読み込まない
-4. `docs/migration/GIT_WORKFLOW.md`
-5. `docs/migration/README.md`
-6. `docs/migration/FEATURE_CATALOG.md` — **対象IDの行だけ**確認（432 UX / 136 FN を一度に読む必要はない）
-7. `docs/migration/PRODUCT_REQUIREMENTS.md` の**対象要件節のみ**
-8. `docs/migration/CODE_QUALITY.md` の該当規約
-9. task scopeに応じて:
-   - route/UI/frontend → `CURRENT_ROUTES.md` + `FRONTEND_FEATURES.md` +対象`frontend/*.md` + `screen-mapping/README.md`
-   - backend/domain/action/API/job → `FUNCTION_INVENTORY.md` +対象`functions/*.md` + `BACKEND_OPTIMIZATION.md`; Server Actionを触る場合は `server-actions/README.md`; Route Handler/APIを触る場合は `route-handlers/README.md`; Cloudflare Worker/ingress/binding/build/job topologyを触る場合は `cloudflare/TOPOLOGY.md`; CPU/1102/request hot-path/PoC performanceを触る場合は `cloudflare/PERFORMANCE_BASELINE.md`; static artifact/alias/visibility/fallback/repairを触る場合は `static-delivery/README.md`; auth/session/linking/terms/Active X/permission/owner invariantを触る場合は `auth/README.md`; Queue/Cron/background job/retry/DLQ/recoveryを触る場合は `background-jobs/README.md`
-   - visual/UI design → `UI_REFERENCE.md`
-10. 必要な`ROUTE_MATRIX.md` / `API_MATRIX.md`
-11. 対象CURRENT code + tests + config
-
-正本の所在が不明な時だけ`DOC_MAP.md`を読む。
+**Independent tracks:** MIG-0401→0404→0405→0406 (performance PoC, no D-08 HTML) and MIG-0301 (domain extraction) can be claimed by distinct owners/PRs. MIG-0402/0403 (visual) still wait for D-08. MIG-0407 waits for 0403 **and** 0406; production is separately approved. See `PERFORMANCE_IMPLEMENTATION_PLAN.md`.
 
 ## Context minimization
 
@@ -301,20 +287,19 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 # Progress persistence
 
-`STATUS.md`はmerge済みtask/dependency/Phaseの正本。各wakeの実行状態はtask固有`work-items/MIG-XXXX.md`とopen PRへ記録し、実装途中にSTATUSを編集しない。
+`STATUS.md`が唯一のtask進捗正本。
 
 終了時は単一wakeの作業結果を必ずPRへ保存する。
 
 - 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
 - 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
-- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `work-items/MIG-XXXX.md`に `IN_PROGRESS`、owner、実行済みunit、テスト、次unit、PR link、実在する直前のsource Head SHAを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYは変えない。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `STATUS.md`に `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、HEADを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYを勝手に変更しない。
 
 何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
 必要に応じて同じPRで更新:
 
-- `work-items/MIG-XXXX.md`（毎wake）
-- `STATUS.md`（レビュー・CI後、merge直前に最新mainとの整合を確認した場合のみ）
+- `STATUS.md`
 - `CURRENT_ROUTES.md`
 - `FRONTEND_FEATURES.md` / `frontend/*.md`
 - `FUNCTION_INVENTORY.md` / `functions/*.md`
@@ -323,7 +308,7 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-通常taskは独立review後、work-itemのDONE証拠とSTATUSの当該task DONE + 依存解消した次task READYを最新mainに合わせて同じPRへ記録し、CI/必要な承認後にsquash mergeする。
+通常taskはtask DONE + next dependency-ready task READYまで同じPRへ記録してsquash mergeする。
 
 ---
 
@@ -334,7 +319,7 @@ repository/PRだけを共有状態の正本にする。
 - 1 task = 1 writer
 - Claude/Codex/Antigravityを同じtaskへ同時writerにしない
 - 他agentはreview/audit/test analysisへ回す
-- 同一work-item/台帳行/core permission/auth/schemaの同時編集を避ける。STATUSはmerge直前の統合時だけ編集する
+- STATUS/同一ledger行/core permission/auth/schemaの同時編集を避ける
 
 Handoffはrepoへ残す:
 
@@ -363,7 +348,7 @@ LOOP:
   implement or audit
   optimize only within preservation contract
   validate code quality + behavior
-  persist task-specific work-item + touched ledgers/matrices; STATUS only at integration
+  persist STATUS + ledgers/matrices
   evaluate stop conditions
 ```
 
@@ -467,7 +452,7 @@ Next:
 
 # Resumable loop / PR lifecycle contract（2026-10-09追補）
 
-1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch work-item checkpointのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch work-item checkpointを優先し、新しいtask/PRを生成しない。
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch STATUSのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
 2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
 3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
 4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。

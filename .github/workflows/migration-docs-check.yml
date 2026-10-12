@@ -6,6 +6,7 @@ on:
       - "AGENTS.md"
       - "docs/migration/**"
       - "scripts/check-migration*.mjs"
+      - "scripts/print-migration-task-context*.mjs"
       - "scripts/check-project-docs.mjs"
       - ".claude/**"
       - ".codex/**"
@@ -52,6 +53,15 @@ jobs:
         run: node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
+      - name: Work-item進捗構造と所有重複の回帰テスト
+        run: |
+          node scripts/check-migration-work-items.mjs
+          node --test scripts/check-migration-work-items.test.mjs
+      - name: 小型エージェント用1MIGコンテキストのサイズ・抽出テスト
+        run: |
+          node --test scripts/print-migration-task-context.test.mjs
+          node scripts/print-migration-task-context.mjs MIG-0401 > /dev/null
+          node scripts/print-migration-task-context.mjs --next > /dev/null
       - name: MD相互リンク検証と回帰テスト
         run: |
           node scripts/check-migration-links.mjs
