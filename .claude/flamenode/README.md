@@ -4,7 +4,7 @@
 > Archived: 2026-07-14
 > Current guide: `AGENTS.md`, `CLAUDE.md`, `docs/AI_CONTEXT.md`
 
-このディレクトリは2026年5月のPhase 0〜9修正キャンペーンの記録であり、現行作業の指示書ではない。
+このディレクトリは2026年5月の修正キャンペーンの要求対応表だけを残す。現行作業の指示書ではなく、移行（docs/migration）のPhase 0〜9とも無関係。当時のphase指示・実装計画・端末ガイドは2026-10-13に削除済み（git履歴で参照可能）。
 
 ## 読取ルール
 
@@ -15,11 +15,7 @@
 
 ## 内容
 
-- `source/`: 当時の詳細設計、監査、チェックリスト
-- `phases/`: 完了済みPhase 0〜9の作業指示
-- `requirements-map.md`: 当時の要求対応表
-- `IMPLEMENTATION_PLAN.md`: 当時の実装計画
-- `archive/`: 旧端末・運用ガイド
+- `requirements-map.md`: 当時の要求対応表（`docs/migration/PRODUCT_REQUIREMENTS.md` がhistorical根拠として参照）
 
 ## 現行入口
 

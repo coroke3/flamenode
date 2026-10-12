@@ -4,7 +4,7 @@
 
 ## Autonomous one-wake operation (self-driving agent)
 
-Start with `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads only the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, and prefers independent MIG-0401 performance preflight when READY. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`.
+Start with `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, drops READY tasks already owned by an open `migration/mig-XXXX-*` PR when `gh` is available (`--offline` skips that lookup), and prefers independent MIG-0401 performance preflight when READY and unowned. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`.
 
 Each agent invocation performs this deterministic sequence without asking for routine permission:
 

@@ -2,7 +2,7 @@
 
 > Status: Active / migration architecture source of truth
 > **Agent quick entry:** [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md) (do not bulk-load this full architecture or all ledgers every wake)
-> Task owner/dependency: [STATUS.md](STATUS.md) · Decisions: [OPEN_DECISIONS.md](OPEN_DECISIONS.md) · Cards: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)
+> Merged task/dependency/Phase state: [STATUS.md](STATUS.md) (live claim/owner = [work-items/MIG-XXXX.md](work-items/README.md) on the owner PR branch) · Decisions: [OPEN_DECISIONS.md](OPEN_DECISIONS.md) · Cards: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)
 > Per-file progress: [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md) · Wiring: [FILE_PROGRESS_PROTOCOL.md](FILE_PROGRESS_PROTOCOL.md)
 > Performance-first: [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) · [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md)
 > Canonical reference index (all ledgers, Phase specs, topology, auth, jobs): [DOC_MAP.md](DOC_MAP.md)
@@ -10,17 +10,17 @@
 
 ## Purpose
 
-**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuは[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)から**対象行だけ**読む。D-08 HTML未提供のPhase2・Phase4 visual・Phase5 real UIはBLOCKED。MIG-0401/0404/0405/0406非visual性能PoCは先行可能。
+**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuは[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)から**対象行だけ**読む。D-08はDECIDED・HTML mockは登録済み（MIG-0200 DONE、2026-10-13）。visual作業はHTML待ちではなくSTATUSの依存鎖でgateされる（MIG-0201 READY→MIG-0202..0206、MIG-0402はMIG-0206 Phase 2 GateとMIG-0401待ち、Phase 5 visual routeはMIG-0407待ち）。MIG-0401/0404/0405/0406非visual性能PoCは先行可能。
 
 Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
 UIは全面的に作り直すが、visual redesignを既存機能の削除理由にしない。
-新しいvisual targetは後日ユーザーが提供するHTML mockを入力とする。
+新しいvisual targetはユーザー提供のHTML mock（2026-10-13登録済み、`mock/`・`UI_REFERENCE.md`）を入力とする。
 
 ### デザイン適用戦略（案A正式採用）
 1. **公開画面（Phase 4/5: Astro SSG + React Islands）**: ユーザー提供の新 HTML mock を正本として適用。
 2. **管理・マイページ・登録画面（Phase 7: React SPA）**: 現行 UI/コンポーネント資産（`packages/ui` へ抽出）を流用し、移行効率を最大化。
-3. **Phase 順序の最適化**: UI/デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307 + MIG-0308 packages/db分離）** は、Phase 2 の HTML モック提供を待たずに先行して着手可能とする。
+3. **Phase 順序の最適化**: UI/デザインに依存しない **Phase 3（ドメイン抽出: MIG-0301〜MIG-0307 + MIG-0308 packages/db分離）** は、Phase 2 のvisual作業の完了を待たずに先行して着手可能とする。
 
 ### Active X 未連携ユーザーのインタラクション
 - いいね・ブックマーク等の操作主体は Active X に分離する。
@@ -99,7 +99,7 @@ Existing design / product intent
 
 New visual target
   UI_REFERENCE.md
-  currently PENDING_HTML
+  currently REGISTERED_HTML (MIG-0200 DONE, mock/)
 
 Progress
   STATUS.md
@@ -117,13 +117,14 @@ Progress
 `docs/design-redesign/`は廃止し、移行入力として使用しない。
 `app/(redesign)`もTARGET visual designの正本ではない。
 
-`UI_REFERENCE.md = PENDING_HTML`の間は:
+現在は`UI_REFERENCE.md = REGISTERED_HTML`（MIG-0200 DONE、D-08 DECIDED）。visual作業の可否はSTATUSの依存鎖で決まる。
+`UI_REFERENCE.md`が`PENDING_HTML`へ戻った場合のみ:
 
 - CURRENT capability/route/permission/state棚卸しを継続する
 - visual designをagentが独自確定しない
 - Phase 2 visual completionを開かない
 
-HTML mock受領後:
+HTML mock登録後（MIG-0200で2026-10-13に登録済み。MIG-0201以降の手順）:
 
 1. reference/version/hashを`UI_REFERENCE.md`へ登録
 2. mock surfaceを`CURRENT_ROUTES.md`へmapping
@@ -610,7 +611,7 @@ Auth migrationは後段。
 
 # 15. Migration phases
 
-進捗・task ID・ownerは `STATUS.md` が正本。
+task ID・依存・merge済みのtask/Phase状態は `STATUS.md` が正本（更新はpre-merge integrationのみ）。open taskのlive claim/owner/checkpointはowner PR branch上の `work-items/MIG-XXXX.md`。
 
 ## Phase 0 — Baseline / inventory
 
@@ -663,9 +664,9 @@ Do not move CURRENT tree wholesale.
 
 ## Phase 2 — Design system / HTML mock integration
 
-Phase 2 visual work remains blocked while `UI_REFERENCE.md = PENDING_HTML`.
+The HTML mock is registered (`UI_REFERENCE.md = REGISTERED_HTML`, MIG-0200 DONE, 2026-10-13); Phase 2 visual work is gated by the STATUS dependency chain (MIG-0201 READY → MIG-0202..0206), not by missing HTML. Stop visual work only if `UI_REFERENCE.md` reverts to `PENDING_HTML`.
 
-After HTML mock registration:
+Phase 2 order:
 
 1. visual/IA extraction
 2. tokens
@@ -780,7 +781,7 @@ If exceeded, analyze input/page count/build strategy before inventing custom SSG
 
 ## UI / UX
 
-- 86 CURRENT screen coverage maintained or explicitly dispositioned
+- 90 CURRENT page routes (74 visual screens) coverage maintained or explicitly dispositioned
 - all required `UX-*` mapped
 - desktop/tablet/mobile where applicable
 - keyboard/focus/a11y where applicable
@@ -833,10 +834,10 @@ Auth:
 | `README.md` | architecture / invariants / phases / gates |
 | `AGENT_PROTOCOL.md` | Claude/Codex/Antigravity execution/loop contract |
 | `GIT_WORKFLOW.md` | branch/PR/review/squash/merge rules |
-| `STATUS.md` | current task/owner/progress/blockers |
+| `STATUS.md` | merged task/dependency/Phase state + blockers (updated only at pre-merge integration); live claim/owner/checkpoint of open tasks = `work-items/MIG-XXXX.md` on the owner PR branch |
 | `CURRENT_ROUTES.md` | CURRENT user-visible route/screen inventory |
 | `FRONTEND_FEATURES.md` + `frontend/*.md` | frontend observable `UX-*` capabilities |
-| `screen-mapping/README.md` | 86 CURRENT screens + cross-route shells → UX/FN/permission/state/query/RA mapping |
+| `screen-mapping/README.md` | 90 CURRENT page routes (74 visual) + cross-route shells → UX/FN/permission/state/query/RA mapping |
 | `FUNCTION_INVENTORY.md` + `functions/*.md` | backend/domain/platform `FN-*` contracts |
 | `PRODUCT_REQUIREMENTS.md` | CURRENT vs existing design/product intent reconciliation |
 | `CODE_QUALITY.md` | professional implementation standard |

@@ -70,7 +70,7 @@
 CURRENT route正本は `CURRENT_ROUTES.md`。
 Frontend-observable behavior正本は `FRONTEND_FEATURES.md` + `frontend/*.md`。
 
-新visual sourceは `UI_REFERENCE.md`。現在は `PENDING_HTML` であり、後日ユーザーから提供されるHTML mockを登録するまではvisual redesignを確定しない。
+新visual sourceは `UI_REFERENCE.md`。HTML mockは2026-10-13に登録済み（MIG-0200 DONE、D-08 DECIDED、`docs/migration/mock/`）で、visual作業はHTML待ちではなくSTATUSの依存鎖（MIG-0201 READY→0202..0206→MIG-0402、Phase 5 visual routeはMIG-0407待ち）でgateされる。案A: 公開画面（Phase 4/5）はmockに合わせ、private/manage/admin SPA（Phase 7）は現行UI資産（`packages/ui`）を流用しmockは参考にする。`UI_REFERENCE.md` が `PENDING_HTML` へ戻った場合のみvisual redesignを確定しない。
 
 `docs/design-redesign/`は使用しない。`app/(redesign)`もTARGET designの正本にしない。
 
@@ -131,9 +131,9 @@ Loading/error/empty/forbidden/pending/degraded/retry/query/history/responsive/a1
 
 - 1 iteration = 1 MIG task
 - 1 task = 1 short-lived branch = 1 PR = 1 squash mergeを原則にする
-- owner/IN_PROGRESSを記録
-- 終了はDONE/REVIEW/BLOCKED
-- STATUS/inventory/matrix更新なしで次へ進まない
+- live claim/owner/checkpointはowner PR branchの `work-items/MIG-XXXX.md` に記録（STATUSは実装中に更新しない）
+- 終了はDONE/REVIEW/BLOCKED（work-itemに証跡を残す）
+- work-item・inventory/matrix更新なしで次へ進まない（STATUSはpre-merge integrationでのみ更新）
 - Phase Gateを自動承認しない
 - production操作が必要なら停止
 - Git運用は `docs/migration/GIT_WORKFLOW.md`
@@ -150,7 +150,7 @@ Loading/error/empty/forbidden/pending/degraded/retry/query/history/responsive/a1
 8. 新経路をshadow/parallelで実装。
 9. parity + quality検査。
 10. rollback確認。
-11. STATUSと該当ledger/matrix更新。
+11. work-itemと該当ledger/matrix更新（STATUSはpre-merge integrationでのみ反映）。
 
 ## 検査
 

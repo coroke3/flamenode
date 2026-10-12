@@ -55,7 +55,7 @@ const required = [
   "docs/migration/ACTIVE_X_MIGRATION_PLAN.md",
   "docs/migration/ROUTING_AND_DEPLOY_PLAN.md",
   "docs/migration/UI_MIGRATION_GUIDE.md",
-  ".claude/commands/flamenode-migration.md",
+  ".claude/skills/flamenode-migration/SKILL.md",
   ".claude/loop.md",
   ".codex/skills/flamenode-migration/SKILL.md",
   ".codex/skills/loop/SKILL.md",
@@ -365,7 +365,6 @@ if (errors.length === 0) {
 
   for (const adapter of [
     "docs/migration/AGENT_PROTOCOL.md",
-    ".claude/commands/flamenode-migration.md",
     ".claude/skills/flamenode-migration/SKILL.md",
     ".codex/skills/flamenode-migration/SKILL.md",
     ".agents/workflows/flamenode-migration.md",
@@ -1096,7 +1095,7 @@ if (errors.length === 0) {
 
   // Tool adapters must delegate to the shared protocol.
   const adapters = [
-    ".claude/commands/flamenode-migration.md",
+    ".claude/skills/flamenode-migration/SKILL.md",
     ".codex/skills/flamenode-migration/SKILL.md",
     ".agents/workflows/flamenode-migration.md",
     ".agents/skills/flamenode-migration/SKILL.md",
@@ -1117,14 +1116,40 @@ if (errors.length === 0) {
     if (/claim the task in STATUS\.md as IN_PROGRESS/i.test(text)) {
       errors.push(`${adapter}: must not instruct claiming task in STATUS.md as IN_PROGRESS; progress belongs in work-items/MIG-XXXX.md`);
     }
+    if (!text.includes("work-items/MIG-XXXX.md")) errors.push(`${adapter}: live checkpoint location work-items/MIG-XXXX.md missing`);
+  }
+  for (const progressDoc of ["docs/migration/AGENT_PROTOCOL.md", ".agents/workflows/flamenode-migration.md"]) {
+    if (/STATUS\.md`?\s*が唯一のtask進捗正本|branch `?STATUS(?:\.md)?`?\s*(?:の|に)|update `STATUS\.md` and affected ledgers/.test(read(progressDoc))) {
+      errors.push(`${progressDoc}: live progress must be checkpointed in work-items/MIG-XXXX.md; STATUS.md is merge-time only`);
+    }
   }
 
-  // Runbook vs Decision alignment: if D-08 is DECIDED, runbook must not state it is BLOCKED_ON_USER or HTML mock not received
+  // Claude Code resolves a skill before a same-name command; a shadowed command silently diverges.
+  const claudeCommandsDir = file(".claude/commands");
+  if (fs.existsSync(claudeCommandsDir)) {
+    for (const name of fs.readdirSync(claudeCommandsDir).filter((entry) => entry.endsWith(".md"))) {
+      const skill = `.claude/skills/${name.slice(0, -3)}/SKILL.md`;
+      if (fs.existsSync(file(skill))) errors.push(`.claude/commands/${name}: shadowed by ${skill}; keep a single Claude adapter`);
+    }
+  }
+  const claudeSkill = read(".claude/skills/flamenode-migration/SKILL.md");
+  for (const phrase of ["IMPLEMENTATION_RUNBOOK.md", "TASK_CARDS_", "OPEN_DECISIONS.md", "GIT_WORKFLOW.md", "MIGRATION_START_HERE.md"]) {
+    if (!claudeSkill.includes(phrase)) errors.push(`.claude/skills/flamenode-migration/SKILL.md: required read missing: ${phrase}`);
+  }
+
+  // Once D-08 is DECIDED, active instructions must not tell agents the HTML mock is still missing.
   const decisionsDoc = read("docs/migration/OPEN_DECISIONS.md");
   const runbookDoc = read("docs/migration/IMPLEMENTATION_RUNBOOK.md");
-  if (decisionsDoc.includes("D-08: A (DECIDED") || decisionsDoc.includes("D-08: DECIDED")) {
+  if (/^\|\s*D-08\s*\|[^|\n]*\|\s*DECIDED\s*\|/m.test(decisionsDoc)) {
     if (runbookDoc.includes("BLOCKED_ON_USER") || runbookDoc.includes("HTMLモックはまだ受領していない")) {
       errors.push("IMPLEMENTATION_RUNBOOK.md: D-08 is DECIDED; runbook must not claim D-08 is BLOCKED_ON_USER or HTML mock not received");
+    }
+    const staleMockClaims = [/missing D-08 HTML/i, /still wait for D-08/i, /New visual design remains pending/i, /UI_REFERENCE\.md = PENDING_HTML`?\s*の間/, /現在`PENDING_HTML`の間/];
+    for (const doc of ["AGENTS.md", "docs/migration/AGENT_PROTOCOL.md", "docs/migration/MIGRATION_START_HERE.md", "docs/migration/STATUS.md", ...adapters]) {
+      const body = read(doc);
+      for (const pattern of staleMockClaims) {
+        if (pattern.test(body)) errors.push(`${doc}: D-08 is DECIDED but still claims the HTML mock is pending (${pattern})`);
+      }
     }
   }
 
