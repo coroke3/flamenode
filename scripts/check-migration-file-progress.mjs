@@ -80,7 +80,7 @@ export function isTrackedSourceCandidate(p){
   ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"].includes(p));
 }
 function trackedChangeCandidate(p){
- return /^(?:app\/|apps\/|packages\/|src\/lib\/|workers\/)/.test(p) &&
+ return /^(?:app\/|apps\/|packages\/|src\/lib\/|src\/components\/|workers\/)/.test(p) &&
  !/(?:^|\/)(?:node_modules|dist|\.next)\//.test(p) ||
  ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"].includes(p);
 }
@@ -100,7 +100,7 @@ export function collectFiles(root=ROOT){
    else if(item.isFile())files.push(path.relative(root,child).replaceAll(path.sep,"/"));
   }
  }
- for(const sub of ["app","src/lib","workers","apps","packages"])visit(path.join(root,sub));
+ for(const sub of ["app","src/lib","src/components","workers","apps","packages"])visit(path.join(root,sub));
  for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"]){
   if(fs.existsSync(path.join(root,base)))files.push(base);
  }
@@ -112,7 +112,7 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  const pages=parsePageLedger(currentRoutes), RH=parseRouteHandlerLedger(routeHandlers),SA=parseActionLedger(serverActions),migs=parseMigs(status);
  const actual=new Set(filePaths);
  const mandatory=new Set(filePaths.filter(isTrackedSourceCandidate));
- for(const referenced of [...taskCardsText.matchAll(/(?:src\/lib|app\/|workers\/|apps\/|packages\/)[a-zA-Z0-9_./\-\[\]]+\.(?:ts|tsx|mjs|astro)/g)].map(x=>x[0]))if(actual.has(referenced))mandatory.add(referenced);
+ for(const referenced of [...taskCardsText.matchAll(/(?:src\/components|src\/lib|app\/|workers\/|apps\/|packages\/)[a-zA-Z0-9_./\-\[\]]+\.(?:ts|tsx|mjs|astro)/g)].map(x=>x[0]))if(actual.has(referenced))mandatory.add(referenced);
  for(const file of mandatory)if(!rows.has(file))errors.push("missing file progress row for source: "+file);
  for(const [file,row] of rows){
   if(!ALLOWED_KINDS.has(row.kind))errors.push(file+" invalid file kind "+row.kind);

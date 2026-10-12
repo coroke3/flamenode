@@ -1,10 +1,10 @@
 # MIG-0011 Gap Scan Checkpoint
 
-> Status: CHECKPOINT / NOT COMPLETE
+> Status: CURRENT_VERIFIED EVIDENCE / ANCHOR
 > Verified through: 2026-10-07
 > Production mutation: none
 
-MIG-0011の途中調査をmainへ安全に合流するためのcheckpoint。MIG-0011完了を意味しない。
+MIG-0011のギャップスキャン完了時の根拠索引（Evidence Anchor）。`FRONTEND_FEATURES.md` や `FUNCTION_INVENTORY.md` の検証根拠として恒久保持される（CIバリデータ検査対象）。
 
 ## Current baseline at checkpoint
 

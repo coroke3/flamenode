@@ -239,6 +239,8 @@
 | `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
 | `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0401 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
+| `src/components/layout/bodyScrollLock.ts` | HELPER | modal/drawer body scroll lock primitive | MIG-0202 | packages/ui/src/layout/bodyScrollLock.ts (retain scroll restoration) | NOT_STARTED | — |
+| `src/components/layout/bodyScrollLock.contract.test.mjs` | TEST | bodyScrollLock export & instant restoration contract | MIG-0202 | SAME (layout utility parity) | NOT_STARTED | — |
 
 ## Future files requiring source/target registration
 
