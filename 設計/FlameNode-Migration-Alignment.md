@@ -1,7 +1,7 @@
 # FlameNode マイグレーション整合メモ
 
 > 注意: このファイルは旧設計の migration 整理メモであり、現在の DB 正本ではない。
-> 現行スキーマの Single Source of Truth は `src/lib/db/schema.ts`、適用順と運用手順は `docs/operations.md`、全体設計は `設計/FlameNode-Design.md` を正とする。
+> 現行スキーマの Single Source of Truth は `src/lib/db/schema.ts`、適用順と運用手順は `docs/operations/README.md`、全体設計は `設計/FlameNode-Design.md` を正とする。
 > 本文中に残る `event_editors`、`event_collaborator_permissions`、`video_comments`、`videos.status`、`videos.x_reapply_*`、`video_score` などは旧案としてのみ扱い、新規実装・migration・worker で復活させない。
 
 ## 1. 目的
