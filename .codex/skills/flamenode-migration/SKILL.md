@@ -13,7 +13,7 @@ Read and follow, in order:
 2. `docs/migration/AGENT_PROTOCOL.md`
 2a. `docs/migration/IMPLEMENTATION_RUNBOOK.md` and one current `docs/migration/TASK_CARDS_*.md` card
 2b. `docs/migration/OPEN_DECISIONS.md`
-2c. `docs/migration/MIGRATION_START_HERE.md`; run `npm run migration:next` for an advisory next-task suggestion (STATUS.md remains the authority; it does not see open PRs)
+2c. `docs/migration/MIGRATION_START_HERE.md`; run `npm run migration:next` for an advisory next-task suggestion (merged STATUS plus PR branch hints; verify live owners, checkpoints, reviews and CI separately)
 2d. `docs/migration/GIT_WORKFLOW.md`
 3. `docs/migration/README.md` (relevant sections only)
 4. `docs/migration/STATUS.md` (selected task and dependency rows only)

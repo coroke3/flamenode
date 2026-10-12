@@ -10,7 +10,7 @@ Thin adapter. The shared execution contract is `docs/migration/AGENT_PROTOCOL.md
 ## Read (targeted sections, not whole ledgers)
 
 1. `AGENTS.md`
-2. `docs/migration/MIGRATION_START_HERE.md`, then `npm run migration:next` (advisory only; it does not see open PRs)
+2. `docs/migration/MIGRATION_START_HERE.md`, then `npm run migration:next` (advisory only; PR branch hints do not verify live owners, checkpoints, reviews or CI)
 3. `docs/migration/AGENT_PROTOCOL.md` — Per-wake read contract, `/loop` contract, Mandatory stop
 4. `docs/migration/GIT_WORKFLOW.md` (current stage) and `docs/migration/work-items/README.md`
 5. `docs/migration/STATUS.md` — only the chosen MIG row and its dependency rows

@@ -24,6 +24,13 @@ export function validateUiReference({ uiText, currentRoutesText, mappingText, pa
     const c = cells(line);
     if (classes.has(c[2])) current.set(c[0], { source: c[1], kind: c[2] });
   }
+  for (const kind of classes) {
+    const reported = currentRoutesText.match(new RegExp("^(?:CURRENT )?" + kind + "\\s+(\\d+)", "m"))?.[1];
+    const actual = [...current.values()].filter(row => row.kind === kind).length;
+    if (reported !== undefined && Number(reported) !== actual) errors.push("CURRENT route classification count mismatch: " + kind);
+  }
+  const reportedTotal = currentRoutesText.match(/^app\/\*\*\/page\.tsx\s+(\d+)/m)?.[1];
+  if (reportedTotal !== undefined && Number(reportedTotal) !== current.size) errors.push("CURRENT route total count mismatch");
   const mocks = new Map();
   for (const page of pages) {
     if (mocks.has(page.name)) errors.push("duplicate mock name: " + page.name);

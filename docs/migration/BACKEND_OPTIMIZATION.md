@@ -371,7 +371,7 @@ Optimization blockers requiring frontend change: 0
 最適化の最終評価は以下完了後のみ行う。
 
 - all frontend capabilities audited
-- all 86 screens mapped
+- all CURRENT routes and cross-route shells mapped (classes/counts derive from CURRENT_ROUTES.md; historical 86-screen baseline is not the current acceptance count)
 - all Server Actions / inline actions disposed
 - all Route Handlers disposed
 - auth/permission baseline complete

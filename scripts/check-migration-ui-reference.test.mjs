@@ -9,6 +9,10 @@ const fixture = () => readUiReferenceInputs(root);
 test("registered source joins every CURRENT route and all supplied mock artifacts", () => {
   assert.deepEqual(validateUiReference(fixture()), []);
 });
+test("CURRENT classification totals derive from real route rows", () => {
+  const f = fixture(); f.currentRoutesText = f.currentRoutesText.replace(/DEV_ONLY\s+1/, "DEV_ONLY                3");
+  assert.match(validateUiReference(f).join("\n"), /classification count mismatch: DEV_ONLY/);
+});
 test("rejects invented UX IDs rather than silently treating them as coverage", () => {
   const f = fixture(); f.uiText += "\nUX-TOP-001\n";
   assert.match(validateUiReference(f).join("\n"), /must not duplicate UX\/FN IDs/);
