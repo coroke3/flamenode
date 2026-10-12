@@ -1,12 +1,12 @@
 # Claude migration loop wake
 
-Follow `docs/migration/AGENT_PROTOCOL.md`. Invoke `/flamenode-migration` for **at most one** migration task per wake. Claude Code's host-provided `/loop` may invoke this instruction repeatedly while that host session supports it; this file itself is not a scheduler.
+Follow `docs/migration/GIT_WORKFLOW.md` and `docs/migration/AGENT_PROTOCOL.md`. Per-wake task state goes into the owner PR's `work-items/MIG-XXXX.md`; STATUS is updated at merge integration only. Invoke `/flamenode-migration` for **at most one** migration task per wake. Claude Code's host-provided `/loop` may invoke this instruction repeatedly while that host session supports it; this file itself is not a scheduler.
 
 
 ## Loop実行時の統一契約（全エージェント共通）
 
 - 1 invocation / 1 wake = 最大 **1 MIG task**。反復を自動スケジューリングする機能はこのskill自体にはない。Claudeの`/loop`等、host側に実在する反復機構だけを使用する。
-- 各wakeは必ず **最新main → open migration PR → PR branch STATUS → OPEN_DECISIONS → 依存状態 → CI** の順で読み直す。古い会話や前wakeの判定で実行しない。
+- 各wakeは必ず **最新main → open migration PR → PR branch work-item checkpoint → OPEN_DECISIONS → 依存状態 → CI** の順で読み直す。古い会話や前wakeの判定で実行しない。
 - `OPEN_DECISIONS.md`で対象taskまたは関連cutoverに紐づく`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`の決定がある場合は、未決の前提を採用しない。影響する実装は`BLOCKED`またはその前で停止。無関係な純粋ロジックだけ対象scope内で進めてよい。
 - 原則1writer。branchを作る前にopen PR検索を行い、draft PR作成後にも同じtaskの重複open PRを再確認する。重複を発見したwriterは実装・mergeせず報告する（Draft PRは厳密な排他ロックではない）。
 - `IN_PROGRESS`がmainに無くても、owner PRがあればそちらがlive lock。途中失敗したら同じPR/branchを再開する。新規branchで同じtaskをやり直さない。

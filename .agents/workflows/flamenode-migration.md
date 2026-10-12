@@ -20,3 +20,5 @@ Antigravity adapter only. Do not invent a separate migration process.
 11. Finish as `DONE`, `REVIEW`, or `BLOCKED`, update `STATUS.md` and affected ledgers/matrices, and persist validation/rollback evidence.
 
 Never automatically cross a Phase Gate or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
+
+Open PR live state: `docs/migration/work-items/MIG-XXXX.md` is updated each wake. `STATUS.md` is the merged task/dependency summary and is updated only at merge integration. See `GIT_WORKFLOW.md`.

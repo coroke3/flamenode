@@ -29,3 +29,6 @@ Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custo
 When UI redesign is involved, feature parity is mandatory: use `FUNCTION_INVENTORY.md` and do not treat visual completion as functional completion.
 
 For repeated autonomous execution, each iteration still equals exactly one MIG task and must persist all progress to repository Markdown before continuing.
+
+
+Open PR live state: `docs/migration/work-items/MIG-XXXX.md` is updated each wake. `STATUS.md` is the merged task/dependency summary and is updated only at merge integration. See `GIT_WORKFLOW.md`.

@@ -21,3 +21,23 @@ test("unknown or malformed task is rejected",()=>{
  assert.throws(()=>getTaskContext("MIG-9999"),/Unknown MIG task/);
  assert.throws(()=>getTaskContext("all tasks"),/exact MIG/);
 });
+
+import { pickNextTask } from "./print-migration-task-context.mjs";
+
+test("next-task advisory prioritizes performance without requiring D-08 for nonvisual PoC",()=>{
+ const status=[
+  "| MIG-0105 | site | DONE | — |",
+  "| MIG-0108 | boundary | DONE | — |",
+  "| MIG-0301 | domain | READY | MIG-0108 |",
+  "| MIG-0401 | perf | READY | MIG-0105 |",
+  "| MIG-0402 | visual | BLOCKED | MIG-0401 |",
+ ].join("\n");
+ const decisions="| D-08 | HTML | BLOCKED_ON_USER | user |";
+ const next=pickNextTask(status,decisions);
+ assert.equal(next.selected,"MIG-0401");
+ assert.deepEqual(next.candidates,["MIG-0401","MIG-0301"]);
+});
+test("next-task advisory stops on unmerged dependencies",()=>{
+ const status="| MIG-0105 | site | IN_PROGRESS | — |\n| MIG-0401 | perf | READY | MIG-0105 |";
+ assert.equal(pickNextTask(status,"").selected,null);
+});

@@ -104,7 +104,7 @@ Tool adapters are intentionally thin:
 
 Repository Markdown state is authoritative; chat history is not.
 
-One migration iteration equals exactly one dependency-ready `MIG-*` task. Update `STATUS.md` and affected inventories before another iteration.
+One migration iteration equals exactly one dependency-ready `MIG-*` task or one bounded micro-unit. Each wake updates the owner PR's `docs/migration/work-items/MIG-XXXX.md`; merge-time integration alone updates `STATUS.md` from latest main. Read live owner PRs before claiming; never auto-merge without required review/approval.
 
 ## Existing function / UX preservation
 

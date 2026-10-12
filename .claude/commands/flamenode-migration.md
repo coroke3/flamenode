@@ -15,9 +15,9 @@ FlameNodeの段階移行を1回につき1タスクだけ進める。
 7. 該当する `ROUTE_MATRIX.md` / `API_MATRIX.md`; screen/UI/route作業では `docs/migration/screen-mapping/README.md`; Cloudflare Worker/ingress/binding/build/job作業では `docs/migration/cloudflare/TOPOLOGY.md`; CPU/1102/request/PoC performance作業では `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`; auth/session/linking/terms/Active X/permission/owner作業では `docs/migration/auth/README.md`; Queue/Cron/background job/retry/DLQ/recovery作業では `docs/migration/background-jobs/README.md`; static artifact/alias/visibility/fallback/repair作業では `docs/migration/static-delivery/README.md`
 7. 対象コードと関連test
 
-実行時は `STATUS.md` の次のREADY taskを **1つだけ** claimし、`Owner: claude` を記録する。
+実行時は最新mainの`STATUS.md`とopen PRからREADY taskを**1つだけ**選び、PR branchの`work-items/MIG-XXXX.md`に`Owner: claude`/PR/変更path/現在unitをclaimする。
 
-終了時は必ず `DONE` / `REVIEW` / `BLOCKED` のいずれかへ遷移し、STATUS・function inventory・matrixを必要に応じて更新する。
+各wakeの終了時はwork-itemへ`IN_PROGRESS`（継続時）/`REVIEW`/`BLOCKED`を記録。独立review後のmerge直前にだけ最新mainとSTATUSを整合し、必要なinventory/matrixを更新する。
 
 `/loop /flamenode-migration` で反復実行してよいが、1 iteration = 1 MIG taskを維持する。
 

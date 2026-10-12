@@ -12,7 +12,7 @@
 > Function parity: [`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)
 > 判断待ち事項正本: [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md)
 
-Claude / Codex / Antigravityを含む全agentが共有する唯一の進捗正本。chat historyやtool-local task listを正本にしない。
+Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関係/Phase進捗正本**。open PRの進行中taskは各PR branchの`work-items/MIG-XXXX.md`をcheckpoint正本にする。chat historyやtool-local task listは正本にしない。
 
 ## Overall
 
@@ -43,9 +43,9 @@ Next: MIG-0301 extraction/DI pattern
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
 - `READY → IN_PROGRESS → REVIEW → DONE` または `BLOCKED`
-- 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch STATUSにowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
-- claim時にOwner/branch/PR/affected UX/FNと `FILE_MIGRATION_MATRIX.md` の対象ファイル/consumerを記録する
-- finish時にvalidation/rollback/evidence/next stateを記録する。ファイルごとの状態はFILE_MIGRATION_MATRIXに残し、MIG親のDONEと混同しない
+- 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch `work-items/MIG-XXXX.md`にowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
+- claim時にtask固有`work-items/MIG-XXXX.md`へOwner/branch/PR/affected UX/FNと対象ファイル/consumerを記録する。実装途中にSTATUSを変更しない
+- 毎wakeのvalidation/rollback/evidence/next stateはtask固有work-itemへ記録する。独立review/CIの後、merge直前に最新mainとSTATUSを統合して当該MIG DONEと次READYを反映する。ファイルの状態はFILE_MIGRATION_MATRIXに残す
 - Phase Gateをagentが自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret変更は明示承認まで停止
 - Git詳細は `GIT_WORKFLOW.md`

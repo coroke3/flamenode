@@ -2,14 +2,14 @@
 
 > Status: Active / operational instructions, not a replacement for AGENT_PROTOCOL.md
 > Updated: 2026-10-09
-> Authority: `STATUS.md`（状態と依存）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
+> Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
 ## 最初の90秒に行うこと
 
 **コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READYだが、MIG-0402/0403 visualはD-08がBLOCKED。
 
-1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`STATUS.md`を読んでowner PRを特定する。**作業中のPRがあるMIGを横取りしない**。
+1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`work-items/MIG-XXXX.md`とopen PRを読んでownerを特定する。**作業中のPRがあるMIGを横取りしない**。
 2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
 3. `STATUS.md`で依存がDONEの`READY`を1件だけ選ぶ。`OPEN_DECISIONS.md`にある未提供資料・PoC・人間承認と照合する。**DECIDED = 本番操作許可ではない**。
 4. 該当カードだけ開く: [Phase2/3](TASK_CARDS_2_3.md), [Phase4/5](TASK_CARDS_4_5.md), [Phase6/7](TASK_CARDS_6_7.md), [Phase8/9](TASK_CARDS_8_9.md)。フェーズSPECとカードが食い違う場合は**両方の引用箇所と衝突を記録して停止**。都合がよい方を勝手に選ばない。
@@ -28,7 +28,7 @@ START
   -> CHECK ownership + task READY + parent tasks DONE
   -> CHECK decisions, required PoCs, mock state and approvals
   -> READ task card + target ledger + CURRENT files/tests
-  -> WRITE mini-claim (exact files / UX / FN / acceptance / rollback)
+  -> WRITE work-items/MIG-XXXX.md claim (exact files / UX / FN / acceptance / rollback); leave STATUS unchanged
   -> CREATE short-lived migration/MIG branch + Draft PR (check duplicate again)
   -> WRITE failing characterization tests BEFORE behavior relocation
   -> IMPLEMENT only named scope; keep legacy behavior and fallback
@@ -37,7 +37,7 @@ START
   -> REPORT:
        PASS -> REVIEW until independent reviewer and required CI are available
        FAIL -> fix within scope; otherwise BLOCKED with repro and next action
-  -> INDEPENDENT review + correct approval -> DONE, update next READY -> squash merge
+  -> INDEPENDENT review + correct approval -> work-item DONE + reconcile STATUS task DONE/next READY against latest main -> squash merge
   -> NEXT wake starts from newly merged main, never stale branch
 END
 ```
@@ -46,7 +46,7 @@ END
 
 ## 大型MIGを複数wakeに分割する方法
 
-45画面などを1回で全部実装しようとしない。[TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md)を読み、**1 wake = 最大1 micro-unit、親MIGとopen PRは固定**。STATUSのPR branchへ各unitのDONE/BLOCKEDとテスト証拠・次unitを記録する。未完了なら`IN_PROGRESS`で同じowner PRに安全なcheckpointを残して次wakeへ引き継ぐ。すべてunit DONEになるまで`REVIEW`にしない。
+45画面などを1回で全部実装しようとしない。[TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md)を読み、**1 wake = 最大1 micro-unit、親MIGとopen PRは固定**。PR branchのwork-items/MIG-XXXX.mdへ各unitのDONE/BLOCKEDとテスト証拠・次unitを記録する。未完了なら`IN_PROGRESS`で同じowner PRに安全なcheckpointを残して次wakeへ引き継ぐ。すべてunit DONEになるまで`REVIEW`にしない。
 
 ## 作業カードの読み方
 
@@ -106,7 +106,7 @@ Next: one explicit action and its owner
 | `module not found` | npm ci、exports、tsconfig、node strip-types、実build成果物 | TS pathだけを直してNode検証を飛ばす |
 | Honoだけ403/401 | Auth.js session cookie、callback、CSRF、Auth UserとActive X、許可モード | UIで認可を代行する |
 | いいね件数が異なる | D-03 fan-outでX件数増加、重複/解除/未連携、app_like_count再集計 | 古いAuth User件数に上書き |
-| loop二重実行 | open PR、writer、branch STATUS、head SHA | 2つ目のPRを作って並走 |
+| loop二重実行 | open PR、writer、branch work-item checkpoint、head SHA | 2つ目のPRを作って並走 |
 | 公開privateが漏れる | visibility fence、entity→path map、キャッシュ、R2 snapshot version | Cache missでprivate JSONを直接出す |
 | SSRで1102懸念 | request CPU p99, hard limit, R2事前HTML、Queue側事前生成 | SSG容量超過を理由に無条件SSR |
 | SPA直アクセス404 | `/dashboard`等bare path、Cloudflare asset prefix、SPA fallback、Auth旧経路 | `/*` catch-allで全公開URLを奪う |

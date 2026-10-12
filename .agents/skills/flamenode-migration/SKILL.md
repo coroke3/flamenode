@@ -11,7 +11,7 @@ This is a thin reusable adapter. Canonical execution contract:
 
 Mandatory concepts:
 
-- `STATUS.md` = progress source of truth
+- `STATUS.md` = merged task/dependency checkpoint; open PR `work-items/MIG-XXXX.md` = live work/owner state
 - `FEATURE_CATALOG.md` = 432 UX / 136 FN の人間向け全機能索引
 - `GIT_WORKFLOW.md` = branch/PR/merge source of truth
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
@@ -36,6 +36,6 @@ Execute exactly one READY MIG task. One writer only. Use the task branch/PR requ
 
 Do not remove or change user-visible behavior merely to simplify the backend. Do not optimize for line count. Prefer explicit, readable, framework-neutral domain code and well-defined permission/transaction/side-effect boundaries.
 
-Finish by persisting `DONE`, `REVIEW`, or `BLOCKED`, updating affected ledgers/matrices, validation evidence, and rollback information.
+Checkpoint the task-specific work-item every wake. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI. Update affected ledgers/matrices and real validation evidence.
 
 Never auto-cross Phase Gates or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.

@@ -40,7 +40,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 # Per-wake required read contract (targeted, not full-file bulk import)
 
-1. Read root `AGENTS.md` scope and [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md). The quick entry is an **index**, not a replacement for this protocol or `GIT_WORKFLOW.md`.
+1. Read root `AGENTS.md` scope and [MIGRATION_START_HERE.md](MIGRATION_START_HERE.md) and use `npm run migration:next` for an advisory READY selection. The quick entry is an **index**, not a replacement for this protocol or `GIT_WORKFLOW.md`.
 2. Read **the one relevant MIG row and its dependency rows** in `STATUS.md`, the related `OPEN_DECISIONS.md` decision, the `IMPLEMENTATION_RUNBOOK.md` current-workflow section, and **one** corresponding `TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` `### MIG-XXXX` block. Check owner PR before claiming.
 3. Filter `FILE_MIGRATION_MATRIX.md` to **owned source/target rows**, then consult relevant `FILE_PROGRESS_PROTOCOL.md` state transitions and `TASK_MICRO_UNITS.md` (large tasks only). Open CURRENT code and tests before writing.
 4. Read only the necessary **portions** of `CURRENT_ROUTES.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `PRODUCT_REQUIREMENTS.md`, `CODE_QUALITY.md`, `ROUTE_MATRIX.md` or `API_MATRIX.md`. Use `GIT_WORKFLOW.md` for PR/merge/approval stages and `UI_REFERENCE.md` when work is visual.
