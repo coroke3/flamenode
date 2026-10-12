@@ -6,7 +6,7 @@ For any platform/UI migration work, `/flamenode-migration`, or code intended for
 
 Mandatory sources include:
 
-- `docs/migration/STATUS.md`
+- `docs/migration/STATUS.md`（merge済み依存状態）+ `docs/migration/work-items/MIG-XXXX.md`（open PRのlive checkpoint）
 - `docs/migration/FEATURE_CATALOG.md`
 - `docs/migration/GIT_WORKFLOW.md`
 - `docs/migration/PRODUCT_REQUIREMENTS.md`

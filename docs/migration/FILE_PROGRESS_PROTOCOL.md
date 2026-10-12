@@ -7,7 +7,7 @@
 
 ## Three levels of state — never confuse them
 
-1. **Task:** STATUS.md owns MIG READY / IN_PROGRESS / REVIEW / BLOCKED / DONE and dependencies. A file being verified never advances a task automatically. Conversely, **if a MIG is marked DONE while one of its owned files is NOT_STARTED, the checker fails**; finish per-file rows or record an explicit reviewed ownership transfer before the task is accepted.
+1. **Task:** STATUS.md owns **merged** MIG READY / IN_PROGRESS / REVIEW / BLOCKED / DONE and dependencies; each open PR owns its live work-item `work-items/MIG-XXXX.md`. A file being verified never advances a task automatically. Conversely, **if a MIG is marked DONE while one of its owned files is NOT_STARTED, the checker fails**; finish per-file rows or record an explicit reviewed ownership transfer before the task is accepted.
 2. **File:** FILE_MIGRATION_MATRIX.md owns CURRENT source → exact TARGET files / adapters, first owner MIG, state, PR / tests / SHA evidence. One CURRENT source is a stable primary key even if it produces multiple targets.
 3. **Behavior:** CURRENT_ROUTES.md and screen-mapping/README.md own screen URL / UX / FN; route-handlers/README.md owns RH-001..033 (33 methods); server-actions/README.md owns SA-001..110 (110 action units); FUNCTION_INVENTORY.md owns FN. A green compile is not behavior parity.
 
@@ -20,7 +20,7 @@
 5. Write regression/characterization tests, create new provider(s), verify exports and runtime binding, preserve legacy adapter and gradually switch consumers. Never remove a route/old action on first implementation pass.
 6. Run tests, compare state/permission/errors/DB audit/Queue effects, update each touched file's state/evidence and the relevant UX/FN/Route/RH/SA ledgers.
 7. Finish at REVIEW only when the entire MIG and all micro-units are functionally complete. DONE requires independent review and CI; Phase Gate/higher-risk prod action requires separate approval.
-8. On multiwake work, checkpoint the same Draft PR branch (owner, HEAD SHA, current micro-unit, each changed file, next path and tests). New wake resumes that PR; never creates another writer PR.
+8. On multiwake work, checkpoint `work-items/MIG-XXXX.md` on the same Draft PR branch (owner, previous source HEAD SHA, current micro-unit, each changed file, next path and tests); do not edit STATUS on each wake. New wake resumes that PR; never creates another writer PR.
 
 ## File-state machine and evidence
 

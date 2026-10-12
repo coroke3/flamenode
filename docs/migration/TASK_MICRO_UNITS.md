@@ -1,12 +1,12 @@
 # Large MIG task micro-units — scoped resumable packets
 
 > Status: Active / mandatory subdivision for broad tasks
-> Parent task state: [STATUS.md](STATUS.md)
+> Merged task/dependency state: [STATUS.md](STATUS.md); live work-item: [work-items/README.md](work-items/README.md)
 > Execution: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) + [GIT_WORKFLOW.md](GIT_WORKFLOW.md)
 > Per-file checkpoint: [FILE_PROGRESS_PROTOCOL.md](FILE_PROGRESS_PROTOCOL.md), [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md)
 > Rule: **one wake processes at most one micro-unit of one MIG**. For a task with multiple units keep its single Draft PR/branch and checkpoint on that branch. Do not mark the parent REVIEW until every unit passed.
 
-## Required per-wake checkpoint in the task PR branch STATUS
+## Required per-wake checkpoint in the task PR branch `work-items/MIG-XXXX.md`
 
 ```text
 Parent MIG: MIG-XXXX
@@ -28,7 +28,7 @@ Next wake: repeat latest PR HEAD read; continue at UXX/UYY
 Merge eligibility: NO until all micro-units DONE and independent review/CI
 ```
 
-- `STATUS.md` mainは最後にmergeされたcheckpointのまま。`IN_PROGRESS`を**open Draft PR上で有効なownerと再開手順を伴う状態**として保持してよい（次wakeで同じbranchを再開する）。PR owner不明/引継ぎ不能になったら`BLOCKED`にしてowner調整し、重複task branchを開かない。
+- mainの`STATUS.md`は最後にmergeされたtask依存checkpointのまま。`IN_PROGRESS`は**同一Draft PRのtask固有work-itemファイルで、有効ownerと再開手順を伴って**保持してよい（次wakeで同じbranchを再開する）。PR owner不明/引継ぎ不能になったら`BLOCKED`にしてowner調整し、重複task branchを開かない。
 - **One task = one PR**は維持。micro-unitごとに別MIGを作る必要が判明した場合は、lead reviewで新MIG ID/STATUS dependency/cardを追加してから切り分ける。
 - 「DONE」とできるのは**micro-unit**の完了だけ。Taskの`REVIEW`はmicro-unit全DONE + overall parity。Taskの`DONE`は別レビュアー+CI+必要Gate許可後。
 - WIPを`REVIEW`と誤ラベル付けして次taskへ進まない。カードにない既存機能を発見したらcard/ledgerに追加してから着手する。
