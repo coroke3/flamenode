@@ -101,7 +101,7 @@ Phase 0中は原則`OBSERVED`/`CANDIDATE`まで。
 - permission / dynamic state / query-history / responsive-a11y profileをscreen単位で固定した。
 - `/list`, `/user`, `/event`, `/user/[id]` のtechnical twin route削除後もlogical query/deep-link contractを維持する。
 - searchParamsを読むscreenをQ-DIRECT扱いしないdrift checkを追加した。
-- responsive/a11yはvisual mock受領前でもcontractとして固定し、visual layoutはPENDING_HTMLのまま捏造しない。
+- responsive/a11yはvisual mock受領前でもcontractとして固定した。未登録時にはvisual layoutを捏造しない。現在の登録状態・公開mock/非公開CURRENT再利用の範囲は`UI_REFERENCE.md`を参照する。
 
 MIG-0010でfrontend変更を必須とするbackend optimization blockerは0。MIG-0011ではこのmappingを用いてorphan/requirement divergence/重複機能を全体scanする。
 
@@ -371,7 +371,7 @@ Optimization blockers requiring frontend change: 0
 最適化の最終評価は以下完了後のみ行う。
 
 - all frontend capabilities audited
-- all 86 screens mapped
+- all CURRENT routes and cross-route shells mapped (classes/counts derive from CURRENT_ROUTES.md; historical 86-screen baseline is not the current acceptance count)
 - all Server Actions / inline actions disposed
 - all Route Handlers disposed
 - auth/permission baseline complete

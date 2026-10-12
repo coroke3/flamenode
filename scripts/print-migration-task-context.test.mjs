@@ -59,3 +59,16 @@ test("next-task advisory stops on unmerged dependencies",()=>{
  const status="| MIG-0105 | site | IN_PROGRESS | — |\n| MIG-0401 | perf | READY | MIG-0105 |";
  assert.equal(pickNextTask(status,"").selected,null);
 });
+
+test("visual tasks include D-08 and are never labelled nonvisual",()=>{
+ for(const id of ["MIG-0201","MIG-0403","MIG-0407","MIG-0501","MIG-0508"]){
+  const {output}=getTaskContext(id);
+  assert.match(output,/^\| D-08 \|/m,id);
+  assert.doesNotMatch(output,/does NOT block this nonvisual task/,id);
+ }
+});
+test("unregistered HTML blocks a READY design task in the advisory selector",()=>{
+ const status="| MIG-0200 | register | DONE | — |\n| MIG-0201 | extract | READY | MIG-0200 |";
+ assert.equal(pickNextTask(status,"| D-08 | HTML | BLOCKED_ON_USER | user |").selected,null);
+ assert.equal(pickNextTask(status,"| D-08 | HTML | DECIDED | user |").selected,"MIG-0201");
+});

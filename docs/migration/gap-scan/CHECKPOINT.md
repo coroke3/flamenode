@@ -104,7 +104,7 @@ Already identified and effectively resolved for migration direction:
 3. UI redesign source
    - historical docs/design-redesign
    - CURRENT migration rule: excluded
-   - target visual source: user-provided HTML mock only; currently PENDING_HTML
+   - target visual source: user-provided HTML mock only; PENDING_HTML at this audit checkpoint. For current registration and scope, see [UI_REFERENCE.md](../UI_REFERENCE.md).
 
 MIG-0011 still needs to record these as explicit resolved dispositions so gate counts become zero.
 

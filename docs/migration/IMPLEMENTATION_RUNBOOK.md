@@ -5,16 +5,20 @@
 > Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
+Checkpoint policy: WORK_ITEM_ONLY
+
 ## 最初の90秒に行うこと
+
+**実行環境:** `package.json`のNode要件（22系）を先に確認する。Windowsで標準Nodeが異なる場合は、導入済みfnmの例として `fnm exec --using 22 node --version`、`fnm exec --using 22 npm.cmd ci --no-audit --no-fund` を使い、以降のnpm/node検証も同じ22系で実行する。engine checkを無効化せず、ホスト全体の既定バージョンを変更する必要はない。
 
 **コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READY。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
 
 1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`work-items/MIG-XXXX.md`とopen PRを読んでownerを特定する。**作業中のPRがあるMIGを横取りしない**。
 2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
-3. `STATUS.md`で依存がDONEの`READY`を1件だけ選ぶ。`OPEN_DECISIONS.md`にある未提供資料・PoC・人間承認と照合する。**DECIDED = 本番操作許可ではない**。
+3. `AGENT_PROTOCOL.md` §Wake decisionで今回の1 actionを選ぶ。自ownerのIN_PROGRESSは同じPRを再開し、REVIEW/BLOCKEDは記録済みgate/再開条件を確認する。新規claimの場合だけ`STATUS.md`で依存がDONEの`READY`を1件選ぶ。reviewer laneではbranchを編集しない。`OPEN_DECISIONS.md`にある未提供資料・PoC・人間承認と照合する。**DECIDED = 本番操作許可ではない**。
 4. 該当カードだけ開く: [Phase2/3](TASK_CARDS_2_3.md), [Phase4/5](TASK_CARDS_4_5.md), [Phase6/7](TASK_CARDS_6_7.md), [Phase8/9](TASK_CARDS_8_9.md)。フェーズSPECとカードが食い違う場合は**両方の引用箇所と衝突を記録して停止**。都合がよい方を勝手に選ばない。
 5. 該当`CURRENT_ROUTES.md` / `route-handlers/README.md` / `server-actions/README.md`の対象行とCURRENT code/testを**実際に開く**。名前だけから動作を推測しない。
-6. 作業PRをclaimし、範囲内だけ編集する。1 wake = 1 task。Phase Gate/Remote D1/secret/production Route変更はユーザー承認がない限り実施しない。
+6. writer actionは既存owner PRを再開するか、未所有のREADYを新規claimし、範囲内だけ編集する。**1 wake = 1 action**（最大1 micro-unit / merge統合 / 独立レビュー / 何もしない）。Phase Gate/Remote D1/secret/production Route変更はユーザー承認がない限り実施しない。
 
 ## ファイル進捗が必要な理由
 
@@ -25,25 +29,34 @@
 ```text
 START
   -> FETCH latest main + open migration PRs
-  -> CHECK ownership + task READY + parent tasks DONE
-  -> CHECK decisions, required PoCs, mock state and approvals
-  -> READ task card + target ledger + CURRENT files/tests
-  -> CREATE short-lived migration/MIG branch from latest main + Draft PR
-  -> WRITE work-items/MIG-XXXX.md claim on that branch (exact files / UX / FN / acceptance / rollback); leave STATUS unchanged
-  -> RE-CHECK open migration PRs for a duplicate writer (stop if one exists)
-  -> WRITE failing characterization tests BEFORE behavior relocation
-  -> IMPLEMENT only named scope; keep legacy behavior and fallback
-  -> RUN relevant tests + full PR CI
-  -> REVIEW actual diff and contracts, note evidence with SHA
-  -> REPORT:
-       PASS -> REVIEW until independent reviewer and required CI are available
-       FAIL -> fix within scope; otherwise BLOCKED with repro and next action
-  -> INDEPENDENT review + correct approval -> work-item DONE + reconcile STATUS task DONE/next READY against latest main -> squash merge
-  -> NEXT wake starts from newly merged main, never stale branch
+  -> APPLY AGENT_PROTOCOL Wake decision: choose exactly ONE action below
+       WRITER UNIT:
+         -> RESUME own IN_PROGRESS branch/PR and recorded next unit
+            OR CLAIM one unowned READY (parents DONE), create branch + Draft PR,
+               write work-item claim, re-check duplicate PRs
+         -> CHECK decisions, required PoCs, mock state and approvals
+         -> READ one task card/unit + target ledger + CURRENT files/tests
+         -> WRITE characterization tests before behavior relocation
+         -> IMPLEMENT only named scope; keep CURRENT contracts
+         -> RUN relevant tests + required CI; inspect diff and actual SHA evidence
+         -> CHECKPOINT own work-item, leave STATUS unchanged:
+              PASS + units remain -> IN_PROGRESS + next unit
+              PASS + all units complete -> REVIEW, await independent review/CI
+              FAIL -> fix within scope; otherwise BLOCKED + recovery condition
+       MERGE INTEGRATION:
+         -> CHECK independent review, required CI and applicable human approvals
+         -> SYNC latest main; reconcile STATUS DONE/next READY and work-item DONE
+         -> RE-RUN required validation/review on changed Head; squash merge only after gates pass
+       INDEPENDENT REVIEW:
+         -> REVIEW eligible other-family/human builder PR, leave evidence at its current Head
+         -> DO NOT edit branch/work-item/STATUS or merge
+       WAIT / NO ACTION:
+         -> REPORT reason and recovery condition, no checkpoint-only push
+  -> STOP; next external wake re-reads main and the live owner PR checkpoint
 END
 ```
 
-**重要：** Hostに反復機構が無い場合は1タスクで終了する。`/loop`と書いたMDはschedulerではない。レビュー/CI待ち中は同じMIGを再claimしない。
+**重要：** Hostに反復機構が無い場合は1 actionで終了する。`/loop`と書いたMDはschedulerではない。レビュー/CI待ち中は同じMIGを再claimしない。writer unitの実装とmerge統合を同じwakeで続けて実行しない。
 
 ## 大型MIGを複数wakeに分割する方法
 
@@ -86,7 +99,7 @@ npm run verify:fast
 
 ```text
 MIG: MIG-XXXX | branch: migration/... | PR: URL | head SHA: ...
-Status: REVIEW / BLOCKED / DONE
+Status: IN_PROGRESS / REVIEW / BLOCKED / DONE
 CURRENT evidence: path#symbol + relevant test file
 Changes: path list and reason
 UX: UX-... parity status + screenshots or scenarios

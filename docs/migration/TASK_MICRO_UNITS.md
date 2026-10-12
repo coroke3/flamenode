@@ -6,17 +6,18 @@
 > Per-file checkpoint: [FILE_PROGRESS_PROTOCOL.md](FILE_PROGRESS_PROTOCOL.md), [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md)
 > Rule: **one wake processes at most one micro-unit of one MIG**. For a task with multiple units keep its single Draft PR/branch and checkpoint on that branch. Do not mark the parent REVIEW until every unit passed.
 
-## Required per-wake checkpoint in the task PR branch `work-items/MIG-XXXX.md`
+## Required micro-unit section in the task PR branch `work-items/MIG-XXXX.md`
 
-```text
-Parent MIG: MIG-XXXX
-Active PR: #NNN
-Owner: claude|codex|antigravity|human
-HEAD commit SHA: ...
-Micro-units:
-  U01: DONE | IN_PROGRESS | BLOCKED | NOT_STARTED
-  U02: ...
-Current micro-unit: UXX
+メタデータは[work-items/README.md](work-items/README.md)のCheckpoint formatを使い、`Task / State / Owner / Branch / PR / Head / Owned paths / Current unit / Validation / Evidence / Rollback / Next`を各1行だけ記録する。`Head`はcheckpoint前に実在するsource commit。以下はその本文へ追加するunit内訳であり、必須メタデータを置き換えない。
+
+```markdown
+## Micro-units
+
+| Unit | State | Actual validation/evidence | Next / recovery condition |
+| --- | --- | --- | --- |
+| U01 | DONE / IN_PROGRESS / BLOCKED / NOT_STARTED | command/result/link | exact next action |
+| U02 | NOT_STARTED | not run | dependency / next action |
+
 Changed files: [exact paths]
 File rows updated: [FILE_MIGRATION_MATRIX.md exact paths and states]
 Provider/consumer wiring: [actual exports/importers and routes]

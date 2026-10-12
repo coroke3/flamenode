@@ -287,12 +287,14 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 # Progress persistence
 
+Checkpoint policy: WORK_ITEM_ONLY
+
 2層で管理する。
 
 - `STATUS.md` = mainにmerge済みのtask/依存/Phase状態。merge直前の統合でだけ更新する。
-- owner PR branchの`work-items/MIG-XXXX.md` = 作業中taskのlive owner/checkpoint。毎wakeここへ保存する。
+- owner PR branchの`work-items/MIG-XXXX.md` = 作業中taskのlive owner/checkpoint。writer wakeはここへ保存する。
 
-終了時は単一wakeの作業結果を必ずPRのwork-itemへ保存する。
+writer wakeの終了時は作業結果を自分が所有するPRのwork-itemへ保存する。reviewer wakeはPRのレビュー/コメントへ証跡を残し、他ownerのwork-itemやSTATUSを編集しない。待機/何もしないwakeは理由と再開条件を報告し、同じcheckpointを無意味にpushしない。
 
 - 1wakeで全micro-unitが完了した場合: `REVIEW`（独立レビュー/CI待ち）、合格後`DONE`。
 - 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
@@ -311,7 +313,7 @@ merge直前の統合で同じPRに含める:
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-通常taskはtask DONE + next dependency-ready task READYまで同じPRへ記録してsquash mergeする。
+独立レビューと必須CIの合格後、merge直前に最新mainから`STATUS.md`を統合する。その時だけtask DONE + next dependency-ready task READYを同じPRへ記録してsquash mergeする。新pushでレビュー/CIが古くなった場合は再評価する。
 
 ---
 
@@ -441,7 +443,7 @@ Optimization blockers requiring frontend change: 0
 ```text
 MIG-XXXX: <task>
 Agent: <agent>
-State: DONE | REVIEW | BLOCKED
+State: IN_PROGRESS | REVIEW | BLOCKED | DONE
 
 Affected:
 - UX-...
@@ -473,7 +475,7 @@ Progress files updated:
 - ...
 
 Next:
-- MIG-YYYY | Phase Gate review | BLOCKED(reason)
+- same MIG / next micro-unit | review/CI wait | Phase Gate review | BLOCKED(reason) | next MIG after merge
 ```
 
 ---

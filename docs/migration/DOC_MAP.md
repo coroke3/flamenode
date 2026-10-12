@@ -96,6 +96,19 @@
 
 ## Active-document classification
 
+通常wakeで読むのは入口、共通規則の対象節、1つのMIGカード、STATUSの対象依存行、owner PRのwork-item、対象CURRENT source/testと関連台帳行だけ。次の文書は役割が異なるため残すが、毎回の全読込対象にはしない。
+
+| 文書 | 読むタイミング / 境界 |
+| --- | --- |
+| `PHASE_*_SPEC.md` | 対象フェーズの設計理由が必要な時。実行手順は対象MIGカード、実際の進捗はSTATUS/work-item。 |
+| `FEATURE_CATALOG.md` | 対象機能と隣接機能を探す派生索引。UX/FNの詳細契約はcanonical台帳。 |
+| `CODE_AUDIT_2026-10-09.md` / `DOC_CONTEXT_AUDIT.md` | 日付付き調査証跡。現在のREADY/DONEやmock登録状態を決める資料ではない。 |
+| `gap-scan/CHECKPOINT.md` / `gap-scan/FRONTEND_REQUIREMENTS.md` | 棚卸し証跡・要件照合。過去のPENDING_HTMLは当時の状態であり、現在はUI_REFERENCEを読む。 |
+| `SMALL_MODEL_SMOKE_TEST.md` | 独立した実行品質の確認時。負例は使い捨てfixtureで作り、本物の決定や台帳を巻き戻さない。 |
+| `UI_REFERENCE.md` / `mock/README.md` | 登録と適用範囲 / 提供artifactの索引。機能契約はscreen-mappingへ委譲する。 |
+
+不要な二重進捗台帳や、UI_REFERENCE内の独自UX/FN一覧を増やさない。誤った記述だけを削除・訂正し、要件・rollback・測定証跡を持つ文書は保持する。
+
 - `canonical-current`
 - `canonical-target`
 - `requirement-reconciliation`

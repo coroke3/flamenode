@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "AGENTS.md"
+      - "CLAUDE.md"
+      - "docs/AI_CONTEXT.md"
       - "docs/migration/**"
       - "scripts/check-migration*.mjs"
       - "scripts/print-migration-task-context*.mjs"
@@ -39,10 +41,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: squash後もcheckpoint元commitを検証できるよう不足PR履歴を取得
+        run: node scripts/check-migration-work-items.mjs --fetch-pr-history
       - name: 移行文書・タスク依存・Decision Gate
         run: node scripts/check-migration-docs.mjs
       - name: 実行契約の状態遷移テスト
         run: node --test scripts/check-migration-execution.test.mjs
+      - name: 登録mockとCURRENT route・適用範囲の回帰テスト
+        run: node --test scripts/check-migration-ui-reference.test.mjs
       - name: 全MIG実装カード網羅性
         run: node scripts/check-migration-task-cards.mjs
       - name: 実装カードchecker回帰テスト
@@ -72,6 +78,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -79,7 +87,9 @@ jobs:
       - name: 依存のロック整合性
         run: npm ci --no-audit --no-fund
       - name: 移行文書・DB schema関連チェック
-        run: npm run check:project-docs
+        run: |
+          node scripts/check-migration-work-items.mjs --fetch-pr-history
+          npm run check:project-docs
       - name: 既存Nextの型・回帰・軽量検証
         run: |
           npm run typecheck

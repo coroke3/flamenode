@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution } from "./check-migration-execution.mjs";
+import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy } from "./check-migration-execution.mjs";
 
 const status = `Current Task: MIG-0301
 Task State: READY
@@ -50,6 +50,27 @@ test("parse status task and decision inventory", () => {
 
 test("unrelated pure MIG-0301 can run before decisions", () => {
   assert.deepEqual(run(), []);
+});
+
+test("adapter checkpoint marker cannot hide contradictory STATUS write rules", () => {
+  const valid = "Checkpoint policy: WORK_ITEM_ONLY. Save work-items/MIG-XXXX.md every wake; reconcile STATUS at merge integration.";
+  assert.deepEqual(validateCheckpointPolicy({adapter:valid}), []);
+  for (const stale of ["`STATUS.md`が唯一のtask進捗正本", "branch STATUSのcheckpointから再開", "Finish as DONE, REVIEW, or BLOCKED, update `STATUS.md`", "persist STATUS + ledgers/matrices"]) {
+    assert.match(validateCheckpointPolicy({adapter:valid+"\n"+stale}).join("\n"), /conflicting per-wake STATUS/);
+  }
+});
+
+test("wake report state choices must allow a healthy incomplete checkpoint", () => {
+  const policy = "Checkpoint policy: WORK_ITEM_ONLY. Save work-items/MIG-XXXX.md on the owning PR.";
+  for (const declaration of [
+    "State: DONE | REVIEW | BLOCKED",
+    "Status: REVIEW / BLOCKED / DONE",
+    "- 終了はDONE/REVIEW/BLOCKED（work-itemに証跡を残す）",
+  ]) {
+    assert.match(validateCheckpointPolicy({ report: policy + "\n" + declaration }).join("\n"), /missing IN_PROGRESS/);
+  }
+  assert.deepEqual(validateCheckpointPolicy({ report: policy + "\nState: IN_PROGRESS | REVIEW | BLOCKED | DONE" }), []);
+  assert.deepEqual(validateCheckpointPolicy({ report: policy + "\nState: READY -> IN_PROGRESS" }), []);
 });
 
 test("requires D-01 before MIG-0303 begins", () => {

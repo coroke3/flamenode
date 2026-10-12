@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { validateMigrationExecution } from "./check-migration-execution.mjs";
+import { validateMigrationExecution, CHECKPOINT_POLICY_FILES } from "./check-migration-execution.mjs";
 import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
 import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
-import { validateWorkItems, readWorkItems } from "./check-migration-work-items.mjs";
+import { validateWorkItems, readWorkItems, gitCommitExists } from "./check-migration-work-items.mjs";
+import { validateUiReference, readUiReferenceInputs } from "./check-migration-ui-reference.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -960,7 +961,7 @@ if (errors.length === 0) {
   const pendingHtml = visualStatus === "PENDING_HTML";
   if (!visualStatus) errors.push("UI_REFERENCE.md: missing explicit Status header");
   if (!pendingHtml && !/APPROVED_HTML|REGISTERED_HTML|APPROVED/i.test(uiReference)) errors.push("UI_REFERENCE.md: visual reference has neither pending nor approved state");
-  if (!uiReference.includes("ユーザーが後日提供するHTML mock")) errors.push("UI_REFERENCE.md: later user-provided HTML mock contract is missing");
+  if (!/ユーザー(?:が後日提供する|提供)HTML mock/.test(uiReference)) errors.push("UI_REFERENCE.md: user-provided HTML mock contract is missing");
   for (const phrase of [
     "authentication principal = Auth User",
     "acting/content/interaction identity = Active X",
@@ -1176,6 +1177,12 @@ if (errors.length === 0) {
     routingText: read("docs/migration/ROUTING_AND_DEPLOY_PLAN.md"),
     viteText: read("apps/app/vite.config.ts"),
     apiSpecText: read("docs/migration/PHASE_6_SPEC.md"),
+    activeXText: read("docs/migration/ACTIVE_X_MIGRATION_PLAN.md"),
+    domainPlanText: read("docs/migration/DB_PACKAGE_EXTRACTION_PLAN.md"),
+    privateSpaText: read("docs/migration/PHASE_7_SPEC.md"),
+    publicPlanText: read("docs/migration/PHASE_4_5_SPEC.md"),
+    uiReferenceText: uiReference,
+    checkpointDocuments: Object.fromEntries(CHECKPOINT_POLICY_FILES.map(file => [file, read(file)])),
   }));
 
   errors.push(...validateTaskCards({
@@ -1198,7 +1205,8 @@ if (errors.length === 0) {
     taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
   }));
 
-  errors.push(...validateWorkItems({statusText:status,entries:readWorkItems(root)}));
+  errors.push(...validateWorkItems({statusText:status,entries:readWorkItems(root),commitExists:value=>gitCommitExists(root,value)}));
+  errors.push(...validateUiReference(readUiReferenceInputs(root)));
 
   errors.push(...validateLinks({root,documents:listMarkdownFiles(root)}));
 

@@ -6,6 +6,12 @@ import { fileURLToPath } from "node:url";
 
 export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0200": ["D-08"],
+  "MIG-0201": ["D-08"],
+  "MIG-0202": ["D-08"],
+  "MIG-0203": ["D-08"],
+  "MIG-0204": ["D-08"],
+  "MIG-0205": ["D-08"],
+  "MIG-0206": ["D-08"],
   "MIG-0308": ["D-01"],
   "MIG-0303": ["D-01"],
   "MIG-0304": ["D-01"],
@@ -13,8 +19,18 @@ export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0306": ["D-01"],
   "MIG-0307": ["D-01"],
   "MIG-0402": ["D-08"],
+  "MIG-0403": ["D-08"],
   "MIG-0405": ["D-02"],
   "MIG-0406": ["D-06"],
+  "MIG-0407": ["D-08"],
+  "MIG-0501": ["D-08"],
+  "MIG-0502": ["D-08"],
+  "MIG-0503": ["D-08"],
+  "MIG-0504": ["D-08"],
+  "MIG-0505": ["D-08"],
+  "MIG-0506": ["D-08"],
+  "MIG-0507": ["D-08"],
+  "MIG-0508": ["D-08"],
   "MIG-0605": ["D-01", "D-03"],
   "MIG-0701": ["D-05"],
   "MIG-0702": ["D-03", "D-04"],
@@ -24,6 +40,46 @@ export const REQUIRED_DECISIONS = Object.freeze({
 const COMPLETED = new Set(["DONE", "SKIPPED"]);
 const ACTIVE = new Set(["READY", "IN_PROGRESS", "REVIEW", "DONE"]);
 const STATES = new Set(["READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "SKIPPED"]);
+
+export const CHECKPOINT_POLICY_FILES = Object.freeze([
+  "docs/AI_CONTEXT.md",
+  "docs/migration/IMPLEMENTATION_RUNBOOK.md",
+  "docs/migration/AGENT_PROTOCOL.md",
+  ".claude/skills/flamenode-migration/SKILL.md",
+  ".claude/loop.md",
+  ".codex/skills/flamenode-migration/SKILL.md",
+  ".codex/skills/loop/SKILL.md",
+  ".agents/workflows/flamenode-migration.md",
+  ".agents/skills/flamenode-migration/SKILL.md",
+  ".agents/skills/loop/SKILL.md",
+  ".agents/rules/flamenode-project.md",
+]);
+
+export function validateCheckpointPolicy(documents) {
+  const errors = [];
+  for (const [file, text] of Object.entries(documents)) {
+    if (!text.includes("Checkpoint policy: WORK_ITEM_ONLY")) errors.push(file + ": missing work-item checkpoint policy");
+    if (!text.includes("work-item") && !text.includes("work-items/")) errors.push(file + ": missing live checkpoint source");
+    // Report templates must not force unfinished, healthy work into REVIEW or BLOCKED.
+    for (const match of text.matchAll(/(?:^(?:State|Status):\s*|終了は)([A-Z_]+(?:\s*[|/]\s*[A-Z_]+)+)/gm)) {
+      const choices = new Set(match[1].split(/[|/]/).map(state => state.trim()));
+      if (choices.has("REVIEW") && choices.has("BLOCKED") && !choices.has("IN_PROGRESS")) {
+        errors.push(file + ": wake report state choices missing IN_PROGRESS");
+      }
+    }
+    for (const pattern of [
+      /`?STATUS\.md`?が唯一のtask進捗正本/,
+      /branch\s+`?STATUS(?:\.md)?`?のcheckpoint/,
+      /branch\s+`?STATUS(?:\.md)?`?を優先/,
+      /claim[^\n]*STATUS\.md[^\n]*IN_PROGRESS/i,
+      /Finish as[^\n]*update\s+`?STATUS\.md/i,
+      /persist STATUS \+ ledgers/,
+    ]) {
+      if (pattern.test(text)) errors.push(file + ": conflicting per-wake STATUS write instruction");
+    }
+  }
+  return errors;
+}
 
 export function parseTaskRows(statusText) {
   const rows = new Map();
@@ -63,9 +119,10 @@ export function expandDependencies(raw) {
 }
 
 export function validateMigrationExecution({
-  statusText, decisionsText, routingText, viteText, apiSpecText, activeXText, domainPlanText, privateSpaText, publicPlanText, uiReferenceText,
+  statusText, decisionsText, routingText, viteText, apiSpecText, activeXText, domainPlanText, privateSpaText, publicPlanText, uiReferenceText, checkpointDocuments,
 }) {
   const errors = [];
+  if (checkpointDocuments) errors.push(...validateCheckpointPolicy(checkpointDocuments));
   const tasks = parseTaskRows(statusText);
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   const decisions = parseDecisionRows(decisionsText);
@@ -152,7 +209,7 @@ export function validateMigrationExecution({
   if (domainPlanText && (!domainPlanText.includes("packages/db") || !domainPlanText.includes("ゼロDDL"))) errors.push("D-01 packages/db zero-DDL plan is missing");
   if (privateSpaText && (!privateSpaText.includes("apps/ops") || !privateSpaText.includes("/_ops_assets/*"))) errors.push("D-05 Ops SPA spec is missing");
   if (publicPlanText && (!publicPlanText.includes("R2") || !publicPlanText.includes("1102"))) errors.push("D-06 R2 HTML/CPU budget spec is missing");
-  if (uiReferenceText && decisions.get("D-08") === "DECIDED" && uiReferenceText.includes("`PENDING_HTML`")) errors.push("D-08 cannot be DECIDED before mock registration");
+  if (uiReferenceText && decisions.get("D-08") === "DECIDED" && !/^> Status:\s*`?(?:REGISTERED_HTML|APPROVED_HTML)\b/m.test(uiReferenceText)) errors.push("D-08 cannot be DECIDED before mock registration");
   if (apiSpecText && !apiSpecText.includes("CURRENT の `/api/*` パス構造")) {
     errors.push("Hono plan must preserve CURRENT API path contract");
   }
@@ -174,6 +231,7 @@ if (invoked) {
     privateSpaText: read("docs/migration/PHASE_7_SPEC.md"),
     publicPlanText: read("docs/migration/PHASE_4_5_SPEC.md"),
     uiReferenceText: read("docs/migration/UI_REFERENCE.md"),
+    checkpointDocuments: Object.fromEntries(CHECKPOINT_POLICY_FILES.map(file => [file, read(file)])),
   });
   if (errors.length) {
     for (const error of errors) console.error("[check:migration-execution] " + error);

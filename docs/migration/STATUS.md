@@ -142,7 +142,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 - [x] CURRENT technical compatibility routes separated from user-visible features
 - [x] global error/404/robots/sitemap/shell behaviors represented
 - [x] old `docs/design-redesign` removed from migration sources
-- [x] new visual source set to `UI_REFERENCE.md = PENDING_HTML`
+- [x] Phase 0 established `UI_REFERENCE.md = PENDING_HTML`; MIG-0200 subsequently registered the approved HTML. Current visual scope is in UI_REFERENCE.
 - [x] existing design/product requirement reconciliation policy fixed
 - [x] Claude / Codex / Antigravity shared protocol fixed
 - [x] migration Git/branch/PR/squash workflow is mandatory
