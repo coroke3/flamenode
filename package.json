@@ -63,6 +63,8 @@
     "check:docs": "node scripts/check-docs.mjs",
     "check:db-history": "node scripts/check-db-change-history.mjs",
     "check:project-docs": "node scripts/check-project-docs.mjs",
+    "check:migration-work-items": "node scripts/check-migration-work-items.mjs",
+    "migration:status": "node scripts/check-migration-work-items.mjs --status",
     "check:ui-acceptance": "node scripts/check-ui-acceptance.mjs",
     "check:video-interactions-auth": "node scripts/check-video-interactions-auth.mjs",
     "verify:fast": "node scripts/cloudflare-verify-fast.mjs",

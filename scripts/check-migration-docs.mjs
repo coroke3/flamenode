@@ -4,6 +4,7 @@ import { validateMigrationExecution } from "./check-migration-execution.mjs";
 import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
 import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
+import { validateWorkItems, readWorkItems } from "./check-migration-work-items.mjs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -13,6 +14,7 @@ const required = [
   "docs/migration/README.md",
   "docs/migration/AGENT_PROTOCOL.md",
   "docs/migration/GIT_WORKFLOW.md",
+  "docs/migration/work-items/README.md",
   "docs/migration/DOC_MAP.md",
   "docs/migration/STATUS.md",
   "docs/migration/CURRENT_ROUTES.md",
@@ -1137,6 +1139,8 @@ if (errors.length === 0) {
     filePaths: collectMigrationFiles(),
     taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
   }));
+
+  errors.push(...validateWorkItems({statusText:status,entries:readWorkItems(root)}));
 
   errors.push(...validateLinks({root,documents:listMarkdownFiles(root)}));
 
