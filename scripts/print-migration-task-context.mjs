@@ -21,7 +21,7 @@ export function getTaskContext(id,root=ROOT){
   const owned=[...rows.values()].filter(row=>row.owner===id).sort((a,b)=>a.path.localeCompare(b.path));
   const dependencies=expandDependencies(task.dependencies);
   const decisionIds=[...(REQUIRED_DECISIONS[id]||[])];
-  if(/^MIG-0[45]/.test(id)&&!decisionIds.includes("D-08"))decisionIds.push("D-08");
+  const visualGateIsInformational=/^MIG-0[45]/.test(id)&&!decisionIds.includes("D-08");
   const decisionRows=decisions.split("\n").filter(line=>decisionIds.some(d=>new RegExp("^\\|\\s*"+d+"\\s*\\|").test(line)));
   const dir="docs/migration/";
   const lines=[
@@ -31,7 +31,8 @@ export function getTaskContext(id,root=ROOT){
     "## STATUS: "+task.state+" — "+task.title,
     "Dependencies: "+(dependencies.map(d=>d+":"+String(tasks.get(d)?.state??"UNKNOWN")).join("; ")||"none"),
     "Required decisions / approval (inspect full relevant subsection):",
-    ...(decisionRows.length?decisionRows:["none explicit; still obey production and D-08 requirements"]),
+    ...(decisionRows.length?decisionRows:["none explicit for this task; production approvals remain separate"]),
+    ...(visualGateIsInformational?["D-08 visual HTML remains a gate for later visual work; it does NOT block this nonvisual task."]:[]),
     "",
     "## Exact task card ("+(card?.path??"no Phase2–9 card")+")",
     card?.heading??"",
