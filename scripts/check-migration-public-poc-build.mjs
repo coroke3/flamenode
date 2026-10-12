@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
-const dir=path.join(root,"apps/site/dist/__migration_poc");
+const dir=path.join(root,"apps/site/dist/migration-fixture-poc");
 const htmlPath=path.join(dir,"public_demo/index.html");
 function fail(message){console.error("[MIG-0401 build] FAIL: "+message);process.exitCode=1;}
 if(!fs.existsSync(htmlPath))fail("expected Astro public fixture HTML absent");
