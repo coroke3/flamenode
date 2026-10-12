@@ -45,7 +45,7 @@ Read **owned rows only** in [FILE_MIGRATION_MATRIX.md](FILE_MIGRATION_MATRIX.md)
 | Domain/DB/Auth/Queue | relevant [FUNCTION_INVENTORY.md](FUNCTION_INVENTORY.md), [auth/README.md](auth/README.md), [background-jobs/README.md](background-jobs/README.md) sections; actual DB/code first |
 | Browser/Worker production routing | [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [cloudflare/TOPOLOGY.md](cloudflare/TOPOLOGY.md); explicit approval required |
 
-Do **not** paste all 432 UX / 136 FN / 110 SA / 90 page rows, all MIG cards, full [README.md](README.md) architecture and [DOC_MAP.md](DOC_MAP.md) into each iteration. Use `rg -n 'MIG-0401|UX-...' docs/migration`, `sed -n 'START,ENDp' file`, or tool-supported line/section retrieval. [DOC_MAP.md](DOC_MAP.md) is a search index, not mandatory every time.
+Do **not** paste all 432 UX / 136 FN / 110 SA / 90 page rows, all MIG cards, full [README.md](README.md) architecture and [DOC_MAP.md](DOC_MAP.md) into each iteration. Large ledgers like [FEATURE_CATALOG.md](FEATURE_CATALOG.md) (73KB) are human-readable derived views, and `gap-scan/` files are CI evidence anchors; do not load them wholesale into LLM context. Use `rg -n 'MIG-0401|UX-...' docs/migration`, `sed -n 'START,ENDp' file`, or tool-supported line/section retrieval. [DOC_MAP.md](DOC_MAP.md) is a search index, not mandatory every time.
 
 ## 3. Completion contract
 

@@ -33,6 +33,6 @@
 ## Outstanding implementation blockers
 
 - MIG-0301 is READY but not completed; the entire migration is not implemented.
-- D-08 UI mock is still PENDING_HTML.
+- D-08 UI mock: HTML mock was registered in `docs/migration/mock/` and D-08 was marked DECIDED via MIG-0200 (PR #284). Phase 2 visual extraction (MIG-0201) is unblocked.
 - Cloudflare Route, 1102 CPU headroom, R2 visibility, Auth.js compatibility and D-03/D-04 real data cutover require separate evidence.
 - This audit is a documentation and test review, not a claim that small models have successfully completed all work autonomously.
