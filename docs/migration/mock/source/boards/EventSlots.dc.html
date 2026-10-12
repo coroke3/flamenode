@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>上映枠</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja" style="position: relative;">
+  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 40px; max-width: 1200px;">
+    <a href="EventDetail.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>PVSF2026S</a>
+    <div class="wrap-row" style="justify-content: space-between; gap: 16px; margin-top: 8px; align-items: flex-end;">
+      <h1 class="t-display">上映枠</h1>
+      <div class="meta-i" style="font-size: 14px;">
+        <span class="st" style="color: var(--ink);"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>受付中</span>
+        <span class="t-num">1 X ID 2枠まで</span>
+      </div>
+      <div class="dl" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
+    </div>
+
+    <sc-if value="{{gate.show}}" hint-placeholder-val="{{false}}">
+      <div class="notice" style="margin-top: 24px; align-items: center;"><i class="{{gate.icon}}" aria-hidden="true"></i><span class="t-sm" style="flex: 1;">{{gate.text}}</span><sc-if value="{{gate.cta}}" hint-placeholder-val="{{true}}"><a href="{{gate.href}}" class="fn-btn fn-btn--secondary fn-btn--sm">{{gate.cta}}</a></sc-if></div>
+    </sc-if>
+
+    <div class="split" style="margin-top: 32px; gap: 32px;">
+      <div class="main">
+        <div class="wrap-row t-sm muted" style="gap: 20px; margin-bottom: 16px;" aria-label="枠の凡例">
+          <span class="il"><i class="fa-solid fa-plus" aria-hidden="true"></i>空き</span>
+          <span class="il"><i class="fa-solid fa-user" aria-hidden="true" style="color: var(--info);"></i>自分の枠</span>
+          <span class="il"><i class="fa-solid fa-rotate" aria-hidden="true"></i>優先再取得中</span>
+          <span style="flex: 1;"></span>
+          <span class="t-sm">空き枠を押すと確保できます。自分の枠を押すと操作メニュー</span>
+        </div>
+        <div class="parts" role="region" aria-label="枠の状態">
+          <sc-for list="{{days}}" as="p" hint-placeholder-count="2">
+            <section class="part">
+              <header><span class="t-num">{{p.label}}</span><span class="t-sm muted t-num">{{p.filled}}</span></header>
+              <sc-for list="{{p.rows}}" as="r" hint-placeholder-count="12">
+                <sc-if value="{{r.isGap}}" hint-placeholder-val="{{false}}"><div class="pgap"><span>休憩 <span class="t-num">{{r.gapRange}}</span></span></div></sc-if>
+                <sc-if value="{{r.isPart}}" hint-placeholder-val="{{false}}"><div class="plabel">{{r.partLabel}}</div></sc-if>
+                <sc-if value="{{r.isSlot}}" hint-placeholder-val="{{true}}">
+                <div class="{{r.rowCls}}">
+                  <span class="tm">{{r.time}}<span class="now-tag">現在</span></span>
+                  <sc-if value="{{r.isBreak}}" hint-placeholder-val="{{false}}"><div class="sl">休憩</div></sc-if>
+                  <sc-if value="{{r.taken}}" hint-placeholder-val="{{true}}">
+                    <button type="button" class="{{r.slCls}}" onClick="{{r.pick}}" aria-label="{{r.time}} {{r.who}} {{r.state}}"><img src="{{r.icon}}" alt=""><span class="nm" style="color: var(--ink);">{{r.who}}</span><i class="{{r.dot}}" title="{{r.state}}" aria-hidden="true"></i></button>
+                  </sc-if>
+                  <sc-if value="{{r.open}}" hint-placeholder-val="{{false}}">
+                    <button type="button" class="{{r.slCls}}" onClick="{{r.pick}}" disabled="{{r.disabled}}" aria-label="{{r.aria}}"><i class="{{r.openIcon}}" aria-hidden="true"></i><span class="nm">{{r.openLabel}}</span></button>
+                  </sc-if>
+                </div>
+                <sc-if value="{{r.menuOpen}}" hint-placeholder-val="{{false}}">
+                  <div class="slot-pop" role="menu" aria-label="{{r.time}} の自分の枠">
+                    <a href="EntrySlotted.dc.html" class="slot-pop-i" role="menuitem"><i class="fa-solid fa-upload" aria-hidden="true"></i>作品登録</a>
+                    <button type="button" class="slot-pop-i" role="menuitem" onClick="{{closeMenu}}"><i class="fa-solid fa-trash" aria-hidden="true"></i>解放</button>
+                    <button type="button" class="slot-pop-i" role="menuitem" onClick="{{closeMenu}}"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i>前を追加</button>
+                    <button type="button" class="slot-pop-i" role="menuitem" disabled="{{yes}}" title="後方に連続する空き枠がありません"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i>後を追加</button>
+                  </div>
+                </sc-if>
+                </sc-if>
+              </sc-for>
+            </section>
+          </sc-for>
+        </div>
+      </div>
+
+    </div>
+  </div>
+  <sc-if value="{{modalOpen}}" hint-placeholder-val="{{false}}">
+    <x-import component-from-global-scope="FlameNode.Modal" open="{{yes}}" contained="{{yes}}" icon="ms ms-event_seat" title="枠を確保" actions="{{modalActions}}" on-close="{{clear}}">
+      <div class="stack" style="gap: 20px; text-align: left;">
+        <div class="stack" style="gap: 0; align-items: center; text-align: center;"><span class="t-num" style="font: 400 32px/40px var(--font-sans); color: var(--ink);">{{sel.range}}</span><span class="t-sm">{{sel.meta}}</span></div>
+        <x-import component-from-global-scope="FlameNode.TextField" label="表示名・団体名" default-value="おたこ" placeholder="例: FlameNode制作部" hint="枠表に表示されます"></x-import>
+        <sc-if value="{{sel.canMulti}}" hint-placeholder-val="{{true}}">
+          <div class="field"><span>取得する枠数</span>
+            <div class="seg" role="radiogroup" aria-label="取得する枠数"><sc-for list="{{countOpts}}" as="o" hint-placeholder-count="2"><button type="button" role="radio" aria-checked="{{o.on}}" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+            <span class="t-sm muted">連続上限は {{sel.limit}} 枠です。{{sel.multiNote}}</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{sel.gapNote}}" hint-placeholder-val="{{false}}"><p class="t-sm" style="margin: 0;"><i class="fa-solid fa-link" aria-hidden="true"></i> 空き枠を確保して、前後の自分の枠を1つの連続枠にまとめます。</p></sc-if>
+        <p class="t-sm" style="margin: 0;">取得名義 <span style="color: var(--ink);">おたこ</span> · 取得 X ID <span style="color: var(--ink);">@012345rty</span></p>
+      </div>
+    </x-import>
+  </sc-if>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"viewer":{"editor":"enum","options":["ok","guest","onboarding"],"default":"ok"},"eventState":{"editor":"enum","options":["open","before","paused","ended"],"default":"open"},"demo":{"editor":"enum","options":["none","reserve","menu"],"default":"none"},"now":{"editor":"enum","options":["off","on"],"default":"off"},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sel: p && p.demo === 'reserve' ? '0-3' : null, count: 1, menu: p && p.demo === 'menu' ? '0-2' : null }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const showNow = (this.props.now ?? 'off') === 'on';
+    const S = this.state; const viewer = this.props.viewer ?? 'ok'; const ev = this.props.eventState ?? 'open';
+    const G = {
+      guest: { show: true, icon: 'fa-solid fa-right-to-bracket', text: '枠の確保にはログインが必要です。', cta: 'ログイン', href: 'EntrySignIn.dc.html', block: true },
+      onboarding: { show: true, icon: 'fa-solid fa-list-check', text: '初期設定が未完了です。利用規約に同意すると枠を確保できます(投稿は X ID 承認後)。', cta: '初期設定を続ける', href: 'OnboardingTerms.dc.html', block: true },
+      ok: { show: false, block: false }
+    }[viewer];
+    const E = { open: null, before: { show: true, icon: 'fa-regular fa-clock', text: '募集開始前です。受付開始までお待ちください。', cta: '', block: true }, paused: { show: true, icon: 'fa-solid fa-pause', text: '現在は受付停止中です。', cta: '', block: true }, ended: { show: true, icon: 'ms ms-inventory_2', text: '終了済みのため新規確保はできません。', cta: '', block: true } }[ev];
+    const gate = E || G;
+    const fmt = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    // '' 空き / '*' 休憩 / '~' 優先再取得中
+    // [部名, 開始(分), 枠, 日付index] — 同じ日の部は1列にまとめ、部の間に休憩行を入れる(SlotGrid.tsx と同じ)
+    const D = [
+      ['1日目 第1部', 18 * 60, ['幼虫', '空白合作チーム', 'おたこ', '', '', 'スティックのり', '*', 'lalaClione', 'おゆする', ''], 0],
+      ['1日目 第2部', 20 * 60, ['あいこーすふぃあ', 'hato', '~', 'てつどうふぁん', '', 'おたこ', '', 'おたこ', '新概念', ''], 0],
+      ['1日目 第3部', 22 * 60, ['', '', '味付け海苔', '', '貴方', '', '', '', 'ホラー映画合作', ''], 0],
+      ['2日目 第1部', 18 * 60, ['ちょこ', '', 'みかん', '', '', '', 'てつどうふぁん', '', '', ''], 1]
+    ];
+    const DAYS = ['11/03(火)', '11/04(水)'];
+    const id = (pi, k) => pi + '-' + k;
+    const [sp, sk] = (S.sel || '').split('-').map(Number);
+    const selRow = S.sel ? D[sp][2][sk] : null;
+    const selOpen = S.sel && selRow === '';
+    let maxRun = 0; if (selOpen) { let k = sk; while (k < D[sp][2].length && D[sp][2][k] === '' && maxRun < 2) { maxRun++; k++; } }
+    const count = Math.min(S.count, Math.max(1, maxRun));
+    const parts = D.map(([label, start, names], pi) => {
+      let t = start;
+      const rows = names.map((n, k) => {
+        const time = fmt(t); t += 6;
+        const isBreak = n === '*', prio = n === '~', open = n === '' , mine = n === 'おたこ';
+        const picked = S.sel === id(pi, k);
+        const inRange = selOpen && pi === sp && k > sk && k < sk + count;
+        const gapMerge = open && k > 0 && k < names.length - 1 && names[k - 1] === 'おたこ' && names[k + 1] === 'おたこ';
+        return { time, isBreak, taken: !open && !isBreak, open, who: prio ? '優先再取得中' : n, icon: T[(pi * 10 + k) % 8],
+          state: mine ? '自分の枠' : prio ? '優先再取得中' : '確保済み', dot: mine ? 'fa-solid fa-user st-ic info' : prio ? 'fa-solid fa-rotate st-ic mute' : 'st-ic',
+          rowCls: (showNow && pi === 0 && k === 2) ? 'srow2 now' : (isBreak ? 'srow2 brk' : 'srow2'),
+          slCls: 'sl' + (open ? '' : ' taken') + (mine ? ' mine' : '') + (prio ? ' prio' : '') + (picked ? ' pick' : '') + (inRange ? ' inrange' : '') + (gapMerge ? ' gap' : ''),
+          openIcon: gapMerge ? 'fa-solid fa-link' : (picked || inRange ? 'fa-solid fa-circle-check' : 'fa-solid fa-plus'),
+          openLabel: gapMerge ? 'ここを埋めて結合' : (picked || inRange ? '選択中' : (gate.block ? (viewer === 'guest' ? '空き。ログインが必要です' : '空き') : '空き')),
+          aria: time + ' の空き枠を選ぶ', disabled: !!gate.block,
+          pick: () => { if (mine) this.setState({ menu: this.state.menu === id(pi, k) ? null : id(pi, k), sel: null }); else if (open && !gate.block) this.setState({ sel: id(pi, k), count: 1, menu: null }); }, menuOpen: mine && S.menu === id(pi, k) };
+      });
+      const real = rows.filter(r => !r.isBreak);
+      return { label, day: D[pi][3], start, end: t, rows: rows.map(r => ({ ...r, isSlot: true, isGap: false, isPart: false })), taken: real.filter(r => r.taken).length, total: real.length };
+    });
+    const days = DAYS.map((label, di) => {
+      const ps = parts.filter(p => p.day === di);
+      const rows = [];
+      ps.forEach((p, i) => {
+        if (i > 0) rows.push({ isGap: true, isPart: false, isSlot: false, gapRange: fmt(ps[i - 1].end - 6) + ' – ' + fmt(p.start) });
+        if (ps.length > 1) rows.push({ isPart: true, isGap: false, isSlot: false, partLabel: p.label.replace(/^\d+日目\s*/, '') });
+        rows.push(...p.rows);
+      });
+      return { label, rows, filled: ps.reduce((a, p) => a + p.taken, 0) + ' / ' + ps.reduce((a, p) => a + p.total, 0) };
+    });
+    const startMin = selOpen ? D[sp][1] + sk * 6 : 0;
+    const selGap = selOpen && sk > 0 && D[sp][2][sk - 1] === 'おたこ' && D[sp][2][sk + 1] === 'おたこ';
+    return {
+      theme: this.props.theme ?? 'dark', yes: true, days, gate,
+      panel: { none: !S.sel, reserve: !!selOpen && !gate.block, mine: selRow === 'おたこ', other: !!S.sel && !selOpen && selRow !== 'おたこ' },
+      sel: { range: selOpen ? fmt(startMin) : (S.sel ? fmt(D[sp][1] + sk * 6) : ''), meta: selOpen ? DAYS[D[sp][3]] + ' · ' + D[sp][0] + ' · ' + (count === 1 ? '単枠' : count + '枠連続') : '', countLabel: count === 1 ? '単枠' : count + '枠連続', min: count <= 1, max: count >= Math.max(1, maxRun), limit: 2, multi: count >= 2, canMulti: maxRun > 1, multiNote: count >= 2 ? 'この選択は1作品分です。別作品は別の枠を確保してください。' : '', cta: selGap ? 'ここを埋めて結合' : (count === 1 ? 'この枠を確保' : count + '枠をまとめて確保'), gapNote: selGap, who: selRow, state: selRow === '~' ? '優先再取得中' : '確保済み' },
+      dec: () => this.setState({ count: Math.max(1, count - 1) }), inc: () => this.setState({ count: Math.min(maxRun, count + 1) }),
+      clear: () => this.setState({ sel: null }), pickNext: () => this.setState({ sel: '0-3', count: 1 }),
+      reserve: (e) => { e.preventDefault(); this.setState({ sel: null }); },
+      closeMenu: () => this.setState({ menu: null }),
+      modalOpen: !!selOpen && !gate.block,
+      countOpts: Array.from({ length: Math.max(1, maxRun) }, (_, i) => i + 1).map((n) => ({ label: n === 1 ? '単枠で確保' : n + '枠連続で確保', on: count === n ? 'true' : 'false', cls: count === n ? 'on' : '', pick: () => this.setState({ count: n }) })),
+      modalActions: (() => { const F = window.FlameNode, h = window.React && window.React.createElement; if (!F || !h) return null; const close = () => this.setState({ sel: null }); return [h(F.Button, { key: 'c', variant: 'tertiary', onClick: close }, 'キャンセル'), h(F.Button, { key: 'r', variant: 'primary', icon: 'fa-solid fa-plus', onClick: close }, selGap ? 'ここを埋めて結合' : '確保する')]; })()
+    };
+  }
+}
+</script>
+</body>
+</html>

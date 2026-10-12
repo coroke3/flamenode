@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベント再生リスト同期</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="playlists" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">再生リスト同期</h1></sc-if><p class="muted">同期を明示的に設定したイベントだけを対象に、YouTube再生リストへの反映状況を確認します。</p></div></div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="作品管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-solid fa-list" aria-hidden="true"></i>すべて</a>
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-brands fa-youtube" aria-hidden="true"></i>メタデータ同期</a>
+      <a href="AdminVideosHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-list-ol" aria-hidden="true"></i>再生リスト同期</a>
+    </nav></sc-if>
+    <div class="metrics" style="margin-bottom: 32px;">
+      <div class="metric"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><b>4</b><span>設定イベント</span></div>
+      <div class="metric"><i class="ms ms-pending_actions" aria-hidden="true"></i><b>7</b><span>同期待ち作品</span></div>
+      <div class="metric"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--danger);"></i><b>1</b><span>失敗イベント</span></div>
+    </div>
+    <div class="wrap-row" style="gap: 8px; margin-bottom: 16px;">
+      <span class="sel-i"><i class="fa-solid fa-toggle-on" aria-hidden="true"></i><select class="select i" aria-label="有効状態"><option>すべて</option><option>有効のみ</option><option>無効のみ</option></select></span>
+      <span class="sel-i"><i class="ms ms-monitor_heart" aria-hidden="true"></i><select class="select i" aria-label="同期状態"><option>同期状態 すべて</option><option>要対応</option><option>注意</option><option>正常</option></select></span>
+    </div>
+    <div class="t-scroll">
+      <div class="dt" style="--cols: minmax(180px,1.2fr) 150px minmax(140px,1fr) 80px 110px minmax(160px,1fr) 80px; --minw: 1000px;">
+        <div class="dt-h"><span>イベント</span><span>同期状態</span><span>設定</span><span class="num">作品</span><span>日時</span><span>エラー・警告</span><span></span></div>
+        <div class="dt-r"><span class="ell">PVSF2026Sp</span><span class="st"><span class="dot err"></span>同期失敗</span><span class="t-sm">追加のみ · 12時間</span><span class="num">73</span><span class="t-num muted">10.04 09:00</span><span class="t-sm ell" style="color: var(--danger);">クォータ超過</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://www.youtube.com/playlist" class="ib sm" aria-label="再生リストを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+        <div class="dt-r"><span class="ell">PVSF2026S</span><span class="st"><span class="dot info"></span>同期中</span><span class="t-sm">追加のみ · 12時間</span><span class="num">94</span><span class="t-num muted">10.04 09:05</span><span class="t-sm muted ell">未反映あり 7</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://www.youtube.com/playlist" class="ib sm" aria-label="再生リストを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+        <div class="dt-r"><span class="ell">PVSF2025S</span><span class="st"><span class="dot ok"></span>正常</span><span class="t-sm">完全同期 · 24時間</span><span class="num">75</span><span class="t-num muted">10.03 21:00</span><span class="t-sm muted">—</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://www.youtube.com/playlist" class="ib sm" aria-label="再生リストを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+        <div class="dt-r"><span class="ell">夏休み創作島　創作島合作</span><span class="st"><span class="dot warn"></span>予定時刻超過</span><span class="t-sm">完全同期 · 6時間</span><span class="num">1</span><span class="t-num muted">10.04 03:00</span><span class="t-sm ell" style="color: var(--warning);">次回予定を3時間超過 · 繰り越し</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://www.youtube.com/playlist" class="ib sm" aria-label="再生リストを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+        <div class="dt-r"><span class="ell">年越し合作</span><span class="st"><span class="dot info"></span>全件確認未実行</span><span class="t-sm">追加のみ · 24時間</span><span class="num">1</span><span class="t-num muted">—</span><span class="t-sm ell" style="color: var(--ink-muted);">初回の全件確認待ち</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://www.youtube.com/playlist" class="ib sm" aria-label="再生リストを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+        <div class="dt-r"><span class="ell">PVSF2025Sp</span><span class="st"><span class="dot"></span>無効</span><span class="t-sm muted">同期しない</span><span class="num">66</span><span class="muted">—</span><span class="t-sm muted">次回予定なし</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="ManagePlaylist.dc.html" class="ib sm" aria-label="設定"><i class="fa-solid fa-gear"></i></a></span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

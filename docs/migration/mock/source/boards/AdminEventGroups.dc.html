@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベントグループ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="groups" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">グループ</h1></sc-if><p class="muted">系列・ジャンルなどのイベントグループと所属イベントを管理します。</p></div>
+      <a href="AdminEventGroupEdit.dc.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i>新規グループ</a>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="イベント管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminEventsHub.dc.html" class="il"><i class="fa-solid fa-list" aria-hidden="true"></i>イベント一覧</a>
+      <a href="AdminEventsHub.dc.html" class="il" aria-current="page"><i class="ms ms-account_tree" aria-hidden="true"></i>グループ</a>
+      <a href="AdminEventsHub.dc.html" class="il"><i class="fa-regular fa-clone" aria-hidden="true"></i>テンプレート</a>
+    </nav></sc-if>
+    <div class="wrap-row" style="gap: 8px; margin-bottom: 16px;">
+      <span class="sel-i"><i class="fa-solid fa-eye" aria-hidden="true"></i><select class="select i" aria-label="公開状態"><option>公開状態すべて</option><option>公開</option><option>非公開</option><option>アーカイブ</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-tag" aria-hidden="true"></i><select class="select i" aria-label="種別"><option>種別すべて</option><option>系列</option><option>ジャンル</option><option>関連</option><option>コレクション</option><option>その他</option></select></span>
+    </div>
+    <div class="dt" style="--cols: 56px minmax(200px,1fr) 120px 110px 96px 80px; --minw: 0px;">
+      <div class="dt-h"><span>表示順</span><span>名前</span><span>種別</span><span>公開状態</span><span class="num">イベント数</span><span></span></div>
+      <div class="dt-r"><span class="t-num muted">1</span><span class="stack"><span>PVSF</span><span class="sub t-mono">pvsf</span></span><span class="il"><i class="fa-solid fa-link muted" aria-hidden="true"></i>系列</span><span class="st"><span class="dot ok"></span>公開</span><span class="num">16</span><span class="row" style="justify-content: flex-end;"><a href="AdminEventGroupEdit.dc.html" class="ib sm" aria-label="編集"><i class="fa-solid fa-pen"></i></a></span></div>
+      <div class="dt-r"><span class="t-num muted">2</span><span class="stack"><span>合作</span><span class="sub t-mono">collabo</span></span><span class="il"><i class="fa-solid fa-tag muted" aria-hidden="true"></i>ジャンル</span><span class="st"><span class="dot ok"></span>公開</span><span class="num">4</span><span class="row" style="justify-content: flex-end;"><a href="AdminEventGroupEdit.dc.html" class="ib sm" aria-label="編集"><i class="fa-solid fa-pen"></i></a></span></div>
+      <div class="dt-r"><span class="t-num muted">3</span><span class="stack"><span>PVSF まとめ動画</span><span class="sub t-mono">summary</span></span><span class="il"><i class="fa-solid fa-box-archive muted" aria-hidden="true"></i>コレクション</span><span class="st"><span class="dot"></span>非公開</span><span class="num">1</span><span class="row" style="justify-content: flex-end;"><a href="AdminEventGroupEdit.dc.html" class="ib sm" aria-label="編集"><i class="fa-solid fa-pen"></i></a></span></div>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

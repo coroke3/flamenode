@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品管理</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div>
+        <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">作品管理</h1></sc-if>
+        <p class="muted">作品の状態確認、監査ログ、参加者設定を行います。</p>
+      </div>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="作品管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminVideosHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-list" aria-hidden="true"></i>すべて</a>
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-brands fa-youtube" aria-hidden="true"></i>メタデータ同期</a>
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-solid fa-list-ol" aria-hidden="true"></i>再生リスト同期</a>
+    </nav></sc-if>
+
+    <div class="wrap-row" style="gap: 8px;">
+      <nav class="subnav" aria-label="公開状態"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="5"><a href="#" aria-current="{{t.cur}}" onClick="{{t.pick}}">{{t.label}}</a></sc-for></nav>
+      <span style="flex: 1;"></span>
+      <span class="sel-i"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><select class="select i" aria-label="イベント"><option>すべてのイベント</option><option>PVSF2026Sp</option><option>PVSF2025S</option></select></span>
+      <div class="field-i" style="width: 260px;"><x-import component-from-global-scope="FlameNode.TextField" type="search" aria-label="検索" placeholder="タイトル / 作者 / X ID"></x-import><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div>
+    </div>
+    <p class="t-sm muted t-num" style="margin: 16px 0 8px;">12 件</p>
+
+    <div class="t-scroll">
+      <div class="dt" role="table" aria-label="作品一覧" style="--cols: minmax(260px, 2.4fr) minmax(140px, 1.2fr) 96px 72px 88px 80px 92px 104px; --minw: 1100px;">
+        <div class="dt-h" role="row"><span>作品</span><span>作者</span><span>状態</span><span>YouTube</span><span>ステージ許可</span><span>必須未回答</span><span>登録</span><span></span></div>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+          <div class="dt-r" role="row">
+            <a href="AdminVideoHub.dc.html" class="row" style="gap: 12px; min-width: 0;"><img class="thumb" src="{{r.thumb}}" alt=""><span class="stack" style="min-width: 0;"><span class="ell">{{r.title}}</span><span class="sub">{{r.event}}</span></span></a>
+            <span class="stack" style="min-width: 0;"><span class="il ell"><i class="{{r.kindIcon}} muted" aria-hidden="true"></i>{{r.creator}}</span><span class="sub">@{{r.x}}</span></span>
+            <span class="st"><span class="{{r.dot}}"></span>{{r.state}}</span>
+            <i class="{{r.yt}}" aria-label="{{r.ytLabel}}" title="{{r.ytLabel}}" style="color: {{r.ytColor}};"></i>
+            <i class="{{r.stage}}" aria-hidden="true"></i>
+            <i class="{{r.req}}" aria-hidden="true" style="color: var(--warning);"></i>
+            <span class="t-num muted">{{r.at}}</span>
+            <span class="row" style="gap: 0; justify-content: flex-end;"><button type="button" class="ib sm" aria-label="承認"><i class="fa-solid fa-check"></i></button><a href="AdminAuditHub.dc.html" class="ib sm" aria-label="この作品の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminVideoHub.dc.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'pending' }; }
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const r = this.__rv();
+    r._nav = (r.tabs || []).map(x => ({ label: x.label, cur: x.id === r.tab ? 'page' : 'false', cls: x.id === r.tab ? 'on' : '', pick: (e) => { e && e.preventDefault && e.preventDefault(); r.setTab(x.id); } }));
+    return r;
+  }
+  __rv() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const D = [
+      ['【幼虫アニメ】◯◯◯でしますか？◯でしますか？','幼虫','MusiVirus','s','pending',1,1,0,'03.28 21:00'],
+      ['空白合作','空白合作チーム','vIXyOepPI395671','g','pending',1,1,1,'03.28 20:48'],
+      ['【文字PV】スチールワンダー / はるまきごはん','スティックのり','Sticknorikun','s','pending',0,1,0,'03.28 20:42'],
+      ['おゆする合作','おゆする','oyu_kurumaebi','g','public',1,1,0,'03.28 20:36'],
+      ['模範囚','hato','Ghx86L','s','public',1,0,0,'03.28 20:30'],
+      ['魔法少女 このは・グリモワール　最終決戦編','おたこ','012345rty','s','private',1,1,0,'03.28 20:00'],
+      ['STEL-LUMINA','赤嶺いずな','izuna_text','s','public',1,1,0,'03.28 19:36'],
+      ['【みずのひと合作】マッドダイナー / 宮守文学','みずのひと合作2','mizunohito_10','g','voided',1,1,0,'03.28 19:30']
+    ];
+    const S = { pending: ['承認待ち', 'dot warn'], public: ['公開', 'dot ok'], private: ['非公開', 'dot'], voided: ['一時停止', 'dot err'] };
+    return {
+      theme: this.props.theme ?? 'dark',
+      tab: this.state.tab, setTab: (id) => this.setState({ tab: id }),
+      tabs: [{ id: 'pending', label: '承認待ち 12' }, { id: 'public', label: '公開' }, { id: 'private', label: '非公開' }, { id: 'voided', label: '無効化' }, { id: 'all', label: 'すべて' }],
+      rows: D.map((d, i) => ({ title: d[0], creator: d[1], x: d[2], kindIcon: d[3] === 'g' ? 'fa-solid fa-user-group' : 'fa-solid fa-user', state: S[d[4]][0], dot: S[d[4]][1], yt: d[5] ? 'fa-brands fa-youtube' : 'fa-solid fa-link-slash', ytLabel: d[5] ? 'YouTube 登録済み' : 'URL未設定', ytColor: d[5] ? 'var(--ink)' : 'var(--ink-muted)', stage: d[6] ? 'fa-solid fa-check' : 'fa-solid fa-minus muted', req: d[7] ? 'fa-solid fa-circle-exclamation' : '', event: 'PVSF2026Sp', at: d[8], thumb: T[i % 8] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

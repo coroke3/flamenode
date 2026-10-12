@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>受信箱</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="inbox" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="inbox" hint-size="100%,96px"></dc-import>
+
+    <div class="wrap-row" style="gap: 8px; margin: 24px 0 12px;">
+      <div class="seg" role="tablist" aria-label="種類"><sc-for list="{{kinds}}" as="k" hint-placeholder-count="5"><button type="button" role="tab" class="{{k.cls}}" onClick="{{k.pick}}"><i class="{{k.icon}}" aria-hidden="true"></i>{{k.label}}<span class="t-num muted">{{k.n}}</span></button></sc-for></div>
+      <span style="flex: 1;"></span>
+      <span class="row t-sm muted kb-hints" style="gap: 12px;"><span class="il"><kbd class="kbd">J</kbd><kbd class="kbd">K</kbd>移動</span><span class="il"><kbd class="kbd">A</kbd>承認</span><span class="il"><kbd class="kbd">R</kbd>却下</span><span class="il"><kbd class="kbd">S</kbd>あとで</span><span class="il"><kbd class="kbd">X</kbd>選択</span></span>
+    </div>
+
+    <sc-if value="{{bulk}}" hint-placeholder-val="{{false}}">
+      <div class="row" style="gap: 8px; padding: 10px 16px; background: var(--surface-active); margin-bottom: 8px;"><span class="t-sm"><b class="t-num">{{selCount}}</b> 件を選択中(必須項目がそろった作品のみ一括承認できます)</span><span style="flex: 1;"></span><button type="button" class="fn-btn fn-btn--primary fn-btn--sm">まとめて承認</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{clearSel}}">解除</button></div>
+    </sc-if>
+
+    <sc-if value="{{empty}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 10px; padding: 80px 0; align-items: center; text-align: center;"><span class="icon-tile lg"><i class="fa-solid fa-check" aria-hidden="true"></i></span><span class="t-h3">すべて対応済みです</span><span class="t-sm muted">新しい提出や申請が届くと、ここに表示されます。</span></div>
+    </sc-if>
+
+    <sc-if value="{{hasItems}}" hint-placeholder-val="{{true}}">
+    <div class="mx-split" style="display: grid; grid-template-columns: minmax(0,1fr) 400px; gap: 24px; align-items: start;">
+      <div role="listbox" aria-label="対応待ち" class="stack" style="gap: 2px;">
+        <sc-for list="{{items}}" as="it" hint-placeholder-count="8">
+          <div class="{{it.cls}}" role="option" aria-selected="{{it.selStr}}">
+            <input type="checkbox" aria-label="選択" checked="{{it.checked}}" onChange="{{it.check}}" style="accent-color: var(--ink); width: 16px; height: 16px; flex: none;">
+            <button type="button" class="ib-row" onClick="{{it.pick}}">
+              <span class="icon-tile" style="width: 36px; height: 36px; flex: none;"><i class="{{it.icon}}" aria-hidden="true"></i></span>
+              <span class="stack" style="gap: 2px; flex: 1; min-width: 0; text-align: left;"><span class="ell">{{it.title}}</span><span class="t-sm muted ell">{{it.meta}}</span></span>
+              <span class="stack" style="gap: 2px; align-items: flex-end; flex: none;"><span class="t-sm t-num" style="{{it.ageStyle}}">{{it.age}}</span><span class="t-sm muted ib-kind">{{it.kindLabel}}</span></span>
+            </button>
+          </div>
+        </sc-for>
+      </div>
+
+      <aside class="raised stack" style="gap: 16px; padding: 20px; position: sticky; top: 16px;" aria-label="選択中の項目">
+        <span class="il t-label muted"><i class="{{cur.icon}}" aria-hidden="true"></i>{{cur.kindLabel}}</span>
+        <sc-if value="{{cur.isVideo}}" hint-placeholder-val="{{true}}"><img src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="" style="width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;"></sc-if>
+        <span class="t-h3">{{cur.title}}</span>
+        <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;">
+          <sc-for list="{{cur.facts}}" as="f" hint-placeholder-count="4"><dt>{{f.k}}</dt><dd style="{{f.style}}">{{f.v}}</dd></sc-for>
+        </dl>
+        <sc-if value="{{cur.needReason}}" hint-placeholder-val="{{false}}"><x-import component-from-global-scope="FlameNode.TextField" aria-label="理由" placeholder="{{cur.reasonPh}}"></x-import></sc-if>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="fn-btn fn-btn--primary" style="flex: 1;" onClick="{{done}}"><i class="{{cur.primaryIcon}}" aria-hidden="true"></i>{{cur.primary}}<kbd class="kbd" style="margin-left: 6px; background: transparent; color: inherit;">A</kbd></button>
+          <button type="button" class="fn-btn fn-btn--secondary" onClick="{{done}}">{{cur.secondary}}</button>
+          <a href="{{cur.href}}" class="ib" aria-label="詳しく開く(Enter)"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+        </div>
+        <span class="t-sm muted">{{cur.note}}</span>
+      </aside>
+    </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"empty":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { kind: 'all', sel: 0, checked: {} }; }
+  renderVals() {
+    const S = this.state;
+    const K = { review: ['審査', 'fa-solid fa-gavel'], mod: ['モデレーション', 'fa-solid fa-flag'], xid: ['X ID申請', 'fa-solid fa-at'], notif: ['通知失敗', 'fa-solid fa-bell-slash'] };
+    const ALL = [
+      { kind: 'review', title: '崇渦に関するお知らせ 前編', meta: 'おたこ · 枠 11.04 14:40 · 必須OK', age: '2時間前', hot: false, facts: [['提出', '10.04 11:02'], ['枠', '11.04 14:40 · 連続2枠'], ['必須項目', 'すべて入力済み'], ['ステージ許可', 'あり']], primary: '承認して公開', primaryIcon: 'fa-solid fa-check', secondary: '確認を依頼', href: 'ManageVideo.dc.html', note: '承認すると投稿者に通知されます。' },
+      { kind: 'review', title: '模範囚', meta: 'hato · 枠 11.03 18:54 · 必須未回答 1', age: '9時間前', hot: false, facts: [['提出', '10.03 23:10'], ['必須項目', '未回答 1(使用ソフト)', 'color: var(--warning);'], ['YouTube', 'URL未設定(後から追加可)']], primary: '承認して公開', primaryIcon: 'fa-solid fa-check', secondary: '確認を依頼', href: 'ManageVideo.dc.html', note: '必須項目が未回答です。確認を依頼すると投稿者に通知されます。' },
+      { kind: 'mod', title: '祟渦に関するお知らせ 後編 — 重複投稿', meta: '新概念 · 期限 03.30 を超過', age: '期限超過', hot: true, facts: [['種別', '重複投稿'], ['期限', '03.30(超過)', 'color: var(--danger);'], ['公開理由', '同じ作品が2件登録されています']], primary: '解決にする', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '対応メモ(任意)', href: 'ManageVideo.dc.html', note: 'ケースはこの作品の「モデレーション」でも扱えます。' },
+      { kind: 'xid', title: '@sub_ajinori の X ID 連携申請', meta: '味付け海苔 · Discord ajinori', age: '1日前', hot: false, facts: [['種別', 'X ID連携'], ['申請者', 'ajinori(Discord)'], ['このイベント', '参加者・枠確保あり']], primary: '承認', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '却下理由(任意・履歴に残る)', href: 'ManageXLink.dc.html', note: 'このイベントの参加者に関係する申請だけを表示しています。' },
+      { kind: 'notif', title: '枠確保の通知が届いていません', meta: 'slot_reserved · @Ghx86L · 429 Too Many Requests', age: '3時間前', hot: false, facts: [['配送経路', 'Discord DM'], ['試行', '4 / 4'], ['エラー', '429 Too Many Requests', 'color: var(--danger);']], primary: '再送する', primaryIcon: 'fa-solid fa-paper-plane', secondary: 'このまま閉じる', href: 'ManageNotifications.dc.html', note: '同じ内容を再送キューに追加します。' }
+    ];
+    const list = (this.props.empty ?? false) ? [] : (S.kind === 'all' ? ALL : ALL.filter(x => x.kind === S.kind));
+    const si = Math.min(S.sel, Math.max(0, list.length - 1));
+    const items = list.map((x, i) => ({ ...x, icon: K[x.kind][1], kindLabel: K[x.kind][0], ageStyle: x.hot ? 'color: var(--danger);' : 'color: var(--ink-muted);', selStr: i === si ? 'true' : 'false', cls: i === si ? 'irow on' : 'irow', checked: !!S.checked[i], check: () => this.setState({ checked: { ...S.checked, [i]: !S.checked[i] } }), pick: () => this.setState({ sel: i }) }));
+    const cur = items[si] || { facts: [], icon: '', kindLabel: '' };
+    const n = (k) => k === 'all' ? ALL.length : ALL.filter(x => x.kind === k).length;
+    const selCount = Object.values(S.checked).filter(Boolean).length;
+    return {
+      theme: this.props.theme ?? 'dark', items, hasItems: items.length > 0, empty: items.length === 0,
+      cur: { ...cur, isVideo: cur.kind === 'review', needReason: !!cur.needReason, facts: (cur.facts || []).map(([k, v, style]) => ({ k, v, style: style || '' })) },
+      kinds: [['all', 'すべて', 'fa-solid fa-inbox'], ['review', '審査', 'fa-solid fa-gavel'], ['mod', 'モデレーション', 'fa-solid fa-flag'], ['xid', 'X ID申請', 'fa-solid fa-at'], ['notif', '通知失敗', 'fa-solid fa-bell-slash']].map(([id, label, icon]) => ({ label, icon, n: n(id), cls: S.kind === id ? 'on' : '', pick: () => this.setState({ kind: id, sel: 0, checked: {} }) })),
+      bulk: selCount > 0, selCount, clearSel: () => this.setState({ checked: {} }),
+      done: () => this.setState({ sel: Math.min(si + 1, items.length - 1) })
+    };
+  }
+}
+</script>
+</body>
+</html>

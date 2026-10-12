@@ -6,7 +6,7 @@
 > Route source: [`../CURRENT_ROUTES.md`](../CURRENT_ROUTES.md)
 > UX source: [`../FRONTEND_FEATURES.md`](../FRONTEND_FEATURES.md)
 > FN source: [`../FUNCTION_INVENTORY.md`](../FUNCTION_INVENTORY.md)
-> Visual target: [`../UI_REFERENCE.md`](../UI_REFERENCE.md) = PENDING_HTML
+> Visual target: [`../UI_REFERENCE.md`](../UI_REFERENCE.md) = READY (docs/migration/mock/)
 > Production mutation: none
 
 MIG-0010は「URLが残っている」だけでなく、各screenが必要なUX/FN、permission、状態、query/deep-link、responsive/accessibility contractを持つことを固定する。
@@ -24,7 +24,7 @@ AUDIT_REQUIRED = 0
 CURRENT_OBSERVED = 0
 route classes with no mapping = 0
 UX Surface tokens with no route/shell resolution = 0
-visual source = PENDING_HTML
+visual source = READY (docs/migration/mock/)
 ```
 
 432 UXをこの文書へ複製しない。各UXのcapability/final disposition/FNは既存frontend ledgerを正本とし、その `Surface` tokenをvisual/compat/system/dev routeまたはcross-route shellへ解決してownershipを確定する。Final reconciliationは `../gap-scan/FRONTEND_REQUIREMENTS.md`。
@@ -415,14 +415,14 @@ These remain migration acceptance requirements and are not visual-only extras.
 
 ## Design-source boundary
 
-`UI_REFERENCE.md` is still `PENDING_HTML`。
+`UI_REFERENCE.md` は `READY`（[`docs/migration/mock/README.md`](../mock/README.md)）として登録済み。
 
 Therefore:
 
-- CURRENT mapping is complete without inventing target visual layout;
-- old `docs/design-redesign` / old redesign surfaces are not target evidence;
-- visual component/layout decisions remain pending until the user-provided HTML mock is registered;
-- UX/FN/permission/query/state/a11y contracts in this document constrain that future visual implementation.
+- 各screenのビジュアル実装は登録されたモック（HTML/CSS/スクリーンショット）を正本として準拠する；
+- 旧 `docs/design-redesign` / 旧 redesign 実装は引き続き参照禁止；
+- UX/FN/permission/query/state/a11y contracts in this document constrain that visual implementation；
+- モックに視覚上現れていない機能も、本ドキュメントおよび `FRONTEND_FEATURES.md` の要求に従ってすべて実装・保持する。
 
 ## Migration use
 

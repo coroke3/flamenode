@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>コマンドパレット</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja" style="min-height: 0; position: relative; height: 640px; overflow: hidden; background: color-mix(in srgb, var(--bg) 70%, transparent);">
+  <div class="cmd" role="dialog" aria-label="移動・操作を検索">
+    <div class="row" style="gap: 12px; padding: 0 16px; height: 56px; box-shadow: inset 0 -1px 0 var(--surface-subtle);">
+      <i class="fa-solid fa-magnifying-glass muted" aria-hidden="true"></i>
+      <input class="cmd-input" value="{{q}}" onInput="{{setQ}}" placeholder="移動先・操作・作品名・参加者を入力" aria-label="検索">
+      <kbd class="kbd">Esc</kbd>
+    </div>
+    <div class="stack" style="gap: 0; padding: 8px; max-height: 520px; overflow: auto;">
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <span class="t-label muted" style="padding: 8px 8px 4px;">{{g.label}}</span>
+        <sc-for list="{{g.items}}" as="it" hint-placeholder-count="3">
+          <a href="{{it.href}}" class="{{it.cls}}"><i class="{{it.icon}}" aria-hidden="true" style="width: 18px; text-align: center;"></i><span style="flex: 1;">{{it.label}}</span><span class="t-sm muted">{{it.hint}}</span><sc-if value="{{it.on}}" hint-placeholder-val="{{false}}"><kbd class="kbd">Enter</kbd></sc-if></a>
+        </sc-for>
+      </sc-for>
+    </div>
+    <div class="row t-sm muted" style="gap: 16px; padding: 10px 16px; box-shadow: inset 0 1px 0 var(--surface-subtle);"><span class="il"><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd>選ぶ</span><span class="il"><kbd class="kbd">Enter</kbd>実行</span><span class="il"><kbd class="kbd">&gt;</kbd>操作だけ</span><span class="il"><kbd class="kbd">@</kbd>参加者</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":960,"height":640}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { q: '枠' }; }
+  renderVals() {
+    const q = (this.state.q || '').trim();
+    const G = [
+      ['操作', [['ms ms-auto_awesome', '枠を一括生成', 'ManageSlots.dc.html', '枠'], ['fa-solid fa-broom', '空き枠を全削除', 'ManageSlots.dc.html', '枠'], ['fa-solid fa-check-double', '必須OKの作品をまとめて承認', 'ManageInbox.dc.html', '受信箱'], ['fa-solid fa-clone', 'この設定をテンプレート化', 'ManageEvent.dc.html', '概要'], ['fa-solid fa-rotate', '公開データを今すぐ反映', 'ManagePlaylist.dc.html', '配信・公開']]],
+      ['移動', [['ms ms-view_timeline', '枠', 'ManageSlots.dc.html', 'PVSF2026S'], ['fa-solid fa-inbox', '受信箱', 'ManageInbox.dc.html', '11件'], ['fa-solid fa-sliders', 'イベント設定 › 枠ルール', 'ManageEdit.dc.html', 'PVSF2026S'], ['ms ms-admin_panel_settings', 'スタッフと権限', 'ManageStaff.dc.html', '5人']]],
+      ['作品・参加者', [['fa-solid fa-film', '空白合作', 'ManageVideo.dc.html', '空白合作チーム · 審査待ち'], ['fa-solid fa-user', 'おたこ(@012345rty)', 'ManageAudience.dc.html', '枠 2 · 提出 1']]]
+    ];
+    let first = true;
+    const groups = G.map(([label, items]) => ({ label, items: items.filter(([, l, , h]) => !q || l.includes(q) || h.includes(q)).map(([icon, l, href, hint]) => { const on = first; first = false; return { icon, label: l, href, hint, on, cls: on ? 'cmd-item on' : 'cmd-item' }; }) })).filter(g => g.items.length);
+    return { theme: this.props.theme ?? 'dark', q: this.state.q, setQ: (e) => this.setState({ q: e.target.value }), groups };
+  }
+}
+</script>
+</body>
+</html>

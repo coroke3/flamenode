@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品・審査</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="videos" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="videos" hint-size="100%,96px"></dc-import>
+    <div class="wrap-row" style="gap: 8px; margin: 32px 0 16px;">
+      <div class="seg" role="group" aria-label="公開状態フィルタ"><sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}<span class="t-num muted">{{t.n}}</span></button></sc-for></div>
+      <span style="flex: 1;"></span>
+      <a href="EventDetail.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>公開ページを見る</a>
+    </div>
+    <sc-if value="{{hasRows}}" hint-placeholder-val="{{true}}">
+      <div class="row t-sm muted kb-hints" style="gap: 16px; margin-bottom: 8px;"><span class="il"><i class="fa-regular fa-keyboard" aria-hidden="true"></i><kbd class="kbd">J</kbd><kbd class="kbd">K</kbd>移動</span><span class="il"><kbd class="kbd">A</kbd>承認して次へ</span><span class="il"><kbd class="kbd">Enter</kbd>詳細を開く</span></div>
+      <div class="mx-split" style="display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 24px; align-items: start;">
+        <div role="listbox" aria-label="作品" class="stack" style="gap: 2px;">
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+            <button type="button" role="option" aria-selected="{{r.selStr}}" class="{{r.cls}}" onClick="{{r.pick}}">
+              <img src="{{r.thumb}}" alt="" style="width: 96px; aspect-ratio: 16/9; object-fit: cover; display: block; flex: none;">
+              <span class="stack" style="gap: 2px; flex: 1; min-width: 0; text-align: left;"><span class="ell">{{r.title}}</span><span class="t-sm muted ell">{{r.creator}} · @{{r.x}} · {{r.at}}</span></span>
+              <span class="stack" style="gap: 4px; align-items: flex-end; flex: none;"><span class="st t-sm"><span class="{{r.dot}}"></span>{{r.state}}</span><span class="t-sm" style="{{r.reqStyle}}">{{r.reqLabel}}</span></span>
+            </button>
+          </sc-for>
+        </div>
+        <aside class="raised stack" style="gap: 16px; padding: 20px; align-self: start;" aria-label="選択中の作品">
+          <img src="{{cur.thumb}}" alt="" style="width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;">
+          <div class="stack" style="gap: 4px;"><span style="font-size: 15px;">{{cur.title}}</span><span class="t-sm muted">{{cur.creator}} · @{{cur.x}}</span></div>
+          <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;">
+            <dt>公開状態</dt><dd class="st"><span class="{{cur.dot}}"></span>{{cur.state}}</dd>
+            <dt>ステージ許可</dt><dd>{{cur.stage}}</dd>
+            <dt>必須未回答</dt><dd style="{{cur.reqStyle}}">{{cur.reqLabel}}</dd>
+            <dt>YouTube</dt><dd>{{cur.yt}}</dd>
+            <dt>登録</dt><dd class="t-num">{{cur.at}}</dd>
+          </dl>
+          <div class="row" style="gap: 8px;">
+            <sc-if value="{{cur.canApprove}}" hint-placeholder-val="{{true}}"><button type="button" class="fn-btn fn-btn--primary" style="flex: 1;" onClick="{{approveNext}}"><i class="fa-solid fa-check" aria-hidden="true"></i>承認して次へ</button></sc-if>
+            <a href="ManageVideo.dc.html" class="fn-btn fn-btn--secondary">詳細</a>
+          </div>
+        </aside>
+      </div>
+    </sc-if>
+    <sc-if value="{{noRows}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 8px; padding: 64px 0; align-items: flex-start;"><span class="icon-tile lg"><i class="fa-solid fa-inbox" aria-hidden="true"></i></span><span class="t-h3">該当する作品はありません</span><span class="t-sm muted">フィルタ条件を変えると、別の作品が表示される場合があります。</span></div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'pending' }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const ST = { pending: ['公開待ち','dot warn'], public: ['公開','dot ok'], private: ['非公開','dot'], voided: ['無効化','dot err'] };
+    const all = [
+      ['崇渦に関するお知らせ 前編','おたこ','012345rty','pending','10.04 11:02','あり',0,'設定済み'],
+      ['模範囚','hato','Ghx86L','pending','10.03 23:10','あり',1,'URL未設定'],
+      ['未来線～ミライン～','てつどうふぁん','wa0bnmhcy2','pending','10.03 19:45','なし',2,'設定済み'],
+      ['【サナドリウム/wiz_nicc】二次創作MV','lalaClione(ララクリオネ)','lala_Clione','public','10.01 08:12','あり',0,'設定済み'],
+      ['個々々々々々人 / Sohbana','あいこーすふぃあ','Ico_sphere_','private','09.30 22:40','あり',0,'URL未設定'],
+      ['空白合作','空白合作チーム','vIXyOepPI395671','voided','09.28 21:05','あり',0,'設定済み']
+    ].map((a, i) => ({ title: a[0], creator: a[1], x: a[2], key: a[3], state: ST[a[3]][0], dot: ST[a[3]][1], at: a[4], stage: a[5], req: a[6] || '—', reqStyle: a[6] ? 'color: var(--warning);' : 'color: var(--ink-muted);', yt: a[7], canApprove: a[3] === 'pending', thumb: T[(i + 3) % 8] }));
+    const t = this.state.tab;
+    const list = t === 'all' ? all : all.filter(r => r.key === t);
+    const si = Math.min(this.state.sel ?? 0, Math.max(0, list.length - 1));
+    const rows = list.map((r, i) => ({ ...r, reqLabel: typeof r.req === 'number' ? '必須未回答 ' + r.req : '必須OK', selStr: i === si ? 'true' : 'false', cls: i === si ? 'qrow on' : 'qrow', pick: () => this.setState({ sel: i }) }));
+    const cur = rows[si] || all[0];
+    const n = (k) => k === 'all' ? 110 : { pending: 6, public: 94, private: 7, voided: 3 }[k];
+    return {
+      theme: this.props.theme ?? 'dark', rows, cur, hasRows: rows.length > 0, noRows: rows.length === 0,
+      approveNext: () => this.setState({ sel: Math.min(si + 1, rows.length - 1) }),
+      tabs: [['all','すべて'],['pending','公開待ち'],['public','公開'],['private','非公開'],['voided','無効化']].map(([id, label]) => ({ label, n: n(id), cls: t === id ? 'on' : '', pick: () => this.setState({ tab: id, sel: 0 }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

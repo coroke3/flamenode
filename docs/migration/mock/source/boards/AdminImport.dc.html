@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>旧形式インポート</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="import" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">旧形式インポート</h1><p class="muted">旧JSON・CSV・TSVを解析し、旧列や旧状態を残さず現在のDB正本へ変換します。一般ランタイムの後方互換機能ではありません。</p></div></div>
+
+    <ol class="steps" aria-label="手順" style="list-style: none; padding: 0; margin: 0 0 32px;">
+      <li style="display: contents;"><span class="{{st1}}" style="gap: 8px;"><i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i>ファイルと範囲</span></li>
+      <li style="display: contents;"><span class="{{st2}}" style="gap: 8px;"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>プレビュー</span></li>
+      <li style="display: contents;"><span class="{{st3}}" style="gap: 8px;"><i class="fa-solid fa-database" aria-hidden="true"></i>新正本へ書き込み</span></li>
+    </ol>
+
+    <div class="split">
+      <div class="main stack" style="gap: 40px;">
+        <section aria-labelledby="f">
+          <h2 id="f" class="t-h3" style="margin-bottom: 12px;">旧形式ファイル</h2>
+          <label class="drop"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true" style="font-size: 20px;"></i><span class="t-sm">JSON / CSV / TSV をドロップ、またはクリックして追加</span><input type="file" multiple accept=".json,.csv,.tsv" hidden></label>
+          <div class="dt" style="--cols: minmax(160px,1fr) 88px 120px 120px 32px; --minw: 0px; margin-top: 8px;">
+            <div class="dt-h"><span>ファイル</span><span class="num">行数</span><span>開始(1始まり)</span><span>終了(含む)</span><span></span></div>
+            <div class="dt-r">
+              <span class="stack" style="gap: 0;"><span class="il ell"><i class="fa-solid fa-file-code muted" aria-hidden="true"></i>video.json</span><span class="sub">提案チャンクサイズ 200行 · 次: 201–400</span></span>
+              <span class="num">622</span>
+              <span class="row" style="gap: 4px;"><input class="select" style="width: 72px; background-image: none; padding-right: 8px;" value="1" aria-label="開始位置"><button type="button" class="ib sm" aria-label="先頭"><i class="fa-solid fa-backward-step"></i></button></span>
+              <span class="row" style="gap: 4px;"><input class="select" style="width: 72px; background-image: none; padding-right: 8px;" value="200" aria-label="終了位置"><button type="button" class="ib sm" aria-label="末尾"><i class="fa-solid fa-forward-step"></i></button></span>
+              <button type="button" class="ib sm" aria-label="削除"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="dt-r">
+              <span class="stack" style="gap: 0;"><span class="il ell"><i class="fa-solid fa-file-code muted" aria-hidden="true"></i>eventinfo.json</span><span class="sub">末尾まで選択済みです</span></span>
+              <span class="num">21</span>
+              <span class="row" style="gap: 4px;"><input class="select" style="width: 72px; background-image: none; padding-right: 8px;" value="1" aria-label="開始位置"><button type="button" class="ib sm" aria-label="先頭"><i class="fa-solid fa-backward-step"></i></button></span>
+              <span class="row" style="gap: 4px;"><input class="select" style="width: 72px; background-image: none; padding-right: 8px;" value="21" aria-label="終了位置"><button type="button" class="ib sm" aria-label="末尾"><i class="fa-solid fa-forward-step"></i></button></span>
+              <button type="button" class="ib sm" aria-label="削除"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="o">
+          <h2 id="o" class="t-h3" style="margin-bottom: 12px;">取り込み設定</h2>
+          <div class="cols2" style="row-gap: 20px;">
+            <div class="field"><span>イベント公開状態</span><div class="row" style="gap: 20px; min-height: 36px;"><label class="radio"><input type="radio" name="ev" checked="{{yes}}">公開</label><label class="radio"><input type="radio" name="ev">非公開</label></div></div>
+            <div class="field"><span>作品公開状態</span><div class="row" style="gap: 20px; min-height: 36px;"><label class="radio"><input type="radio" name="vv" checked="{{yes}}">公開</label><label class="radio"><input type="radio" name="vv">非公開</label></div></div>
+            <label class="field"><span>既存IDの扱い</span><select class="select"><option>既存IDをスキップ</option><option>既存IDがあれば停止</option><option>過去の旧形式インポート行だけ置換</option></select></label>
+            <label class="field"><span>1ランの最大ステップ数</span><select class="select"><option>100ステップで一時停止</option><option>250ステップで一時停止</option><option selected="{{yes}}">500ステップで一時停止(既定)</option></select></label>
+          </div>
+          <p class="t-sm muted" style="margin: 12px 0 0;">1 HTTP = 原子ステップ1件。ブラウザが連続POSTする上限です。<br>skip_existing では各チャンクの書き込み完了を確認してから次の範囲をプレビューしてください(自動連鎖はしません)。</p>
+        </section>
+
+        <section aria-labelledby="q">
+          <h2 id="q" class="t-h3" style="margin-bottom: 4px;">作品の追加列 <span class="muted t-sm" style="font-weight: 400;">任意</span></h2>
+          <p class="t-sm muted" style="margin: 0 0 12px;">未対応列をイベントのカスタム質問として取り込めます。</p>
+          <div class="dt" style="--cols: 140px 24px minmax(200px,1fr); --minw: 0px;">
+            <div class="dt-h"><span>列</span><span></span><span>質問文Q</span></div>
+            <div class="dt-r"><span class="t-mono">comment</span><i class="fa-solid fa-arrow-right muted" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問文" default-value="作品へのコメント"></x-import></div>
+            <div class="dt-r"><span class="t-mono">ymulink</span><i class="fa-solid fa-arrow-right muted" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問文" placeholder="取り込まない"></x-import></div>
+          </div>
+        </section>
+
+        <div class="row" style="gap: 8px;">
+          <button type="button" class="{{previewBtn}}" onClick="{{preview}}"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>プレビュー</button>
+          <span class="t-sm muted">ファイルまたは設定を変更すると再プレビューが必要です。</span>
+        </div>
+      </div>
+
+      <aside class="side" aria-live="polite">
+        <sc-if value="{{idle}}" hint-placeholder-val="{{false}}">
+          <div class="stack" style="gap: 12px; padding-top: 8px;"><span class="icon-tile lg"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span><span class="t-sm muted">先にプレビューを実行してください。</span></div>
+        </sc-if>
+        <sc-if value="{{hasResult}}" hint-placeholder-val="{{true}}">
+          <div class="stack" style="gap: 20px;">
+            <h2 class="t-h3">{{resTitle}}</h2>
+            <sc-if value="{{applying}}" hint-placeholder-val="{{false}}">
+              <div class="stack" style="gap: 8px;"><div class="bar"><i style="width: 46%;"></i></div><span class="t-sm muted t-num">進捗: 214 / 468(stage=videoMembers, index=66) — 続きから再開できます</span></div>
+            </sc-if>
+            <dl class="kv" style="grid-template-columns: 1fr auto; gap: 6px 16px;">
+              <dt>入力行</dt><dd class="t-num">200 / 622</dd>
+              <dt>イベント</dt><dd class="t-num">1</dd>
+              <dt>作品</dt><dd class="t-num">200</dd>
+              <dt>作品×イベント</dt><dd class="t-num">200</dd>
+              <dt>作品メンバー</dt><dd class="t-num">1,148</dd>
+              <dt>チャプター</dt><dd class="t-num">312</dd>
+              <dt>X ID</dt><dd class="t-num">486</dd>
+              <dt>使用ソフト</dt><dd class="t-num">274</dd>
+              <dt>カスタム質問 / 回答</dt><dd class="t-num">1 / 188</dd>
+              <dt>未対応列</dt><dd class="t-num">1</dd>
+            </dl>
+            <div class="row" style="gap: 16px;">
+              <span class="il t-sm"><i class="fa-solid fa-circle-xmark" aria-hidden="true" style="color: var(--danger);"></i>エラー 0</span>
+              <span class="il t-sm"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--warning);"></i>警告 3</span>
+            </div>
+            <details class="t-sm"><summary class="il" style="cursor: pointer;"><i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>警告を表示</summary>
+              <ul class="muted" style="margin: 8px 0 0; padding-left: 18px; line-height: 1.8;"><li>行 41: ychlink が YouTube チャンネルURLではありません</li><li>行 118: icon が Google Drive の共有リンクです</li><li>行 163: time が募集期間外です</li></ul>
+            </details>
+            <div class="stack" style="gap: 4px;"><span class="t-label muted">作品例</span><span class="t-sm">【文字PV】スチールワンダー / はるまきごはん - スティックのり</span><span class="t-sm muted t-mono">@Sticknorikun · 2026.03.29 05:42</span></div>
+            <span class="t-sm muted">plan hash: <span class="t-mono">9f3c…a71e</span></span>
+            <button type="button" class="fn-btn fn-btn--primary" onClick="{{apply}}">{{applyLabel}}</button>
+          </div>
+        </sc-if>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { stage: 'previewed' }; }
+  renderVals() {
+    const g = this.state.stage;
+    return {
+      theme: this.props.theme ?? 'dark', yes: true,
+      idle: g === 'input', hasResult: g !== 'input', applying: g === 'applying',
+      st1: g === 'input' ? 'il on' : 'il done', st2: g === 'previewed' ? 'il on' : g === 'applying' ? 'il done' : 'il', st3: g === 'applying' ? 'il on' : 'il',
+      previewBtn: g === 'input' ? 'fn-btn fn-btn--primary' : 'fn-btn fn-btn--secondary',
+      resTitle: g === 'applying' ? 'インポート処理中' : 'プレビュー結果', resIcon: g === 'applying' ? 'fa-solid fa-spinner' : 'fa-solid fa-clipboard-check',
+      applyLabel: g === 'applying' ? '続きから再開' : '新正本へ書き込む',
+      preview: () => this.setState({ stage: 'previewed' }),
+      apply: () => this.setState({ stage: 'applying' })
+    };
+  }
+}
+</script>
+</body>
+</html>

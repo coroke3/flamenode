@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>[作品詳細(管理) のタブ] 参加者設定 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/videos/[id]/members / source: source/boards/AdminVideoMembers.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">作品</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <a href="AdminVideoHub.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品詳細</a>
+    <h1 class="t-h1" style="margin-top: 8px;">空白合作 <span class="muted t-num" style="font: 400 15px/24px var(--font-sans);">13人</span></h1>
+    <nav class="subnav" aria-label="作品管理メニュー" style="margin-top: 20px;">
+      <a href="AdminVideoHub.html" class="il"><i class="fa-solid fa-gavel" aria-hidden="true"></i>管理詳細</a>
+      <a href="AdminVideoHub.html" class="il" aria-current="page"><i class="fa-solid fa-user-group" aria-hidden="true"></i>メンバー</a>
+      <a href="VideoEdit.html" class="il"><i class="fa-solid fa-pen" aria-hidden="true"></i>内容編集</a>
+      <a href="VideoPermissions.html" class="il"><i class="ms ms-manage_accounts" aria-hidden="true"></i>編集権限</a>
+      <a href="VideoDetail.html" class="il"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>公開ページ</a>
+      <a href="AdminAuditHub.html" class="il"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>監査ログ</a>
+    </nav>
+    <p class="il t-sm muted" style="margin: 20px 0 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>公開参加者と合作設定を管理します。既存のメンバーチャプターも保持したまま保存します。</p>
+
+    <div class="row" style="gap: 20px; margin-top: 24px;"><span class="t-label muted">作品形式</span><label class="radio"><input type="radio" name="collab">個人</label><label class="radio"><input type="radio" name="collab" checked="">合作</label></div>
+    <div style="margin-top: 16px;"><div class="dc-import" data-board="MemberEditor">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja" style="min-height: 0; background: transparent;">
+  <div class="row" style="gap: 12px; flex-wrap: wrap;">
+    <div class="seg" role="tablist" aria-label="メンバー編集の表示モード">
+      <button type="button" role="tab" class="on"><i class="fa-solid fa-timeline" aria-hidden="true"></i>タイムライン</button><button type="button" role="tab" class=""><i class="fa-solid fa-table-list" aria-hidden="true"></i>表</button><button type="button" role="tab" class=""><i class="fa-solid fa-paste" aria-hidden="true"></i>一括(TSV・AI)</button><button type="button" role="tab" class=""><i class="fa-solid fa-comment-dots" aria-hidden="true"></i>サジェスト</button>
+    </div>
+    <span class="t-sm muted" style="flex: 1;">動画の長さに沿ってチャプターを置けます</span>
+    <span class="t-sm muted t-num">5人 · チャプター 5</span>
+  </div>
+
+  
+  
+    <div class="tl-wrap" style="margin-top: 16px;">
+      <div class="tl-ruler"><span style="left: 0%;">0:00</span><span style="left: 12.448132780082988%;">1:00</span><span style="left: 24.896265560165975%;">2:00</span><span style="left: 37.344398340248965%;">3:00</span><span style="left: 49.79253112033195%;">4:00</span><span style="left: 62.24066390041494%;">5:00</span><span style="left: 74.68879668049793%;">6:00</span><span style="left: 87.13692946058092%;">7:00</span><span style="left: 99.5850622406639%;">8:00</span></div>
+      <div class="tl-track" title="クリックした位置にチャプターを追加">
+        
+          <div class="tl-seg s0" style="left: 0%; width: 4.979253112033195%;"><img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""><span>丸い人</span></div>
+        
+          <div class="tl-seg s1" style="left: 4.979253112033195%; width: 4.979253112033195%;"><img src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt=""><span>ぴーふら</span></div>
+        
+          <div class="tl-seg s2" style="left: 9.95850622406639%; width: 4.979253112033195%;"><img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt=""><span>sum1</span></div>
+        
+          <div class="tl-seg s0" style="left: 14.937759336099585%; width: 24.481327800829874%;"><img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt=""><span>Eipi</span></div>
+        
+          <div class="tl-seg s2" style="left: 39.41908713692946%; width: 60.58091286307054%;"><img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt=""><span>sum1</span></div>
+        
+        <div class="tl-cursor" style="left: 31.327800829875518%;"><span class="t-num">2:31</span></div>
+      </div>
+      <div class="row t-sm muted" style="gap: 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span>空いている位置をクリックで追加</span>
+        <span class="il"><i class="fa-solid fa-arrows-left-right" aria-hidden="true"></i>境界をドラッグで開始時刻を調整</span>
+        <span>選択中に ← → で1秒、Shift で10秒</span>
+        <span style="flex: 1;"></span>
+        <span class="il t-num"><i class="fa-brands fa-youtube" aria-hidden="true"></i>長さ 8:02(YouTube から取得)</span>
+      </div>
+    </div>
+    
+      <div class="raised row" style="gap: 8px; padding: 12px 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span class="t-num" style="font-size: 18px;">2:31</span>
+        <span class="t-sm muted">からのチャプター</span>
+        <span class="sel-i" style="flex: 1 1 220px;"><i class="fa-solid fa-user" aria-hidden="true"></i><select class="select i" aria-label="担当メンバー"><option>Eipi(@Eipi_Rainbow)</option><option>丸い人(@Maruihito_maru)</option><option>ぴーふら(@Fura1107_)</option><option>+ 新しいメンバー</option></select></span>
+        <button type="button" class="fn-btn fn-btn--primary fn-btn--sm"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button>
+        <button type="button" class="ib sm" aria-label="やめる"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    
+  
+
+  
+  
+    <div style="margin-top: 16px;">
+      <div class="mrow2 t-label muted"><span></span><span>メンバー</span><span>役割</span><span>チャプター(開始)</span><span>編集</span><span>公開</span><span></span></div>
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="丸い人 を個別に編集"><img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">丸い人</span><span class="t-sm muted ell">@Maruihito_maru</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:00<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm on" aria-label="作品編集に参加(押すと外す)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="ぴーふら を個別に編集"><img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">ぴーふら</span><span class="t-sm muted ell">@Fura1107_</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:24<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="sum1 を個別に編集"><img class="avatar" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">sum1</span><span class="t-sm muted ell">@sum1_eizou</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:48<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span><span class="chip t-num" style="height: 26px; cursor: default;">3:10<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="Eipi を個別に編集"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">Eipi</span><span class="t-sm muted ell">@Eipi_Rainbow</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">1:12<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="Av1 を個別に編集"><img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">Av1</span><span class="t-sm muted ell">@Av1_mz</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm" aria-label="非公開(押すと公開)"><i class="fa-solid fa-eye-slash"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+    </div>
+
+    <div style="position: relative; max-width: 420px; margin-top: 12px;">
+      <div class="field-i"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" arialabel="メンバーを追加" placeholder="X ID または名前で追加" value="ei"></div></div></div><i class="fa-solid fa-user-plus" aria-hidden="true"></i></div>
+      
+        <div class="raised stack" role="listbox" aria-label="候補" style="gap: 0; padding: 4px; position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 5;">
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">Eipi <span class="muted">@Eipi_Rainbow</span></span><span class="t-sm muted">PVSF2026Sp ほか 3作品</span></button>
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">eiko <span class="muted">@eiko_mv</span></span><span class="t-sm muted">1作品</span></button>
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">Eita <span class="muted">@eita_anim</span></span><span class="t-sm muted">合作 2作品</span></button>
+          
+          <button type="button" class="tl" style="height: 40px;"><i class="fa-solid fa-user-pen" aria-hidden="true"></i>X ID なしで「ei」を追加</button>
+        </div>
+      
+    </div>
+  
+
+  
+  
+
+  
+  
+</div>
+</div></div>
+
+    <div class="row" style="gap: 8px; margin-top: 40px;"><button type="button" class="fn-btn fn-btn--primary">参加者設定を保存</button></div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

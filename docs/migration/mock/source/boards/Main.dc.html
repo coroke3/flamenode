@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>トップ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+
+  <a href="Rules.dc.html" class="wrap meta-i" style="padding-top: 8px; padding-bottom: 8px;">
+    <span style="color: var(--ink);">利用規約を改定しました(2026.10.01 施行)</span>
+    <span class="t-num">2026.09.24</span>
+  </a>
+
+
+  <sc-if value="{{heroEvent}}" hint-placeholder-val="{{true}}">
+    <section aria-labelledby="hero-ev" style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px 48px; margin-top: 24px;">
+      <a href="EventDetail.dc.html" style="flex: 999 1 640px; min-width: 0; display: block;">
+        <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="PVSF2026S メインビジュアル" style="display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--surface-raised);">
+      </a>
+      <div class="hero-txt" style="flex: 1 1 320px; min-width: 0; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 16px;">
+        <span class="st"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>募集期間中</span>
+        <h2 id="hero-ev" class="t-h1" style="font-size: 40px; line-height: 48px;">PVSF2026S</h2>
+        <div class="meta-i">
+          <span class="t-num">11.03 — 11.04</span>
+          <span class="t-num">128 / 160 枠</span>
+        </div>
+        <div class="bar" aria-label="枠の埋まり 80%"><i style="width: 80%; background: var(--ink);"></i></div>
+        <div class="dl dl-sm" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
+        <div class="actions" style="margin-top: 8px;">
+          <a href="EventSlots.dc.html" class="fn-btn fn-btn--primary">枠を確保</a>
+          <a href="EventDetail.dc.html" class="ib" aria-label="イベント詳細"><i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+      </div>
+    </section>
+  </sc-if>
+  <sc-if value="{{heroTrend}}" hint-placeholder-val="{{false}}">
+    <section aria-labelledby="hero-tr" style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 32px 48px; margin-top: 24px;">
+      <a href="VideoDetail.dc.html" style="flex: 999 1 640px; min-width: 0; display: block; position: relative;">
+        <img class="cover" src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="崇渦に関するお知らせ 前編 のサムネイル">
+        <span style="position: absolute; left: 40px; bottom: 32px; width: 64px; height: 64px; display: flex; align-items: center; justify-content: center; background: var(--brand); color: var(--on-brand); font-size: 24px;" aria-hidden="true"><i class="fa-solid fa-play"></i></span>
+      </a>
+      <div class="hero-txt" style="flex: 1 1 320px; min-width: 0; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 16px;">
+        <span class="t-sm muted">急上昇 1位</span>
+        <h2 id="hero-tr" class="t-h1" style="font-size: 40px; line-height: 48px;">崇渦に関するお知らせ 前編</h2>
+        <a href="Creator.dc.html" class="row" style="gap: 10px;">
+          <img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" style="width: 32px; height: 32px;">
+          <span>おたこ</span>
+        </a>
+        <div class="meta-i">
+          <span>PVSF2026S</span>
+          <span class="t-num">08:02</span>
+          <span class="t-num"><i class="fa-regular fa-heart" aria-hidden="true"></i>128</span>
+        </div>
+        <div class="actions" style="margin-top: 8px;">
+          <a href="VideoDetail.dc.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-play" aria-hidden="true"></i>再生</a>
+          <button type="button" class="ib" aria-label="セーブ"><i class="fa-regular fa-bookmark"></i></button>
+          <a href="Trending.dc.html" class="ib" aria-label="急上昇ランキング"><i class="fa-solid fa-ranking-star"></i></a>
+        </div>
+      </div>
+    </section>
+  </sc-if>
+
+  <section class="wrap" aria-label="検索" style="padding-top: 50px; padding-bottom: 50px;">
+    <p class="meet" lang="en" aria-label="Find by works, events, creators"><span aria-hidden="true">Find by </span><span class="meet-w" aria-hidden="true"><span>works</span><span>events</span><span>creators</span></span></p>
+    <form role="search" action="Events.dc.html" method="get" class="top-search" style="max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; background: var(--surface-raised);">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true" style="font-size: 16px; color: var(--ink-muted);"></i>
+      <label for="top-search" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">イベントを検索</label>
+      <input id="top-search" name="q" type="search" placeholder="イベント・動画・クリエイターを検索" style="flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 22px;">
+    </form>
+  </section>
+  <div class="wrap">
+    <section class="sec" aria-labelledby="h-hot">
+      <div class="sec-head">
+        <h2 id="h-hot" class="t-h2">FlameNode で注目</h2>
+        <a href="Trending.dc.html" class="il t-sm muted">ランキング<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+      </div>
+      <div class="shelf" data-dir="left" role="region" aria-label="FlameNode で注目">
+        <div class="shelf-nudge" style="transform: translateX({{hotLNudge}}px);">
+          <div class="shelf-track">
+            <sc-for list="{{hotL}}" as="v" hint-placeholder-count="12">
+              <a href="VideoDetail.dc.html" class="shelf-i" tabindex="{{v.tab}}" aria-hidden="{{v.clone}}"><span class="shelf-rank t-num" aria-hidden="true">{{v.rank}}</span><x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import></a>
+            </sc-for>
+          </div>
+        </div>
+        <button type="button" class="shelf-arrow prev" aria-label="前へ" onClick="{{hotLPrev}}"><i class="fa-solid fa-chevron-left"></i></button>
+        <button type="button" class="shelf-arrow next" aria-label="次へ" onClick="{{hotLNext}}"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="h-pick">
+      <div class="sec-head">
+        <h2 id="h-pick" class="t-h2">今週のピックアップ</h2>
+        <a href="Recommend.dc.html" class="il t-sm muted">一覧<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+      </div>
+      <div class="shelf" data-dir="right" role="region" aria-label="今週のピックアップ">
+        <div class="shelf-nudge" style="transform: translateX({{pickLNudge}}px);">
+          <div class="shelf-track">
+            <sc-for list="{{pickL}}" as="v" hint-placeholder-count="12">
+              <a href="VideoDetail.dc.html" class="shelf-i" tabindex="{{v.tab}}" aria-hidden="{{v.clone}}"><x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import></a>
+            </sc-for>
+          </div>
+        </div>
+        <button type="button" class="shelf-arrow prev" aria-label="前へ" onClick="{{pickLPrev}}"><i class="fa-solid fa-chevron-left"></i></button>
+        <button type="button" class="shelf-arrow next" aria-label="次へ" onClick="{{pickLNext}}"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="h-new">
+      <div class="sec-head">
+        <h2 id="h-new" class="t-h2">新着</h2>
+        <a href="Videos.dc.html" class="il t-sm muted">すべて<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+      </div>
+      <div class="shelf" data-dir="left" role="region" aria-label="新着">
+        <div class="shelf-nudge" style="transform: translateX({{freshLNudge}}px);">
+          <div class="shelf-track">
+            <sc-for list="{{freshL}}" as="v" hint-placeholder-count="12">
+              <a href="VideoDetail.dc.html" class="shelf-i" tabindex="{{v.tab}}" aria-hidden="{{v.clone}}"><x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import></a>
+            </sc-for>
+          </div>
+        </div>
+        <button type="button" class="shelf-arrow prev" aria-label="前へ" onClick="{{freshLPrev}}"><i class="fa-solid fa-chevron-left"></i></button>
+        <button type="button" class="shelf-arrow next" aria-label="次へ" onClick="{{freshLNext}}"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </section>
+
+
+    <section class="sec" aria-labelledby="h-old">
+      <div class="sec-head">
+        <h2 id="h-old" class="t-h2">懐かしの映像</h2>
+        <a href="Videos.dc.html" class="il t-sm muted">過去の作品<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+      </div>
+      <div class="shelf" data-dir="right" role="region" aria-label="懐かしの映像">
+        <div class="shelf-nudge" style="transform: translateX({{oldLNudge}}px);">
+          <div class="shelf-track">
+            <sc-for list="{{oldL}}" as="v" hint-placeholder-count="12">
+              <a href="VideoDetail.dc.html" class="shelf-i" tabindex="{{v.tab}}" aria-hidden="{{v.clone}}"><x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import></a>
+            </sc-for>
+          </div>
+        </div>
+        <button type="button" class="shelf-arrow prev" aria-label="前へ" onClick="{{oldLPrev}}"><i class="fa-solid fa-chevron-left"></i></button>
+        <button type="button" class="shelf-arrow next" aria-label="次へ" onClick="{{oldLNext}}"><i class="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="h-ev">
+      <div class="sec-head">
+        <h2 id="h-ev" class="t-h2">最近のイベント</h2>
+        <a href="Events.dc.html" class="il t-sm muted">すべて<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+      </div>
+      <div class="grid-v3">
+        <sc-for list="{{events}}" as="e" hint-placeholder-count="3">
+          <a href="EventDetail.dc.html" class="ev-visual">
+            <img src="{{e.img}}" alt="">
+            <div class="row" style="gap: 12px; align-items: flex-start;">
+              <img class="ev-icon" src="{{e.icon}}" alt="">
+              <div class="stack" style="gap: 6px; min-width: 0;">
+                <span style="font-size: 15px;">{{e.title}}</span>
+                <span class="meta-i">
+                  <span class="st" style="color: var(--ink);"><i class="{{e.dot}}" aria-hidden="true"></i>{{e.status}}</span>
+                  <span class="t-num">{{e.date}}</span>
+                  <span class="t-num">{{e.slots}}</span>
+                </span>
+              </div>
+            </div>
+          </a>
+        </sc-for>
+      </div>
+    </section>
+
+    <nav class="sec join" aria-label="参加する">
+      <a href="EventSlots.dc.html"><span>枠を確保する</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="MyPage.dc.html"><span>作品を投稿する</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+      <a href="Events.dc.html"><span>イベントを探す</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a>
+    </nav>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"hero":{"editor":"enum","options":["event","trending"],"default":"event"},"$preview":{"width":1440,"height":2600}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { n: {} }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const V = [
+      ['【幼虫アニメ】◯◯◯でしますか？◯でしますか？','幼虫','PVSF2026Sp'],['空白合作','空白合作チーム','PVSF2026Sp'],['【文字PV】スチールワンダー / はるまきごはん','スティックのり','PVSF2026Sp'],['【サナドリウム/wiz_nicc】二次創作MV','lalaClione(ララクリオネ)','PVSF2026Sp'],
+      ['個々々々々々人 / Sohbana','あいこーすふぃあ','PVSF2026Sp'],['模範囚','hato','PVSF2026Sp'],['未来線～ミライン～','てつどうふぁん','PVSF2026Sp'],['おゆする合作','おゆする','PVSF2026Sp']
+    ].map((a, i) => ({ title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', event: a[2], dur: '', thumb: T[i % 8] }));
+    const events = [
+      { title: 'PVSF2026S', status: '受付中', dot: 'ms ms-event_available st-ic ok', date: '11.03 — 11.04', slots: '128 / 160 枠', img: T[6], icon: T[3] },
+      { title: '年越し合作 2026', status: '開催中', dot: 'ms ms-sensors st-ic live', date: '10.01 — 10.31', slots: '', img: T[1], icon: T[5] },
+      { title: 'PVSF2026R', status: '募集開始前', dot: 'fa-solid fa-clock st-ic info', date: '12.20', slots: '0 / 60 枠', img: T[2], icon: T[0] }
+    ];
+    const hero = this.props.hero ?? 'event';
+    const oldV = [['Ruling of 31 eyes','貴方','PVSF2023Sp'],['記念碑的な負け方を','貴方','PVSF2022R'],['カノン / 可不','おたこ','PVSF2022Sp'],['【鉄道PV】Journey/DECO*27','てつどうふぁん','PVSF2022R'],['ハイパー.','おたこ','PVSF2023R'],['パンダと行く！都会の歩き方','おたこ','PVSF2024GW']].map((a, i) => ({ title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', thumb: T[(i + 4) % 8] }));
+    // TopLoopShelf と同じ: 横一列の無限ループ。自動送り(26px/秒)、向きは段ごとに左右交互、操作中は停止
+    const loop = (key, items, rank) => { const base = items.map((v, i) => ({ ...v, rank: i + 1 })); return [...base, ...base].map((v, i) => ({ ...v, clone: i >= base.length ? 'true' : 'false', tab: i >= base.length ? '-1' : '0' })); };
+    const nudge = (key) => ({ [key + 'Nudge']: (this.state.n[key] || 0), [key + 'Prev']: () => this.setState({ n: { ...this.state.n, [key]: (this.state.n[key] || 0) + 592 } }), [key + 'Next']: () => this.setState({ n: { ...this.state.n, [key]: (this.state.n[key] || 0) - 592 } }) });
+    return {
+      theme: this.props.theme ?? 'dark',
+      heroEvent: hero === 'event', heroTrend: hero === 'trending',
+      hotL: loop('hot', V), pickL: loop('pick', [...V.slice(4), ...V.slice(0, 4)]), freshL: loop('fresh', V), oldL: loop('old', oldV), events,
+      ...nudge('hotL'), ...nudge('pickL'), ...nudge('freshL'), ...nudge('oldL'),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>監査ログ — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/audit(ログ・設定・復元) / source: source/boards/AdminAuditHub.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">監査ログ</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <h1 class="t-display">監査ログ</h1>
+    <div class="hub-bar">
+      <nav class="subnav" aria-label="監査ログ" role="tablist"><a href="#" class="il" role="tab" aria-current="page" aria-selected="true"><i class="fa-solid fa-list" aria-hidden="true"></i>監査ログ<span class="t-num muted"></span></a><a href="#" class="il" role="tab" aria-current="false" aria-selected="false"><i class="fa-solid fa-sliders" aria-hidden="true"></i>ログ設定<span class="t-num muted"></span></a><a href="#" class="il" role="tab" aria-current="false" aria-selected="false"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>復元履歴<span class="t-num muted"></span></a></nav>
+      <div class="hub-links"></div>
+    </div>
+    <div class="hub-body">
+      <div class="dc-import" data-board="AdminAudit">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000} .kchip{display:inline-block;padding:0 6px;margin:0 4px 2px 0;background:var(--surface-active);font:400 12px/20px var(--font-mono)}</style>
+
+<div class="p-root emb-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  
+  <main class="c-main">
+    <div class="c-head"><div><p class="muted">管理操作を新しい順に表示します。before / after の変更キーをサマリで確認できます。</p></div></div>
+    
+    <form class="wrap-row aud-filters" style="gap: 8px; margin-bottom: 16px;">
+      <span class="sel-i"><i class="fa-solid fa-table" aria-hidden="true"></i><select class="select i" aria-label="テーブル"><option>テーブル すべて</option><option>videos</option><option>events</option><option>slots</option><option>users</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-code-commit" aria-hidden="true"></i><select class="select i" aria-label="操作種別"><option>操作 すべて</option><option>作成</option><option>更新</option><option>削除</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i><select class="select i" aria-label="復元ステータス"><option>復元 すべて</option><option>復元可能</option><option>復元済み</option><option>期限切れ</option><option>復元不可</option><option>競合</option><option>失敗</option></select></span>
+      <span class="field-i sm-field" style="width: 200px;"><i class="fa-solid fa-crosshairs" aria-hidden="true"></i><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" arialabel="target_id 完全一致" placeholder="target_id 完全一致"></div></div></div></span>
+      <span class="field-i sm-field" style="width: 200px;"><i class="fa-solid fa-user" aria-hidden="true"></i><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r1:" class="fn-field__control" arialabel="user_id 完全一致" placeholder="user_id 完全一致"></div></div></div></span>
+      <div class="field-i" style="width: 180px;"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r2:" class="fn-field__control" arialabel="実行者 user_id" placeholder="実行者 user_id"></div></div></div><i class="fa-solid fa-user" aria-hidden="true"></i></div>
+      <div class="field-i" style="width: 180px;"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r3:" class="fn-field__control" arialabel="対象レコード ID" placeholder="target_id"></div></div></div><i class="fa-solid fa-crosshairs" aria-hidden="true"></i></div>
+      <div style="width: 150px; display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r4:" class="fn-field__control" arialabel="since (JST)" type="date"></div></div></div>
+      <div style="width: 150px; display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r5:" class="fn-field__control" arialabel="until (JST)" type="date"></div></div></div>
+      <span style="flex: 1;"></span>
+      <span class="row" role="group" aria-label="表示切替" style="gap: 0;"><button type="button" class="ib on" aria-label="テーブル"><i class="fa-solid fa-table-list"></i></button><button type="button" class="ib" aria-label="タイムライン"><i class="fa-solid fa-timeline"></i></button><button type="button" class="ib" aria-label="カード"><i class="fa-solid fa-grip"></i></button></span>
+    </form>
+    <div class="t-scroll">
+      <div class="dt" style="--cols: 110px 92px 100px minmax(120px,.8fr) 130px minmax(200px,1.6fr) 110px 40px; --minw: 1040px;">
+        <div class="dt-h"><span>日時</span><span>操作</span><span>テーブル</span><span>対象 ID</span><span>実行者</span><span>変更差分サマリ</span><span>復元</span><span></span></div>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.04 11:02</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true" style="color: var(--info);"></i>更新</span>
+            <span class="t-mono">videos</span>
+            <span class="t-mono ell">vid_9c1e2a</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">Mochi</span></span>
+            <span class="ell"><span class="kchip">status</span><span class="kchip">reviewed_at</span><span class="t-sm muted"></span></span>
+            <span class="st"><span class="dot ok"></span>復元可能</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.04 09:40</span>
+            <span class="il"><i class="fa-solid fa-plus" aria-hidden="true" style="color: var(--success);"></i>作成</span>
+            <span class="t-mono">slots</span>
+            <span class="t-mono ell">slt_44a2f0</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">おたこ</span></span>
+            <span class="ell"><span class="kchip">reserved_by</span><span class="kchip">x_user_id</span><span class="t-sm muted">+3</span></span>
+            <span class="st"><span class="dot"></span>復元不可</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.03 22:10</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true" style="color: var(--info);"></i>更新</span>
+            <span class="t-mono">x_link_requests</span>
+            <span class="t-mono ell">xlr_31a9c4</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">あおね</span></span>
+            <span class="ell"><span class="kchip">status</span><span class="kchip">decided_at</span><span class="t-sm muted"></span></span>
+            <span class="st"><span class="dot ok"></span>復元可能</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.03 20:01</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true" style="color: var(--info);"></i>更新</span>
+            <span class="t-mono">videos</span>
+            <span class="t-mono ell">vid_7d0b11</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">Mochi</span></span>
+            <span class="ell"><span class="kchip">title</span><span class="kchip">music</span><span class="t-sm muted">+2</span></span>
+            <span class="st"><span class="dot warn"></span>競合</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.02 18:30</span>
+            <span class="il"><i class="fa-solid fa-plus" aria-hidden="true" style="color: var(--success);"></i>作成</span>
+            <span class="t-mono">event_staff</span>
+            <span class="t-mono ell">stf_12ab90</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">Mochi</span></span>
+            <span class="ell"><span class="kchip">permission_preset</span><span class="kchip">x_user_id</span><span class="t-sm muted"></span></span>
+            <span class="st"><span class="dot"></span>復元不可</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">10.01 21:00</span>
+            <span class="il"><i class="fa-solid fa-trash-can" aria-hidden="true" style="color: var(--danger);"></i>削除</span>
+            <span class="t-mono">slots</span>
+            <span class="t-mono ell">slt_0091aa</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">Mochi</span></span>
+            <span class="ell"><span class="kchip">—</span><span class="kchip"></span><span class="t-sm muted"></span></span>
+            <span class="st"><span class="dot info"></span>復元済み</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+          <a href="AdminAuditDetail.html" class="dt-r" style="color: var(--ink);">
+            <span class="t-num muted">09.20 10:00</span>
+            <span class="il"><i class="fa-solid fa-pen" aria-hidden="true" style="color: var(--info);"></i>更新</span>
+            <span class="t-mono">events</span>
+            <span class="t-mono ell">PVSF2026S</span>
+            <span class="row" style="gap: 8px;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 20px; height: 20px;"><span class="ell">Mochi</span></span>
+            <span class="ell"><span class="kchip">entry_end_time</span><span class="kchip"></span><span class="t-sm muted"></span></span>
+            <span class="st"><span class="dot"></span>期限切れ</span>
+            <i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i>
+          </a>
+        
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+</div>
+      
+      
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

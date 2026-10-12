@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>グループ作成・編集 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /admin/event-groups/new · [id]/edit / source: source/boards/AdminEventGroupEdit.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><div class="dc-import" data-board="AdminNav">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<nav class="c-nav" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+  <div class="c-mbar">
+    <button type="button" class="ib" aria-label="メニューを開く" aria-expanded="false"><i class="fa-solid fa-bars"></i></button>
+    <span class="c-mbar-t"><span class="t-label muted">管理</span><span class="ell">イベント</span></span>
+    <a href="CommandPalette.html" class="ib" aria-label="移動・操作を検索"><i class="fa-solid fa-magnifying-glass"></i></a>
+  </div>
+  <div class="brand">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 16px;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 16px;">
+    <span class="t-label muted">管理</span>
+  </div>
+  <div class="row" style="gap: 2px; padding: 0 12px 8px;">
+    <a href="Manage.html" class="ib sm" style="padding: 0;" aria-label="運営へ"><i class="fa-solid fa-clipboard-list"></i></a>
+    <a href="Main.html" class="ib sm" style="padding: 0;" aria-label="公開サイトへ"><i class="fa-solid fa-globe"></i></a>
+    <span style="flex: 1;"></span>
+    <button type="button" class="ib sm" style="padding: 0;" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+  </div>
+  
+    <span class="grp">概要</span>
+    
+      <a href="Admin.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-dashboard" aria-hidden="true" style="width: 16px; text-align: center;"></i>ダッシュボード</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">対応</span>
+    
+      <a href="AdminVideosHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-film" aria-hidden="true" style="width: 16px; text-align: center;"></i>作品</span>
+        <span class="n">12</span>
+      </a>
+    
+      <a href="AdminUsersHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-users" aria-hidden="true" style="width: 16px; text-align: center;"></i>ユーザー / X ID</span>
+        <span class="n">4</span>
+      </a>
+    
+      <a href="AdminModeration.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-flag" aria-hidden="true" style="width: 16px; text-align: center;"></i>モデレーション</span>
+        <span class="n">2</span>
+      </a>
+    
+  
+    <span class="grp">サイト</span>
+    
+      <a href="AdminEventsHub.dc.html" class="on" aria-current="page">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-calendar-days" aria-hidden="true" style="width: 16px; text-align: center;"></i>イベント</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAnnouncements.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bullhorn" aria-hidden="true" style="width: 16px; text-align: center;"></i>お知らせ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminRules.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-scale-balanced" aria-hidden="true" style="width: 16px; text-align: center;"></i>規約</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">運用</span>
+    
+      <a href="AdminNotifications.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-bell" aria-hidden="true" style="width: 16px; text-align: center;"></i>通知配信</span>
+        <span class="n">1</span>
+      </a>
+    
+      <a href="AdminHealthHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="ms ms-monitor_heart" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働状況</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminStaticBuilds.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-code" aria-hidden="true" style="width: 16px; text-align: center;"></i>静的JSON再生成</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminYoutubeQuota.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-chart-pie" aria-hidden="true" style="width: 16px; text-align: center;"></i>YouTube クォータ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminCostGuard.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-gauge-high" aria-hidden="true" style="width: 16px; text-align: center;"></i>稼働モード</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminAuditHub.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true" style="width: 16px; text-align: center;"></i>監査ログ</span>
+        <span class="n"></span>
+      </a>
+    
+  
+    <span class="grp">高度な管理</span>
+    
+      <a href="AdminSecurity.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-shield-halved" aria-hidden="true" style="width: 16px; text-align: center;"></i>セキュリティ</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminPermSim.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-key" aria-hidden="true" style="width: 16px; text-align: center;"></i>権限シミュレーター</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminApi.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-plug" aria-hidden="true" style="width: 16px; text-align: center;"></i>公開API</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminImport.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-file-import" aria-hidden="true" style="width: 16px; text-align: center;"></i>旧形式インポート</span>
+        <span class="n"></span>
+      </a>
+    
+      <a href="AdminSpreadsheet.dc.html" class="" aria-current="false">
+        <span class="il" style="gap: 10px;"><i class="fa-solid fa-table" aria-hidden="true" style="width: 16px; text-align: center;"></i>DBスプレッドシート</span>
+        <span class="n"></span>
+      </a>
+    
+  
+</nav>
+</div></div>
+  <main class="c-main">
+    <a href="AdminEventsHub.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>グループ一覧</a>
+    <div class="c-head" style="margin-top: 8px;">
+      <h1 class="t-display">PVSF</h1>
+      <div class="row" style="gap: 0;"><a href="Events.html" class="ib" aria-label="公開ページ"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><a href="AdminAuditHub.html" class="ib" aria-label="監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="ConfirmModal.html" class="ib" aria-label="グループを削除"><i class="fa-regular fa-trash-can"></i></a></div>
+    </div>
+    <div class="split">
+      <form class="main form">
+        <h2 class="t-h3">基本情報</h2>
+        <div class="cols2"><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r0:">名前 *</label><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" value="PVSF"></div></div></div><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r1:">スラッグ *</label><div class="fn-field__wrap"><input id=":r1:" class="fn-field__control" aria-describedby=":r1:-msg" value="pvsf"></div><div id=":r1:-msg" class="fn-field__msg">名前から自動で入ります(英数字とハイフン)</div></div></div></div>
+        <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r2:">説明</label><div class="fn-field__wrap"><textarea id=":r2:" class="fn-field__control" rows="4">映像連続投稿祭の各回</textarea></div></div></div>
+        <div class="cols2">
+          <label class="field"><span>種別</span><span class="sel-i"><i class="fa-solid fa-tag" aria-hidden="true"></i><select class="select i"><option>系列</option><option>ジャンル</option><option>関連</option><option>コレクション</option><option>その他</option></select></span></label>
+          <div class="field"><span>公開状態</span><div class="row" style="gap: 16px; min-height: 36px;"><label class="radio"><input type="radio" name="v" checked="">公開</label><label class="radio"><input type="radio" name="v">非公開</label><label class="radio"><input type="radio" name="v">アーカイブ</label></div></div>
+          <div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r3:">表示順</label><div class="fn-field__wrap"><input id=":r3:" class="fn-field__control" type="number" value="1"></div></div></div>
+          <div class="field"><span>アクセント色</span><div class="row" style="gap: 6px; flex-wrap: wrap;"><button type="button" class="en-sw on" style="background: #ff5500;" aria-label="#ff5500"></button><button type="button" class="en-sw" style="background: #f2c94c;" aria-label="#f2c94c"></button><button type="button" class="en-sw" style="background: #6fcf97;" aria-label="#6fcf97"></button><button type="button" class="en-sw" style="background: #56ccf2;" aria-label="#56ccf2"></button><button type="button" class="en-sw" style="background: #bb6bd9;" aria-label="#bb6bd9"></button><button type="button" class="en-sw" style="background: #d6ec8a;" aria-label="#d6ec8a"></button><span class="t-mono t-sm muted" style="margin-left: 6px;">#ff5500</span></div></div>
+        </div>
+        <div class="field-i"><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r4:">アイコン URL</label><div class="fn-field__wrap"><input id=":r4:" class="fn-field__control"></div></div></div><i class="fa-solid fa-image" aria-hidden="true"></i></div>
+        <div><button type="submit" class="fn-btn fn-btn--primary">保存</button></div>
+      </form>
+      <section class="side stack" style="gap: 12px;" aria-labelledby="mem">
+        <h2 id="mem" class="t-h3">所属イベント <span class="muted t-num">16</span></h2>
+        <div class="row" style="gap: 6px;"><div class="field-i" style="flex: 1;"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r5:" class="fn-field__control" arialabel="イベント名で検索" placeholder="イベント名で検索"></div></div></div><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div><button type="button" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-plus" aria-hidden="true"></i>選択を追加</button></div>
+        <div>
+          <div class="fn-row fn-row--compact"><img class="ev-icon" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 24px; height: 24px;"><span class="fn-row__body"><span class="fn-row__title">PVSF2026Sp</span><span class="fn-row__meta t-num">2026.03.27</span></span><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="fn-row fn-row--compact"><img class="ev-icon" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 24px; height: 24px;"><span class="fn-row__body"><span class="fn-row__title">PVSF2025S</span><span class="fn-row__meta t-num">2025.08.29</span></span><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="fn-row fn-row--compact"><img class="ev-icon" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 24px; height: 24px;"><span class="fn-row__body"><span class="fn-row__title">PVSF2025Sp</span><span class="fn-row__meta t-num">2025.03.29</span></span><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></div>
+          <div class="fn-row fn-row--compact"><img class="ev-icon" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="" style="width: 24px; height: 24px;"><span class="fn-row__body"><span class="fn-row__title">第一回紅白PV連続投稿合戦</span><span class="fn-row__meta t-num">2019.12.26</span></span><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</div>
+
+</div>
+</body></html>

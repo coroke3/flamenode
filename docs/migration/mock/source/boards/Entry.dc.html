@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>参加・投稿</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000} .pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--surface-subtle);font-size:12px}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+
+  <div class="wrap" style="padding-top: 40px; max-width: 1200px;">
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
+      <a href="MyPage.dc.html" class="il"><i class="ms ms-dashboard" aria-hidden="true"></i>ダッシュボード</a>
+      <a href="MyPage.dc.html" class="il" aria-current="page"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i>参加・投稿</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-regular fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
+    </nav></sc-if>
+
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="wrap-row" style="justify-content: space-between; gap: 16px; margin-top: 40px; align-items: flex-end;">
+      <h1 class="t-display">参加・投稿</h1>
+    </div></sc-if>
+
+    <section aria-labelledby="next" style="margin-top: 32px;">
+      <h2 id="next" class="vh">次にやること</h2>
+      <div class="row ent-next raised" style="gap: 20px; flex-wrap: wrap; padding: 20px; align-items: center;">
+        <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 120px; aspect-ratio: 16/9; object-fit: cover; display: block;">
+        <span class="stack" style="gap: 6px; flex: 1 1 180px;">
+          <span style="font-size: 18px;">PVSF2026S に作品を提出</span>
+          <span class="meta-i"><span class="t-num">11.03 18:24 – 18:36(連続2枠)</span></span>
+          <div class="dl dl-sm" role="timer" aria-label="提出締切まであと3日(10.07 23:59)"><span class="dl-k t-xs muted">提出締切 <span class="t-num">10.07 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">3</b><span class="dl-u">日</span></span></div>
+          <div class="bar" style="margin-top: 6px; max-width: 320px;" aria-label="入力の進み具合 50%"><i style="width: 50%; background: var(--ink);"></i></div>
+          <span class="t-sm muted">下書き 2 / 4 ステップ</span>
+        </span>
+        <a href="EntrySlotted.dc.html" class="fn-btn fn-btn--primary">続きから提出</a>
+      </div>
+    </section>
+
+    <section aria-labelledby="open" style="margin-top: 48px;">
+      <h2 id="open" class="t-h2" style="margin-bottom: 12px;">作品を提出する</h2>
+      <sc-for list="{{events}}" as="e" hint-placeholder-count="3">
+        <a href="{{e.href}}" class="fn-row en-ev" style="padding: 14px 16px; gap: 16px;">
+          <img class="ev-icon" src="{{e.icon}}" alt="" style="width: 40px; height: 40px;">
+          <span class="fn-row__body">
+            <span class="fn-row__title">{{e.title}}</span>
+            <span class="meta-i"><span class="t-num">{{e.deadline}}</span><span class="t-num">{{e.slots}}</span></span>
+          </span>
+          <span class="fn-row__trail"><i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i></span>
+        </a>
+      </sc-for>
+      <a href="EntryUnslotted.dc.html" class="fn-row en-ev" style="padding: 14px 16px; gap: 16px;">
+        <span class="icon-tile" style="width: 40px; height: 40px;"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i></span>
+        <span class="fn-row__body"><span class="fn-row__title">イベントに関係なく投稿する</span></span>
+        <span class="fn-row__trail"><i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i></span>
+      </a>
+    </section>
+
+    <section aria-labelledby="done" style="margin-top: 56px;">
+      <h2 id="done" class="t-h2" style="margin-bottom: 12px;">提出済み</h2>
+      <sc-for list="{{done}}" as="w" hint-placeholder-count="2">
+        <a href="VideoEdit.dc.html" class="fn-row">
+          <img class="fn-row__thumb" src="{{w.thumb}}" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">{{w.title}}</span><span class="fn-row__meta">{{w.meta}}</span></span>
+          <span class="fn-row__trail"><span class="st"><i class="{{w.dot}}" aria-hidden="true"></i>{{w.state}}</span></span>
+        </a>
+      </sc-for>
+    </section>
+  </div>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    return {
+      theme: this.props.theme ?? 'dark',
+      events: [
+        { title: 'PVSF2026S', deadline: '10.16 締切', slots: '残り 32 枠', href: 'EventSlots.dc.html', icon: T[3] },
+        { title: 'PVSF2026R', deadline: '11.04 締切', slots: '残り 38 枠', href: 'EventSlots.dc.html', icon: T[0] },
+        { title: '年越し合作 2026', deadline: '10.31 締切', slots: '', href: 'EntryUnslotted.dc.html', icon: T[5] }
+      ],
+      done: [
+        { title: '崇渦に関するお知らせ 前編', meta: 'PVSF2026S · 11.04', state: '審査待ち', dot: 'ms ms-pending_actions st-ic warn', thumb: T[4] },
+        { title: '【短編アニメ】魔法少女vs改造人間', meta: '年越し合作 2026', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[7] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

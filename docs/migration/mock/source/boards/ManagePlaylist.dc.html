@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>配信・公開</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="delivery" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="delivery" hint-size="100%,96px"></dc-import>
+
+    <nav class="subnav" aria-label="配信・公開" style="margin-top: 24px;">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><a href="#" class="il" aria-current="{{t.cur}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}<span class="t-num muted">{{t.n}}</span></a></sc-for>
+    </nav>
+
+    <sc-if value="{{tPl}}" hint-placeholder-val="{{true}}">
+    <div class="split" style="margin-top: 24px;">
+      <form class="main stack" style="gap: 40px;" onSubmit="{{prevent}}">
+        <!-- 連携先 -->
+        <section aria-labelledby="pl">
+          <h2 id="pl" class="t-label muted" style="margin: 0 0 8px;">連携先の再生リスト</h2>
+          <sc-if value="{{linked}}" hint-placeholder-val="{{true}}">
+            <div class="raised row" style="gap: 16px; padding: 16px;">
+              <span class="icon-tile"><i class="fa-brands fa-youtube" aria-hidden="true"></i></span>
+              <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="t-mono ell">PLx7Vw2Gq0PVSF2026S</span><span class="t-sm muted">公開作品 94 件が対象</span></span>
+              <a href="https://www.youtube.com/playlist" class="ib" aria-label="YouTube で開く"><i class="fa-brands fa-youtube"></i></a>
+              <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleChange}}">変更</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{editing}}" hint-placeholder-val="{{false}}">
+            <div class="stack" style="gap: 8px; margin-top: 8px;">
+              <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" aria-label="再生リストURL / ID" placeholder="再生リストのURLを貼り付け(IDだけでも可)" default-value="https://youtube.com/playlist?list=PLx7Vw2Gq0PVSF2026S&amp;si=a1"></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
+              <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>ID <span class="t-mono">PLx7Vw2Gq0PVSF2026S</span> を認識しました(共有用パラメータは除去)</span>
+            </div>
+          </sc-if>
+        </section>
+
+        <!-- 同期のしかた(文章で設定) -->
+        <section aria-labelledby="how">
+          <h2 id="how" class="t-label muted" style="margin: 0 0 12px;">同期のしかた</h2>
+          <p class="sentence">公開作品を
+            <span class="sel-i"><select class="select" aria-label="同期方式" onChange="{{setMode}}"><option value="append_only" selected="{{yes}}">追加のみ(推奨)</option><option value="mirror">完全同期</option><option value="off">同期しない</option></select></span>
+            で、
+            <span class="sel-i"><select class="select" aria-label="同期間隔" disabled="{{off}}"><option>1時間</option><option>3時間</option><option>6時間</option><option selected="{{yes}}">12時間(推奨)</option><option>24時間</option><option>7日</option></select></span>
+            ごとに再生リストへ反映する。</p>
+          <p class="il t-sm muted" style="margin: 12px 0 0;"><i class="{{modeIcon}}" aria-hidden="true"></i>{{modeDesc}}</p>
+        </section>
+
+        <div class="row" style="gap: 12px;"><button type="submit" class="fn-btn fn-btn--primary">保存</button><span class="t-sm muted">保存すると次回の定期実行から反映されます</span></div>
+
+        <details class="t-sm">
+          <summary class="il muted" style="cursor: pointer;"><i class="fa-solid fa-leaf" aria-hidden="true"></i>無料枠向けの制御(既定は12時間間隔・追加のみ)</summary>
+          <ul class="muted" style="margin: 8px 0 0; padding-left: 18px; line-height: 1.8;">
+            <li>再生リスト全件確認はページ分割し、差分だけを書き込みます。</li>
+            <li>既存の並び替えも1回で全部処理せず、少量ずつ継続します。</li>
+            <li>1回のWorker実行と1日あたりのYouTubeクォータに上限を設け、超過分は次回へ繰り越します。</li>
+            <li>OAuthのクライアントID・シークレット・更新トークンはWorker secretだけに保存します。</li>
+          </ul>
+        </details>
+      </form>
+
+      <aside class="side stack" style="gap: 16px;">
+        <section class="raised stack" style="gap: 14px; padding: 20px;" aria-labelledby="st">
+          <div class="row" style="justify-content: space-between;"><h2 id="st" class="t-label muted" style="margin: 0;">同期状態</h2><button type="button" class="ib sm" aria-label="今すぐ同期"><i class="fa-solid fa-rotate"></i></button></div>
+          <span class="st" style="font-size: 18px;"><span class="{{st.dot}}"></span>{{st.label}}</span>
+          <span class="t-sm muted">{{st.reason}}</span>
+          <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="muted">作品の反映</span><span class="t-num">{{st.synced}} / 94</span></div><div class="bar"><i style="width: {{st.pct}};"></i></div></div>
+          <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;"><dt>最終同期</dt><dd class="t-num">10.04 09:00</dd><dt>次回予定</dt><dd class="t-num">10.04 21:00</dd></dl>
+        </section>
+      </aside>
+    </div>
+    </sc-if>
+
+    <!-- 作品情報API(このイベントのみ) -->
+    <sc-if value="{{tApi}}" hint-placeholder-val="{{false}}">
+      <div class="split" style="margin-top: 24px;">
+        <div class="main stack" style="gap: 32px;">
+          <div class="row" style="gap: 16px; justify-content: space-between;">
+            <span class="stack" style="gap: 2px;"><span class="st" style="font-size: 18px;"><span class="{{apiDot}}"></span>{{apiState}}</span><span class="t-sm muted">{{apiNote}}</span></span>
+            <button type="button" class="{{apiBtnCls}}" onClick="{{toggleApi}}"><i class="{{apiBtnIcon}}" aria-hidden="true"></i>{{apiBtn}}</button>
+          </div>
+          <sc-if value="{{apiOn}}" hint-placeholder-val="{{true}}">
+            <section class="stack" style="gap: 16px;" aria-labelledby="lb">
+              <h2 id="lb" class="t-label muted" style="margin: 0;">出力リンクをつくる</h2>
+              <div class="row" style="gap: 24px; flex-wrap: wrap; align-items: flex-end;">
+                <div class="field"><span>データ形式</span>
+                  <div class="seg" role="group" aria-label="データ形式">
+                    <button type="button" class="{{fmtV5}}" onClick="{{setV5}}" title="イベント・作品・制作者・公開メンバー・チャプター・使用ソフト・公開回答">新形式 v5</button>
+                    <button type="button" class="{{fmtLegacy}}" onClick="{{setLegacy}}" title="旧EventArchives系の配列・列名">旧形式互換</button>
+                  </div>
+                </div>
+                <div class="field"><span>更新方式</span>
+                  <div class="seg" role="group" aria-label="更新方式">
+                    <button type="button" class="{{upRt}}" onClick="{{setRt}}"><i class="fa-solid fa-bolt" aria-hidden="true"></i>リアルタイム</button>
+                    <button type="button" class="{{upSch}}" onClick="{{setSch}}"><i class="fa-regular fa-clock" aria-hidden="true"></i>節約定期更新</button>
+                  </div>
+                </div>
+                <sc-if value="{{scheduled}}" hint-placeholder-val="{{false}}">
+                  <div class="field"><span>更新間隔</span>
+                    <div class="seg" role="group" aria-label="更新間隔"><sc-for list="{{refreshOpts}}" as="o" hint-placeholder-count="4"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div>
+                  </div>
+                </sc-if>
+              </div>
+              <p class="t-sm muted" style="margin: 0;">{{modeNote}}</p>
+              <div class="row" style="gap: 0; background: var(--bg);">
+                <span class="t-mono t-sm ell" style="flex: 1; padding: 0 12px; line-height: 40px;">{{href}}</span>
+                <button type="button" class="ib" aria-label="{{copyLabel}}" onClick="{{copy}}"><i class="{{copyIcon}}"></i></button>
+                <a class="ib" href="#" aria-label="開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+              </div>
+            </section>
+            <section aria-labelledby="pv">
+              <h2 id="pv" class="t-label muted" style="margin: 0 0 8px;">レスポンスのプレビュー(先頭1件)</h2>
+              <pre class="raised t-mono t-sm" style="margin: 0; padding: 16px 20px; overflow: auto; line-height: 1.7;">{{preview}}</pre>
+            </section>
+          </sc-if>
+        </div>
+        <aside class="side stack" style="gap: 16px;">
+          <section class="raised stack" style="gap: 10px; padding: 20px;">
+            <h2 class="t-label muted" style="margin: 0;">出力される範囲</h2>
+            <ul class="t-sm" style="margin: 0; padding-left: 18px; line-height: 1.8;"><li>公開状態が「公開」の作品のみ</li><li>非公開メンバー・運営メモは含みません</li><li>公開回答の質問だけを含みます</li></ul>
+          </section>
+          <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-key" aria-hidden="true"></i>必要な権限: 公開API設定</p>
+        </aside>
+      </div>
+    </sc-if>
+
+    <!-- 公開データ(静的JSON) -->
+    <sc-if value="{{tJson}}" hint-placeholder-val="{{false}}">
+      <div class="split" style="margin-top: 24px;">
+        <div class="main stack" style="gap: 24px;">
+          <div class="row" style="gap: 16px; justify-content: space-between; flex-wrap: wrap;">
+            <span class="stack" style="gap: 2px;"><span class="st" style="font-size: 18px;"><span class="{{js.dot}}"></span>{{js.label}}</span><span class="t-sm muted">{{js.note}}</span></span>
+            <button type="button" class="fn-btn fn-btn--primary" onClick="{{rebuild}}" disabled="{{js.busy}}">{{js.btn}}</button>
+          </div>
+          <div class="dt" style="--cols: 104px 96px minmax(160px,1fr) minmax(160px,1fr) 72px 96px; --minw: 0px;">
+            <div class="dt-h"><span>状態</span><span>対象種別</span><span>対象</span><span>理由</span><span>優先度</span><span>更新</span></div>
+            <sc-for list="{{queue}}" as="q" hint-placeholder-count="5">
+              <div class="dt-r">
+                <span class="st"><span class="{{q.dot}}"></span>{{q.state}}</span>
+                <span class="t-sm">{{q.kind}}</span>
+                <span class="ell">{{q.target}}</span>
+                <span class="t-sm muted ell">{{q.reason}}</span>
+                <span class="t-sm">{{q.pri}}</span>
+                <span class="t-num t-sm muted">{{q.at}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{js.empty}}" hint-placeholder-val="{{false}}"><p class="il muted" style="margin: 0;"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>公開ページは最新です。</p></sc-if>
+        </div>
+        <aside class="side stack" style="gap: 16px;">
+          <section class="raised stack" style="gap: 10px; padding: 20px;">
+            <h2 class="t-label muted" style="margin: 0;">公開ページへの反映</h2>
+            <p class="t-sm" style="margin: 0; line-height: 1.8;">作品・枠・イベント設定の変更は自動でキューに入り、数分で公開ページに反映されます。急ぐときだけ「今すぐ反映」を使います。</p>
+            <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;"><dt>最終生成</dt><dd class="t-num">10.04 13:42</dd><dt>対象</dt><dd>イベント・公開作品 94・公開X ID</dd></dl>
+          </section>
+          <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-key" aria-hidden="true"></i>必要な権限: 静的JSON再生成</p>
+        </aside>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"tab":{"editor":"enum","options":["playlist","api","json"],"default":"playlist"},"status":{"editor":"enum","options":["synced","running","waiting","quota","failed"],"default":"synced"},"jsonState":{"editor":"enum","options":["pending","running","done","failed"],"default":"pending"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: null, mode: 'append_only', edit: false, api: true, format: 'v5', update: 'realtime', refresh: '60', copied: false, kicked: false }; }
+  renderVals() {
+    const s = this.state;
+    const tab = s.tab || this.props.tab || 'playlist';
+    const m = s.mode;
+    const D = { append_only: ['fa-solid fa-plus', '新しく公開された作品を末尾に追加します。既存の並びや項目は変更しません。'], mirror: ['fa-solid fa-arrows-rotate', '投稿枠順に並べ替え、公開対象でなくなった作品は再生リストから削除します。並び替えは少量ずつ継続します。'], off: ['fa-solid fa-pause', '自動同期を止めます。再生リストはそのまま残ります。'] }[m];
+    const ST = {
+      synced: ['dot ok', '同期済み', '差分はありません。', 94],
+      running: ['dot info', '実行中', '再生リストの全件確認を分割して続行しています。', 61],
+      waiting: ['dot info', '実行待ち', '次回の定期実行を待っています。', 90],
+      quota: ['dot warn', 'クォータ・分割処理待ち', 'YouTube APIの日次クォータ上限に近いため、次回へ繰り越しました。', 72],
+      failed: ['dot err', '同期失敗', '再生リストにアクセスできません。URLと共有設定を確認してください。', 90]
+    }[this.props.status ?? 'synced'];
+    // API link (src/lib/eventEndpoints)
+    const q = new URLSearchParams({ update: s.update });
+    if (s.format === 'legacy') q.set('format', 'legacy');
+    if (s.update === 'scheduled') q.set('refresh', s.refresh);
+    const set = (o) => () => this.setState({ ...o, copied: false });
+    const preview = s.format === 'v5'
+      ? '{\n  "event": { "id": "PVSF2026S", "title": "PVSF2026S" },\n  "videos": [{\n    "title": "崇渦に関するお知らせ 前編",\n    "creator": { "name": "おたこ", "xId": "012345rty" },\n    "members": [ … ], "chapters": [ … ], "software": [ … ]\n  }]\n}'
+      : '[\n  {\n    "title": "崇渦に関するお知らせ 前編",\n    "creator": "おたこ",\n    "tlink": "012345rty",\n    "ylink": "https://youtu.be/…"\n  }\n]';
+    // static json queue (static_rebuild_queue)
+    const js = this.props.jsonState ?? 'pending';
+    const kicked = s.kicked || js === 'running';
+    const QS = {
+      pending: ['dot info', '未実行'], running: ['dot info', '実行中'], done: ['dot ok', '完了'], failed: ['dot err', '失敗']
+    };
+    const base = [
+      ['event_crew', 'PVSF2026S', 'イベント設定の更新', '通常', '13:58'],
+      ['video_v2', '崇渦に関するお知らせ 前編', '作品の公開状態の変更', '高', '13:55'],
+      ['video_v2', '【文字PV】スチールワンダー', '作品メンバーの更新', '通常', '13:51'],
+      ['video_v2', '模範囚', '枠の更新', '通常', '13:47'],
+      ['user_profile', '@012345rty', 'X ID承認', '低', '13:44']
+    ];
+    const qState = js === 'done' ? 'done' : js === 'failed' ? 'failed' : (kicked ? 'running' : 'pending');
+    const queue = js === 'done' ? [] : base.map(([k, t, r, p, a], i) => {
+      const st = js === 'failed' && i === 1 ? 'failed' : qState === 'failed' ? 'done' : qState;
+      return { dot: QS[st][0], state: QS[st][1], kind: { event_crew: 'イベント', video_v2: '作品', user_profile: 'X ID' }[k], target: t, reason: r, pri: p, at: a };
+    });
+    const J = {
+      pending: ['dot info', '未反映の変更 5 件', '数分以内に自動で反映されます。', '今すぐ反映'],
+      running: ['dot info', '反映中 5 件', '公開ページ向けJSONを再生成しています。', '反映中…'],
+      done: ['dot ok', '最新', '未反映の変更はありません。', '再生成する'],
+      failed: ['dot err', '1 件失敗', '「崇渦に関するお知らせ 前編」の再生成に失敗しました。もう一度実行してください。', '失敗分を再実行']
+    }[js === 'pending' && kicked ? 'running' : js];
+    const T = [['playlist', 'YouTube 再生リスト', 'fa-brands fa-youtube', ''], ['api', '作品情報API', 'fa-solid fa-plug', ''], ['json', '公開データ', 'fa-solid fa-database', js === 'done' ? '' : '5']];
+    return {
+      theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
+      tabs: T.map(([id, label, icon, n]) => ({ label, icon, n, cur: tab === id ? 'page' : 'false', pick: (e) => { e.preventDefault(); this.setState({ tab: id }); } })),
+      tPl: tab === 'playlist', tApi: tab === 'api', tJson: tab === 'json',
+      linked: !s.edit, editing: s.edit, toggleChange: () => this.setState({ edit: !s.edit }),
+      setMode: (e) => this.setState({ mode: e.target.value }), off: m === 'off', modeIcon: D[0], modeDesc: D[1],
+      st: { dot: ST[0], label: ST[1], reason: ST[2], synced: ST[3], pct: Math.round(ST[3] / 94 * 100) + '%' },
+      apiOn: s.api, apiDot: s.api ? 'dot ok' : 'dot', apiState: s.api ? '公開中' : '停止中',
+      apiNote: s.api ? 'このイベントの公開作品情報を外部へ出力しています。' : '有効にすると出力リンクを発行できます。',
+      apiBtn: s.api ? '停止する' : '有効にする', apiBtnIcon: s.api ? 'fa-solid fa-toggle-on' : 'fa-solid fa-toggle-off',
+      apiBtnCls: s.api ? 'fn-btn fn-btn--secondary' : 'fn-btn fn-btn--primary', toggleApi: () => this.setState({ api: !s.api }),
+      href: 'https://flamenode.net/api/event-endpoints/PVSF2026S?' + q.toString(),
+      fmtV5: s.format === 'v5' ? 'on' : '', fmtLegacy: s.format === 'legacy' ? 'on' : '',
+      upRt: s.update === 'realtime' ? 'on' : '', upSch: s.update === 'scheduled' ? 'on' : '',
+      scheduled: s.update === 'scheduled',
+      refreshOpts: [['15', '15分'], ['60', '1時間'], ['360', '6時間'], ['1440', '24時間']].map(([v, label]) => ({ label, cls: s.refresh === v ? 'on' : '', pick: set({ refresh: v }) })),
+      modeNote: s.update === 'realtime' ? 'リクエストごとに最新の情報を返します。更新直後に反映したい用途向けです。' : '指定間隔ごとにだけ再生成し、それ以外はキャッシュを返します。公開可否は毎回確認します。',
+      setV5: set({ format: 'v5' }), setLegacy: set({ format: 'legacy' }), setRt: set({ update: 'realtime' }), setSch: set({ update: 'scheduled' }),
+      copy: () => this.setState({ copied: true }), copyIcon: s.copied ? 'fa-solid fa-check' : 'fa-regular fa-copy', copyLabel: s.copied ? 'コピー済み' : 'URLをコピー',
+      preview,
+      queue, rebuild: () => this.setState({ kicked: true }),
+      js: { dot: J[0], label: J[1], note: J[2], btn: J[3], busy: J[1].startsWith('反映中'), empty: js === 'done' }
+    };
+  }
+}
+</script>
+</body>
+</html>

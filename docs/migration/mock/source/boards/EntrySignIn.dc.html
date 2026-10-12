@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ログイン</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="" account="guest" hint-size="100%,72px"></dc-import>
+
+  <div style="display: flex; flex-wrap: wrap; min-height: 760px;">
+    <img src="/_blob/f5c1a8af077b887c7bb1d043f3cf69c1" alt="" style="flex: 1 1 480px; min-width: 0; object-fit: cover; display: block; background: var(--surface-raised);">
+    <div style="flex: 1 1 480px; min-width: 0; padding: 96px 64px; display: flex; flex-direction: column; justify-content: center; gap: 24px; max-width: 640px;">
+      <h1 class="t-display">ログイン</h1>
+      <p class="muted" style="margin: 0;">ログインは Discord で行います。作品に表示されるのは、あとで登録する X ID です。</p>
+      <sc-if value="{{err.show}}" hint-placeholder-val="{{false}}">
+        <div class="notice" role="alert"><i class="{{err.icon}}" aria-hidden="true" style="padding-top: 4px; color: {{err.color}};"></i><span class="stack t-sm" style="gap: 2px;"><b>{{err.title}}</b><span class="muted">{{err.body}}</span></span></div>
+      </sc-if>
+      <div class="actions" style="margin-top: 8px;">
+        <button type="button" class="fn-btn fn-btn--primary" style="height: 48px; padding: 0 24px; font-size: 15px;"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discord でログイン</button>
+      </div>
+      <ol class="stack t-sm muted" style="gap: 6px; margin: 0; padding-left: 18px;">
+        <li>Discord でログイン(ログイン専用。公開はされません)</li>
+        <li>初回だけ:利用規約の確認と、活動名義となる X ID の登録(約1分)</li>
+        <li>枠の確保は規約同意後すぐ、作品の投稿は X ID の承認後にできます</li>
+      </ol>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"error":{"editor":"enum","options":["none","expired","canceled","linked","email","unavailable"],"default":"none"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const E = {
+      none: null,
+      expired: ['fa-regular fa-clock', 'var(--warning)', 'ログイン確認の有効期限が切れました', 'もう一度 Discord でログインしてください。'],
+      canceled: ['fa-solid fa-xmark', 'var(--ink-muted)', 'Discord認証がキャンセルされました', 'ログインするには、Discord の画面で「認証」を押してください。'],
+      linked: ['fa-solid fa-link-slash', 'var(--danger)', 'このDiscordアカウントは別のユーザーに紐付いています', '別の Discord アカウントでログインするか、運営に問い合わせてください。'],
+      email: ['fa-solid fa-envelope', 'var(--info)', '同じメールのアカウントが既にあります', 'もう一度ログインすると紐付けを完了できます。'],
+      unavailable: ['fa-solid fa-triangle-exclamation', 'var(--danger)', '認証基盤が一時的に利用できません', '時間をおいて再度お試しください。']
+    }[this.props.error ?? 'none'];
+    return { theme: this.props.theme ?? 'dark', err: E ? { show: true, icon: E[0], color: E[1], title: E[2], body: E[3] } : { show: false } };
+  }
+}
+</script>
+</body>
+</html>

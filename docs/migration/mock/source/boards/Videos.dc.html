@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品一覧</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="list" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 56px;">
+    <div class="wrap-row" style="justify-content: space-between; gap: 16px; align-items: flex-end;">
+      <h1 class="t-display">作品</h1>
+      <span class="t-sm muted t-num">73 / 622</span>
+    </div>
+
+    <form role="search" class="wrap-row vid-srch" style="gap: 8px; margin-top: 32px;" onSubmit="{{prevent}}">
+      <div class="field-i" style="flex: 1 1 260px; max-width: 360px;">
+        <x-import component-from-global-scope="FlameNode.TextField" type="search" aria-label="作品を検索" placeholder="作品を検索(2文字以上)"></x-import>
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      </div>
+      <div class="vid-opts">
+      <span class="sel-i" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><select class="select i" aria-label="イベント"><option>イベント</option><option selected="{{yes}}">PVSF2026Sp</option><option>年越し合作 2026</option><option>イベントなし</option></select></span>
+      <span class="sel-i" title="クリエイター"><i class="fa-solid fa-user" aria-hidden="true"></i><select class="select i" aria-label="クリエイター"><option>クリエイター</option><option>おたこ</option></select></span>
+      <span class="sel-i" title="公開日"><i class="fa-regular fa-calendar" aria-hidden="true"></i><select class="select i" aria-label="公開日"><option>公開日</option><option>2026年</option><option>2025年</option></select></span>
+      <span style="flex: 1;"></span>
+      <span class="sel-i" title="並び替え"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>おすすめ順</option><option>新着順</option><option>古い順</option></select></span>
+      <span class="row" role="group" aria-label="表示形式" style="gap: 0;">
+        <button type="button" class="{{tileCls}}" aria-label="タイル表示" aria-pressed="{{isTile}}" onClick="{{vTile}}"><i class="fa-solid fa-table-cells-large"></i></button>
+        <button type="button" class="{{listCls}}" aria-label="一覧表示" aria-pressed="{{isList}}" onClick="{{vList}}"><i class="fa-solid fa-list"></i></button>
+        <button type="button" class="{{compCls}}" aria-label="コンパクト表示" aria-pressed="{{isCompact}}" onClick="{{vComp}}"><i class="fa-solid fa-bars"></i></button>
+      </span>
+      </div>
+    </form>
+
+    <div class="wrap-row t-sm" style="gap: 6px; margin-top: 16px;" aria-label="適用中のフィルター">
+      <i class="fa-solid fa-filter muted" aria-hidden="true" style="margin-right: 6px;"></i>
+      <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" aria-label="PVSF2026Sp を解除">PVSF2026Sp<i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+      <button type="button" class="ib sm" aria-label="すべて解除"><i class="fa-solid fa-filter-circle-xmark"></i></button>
+    </div>
+
+    <sc-if value="{{isTile}}" hint-placeholder-val="{{true}}">
+      <div class="grid-v" style="margin-top: 40px;">
+        <sc-for list="{{videos}}" as="v" hint-placeholder-count="12">
+          <a href="VideoDetail.dc.html" style="display: block;">
+            <x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" duration="{{v.dur}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import>
+          </a>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{isList}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 32px;">
+        <sc-for list="{{videos}}" as="v" hint-placeholder-count="12">
+          <x-import component-from-global-scope="FlameNode.Row" title="{{v.title}}" meta="{{v.meta}}" thumbnail="{{v.thumb}}" on-click="{{noop}}"></x-import>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{isCompact}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 32px; columns: 2 420px; column-gap: 24px;">
+        <sc-for list="{{videos}}" as="v" hint-placeholder-count="12">
+          <x-import component-from-global-scope="FlameNode.Row" compact="{{yes}}" title="{{v.title}}" meta="{{v.meta}}" on-click="{{noop}}"></x-import>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <nav aria-label="ページ移動" class="row" style="gap: 0; margin-top: 56px;">
+      <x-import component-from-global-scope="FlameNode.Button" variant="tertiary" size="sm" disabled="{{yes}}" aria-label="前へ"><i class="fa-solid fa-chevron-left"></i></x-import>
+      <x-import component-from-global-scope="FlameNode.Button" variant="secondary" size="sm" aria-current="page">1</x-import>
+      <x-import component-from-global-scope="FlameNode.Button" variant="tertiary" size="sm">2</x-import>
+      <x-import component-from-global-scope="FlameNode.Button" variant="tertiary" size="sm">3</x-import>
+      <span class="muted" style="padding: 0 12px;"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></span>
+      <x-import component-from-global-scope="FlameNode.Button" variant="tertiary" size="sm">7</x-import>
+      <x-import component-from-global-scope="FlameNode.Button" variant="tertiary" size="sm" aria-label="次へ"><i class="fa-solid fa-chevron-right"></i></x-import>
+    </nav>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: 'tile' }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const V = [["【幼虫アニメ】◯◯◯でしますか？◯でしますか？", "幼虫", "2026.03.28"], ["空白合作", "空白合作チーム", "2026.03.28"], ["【文字PV】スチールワンダー / はるまきごはん - スティックのり【#PVSF2026Sp】", "スティックのり", "2026.03.28"], ["おゆする合作", "おゆする", "2026.03.28"], ["模範囚", "hato", "2026.03.28"], ["【サナドリウム/wiz_nicc】二次創作MV", "lalaClione（ララクリオネ）", "2026.03.28"], ["【鉄道PV・てつどうふぁんMV●第23弾】未来線～ミライン～", "てつどうふぁん", "2026.03.28"], ["個々々々々々人 / Sohbana", "あいこーすふぃあ", "2026.03.28"], ["魔法少女 このは・グリモワール　最終決戦編", "おたこ", "2026.03.28"], ["祟渦に関するお知らせ 後編", "ホラー映画合作", "2026.03.28"], ["合作したいだろって！！", "合作したいだろって！！", "2026.03.28"], ["STEL-LUMINA", "赤嶺いずな", "2026.03.28"]];
+    const v = this.state.view;
+    return {
+      theme: this.props.theme ?? 'dark', yes: true, noop: () => {}, prevent: (e) => e.preventDefault(),
+      view: v, setView: (id) => this.setState({ view: id }),
+      views: [{ id: 'tile', label: 'タイル' }, { id: 'list', label: '一覧' }, { id: 'compact', label: 'コンパクト' }],
+      isTile: v === 'tile', isList: v === 'list', isCompact: v === 'compact',
+      tileCls: v === 'tile' ? 'ib on' : 'ib', listCls: v === 'list' ? 'ib on' : 'ib', compCls: v === 'compact' ? 'ib on' : 'ib',
+      vTile: () => this.setState({ view: 'tile' }), vList: () => this.setState({ view: 'list' }), vComp: () => this.setState({ view: 'compact' }),
+      videos: V.map((a, i) => ({ title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', dur: '', event: 'PVSF2026Sp', thumb: T[i % 8], meta: a[1] + ' · PVSF2026Sp · ' + a[2] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

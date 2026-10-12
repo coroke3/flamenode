@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>YouTube quota</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="quota" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">YouTube quota</h1><p class="muted">単一APIキーを使用し、Google Cloud Consoleの日次quota設定の80%以内でFlameNodeの処理を共有管理します。</p></div></div>
+    <div class="raised stack" style="gap: 16px; padding: 28px; max-width: 880px;">
+      <div class="row" style="justify-content: space-between;"><span class="il t-label muted"><i class="fa-regular fa-calendar" aria-hidden="true"></i>quota日(太平洋時間) 2026-10-03</span><span class="st"><span class="dot ok"></span>余裕あり</span></div>
+      <div class="row" style="align-items: baseline; gap: 8px;"><span class="t-num" style="font: 400 40px/48px var(--font-sans);">2,140</span><span class="muted">/ 8,000 units(FlameNode上限 80%)</span></div>
+      <div class="bar" style="height: 8px;" aria-label="使用率 27%"><i style="width: 27%; background: var(--ink);"></i></div>
+      <div class="metrics" style="gap: 40px;">
+        <div class="metric"><span>Google設定値</span><b style="font-size: 24px;">10,000</b></div>
+        <div class="metric"><span>推定使用量</span><b style="font-size: 24px;">2,140</b></div>
+        <div class="metric"><span>残り予算</span><b style="font-size: 24px;">5,860</b></div>
+        <div class="metric"><span>使用率</span><b style="font-size: 24px;">27%</b></div>
+      </div>
+    </div>
+    <section class="c-sec" aria-labelledby="rule">
+      <h2 id="rule" class="t-h3" style="margin-bottom: 12px;">運用条件</h2>
+      <div class="stack t-sm" style="gap: 10px;">
+        <span class="il"><i class="fa-solid fa-key muted" aria-hidden="true"></i>APIキー: 単一キーのみ</span>
+        <span class="il"><i class="ms ms-view_day muted" aria-hidden="true"></i>1回の同期: 最大200作品、videos.list最大4回</span>
+        <span class="il"><i class="fa-solid fa-rotate-right muted" aria-hidden="true"></i>再試行込み外部呼び出し: 最大8回、逐次実行</span>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

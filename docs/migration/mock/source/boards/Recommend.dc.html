@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>おすすめ</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="list" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 56px;">
+    <h1 class="t-display">おすすめ</h1>
+    <div class="seg rc-tabs" role="tablist" aria-label="表示カテゴリ" style="margin-top: 24px;">
+      <sc-for list="{{cats}}" as="c" hint-placeholder-count="6">
+        <button type="button" role="tab" class="{{c.cls}}" aria-selected="{{c.sel}}" onClick="{{c.pick}}">{{c.label}}</button>
+      </sc-for>
+    </div>
+
+    <sc-for list="{{shelves}}" as="s" hint-placeholder-count="4">
+      <section class="sec" style="margin-top: 64px;">
+        <div class="sec-head">
+          <h2 class="t-h2">{{s.title}}</h2>
+        </div>
+        <div class="grid-v">
+          <sc-for list="{{s.items}}" as="v" hint-placeholder-count="4">
+            <a href="VideoDetail.dc.html" style="display: block;">
+              <x-import component-from-global-scope="FlameNode.VideoCard" title="{{v.title}}" thumbnail="{{v.thumb}}" creator="{{v.creator}}" creator-icon="{{v.cicon}}"></x-import>
+            </a>
+          </sc-for>
+        </div>
+      </section>
+    </sc-for>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { cat: 'all' }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const V = [["【幼虫アニメ】◯◯◯でしますか？◯でしますか？", "幼虫", "PVSF2026Sp"], ["個々々々々々人 / Sohbana", "あいこーすふぃあ", "PVSF2026Sp"], ["納期延長天国合作 - メルティランドナイトメア(yuigot Remix)", "納期延長天国合作", "PVSF2026Sp"], ["【二次創作MV】幸福刑【PVSF2026Sp】」", "かい⑨/ほたる", "PVSF2026Sp"], ["初音ミク - 天地無用", "えど", "PVSF2026Sp"], ["ブレインロット", "まぐれ", "PVSF2026Sp"], ["匙ノ咒", "As合作", "PVSF2026Sp"], ["【二次創作】ジェーンは凍っていた", "おゆ", "PVSF2026Sp"], ["あ合作", "あ合作", "PVSF2026Sp"], ["ハーモニー", "PRiM", "PVSF2026Sp"], ["突破納期二日合作", "突発納期二日合作", "PVSF2026Sp"], ["folklore / 初音ミク", "mill", "PVSF2025S"], ["【VocaloidRemixを広めたい】現代VOCALOID創造都市", "【VocaloidRemixを広めたい】現代VOCALOID創造都市", "PVSF2025S"], ["縁の行方/二次創作MV", "はる", "PVSF2025S"], ["しましま", "PRiM", "PVSF2025S"], ["[Theme] MonoLogue", "あおね", "PVSF2025S"]];
+    const pick = (o) => [0, 1, 2, 3].map((k) => { const a = V[(k + o) % V.length]; return { title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', event: a[2], thumb: T[(k + o) % 8] }; });
+    const c = this.state.cat;
+    const all = [
+      { id: 'pop', title: '人気作品', icon: 'fa-solid fa-fire', sub: '再生といいねが多い作品', items: pick(0) },
+      { id: 'new', title: '新着だけど良さそう', icon: 'fa-solid fa-seedling', sub: '新着作品', items: pick(4) },
+      { id: 'miss', title: '見落としがちな作品', icon: 'fa-solid fa-magnifying-glass', sub: '再生が少ないが評価の高い作品', items: pick(8) },
+      { id: 'ev', title: 'PVSF2026Sp から', icon: 'fa-solid fa-calendar-days', sub: 'PVSF2026Sp', items: pick(12) },
+      { id: 'set', title: 'さらに探す作品', icon: 'ms ms-view_day', sub: '次に見る作品を探す', items: pick(2) }
+    ];
+    return {
+      theme: this.props.theme ?? 'dark',
+      cats: [['all','すべて','fa-solid fa-border-all','全カテゴリを順に',20],['pop','人気作品','fa-solid fa-fire','再生といいねが多い',4],['new','新着','fa-solid fa-seedling','公開から日が浅い',4],['miss','見落としがち','fa-solid fa-magnifying-glass','再生は少ないが高評価',4],['ev','イベント','fa-solid fa-calendar-days','イベントごとの作品',4],['set','まとめて見る','ms ms-view_day','次に見る作品を探す',4]].map(([id, label, icon, sub, n], k) => ({ label, icon, sub, n, thumbs: [T[(k * 3) % 8], T[(k * 3 + 1) % 8], T[(k * 3 + 2) % 8]], cls: c === id ? 'on' : '', sel: c === id ? 'true' : 'false', pick: () => this.setState({ cat: id }) })),
+      shelves: c === 'all' ? all : all.filter(x => x.id === c)
+    };
+  }
+}
+</script>
+</body>
+</html>

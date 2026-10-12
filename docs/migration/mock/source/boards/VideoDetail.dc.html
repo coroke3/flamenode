@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品詳細</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000} details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}</style>
+</helmet>
+<div class="p-root vd has-dock" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="list" hint-size="100%,72px"></dc-import>
+
+  <div class="vd-layout" style="display: flex; flex-wrap: wrap; gap: 32px;">
+    <main class="vd-main" style="flex: 999 1 720px; min-width: 0;">
+      <sc-if value="{{hasYt}}" hint-placeholder-val="{{true}}">
+        <div class="vd-player" style="background: #000;">
+          <img class="cover" src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="プレイヤー(YouTube 埋め込み)">
+        </div>
+      </sc-if>
+      <sc-if value="{{noYt}}" hint-placeholder-val="{{false}}">
+        <div class="stack" style="aspect-ratio: 16/9; align-items: center; justify-content: center; gap: 12px; background: var(--surface-raised); text-align: center; padding: 24px;">
+          <span class="icon-tile lg"><i class="fa-brands fa-youtube" aria-hidden="true"></i></span>
+          <span>YouTube動画は未登録ですが、作品情報を公開しています。</span>
+        </div>
+      </sc-if>
+      <x-import component-from-global-scope="FlameNode.ProgressBar" value="{{progress}}" label="再生位置"></x-import>
+
+      <div class="vd-info" style="padding: 24px 0 0 40px; display: flex; flex-direction: column; gap: 20px;">
+        <h1 class="t-display vd-title">空白合作</h1>
+
+        <div class="wrap-row" style="gap: 12px 16px;">
+          <a href="Creator.dc.html" class="row" style="gap: 12px;">
+            <img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" style="width: 40px; height: 40px;">
+            <span class="stack">
+              <span>空白合作チーム</span>
+              <span class="t-sm muted t-num">@vIXyOepPI395671 · 公開 2026.03.29</span>
+            </span>
+          </a>
+          <span class="row" style="gap: 0;" aria-label="投稿者へのリンク">
+            <a href="Creator.dc.html" class="ib sm" aria-label="FlameNode のプロフィールを開く"><i class="fa-solid fa-user"></i></a>
+            <a href="https://x.com/vIXyOepPI395671" class="ib sm" aria-label="X (@vIXyOepPI395671) を開く"><i class="fa-brands fa-x-twitter"></i></a>
+            <a href="https://youtube.com/" class="ib sm" aria-label="YouTube チャンネルを開く"><i class="fa-brands fa-youtube"></i></a>
+          </span>
+          <span style="flex: 1;"></span>
+          <sc-if value="{{gateMsg}}" hint-placeholder-val="{{false}}">
+            <span class="row" style="gap: 10px;"><span class="t-sm muted">{{gateMsg}}</span><a href="{{gateHref}}" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="{{gateIcon}}" aria-hidden="true"></i>{{gateCta}}</a></span>
+          </sc-if>
+          <span class="row vd-acts" style="gap: 2px;">
+            <button type="button" class="fn-btn fn-btn--secondary" aria-pressed="{{liked}}" onClick="{{toggleLike}}" disabled="{{gateBlock}}"><i class="{{likeIcon}}" aria-hidden="true"></i><span class="t-num">{{likeCount}}</span></button>
+            <button type="button" class="fn-btn fn-btn--secondary" aria-pressed="{{saved}}" aria-label="セーブ" onClick="{{toggleSave}}" disabled="{{gateBlock}}"><i class="{{saveIcon}}" aria-hidden="true"></i></button>
+          </span>
+        </div>
+
+        <div class="wrap-row" style="gap: 8px 16px; font-size: 14px;">
+          <img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 24px; height: 24px;">
+          <a href="EventDetail.dc.html">PVSF2026Sp</a>
+          <span class="st"><i class="ms ms-inventory_2 st-ic mute" aria-hidden="true"></i>開催済み</span>
+          <span style="flex: 1;"></span>
+          <a href="https://www.youtube.com/playlist" class="il t-sm"><i class="fa-brands fa-youtube" aria-hidden="true"></i>YouTube再生リスト<i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" style="font-size: 11px;"></i></a>
+        </div>
+        <div class="wrap-row t-sm" style="gap: 8px; margin-top: -8px;" aria-label="その他の所属イベント">
+          <span class="muted">他の所属</span>
+          <a href="EventDetail.dc.html" class="fn-btn fn-btn--secondary fn-btn--sm">PVSF まとめ動画</a>
+        </div>
+
+        <section aria-label="作品情報" style="display: flex; flex-direction: column; gap: 14px; max-width: 880px;">
+          <p style="margin: 0;">勇気を出してみんなを誘いました</p>
+          <div class="meta-i" style="font-size: 14px; gap: 8px 24px;">
+            <a href="https://example.com/" style="color: var(--ink);"><i class="fa-solid fa-music" aria-hidden="true" style="color: var(--ink-muted);"></i>ホワイトスペースにおいで / 椎野乃々<i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true" style="font-size: 11px;"></i></a>
+            <span style="color: var(--ink);"><i class="ms ms-movie_edit" aria-label="使用ソフト" style="color: var(--ink-muted);"></i>AviUtl, After Effects</span>
+          </div>
+          <details>
+            <summary class="il t-sm" style="color: var(--ink);"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i>詳細コメント</summary>
+            <dl class="kv" style="margin-top: 16px; grid-template-columns: 120px minmax(0, 1fr);">
+              <dt>みどころ</dt><dd>13人それぞれのパートが、1曲の中で順番に入れ替わります。</dd>
+              <dt>制作エピソード</dt><dd>声をかけてから約1か月で全員のパートがそろいました。</dd>
+              <dt>あとがき</dt><dd>見てくださった皆さん、ありがとうございました。</dd>
+            </dl>
+          </details>
+        </section>
+
+        <section aria-labelledby="members" class="vd-members" style="max-width: 880px; margin-top: 16px;">
+          <div class="sec-head" style="margin-bottom: 12px;">
+            <h2 id="members" class="vh t-h3">参加メンバー <span class="muted t-num">13</span></h2>
+            <span class="row" style="gap: 0;" role="group" aria-label="メンバー表示切替">
+              <button type="button" class="{{tblCls}}" aria-label="テーブル" aria-pressed="{{isTable}}" onClick="{{showTable}}"><i class="fa-solid fa-table-list"></i></button>
+              <button type="button" class="{{cardCls}}" aria-label="カード" aria-pressed="{{isCard}}" onClick="{{showCard}}"><i class="fa-solid fa-grip"></i></button>
+            </span>
+          </div>
+          <sc-if value="{{isTable}}" hint-placeholder-val="{{true}}">
+            <div class="t-scroll">
+              <div class="vd-mtable" style="min-width: 600px; font-size: 14px; line-height: 22px;" role="table" aria-label="参加メンバー">
+                <div role="row" style="display: grid; grid-template-columns: minmax(180px, 1.4fr) 120px 120px minmax(160px, 2fr); gap: 16px; padding: 0 0 10px;" class="t-label muted vd-mhead">
+                  <span role="columnheader" class="il">活動名<i class="fa-solid fa-sort" aria-hidden="true"></i></span>
+                  <span role="columnheader" class="il">役割<i class="fa-solid fa-sort" aria-hidden="true"></i></span>
+                  <span role="columnheader" class="il">チャプター<i class="fa-solid fa-sort-down" aria-hidden="true"></i></span>
+                  <span role="columnheader">コメント</span>
+                </div>
+                <sc-for list="{{members}}" as="m" hint-placeholder-count="3">
+                  <div role="row" class="fn-row vd-mrow" style="display: grid; grid-template-columns: minmax(180px, 1.4fr) 120px 120px minmax(160px, 2fr); gap: 16px; padding: 10px 0;">
+                    <span role="cell" class="row" style="gap: 10px;"><img class="avatar" src="{{m.img}}" alt="" style="width: 28px; height: 28px;"><span class="stack"><span>{{m.name}}</span><span class="t-sm muted">@{{m.x}}</span></span></span>
+                    <span role="cell">{{m.role}}</span>
+                    <span role="cell" class="t-num" style="color: var(--brand-text);">{{m.ch}}</span>
+                    <span role="cell" class="muted">{{m.comment}}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{isCard}}" hint-placeholder-val="{{false}}">
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 2px;">
+              <sc-for list="{{members}}" as="m" hint-placeholder-count="6">
+                <div class="raised stack" style="gap: 14px; padding: 20px;">
+                  <div class="row" style="gap: 14px;">
+                    <img class="avatar" src="{{m.img}}" alt="" style="width: 56px; height: 56px;">
+                    <span class="stack" style="gap: 2px; min-width: 0;"><span class="ell">{{m.name}}</span><a href="https://x.com/" class="t-sm muted ell">@{{m.x}}</a></span>
+                  </div>
+                  <div><span class="chip" style="cursor: default; height: 26px;">{{m.role}}</span></div>
+                  <sc-if value="{{m.comment}}" hint-placeholder-val="{{true}}"><p class="t-sm muted" style="margin: 0;">{{m.comment}}</p></sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </section>
+      </div>
+    </main>
+
+    <aside class="vd-side" aria-label="動画補助情報" style="flex: 1 1 380px; min-width: 0; max-width: 480px; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 24px;">
+      <section aria-labelledby="ch" class="{{chSheet}}" style="background: var(--surface-raised);">
+        <div class="row" style="justify-content: space-between; padding: 12px 8px 12px 16px;">
+          <h2 id="ch" class="vh t-h3" style="font-size: 15px;">チャプター <span class="muted t-num">6</span></h2>
+          <span class="row" style="gap: 0;">
+            <button type="button" class="ib sm" aria-label="チャプターコメントを追加" onClick="{{toggleCompose}}"><i class="fa-solid fa-plus"></i></button>
+            <button type="button" class="ib sm" aria-label="CSV で一括登録"><i class="fa-solid fa-file-csv"></i></button>
+            <button type="button" class="ib sm" aria-label="{{chToggleLabel}}" onClick="{{toggleCh}}"><i class="{{chIcon}}"></i></button>
+          </span>
+        </div>
+        <sc-if value="{{chOpen}}" hint-placeholder-val="{{true}}">
+          <div style="max-height: 360px; overflow-y: auto;">
+            <sc-for list="{{chapters}}" as="c" hint-placeholder-count="6">
+              <button type="button" class="{{c.cls}}" style="padding: 10px 16px; gap: 12px; align-items: flex-start;">
+                <span class="t-num" style="width: 44px; flex: none; font-size: 13px; color: var(--brand-text);">{{c.t}}</span>
+                <span class="fn-row__body"><span class="fn-row__title" style="font-size: 14px; line-height: 20px; white-space: normal;">{{c.label}}</span><span class="fn-row__meta il" style="font-size: 12px;"><i class="{{c.kindIcon}}" aria-hidden="true"></i>{{c.who}}</span></span>
+              </button>
+            </sc-for>
+          </div>
+          <sc-if value="{{composing}}" hint-placeholder-val="{{false}}">
+            <form class="stack" style="gap: 10px; padding: 12px 16px 16px;" onSubmit="{{prevent}}">
+              <div class="row" style="gap: 8px;">
+                <x-import component-from-global-scope="FlameNode.TextField" aria-label="時刻" default-value="1:42" style="width: 72px;"></x-import>
+                <x-import component-from-global-scope="FlameNode.TextField" aria-label="タイトル" placeholder="タイトル(例:サビの入り)" style="flex: 1;"></x-import>
+              </div>
+              <x-import component-from-global-scope="FlameNode.TextField" aria-label="補足メモ" placeholder="補足メモ (任意, 1000文字以内)"></x-import>
+              <div class="row" style="gap: 8px; justify-content: flex-end;">
+                <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleCompose}}">閉じる</button>
+                <button type="submit" class="fn-btn fn-btn--primary fn-btn--sm">投稿</button>
+              </div>
+            </form>
+          </sc-if>
+          <p class="il t-sm muted" style="margin: 0; padding: 8px 16px 14px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>投稿には承認済み X ID が必要です</p>
+          <div class="vd-sheet-members" role="list" aria-label="参加メンバー">
+            <h3 class="t-label muted" style="margin: 0; padding: 12px 16px 4px;">メンバー <span class="t-num">13</span></h3>
+            <sc-for list="{{members}}" as="m" hint-placeholder-count="4">
+              <a href="Creator.dc.html" role="listitem" class="fn-row" style="padding: 8px 16px; gap: 12px; align-items: center;">
+                <img class="avatar" src="{{m.img}}" alt="" style="width: 28px; height: 28px;">
+                <span class="fn-row__body"><span class="fn-row__title" style="font-size: 14px; line-height: 20px;">{{m.name}}</span><span class="fn-row__meta" style="font-size: 12px;">{{m.role}}</span></span>
+                <span class="t-num" style="font-size: 13px; color: var(--brand-text);">{{m.ch}}</span>
+              </a>
+            </sc-for>
+          </div>
+        </sc-if>
+      </section>
+
+      <section aria-labelledby="pl" class="{{plSheet}}" style="background: var(--surface-raised);">
+        <div class="row" style="justify-content: space-between; padding: 12px 8px 8px 16px;">
+          <span class="stack">
+            <h2 id="pl" class="t-h3" style="font-size: 15px;">PVSF2026Sp</h2>
+            <span class="t-sm muted t-num">再生リスト · 2 / 73</span>
+          </span>
+          <span class="row" style="gap: 0;">
+            <button type="button" class="{{autoCls}}" aria-pressed="{{auto}}" aria-label="次の動画を自動再生" onClick="{{toggleAuto}}"><i class="fa-solid fa-repeat"></i></button>
+            <button type="button" class="ib sm" aria-label="並び順を初期化"><i class="fa-solid fa-rotate-left"></i></button>
+          </span>
+        </div>
+        <div style="max-height: 420px; overflow-y: auto; padding-bottom: 8px;">
+          <sc-for list="{{playlist}}" as="v" hint-placeholder-count="6">
+            <div class="{{v.cls}}" style="padding: 8px 8px 8px 12px; gap: 12px; align-items: center;">
+              <span class="t-sm muted t-num" style="width: 16px; flex: none; text-align: center;"><i class="{{v.marker}}" aria-hidden="true"></i>{{v.num}}</span>
+              <img class="fn-row__thumb" src="{{v.thumb}}" alt="" style="width: 100px;">
+              <span class="fn-row__body"><span class="fn-row__title" style="font-size: 14px; line-height: 20px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">{{v.title}}</span><span class="fn-row__meta" style="font-size: 12px;">{{v.meta}}</span></span>
+              <span class="stack" style="gap: 0;">
+                <button type="button" class="ib sm" style="height: 22px;" aria-label="上へ"><i class="fa-solid fa-chevron-up"></i></button>
+                <button type="button" class="ib sm" style="height: 22px;" aria-label="下へ"><i class="fa-solid fa-chevron-down"></i></button>
+              </span>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <section aria-labelledby="rel">
+        <h2 id="rel" class="vh t-h3" style="font-size: 15px; margin-bottom: 8px;">関連動画</h2>
+        <sc-for list="{{related}}" as="v" hint-placeholder-count="6">
+          <a href="VideoDetail.dc.html" class="fn-row fn-row--compact" style="padding: 8px 0;">
+            <img class="fn-row__thumb" src="{{v.thumb}}" alt="" style="width: 152px;">
+            <span class="fn-row__body"><span class="fn-row__title" style="white-space: normal;">{{v.title}}</span><span class="fn-row__meta">{{v.meta}}</span></span>
+          </a>
+        </sc-for>
+      </section>
+    </aside>
+  </div>
+  <!-- スマホ: 動画補助ドック(VideoUtilityDock.tsx と同じ構成) -->
+  <nav class="vd-dock" aria-label="動画補助メニュー">
+    <button type="button" class="{{dockPl}}" aria-pressed="{{dockPlOn}}" onClick="{{openPl}}"><i class="fa-solid fa-list-ol" aria-hidden="true"></i><span>再生リスト</span><span class="t-num muted">73</span></button>
+    <button type="button" class="{{dockCh}}" aria-pressed="{{dockChOn}}" onClick="{{openCh}}"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><span>チャプター・コメント</span><span class="t-num muted">6</span></button>
+  </nav>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"sheet":{"editor":"enum","options":["","ch","pl"],"default":""},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"progress":{"editor":"range","min":0,"max":1,"step":0.01,"default":0.35},"memberView":{"editor":"enum","options":["table","card"],"default":"table"},"viewer":{"editor":"enum","options":["ok","guest","terms","xid","banned"],"default":"ok"},"noYoutube":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: (p && p.memberView) || 'table', chOpen: true, composing: false, auto: true, liked: false, saved: false, sheet: (p && p.sheet) || null }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const s = this.state; const ib = (on) => on ? 'ib sm on' : 'ib sm';
+    const list = [['【幼虫アニメ】◯◯◯でしますか？◯でしますか？','幼虫'],['空白合作','空白合作チーム'],['【文字PV】スチールワンダー / はるまきごはん - スティックのり【#PVSF2026Sp】','スティックのり'],['おゆする合作','おゆする'],['模範囚','hato'],['【サナドリウム/wiz_nicc】二次創作MV','lalaClione(ララクリオネ)'],['【鉄道PV・てつどうふぁんMV●第23弾】未来線～ミライン～','てつどうふぁん']];
+    const ch = [['0:00','イントロ','丸い人','m'],['0:24','ぴーふらパート','ぴーふら','m'],['0:48','sum1パート','sum1','m'],['1:05','ここの切り替え好き','幼虫','c'],['1:12','Eipiパート','Eipi','m'],['1:36','Av1パート','Av1','m']];
+    return {
+      theme: this.props.theme ?? 'dark', progress: this.props.progress ?? 0.35, prevent: (e) => e.preventDefault(),
+      hasYt: !(this.props.noYoutube ?? false), noYt: !!(this.props.noYoutube ?? false),
+      ...(() => { const g = { ok: null, guest: ['ログインするといいね、セーブができます。', 'ログイン', 'EntrySignIn.dc.html', 'fa-solid fa-right-to-bracket'], terms: ['利用規約に同意するといいね、セーブができます。', '利用規約へ', 'Rules.dc.html', 'fa-solid fa-scale-balanced'], xid: ['いいね・セーブには承認済みの Active X ID が必要です。', 'X ID設定へ', 'MyPage.dc.html', 'fa-brands fa-x-twitter'], banned: ['現在、このアカウントは利用停止中です。', '詳細', 'Rules.dc.html', 'fa-solid fa-ban'] }[this.props.viewer ?? 'ok']; return { gateMsg: g ? g[0] : '', gateCta: g ? g[1] : '', gateHref: g ? g[2] : '', gateIcon: g ? g[3] : '', gateBlock: !!g }; })(),
+      liked: s.liked ? 'true' : 'false', likeIcon: s.liked ? 'fa-solid fa-heart' : 'fa-regular fa-heart', likeCount: s.liked ? 129 : 128,
+      saved: s.saved ? 'true' : 'false', saveIcon: s.saved ? 'fa-solid fa-bookmark' : 'fa-regular fa-bookmark',
+      toggleLike: () => this.setState({ liked: !s.liked }), toggleSave: () => this.setState({ saved: !s.saved }),
+      isTable: s.view === 'table', isCard: s.view === 'card', tblCls: ib(s.view === 'table'), cardCls: ib(s.view === 'card'),
+      showTable: () => this.setState({ view: 'table' }), showCard: () => this.setState({ view: 'card' }),
+      chOpen: s.chOpen, toggleCh: () => this.setState({ chOpen: !s.chOpen }), chIcon: s.chOpen ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down', chToggleLabel: s.chOpen ? '閉じる' : '開く',
+      chSheet: 'vd-sheet' + (s.sheet === 'ch' ? ' open' : ''), plSheet: 'vd-sheet' + (s.sheet === 'pl' ? ' open' : ''),
+      dockPl: s.sheet === 'pl' ? 'on' : '', dockCh: s.sheet === 'ch' ? 'on' : '', dockPlOn: s.sheet === 'pl' ? 'true' : 'false', dockChOn: s.sheet === 'ch' ? 'true' : 'false',
+      openPl: () => this.setState({ sheet: s.sheet === 'pl' ? null : 'pl' }), openCh: () => this.setState({ sheet: s.sheet === 'ch' ? null : 'ch' }),
+      composing: s.composing, toggleCompose: () => this.setState({ composing: !s.composing, chOpen: true }),
+      auto: s.auto ? 'true' : 'false', autoCls: ib(s.auto), toggleAuto: () => this.setState({ auto: !s.auto }),
+      chapters: ch.map((a, i) => ({ t: a[0], label: a[1], who: a[2], kindIcon: a[3] === 'm' ? 'fa-solid fa-user-group' : 'fa-regular fa-comment', cls: i === 2 ? 'fn-row fn-row--selected' : 'fn-row' })),
+      members: [
+        { name: '丸い人', x: 'Maruihito_maru', role: '映像', ch: '0:00', comment: 'イントロ担当', img: T[2] },
+        { name: 'ぴーふら', x: 'Fura1107_', role: '映像', ch: '0:24', comment: '', img: T[0] },
+        { name: 'sum1', x: 'sum1_eizou', role: '映像', ch: '0:48', comment: '初合作でした', img: T[5] },
+        { name: 'Eipi', x: 'Eipi_Rainbow', role: '映像', ch: '1:12', comment: '', img: T[3] },
+        { name: 'Av1', x: 'Av1_mz', role: '映像', ch: '1:36', comment: '', img: T[6] },
+        { name: 'usuzumi', x: 'uszm_28', role: '映像', ch: '2:00', comment: '', img: T[7] }
+      ],
+      playlist: list.map((a, i) => ({ title: a[0], meta: a[1], thumb: T[i % 8], num: i === 1 ? '' : i + 1, marker: i === 1 ? 'fa-solid fa-play' : '', cls: i === 1 ? 'fn-row fn-row--selected' : 'fn-row' })),
+      related: [['個々々々々々人 / Sohbana','あいこーすふぃあ'],['魔法少女 このは・グリモワール 最終決戦編','おたこ'],['Mitchie Mメドレー合作','Mitchie Mメドレー合作'],['【短編アニメ】魔法少女vs改造人間','おたこ'],['Ruling of 31 eyes','貴方'],['祟渦に関するお知らせ 後編','ホラー映画合作']].map((a, i) => ({ title: a[0], meta: a[1], thumb: T[(i + 5) % 8] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品詳細(管理)</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main"><sc-if value="{{full}}" hint-placeholder-val="{{false}}">
+    <a href="AdminVideosHub.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品一覧</a>
+    <div class="wrap-row" style="gap: 16px; justify-content: space-between; margin-top: 8px; align-items: flex-end;">
+      <div class="stack" style="gap: 6px;">
+        <h1 class="t-h1">空白合作</h1>
+        <span class="meta-i"><span class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>空白合作チーム</span><span><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>vIXyOepPI395671</span><span><i class="fa-solid fa-calendar-days" aria-hidden="true"></i>PVSF2026Sp</span><span class="t-num"><i class="fa-regular fa-clock" aria-hidden="true"></i>03.28 20:48</span></span>
+      </div>
+      <span class="st"><span class="dot warn"></span>審査待ち</span>
+    </div>
+    <nav class="subnav" aria-label="作品管理メニュー" style="margin-top: 24px;">
+      <a href="AdminVideoHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-gavel" aria-hidden="true"></i>管理詳細</a>
+      <a href="AdminVideoHub.dc.html" class="il"><i class="fa-solid fa-user-group" aria-hidden="true"></i>メンバー</a>
+      <a href="VideoEdit.dc.html" class="il"><i class="fa-solid fa-pen" aria-hidden="true"></i>内容編集</a>
+      <a href="VideoPermissions.dc.html" class="il"><i class="ms ms-manage_accounts" aria-hidden="true"></i>編集権限</a>
+      <a href="VideoDetail.dc.html" class="il"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>公開ページ</a>
+      <a href="AdminAuditHub.dc.html" class="il"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>監査ログ</a>
+    </nav></sc-if>
+
+    <div class="split" style="margin-top: 32px;">
+      <div class="main stack" style="gap: 40px;">
+        <section aria-labelledby="info">
+          <h2 id="info" class="t-h3" style="margin-bottom: 16px;">作品情報</h2>
+          <div class="row" style="gap: 20px; align-items: flex-start; flex-wrap: wrap;">
+            <img src="/_blob/191c3939aefb326fc04fd3ccf6db83a9" alt="" style="width: 280px; aspect-ratio: 16/9; object-fit: cover; display: block;">
+            <dl class="kv" style="flex: 1 1 320px; font-size: 14px;">
+              <dt class="il"><i class="fa-brands fa-youtube" aria-hidden="true"></i>YouTube</dt><dd class="t-mono"><a class="p-link" href="https://youtu.be/">youtu.be/xxxxxxxxxxx</a></dd>
+              <dt class="il"><i class="fa-solid fa-music" aria-hidden="true"></i>楽曲</dt><dd>ホワイトスペースにおいで</dd>
+              <dt class="il"><i class="fa-solid fa-microphone" aria-hidden="true"></i>作曲者</dt><dd>椎野乃々</dd>
+              <dt class="il"><i class="ms ms-auto_awesome" aria-hidden="true"></i>使用ソフト</dt><dd>After Effects, AviUtl</dd>
+              <dt class="il"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>権利確認</dt><dd class="il"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>確認済み</dd>
+              <dt class="il"><i class="fa-solid fa-circle-question" aria-hidden="true"></i>必須未回答</dt><dd class="il" style="color: var(--warning);"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>ステージ音量</dd>
+            </dl>
+          </div>
+          <p style="margin: 20px 0 0; max-width: 720px;" class="muted">勇気を出してみんなを誘いました</p>
+        </section>
+        <section aria-labelledby="mem">
+          <div class="sec-head" style="margin-bottom: 8px;"><h2 id="mem" class="t-h3">メンバー <span class="muted t-num">13</span></h2><a href="AdminVideoHub.dc.html" class="ib sm" aria-label="メンバーを編集"><i class="fa-solid fa-pen"></i></a></div>
+          <div class="wrap-row" style="gap: 6px;">
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>丸い人</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>ぴーふら</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>sum1</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>Eipi</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>Av1</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>usuzumi</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>すわなつぬ</span>
+            <span class="il t-sm" style="padding: 4px 10px; background: var(--surface-subtle);"><i class="fa-solid fa-user muted" aria-hidden="true"></i>loptye</span><span class="t-sm muted" style="padding: 4px 6px;">ほか5人</span>
+          </div>
+        </section>
+        <section aria-labelledby="cases">
+          <h2 id="cases" class="t-h3" style="margin-bottom: 12px;">モデレーションケース</h2>
+          <div class="raised stack" style="gap: 8px; padding: 16px;">
+            <div class="row" style="gap: 12px;"><span class="st"><span class="dot warn"></span>対応中</span><span class="t-sm">権利・楽曲・素材確認</span><span style="flex: 1;"></span><span class="il t-sm muted t-num"><i class="fa-regular fa-calendar" aria-hidden="true"></i>期限 04.05</span></div>
+            <dl class="kv" style="font-size: 13px; grid-template-columns: 96px 1fr;"><dt>公開理由</dt><dd>楽曲の利用許諾を確認中です</dd><dt>内部メモ</dt><dd>作曲者のガイドラインURLを確認</dd><dt>関連X ID</dt><dd>@vIXyOepPI395671</dd></dl>
+          </div>
+          <details style="margin-top: 12px;">
+            <summary class="il t-sm" style="cursor: pointer;"><i class="fa-solid fa-plus" aria-hidden="true"></i>ケースを作成</summary>
+            <div class="form" style="margin-top: 16px;">
+              <label class="field"><span>種別</span><span class="sel-i"><i class="fa-solid fa-tag" aria-hidden="true"></i><select class="select i"><option>権利・楽曲・素材確認</option><option>重複投稿</option><option>void: 一時停止・確認中</option><option>x_reapply: X ID再申請</option><option>operator: 運営判断</option></select></span></label>
+              <x-import component-from-global-scope="FlameNode.TextField" label="ユーザーに見せてもよい理由"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="運営内メモ" multiline="{{yes}}"></x-import>
+              <div class="cols2"><x-import component-from-global-scope="FlameNode.TextField" label="期限" type="date"></x-import><x-import component-from-global-scope="FlameNode.TextField" label="関連X ID" placeholder="@x_id"></x-import></div>
+              <label class="field"><span>作品の状態</span><span class="sel-i"><i class="fa-solid fa-eye" aria-hidden="true"></i><select class="select i"><option>変更しない</option><option>一時的に公開停止</option><option>再確認待ち</option></select></span></label>
+              <div><button type="button" class="fn-btn fn-btn--secondary">ケースを作成</button></div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <aside class="side stack" style="gap: 24px;">
+        <section class="raised stack" style="gap: 14px; padding: 24px;">
+          <h2 class="t-h3">審査</h2>
+          <button type="button" class="fn-btn fn-btn--primary"><i class="fa-solid fa-check" aria-hidden="true"></i>承認して公開</button>
+          <label class="field"><span>変更先ステータス</span><span class="sel-i"><i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i><select class="select i"><option>選択してください</option><option>公開</option><option>非公開</option><option>審査待ち</option><option>無効化</option></select></span></label>
+          <x-import component-from-global-scope="FlameNode.TextField" label="理由" multiline="{{yes}}" placeholder="例: 重複投稿のため無効化 / X ID の本人確認が必要" hint="非公開・無効化には理由が必要です"></x-import>
+          <button type="button" class="fn-btn fn-btn--secondary">審査結果を保存</button>
+          <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>無効化の解除には未解決のケースが必要です</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark', yes: true }; }
+}
+</script>
+</body>
+</html>

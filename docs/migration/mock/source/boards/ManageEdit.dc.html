@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベント設定</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="edit" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="edit" hint-size="100%,96px"></dc-import>
+
+    <div class="split" style="margin-top: 32px;">
+      <form class="main" onSubmit="{{prevent}}">
+        <nav class="subnav" aria-label="設定セクション"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="5"><a href="#" aria-current="{{t.cur}}" onClick="{{t.pick}}">{{t.label}}</a></sc-for></nav>
+
+        <sc-if value="{{s_basic}}" hint-placeholder-val="{{true}}">
+          <div class="form" style="margin-top: 32px;">
+            <label class="field"><span>種別</span><span class="sel-i"><i class="ms ms-category" aria-hidden="true"></i><select class="select i"><option>通常イベント</option><option>コラボ</option><option>タイプ別</option><option>その他</option></select></span></label>
+            <div class="field"><span>ID</span><div class="row" style="gap: 0; background: var(--surface-subtle); height: 36px;"><i class="fa-solid fa-hashtag muted" aria-hidden="true" style="padding: 0 12px;"></i><span class="t-mono t-sm" style="flex: 1;">PVSF2026S</span><span class="t-sm muted" style="padding: 0 12px;">変更は「注意が必要な操作」から</span></div></div>
+            <x-import component-from-global-scope="FlameNode.TextField" label="タイトル *" default-value="PVSF2026S"></x-import>
+            <x-import component-from-global-scope="FlameNode.TextField" label="説明" multiline="{{yes}}"></x-import>
+            <div class="cols2">
+              <div class="field"><span>アイコン</span><div class="row" style="gap: 12px;"><img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 48px; height: 48px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="アイコンURL" placeholder="アイコンURL" style="flex: 1;"></x-import></div></div>
+              <div class="field"><span>バナー画像</span><div class="row" style="gap: 12px;"><img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 96px; height: 48px; object-fit: cover;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="バナー画像URL" placeholder="バナー画像URL" style="flex: 1;"></x-import></div></div>
+            </div>
+            <div class="field" style="max-width: 240px;"><span>アクセントカラー</span><div class="row" style="gap: 8px;"><span style="width: 36px; height: 36px; background: #ffd400; flex: none;"></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="アクセントカラー" placeholder="#ffd400" style="flex: 1;"></x-import></div></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_pub}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <div class="sched" aria-label="スケジュール">
+              <div class="sc-axis"><span style="left: 0%;">9月</span><span style="left: 33.3%;">10月</span><span style="left: 66.6%;">11月</span><span class="sc-today" style="left: 34.4%;">今日 10/04</span></div>
+              <div class="sc-row"><span class="sc-lbl">受付期間</span><span class="sc-bar" style="left: 0%; width: 50.5%;"><i class="rb-hd"></i><span>09/01 – 10/16</span><i class="rb-hd r"></i></span></div>
+              <div class="sc-row"><span class="sc-lbl">開催期間</span><span class="sc-bar strong" style="left: 68.8%; width: 2.2%;"><i class="rb-hd"></i><i class="rb-hd r"></i></span><span class="t-sm" style="position: absolute; left: 72%; top: 6px;">11/03 – 11/04</span></div>
+            </div>
+            <div class="stack" style="gap: 10px;">
+              <div class="prow"><span class="t-label muted">受付期間</span><input class="dinput t-num" value="2026/09/01 00:00" aria-label="募集開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/10/16 23:59" aria-label="募集終了日時"><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">今日から</button><button type="button" class="chip">開催の2週間前まで</button></span></div>
+              <div class="prow"><span class="t-label muted">開催期間</span><input class="dinput t-num" value="2026/11/03 18:00" aria-label="開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/11/04 23:00" aria-label="終了日時"><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">1日</button><button type="button" class="chip on">2日間</button><button type="button" class="chip">3日間</button></span></div>
+              <span class="il t-sm muted"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>「11/3 18時」「1103 1800」のような短い入力も読み取ります。年は省略すると次に来る日付で補完します。</span>
+              <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>受付終了(10/16)は開催開始(11/03)より前です</span>
+            </div>
+            <div class="field"><span>公開状態</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="pub">非公開</label><label class="radio"><input type="radio" name="pub" checked="{{yes}}">公開</label></div></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_perm}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <div class="field"><span>一般ユーザーの追加紐付け</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="link" checked="{{yes}}">運営承認制</label><label class="radio"><input type="radio" name="link">許可</label></div></div>
+            <div class="field"><span>枠なし投稿の紐付け</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="free">不許可</label><label class="radio"><input type="radio" name="free" checked="{{yes}}">許可</label></div></div>
+            <div class="field"><span>所有者の一般作品権限</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="own" checked="{{ownDefault}}" onChange="{{setOwnDefault}}">既定(イベント個別設定なし)</label><label class="radio"><input type="radio" name="own" checked="{{ownCustom}}" onChange="{{setOwnCustom}}">個別指定</label></div></div>
+            <sc-if value="{{ownCustom}}" hint-placeholder-val="{{false}}">
+              <div class="raised stack" style="gap: 10px; padding: 16px 20px;">
+                <span class="t-label muted">編集対象フィールド</span>
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px 16px;">
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="提出者情報" default-checked="{{yes}}"></x-import>
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="作品情報" default-checked="{{yes}}"></x-import>
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・クレジット" default-checked="{{yes}}"></x-import>
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="紹介・振り返り" default-checked="{{yes}}"></x-import>
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="イベント回答"></x-import>
+                  <x-import component-from-global-scope="FlameNode.Checkbox" label="合作" default-checked="{{yes}}"></x-import>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_slot}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <div class="field"><span>枠タイプ</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="st" checked="{{yes}}">時間枠</label><label class="radio"><input type="radio" name="st">件数枠</label></div></div>
+            <div class="cols2">
+              <x-import component-from-global-scope="FlameNode.TextField" label="1作品あたり最大枠数" type="number" default-value="2"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="1 X IDあたりの確保上限" type="number" default-value="2"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="枠同士の間隔(分)" type="number" default-value="6"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="部の分割閾値(分)" type="number" default-value="15"></x-import>
+            </div>
+            <div class="field"><span>確保者表示</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="disp" checked="{{yes}}">公開名</label><label class="radio"><input type="radio" name="disp">匿名</label><label class="radio"><input type="radio" name="disp">非表示</label></div></div>
+            <x-import component-from-global-scope="FlameNode.TextField" label="部(1行1件)" multiline="{{yes}}" default-value="1日目 第1部&#10;1日目 第2部&#10;1日目 第3部"></x-import>
+            <a href="ManageSlots.dc.html" class="il t-sm" style="color: var(--brand-text);" aria-label="枠設定へのショートカット"><i class="ms ms-view_timeline" aria-hidden="true"></i>イベント枠を設定する</a>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_req}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <p class="t-sm muted" style="margin: 0;">表示名と作品タイトルは常に必須です。ここで選んだ項目は、このイベントへの投稿・枠提出・作品編集でも必須になります。</p>
+            <sc-for list="{{reqGroups}}" as="g" hint-placeholder-count="3">
+              <div class="stack" style="gap: 10px;">
+                <span class="il t-label muted"><i class="{{g.icon}}" aria-hidden="true"></i>{{g.label}}</span>
+                <div style="display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px 16px;">
+                  <sc-for list="{{g.items}}" as="f" hint-placeholder-count="4">
+                    <x-import component-from-global-scope="FlameNode.Checkbox" label="{{f.label}}" default-checked="{{f.on}}" disabled="{{f.always}}"></x-import>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_q}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <h3 class="t-h3">ステージ・権利確認</h3>
+            <div class="raised stack" style="gap: 12px; padding: 16px 20px;">
+              <div class="row" style="gap: 8px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問名" default-value="楽曲・素材の権利を確認しました" style="flex: 1;"></x-import><x-import component-from-global-scope="FlameNode.Checkbox" label="必須" default-checked="{{yes}}"></x-import></div>
+            </div>
+            <h3 class="t-h3" style="margin-top: 16px;">カスタム質問</h3>
+            <div class="raised stack" style="gap: 12px; padding: 16px 20px;">
+              <div class="row" style="gap: 8px;"><i class="fa-solid fa-grip-vertical muted" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問名" default-value="ステージで流す際の音量調整は必要ですか?" style="flex: 1;"></x-import><span class="sel-i"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><select class="select i" aria-label="回答形式"><option>短文</option><option selected="{{yes}}">選択</option><option>チェック</option></select></span><button type="button" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></button></div>
+              <div class="stack" style="gap: 4px; padding-left: 24px;">
+                <span class="t-label muted">選択肢</span>
+                <div class="wrap-row" style="gap: 4px;"><span class="chip">不要<i class="fa-solid fa-xmark" aria-hidden="true"></i></span><span class="chip">必要<i class="fa-solid fa-xmark" aria-hidden="true"></i></span><button type="button" class="chip"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button></div>
+              </div>
+              <div style="padding-left: 24px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="補足文" placeholder="補足文(任意)"></x-import></div>
+              <div class="row" style="gap: 20px; padding-left: 24px;"><x-import component-from-global-scope="FlameNode.Checkbox" label="必須" default-checked="{{yes}}"></x-import><x-import component-from-global-scope="FlameNode.Checkbox" label="有効" default-checked="{{yes}}"></x-import></div>
+            </div>
+            <div><button type="button" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-plus" aria-hidden="true"></i>質問を追加</button></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{s_yt}}" hint-placeholder-val="{{false}}">
+          <div class="form" style="margin-top: 32px;">
+            <div class="row" style="gap: 12px; flex-wrap: wrap;"><span class="t-label muted">プリセット</span>
+              <div class="seg" role="group" aria-label="概要欄テンプレートのプリセット"><sc-for list="{{presets}}" as="p" hint-placeholder-count="4"><button type="button" class="{{p.cls}}" onClick="{{p.pick}}">{{p.label}}</button></sc-for></div>
+            </div>
+            <div class="row" style="gap: 12px; justify-content: space-between; flex-wrap: wrap;">
+              <span class="t-sm muted il"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>行を選んで下の項目を押すと、その行に差し込みます。行はドラッグか矢印で並べ替えられます。</span>
+              <div class="seg" role="group" aria-label="編集方法"><button type="button" class="{{edBlock}}" onClick="{{toBlock}}"><i class="fa-solid fa-cubes" aria-hidden="true"></i>ブロック</button><button type="button" class="{{edText}}" onClick="{{toText}}"><i class="fa-solid fa-code" aria-hidden="true"></i>テキスト</button></div>
+            </div>
+            <div class="cols2" style="align-items: stretch;">
+              <div class="field"><span>テンプレート</span>
+                <sc-if value="{{isBlock}}" hint-placeholder-val="{{true}}">
+                  <div class="tb" role="listbox" aria-label="概要欄の行">
+                    <sc-for list="{{lines}}" as="l" hint-placeholder-count="8">
+                      <div class="{{l.cls}}" role="option" aria-selected="{{l.sel}}" onClick="{{l.pick}}">
+                        <span class="tb-grip" aria-hidden="true"><i class="fa-solid fa-grip-vertical"></i></span>
+                        <sc-if value="{{l.isText}}" hint-placeholder-val="{{true}}"><span class="tb-body"><sc-for list="{{l.segs}}" as="g" hint-placeholder-count="2"><span class="{{g.cls}}" title="{{g.title}}">{{g.v}}</span></sc-for></span></sc-if>
+                        <sc-if value="{{l.isBlank}}" hint-placeholder-val="{{false}}"><span class="tb-body muted t-sm">空行</span></sc-if>
+                        <sc-if value="{{l.isLoop}}" hint-placeholder-val="{{false}}">
+                          <span class="tb-body stack" style="gap: 8px;">
+                            <span class="il t-sm"><i class="fa-solid fa-repeat" aria-hidden="true"></i>共同制作者の人数ぶん繰り返す</span>
+                            <span class="wrap-row" style="gap: 4px;"><sc-for list="{{l.fields}}" as="f" hint-placeholder-count="4"><button type="button" class="{{f.cls}}" aria-pressed="{{f.on}}" onClick="{{f.toggle}}"><i class="{{f.icon}}" aria-hidden="true"></i>{{f.label}}</button></sc-for></span>
+                            <span class="row t-sm" style="gap: 8px;"><span class="muted">行頭</span><span class="seg" role="group" aria-label="行頭の記号"><sc-for list="{{l.bullets}}" as="u" hint-placeholder-count="3"><button type="button" class="{{u.cls}}" onClick="{{u.pick}}">{{u.label}}</button></sc-for></span></span>
+                          </span>
+                        </sc-if>
+                        <span class="tb-tools"><button type="button" class="ib sm" aria-label="上へ" onClick="{{l.up}}"><i class="fa-solid fa-arrow-up"></i></button><button type="button" class="ib sm" aria-label="下へ" onClick="{{l.down}}"><i class="fa-solid fa-arrow-down"></i></button><button type="button" class="ib sm" aria-label="行を削除" onClick="{{l.del}}"><i class="fa-solid fa-xmark"></i></button></span>
+                      </div>
+                    </sc-for>
+                    <div class="wrap-row" style="gap: 4px; padding: 8px 0 0;">
+                      <button type="button" class="chip" onClick="{{addText}}"><i class="fa-solid fa-font" aria-hidden="true"></i>テキスト行</button>
+                      <button type="button" class="chip" onClick="{{addBlank}}"><i class="fa-solid fa-arrows-up-down" aria-hidden="true"></i>空行</button>
+                      <button type="button" class="chip" onClick="{{addLoop}}" disabled="{{hasLoop}}"><i class="fa-solid fa-repeat" aria-hidden="true"></i>共同制作者の繰り返し</button>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{isText}}" hint-placeholder-val="{{false}}"><textarea class="select t-mono" style="height: 360px; padding: 12px; background-image: none; font-size: 13px; line-height: 20px; resize: vertical;">{{tpl}}</textarea></sc-if>
+              </div>
+              <div class="field"><span class="row" style="justify-content: space-between;"><span>ライブプレビュー(サンプル値で表示)</span><button type="button" class="ib sm" aria-label="出力例をコピー"><i class="fa-regular fa-copy"></i></button></span><pre class="t-sm" style="margin: 0; min-height: 360px; overflow: auto; padding: 12px; background: var(--surface-raised); white-space: pre-wrap; font-family: inherit;">{{tplPreview}}</pre></div>
+            </div>
+            <div class="stack" style="gap: 8px;">
+              <span class="t-label muted">差し込める項目 <span class="t-sm" style="text-transform: none;">— {{target}}</span></span>
+              <sc-for list="{{varGroups}}" as="g" hint-placeholder-count="5">
+                <div class="row" style="gap: 8px; align-items: flex-start;"><span class="t-sm muted" style="width: 120px; flex: none; padding-top: 6px;">{{g.label}}</span><div class="wrap-row" style="gap: 4px;"><sc-for list="{{g.vars}}" as="v" hint-placeholder-count="4"><button type="button" class="chip" onClick="{{v.ins}}"><i class="fa-solid fa-plus" aria-hidden="true"></i>{{v.label}}</button></sc-for></div></div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <div class="row" style="gap: 8px; margin-top: 48px;">
+          <button type="submit" class="fn-btn fn-btn--primary">保存</button>
+          <span class="t-sm il" style="color: var(--warning);"><span class="dot warn"></span>未保存の変更があります</span>
+          <span class="t-sm muted">· 下書きはこのブラウザに自動保存</span>
+        </div>
+      </form>
+
+      <aside class="side stack" style="gap: 32px;">
+        <section aria-labelledby="pv">
+          <h2 id="pv" class="t-h3" style="margin-bottom: 12px;">設定プレビュー</h2>
+          <div class="raised stack" style="gap: 10px; padding: 16px; font-size: 13px;">
+            <span class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>時間枠 · 6分間隔 · 3部</span>
+            <span class="il"><i class="ms ms-event_seat muted" aria-hidden="true"></i>1 X ID 2枠まで</span>
+            <span class="il"><i class="fa-solid fa-link muted" aria-hidden="true"></i>枠なし投稿を許可</span>
+            <span class="il"><i class="fa-solid fa-user-check muted" aria-hidden="true"></i>追加紐付けは運営承認制</span>
+          </div>
+        </section>
+        <details class="danger-zone">
+          <summary class="il t-sm muted"><i class="fa-solid fa-chevron-right dz-chev" aria-hidden="true"></i>注意が必要な操作<span class="t-num">3</span></summary>
+          <div class="stack" style="gap: 0; margin-top: 8px;">
+            <button type="button" class="dz-row" onClick="{{toggleRename}}"><span class="il"><i class="fa-solid fa-hashtag" aria-hidden="true"></i>イベントIDを変更</span><span class="t-sm muted">URLが変わります</span></button>
+            <sc-if value="{{renaming}}" hint-placeholder-val="{{false}}">
+              <div class="raised stack" style="gap: 10px; padding: 16px; margin: 4px 0 8px;">
+                <x-import component-from-global-scope="FlameNode.TextField" label="新しいID" placeholder="例: pvsf-2026"></x-import>
+                <x-import component-from-global-scope="FlameNode.TextField" label="確認のため現在のIDを入力" placeholder="PVSF2026S"></x-import>
+                <span class="t-sm muted">影響範囲: 公開URL・作品の所属・枠・API出力リンク</span>
+                <div><button type="button" class="fn-btn fn-btn--danger fn-btn--sm">IDを変更</button></div>
+              </div>
+            </sc-if>
+            <button type="button" class="dz-row"><span class="il"><i class="fa-solid fa-eye-slash" aria-hidden="true"></i>イベントを非公開にする</span><span class="t-sm muted">公開ページから消えます</span></button>
+            <button type="button" class="dz-row"><span class="il"><i class="fa-solid fa-box-archive" aria-hidden="true"></i>アーカイブ</span><span class="t-sm muted">編集できなくなります</span></button>
+          </div>
+        </details>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1600}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { sec: 'basic', own: 'default', preset: 'event', renaming: false, lines: null, sel: null, ed: 'block' }; }
+  renderVals() {
+    const r = this.__rv();
+    r._nav = (r.secs || []).map(x => ({ label: x.label, cur: x.id === r.sec ? 'page' : 'false', cls: x.id === r.sec ? 'on' : '', pick: (e) => { e && e.preventDefault && e.preventDefault(); r.setSec(x.id); } }));
+    return r;
+  }
+  __rv() {
+    const S = this.state; const s = S.sec;
+    const P = {
+      simple: '{{title}}\n\n{{intro_comment}}\n\n{{creator_name}} @{{creator_x_id}}\n{{youtube_url}}',
+      event: '{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n部: {{part}}\n投稿者: {{creator_name}} @{{creator_x_id}}\n楽曲: {{music}}\n使用ソフト: {{used_software}}\n\n{{event_url}}',
+      collab: '{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} @{{creator_x_id}}\n\n共同制作者\n{{#members}}\n- {{member_name}} @{{member_x_id}} {{member_role}}\n{{/members}}',
+      'collab-chapter': '{{title}}\n\n{{intro_comment}}\n\nイベント: {{event_title}}\n代表: {{creator_name}} @{{creator_x_id}}\n\n共同制作者 / チャプター\n{{#members}}\n{{member_chapter}} {{member_name}} @{{member_x_id}}\n{{/members}}'
+    };
+    const ctx = { title: '空白合作', intro_comment: '勇気を出してみんなを誘いました', event_title: 'PVSF2026S', part: '1日目 第1部', creator_name: '空白合作チーム', creator_x_id: 'vIXyOepPI395671', music: 'ホワイトスペースにおいで', used_software: 'AviUtl / After Effects', event_url: 'https://flamenode.net/event/PVSF2026S', youtube_url: 'https://youtu.be/_UwLG4eJDgM' };
+    const M = [['0:00','丸い人','Maruihito_maru','映像'],['0:24','ぴーふら','Fura1107_','映像']];
+    const render = (t) => t.replace(/\{\{#members\}\}\n([\s\S]*?)\{\{\/members\}\}/g, (_, body) => M.map(([c, n, x, r]) => body.replace(/\{\{member_chapter\}\}/g, c).replace(/\{\{member_name\}\}/g, n).replace(/\{\{member_x_id\}\}/g, x).replace(/\{\{member_role\}\}/g, r)).join('')).replace(/\{\{(\w+)\}\}/g, (_, k) => ctx[k] ?? '');
+    const parse = (t) => {
+      const out = [];
+      const parts = t.split(/\{\{#members\}\}\n([\s\S]*?)\n?\{\{\/members\}\}/);
+      parts.forEach((chunk, i) => {
+        if (i % 2 === 1) {
+          const f = { chapter: /member_chapter/.test(chunk), name: /member_name\}/.test(chunk), xid: /member_x_id/.test(chunk), role: /member_role/.test(chunk) };
+          out.push({ loop: true, f, bullet: chunk.trim().startsWith('-') ? '- ' : chunk.trim().startsWith('・') ? '・' : '' });
+          return;
+        }
+        let ls = chunk.split('\n');
+        if (i > 0 && ls[0] === '') ls = ls.slice(1);
+        if (i < parts.length - 1 && ls[ls.length - 1] === '') ls = ls.slice(0, -1);
+        ls.forEach(line => out.push({ segs: line === '' ? [] : line.split(/(\{\{\w+\}\})/).filter(Boolean).map(x => { const m = x.match(/^\{\{(\w+)\}\}$/); return m ? { k: m[1] } : { v: x }; }) }));
+      });
+      return out;
+    };
+    const ser = (L) => L.map(l => l.loop
+      ? '{{#members}}\n' + l.bullet + [l.f.chapter && '{{member_chapter}}', l.f.name && '{{member_name}}', l.f.xid && '@{{member_x_id}}', l.f.role && '{{member_role}}'].filter(Boolean).join(' ') + '\n{{/members}}'
+      : l.segs.map(g => g.k ? '{{' + g.k + '}}' : g.v).join('')).join('\n');
+    const lines0 = S.lines || parse(P[S.preset]);
+    const tpl = ser(lines0);
+    const V = { 'イベント': [['event_title','イベント名'],['event_id','イベントID'],['event_url','イベントURL'],['part','部']], '作品': [['title','作品タイトル'],['youtube_url','YouTube URL'],['youtube_video_id','YouTube動画ID'],['collaboration_type','作品形式'],['music','楽曲'],['music_reference_url','楽曲参照URL'],['credit','クレジット'],['used_software','使用ソフト']], '投稿者': [['creator_name','投稿者名'],['creator_x_id','投稿者X ID'],['creator_channel_url','YouTubeチャンネル'],['creator_profile','プロフィール'],['creator_social_links','SNSリンク']], '共同制作者': [['members','共同制作者'],['member_names','共同制作者名'],['member_x_ids','X ID'],['member_roles','役割'],['member_comments','コメント']], 'コメント・作品情報': [['intro_comment','作品紹介'],['highlights','見どころ'],['production_story','制作エピソード'],['closing_comment','あとがき']], '追加質問': [['stage_permissions','ステージ・権利回答'],['custom_answers','カスタム質問回答']] };
+    const VL = Object.fromEntries(Object.values(V).flat().map(([k, l]) => [k, l]));
+    const R = [
+      ['提出者情報', 'fa-solid fa-user', [['表示名', true, true], ['アイコン', true, false], ['自分・団体の概要', false, false], ['YouTubeチャンネル', false, false], ['その他のSNSリンク', false, false]]],
+      ['作品情報', 'fa-solid fa-film', [['作品タイトル', true, true], ['部', true, false], ['使用楽曲', true, false], ['楽曲参考URL', false, false], ['クレジット', false, false], ['紹介コメント', false, false], ['みどころ', false, false], ['制作エピソード', false, false], ['使用ソフト', false, false], ['あとがき', false, false]]],
+      ['YouTube', 'fa-brands fa-youtube', [['YouTube URL', true, false]]]
+    ];
+    return {
+      theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
+      sec: s, setSec: (id) => this.setState({ sec: id }),
+      secs: [{ id: 'basic', label: '基本情報' }, { id: 'pub', label: '公開・受付' }, { id: 'perm', label: '投稿・権限' }, { id: 'req', label: '必須項目' }, { id: 'q', label: '質問' }, { id: 'slot', label: '枠' }, { id: 'yt', label: '概要欄' }],
+      s_basic: s === 'basic', s_pub: s === 'pub', s_perm: s === 'perm', s_slot: s === 'slot', s_req: s === 'req', s_q: s === 'q', s_yt: s === 'yt',
+      ownDefault: S.own === 'default', ownCustom: S.own === 'custom', setOwnDefault: () => this.setState({ own: 'default' }), setOwnCustom: () => this.setState({ own: 'custom' }),
+      reqGroups: R.map(([label, icon, items]) => ({ label, icon, items: items.map(([l, on, always]) => ({ label: always ? l + '(常に必須)' : l, on, always })) })),
+      presets: [['simple','シンプル'],['event','イベント標準'],['collab','合作'],['collab-chapter','合作＋チャプター']].map(([id, label]) => ({ label, cls: S.preset === id ? 'on' : '', pick: () => this.setState({ preset: id, lines: null, sel: null }) })),
+      varGroups: Object.entries(V).filter(([label]) => label !== '共同制作者').map(([label, vars]) => ({ label, vars: vars.map(([k, l]) => ({ label: l, ins: () => {
+        const L = [...lines0]; const t = S.sel != null && L[S.sel] && !L[S.sel].loop ? S.sel : -1;
+        if (t >= 0) L[t] = { segs: [...L[t].segs, ...(L[t].segs.length ? [{ v: ' ' }] : []), { k }] }; else L.push({ segs: [{ v: l + ': ' }, { k }] });
+        this.setState({ lines: L, sel: t >= 0 ? t : L.length - 1 });
+      } })) })),
+      loopLabel: '{{#members}} … {{/members}}',
+      tpl, tplPreview: render(tpl),
+      isBlock: S.ed === 'block', isText: S.ed === 'text', edBlock: S.ed === 'block' ? 'on' : '', edText: S.ed === 'text' ? 'on' : '',
+      toBlock: () => this.setState({ ed: 'block' }), toText: () => this.setState({ ed: 'text' }),
+      lines: lines0.map((l, i) => {
+        const put = (L) => this.setState({ lines: L });
+        const mv = (d) => (e) => { e.stopPropagation(); const j = i + d; if (j < 0 || j >= lines0.length) return; const L = [...lines0]; [L[i], L[j]] = [L[j], L[i]]; this.setState({ lines: L, sel: j }); };
+        const base = { sel: S.sel === i ? 'true' : 'false', pick: () => this.setState({ sel: i, lines: lines0 }), up: mv(-1), down: mv(1), del: (e) => { e.stopPropagation(); this.setState({ lines: lines0.filter((_, j) => j !== i), sel: null }); } };
+        const cls = 'tb-line' + (S.sel === i ? ' on' : '');
+        if (l.loop) {
+          const FL = [['chapter', 'チャプター', 'fa-regular fa-clock'], ['name', '名前', 'fa-solid fa-user'], ['xid', '@X ID', 'fa-brands fa-x-twitter'], ['role', '役割', 'fa-solid fa-tag']];
+          return { ...base, cls: cls + ' loop', isLoop: true, isText: false, isBlank: false,
+            fields: FL.map(([k, label, icon]) => ({ label, icon, on: l.f[k] ? 'true' : 'false', cls: l.f[k] ? 'chip on' : 'chip', toggle: (e) => { e.stopPropagation(); const L = [...lines0]; L[i] = { ...l, f: { ...l.f, [k]: !l.f[k] } }; put(L); } })),
+            bullets: [['- ', '-'], ['・', '・'], ['', 'なし']].map(([v, label]) => ({ label, cls: l.bullet === v ? 'on' : '', pick: (e) => { e.stopPropagation(); const L = [...lines0]; L[i] = { ...l, bullet: v }; put(L); } })) };
+        }
+        if (!l.segs.length) return { ...base, cls: cls + ' blank', isBlank: true, isText: false, isLoop: false };
+        return { ...base, cls, isText: true, isBlank: false, isLoop: false,
+          segs: l.segs.map(g => g.k ? { cls: 'tb-var', v: VL[g.k] || g.k, title: '{{' + g.k + '}}' } : { cls: 'tb-txt', v: g.v, title: '' }) };
+      }),
+      hasLoop: lines0.some(l => l.loop),
+      addText: () => this.setState({ lines: [...lines0, { segs: [{ v: 'テキスト' }] }], sel: lines0.length }),
+      addBlank: () => this.setState({ lines: [...lines0, { segs: [] }], sel: null }),
+      addLoop: () => this.setState({ lines: [...lines0, { loop: true, f: { chapter: false, name: true, xid: true, role: true }, bullet: '- ' }], sel: null }),
+      target: S.sel != null && lines0[S.sel] && !lines0[S.sel].loop ? (S.sel + 1) + '行目の末尾に差し込みます' : '押すと新しい行として末尾に追加します',
+      renaming: S.renaming, toggleRename: () => this.setState({ renaming: !S.renaming })
+    };
+  }
+}
+</script>
+</body>
+</html>

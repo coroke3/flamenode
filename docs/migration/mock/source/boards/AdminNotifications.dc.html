@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>通知配信状況</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="notifications" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head">
+      <div><h1 class="t-display">通知配信</h1><p class="t-sm muted">notification_outbox の直近100件。Queue wake で即時起動し1回最大6件を処理、毎時 Recovery Cron がバックアップ。失敗時は1/5/15分間隔で最大4回試行します。</p></div>
+      <button type="button" class="fn-btn fn-btn--secondary">失敗分を一括再送(上限 50)</button>
+    </div>
+    <div class="wrap-row" style="gap: 8px; margin-bottom: 8px;">
+      <nav class="subnav" aria-label="ステータスフィルタ"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="5"><a href="#" aria-current="{{t.cur}}" onClick="{{t.pick}}">{{t.label}}</a></sc-for></nav>
+    </div>
+    <div class="wrap-row" style="gap: 8px; margin-bottom: 16px;">
+      <div class="field-i" style="width: 240px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="通知本文を検索" placeholder="通知本文を検索"></x-import><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div>
+      <div class="field-i" style="width: 240px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="type 完全一致" placeholder="type(例: x_id_approved)"></x-import><i class="fa-solid fa-tag" aria-hidden="true"></i></div>
+      <div class="field-i" style="width: 200px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="event_id 完全一致" placeholder="event_id"></x-import><i class="fa-solid fa-calendar-days" aria-hidden="true"></i></div>
+    </div>
+    <div class="t-scroll">
+      <div class="dt" style="--cols: 120px minmax(220px,1.6fr) 64px 110px 110px 132px; --minw: 900px;">
+        <div class="dt-h"><span>状態</span><span>通知</span><span class="num">試行</span><span>次試行</span><span>登録</span><span></span></div>
+        <div class="dt-r"><span class="st"><span class="dot err"></span>最終失敗</span><span class="stack" style="min-width: 0;"><span class="ell">video_published · 空白合作</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>webhook · PVSF2026Sp · 429 Too Many Requests</span></span><span class="num">4/4</span><span class="muted">—</span><span class="t-num muted">10.04 11:03</span><span class="row" style="justify-content: flex-end; gap: 0;"><button type="button" class="ib sm" aria-label="再試行"><i class="fa-solid fa-rotate-right"></i></button><button type="button" class="ib sm" aria-label="強制再送"><i class="fa-solid fa-paper-plane"></i></button><button type="button" class="ib sm" aria-label="payload を表示"><i class="fa-solid fa-code"></i></button><a href="AdminAuditHub.dc.html" class="ib sm" aria-label="この通知の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a></span></div>
+        <div class="dt-r"><span class="st"><span class="dot info"></span>配信待ち</span><span class="stack" style="min-width: 0;"><span class="ell">entry_deadline_reminder</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>DM · PVSF2026S</span></span><span class="num">0/4</span><span class="t-num">10.05 09:00</span><span class="t-num muted">10.04 09:00</span><span class="row" style="justify-content: flex-end; gap: 0;"><button type="button" class="ib sm" aria-label="キャンセル"><i class="fa-solid fa-xmark"></i></button><button type="button" class="ib sm" aria-label="payload を表示"><i class="fa-solid fa-code"></i></button></span></div>
+        <div class="dt-r"><span class="st"><span class="dot warn"></span>送信中</span><span class="stack" style="min-width: 0;"><span class="ell">x_id_approved · @izuna_text</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>DM</span></span><span class="num">1/4</span><span class="t-num">10.04 11:20</span><span class="t-num muted">10.04 11:19</span><span class="row" style="justify-content: flex-end; gap: 0;"><button type="button" class="ib sm" aria-label="payload を表示"><i class="fa-solid fa-code"></i></button></span></div>
+        <div class="dt-r"><span class="st"><span class="dot ok"></span>送信済み</span><span class="stack" style="min-width: 0;"><span class="ell">slot_reserved · 11.03 18:24</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>DM · PVSF2026S</span></span><span class="num">1/4</span><span class="muted">—</span><span class="t-num muted">10.04 09:40</span><span class="row" style="justify-content: flex-end; gap: 0;"><button type="button" class="ib sm" aria-label="強制再送"><i class="fa-solid fa-paper-plane"></i></button><button type="button" class="ib sm" aria-label="payload を表示"><i class="fa-solid fa-code"></i></button></span></div>
+      </div>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'all' }; }
+  renderVals() {
+    const r = this.__rv();
+    r._nav = (r.tabs || []).map(x => ({ label: x.label, cur: x.id === r.tab ? 'page' : 'false', cls: x.id === r.tab ? 'on' : '', pick: (e) => { e && e.preventDefault && e.preventDefault(); r.setTab(x.id); } }));
+    return r;
+  }
+  __rv() {
+    return { theme: this.props.theme ?? 'dark', tab: this.state.tab, setTab: (id) => this.setState({ tab: id }), tabs: [{ id: 'all', label: 'すべて' }, { id: 'pending', label: '配信待ち' }, { id: 'sending', label: '送信中' }, { id: 'sent', label: '送信済み' }, { id: 'failed', label: '最終失敗 1' }, { id: 'canceled', label: 'キャンセル' }] };
+  }
+}
+</script>
+</body>
+</html>

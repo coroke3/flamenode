@@ -64,7 +64,7 @@ Next: MIG-0301 extraction/DI pattern
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request + Queue/Cron/job semantics | 0 | bindings/routes/jobs fixed |
 | Human-readable full feature catalog | 432 UX + 136 FN | canonical ledgersとcheckerで一致確認対象 | n/a | catalog drift 0 |
-| New UI visual source | HTML mock pending | `UI_REFERENCE.md = PENDING_HTML` | n/a | user HTML mock登録前にvisual targetを確定しない |
+| New UI visual source | HTML mock registered | `UI_REFERENCE.md = READY (docs/migration/mock/)` | n/a | デザインモック受領済み。MIG-0201以降で抽出・実装可能 |
 
 Current FN state summary:
 
@@ -104,7 +104,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | BLOCKED (`PENDING_HTML`, Phase 4/5前提) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -179,7 +179,7 @@ Frontend / Backend の分割監査は main に統合済み。
 - 性能/architecture最適化のためにfrontend product behavior変更が必須となるblockerは0。
 - Active X interaction ownershipは性能都合ではなく、明示済みTARGET semantic requirement。
 - `docs/design-redesign/` は存在せず、移行入力として使用しない。
-- 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録するまで `PENDING_HTML`。
+- 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録完了（MIG-0200 DONE、`READY`）。
 - Cloudflare CURRENT production topologyはread-only再確認済み: `flamenode-web` + fast/content/sync jobs、root/www Custom Domain、`flamenode_db`、`flamenode-storage`、3 wake Queue + 3 DLQ。production mutationは0。
 - GitHub Copilot reviewは要求したがquota超過で実レビューされなかったため、独立レビュー済みとは扱わない。
 - 2026-10-07、ユーザーから「mainに合流」の明示指示を受けたため、これはPR #250のmergeに対するLead/human approvalとして記録する。
@@ -220,15 +220,15 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 2 — Design System / HTML mock integration
 
-> D-08はHTMLモック先行を選択済み。ただし実ファイル未受領のため BLOCKED_ON_USER。勝手にREADYへ変更しない。
+> 2026-10-13: ユーザーより新HTMLモック一式を受領し、`docs/migration/mock/` へ配置および `UI_REFERENCE.md` への登録完了（MIG-0200 DONE）。MIG-0201 が READY。
 
 > ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
 > UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | BLOCKED | user input |
-| MIG-0201 | visual/IA extraction + design tokens | BLOCKED | MIG-0108, MIG-0200 |
+| MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | DONE | user input |
+| MIG-0201 | visual/IA extraction + design tokens | READY | MIG-0108, MIG-0200 |
 | MIG-0202 | primitives | BLOCKED | MIG-0201 |
 | MIG-0203 | navigation/layout | BLOCKED | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | BLOCKED | MIG-0202 |
@@ -418,7 +418,7 @@ Phase 1 (Repository boundaries) is fully complete.
 All skeleton packages (`packages/ui`, `packages/contracts`, `packages/domain`) and apps (`apps/site`, `apps/app`, `apps/api`) are established and typechecked without affecting existing Next.js logic.
 
 Next tasks:
-- **Phase 2 (MIG-0200)**: Waiting for user HTML mock registration (`UI_REFERENCE.md = PENDING_HTML`).
+- **Phase 2 (MIG-0201)**: Visual/IA extraction + design tokens (`MIG-0200` registered HTML mock is DONE).
 - **Phase 3 (MIG-0301)**: Domain extraction can proceed safely once approved.
 
 

@@ -67,7 +67,7 @@
 
 - `docs/design-redesign/` is removed and is not a migration source.
 - `app/(redesign)` is not an authoritative target design.
-- New visual/information-architecture target remains `UI_REFERENCE.md = PENDING_HTML` until the user supplies an HTML mock.
+- New visual/information-architecture target is registered at `docs/migration/UI_REFERENCE.md` (`docs/migration/mock/`).
 - HTML mock never overrides permission/business/visibility/side-effect contracts by itself.
 
 ## Rules

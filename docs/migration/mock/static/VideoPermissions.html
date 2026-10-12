@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>編集権限 — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route: /dashboard/edit/[id]/permissions / source: source/boards/VideoPermissions.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0;background:#000}</style>
+
+<div class="p-root" data-theme="dark" lang="ja" style="position: relative;">
+  <div class="dc-import" data-board="PublicHeader">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<header class="hd2" lang="ja">
+  <div class="hd-bar">
+    <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
+      <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
+      <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
+    </a>
+    <nav class="hd-nav" aria-label="メインナビゲーション">
+      <a href="Videos.dc.html" aria-current="false">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="false">イベント</a>
+    </nav>
+    <div class="hd-right">
+      <label class="hd-search">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" placeholder="作品・クリエイターを検索" aria-label="検索" value="">
+        <kbd class="kbd hd-kbd">/</kbd>
+      </label>
+      <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
+      
+        <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
+        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+        <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
+      
+      
+      <button type="button" class="ib hd-burger" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニュー"><i class="fa-solid fa-bars"></i></button>
+    </div>
+  </div>
+
+  
+  
+
+  
+  
+
+  
+  
+
+  
+  <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
+    <a href="Videos.dc.html" aria-current="false" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+  </nav>
+</header>
+</div>
+
+  <div class="wrap" style="padding-top: 32px; max-width: 880px;">
+    <a href="VideoEdit.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品編集へ戻る</a>
+    <h1 class="t-display" style="margin-top: 12px;">編集できる人</h1>
+    <p class="muted" style="margin: 8px 0 0;">祟渦に関するお知らせ 後編</p>
+
+    <details class="t-sm" style="margin-top: 24px;">
+      <summary class="il muted" style="cursor: pointer;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>編集権限のしくみ</summary>
+      <ul class="muted" style="margin: 8px 0 0; padding-left: 18px; line-height: 1.8;">
+        <li>権限は X ID に付与します。その X ID がログインアカウントに承認済みで連携されると編集できます。</li>
+        <li>未連携でも先に付与でき、連携完了までは編集できません。</li>
+        <li>付与・解除できるのは作者と、権限を持つ運営・管理者です。合作メンバーは他の人へ再付与できません。</li>
+        <li>提出主体・YouTube ID・公開状態は、管理者またはイベント運営の権限が必要です。</li>
+      </ul>
+    </details>
+
+    <div class="notice" style="margin-top: 24px;"><i class="fa-solid fa-link-slash" aria-hidden="true" style="color: var(--info); padding-top: 4px;"></i><span class="stack t-sm" style="gap: 2px;"><b>X ID連携待ちの編集者が 1 人います</b><span class="muted">権限は保存済みです。X ID とログインアカウントの連携が承認されると編集できます。</span></span></div>
+
+    <section class="c-sec" aria-labelledby="now" style="margin-top: 40px;">
+      <h2 id="now" class="t-h3" style="margin-bottom: 8px;">現在編集できる人</h2>
+      
+        <div class="row" style="gap: 16px; padding: 14px 0;">
+          <img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 40px; height: 40px;">
+          <span class="stack" style="gap: 2px; flex: 1; min-width: 0;">
+            <span class="row" style="gap: 8px;"><span>ホラー映画合作</span><span class="t-sm muted">@metameta194</span></span>
+            <span class="meta-i t-sm"><span>公開メンバー</span><span class="st"><i class="fa-solid fa-pen st-ic ok" aria-hidden="true"></i>編集可能</span></span>
+          </span>
+          <span class="t-sm muted">作者</span>
+          
+        </div>
+      
+        <div class="row" style="gap: 16px; padding: 14px 0;">
+          <img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 40px; height: 40px;">
+          <span class="stack" style="gap: 2px; flex: 1; min-width: 0;">
+            <span class="row" style="gap: 8px;"><span>おたこ</span><span class="t-sm muted">@012345rty</span></span>
+            <span class="meta-i t-sm"><span>公開メンバー</span><span class="st"><i class="fa-solid fa-pen st-ic ok" aria-hidden="true"></i>編集可能</span></span>
+          </span>
+          
+          <button type="button" class="ib sm" aria-label="権限を解除"><i class="fa-solid fa-user-minus"></i></button>
+        </div>
+      
+        <div class="row" style="gap: 16px; padding: 14px 0;">
+          <img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 40px; height: 40px;">
+          <span class="stack" style="gap: 2px; flex: 1; min-width: 0;">
+            <span class="row" style="gap: 8px;"><span>編集補助</span><span class="t-sm muted">@horror_edit</span></span>
+            <span class="meta-i t-sm"><span>非公開編集者</span><span class="st"><i class="fa-solid fa-link-slash st-ic info" aria-hidden="true"></i>権限付与済み · X ID連携待ち</span></span>
+          </span>
+          
+          <button type="button" class="ib sm" aria-label="権限を解除"><i class="fa-solid fa-user-minus"></i></button>
+        </div>
+      
+    </section>
+
+    <section class="c-sec" aria-labelledby="cand">
+      <h2 id="cand" class="t-h3" style="margin-bottom: 4px;">公開メンバー</h2>
+      <p class="t-sm muted" style="margin: 0 0 8px;">メンバー欄に載っているが、まだ編集権がない人です。</p>
+      <div class="row" style="gap: 16px; padding: 14px 0;">
+        <img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 40px; height: 40px;">
+        <span class="stack" style="gap: 2px; flex: 1;"><span class="row" style="gap: 8px;"><span>味付け海苔</span><span class="t-sm muted">@sub_ajinori</span></span><span class="t-sm muted">撮影</span></span>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">編集権を付与</button>
+      </div>
+    </section>
+
+    <section class="c-sec" aria-labelledby="hid">
+      <h2 id="hid" class="t-h3" style="margin-bottom: 4px;">表示されない編集者を追加</h2>
+      <p class="t-sm muted" style="margin: 0 0 12px;">作品ページのメンバー欄には載せずに、編集だけを任せます。</p>
+      <form class="row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+        <span style="flex: 1 1 200px;"><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r0:">表示名</label><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" placeholder="表示名"></div></div></div></span>
+        <span class="field-i" style="flex: 1 1 200px;"><i class="fa-solid fa-at" aria-hidden="true"></i><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r1:">X ID(@なし・必須)</label><div class="fn-field__wrap"><input id=":r1:" class="fn-field__control" placeholder="username"></div></div></div></span>
+        <button type="submit" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button>
+      </form>
+    </section>
+  </div>
+
+  
+  
+
+  <div class="foot-spacer"></div>
+  <div class="dc-import" data-board="PublicFooter">
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+  <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
+    <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
+    <span style="color: var(--ink-muted); font-size: 13px;">© FlameNode</span>
+  </div>
+  <nav aria-label="見る" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="Videos.html" class="il">作品一覧</a>
+    <a href="Recommend.html" class="il">おすすめ</a>
+    <a href="Creators.html" class="il">クリエイター</a>
+    <a href="Events.html" class="il">イベント一覧</a>
+  </nav>
+  <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html" class="il">ダッシュボード</a>
+    <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
+    <a href="About.html" class="il">イベント開催相談</a>
+  </nav>
+  <nav aria-label="FlameNode" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
+    <a href="About.html" class="il">FlameNode について</a>
+    <a href="Rules.html" class="il">利用規約</a>
+  </nav>
+</footer>
+</div>
+</div>
+
+</div>
+</body></html>

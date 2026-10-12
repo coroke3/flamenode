@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>FlameNode について</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 80px;">
+    <section style="display: flex; flex-wrap: wrap; gap: 32px 96px; align-items: flex-end;">
+      <div class="stack" style="gap: 24px; flex: 1 1 560px; min-width: 0;">
+        <h1 class="t-display">FlameNode</h1>
+        <p style="margin: 0; font-size: 18px; line-height: 30px; max-width: 640px;">個人制作映像のアーカイブと、イベント参加・投稿・運営の記録をつなぐサイトです。</p>
+        <div class="actions">
+          <a href="Videos.dc.html" class="fn-btn fn-btn--primary">作品を見る</a>
+          <a href="Events.dc.html" class="fn-btn fn-btn--secondary">イベントを見る</a>
+        </div>
+      </div>
+      <div class="metrics" aria-label="FlameNode がつなぐ情報" style="flex: 1 1 360px;">
+        <div class="metric"><b>3,240</b><span>作品</span></div>
+        <div class="metric"><b>812</b><span>作者名義</span></div>
+        <div class="metric"><b>46</b><span>イベント</span></div>
+        <div class="metric"><b>5,120</b><span>投稿枠</span></div>
+      </div>
+    </section>
+  </div>
+
+  <img class="cover" src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="margin-top: 80px; aspect-ratio: 32/9;">
+
+  <div class="wrap">
+    <section class="sec" aria-labelledby="who">
+      <h2 id="who" class="t-h2" style="margin-bottom: 32px;">使う人</h2>
+      <dl class="kv ab-kv" style="grid-template-columns: 200px minmax(0, 720px); gap: 32px 48px;">
+        <dt style="font-size: 15px; color: var(--ink);">見る人へ</dt>
+        <dd class="muted">新着、ピックアップ、作者、イベントから作品を探せます。作品ページでは、メンバー、チャプター、関連作品も合わせて見られます。</dd>
+        <dt style="font-size: 15px; color: var(--ink);">投稿する人へ</dt>
+        <dd class="muted">YouTube 作品を、表示名、アイコン、X ID、合作メンバー、イベント所属と一緒に登録できます。イベント枠に紐づく提出も同じ流れで扱います。</dd>
+        <dt style="font-size: 15px; color: var(--ink);">運営する人へ</dt>
+        <dd class="muted">募集枠、提出状況、公開作品、スタッフ権限、通知、変更履歴をまとめて扱い、開催後のアーカイブにもつなげます。</dd>
+      </dl>
+    </section>
+
+    <section class="sec" aria-labelledby="rules3">
+      <h2 id="rules3" class="t-h2" style="margin-bottom: 32px;">3つの原則</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 48px;">
+        <div class="stack" style="gap: 8px;"><span class="t-h3">作品を主役にする</span><span class="muted">説明より先に、サムネイル、タイトル、作者、再生導線が見える密度を保ちます。</span></div>
+        <div class="stack" style="gap: 8px;"><span class="t-h3">名義を分けて守る</span><span class="muted">Discord はログイン、X ID は公開名義として扱い、投稿主体と表示名義を混同しません。</span></div>
+        <div class="stack" style="gap: 8px;"><span class="t-h3">イベントを記録にする</span><span class="muted">募集ページだけで終わらせず、投稿枠、公開作品、履歴まで同じイベントに残します。</span></div>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="identity">
+      <h2 id="identity" class="t-h2" style="margin-bottom: 32px;">アイデンティティ</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2px;">
+        <div class="raised stack" style="gap: 24px; padding: 48px; min-height: 240px; justify-content: space-between;">
+          <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode Logo" style="height: 32px; width: auto; align-self: flex-start;">
+          <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode Logo" style="height: 32px; width: auto; align-self: flex-start;">
+          <span class="t-label muted">FlameNode Logo</span>
+        </div>
+        <div class="raised stack" style="gap: 24px; padding: 48px; min-height: 240px; justify-content: space-between;">
+          <span style="font: 400 40px/48px var(--font-display);">Aa</span>
+          <span class="t-label muted">FlameNode Sans</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" aria-labelledby="credits">
+      <h2 id="credits" class="t-h2" style="margin-bottom: 16px;">クレジット</h2>
+      <dl class="kv">
+        <dt>制作クレジット</dt>
+        <dd class="wrap-row" style="gap: 16px;">ともき <a class="p-link" href="https://x.com/tomoki3192">X @tomoki3192</a><a class="p-link" href="https://www.foriio.com/tomokidesign">foriio</a></dd>
+      </dl>
+    </section>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2400}}'>
+class Component extends DCLogic {
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

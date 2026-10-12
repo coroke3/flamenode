@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>YouTube同期状態</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="ytsync" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">YouTube同期</h1></sc-if><p class="muted">video_youtube_metadata と作品情報を照合し、同期失敗・未同期・YouTube ID なしを確認します。</p></div></div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="作品管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-solid fa-list" aria-hidden="true"></i>すべて</a>
+      <a href="AdminVideosHub.dc.html" class="il" aria-current="page"><i class="fa-brands fa-youtube" aria-hidden="true"></i>メタデータ同期</a>
+      <a href="AdminVideosHub.dc.html" class="il"><i class="fa-solid fa-list-ol" aria-hidden="true"></i>再生リスト同期</a>
+    </nav></sc-if>
+    <div class="wrap-row" style="gap: 8px; margin-bottom: 16px;">
+      <span class="sel-i"><i class="fa-solid fa-rotate" aria-hidden="true"></i><select class="select i" aria-label="sync_status"><option>同期 すべて</option><option>失敗</option><option>stale</option><option>missing</option><option>なし</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-lock" aria-hidden="true"></i><select class="select i" aria-label="YouTube privacy"><option>privacy すべて</option><option>公開</option><option>unlisted</option><option>非公開</option></select></span>
+      <span class="sel-i"><i class="ms ms-sensors" aria-hidden="true"></i><select class="select i" aria-label="YouTube availability"><option>availability すべて</option><option>available</option><option>removed</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-eye" aria-hidden="true"></i><select class="select i" aria-label="FlameNode公開状態"><option>FlameNode すべて</option><option>公開</option><option>非公開</option></select></span>
+    </div>
+    <div class="t-scroll">
+      <div class="dt" style="--cols: minmax(200px,1.6fr) 130px 104px 104px 80px 88px 112px 80px; --minw: 1000px;">
+        <div class="dt-h"><span>作品</span><span>YouTube ID</span><span>FlameNode</span><span>YouTube</span><span class="num">再生時間</span><span class="num">再生数</span><span>同期</span><span></span></div>
+        <div class="dt-r"><span class="ell">【文字PV】スチールワンダー / はるまきごはん</span><span class="t-mono ell">yhM3…Qe0</span><span class="st"><span class="dot ok"></span>公開</span><span class="st"><span class="dot ok"></span>公開</span><span class="num">03:12</span><span class="num">1,204</span><span class="st"><span class="dot ok"></span>ok 10.04</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://youtu.be/" class="ib sm" aria-label="YouTubeで開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><button type="button" class="ib sm" aria-label="再同期"><i class="fa-solid fa-rotate"></i></button></span></div>
+        <div class="dt-r"><span class="ell">【幼虫アニメ】◯◯◯でしますか？◯でしますか？</span><span class="t-mono ell">OdpROVQne04</span><span class="st"><span class="dot ok"></span>公開</span><span class="st"><span class="dot info"></span>限定公開</span><span class="num">02:40</span><span class="num">388</span><span class="st"><span class="dot warn"></span>stale</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://youtu.be/OdpROVQne04" class="ib sm" aria-label="YouTubeで開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><button type="button" class="ib sm" aria-label="再同期"><i class="fa-solid fa-rotate"></i></button></span></div>
+        <div class="dt-r"><span class="ell">空白合作</span><span class="t-mono ell">—</span><span class="st"><span class="dot warn"></span>審査待ち</span><span class="muted">—</span><span class="num muted">—</span><span class="num muted">—</span><span class="st"><span class="dot"></span>metadataなし</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="AdminVideoHub.dc.html" class="ib sm" aria-label="作品を開く"><i class="fa-solid fa-arrow-right"></i></a></span></div>
+        <div class="dt-r"><span class="ell">模範囚</span><span class="t-mono ell">a8Kd…Z1c</span><span class="st"><span class="dot ok"></span>公開</span><span class="st"><span class="dot err"></span>削除済み</span><span class="num muted">—</span><span class="num muted">—</span><span class="st"><span class="dot err"></span>失敗</span><span class="row" style="justify-content: flex-end; gap: 0;"><a href="https://youtu.be/" class="ib sm" aria-label="YouTubeで開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a><button type="button" class="ib sm" aria-label="再同期"><i class="fa-solid fa-rotate"></i></button></span></div>
+      </div>
+    </div>
+    <p class="t-sm muted" style="margin-top: 16px;">条件に一致する行がさらにあります。</p>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

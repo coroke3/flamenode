@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ユーザー管理</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}.chip.on{background:var(--ink);color:var(--bg)}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="users" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div>
+        <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">ユーザー</h1></sc-if>
+        <p class="muted">Discordログイン済みユーザーと X ID の現在の紐付けを確認・管理します。</p>
+      </div>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="ユーザー管理メニュー" style="margin-bottom: 24px;">
+      <a href="AdminUsersHub.dc.html" class="il" aria-current="{{curUsers}}" onClick="{{showUsers}}"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discordユーザー</a>
+      <a href="AdminUsersHub.dc.html" class="il" aria-current="{{curPerm}}" onClick="{{showPerm}}"><i class="fa-solid fa-key" aria-hidden="true"></i>権限管理</a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請 <span class="t-num">3</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請 <span class="t-num">1</span></a>
+    </nav></sc-if>
+
+    <sc-if value="{{isUsers}}" hint-placeholder-val="{{true}}">
+      <div class="wrap-row" style="gap: 6px;">
+        <div class="field-i" style="width: 280px; margin-right: 8px;"><x-import component-from-global-scope="FlameNode.TextField" type="search" aria-label="検索" placeholder="Discord / X ID / 名前"></x-import><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div>
+        <button type="button" class="chip on">すべて</button>
+        <button type="button" class="chip"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>有効</button>
+        <button type="button" class="chip"><i class="fa-solid fa-ban" aria-hidden="true"></i>BAN</button>
+        <button type="button" class="chip"><i class="fa-solid fa-crown" aria-hidden="true"></i>admin</button>
+        <button type="button" class="chip"><i class="fa-solid fa-shield" aria-hidden="true"></i>moderator</button>
+        <button type="button" class="chip"><i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>開催権限あり</button>
+        <button type="button" class="chip"><i class="fa-solid fa-scale-unbalanced" aria-hidden="true"></i>TOS未同意</button>
+        <button type="button" class="chip"><i class="fa-solid fa-user-slash" aria-hidden="true"></i>Active X ID なし</button>
+      </div>
+      <p class="t-sm muted t-num" style="margin: 16px 0 8px;">1,204 件</p>
+      <div class="t-scroll">
+        <div class="dt" style="--cols: minmax(180px, 1.4fr) minmax(160px, 1.2fr) 88px 132px 96px 92px 72px; --minw: 900px;">
+          <div class="dt-h"><span>Discord</span><span>Active X ID</span><span>ロール</span><span>状態</span><span>規約</span><span>登録</span><span></span></div>
+          <sc-for list="{{users}}" as="u" hint-placeholder-count="8">
+            <div class="dt-r">
+              <a href="AdminUserHub.dc.html" class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="{{u.icon}}" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0;"><span class="ell">{{u.name}}</span><span class="sub il"><i class="fa-brands fa-discord" aria-hidden="true"></i>{{u.discord}}</span></span></a>
+              <span class="il ell" style="color: {{u.xColor}};"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>{{u.x}}</span>
+              <span class="il"><i class="{{u.roleIcon}}" aria-hidden="true"></i>{{u.role}}</span>
+              <span class="row" style="gap: 8px;"><span class="st"><span class="{{u.dot}}"></span>{{u.state}}</span><i class="{{u.host}}" title="開催権限あり" aria-label="{{u.hostLabel}}"></i></span>
+              <span class="il t-sm" style="color: {{u.tosColor}};"><i class="{{u.tosIcon}}" aria-hidden="true"></i>{{u.tos}}</span>
+              <span class="t-num muted">{{u.at}}</span>
+              <span class="row" style="gap: 0; justify-content: flex-end;"><a href="AdminAuditHub.dc.html" class="ib sm" aria-label="このユーザーが実行した管理操作の監査ログ"><i class="fa-solid fa-clock-rotate-left"></i></a><a href="AdminUserHub.dc.html" class="ib sm" aria-label="詳細"><i class="fa-solid fa-arrow-right"></i></a></span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{isPerm}}" hint-placeholder-val="{{false}}">
+      <p class="muted" style="margin: 0 0 24px;">一般作品でユーザーに開放する編集項目を管理します。</p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 2px;">
+        <section class="raised stack" style="gap: 12px; padding: 24px;">
+          <h2 class="t-h3">通常作品</h2>
+          <p class="t-sm muted" style="margin: 0;">公開済み作品のオーナーが通常モードで編集できる項目です。</p>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="作品タイトル" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="紹介コメント・詳細コメント" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・使用ソフト" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="メンバー・チャプター" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="YouTube URL"></x-import>
+        </section>
+        <section class="raised stack" style="gap: 12px; padding: 24px;">
+          <h2 class="t-h3">公開前作品</h2>
+          <p class="t-sm muted" style="margin: 0;">公開前・非公開作品のオーナーが通常モードで編集できる項目です。</p>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="作品タイトル" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="紹介コメント・詳細コメント" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・使用ソフト" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="メンバー・チャプター" default-checked="{{yes}}"></x-import>
+          <x-import component-from-global-scope="FlameNode.Checkbox" label="YouTube URL" default-checked="{{yes}}"></x-import>
+        </section>
+      </div>
+      <div style="margin-top: 24px;"><button type="button" class="fn-btn fn-btn--primary">保存</button></div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'users' }; }
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const U = [
+      ['Mochi', 'coroke3', '@coroke3', 'ADMIN', 'ok', 1, 1, '2019.12.20'],
+      ['あおね', 'hs_nozomizo13', '@hs_nozomizo13', 'MOD', 'ok', 1, 1, '2021.03.02'],
+      ['おたこ', '012345rty', '@012345rty', 'USER', 'ok', 1, 1, '2022.08.11'],
+      ['みずのひと', 'mizunohito_10', '@mizunohito_10', 'USER', 'ok', 1, 1, '2023.03.30'],
+      ['スティックのり', 'sticknori', '@Sticknorikun', 'USER', 'ok', 0, 0, '2025.08.20'],
+      ['幼虫', 'musivirus', '@MusiVirus', 'USER', 'ok', 0, 1, '2026.03.10'],
+      ['新規ユーザー', 'newbie_2026', 'active Xなし', 'USER', 'ok', 0, 0, '2026.10.03'],
+      ['(停止中)', 'spam_acc', '@spam_acc', 'USER', 'ban', 0, 1, '2025.11.02']
+    ];
+    const R = { ADMIN: 'fa-solid fa-crown', MOD: 'fa-solid fa-shield', USER: 'fa-regular fa-user' };
+    const t = this.state.tab;
+    return {
+      theme: this.props.theme ?? 'dark', yes: true,
+      isUsers: t === 'users', isPerm: t === 'perm', curUsers: t === 'users' ? 'page' : 'false', curPerm: t === 'perm' ? 'page' : 'false',
+      showUsers: (e) => { e.preventDefault(); this.setState({ tab: 'users' }); }, showPerm: (e) => { e.preventDefault(); this.setState({ tab: 'perm' }); },
+      users: U.map((u, i) => ({ name: u[0], discord: u[1], x: u[2], xColor: u[2].startsWith('@') ? 'var(--ink)' : 'var(--ink-muted)', role: u[3], roleIcon: R[u[3]], state: u[4] === 'ban' ? 'BAN' : '有効', dot: u[4] === 'ban' ? 'dot err' : 'dot ok', host: u[5] ? 'fa-solid fa-calendar-plus' : '', hostLabel: u[5] ? '開催権限あり' : '', tos: u[6] ? '同意済' : '未同意', tosIcon: u[6] ? 'fa-solid fa-check' : 'fa-solid fa-circle-exclamation', tosColor: u[6] ? 'var(--ink-muted)' : 'var(--warning)', at: u[7], icon: T[i % 8] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

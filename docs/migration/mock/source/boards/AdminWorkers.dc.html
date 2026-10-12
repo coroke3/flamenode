@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>バックグラウンド処理監視</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="workers" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <main class="c-main">
+    <div class="c-head">
+      <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">Worker監視</h1></sc-if><p class="muted">Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗を D1 の内部記録から確認します。</p></div>
+      <button type="button" class="fn-btn fn-btn--secondary">最新状態へ更新</button>
+    </div>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="診断メニュー" style="margin-bottom: 24px;">
+      <a href="AdminHealthHub.dc.html" class="il"><i class="ms ms-monitor_heart" aria-hidden="true"></i>ヘルスチェック</a>
+      <a href="AdminHealthHub.dc.html" class="il"><i class="ms ms-account_tree" aria-hidden="true"></i>DB整合性</a>
+      <a href="AdminHealthHub.dc.html" class="il" aria-current="page"><i class="ms ms-dns" aria-hidden="true"></i>Worker監視</a>
+    </nav></sc-if>
+    <div class="queue">
+      <a href="AdminCostGuard.dc.html"><span class="il"><i class="fa-solid fa-gauge-high" aria-hidden="true"></i>operation_mode</span><b style="font-size: 24px;">通常</b><span class="st"><span class="dot ok"></span>正常</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-skull" aria-hidden="true"></i>停止・失敗Worker</span><b class="muted">0</b><span class="st"><span class="dot ok"></span>正常</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>注意パイプライン</span><b>1</b><span class="st"><span class="dot warn"></span>注意</span></a>
+      <a href="#"><span class="il"><i class="fa-solid fa-box-open" aria-hidden="true"></i>失敗データ</span><b>2</b><span class="st"><span class="dot err"></span>要対応</span></a>
+      <a href="AdminNotifications.dc.html"><span class="il"><i class="fa-solid fa-bell" aria-hidden="true"></i>通知配信</span><b>1</b><span>最終失敗</span></a>
+      <a href="AdminStaticBuilds.dc.html"><span class="il"><i class="fa-solid fa-file-code" aria-hidden="true"></i>静的JSON再生成</span><b>1</b><span>失敗</span></a>
+    </div>
+
+    <section class="c-sec" aria-labelledby="cron">
+      <h2 id="cron" class="t-h3" style="margin-bottom: 8px;">定期実行の状態</h2>
+      <div class="t-scroll"><div class="dt" style="--cols: minmax(160px,1fr) 100px 110px 110px 110px 110px minmax(120px,1fr); --minw: 940px;">
+        <div class="dt-h"><span>ジョブ</span><span>状態</span><span>最終開始</span><span>最終成功</span><span>最終失敗</span><span>次回目安</span><span>エラー</span></div>
+        <div class="dt-r"><span class="t-mono">fast-jobs</span><span class="st"><span class="dot ok"></span>正常</span><span class="t-num muted">11:20</span><span class="t-num muted">11:20</span><span class="muted">—</span><span class="t-num">11:25</span><span class="muted">—</span></div>
+        <div class="dt-r"><span class="t-mono">content-jobs</span><span class="st"><span class="dot info"></span>実行中</span><span class="t-num muted">11:00</span><span class="t-num muted">10:00</span><span class="muted">—</span><span class="t-num">12:00</span><span class="muted">—</span></div>
+        <div class="dt-r"><span class="t-mono">sync-jobs</span><span class="st"><span class="dot warn"></span>注意</span><span class="t-num muted">09:00</span><span class="t-num muted">03:00</span><span class="t-num" style="color: var(--danger);">09:01</span><span class="t-num">21:00</span><span class="t-sm ell" style="color: var(--danger);">クォータ超過</span></div>
+      </div></div>
+    </section>
+
+    <section class="c-sec" aria-labelledby="qs">
+      <h2 id="qs" class="t-h3" style="margin-bottom: 8px;">キュー状態</h2>
+      <div class="t-scroll"><div class="dt" style="--cols: minmax(160px,1fr) 80px 120px 80px 100px 80px; --minw: 680px;">
+        <div class="dt-h"><span>処理</span><span class="num">未処理</span><span>最古の未処理</span><span class="num">失敗</span><span class="num">再試行上限</span><span class="num">停滞</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-solid fa-bell muted" aria-hidden="true"></i>通知</span><span class="num">3</span><span class="t-num muted">11:19</span><span class="num" style="color: var(--danger);">1</span><span class="num">0</span><span class="num">0</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-solid fa-file-code muted" aria-hidden="true"></i>静的JSON</span><span class="num">12</span><span class="t-num muted">10:41</span><span class="num" style="color: var(--danger);">1</span><span class="num">0</span><span class="num">0</span></div>
+        <div class="dt-r"><span class="il"><i class="fa-brands fa-youtube muted" aria-hidden="true"></i>YouTube同期</span><span class="num">7</span><span class="t-num muted">09:01</span><span class="num">0</span><span class="num">0</span><span class="num">0</span></div>
+      </div></div>
+    </section>
+
+    <div class="split c-sec">
+      <section class="main" aria-labelledby="cap">
+        <h2 id="cap" class="t-h3" style="margin-bottom: 4px;">処理能力と滞留</h2>
+        <p class="t-sm muted" style="margin: 0 0 8px;">新規流入が止まった場合の理論解消時間です。外部API障害やCloudflare側の制限は含みません。</p>
+        <div class="dt" style="--cols: minmax(140px,1fr) 80px 100px 100px minmax(120px,1fr); --minw: 0px;">
+          <div class="dt-h"><span>処理</span><span class="num">滞留</span><span class="num">最大処理/日</span><span>解消目安</span><span>補足</span></div>
+          <div class="dt-r"><span>静的JSON</span><span class="num">12</span><span class="num">2,880</span><span>約6分</span><span class="t-sm muted">キュー起動</span></div>
+          <div class="dt-r"><span>YouTubeメタデータ同期</span><span class="num">7</span><span class="num">800</span><span>約13分</span><span class="t-sm muted">クォータ 80% 以内</span></div>
+        </div>
+      </section>
+      <aside class="side stack" style="gap: 24px;">
+        <section><h2 class="t-h3" style="margin-bottom: 8px;">グローバル静的JSONの最終生成</h2><span class="t-sm t-num">users_index · 10.04 06:00</span></section>
+        <section><h2 class="t-h3" style="margin-bottom: 8px;">無料枠の外部監視</h2><div class="stack t-sm" style="gap: 8px;"><a class="il p-link" href="https://dash.cloudflare.com/"><i class="fa-brands fa-cloudflare" aria-hidden="true"></i>Cloudflare Dashboard</a><a class="il p-link" href="https://console.cloud.google.com/"><i class="fa-brands fa-google" aria-hidden="true"></i>YouTube API Quotas</a></div></section>
+      </aside>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1600}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() { return { theme: this.props.theme ?? 'dark' }; }
+}
+</script>
+</body>
+</html>

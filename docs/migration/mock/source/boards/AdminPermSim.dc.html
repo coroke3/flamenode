@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>権限シミュレーター</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="permsim" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">権限シミュレーター</h1><p class="muted">イベントスタッフのプリセットとカスタム権限をX IDから確認します。イベントスタッフ登録の正本を参照します。</p></div></div>
+
+    <form class="row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;" onSubmit="{{simulate}}">
+      <span class="sel-i"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><select class="select i" aria-label="イベント ID" style="min-width: 240px;"><option>PVSF2026S</option><option>PVSF2026Sp</option><option>PVSF2025S</option><option>SummerIsland</option></select></span>
+      <span class="field-i sm-field" style="width: 240px;"><i class="fa-solid fa-at" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="X ID" placeholder="screen_name" default-value="MusiVirus"></x-import></span>
+      <button type="submit" class="fn-btn fn-btn--primary"><i class="fa-solid fa-play" aria-hidden="true"></i>シミュレート</button>
+    </form>
+
+    <sc-if value="{{isEmpty}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 12px; padding: 64px 0; align-items: flex-start;"><span class="icon-tile lg"><i class="fa-solid fa-key" aria-hidden="true"></i></span><span class="t-h3">条件を入力してシミュレートしてください。</span></div>
+    </sc-if>
+    <sc-if value="{{isNotFound}}" hint-placeholder-val="{{false}}">
+      <div class="notice" role="status" style="margin-top: 32px;"><i class="fa-solid fa-user-slash muted" aria-hidden="true" style="padding-top: 4px;"></i><span class="t-sm">該当するスタッフ行が見つかりませんでした(event: <span class="t-mono">PVSF2026S</span>)。<a class="p-link" href="ManageStaff.dc.html">スタッフ管理で追加</a></span></div>
+    </sc-if>
+
+    <sc-if value="{{isFound}}" hint-placeholder-val="{{true}}">
+      <div class="row" style="gap: 16px; margin-top: 40px; align-items: center;">
+        <img class="avatar round" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" width="56" height="56" style="width: 56px; height: 56px;">
+        <div class="stack" style="gap: 2px; flex: 1;">
+          <span class="t-h2">幼虫</span>
+          <span class="t-sm muted t-mono">@MusiVirus</span>
+        </div>
+        <a class="fn-btn fn-btn--secondary fn-btn--sm" href="ManageStaff.dc.html">スタッフ管理へ</a>
+      </div>
+      <dl class="kv" style="margin-top: 24px;">
+        <dt>プリセット</dt><dd class="row" style="gap: 8px;"><b>運営</b><span class="t-mono t-sm muted">manager</span></dd>
+        <dt>説明</dt><dd class="t-sm">通常のイベント運営向けです。枠管理、投稿確認、作品情報の修正ができます。スタッフ管理や危険操作は含みません。</dd>
+        <dt>解決済み権限</dt><dd><b class="t-num">13</b><span class="muted t-sm"> / 20 キー</span></dd>
+      </dl>
+
+      <div class="row" style="justify-content: space-between; margin: 40px 0 8px;">
+        <h2 class="t-h3">権限</h2>
+        <div class="seg" role="group" aria-label="表示">
+          <button type="button" class="{{segAll}}" onClick="{{showAll}}">すべて</button>
+          <button type="button" class="{{segAllowed}}" onClick="{{showAllowed}}"><i class="fa-solid fa-check" aria-hidden="true"></i>可のみ</button>
+          <button type="button" class="{{segSpot}}" onClick="{{showSpot}}"><i class="fa-solid fa-star" aria-hidden="true"></i>主要</button>
+        </div>
+      </div>
+      <div class="dt" style="--cols: 28px minmax(180px,1fr) minmax(200px,1fr) 72px; --minw: 0px;">
+        <div class="dt-h"><span></span><span>権限</span><span>キー</span><span>可否</span></div>
+        <sc-for list="{{perms}}" as="p" hint-placeholder-count="13">
+          <div class="dt-r">
+            <span class="muted"><i class="{{p.groupIcon}}" aria-hidden="true"></i></span>
+            <span class="row" style="gap: 8px;">{{p.label}}<sc-if value="{{p.spot}}" hint-placeholder-val="{{false}}"><i class="fa-solid fa-star muted" aria-label="主要権限" style="font-size: 11px;"></i></sc-if></span>
+            <span class="t-mono t-sm muted">{{p.key}}</span>
+            <span class="{{p.cls}}"><i class="{{p.icon}}" aria-hidden="true"></i>{{p.state}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"state":{"editor":"enum","options":["found","notfound","empty"],"default":"found"},"$preview":{"width":1440,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { view: 'all' }; }
+  renderVals() {
+    const st = this.props.state ?? 'found';
+    const allowed = new Set(['event.basic','event.publish','event.slots','event.questions','event.review','event.notifications','video.basics','video.descriptions','video.credits','video.members','video.member_chapters','video.status','video.permissions']);
+    const spot = new Set(['event.basic','event.slots','event.review','event.members','video.status','video.descriptions','event.notifications']);
+    const all = [
+      ['event.basic','イベント基本情報'],['event.publish','受付・公開設定'],['event.slots','枠管理'],['event.members','スタッフ管理'],['event.questions','投稿フォーム・質問'],['event.review','審査・承認'],['event.notifications','通知・受信箱'],['event.public_api','公開API設定'],['event.static_rebuild','静的JSON再生成'],['xid.link_requests','X ID連携申請'],
+      ['video.basics','作品基本情報'],['video.descriptions','作品説明'],['video.credits','楽曲・クレジット'],['video.members','作品メンバー'],['video.member_chapters','メンバーチャプター'],['video.status','公開状態'],['video.primary_event','所属イベント'],['video.youtube_id','YouTube ID'],['video.identity','提出主体'],['video.permissions','共同編集権限']
+    ].map(([key, label]) => {
+      const ok = allowed.has(key);
+      return { key, label, spot: spot.has(key), ok,
+        groupIcon: key.startsWith('video') ? 'fa-solid fa-film' : key.startsWith('xid') ? 'fa-solid fa-at' : 'fa-solid fa-calendar-days',
+        icon: ok ? 'fa-solid fa-check' : 'fa-solid fa-xmark', state: ok ? '可' : '不可', cls: ok ? 'il ok-i' : 'il no-i' };
+    });
+    const v = this.state.view;
+    const perms = v === 'allowed' ? all.filter(p => p.ok) : v === 'spot' ? all.filter(p => p.spot) : all;
+    const set = (view) => () => this.setState({ view });
+    return {
+      theme: this.props.theme ?? 'dark', perms,
+      isFound: st === 'found', isNotFound: st === 'notfound', isEmpty: st === 'empty',
+      segAll: v === 'all' ? 'on' : '', segAllowed: v === 'allowed' ? 'on' : '', segSpot: v === 'spot' ? 'on' : '',
+      showAll: set('all'), showAllowed: set('allowed'), showSpot: set('spot'),
+      simulate: (e) => e.preventDefault()
+    };
+  }
+}
+</script>
+</body>
+</html>

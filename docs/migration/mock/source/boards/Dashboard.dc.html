@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>ダッシュボード</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+
+  <div class="wrap" style="padding-top: 32px;">
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
+      <a href="MyPage.dc.html" class="il" aria-current="page"><i class="fa-solid fa-house" aria-hidden="true"></i>ダッシュボード</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i>参加・投稿</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
+      <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
+    </nav></sc-if>
+
+    <div class="wrap-row dash-head" style="justify-content: space-between; gap: 24px; margin-top: 40px; align-items: center;">
+      <div class="row" style="gap: 16px;">
+        <img class="avatar pf-av" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" style="width: 96px; height: 96px;">
+        <div class="stack" style="gap: 2px;">
+          <h1 class="t-display" style="margin: 0;">{{name}}</h1>
+          <span class="t-sm muted">{{handle}}</span>
+        </div>
+      </div>
+      <div class="row" style="gap: 8px;">
+        <a href="MyPage.dc.html" class="ib" aria-label="設定"><i class="fa-solid fa-gear"></i></a>
+        <a href="MyPage.dc.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i><span class="dh-long">作品を</span>投稿する</a>
+      </div>
+    </div>
+
+    <sc-if value="{{banner.show}}" hint-placeholder-val="{{false}}">
+      <div class="notice" style="margin-top: 32px; align-items: center;">
+        <i class="{{banner.icon}}" aria-hidden="true" style="font-size: 16px;"></i>
+        <span class="stack" style="gap: 2px; flex: 1;"><b class="t-sm">{{banner.title}}</b><span class="t-sm muted">{{banner.body}}</span></span>
+        <a href="{{banner.href}}" class="fn-btn fn-btn--secondary fn-btn--sm">{{banner.cta}}</a>
+      </div>
+    </sc-if>
+
+    <!-- アクティブ枠 -->
+    <section aria-labelledby="hero" class="raised dash-hero" style="margin-top: 32px;">
+      <div class="stack" style="gap: 8px;">
+        <span class="il t-label muted" id="hero"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>エントリーした枠</span>
+        <span class="t-h2">PVSF2026S</span>
+        <span class="meta-i t-sm"><span>11.03 13:15</span><span>1日目 第2部</span><span class="st"><i class="fa-solid fa-clock st-ic info" aria-hidden="true"></i>確保済み · 未提出</span></span>
+      </div>
+      <div class="dl" role="timer" aria-label="提出締切まであと3日(10.07 23:59)">
+        <span class="dl-k t-xs muted">提出締切 <span class="t-num">10.07 23:59</span></span>
+        <span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">3</b><span class="dl-u">日</span></span>
+      </div>
+      <div class="row" style="gap: 8px;">
+        <a href="EventDetail.dc.html" class="ib" aria-label="イベントへ"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+        <a href="EntrySlotted.dc.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-upload" aria-hidden="true"></i>作品を提出</a>
+      </div>
+    </section>
+
+    <div class="metrics" style="margin-top: 48px;" aria-label="アカウント統計">
+      <div class="metric"><b>1,284</b><span>累計いいね</span></div>
+      <div class="metric"><b>86,320</b><span>累計再生数</span></div>
+      <div class="metric"><b>10</b><span>投稿作品</span></div>
+      <div class="metric"><b>9</b><span>参加イベント</span></div>
+    </div>
+
+    <div class="split" style="margin-top: 64px;">
+      <div class="main stack" style="gap: 64px;">
+        <section aria-labelledby="works">
+          <div class="sec-head"><h2 id="works" class="t-h2">自分の作品</h2><a href="MyPage.dc.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+          <sc-for list="{{works}}" as="w" hint-placeholder-count="4">
+            <a href="VideoEdit.dc.html" class="fn-row">
+              <img class="fn-row__thumb" src="{{w.thumb}}" alt="">
+              <span class="fn-row__body"><span class="fn-row__title">{{w.title}}</span><span class="fn-row__meta">{{w.meta}}</span></span>
+              <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="{{w.dot}}" aria-hidden="true"></i>{{w.state}}</span><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
+            </a>
+          </sc-for>
+        </section>
+
+        <section aria-labelledby="collab">
+          <div class="sec-head"><h2 id="collab" class="t-h2">共同編集できる作品</h2><a href="MyPage.dc.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+          <sc-for list="{{collabs}}" as="w" hint-placeholder-count="3">
+            <a href="VideoEdit.dc.html" class="fn-row">
+              <img class="fn-row__thumb" src="{{w.thumb}}" alt="">
+              <span class="fn-row__body"><span class="fn-row__title">{{w.title}}</span><span class="fn-row__meta">{{w.meta}}</span></span>
+              <span class="fn-row__trail"><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
+            </a>
+          </sc-for>
+        </section>
+
+        <section aria-labelledby="chap">
+          <div class="sec-head"><h2 id="chap" class="t-h2">自分のチャプターコメント</h2><a href="MyPage.dc.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+          <sc-for list="{{chapters}}" as="c" hint-placeholder-count="2">
+            <a href="VideoDetail.dc.html" class="row" style="gap: 16px; padding: 14px 0; align-items: flex-start;">
+              <span class="t-mono t-sm" style="width: 48px; flex: none; padding-top: 2px;">{{c.at}}</span>
+              <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="t-sm">{{c.body}}</span><span class="t-sm muted ell">{{c.video}}</span></span>
+              <span class="st t-sm"><i class="{{c.dot}}" aria-hidden="true"></i>{{c.state}}</span>
+            </a>
+          </sc-for>
+        </section>
+      </div>
+
+      <aside class="side stack" style="gap: 40px;">
+        <section aria-labelledby="xids">
+          <div class="sec-head" style="margin-bottom: 8px;"><h2 id="xids" class="t-h3">連携 X ID</h2><a href="MyPage.dc.html" class="ib sm" aria-label="X ID を管理"><i class="fa-solid fa-gear"></i></a></div>
+          <sc-for list="{{xids}}" as="x" hint-placeholder-count="2">
+            <a href="MyPage.dc.html" class="row" style="gap: 12px; padding: 10px 0;">
+              <img class="avatar" src="{{x.icon}}" alt="" style="width: 36px; height: 36px;">
+              <span class="stack" style="gap: 0; flex: 1; min-width: 0;"><span class="t-sm ell">{{x.name}}</span><span class="t-sm muted">@{{x.id}}</span></span>
+              <span class="st t-sm"><i class="{{x.dot}}" aria-hidden="true"></i>{{x.state}}</span>
+            </a>
+          </sc-for>
+          <a href="MyPage.dc.html" class="il t-sm muted" style="margin-top: 8px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>X ID を連携する</a>
+        </section>
+        <section aria-labelledby="ev">
+          <h2 id="ev" class="t-h3" style="margin-bottom: 8px;">受付中のイベント</h2>
+          <a href="EventDetail.dc.html" class="row" style="gap: 12px; padding: 10px 0;"><img class="ev-icon" src="/_blob/525c7209e503b8327cbd5bf4a64e5fc8" alt="" style="width: 36px; height: 36px;"><span class="stack" style="gap: 0; flex: 1;"><span class="t-sm">PVSF2026S</span><span class="t-sm muted">受付 〜 10.31 · 残り 42 枠</span></span><i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i></a>
+        </section>
+      </aside>
+    </div>
+  </div>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,320px"></dc-import></sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"xstate":{"editor":"enum","options":["ok","pending","none","onboarding"],"default":"ok"},"$preview":{"width":1440,"height":2100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = this.__emb();
+    const emb = this.props.embed ?? true;
+    r.full = !emb; r.rootCls = emb ? 'p-root emb-root' : 'p-root';
+    return r;
+  }
+  __emb() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const xs = this.props.xstate ?? 'ok';
+    const B = {
+      ok: { show: false },
+      pending: { show: true, icon: 'ms ms-pending_actions', title: '申請完了・承認待ち', body: 'X ID 連携の申請を運営が確認しています。枠確保は可能です。', cta: '申請を確認', href: 'MyPage.dc.html' },
+      none: { show: true, icon: 'fa-brands fa-x-twitter', title: 'X ID 未連携', body: 'X ID を連携すると、承認後に作品の投稿やマイ・ギャラリーが使えるようになります。', cta: 'X ID を連携する', href: 'MyPage.dc.html' },
+      onboarding: { show: true, icon: 'fa-solid fa-list-check', title: '初期設定が未完了です', body: '利用規約への同意と活動名義の登録が終わると投稿できます。', cta: '初期設定を続ける', href: 'OnboardingTerms.dc.html' },
+    }[xs];
+    const named = xs === 'ok';
+    return {
+      theme: this.props.theme ?? 'dark', banner: B,
+      name: named ? 'おたこ' : 'ゲスト', handle: named ? '@012345rty · 活動名義' : (xs === 'pending' ? 'X ID 承認待ち' : 'X ID 未選択'),
+      works: [
+        { title: '魔法少女 このは・グリモワール 最終決戦編', meta: 'PVSF2026Sp · 2026.03.29', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[4] },
+        { title: '崇渦に関するお知らせ 前編', meta: 'PVSF2026Sp · 2026.03.28', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[7] },
+        { title: '【短編アニメ】魔法少女vs改造人間', meta: 'PVSF2025Sp · 2025.03.30', state: '公開', dot: 'fa-solid fa-eye st-ic ok', thumb: T[5] },
+        { title: '【自主制作アニメ】めざした空の向こう側', meta: 'PVSF2025Sp · 2025.03.30', state: '非公開', dot: 'fa-solid fa-eye-slash st-ic mute', thumb: T[1] },
+      ],
+      collabs: [
+        { title: '祟渦に関するお知らせ 後編', meta: 'ホラー映画合作 · PVSF2026Sp', thumb: T[6] },
+        { title: 'Mitchie Mメドレー合作', meta: 'Mitchie Mメドレー合作 · PVSF2025S', thumb: T[3] },
+        { title: 'ホラー映画ロケ下見.mp4', meta: 'ホラー映画合作 · PVSF2025S', thumb: T[0] },
+      ],
+      chapters: [
+        { at: '1:42', body: 'このはの変身シーン、作画を全部描き直しました', video: '魔法少女 このは・グリモワール 最終決戦編', state: '公開', dot: 'fa-solid fa-eye st-ic ok' },
+        { at: '0:18', body: 'ロケ地の下見映像を担当', video: 'ホラー映画ロケ下見.mp4', state: '非公開', dot: 'fa-solid fa-eye-slash st-ic mute' },
+      ],
+      xids: named ? [
+        { id: '012345rty', name: 'おたこ', icon: T[2], state: 'アクティブ', dot: 'fa-solid fa-check st-ic ok' },
+        { id: 'otako_sub', name: 'おたこ(サブ)', icon: T[3], state: '承認待ち', dot: 'ms ms-pending_actions st-ic warn' },
+      ] : []
+    };
+  }
+}
+</script>
+</body>
+</html>

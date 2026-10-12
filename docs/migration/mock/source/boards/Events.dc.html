@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>イベント一覧</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+
+  <div class="wrap" style="padding-top: 56px;">
+    <h1 class="t-display">イベント</h1>
+
+    <form role="search" class="wrap-row ev-srch" style="gap: 8px; margin-top: 24px;" onSubmit="{{prevent}}">
+      <div class="seg" role="group" aria-label="イベントの状態">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for>
+      </div>
+      <span style="flex: 1;"></span>
+      <div class="field-i sm-field" style="width: 300px;">
+        <input type="search" class="select" aria-label="イベントを検索" placeholder="イベント名・説明・公開運営者" value="{{q}}" onInput="{{setQ}}" style="width: 100%; background-image: none; padding-left: 36px;">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true" style="bottom: 11px;"></i>
+      </div>
+      <span class="sel-i" title="並び替え"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>おすすめ順</option><option>応募締切順</option><option>開始日順</option><option>新着順</option></select></span>
+    </form>
+
+    <sc-if value="{{showFeature}}" hint-placeholder-val="{{true}}">
+      <a href="EventDetail.dc.html" class="ev-feat">
+        <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;">
+        <div class="stack" style="gap: 10px; min-width: 0;">
+          <span class="st t-sm"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>募集期間中</span>
+          <span class="t-h2">PVSF2026S</span>
+          <span class="meta-i t-sm"><span>2026.11.03 — 11.04</span><span>128 / 160 枠</span></span>
+          <div class="bar" style="max-width: 360px;"><i style="width: 80%;"></i></div>
+          <div class="dl dl-sm" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
+        </div>
+      </a>
+    </sc-if>
+
+    <sc-if value="{{isSearch}}" hint-placeholder-val="{{false}}">
+      <section class="sec" aria-labelledby="sr" style="margin-top: 48px;">
+        <h2 id="sr" class="t-h2" style="margin-bottom: 24px;">検索結果 <span class="t-num muted" style="font-weight: 400;">{{resultCount}}</span></h2>
+        <div class="grid-v3">
+          <sc-for list="{{results}}" as="e" hint-placeholder-count="3">
+            <a href="EventDetail.dc.html" class="ev-visual"><img src="{{e.img}}" alt=""><div class="row" style="gap: 12px; align-items: flex-start;"><img class="ev-icon" src="{{e.icon}}" alt=""><div class="stack" style="gap: 4px; min-width: 0;"><span style="font-size: 15px;">{{e.title}}</span><span class="row t-sm muted" style="gap: 12px;"><span class="st" style="color: var(--ink);"><i class="{{e.dot}}" aria-hidden="true"></i>{{e.status}}</span><span class="t-num">{{e.date}}</span></span></div></div></a>
+          </sc-for>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{notSearch}}" hint-placeholder-val="{{true}}">
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+        <section class="sec" aria-label="{{g.name}}" style="margin-top: 64px;">
+          <div class="sec-head" style="margin-bottom: 24px; align-items: center;">
+            <div class="row" style="gap: 12px;">
+              <sc-if value="{{g.icon}}" hint-placeholder-val="{{true}}"><img class="ev-icon" src="{{g.icon}}" alt="" style="width: 32px; height: 32px;"></sc-if>
+              <h2 class="t-h2">{{g.name}}</h2>
+              <span class="t-num muted t-sm">{{g.count}}</span>
+            </div>
+            <sc-if value="{{g.more}}" hint-placeholder-val="{{false}}"><a href="#" class="il t-sm muted">すべて表示<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></sc-if>
+          </div>
+          <div class="grid-v3">
+            <sc-for list="{{g.events}}" as="e" hint-placeholder-count="3">
+              <a href="EventDetail.dc.html" class="ev-visual"><img src="{{e.img}}" alt=""><div class="row" style="gap: 12px; align-items: flex-start;"><img class="ev-icon" src="{{e.icon}}" alt=""><div class="stack" style="gap: 4px; min-width: 0;"><span style="font-size: 15px;">{{e.title}}</span><span class="row t-sm muted" style="gap: 12px;"><span class="st" style="color: var(--ink);"><i class="{{e.dot}}" aria-hidden="true"></i>{{e.status}}</span><span class="t-num">{{e.date}}</span></span></div></div></a>
+            </sc-for>
+          </div>
+        </section>
+      </sc-for>
+    </sc-if>
+  </div>
+  <div class="foot-spacer"></div>
+  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'all', q: '' }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const S = this.state;
+    const st = { open: ['募集中','ms ms-event_available st-ic ok'], before: ['開催前','fa-solid fa-clock st-ic info'], held: ['開催済み','ms ms-inventory_2 st-ic mute'] };
+    const ev = (title, s, date, i) => ({ title, status: st[s][0], dot: st[s][1], key: s, date, img: T[(i + 6) % 8], icon: T[(i + 3) % 8] });
+    const pvsf = [ev('PVSF2026S','open','2026.11.03 — 11.04',0), ev('PVSF2026Sp','held','2026.03.27 — 03.28',1), ev('PVSF2025S','held','2025.08.29 — 08.30',2), ev('PVSF2025Sp','held','2025.03.29 — 03.30',3), ev('PVSF2024GW','held','2024.05.05 — 05.06',4), ev('PVSF2023R','held','2023.12.17',5)];
+    const collab = [ev('年越し合作 2026','before','2026.12.31',6), ev('夏休み創作島　創作島合作','held','2024.12.15',7), ev('年越し合作','held','2022.12.31',0), ev('OS-N合作','held','2022.08.21',1), ev('連投合作','held','2020.03.30',2)];
+    const other = [ev('PVSF まとめ動画','held','2019.12.28 —',3)];
+    const f = (list) => S.tab === 'all' ? list : list.filter(e => e.key === S.tab);
+    const groups = [
+      { name: 'PVSF', kind: '系列', kindIcon: 'fa-solid fa-link', icon: T[3], all: pvsf, total: 16 },
+      { name: '合作', kind: 'ジャンル', kindIcon: 'fa-solid fa-tag', icon: T[7], all: collab, total: 5 },
+      { name: 'その他のイベント', kind: '', kindIcon: '', icon: '', all: other, total: 1 },
+    ].map(g => { const events = f(g.all); return { ...g, events, count: String(S.tab === 'all' ? g.total : events.length).padStart(2, '0'), more: S.tab === 'all' && g.total > g.all.length }; }).filter(g => g.events.length);
+    const q = (S.q || '').trim();
+    const results = q ? [...pvsf, ...collab, ...other].filter(e => e.title.toLowerCase().includes(q.toLowerCase())) : [];
+    return {
+      theme: this.props.theme ?? 'dark', prevent: (e) => e.preventDefault(), q: S.q,
+      setQ: (e) => this.setState({ q: e.target.value }),
+      tabs: [['all','すべて'],['open','募集中'],['before','開催前'],['held','開催済み']].map(([id, label]) => ({ label, cls: S.tab === id ? 'on' : '', pick: () => this.setState({ tab: id }) })),
+      showFeature: !q && (S.tab === 'all' || S.tab === 'open'),
+      isSearch: !!q, notSearch: !q, results, resultCount: String(results.length).padStart(2, '0'), groups
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>X ID 申請</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="xlink" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head">
+      <div>
+        <h1 class="t-display">X ID 申請</h1>
+        <p class="muted">X ID連携申請を承認・却下します。統合操作は管理者画面に限定されます。</p>
+      </div>
+    </div>
+    <div class="dt" style="--cols: 100px 120px minmax(160px,1fr) minmax(160px,1fr) 110px minmax(220px,1.4fr); --minw: 0px;">
+      <div class="dt-h"><span>申請 ID</span><span>種別</span><span>申請 X ID</span><span>申請者</span><span>申請日時</span><span></span></div>
+      <sc-for list="{{reqs}}" as="r" hint-placeholder-count="3">
+        <div class="dt-r">
+          <span class="t-mono t-sm muted">{{r.id}}</span>
+          <span class="il t-sm"><i class="{{r.typeIcon}}" aria-hidden="true"></i>{{r.type}}</span>
+          <span class="row" style="gap: 8px;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 28px; height: 28px;"><span class="stack" style="gap: 0;"><span>@{{r.x}}</span><span class="sub">{{r.sub}}</span></span><a href="https://x.com/" class="ib sm" aria-label="X で確認"><i class="fa-solid fa-arrow-up-right-from-square"></i></a></span>
+          <span class="il t-sm"><i class="fa-brands fa-discord muted" aria-hidden="true"></i>{{r.discord}}</span>
+          <span class="t-num t-sm muted">{{r.at}}</span>
+          <span class="row" style="gap: 4px; justify-content: flex-end;">
+            <sc-if value="{{r.canAct}}" hint-placeholder-val="{{true}}">
+              <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{r.reject}}">却下</button>
+              <button type="button" class="fn-btn fn-btn--primary fn-btn--sm"><i class="fa-solid fa-check" aria-hidden="true"></i>承認</button>
+            </sc-if>
+            <sc-if value="{{r.adminOnly}}" hint-placeholder-val="{{false}}"><span class="t-sm muted il"><i class="fa-solid fa-lock" aria-hidden="true"></i>管理者が処理</span></sc-if>
+          </span>
+        </div>
+        <sc-if value="{{r.rejecting}}" hint-placeholder-val="{{false}}">
+          <div class="raised row" style="gap: 8px; padding: 12px 16px; margin-bottom: 2px;">
+            <span style="flex: 1;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="却下理由" placeholder="却下理由(任意・履歴に残る)"></x-import></span>
+            <button type="button" class="fn-btn fn-btn--danger fn-btn--sm" onClick="{{r.reject}}">却下する</button>
+          </div>
+        </sc-if>
+      </sc-for>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { rej: 'xr_8d02' }; }
+  renderVals() {
+    const R = [
+      { id: 'xr_8c11', type: 'X ID連携', typeIcon: 'fa-solid fa-link', x: 'otako_sub', sub: 'おたこ(サブ)', discord: 'otako', at: '10.02 12:10', icon: '/_blob/755d245a064a6f5935c3dccd9a941048', adminOnly: false },
+      { id: 'xr_8d02', type: 'X ID連携', typeIcon: 'fa-solid fa-link', x: 'sub_ajinori', sub: '味付け海苔', discord: 'ajinori', at: '10.03 08:40', icon: '/_blob/191c3939aefb326fc04fd3ccf6db83a9', adminOnly: false },
+      { id: 'xr_8d19', type: '旧別名申請', typeIcon: 'fa-solid fa-tag', x: 'who_watakushi', sub: '貴方', discord: 'anata', at: '10.03 21:02', icon: '/_blob/6ecfc7b6882f277d815f563e873f25ee', adminOnly: false },
+      { id: 'xr_8e40', type: 'X ID統合', typeIcon: 'ms ms-merge', x: 'otako_old', sub: '→ @012345rty', discord: 'otako', at: '10.04 09:15', icon: '/_blob/fc027fe6fe3a001a22a1933270ce72b9', adminOnly: true }
+    ];
+    return {
+      theme: this.props.theme ?? 'dark',
+      reqs: R.map(r => ({ ...r, canAct: !r.adminOnly, rejecting: this.state.rej === r.id, reject: () => this.setState({ rej: this.state.rej === r.id ? null : r.id }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

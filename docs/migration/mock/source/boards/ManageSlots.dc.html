@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>枠管理</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="slots" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="slots" hint-size="100%,96px"></dc-import>
+
+    <details class="raised" style="margin-top: 32px; padding: 20px 24px;">
+      <summary class="il" style="cursor: pointer;"><i class="fa-solid fa-plus" aria-hidden="true"></i>枠を一括生成</summary>
+      <form class="stack" style="gap: 16px; margin-top: 20px;" onSubmit="{{prevent}}">
+        <div class="seg" role="group" aria-label="枠タイプ"><button type="button" class="{{genTime}}" onClick="{{setGenTime}}"><i class="fa-regular fa-clock" aria-hidden="true"></i>時間枠</button><button type="button" class="{{genCount}}" onClick="{{setGenCount}}"><i class="fa-solid fa-list-ol" aria-hidden="true"></i>件数枠</button></div>
+        <sc-if value="{{isGenTime}}" hint-placeholder-val="{{true}}">
+          <div class="stack" style="gap: 18px;">
+            <div class="field"><span>日付(開催期間から選択)</span>
+              <div class="wrap-row" style="gap: 4px;"><sc-for list="{{days}}" as="d" hint-placeholder-count="2"><button type="button" class="{{d.cls}}" onClick="{{d.pick}}"><span class="t-num">{{d.md}}</span><span class="muted">{{d.dow}}</span><span class="t-sm muted">{{d.label}}</span></button></sc-for><button type="button" class="chip" style="height: 44px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>別の日</button></div>
+            </div>
+            <div class="{{tpCls}}">
+              <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <span class="t-label muted">時間帯</span>
+                <span class="il t-sm" style="color: var(--ink); flex: 1;"><i class="{{pickStep.icon}}" aria-hidden="true"></i>{{pickStep.text}}</span>
+                <button type="button" class="ib sm" aria-label="{{focusLabel}}" onClick="{{toggleFocus}}"><i class="{{focusIcon}}"></i></button>
+              </div>
+              <div class="tp-rows">
+                <sc-for list="{{tpRows}}" as="r" hint-placeholder-count="2">
+                  <div class="tp-row">
+                    <span class="tp-lbl t-num">{{r.label}}</span>
+                    <div class="tp-track" onPointerDown="{{r.down}}" onPointerMove="{{r.move}}" onPointerUp="{{r.up}}" onPointerLeave="{{leave}}" aria-label="{{r.label}} の時間帯">
+                      <sc-for list="{{r.ticks}}" as="h" hint-placeholder-count="15"><span class="tp-h" style="--p: {{h.p}};">{{h.label}}</span></sc-for>
+                      <sc-for list="{{r.ex}}" as="x" hint-placeholder-count="1"><span class="tp-ex" style="--p: {{x.p}}; --w: {{x.w}};"></span></sc-for>
+                      <sc-if value="{{r.sel.show}}" hint-placeholder-val="{{true}}"><span class="{{r.sel.cls}}" style="--p: {{r.sel.p}}; --w: {{r.sel.w}};"><span class="rb-len t-num">{{r.sel.label}}</span></span></sc-if>
+                      <sc-if value="{{r.cur.show}}" hint-placeholder-val="{{false}}"><span class="tp-cur" style="--p: {{r.cur.p}};"><span class="t-num">{{r.cur.label}}</span></span></sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <span class="t-sm muted">PC:開始と終了をクリック / スマホ:押したままなぞって離す。24時以降は「25:00(翌1:00)」で表します。縦長の画面では縦向きに切り替わります。</span>
+              <div class="row" style="gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                <input class="tinput t-num" value="{{from}}" aria-label="開始時刻" onInput="{{setFrom}}"><span class="muted">–</span><input class="tinput t-num" value="{{to}}" aria-label="終了時刻" onInput="{{setTo}}">
+                <span class="t-sm muted">「1830」「18.5」「18時半」も可</span>
+                <span style="flex: 1;"></span>
+                <span class="t-label muted">枠の長さ</span>
+                <span class="wrap-row" style="gap: 2px;"><sc-for list="{{lens}}" as="l" hint-placeholder-count="5"><button type="button" class="{{l.cls}}" onClick="{{l.pick}}">{{l.label}}</button></sc-for></span>
+              </div>
+            </div>
+            <div class="raised stack" style="gap: 10px; padding: 16px 20px;" aria-live="polite">
+              <span class="row" style="gap: 12px; flex-wrap: wrap;"><b class="t-num" style="font-size: 18px;">{{preview.count}} 枠</b><span class="t-sm muted">{{preview.text}}</span><span style="flex: 1;"></span><sc-if value="{{preview.warn}}" hint-placeholder-val="{{false}}"><span class="il t-sm" style="color: var(--warning);"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>{{preview.warn}}</span></sc-if></span>
+              <div class="wrap-row" style="gap: 2px;"><sc-for list="{{preview.parts}}" as="pp" hint-placeholder-count="2"><span class="chip" style="cursor: default;">{{pp}}</span></sc-for></div>
+              <span class="t-sm muted">連続した枠は1つの部になります。前の枠との間が「部の分割閾値」(15分)以上空くと新しい部になります。</span>
+            </div>
+            <div><button type="submit" class="fn-btn fn-btn--primary">{{preview.count}} 枠を生成</button></div>
+          </div>
+        </sc-if>
+        <sc-if value="{{isGenCount}}" hint-placeholder-val="{{false}}">
+          <div class="wrap-row" style="gap: 12px; align-items: flex-end;">
+            <x-import component-from-global-scope="FlameNode.TextField" label="作成枠数 *" type="number" default-value="20" style="width: 120px;"></x-import>
+            <x-import component-from-global-scope="FlameNode.TextField" label="開始番号" type="number" default-value="1" style="width: 120px;"></x-import>
+            <x-import component-from-global-scope="FlameNode.TextField" label="ラベル接頭辞" placeholder="例: No." style="width: 160px;"></x-import>
+            <x-import component-from-global-scope="FlameNode.TextField" label="一括ラベル" placeholder="例: 1部" style="width: 160px;"></x-import>
+            <button type="submit" class="fn-btn fn-btn--primary">一括生成</button>
+          </div>
+        </sc-if>
+      </form>
+    </details>
+
+    <div class="wrap-row" style="gap: 8px; margin: 32px 0 16px;">
+      <div class="wrap-row t-sm muted" style="gap: 20px;">
+        <span class="st"><span class="dot ok"></span>空き</span>
+        <span class="st"><span class="dot info"></span>確保済み</span>
+        <span class="st"><span class="dot"></span>提出済み</span>
+      </div>
+      <span style="flex: 1;"></span>
+      <span class="sel-i" title="枠の状態"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="枠の状態"><option>すべて</option><option>空き</option><option>確保済み</option><option>提出済み</option></select></span>
+      <button type="button" class="{{selBtn}}" onClick="{{toggleSel}}"><i class="fa-regular fa-square-check" aria-hidden="true"></i>選択</button>
+      <button type="button" class="ib" aria-label="空き枠を全削除"><i class="fa-solid fa-broom"></i></button>
+    </div>
+    <sc-if value="{{selecting}}" hint-placeholder-val="{{false}}">
+      <div class="row" style="gap: 8px; padding: 10px 16px; background: var(--surface-active); margin-bottom: 8px; position: sticky; top: 0; z-index: 2;">
+        <span class="t-sm"><b class="t-num">3</b> 枠を選択中</span>
+        <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">すべて選択</button>
+        <span style="flex: 1;"></span>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">解放</button>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>作品のみ解放</button>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">強制解放</button>
+        <button type="button" class="fn-btn fn-btn--danger fn-btn--sm"><i class="fa-regular fa-trash-can" aria-hidden="true"></i>削除</button>
+      </div>
+    </sc-if>
+    <div class="parts" role="region" aria-label="枠一覧" tabindex="0">
+      <sc-for list="{{dayCols}}" as="p" hint-placeholder-count="1">
+        <section class="part">
+          <header><span class="t-num">{{p.label}}</span><span class="t-sm muted t-num">{{p.filled}}</span></header>
+          <sc-for list="{{p.rows}}" as="r" hint-placeholder-count="12">
+            <sc-if value="{{r.isGap}}" hint-placeholder-val="{{false}}"><div class="pgap"><span>休憩 <span class="t-num">{{r.gapRange}}</span></span></div></sc-if>
+            <sc-if value="{{r.isPart}}" hint-placeholder-val="{{false}}"><div class="plabel row" style="justify-content: space-between; padding-right: 0;"><span>{{r.partLabel}} <span class="t-num">{{r.partFilled}}</span></span><button type="button" class="ib sm" aria-label="{{r.editLabel}}"><i class="fa-solid fa-pen"></i></button></div></sc-if>
+            <sc-if value="{{r.isSlot}}" hint-placeholder-val="{{true}}">
+            <div class="srow2">
+              <span class="tm">{{r.time}}</span>
+              <div class="{{r.slCls}}" style="padding-right: 0;">
+                <sc-if value="{{r.taken}}" hint-placeholder-val="{{true}}"><img src="{{r.icon}}" alt=""></sc-if>
+                <span class="nm" style="color: {{r.nameColor}};">{{r.who}}</span>
+                <span class="{{r.dot}}" title="{{r.state}}" aria-label="{{r.state}}"></span>
+                <sc-if value="{{selecting}}" hint-placeholder-val="{{false}}"><input type="checkbox" aria-label="{{r.time}} を選択" checked="{{r.checked}}" style="accent-color: var(--ink); width: 16px; height: 16px; margin: 0 8px;"></sc-if>
+                <button type="button" class="ib sm" aria-label="{{r.time}} の枠を操作" onClick="{{r.openMenu}}"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+              </div>
+            </div>
+            <sc-if value="{{r.menu}}" hint-placeholder-val="{{false}}">
+              <div class="raised stack" style="gap: 2px; padding: 8px; margin: 0 0 2px 64px;">
+                <span class="t-sm muted" style="padding: 4px 8px;">{{r.who}} · 名義 @{{r.x}}</span>
+                <sc-for list="{{r.actions}}" as="x" hint-placeholder-count="3"><button type="button" class="tl" onClick="{{closeMenu}}"><i class="{{x.icon}}" aria-hidden="true"></i>{{x.label}}</button></sc-for>
+              </div>
+            </sc-if>
+            </sc-if>
+          </sc-for>
+        </section>
+      </sc-for>
+    </div>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { gen: 'time', sel: false, menu: 1, day: 1, from: '18:00', to: '19:30', len: 6, phase: 'done', hov: null }; }
+  renderVals() {
+    const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
+    const fmt = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    const names = ['幼虫', 'おたこ', '', '新概念', '', 'スティックのり', 'lalaClione', '', 'あいこーすふぃあ', 'hato', '', 'てつどうふぁん', '', 'おたこ', '', '新概念', 'スティックのり', '', '', 'lalaClione', '', '', '味付け海苔', ''];
+    const P = [['1日目 第1部', 18 * 60 + 12], ['1日目 第2部', 20 * 60], ['1日目 第3部', 22 * 60 + 30]];
+    const p0end = (pi) => fmt(P[pi - 1][1] + 7 * 6);
+    const parts = P.map((p, pi) => {
+      const rows = [];
+      for (let k = 0; k < 8; k++) {
+        const n = names[pi * 8 + k]; const idx = pi * 8 + k; const sub = n && idx % 3 !== 1;
+        rows.push({ time: fmt(p[1] + k * 6), taken: !!n, who: n || '空き', nameColor: n ? 'var(--ink)' : 'var(--ink-muted)', icon: T[(idx + 2) % 8], state: !n ? '空き' : sub ? '提出済み' : '確保済み', dot: !n ? 'dot ok' : sub ? 'dot' : 'dot info', slCls: n ? 'sl taken' : 'sl' });
+      }
+      return { label: p[0], filled: rows.filter((r) => r.taken).length + ' / ' + rows.length, rows };
+    });
+    const S = this.state;
+    parts.forEach((p, pi) => p.rows.forEach((r, k) => {
+      const id = pi * 8 + k;
+      r.x = r.who === 'おたこ' ? '012345rty' : 'MusiVirus';
+      r.checked = S.sel && (id === 0 || id === 1 || id === 3);
+      r.menu = S.menu === id;
+      r.openMenu = () => this.setState({ menu: S.menu === id ? null : id });
+      r.actions = r.state === '提出済み' ? [{ icon: 'fa-solid fa-arrow-up-right-from-square', label: '作品を見る' }, { icon: 'fa-solid fa-rotate-left', label: '作品のみ解放' }, { icon: 'fa-solid fa-unlock-keyhole', label: '強制解放' }] : r.state === '確保済み' ? [{ icon: 'fa-solid fa-lock-open', label: '解放' }] : [{ icon: 'fa-regular fa-trash-can', label: '削除' }];
+    }));
+    // 同じ日の部は1列にまとめ、部の間に休憩行(SlotGrid.tsx と同じ)
+    const dayCols = [{ label: '11/03(火)', rows: parts.flatMap((p, pi) => [
+      ...(pi > 0 ? [{ isGap: true, isPart: false, isSlot: false, gapRange: p0end(pi) + ' – ' + fmt(P[pi][1]) }] : []),
+      { isPart: true, isGap: false, isSlot: false, partLabel: p.label.replace(/^\d+日目\s*/, ''), partFilled: p.filled, editLabel: p.label + ' を編集' },
+      ...p.rows.map((r) => ({ ...r, isSlot: true, isGap: false, isPart: false }))
+    ]), filled: parts.reduce((a, p) => a + p.rows.filter((r) => r.taken).length, 0) + ' / ' + parts.reduce((a, p) => a + p.rows.length, 0) }];
+    const toMin = (v) => { v = String(v).trim().replace(/[時]/, ':').replace('半', '30').replace('分', ''); let h, m; if (/^\d{3,4}$/.test(v)) { h = +v.slice(0, -2); m = +v.slice(-2); } else if (/^\d+(\.\d+)?$/.test(v)) { h = Math.floor(+v); m = Math.round((+v - h) * 60); } else { const q = v.split(':'); h = +q[0]; m = +(q[1] || 0); } return (isNaN(h) || isNaN(m)) ? null : h * 60 + m; };
+    const f2 = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    const A = toMin(S.from), B = toMin(S.to), L = S.len;
+    
+    const valid = A != null && B != null && B > A && S.phase !== 'end';
+    const cnt = valid ? Math.floor((B - A) / L) : 0;
+    const partsP = valid ? [(S.day === 0 ? '1日目 第4部 ' : '2日目 第1部 ') + f2(A) + '–' + f2(A + cnt * L)] : [];
+    const overlap = valid && A < 23 * 60 && B > 18 * 60 && S.day === 0;
+    return { theme: this.props.theme ?? 'dark', prevent: (e) => e.preventDefault(), parts,
+      dayCols,
+      days: [['11/03','火','1日目'],['11/04','水','2日目']].map(([md, dow, label], i) => ({ md, dow, label, cls: S.day === i ? 'chip on daychip' : 'chip daychip', pick: () => this.setState({ day: i }) })),
+      ...(() => {
+        const snap = (m) => Math.max(0, Math.min(30 * 60, Math.round(m / L) * L));
+        const ROWS = [[0, 15 * 60, '0 – 15時'], [15 * 60, 15 * 60, '15 – 翌6時']];
+        const posOf = (e, base, span) => { const r = e.currentTarget.getBoundingClientRect(); const v = r.height > r.width ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width; return snap(base + Math.max(0, Math.min(1, v)) * span); };
+        const lab = (m) => m >= 24 * 60 ? f2(m) + '(翌' + f2(m - 24 * 60).replace(/^0/, '') + ')' : f2(m);
+        const ph = S.phase, hov = S.hov;
+        let a = A, b = B;
+        if (ph === 'end' && hov != null) { a = Math.min(A, hov); b = Math.max(A, hov); }
+        if (ph === 'end' && hov == null) { b = a; }
+        const showSel = (ph === 'done' && valid) || ph === 'end';
+        const commit = (m) => { if (S.phase === 'end') { const lo = Math.min(A, m), hi = Math.max(A, m); this.setState({ from: f2(lo), to: f2(hi === lo ? lo + L : hi), phase: 'done', drag: false }); } else { this.setState({ from: f2(m), to: '', phase: 'end', down: m, drag: true }); } };
+        const tpRows = ROWS.map(([base, span, label]) => {
+          const P = (m) => ((m - base) / span * 100) + '%';
+          const lo = Math.max(a, base), hi = Math.min(b, base + span);
+          const ticks = []; for (let h = 0; h < 15; h++) { const m = base + h * 60; ticks.push({ p: P(m), label: (m / 60 >= 24 ? (m / 60) : m / 60) + '' }); }
+          const exS = 18 * 60, exE = 23 * 60;
+          const ex = (S.day === 0 && exE > base && exS < base + span) ? [{ p: P(Math.max(exS, base)), w: ((Math.min(exE, base + span) - Math.max(exS, base)) / span * 100) + '%' }] : [];
+          return {
+            label, ticks, ex,
+            sel: { show: showSel && hi > lo, cls: ph === 'end' ? 'tp-sel live' : 'tp-sel', p: P(lo), w: ((hi - lo) / span * 100) + '%', label: (b - a) > 0 && lo === a ? Math.floor((b - a) / L) + '枠 · ' + (b - a) + '分' : '' },
+            cur: { show: hov != null && hov >= base && hov <= base + span, p: P(hov ?? base), label: lab(hov ?? base) },
+            down: (e) => { const m = posOf(e, base, span); if (e.currentTarget.setPointerCapture) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {} } this.setState({ hov: m }); if (S.phase !== 'end') commit(m); },
+            move: (e) => this.setState({ hov: posOf(e, base, span) }),
+            up: (e) => { const m = posOf(e, base, span); if (S.phase === 'end' && (S.drag ? Math.abs(m - (S.down ?? m)) >= L : true)) commit(m); else if (S.phase === 'end') this.setState({ drag: false }); }
+          };
+        });
+        return {
+          tpRows, tpCls: 'tpick' + (S.focus ? ' focus' : ''), focusLabel: S.focus ? '元のサイズに戻す' : '横幅いっぱいに広げる', focusIcon: S.focus ? 'fa-solid fa-compress' : 'fa-solid fa-expand', toggleFocus: () => this.setState({ focus: !S.focus }),
+          pickStep: ph === 'end' ? { icon: 'fa-solid fa-2', text: '終了位置をクリック(または離す) · ' + lab(A) + ' から' } : (valid ? { icon: 'fa-solid fa-check', text: lab(A) + ' – ' + lab(B) + ' · もう一度押すと選び直し' } : { icon: 'fa-solid fa-1', text: '開始位置をクリック' }),
+          leave: () => this.setState({ hov: null })
+        };
+      })(),
+      from: S.from, to: S.to, setFrom: (e) => this.setState({ from: e.target.value }), setTo: (e) => this.setState({ to: e.target.value }),
+      lens: [3, 5, 6, 10, 15].map(n => ({ label: n + '分', cls: L === n ? 'chip on' : 'chip', pick: () => this.setState({ len: n }) })),
+      preview: { count: cnt, text: valid ? (['11/03(火)','11/04(水)'][S.day] + ' ' + f2(A) + ' – ' + f2(A + cnt * L) + ' · ' + L + '分ごと' + ((B - A) % L ? '(端数 ' + ((B - A) % L) + '分は作りません)' : '')) : '開始と終了の時刻を入れてください', parts: partsP, warn: overlap ? '既存の枠と時間が重なっています(重複分は作成されません)' : '' },
+      genTime: S.gen === 'time' ? 'on' : '', genCount: S.gen === 'count' ? 'on' : '', isGenTime: S.gen === 'time', isGenCount: S.gen === 'count',
+      setGenTime: () => this.setState({ gen: 'time' }), setGenCount: () => this.setState({ gen: 'count' }),
+      selecting: S.sel, selBtn: S.sel ? 'fn-btn fn-btn--secondary fn-btn--sm on' : 'fn-btn fn-btn--tertiary fn-btn--sm', toggleSel: () => this.setState({ sel: !S.sel }),
+      closeMenu: () => this.setState({ menu: null }) };
+  }
+}
+</script>
+</body>
+</html>

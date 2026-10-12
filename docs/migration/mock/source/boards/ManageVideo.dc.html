@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品審査</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="ManageNav" active="videos" hint-size="100%,900px"></dc-import></div>
+  <main class="c-main">
+    <dc-import name="ManageEventHead" tab="videos" hint-size="100%,96px"></dc-import>
+    <div class="row" style="gap: 8px; margin-top: 20px; flex-wrap: wrap;">
+      <a href="ManageVideos.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品一覧</a>
+      <span style="flex: 1;"></span>
+      <span class="t-sm muted t-num">公開待ち 1 / 6</span>
+      <button type="button" class="ib sm" aria-label="前の作品(K)"><i class="fa-solid fa-chevron-up"></i></button>
+      <button type="button" class="ib sm" aria-label="次の作品(J)"><i class="fa-solid fa-chevron-down"></i></button>
+    </div>
+    <h1 class="t-h1" style="margin: 8px 0 0;">崇渦に関するお知らせ 前編</h1>
+    <nav class="subnav" aria-label="作品の運営メニュー" style="margin-top: 16px;">
+      <sc-for list="{{vtabs}}" as="t" hint-placeholder-count="6"><a href="#" class="il" aria-current="{{t.cur}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}<span class="t-num muted">{{t.n}}</span></a></sc-for>
+    </nav>
+
+    <sc-if value="{{tReview}}" hint-placeholder-val="{{true}}">
+    <div class="split" style="margin-top: 16px;">
+      <div class="main stack" style="gap: 24px;">
+        <img class="cover" src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="プレイヤー">
+        <div class="wrap-row" style="gap: 12px; justify-content: space-between;">
+          <span class="t-h2">崇渦に関するお知らせ 前編</span>
+          <span class="st"><span class="dot warn"></span>公開待ち</span>
+        </div>
+        <div class="meta-i" style="font-size: 14px;">
+          <span style="color: var(--ink);"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" style="width: 20px; height: 20px;">おたこ</span>
+          <span><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>012345rty</span>
+          <span class="t-num"><i class="ms ms-event_seat" aria-hidden="true"></i>11.04 14:40</span>
+          <span class="t-num"><i class="fa-solid fa-arrow-up-from-bracket" aria-hidden="true"></i>10.04 11:02</span>
+          <a href="https://www.youtube.com/" style="color: var(--brand-text);"><i class="fa-brands fa-youtube" aria-hidden="true"></i>xxxxxxxxxxx</a>
+        </div>
+        <dl class="kv" style="font-size: 14px;">
+          <dt class="il"><i class="fa-regular fa-comment" aria-hidden="true"></i>紹介コメント</dt><dd>ホラー映画合作の前編です。</dd>
+          <dt class="il"><i class="fa-solid fa-music" aria-hidden="true"></i>楽曲</dt><dd class="muted">映画のため楽曲はありません</dd>
+          <dt class="il"><i class="ms ms-auto_awesome" aria-hidden="true"></i>使用ソフト</dt><dd>AviUtl, Blender</dd>
+          </dl>
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 8px;">メンバー <span class="t-num muted" style="font-weight: 400;">3</span></h2>
+          <div class="dt" style="--cols: minmax(160px,1fr) 120px 100px; --minw: 0px;">
+            <div class="dt-h"><span>名前</span><span>役割</span><span>チャプター</span></div>
+            <div class="dt-r"><span class="stack" style="gap: 0;"><span>おたこ</span><span class="sub">@012345rty</span></span><span>脚本・映像</span><span class="t-num">0:00</span></div>
+            <div class="dt-r"><span class="stack" style="gap: 0;"><span>新概念</span><span class="sub">@metameta194</span></span><span>撮影</span><span class="t-num">2:10</span></div>
+            <div class="dt-r"><span class="stack" style="gap: 0;"><span>味付け海苔</span><span class="sub">@sub_ajinori</span></span><span>出演</span><span class="muted">なし</span></div>
+          </div>
+        </section>
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 12px;">追加質問への回答</h2>
+          <dl class="kv" style="font-size: 14px;">
+            <dt>音量調整は必要ですか?</dt><dd>不要</dd>
+            <dt>楽曲・素材の権利確認</dt><dd class="il"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>確認済み</dd>
+          </dl>
+        </section>
+      </div>
+      <aside class="side stack" style="gap: 24px;">
+        <section class="raised stack" style="gap: 16px; padding: 24px;">
+          <h2 class="t-h3">審査</h2>
+          <span class="t-sm muted">必須項目と権利確認はそろっています。</span>
+          <button type="button" class="fn-btn fn-btn--primary"><i class="fa-solid fa-check" aria-hidden="true"></i>承認して公開待ちへ</button>
+        </section>
+        <section class="stack" style="gap: 12px;">
+          <h2 class="t-h3">公開状態を変更</h2>
+          <label class="field"><span>変更先ステータス</span><select class="select" onChange="{{setStatus}}"><option value="pending">審査待ち</option><option value="public">公開</option><option value="private">非公開</option><option value="voided">無効化</option></select></label>
+          <sc-if value="{{isVoid}}" hint-placeholder-val="{{false}}">
+            <label class="field"><span>無効化カテゴリ</span><select class="select"><option>X ID 不正 (x_id_invalid)</option><option>重複投稿</option><option>投稿者による取り下げ (withdrawn_by_creator)</option><option>運営判断 (operator_decision)</option><option>期限切れ (expired)</option></select></label>
+            <x-import component-from-global-scope="FlameNode.TextField" label="理由(必須)" multiline="{{yes}}" placeholder="例: 重複投稿のため無効化 / X ID の本人確認が必要"></x-import>
+          </sc-if>
+          <div><button type="button" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-check" aria-hidden="true"></i>適用</button></div>
+          <a href="VideoEdit.dc.html" class="il t-sm" style="color: var(--brand-text);"><i class="fa-solid fa-pen" aria-hidden="true"></i>運営として作品を編集</a>
+        </section>
+        <section>
+          <h2 class="t-h3" style="margin-bottom: 8px;">履歴</h2>
+          <div class="stack t-sm" style="gap: 8px;">
+            <span class="row" style="gap: 8px;"><span class="dot warn"></span>提出<span class="muted t-num" style="margin-left: auto;">10.04 11:02</span></span>
+            <span class="row" style="gap: 8px;"><span class="dot info"></span>枠確保<span class="muted t-num" style="margin-left: auto;">09.14 10:22</span></span>
+          </div>
+        </section>
+      </aside>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{tEdit}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 16px; margin-top: 24px; max-width: 720px;">
+        <p class="muted" style="margin: 0;">運営権限で作品情報を編集します。投稿者の画面と同じフォームを「運営として」モードで開きます。提出主体・YouTube ID・公開状態など運営だけが変えられる項目も編集できます。</p>
+        <div class="wrap-row" style="gap: 2px;">
+          <a href="VideoEdit.dc.html" class="raised stack" style="gap: 6px; padding: 16px; flex: 1 1 200px;"><i class="fa-solid fa-film" aria-hidden="true"></i><span>作品情報</span><span class="t-sm muted">タイトル・楽曲・紹介文</span></a>
+          <a href="VideoEdit.dc.html" class="raised stack" style="gap: 6px; padding: 16px; flex: 1 1 200px;"><i class="fa-solid fa-user" aria-hidden="true"></i><span>投稿者情報</span><span class="t-sm muted">表示名・アイコン・SNS</span></a>
+          <a href="VideoEdit.dc.html" class="raised stack" style="gap: 6px; padding: 16px; flex: 1 1 200px;"><i class="fa-brands fa-youtube" aria-hidden="true"></i><span>YouTube・提出主体</span><span class="t-sm muted">運営だけが変更可能</span></a>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{tMembers}}" hint-placeholder-val="{{false}}">
+      <div style="margin-top: 24px;"><dc-import name="MemberEditor" hint-size="100%,620px"></dc-import></div>
+    </sc-if>
+
+    <sc-if value="{{tPerm}}" hint-placeholder-val="{{false}}">
+      <div class="stack" style="gap: 12px; margin-top: 24px; max-width: 880px;">
+        <div class="dt" style="--cols: minmax(200px,1.4fr) 120px minmax(160px,1fr) 48px; --minw: 0px;">
+          <div class="dt-h"><span>編集できる人</span><span>種別</span><span>状態</span><span></span></div>
+          <div class="dt-r"><span class="stack" style="gap: 0;"><span>おたこ</span><span class="sub">@012345rty · 作者</span></span><span class="t-sm">公開メンバー</span><span class="st t-sm"><span class="dot ok"></span>編集可能</span><span></span></div>
+          <div class="dt-r"><span class="stack" style="gap: 0;"><span>新概念</span><span class="sub">@metameta194</span></span><span class="t-sm">公開メンバー</span><span class="st t-sm"><span class="dot ok"></span>編集可能</span><button type="button" class="ib sm" aria-label="権限を解除"><i class="fa-solid fa-user-minus"></i></button></div>
+          <div class="dt-r"><span class="stack" style="gap: 0;"><span>味付け海苔</span><span class="sub">@sub_ajinori</span></span><span class="t-sm">公開メンバー</span><span class="st t-sm"><span class="dot info"></span>権限付与済み · X ID連携待ち</span><button type="button" class="ib sm" aria-label="権限を解除"><i class="fa-solid fa-user-minus"></i></button></div>
+        </div>
+        <a href="VideoPermissions.dc.html" class="il t-sm" style="color: var(--brand-text);"><i class="fa-solid fa-user-plus" aria-hidden="true"></i>編集できる人を追加・通知する</a>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{tMod}}" hint-placeholder-val="{{false}}">
+      <div class="split" style="margin-top: 24px; gap: 32px;">
+        <div class="main stack" style="gap: 2px;">
+          <div class="raised stack" style="gap: 8px; padding: 16px 20px;">
+            <span class="row" style="gap: 12px;"><span class="st"><span class="dot warn"></span>対応中</span><span class="il t-sm"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>権利・楽曲・素材確認</span><span style="flex: 1;"></span><span class="t-sm t-num muted">10.10 まで</span></span>
+            <span class="t-sm">公開理由:素材の利用条件を確認中です</span>
+            <span class="t-sm muted">運営メモ:ロケ地の撮影許可を投稿者に確認</span>
+            <div class="row" style="gap: 8px; margin-top: 4px;"><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-solid fa-check" aria-hidden="true"></i>解決</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">却下</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">期限を延長</button></div>
+          </div>
+        </div>
+        <form class="side raised stack" style="gap: 12px; padding: 20px;" onSubmit="{{prevent}}">
+          <span class="t-label muted">ケースを作成</span>
+          <div class="wrap-row" style="gap: 2px;"><sc-for list="{{modTypes}}" as="m" hint-placeholder-count="5"><button type="button" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true"></i>{{m.label}}</button></sc-for></div>
+          <x-import component-from-global-scope="FlameNode.TextField" label="公開理由(投稿者に表示)" placeholder="例: 楽曲の利用許諾を確認中です"></x-import>
+          <x-import component-from-global-scope="FlameNode.TextField" label="運営メモ(運営のみ)" placeholder="任意"></x-import>
+          <div class="prow"><span class="t-label muted">期限</span><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">3日</button><button type="button" class="chip on">7日</button><button type="button" class="chip">14日</button><button type="button" class="chip">なし</button></span></div>
+          <label class="field"><span>作品の状態</span><select class="select"><option>変更しない</option><option>一時的に公開停止(無効化)</option><option>公開待ちに戻す</option></select></label>
+          <button type="submit" class="fn-btn fn-btn--primary fn-btn--sm">ケースを作成</button>
+        </form>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{tHistory}}" hint-placeholder-val="{{false}}">
+      <div class="dt" style="--cols: 112px 88px minmax(140px,1fr) minmax(220px,1.6fr) 96px; --minw: 0px; margin-top: 24px;">
+        <div class="dt-h"><span>日時</span><span>操作</span><span>実行者</span><span>変更</span><span></span></div>
+        <div class="dt-r"><span class="t-num muted">10.04 11:02</span><span class="il t-sm"><i class="fa-solid fa-pen" aria-hidden="true"></i>更新</span><span>おたこ</span><span class="t-sm">YouTube URL を設定</span><a href="ManageHistory.dc.html" class="il t-sm" style="justify-self: end;">差分<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+        <div class="dt-r"><span class="t-num muted">10.03 22:40</span><span class="il t-sm"><i class="fa-solid fa-pen" aria-hidden="true"></i>更新</span><span>新概念</span><span class="t-sm">メンバー 2 人を追加、チャプター 0:00 / 2:10</span><a href="ManageHistory.dc.html" class="il t-sm" style="justify-self: end;">差分<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+        <div class="dt-r"><span class="t-num muted">10.01 21:12</span><span class="il t-sm"><i class="fa-solid fa-plus" aria-hidden="true"></i>作成</span><span>おたこ</span><span class="t-sm">枠 11.04 14:40 に提出</span><span></span></div>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"tab":{"editor":"enum","options":["review","edit","members","perm","mod","history"],"default":"review"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { st: 'pending', tab: (p && p.tab) || 'review', mt: 'rights' }; }
+  renderVals() {
+    const t = this.state.tab;
+    const tabs = [['review','審査','fa-solid fa-gavel',''],['edit','内容を編集','fa-solid fa-pen',''],['members','メンバー','fa-solid fa-user-group','3'],['perm','編集権限','ms ms-manage_accounts','3'],['mod','モデレーション','fa-solid fa-flag','1'],['history','履歴','fa-solid fa-clock-rotate-left','']];
+    return { theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(), isVoid: this.state.st === 'voided', setStatus: (e) => this.setState({ st: e.target.value }),
+      vtabs: tabs.map(([id, label, icon, n]) => ({ label, icon, n, cur: t === id ? 'page' : 'false', pick: (e) => { e.preventDefault(); this.setState({ tab: id }); } })),
+      tReview: t === 'review', tEdit: t === 'edit', tMembers: t === 'members', tPerm: t === 'perm', tMod: t === 'mod', tHistory: t === 'history',
+      modTypes: [['rights','権利・素材','fa-solid fa-scale-balanced'],['duplicate','重複投稿','fa-regular fa-clone'],['void','一時停止・確認','fa-solid fa-pause'],['x_reapply','X ID再申請','fa-solid fa-at'],['operator','運営判断','fa-solid fa-gavel']].map(([id, label, icon]) => ({ label, icon, cls: this.state.mt === id ? 'chip on' : 'chip', pick: () => this.setState({ mt: id }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

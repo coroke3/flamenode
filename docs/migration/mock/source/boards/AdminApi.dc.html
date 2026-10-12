@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>作品情報出力API</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="fn.css">
+<link rel="stylesheet" href="fa/css/all.min.css">
+<link rel="stylesheet" href="ds/flamenode/components/bundle.css">
+<script src="ds/flamenode/components/bundle.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("/_blob/e1b2acd2ddb6c6ef8a2628083a3dee18") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/4f51ad00912829d7c0531a7d81ec8ce6") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Brands";font-style:normal;font-weight:400;font-display:block;src:url("/_blob/a1bab24d40f4d7535290494cddfa132d") format("woff2")}
+@font-face{font-family:"Jost";font-weight:400;font-display:swap;src:url("/_blob/95c94be75698a120789b2f605087cf65") format("woff2")}
+@font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
+@font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0;background:#000}</style>
+</helmet>
+<div class="p-root" data-theme="{{theme}}" lang="ja">
+<div class="c-layout">
+  <div class="c-side"><dc-import name="AdminNav" active="api" hint-size="100%,1240px"></dc-import></div>
+  <main class="c-main">
+    <div class="c-head"><div><h1 class="t-display">作品情報出力API</h1><p class="muted">イベント単位で公開作品情報リンクを発行します。データ形式と更新方式を組み合わせて選べます。</p></div></div>
+
+    <form class="row" style="gap: 8px; flex-wrap: wrap;" onSubmit="{{prevent}}">
+      <span class="sel-i"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><select class="select i" aria-label="公開イベント" required style="min-width: 320px;"><option value="">公開イベントを選択</option><option>PVSF2026Sp (PVSF2026Sp) / 発行済み</option><option>PVSF2025S (PVSF2025S) / 発行済み</option><option>夏休み創作島　創作島合作 (SummerIsland)</option><option>PVSF2024GW (PVSF2024GW)</option></select></span>
+      <button type="submit" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i>APIリンクを発行</button>
+    </form>
+
+    <section class="c-sec" aria-labelledby="eps">
+      <h2 id="eps" class="t-h3" style="margin-bottom: 8px;">発行済み <span class="muted t-num" style="font-weight: 400;">3</span></h2>
+      <div class="dt" style="--cols: 88px minmax(160px,1fr) 120px 96px; --minw: 0px;">
+        <div class="dt-h"><span>状態</span><span>イベント</span><span>発行・更新</span><span></span></div>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+          <div class="dt-r">
+            <span class="st"><span class="{{r.dot}}"></span>{{r.state}}</span>
+            <span class="stack" style="gap: 0;"><span class="ell">{{r.title}}</span><span class="sub t-mono">{{r.id}}</span></span>
+            <span class="t-num muted t-sm">{{r.updated}}</span>
+            <span class="row" style="justify-content: flex-end; gap: 0;">
+              <button type="button" class="ib sm" aria-label="{{r.toggleLabel}}"><i class="{{r.toggleIcon}}"></i></button>
+              <button type="button" class="{{r.openCls}}" aria-label="出力リンクを作成" onClick="{{r.open}}"><i class="fa-solid fa-sliders"></i></button>
+            </span>
+          </div>
+          <sc-if value="{{r.isOpen}}" hint-placeholder-val="{{false}}">
+            <div class="raised stack" style="gap: 16px; padding: 20px 24px; margin-bottom: 2px;">
+              <div class="row" style="gap: 24px; flex-wrap: wrap; align-items: flex-end;">
+                <div class="field"><span>データ形式</span>
+                  <div class="seg" role="group" aria-label="データ形式">
+                    <button type="button" class="{{fmtV5}}" onClick="{{setV5}}" title="イベント・作品・制作者・公開メンバー・チャプター・使用ソフト・公開回答を現在の正本に沿って構成">新形式 v5</button>
+                    <button type="button" class="{{fmtLegacy}}" onClick="{{setLegacy}}" title="旧EventArchives系の配列・列名で返す">旧形式互換</button>
+                  </div>
+                </div>
+                <div class="field"><span>更新方式</span>
+                  <div class="seg" role="group" aria-label="更新方式">
+                    <button type="button" class="{{upRt}}" onClick="{{setRt}}"><i class="fa-solid fa-bolt" aria-hidden="true"></i>リアルタイム</button>
+                    <button type="button" class="{{upSch}}" onClick="{{setSch}}"><i class="fa-regular fa-clock" aria-hidden="true"></i>節約定期更新</button>
+                  </div>
+                </div>
+                <sc-if value="{{scheduled}}" hint-placeholder-val="{{false}}">
+                  <label class="field"><span>更新間隔</span><select class="select" onChange="{{setRefresh}}"><option value="15">15分</option><option value="60" selected="{{yes}}">1時間</option><option value="360">6時間</option><option value="1440">24時間</option></select></label>
+                </sc-if>
+              </div>
+              <p class="t-sm muted" style="margin: 0;">{{modeNote}}</p>
+              <div class="row" style="gap: 0; background: var(--bg);">
+                <span class="t-mono t-sm ell" style="flex: 1; padding: 0 12px; line-height: 40px;">{{href}}</span>
+                <button type="button" class="ib" aria-label="URLをコピー" onClick="{{copy}}"><i class="{{copyIcon}}"></i></button>
+                <a class="ib" href="#" aria-label="開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+              </div>
+            </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { open: 'PVSF2026Sp', format: 'v5', update: 'realtime', refresh: '60', copied: false }; }
+  renderVals() {
+    const s = this.state;
+    const src = [
+      { id: 'PVSF2026Sp', title: 'PVSF2026Sp', on: true, updated: '2026.03.20' },
+      { id: 'PVSF2025S', title: 'PVSF2025S', on: true, updated: '2025.08.02' },
+      { id: 'PVSF2025Sp', title: 'PVSF2025Sp', on: false, updated: '2025.04.11' },
+    ];
+    const rows = src.map(r => ({ ...r, dot: r.on ? 'dot ok' : 'dot', state: r.on ? '有効' : '無効',
+      toggleLabel: r.on ? '無効にする' : '有効にする', toggleIcon: r.on ? 'fa-solid fa-toggle-on' : 'fa-solid fa-toggle-off',
+      isOpen: s.open === r.id, openCls: s.open === r.id ? 'ib sm on' : 'ib sm',
+      open: () => this.setState({ open: s.open === r.id ? null : r.id, copied: false }) }));
+    const q = new URLSearchParams({ update: s.update });
+    if (s.format === 'legacy') q.set('format', 'legacy');
+    if (s.update === 'scheduled') q.set('refresh', s.refresh);
+    const href = 'https://flamenode.net/api/event-endpoints/' + (s.open || 'PVSF2026Sp') + '?' + q.toString();
+    const set = (o) => () => this.setState({ ...o, copied: false });
+    return {
+      theme: this.props.theme ?? 'dark', rows, href, yes: true,
+      fmtV5: s.format === 'v5' ? 'on' : '', fmtLegacy: s.format === 'legacy' ? 'on' : '',
+      upRt: s.update === 'realtime' ? 'on' : '', upSch: s.update === 'scheduled' ? 'on' : '',
+      scheduled: s.update === 'scheduled',
+      modeNote: s.update === 'realtime' ? 'リクエストごとにD1から最新情報を取得します。更新直後に反映したい用途向けです。' : '形式別にKV共有キャッシュし、指定間隔ごとにだけD1から再生成します。公開可否はキャッシュ利用前にD1で確認します。',
+      setV5: set({ format: 'v5' }), setLegacy: set({ format: 'legacy' }), setRt: set({ update: 'realtime' }), setSch: set({ update: 'scheduled' }),
+      setRefresh: (e) => this.setState({ refresh: e.target.value, copied: false }),
+      copy: () => this.setState({ copied: true }), copyIcon: s.copied ? 'fa-solid fa-check' : 'fa-regular fa-copy', copyLabel: s.copied ? 'コピー済み' : 'URLをコピー',
+      prevent: (e) => e.preventDefault()
+    };
+  }
+}
+</script>
+</body>
+</html>
