@@ -242,7 +242,7 @@
 
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 
-| `apps/site/src/pages/__migration_poc/[id].astro` | PAGE | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
+| `apps/site/src/pages/__migration_poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
 
 ## Future files requiring source/target registration
 
