@@ -7,26 +7,25 @@ import { createHash } from "node:crypto";
 import { loadPublicBuildSnapshot, newSnapshotBuildMetrics } from "../../lib/publicDataLoader";
 import type { PublicSnapshot } from "../../lib/publicDataLoader";
 
-const generation = "synthetic-build-01";
-const publicKey = "snapshot/video/public_demo.json";
-const privateKey = "snapshot/video/private_demo.json";
-const fixture = {
-  [publicKey]: { kind: "video", id: "public_demo", title: "Synthetic public video" },
-  [privateKey]: { kind: "video", id: "private_demo", title: "Synthetic private video" },
-};
-const manifest = { schemaVersion: 1 as const, generation, allowedKeys: [publicKey], blockedKeys: [privateKey] };
-const bytes = Object.fromEntries(Object.entries(fixture).map(([key, payload]) => [
-  key,
-  new TextEncoder().encode(JSON.stringify({
-    schemaVersion: 1, generation, key,
-    visibility: key === publicKey ? "public" : "private",
-    payload,
-    sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
-  })),
-]));
-const source = { read: async (key: string) => bytes[key] ?? null };
-
 export async function getStaticPaths() {
+  const generation = "synthetic-build-01";
+  const publicKey = "snapshot/video/public_demo.json";
+  const privateKey = "snapshot/video/private_demo.json";
+  const fixture = {
+    [publicKey]: { kind: "video", id: "public_demo", title: "Synthetic public video" },
+    [privateKey]: { kind: "video", id: "private_demo", title: "Synthetic private video" },
+  };
+  const manifest = { schemaVersion: 1 as const, generation, allowedKeys: [publicKey], blockedKeys: [privateKey] };
+  const bytes = Object.fromEntries(Object.entries(fixture).map(([key, payload]) => [
+    key,
+    new TextEncoder().encode(JSON.stringify({
+      schemaVersion: 1, generation, key,
+      visibility: key === publicKey ? "public" : "private",
+      payload,
+      sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+    })),
+  ]));
+  const source = { read: async (key: string) => bytes[key] ?? null };
   const metrics = newSnapshotBuildMetrics();
   // Always enumerate from the verified allowed list, not from R2 object listing.
   const result = [];
