@@ -4,7 +4,7 @@
 > Verified: 2026-10-07
 > Scope: Frontend / UX / route / requirement reconciliation only
 > Branch: `migration/mig-0011-frontend-requirements`
-> UI visual authority: [`../UI_REFERENCE.md`](../UI_REFERENCE.md) = `PENDING_HTML`
+> UI visual authority: [`../UI_REFERENCE.md`](../UI_REFERENCE.md)。この棚卸し時点は `PENDING_HTML`。現在の登録状態・適用範囲は同正本を参照する。
 > Backend FN detailed audit / backend optimization / Queue・API・Server Action最終最適化判断: **out of scope**
 
 この文書をMIG-0011のFrontend側正本とする。CURRENTの観測事実とTARGET要件を分離し、旧`docs/design-redesign`および`app/(redesign)`をTARGET visual evidenceとして使用しない。

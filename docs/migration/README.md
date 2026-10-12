@@ -10,7 +10,7 @@
 
 ## Purpose
 
-**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuは[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)から**対象行だけ**読む。D-08 HTML未提供のPhase2・Phase4 visual・Phase5 real UIはBLOCKED。MIG-0401/0404/0405/0406非visual性能PoCは先行可能。
+**実装導線：** `FILE_MIGRATION_MATRIX.md`で対象ソースをフィルタし、`FILE_PROGRESS_PROTOCOL.md`の順序でprovider→consumerを接続し、PR/SHA/テスト付きでファイルごとに状態を更新する。 `AGENTS.md`→`AGENT_PROTOCOL.md`→`STATUS.md`とopen PRのwork-item→`OPEN_DECISIONS.md`→`IMPLEMENTATION_RUNBOOK.md`→該当`TASK_CARDS_*`の1MIG→CURRENT code/test。Luna/Haikuは[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)から**対象行だけ**読む。D-08 HTMLは登録済み。Phase2抽出以降はSTATUSの依存とGateに従い、公開mock/非公開CURRENT再利用を守る。MIG-0401/0404/0405/0406非visual性能PoCは独立した依存で先行可能。
 
 Next.js + OpenNext中心のCURRENT productionを、Cloudflare Workers FreeのCPU制約に耐え、既存機能を欠落させず、長期的に読みやすく保守しやすい構成へ段階移行する。
 
@@ -99,7 +99,7 @@ Existing design / product intent
 
 New visual target
   UI_REFERENCE.md
-  currently PENDING_HTML
+  REGISTERED_HTML (public mock / private CURRENT UI reuse)
 
 Progress
   STATUS.md

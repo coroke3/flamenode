@@ -5,9 +5,11 @@ description: Execute exactly one persisted FlameNode migration cycle; requires a
 
 # Antigravity migration loop
 
+Checkpoint policy: WORK_ITEM_ONLY
+
 This skill does **not** create a background timer. Re-invoke through a supported host mechanism or manually.
 Use `.agents/skills/flamenode-migration/SKILL.md` and `docs/migration/AGENT_PROTOCOL.md`. Checkpoint each wake in `work-items/MIG-XXXX.md` on the owning PR; never edit STATUS until merge integration.
-One task per interaction turn; after its PR is reviewed and merged (or is blocked/review-pending), report and stop.
+At most one task / bounded micro-unit per invocation; persist IN_PROGRESS if more units remain, otherwise REVIEW or BLOCKED. Report and stop after the checkpoint or approved merge.
 Never advance another task in the same turn.
 
 

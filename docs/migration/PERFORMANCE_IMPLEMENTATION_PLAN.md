@@ -1,6 +1,6 @@
 # Performance-first Migration Work Order (1102 / CPU / visibility)
 
-> Status: TARGET work order, **not implemented**. Task state authority: [STATUS.md](STATUS.md). Baseline: [cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md). Route-level evidence: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md). Visual input: [UI_REFERENCE.md](UI_REFERENCE.md) (`PENDING_HTML`).
+> Status: TARGET work order, **not implemented**. Merged task authority: [STATUS.md](STATUS.md); live owner state: work-items on open PRs. Baseline: [cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md). Route-level evidence: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md). Visual input and scope: [UI_REFERENCE.md](UI_REFERENCE.md) (`REGISTERED_HTML`).
 > Authoritative precedence: CURRENT code/test and Cloudflare outcomes → STATUS dependencies → TASK_CARDS_4_5 acceptance → this performance supplement. Do not create a second independent status ledger.
 
 ## Objective, scope and independent tracks

@@ -17,6 +17,6 @@ Read:
 6. `docs/migration/FUNCTION_INVENTORY.md`
 7. relevant matrix/code/tests
 
-Execute exactly one READY MIG task, record `Owner: claude` and scope in the task-specific work-item on the owner PR branch, validate it, and persist a bounded checkpoint before returning. Only update STATUS at pre-merge integration.
+Checkpoint policy: WORK_ITEM_ONLY. Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per wake. Record `Owner: claude` and scope in the task-specific work-item on the owner PR branch, validate it, and persist a bounded checkpoint before returning. Only update STATUS at pre-merge integration after independent review/CI.
 
 Do not auto-cross Phase Gates or perform production Cloudflare/Remote D1/secret changes without explicit approval.

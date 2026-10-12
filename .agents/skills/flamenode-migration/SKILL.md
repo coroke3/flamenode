@@ -15,7 +15,7 @@ Mandatory concepts:
 - `FEATURE_CATALOG.md` = 432 UX / 136 FN の人間向け全機能索引
 - `GIT_WORKFLOW.md` = branch/PR/merge source of truth
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
-- `screen-mapping/README.md` = CURRENT 86 screens + cross-route shells → UX/FN/permission/state/query/RA mapping
+- `screen-mapping/README.md` = CURRENT routes + cross-route shells → UX/FN/permission/state/query/RA mapping (counts derive from CURRENT_ROUTES)
 - `FRONTEND_FEATURES.md` + `frontend/*.md` = granular `UX-*` behavior
 - `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
 - `server-actions/README.md` = CURRENT Server Action / inline action execution-unit evidence
@@ -28,14 +28,14 @@ Mandatory concepts:
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
-- `UI_REFERENCE.md` = future HTML visual source; stop visual redesign while `PENDING_HTML`
+- `UI_REFERENCE.md` = registered HTML visual source and scope policy; public mock / private CURRENT UI reuse. Stop visual redesign if `PENDING_HTML`.
 
 毎回まず `docs/migration/FEATURE_CATALOG.md` で対象機能と隣接機能を確認する。
 
-Execute exactly one READY MIG task. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
+Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
 
 Do not remove or change user-visible behavior merely to simplify the backend. Do not optimize for line count. Prefer explicit, readable, framework-neutral domain code and well-defined permission/transaction/side-effect boundaries.
 
-Checkpoint the task-specific work-item every wake. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI. Update affected ledgers/matrices and real validation evidence.
+Checkpoint policy: WORK_ITEM_ONLY. Checkpoint the task-specific work-item every wake. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI. Update affected ledgers/matrices and real validation evidence.
 
 Never auto-cross Phase Gates or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.

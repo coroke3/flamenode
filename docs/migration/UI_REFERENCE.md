@@ -12,21 +12,21 @@
 
 ## Current state
 
-ユーザーが後日提供するHTML mock（新デザイン一式）を [`docs/migration/mock/README.md`](mock/README.md) に受領し、本ドキュメントへ登録完了（MIG-0200）。
-旧 `docs/design-redesign/` および `app/(redesign)` の過去mockは引き続き廃止・使用禁止であり、本ドキュメントおよび [`docs/migration/mock/README.md`](mock/README.md) を新UIの唯一のビジュアル正本とする。
+ユーザー提供HTML mock（新デザイン一式）を [`docs/migration/mock/README.md`](mock/README.md) に受領し、本ドキュメントへ登録完了（MIG-0200）。
+旧 `docs/design-redesign/` および `app/(redesign)` の過去mockは引き続き廃止・使用禁止であり、本ドキュメントおよび [`docs/migration/mock/README.md`](mock/README.md) を公開新UIのビジュアル正本とする。
 
 ## User decision (2026-10-09 / 確定: 2026-10-13)
 
 D-08=A: **新HTMLモックを確定してからUIを移行する**。
 2026-10-13にモック一式を受領・検証し、本ドキュメントへ登録（MIG-0200）したため、D-08 は **DECIDED** となった。
-Phase 2（MIG-0201: visual/IA抽出 + design tokens）がアンロックされ、Phase 4/5（公開画面 Astro SSG + React Islands）および Phase 7（非公開 SPA）のUI実装へ順次展開可能。
+Phase 2（MIG-0201: visual/IA抽出 + design tokens）は依存を満たして開始可能。Phase 4/5の公開UIは登録mockを適用する。Phase 7の非公開SPAは採用済みOption Aに従いCURRENT UIを再利用し、private mockは参考資料とする。各MIGの依存・レビュー・Gateはモック登録後も必要。
 
 ---
 
 ## Registered HTML mock reference (MIG-0200)
 
 ```text
-Reference status: READY
+Reference status: REGISTERED_HTML (APPROVED)
 Reference file(s): docs/migration/mock/ (README.md, pages.json, static/*.html, site/, source/, screenshots/)
 Received at: 2026-10-13
 Version/hash: claude.ai Design artifact version 1791816999-f0e9 (2026-10-12)
@@ -49,7 +49,9 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
 
 ---
 
-## デザイン原則・共通ルール（確定事項）
+## 公開UIのデザイン原則・共通ルール
+
+以下はmockの意図。公開surfaceへ適用し、非公開はCURRENT UIを維持する。投稿の自動遷移・メニュー操作などの振る舞いはmockだけで承認せず、CURRENTのUX/FNと照合する。
 
 1. **配色**:
    - ダークが既定（背景: 純黒 `#000000`、文字: 純白 `#ffffff`）。
@@ -85,119 +87,146 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
     - `≤ 1007px`: トップヒーロー画像下文字回り込み（360pxブロック中央寄せ）
     - `≤ 900px`: 作品詳細1カラム + 下部ドック、運営2カラム→1カラム
     - `≤ 700px` / `≤ 640px`: スマホ表示（固定ヘッダー、文字サイズ、フッター12px）
-    - 280〜1280px で横スクロールはみ出しなしを確認済み。
+    - 280〜1280px はmockの参考幅。移行実装で横スクロール・キーボード・フォーカスを改めて検証する。
 
 ---
 
-## モック画面と CURRENT ルート・移行先の対応表
+## CURRENT route と mock の対応
 
-### 1. 公開画面 (15画面) → `apps/site` (Astro SSG + React Islands)
+契約参照: [CURRENT_SCREEN_MAPPING](screen-mapping/README.md)。各行の CURRENT route を同台帳で検索し、その行の UX/FN、permission、state、URL/query/history、responsive/a11y をすべて読む。ここでは機能IDや未確定の移行先ファイルを重複定義しない。移行先は対象MIGカードと FILE_MIGRATION_MATRIX が管理する。
 
-| モック名 | モックルート | 静的HTML | CURRENTルート | 画面区分 | 関連UX | 移行先 |
-|---|---|---|---|---|---|---|
-| `Main` | `/` | `static/Main.html` | `/` | VISUAL_SCREEN | UX-TOP-001..008 | `apps/site/src/pages/index.astro` |
-| `VideoDetail` | `/[id]` | `static/VideoDetail.html` | `/[id]` | VISUAL_SCREEN | UX-VID-001..012 | `apps/site/src/pages/[id].astro` |
-| `About` | `/about` | `static/About.html` | `/about` | VISUAL_SCREEN | UX-ABOUT-001..003 | `apps/site/src/pages/about.astro` |
-| `Events` | `/event` | `static/Events.html` | `/event` | VISUAL_SCREEN | UX-EVT-001..005 | `apps/site/src/pages/event.astro` |
-| `EventDetail` | `/event/[id]` | `static/EventDetail.html` | `/event/[id]` | VISUAL_SCREEN | UX-EVTD-001..008 | `apps/site/src/pages/event/[id].astro` |
-| `EventSlots` | `/event/[id]/slots` | `static/EventSlots.html` | `/event/[id]/slots` | VISUAL_SCREEN | UX-SLOT-001..005 | `apps/site/src/pages/event/[id]/slots.astro` |
-| `EventRelease` | `/event/[id]/release` | `static/EventRelease.html` | `/event/[id]/release` | VISUAL_SCREEN | UX-EVTR-001..004 | `apps/site/src/pages/event/[id]/release.astro` |
-| `Videos` | `/list` | `static/Videos.html` | `/list` | VISUAL_SCREEN | UX-LIST-001..008 | `apps/site/src/pages/list.astro` |
-| `Recommend` | `/recommend` | `static/Recommend.html` | `/recommend` | VISUAL_SCREEN | UX-REC-001..004 | `apps/site/src/pages/recommend.astro` |
-| `Trending` | `/trending` | `static/Trending.html` | `/trending` | VISUAL_SCREEN | UX-TRD-001..004 | `apps/site/src/pages/trending.astro` |
-| `Creators` | `/user` | `static/Creators.html` | `/user` | VISUAL_SCREEN | UX-USR-001..005 | `apps/site/src/pages/user.astro` |
-| `Creator` | `/user/[id]` | `static/Creator.html` | `/user/[id]` | VISUAL_SCREEN | UX-USRD-001..008 | `apps/site/src/pages/user/[id].astro` |
-| `Portfolio` | `/user/[id]/portfolio` | `static/Portfolio.html` | `/user/[id]/portfolio` | VISUAL_SCREEN | UX-PORT-001..004 | `apps/site/src/pages/user/[id]/portfolio.astro` |
-| `Rules` | `/rules` | `static/Rules.html` | `/rules` | VISUAL_SCREEN | UX-RULE-001..003 | `apps/site/src/pages/rules.astro` |
-| `Maintenance` | `/maintenance` | `static/Maintenance.html` | `/maintenance` | SYSTEM_SURFACE | UX-SYS-001..002 | `apps/site/src/pages/maintenance.astro` |
+- PUBLIC_MOCK: 公開visualのmock適用。maintenanceはSYSTEMの運用意味を保持した上で外見だけ参照する。
+- CURRENT_UI_REUSE: 非公開visualはCURRENT UIを移植。private mockは参考であり受入基準にしない。
+- PRESERVE_REDIRECT / PRESERVE_SYSTEM: canonical台帳のredirect/query/auth契約を維持。独立した新画面の追加指示ではない。
+- DEV_ONLY: 開発用surface。本番visualへ昇格しない。
 
-### 2. ユーザー／個人画面 (8画面 + 4タブ) → `apps/app` (Personal React SPA)
+| CURRENT route | Class | Visual policy | Mock references |
+| --- | --- | --- | --- |
+| `/` | VISUAL_SCREEN | PUBLIC_MOCK | `Main` |
+| `/[id]` | VISUAL_SCREEN | PUBLIC_MOCK | `VideoDetail` |
+| `/about` | VISUAL_SCREEN | PUBLIC_MOCK | `About` |
+| `/event` | VISUAL_SCREEN | PUBLIC_MOCK | `Events` |
+| `/event/[id]` | VISUAL_SCREEN | PUBLIC_MOCK | `EventDetail` |
+| `/event/[id]/release` | VISUAL_SCREEN | PUBLIC_MOCK | `EventRelease` |
+| `/event/[id]/slots` | VISUAL_SCREEN | PUBLIC_MOCK | `EventSlots` |
+| `/groups` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/groups/[slug]` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/list` | VISUAL_SCREEN | PUBLIC_MOCK | `Videos` |
+| `/recommend` | VISUAL_SCREEN | PUBLIC_MOCK | `Recommend` |
+| `/rules` | VISUAL_SCREEN | PUBLIC_MOCK | `Rules` |
+| `/trending` | VISUAL_SCREEN | PUBLIC_MOCK | `Trending` |
+| `/user` | VISUAL_SCREEN | PUBLIC_MOCK | `Creators` |
+| `/user/[id]` | VISUAL_SCREEN | PUBLIC_MOCK | `Creator` |
+| `/user/[id]/portfolio` | VISUAL_SCREEN | PUBLIC_MOCK | `Portfolio` |
+| `/dashboard` | VISUAL_SCREEN | CURRENT_UI_REUSE | `Dashboard`, `MyPage` |
+| `/dashboard/edit/[id]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `VideoEdit` |
+| `/dashboard/edit/[id]/permissions` | VISUAL_SCREEN | CURRENT_UI_REUSE | `VideoPermissions` |
+| `/dashboard/library` | VISUAL_SCREEN | CURRENT_UI_REUSE | `Library` |
+| `/dashboard/settings` | VISUAL_SCREEN | CURRENT_UI_REUSE | `Settings` |
+| `/dashboard/youtube-playlists` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/entry` | VISUAL_SCREEN | CURRENT_UI_REUSE | `EntrySignIn`, `Entry` |
+| `/entry/slotted` | VISUAL_SCREEN | CURRENT_UI_REUSE | `EntrySlotted` |
+| `/entry/unslotted` | VISUAL_SCREEN | CURRENT_UI_REUSE | `EntryUnslotted` |
+| `/manage` | VISUAL_SCREEN | CURRENT_UI_REUSE | `Manage` |
+| `/manage/events/[id]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageEvent` |
+| `/manage/events/[id]/audience` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageAudience` |
+| `/manage/events/[id]/edit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageEdit` |
+| `/manage/events/[id]/review` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/manage/events/[id]/slots` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageSlots` |
+| `/manage/events/[id]/staff` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageStaff` |
+| `/manage/events/[id]/videos` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageVideos` |
+| `/manage/events/[id]/videos/[videoId]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageVideo` |
+| `/manage/events/[id]/youtube-playlist` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManagePlaylist` |
+| `/manage/notifications` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageNotifications` |
+| `/manage/x-link-requests` | VISUAL_SCREEN | CURRENT_UI_REUSE | `ManageXLink` |
+| `/admin` | VISUAL_SCREEN | CURRENT_UI_REUSE | `Admin` |
+| `/admin/announcements` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAnnouncements` |
+| `/admin/announcements/[id]/edit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAnnouncementEdit` |
+| `/admin/announcements/new` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAnnouncementEdit` |
+| `/admin/api-endpoints` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminApi` |
+| `/admin/audit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAudit`, `AdminAuditHub` |
+| `/admin/audit/[id]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAuditDetail` |
+| `/admin/audit/restore` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAuditRestore` |
+| `/admin/audit/settings` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminAuditSettings` |
+| `/admin/cost-guard` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminCostGuard` |
+| `/admin/event-groups` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminEventGroups` |
+| `/admin/event-groups/[id]/edit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminEventGroupEdit` |
+| `/admin/event-groups/new` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminEventGroupEdit` |
+| `/admin/events` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminEvents`, `AdminEventsHub` |
+| `/admin/events/[id]` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/admin/events/[id]/edit` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/admin/events/[id]/slots` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/admin/events/[id]/staff` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/admin/events/new` | VISUAL_SCREEN | CURRENT_UI_REUSE | — |
+| `/admin/events/templates` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminEventTemplates` |
+| `/admin/health` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminHealth`, `AdminHealthHub` |
+| `/admin/health/integrity` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminIntegrity` |
+| `/admin/history` | COMPAT_REDIRECT | PRESERVE_REDIRECT | — |
+| `/admin/import` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminImport` |
+| `/admin/moderation` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminModeration` |
+| `/admin/notifications` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminNotifications` |
+| `/admin/permissions/simulator` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminPermSim` |
+| `/admin/rules` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminRules` |
+| `/admin/rules/[id]/edit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminRuleEdit` |
+| `/admin/rules/new` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminRuleEdit` |
+| `/admin/security` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminSecurity` |
+| `/admin/spreadsheet` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminSpreadsheet` |
+| `/admin/static-builds` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminStaticBuilds` |
+| `/admin/users` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminUsers`, `AdminUsersHub` |
+| `/admin/users/[id]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminUser`, `AdminUserHub` |
+| `/admin/users/[id]/edit` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminUserEdit` |
+| `/admin/videos` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminVideos`, `AdminVideosHub` |
+| `/admin/videos/[id]` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminVideo`, `AdminVideoHub` |
+| `/admin/videos/[id]/members` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminVideoMembers` |
+| `/admin/workers` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminWorkers` |
+| `/admin/x-id-merges` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminXIdMerges` |
+| `/admin/x-link-requests` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminXLink` |
+| `/admin/youtube-quota` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminYoutubeQuota` |
+| `/admin/youtube-sync` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminYoutubeSync` |
+| `/admin/youtube-sync/playlists` | VISUAL_SCREEN | CURRENT_UI_REUSE | `AdminPlaylists` |
+| `/dev/ui-surfaces` | DEV_ONLY | DEV_ONLY | — |
+| `/maintenance` | SYSTEM_SURFACE | PUBLIC_MOCK | `Maintenance` |
+| `/onboarding` | VISUAL_SCREEN | CURRENT_UI_REUSE | `OnboardingTerms`, `OnboardingXId` |
+| `/auth/complete` | SYSTEM_SURFACE | PRESERVE_SYSTEM | — |
+| `/list/~query` | SYSTEM_SURFACE | PRESERVE_SYSTEM | — |
+| `/user/~query` | SYSTEM_SURFACE | PRESERVE_SYSTEM | — |
+| `/event/~query` | SYSTEM_SURFACE | PRESERVE_SYSTEM | — |
+| `/user/[id]/paged` | SYSTEM_SURFACE | PRESERVE_SYSTEM | — |
 
-| モック名 | モックルート | 静的HTML | CURRENTルート | 画面区分 | 関連UX | 移行先 |
-|---|---|---|---|---|---|---|
-| `MyPage` | `/dashboard` ほか | `static/MyPage.html` | `/dashboard` | VISUAL_SCREEN | UX-DASH-001..008 | `apps/app/src/pages/Dashboard.tsx` |
-| `VideoEdit` | `/dashboard/edit/[id]` | `static/VideoEdit.html` | `/dashboard/edit/[id]` | VISUAL_SCREEN | UX-VEDT-001..010 | `apps/app/src/pages/VideoEdit.tsx` |
-| `VideoPermissions` | `/dashboard/edit/[id]/permissions` | `static/VideoPermissions.html` | `/dashboard/edit/[id]/permissions` | VISUAL_SCREEN | UX-VPRM-001..005 | `apps/app/src/pages/VideoPermissions.tsx` |
-| `EntrySignIn` | `/entry` | `static/EntrySignIn.html` | `/entry` (未ログイン) | VISUAL_SCREEN | UX-ENT-001..005 | `apps/app/src/pages/Entry.tsx` |
-| `EntrySlotted` | `/entry/slotted` | `static/EntrySlotted.html` | `/entry` (枠あり) | VISUAL_SCREEN | UX-SLOT-001..005 | `apps/app/src/pages/EntrySlotted.tsx` |
-| `EntryUnslotted` | `/entry/unslotted` | `static/EntryUnslotted.html` | `/entry` (枠なし) | VISUAL_SCREEN | UX-UNSL-001..004 | `apps/app/src/pages/EntryUnslotted.tsx` |
-| `OnboardingTerms` | `/onboarding` | `static/OnboardingTerms.html` | `/onboarding` (step 1) | VISUAL_SCREEN | UX-ONB-001..003 | `apps/app/src/pages/Onboarding.tsx` |
-| `OnboardingXId` | `/onboarding` | `static/OnboardingXId.html` | `/onboarding` (step 2) | VISUAL_SCREEN | UX-ONB-004..006 | `apps/app/src/pages/Onboarding.tsx` |
-| `Dashboard` (タブ) | `/dashboard` | `static/Dashboard.html` | `/dashboard` | VISUAL_SCREEN | UX-DASH-001..004 | `apps/app/src/pages/Dashboard.tsx` |
-| `Entry` (タブ) | `/entry` | `static/Entry.html` | `/entry` | VISUAL_SCREEN | UX-ENT-001..005 | `apps/app/src/pages/Entry.tsx` |
-| `Library` (タブ) | `/dashboard/library` | `static/Library.html` | `/dashboard/library` | VISUAL_SCREEN | UX-LIB-001..004 | `apps/app/src/pages/Library.tsx` |
-| `Settings` (タブ) | `/dashboard/settings` | `static/Settings.html` | `/dashboard/settings` | VISUAL_SCREEN | UX-SET-001..008 | `apps/app/src/pages/Settings.tsx` |
+### CURRENT route を持たないmock
 
-### 3. 運営画面 (14画面) → `apps/ops` (Ops React SPA - Manage)
+これらは REFERENCE_ONLY。新URL・機能追加・CURRENT画面との置換を許可しない。
 
-| モック名 | モックルート | 静的HTML | CURRENTルート | 画面区分 | 関連UX | 移行先 |
-|---|---|---|---|---|---|---|
-| `Manage` | `/manage` | `static/Manage.html` | `/manage` | VISUAL_SCREEN | UX-MNG-001..006 | `apps/ops/src/pages/manage/Index.tsx` |
-| `ManageEvent` | `/manage/events/[id]` | `static/ManageEvent.html` | `/manage/events/[id]` | VISUAL_SCREEN | UX-MEVT-001..006 | `apps/ops/src/pages/manage/Event.tsx` |
-| `ManageVideos` | `/manage/events/[id]/videos` | `static/ManageVideos.html` | `/manage/events/[id]/videos` | VISUAL_SCREEN | UX-MVID-001..008 | `apps/ops/src/pages/manage/Videos.tsx` |
-| `ManageVideo` | `/manage/events/[id]/videos/[videoId]` | `static/ManageVideo.html` | `/manage/events/[id]/videos/[videoId]` | VISUAL_SCREEN | UX-MVD-001..006 | `apps/ops/src/pages/manage/VideoDetail.tsx` |
-| `ManageInbox` | `/manage/events/[id]/inbox` | `static/ManageInbox.html` | `/manage/events/[id]/inbox` | VISUAL_SCREEN | UX-MINB-001..005 | `apps/ops/src/pages/manage/Inbox.tsx` |
-| `ManageEventNew` | `/manage/events/new` | `static/ManageEventNew.html` | `/manage/events/new` | VISUAL_SCREEN | UX-MNEW-001..004 | `apps/ops/src/pages/manage/EventNew.tsx` |
-| `ManageSlots` | `/manage/events/[id]/slots` | `static/ManageSlots.html` | `/manage/events/[id]/slots` | VISUAL_SCREEN | UX-MSLT-001..006 | `apps/ops/src/pages/manage/Slots.tsx` |
-| `ManageAudience` | `/manage/events/[id]/audience` | `static/ManageAudience.html` | `/manage/events/[id]/audience` | VISUAL_SCREEN | UX-MAUD-001..004 | `apps/ops/src/pages/manage/Audience.tsx` |
-| `ManageEdit` | `/manage/events/[id]/edit` | `static/ManageEdit.html` | `/manage/events/[id]/edit` | VISUAL_SCREEN | UX-MEDT-001..006 | `apps/ops/src/pages/manage/EventEdit.tsx` |
-| `ManageStaff` | `/manage/events/[id]/staff` | `static/ManageStaff.html` | `/manage/events/[id]/staff` | VISUAL_SCREEN | UX-MSTF-001..005 | `apps/ops/src/pages/manage/Staff.tsx` |
-| `ManageHistory` | `/manage/events/[id]/history` | `static/ManageHistory.html` | `/manage/events/[id]/history` | VISUAL_SCREEN | UX-MHST-001..004 | `apps/ops/src/pages/manage/History.tsx` |
-| `ManagePlaylist` | `/manage/events/[id]/youtube-playlist` | `static/ManagePlaylist.html` | `/manage/events/[id]/youtube-playlist` | VISUAL_SCREEN | UX-MPLS-001..004 | `apps/ops/src/pages/manage/Playlist.tsx` |
-| `ManageNotifications` | `/manage/notifications` | `static/ManageNotifications.html` | `/manage/notifications` | VISUAL_SCREEN | UX-MNTF-001..004 | `apps/ops/src/pages/manage/Notifications.tsx` |
-| `ManageXLink` | `/manage/x-link-requests` | `static/ManageXLink.html` | `/manage/x-link-requests` | VISUAL_SCREEN | UX-MXLK-001..004 | `apps/ops/src/pages/manage/XLink.tsx` |
+| Mock | Disposition | Reason |
+| --- | --- | --- |
+| `ManageInbox` | REFERENCE_ONLY | 対応するCURRENT routeが存在しない。追加は別の要件決定を要する。 |
+| `ManageEventNew` | REFERENCE_ONLY | 対応するCURRENT routeが存在しない。追加は別の要件決定を要する。 |
+| `ManageHistory` | REFERENCE_ONLY | 対応するCURRENT routeが存在しない。追加は別の要件決定を要する。 |
 
-### 4. 管理画面 (24画面 + 19タブ) → `apps/ops` (Ops React SPA - Admin)
+### 共通パーツの適用範囲
 
-| モック名 | モックルート | 静的HTML | CURRENTルート | 画面区分 | 関連UX | 移行先 |
-|---|---|---|---|---|---|---|
-| `Admin` | `/admin` | `static/Admin.html` | `/admin` | VISUAL_SCREEN | UX-ADM-001..006 | `apps/ops/src/pages/admin/Dashboard.tsx` |
-| `AdminVideosHub` | `/admin/videos` | `static/AdminVideosHub.html` | `/admin/videos` | VISUAL_SCREEN | UX-AVID-001..006 | `apps/ops/src/pages/admin/Videos.tsx` |
-| `AdminVideoHub` | `/admin/videos/[id]` | `static/AdminVideoHub.html` | `/admin/videos/[id]` | VISUAL_SCREEN | UX-AVD-001..005 | `apps/ops/src/pages/admin/VideoDetail.tsx` |
-| `AdminUsersHub` | `/admin/users` | `static/AdminUsersHub.html` | `/admin/users` | VISUAL_SCREEN | UX-AUSR-001..006 | `apps/ops/src/pages/admin/Users.tsx` |
-| `AdminUserHub` | `/admin/users/[id]` | `static/AdminUserHub.html` | `/admin/users/[id]` | VISUAL_SCREEN | UX-AUD-001..005 | `apps/ops/src/pages/admin/UserDetail.tsx` |
-| `AdminModeration` | `/admin/moderation` | `static/AdminModeration.html` | `/admin/moderation` | VISUAL_SCREEN | UX-AMOD-001..004 | `apps/ops/src/pages/admin/Moderation.tsx` |
-| `AdminEventsHub` | `/admin/events` | `static/AdminEventsHub.html` | `/admin/events` | VISUAL_SCREEN | UX-AEVT-001..006 | `apps/ops/src/pages/admin/Events.tsx` |
-| `AdminEventGroupEdit` | `/admin/event-groups/new` · `[id]/edit` | `static/AdminEventGroupEdit.html` | `/admin/event-groups/new`, `[id]/edit` | VISUAL_SCREEN | UX-AEGE-001..004 | `apps/ops/src/pages/admin/EventGroupEdit.tsx` |
-| `AdminAnnouncements` | `/admin/announcements` | `static/AdminAnnouncements.html` | `/admin/announcements` | VISUAL_SCREEN | UX-AANN-001..004 | `apps/ops/src/pages/admin/Announcements.tsx` |
-| `AdminAnnouncementEdit` | `/admin/announcements/new` · `[id]/edit` | `static/AdminAnnouncementEdit.html` | `/admin/announcements/new`, `[id]/edit` | VISUAL_SCREEN | UX-AANE-001..004 | `apps/ops/src/pages/admin/AnnouncementEdit.tsx` |
-| `AdminRules` | `/admin/rules` | `static/AdminRules.html` | `/admin/rules` | VISUAL_SCREEN | UX-ARUL-001..004 | `apps/ops/src/pages/admin/Rules.tsx` |
-| `AdminRuleEdit` | `/admin/rules/new` · `[id]/edit` | `static/AdminRuleEdit.html` | `/admin/rules/new`, `[id]/edit` | VISUAL_SCREEN | UX-ARLE-001..004 | `apps/ops/src/pages/admin/RuleEdit.tsx` |
-| `AdminYoutubeQuota` | `/admin/youtube-quota` | `static/AdminYoutubeQuota.html` | `/admin/youtube-quota` | VISUAL_SCREEN | UX-AYTQ-001..004 | `apps/ops/src/pages/admin/YoutubeQuota.tsx` |
-| `AdminNotifications` | `/admin/notifications` | `static/AdminNotifications.html` | `/admin/notifications` | VISUAL_SCREEN | UX-ANTF-001..004 | `apps/ops/src/pages/admin/Notifications.tsx` |
-| `AdminAuditHub` | `/admin/audit` | `static/AdminAuditHub.html` | `/admin/audit` | VISUAL_SCREEN | UX-AAUD-001..006 | `apps/ops/src/pages/admin/Audit.tsx` |
-| `AdminAuditDetail` | `/admin/audit/[id]` | `static/AdminAuditDetail.html` | `/admin/audit/[id]` | VISUAL_SCREEN | UX-AADD-001..004 | `apps/ops/src/pages/admin/AuditDetail.tsx` |
-| `AdminCostGuard` | `/admin/cost-guard` | `static/AdminCostGuard.html` | `/admin/cost-guard` | VISUAL_SCREEN | UX-ACST-001..004 | `apps/ops/src/pages/admin/CostGuard.tsx` |
-| `AdminStaticBuilds` | `/admin/static-builds` | `static/AdminStaticBuilds.html` | `/admin/static-builds` | VISUAL_SCREEN | UX-ASBD-001..004 | `apps/ops/src/pages/admin/StaticBuilds.tsx` |
-| `AdminHealthHub` | `/admin/health` | `static/AdminHealthHub.html` | `/admin/health` | VISUAL_SCREEN | UX-AHLT-001..006 | `apps/ops/src/pages/admin/Health.tsx` |
-| `AdminSecurity` | `/admin/security` | `static/AdminSecurity.html` | `/admin/security` | VISUAL_SCREEN | UX-ASEC-001..004 | `apps/ops/src/pages/admin/Security.tsx` |
-| `AdminPermSim` | `/admin/permissions/simulator` | `static/AdminPermSim.html` | `/admin/permissions/simulator` | VISUAL_SCREEN | UX-APRM-001..004 | `apps/ops/src/pages/admin/PermissionSimulator.tsx` |
-| `AdminApi` | `/admin/api-endpoints` | `static/AdminApi.html` | `/admin/api-endpoints` | VISUAL_SCREEN | UX-AAPI-001..004 | `apps/ops/src/pages/admin/ApiEndpoints.tsx` |
-| `AdminImport` | `/admin/import` | `static/AdminImport.html` | `/admin/import` | VISUAL_SCREEN | UX-AIMP-001..004 | `apps/ops/src/pages/admin/Import.tsx` |
-| `AdminSpreadsheet` | `/admin/spreadsheet` | `static/AdminSpreadsheet.html` | `/admin/spreadsheet` | VISUAL_SCREEN | UX-ASPR-001..004 | `apps/ops/src/pages/admin/Spreadsheet.tsx` |
+公開mockのCSS/tokensは公開rootへscopeする。非公開CURRENTのテーマ・部品・入力/操作フローへglobal CSSを波及させない。共通パーツの新規実装先・採否は対象MIGカードで決める。
 
-### 5. 共通パーツ (12部品) → `packages/ui` (`@flamenode/ui`)
-
-| 部品名 | ソース | 役割 | 移行先コンポーネント |
-|---|---|---|---|
-| `PublicHeader` | `source/boards/PublicHeader.dc.html` | 公開ヘッダー（ロゴ・検索・ナビ・アバター・≡） | `packages/ui/src/components/PublicHeader.tsx` |
-| `PublicFooter` | `source/boards/PublicFooter.dc.html` | 公開フッター（12px薄グレーリンク・コピーライト） | `packages/ui/src/components/PublicFooter.tsx` |
-| `AdminNav` | `source/boards/AdminNav.dc.html` | 管理サイドバー | `packages/ui/src/components/AdminNav.tsx` |
-| `ManageNav` | `source/boards/ManageNav.dc.html` | 運営サイドバー | `packages/ui/src/components/ManageNav.tsx` |
-| `ManageEventHead` | `source/boards/ManageEventHead.dc.html` | イベント運営ヘッダー | `packages/ui/src/components/ManageEventHead.tsx` |
-| `ConfirmModal` | `source/boards/ConfirmModal.dc.html` | 確認モーダルダイアログ | `packages/ui/src/components/ConfirmModal.tsx` |
-| `MemberEditor` | `source/boards/MemberEditor.dc.html` | 合作メンバー編集（タイムライン/表/一括） | `packages/ui/src/components/MemberEditor.tsx` |
-| `EntrySubmitter` | `source/boards/EntrySubmitter.dc.html` | 提出者情報（枠提出・作品投稿共通） | `packages/ui/src/components/EntrySubmitter.tsx` |
-| `IconPicker` | `source/boards/IconPicker.dc.html` | アイコン選択（候補グリッド/切り抜き） | `packages/ui/src/components/IconPicker.tsx` |
-| `EntryQuestions` | `source/boards/EntryQuestions.dc.html` | 運営からの質問（質問種別ごとの入力） | `packages/ui/src/components/EntryQuestions.tsx` |
-| `LinkEditor` | `source/boards/LinkEditor.dc.html` | リンク編集（URL貼り付けで種類自動判定） | `packages/ui/src/components/LinkEditor.tsx` |
-| `CommandPalette` | `source/boards/CommandPalette.dc.html` | コマンドパレット（⌘K） | `packages/ui/src/components/CommandPalette.tsx` |
+| Mock | Visual policy | Scope |
+| --- | --- | --- |
+| `PublicHeader` | PUBLIC_MOCK | 公開surfaceのみ |
+| `PublicFooter` | PUBLIC_MOCK | 公開surfaceのみ |
+| `AdminNav` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `ManageNav` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `ManageEventHead` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `ConfirmModal` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `MemberEditor` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `EntrySubmitter` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `IconPicker` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `EntryQuestions` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `LinkEditor` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
+| `CommandPalette` | CURRENT_UI_REUSE | 非公開CURRENT部品を維持。mockは参考資料 |
 
 ---
 
 ## Authority boundary（権限境界・不変条件）
 
-モックが正本となる範囲:
+公開surfaceでモックが正本となる範囲（privateはCURRENT UI）:
 - layout（レイアウト構造）
 - visual hierarchy（視覚階層）
 - typography（フォント・文字サイズ・太さ）
@@ -226,10 +255,10 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
 
 ## Design acceptance gate（受入基準）
 
-各画面の実装完了判定は、以下をすべて満たすこと:
+各画面の実装完了判定は、該当routeのvisual policyとcanonical契約を満たすこと。PUBLIC_MOCKは登録mockを検証し、CURRENT_UI_REUSEはCURRENT UIの外見・操作を維持する。redirect/system/devは分類に対応した契約を検証する。
 
 ```text
-visual target implemented（docs/migration/mock/ の該当画面と一致）
+visual policy verified（公開mock適用 / 非公開CURRENT UI維持 / redirect・system・dev契約）
 + required UX IDs mapped（担当UX機能がすべて実装されている）
 + CURRENT behavior parity verified（現行機能との動作同等性を検証済み）
 + permissions verified（サーバーサイドでの権限検証）

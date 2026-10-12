@@ -11,7 +11,7 @@ Start with `AGENTS.md` and `docs/migration/MIGRATION_START_HERE.md`. Follow the 
 
 One invocation processes at most one READY MIG task or one of its bounded micro-units. Re-read latest main, open migration PRs and the owning PR checkpoint before claiming. Resume the same owner PR; never create a duplicate.
 
-Checkpoint policy: `WORK_ITEM_ONLY`.
+Checkpoint policy: WORK_ITEM_ONLY.
 Record `Owner: codex`, scope, current unit, actual tests, source SHA, rollback and next unit in the owner PR's `docs/migration/work-items/MIG-XXXX.md`. Ordinary implementation wakes do not edit `STATUS.md`.
 Incomplete but healthy work remains `IN_PROGRESS` with a durable checkpoint. Mark `REVIEW` only after all units pass; record blockers and recovery conditions as `BLOCKED`. After independent review and required CI/approval, reconcile the task's DONE/next READY in `STATUS.md` against latest main immediately before squash merge.
 

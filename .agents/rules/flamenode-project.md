@@ -25,6 +25,8 @@ Mandatory sources include:
 
 Rules:
 
+Checkpoint policy: WORK_ITEM_ONLY. Update the owner PR's task work-item each wake; update STATUS only at merge integration after independent review/CI.
+
 - Do not create a separate Antigravity migration process or progress ledger.
 - One migration writer per MIG task; obey branch/PR/squash workflow.
 - Preserve user-visible UX, functions, permissions, visibility, audit and side effects by default.

@@ -29,7 +29,7 @@
 
 **先行性能トラック:** MIG-0105 DONE → **MIG-0401 READY** → MIG-0404 → MIG-0405 → MIG-0406。既存スナップショットと公開/非公開fixture、簡易HTMLを用いる。実ページの可視性・URLパリティを完了したとは扱わない。
 
-**Visualトラック:** MIG-0200..0206（D-08 HTML待ち）→ MIG-0402 → MIG-0403（0404にも依存）。**MIG-0407はMIG-0403とMIG-0406の両方**に依存する。これらの依存関係の正本は[STATUS.md](STATUS.md)のみ。
+**Visualトラック:** MIG-0200..0206（D-08登録済み。残るPhase 2依存・Gateは省略しない）→ MIG-0402 → MIG-0403（0404にも依存）。**MIG-0407はMIG-0403とMIG-0406の両方**に依存する。merge済み依存関係は[STATUS.md](STATUS.md)、open PRの進捗はownerのwork-itemを参照する。
 
 性能の所有・測定・異常系・本番承認境界は[PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md)、経路別のsource/targetは[PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md)に記録。SSR削減をHono/ゲートウェイ/Queueへの単なるCPU移動で置き換えない。
 

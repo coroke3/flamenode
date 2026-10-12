@@ -98,8 +98,8 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 
 ユーザー選択はA。**2026-10-13 確定:** ユーザーからデザインモック一式（claude.ai Design アーティファクト version 1791816999-f0e9、全96ページ・パーツ）を受領し、[`docs/migration/mock/`](mock/README.md) に配置・[`UI_REFERENCE.md`](UI_REFERENCE.md) に登録完了。D-08 は **DECIDED** となった。
 
-- 受領・検証したモック（`docs/migration/mock/`）を新UIの唯一のビジュアル正本とする。
-- Phase 2（MIG-0201: visual/IA抽出・tokens）がアンロックされ、Phase 4/5の公開画面UI実装およびPhase 7の非公開SPA実装へ着手可能。
+- 受領・検証したモック（`docs/migration/mock/`）を公開新UIのビジュアル正本とする。採用済みOption A（公開UIだけ刷新、非公開UIはCURRENT再利用）を維持し、非公開モックは参考資料とする。非公開画面の刷新は別の明示決定を要する。
+- Phase 2（MIG-0201: visual/IA抽出・tokens）は依存を満たして開始可能。Phase 4/5の公開UIとPhase 7の非公開SPAは各MIGの依存・Gateを要求する。登録は自動着手・本番切替の許可ではない。
 - 移行中もCURRENTのUX/FN/API/権限/URL副作用を厳格に保持する（ビジュアルの反映のみで機能を暗黙削除しない）。
 
 ## Open evidence — separate from design decisions

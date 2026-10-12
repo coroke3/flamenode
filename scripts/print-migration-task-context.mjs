@@ -21,7 +21,7 @@ export function getTaskContext(id,root=ROOT){
   const owned=[...rows.values()].filter(row=>row.owner===id).sort((a,b)=>a.path.localeCompare(b.path));
   const dependencies=expandDependencies(task.dependencies);
   const decisionIds=[...(REQUIRED_DECISIONS[id]||[])];
-  const visualGateIsInformational=/^MIG-0[45]/.test(id)&&!decisionIds.includes("D-08");
+  const visualGateIsInformational=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"].includes(id);
   const decisionRows=decisions.split("\n").filter(line=>decisionIds.some(d=>new RegExp("^\\|\\s*"+d+"\\s*\\|").test(line)));
   const dir="docs/migration/";
   const lines=[

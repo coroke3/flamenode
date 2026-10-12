@@ -1,5 +1,7 @@
 # Claude migration loop wake
 
+Checkpoint policy: WORK_ITEM_ONLY
+
 Follow `docs/migration/GIT_WORKFLOW.md` and `docs/migration/AGENT_PROTOCOL.md`. Per-wake task state goes into the owner PR's `work-items/MIG-XXXX.md`; STATUS is updated at merge integration only. Invoke `/flamenode-migration` for **at most one** migration task per wake. Claude Code's host-provided `/loop` may invoke this instruction repeatedly while that host session supports it; this file itself is not a scheduler.
 
 

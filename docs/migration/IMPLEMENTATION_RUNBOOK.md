@@ -7,7 +7,7 @@
 
 ## 最初の90秒に行うこと
 
-**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READYだが、MIG-0402/0403 visualはD-08がBLOCKED。
+**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。非visual性能PoCとdomainは独立した依存を持つ。visual作業は登録済みD-08だけで許可せず、STATUSの依存行とGateを確認する。
 
 1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`work-items/MIG-XXXX.md`とopen PRを読んでownerを特定する。**作業中のPRがあるMIGを横取りしない**。
 2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
@@ -116,7 +116,7 @@ Next: one explicit action and its owner
 
 本番DB書き込み・データ移行・適用済みmigrationの変更、本番Route/Custom Domain/DNS、Secrets、Discord認証cutover、権限/可視性を変えるproduct behavior、Phase Gate、採用済み仕様の再決定。これらは設計が`DECIDED`でも作業実行を自動許可しない。
 
-HTMLモックはまだ受領していないため、D-08は **BLOCKED_ON_USER** を維持。D-08を根拠にPhase2/4/5のvisual taskを`READY`にしてはいけない。非visual調査・domain/DB抽出など独立したtaskのみ進める。
+HTMLモックは登録済み（`UI_REFERENCE.md = REGISTERED_HTML`、D-08 `DECIDED`）。MIG-0201は抽出に進めるが、MIG-0402はMIG-0206とMIG-0401の完了を要求する。モック登録だけでPhase 4/5やPhase 7の依存・Gateを飛ばさない。公開UIはmock適用、非公開UIはCURRENT再利用という`UI_REFERENCE.md`の範囲を守る。未登録の場合は影響するvisual作業を停止する。
 
 ## 優先して読む詳細資料
 

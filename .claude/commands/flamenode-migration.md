@@ -17,7 +17,7 @@ FlameNodeの段階移行を1回につき1タスクだけ進める。
 
 実行時は最新mainの`STATUS.md`とopen PRからREADY taskを**1つだけ**選び、PR branchの`work-items/MIG-XXXX.md`に`Owner: claude`/PR/変更path/現在unitをclaimする。
 
-各wakeの終了時はwork-itemへ`IN_PROGRESS`（継続時）/`REVIEW`/`BLOCKED`を記録。独立review後のmerge直前にだけ最新mainとSTATUSを整合し、必要なinventory/matrixを更新する。
+Checkpoint policy: WORK_ITEM_ONLY。各wakeの終了時はwork-itemへ`IN_PROGRESS`（継続時）/`REVIEW`/`BLOCKED`を記録。独立review後のmerge直前にだけ最新mainとSTATUSを整合し、必要なinventory/matrixを更新する。
 
 `/loop /flamenode-migration` で反復実行してよいが、1 iteration = 1 MIG taskを維持する。
 

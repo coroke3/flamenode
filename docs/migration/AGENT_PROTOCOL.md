@@ -287,19 +287,20 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 # Progress persistence
 
-`STATUS.md`が唯一のtask進捗正本。
+Checkpoint policy: WORK_ITEM_ONLY
+
+`STATUS.md`はmerge済みtask/依存関係の正本。open PRのlive stateと再開位置の正本は、そのbranchの`work-items/MIG-XXXX.md`。
 
 終了時は単一wakeの作業結果を必ずPRへ保存する。
 
 - 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
 - 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
-- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのbranch `STATUS.md`に `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、HEADを必ず記録する（`TASK_MICRO_UNITS.md`）。mainのREADYを勝手に変更しない。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRの`work-items/MIG-XXXX.md`を`IN_PROGRESS`で保存する。有効owner、実行済みunit、実行したテスト、次unit、PR link、実在するsource HEADを記録する（`TASK_MICRO_UNITS.md`）。通常wakeではbranch/mainの`STATUS.md`を変更しない。
 
 何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
 必要に応じて同じPRで更新:
 
-- `STATUS.md`
 - `CURRENT_ROUTES.md`
 - `FRONTEND_FEATURES.md` / `frontend/*.md`
 - `FUNCTION_INVENTORY.md` / `functions/*.md`
@@ -308,7 +309,7 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-通常taskはtask DONE + next dependency-ready task READYまで同じPRへ記録してsquash mergeする。
+独立レビューと必須CIの合格後、merge直前に最新mainから`STATUS.md`を統合する。その時だけtask DONE + next dependency-ready task READYを同じPRへ記録してsquash mergeする。新pushでレビュー/CIが古くなった場合は再評価する。
 
 ---
 
@@ -340,15 +341,15 @@ next action
 
 ```text
 LOOP:
-  read STATUS
-  select exactly one READY MIG task
+  read latest main STATUS, open PRs and owner work-item
+  resume one owner task or select one unclaimed dependency-ready MIG
   obey Git workflow
   claim
   inventory CURRENT route/UX/FN/requirements
   implement or audit
   optimize only within preservation contract
   validate code quality + behavior
-  persist STATUS + ledgers/matrices
+  persist owner work-item + affected ledgers/matrices
   evaluate stop conditions
 ```
 
@@ -452,7 +453,7 @@ Next:
 
 # Resumable loop / PR lifecycle contract（2026-10-09追補）
 
-1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、branch STATUSのcheckpointから再開する。PR branchに当該taskの`IN_PROGRESS/REVIEW`があるなら、branch STATUSを優先し、新しいtask/PRを生成しない。
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、owner PRの`work-items/MIG-XXXX.md`から再開する。そのwork-itemに`IN_PROGRESS/REVIEW/BLOCKED`があるならlive stateを優先し、新しいtask/PRを生成しない。`REVIEW`は次unit実装の許可ではなく、独立レビュー/CI待ちを意味する。
 2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
 3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
 4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。

@@ -140,7 +140,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] CURRENT technical compatibility routes separated from user-visible features
 - [x] global error/404/robots/sitemap/shell behaviors represented
 - [x] old `docs/design-redesign` removed from migration sources
-- [x] new visual source set to `UI_REFERENCE.md = PENDING_HTML`
+- [x] Phase 0 established `UI_REFERENCE.md = PENDING_HTML`; MIG-0200 subsequently registered the approved HTML. Current visual scope is in UI_REFERENCE.
 - [x] existing design/product requirement reconciliation policy fixed
 - [x] Claude / Codex / Antigravity shared protocol fixed
 - [x] migration Git/branch/PR/squash workflow is mandatory
@@ -252,7 +252,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 4 — Public PoC
 
-> **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、D-08 HTMLモック待ちは **MIG-0402/0403と正式UI移行** だけ。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
+> **1102優先の2トラック (2026-10-09、登録状態追記2026-10-13):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能。D-08 HTMLは登録済みだが、**MIG-0402/0403と正式UI移行** はPhase 2等の依存・Gateを要求する。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
 >
 > **並行READY:** MIG-0301 (Domain) と MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
 >
@@ -371,7 +371,7 @@ Completed:
   のlogical URL contractを固定
 - searchParamsを読むCURRENT pageをQ-DIRECT扱いしないdrift ruleを追加
 - error/global-error/not-found/robots/sitemapを86 screen外のglobal surfacesとしてshell mapping
-- visual sourceはUI_REFERENCE=PENDING_HTMLのまま維持し、target layout/componentは捏造しない
+- このaudit時点のvisual sourceはUI_REFERENCE=PENDING_HTMLで、target layout/componentを捏造していない。現在はMIG-0200登録済みのUI_REFERENCEと公開mock/非公開CURRENT再利用の範囲を読む。
 - `screen-mapping/README.md` をROUTE_MATRIX / FRONTEND_FEATURES / architecture / shared protocol / Claude / Codex / Antigravity / checkerへ接続
 - production runtime/Cloudflare/D1/R2/KV/Queue mutation 0
 

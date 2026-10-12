@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const fields = ["Task","State","Owner","Branch","PR","Head","Owned paths","Current unit","Validation","Evidence","Rollback","Next"];
 const activeStates = new Set(["IN_PROGRESS","REVIEW","BLOCKED"]);
@@ -15,7 +16,17 @@ export function readWorkItems(root) {
   return Object.fromEntries(fs.readdirSync(dir).filter(x=>x.endsWith(".md")&&!["README.md","TEMPLATE.md"].includes(x))
     .map(x=>[x,fs.readFileSync(path.join(dir,x),"utf8")]));
 }
-export function validateWorkItems({statusText,entries}) {
+export function gitCommitExists(root, value) {
+  if (!sha.test(value || "")) return false;
+  try {
+    execFileSync("git", ["cat-file", "-e", value + "^{commit}"], { cwd: root, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function validateWorkItems({statusText,entries,commitExists}) {
   const errors=[], ids=new Set([...statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map(m=>m[1])), claimed=new Map(), prs=new Map(), branches=new Map();
   for(const [filename,body] of Object.entries(entries)) {
     if(!/^MIG-\d{4}\.md$/.test(filename)){errors.push("invalid filename: "+filename);continue;}
@@ -35,6 +46,7 @@ export function validateWorkItems({statusText,entries}) {
       if(!new RegExp("^migration/"+id.toLowerCase()+"-[a-z0-9][a-z0-9-]*$").test(map.Branch||""))errors.push(filename+": invalid task branch");
       if(!/^#\d+$/.test(map.PR||""))errors.push(filename+": invalid real PR number");
       if(!sha.test(map.Head||""))errors.push(filename+": missing previous source SHA");
+      else if(commitExists && !commitExists(map.Head))errors.push(filename+": source SHA is not an available Git commit (fetch full history): "+map.Head);
       if(!map["Owned paths"]||map["Owned paths"]==="none")errors.push(filename+": missing owned paths");
       if(!map["Current unit"]||map["Current unit"]==="none")errors.push(filename+": missing micro-unit");
       for(const [label,value,seen] of [["PR",map.PR,prs],["Branch",map.Branch,branches]]) {
@@ -56,7 +68,7 @@ export function validateWorkItems({statusText,entries}) {
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
   const statusText=fs.readFileSync(path.join(root,"docs/migration/STATUS.md"),"utf8"),entries=readWorkItems(root);
-  const errors=validateWorkItems({statusText,entries});
+  const errors=validateWorkItems({statusText,entries,commitExists: value => gitCommitExists(root,value)});
   if(errors.length){errors.forEach(x=>console.error("[migration:work-items] "+x));process.exitCode=1;}
   else{
     console.log("[migration:work-items] OK: "+Object.keys(entries).length+" checkpoints");

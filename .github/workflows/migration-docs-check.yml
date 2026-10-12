@@ -43,6 +43,8 @@ jobs:
         run: node scripts/check-migration-docs.mjs
       - name: 実行契約の状態遷移テスト
         run: node --test scripts/check-migration-execution.test.mjs
+      - name: 登録mockとCURRENT route・適用範囲の回帰テスト
+        run: node --test scripts/check-migration-ui-reference.test.mjs
       - name: 全MIG実装カード網羅性
         run: node scripts/check-migration-task-cards.mjs
       - name: 実装カードchecker回帰テスト
@@ -72,6 +74,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22

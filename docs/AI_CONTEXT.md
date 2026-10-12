@@ -70,7 +70,7 @@
 CURRENT route正本は `CURRENT_ROUTES.md`。
 Frontend-observable behavior正本は `FRONTEND_FEATURES.md` + `frontend/*.md`。
 
-新visual sourceは `UI_REFERENCE.md`。現在は `PENDING_HTML` であり、後日ユーザーから提供されるHTML mockを登録するまではvisual redesignを確定しない。
+新visual sourceと適用範囲は `UI_REFERENCE.md`。HTML mockは登録済み（`REGISTERED_HTML`、D-08 `DECIDED`）。公開UIは登録mock、非公開UIはCURRENT再利用を採用する。各MIGの依存完了・レビュー・Gateは別途確認する。将来未登録状態へ戻った場合はvisual redesignを確定しない。
 
 `docs/design-redesign/`は使用しない。`app/(redesign)`もTARGET designの正本にしない。
 

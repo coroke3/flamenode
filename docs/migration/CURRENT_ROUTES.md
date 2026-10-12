@@ -11,7 +11,7 @@
 
 - routeの存在、role、purpose、primary actionはCURRENT codeから確認する。
 - visual designの正本にはしない。
-- target UIは `UI_REFERENCE.md` に後から登録されるHTML mockを使う。
+- target UIの適用範囲は `UI_REFERENCE.md` に従う（公開は登録HTML mock、非公開はCURRENT再利用）。
 - route削除/統合は、関連`UX-*`を全て移行し、URL互換性のdispositionを記録し、必要なら明示承認を得るまで行わない。
 - route数とUX capability数は1:1ではない。
 - `COMPAT_REDIRECT` はURL contractであり独立visual screenとして数えない。
@@ -138,7 +138,7 @@
 ```text
 CURRENT VISUAL_SCREEN  74
 COMPAT_REDIRECT         9
-DEV_ONLY                3
+DEV_ONLY                1
 SYSTEM_SURFACE          6
 --------------------------
 app/**/page.tsx         90
@@ -167,7 +167,7 @@ app/**/page.tsx         90
 
 ## Global surfaces
 
-以下は86 screenとは別のcross-cutting contract。
+以下はpage routeとは別のcross-cutting contract。
 
 - `app/error.tsx`: recoverable route error
 - `app/global-error.tsx`: catastrophic root error

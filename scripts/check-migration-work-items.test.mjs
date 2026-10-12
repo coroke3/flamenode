@@ -23,3 +23,12 @@ test("duplicate paths are rejected",()=>{
 });
 test("REVIEW requires evidence",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active.replace("State: IN_PROGRESS","State: REVIEW")}}).join(" "),/Evidence required/));
 test("unknown MIG rejected",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0999.md":ready}}).join(" "),/absent from STATUS/));
+
+test("formatted but nonexistent source SHA is rejected",()=>{
+ const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":active},commitExists:()=>false});
+ assert.match(errors.join(" "),/source SHA is not an available Git commit/);
+});
+test("available source commit is accepted without claiming it is the tested head",()=>{
+ const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":active},commitExists:value=>value==="a".repeat(40)});
+ assert.deepEqual(errors,[]);
+});
