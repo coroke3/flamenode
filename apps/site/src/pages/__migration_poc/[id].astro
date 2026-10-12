@@ -1,0 +1,62 @@
+---
+/**
+ * Synthetic fixture only. This is a nonproduction build/visibility PoC,
+ * NOT a public rollout, live route source or a substitute for the visibility gateway.
+ */
+import { createHash } from "node:crypto";
+import { loadPublicBuildSnapshot, newSnapshotBuildMetrics } from "../../lib/publicDataLoader";
+import type { PublicSnapshot } from "../../lib/publicDataLoader";
+
+const generation = "synthetic-build-01";
+const publicKey = "snapshot/video/public_demo.json";
+const privateKey = "snapshot/video/private_demo.json";
+const fixture = {
+  [publicKey]: { kind: "video", id: "public_demo", title: "Synthetic public video" },
+  [privateKey]: { kind: "video", id: "private_demo", title: "Synthetic private video" },
+};
+const manifest = { schemaVersion: 1 as const, generation, allowedKeys: [publicKey], blockedKeys: [privateKey] };
+const bytes = Object.fromEntries(Object.entries(fixture).map(([key, payload]) => [
+  key,
+  new TextEncoder().encode(JSON.stringify({
+    schemaVersion: 1, generation, key,
+    visibility: key === publicKey ? "public" : "private",
+    payload,
+    sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"),
+  })),
+]));
+const source = { read: async (key: string) => bytes[key] ?? null };
+
+export async function getStaticPaths() {
+  const metrics = newSnapshotBuildMetrics();
+  // Always enumerate from the verified allowed list, not from R2 object listing.
+  const result = [];
+  for (const key of manifest.allowedKeys) {
+    const dto = await loadPublicBuildSnapshot(source, key, { generation, manifest, metrics });
+    result.push({ params: { id: dto.id }, props: { dto } });
+  }
+  // Private fixture is deliberately present in the source but cannot be emitted.
+  let denied = false;
+  try {
+    await loadPublicBuildSnapshot(source, privateKey, { generation, manifest, metrics });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "NOT_PUBLIC") denied = true;
+    else throw error;
+  }
+  if (!denied) throw new Error("MIG-0401 fail-closed private fixture assertion failed");
+  console.info(
+    `[MIG-0401 synthetic build] reads=${metrics.reads} bytes=${metrics.bytes} parseMs=${metrics.parseMs.toFixed(3)} publicCandidates=${result.length} denied=${metrics.rejected}`,
+  );
+  return result;
+}
+
+interface Props { dto: PublicSnapshot }
+const { dto } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><meta name="robots" content="noindex,nofollow" /><title>MIG-0401 synthetic fixture</title></head>
+  <body data-synthetic-only="true">
+    <h1>MIG-0401 synthetic fixture</h1>
+    <p data-public-id={dto.id}>{dto.title}</p>
+  </body>
+</html>
