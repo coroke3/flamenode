@@ -1,5 +1,7 @@
 # FlameNode 設計確認質問
 
+> **UIデザイン正本に関する注意:** ターゲットUIのビジュアルデザインは `docs/migration/mock/`（`docs/migration/UI_REFERENCE.md`）に登録されたHTMLモックが正本です。本ドキュメントの旧配色・モード決定はモック受領前の検討記録であり、新UI実装時はHTMLモックおよび `UI_REFERENCE.md` を優先してください。
+
 ## 解決済みの決定
 
 ### 1. イベント権限ロール
