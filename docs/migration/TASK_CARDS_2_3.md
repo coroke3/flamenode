@@ -8,12 +8,12 @@
 
 各MIG開始前に `FILE_MIGRATION_MATRIX.md` で所有source、テスト、依存consumerを絞り込み、実target fileと接続済みexport/importを `FILE_PROGRESS_PROTOCOL.md` に従って同じPRで更新する。タスクDONEの前に担当ファイルに `NOT_STARTED` が残っていないことを checker で確認する。
 
-Phase 2 visual cards **remain BLOCKED** until user HTML mock is registered in `UI_REFERENCE.md`. Phase 3 pure/domain cards may proceed in parallel **only where STATUS dependencies actually allow**. After D-01=A, D-01 no longer blocks design; **MIG-0308 code migration** gates DB-coupled extraction. All PRs preserve legacy Next behavior, user-facing UX and owner/security/visibility invariants. Never fabricate approved HTML or mark unexecuted tests as PASS.
+The user HTML mock is registered in `UI_REFERENCE.md` (MIG-0200 DONE, D-08 DECIDED, 2026-10-13), so Phase 2 visual cards are gated by the STATUS dependency chain, not by missing HTML: MIG-0201 is READY, MIG-0202..0206 follow in order, and MIG-0206 (Phase 2 Gate) is never self-approved. Stop visual work only if `UI_REFERENCE.md` reverts to `PENDING_HTML`. Phase 3 pure/domain cards may proceed in parallel **only where STATUS dependencies actually allow**. After D-01=A, D-01 no longer blocks design; **MIG-0308 code migration** gates DB-coupled extraction. All PRs preserve legacy Next behavior, user-facing UX and owner/security/visibility invariants. Never fabricate approved HTML or mark unexecuted tests as PASS.
 
 ### MIG-0200 — register approved HTML mock
 
 - 読む: `UI_REFERENCE.md`, user-provided attachment/file, `CURRENT_ROUTES.md`, `screen-mapping/README.md`.
-- 変更: HTML取得元と実際のhash/version/date/scope・screen対応を記録。原本を参照可能なrepositoryまたは接続先に登録し、1 surfaceごとにCURRENT route/UX/FN対応表を追加。ユーザー未提供なら`BLOCKED_ON_USER`のまま。
+- 変更: HTML取得元と実際のhash/version/date/scope・screen対応を記録。原本を参照可能なrepositoryまたは接続先に登録し、1 surfaceごとにCURRENT route/UX/FN対応表を追加。ユーザー未提供なら`BLOCKED_ON_USER`のまま（MIG-0200は2026-10-13にDONE済み。再登録・差し替え時のみ該当）。
 - 試験: fileの実在/hash、未掲載画面一覧、scope/excludedを手動review。新デザインの推測禁止。
 - DONE: `UI_REFERENCE.md` の記載とHTML実体、ユーザーの採用確認が一致。D-08の状態更新は**HTML受領後**のみ。
 

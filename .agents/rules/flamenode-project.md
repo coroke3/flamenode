@@ -33,6 +33,6 @@ Rules:
 - Do not optimize for line count.
 - Code must satisfy the professional-quality standard in `CODE_QUALITY.md`.
 - `docs/design-redesign` is obsolete; do not use old redesign artifacts as the target design.
-- While `UI_REFERENCE.md` is `PENDING_HTML`, do not invent/finalize a new visual design.
+- The HTML mock is registered (`UI_REFERENCE.md`, `docs/migration/mock/`, MIG-0200 DONE, D-08 DECIDED); visual work follows the mock and the STATUS dependency chain. Do not invent/finalize a visual design that departs from it; stop visual work only if `UI_REFERENCE.md` reverts to `PENDING_HTML`.
 - Do not perform production Cloudflare routing, Remote D1, secret, or deploy mutations without explicit approval.
 - Never automatically approve/cross a Phase Gate.

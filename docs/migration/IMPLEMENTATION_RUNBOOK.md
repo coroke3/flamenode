@@ -28,8 +28,9 @@ START
   -> CHECK ownership + task READY + parent tasks DONE
   -> CHECK decisions, required PoCs, mock state and approvals
   -> READ task card + target ledger + CURRENT files/tests
-  -> WRITE work-items/MIG-XXXX.md claim (exact files / UX / FN / acceptance / rollback); leave STATUS unchanged
-  -> CREATE short-lived migration/MIG branch + Draft PR (check duplicate again)
+  -> CREATE short-lived migration/MIG branch from latest main + Draft PR
+  -> WRITE work-items/MIG-XXXX.md claim on that branch (exact files / UX / FN / acceptance / rollback); leave STATUS unchanged
+  -> RE-CHECK open migration PRs for a duplicate writer (stop if one exists)
   -> WRITE failing characterization tests BEFORE behavior relocation
   -> IMPLEMENT only named scope; keep legacy behavior and fallback
   -> RUN relevant tests + full PR CI

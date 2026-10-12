@@ -92,7 +92,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 - 読む: `CURRENT_ROUTES.md` Manage 12、`frontend/MANAGE_ADMIN.md`, `packages/ui`, `apps/app/{package.json,vite.config.ts}`。
 - 変更手順: (1)`+apps/ops/package.json` (`@flamenode/ops`), `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts` (`base:'/'`, `assetsDir:'_ops_assets'`)。`+apps/ops/src/{main,App}.tsx` Routerとerror boundary。(2)shared UI/contracts importとpackage-lock/npm ci。(3)`+flamenode-ops` Worker/static assets bindingは別MIG/PoCで契約テスト（本番route変更なし）。(4) Manage12画面をCURRENTから移植。
-- 試験: `npm run build --workspace=@flamenode/app`, `npm run build --workspace=@flamenode/ops` + CSS/JSに相互混入なし、bare/deep URL/browser back, no session, owner0防止、slot concurrency、staff editing, notification retry।
+- 試験: `npm run build --workspace=@flamenode/app`, `npm run build --workspace=@flamenode/ops` + CSS/JSに相互混入なし、bare/deep URL/browser back, no session, owner0防止、slot concurrency、staff editing, notification retry。
 - DONE: **別build/manifest/bindings** と同一cookie、owner/staff role権限、管理機能12のstate/UX/FNが揃う。
 
 ### MIG-0705 — Admin 45 surfaces on Ops SPA

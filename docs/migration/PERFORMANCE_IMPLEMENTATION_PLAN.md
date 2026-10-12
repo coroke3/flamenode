@@ -1,6 +1,6 @@
 # Performance-first Migration Work Order (1102 / CPU / visibility)
 
-> Status: TARGET work order, **not implemented**. Task state authority: [STATUS.md](STATUS.md). Baseline: [cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md). Route-level evidence: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md). Visual input: [UI_REFERENCE.md](UI_REFERENCE.md) (`PENDING_HTML`).
+> Status: TARGET work order, **not implemented**. Task state authority: [STATUS.md](STATUS.md). Baseline: [cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md). Route-level evidence: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md). Visual input: [UI_REFERENCE.md](UI_REFERENCE.md) (`REGISTERED_HTML`, MIG-0200 DONE; D-08 DECIDED).
 > Authoritative precedence: CURRENT code/test and Cloudflare outcomes → STATUS dependencies → TASK_CARDS_4_5 acceptance → this performance supplement. Do not create a second independent status ledger.
 
 ## Objective, scope and independent tracks
@@ -10,7 +10,7 @@ Remove the dominant **request-time** Next/OpenNext SSR/RSC cost without relocati
 | Track | Task order (existing MIG IDs) | Blocking rule |
 | --- | --- | --- |
 | Performance preflight | MIG-0401 → MIG-0404 → MIG-0405 → MIG-0406 | MIG-0105 DONE unlocks 0401. Existing fixture/snapshot and placeholder HTML are permitted **only for isolated nonproduction performance tests**. No D-08 HTML needed. |
-| Visual, frontend parity | MIG-0200..0206 → MIG-0402 → MIG-0403 | D-08 approved HTML and test evidence mandatory. 0403 also depends on 0404; no fabricated designs. |
+| Visual, frontend parity | MIG-0200..0206 → MIG-0402 → MIG-0403 | Registered HTML mock (D-08 DECIDED) and test evidence mandatory; order gated by STATUS dependencies (MIG-0402 waits for MIG-0206 + MIG-0401). 0403 also depends on 0404; no fabricated designs. |
 | Production-ready Phase 4 | MIG-0407 after **both 0403 and 0406** | Independent review + human Gate; neither track alone authorizes cutover. |
 | Public pages | MIG-0501..0508 | Preserve actual STATUS task dependencies; select high-load routes early once prereqs pass. |
 | Domain, Hono, SPA | MIG-0301..0308, MIG-0601..0607, MIG-0701..0706 | Can advance on their own dependencies; a Hono switch does not prove CPU improvement. |

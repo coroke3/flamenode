@@ -77,7 +77,7 @@ Next wake (one file/micro-unit): ...
 - Candidate +path or TBD still present when marking BRIDGED/PARITY_VERIFIED: fail.
 - Old source removed with no RETIRED file row and verified import/URL compatibility: fail.
 - Parallel PR touched shared file owned by another agent: stop/coordinate handoff.
-- D-08 UI HTML remains missing; Phase2/4/5 visual work not started by assumption.
+- The HTML mock is registered (D-08 DECIDED, MIG-0200 DONE); a Phase2/4/5 visual task starts only when its STATUS dependencies are DONE (e.g. MIG-0402 needs MIG-0206 Phase 2 Gate + MIG-0401). Stop if a dependency is not DONE or `UI_REFERENCE.md` reverts to `PENDING_HTML`.
 - Production Cloudflare Route, Remote D1, secrets, Auth.js cutover or Phase Gate requested without explicit approval: stop.
 - Checker passing means ledger structure is correct, NOT real running /loop, code parity, or zero-1102.
 

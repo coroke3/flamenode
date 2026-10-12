@@ -13,7 +13,7 @@
 4. For platform/UI migration, start with [`docs/migration/MIGRATION_START_HERE.md`](docs/migration/MIGRATION_START_HERE.md), apply the relevant [`AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md) rules, filter [`STATUS.md`](docs/migration/STATUS.md) and [`FILE_MIGRATION_MATRIX.md`](docs/migration/FILE_MIGRATION_MATRIX.md) to one MIG/owner, follow [`FILE_PROGRESS_PROTOCOL.md`](docs/migration/FILE_PROGRESS_PROTOCOL.md) and [`IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) relevant steps and **one** matching `TASK_CARDS_*.md` MIG card. Preserve PR/Decision Gates; do not load entire ledgers/docs every iteration.
 5. Before coding, open CURRENT source/tests referenced by that card. `+path` denotes a planned file, not an existing file.
 
-Do not bulk-load the repository, Historical/archive material, completed migration phases, or old `.claude/flamenode/source/` documents.
+Do not bulk-load the repository, Historical/archive material, or completed migration phases.
 
 ## Precedence
 
@@ -98,7 +98,7 @@ Claude Code, Codex, Antigravity, and other agents share one protocol:
 
 Tool adapters are intentionally thin:
 
-- Claude: `.claude/commands/flamenode-migration.md`, `.claude/skills/flamenode-migration/SKILL.md`
+- Claude: `.claude/skills/flamenode-migration/SKILL.md` (`/flamenode-migration`), `.claude/loop.md` (bare `/loop`)
 - Codex: `.codex/skills/flamenode-migration/SKILL.md`
 - Antigravity: `.agents/workflows/flamenode-migration.md`, `.agents/skills/flamenode-migration/SKILL.md`, `.agents/rules/flamenode-project.md`
 

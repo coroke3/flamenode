@@ -13,10 +13,12 @@ Read and follow, in order:
 2. `docs/migration/AGENT_PROTOCOL.md`
 2a. `docs/migration/IMPLEMENTATION_RUNBOOK.md` and one current `docs/migration/TASK_CARDS_*.md` card
 2b. `docs/migration/OPEN_DECISIONS.md`
-3. `docs/migration/README.md`
-4. `docs/migration/STATUS.md`
-5. `docs/migration/FEATURE_CATALOG.md`
-6. `docs/migration/FUNCTION_INVENTORY.md`
+2c. `docs/migration/MIGRATION_START_HERE.md`; run `npm run migration:next` for an advisory next-task suggestion (STATUS.md remains the authority; it does not see open PRs)
+2d. `docs/migration/GIT_WORKFLOW.md`
+3. `docs/migration/README.md` (relevant sections only)
+4. `docs/migration/STATUS.md` (selected task and dependency rows only)
+5. `docs/migration/FEATURE_CATALOG.md` (relevant rows only)
+6. `docs/migration/FUNCTION_INVENTORY.md` (relevant rows only)
 7. the relevant route/API matrix and target code/tests; for screen/UI/route work also read `docs/migration/screen-mapping/README.md`; for Cloudflare Worker/ingress/binding/build/job work also read `docs/migration/cloudflare/TOPOLOGY.md`; for CPU/1102/request/PoC performance work also read `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`; for auth/session/linking/terms/Active X/permission/owner work also read `docs/migration/auth/README.md`; for Queue/Cron/background job/retry/DLQ/recovery work also read `docs/migration/background-jobs/README.md`; for static artifact/alias/visibility/fallback/repair work also read `docs/migration/static-delivery/README.md`
 
 Execute **exactly one READY MIG task** per invocation.
@@ -29,6 +31,3 @@ Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custo
 When UI redesign is involved, feature parity is mandatory: use `FUNCTION_INVENTORY.md` and do not treat visual completion as functional completion.
 
 For repeated autonomous execution, each iteration still equals exactly one MIG task and must persist all progress to repository Markdown before continuing.
-
-
-Open PR live state: `docs/migration/work-items/MIG-XXXX.md` is updated each wake. `STATUS.md` is the merged task/dependency summary and is updated only at merge integration. See `GIT_WORKFLOW.md`.

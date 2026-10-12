@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 > Status: Active
-> Last verified: 2026-10-06
-> Verified against commit: `99591f7b3387b6b33d113f2685d6b31e38085fdc`
+> Last verified: 2026-10-13
+> Verified against commit: `7a29eab8f79ad53e607693c682333eaf1b08c170`
 > Source of truth: `AGENTS.md`
 
 規範・不変条件・検査の正本は [`AGENTS.md`](AGENTS.md)。タスク別の次の1件は [`docs/AI_CONTEXT.md`](docs/AI_CONTEXT.md)。
@@ -12,9 +12,9 @@
 1. `AGENTS.md`
 2. `docs/AI_CONTEXT.md` の該当タスク行
 3. 対象コードと関連test
-4. migration taskだけ `docs/migration/AGENT_PROTOCOL.md` → `docs/migration/STATUS.md`
+4. migration taskだけ `docs/migration/MIGRATION_START_HERE.md` → `npm run migration:next` → `docs/migration/AGENT_PROTOCOL.md` の該当節 → `STATUS.md` の該当行
 
-`.claude/flamenode/source/`、`archive/`、完了済みphaseは、過去仕様調査を明示されたときだけ読む。
+`.claude/flamenode/requirements-map.md`、`archive/`、完了済みphaseは、過去仕様調査を明示されたときだけ読む。
 
 ## 役割の選び方
 
@@ -30,15 +30,17 @@
 
 ## Migration loop
 
-`/flamenode-migration` は1回につき `docs/migration/STATUS.md` のREADY taskを1つだけ進めるClaude adapter。
+`/flamenode-migration` は1回につき1 actionだけ進めるClaude adapter（`.claude/skills/flamenode-migration/SKILL.md`）。引数なしの `/loop` は `.claude/loop.md` を使う。同名の `.claude/commands/` は作らない（skillが優先され、commandは無視される）。
 
-共通実行契約の正本は [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md)。`.claude/commands/flamenode-migration.md` と `.claude/skills/flamenode-migration/SKILL.md` は薄いadapterであり、仕様正本ではない。
+共通実行契約の正本は [`docs/migration/AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md) §`/loop`（Wake decision / Independent review evidence / Pacing）。adapterは仕様正本ではない。
 
 `/loop`併用時も以下を守る。
 
-- 1 iteration = 1 MIG task
-- iteration開始/終了stateをSTATUSへ保存
-- `IN_PROGRESS`のまま次へ進まない
+- 1 wake = 1 action（自PRのmicro-unit 1つ / merge統合 1件 / 他agent PRの独立レビュー 1件 / 何もしない）
+- live stateはowner PR branchの `docs/migration/work-items/MIG-XXXX.md`。`STATUS.md` はmerge直前の統合でだけ更新
+- checkpointの無い `IN_PROGRESS` を残さない
+- Claudeのsubagentレビューは独立レビューに数えない
+- 人間承認待ち・BLOCKED・READY無しならpollingせずloopを止めて報告
 - Phase Gateを自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret操作は明示承認まで停止
 - BLOCKEDを無視して後続Phaseへ進まない
