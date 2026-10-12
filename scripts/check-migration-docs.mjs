@@ -1111,6 +1111,39 @@ if (errors.length === 0) {
     if (!antigravityRule.includes(phrase)) errors.push(`Antigravity rule: required source missing: ${phrase}`);
   }
 
+  // Adapter discipline: must persist progress to work-items/MIG-XXXX.md and not mutate STATUS.md during implementation
+  for (const adapter of adapters) {
+    const text = read(adapter);
+    if (/claim the task in STATUS\.md as IN_PROGRESS/i.test(text)) {
+      errors.push(`${adapter}: must not instruct claiming task in STATUS.md as IN_PROGRESS; progress belongs in work-items/MIG-XXXX.md`);
+    }
+  }
+
+  // Runbook vs Decision alignment: if D-08 is DECIDED, runbook must not state it is BLOCKED_ON_USER or HTML mock not received
+  const decisionsDoc = read("docs/migration/OPEN_DECISIONS.md");
+  const runbookDoc = read("docs/migration/IMPLEMENTATION_RUNBOOK.md");
+  if (decisionsDoc.includes("D-08: A (DECIDED") || decisionsDoc.includes("D-08: DECIDED")) {
+    if (runbookDoc.includes("BLOCKED_ON_USER") || runbookDoc.includes("HTMLモックはまだ受領していない")) {
+      errors.push("IMPLEMENTATION_RUNBOOK.md: D-08 is DECIDED; runbook must not claim D-08 is BLOCKED_ON_USER or HTML mock not received");
+    }
+  }
+
+  // UI_REFERENCE UX prefix validity: all UX prefixes must come from canonical FEATURE_CATALOG prefixes
+  const uiRefDoc = read("docs/migration/UI_REFERENCE.md");
+  const validUxPrefixes = new Set([
+    "UX-ADM", "UX-AUTH", "UX-DASH", "UX-DISC", "UX-ENTRY", "UX-EVENT",
+    "UX-GLOBAL", "UX-LIB", "UX-MNG", "UX-PUB", "UX-SET", "UX-SLOT",
+    "UX-SUB", "UX-SYS", "UX-USER", "UX-VID"
+  ]);
+  const uxRegex = /UX-[A-Z0-9]+-\d+/g;
+  let uxMatch;
+  while ((uxMatch = uxRegex.exec(uiRefDoc)) !== null) {
+    const prefix = uxMatch[0].split("-").slice(0, 2).join("-");
+    if (!validUxPrefixes.has(prefix)) {
+      errors.push(`UI_REFERENCE.md: non-canonical UX prefix found: ${prefix} (${uxMatch[0]})`);
+    }
+  }
+
   // Execution gates must be enforced against actual STATUS/Decisions/config, not only keyword presence.
   errors.push(...validateMigrationExecution({
     statusText: status,

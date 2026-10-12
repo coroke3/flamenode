@@ -58,7 +58,8 @@ export function validateTaskCards({status, fileContents, runbook, protocol, deci
   if (!protocol?.includes("IMPLEMENTATION_RUNBOOK.md")) errors.push("AGENT_PROTOCOL: IMPLEMENTATION_RUNBOOK.md not in mandatory read order");
   if (!protocol?.includes("TASK_CARDS_")) errors.push("AGENT_PROTOCOL: task cards not referenced");
   if(!decisions?.includes("MIG-0308") || !tasks.has("MIG-0308")) errors.push("D-01 packages/db migration task missing");
-  if (!runbook?.includes("BLOCKED_ON_USER") || !decisions?.includes("D-08")) errors.push("HTML mock safety gate missing");
+  const mockGatePassed = (runbook?.includes("BLOCKED_ON_USER") || (runbook?.includes("DECIDED") && runbook?.includes("UI_REFERENCE"))) && decisions?.includes("D-08");
+  if (!mockGatePassed) errors.push("HTML mock safety gate missing");
   for (const required of ["Phase 2", "Phase 3", "Phase 4", "Phase 5", "Phase 6", "Phase 7", "Phase 8", "Phase 9"]) {
     const text = Object.values(fileContents).join("\n");
     if (!text.includes(required)) errors.push("missing coverage for " + required);

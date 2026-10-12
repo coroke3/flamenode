@@ -21,8 +21,8 @@ Read and follow, in order:
 
 Execute **exactly one READY MIG task** per invocation.
 
-Before coding, claim the task in `STATUS.md` as `IN_PROGRESS` and record `Owner: codex`.
-At the end, move it to `DONE`, `REVIEW`, or `BLOCKED`; never leave it `IN_PROGRESS`.
+Before coding, record `Owner: codex` and task scope in `docs/migration/work-items/MIG-XXXX.md` on the task branch/PR. Keep `STATUS.md` unchanged during implementation.
+At each wake, persist bounded checkpoint progress in `docs/migration/work-items/MIG-XXXX.md`. `STATUS.md` is updated only at pre-merge integration. See `GIT_WORKFLOW.md`.
 
 Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
 
