@@ -54,7 +54,7 @@ docs/<short-description>
 chore/<short-description>
 ```
 
-Do not include agent names in branch names. Ownership is tracked in `STATUS.md` / PR metadata, so a branch can be handed off without renaming.
+Do not include agent names in branch names. Ownership is tracked in the PR and task-specific `work-items/MIG-XXXX.md`, so a branch can be handed off without renaming.
 
 ---
 

@@ -2,7 +2,7 @@
 
 > Status: Active / operational instructions, not a replacement for AGENT_PROTOCOL.md
 > Updated: 2026-10-09
-> Authority: `STATUS.md`（状態と依存）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
+> Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
 ## 最初の90秒に行うこと
