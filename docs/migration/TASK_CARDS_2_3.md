@@ -26,9 +26,9 @@ Phase 2 visual cards **remain BLOCKED** until user HTML mock is registered in `U
 
 ### MIG-0202 — shared UI primitives
 
-- 読む: `packages/ui/src/components/Button.tsx`, `packages/ui/src/adapters/index.tsx`, HTMLのbutton/link/input類。
-- 変更: `packages/ui/src/components/`でButton, Link wrapper, Badge, Dialogのうち登録済みHTMLに存在するprimitiveだけ作成。disabled/loading/error/focus状態とa11yを含む。
-- 試験: `npm run build --workspace=@flamenode/ui`、keyboard/aria/focusのcomponent tests、Next/Astro/Vite双方のbundler解決を確認。
+- 読む: `packages/ui/src/components/Button.tsx`, `packages/ui/src/adapters/index.tsx`, HTMLのbutton/link/input類、`src/components/layout/bodyScrollLock.ts`。
+- 変更: `packages/ui/src/components/`でButton, Link wrapper, Badge, Dialogのうち登録済みHTMLに存在するprimitiveだけ作成。disabled/loading/error/focus状態とa11yを含む。モーダル/ドロワー背景固定用に `+packages/ui/src/layout/bodyScrollLock.ts` へ移植し、即時復元セマンティクスを維持する。
+- 試験: `npm run build --workspace=@flamenode/ui`、keyboard/aria/focusのcomponent tests、`bodyScrollLock.contract.test.mjs` パリティ、Next/Astro/Vite双方のbundler解決を確認。
 - DONE: 対象primitivesのUI_REFERENCE差分、状態変化とdisabled semanticsのE2E/スナップショットが記録済み。
 
 ### MIG-0203 — public navigation / layout
