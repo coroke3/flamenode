@@ -1,0 +1,148 @@
+/**
+ * Build-only snapshot projection PoC (MIG-0401).
+ * This is NOT a request handler or a replacement for the request-time visibility gateway.
+ * Runtime reads are injected so Astro builds can use local fixtures or a read-only R2 client.
+ */
+import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
+
+export type SnapshotKind = "video" | "user" | "event";
+export type PublicSnapshot = Readonly<{ kind: SnapshotKind; id: string; title: string }>;
+export type SnapshotSource = Readonly<{
+  read(key: string): Promise<Uint8Array | null>;
+}>;
+export type SnapshotManifest = Readonly<{
+  schemaVersion: 1;
+  generation: string;
+  allowedKeys: readonly string[];
+  blockedKeys: readonly string[];
+}>;
+export type SnapshotBuildMetrics = {
+  reads: number;
+  bytes: number;
+  parseMs: number;
+  accepted: number;
+  rejected: number;
+};
+export type SnapshotLoadOptions = Readonly<{
+  manifest: SnapshotManifest | null;
+  generation: string;
+  maxBytes?: number;
+  metrics?: SnapshotBuildMetrics;
+}>;
+type SnapshotEnvelope = {
+  schemaVersion: number;
+  generation: string;
+  key: string;
+  visibility: string;
+  sha256: string;
+  payload: unknown;
+};
+
+const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
+const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+const HEX_256 = /^[a-f0-9]{64}$/;
+const decode = new TextDecoder("utf-8", { fatal: true });
+
+export class SnapshotBuildError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = "SnapshotBuildError";
+  }
+}
+
+export function newSnapshotBuildMetrics(): SnapshotBuildMetrics {
+  return { reads: 0, bytes: 0, parseMs: 0, accepted: 0, rejected: 0 };
+}
+
+function reject(metrics: SnapshotBuildMetrics, code: string, message: string): never {
+  metrics.rejected += 1;
+  throw new SnapshotBuildError(code, message);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validatedPublicDto(value: unknown): PublicSnapshot | null {
+  if (!isRecord(value)) return null;
+  const { kind, id, title } = value;
+  if (
+    !["video", "user", "event"].includes(String(kind)) ||
+    typeof id !== "string" || !ID_PATTERN.test(id) ||
+    typeof title !== "string" || title.length === 0 || title.length > 300
+  ) return null;
+  // Strict projection. Never forward unknown metadata or private attributes.
+  return { kind: kind as SnapshotKind, id, title };
+}
+
+function checkedManifest(manifest: SnapshotManifest | null, generation: string, metrics: SnapshotBuildMetrics): SnapshotManifest {
+  if (!manifest || manifest.schemaVersion !== 1 ||
+    typeof manifest.generation !== "string" || manifest.generation !== generation ||
+    !Array.isArray(manifest.allowedKeys) || !Array.isArray(manifest.blockedKeys) ||
+    !manifest.allowedKeys.every(k => typeof k === "string") ||
+    !manifest.blockedKeys.every(k => typeof k === "string")) {
+    return reject(metrics, "MANIFEST_UNAVAILABLE", "Snapshot build visibility manifest missing, stale or invalid");
+  }
+  return manifest;
+}
+
+/**
+ * Strictly read a versioned, SHA-verified public-only projection.
+ * Fail closed on private, stale, invalid, missing or oversized inputs.
+ * Does not call D1, Queue, HTTP or production Workers.
+ */
+export async function loadPublicBuildSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<PublicSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const manifest = checkedManifest(options.manifest, options.generation, metrics);
+  if (typeof key !== "string" || !/^snapshot\/(video|user|event)\/[a-zA-Z0-9_-]+\.json$/.test(key)) {
+    return reject(metrics, "INVALID_KEY", "Invalid snapshot key");
+  }
+  if (manifest.blockedKeys.includes(key) || !manifest.allowedKeys.includes(key)) {
+    return reject(metrics, "NOT_PUBLIC", "Snapshot denied by visibility manifest");
+  }
+  const maxBytes = options.maxBytes ?? MAX_OBJECT_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_OBJECT_BYTES) {
+    return reject(metrics, "INVALID_LIMIT", "Invalid snapshot byte limit");
+  }
+  metrics.reads += 1;
+  let bytes: Uint8Array | null;
+  try {
+    bytes = await source.read(key);
+  } catch {
+    return reject(metrics, "SOURCE_UNAVAILABLE", "Snapshot source unavailable");
+  }
+  if (!bytes) return reject(metrics, "SNAPSHOT_MISSING", "Public snapshot missing");
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength > maxBytes || bytes.byteLength === 0) {
+    return reject(metrics, "INVALID_SIZE", "Snapshot exceeds build size limit or is invalid");
+  }
+  metrics.bytes += bytes.byteLength;
+  const start = performance.now();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(decode.decode(bytes));
+  } catch {
+    return reject(metrics, "INVALID_JSON", "Snapshot is not valid JSON/UTF-8");
+  } finally {
+    metrics.parseMs += performance.now() - start;
+  }
+  if (!isRecord(parsed)) return reject(metrics, "INVALID_ENVELOPE", "Snapshot envelope invalid");
+  const envelope = parsed as SnapshotEnvelope;
+  if (envelope.schemaVersion !== 1 || envelope.generation !== options.generation || envelope.key !== key) {
+    return reject(metrics, "GENERATION_MISMATCH", "Snapshot generation, schema or key mismatch");
+  }
+  if (envelope.visibility !== "public") return reject(metrics, "NOT_PUBLIC", "Snapshot marked nonpublic");
+  if (!HEX_256.test(envelope.sha256)) return reject(metrics, "INVALID_HASH", "Snapshot digest missing");
+  const actualHash = createHash("sha256").update(JSON.stringify(envelope.payload)).digest("hex");
+  if (actualHash !== envelope.sha256) return reject(metrics, "HASH_MISMATCH", "Snapshot digest mismatch");
+  const dto = validatedPublicDto(envelope.payload);
+  if (!dto) return reject(metrics, "INVALID_PAYLOAD", "Snapshot public DTO invalid");
+  const expectedKey = `snapshot/${dto.kind}/${dto.id}.json`;
+  if (expectedKey !== key) return reject(metrics, "ENTITY_MISMATCH", "Snapshot entity ID does not match key");
+  metrics.accepted += 1;
+  return dto;
+}

@@ -240,6 +240,9 @@
 | `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0401 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
 
+| `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
+| `scripts/migration-public-snapshot.test.mjs` | TEST | synthetic public/private/stale/broken snapshot regression for loader | MIG-0401 | SAME (Node strip-types test) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -247,7 +250,7 @@
 | `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
 | `packages/domain/src/slots/reservationLimit.ts` | MIG-0301 | NOT_CREATED | `src/lib/slots/slotReservationLimit.ts` legacy export bridge |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
-| `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | NOT_CREATED | static projection R2 public snapshot, privacy fence |
+| `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | NOT_CREATED | visibility manifest/cache/fail-closed + Route PoC |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | NOT_CREATED | SSG file count → R2 pre-generated HTML fallback (no unmeasured SSR) |
 
