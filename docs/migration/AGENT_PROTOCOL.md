@@ -15,10 +15,14 @@
 /loop /flamenode-migration
 ```
 
+- adapter: `.claude/skills/flamenode-migration/SKILL.md`（Claude Codeは同名のcommandよりskillを優先するため、`.claude/commands/`に同名ファイルを置かない）
+- `/loop /flamenode-migration` は自己ペース。引数なしの `/loop` は `.claude/loop.md` を各wakeのpromptとして使う。
+- 1 wake終了時の次回予定は下記「`/loop` / continuous execution」のpacingに従う。
+
 ### OpenAI Codex
 
 `.codex/skills/flamenode-migration/SKILL.md` を利用する。
-継続実行でもrepositoryの`STATUS.md`を進捗正本にする。
+継続実行でもmerge済み状態は`STATUS.md`、作業中taskのlive checkpointはowner PR branchの`work-items/MIG-XXXX.md`を正本にする。
 
 ### Google Antigravity
 
@@ -47,7 +51,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 5. Subsystem baselines **only when touched**: `server-actions/README.md` (SA), `route-handlers/README.md` (RH), `cloudflare/TOPOLOGY.md` (deployment), `cloudflare/PERFORMANCE_BASELINE.md` + `PERF_HOTPATH_MATRIX.md` (1102), `static-delivery/README.md` (public), `auth/README.md` (security), `background-jobs/README.md` (Queue), `screen-mapping/README.md` (UI parity).
 6. Full `README.md`, `FEATURE_CATALOG.md` and `BACKEND_OPTIMIZATION.md` are **on-demand references**, not full-file mandatory context for every wake. Read `DOC_MAP.md` only if source-of-truth ownership is unclear.
 
-**Independent tracks:** MIG-0401→0404→0405→0406 (performance PoC, no D-08 HTML) and MIG-0301 (domain extraction) can be claimed by distinct owners/PRs. MIG-0402/0403 (visual) still wait for D-08. MIG-0407 waits for 0403 **and** 0406; production is separately approved. See `PERFORMANCE_IMPLEMENTATION_PLAN.md`.
+**Independent tracks:** MIG-0401→0404→0405→0406 (performance PoC), MIG-0201→…→0206 (Phase 2 design system; D-08 DECIDED / mock registered) and MIG-0301→ (domain extraction) can be claimed by distinct owners/PRs when their owned paths do not overlap. MIG-0402 waits for the Phase 2 Gate (MIG-0206) and MIG-0401; MIG-0403 additionally for 0404. MIG-0407 waits for 0403 **and** 0406; production is separately approved. See `PERFORMANCE_IMPLEMENTATION_PLAN.md`.
 
 ## Context minimization
 
@@ -86,7 +90,7 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 
 ## Claim
 
-開始前には FILE_MIGRATION_MATRIX.md で対象sourceの現在の行と全consumer/legacy bridgeを確認し、ファイルごとの変更・テスト・rollback計画を記入する。
+開始前には FILE_MIGRATION_MATRIX.md で対象sourceの現在の行と全consumer/legacy bridgeを確認し、ファイルごとの変更・テスト・rollback計画を記入する。claimはmainから切ったtask branchとDraft PRを作成した後、そのbranchの`work-items/MIG-XXXX.md`へ書く（形式は`work-items/README.md`）。`STATUS.md`はclaimで変更しない。
 
 ```text
 Task:
@@ -159,16 +163,12 @@ Production action required: yes/no
 
 # UI redesign contract
 
-`UI_REFERENCE.md`が正本。
+`UI_REFERENCE.md`が正本。2026-10-13にHTML mockを`docs/migration/mock/`へ登録済み（MIG-0200 DONE / D-08 DECIDED）。
 
-現在`PENDING_HTML`の間:
-
-- `docs/design-redesign`を参照しない
-- `app/(redesign)`をtarget designの正本にしない
-- agentが独自の新visual designを確定しない
-- CURRENT UX contractの棚卸し/維持は続ける
-
-後日HTML mockが登録されたら、mockをvisual/IA targetとしてroute/UXへmappingする。
+- 公開画面（Phase 4/5）はmockをvisual/IA targetとしてroute/UXへmappingする。
+- 非公開SPA（Phase 7）は現行UI資産（`packages/ui`）を流用し、mockは参考デザインとする（`UI_REFERENCE.md`のデザイン適用戦略）。
+- 画面単位のvisual実装はPhase 2の依存（MIG-0201..0206）完了後。mock登録はvisual taskの自動READY化ではない。
+- `docs/design-redesign`、`app/(redesign)`をtarget designの正本にしない。mockに無いvisual designをagentが独自に確定しない。
 
 HTML mockに存在しないCURRENT機能を黙って消さない。
 permission/business/visibility/side-effect rulesはHTML mockだけでは変更しない。
@@ -289,18 +289,22 @@ checker/testを実行できなかった場合、実行済みと書かず理由�
 
 Checkpoint policy: WORK_ITEM_ONLY
 
-`STATUS.md`はmerge済みtask/依存関係の正本。open PRのlive stateと再開位置の正本は、そのbranchの`work-items/MIG-XXXX.md`。
+2層で管理する。
 
-終了時は単一wakeの作業結果を必ずPRへ保存する。
+- `STATUS.md` = mainにmerge済みのtask/依存/Phase状態。merge直前の統合でだけ更新する。
+- owner PR branchの`work-items/MIG-XXXX.md` = 作業中taskのlive owner/checkpoint。毎wakeここへ保存する。
 
-- 1wakeで全micro-unitが完了した場合: `REVIEW`（別レビュアー/CI待ち）、合格後`DONE`。
+終了時は単一wakeの作業結果を必ずPRのwork-itemへ保存する。
+
+- 1wakeで全micro-unitが完了した場合: `REVIEW`（独立レビュー/CI待ち）、合格後`DONE`。
 - 未解決障害がある場合: `BLOCKED`（再開条件とowner記載）。
-- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRの`work-items/MIG-XXXX.md`を`IN_PROGRESS`で保存する。有効owner、実行済みunit、実行したテスト、次unit、PR link、実在するsource HEADを記録する（`TASK_MICRO_UNITS.md`）。通常wakeではbranch/mainの`STATUS.md`を変更しない。
+- **正常な途中経過で、micro-unitがまだ残る場合**: 同一Draft PRのwork-itemに `IN_PROGRESS` を維持してよい。ただし有効owner、実行済みunit、テスト、次unit、PR link、Headを必ず記録する（`TASK_MICRO_UNITS.md`）。mainの`STATUS.md`は変更しない。
 
 何のチェックポイントもない`IN_PROGRESS`の放置は禁止。
 
-必要に応じて同じPRで更新:
+merge直前の統合で同じPRに含める:
 
+- `STATUS.md`（当該MIG DONE + 依存が解消したtaskのREADYのみ）
 - `CURRENT_ROUTES.md`
 - `FRONTEND_FEATURES.md` / `frontend/*.md`
 - `FUNCTION_INVENTORY.md` / `functions/*.md`
@@ -339,19 +343,44 @@ next action
 
 # `/loop` / continuous execution
 
+Markdown/skill自体はschedulerではない。Claude `/loop`等、hostに実在する反復機構だけが次のwakeを作る。各loop adapter（`.claude/loop.md`、`.codex/skills/loop/SKILL.md`、`.agents/skills/loop/SKILL.md`）は本節を参照する。
+
+## Wake decision（1 wake = 下記のうち1つだけ）
+
 ```text
-LOOP:
-  read latest main STATUS, open PRs and owner work-item
-  resume one owner task or select one unclaimed dependency-ready MIG
-  obey Git workflow
-  claim
-  inventory CURRENT route/UX/FN/requirements
-  implement or audit
-  optimize only within preservation contract
-  validate code quality + behavior
-  persist owner work-item + affected ledgers/matrices
-  evaluate stop conditions
+WAKE:
+  0. git fetch origin main。gh pr list --state open で migration/mig-* PRと各branchの work-items/MIG-XXXX.md、
+     OPEN_DECISIONS、依存状態、CIを読み直す（前wakeや会話の判断を再利用しない）
+  1. 自agentがownerのopen PRがある
+       IN_PROGRESS -> 次のmicro-unitを1つ進めてwork-itemへcheckpoint
+       REVIEW + 独立レビュー証拠 + reviewed Headで必須CI green（高リスクは人間承認も）
+                   -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE、squash merge
+       REVIEW（証拠待ち） -> 新しいwriter taskは始めない。2があれば実行、無ければ終了
+       BLOCKED     -> 再開条件を満たせば再開、満たさなければ終了
+  2. 他agentのPRがREVIEWで、現在のHeadに独立レビューが無い -> reviewer laneとしてレビュー1件
+  3. 自agentのopen PRが無い -> npm run migration:next の候補のうち、open PRに所有されておらず
+     owned pathが他PRと重ならないREADY taskを1つclaimし、カード1件 / micro-unit 1つだけ実装
+  4. 該当なし -> 何もせず理由とhandoffを報告して終了
 ```
+
+- `npm run migration:next`はmerge済みSTATUSと（取得できれば）open PRのbranch名だけを見るadvisory。ownerの最終確認はGitHubの現物で行う。
+- 原則1writer。branch作成前とDraft PR作成後に同一MIGのopen PRを再検索し、重複したら後発は実装・mergeせず報告する。
+- 途中失敗は同じPR/branchで再開する。新規branchで同じtaskをやり直さない。
+- 品質ゲートは`npm run check:project-docs`、対象package build/typecheck/test、契約・権限・副作用・rollback。実行していない検証をPASS扱いしない。テスト修正の試行は同scope内2回まで、残れば`BLOCKED`。
+- 次のwriter taskは、自PRのmergeを最新mainで観測した後のwakeでだけ選ぶ。
+
+## Independent review evidence
+
+- 独立レビュー = builderと別のagent family（Claude / Codex・ChatGPT / Antigravity）または人間。同じagentのsubagent（例: Claudeの`flamenode-architecture-reviewer`）はbuilder側pre-reviewであり数えない。
+- 全agentが同じGitHubアカウントを使うためApproveできない場合がある。PR commentに `Independent review: <reviewer> | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認したUX/FN/permission/visibility/side effect/rollbackを書く。
+- reviewer laneはbranchを編集せずmergeもしない。reviewed Head以降のpushは再レビューとCIを要する。
+- merge: 上記証拠 + 必須CI greenで、owner agentがsquash mergeしてよい。`GIT_WORKFLOW.md` §9の高リスク対象とPhase Gateは、加えてユーザーの明示承認（PR comment等）が必要。人間はいつでもmergeできる。
+
+## Pacing（自己ペースのhost向け）
+
+- 作業を進め、次wakeで続きがある: 短い間隔（1〜5分）。
+- 他agentのレビュー/CI待ち: 長い間隔（20〜60分）。
+- 人間承認・Phase Gate・`BLOCKED`・READY無しで進められる作業が無い: ポーリングせずloopを停止し、理由を報告する。
 
 ## Mandatory stop
 
@@ -368,10 +397,10 @@ LOOP:
 - auth/security/permission/visibility requirement conflict未解決
 - required UX/FN inventoryが不明
 - optimizationがfrontend behavior変更を要求
-- UI visual taskだが`UI_REFERENCE.md = PENDING_HTML`
+- UI visual taskだがPhase 2 Gate（MIG-0206）など依存が未完了、または`UI_REFERENCE.md`にmock未登録
 - test failureがtask scopeを超える
 - rollback不能/未証明
-- 別agentが対象taskを所有中
+- 別agentが対象taskを所有中（writerにならない。Wake decisionの2/3へ）
 
 Phase Gateをagentが自動承認しない。
 
@@ -453,11 +482,11 @@ Next:
 
 # Resumable loop / PR lifecycle contract（2026-10-09追補）
 
-1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、owner PRの`work-items/MIG-XXXX.md`から再開する。そのwork-itemに`IN_PROGRESS/REVIEW/BLOCKED`があるならlive stateを優先し、新しいtask/PRを生成しない。`REVIEW`は次unit実装の許可ではなく、独立レビュー/CI待ちを意味する。
+1. 各wakeにおいて最新mainとopen migration PRを読み込む。大型MIGは `TASK_MICRO_UNITS.md` の1unitを選び、PR branchの`work-items/MIG-XXXX.md`のcheckpointから再開する。PR branchのwork-itemに当該taskの`IN_PROGRESS/REVIEW`があるなら、mainのSTATUSよりwork-itemを優先し、新しいtask/PRを生成しない。
 2. `OPEN_DECISIONS.md`の`Needed by`相当のMIG依存を解釈し、該当タスクについて`OPEN`/`PROVISIONAL`/`BLOCKED_ON_USER`を「許可済み」と解釈しない。決定の証拠（decision ID / owner / date）をPRへ記録する。
 3. task claimはGitHubの単一atomic transactionではない。draft PRを作成する前後で同一MIGのopen PRを照合し、重複したら作業せずowner調整へ止める。mainの`READY`のみで未所有とみなさない。
 4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
-5. `REVIEW`は必ず独立したレビュアーによるレビューと、対象branchの必須CI成功を必要とする。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
+5. `REVIEW`は独立レビューと必須CIの待ち状態であり、合格ではない。`DONE`へ進むには独立レビュー（上記Independent review evidence）と対象branchの必須CI成功が必要。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
 6. 人間承認が必要なGate/認証/権限/visibility/DB schema/本番切替を、Loop維持のために自動承認しない。安全に進められる無関係taskがある場合も、明示的なdependencyとwriterの独立が条件。
 7. merge後に最新mainのstatus/task/lock解消を再読込するまでは次taskへ移らない。hostが反復機構を持たなければ一回で終了する。
 8. stale`IN_PROGRESS`/古いPRは自動削除しない。PRを根拠にhandoffし、claim譲渡・失敗理由・未実行チェック・次の実行者を明示する。

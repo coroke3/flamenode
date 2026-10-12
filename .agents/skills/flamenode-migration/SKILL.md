@@ -15,7 +15,7 @@ Mandatory concepts:
 - `FEATURE_CATALOG.md` = 432 UX / 136 FN の人間向け全機能索引
 - `GIT_WORKFLOW.md` = branch/PR/merge source of truth
 - `CURRENT_ROUTES.md` = CURRENT user-visible routes
-- `screen-mapping/README.md` = CURRENT routes + cross-route shells → UX/FN/permission/state/query/RA mapping (counts derive from CURRENT_ROUTES)
+- `screen-mapping/README.md` = CURRENT 90 page routes (74 visual) + cross-route shells → UX/FN/permission/state/query/RA mapping
 - `FRONTEND_FEATURES.md` + `frontend/*.md` = granular `UX-*` behavior
 - `FUNCTION_INVENTORY.md` + `functions/*.md` = `FN-*` backend contracts
 - `server-actions/README.md` = CURRENT Server Action / inline action execution-unit evidence
@@ -28,7 +28,7 @@ Mandatory concepts:
 - `PRODUCT_REQUIREMENTS.md` = existing-design/current reconciliation
 - `BACKEND_OPTIMIZATION.md` = optimization/blocker decisions
 - `CODE_QUALITY.md` = professional implementation standard
-- `UI_REFERENCE.md` = registered HTML visual source and scope policy; public mock / private CURRENT UI reuse. Stop visual redesign if `PENDING_HTML`.
+- `UI_REFERENCE.md` = registered HTML visual source (`docs/migration/mock/`, MIG-0200 DONE, D-08 DECIDED); visual work follows the STATUS dependency chain (MIG-0201 → 0202..0206 → MIG-0402; Phase 5 visual routes wait for MIG-0407); stop visual redesign only if it reverts to `PENDING_HTML`
 
 毎回まず `docs/migration/FEATURE_CATALOG.md` で対象機能と隣接機能を確認する。
 

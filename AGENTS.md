@@ -13,7 +13,7 @@
 4. For platform/UI migration, start with [`docs/migration/MIGRATION_START_HERE.md`](docs/migration/MIGRATION_START_HERE.md), apply the relevant [`AGENT_PROTOCOL.md`](docs/migration/AGENT_PROTOCOL.md) rules, filter [`STATUS.md`](docs/migration/STATUS.md) and [`FILE_MIGRATION_MATRIX.md`](docs/migration/FILE_MIGRATION_MATRIX.md) to one MIG/owner, follow [`FILE_PROGRESS_PROTOCOL.md`](docs/migration/FILE_PROGRESS_PROTOCOL.md) and [`IMPLEMENTATION_RUNBOOK.md`](docs/migration/IMPLEMENTATION_RUNBOOK.md) relevant steps and **one** matching `TASK_CARDS_*.md` MIG card. Preserve PR/Decision Gates; do not load entire ledgers/docs every iteration.
 5. Before coding, open CURRENT source/tests referenced by that card. `+path` denotes a planned file, not an existing file.
 
-Do not bulk-load the repository, Historical/archive material, completed migration phases, or old `.claude/flamenode/source/` documents.
+Do not bulk-load the repository, Historical/archive material, or completed migration phases.
 
 ## Precedence
 
@@ -26,7 +26,7 @@ Do not bulk-load the repository, Historical/archive material, completed migratio
 
 Migration work must distinguish **CURRENT** production behavior from **TARGET** architecture.
 
-`docs/design-redesign/` is obsolete and must not be used. New visual design remains pending until the user supplies an HTML mock and it is registered in `docs/migration/UI_REFERENCE.md`.
+`docs/design-redesign/` is obsolete and must not be used. The registered HTML mock in `docs/migration/UI_REFERENCE.md` (`docs/migration/mock/`) is the authoritative visual design source (D-08 DECIDED).
 
 ## Sources of truth
 
@@ -98,7 +98,7 @@ Claude Code, Codex, Antigravity, and other agents share one protocol:
 
 Tool adapters are intentionally thin:
 
-- Claude: `.claude/commands/flamenode-migration.md`, `.claude/skills/flamenode-migration/SKILL.md`
+- Claude: `.claude/skills/flamenode-migration/SKILL.md` (`/flamenode-migration`), `.claude/loop.md` (bare `/loop`)
 - Codex: `.codex/skills/flamenode-migration/SKILL.md`
 - Antigravity: `.agents/workflows/flamenode-migration.md`, `.agents/skills/flamenode-migration/SKILL.md`, `.agents/rules/flamenode-project.md`
 
@@ -128,13 +128,9 @@ Visual completion alone is never functional completion.
 
 `docs/design-redesign/` is not a valid source and is removed from the migration workflow.
 
-Until `docs/migration/UI_REFERENCE.md` changes from `PENDING_HTML`:
+The approved HTML mock is registered in `docs/migration/UI_REFERENCE.md` (`REGISTERED_HTML`) and mapped to CURRENT routes and `UX-*` capabilities.
 
-- do not infer the target visual design from `app/(redesign)`
-- do not finalize a new visual hierarchy on your own
-- continue CURRENT route/UX/requirement auditing
-
-After the user supplies an HTML mock, register it in `UI_REFERENCE.md` and map it to CURRENT routes and `UX-*` capabilities.
+Do not infer the target visual design from `app/(redesign)`.
 
 The HTML mock governs visual/IA intent only. It does not by itself override permissions, business rules, visibility, data ownership, API semantics, audit, notifications, retry/idempotency, URL compatibility, or destructive-operation semantics.
 

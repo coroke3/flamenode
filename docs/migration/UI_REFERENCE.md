@@ -21,6 +21,17 @@ D-08=A: **新HTMLモックを確定してからUIを移行する**。
 2026-10-13にモック一式を受領・検証し、本ドキュメントへ登録（MIG-0200）したため、D-08 は **DECIDED** となった。
 Phase 2（MIG-0201: visual/IA抽出 + design tokens）は依存を満たして開始可能。Phase 4/5の公開UIは登録mockを適用する。Phase 7の非公開SPAは採用済みOption Aに従いCURRENT UIを再利用し、private mockは参考資料とする。各MIGの依存・レビュー・Gateはモック登録後も必要。
 
+### デザイン適用戦略（案A正式採用）
+[`README.md`](README.md) §デザイン適用戦略 および [`PHASE_7_SPEC.md`](PHASE_7_SPEC.md) §1 に基づき、画面区分ごとに以下の適用戦略を厳格に順守する：
+1. **公開画面（Phase 4/5: Astro SSG + React Islands）**:
+   - ユーザー提供の新 HTML mock（`static/*.html`）を視覚・IAの正本として完全一致させる。
+   - 担当する `UX-*` 機能パリティを全件満たす。
+2. **管理・マイページ・登録画面（Phase 7: Personal / Ops React SPA）**:
+   - 現行 UI/コンポーネント資産（`packages/ui` へ抽出）を流用して移行効率を最大化する。
+   - モック（`static/Admin*.html`, `static/Manage*.html`, `static/MyPage.html` 等）は、将来的なUIリファイン・情報階層の**参考デザイン（Reference Target）**として位置付ける。
+   - Phase 7 の一次移行完了条件（Gate）は「現行機能パリティ（`UX-*` / `FN-*`）＋現行UI資産のSPA移行（`packages/ui`）」であり、新モックへの完全視覚追従は一次ブロッキング条件としない。
+
+
 ---
 
 ## Registered HTML mock reference (MIG-0200)

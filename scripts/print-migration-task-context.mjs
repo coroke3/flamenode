@@ -2,6 +2,7 @@
 // A compact navigational packet only; never a replacement for CURRENT code, AGENTS or canonical ledgers.
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS } from "./check-migration-execution.mjs";
 import { parseFileRows } from "./check-migration-file-progress.mjs";
@@ -55,8 +56,24 @@ export function getTaskContext(id,root=ROOT){
   return {output,chars:output.length,fileRows:owned.length};
 }
 
-// Advisory selector: merged STATUS dependency state only. GitHub open-PR ownership must be rechecked.
-export function pickNextTask(statusText,decisionText){
+// Live ownership hint from open PR branch names (migration/mig-XXXX-*). Never a lock; the PR itself stays authoritative.
+export function parseOwnedTasks(prs){
+  const owned=new Map();
+  for(const pr of prs){
+    const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName||"");
+    if(match)owned.set("MIG-"+match[1],pr.number);
+  }
+  return owned;
+}
+export function readOpenPrOwners(root=ROOT){
+  try{
+    const out=execFileSync("gh",["pr","list","--state","open","--limit","100","--json","number,headRefName"],{cwd:root,encoding:"utf8",timeout:15000,stdio:["ignore","pipe","ignore"]});
+    return {owned:parseOwnedTasks(JSON.parse(out)),live:true};
+  }catch{return {owned:new Map(),live:false};}
+}
+
+// Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
+export function pickNextTask(statusText,decisionText,owned=new Map()){
   const tasks=parseTaskRows(statusText);
   const decisions=new Map();
   for(const line of decisionText.split("\n")){
@@ -73,21 +90,27 @@ export function pickNextTask(statusText,decisionText){
   }
   // Optimize for 1102 first when independent performance PoC is already unblocked.
   candidates.sort((a,b)=>(a==="MIG-0401"?-1:b==="MIG-0401"?1:a.localeCompare(b)));
-  return {selected:candidates[0]??null,candidates};
+  const ownedByPr=candidates.filter(id=>owned.has(id));
+  return {selected:candidates.find(id=>!owned.has(id))??null,candidates,ownedByPr};
 }
-export function getNextTaskContext(root=ROOT){
-  const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"));
-  if(!next.selected)throw new Error("No dependency-ready MIG in merged STATUS; check blockers, approvals and active owner PRs");
+export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root)){
+  const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned);
+  const ownedNote=next.ownedByPr.map(id=>id+"=PR#"+owners.owned.get(id)).join(",");
+  if(!next.selected){
+    if(ownedNote)throw new Error("Every dependency-ready MIG is owned by an open PR ("+ownedNote+"); resume your own PR, review another agent's REVIEW PR, or stop");
+    throw new Error("No dependency-ready MIG in merged STATUS; check blockers, approvals and active owner PRs");
+  }
   const result=getTaskContext(next.selected,root);
-  return {...result,selected:next.selected,candidates:next.candidates};
+  return {...result,selected:next.selected,candidates:next.candidates,ownedNote,live:owners.live};
 }
 
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(invoked){
  try{
   const automatic=process.argv[2]==="--next";
-  const {output,chars,fileRows,selected,candidates}=automatic?getNextTaskContext():getTaskContext(process.argv[2]);
-  if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+"; verify live GitHub PRs and decisions before claiming\n");
+  const owners=process.argv.includes("--offline")?{owned:new Map(),live:false}:undefined;
+  const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners):getTaskContext(process.argv[2]);
+  if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");
   process.stdout.write(output);
   process.stderr.write("[migration-context] chars="+chars+" assigned source rows="+fileRows+" (source/test and policy are additional required reads)\n");
   if(chars>24000)process.stderr.write("[migration-context] NOTE: large packet; split by TASK_MICRO_UNITS.md and scoped source rows before passing to a model\n");

@@ -155,6 +155,6 @@ npm run check:project-docs
 
 - `historical/README.md`
 - `db-history/README.md`
-- `.claude/flamenode/source/`
+- `.claude/flamenode/requirements-map.md`（2026-05キャンペーンの要求対応表）
 
 必要なhistorical文書だけを読む。current implementationへ自動復活させない。

@@ -43,7 +43,6 @@ const STATES = new Set(["READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "SK
 
 export const CHECKPOINT_POLICY_FILES = Object.freeze([
   "docs/migration/AGENT_PROTOCOL.md",
-  ".claude/commands/flamenode-migration.md",
   ".claude/skills/flamenode-migration/SKILL.md",
   ".claude/loop.md",
   ".codex/skills/flamenode-migration/SKILL.md",

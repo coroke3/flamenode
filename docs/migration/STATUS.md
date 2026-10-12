@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-09
+> Last updated: 2026-10-13
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -17,17 +17,19 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 ## Overall
 
 ```text
-Current Phase: 3 — Domain extraction
+Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
 Current Task: MIG-0301
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0108
-Last Task PR: #276
-Active Task PR: none
-Next: MIG-0301 extraction/DI pattern
+Last Completed Task: MIG-0200
+Last Task PR: #284
+Merged READY: MIG-0201, MIG-0301, MIG-0401
+Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
+
+この節はmerge済み状態だけを表す。owner・Active PR・IN_PROGRESS/REVIEWのlive状態はGitHubのopen PRとそのbranchの`work-items/MIG-XXXX.md`で確認する（`npm run migration:next`がopen PR所有のtaskを除外して候補を出す）。
 
 ## State definitions
 
@@ -94,7 +96,7 @@ Total                           432
 432は現在確認済みのCURRENT frontend baseline。以後コードから新たなobservable behaviorを発見した場合は、実装前にcanonical ledgerと `FEATURE_CATALOG.md` を同時更新する。
 MIG-0011は全件disposition・統合validation済み。2026-10-07のユーザー明示指示により、独立レビュー未達を記録した上でmerge承認され `DONE` とする。独立レビュー要件自体はMIG-0012 Phase 0 Gateで再評価する。
 
-Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentが残る限りCLOSED。
+Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentの完了を確認済み）。
 
 ---
 
@@ -201,8 +203,6 @@ Validation:
 
 # Phases 1–9
 
-Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as safe preparatory work.
-
 ## Phase 1 — Repository boundaries
 
 > タスク別詳細仕様書: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)（Luna / Flash 等の軽量モデル向け完全仕様・コード例）
@@ -252,9 +252,9 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 4 — Public PoC
 
-> **1102優先の2トラック (2026-10-09、登録状態追記2026-10-13):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能。D-08 HTMLは登録済みだが、**MIG-0402/0403と正式UI移行** はPhase 2等の依存・Gateを要求する。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
+> **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、視覚系の **MIG-0402/0403と正式UI移行** はPhase 2 Gate（MIG-0206）の完了待ち（D-08はDECIDED、mock登録済み）。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
 >
-> **並行READY:** MIG-0301 (Domain) と MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
+> **並行READY:** MIG-0201 (Design system)、MIG-0301 (Domain)、MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
 >
 > Performance measurement/protocol: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md) / [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) 。
 
@@ -345,86 +345,6 @@ MIG-0805 requires explicit user approval before production action.
 
 ---
 
-# Last completed task
+# Completed task history
 
-## MIG-0010 — 86 CURRENT screens + cross-route shells → UX/FN mapping
-
-```text
-State: DONE
-Owner: chatgpt
-PR: #246
-Production action required: no
-Runtime behavior changed: no
-```
-
-Completed:
-
-- 86 CURRENT USER_SCREENを全件route-local UX/FNへmapping
-- 16 cross-route shellを定義
-- 432 UX capabilitiesの170 distinct Surface tokenをCURRENT routeまたはshellへ完全解決
-- screenごとに permission profile / dynamic-state profile / URL-query-history profile / responsive-a11y profile / TARGET render ownershipを固定
-- public technical twin:
-  - /list/~query -> Q-LIST(q,event,sort,page,view)
-  - /user/~query -> Q-USER(q,sort,page)
-  - /event/~query -> Q-EVENT(q,status,sort)
-  - /user/[id]/paged -> Q-USER-PAGED(worksPage,collabPage)
-  のlogical URL contractを固定
-- searchParamsを読むCURRENT pageをQ-DIRECT扱いしないdrift ruleを追加
-- error/global-error/not-found/robots/sitemapを86 screen外のglobal surfacesとしてshell mapping
-- このaudit時点のvisual sourceはUI_REFERENCE=PENDING_HTMLで、target layout/componentを捏造していない。現在はMIG-0200登録済みのUI_REFERENCEと公開mock/非公開CURRENT再利用の範囲を読む。
-- `screen-mapping/README.md` をROUTE_MATRIX / FRONTEND_FEATURES / architecture / shared protocol / Claude / Codex / Antigravity / checkerへ接続
-- production runtime/Cloudflare/D1/R2/KV/Queue mutation 0
-
-Validation evidence:
-
-- CURRENT routes: 86
-- screen mapping rows: 86
-- UX capabilities: 432
-- distinct UX Surface tokens: 170
-- Surface resolution rows: 170
-- cross-route shells: 16
-- screen routes with no local UX: 0
-- unresolved Surface tokens: 0
-- unknown route/shell owners: 0
-- malformed permission/state/query/RA rows: 0
-- CURRENT page searchParams vs Q profile mismatches: 0
-- migration checker JavaScript syntax parse: OK
-- branch behind main=0 at final review
-- GitHub status checks: none
-- author self-review only; independent approval is not represented
-
-Optimization conclusions:
-
-- backend commonization may not erase screen-specific permission/state/query/deep-link contracts
-- responsive/a11y requirements are migration contracts independent of future visual mock
-- technical query twin routes may disappear only after logical URL replacement evidence exists
-- frontend product-contract change required for current optimization candidates: 0
-
-Rollback:
-
-- revert PR #246 squash commit; production rollback action is unnecessary because MIG-0010 is documentation/checker-only
-
-
-## MIG-0011 checkpoint merged before completion
-
-- Progress saved in `gap-scan/CHECKPOINT.md`.
-- MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
-- Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0108 / Phase 1 Gate passed.
-
-# Next task claim template
-
-Phase 1 (Repository boundaries) is fully complete.
-All skeleton packages (`packages/ui`, `packages/contracts`, `packages/domain`) and apps (`apps/site`, `apps/app`, `apps/api`) are established and typechecked without affecting existing Next.js logic.
-
-Next tasks:
-- **Phase 2 (MIG-0201)**: Visual/IA extraction + design tokens (`MIG-0200` registered HTML mock is DONE).
-- **Phase 3 (MIG-0301)**: Domain extraction can proceed safely once approved.
-
-
-
-
-
-
-
-
+完了taskの詳細（変更・validation・rollback）は各PRと`work-items/MIG-XXXX.md`、およびgit履歴を正本とする。直近: MIG-0200（PR #284、HTML mock登録）、MIG-0108（PR #276、Phase 1 Gate）、MIG-0011/0012（Phase 0）。

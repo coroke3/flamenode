@@ -39,6 +39,22 @@ test("next-task advisory prioritizes performance without requiring D-08 for nonv
  assert.equal(next.selected,"MIG-0401");
  assert.deepEqual(next.candidates,["MIG-0401","MIG-0301"]);
 });
+import { parseOwnedTasks } from "./print-migration-task-context.mjs";
+
+test("next-task advisory skips READY tasks already owned by an open PR",()=>{
+ const status=[
+  "| MIG-0105 | site | DONE | — |",
+  "| MIG-0108 | boundary | DONE | — |",
+  "| MIG-0301 | domain | READY | MIG-0108 |",
+  "| MIG-0401 | perf | READY | MIG-0105 |",
+ ].join("\n");
+ const owned=parseOwnedTasks([{number:283,headRefName:"migration/mig-0401-public-snapshot-loader"},{number:290,headRefName:"fix/docs"}]);
+ assert.deepEqual([...owned],[["MIG-0401",283]]);
+ const next=pickNextTask(status,"",owned);
+ assert.equal(next.selected,"MIG-0301");
+ assert.deepEqual(next.ownedByPr,["MIG-0401"]);
+ assert.equal(pickNextTask(status,"",new Map([["MIG-0401",1],["MIG-0301",2]])).selected,null);
+});
 test("next-task advisory stops on unmerged dependencies",()=>{
  const status="| MIG-0105 | site | IN_PROGRESS | — |\n| MIG-0401 | perf | READY | MIG-0105 |";
  assert.equal(pickNextTask(status,"").selected,null);

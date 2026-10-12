@@ -4,7 +4,7 @@
 
 ## Autonomous one-wake operation (self-driving agent)
 
-Start with `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads only the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, and prefers independent MIG-0401 performance preflight when READY. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`.
+Start with `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, drops READY tasks already owned by an open `migration/mig-XXXX-*` PR when `gh` is available (`--offline` skips that lookup), and prefers independent MIG-0401 performance preflight when READY and unowned. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`.
 
 Each agent invocation performs this deterministic sequence without asking for routine permission:
 
@@ -31,7 +31,7 @@ The output contains **one task, its dependency states, matching decisions, one w
 
 Read the top "Overall" and **your MIG row + dependency rows** in [STATUS.md](STATUS.md), the relevant D-xx row in [OPEN_DECISIONS.md](OPEN_DECISIONS.md) and the **one** `### MIG-XXXX` section in the matching TASK_CARDS document. If owner PR exists, resume that branch; do not fork a second writer. Use [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) "最初の90秒" and "一件を進める厳密な手順" on a fresh wake.
 
-Phase 4 performance path **MIG-0401→0404→0405→0406** is a valid **separate track** from MIG-0301 domain work. D-08 HTML is registered; **MIG-0402/0403 and Phase 5 real UI** still require their STATUS dependencies, including Phase 2 Gate and MIG-0401. Registration alone does not unlock them. Phase 4 Gate MIG-0407 requires performance **AND** visual tests. Read [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) for CPU/Gateway work.
+Phase 4 performance path **MIG-0401→0404→0405→0406** is a valid **separate track** from MIG-0301 domain work, with dependencies tracked only in STATUS. **MIG-0402/0403 and Phase 5 real UI** require Phase 2 design system foundation (MIG-0201..0206; D-08 DECIDED); Phase 4 Gate MIG-0407 requires performance **AND** visual tests. Read [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) for CPU/Gateway work.
 
 ## 2. Load only files your task changes
 

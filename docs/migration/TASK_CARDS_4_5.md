@@ -2,7 +2,7 @@
 
 > Status: Active / 15 executable MIG cards
 > Authority: [STATUS.md](STATUS.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [ROUTE_MATRIX.md](ROUTE_MATRIX.md), [static-delivery baseline](static-delivery/README.md), [CPU baseline](cloudflare/PERFORMANCE_BASELINE.md)
-> Critical: Phase4/5 **visual** work waits for D-08 approved HTML. **0401→0404→0405→0406は非visual性能PoCとして既存MIGを順序変更し先行可能**。元のMIG IDs・状態正本はSTATUS、詳細なP0/P1測定計画はPERFORMANCE_IMPLEMENTATION_PLAN.md。
+> Critical: HTML mock is registered (MIG-0200 DONE, D-08 DECIDED, 2026-10-13); Phase4/5 **visual** work is gated by the STATUS chain, not missing HTML: MIG-0402 waits for MIG-0206 (Phase 2 Gate) + MIG-0401, Phase 5 visual routes wait for MIG-0407. **0401→0404→0405→0406は非visual性能PoCとして既存MIGを順序変更し先行可能**。元のMIG IDs・状態正本はSTATUS、詳細なP0/P1測定計画はPERFORMANCE_IMPLEMENTATION_PLAN.md。
 
 ## Every Public task MUST preserve
 
@@ -70,7 +70,7 @@
 
 ### MIG-0407 — Phase 4 Gate
 
-- **独立両Gate:** MIG-0403の承認済み実HTMLによる3画面UX/可視性/SEO証跡 **AND** MIG-0406のCPU/R2/Queue/容量証跡が揃うまでREVIEW/DONEにしない。性能トラックのPASSでD-08を解除しない。移行後web `exceededCpu` **90%以上削減は達成目標であり予測/合格の自動保証ではない**。
+- **独立両Gate:** MIG-0403の承認済み実HTMLによる3画面UX/可視性/SEO証跡 **AND** MIG-0406のCPU/R2/Queue/容量証跡が揃うまでREVIEW/DONEにしない。性能トラックのPASSで視覚/UX受入をDONEにしない。移行後web `exceededCpu` **90%以上削減は達成目標であり予測/合格の自動保証ではない**。
 
 
 - 読む: 0401..0406のPRとCPU/visibility test、D-02/D-06/D-08 evidence。
