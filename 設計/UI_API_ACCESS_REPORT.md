@@ -1,6 +1,6 @@
 # UI・API/権限レビュー レポート (2026-05-04)
 
-> このファイルは旧実装を確認した時点の参考レポートです。現在の正の設計は `PVSF-Master-Design.md`、`FlameNode-Design-System.md`、`FlameNode-Legacy-Data-Compatibility.md`、`FlameNode-Cloudflare-Free-Tier-Guardrails.md`、および `設計app/**.md` です。ここにある旧実装ファイル名や未実装指摘は、現在の設計仕様より優先しません。
+> このファイルは旧実装を確認した時点の参考レポートです。現在の正の設計は `FlameNode-Design-System.md`、`FlameNode-Legacy-Data-Compatibility.md`、`FlameNode-Cloudflare-Free-Tier-Guardrails.md`、および `docs/migration/CURRENT_ROUTES.md` です。ここにある旧実装ファイル名や未実装指摘は、現在の設計仕様より優先しません。
 
 ## 対象
 - [DESIGN_REVIEW_REPORT.md](DESIGN_REVIEW_REPORT.md)

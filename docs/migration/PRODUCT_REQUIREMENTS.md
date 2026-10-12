@@ -24,8 +24,6 @@ CURRENT behaviorの意味・背景・未実装要件を確認する入力。
 
 - `AGENTS.md`
 - `.claude/flamenode/requirements-map.md`
-- `.claude/flamenode/source/flamenode_final_detailed_design.md`
-- `.claude/flamenode/source/flamenode_final_consistency_audit.md`
 - `docs/operations/ui-acceptance.md`
 - `docs/operations/*.md`
 - `設計/` の現在参照されている仕様
