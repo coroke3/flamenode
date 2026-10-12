@@ -31,7 +31,7 @@ The output contains **one task, its dependency states, matching decisions, one w
 
 Read the top "Overall" and **your MIG row + dependency rows** in [STATUS.md](STATUS.md), the relevant D-xx row in [OPEN_DECISIONS.md](OPEN_DECISIONS.md) and the **one** `### MIG-XXXX` section in the matching TASK_CARDS document. If owner PR exists, resume that branch; do not fork a second writer. Use [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) "最初の90秒" and "一件を進める厳密な手順" on a fresh wake.
 
-Phase 4 performance path **MIG-0401→0404→0405→0406** is a valid **separate track** from MIG-0301 domain work, with dependencies tracked only in STATUS. **MIG-0402/0403 and Phase 5 real UI** remain blocked by missing D-08 HTML; Phase 4 Gate MIG-0407 requires performance **AND** visual tests. Read [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) for CPU/Gateway work.
+Phase 4 performance path **MIG-0401→0404→0405→0406** is a valid **separate track** from MIG-0301 domain work, with dependencies tracked only in STATUS. **MIG-0402/0403 and Phase 5 real UI** require Phase 2 design system foundation (MIG-0201..0206; D-08 DECIDED); Phase 4 Gate MIG-0407 requires performance **AND** visual tests. Read [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) for CPU/Gateway work.
 
 ## 2. Load only files your task changes
 
