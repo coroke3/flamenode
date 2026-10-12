@@ -1,7 +1,7 @@
 # FlameNode Migration Git Workflow
 
 > Status: Active / Git workflow source of truth
-> Last verified: 2026-10-06
+> Last verified: 2026-10-12
 > Scope: platform migration / UI redesign / migration-related infrastructure work
 > Related: `AGENTS.md`, `AGENT_PROTOCOL.md`, `STATUS.md`
 
@@ -72,9 +72,21 @@ Before creating a write branch:
 
 The open task PR is the short-lived live lock for that task. Larger tasks may be checkpointed across multiple wakes **within the same Draft PR**, following `TASK_MICRO_UNITS.md`; each wake records status/tests/next unit on PR branch. Only the last wake moves the complete task to REVIEW. **PR作成は原子的なロックではない**ので作成直後にも同一MIGのopen PRを検索する。重複時は後発writerが停止し、実装・mergeせずLeadへowner調整を要求する。
 
-`main`'s `STATUS.md` is the last merged checkpoint; while a task PR is active, the PR branch's `STATUS.md` plus the open PR are the live state for that task.
+`main`'s `STATUS.md` is the last **merged** dependency/Phase checkpoint. The open PR and the branch's task-specific `work-items/MIG-XXXX.md` are the live state; ordinary implementation wakes do **not** edit `STATUS.md`.
 
 No agent may start a second implementation PR for a MIG task that already has an open owner PR.
+
+## 3a. Work-item checkpoints / Git conflict isolation
+
+`STATUS.md` remains the integrated task/dependency/Phase state used by existing validation scripts. Each active task instead persists its in-flight owner, current unit, test results, exact paths, rollback, blockers and next step in **`docs/migration/work-items/MIG-XXXX.md`**, only on that task's PR branch. Format: [work-items/README.md](work-items/README.md).
+
+- Before every wake: re-read latest main, all open migration PRs, the owning task's PR branch and its checkpoint; never use chat history as a lock.
+- Do not change `STATUS.md` for a claim or mid-task checkpoint. Multiple independent writers must not rewrite this shared file on every wake.
+- The open Draft PR is a discoverable *advisory* owner lock, not an atomic lock: search again immediately after PR creation. Stop on duplicate MIG PR.
+- Agents on different tasks may only edit their **own** work-item checkpoint. Concurrent changes to the same code path, migration file matrix row, UX/FN/Route/API ledger or permission/schema/auth boundary are prohibited.
+- Before merge, fetch latest main; reconcile dependency/Phase state and any other merged task; only then update the **affected task and newly unblocked tasks** in `STATUS.md`. Do not overwrite the full summary with a stale copy.
+- Re-run required CI/contract checks and independent review on the integrated head. Move the work-item to DONE with actual evidence, then squash merge. Next wake reads the new main.
+- `node scripts/check-migration-work-items.mjs` validates local record structure/declared duplicate paths; actual remote PR, reviewer identity and CI must still be inspected.
 
 ---
 
@@ -85,17 +97,17 @@ READY on main
   ↓
 branch from latest main
   ↓
-draft PR + IN_PROGRESS on branch
+draft PR + IN_PROGRESS in task-specific work-item file
   ↓
-implement one bounded micro-unit, checkpoint IN_PROGRESS on branch
+implement bounded micro-unit, checkpoint work-item on same PR branch
   ↓
 repeat next wake on the SAME PR until all units DONE
   ↓
-REVIEW on branch
+REVIEW in work-item checkpoint
   ↓
 independent review
   ↓
-set DONE + next READY in the same branch
+after review, DONE work-item + reconcile STATUS against latest main
   ↓
 squash merge
   ↓
@@ -112,7 +124,8 @@ Before merge, the task branch should already contain the final state that main s
 
 - `FILE_MIGRATION_MATRIX.md` contains every changed CURRENT/NEW source path, target provider/consumer linkage, test+PR+SHA evidence, file state; validated by `node scripts/check-migration-file-progress.mjs`
 
-- current task `DONE`
+- current task work-item `DONE` with real review/CI evidence
+- current task `DONE` in `STATUS.md` against latest main
 - evidence/validation recorded
 - affected inventory/matrices updated
 - next dependency-ready task(s) marked `READY`
@@ -287,7 +300,7 @@ Other agents may work in parallel on read-only activities:
 - benchmark analysis
 - code archaeology
 
-This keeps `STATUS.md`, inventories, route/API matrices, and shared migration boundaries conflict-free.
+Per-MIG checkpoint files prevent every wake from writing to `STATUS.md`. Shared ledgers/matrices still need nonoverlapping row/path ownership, and `STATUS.md` is integrated serially just before merge.
 
 ### Parallel write exception
 
@@ -295,7 +308,7 @@ Parallel write PRs are allowed only when all are true:
 
 - tasks are dependency-independent
 - file/domain ownership does not overlap
-- neither task modifies shared migration state rows owned by the other
+- neither task modifies another work-item file or shared matrix/ledger rows owned by the other; STATUS integration is serialized at merge
 - rollback is independent
 - Lead explicitly marks the work parallel-safe
 
@@ -461,7 +474,7 @@ Prefer handing off between tasks, not mid-task.
 If a mid-task handoff is necessary:
 
 - keep the same branch/PR
-- update owner in the PR branch `STATUS.md`
+- update owner in the PR branch `work-items/MIG-XXXX.md`
 - record what is complete and incomplete
 - record exact validation already run
 - record current blockers
@@ -479,13 +492,13 @@ The next agent re-reads the branch state and continues from there.
 3. branch from latest main:
    migration/mig-xxxx-description
 4. open draft PR
-5. mark task IN_PROGRESS on branch
+5. mark work-item IN_PROGRESS on branch (do not edit STATUS.md during work)
 6. implement exactly that task
 7. update inventories/matrices/tests
 8. validate
-9. mark task REVIEW, request independent review
+9. mark work-item REVIEW, request independent review
 10. address findings + rerun validation
-11. set task DONE + next task READY in same branch
+11. after independent review, update work-item DONE and reconcile STATUS task DONE + next READY against latest main
 12. CI成功・別レビュアー確認・必要な人間承認を確認した場合だけsquash merge。権限/レビューが不足する場合はREVIEWで停止
 13. delete branch
 14. next loop starts from updated main
