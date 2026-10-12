@@ -3,7 +3,9 @@
 > 状態: Active / Phase 8 & 9 実行向け仕様書
 > 最終検証: 2026-10-09（`auth/README.md` の認証ベースラインおよび `OPEN_DECISIONS.md` D-07 に基づき改定）
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
-> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`auth/README.md`](auth/README.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-02, D-07)
+> 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md), [`auth/README.md`](auth/README.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-02, D-07)
+>
+> **タスク正本:** 個別タスクの実行指示（読む・変える・試す・DONE条件）の正本は [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md) です。本仕様書は Phase 8 & 9 のスコープ・方針・完了条件を規定する仕様書です。
 
 ---
 
