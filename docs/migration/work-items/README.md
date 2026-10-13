@@ -7,7 +7,7 @@
 1. 最新mainのSTATUS、OPEN_DECISIONS、open migration PRと保有pathを確認。依存がDONEのREADYのみclaim。Draft PRの作成前後で同一MIGの重複PRを検索（Draft PRはatomic lockではない）。
 2. 1 MIG = 1 short-lived branch = 1 draft PR。branch上に`work-items/MIG-XXXX.md`を作り、Owner/PR/既知のHead/Owned paths/現在unitを記録する。
 3. writer wakeは同じPRへcheckpoint、実テスト結果、blocker、nextをpush。待機/何もしないwakeは再開条件を報告し、同じcheckpointを無意味にpushしない。**途中ではSTATUSを書き換えない。** 他taskのwork-itemや同一共有台帳行を編集しない。
-4. 全unit終了でREVIEW、CIと独立review。高リスクtaskは別途人間承認。SHA変更後は必要な再レビュー。
+4. 全unit終了でREVIEW、CIと独立review（別agent/人間、またはbuilderより上位モデルのsubagent）。高リスクtaskは別途人間承認。SHA変更後は必要な再レビュー。REVIEW待ちの間、ownerは依存の無い別taskへ進んでよい。
 5. merge直前に最新mainへ同期し、該当MIGのDONEと依存を解消したREADYだけをSTATUSへ反映する。共有台帳と検証を再実行してsquash merge。次wakeでmainの結果を再確認する。
 
 重複pathの並列書き込みは禁止。並列例外でも各agentは独立したtaskファイルを所有する。手続きの正本は `../GIT_WORKFLOW.md`。PRの状態とCI/レビュー結果はGitHubの現物を確認し、MDだけで完了と判断しない。

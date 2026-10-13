@@ -32,7 +32,7 @@ Mandatory concepts:
 
 毎回まず `docs/migration/FEATURE_CATALOG.md` で対象機能と隣接機能を確認する。
 
-Follow AGENT_PROTOCOL's Wake decision: resume your own PR, perform one eligible independent review, claim at most one unowned dependency-ready MIG / bounded micro-unit, or stop. One writer only. Use the task branch/PR required by `GIT_WORKFLOW.md`.
+Follow AGENT_PROTOCOL's Wake decision: resume your own PR, perform one eligible independent review, claim at most one unowned dependency-ready MIG / bounded micro-unit, or stop. One writer only. While your PR waits in REVIEW, continue other dependency-independent work (one IN_PROGRESS PR per agent; REVIEW PRs may accumulate). A fresh-context subagent on a higher-tier model than the builder counts as independent review. Use the task branch/PR required by `GIT_WORKFLOW.md`.
 
 Do not remove or change user-visible behavior merely to simplify the backend. Do not optimize for line count. Prefer explicit, readable, framework-neutral domain code and well-defined permission/transaction/side-effect boundaries.
 

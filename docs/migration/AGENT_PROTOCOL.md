@@ -383,7 +383,7 @@ WAKE:
 - 基本: 独立レビュー = builderと別のagent（Claude / Codex・ChatGPT / Antigravity）または人間。
 - 上位モデルsubagent: builderより上位のモデル（Claudeでは Haiku < Sonnet < Opus。Luna / Flash 等の軽量モデルはHaiku相当）を、新しいcontextのsubagentとして起動し、PR diff・Work Order・関連するCURRENT契約（UX/FN/permission/visibility/side effect）を渡してレビューさせた場合は独立レビューとして数える。同等以下のモデルのsubagent、builder自身の見直しは数えない。builderが最上位モデル（例: Opus）の場合は、他agentまたは人間のレビューが必要。
 - PR commentに `Independent review: <agent>/<model> (<separate agent | fresh-context subagent of <builder model> | human>) | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認した契約・テスト・rollbackを書く。全agentが同じGitHubアカウントのためGitHub上のApproveは使わない。
-- reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。reviewed Head以降のpushは再レビューとCIを要する。
+- reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。reviewed Head以降のpushは再レビューとCIを要する。ただしmerge統合のcommit（`STATUS.md`と自work-itemだけの変更、競合の無い最新mainへのrebase）は再レビュー不要で、最終HeadのCI passだけを要する。
 - merge: 上記証拠 + reviewed Headで必須CI greenなら、owner agentがsquash mergeしてよい。`GIT_WORKFLOW.md` §9の高リスク対象とPhase Gateは、加えてユーザーの明示承認（PR comment等）が必要。hostの権限設定がmergeを拒否した場合はPRに記録してユーザーへ委ね、他の作業を続ける。人間はいつでもmergeできる。
 
 ## Pacing（自己ペースのhost向け）

@@ -183,7 +183,7 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 - Prefer the smallest coherent change that advances the current gate.
 - For migration writes, use **1 MIG task = 1 short-lived branch = 1 PR = 1 squash merge** unless `GIT_WORKFLOW.md` explicitly allows an exception.
 - Open a draft PR early; the open task PR is the writer lock.
-- Only one migration writer lane is active by default; other agents may review/audit in parallel.
+- Each agent keeps at most one migration writer lane (`IN_PROGRESS` PR); PRs waiting in `REVIEW` may accumulate while the agent continues dependency-independent work. Independent review comes from another agent or a human, or from a fresh-context subagent on a higher-tier model than the builder (`docs/migration/AGENT_PROTOCOL.md` §Independent review evidence).
 - Do not have multiple agents edit the same file/domain/task concurrently.
 - DB/auth/security/visibility/public API/Cloudflare routing decisions require stronger review.
 - Separate code landing from production traffic cutover/routing changes.
@@ -196,7 +196,7 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 Use lightweight agents/models for bounded inventory, search, docs and mechanical edits.
 Use stronger reasoning/review for architecture, DB, auth, permissions, security, visibility, routing, destructive changes, gates and final review.
 
-Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. Writing or refining Work Orders, independent review, merge integration and Phase Gates stay with a stronger model or a human.
+Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. Writing or refining Work Orders, reviewing other agents' PRs, high-risk merges and Phase Gates stay with a stronger model or a human; a lightweight model may get its own PR reviewed by a higher-tier subagent and merge-integrate it (runbook steps E/F).
 
 Stop/escalate when:
 
