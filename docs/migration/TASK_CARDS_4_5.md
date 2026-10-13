@@ -3,6 +3,7 @@
 > Status: Active / 15 executable MIG cards
 > Authority: [STATUS.md](STATUS.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [ROUTE_MATRIX.md](ROUTE_MATRIX.md), [static-delivery baseline](static-delivery/README.md), [CPU baseline](cloudflare/PERFORMANCE_BASELINE.md)
 > Critical: HTML mock is registered (MIG-0200 DONE, D-08 DECIDED, 2026-10-13); Phase4/5 **visual** work is gated by the STATUS chain, not missing HTML: MIG-0402 waits for MIG-0206 (Phase 2 Gate) + MIG-0401, Phase 5 visual routes wait for MIG-0407. **0401→0404→0405→0406は非visual性能PoCとして既存MIGを順序変更し先行可能**。元のMIG IDs・状態正本はSTATUS、詳細なP0/P1測定計画はPERFORMANCE_IMPLEMENTATION_PLAN.md。
+> Work Order: 実装手順の正本は各Phase仕様書の `### MIG-XXXX:` 節（Model / Readiness付き）。このカードは要約。小型モデルは `Model: small` かつ `READY_FOR_SMALL_MODEL` のWork Orderだけを実行する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)）。
 
 ## Every Public task MUST preserve
 

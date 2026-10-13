@@ -3,6 +3,7 @@
 > Status: Active / mandatory task recipes
 > Companion: [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md), [STATUS.md](STATUS.md), [PHASE_3_SPEC.md](PHASE_3_SPEC.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md)
 > Rule: one MIG card per invocation; check the actual code before editing; `+path` denotes a planned new file.
+> Work Order: 実装手順の正本は各Phase仕様書の `### MIG-XXXX:` 節（Model / Readiness付き）。このカードは要約。小型モデルは `Model: small` かつ `READY_FOR_SMALL_MODEL` のWork Orderだけを実行する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)）。
 
 ## Common contract
 

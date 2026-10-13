@@ -1,7 +1,7 @@
 # FlameNode 小型エージェント実装ランブック（必読・共通）
 
 > Status: Active / operational instructions, not a replacement for AGENT_PROTOCOL.md
-> Updated: 2026-10-09
+> Updated: 2026-10-13
 > Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
@@ -72,6 +72,87 @@ END
 - `停止`: 必要な情報が無い・失敗したときは手を止めて根拠と再開条件を書き残す。
 
 同一タスクが大きすぎて1 PRで完成できないと判明した場合、無理に`DONE`にしない。`STATUS.md`の分割提案（親子MIG-IDと依存、影響台帳）を別レビューに出す。勝手に他タスクを処理したことにしない。
+
+## Work Order（仕様節）と小型モデルの実行条件
+
+カード（`TASK_CARDS_*.md`）は要約、実装の正本は各Phase仕様書（[Phase 2](PHASE_2_SPEC.md) / [Phase 3](PHASE_3_SPEC.md) / [Phase 4/5](PHASE_4_5_SPEC.md) / [Phase 6](PHASE_6_SPEC.md) / [Phase 7](PHASE_7_SPEC.md) / [Phase 8/9](PHASE_8_9_SPEC.md)）の `### MIG-XXXX:` 節（Work Order）。`npm run migration:next` / `node scripts/print-migration-task-context.mjs MIG-XXXX` はカードとこの節を1つのパケットにまとめて出力する。
+
+Work Orderの必須形式（見出しは一字一句この通り。checkerが解析する）:
+
+```text
+### MIG-XXXX: <title>
+- **Model:** small | lead
+- **Readiness:** READY_FOR_SMALL_MODEL | NEEDS_REFINEMENT — <理由と確定に必要なもの>
+- **Depends on:** <MIG IDs> / **Decisions:** <D-xx DECIDED | none>
+- **Verified against:** `<main short SHA>` (<date>)
+#### Source snapshot      … `path:line` と事実。mainと違えばSTOP
+#### Owned paths          … 新規 / 変更 / 触らない（理由）
+#### Micro-units          … U01.. 各unitに手順・コード・検証コマンドと期待結果
+#### Test cases           … | ID | 入力/操作 | 期待 |
+#### Commands             … 全unit完了時のコマンドと期待結果
+#### Ledger updates       … FILE_MIGRATION_MATRIX行（貼り付け可能な形式）・UX/FN ID
+#### DONE checklist       … 2値で検証できる項目のみ
+#### STOP                 … 小型モデルが止まってleadへ返す条件
+#### Rollback
+```
+
+小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、独立レビュー、Phase Gate、merge統合、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。
+
+小型モデルの実行規則:
+
+- Micro-unitsを番号順に、1 wake = 1 unit。手順にない編集・リファクタ・命名変更をしない。
+- `Owned paths` 以外のファイルを変更しない。必要になったらSTOP。
+- `Source snapshot` と実ファイルが1点でも違えばSTOP（自分で仕様を読み替えない）。
+- 検証コマンドの結果が `期待` と違う場合、同じunit内で修正を2回まで。解消しなければ`BLOCKED`としてコマンド・出力・差分をwork-itemへ記録してSTOP。
+- テスト・checkerを弱めない、skipしない、実行していないものをPASSと書かない。
+- `STOP` に該当したら、work-itemの`Next`に「lead判断待ち: <具体的な問い>」を書いて終了する。
+
+## 1 wake のコマンド手順（小型モデルはこの順にそのまま実行）
+
+`MIG-XXXX` / `mig-xxxx-<slug>` / `<n>` は実値に置き換える。slugはWork Orderのtitleを英小文字kebab-caseにしたもの。
+
+**A. 状況確認（毎wake）**
+
+```bash
+git fetch origin
+git switch main && git pull --ff-only origin main
+npm run migration:next -- --model small
+gh pr list --state open --json number,headRefName,title,isDraft
+```
+
+- 自分（`Owner: <agent>`）のopen PRがある → **C** へ（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）。
+- 自分のPRが無く、候補が出た → **B** へ。候補が出ない → 何もせず「READY_FOR_SMALL_MODELのtask無し」と報告して終了。
+
+**B. claim（新規taskのみ）**
+
+```bash
+git switch -c migration/mig-xxxx-<slug> origin/main
+git commit --allow-empty -m "MIG-XXXX: 作業開始"
+git push -u origin migration/mig-xxxx-<slug>
+gh pr create --draft --base main --title "MIG-XXXX: <日本語の短い説明>" --body "GIT_WORKFLOW.md §5 の必須項目を記入"
+gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("migration/mig-xxxx-")) | .number'
+```
+
+最後のコマンドが2件以上を返したら、作ったPRをcloseしてSTOP（後発が引く）。1件なら `docs/migration/work-items/MIG-XXXX.md` を [work-items/README.md](work-items/README.md) の形式で作成（`State: IN_PROGRESS`、`Owner`、`Branch`、`PR: #<n>`、`Owned paths` はWork Orderの値、`Current unit: U01`）し、commit/pushする。
+
+**C. micro-unit 1つ**
+
+```bash
+# Work Orderの U0n 手順を実行し、U0n の検証コマンドを実行する
+npm run check:migration-work-items
+npm run check:project-docs
+git add <Owned pathsのファイルだけ>
+git commit -m "MIG-XXXX U0n: <やったこと>"
+git rev-parse HEAD          # この値を work-item の Head に書く
+# work-item を更新: Current unit / Validation（実行コマンドと実結果）/ Head / Next（次unit）
+git add docs/migration/work-items/MIG-XXXX.md
+git commit -m "MIG-XXXX: U0n checkpoint"
+git push
+```
+
+**D. 全unit完了時**
+
+Work Orderの `Commands` と `DONE checklist` を全部実行・確認し、work-itemを `State: REVIEW` にしてpush。`gh pr ready <n>` の後、PRへ「Independent review requested: Head <40hex>」とcommentして終了する。merge統合・`STATUS.md`更新はしない（leadの担当。hostが自己mergeを拒否する場合もある）。
 
 ## 最小検証コマンド
 

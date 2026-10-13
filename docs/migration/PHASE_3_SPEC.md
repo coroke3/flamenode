@@ -61,6 +61,10 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 # 3. タスク別仕様
 
 ### MIG-0301: extraction/DI pattern（抽出パターンの確立）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — packages/domainのテスト実行経路（node strip-types/exports）を確定する
+- **Depends on:** MIG-0108 / **Decisions:** none
+- **Verified against:** `5d15922f` (2026-10-13)
 
 - **目的**: Tier 1 の抽出方式（ファイル配置・import 規約・ブリッジ・テスト）を、1 モジュールで実証して固定する。
 - **PoC 対象**: `src/lib/slots/slotReservationLimit.ts`（`MAX_SLOT_RESERVATIONS_PER_XID`, `normalizeSlotReservationLimit`, `slotReservationLimitMessage`。import なし）

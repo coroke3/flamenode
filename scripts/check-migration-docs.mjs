@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { validateMigrationExecution, CHECKPOINT_POLICY_FILES } from "./check-migration-execution.mjs";
-import { validateTaskCards, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
+import { validateTaskCards, validateWorkOrders, readSpecs, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
 import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
 import { validateWorkItems, readWorkItems, gitCommitExists } from "./check-migration-work-items.mjs";
@@ -1194,6 +1194,7 @@ if (errors.length === 0) {
     smokeDocs: read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
     microUnits: read("docs/migration/TASK_MICRO_UNITS.md"),
   }));
+  errors.push(...validateWorkOrders({ status, specs: readSpecs(read) }));
 
   errors.push(...validateFileProgress({
     matrix: read("docs/migration/FILE_MIGRATION_MATRIX.md"),
@@ -1214,7 +1215,7 @@ if (errors.length === 0) {
   for (const phrase of [
     "1 MIG task = 1 branch = 1 PR = 1 merge unit",
     "squash merge",
-    "Only one migration **writer lane** is active at a time",
+    "at most one migration **writer lane** (`IN_PROGRESS` PR) at a time",
     "Code landing and traffic switching are separate operations",
   ]) {
     if (!gitWorkflow.includes(phrase)) errors.push(`GIT_WORKFLOW.md: required policy phrase missing: ${phrase}`);

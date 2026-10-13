@@ -196,6 +196,8 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 Use lightweight agents/models for bounded inventory, search, docs and mechanical edits.
 Use stronger reasoning/review for architecture, DB, auth, permissions, security, visibility, routing, destructive changes, gates and final review.
 
+Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. Writing or refining Work Orders, independent review, merge integration and Phase Gates stay with a stronger model or a human.
+
 Stop/escalate when:
 
 - CURRENT/TARGET is ambiguous

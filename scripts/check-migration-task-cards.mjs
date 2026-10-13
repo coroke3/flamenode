@@ -74,6 +74,94 @@ export function validateTaskCards({status, fileContents, runbook, protocol, deci
   return errors;
 }
 
+// Work Orders: the `### MIG-XXXX:` section of the phase spec is the executable recipe for small models.
+export const SPEC_FILES = Object.freeze({
+  "01": "docs/migration/PHASE_1_SPEC.md",
+  "02": "docs/migration/PHASE_2_SPEC.md",
+  "03": "docs/migration/PHASE_3_SPEC.md",
+  "04": "docs/migration/PHASE_4_5_SPEC.md",
+  "05": "docs/migration/PHASE_4_5_SPEC.md",
+  "06": "docs/migration/PHASE_6_SPEC.md",
+  "07": "docs/migration/PHASE_7_SPEC.md",
+  "08": "docs/migration/PHASE_8_9_SPEC.md",
+  "09": "docs/migration/PHASE_8_9_SPEC.md",
+});
+export const WORK_ORDER_SECTIONS = Object.freeze(["Source snapshot", "Owned paths", "Micro-units", "Test cases", "Commands", "Ledger updates", "DONE checklist", "STOP", "Rollback"]);
+export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
+
+// Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
+function workOrderSections(specText) {
+  const lines = specText.replace(/\r\n/g, "\n").split("\n");
+  const sections = [];
+  let fenced = false;
+  let current = null;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) fenced = !fenced;
+    const heading = !fenced && /^#{1,3}\s/.test(line);
+    if (heading) {
+      if (current) sections.push(current);
+      const id = line.match(/^###\s+(MIG-\d{4})\b/)?.[1];
+      current = id ? { id, lines: [line] } : null;
+    } else if (current) current.lines.push(line);
+  }
+  if (current) sections.push(current);
+  return sections.map(({ id, lines: body }) => ({ id, text: body.join("\n").trim() }));
+}
+
+export function parseWorkOrder(text) {
+  return {
+    text,
+    model: text.match(/\*\*Model:\*\*\s*(small|lead)\b/)?.[1] ?? null,
+    readiness: text.match(/\*\*Readiness:\*\*\s*(READY_FOR_SMALL_MODEL|NEEDS_REFINEMENT)\b/)?.[1] ?? null,
+    declaresModel: /\*\*Model:\*\*/.test(text),
+    declaresReadiness: /\*\*Readiness:\*\*/.test(text),
+  };
+}
+
+export function extractWorkOrder(specText, id) {
+  const section = workOrderSections(specText ?? "").find((s) => s.id === id);
+  return section ? parseWorkOrder(section.text) : null;
+}
+
+export function validateWorkOrders({ status, specs }) {
+  const errors = [];
+  const tasks = parseTrackedMigrationTasks(status);
+  for (const [file, text] of Object.entries(specs)) {
+    if (text === undefined) continue;
+    const seen = new Set();
+    for (const { id } of workOrderSections(text)) {
+      if (seen.has(id)) errors.push(file + ": duplicate work order heading " + id);
+      seen.add(id);
+    }
+  }
+  for (const [id, task] of tasks) {
+    const file = specFileFor(id);
+    const order = file ? extractWorkOrder(specs[file], id) : null;
+    if (!order) {
+      if (task.state === "READY") errors.push(id + ": READY task has no work order section in " + file);
+      continue;
+    }
+    if (order.declaresModel && !order.model) errors.push(id + ": Model must be small or lead");
+    if (order.declaresReadiness && !order.readiness) errors.push(id + ": Readiness must be READY_FOR_SMALL_MODEL or NEEDS_REFINEMENT");
+    if (task.state === "READY" && (!order.model || !order.readiness)) errors.push(id + ": READY task work order must declare Model and Readiness");
+    if (order.readiness === "READY_FOR_SMALL_MODEL") {
+      if (order.model !== "small") errors.push(id + ": READY_FOR_SMALL_MODEL requires Model: small");
+      if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.text)) errors.push(id + ": small-model work order needs Verified against `<sha>`");
+      for (const section of WORK_ORDER_SECTIONS) {
+        if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": small-model work order missing #### " + section);
+      }
+      if (!/\*\*U01\b/.test(order.text)) errors.push(id + ": small-model work order has no U01 micro-unit");
+    }
+  }
+  return errors;
+}
+
+export function readSpecs(read) {
+  return Object.fromEntries([...new Set(Object.values(SPEC_FILES))].map((p) => {
+    try { return [p, read(p)]; } catch { return [p, undefined]; }
+  }));
+}
+
 const invoked = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if(invoked){
   const root=process.cwd();
@@ -87,6 +175,7 @@ if(invoked){
     smokeDocs:read("docs/migration/SMALL_MODEL_SMOKE_TEST.md"),
     microUnits:read("docs/migration/TASK_MICRO_UNITS.md"),
   });
+  errors.push(...validateWorkOrders({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
   for(const error of errors)console.error("[migration-task-cards] "+error);
   if(errors.length)process.exitCode=1;
   else console.log("[migration-task-cards] OK: "+TASK_CARD_FILES.length+" card files cover all "+parseTrackedMigrationTasks(read("docs/migration/STATUS.md")).size+" active/future MIG tasks.");

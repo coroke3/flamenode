@@ -36,6 +36,10 @@
 # 2. Phase 4: Public PoC タスク別仕様書
 
 ### MIG-0401: Astro build-input PoC
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — PR #283にて実装済み、独立レビュー待ち
+- **Depends on:** MIG-0105 / **Decisions:** none
+- **Verified against:** `5d15922f` (2026-10-13)
 - **目的**: `apps/site` において、R2 プロジェクション JSON またはスナップショットからビルド時に入力データを読み込むローダーを検証。
 - **作成ファイル**: `+apps/site/src/lib/publicDataLoader.ts`
 - **検証**: `npm run build --workspace=@flamenode/site`

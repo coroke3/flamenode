@@ -71,3 +71,37 @@ test("missing protocol references and D-08 guard fail", () => {
 test("large task must have micro-unit recipe", () => {
   assert.match(validateTaskCards({...base,microUnits:"# no packets"}).join(" "),/MIG-0705: large task/);
 });
+
+import { extractWorkOrder, validateWorkOrders, WORK_ORDER_SECTIONS } from "./check-migration-task-cards.mjs";
+
+const completeOrder = (id, model = "small", readiness = "READY_FOR_SMALL_MODEL") => [
+  "### " + id + ": title",
+  "- **Model:** " + model,
+  "- **Readiness:** " + readiness,
+  "- **Verified against:** `5d15922f` (2026-10-13)",
+  ...WORK_ORDER_SECTIONS.flatMap((section) => ["#### " + section, section === "Micro-units" ? "- **U01 step** — 手順\n```bash\n# comment inside fence is not a heading\nnode --test\n```" : "- item"]),
+].join("\n");
+
+test("work order section ends at the next heading outside fenced code", () => {
+  const spec = completeOrder("MIG-0301") + "\n### MIG-0302: next\n- **Model:** lead";
+  const order = extractWorkOrder(spec, "MIG-0301");
+  assert.equal(order.model, "small");
+  assert.equal(order.readiness, "READY_FOR_SMALL_MODEL");
+  assert.match(order.text, /# comment inside fence/);
+  assert.doesNotMatch(order.text, /MIG-0302/);
+  assert.equal(extractWorkOrder(spec, "MIG-0302").model, "lead");
+});
+
+test("READY task requires a complete work order before small-model execution", () => {
+  const specs = { "docs/migration/PHASE_3_SPEC.md": completeOrder("MIG-0301") };
+  assert.deepEqual(validateWorkOrders({ status, specs }), []);
+  assert.match(validateWorkOrders({ status, specs: {} }).join(" "), /MIG-0301: READY task has no work order/);
+  const missingStop = { "docs/migration/PHASE_3_SPEC.md": completeOrder("MIG-0301").replace("#### STOP", "#### Notes") };
+  assert.match(validateWorkOrders({ status, specs: missingStop }).join(" "), /missing #### STOP/);
+  const leadReady = { "docs/migration/PHASE_3_SPEC.md": completeOrder("MIG-0301", "lead") };
+  assert.match(validateWorkOrders({ status, specs: leadReady }).join(" "), /requires Model: small/);
+  const refinement = { "docs/migration/PHASE_3_SPEC.md": "### MIG-0301: t\n- **Model:** small\n- **Readiness:** NEEDS_REFINEMENT — waiting" };
+  assert.deepEqual(validateWorkOrders({ status, specs: refinement }), []);
+  const duplicate = { "docs/migration/PHASE_3_SPEC.md": completeOrder("MIG-0301") + "\n" + completeOrder("MIG-0301") };
+  assert.match(validateWorkOrders({ status, specs: duplicate }).join(" "), /duplicate work order heading MIG-0301/);
+});

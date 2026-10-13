@@ -123,7 +123,7 @@ Production action required: yes/no
 - main直push禁止
 - task branchをmainから切る
 - Draft PRを早期作成
-- one writer lane
+- 1 MIG = 1 writer。agentあたり`IN_PROGRESS`は1つ、`REVIEW`待ちは複数可（「REVIEW待ちを貯めて並行に進める規則」）
 - 他agentはreview/audit laneにできる
 - code landingとproduction traffic切替は別操作
 - Remote D1 / secret / Worker Route / Custom Domain変更は明示承認なしに実行しない
@@ -345,42 +345,52 @@ next action
 
 Markdown/skill自体はschedulerではない。Claude `/loop`等、hostに実在する反復機構だけが次のwakeを作る。各loop adapter（`.claude/loop.md`、`.codex/skills/loop/SKILL.md`、`.agents/skills/loop/SKILL.md`）は本節を参照する。
 
-## Wake decision（1 wake = 下記のうち1つだけ）
+## Wake decision（1 wake = 下記のうち1つだけ。上から順に判定）
 
 ```text
 WAKE:
   0. git fetch origin main。gh pr list --state open で migration/mig-* PRと各branchの work-items/MIG-XXXX.md、
-     OPEN_DECISIONS、依存状態、CIを読み直す（前wakeや会話の判断を再利用しない）
-  1. 自agentがownerのopen PRがある
-       IN_PROGRESS -> 次のmicro-unitを1つ進めてwork-itemへcheckpoint
-       REVIEW + 独立レビュー証拠 + reviewed Headで必須CI green（高リスクは人間承認も）
-                   -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE、squash merge
-       REVIEW（証拠待ち） -> 新しいwriter taskは始めない。2があれば実行、無ければ終了
-       BLOCKED     -> 再開条件を満たせば再開、満たさなければ終了
-  2. 他agentのPRがREVIEWで、現在のHeadに独立レビューが無い -> reviewer laneとしてレビュー1件
-  3. 自agentのopen PRが無い -> npm run migration:next の候補のうち、open PRに所有されておらず
-     owned pathが他PRと重ならないREADY taskを1つclaimし、カード1件 / micro-unit 1つだけ実装
-  4. 該当なし -> 何もせず理由とhandoffを報告して終了
+     PR comment上のレビュー、OPEN_DECISIONS、依存状態、CIを読み直す（前wakeや会話の判断を再利用しない）
+  1. 自agentのPRで、reviewed Headに独立レビューAPPROVE + 必須CI green（高リスク/Phase Gateはユーザー承認も）
+       -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE、squash merge
+  2. 自agentのPRがREVIEWで現在のHeadに独立レビューが無く、builderより上位のモデルをsubagentとして起動できる
+       -> 上位モデルsubagentでレビュー1件（PR commentへ記録）。APPROVEかつCI greenなら同じwakeで1まで行ってよい
+  3. 自agentのPRがIN_PROGRESS -> 次のmicro-unitを1つ進めてwork-itemへcheckpoint
+  4. 他agentのPRがREVIEWで、現在のHeadに独立レビューが無く、自分が独立レビュアーの条件を満たす
+       -> reviewer laneとしてレビュー1件
+  5. 自agentのIN_PROGRESS PRが無い -> 未所有のREADY taskを1つclaimし、Work Orderのmicro-unit 1つだけ実装
+     （自分のREVIEW待ちPRがあっても進める。小型モデルは --model small の候補だけ）
+  6. leadのみ: Work OrderがNEEDS_REFINEMENTのtaskを1件詰める（docs/mig-xxxx-work-order branch、実コードで検証）
+  7. 該当なし -> 理由とREVIEW待ちPR一覧を報告して終了
 ```
 
+- Work Order = 各`PHASE_*_SPEC.md`の`### MIG-XXXX:`節。必須形式と小型モデルの実行規則は`IMPLEMENTATION_RUNBOOK.md`「Work Order（仕様節）と小型モデルの実行条件」。
+- Work Orderは依存taskのmerge結果で変わるため、先のPhaseまで一度に書かない（rolling wave）。依存taskがmergeされたら、leadが後続のSource snapshot/Owned paths/Micro-unitsを実コードで更新してからREADY_FOR_SMALL_MODELにする。
 - `npm run migration:next`はmerge済みSTATUSと（取得できれば）open PRのbranch名だけを見るadvisory。ownerの最終確認はGitHubの現物で行う。
-- 原則1writer。branch作成前とDraft PR作成後に同一MIGのopen PRを再検索し、重複したら後発は実装・mergeせず報告する。
+
+## REVIEW待ちを貯めて並行に進める規則
+
+- レビュー待ちで止まらない。自分のPRが`REVIEW`の間も、依存の無い別taskの実装・他agent PRのレビュー・Work Orderの精緻化を進める。
+- 1 MIG = 1 writer。agentあたり`IN_PROGRESS`のwriter PRは同時に1つまで。`REVIEW`待ちのPRは複数持ってよい。
+- 新しくclaimするtaskは、依存taskがmain上で`DONE`、owned pathと共有ledger行（FILE_MIGRATION_MATRIX等）が全open PRと重ならないこと。依存先がまだREVIEWのtaskは始めない（依存PRのmergeを最新mainで観測してから）。
+- branch作成前とDraft PR作成後に同一MIGのopen PRを再検索し、重複したら後発は実装・mergeせず報告する。
 - 途中失敗は同じPR/branchで再開する。新規branchで同じtaskをやり直さない。
+- REVIEW待ちPRはmerge統合の時に最新mainへ同期する。同期で競合したらそのPRの次のwakeで解消し、再レビューを受ける。
 - 品質ゲートは`npm run check:project-docs`、対象package build/typecheck/test、契約・権限・副作用・rollback。実行していない検証をPASS扱いしない。テスト修正の試行は同scope内2回まで、残れば`BLOCKED`。
-- 次のwriter taskは、自PRのmergeを最新mainで観測した後のwakeでだけ選ぶ。
 
 ## Independent review evidence
 
-- 独立レビュー = builderと別のagent family（Claude / Codex・ChatGPT / Antigravity）または人間。同じagentのsubagent（例: Claudeの`flamenode-architecture-reviewer`）はbuilder側pre-reviewであり数えない。
-- 全agentが同じGitHubアカウントを使うためApproveできない場合がある。PR commentに `Independent review: <reviewer> | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認したUX/FN/permission/visibility/side effect/rollbackを書く。
-- reviewer laneはbranchを編集せずmergeもしない。reviewed Head以降のpushは再レビューとCIを要する。
-- merge: 上記証拠 + 必須CI greenで、owner agentがsquash mergeしてよい。`GIT_WORKFLOW.md` §9の高リスク対象とPhase Gateは、加えてユーザーの明示承認（PR comment等）が必要。人間はいつでもmergeできる。
+- 基本: 独立レビュー = builderと別のagent（Claude / Codex・ChatGPT / Antigravity）または人間。
+- 上位モデルsubagent: builderより上位のモデル（Claudeでは Haiku < Sonnet < Opus。Luna / Flash 等の軽量モデルはHaiku相当）を、新しいcontextのsubagentとして起動し、PR diff・Work Order・関連するCURRENT契約（UX/FN/permission/visibility/side effect）を渡してレビューさせた場合は独立レビューとして数える。同等以下のモデルのsubagent、builder自身の見直しは数えない。builderが最上位モデル（例: Opus）の場合は、他agentまたは人間のレビューが必要。
+- PR commentに `Independent review: <agent>/<model> (<separate agent | fresh-context subagent of <builder model> | human>) | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認した契約・テスト・rollbackを書く。全agentが同じGitHubアカウントのためGitHub上のApproveは使わない。
+- reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。reviewed Head以降のpushは再レビューとCIを要する。
+- merge: 上記証拠 + reviewed Headで必須CI greenなら、owner agentがsquash mergeしてよい。`GIT_WORKFLOW.md` §9の高リスク対象とPhase Gateは、加えてユーザーの明示承認（PR comment等）が必要。hostの権限設定がmergeを拒否した場合はPRに記録してユーザーへ委ね、他の作業を続ける。人間はいつでもmergeできる。
 
 ## Pacing（自己ペースのhost向け）
 
-- 作業を進め、次wakeで続きがある: 短い間隔（1〜5分）。
-- 他agentのレビュー/CI待ち: 長い間隔（20〜60分）。
-- 人間承認・Phase Gate・`BLOCKED`・READY無しで進められる作業が無い: ポーリングせずloopを停止し、理由を報告する。
+- 進められる作業がある: 短い間隔（1〜5分）。
+- 自分のREVIEW待ちPRへの他agentのレビュー待ちだけが残る: 長い間隔（20〜60分）で再確認。
+- 人間承認・Phase Gate・`BLOCKED`だけが残り、進められる作業が無い: ポーリングせずloopを停止し、待ち一覧を報告する。
 
 ## Mandatory stop
 
@@ -400,7 +410,7 @@ WAKE:
 - UI visual taskだがPhase 2 Gate（MIG-0206）など依存が未完了、または`UI_REFERENCE.md`にmock未登録
 - test failureがtask scopeを超える
 - rollback不能/未証明
-- 別agentが対象taskを所有中（writerにならない。Wake decisionの2/3へ）
+- 別agentが対象taskを所有中（writerにならない。Wake decisionの4/5へ）
 
 Phase Gateをagentが自動承認しない。
 
@@ -488,7 +498,7 @@ Next:
 4. 実装は一taskずつ、大型MIGは1wakeにつき1micro-unitずつ。期待する関数・経路・静的情報が足りないときに「作業済み」と扱わない。失敗テストの修正は同scope内2回まで。その後は`BLOCKED`として証拠と再開条件を残す。
 5. `REVIEW`は独立レビューと必須CIの待ち状態であり、合格ではない。`DONE`へ進むには独立レビュー（上記Independent review evidence）と対象branchの必須CI成功が必要。`DONE`へ進む前にレビュー時のhead SHA、レビュー結論、run URL、rollback証拠をPRに記録。新push後はレビュー/CIを再評価する。
 6. 人間承認が必要なGate/認証/権限/visibility/DB schema/本番切替を、Loop維持のために自動承認しない。安全に進められる無関係taskがある場合も、明示的なdependencyとwriterの独立が条件。
-7. merge後に最新mainのstatus/task/lock解消を再読込するまでは次taskへ移らない。hostが反復機構を持たなければ一回で終了する。
+7. 依存taskへは、依存PRのmergeと最新mainのstatus/lock解消を再読込するまで移らない。依存の無いtaskはREVIEW待ちの間も進めてよい。hostが反復機構を持たなければ一回で終了する。
 8. stale`IN_PROGRESS`/古いPRは自動削除しない。PRを根拠にhandoffし、claim譲渡・失敗理由・未実行チェック・次の実行者を明示する。
 
 状態機械としての契約: `READY → IN_PROGRESS → REVIEW → DONE`。例外: `IN_PROGRESS/REVIEW → BLOCKED`（復旧条件明記）。`REVIEW`は合格を意味しない。`DONE`はreview/CIと依存完了を必要とする。フェーズGateはユーザーの明示承認を別に要する。
