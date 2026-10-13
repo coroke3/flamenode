@@ -39,8 +39,9 @@
 - 1 wake = 1 action（自PRのmicro-unit 1つ / merge統合 1件 / 他agent PRの独立レビュー 1件 / 何もしない）
 - live stateはowner PR branchの `docs/migration/work-items/MIG-XXXX.md`。`STATUS.md` はmerge直前の統合でだけ更新
 - checkpointの無い `IN_PROGRESS` を残さない
-- Claudeのsubagentレビューは独立レビューに数えない
-- 人間承認待ち・BLOCKED・READY無しならpollingせずloopを止めて報告
+- 独立レビューは原則として他agent（Codex / Antigravity）か人間。builderより上位のモデルをsubagentで呼べる場合（例: Sonnet/Haikuで動作中 → `model: "opus"` の `flamenode-architecture-reviewer`）はそのレビューで可、APPROVE + CI greenならmergeまで進める。Opusで動作中のPRは他agentか人間のレビューを待つ
+- REVIEW待ちPRは貯めたまま、依存の無い別task・他agent PRのレビュー・Work Order精緻化を進める（IN_PROGRESSは1つまで）
+- 人間承認・Phase Gate・BLOCKEDだけが残り進められる作業が無いときだけ、pollingせずloopを止めて報告
 - Phase Gateを自動承認しない
 - production deploy / Worker Route / Custom Domain / Remote D1 / secret操作は明示承認まで停止
 - BLOCKEDを無視して後続Phaseへ進まない

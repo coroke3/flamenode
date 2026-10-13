@@ -96,7 +96,7 @@ Work Orderの必須形式（見出しは一字一句この通り。checkerが解
 #### Rollback
 ```
 
-小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、独立レビュー、Phase Gate、merge統合、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。
+小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**）まで行ってよい。
 
 小型モデルの実行規則:
 
@@ -120,8 +120,13 @@ npm run migration:next -- --model small
 gh pr list --state open --json number,headRefName,title,isDraft
 ```
 
-- 自分（`Owner: <agent>`）のopen PRがある → **C** へ（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）。
-- 自分のPRが無く、候補が出た → **B** へ。候補が出ない → 何もせず「READY_FOR_SMALL_MODELのtask無し」と報告して終了。
+上から順に判定する（自分 = work-itemの`Owner`が自分のPR）。
+
+1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
+2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
+3. 自分のPRが`IN_PROGRESS` → **C**（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）
+4. 自分の`IN_PROGRESS` PRが無く、候補が出た → **B**（自分の`REVIEW`待ちPRがあっても進める）
+5. どれも無い → 何もせず「進められる作業無し」とREVIEW待ちPR一覧を報告して終了
 
 **B. claim（新規taskのみ）**
 
@@ -152,7 +157,48 @@ git push
 
 **D. 全unit完了時**
 
-Work Orderの `Commands` と `DONE checklist` を全部実行・確認し、work-itemを `State: REVIEW` にしてpush。`gh pr ready <n>` の後、PRへ「Independent review requested: Head <40hex>」とcommentして終了する。merge統合・`STATUS.md`更新はしない（leadの担当。hostが自己mergeを拒否する場合もある）。
+Work Orderの `Commands` と `DONE checklist` を全部実行・確認し、work-itemを `State: REVIEW` にしてpush。`gh pr ready <n>` の後、PRへ「Independent review requested: Head <40hex>」とcommentして終了する。次のwakeからは **A** の判定に従い、レビュー待ちの間も別taskへ進む。
+
+**E. 上位モデルによる独立レビュー（自分のPR、1件）**
+
+```bash
+gh pr view <n> --json headRefOid --jq .headRefOid     # Head
+gh pr diff <n> > /tmp/mig-xxxx.diff
+node scripts/print-migration-task-context.mjs MIG-XXXX > /tmp/mig-xxxx-packet.md
+```
+
+自分より上位のモデル（例: Haiku/Sonnet/Luna/Flashで動作中なら Opus）を新しいcontextのsubagentとして起動し、Head・diff・packetを渡して「Work OrderのTest cases・DONE checklist・STOPとCURRENT契約（UX/FN/permission/visibility/side effect/rollback）に照らしてレビューし、APPROVEかCHANGES_REQUESTEDと理由を返せ。branchは編集するな」と依頼する。結果をそのままPRへ記録する。
+
+```bash
+gh pr comment <n> --body "Independent review: <agent>/<model> (fresh-context subagent of <自分のmodel>) | Head: <40hex> | Verdict: <APPROVE|CHANGES_REQUESTED>
+<確認した項目と指摘>"
+```
+
+CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
+
+**F. merge統合（Model: small のPRのみ。leadのPR・高リスク・Phase Gateはleadとユーザー承認）**
+
+```bash
+gh pr checks <n>                                   # 全てpassでなければ終了して次wake
+git switch migration/mig-xxxx-<slug> && git pull --ff-only
+git fetch origin && git rebase origin/main         # 競合したら git rebase --abort してSTOP（leadへ）
+```
+
+1. `docs/migration/STATUS.md`: 当該MIG行のStateを`DONE`にする。Depends onの全MIGが`DONE`になった行だけ`BLOCKED`→`READY`にする。他の行は変えない。
+2. `docs/migration/work-items/MIG-XXXX.md`: `State: DONE`、`Evidence`にレビューcommentのURLとCI runのURL。
+3. 検証して統合commitをpushする。
+
+```bash
+npm run check:migration-work-items && npm run check:project-docs
+git add docs/migration/STATUS.md docs/migration/work-items/MIG-XXXX.md
+git commit -m "MIG-XXXX: STATUS統合"
+git push --force-with-lease
+gh pr ready <n>
+gh pr checks <n> --watch                           # 最終HeadのCIがpassしてから
+gh pr merge <n> --squash
+```
+
+統合commit（`STATUS.md`と自分のwork-itemだけの変更、競合の無いrebase）は再レビュー不要だが、CIは最終Headでpassが必要。hostの権限設定が`gh pr merge`を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
 
 ## 最小検証コマンド
 

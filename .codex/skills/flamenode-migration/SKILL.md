@@ -23,7 +23,7 @@ Read and follow, in order:
 
 Checkpoint policy: WORK_ITEM_ONLY.
 
-Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. Follow AGENT_PROTOCOL's Wake decision; REVIEW waits for independent review/CI and BLOCKED waits for its recorded recovery condition.
+Resume one owner PR or execute at most one unclaimed dependency-ready MIG task / bounded micro-unit per invocation. Follow AGENT_PROTOCOL's Wake decision; REVIEW waits for independent review/CI and BLOCKED waits for its recorded recovery condition. While your PR waits in REVIEW, continue other dependency-independent work (one IN_PROGRESS PR per agent; REVIEW PRs may accumulate). A fresh-context subagent on a higher-tier model than the builder counts as independent review.
 
 Before coding, record `Owner: codex` and task scope in `docs/migration/work-items/MIG-XXXX.md` on the task branch/PR. Keep `STATUS.md` unchanged during implementation.
 For each writer wake, persist bounded checkpoint progress in your own `docs/migration/work-items/MIG-XXXX.md`. Review-only wakes record evidence in the reviewed PR without editing its branch/checkpoint; wait/no-action wakes report the gate without a checkpoint-only push. `STATUS.md` is updated only at pre-merge integration. See `GIT_WORKFLOW.md`.
