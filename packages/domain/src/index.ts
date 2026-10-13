@@ -1,1 +1,1 @@
-export * from "./permissions";
+export * from "./slots/reservationLimit.ts";
