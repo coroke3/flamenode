@@ -6,10 +6,16 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS } from "./check-migration-execution.mjs";
 import { parseFileRows } from "./check-migration-file-progress.mjs";
-import { TASK_CARD_FILES, collectTaskCards } from "./check-migration-task-cards.mjs";
+import { TASK_CARD_FILES, collectTaskCards, specFileFor, extractWorkOrder } from "./check-migration-task-cards.mjs";
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const read=(root,file)=>fs.readFileSync(path.join(root,file),"utf8");
+const readOptional=(root,file)=>{try{return read(root,file);}catch{return undefined;}};
+export function getWorkOrder(id,root=ROOT){
+  const file=specFileFor(id);
+  const order=file?extractWorkOrder(readOptional(root,file),id):null;
+  return {file,order,smallReady:order?.model==="small"&&order?.readiness==="READY_FOR_SMALL_MODEL"};
+}
 export function getTaskContext(id,root=ROOT){
   if(!/^MIG-\d{4}$/.test(id))throw new Error("Provide one exact MIG-XXXX task ID");
   const status=read(root,"docs/migration/STATUS.md");
@@ -24,12 +30,14 @@ export function getTaskContext(id,root=ROOT){
   const decisionIds=[...(REQUIRED_DECISIONS[id]||[])];
   const visualGateIsInformational=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"].includes(id);
   const decisionRows=decisions.split("\n").filter(line=>decisionIds.some(d=>new RegExp("^\\|\\s*"+d+"\\s*\\|").test(line)));
+  const {file:specFile,order,smallReady}=getWorkOrder(id,root);
   const dir="docs/migration/";
   const lines=[
     "# "+id+" — narrow source-of-truth navigation packet",
     "> Read root AGENTS.md, the relevant AGENT_PROTOCOL.md and GIT_WORKFLOW.md rules. This output is a **locator**, not permission to omit CURRENT code/test or independent review.",
     "",
     "## STATUS: "+task.state+" — "+task.title,
+    "Work order: Model="+(order?.model??"unset")+" Readiness="+(order?.readiness??"unset")+(smallReady?" -> a small model may execute it":" -> lead only (small models must not claim it)"),
     "Dependencies: "+(dependencies.map(d=>d+":"+String(tasks.get(d)?.state??"UNKNOWN")).join("; ")||"none"),
     "Required decisions / approval (inspect full relevant subsection):",
     ...(decisionRows.length?decisionRows:["none explicit for this task; production approvals remain separate"]),
@@ -38,6 +46,9 @@ export function getTaskContext(id,root=ROOT){
     "## Exact task card ("+(card?.path??"no Phase2–9 card")+")",
     card?.heading??"",
     card?.text.trim()??"See STATUS and CURRENT code; no runnable Phase2–9 card recorded for this historical task.",
+    "",
+    "## Work order ("+(specFile??"no phase spec")+")",
+    order?.text??("No '### "+id+":' work order section yet: NEEDS_REFINEMENT. A lead must write it (IMPLEMENTATION_RUNBOOK.md Work Order format) before a small model starts."),
     "",
     "## Assigned source-file rows ("+owned.length+"; full ledger remains authoritative)",
     ...owned.map(row=>" - "+row.path+" | "+row.kind+" | "+row.state+" | "+row.target),
@@ -73,7 +84,7 @@ export function readOpenPrOwners(root=ROOT){
 }
 
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
-export function pickNextTask(statusText,decisionText,owned=new Map()){
+export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
   const tasks=parseTaskRows(statusText);
   const decisions=new Map();
   for(const line of decisionText.split("\n")){
@@ -86,6 +97,7 @@ export function pickNextTask(statusText,decisionText,owned=new Map()){
     const deps=expandDependencies(task.dependencies);
     if(deps.some(d=>tasks.get(d)?.state!=="DONE"))continue;
     if((REQUIRED_DECISIONS[id]||[]).some(d=>decisions.get(d)!=="DECIDED"))continue;
+    if(!eligible(id))continue;
     candidates.push(id);
   }
   // Optimize for 1102 first when independent performance PoC is already unblocked.
@@ -93,12 +105,13 @@ export function pickNextTask(statusText,decisionText,owned=new Map()){
   const ownedByPr=candidates.filter(id=>owned.has(id));
   return {selected:candidates.find(id=>!owned.has(id))??null,candidates,ownedByPr};
 }
-export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root)){
-  const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned);
+export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smallOnly=false}={}){
+  const eligible=smallOnly?(id=>getWorkOrder(id,root).smallReady):()=>true;
+  const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned,eligible);
   const ownedNote=next.ownedByPr.map(id=>id+"=PR#"+owners.owned.get(id)).join(",");
   if(!next.selected){
     if(ownedNote)throw new Error("Every dependency-ready MIG is owned by an open PR ("+ownedNote+"); resume your own PR, review another agent's REVIEW PR, or stop");
-    throw new Error("No dependency-ready MIG in merged STATUS; check blockers, approvals and active owner PRs");
+    throw new Error(smallOnly?"No dependency-ready MIG with a READY_FOR_SMALL_MODEL work order; a lead must refine one (AGENT_PROTOCOL.md Wake decision 4) or stop":"No dependency-ready MIG in merged STATUS; check blockers, approvals and active owner PRs");
   }
   const result=getTaskContext(next.selected,root);
   return {...result,selected:next.selected,candidates:next.candidates,ownedNote,live:owners.live};
@@ -109,7 +122,9 @@ if(invoked){
  try{
   const automatic=process.argv[2]==="--next";
   const owners=process.argv.includes("--offline")?{owned:new Map(),live:false}:undefined;
-  const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners):getTaskContext(process.argv[2]);
+  const modelAt=process.argv.indexOf("--model");
+  const smallOnly=modelAt>0&&process.argv[modelAt+1]==="small";
+  const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(process.argv[2]);
   if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");
   process.stdout.write(output);
   process.stderr.write("[migration-context] chars="+chars+" assigned source rows="+fileRows+" (source/test and policy are additional required reads)\n");

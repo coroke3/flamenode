@@ -3,6 +3,7 @@
 > Status: Active / 12 executable MIG cards
 > Contracts: [Auth baseline](auth/README.md), [Phase8/9 SPEC](PHASE_8_9_SPEC.md), [Git approval policy](GIT_WORKFLOW.md), [Routing plan](ROUTING_AND_DEPLOY_PLAN.md), [migration STATUS](STATUS.md)
 > D-07=A: keep Auth.js / @auth/core / D1 database session. **Never invent custom OAuth, new credentials, cookie naming or token protocol.**
+> Work Order: 実装手順の正本は各Phase仕様書の `### MIG-XXXX:` 節（Model / Readiness付き）。このカードは要約。小型モデルは `Model: small` かつ `READY_FOR_SMALL_MODEL` のWork Orderだけを実行する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)）。
 
 ## Phase 8: Auth.js compatibility
 

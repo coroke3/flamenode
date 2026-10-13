@@ -72,3 +72,10 @@ test("unregistered HTML blocks a READY design task in the advisory selector",()=
  assert.equal(pickNextTask(status,"| D-08 | HTML | BLOCKED_ON_USER | user |").selected,null);
  assert.equal(pickNextTask(status,"| D-08 | HTML | DECIDED | user |").selected,"MIG-0201");
 });
+test("small-model advisory only offers tasks whose work order is READY_FOR_SMALL_MODEL",()=>{
+ const status="| MIG-0108 | boundary | DONE | — |\n| MIG-0201 | tokens | READY | MIG-0108 |\n| MIG-0301 | domain | READY | MIG-0108 |";
+ const next=pickNextTask(status,"",new Map(),id=>id==="MIG-0301");
+ assert.equal(next.selected,"MIG-0301");
+ assert.deepEqual(next.candidates,["MIG-0301"]);
+ assert.equal(pickNextTask(status,"",new Map(),()=>false).selected,null);
+});

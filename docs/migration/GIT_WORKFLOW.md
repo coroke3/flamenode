@@ -264,7 +264,7 @@ Rules:
 - An agent must not be the only reviewer of its own migration PR.
 - Claude, Codex, and Antigravity may rotate Builder/Reviewer roles.
 - Review findings are written to the PR/repository, not left only in chat.
-- The reviewer checks CURRENT parity, not only code style. Independent reviewer eligibility follows [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) §Independent review evidence (a different agent family or a human); builder's self-review/same-family subagent/CIだけで独立レビューと称しない。レビュー対象のcommit SHAを記録し、レビュー後に変更した場合は再レビューとCIを要求する。
+- The reviewer checks CURRENT parity, not only code style. Independent reviewer eligibility follows [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) §Independent review evidence: a different agent or a human by default, or a fresh-context subagent running a **higher-tier model than the builder** (e.g. Sonnet/Haiku builder → Opus reviewer). builder's self-review/同等以下のmodelのsubagent/CIだけで独立レビューと称しない。レビュー対象のcommit SHAを記録し、レビュー後に変更した場合は再レビューとCIを要求する。
 
 ### High-risk two/three-party rule
 
@@ -289,7 +289,7 @@ A third verifier agent is recommended for these tasks when practical.
 
 ### Default
 
-Only one migration **writer lane** is active at a time.
+Each agent has at most one migration **writer lane** (`IN_PROGRESS` PR) at a time. PRs waiting in `REVIEW` may accumulate while the agent works on other dependency-independent tasks (user policy 2026-10-13; rules in AGENT_PROTOCOL.md「REVIEW待ちを貯めて並行に進める規則」).
 
 Other agents may work in parallel on read-only activities:
 
@@ -310,9 +310,8 @@ Parallel write PRs are allowed only when all are true:
 - file/domain ownership does not overlap
 - neither task modifies another work-item file or shared matrix/ledger rows owned by the other; STATUS integration is serialized at merge
 - rollback is independent
-- Lead explicitly marks the work parallel-safe
 
-If uncertain, serialize the tasks.
+The user approved this as a standing rule on 2026-10-13: a task that meets all four conditions is parallel-safe without a per-task Lead mark. If uncertain, serialize the tasks.
 
 ---
 
@@ -499,7 +498,7 @@ The next agent re-reads the branch state and continues from there.
 9. mark work-item REVIEW, request independent review
 10. address findings + rerun validation
 11. after independent review, update work-item DONE and reconcile STATUS task DONE + next READY against latest main
-12. CI成功・別レビュアー確認・必要な人間承認を確認した場合だけsquash merge。権限/レビューが不足する場合はREVIEWで停止
+12. CI成功・独立レビュー（別agent/人間、またはbuilderより上位モデルのsubagent）・必要な人間承認を確認した場合だけsquash merge。レビュー待ちの間はREVIEWのまま、依存の無い別taskへ進む
 13. delete branch
 14. next loop starts from updated main
 ```
