@@ -27,66 +27,237 @@
 
 # 2. Phase 7 タスク別詳細仕様書（実ルート対応）
 
+### Phase 7 共通契約（MIG-0701〜0706）
+
+- 見た目は CURRENT の UI を移植する（案A。`UI_REFERENCE.md`）。private mock は参考で、Gate 条件にしない。
+- データと mutation は Phase 6 の Hono API だけを使う。SPA から D1 や Server Action を呼ばない。権限は Hono 側で必ず再検証する。
+- Adapter は各SPA root の Provider で注入する（MIG-0203）。
+- 本番の Route 切替は各MIGの DONE 後に人間の明示承認を得て別操作として行う。
+- 共通のコマンド: `npm run build --workspace=@flamenode/app`（Ops は `--workspace=@flamenode/ops`）, `npm run typecheck`, `npm run check:project-docs`。
+- 共通の Rollback: PRをrevert。本番 Route を切り替えた後の戻しは `ROUTING_AND_DEPLOY_PLAN.md` の手順で、その実行も明示承認事項。
+
 ### MIG-0701: dashboard read-only（Personal 参照系画面）
-- **対象画面** (`CURRENT_ROUTES.md` Personal 6 ルート):
-  - `/dashboard`（マイページ・状態把握）
-  - `/dashboard/library`（保存・いいね・自作品・共同編集一覧、Active X 主体で表示）
-  - `/dashboard/settings`（プロフィール・X ID 連携設定）
-  - `/dashboard/youtube-playlists`（互換リダイレクト）
-- **仕様**: Hono API からデータをフェッチし、現行 UI コンポーネントで描画。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608（session 読み取り）の merge 後
+- **Depends on:** MIG-0102, MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- CURRENT: `app/(auth)/dashboard/page.tsx`, `app/(auth)/dashboard/library/page.tsx`, `app/(auth)/dashboard/settings/page.tsx`, `app/(auth)/dashboard/youtube-playlists/page.tsx`（COMPAT_REDIRECT）, `app/(auth)/onboarding/page.tsx`（`FILE_MIGRATION_MATRIX.md` で MIG-0701 所有）。
+- `apps/app/vite.config.ts`: `base: "/"`, `assetsDir: "_personal_assets"`。`apps/app/src/App.tsx` は疎通用 Button のみ。`react-router-dom` `^7.0.0` は依存に入っている。
+- 認証まわりの状態（loading / BAN / X 未連携）の契約は `frontend/AUTH_PERSONAL_ENTRY.md`。
+#### Owned paths
+- 変更: `apps/app/src/App.tsx`, `apps/app/src/main.tsx`
+- 新規: `+apps/app/src/routes/dashboard/*.tsx`, `+apps/app/src/routes/onboarding.tsx`, `+apps/app/src/api/*.ts`
+- 触らない: `app/(auth)/**`
+#### Micro-units
+- **U01 router shell**: React Router と error boundary、未ログイン時の挙動（CURRENT と同じ遷移先）。
+- **U02 dashboard / library**: Active X 単位の表示。`no-store`。
+- **U03 settings / onboarding / youtube-playlists redirect**: 表示のみ（更新は MIG-0702）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | X 0件 / 1件 / 複数 | CURRENT と同じ表示 |
+| T02 | 未ログインで直接URL | CURRENT と同じ遷移 |
+| T03 | 再読込・戻る・進む | 状態が壊れない |
+| T04 | BAN された利用者 | CURRENT と同じ表示 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の5ページ行を IN_PROGRESS（target は `apps/app/src/routes/*`）。
+#### DONE checklist
+- [ ] 5ルートの状態が CURRENT と一致
+- [ ] SPA から Server Action や D1 を呼んでいない
+#### STOP
+- 必要な API が Phase 6 に無い場合は止めて lead へ返す。
+#### Rollback
+Phase 7 共通契約のとおり。
 
 ### MIG-0702: dashboard mutations（Personal 更新系機能）
-- **対象機能**:
-  - プロフィール編集・Active X 切り替え（SA-098〜105）
-  - **Active X 登録・連携モーダル**: 未連携ユーザーがいいね/ブックマークを試みた際の誘導モーダルを完全実装。
-  - 通知一覧・現行の読込/障害表示。**CURRENTに存在しない「既読化」mutationを勝手に追加しない**（独立feature task/承認が必要）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602・MIG-0605・MIG-0701 の merge 後（Active X / profile の API は MIG-0605）
+- **Depends on:** MIG-0602, MIG-0605, MIG-0701 / **Decisions:** D-03 DECIDED, D-04 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- SA-098〜105（`src/lib/actions/xid.ts`: `setActiveXId`, `requestXIdLink`, `cancelXIdLinkRequest`, `requestXIdMergeRevert`, `updateXIdProfile`, `deleteLinkedXId`, `setXIdIcon`, `uploadXIdIcon`）、SA-076 `acceptOnboardingTerms`（`src/lib/actions/terms.ts`）。
+- 通知の「既読化」は CURRENT に無い。追加しない。
+#### Owned paths
+- 新規: `+apps/app/src/routes/dashboard/settings/*.tsx`（更新フォーム）, `+apps/app/src/components/ActiveXLinkModal.tsx`
+- 触らない: `src/lib/actions/**`
+#### Micro-units
+- **U01 profile / X**: SA-102〜105。
+- **U02 Active X / link**: SA-098〜101。未連携ユーザーの登録誘導モーダル。
+- **U03 onboarding**: SA-076。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 二重送信 | 1回だけ反映 |
+| T02 | 承認待ちの連携 | CURRENT と同じ表示 |
+| T03 | manager 権限だけの X | CURRENT と同じ可否 |
+| T04 | X 0件でいいね | 誘導モーダル |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-076, 098〜105 に SPA 側の呼び出し元。
+#### DONE checklist
+- [ ] U01〜U03 が DONE
+- [ ] CURRENT に無い mutation を追加していない
+#### STOP
+- D-04（Active X 一斉切替）の実行が必要に見えたら止める（別承認）。
+#### Rollback
+Phase 7 共通契約のとおり。
 
 ### MIG-0703: entry（Entry 画面群）
-- **対象画面** (`CURRENT_ROUTES.md` Entry 3 ルート):
-  - `/entry`（ログイン・条件確認・投稿種別選択）
-  - `/entry/slotted`（枠確保済み作品提出）
-  - `/entry/unslotted`（枠なし作品通常登録）
-  - `/dashboard/edit/[id]`, `/dashboard/edit/[id]/permissions`（作品情報・共同編集権限編集）
-- **仕様**: 作品編集権限判定（PR #265 一本化ロジック）を厳格に適用。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿は MIG-0603、枠は MIG-0604 の API を使う
+- **Depends on:** MIG-0603, MIG-0604, MIG-0702 / **Decisions:** none
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- CURRENT: `app/(auth)/entry/page.tsx`, `app/(auth)/entry/slotted/page.tsx`, `app/(auth)/entry/unslotted/page.tsx`, `app/(auth)/dashboard/edit/[id]/page.tsx`, `app/(auth)/dashboard/edit/[id]/permissions/page.tsx`。
+- フォーム: `src/components/forms/VideoForm.tsx`, `UnslottedPostForm.tsx`, `CustomQuestionFields.tsx`, `VideoMembersField.tsx`（契約テスト `src/components/forms/*.contract.test.mjs` 5件）。
+- SA-086〜089（投稿・更新）。編集権限は PR #265 の一本化した判定。
+#### Owned paths
+- 新規: `+apps/app/src/routes/entry/*.tsx`, `+apps/app/src/routes/dashboard/edit/*.tsx`
+- 触らない: `src/components/forms/**`（移植元。Phase 9 まで残す）
+#### Micro-units
+- **U01 entry**: `/entry` と slotted / unslotted。
+- **U02 edit**: `/dashboard/edit/:id` と permissions。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 投稿済みの枠で再投稿 | CURRENT と同じ拒否 |
+| T02 | 不正な YouTube URL・重複 | CURRENT と同じエラー |
+| T03 | collaborator が権限ページ | CURRENT と同じ可否 |
+| T04 | 編集中の再読込 | CURRENT と同じ |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の5ページ行を IN_PROGRESS。
+#### DONE checklist
+- [ ] 5ルートのフォーム状態と副作用が SA ごとに CURRENT と一致
+#### STOP
+- 権限判定を SPA 側で決める必要が出たら止める（Hono が正）。
+#### Rollback
+Phase 7 共通契約のとおり。
 
 ### MIG-0704: manage（Manage イベント運営画面群）
-- **最初に** `+apps/ops` ワークスペースを生成し、名前を `@flamenode/ops`、別Vite設定・entrypoint・`/_ops_assets/*`・`flamenode-ops` Workerとして独立build/preview/CIを設定する（Personal `apps/app` とpackage lockを共有）。
-- **対象画面** (`CURRENT_ROUTES.md` Manage 12 ルート):
-  - `/manage`（担当イベント一覧）
-  - `/manage/events/[id]`（イベント基本設定）
-  - `/manage/events/[id]/audience`（観客・参加者情報）
-  - `/manage/events/[id]/edit`（イベント設定編集）
-  - `/manage/events/[id]/slots`（スロットタイムテーブル編集）
-  - `/manage/events/[id]/staff`（スタッフ・オーナー権限管理）
-  - `/manage/events/[id]/videos`, `.../videos/[videoId]`（イベント提出作品管理・審査）
-  - `/manage/events/[id]/youtube-playlist`（再生リスト連携）
-  - `/manage/notifications`（通知障害確認・再試行）
-  - `/manage/x-link-requests`（X 連携リクエスト審査）
-- **仕様**: オーナー 0 人禁止の不変条件（FN-X-001）を防御。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0604 と MIG-0703 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
+- **Depends on:** MIG-0604, MIG-0703 / **Decisions:** D-05 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- CURRENT（12ファイル）: `app/(manage)/manage/page.tsx`, `app/(manage)/manage/events/[id]/{page,edit/page,audience/page,slots/page,staff/page,videos/page,videos/[videoId]/page,youtube-playlist/page,review/page}.tsx`, `app/(manage)/manage/notifications/page.tsx`, `app/(manage)/manage/x-link-requests/page.tsx`。
+- `apps/ops` はまだ無い（`FILE_MIGRATION_MATRIX.md` の Future files 表で NOT_CREATED）。
+- 部品: `src/components/manage/**`, `src/components/layout/ManageSidebarNav.tsx`, `ManageActiveXNotice.tsx`。
+#### Owned paths
+- 新規: `+apps/ops/package.json`（`@flamenode/ops`）, `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts`（`assetsDir: "_ops_assets"`）, `+apps/ops/src/**`
+- 変更: `package-lock.json`, `.github/workflows/migration-docs-check.yml`（Ops の build を追加）
+- 触らない: `app/(manage)/**`, `apps/app/**`
+#### Micro-units
+- U01〜U05 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704 のとおり。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | Personal と Ops の build | CSS/JS が互いに混ざらない |
+| T02 | 担当外イベントの URL | 拒否 |
+| T03 | 最後の owner の解任 | 拒否 |
+| T04 | `/manage/events/[id]/review` | `videos?status=pending` へ互換 redirect |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npm run build --workspace=@flamenode/ops
+npm run typecheck
+npm run check:event-owners
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の Manage 12行を IN_PROGRESS、`apps/ops/**` 行を追加。
+#### DONE checklist
+- [ ] U01〜U05 と Final audit が DONE
+- [ ] Ops の build が CI で動く
+#### STOP
+- Ops の Worker / Route を本番に作る必要が出たら止める（明示承認事項）。
+#### Rollback
+Phase 7 共通契約のとおり。
 
 ### MIG-0705: admin（Admin 全体管理者画面群）
-- **対象画面** (`CURRENT_ROUTES.md` Admin 45 ルート):
-  - `/admin`（ダッシュボード）
-  - `/admin/announcements/*`（お知らせ管理）
-  - `/admin/api-endpoints`（エンドポイント設定）
-  - `/admin/audit/*`（監査ログ・復元）
-  - `/admin/cost-guard`（運用モード・コストガード）
-  - `/admin/event-groups/*`（イベントグループ管理）
-  - `/admin/events/*`（全イベント管理）
-  - `/admin/health/*`, `/admin/security`（ヘルス・セキュリティ診断）
-  - `/admin/import`（レガシーインポート）
-  - `/admin/moderation`（モデレーション管理）
-  - `/admin/notifications`（全体通知再試行）
-  - `/admin/permissions/simulator`（権限シミュレータ）
-  - `/admin/rules/*`（利用規約管理）
-  - `/admin/spreadsheet`（DB テーブル閲覧・安全編集）
-  - `/admin/static-builds`（静的ビルド再生成管理）
-  - `/admin/users/*`（ユーザー検索・詳細・BAN・ロール付与）
-  - `/admin/videos/*`（全動画管理・メンバー編集）
-  - `/admin/workers`（Worker 稼働状態監視）
-  - `/admin/x-id-merges`（X ID 統合・差し戻し）
-  - `/admin/x-link-requests`（X 連携申請処理）
-  - `/admin/youtube-quota`, `/admin/youtube-sync/*`（YouTube クォータ・同期管理）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
+- **Depends on:** MIG-0605, MIG-0704 / **Decisions:** D-05 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- CURRENT: `app/(admin)/**/page.tsx` 45件（`CURRENT_ROUTES.md` Admin 45）。部品は `src/components/admin/**`。
+- 危険操作（spreadsheet 書き込み、X merge、audit restore、BAN）は strict audit と確認が必要（`server-actions/README.md`）。
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/**`（lazy chunk）
+- 触らない: `app/(admin)/**`, `apps/app/**`
+#### Micro-units
+- U01〜U08 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705 のとおり。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × 45ルート | CURRENT と同じ可否 |
+| T02 | spreadsheet の import 途中失敗 | 全件ロールバック |
+| T03 | 発行 token | ブラウザに渡らない |
+| T04 | Personal bundle | admin のコードが入っていない |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/ops
+npm run build --workspace=@flamenode/app
+npm run typecheck
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の Admin 45行を IN_PROGRESS。
+#### DONE checklist
+- [ ] U01〜U08 と Final audit が DONE
+- [ ] 危険操作が独立レビューを通っている
+#### STOP
+- 任意SQLを実行できる画面が必要に見えたら止める。
+#### Rollback
+Phase 7 共通契約のとおり。
 
 ### MIG-0706: Phase 7 Gate
-- **完了条件**: 全 Personal (6), Entry (3), Manage (12), Admin (45) 画面を**Personal/Opsの2SPA**に移行。2つの別build成功、相互に混ざらないJS/CSS、static asset名前空間、deep links/reload/back-forward、cookie/session、cross-app navigation、アクセス拒否/権限、404、全Server ActionのHono対応とロールバック安全性を確認。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Depends on:** MIG-0705 / **Decisions:** D-05 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- Personal 6 + `/onboarding`、Entry 3、Manage 12、Admin 45（`CURRENT_ROUTES.md`）と MIG-0701〜0705 の merge 済みPR。
+#### Owned paths
+- 新規: `+docs/migration/design/PHASE_7_GATE.md`
+- 変更: `docs/migration/ROUTE_MATRIX.md`, `docs/migration/STATUS.md`（承認後だけ）
+#### Micro-units
+- **U01 matrix**: 全ルートの対応・権限・404・再読込・SPA間遷移の証跡をまとめる。
+- **U02 review**: 独立レビューと人間の Phase Gate 承認を依頼。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 2つの SPA の build | 両方成功、asset prefix が分離 |
+| T02 | 権限の無い利用者が Ops の DTO | 拒否 |
+| T03 | 未移行の Server Action | 0件 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/app
+npm run build --workspace=@flamenode/ops
+npm run check:project-docs
+```
+#### Ledger updates
+承認後に `STATUS.md` の MIG-0706 を DONE。
+#### DONE checklist
+- [ ] 全ルートの証跡
+- [ ] 独立レビューの APPROVE と人間の Phase Gate 承認
+- [ ] Ops の bundle が存在する
+#### STOP
+- 人間の承認なしに STATUS を DONE にしない。
+#### Rollback
+Gate のPRをrevert。

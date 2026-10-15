@@ -156,6 +156,67 @@ export function validateWorkOrders({ status, specs }) {
   return errors;
 }
 
+// Plan completeness: every unfinished tracked task has a full work order whose
+// dependencies agree with the merged STATUS graph, and READY really means unblocked.
+function expandMigRefs(text) {
+  const ids = new Set();
+  for (const m of (text ?? "").matchAll(/MIG-(\d{4})(?:\.\.MIG-(\d{4}))?/g)) {
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    for (let n = from; n <= to; n++) ids.add("MIG-" + String(n).padStart(4, "0"));
+  }
+  return ids;
+}
+
+function parseAllMigrationStates(status) {
+  const states = new Map();
+  for (const line of status.split("\n")) {
+    const cells = line.split("|").map((s) => s.trim());
+    if (/^MIG-\d{4}$/.test(cells[1] ?? "")) states.set(cells[1], cells[3]);
+  }
+  return states;
+}
+
+export function validatePlanCompleteness({ status, specs }) {
+  const errors = [];
+  const tasks = parseTrackedMigrationTasks(status);
+  const states = parseAllMigrationStates(status);
+  const deps = new Map([...tasks].map(([id, t]) => [id, expandMigRefs(t.dependency)]));
+  const closure = (id, seen = new Set()) => {
+    for (const dep of deps.get(id) ?? []) {
+      if (!seen.has(dep)) { seen.add(dep); closure(dep, seen); }
+    }
+    return seen;
+  };
+  for (const [id, task] of tasks) {
+    if (task.state === "READY") {
+      for (const dep of deps.get(id)) {
+        if (states.get(dep) !== "DONE") errors.push(id + ": READY but dependency " + dep + " is " + (states.get(dep) ?? "unknown"));
+      }
+    }
+    if (task.state === "DONE" || task.state === "SKIPPED") continue;
+    const file = specFileFor(id);
+    const order = file ? extractWorkOrder(specs[file], id) : null;
+    if (!order) { errors.push(id + ": unfinished task has no work order in " + file); continue; }
+    if (!order.model || !order.readiness) errors.push(id + ": work order must declare valid Model and Readiness");
+    if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.text)) errors.push(id + ": work order needs Verified against `<sha>`");
+    for (const section of WORK_ORDER_SECTIONS) {
+      if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": work order missing #### " + section);
+    }
+    const dependsLine = order.text.match(/\*\*Depends on:\*\*([^\n]*)/)?.[1];
+    if (dependsLine === undefined) { errors.push(id + ": work order missing Depends on"); continue; }
+    const declared = expandMigRefs(dependsLine.split("**Decisions:**")[0]);
+    for (const dep of deps.get(id)) {
+      if (!declared.has(dep)) errors.push(id + ": work order Depends on omits STATUS dependency " + dep);
+    }
+    const reachable = closure(id);
+    for (const dep of declared) {
+      if (!deps.get(id).has(dep) && !reachable.has(dep)) errors.push(id + ": work order depends on " + dep + " but STATUS has no such dependency path");
+    }
+  }
+  return errors;
+}
+
 export function readSpecs(read) {
   return Object.fromEntries([...new Set(Object.values(SPEC_FILES))].map((p) => {
     try { return [p, read(p)]; } catch { return [p, undefined]; }
@@ -176,6 +237,7 @@ if(invoked){
     microUnits:read("docs/migration/TASK_MICRO_UNITS.md"),
   });
   errors.push(...validateWorkOrders({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
+  errors.push(...validatePlanCompleteness({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
   for(const error of errors)console.error("[migration-task-cards] "+error);
   if(errors.length)process.exitCode=1;
   else console.log("[migration-task-cards] OK: "+TASK_CARD_FILES.length+" card files cover all "+parseTrackedMigrationTasks(read("docs/migration/STATUS.md")).size+" active/future MIG tasks.");

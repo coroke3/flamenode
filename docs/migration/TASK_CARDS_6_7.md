@@ -1,6 +1,6 @@
 # Implementation cards: Phase 6 / 7 — Hono APIs and dual private SPAs
 
-> Status: Active / 13 executable MIG cards
+> Status: Active / 14 executable MIG cards
 > Authoritative inventories: [RH method ledger](route-handlers/README.md), [SA execution units](server-actions/README.md), [UX/FN](FEATURE_CATALOG.md), [permissions baseline](auth/README.md), [Active X migration](ACTIVE_X_MIGRATION_PLAN.md)
 > Migrations do NOT replace system behavior: Transport(Hono) → typed DTO/authz → domain policy → D1 adapter/transaction + post-commit effects.
 > Work Order: 実装手順の正本は各Phase仕様書の `### MIG-XXXX:` 節（Model / Readiness付き）。このカードは要約。小型モデルは `Model: small` かつ `READY_FOR_SMALL_MODEL` のWork Orderだけを実行する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)）。
@@ -22,9 +22,16 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: success/401/403/404/503、missing token/invalid token、stale R2、quota/CPU、production secretがresponse/traceに無い。
 - DONE: RH-017/018/026/029の契約比較テストをPR記録、旧Handlerはまだ削除しない。
 
+### MIG-0608 — Hono read-only session resolution
+
+- 読む: `src/lib/auth/index.ts`（`session: { strategy: "database" }`）, `src/lib/auth/{currentUser,session,requestAuthContext}.ts`, `src/lib/db/schema.base.ts` の `session`/`user`, MIG-0801 baseline fixtures。
+- 変更: `+apps/api/src/auth/session.ts` に cookie → D1 `session` → `user` の読み取り専用解決と Hono middleware を追加。cookie の発行・更新・削除、login/callback/logout（RH-010/011）は Phase 8 まで旧 Next のまま。
+- 試験: 旧Next発行cookieで同一利用者、期限切れ/削除済み/改ざん/BAN、sessionTokenがログに出ないこと、request単位の解決（module global無し）。
+- DONE: MIG-0602以降の認証付きHono APIが旧Nextのsessionを読める証跡と独立レビュー。独自token/署名を作っていない。
+
 ### MIG-0602 — low-risk write commands
 
-- 読む: SA-004..008, SA-035..037, announcements/templates/API endpoints CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
+- 読む: SA-004..011（announcements / API endpoints / audit settings。SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
 - 変更: Hono Zod input検証、session userのpolicy判定、D1 write transaction + audit outboxを同一業務サービスへ委譲。新APIだけのvalidationを作って旧Nextと意味を分けない。
 - 試験: unauthorized/forbidden/banned、invalid body、CAS lost update、audit write failure→rollback、post-commit queue exactly-once-ish/idempotent retry、same-origin check。
 - DONE: SA unitごとに同一requestで旧/新statusとDB副作用・監査・Queue結果が一致。
