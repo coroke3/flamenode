@@ -20,9 +20,9 @@
 @font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>
-body{margin:0;background:#000}
+body{margin:0}
 @keyframes fn-tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .rl-item{display:grid;grid-template-columns:minmax(64px,80px) 72px 40px minmax(120px,200px) minmax(0,1fr) max-content;align-items:center;gap:16px;padding:12px 16px 4px}
 .rl-wrap:hover{background:var(--surface-subtle)}
@@ -49,7 +49,7 @@ body{margin:0;background:#000}
 </style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="event" hint-size="100%,72px"></dc-import>
 
   <div class="wrap" style="padding-top: 48px; max-width: 1280px;">
     <a href="EventDetail.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>PVSF2026S</a>
@@ -150,7 +150,7 @@ body{margin:0;background:#000}
     </sc-if>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"view":{"editor":"enum","options":["list","card","creator"],"default":"list"},"$preview":{"width":1440,"height":1800}}'>

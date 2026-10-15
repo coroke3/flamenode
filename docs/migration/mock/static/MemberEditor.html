@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合作メンバー編集(タイムライン/表/一括) — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route:  / source: source/boards/MemberEditor.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>body{margin:0}</style>
+
+<div class="p-root" data-theme="dark" lang="ja" style="min-height: 0; background: transparent;">
+  <div class="row" style="gap: 12px; flex-wrap: wrap;">
+    <div class="seg" role="tablist" aria-label="メンバー編集の表示モード">
+      <button type="button" role="tab" class="on"><i class="fa-solid fa-timeline" aria-hidden="true"></i>タイムライン</button><button type="button" role="tab" class=""><i class="fa-solid fa-table-list" aria-hidden="true"></i>表</button><button type="button" role="tab" class=""><i class="fa-solid fa-paste" aria-hidden="true"></i>一括(TSV・AI)</button><button type="button" role="tab" class=""><i class="fa-solid fa-comment-dots" aria-hidden="true"></i>提案</button>
+    </div>
+    <span class="t-sm muted" style="flex: 1;">動画の長さに沿ってチャプターを置けます</span>
+    <span class="t-sm muted t-num">5人 · チャプター 5</span>
+  </div>
+
+  
+  
+    <div class="tl-wrap" style="margin-top: 16px;">
+      <div class="tl-ruler"><span style="left: 0%;">0:00</span><span style="left: 12.448132780082988%;">1:00</span><span style="left: 24.896265560165975%;">2:00</span><span style="left: 37.344398340248965%;">3:00</span><span style="left: 49.79253112033195%;">4:00</span><span style="left: 62.24066390041494%;">5:00</span><span style="left: 74.68879668049793%;">6:00</span><span style="left: 87.13692946058092%;">7:00</span><span style="left: 99.5850622406639%;">8:00</span></div>
+      <div class="tl-track" title="クリックした位置にチャプターを追加">
+        
+          <div class="tl-seg s0" style="left: 0%; width: 4.979253112033195%;"><img src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""><span>丸い人</span></div>
+        
+          <div class="tl-seg s1" style="left: 4.979253112033195%; width: 4.979253112033195%;"><img src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt=""><span>ぴーふら</span></div>
+        
+          <div class="tl-seg s2" style="left: 9.95850622406639%; width: 4.979253112033195%;"><img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt=""><span>sum1</span></div>
+        
+          <div class="tl-seg s0" style="left: 14.937759336099585%; width: 24.481327800829874%;"><img src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt=""><span>Eipi</span></div>
+        
+          <div class="tl-seg s2" style="left: 39.41908713692946%; width: 60.58091286307054%;"><img src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt=""><span>sum1</span></div>
+        
+        <div class="tl-cursor" style="left: 31.327800829875518%;"><span class="t-num">2:31</span></div>
+      </div>
+      <div class="row t-sm muted" style="gap: 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span>空いている位置をクリックで追加</span>
+        <span class="il"><i class="fa-solid fa-arrows-left-right" aria-hidden="true"></i>境界をドラッグで開始時刻を調整</span>
+        <span>選択中に ← → で1秒、Shift で10秒</span>
+        <span style="flex: 1;"></span>
+        <span class="il t-num"><i class="fa-brands fa-youtube" aria-hidden="true"></i>長さ 8:02(YouTube から取得)</span>
+      </div>
+    </div>
+    
+      <div class="raised row" style="gap: 8px; padding: 12px 16px; margin-top: 8px; flex-wrap: wrap;">
+        <span class="t-num" style="font-size: 18px;">2:31</span>
+        <span class="t-sm muted">からのチャプター</span>
+        <span class="sel-i" style="flex: 1 1 220px;"><i class="fa-solid fa-user" aria-hidden="true"></i><select class="select i" aria-label="担当メンバー"><option>Eipi(@Eipi_Rainbow)</option><option>丸い人(@Maruihito_maru)</option><option>ぴーふら(@Fura1107_)</option><option>+ 新しいメンバー</option></select></span>
+        <button type="button" class="fn-btn fn-btn--primary fn-btn--sm"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button>
+        <button type="button" class="ib sm" aria-label="やめる"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    
+  
+
+  
+  
+    <div style="margin-top: 16px;">
+      <div class="mrow2 t-label muted"><span></span><span>メンバー</span><span>役割</span><span>チャプター(開始)</span><span>編集</span><span>公開</span><span></span></div>
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="丸い人 を個別に編集"><img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">丸い人</span><span class="t-sm muted ell">@Maruihito_maru</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:00<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm on" aria-label="作品編集に参加(押すと外す)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="ぴーふら を個別に編集"><img class="avatar" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">ぴーふら</span><span class="t-sm muted ell">@Fura1107_</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:24<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="sum1 を個別に編集"><img class="avatar" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">sum1</span><span class="t-sm muted ell">@sum1_eizou</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">0:48<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span><span class="chip t-num" style="height: 26px; cursor: default;">3:10<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="Eipi を個別に編集"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">Eipi</span><span class="t-sm muted ell">@Eipi_Rainbow</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            <span class="chip t-num" style="height: 26px; cursor: default;">1:12<i class="fa-solid fa-xmark" aria-label="削除" style="cursor: pointer;"></i></span>
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm on" aria-label="公開(押すと非公開)"><i class="fa-solid fa-eye"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+        <div class="mrow2">
+          <i class="fa-solid fa-grip-vertical muted" aria-hidden="true" style="cursor: grab;" title="ドラッグで並べ替え"></i>
+          <button type="button" class="row" style="gap: 10px; min-width: 0; border: 0; background: none; padding: 0; color: inherit; text-align: left; cursor: pointer;" aria-expanded="false" aria-label="Av1 を個別に編集"><img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 28px; height: 28px;"><span class="stack" style="min-width: 0; gap: 0;"><span class="ell" style="font-size: 14px;">Av1</span><span class="t-sm muted ell">@Av1_mz</span></span></button>
+          <input class="cell" aria-label="役割" value="映像" placeholder="作画 / 編集 / 音響など">
+          <span class="row" style="gap: 4px; flex-wrap: wrap;">
+            
+            <button type="button" class="chip" style="height: 26px;" aria-label="チャプターを追加"><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </span>
+          <button type="button" class="ib sm" aria-label="編集不可(押すと作品編集に参加)"><i class="fa-solid fa-pen"></i></button>
+          <button type="button" class="ib sm" aria-label="非公開(押すと公開)"><i class="fa-solid fa-eye-slash"></i></button>
+          <span class="row" style="gap: 0;"><button type="button" class="ib sm" aria-label="コメントを編集"><i class="fa-regular fa-comment"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-xmark"></i></button></span>
+        </div>
+        
+      
+    </div>
+
+    <div style="position: relative; max-width: 420px; margin-top: 12px;">
+      <div class="field-i"><div style="display: contents;"><div class="fn-field"><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" aria-label="メンバーを追加" placeholder="X ID または名前で追加" value="ei"></div></div></div><i class="fa-solid fa-user-plus" aria-hidden="true"></i></div>
+      
+        <div class="raised stack" role="listbox" aria-label="候補" style="gap: 0; padding: 4px; position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 5;">
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">Eipi <span class="muted">@Eipi_Rainbow</span></span><span class="t-sm muted">PVSF2026Sp ほか 3作品</span></button>
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">eiko <span class="muted">@eiko_mv</span></span><span class="t-sm muted">1作品</span></button>
+          
+            <button type="button" class="tl" role="option" style="height: 44px;"><img class="avatar" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="" style="width: 24px; height: 24px;"><span style="flex: 1;">Eita <span class="muted">@eita_anim</span></span><span class="t-sm muted">合作 2作品</span></button>
+          
+          <button type="button" class="tl" style="height: 40px;"><i class="fa-solid fa-user-pen" aria-hidden="true"></i>X ID なしで「ei」を追加</button>
+        </div>
+      
+    </div>
+  
+
+  
+  
+
+  
+  
+</div>
+
+</div>
+</body></html>

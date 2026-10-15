@@ -21,16 +21,16 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="xlink" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="xlink" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
     <div class="c-head">
       <div>
         <h1 class="t-display">X ID 申請</h1>
-        <p class="muted">X ID連携申請を承認・却下します。統合操作は管理者画面に限定されます。</p>
+        <p class="muted">X ID 連携申請を承認・却下します。X ID の統合は管理者が行います。</p>
       </div>
     </div>
     <div class="dt" style="--cols: 100px 120px minmax(160px,1fr) minmax(160px,1fr) 110px minmax(220px,1.4fr); --minw: 0px;">
@@ -67,10 +67,10 @@ class Component extends DCLogic {
   constructor(p) { super(p); this.state = { rej: 'xr_8d02' }; }
   renderVals() {
     const R = [
-      { id: 'xr_8c11', type: 'X ID連携', typeIcon: 'fa-solid fa-link', x: 'otako_sub', sub: 'おたこ(サブ)', discord: 'otako', at: '10.02 12:10', icon: '/_blob/755d245a064a6f5935c3dccd9a941048', adminOnly: false },
-      { id: 'xr_8d02', type: 'X ID連携', typeIcon: 'fa-solid fa-link', x: 'sub_ajinori', sub: '味付け海苔', discord: 'ajinori', at: '10.03 08:40', icon: '/_blob/191c3939aefb326fc04fd3ccf6db83a9', adminOnly: false },
+      { id: 'xr_8c11', type: 'X ID 連携', typeIcon: 'fa-solid fa-link', x: 'otako_sub', sub: 'おたこ(サブ)', discord: 'otako', at: '10.02 12:10', icon: '/_blob/755d245a064a6f5935c3dccd9a941048', adminOnly: false },
+      { id: 'xr_8d02', type: 'X ID 連携', typeIcon: 'fa-solid fa-link', x: 'sub_ajinori', sub: '味付け海苔', discord: 'ajinori', at: '10.03 08:40', icon: '/_blob/191c3939aefb326fc04fd3ccf6db83a9', adminOnly: false },
       { id: 'xr_8d19', type: '旧別名申請', typeIcon: 'fa-solid fa-tag', x: 'who_watakushi', sub: '貴方', discord: 'anata', at: '10.03 21:02', icon: '/_blob/6ecfc7b6882f277d815f563e873f25ee', adminOnly: false },
-      { id: 'xr_8e40', type: 'X ID統合', typeIcon: 'ms ms-merge', x: 'otako_old', sub: '→ @012345rty', discord: 'otako', at: '10.04 09:15', icon: '/_blob/fc027fe6fe3a001a22a1933270ce72b9', adminOnly: true }
+      { id: 'xr_8e40', type: 'X ID 統合', typeIcon: 'ms ms-merge', x: 'otako_old', sub: '→ @012345rty', discord: 'otako', at: '10.04 09:15', icon: '/_blob/fc027fe6fe3a001a22a1933270ce72b9', adminOnly: true }
     ];
     return {
       theme: this.props.theme ?? 'dark',

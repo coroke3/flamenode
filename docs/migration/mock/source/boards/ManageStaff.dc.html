@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="staff" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="staff" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="staff" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="staff" hint-size="100%,96px"></dc-import>
 
     <nav class="subnav" aria-label="スタッフと権限" style="margin-top: 24px;">
       <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><a href="#" class="il" aria-current="{{t.cur}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</a></sc-for>
@@ -35,30 +35,23 @@
 
     <!-- メンバー一覧 -->
     <sc-if value="{{tList}}" hint-placeholder-val="{{false}}">
-      <p class="il t-sm muted" style="margin: 24px 0 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>権限は担当プリセット、公開ページの肩書は公開肩書から解決します。最後の代表者は外せません。</p>
-      <div class="t-scroll" style="margin-top: 16px;">
-        <table class="tbl">
-          <colgroup><col><col style="width: 200px;"><col style="width: 180px;"><col style="width: 72px;"><col style="width: 96px;"></colgroup>
-          <thead><tr><th>メンバー</th><th>プリセット</th><th>公開肩書</th><th>公開</th><th class="num">操作</th></tr></thead>
-          <tbody>
-            <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
-              <tr>
-                <td><span class="row" style="gap: 10px;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 28px; height: 28px;"><span>{{r.name}}<span class="sub">{{r.xid}}</span></span></span></td>
-                <td><sc-if value="{{r.owner}}" hint-placeholder-val="{{false}}"><span class="il"><i class="fa-solid fa-crown" aria-hidden="true"></i>代表</span></sc-if><sc-if value="{{r.editable}}" hint-placeholder-val="{{true}}"><span class="sel-i"><select class="select" aria-label="プリセット" onChange="{{r.setPreset}}"><sc-for list="{{r.opts}}" as="o" hint-placeholder-count="7"><option value="{{o.v}}" selected="{{o.sel}}">{{o.label}}</option></sc-for></select></span></sc-if></td>
-                <td>{{r.title}}</td>
-                <td><span class="st"><span class="{{r.pubDot}}"></span>{{r.pub}}</span></td>
-                <td class="num"><sc-if value="{{r.owner}}" hint-placeholder-val="{{false}}"><span class="muted t-sm">変更不可</span></sc-if><sc-if value="{{r.editable}}" hint-placeholder-val="{{true}}"><button type="button" class="ib sm" aria-label="権限を個別に設定" onClick="{{toMatrix}}"><i class="fa-solid fa-key"></i></button><button type="button" class="ib sm" aria-label="外す"><i class="fa-solid fa-user-minus"></i></button></sc-if></td>
-              </tr>
-            </sc-for>
-          </tbody>
-        </table>
+      <div class="sl-list" role="table" aria-label="スタッフ" style="margin-top: 24px;">
+        <div class="sl-h" role="row"><span>メンバー</span><span>担当</span><span>公開肩書</span><span></span></div>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+          <div class="sl-r" role="row">
+            <span class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 32px; height: 32px;"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">{{r.name}}</span><span class="t-sm muted ell">{{r.xid}}</span></span></span>
+            <span><sc-if value="{{r.owner}}" hint-placeholder-val="{{false}}"><span class="il"><i class="fa-solid fa-crown" aria-hidden="true"></i>代表</span></sc-if><sc-if value="{{r.editable}}" hint-placeholder-val="{{true}}"><span class="sel-i"><select class="select" aria-label="担当" onChange="{{r.setPreset}}"><sc-for list="{{r.opts}}" as="o" hint-placeholder-count="7"><option value="{{o.v}}" selected="{{o.sel}}">{{o.label}}</option></sc-for></select></span></sc-if></span>
+            <span class="t-sm sl-title">{{r.title}}<span class="muted"> · {{r.pub}}</span></span>
+            <span class="row sl-acts" style="gap: 4px; justify-content: flex-end;"><sc-if value="{{r.editable}}" hint-placeholder-val="{{true}}"><button type="button" class="ib sm" aria-label="権限を個別に設定" title="権限を個別に設定" onClick="{{toMatrix}}"><i class="fa-solid fa-key"></i></button><button type="button" class="ib sm" aria-label="外す" title="外す"><i class="fa-solid fa-user-minus"></i></button></sc-if></span>
+          </div>
+        </sc-for>
       </div>
 
       <section class="c-sec" aria-labelledby="add">
-        <h2 id="add" class="t-h3" style="margin-bottom: 12px;">メンバーを追加</h2>
+        <h2 id="add" class="t-h3" style="margin-bottom: 12px;">スタッフを追加</h2>
         <form class="wrap-row" style="gap: 8px; align-items: flex-end;" onSubmit="{{prevent}}">
           <div class="field-i" style="width: 220px;"><x-import component-from-global-scope="FlameNode.TextField" label="X ID(@なし)" placeholder="username"></x-import><i class="fa-brands fa-x-twitter" aria-hidden="true"></i></div>
-          <label class="field"><span>プリセット</span><select class="select"><option>運営</option><option>枠管理担当</option><option>作品修正担当</option><option>レビュー担当</option><option>X ID確認担当</option><option selected="{{yes}}">表示のみスタッフ</option><option>カスタム</option></select></label>
+          <label class="field"><span>担当</span><select class="select"><option>運営</option><option>枠管理担当</option><option>作品修正担当</option><option>レビュー担当</option><option>X ID 確認担当</option><option selected="{{yes}}">表示のみスタッフ</option><option>カスタム</option></select></label>
           <div style="width: 180px;"><x-import component-from-global-scope="FlameNode.TextField" label="公開肩書" placeholder="例: 配信"></x-import></div>
           <div style="flex: 1 1 200px;"><x-import component-from-global-scope="FlameNode.TextField" label="追加理由" placeholder="監査ログに残ります"></x-import></div>
           <button type="submit" class="fn-btn fn-btn--primary">追加</button>
@@ -69,27 +62,21 @@
     <!-- 権限マトリクス -->
     <sc-if value="{{tMatrix}}" hint-placeholder-val="{{true}}">
       <div class="wrap-row" style="justify-content: space-between; gap: 16px; margin-top: 24px;">
-        <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>マスをクリックで付け外し。プリセットと違う組み合わせになると自動で「カスタム」に切り替わります。</p>
+        <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>マスを押して付け外し。担当の既定と違えば「カスタム」になります。</p>
         <span class="t-sm muted il"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--warning);"></i>危険な権限は付与時に理由が必要です</span>
       </div>
       <div class="t-scroll" style="margin-top: 16px;">
-        <table class="pm">
-          <thead>
-            <tr class="pm-grp"><th></th><th></th><sc-for list="{{groups}}" as="g" hint-placeholder-count="3"><th colspan="{{g.n}}">{{g.label}}</th></sc-for></tr>
-            <tr><th class="pm-name">メンバー</th><th class="pm-pre">プリセット</th>
-              <sc-for list="{{keys}}" as="k" hint-placeholder-count="23"><th class="{{k.cls}}" title="{{k.desc}}"><span>{{k.label}}</span></th></sc-for>
-            </tr>
-          </thead>
-          <tbody>
-            <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
-              <tr>
-                <td class="pm-name"><span class="row" style="gap: 10px;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 24px; height: 24px;"><span class="ell">{{r.name}}</span></span></td>
-                <td class="pm-pre"><span class="{{r.preCls}}">{{r.presetLabel}}</span></td>
-                <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="23"><td class="{{c.cls}}"><button type="button" aria-label="{{c.aria}}" aria-pressed="{{c.on}}" disabled="{{c.lock}}" onClick="{{c.toggle}}"><i class="{{c.icon}}" aria-hidden="true"></i></button></td></sc-for>
-              </tr>
-            </sc-for>
-          </tbody>
-        </table>
+        <div class="pmg" role="table" aria-label="権限の詳細">
+          <div class="pmg-row pmg-grp" role="row"><span></span><span></span><sc-for list="{{groups}}" as="g" hint-placeholder-count="3"><span style="grid-column: span {{g.n}};">{{g.label}}</span></sc-for></div>
+          <div class="pmg-row pmg-keys" role="row"><span>メンバー</span><span>担当</span><sc-for list="{{keys}}" as="k" hint-placeholder-count="23"><span class="{{k.cls}}" title="{{k.desc}}"><span>{{k.label}}</span></span></sc-for></div>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+            <div class="pmg-row pmg-body" role="row">
+              <span class="row" style="gap: 10px; min-width: 0;"><img class="avatar" src="{{r.icon}}" alt="" style="width: 24px; height: 24px;"><span class="ell">{{r.name}}</span></span>
+              <span class="pm-pre-c"><span class="{{r.preCls}}">{{r.presetLabel}}</span></span>
+              <sc-for list="{{r.cells}}" as="c" hint-placeholder-count="23"><span class="{{c.cls}}"><button type="button" aria-label="{{c.aria}}" aria-pressed="{{c.on}}" disabled="{{c.lock}}" onClick="{{c.toggle}}"><i class="{{c.icon}}" aria-hidden="true"></i></button></span></sc-for>
+            </div>
+          </sc-for>
+        </div>
       </div>
       <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
         <div class="savebar"><span class="t-sm">{{dirtyText}}</span><span class="row" style="gap: 8px;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{reset}}">元に戻す</button><button type="button" class="fn-btn fn-btn--primary fn-btn--sm" onClick="{{reset}}">変更を保存</button></span></div>
@@ -107,7 +94,7 @@
         </section>
         <section class="raised stack" style="gap: 12px; padding: 20px 24px;">
           <h3 class="t-h3">スタッフCSV反映</h3>
-          <label class="drop" style="padding: 16px;"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i><span class="t-sm">x_user_id, preset, public_title の CSV を選ぶ</span><input type="file" accept=".csv" hidden></label>
+          <label class="drop" style="padding: 16px;"><i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i><span class="t-sm">CSV を選ぶ(列: x_user_id, preset, public_title)</span><input type="file" accept=".csv" hidden></label>
           <x-import component-from-global-scope="FlameNode.TextField" label="反映理由" placeholder="監査ログに残ります"></x-import>
           <div><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">スタッフCSV反映</button></div>
         </section>
@@ -117,7 +104,7 @@
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"tab":{"editor":"enum","options":["list","matrix","more"],"default":"matrix"},"$preview":{"width":1440,"height":1400}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"tab":{"editor":"enum","options":["list","matrix","more"],"default":"list"},"$preview":{"width":1440,"height":1400}}'>
 class Component extends DCLogic {
   constructor(p) {
     super(p);
@@ -125,12 +112,12 @@ class Component extends DCLogic {
   }
   renderVals() {
     const s = this.state;
-    const tab = s.tab || this.props.tab || 'matrix';
+    const tab = s.tab || this.props.tab || 'list';
     // src/lib/auth/permissions/keys.ts の定義順・ラベル
     const K = [
-      ['event.basic','基本情報','イベント'],['event.publish','受付・公開','イベント'],['event.slots','枠管理','イベント'],['event.members','スタッフ管理','イベント',1],['event.questions','投稿フォーム','イベント'],['event.review','審査・承認','イベント'],['event.notifications','通知・受信箱','イベント'],
-      ['video.basics','基本情報','作品'],['video.descriptions','作品説明','作品'],['video.credits','楽曲','作品'],['video.members','メンバー','作品'],['video.member_chapters','チャプター','作品'],['video.status','公開状態','作品'],['video.primary_event','所属イベント','作品',1],['video.youtube_id','YouTube ID','作品',1],['video.identity','提出主体','作品',1],['video.permissions','共同編集','作品',1],
-      ['event.public_api','公開API','公開データ',1],['event.static_rebuild','静的JSON','公開データ',1],['xid.link_requests','X ID申請','公開データ']
+      ['event.basic','基本情報','イベント'],['event.publish','募集・公開','イベント'],['event.slots','枠管理','イベント'],['event.members','スタッフ管理','イベント',1],['event.questions','投稿フォーム','イベント'],['event.review','審査・承認','イベント'],['event.notifications','通知・受信箱','イベント'],
+      ['video.basics','基本情報','作品'],['video.descriptions','作品説明','作品'],['video.credits','楽曲','作品'],['video.members','メンバー','作品'],['video.member_chapters','チャプター','作品'],['video.status','公開状態','作品'],['video.primary_event','所属イベント','作品',1],['video.youtube_id','YouTube ID','作品',1],['video.identity','提出名義','作品',1],['video.permissions','共同編集','作品',1],
+      ['event.public_api','公開API','公開データ',1],['event.static_rebuild','静的JSON','公開データ',1],['xid.link_requests','X ID 申請','公開データ']
     ];
     const P = {
       owner: ['代表', ['event.basic','event.publish','event.slots','event.members','event.questions','event.review','event.notifications','video.basics','video.descriptions','video.credits','video.members','video.member_chapters','video.status','video.permissions']],
@@ -138,7 +125,7 @@ class Component extends DCLogic {
       slot_manager: ['枠管理担当', ['event.slots']],
       content_editor: ['作品修正担当', ['video.basics','video.descriptions','video.credits','video.members','video.member_chapters']],
       reviewer: ['レビュー担当', ['event.review','video.status']],
-      xid_reviewer: ['X ID確認担当', ['xid.link_requests']],
+      xid_reviewer: ['X ID 確認担当', ['xid.link_requests']],
       public_staff: ['表示のみスタッフ', []],
       custom: ['カスタム', []]
     };
@@ -182,7 +169,7 @@ class Component extends DCLogic {
     });
     const groups = [['イベント', 7], ['作品', 10], ['公開データ・X ID', 3]].map(([label, n]) => ({ label, n }));
     const keys = K.map(([key, label, grp, danger], i) => ({ label, desc: key, cls: ['pm-k', danger ? 'danger' : '', (i === 0 || K[i - 1][2] !== grp) ? 'gs' : ''].join(' ').trim() }));
-    const T = [['list', 'メンバー', 'fa-solid fa-users'], ['matrix', '権限マトリクス', 'ms ms-view_timeline'], ['more', '移譲・CSV', 'fa-solid fa-crown']];
+    const T = [['list', 'メンバー', 'fa-solid fa-users'], ['matrix', '権限の詳細', 'fa-solid fa-key'], ['more', '移譲・CSV', 'fa-solid fa-crown']];
     return {
       theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
       tabs: T.map(([id, label, icon]) => ({ label, icon, cur: tab === id ? 'page' : 'false', pick: (e) => { e.preventDefault(); this.setState({ tab: id }); } })),

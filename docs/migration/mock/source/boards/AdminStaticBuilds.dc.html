@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="static" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="static" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
     <div class="c-head"><div><h1 class="t-display">静的JSON再生成</h1><p class="muted">R2 公開用 JSON の編集駆動キュー。Next.js 本体のビルドとは別です。</p></div></div>
 
@@ -43,7 +43,7 @@
       <h2 id="bf" class="t-h3" style="margin-bottom: 12px;">一括バックフィル</h2>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2px;">
         <div class="raised stack" style="gap: 10px; padding: 18px;"><span class="il"><i class="fa-solid fa-calendar-days muted" aria-hidden="true"></i>event_crew(公開イベント)</span><div class="bar"><i style="width: 100%; background: var(--ink);"></i></div><span class="row" style="justify-content: space-between;"><span class="st"><span class="dot ok"></span>完了</span><button type="button" class="ib sm" aria-label="先頭から投入"><i class="fa-solid fa-backward-step"></i></button></span></div>
-        <div class="raised stack" style="gap: 10px; padding: 18px;"><span class="il"><i class="fa-solid fa-film muted" aria-hidden="true"></i>video_v2(公開動画)</span><div class="bar"><i style="width: 62%; background: var(--ink);"></i></div><span class="row" style="justify-content: space-between;"><span class="st"><span class="dot info"></span>実行中 386 / 622</span><button type="button" class="ib sm" aria-label="続きを投入"><i class="fa-solid fa-forward-step"></i></button></span></div>
+        <div class="raised stack" style="gap: 10px; padding: 18px;"><span class="il"><i class="fa-solid fa-film muted" aria-hidden="true"></i>video_v2(公開作品)</span><div class="bar"><i style="width: 62%; background: var(--ink);"></i></div><span class="row" style="justify-content: space-between;"><span class="st"><span class="dot info"></span>実行中 386 / 622</span><button type="button" class="ib sm" aria-label="続きを投入"><i class="fa-solid fa-forward-step"></i></button></span></div>
         <div class="raised stack" style="gap: 10px; padding: 18px;"><span class="il"><i class="fa-solid fa-user muted" aria-hidden="true"></i>user_profile(公開可能 X ID)</span><div class="bar"><i style="width: 0%;"></i></div><span class="row" style="justify-content: space-between;"><span class="st"><span class="dot"></span>未実行</span><button type="button" class="ib sm" aria-label="先頭から投入"><i class="fa-solid fa-play"></i></button></span></div>
       </div>
     </section>

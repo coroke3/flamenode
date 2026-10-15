@@ -21,18 +21,18 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="xlink" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="xlink" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
-    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">X ID 申請</h1></sc-if><p class="muted">X ID連携申請を確認します。統合と差し戻しはX ID統合管理で処理します。</p></div></div>
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">X ID 申請</h1></sc-if><p class="muted">X ID 連携申請を確認します。統合と差し戻しは X ID 統合管理で処理します。</p></div></div>
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="ユーザー管理メニュー" style="margin-bottom: 24px;">
       <a href="AdminUsersHub.dc.html" class="il"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discordユーザー</a>
       <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-key" aria-hidden="true"></i>権限管理</a>
-      <a href="AdminUsersHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請 <span class="t-num">3</span></a>
-      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請 <span class="t-num">1</span></a>
+      <a href="AdminUsersHub.dc.html" class="il" aria-current="page"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請 <span class="t-num">3</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID 統合申請 <span class="t-num">1</span></a>
     </nav></sc-if>
 
     <section aria-labelledby="q">
@@ -83,8 +83,8 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'dark',
       reqs: [
-        { x: 'otako_sub', id: 'xlr_4a1c', kind: 'X ID連携', kindIcon: 'fa-solid fa-link', discord: '012345rty', uid: 'usr_8f21c0', at: '10.02 12:10', icon: T[0] },
-        { x: 'izuna_text', id: 'xlr_4a20', kind: 'X ID連携', kindIcon: 'fa-solid fa-link', discord: 'izuna', uid: 'usr_77ab12', at: '10.03 08:40', icon: T[1] },
+        { x: 'otako_sub', id: 'xlr_4a1c', kind: 'X ID 連携', kindIcon: 'fa-solid fa-link', discord: '012345rty', uid: 'usr_8f21c0', at: '10.02 12:10', icon: T[0] },
+        { x: 'izuna_text', id: 'xlr_4a20', kind: 'X ID 連携', kindIcon: 'fa-solid fa-link', discord: 'izuna', uid: 'usr_77ab12', at: '10.03 08:40', icon: T[1] },
         { x: 'keneizo_old', id: 'xlr_4a22', kind: '旧別名申請', kindIcon: 'fa-solid fa-clock-rotate-left', discord: 'keneizo', uid: 'usr_1c9e04', at: '10.03 21:02', icon: T[2] }
       ]
     };

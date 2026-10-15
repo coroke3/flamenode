@@ -20,11 +20,11 @@
 @font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000}</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="event" hint-size="100%,72px"></dc-import>
 
   <div class="wrap" style="padding-top: 56px;">
     <h1 class="t-display">イベント</h1>
@@ -35,10 +35,10 @@
       </div>
       <span style="flex: 1;"></span>
       <div class="field-i sm-field" style="width: 300px;">
-        <input type="search" class="select" aria-label="イベントを検索" placeholder="イベント名・説明・公開運営者" value="{{q}}" onInput="{{setQ}}" style="width: 100%; background-image: none; padding-left: 36px;">
+        <input type="search" class="select" aria-label="イベントを検索" placeholder="イベント名・説明・運営者で検索" value="{{q}}" onInput="{{setQ}}" style="width: 100%; background-image: none; padding-left: 36px;">
         <i class="fa-solid fa-magnifying-glass" aria-hidden="true" style="bottom: 11px;"></i>
       </div>
-      <span class="sel-i" title="並び替え"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>おすすめ順</option><option>応募締切順</option><option>開始日順</option><option>新着順</option></select></span>
+      <span class="sel-i" title="並び替え"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>おすすめ順</option><option>募集締切順</option><option>開始日順</option><option>新着順</option></select></span>
     </form>
 
     <sc-if value="{{showFeature}}" hint-placeholder-val="{{true}}">
@@ -47,10 +47,10 @@
         <div class="stack" style="gap: 10px; min-width: 0;">
           <span class="st t-sm"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>募集期間中</span>
           <span class="t-h2">PVSF2026S</span>
-          <span class="meta-i t-sm"><span>2026.11.03 — 11.04</span><span>128 / 160 枠</span></span>
+          <span class="meta-i t-sm"><span>2026.11.03 – 11.04</span><span>128 / 160 枠</span></span>
           <div class="bar" style="max-width: 360px;"><i style="width: 80%;"></i></div>
-          <div class="dl dl-sm" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
         </div>
+        <div class="dl dl-sm ev-feat-dl" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
       </a>
     </sc-if>
 
@@ -86,7 +86,7 @@
     </sc-if>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2000}}'>
@@ -97,9 +97,9 @@ class Component extends DCLogic {
     const S = this.state;
     const st = { open: ['募集中','ms ms-event_available st-ic ok'], before: ['開催前','fa-solid fa-clock st-ic info'], held: ['開催済み','ms ms-inventory_2 st-ic mute'] };
     const ev = (title, s, date, i) => ({ title, status: st[s][0], dot: st[s][1], key: s, date, img: T[(i + 6) % 8], icon: T[(i + 3) % 8] });
-    const pvsf = [ev('PVSF2026S','open','2026.11.03 — 11.04',0), ev('PVSF2026Sp','held','2026.03.27 — 03.28',1), ev('PVSF2025S','held','2025.08.29 — 08.30',2), ev('PVSF2025Sp','held','2025.03.29 — 03.30',3), ev('PVSF2024GW','held','2024.05.05 — 05.06',4), ev('PVSF2023R','held','2023.12.17',5)];
+    const pvsf = [ev('PVSF2026S','open','2026.11.03 – 11.04',0), ev('PVSF2026Sp','held','2026.03.27 – 03.28',1), ev('PVSF2025S','held','2025.08.29 – 08.30',2), ev('PVSF2025Sp','held','2025.03.29 – 03.30',3), ev('PVSF2024GW','held','2024.05.05 – 05.06',4), ev('PVSF2023R','held','2023.12.17',5)];
     const collab = [ev('年越し合作 2026','before','2026.12.31',6), ev('夏休み創作島　創作島合作','held','2024.12.15',7), ev('年越し合作','held','2022.12.31',0), ev('OS-N合作','held','2022.08.21',1), ev('連投合作','held','2020.03.30',2)];
-    const other = [ev('PVSF まとめ動画','held','2019.12.28 —',3)];
+    const other = [ev('PVSF まとめ動画','held','2019.12.28 –',3)];
     const f = (list) => S.tab === 'all' ? list : list.filter(e => e.key === S.tab);
     const groups = [
       { name: 'PVSF', kind: '系列', kindIcon: 'fa-solid fa-link', icon: T[3], all: pvsf, total: 16 },

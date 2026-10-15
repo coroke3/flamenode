@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000} .mode{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--surface-raised);border:0;color:var(--ink-muted);text-align:left;font:inherit;cursor:pointer} .mode.on{background:var(--surface-active);color:var(--ink)} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 12px/20px var(--font-sans);cursor:pointer} .chip.on{background:var(--ink);color:var(--bg)}</style>
+<style>body{margin:0} .mode{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--surface-raised);border:0;color:var(--ink-muted);text-align:left;font:inherit;cursor:pointer} .mode.on{background:var(--surface-active);color:var(--ink)} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 12px/20px var(--font-sans);cursor:pointer} .chip.on{background:var(--ink);color:var(--bg)}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="costguard" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="costguard" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
-    <div class="c-head"><div><h1 class="t-display">コストガード</h1><p class="muted">実測collectorがないため、自動判定は行わず、手動モードと15分限定の緊急解除だけを管理します。</p></div></div>
+    <div class="c-head"><div><h1 class="t-display">コストガード</h1><p class="muted">動作モードは手動で切り替えます。緊急時は機能ごとに15分だけ制限を解除できます。</p></div></div>
 
     <section aria-labelledby="mode">
       <h2 id="mode" class="t-h3" style="margin-bottom: 12px;">手動動作モード</h2>
@@ -37,7 +37,7 @@
         </sc-for>
       </div>
       <div class="row" style="gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-        <x-import component-from-global-scope="FlameNode.TextField" aria-label="変更理由" placeholder="変更理由(normalへの復帰時も必須)" style="flex: 1 1 320px;"></x-import>
+        <x-import component-from-global-scope="FlameNode.TextField" aria-label="変更理由" placeholder="変更理由(通常に戻すときも必須)" style="flex: 1 1 320px;"></x-import>
         <button type="button" class="fn-btn fn-btn--primary"><i class="fa-solid fa-check" aria-hidden="true"></i>モードを更新</button>
       </div>
       <div class="row" style="gap: 12px; margin-top: 16px; padding: 14px 16px; background: var(--surface-subtle); flex-wrap: wrap;">
@@ -50,7 +50,7 @@
 
     <div class="split c-sec">
       <section class="main" aria-labelledby="dis">
-        <h2 id="dis" class="t-h3" style="margin-bottom: 4px;">恒久的な無効化機能</h2>
+        <h2 id="dis" class="t-h3" style="margin-bottom: 4px;">止めておく機能</h2>
         <p class="t-sm muted" style="margin: 0 0 12px;">選んだ機能を無効化します(空なら全て有効)</p>
         <div class="wrap-row" style="gap: 4px;">
           <sc-for list="{{features}}" as="f" hint-placeholder-count="20"><button type="button" class="{{f.cls}}" aria-pressed="{{f.on}}">{{f.name}}</button></sc-for>
@@ -60,7 +60,7 @@
       <aside class="side stack" style="gap: 12px;" aria-labelledby="ov">
         <h2 id="ov" class="t-h3">15分限定の緊急解除</h2>
         <label class="field"><span>対象機能(最大8件)</span><span class="sel-i"><i class="fa-solid fa-list-check" aria-hidden="true"></i><select class="select i"><option>枠の確保</option><option>作品の編集</option></select></span></label>
-        <x-import component-from-global-scope="FlameNode.TextField" aria-label="override理由" placeholder="override理由(必須)"></x-import>
+        <x-import component-from-global-scope="FlameNode.TextField" aria-label="解除の理由" placeholder="解除の理由(必須)"></x-import>
         <x-import component-from-global-scope="FlameNode.TextField" aria-label="確認" placeholder="有効化は OVERRIDE、解除は CLEAR"></x-import>
         <div class="row" style="gap: 2px;"><button type="button" class="fn-btn fn-btn--secondary">15分有効化</button><button type="button" class="fn-btn fn-btn--tertiary"><i class="fa-solid fa-xmark" aria-hidden="true"></i>即時解除</button></div>
       </aside>
@@ -83,7 +83,7 @@ class Component extends DCLogic {
   constructor(p) { super(p); this.state = { mode: 'normal' }; }
   renderVals() {
     const M = [['normal', '通常', '全機能をフル稼働。', 'fa-solid fa-circle-check'], ['eco', '省エネ', '重い検索や推薦の更新間隔を緩める。', 'fa-solid fa-leaf'], ['readonly', '読み取り専用', '投稿・更新・通知系を停止し、閲覧のみを許可する。', 'fa-solid fa-book-open'], ['static', '静的のみ', '静的 JSON ベースの閲覧のみ提供する。', 'fa-solid fa-file-code']];
-    const F = ['枠なし作品の投稿', '枠付き作品の投稿', '作品の編集', 'いいね・ブックマーク', 'チャプターコメント', '枠の確保', '枠の解放', 'X ID連携', '連続枠の分割', '連続枠の拡張', '連続枠の結合', 'ユーザー権限管理', 'ユーザー停止', '通知管理', 'ユーザーのイベント作成', 'イベント作成', 'Xアイコン再計算', '規約作成', '規約更新', '規約公開', '規約アーカイブ', '規約通知', 'モデレーション作成', 'モデレーション更新', 'お知らせ配信', '作品ステータス管理', 'APIエンドポイント管理', 'イベントテンプレート管理', '権限管理', 'YouTube同期', '通知管理(管理者)', '静的データ再生成', '合作編集権限', '管理スプレッドシート', 'イベント更新', 'イベントアーカイブ', '枠作成', '枠更新', '枠削除', 'イベントスタッフ管理', '作品ステータス(運営)'];
+    const F = ['枠なし作品の投稿', '枠付き作品の投稿', '作品の編集', 'いいね・セーブ', 'チャプターコメント', '枠の確保', '枠の解放', 'X ID 連携', '連続枠の分割', '連続枠の拡張', '連続枠の結合', 'ユーザー権限管理', 'ユーザー停止', '通知管理', 'ユーザーのイベント作成', 'イベント作成', 'Xアイコン再計算', '規約作成', '規約更新', '規約公開', '規約アーカイブ', '規約通知', 'モデレーション作成', 'モデレーション更新', 'お知らせ配信', '作品ステータス管理', 'APIエンドポイント管理', 'イベントテンプレート管理', '権限管理', 'YouTube同期', '通知管理(管理者)', '静的データ再生成', '合作編集権限', '管理スプレッドシート', 'イベント更新', 'イベントアーカイブ', '枠作成', '枠更新', '枠削除', 'イベントスタッフ管理', '作品ステータス(運営)'];
     const m = this.state.mode;
     return {
       theme: this.props.theme ?? 'dark',

@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="workers" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="workers" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head">
       <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">Worker監視</h1></sc-if><p class="muted">Cron Worker、通知、静的JSON、YouTube同期、スコア更新の遅延と失敗を D1 の内部記録から確認します。</p></div>

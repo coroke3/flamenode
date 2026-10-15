@@ -21,92 +21,37 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="overview" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="overview" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="overview" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="overview" hint-size="100%,96px"></dc-import>
 
     <section class="c-sec" style="margin-top: 40px;" aria-labelledby="todo">
       <h2 id="todo" class="t-h2" style="margin-bottom: 16px;">要対応</h2>
       <div class="queue">
-        <a href="ManageVideos.dc.html"><span class="il"><i class="ms ms-pending_actions" aria-hidden="true"></i>審査キュー</span><b>6</b><span>最古 10.02 18:40</span></a>
+        <a href="ManageInbox.dc.html"><span class="il"><i class="fa-solid fa-inbox" aria-hidden="true"></i>受信箱</span><b>5</b><span>審査 2 · モデレーション 1 · 申請 1 · 通知失敗 1</span></a>
         <a href="ManageSlots.dc.html"><span class="il"><i class="ms ms-event_seat" aria-hidden="true"></i>未提出の確保枠</span><b>18</b><span>締切 10.07 23:59</span></a>
-        <a href="ManageNotifications.dc.html"><span class="il"><i class="fa-solid fa-bell-slash" aria-hidden="true" style="color: var(--danger);"></i>通知失敗</span><b>1</b><span>再送できます</span></a>
-        <a href="ManageEdit.dc.html"><span class="il"><i class="fa-solid fa-list-check" aria-hidden="true"></i>投稿の必須項目</span><b>4</b><span>作品フォームの必須設定</span></a>
       </div>
     </section>
 
-    <div class="split c-sec">
-      <div class="main stack" style="gap: 56px;">
-        <section aria-labelledby="prog">
-          <h2 id="prog" class="t-h2" style="margin-bottom: 20px;">進行状況</h2>
-          <div class="stack" style="gap: 18px;">
-            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>枠の埋まり</span><span class="t-num">128 / 160</span></div><div class="bar" aria-label="枠の埋まり率 80%"><i style="width: 80%; background: var(--ink);"></i></div></div>
-            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="fa-solid fa-film muted" aria-hidden="true"></i>提出済み</span><span class="t-num">110 / 128</span></div><div class="bar"><i style="width: 86%; background: var(--ink);"></i></div></div>
-            <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><span class="il"><i class="fa-solid fa-check muted" aria-hidden="true"></i>承認済み</span><span class="t-num">94 / 110</span></div><div class="bar"><i style="width: 85%; background: var(--ink);"></i></div></div>
-          </div>
-        </section>
-
-        <section aria-labelledby="recent">
-          <div class="sec-head" style="margin-bottom: 8px;"><h2 id="recent" class="t-h2">直近の審査待ち</h2><a href="ManageVideos.dc.html" class="ib" aria-label="作品を管理"><i class="fa-solid fa-arrow-right"></i></a></div>
-          <sc-for list="{{pending}}" as="v" hint-placeholder-count="4">
-            <a href="ManageVideo.dc.html" class="fn-row">
-              <img class="fn-row__thumb" src="{{v.thumb}}" alt="" style="width: 112px;">
-              <span class="fn-row__body"><span class="fn-row__title">{{v.title}}</span><span class="fn-row__meta il"><img class="avatar" src="{{v.icon}}" alt="" style="width: 16px; height: 16px;">{{v.creator}} · <span class="t-num">{{v.at}}</span></span></span>
-              <span class="fn-row__trail"><button type="button" class="ib sm" aria-label="承認"><i class="fa-solid fa-check"></i></button></span>
-            </a>
-          </sc-for>
-        </section>
-
-        <section aria-labelledby="log">
-          <div class="sec-head" style="margin-bottom: 8px;">
-            <h2 id="log" class="t-h2">通知ログ</h2>
-            <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="通知カテゴリフィルタ"><option>すべて</option><option>審査</option><option>枠</option><option>リマインド</option></select></span>
-          </div>
-          <sc-for list="{{notifs}}" as="n" hint-placeholder-count="4">
-            <div class="row" style="gap: 12px; padding: 10px 0; font-size: 14px;"><span class="{{n.dot}}"></span><span style="flex: 1;">{{n.body}}</span><span class="muted t-sm">{{n.state}}</span><span class="muted t-num t-sm">{{n.at}}</span></div>
-          </sc-for>
-        </section>
+    <section class="c-sec" aria-labelledby="prog">
+      <h2 id="prog" class="t-h2" style="margin-bottom: 20px;">進行状況</h2>
+      <div class="stack me-prog" style="gap: 18px;">
+        <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><a href="ManageSlots.dc.html" class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>枠の埋まり</a><span class="t-num">128 / 160</span></div><div class="bar" aria-label="枠の埋まり率 80%"><i style="width: 80%; background: var(--ink);"></i></div></div>
+        <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><a href="ManageAudience.dc.html" class="il"><i class="fa-solid fa-film muted" aria-hidden="true"></i>提出済み</a><span class="t-num">110 / 128</span></div><div class="bar"><i style="width: 86%; background: var(--ink);"></i></div></div>
+        <div class="stack" style="gap: 6px;"><div class="row t-sm" style="justify-content: space-between;"><a href="ManageVideos.dc.html" class="il"><i class="fa-solid fa-check muted" aria-hidden="true"></i>承認済み</a><span class="t-num">94 / 110</span></div><div class="bar"><i style="width: 85%; background: var(--ink);"></i></div></div>
       </div>
+    </section>
 
-      <aside class="side stack" style="gap: 40px;">
-        <section>
-          <h2 class="t-h3" style="margin-bottom: 12px;">ショートカット</h2>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px;" aria-label="イベント運営ショートカット">
-            <a href="ManageSlots.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="ms ms-view_timeline" aria-hidden="true"></i><span class="t-sm">予約枠を確認</span></a>
-            <a href="ManageVideos.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="fa-solid fa-film" aria-hidden="true"></i><span class="t-sm">作品を管理</span></a>
-            <a href="ManageAudience.dc.html" class="raised stack" style="gap: 8px; padding: 16px;"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span class="t-sm">参加者を確認</span></a>
-            <button type="button" class="raised stack" style="gap: 8px; padding: 16px; border: 0; color: var(--ink); text-align: left; cursor: pointer; font: inherit;" onClick="{{toggleTpl}}" aria-expanded="{{tplStr}}"><i class="fa-regular fa-clone" aria-hidden="true"></i><span class="t-sm">この設定をテンプレート化</span></button>
-          </div>
-          <sc-if value="{{tpl}}" hint-placeholder-val="{{false}}">
-            <form class="raised stack" style="gap: 12px; padding: 16px; margin-top: 2px;" onSubmit="{{saveTpl}}">
-              <x-import component-from-global-scope="FlameNode.TextField" label="テンプレート名 *" placeholder="例: PVSF 標準セット" default-value="PVSF 標準セット(2026)"></x-import>
-              <x-import component-from-global-scope="FlameNode.TextField" label="メモ(任意)" placeholder="用途や差分のメモ"></x-import>
-              <span class="t-sm muted">保存される内容:種別・説明・アイコン/バナー・投稿フォーム・必須項目・質問・枠ルール・概要欄テンプレート。日付は含まず、適用したイベントは非公開から始まります。</span>
-              <div class="row" style="gap: 8px;"><button type="submit" class="fn-btn fn-btn--primary fn-btn--sm">テンプレートとして保存</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleTpl}}">キャンセル</button></div>
-            </form>
-          </sc-if>
-        </section>
-        <section>
-          <h2 class="t-h3" style="margin-bottom: 12px;">投稿の必須項目</h2>
-          <div class="stack t-sm" style="gap: 8px;">
-            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>作品タイトル・YouTube URL(常に必須)</span>
-            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>アイコン</span>
-            <span class="il"><i class="fa-solid fa-circle-check" aria-hidden="true"></i>ステージ・権利確認</span>
-            <span class="il muted"><i class="fa-regular fa-circle" aria-hidden="true"></i>YouTube チャンネル</span>
-          </div>
-        </section>
-        <section>
-          <h2 class="t-h3" style="margin-bottom: 12px;">操作履歴</h2>
-          <sc-for list="{{audit}}" as="a" hint-placeholder-count="3">
-            <div class="stack" style="gap: 2px; padding: 8px 0;"><span class="t-sm">{{a.what}}</span><span class="t-label muted t-num">{{a.who}} · {{a.at}}</span></div>
-          </sc-for>
-        </section>
-      </aside>
-    </div>
+    <section class="c-sec" aria-labelledby="recent">
+      <div class="sec-head" style="margin-bottom: 8px;"><h2 id="recent" class="t-h2">最近の変更</h2><a href="ManageHistory.dc.html" class="il t-sm muted">履歴<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
+      <sc-for list="{{audit}}" as="a" hint-placeholder-count="3">
+        <div class="row" style="gap: 16px; padding: 10px 0;"><span class="t-sm" style="flex: 1; min-width: 0;">{{a.what}}</span><span class="t-sm muted t-num" style="white-space: nowrap;">{{a.who}} · {{a.at}}</span></div>
+      </sc-for>
+    </section>
   </main>
 </div>
 </div>

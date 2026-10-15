@@ -20,11 +20,11 @@
 @font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000}</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import>
 
   <div class="wrap" style="padding-top: 80px;">
     <section style="display: flex; flex-wrap: wrap; gap: 32px 96px; align-items: flex-end;">
@@ -64,7 +64,7 @@
       <h2 id="rules3" class="t-h2" style="margin-bottom: 32px;">3つの原則</h2>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 48px;">
         <div class="stack" style="gap: 8px;"><span class="t-h3">作品を主役にする</span><span class="muted">説明より先に、サムネイル、タイトル、作者、再生導線が見える密度を保ちます。</span></div>
-        <div class="stack" style="gap: 8px;"><span class="t-h3">名義を分けて守る</span><span class="muted">Discord はログイン、X ID は公開名義として扱い、投稿主体と表示名義を混同しません。</span></div>
+        <div class="stack" style="gap: 8px;"><span class="t-h3">名義を分けて守る</span><span class="muted">Discord はログインだけに使い、作品に出る名義は X ID です。2つを混ぜずに扱います。</span></div>
         <div class="stack" style="gap: 8px;"><span class="t-h3">イベントを記録にする</span><span class="muted">募集ページだけで終わらせず、投稿枠、公開作品、履歴まで同じイベントに残します。</span></div>
       </div>
     </section>
@@ -93,7 +93,7 @@
     </section>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2400}}'>

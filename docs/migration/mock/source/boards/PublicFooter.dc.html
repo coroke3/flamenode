@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+<footer class="pub-foot" data-theme="{{theme}}" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
   <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
     <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
     <img class="logo-l" src="/_blob/eded756c59dbc57e0b63d862e98d3177" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
@@ -47,9 +47,9 @@
   </nav>
 </footer>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":280}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":280}}'>
 class Component extends DCLogic {
-  renderVals() { return {}; }
+  renderVals() { return { theme: this.props.theme ?? 'dark' }; }
 }
 </script>
 </body>

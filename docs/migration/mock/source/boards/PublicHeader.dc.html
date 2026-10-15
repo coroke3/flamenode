@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<header class="{{hdCls}}" lang="ja">
+<header class="{{hdCls}}" data-theme="{{theme}}" lang="ja">
   <div class="hd-bar">
     <a href="Main.dc.html" class="hd-logo" aria-label="FlameNode トップ">
       <img class="logo-d" src="/_blob/eee88ecd1bced2fd7ce508f977487e59" alt="FlameNode">
@@ -62,7 +62,7 @@
         <a href="VideoDetail.dc.html" class="hd-sugg-i"><img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" class="hd-th"><span class="stack" style="gap: 0; min-width: 0;"><span class="ell">空白合作</span><span class="t-sm muted">空白合作チーム · PVSF2026Sp</span></span></a>
       </div>
       <div class="hd-sugg-g"><span class="t-label muted">クリエイター</span><a href="Creator.dc.html" class="hd-sugg-i"><img src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" class="avatar" style="width: 28px; height: 28px;"><span>おたこ <span class="t-sm muted t-mono">@012345rty</span></span></a></div>
-      <div class="hd-sugg-g"><span class="t-label muted">イベント</span><a href="EventDetail.dc.html" class="hd-sugg-i"><img src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" class="ev-icon" style="width: 28px; height: 28px;"><span>PVSF2026S <span class="st t-sm"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>受付中</span></span></a></div>
+      <div class="hd-sugg-g"><span class="t-label muted">イベント</span><a href="EventDetail.dc.html" class="hd-sugg-i"><img src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" class="ev-icon" style="width: 28px; height: 28px;"><span>PVSF2026S <span class="st t-sm"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>募集中</span></span></a></div>
       <a href="Videos.dc.html" class="hd-sugg-all t-sm"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>「空白」で作品をすべて検索<kbd class="kbd">Enter</kbd></a>
     </div>
   </sc-if>
@@ -71,7 +71,7 @@
   <sc-if value="{{accOpen}}" hint-placeholder-val="{{false}}">
     <div class="hd-pop hd-acc" role="menu" aria-label="アカウント">
       <div class="hd-acc-me"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""><span class="stack" style="gap: 0;"><b>おたこ</b><span class="t-sm muted">Discord でログイン中</span></span></div>
-      <span class="t-label muted hd-acc-h">活動名義(Active X ID)</span>
+      <span class="t-label muted hd-acc-h">活動名義(X ID)</span>
       <sc-for list="{{xids}}" as="x" hint-placeholder-count="3">
         <button type="button" role="menuitemradio" aria-checked="{{x.on}}" aria-label="{{x.aria}}" class="{{x.cls}}" disabled="{{x.off}}" onClick="{{x.pick}}"><img class="avatar" src="{{x.img}}" alt=""><span class="ell">{{x.name}}</span><i class="{{x.check}}" aria-hidden="true"></i></button>
       </sc-for>
@@ -92,31 +92,46 @@
   <!-- スマホ: ハンバーガーメニュー(ナビ・アカウント・テーマを統合。アバターと≡のどちらからも開く) -->
   <sc-if value="{{navOpen}}" hint-placeholder-val="{{false}}">
     <div id="hd-menu" class="hd-pop hd-menu" role="dialog" aria-label="メニュー">
-      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
-        <div class="hd-acc-me"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""><span class="stack" style="gap: 0;"><b>おたこ</b><span class="t-sm muted">Discord でログイン中</span></span></div>
-        <span class="t-label muted hd-acc-h">活動名義(Active X ID)</span>
-        <sc-for list="{{xids}}" as="x" hint-placeholder-count="2">
-          <button type="button" role="menuitemradio" aria-checked="{{x.on}}" aria-label="{{x.aria}}" class="{{x.cls}}" disabled="{{x.off}}" onClick="{{x.pick}}"><img class="avatar" src="{{x.img}}" alt=""><span class="ell">{{x.name}}</span><i class="{{x.check}}" aria-hidden="true"></i></button>
-        </sc-for>
-        <div class="hd-acc-sep"></div>
-      </sc-if>
-      <nav aria-label="メインナビゲーション">
-        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><a href="{{t.href}}" aria-current="{{t.cur}}"><i class="{{t.icon}}" aria-hidden="true"></i><span>{{t.label}}</span></a></sc-for>
+      <!-- 1. 見る(最頻): 大きく -->
+      <nav class="hm-main" aria-label="メインナビゲーション">
+        <sc-for list="{{nav}}" as="t" hint-placeholder-count="3"><a href="{{t.href}}" aria-current="{{t.cur}}"><span>{{t.label}}</span><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></a></sc-for>
       </nav>
+      <!-- 2. 主操作: 1つだけ Primary -->
       <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
-        <div class="hd-acc-sep"></div>
-        <a href="MyPage.dc.html"><i class="fa-solid fa-bookmark" aria-hidden="true"></i><span>ライブラリ</span></a>
-        <a href="MyPage.dc.html"><i class="fa-solid fa-gear" aria-hidden="true"></i><span>設定</span></a>
-        <a href="Manage.dc.html"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i><span>運営</span><span class="t-sm muted t-num" style="margin-left: auto;">審査待ち 7</span></a>
-        <a href="Admin.dc.html"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>管理</span></a>
+        <a class="fn-btn fn-btn--primary hm-cta" href="MyPage.dc.html"><i class="fa-solid fa-plus" aria-hidden="true"></i>作品を投稿する</a>
       </sc-if>
-      <div class="hd-acc-sep"></div>
-      <div class="hd-menu-row"><span class="il"><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>テーマ</span>
-        <div class="seg" role="radiogroup" aria-label="テーマ"><sc-for list="{{themes}}" as="m" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{m.on}}" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true"></i>{{m.label}}</button></sc-for></div>
+      <sc-if value="{{guest}}" hint-placeholder-val="{{false}}">
+        <a class="fn-btn fn-btn--primary hm-cta" href="EntrySignIn.dc.html"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discord でログイン</a>
+        <p class="t-sm muted hm-note">ログインすると、枠の確保と作品の投稿ができます</p>
+      </sc-if>
+      <!-- 3. 自分: 中くらい・まとめて -->
+      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+        <section class="hm-me" aria-label="アカウント">
+          <a class="hm-who" href="MyPage.dc.html"><img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt=""><span class="stack" style="gap: 0; min-width: 0;"><span class="hm-name">おたこ</span><span class="t-sm muted">マイページ · Discord でログイン中</span></span><i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a>
+          <div class="hm-quick">
+            <a href="MyPage.dc.html"><i class="fa-solid fa-bookmark" aria-hidden="true"></i><span>ライブラリ</span></a>
+            <a href="MyPage.dc.html"><i class="fa-solid fa-gear" aria-hidden="true"></i><span>設定</span></a>
+            <a href="Manage.dc.html"><i class="fa-solid fa-clipboard-list" aria-hidden="true"></i><span>運営</span><b class="hm-badge t-num" aria-label="審査待ち 7">7</b></a>
+            <a href="Admin.dc.html"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>管理</span></a>
+          </div>
+          <span class="t-label muted hm-h">活動名義(X ID)</span>
+          <div class="hm-xids" role="radiogroup" aria-label="活動名義">
+            <sc-for list="{{xids}}" as="x" hint-placeholder-count="2">
+              <button type="button" role="radio" aria-checked="{{x.on}}" aria-label="{{x.aria}}" class="{{x.cls}}" disabled="{{x.off}}" onClick="{{x.pick}}"><img class="avatar" src="{{x.img}}" alt=""><span class="ell">{{x.name}}</span><i class="{{x.check}}" aria-hidden="true"></i></button>
+            </sc-for>
+          </div>
+          <a href="MyPage.dc.html" class="hd-acc-sub t-sm"><i class="fa-solid fa-plus" aria-hidden="true"></i>X ID を追加・申請状況を見る</a>
+        </section>
+      </sc-if>
+      <!-- 4. 設定系: 小さく・下に -->
+      <div class="hm-foot">
+        <div class="hm-theme"><span class="t-label muted">テーマ</span>
+          <div class="seg" role="radiogroup" aria-label="テーマ"><sc-for list="{{themes}}" as="m" hint-placeholder-count="3"><button type="button" role="radio" aria-checked="{{m.on}}" class="{{m.cls}}" onClick="{{m.pick}}"><i class="{{m.icon}}" aria-hidden="true"></i>{{m.label}}</button></sc-for></div>
+        </div>
+        <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
+          <button type="button" class="hm-out"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i>ログアウト</button>
+        </sc-if>
       </div>
-      <sc-if value="{{signedIn}}" hint-placeholder-val="{{true}}">
-        <button type="button" class="hd-menu-out"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i><span>ログアウト</span></button>
-      </sc-if>
     </div>
     <div class="hd-scrim hd-menu-scrim" onClick="{{toggleNav}}"></div>
   </sc-if>
@@ -127,7 +142,7 @@
   </nav>
 </header>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["","list","user","event","me"],"default":""},"account":{"editor":"enum","options":["user","guest"],"default":"user"},"menu":{"editor":"enum","options":["none","account","search","nav"],"default":"none"},"$preview":{"width":1440,"height":72}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"active":{"editor":"enum","options":["","list","user","event","me"],"default":""},"account":{"editor":"enum","options":["user","guest"],"default":"user"},"menu":{"editor":"enum","options":["none","account","search","nav"],"default":"none"},"$preview":{"width":1440,"height":72}}'>
 class Component extends DCLogic {
   constructor(p) { super(p); this.state = { menu: null, x: '012345rty', theme: 'dark' }; }
   renderVals() {
@@ -135,12 +150,13 @@ class Component extends DCLogic {
     const a = this.props.active ?? '';
     const acc = this.props.account ?? 'user';
     const menu = S.menu || this.props.menu || 'none';
-    const N = [['list', '動画', 'Videos.dc.html', 'fa-solid fa-film'], ['user', 'クリエイター', 'Creators.dc.html', 'fa-solid fa-user-group'], ['event', 'イベント', 'Events.dc.html', 'fa-solid fa-calendar-days']];
+    const N = [['list', '作品', 'Videos.dc.html', 'fa-solid fa-film'], ['user', 'クリエイター', 'Creators.dc.html', 'fa-solid fa-user-group'], ['event', 'イベント', 'Events.dc.html', 'fa-solid fa-calendar-days']];
     // src/components/user/AccountMenu.tsx の状態表記
     // Settings と同じ X ID。承認待ちは選べないので薄く表示するだけ
     const X = [['012345rty', 'おたこ', '/_blob/fc027fe6fe3a001a22a1933270ce72b9', false], ['otako_sub', 'おたこ(サブ)', '/_blob/3d8d62bbac75243d266ec6e3de039e6d', true]];
     const set = (m) => () => this.setState({ menu: menu === m ? 'none' : m });
     return {
+      theme: this.props.theme ?? 'dark',
       hdCls: 'hd2' + (menu === 'search' ? ' open-search' : menu === 'account' ? ' open-acc' : menu === 'nav' ? ' open-nav' : ''),
       navOpen: menu === 'nav', toggleNav: set('nav'), burgerCls: 'ib hd-burger' + (menu === 'nav' ? ' on' : ''), burgerIcon: menu === 'nav' ? 'fa-solid fa-xmark' : 'fa-solid fa-bars',
       nav: N.map(([id, label, href]) => ({ label, href, cur: a === id ? 'page' : 'false' })),

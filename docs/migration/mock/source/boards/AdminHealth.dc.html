@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="health" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="health" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">ヘルスチェック</h1></sc-if><p class="muted">データベースの整合性を読み取り専用で点検します。修復操作はありません。</p></div></div>
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="診断メニュー" style="margin-bottom: 24px;">
@@ -36,15 +36,15 @@
     <div class="wrap-row" style="gap: 8px; margin-bottom: 20px;">
       <div class="seg" role="group" aria-label="診断モード"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="2"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for></div>
       <span class="t-sm muted" style="flex: 1 1 280px;">{{modeDesc}}</span>
-      <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="状態フィルタ"><option>すべて</option><option>危険</option><option>警告</option><option>確認</option><option>OK</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="状態フィルタ"><option>すべて</option><option>危険</option><option>警告</option><option>確認</option><option>正常</option></select></span>
     </div>
     <div class="notice" style="margin-bottom: 16px;"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true" style="color: var(--warning); padding-top: 4px;"></i><span class="t-sm">警告 2 件が検出されています。一覧から確認してください。</span></div>
     <div class="dt" style="--cols: minmax(240px,1.6fr) 100px 72px minmax(200px,1.4fr); --minw: 0px;">
       <div class="dt-h"><span>チェック項目</span><span>状態</span><span class="num">件数</span><span>サンプル / 備考</span></div>
-      <div class="dt-r"><span>通知 outbox の最終失敗</span><span class="st"><span class="dot warn"></span>警告</span><span class="num">1</span><span class="t-mono t-sm ell">nfo_8c21a0</span></div>
+      <div class="dt-r"><span>通知の送信失敗(再試行の上限到達)</span><span class="st"><span class="dot warn"></span>警告</span><span class="num">1</span><span class="t-mono t-sm ell">nfo_8c21a0</span></div>
       <div class="dt-r"><span>期限切れモデレーションケース</span><span class="st"><span class="dot warn"></span>警告</span><span class="num">1</span><span class="t-mono t-sm ell">mod_331c02</span></div>
-      <div class="dt-r"><span>Active X ID 未設定の投稿者</span><span class="st"><span class="dot info"></span>確認</span><span class="num">4</span><span class="t-sm muted">サンプル (最大5件)</span></div>
-      <div class="dt-r"><span>システム設定の欠落</span><span class="st"><span class="dot ok"></span>OK</span><span class="num">0</span><span class="muted">—</span></div>
+      <div class="dt-r"><span>X ID 未設定の投稿者</span><span class="st"><span class="dot info"></span>確認</span><span class="num">4</span><span class="t-sm muted">サンプル (最大5件)</span></div>
+      <div class="dt-r"><span>システム設定の欠落</span><span class="st"><span class="dot ok"></span>正常</span><span class="num">0</span><span class="muted">—</span></div>
     </div>
   </main>
 </div>

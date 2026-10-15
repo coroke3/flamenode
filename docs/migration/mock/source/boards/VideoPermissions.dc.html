@@ -21,10 +21,10 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja" style="position: relative;">
-  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import>
 
   <div class="wrap" style="padding-top: 32px; max-width: 880px;">
     <a href="VideoEdit.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品編集へ戻る</a>
@@ -37,11 +37,11 @@
         <li>権限は X ID に付与します。その X ID がログインアカウントに承認済みで連携されると編集できます。</li>
         <li>未連携でも先に付与でき、連携完了までは編集できません。</li>
         <li>付与・解除できるのは作者と、権限を持つ運営・管理者です。合作メンバーは他の人へ再付与できません。</li>
-        <li>提出主体・YouTube ID・公開状態は、管理者またはイベント運営の権限が必要です。</li>
+        <li>提出名義・YouTube ID・公開状態は、管理者またはイベント運営の権限が必要です。</li>
       </ul>
     </details>
 
-    <div class="notice" style="margin-top: 24px;"><i class="fa-solid fa-link-slash" aria-hidden="true" style="color: var(--info); padding-top: 4px;"></i><span class="stack t-sm" style="gap: 2px;"><b>X ID連携待ちの編集者が 1 人います</b><span class="muted">権限は保存済みです。X ID とログインアカウントの連携が承認されると編集できます。</span></span></div>
+    <div class="notice" style="margin-top: 24px;"><i class="fa-solid fa-link-slash" aria-hidden="true" style="color: var(--info); padding-top: 4px;"></i><span class="stack t-sm" style="gap: 2px;"><b>X ID 連携待ちの編集者が 1 人います</b><span class="muted">権限は保存済みです。X ID とログインアカウントの連携が承認されると編集できます。</span></span></div>
 
     <section class="c-sec" aria-labelledby="now" style="margin-top: 40px;">
       <h2 id="now" class="t-h3" style="margin-bottom: 8px;">現在編集できる人</h2>
@@ -60,16 +60,16 @@
 
     <section class="c-sec" aria-labelledby="cand">
       <h2 id="cand" class="t-h3" style="margin-bottom: 4px;">公開メンバー</h2>
-      <p class="t-sm muted" style="margin: 0 0 8px;">メンバー欄に載っているが、まだ編集権がない人です。</p>
+      <p class="t-sm muted" style="margin: 0 0 8px;">作品ページに載っているメンバーのうち、まだ編集できない人です。</p>
       <div class="row" style="gap: 16px; padding: 14px 0;">
         <img class="avatar" src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 40px; height: 40px;">
         <span class="stack" style="gap: 2px; flex: 1;"><span class="row" style="gap: 8px;"><span>味付け海苔</span><span class="t-sm muted">@sub_ajinori</span></span><span class="t-sm muted">撮影</span></span>
-        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" onClick="{{grantMember}}">編集権を付与</button>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" onClick="{{grantMember}}">編集権限を付与</button>
       </div>
     </section>
 
     <section class="c-sec" aria-labelledby="hid">
-      <h2 id="hid" class="t-h3" style="margin-bottom: 4px;">表示されない編集者を追加</h2>
+      <h2 id="hid" class="t-h3" style="margin-bottom: 4px;">メンバー欄に出さない編集者を追加</h2>
       <p class="t-sm muted" style="margin: 0 0 12px;">作品ページのメンバー欄には載せずに、編集だけを任せます。</p>
       <form class="row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;" onSubmit="{{grantHidden}}">
         <span style="flex: 1 1 200px;"><x-import component-from-global-scope="FlameNode.TextField" label="表示名" placeholder="表示名"></x-import></span>
@@ -80,7 +80,7 @@
   </div>
 
   <sc-if value="{{grantOpen}}" hint-placeholder-val="{{false}}">
-    <x-import component-from-global-scope="FlameNode.Modal" open="{{yes}}" contained="{{yes}}" title="作品編集に参加させますか？" actions="{{grantActions}}">
+    <x-import component-from-global-scope="FlameNode.Modal" open="{{yes}}" contained="{{yes}}" title="編集権限を付与しますか？" actions="{{grantActions}}">
       <div class="stack t-sm" style="gap: 12px;">
         <span>味付け海苔 さんの X ID に、作品「祟渦に関するお知らせ 後編」の編集権限を付与します。</span>
         <span class="muted">未連携の X ID にも権限は保存できます。その場合はアカウント連携の承認後に編集可能になります。</span>
@@ -97,7 +97,7 @@
   </sc-if>
 
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,320px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,320px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>
@@ -109,7 +109,7 @@ class Component extends DCLogic {
     const E = [
       { name: 'ホラー映画合作', xid: '@metameta194', icon: '/_blob/755d245a064a6f5935c3dccd9a941048', kind: '公開メンバー', kindIcon: 'fa-solid fa-eye', state: '編集可能', dot: 'fa-solid fa-pen st-ic ok', owner: true, revocable: false, pub: true },
       { name: 'おたこ', xid: '@012345rty', icon: '/_blob/fc027fe6fe3a001a22a1933270ce72b9', kind: '公開メンバー', kindIcon: 'fa-solid fa-eye', state: '編集可能', dot: 'fa-solid fa-pen st-ic ok', owner: false, revocable: true, pub: true },
-      { name: '編集補助', xid: '@horror_edit', icon: '/_blob/3d8d62bbac75243d266ec6e3de039e6d', kind: '非公開編集者', kindIcon: 'fa-solid fa-eye-slash', state: '権限付与済み · X ID連携待ち', dot: 'fa-solid fa-link-slash st-ic info', owner: false, revocable: true, pub: false },
+      { name: '編集補助', xid: '@horror_edit', icon: '/_blob/3d8d62bbac75243d266ec6e3de039e6d', kind: '非公開編集者', kindIcon: 'fa-solid fa-eye-slash', state: '権限付与済み · X ID 連携待ち', dot: 'fa-solid fa-link-slash st-ic info', owner: false, revocable: true, pub: false },
     ].map(e => ({ ...e, revoke: () => this.setState({ dialog: 'revoke', target: e }) }));
     const F = window.FlameNode; const h = window.React && window.React.createElement;
     const btn = (list) => (F && h) ? list.map(([key, variant, label]) => h(F.Button, { key, variant, onClick: close }, label)) : null;

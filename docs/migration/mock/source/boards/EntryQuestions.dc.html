@@ -22,7 +22,7 @@
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>
-body{margin:0;background:#000}
+body{margin:0}
 .qs{display:grid;gap:32px}
 .qs-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
 .q{display:grid;gap:10px}
@@ -73,7 +73,7 @@ class Component extends DCLogic {
     // 公開範囲: public 作品ページに公開 / review 審査用 / private 運営のみ
     const VIS = { public: '作品ページに公開', review: '審査用', private: '運営のみ' };
     const Q = [
-      { id: 'vol', type: 'radio', label: 'ステージで流す際の音量調整は必要ですか?', req: true, vis: 'private', opts: ['不要', '必要'] },
+      { id: 'vol', type: 'radio', label: 'ステージで流す際の音量調整は必要ですか？', req: true, vis: 'private', opts: ['不要', '必要'] },
       { id: 'flags', type: 'checkbox', label: '作品に含まれる表現', req: true, vis: 'review', help: 'あてはまるものをすべて選んでください', opts: ['点滅・フラッシュ', '流血表現', '大音量', '該当なし'] },
       { id: 'term', type: 'select', label: '制作期間', req: false, vis: 'public', opts: ['1週間未満', '1か月未満', '3か月未満', '3か月以上'] },
       { id: 'yomi', type: 'text', label: '配信で読み上げる名前の読み', req: false, vis: 'private', ph: '例: おたこ', max: 40 },

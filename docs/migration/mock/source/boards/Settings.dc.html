@@ -21,10 +21,10 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import></sc-if>
 
   <div class="wrap" style="padding-top: 32px;">
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
@@ -33,9 +33,9 @@
       <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-bookmark" aria-hidden="true"></i>ライブラリ</a>
       <a href="MyPage.dc.html" class="il" aria-current="page"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
     </nav></sc-if>
-    <h1 class="t-display" style="margin-top: 40px;">設定</h1>
+    <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display" style="margin-top: 40px;">設定</h1></sc-if>
 
-    <div class="st-split" style="display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 48px; margin-top: 32px; align-items: start;">
+    <div class="st-split" style="display: grid; grid-template-columns: 240px minmax(0,1fr); gap: 48px; margin-top: 8px; align-items: start;">
       <nav aria-label="X ID とアカウント" role="tablist" class="stack st-nav" style="gap: 2px;">
         <sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
           <button type="button" role="tab" class="{{t.cls}}" onClick="{{t.pick}}" style="height: auto; padding: 10px 12px; gap: 12px;">
@@ -55,16 +55,15 @@
               <div class="row" style="gap: 4px;">
                 <sc-if value="{{x.active}}" hint-placeholder-val="{{true}}"><span class="st t-sm" style="margin-right: 8px;"><i class="fa-solid fa-check st-ic ok" aria-hidden="true"></i>アクティブ</span></sc-if>
                 <sc-if value="{{x.canActivate}}" hint-placeholder-val="{{false}}"><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-solid fa-check" aria-hidden="true"></i>アクティブに設定</button></sc-if>
-                <a href="Creator.dc.html" class="ib sm" aria-label="公開プロフィール"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-                <button type="button" class="ib sm" aria-label="連携を解除" onClick="{{toggleUnlink}}"><i class="fa-solid fa-link-slash"></i></button>
+                <a href="Creator.dc.html" class="fn-btn fn-btn--tertiary fn-btn--sm"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>公開プロフィール</a>
               </div>
             </div>
 
             <sc-if value="{{unlinking}}" hint-placeholder-val="{{false}}">
-              <div class="notice" role="alertdialog" aria-label="X ID 連携を削除しますか?" style="margin-top: 24px; align-items: flex-start;">
+              <div class="notice" role="alertdialog" aria-label="X ID の連携を解除しますか？" style="margin-top: 24px; align-items: flex-start;">
                 <i class="fa-solid fa-link-slash" aria-hidden="true" style="padding-top: 4px;"></i>
-                <div class="stack t-sm" style="gap: 6px; flex: 1;"><b>@{{x.id}} の連携を削除しますか?</b><span class="muted">X ID自体・過去の作品・履歴は削除されません。このDiscordアカウントからは編集できなくなります。同じX IDを再連携すれば編集権限は戻ります。</span>
-                  <div class="row" style="gap: 8px; margin-top: 4px;"><button type="button" class="fn-btn fn-btn--danger fn-btn--sm" onClick="{{toggleUnlink}}">連携を削除する</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleUnlink}}">キャンセル</button></div>
+                <div class="stack t-sm" style="gap: 6px; flex: 1;"><b>@{{x.id}} の連携を解除しますか？</b><span class="muted">作品と履歴はそのまま残ります。このアカウントからは編集できなくなり、もう一度連携すれば元に戻ります。</span>
+                  <div class="row" style="gap: 8px; margin-top: 4px;"><button type="button" class="fn-btn fn-btn--danger fn-btn--sm" onClick="{{toggleUnlink}}">連携を解除する</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleUnlink}}">キャンセル</button></div>
                 </div>
               </div>
             </sc-if>
@@ -73,8 +72,8 @@
             </sc-if>
 
             <form class="form" style="margin-top: 32px; max-width: 640px;" onSubmit="{{prevent}}">
-              <dc-import name="IconPicker" ctx="xid" icon="select" hint-size="100%,300px"></dc-import>
               <x-import component-from-global-scope="FlameNode.TextField" label="表示名" default-value="{{x.name}}"></x-import>
+              <dc-import name="IconPicker" theme="{{theme}}" ctx="xid" icon="select" hint-size="100%,300px"></dc-import>
               <x-import component-from-global-scope="FlameNode.TextField" label="プロフィール" multiline="{{yes}}" placeholder="制作スタイル、得意なこと、活動紹介など" default-value="アニメと実写を混ぜた短編を作っています。"></x-import>
               <x-import component-from-global-scope="FlameNode.TextField" label="依頼・連絡先" placeholder="依頼・連絡先、メール、フォームURL、DM可否など"></x-import>
 
@@ -101,33 +100,18 @@
                 </sc-if>
               </div>
 
-              <dc-import name="LinkEditor" hint-size="100%,180px"></dc-import>
-              <div class="row"><button type="submit" class="fn-btn fn-btn--primary">保存</button></div>
+              <dc-import name="LinkEditor" theme="{{theme}}" hint-size="100%,180px"></dc-import>
+              <div class="row act-bar" style="gap: 8px;"><button type="submit" class="fn-btn fn-btn--primary">保存</button><span style="flex: 1;"></span><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleUnlink}}"><i class="fa-solid fa-link-slash" aria-hidden="true"></i>連携を解除</button></div>
             </form>
           </section>
         </sc-if>
 
-        <!-- 申請履歴 -->
-        <sc-if value="{{isHistory}}" hint-placeholder-val="{{false}}">
-          <section aria-labelledby="hh">
-            <h2 id="hh" class="t-h2">X ID申請履歴</h2>
-            <p class="t-sm muted" style="margin: 4px 0 24px;">申請中・承認・却下・取り下げを含む全状態を、新しいものから最大50件確認できます。</p>
-            <div class="dt" style="--cols: 110px minmax(160px,1fr) 110px 120px 140px; --minw: 0px;">
-              <div class="dt-h"><span>種別</span><span>X ID</span><span>状態</span><span>申請日</span><span></span></div>
-              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID連携</span><span>@otako_sub</span><span class="st t-sm"><i class="ms ms-pending_actions st-ic warn" aria-hidden="true"></i>申請中</span><span class="t-num muted t-sm">2026.10.02</span><span class="row" style="justify-content: flex-end;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">取り下げる</button></span></div>
-              <div class="dt-r"><span class="il t-sm"><i class="ms ms-merge muted" aria-hidden="true"></i>X ID統合</span><span class="t-sm">@otako_old <i class="fa-solid fa-arrow-right muted" aria-hidden="true"></i> @012345rty</span><span class="st t-sm"><i class="fa-solid fa-circle-check st-ic ok" aria-hidden="true"></i>完了</span><span class="t-num muted t-sm">2026.09.20</span><span class="row" style="justify-content: flex-end;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" title="運営が承認すると、統合前の名義へ戻ります">統合を取り消す</button></span></div>
-              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID連携</span><span>@012345rty</span><span class="st t-sm"><i class="fa-solid fa-circle-check st-ic ok" aria-hidden="true"></i>承認済み</span><span class="t-num muted t-sm">2025.03.01</span><span></span></div>
-              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID連携</span><span>@otako_test</span><span class="st t-sm"><i class="fa-solid fa-circle-xmark st-ic err" aria-hidden="true"></i>却下</span><span class="t-num muted t-sm">2025.02.27</span><span class="t-sm muted" style="text-align: right;">再審査は運営</span></div>
-            </div>
-          </section>
-        </sc-if>
-
-        <!-- X ID連携 -->
+        <!-- X ID 連携 -->
         <sc-if value="{{isLink}}" hint-placeholder-val="{{false}}">
           <section aria-labelledby="lh" class="stack" style="gap: 48px;">
             <div>
-              <h2 id="lh" class="t-h2">X IDを連携</h2>
-              <p class="t-sm muted" style="margin: 4px 0 20px;">@ を除いたユーザー名、またはプロフィール URL を入力してください。運営の承認後に使えます。複数の X ID を連携し、アクティブを切り替えられます。</p>
+              <h2 id="lh" class="t-h2">X ID を追加</h2>
+              <p class="t-sm muted" style="margin: 4px 0 20px;">ユーザー名かプロフィール URL を入力してください。運営が承認すると使えるようになります。</p>
               <form class="row" style="gap: 8px; max-width: 560px;" onSubmit="{{prevent}}">
                 <span class="field-i" style="flex: 1;"><i class="fa-solid fa-at" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="X ID" placeholder="username または https://x.com/username" default-value="https://x.com/otako_sub?s=21"></x-import></span>
                 <button type="submit" class="fn-btn fn-btn--primary">申請</button>
@@ -135,7 +119,7 @@
               <span class="il t-sm" style="margin-top: 8px;"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i><b>@otako_sub</b> として申請します<span class="muted">(URL・@ 付きでも読み取ります)</span></span>
             </div>
             <div>
-              <h2 class="t-h3">X ID統合申請</h2>
+              <h2 class="t-h3">X ID 統合申請</h2>
               <p class="t-sm muted" style="margin: 4px 0 20px;">X ID を変更したときに、旧 X ID の作品を新しい X ID へまとめます。</p>
               <div class="row" style="gap: 12px; align-items: flex-end; flex-wrap: wrap;">
                 <label class="field" style="flex: 1 1 200px;"><span>統合元(無効化)</span><select class="select"><option>@otako_old</option><option>@otako_sub</option></select></label>
@@ -144,11 +128,22 @@
               </div>
               <ul class="t-sm muted" style="margin: 16px 0 0; padding-left: 18px; line-height: 1.8;">
                 <li>作品は削除せず、投稿者・合作メンバー・チャプター欄の X ID だけを統合先へ変更します。</li>
-                <li>予約枠・連続枠・スタッフ・認証リンク・審査案件も統合先へ揃えます。</li>
-                <li>統合元は選択対象から外れます。内部履歴と別名は保持します。</li>
+                <li>確保した枠・スタッフ登録・審査中の案件も統合先へ移ります。</li>
+                <li>統合元の X ID は選べなくなります。履歴は残ります。</li>
                 <li>対象作品の動画ID・公開状態・内容は変わりません。</li>
               </ul>
               <button type="button" class="fn-btn fn-btn--secondary" style="margin-top: 20px;">統合を申請</button>
+            </div>
+            <div>
+              <h2 class="t-h3">申請状況</h2>
+              <p class="t-sm muted" style="margin: 4px 0 16px;">新しいものから最大50件。</p>
+              <div class="dt" style="--cols: 110px minmax(160px,1fr) 110px 120px 140px; --minw: 0px;">
+              <div class="dt-h"><span>種別</span><span>X ID</span><span>状態</span><span>申請日</span><span></span></div>
+              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID 連携</span><span>@otako_sub</span><span class="st t-sm"><i class="ms ms-pending_actions st-ic warn" aria-hidden="true"></i>申請中</span><span class="t-num muted t-sm">2026.10.02</span><span class="row" style="justify-content: flex-end;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm">取り下げる</button></span></div>
+              <div class="dt-r"><span class="il t-sm"><i class="ms ms-merge muted" aria-hidden="true"></i>X ID 統合</span><span class="t-sm">@otako_old <i class="fa-solid fa-arrow-right muted" aria-hidden="true"></i> @012345rty</span><span class="st t-sm"><i class="fa-solid fa-circle-check st-ic ok" aria-hidden="true"></i>完了</span><span class="t-num muted t-sm">2026.09.20</span><span class="row" style="justify-content: flex-end;"><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" title="運営が承認すると、統合前の名義へ戻ります">統合を取り消す</button></span></div>
+              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID 連携</span><span>@012345rty</span><span class="st t-sm"><i class="fa-solid fa-circle-check st-ic ok" aria-hidden="true"></i>承認済み</span><span class="t-num muted t-sm">2025.03.01</span><span></span></div>
+              <div class="dt-r"><span class="il t-sm"><i class="fa-solid fa-link muted" aria-hidden="true"></i>X ID 連携</span><span>@otako_test</span><span class="st t-sm"><i class="fa-solid fa-circle-xmark st-ic err" aria-hidden="true"></i>却下</span><span class="t-num muted t-sm">2025.02.27</span><span class="t-sm muted" style="text-align: right;">再審査は運営に依頼</span></div>
+            </div>
             </div>
           </section>
         </sc-if>
@@ -167,7 +162,7 @@
     </div>
   </div>
   <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,320px"></dc-import></sc-if>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,320px"></dc-import></sc-if>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1700}}'>
@@ -189,15 +184,14 @@ class Component extends DCLogic {
     const tabs = [
       tab('x:012345rty', '@012345rty', 'おたこ · アクティブ', X['012345rty'].img, ''),
       tab('x:otako_sub', '@otako_sub', '承認待ち', X['otako_sub'].img, ''),
-      tab('history', '申請履歴', '1件申請中', '', 'fa-solid fa-clock-rotate-left'),
-      tab('link', 'X ID連携', 'X IDを連携', '', 'fa-solid fa-plus'),
-      tab('discord', 'Discord', 'otako', '', 'fa-brands fa-discord'),
+      tab('link', 'X ID を追加', '申請・統合 · 1件申請中', '', 'fa-solid fa-plus'),
+      tab('discord', 'ログイン', 'Discord · otako', '', 'fa-brands fa-discord'),
     ];
     const isX = s.tab.startsWith('x:');
     return {
       theme: this.props.theme ?? 'dark', yes: true, tabs,
       x: isX ? X[s.tab.slice(2)] : X['012345rty'],
-      isX, isHistory: s.tab === 'history', isLink: s.tab === 'link', isDiscord: s.tab === 'discord',
+      isX, isLink: s.tab === 'link', isDiscord: s.tab === 'discord',
       chOpen: s.ch, toggleCh: () => this.setState({ ch: !s.ch }),
       chIsSel: s.chMode === 'select', chIsUrl: s.chMode === 'url',
       chSel: s.chMode === 'select' ? 'on' : '', chUrl: s.chMode === 'url' ? 'on' : '',

@@ -21,10 +21,10 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import></sc-if>
 
   <div class="wrap" style="padding-top: 32px;">
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
@@ -34,8 +34,8 @@
       <a href="MyPage.dc.html" class="il"><i class="fa-solid fa-gear" aria-hidden="true"></i>設定</a>
     </nav></sc-if>
 
-    <div class="wrap-row" style="justify-content: space-between; align-items: flex-end; gap: 24px; margin-top: 40px;">
-      <h1 class="t-display">ライブラリ</h1>
+    <div class="wrap-row" style="justify-content: space-between; align-items: flex-end; gap: 24px; margin-top: 8px;">
+      <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">ライブラリ</h1></sc-if>
       <div class="seg" role="tablist" aria-label="ライブラリ種別">
         <sc-for list="{{kinds}}" as="k" hint-placeholder-count="5">
           <button type="button" role="tab" class="{{k.cls}}" onClick="{{k.pick}}">{{k.label}}<span class="t-num muted">{{k.n}}</span></button>
@@ -83,7 +83,7 @@
     </sc-if>
   </div>
   <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,320px"></dc-import></sc-if>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,320px"></dc-import></sc-if>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"emptyState":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1500}}'>
@@ -115,13 +115,13 @@ class Component extends DCLogic {
     const D = { like: '自分がいいねした作品を一覧表示します。', save: '自分がセーブした作品を一覧表示します。', mine: 'Active X ID 名義で投稿した作品を表示します。', collab: '承認済み X ID で共同編集できる作品を表示します。', chapter: '承認済み X ID で投稿したチャプターコメントを表示します。' };
     const E = { like: ['まだ「いいね」した作品がありません。','fa-regular fa-heart','作品を探す','Recommend.dc.html'], save: ['まだ「セーブ」した作品がありません。','fa-regular fa-bookmark','作品を探す','Recommend.dc.html'], mine: ['自分の作品はまだ登録されていません。','fa-solid fa-film','作品を投稿する','MyPage.dc.html'], collab: ['共同編集できる作品はまだありません。','fa-solid fa-user-group','X ID を確認','MyPage.dc.html'], chapter: ['まだ投稿したチャプターコメントはありません。','fa-solid fa-list-ol','作品を探す','Recommend.dc.html'] };
     const N = { like: 18, save: 3, mine: 10, collab: 14, chapter: 3 };
-    const kinds = [['like','いいね','fa-solid fa-heart'],['save','セーブ','fa-solid fa-bookmark'],['mine','自分の作品','fa-solid fa-film'],['collab','共同編集','fa-solid fa-user-group'],['chapter','チャプター','fa-solid fa-list-ol']]
+    const kinds = [['like','いいね','fa-solid fa-heart'],['save','セーブ','fa-solid fa-bookmark'],['chapter','チャプターコメント','fa-solid fa-list-ol']]
       .map(([id, label, icon]) => ({ label, icon, n: forceEmpty ? 0 : N[id], cls: k === id ? 'on' : '', pick: () => this.setState({ kind: id }) }));
     const isCh = k === 'chapter';
     return {
       theme: this.props.theme ?? 'dark', yes: true, kinds, desc: D[k],
       videos: L[k] || [], chapters,
-      showGrid: !forceEmpty && !isCh, showChapters: !forceEmpty && isCh, empty: forceEmpty, paged: !forceEmpty && (k === 'like' || k === 'collab'),
+      showGrid: !forceEmpty && !isCh, showChapters: !forceEmpty && isCh, empty: forceEmpty, paged: !forceEmpty && k === 'like',
       emptyText: E[k][0], emptyIcon: E[k][1], emptyCta: E[k][2], emptyHref: E[k][3]
     };
   }

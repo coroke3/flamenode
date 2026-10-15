@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>X ID統合</title>
+<title>X ID 統合</title>
 <script src="./support.js"></script>
 <link rel="stylesheet" href="fn.css">
 <link rel="stylesheet" href="fa/css/all.min.css">
@@ -21,20 +21,20 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="merge" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="merge" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
-    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">X ID統合</h1></sc-if><p class="muted">統合申請の影響確認、承認、実行と、期限内の差し戻しを扱います。復元JSONは画面へ表示しません。</p></div></div>
+    <div class="c-head"><div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">X ID 統合</h1></sc-if><p class="muted">統合申請の影響確認、承認、実行と、期限内の差し戻しを扱います。復元JSONは画面へ表示しません。</p></div></div>
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="ユーザー管理メニュー" style="margin-bottom: 24px;">
       <a href="AdminUsersHub.dc.html" class="il"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discordユーザー</a>
       <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-key" aria-hidden="true"></i>権限管理</a>
-      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請 <span class="t-num">3</span></a>
-      <a href="AdminUsersHub.dc.html" class="il" aria-current="page"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請 <span class="t-num">1</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請 <span class="t-num">3</span></a>
+      <a href="AdminUsersHub.dc.html" class="il" aria-current="page"><i class="ms ms-merge" aria-hidden="true"></i>X ID 統合申請 <span class="t-num">1</span></a>
     </nav></sc-if>
-    <nav class="subnav" aria-label="X ID統合管理ビュー"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="5"><a href="#" aria-current="{{t.cur}}" onClick="{{t.pick}}">{{t.label}}</a></sc-for></nav>
+    <nav class="subnav" aria-label="X ID 統合管理ビュー"><sc-for list="{{_nav}}" as="t" hint-placeholder-count="5"><a href="#" aria-current="{{t.cur}}" onClick="{{t.pick}}">{{t.label}}</a></sc-for></nav>
 
     <sc-if value="{{isMerge}}" hint-placeholder-val="{{true}}">
       <div class="split" style="margin-top: 24px;">
@@ -60,7 +60,7 @@
                 <div class="dt-r"><span class="ell">PVSF2022R 参加作品</span><span class="st"><span class="dot ok"></span>公開</span><span class="t-sm muted">投稿者 → 統合先</span></div>
               </div>
             </details>
-            <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>統合元は alias・監査・差し戻し用に内部保持されます。期限内なら差し戻せます。</p>
+            <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>統合元の X ID は差し戻し用に内部で保持されます。期限内なら差し戻せます。</p>
             <div class="row" style="gap: 8px; flex-wrap: wrap;">
               <button type="button" class="fn-btn fn-btn--secondary">却下</button>
               <button type="button" class="fn-btn fn-btn--secondary"><i class="fa-solid fa-check" aria-hidden="true"></i>承認</button>

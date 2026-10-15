@@ -21,13 +21,15 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000} details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}</style>
+<style>body{margin:0} details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}</style>
 </helmet>
 <div class="p-root vd has-dock" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="list" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="list" hint-size="100%,72px"></dc-import>
 
-  <div class="vd-layout" style="display: flex; flex-wrap: wrap; gap: 32px;">
-    <main class="vd-main" style="flex: 999 1 720px; min-width: 0;">
+  <div class="vd-layout">
+    <main class="vd-main">
+      <div class="vd-hero">
+      <div class="vd-player-pane">
       <sc-if value="{{hasYt}}" hint-placeholder-val="{{true}}">
         <div class="vd-player" style="background: #000;">
           <img class="cover" src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="プレイヤー(YouTube 埋め込み)">
@@ -36,12 +38,13 @@
       <sc-if value="{{noYt}}" hint-placeholder-val="{{false}}">
         <div class="stack" style="aspect-ratio: 16/9; align-items: center; justify-content: center; gap: 12px; background: var(--surface-raised); text-align: center; padding: 24px;">
           <span class="icon-tile lg"><i class="fa-brands fa-youtube" aria-hidden="true"></i></span>
-          <span>YouTube動画は未登録ですが、作品情報を公開しています。</span>
+          <span>YouTube の動画はまだ登録されていません。作品情報は公開中です。</span>
         </div>
       </sc-if>
       <x-import component-from-global-scope="FlameNode.ProgressBar" value="{{progress}}" label="再生位置"></x-import>
+      </div>
 
-      <div class="vd-info" style="padding: 24px 0 0 40px; display: flex; flex-direction: column; gap: 20px;">
+      <div class="vd-info">
         <h1 class="t-display vd-title">空白合作</h1>
 
         <div class="wrap-row" style="gap: 12px 16px;">
@@ -139,9 +142,10 @@
           </sc-if>
         </section>
       </div>
+      </div>
     </main>
 
-    <aside class="vd-side" aria-label="動画補助情報" style="flex: 1 1 380px; min-width: 0; max-width: 480px; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 24px;">
+    <aside class="vd-side" aria-label="作品の補足情報">
       <section aria-labelledby="ch" class="{{chSheet}}" style="background: var(--surface-raised);">
         <div class="row" style="justify-content: space-between; padding: 12px 8px 12px 16px;">
           <h2 id="ch" class="vh t-h3" style="font-size: 15px;">チャプター <span class="muted t-num">6</span></h2>
@@ -194,7 +198,7 @@
             <span class="t-sm muted t-num">再生リスト · 2 / 73</span>
           </span>
           <span class="row" style="gap: 0;">
-            <button type="button" class="{{autoCls}}" aria-pressed="{{auto}}" aria-label="次の動画を自動再生" onClick="{{toggleAuto}}"><i class="fa-solid fa-repeat"></i></button>
+            <button type="button" class="{{autoCls}}" aria-pressed="{{auto}}" aria-label="次の作品を自動再生" onClick="{{toggleAuto}}"><i class="fa-solid fa-repeat"></i></button>
             <button type="button" class="ib sm" aria-label="並び順を初期化"><i class="fa-solid fa-rotate-left"></i></button>
           </span>
         </div>
@@ -214,23 +218,25 @@
       </section>
 
       <section aria-labelledby="rel">
-        <h2 id="rel" class="vh t-h3" style="font-size: 15px; margin-bottom: 8px;">関連動画</h2>
+        <h2 id="rel" class="vh t-h3" style="font-size: 15px; margin-bottom: 8px;">関連作品</h2>
+        <div class="vd-related">
         <sc-for list="{{related}}" as="v" hint-placeholder-count="6">
           <a href="VideoDetail.dc.html" class="fn-row fn-row--compact" style="padding: 8px 0;">
             <img class="fn-row__thumb" src="{{v.thumb}}" alt="" style="width: 152px;">
             <span class="fn-row__body"><span class="fn-row__title" style="white-space: normal;">{{v.title}}</span><span class="fn-row__meta">{{v.meta}}</span></span>
           </a>
         </sc-for>
+        </div>
       </section>
     </aside>
   </div>
   <!-- スマホ: 動画補助ドック(VideoUtilityDock.tsx と同じ構成) -->
-  <nav class="vd-dock" aria-label="動画補助メニュー">
+  <nav class="vd-dock" aria-label="作品メニュー">
     <button type="button" class="{{dockPl}}" aria-pressed="{{dockPlOn}}" onClick="{{openPl}}"><i class="fa-solid fa-list-ol" aria-hidden="true"></i><span>再生リスト</span><span class="t-num muted">73</span></button>
     <button type="button" class="{{dockCh}}" aria-pressed="{{dockChOn}}" onClick="{{openCh}}"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><span>チャプター・コメント</span><span class="t-num muted">6</span></button>
   </nav>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"sheet":{"editor":"enum","options":["","ch","pl"],"default":""},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"progress":{"editor":"range","min":0,"max":1,"step":0.01,"default":0.35},"memberView":{"editor":"enum","options":["table","card"],"default":"table"},"viewer":{"editor":"enum","options":["ok","guest","terms","xid","banned"],"default":"ok"},"noYoutube":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1800}}'>
@@ -244,7 +250,7 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'dark', progress: this.props.progress ?? 0.35, prevent: (e) => e.preventDefault(),
       hasYt: !(this.props.noYoutube ?? false), noYt: !!(this.props.noYoutube ?? false),
-      ...(() => { const g = { ok: null, guest: ['ログインするといいね、セーブができます。', 'ログイン', 'EntrySignIn.dc.html', 'fa-solid fa-right-to-bracket'], terms: ['利用規約に同意するといいね、セーブができます。', '利用規約へ', 'Rules.dc.html', 'fa-solid fa-scale-balanced'], xid: ['いいね・セーブには承認済みの Active X ID が必要です。', 'X ID設定へ', 'MyPage.dc.html', 'fa-brands fa-x-twitter'], banned: ['現在、このアカウントは利用停止中です。', '詳細', 'Rules.dc.html', 'fa-solid fa-ban'] }[this.props.viewer ?? 'ok']; return { gateMsg: g ? g[0] : '', gateCta: g ? g[1] : '', gateHref: g ? g[2] : '', gateIcon: g ? g[3] : '', gateBlock: !!g }; })(),
+      ...(() => { const g = { ok: null, guest: ['ログインすると、いいねとセーブができます。', 'ログイン', 'EntrySignIn.dc.html', 'fa-solid fa-right-to-bracket'], terms: ['利用規約に同意すると、いいねとセーブができます。', '利用規約へ', 'Rules.dc.html', 'fa-solid fa-scale-balanced'], xid: ['いいね・セーブには、承認済みの X ID が必要です。', 'X ID 設定へ', 'MyPage.dc.html', 'fa-brands fa-x-twitter'], banned: ['現在、このアカウントは利用停止中です。', '詳細', 'Rules.dc.html', 'fa-solid fa-ban'] }[this.props.viewer ?? 'ok']; return { gateMsg: g ? g[0] : '', gateCta: g ? g[1] : '', gateHref: g ? g[2] : '', gateIcon: g ? g[3] : '', gateBlock: !!g }; })(),
       liked: s.liked ? 'true' : 'false', likeIcon: s.liked ? 'fa-solid fa-heart' : 'fa-regular fa-heart', likeCount: s.liked ? 129 : 128,
       saved: s.saved ? 'true' : 'false', saveIcon: s.saved ? 'fa-solid fa-bookmark' : 'fa-regular fa-bookmark',
       toggleLike: () => this.setState({ liked: !s.liked }), toggleSave: () => this.setState({ saved: !s.saved }),

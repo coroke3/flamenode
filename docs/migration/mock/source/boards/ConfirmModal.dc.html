@@ -24,9 +24,9 @@
 <style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja" style="position: relative; width: 880px; height: 560px; min-height: 0; overflow: hidden;">
-  <x-import component-from-global-scope="FlameNode.Modal" open="{{yes}}" contained="{{yes}}" title="作品を削除しますか?" actions="{{actions}}">
+  <x-import component-from-global-scope="FlameNode.Modal" open="{{yes}}" contained="{{yes}}" title="この作品を削除しますか？" actions="{{actions}}">
     <span class="icon-tile lg" style="margin: 0 auto 20px; color: var(--danger);"><i class="fa-solid fa-trash-can" aria-hidden="true"></i></span>
-    <span style="display: block;">「崇渦に関するお知らせ 前編」を削除します。この操作は監査ログに記録されます。</span>
+    <span style="display: block;">「崇渦に関するお知らせ 前編」は公開ページと一覧から消えます。削除は記録され、管理者に頼めば復元できます。</span>
   </x-import>
 </div>
 </x-dc>

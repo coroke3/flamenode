@@ -19,7 +19,7 @@
 
 </style>
 
-<style>body{margin:0;background:#000} details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}</style>
+<style>body{margin:0} details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}</style>
 
 <div class="p-root vd has-dock" data-theme="dark" lang="ja">
   <div class="dc-import" data-board="PublicHeader">
@@ -34,14 +34,14 @@
 
 <style>body{margin:0}</style>
 
-<header class="hd2" lang="ja">
+<header class="hd2" data-theme="dark" lang="ja">
   <div class="hd-bar">
     <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
       <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
       <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
     </a>
     <nav class="hd-nav" aria-label="メインナビゲーション">
-      <a href="Videos.dc.html" aria-current="page">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="false">イベント</a>
+      <a href="Videos.html" aria-current="page">作品</a><a href="Creators.html" aria-current="false">クリエイター</a><a href="Events.html" aria-current="false">イベント</a>
     </nav>
     <div class="hd-right">
       <label class="hd-search">
@@ -52,7 +52,7 @@
       <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
       
         <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
-        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <a href="MyPage.html?tab=Entry" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
         <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
         <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
       
@@ -72,13 +72,15 @@
 
   
   <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
-    <a href="Videos.dc.html" aria-current="page" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+    <a href="Videos.html" aria-current="page" aria-label="作品" title="作品"><i class="fa-solid fa-film" aria-hidden="true"></i><span>作品</span></a><a href="Creators.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
   </nav>
 </header>
 </div>
 
-  <div class="vd-layout" style="display: flex; flex-wrap: wrap; gap: 32px;">
-    <main class="vd-main" style="flex: 999 1 720px; min-width: 0;">
+  <div class="vd-layout">
+    <main class="vd-main">
+      <div class="vd-hero">
+      <div class="vd-player-pane">
       
         <div class="vd-player" style="background: #000;">
           <img class="cover" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="プレイヤー(YouTube 埋め込み)">
@@ -86,8 +88,9 @@
       
       
       <div style="display: contents;"><div class="fn-progress" role="progressbar" aria-label="再生位置" aria-valuemin="0" aria-valuemax="100" aria-valuenow="35"><div class="fn-progress__fill" style="width: 35%;"></div></div></div>
+      </div>
 
-      <div class="vd-info" style="padding: 24px 0 0 40px; display: flex; flex-direction: column; gap: 20px;">
+      <div class="vd-info">
         <h1 class="t-display vd-title">空白合作</h1>
 
         <div class="wrap-row" style="gap: 12px 16px;">
@@ -205,9 +208,10 @@
           
         </section>
       </div>
+      </div>
     </main>
 
-    <aside class="vd-side" aria-label="動画補助情報" style="flex: 1 1 380px; min-width: 0; max-width: 480px; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 24px;">
+    <aside class="vd-side" aria-label="作品の補足情報">
       <section aria-labelledby="ch" class="vd-sheet" style="background: var(--surface-raised);">
         <div class="row" style="justify-content: space-between; padding: 12px 8px 12px 16px;">
           <h2 id="ch" class="vh t-h3" style="font-size: 15px;">チャプター <span class="muted t-num">6</span></h2>
@@ -303,7 +307,7 @@
             <span class="t-sm muted t-num">再生リスト · 2 / 73</span>
           </span>
           <span class="row" style="gap: 0;">
-            <button type="button" class="ib sm on" aria-pressed="true" aria-label="次の動画を自動再生"><i class="fa-solid fa-repeat"></i></button>
+            <button type="button" class="ib sm on" aria-pressed="true" aria-label="次の作品を自動再生"><i class="fa-solid fa-repeat"></i></button>
             <button type="button" class="ib sm" aria-label="並び順を初期化"><i class="fa-solid fa-rotate-left"></i></button>
           </span>
         </div>
@@ -383,7 +387,8 @@
       </section>
 
       <section aria-labelledby="rel">
-        <h2 id="rel" class="vh t-h3" style="font-size: 15px; margin-bottom: 8px;">関連動画</h2>
+        <h2 id="rel" class="vh t-h3" style="font-size: 15px; margin-bottom: 8px;">関連作品</h2>
+        <div class="vd-related">
         
           <a href="VideoDetail.html" class="fn-row fn-row--compact" style="padding: 8px 0;">
             <img class="fn-row__thumb" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="" style="width: 152px;">
@@ -415,11 +420,12 @@
             <span class="fn-row__body"><span class="fn-row__title" style="white-space: normal;">祟渦に関するお知らせ 後編</span><span class="fn-row__meta">ホラー映画合作</span></span>
           </a>
         
+        </div>
       </section>
     </aside>
   </div>
   
-  <nav class="vd-dock" aria-label="動画補助メニュー">
+  <nav class="vd-dock" aria-label="作品メニュー">
     <button type="button" class="" aria-pressed="false"><i class="fa-solid fa-list-ol" aria-hidden="true"></i><span>再生リスト</span><span class="t-num muted">73</span></button>
     <button type="button" class="" aria-pressed="false"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><span>チャプター・コメント</span><span class="t-num muted">6</span></button>
   </nav>
@@ -436,7 +442,7 @@
 
 <style>body{margin:0}</style>
 
-<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+<footer class="pub-foot" data-theme="dark" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
   <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
     <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
     <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
@@ -449,7 +455,7 @@
     <a href="Events.html" class="il">イベント一覧</a>
   </nav>
   <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
-    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html?tab=Entry" class="il">投稿する</a>
     <a href="MyPage.html" class="il">ダッシュボード</a>
     <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
     <a href="About.html" class="il">イベント開催相談</a>

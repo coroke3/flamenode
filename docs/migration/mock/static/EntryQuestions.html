@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>運営からの質問(質問種別ごとの入力) — FlameNode (static)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<link rel="stylesheet" href="../site/assets/fa/css/all.min.css">
+<link rel="stylesheet" href="../site/assets/bundle.css">
+<link rel="stylesheet" href="../site/assets/fn.css">
+<style>html,body{margin:0;background:#000}</style>
+</head><body>
+<!-- 静的スナップショット(初期状態)。route:  / source: source/boards/EntryQuestions.dc.html -->
+<div id="fn-root">
+
+<style>
+
+
+
+
+
+
+</style>
+
+<style>
+body{margin:0}
+.qs{display:grid;gap:32px}
+.qs-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.q{display:grid;gap:10px}
+.q-l{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:15px;line-height:24px;color:var(--ink)}
+.q-req{color:var(--danger);font-size:13px}
+.q-vis{font-size:12px;line-height:16px;color:var(--ink-muted)}
+.q-help{margin:-4px 0 0;font-size:12px;line-height:16px;color:var(--ink-muted)}
+.q-in{width:100%;max-width:520px;height:40px;padding:0 12px;border:0;background:var(--surface-subtle);color:var(--ink);font:400 15px/24px var(--font-sans);outline:none;box-sizing:border-box}
+.q-in:focus{background:var(--surface-active)}
+textarea.q-in{height:auto;min-height:104px;padding:8px 12px;resize:vertical}
+.q-cnt{font-size:12px;line-height:16px;color:var(--ink-muted);text-align:right;max-width:520px}
+
+.q-opts{display:grid;gap:2px;max-width:520px}
+.q-o{display:grid;grid-template-columns:18px minmax(0,1fr);gap:12px;align-items:center;min-height:44px;padding:0 14px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 15px/22px var(--font-sans);text-align:left;cursor:pointer}
+.q-o:hover{color:var(--ink)}
+.q-o.on{background:var(--surface-active);color:var(--ink)}
+.q-o .bx{width:16px;height:16px;box-sizing:border-box;box-shadow:inset 0 0 0 1.5px var(--ink-muted);display:grid;place-items:center;font-size:10px;color:var(--bg)}
+.q-o.on .bx{box-shadow:none;background:var(--ink)}
+.q-o.radio.on .bx::after{content:"";width:6px;height:6px;background:var(--bg)}
+.q-sel{appearance:none;width:100%;max-width:520px;height:40px;padding:0 40px 0 12px;border:0;background:var(--surface-subtle) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 14px center;color:var(--ink);font:400 15px/24px var(--font-sans)}
+.q-sel.ph{color:var(--ink-muted)}
+@media (max-width:640px){.q-opts,.q-in,.q-sel,.q-cnt{max-width:none}}
+</style>
+
+<div class="p-root qs" data-theme="dark" lang="ja" style="min-height: 0; background: transparent; padding-bottom: 0;">
+  <div class="qs-h"><h3 class="t-h3" style="margin: 0;">運営からの質問</h3><span class="t-sm muted">PVSF2026S</span></div>
+  
+    <div class="q" role="group" aria-label="ステージで流す際の音量調整は必要ですか？">
+      <div class="q-l"><span>ステージで流す際の音量調整は必要ですか？</span><span class="q-req" aria-label="必須">*</span><span class="q-vis">運営のみ</span></div>
+      
+      
+      
+      
+        <div class="q-opts" role="radiogroup">
+          <button type="button" role="radio" aria-checked="false" class="q-o radio"><span class="bx"><i class="" aria-hidden="true"></i></span><span>不要</span></button><button type="button" role="radio" aria-checked="false" class="q-o radio"><span class="bx"><i class="" aria-hidden="true"></i></span><span>必要</span></button>
+        </div>
+      
+      
+    </div>
+  
+    <div class="q" role="group" aria-label="作品に含まれる表現">
+      <div class="q-l"><span>作品に含まれる表現</span><span class="q-req" aria-label="必須">*</span><span class="q-vis">審査用</span></div>
+      <p class="q-help">あてはまるものをすべて選んでください</p>
+      
+      
+      
+        <div class="q-opts" role="group">
+          <button type="button" role="checkbox" aria-checked="false" class="q-o check"><span class="bx"><i class="" aria-hidden="true"></i></span><span>点滅・フラッシュ</span></button><button type="button" role="checkbox" aria-checked="false" class="q-o check"><span class="bx"><i class="" aria-hidden="true"></i></span><span>流血表現</span></button><button type="button" role="checkbox" aria-checked="true" class="q-o check on"><span class="bx"><i class="fa-solid fa-check" aria-hidden="true"></i></span><span>大音量</span></button><button type="button" role="checkbox" aria-checked="false" class="q-o check"><span class="bx"><i class="" aria-hidden="true"></i></span><span>該当なし</span></button>
+        </div>
+      
+      
+    </div>
+  
+    <div class="q" role="group" aria-label="制作期間">
+      <div class="q-l"><span>制作期間</span><span class="q-vis">作品ページに公開</span></div>
+      
+      
+      
+      
+      <select class="q-sel ph" aria-label="制作期間"><option value="">選択してください</option><option value="1週間未満">1週間未満</option><option value="1か月未満">1か月未満</option><option value="3か月未満">3か月未満</option><option value="3か月以上">3か月以上</option></select>
+    </div>
+  
+    <div class="q" role="group" aria-label="配信で読み上げる名前の読み">
+      <div class="q-l"><span>配信で読み上げる名前の読み</span><span class="q-vis">運営のみ</span></div>
+      
+      <input class="q-in" type="text" maxlength="40" placeholder="例: おたこ" value="" aria-label="配信で読み上げる名前の読み"><div class="q-cnt t-num">0 / 40</div>
+      
+      
+      
+    </div>
+  
+    <div class="q" role="group" aria-label="運営へのメッセージ">
+      <div class="q-l"><span>運営へのメッセージ</span><span class="q-vis">運営のみ</span></div>
+      
+      
+      <textarea class="q-in" maxlength="1000" placeholder="上映時の注意点など" aria-label="運営へのメッセージ"></textarea><div class="q-cnt t-num">0 / 1000</div>
+      
+      
+    </div>
+  
+</div>
+
+</div>
+</body></html>

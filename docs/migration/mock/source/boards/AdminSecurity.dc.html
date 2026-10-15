@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="security" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="security" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
     <div class="c-head">
       <div><h1 class="t-display">セキュリティ</h1><p class="muted">権限・認証状態の整合性を読み取り専用で点検します。初期表示では実行せず、必要なときだけ明示的に実行します。</p></div>
@@ -37,9 +37,9 @@
       <span class="t-sm muted">実行すると、漏洩・権限矛盾の可能性がある項目を状態フィルタ付きの一覧で表示します。</span>
     </div>
     <h2 class="il t-label muted" style="margin: 0 0 8px;"><i class="fa-solid fa-eye" aria-hidden="true"></i>実行後の表示例</h2>
-    <div class="dt" style="--cols: minmax(240px,1.6fr) 100px 72px minmax(200px,1.4fr); --minw: 0px; opacity: .7;">
+    <div class="dt" style="--cols: minmax(240px,1.6fr) 100px 72px minmax(200px,1.4fr); --minw: 0px; opacity: .85;" aria-label="実行後の表示例(サンプル)">
       <div class="dt-h"><span>チェック項目</span><span>状態</span><span class="num">件数</span><span>サンプル / 備考</span></div>
-      <div class="dt-r"><span>BAN ユーザーの有効セッション</span><span class="st"><span class="dot ok"></span>OK</span><span class="num">0</span><span class="muted">—</span></div>
+      <div class="dt-r"><span>BAN ユーザーの有効セッション</span><span class="st"><span class="dot ok"></span>正常</span><span class="num">0</span><span class="muted">—</span></div>
       <div class="dt-r"><span>owner 不在のイベント</span><span class="st"><span class="dot err"></span>危険</span><span class="num">1</span><span class="t-mono t-sm">toshikoshi</span></div>
     </div>
   </main>
