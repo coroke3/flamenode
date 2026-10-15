@@ -36,6 +36,8 @@
 ### MIG-0601: low-risk reads（低リスク参照系 API）
 - **Model:** small
 - **Readiness:** NEEDS_REFINEMENT — MIG-0307 の merge 後、lead が Hono の route 登録とテストの書き方（U01 のコード例）を `apps/api/src/index.ts` の実物に合わせて追記したら READY_FOR_SMALL_MODEL
+- **Recipe:** R-API
+- **Runtime:** S2
 - **Depends on:** MIG-0307, MIG-0107 / **Decisions:** D-02 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -47,9 +49,12 @@
 | software suggestions | RH-029 | `app/api/software/suggestions/route.ts`（`src/lib/api/softwareSuggestions.contract.test.mjs`） |
 #### Owned paths
 - 新規: `+apps/api/src/routes/health.ts`, `+apps/api/src/routes/publicAboutStats.ts`, `+apps/api/src/routes/softwareSuggestions.ts`, `+packages/contracts/src/health.ts` ほか DTO
-- 変更: `apps/api/src/index.ts`（route 登録のみ）
+- 新規: `+apps/api/src/env.ts`, `+apps/api/src/app.ts`, `+apps/api/test/*.test.mjs`（形は `IMPLEMENTATION_RECIPES.md` の R-API）
+- 変更: `apps/api/src/index.ts`（`export default app` だけにする）
+- 削除: `apps/api/src/types/hono.d.ts`（`any` を返す手書きの型 shim。本物の hono の型を隠す）
 - 触らない: `app/api/**`（本番切替まで旧実装を維持）
 #### Micro-units
+- **U00 土台**: `apps/api/src/types/hono.d.ts` を消し、R-API の配置（`env.ts` / `app.ts` / `index.ts`）を作る。`npm run build --workspace=@flamenode/api` が本物の hono の型で通ることを確認する。zod を `apps/api` の bundle に入れる場合は、build 後の bundle で zod の版を確認し、3.x なら `ZERO_1102.md` §4 の 10 に従って非本番で memory を測り、結果を PR に書く（更新はこの task でしない）。
 - **U01 health**: RH-018 と RH-017。deep は token 不一致で CURRENT と同じ status。検証: 既存 `route.test.mjs` と同じケースを Hono の `app.request()` で実行。
 - **U02 about-stats**: RH-026。R2 binding 名を CURRENT と同じにする。
 - **U03 software**: RH-029。MIG-0302 の domain 関数を使う。
@@ -82,6 +87,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0608: Hono read-only session resolution（Auth.js database session 互換）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0801 の baseline テスト（cookie 名・属性・期限・失効）が入ってから。高リスク（認証）なので小型モデルに渡さない
+- **Recipe:** R-API
+- **Runtime:** S4
 - **Depends on:** MIG-0801, MIG-0107 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -125,6 +132,8 @@ PRをrevert。旧 Next の認証は変わらない。
 ### MIG-0602: low-risk mutations（低リスク更新系 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608 の merge 後。transaction・監査を Hono → application service のどこで行うかを MIG-0303 の結果で確定
+- **Recipe:** R-API
+- **Runtime:** S3
 - **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-01 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -169,6 +178,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0603: video APIs（動画・チャプター API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0304 の merge 後
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0304 / **Decisions:** D-03 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -217,6 +228,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0305 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -263,6 +276,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0605: user/X/admin APIs（ユーザー・X・管理 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0306 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0306 / **Decisions:** D-03 DECIDED, D-04 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -315,10 +330,12 @@ Phase 6 共通契約のとおり。
 ### MIG-0606: API CPU benchmark
 - **Model:** small
 - **Readiness:** NEEDS_REFINEMENT — MIG-0603〜0605 の merge 後、lead が測定スクリプトの雛形と測定条件（ローカル `wrangler dev` / 非本番、サンプル数）を確定したら READY_FOR_SMALL_MODEL
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0603, MIG-0604, MIG-0605 / **Decisions:** D-06 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- 予算: 単純 read p95 < 5ms、mutation p95 < 8ms、上限 10ms（Free）。基準は `cloudflare/PERFORMANCE_BASELINE.md`。
+- 予算: `ZERO_1102.md` §3 の**最大値**で判定する（参照 S2 < 7ms、更新 S3 < 8ms、session 解決 S4 は 2ms 以内）。p50/p95/p99 は記録するが合否に使わない。入力は §5 の4種類（通常・上限ちょうど・不正・cold）を各 50回以上。
 - 対象: RH-010/011 を除く 31 メソッドの Hono 実装（`apps/api/src/routes/**`）。
 #### Owned paths
 - 新規: `+scripts/benchmark-api-cpu.mjs`, `+docs/migration/cloudflare/API_CPU_BENCHMARK.md`
@@ -339,7 +356,7 @@ npm run check:project-docs
 #### Ledger updates
 `API_CPU_BENCHMARK.md` を新規作成。`API_MATRIX.md` の各メソッドに測定値。
 #### DONE checklist
-- [ ] 31メソッドの測定値と条件が記録されている
+- [ ] 31メソッドの測定値（max を含む）と条件が記録され、max が `ZERO_1102.md` §3 の予算未満か、超過の担当MIGが記録されている
 - [ ] 測定値を本番値と書いていない
 #### STOP
 - 予算超過を直すためにエンドポイントを書き換え始めたら止める（担当MIGへ）。
@@ -349,6 +366,8 @@ PRをrevert。
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0606 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot

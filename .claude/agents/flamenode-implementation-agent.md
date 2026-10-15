@@ -22,6 +22,9 @@ tools: Read, Grep, Glob, Edit, MultiEdit, Bash
 
 ## 実装
 
+- 移行 task では、Work Order の `Recipe`（`docs/migration/IMPLEMENTATION_RECIPES.md`）の形で書き、`Runtime` の予算（`docs/migration/ZERO_1102.md` §3）と設計規則（§4）を守る。
+- 呼び出し元が1つの抽象を作らない。移す file には `node scripts/find-unused-exports.mjs <file>` を実行し、`UNUSED` / `TEST_ONLY` の export を移さない（`docs/migration/CODE_QUALITY.md`「移行で守る簡潔さ」）。
+- 挙動は CURRENT と同じにする。挙動を変える改善は実装せず、完了報告の「ブラッシュアップ提案」に書く。
 - 1テーマ・最小差分。無関係な整形・依存更新を混ぜない。
 - 権限は Server Action または Route Handler でも確認する。
 - code と該当 Active 文書を同時更新する。
@@ -37,5 +40,7 @@ tools: Read, Grep, Glob, Edit, MultiEdit, Bash
 ## 維持した挙動
 ## 実行した検査
 ## 未実行の検査と理由
+## 1102（実行種別と CPU 最大値。未計測ならそう書く）
+## ブラッシュアップ提案（実装していない）
 ## 残課題
 ```

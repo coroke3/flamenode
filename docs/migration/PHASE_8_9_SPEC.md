@@ -18,6 +18,8 @@ Next.js 固有のラッパーから Web Standards 準拠の Auth.js（`@auth/cor
 ### MIG-0801: Auth baseline fixtures/tests
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0008）は DONE。lead が cookie 名・属性の実測方法（非本番 build で `Set-Cookie` を記録）を U01 に書き足したら着手可。認証は高リスクなので小型モデルに渡さない
+- **Recipe:** R-TEST
+- **Runtime:** N
 - **Depends on:** MIG-0008 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -61,6 +63,8 @@ PRをrevert（テスト追加のみ）。
 ### MIG-0802: Web Standard/Auth integration PoC
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0801 と MIG-0607 の後。`@auth/core` と `next-auth@5.0.0-beta.32` の cookie・CSRF の互換を非本番で確かめる
+- **Recipe:** R-API
+- **Runtime:** S4
 - **Depends on:** MIG-0801, MIG-0607 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -100,6 +104,8 @@ PRをrevert。本番の認証は旧 Next のまま。
 ### MIG-0803: Discord/account-linking parity
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0802 の後
+- **Recipe:** R-API
+- **Runtime:** S3, S4
 - **Depends on:** MIG-0802 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -135,10 +141,12 @@ PRをrevert。
 ### MIG-0804: CPU/security review
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0803 の後
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0803 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- 目標: auth の request p95 < 9ms（本仕様 MIG-0804 目的）。基準は `cloudflare/PERFORMANCE_BASELINE.md`。
+- 目標: `ZERO_1102.md` §3 の最大値。session 解決（S4）は 2ms 以内、それを含む API 全体は S2 < 7ms / S3 < 8ms。p95 は参考として記録する。
 - 既存の安全なリダイレクト: `src/lib/auth/origin.ts`, `#utils/next` の `sanitizeNextPath`。
 #### Owned paths
 - 新規: `+docs/migration/auth/SECURITY_REVIEW.md`
@@ -172,6 +180,8 @@ PRをrevert。
 ### MIG-0805: production cutover proposal
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 手順書だけを作る task。本番の Route・Discord 設定の変更は別の明示承認
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0804 / **Decisions:** D-02 DECIDED, D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -207,6 +217,8 @@ npm run check:project-docs
 ### MIG-0806: Phase 8 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0805 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -252,6 +264,8 @@ Gate のPRをrevert。
 ### MIG-0901: residual dependency inventory
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase 5〜8 の Gate 通過と、各ルートの本番切替が承認・実施済みであることが前提
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0508, MIG-0607, MIG-0706, MIG-0806 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -287,6 +301,8 @@ npm run check:project-docs
 ### MIG-0902: rollback observation window
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 観測期間の長さ（最低7日を候補）と責任者を人間が決める
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0901 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -318,6 +334,8 @@ npm run check:project-docs
 ### MIG-0903: remove legacy Server Actions/routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0902 の後
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0902 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -355,6 +373,8 @@ node scripts/check-migration-file-progress.mjs
 ### MIG-0904: remove OpenNext/Next deploy path
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0903 の後
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0903 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -397,6 +417,8 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 ### MIG-0905: final architecture/docs consolidation
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0904 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -430,6 +452,8 @@ PRをrevert。
 ### MIG-0906: Final Gate & Migration Complete
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 人間の最終承認が必要
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0905 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot

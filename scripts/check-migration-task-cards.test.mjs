@@ -78,8 +78,10 @@ const completeOrder = (id, model = "small", readiness = "READY_FOR_SMALL_MODEL")
   "### " + id + ": title",
   "- **Model:** " + model,
   "- **Readiness:** " + readiness,
+  "- **Recipe:** R-DOMAIN",
+  "- **Runtime:** N",
   "- **Verified against:** `5d15922f` (2026-10-13)",
-  ...WORK_ORDER_SECTIONS.flatMap((section) => ["#### " + section, section === "Micro-units" ? "- **U01 step** — 手順\n```bash\n# comment inside fence is not a heading\nnode --test\n```" : "- item"]),
+  ...WORK_ORDER_SECTIONS.flatMap((section) => ["#### " + section, section === "Micro-units" ? "- **U01 step** — 手順\n```bash\n# comment inside fence is not a heading\nnode --test\n```\n期待: 終了コード0" : "- item"]),
 ].join("\n");
 
 test("work order section ends at the next heading outside fenced code", () => {
@@ -126,4 +128,27 @@ test("every unfinished task needs a full work order whose dependencies match STA
   assert.match(validatePlanCompleteness({ status: graph, specs: spec("") }).join(" "), /MIG-0303: unfinished task has no work order/);
   assert.match(validatePlanCompleteness({ status: graph, specs: spec(order("MIG-0303", "MIG-0302").replace("#### Rollback", "#### Notes")) }).join(" "), /MIG-0303: work order missing #### Rollback/);
   assert.match(validatePlanCompleteness({ status: graph.replace("| MIG-0302 | read | BLOCKED |", "| MIG-0302 | read | READY |"), specs: spec(order("MIG-0303", "MIG-0302")) }).join(" "), /MIG-0302: READY but dependency MIG-0301 is READY/);
+});
+
+import { validateSmallModelOrder } from "./check-migration-task-cards.mjs";
+
+test("small-model work order must be decided: commands, expectations, exact paths, no vague wording", () => {
+  assert.deepEqual(validateSmallModelOrder("MIG-0301", completeOrder("MIG-0301")), []);
+  const noExpect = completeOrder("MIG-0301").replace("期待: 終了コード0", "");
+  assert.match(validateSmallModelOrder("MIG-0301", noExpect).join(" "), /expected result/);
+  const vague = completeOrder("MIG-0301").replace("- item", "- 必要に応じて直す");
+  assert.match(validateSmallModelOrder("MIG-0301", vague).join(" "), /undecided wording: 必要に応じて/);
+  const glob = completeOrder("MIG-0301").replace("#### Owned paths\n- item", "#### Owned paths\n- 新規: `packages/ui/src/*.tsx`");
+  assert.match(validateSmallModelOrder("MIG-0301", glob).join(" "), /exact files, not globs/);
+});
+
+test("unfinished work orders name a known recipe and runtime class", () => {
+  const graph = "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-0108 | gate | DONE | — |\n| MIG-0301 | x | READY | MIG-0108 |\n";
+  const order = completeOrder("MIG-0301").replace("- **Verified against:**", "- **Depends on:** MIG-0108 / **Decisions:** none\n- **Verified against:**");
+  const specs = (o) => ({ "docs/migration/PHASE_3_SPEC.md": o });
+  const recipes = "## R-DOMAIN: move\n## R-API: hono\n";
+  assert.deepEqual(validatePlanCompleteness({ status: graph, specs: specs(order), recipes }), []);
+  assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("R-DOMAIN", "R-MAGIC")), recipes }).join(" "), /Recipe R-MAGIC is not a section/);
+  assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("- **Runtime:** N", "- **Runtime:** fast")), recipes }).join(" "), /Runtime must list/);
+  assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("- **Recipe:** R-DOMAIN\n", "")), recipes }).join(" "), /missing Recipe/);
 });

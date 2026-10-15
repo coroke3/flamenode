@@ -27,6 +27,8 @@
 | cross-model live smoke acceptance | `docs/migration/SMALL_MODEL_SMOKE_TEST.md` |
 | migration Git / branch / PR / merge policy | `docs/migration/GIT_WORKFLOW.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
+| migration code shape per task kind (recipes) | `docs/migration/IMPLEMENTATION_RECIPES.md` |
+| 1102 acceptance: runtime classes, max-CPU budgets, design rules | `docs/migration/ZERO_1102.md` |
 | current phase / merged task / dependency state | `docs/migration/STATUS.md` |
 | active owner / per-wake checkpoint on task PR | `docs/migration/work-items/MIG-XXXX.md`（format: `work-items/README.md`） |
 | CURRENT page route実装・分類 | `docs/migration/CURRENT_ROUTES.md` |
@@ -87,6 +89,8 @@
 - `auth/README.md` owns CURRENT Auth.js/session/linking/terms/Active X/event-video authorization/owner-invariant semantics.
 - `background-jobs/README.md` owns CURRENT Queue doorbell/Cron/D1 work-state/retry/DLQ/recovery/idempotency/async-state semantics.
 - `CODE_QUALITY.md` owns implementation quality standards.
+- `IMPLEMENTATION_RECIPES.md` owns the code shape each Work Order's `Recipe` line points to.
+- `ZERO_1102.md` owns 1102 acceptance (runtime classes and max-CPU budgets); measured CURRENT values stay in `cloudflare/PERFORMANCE_BASELINE.md`.
 - `STATUS.md` is the only **merged** task/Phase/dependency source. Do not add `PROGRESS.md`/`WORK_ITEMS.md`. In-flight task checkpoints are isolated in the owner PR's `work-items/MIG-XXXX.md`.
 - `GIT_WORKFLOW.md` is the only branch/PR/merge policy source.
 - Do not duplicate exact schema columns, binding IDs, API fields, or long command lists across docs.

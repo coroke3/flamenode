@@ -48,8 +48,9 @@ Read docs/migration/AGENT_PROTOCOL.md and execute exactly one READY MIG task.
 2. Read **the one relevant MIG row and its dependency rows** in `STATUS.md`, the related `OPEN_DECISIONS.md` decision, the `IMPLEMENTATION_RUNBOOK.md` current-workflow section, and **one** corresponding `TASK_CARDS_2_3.md` / `TASK_CARDS_4_5.md` / `TASK_CARDS_6_7.md` / `TASK_CARDS_8_9.md` `### MIG-XXXX` block. Check owner PR before claiming.
 3. Filter `FILE_MIGRATION_MATRIX.md` to **owned source/target rows**, then consult relevant `FILE_PROGRESS_PROTOCOL.md` state transitions and `TASK_MICRO_UNITS.md` (large tasks only). Open CURRENT code and tests before writing.
 4. Read only the necessary **portions** of `CURRENT_ROUTES.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `PRODUCT_REQUIREMENTS.md`, `CODE_QUALITY.md`, `ROUTE_MATRIX.md` or `API_MATRIX.md`. Use `GIT_WORKFLOW.md` for PR/merge/approval stages and `UI_REFERENCE.md` when work is visual.
-5. Subsystem baselines **only when touched**: `server-actions/README.md` (SA), `route-handlers/README.md` (RH), `cloudflare/TOPOLOGY.md` (deployment), `cloudflare/PERFORMANCE_BASELINE.md` + `PERF_HOTPATH_MATRIX.md` (1102), `static-delivery/README.md` (public), `auth/README.md` (security), `background-jobs/README.md` (Queue), `screen-mapping/README.md` (UI parity).
-6. Full `README.md`, `FEATURE_CATALOG.md` and `BACKEND_OPTIMIZATION.md` are **on-demand references**, not full-file mandatory context for every wake. Read `DOC_MAP.md` only if source-of-truth ownership is unclear.
+5. Every writer wake: the Work Order's `Recipe` section in `IMPLEMENTATION_RECIPES.md`, its `Runtime` row in `ZERO_1102.md` §3 and the design rules in §4, and `CODE_QUALITY.md`「移行で守る簡潔さ」「機能維持とブラッシュアップの線引き」. `npm run migration:next` prints the recipe and the budget rows in the packet.
+6. Subsystem baselines **only when touched**: `server-actions/README.md` (SA), `route-handlers/README.md` (RH), `cloudflare/TOPOLOGY.md` (deployment), `cloudflare/PERFORMANCE_BASELINE.md` + `PERF_HOTPATH_MATRIX.md` (1102), `static-delivery/README.md` (public), `auth/README.md` (security), `background-jobs/README.md` (Queue), `screen-mapping/README.md` (UI parity).
+7. Full `README.md`, `FEATURE_CATALOG.md` and `BACKEND_OPTIMIZATION.md` are **on-demand references**, not full-file mandatory context for every wake. Read `DOC_MAP.md` only if source-of-truth ownership is unclear.
 
 **Independent tracks:** MIG-0401→0404→0405→0406 (performance PoC), MIG-0201→…→0206 (Phase 2 design system; D-08 DECIDED / mock registered) and MIG-0301→ (domain extraction) can be claimed by distinct owners/PRs when their owned paths do not overlap. MIG-0402 waits for the Phase 2 Gate (MIG-0206) and MIG-0401; MIG-0403 additionally for 0404. MIG-0407 waits for 0403 **and** 0406; production is separately approved. See `PERFORMANCE_IMPLEMENTATION_PLAN.md`.
 
@@ -360,7 +361,9 @@ WAKE:
        -> reviewer laneとしてレビュー1件
   5. 自agentのIN_PROGRESS PRが無い -> 未所有のREADY taskを1つclaimし、Work Orderのmicro-unit 1つだけ実装
      （自分のREVIEW待ちPRがあっても進める。小型モデルは --model small の候補だけ）
-  6. leadのみ: Work OrderがNEEDS_REFINEMENTのtaskを1件詰める（docs/mig-xxxx-work-order branch、実コードで検証）
+  6. leadのみ: Work OrderがNEEDS_REFINEMENTのtaskを1件詰める（docs/mig-xxxx-work-order branch、実コードで検証。
+     手順は実際に試し、コード・コマンド・期待値を書く。形はIMPLEMENTATION_RECIPES.md、予算はZERO_1102.md。
+     READY_FOR_SMALL_MODELにする前に `node scripts/check-migration-task-cards.mjs` の小型モデル検査を通す）
   7. 該当なし -> 理由とREVIEW待ちPR一覧を報告して終了
 ```
 

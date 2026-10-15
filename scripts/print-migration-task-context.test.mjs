@@ -79,3 +79,13 @@ test("small-model advisory only offers tasks whose work order is READY_FOR_SMALL
  assert.deepEqual(next.candidates,["MIG-0301"]);
  assert.equal(pickNextTask(status,"",new Map(),()=>false).selected,null);
 });
+test("packet carries the recipe shape and the 1102 budget named by the work order",()=>{
+ const api=getTaskContext("MIG-0603").output;
+ assert.match(api,/## R-API:/);
+ assert.match(api,/^\| `S2` \|/m);
+ assert.match(api,/^\| `S3` \|/m);
+ assert.doesNotMatch(api,/## R-PAGE:/);
+ const domain=getTaskContext("MIG-0301").output;
+ assert.match(domain,/## R-DOMAIN:/);
+ assert.match(domain,/## 全レシピ共通/);
+});

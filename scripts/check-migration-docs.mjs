@@ -1195,7 +1195,7 @@ if (errors.length === 0) {
     microUnits: read("docs/migration/TASK_MICRO_UNITS.md"),
   }));
   errors.push(...validateWorkOrders({ status, specs: readSpecs(read) }));
-  errors.push(...validatePlanCompleteness({ status, specs: readSpecs(read) }));
+  errors.push(...validatePlanCompleteness({ status, specs: readSpecs(read), recipes: read("docs/migration/IMPLEMENTATION_RECIPES.md") }));
 
   errors.push(...validateFileProgress({
     matrix: read("docs/migration/FILE_MIGRATION_MATRIX.md"),

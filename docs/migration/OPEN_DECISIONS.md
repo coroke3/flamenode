@@ -1,7 +1,7 @@
 # FlameNode Migration Decisions — adopted options & remaining evidence
 
 > Status: Active / 仕様上の採用方針と実行ゲートの正本
-> Last updated: 2026-10-09
+> Last updated: 2026-10-15
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
@@ -23,6 +23,7 @@
 | D-06 | **A: 無料SSG優先。容量超過時はR2事前生成HTML優先、限定SSRは例外** | DECIDED | MIG-0406/0501..0508 | 静的出力実数・CPU・1102/visibility/SEO検証 |
 | D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
 | D-08 | **A: HTMLモックを先に確定してからUIを移行** | DECIDED | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | デザインモック受領・登録完了（docs/migration/mock/、UI_REFERENCE.md）。Phase 2抽出アンロック。 |
+| D-09 | 背景処理（Queue / Cron）を 1102 ゼロにする方式（下の D-09 節の A/B/C） | PROVISIONAL | 未作成（決定後に追加）。`ZERO_1102.md` G2 | ユーザーの選択。決まるまで G2 は未達 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -111,3 +112,14 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 - D-06: 本番のREAD ONLY COUNT、Static Assets files、CPU/1102負荷測定。リモートデータ取得の承認が必要なら別途取得。
 - D-07: 既存auth cookie/session/OAuth契約の非本番PoC。
 - D-08: HTMLモックの受領・UI_REFERENCE.md登録完了（MIG-0200完了）。
+
+## D-09 — 背景処理の 1102 ゼロ化（PROVISIONAL、2026-10-15 追加）
+
+根拠: 背景処理の Worker（`flamenode-content-jobs`、`flamenode-fast-jobs`、`flamenode-sync-jobs`）は、どの MIG task でも「触らない」になっている。CURRENT の CPU は content の queue が p95 107ms・max 148ms、sync の scheduled が max 83ms（[cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md) の Four-Worker 表）。Workers Free の Cron Trigger の上限は 10ms（https://developers.cloudflare.com/workers/platform/limits/ ）。詳細は [ZERO_1102.md](ZERO_1102.md) §6。
+
+| 案 | 内容 | 代償 |
+| --- | --- | --- |
+| A | 公開データ（一覧・検索索引・人気順など）の生成を Worker から build 時（Astro の build）へ移し、内容の更新は deploy hook で build を起こす。残る小さな処理（通知など）は B の方法で 8ms 未満に分ける | 作品の追加・修正が公開ページに出るまで、build 1回分（数分）かかる。build 回数に上限がある |
+| B | 背景処理をすべて Worker のまま、1 message あたり 8ms 未満になるよう分割する | 検索索引の作成（CURRENT で 350ms〜1.6s）を数十〜数百の message に分ける必要があり、仕組みが複雑になる。Queue の無料枠（1日 10,000 operations）を圧迫する |
+| C | Workers Paid（月 $5〜）にし、背景処理の CPU 上限を 30秒〜15分にする | 費用がかかる。web の request は Paid でも予算どおり 10ms 未満を守る |
+

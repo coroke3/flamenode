@@ -38,6 +38,8 @@
 ### MIG-0401: Astro build-input PoC
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — PR #283 で実装済み、独立レビュー待ち（owner の work-item `docs/migration/work-items/MIG-0401.md` は PR #283 の branch にある）
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0105 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -76,6 +78,8 @@ PR #283 を merge 後に revert。本番には影響しない。
 ### MIG-0402: shared React UI in Astro
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0206（Phase 2 Gate）と MIG-0401（PR #283）の merge 後、`AdapterProvider`（MIG-0203）の API で書き直す
+- **Recipe:** R-UI
+- **Runtime:** N
 - **Depends on:** MIG-0206, MIG-0401 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -120,6 +124,8 @@ PRをrevert。
 ### MIG-0403: representative video/user/event SSG
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0402 と MIG-0404 の merge 後。snapshot の DTO は MIG-0401 の `PublicSnapshot`（`kind/id/title` のみ）なので、代表画面に必要な項目への拡張を先に決める
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0402, MIG-0404 / **Decisions:** D-02 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -163,6 +169,8 @@ PRをrevert。本番には影響しない。
 ### MIG-0404: route-map generator（**0401の直後、0403を待たない**）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0401（PR #283）の merge 後。canonical/alias の出所（R2 artifact か build 時 D1 read-only か）を決める
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0401 / **Decisions:** D-02 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -206,11 +214,13 @@ PRをrevert。
 ### MIG-0405: visibility gateway
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0404 の manifest 形式と、gateway を `apps/site` 内に置くか独立 Worker にするか（`cloudflare/TOPOLOGY.md`）を決めてから
+- **Recipe:** R-GATEWAY
+- **Runtime:** S1
 - **Depends on:** MIG-0404 / **Decisions:** D-02 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT の可視性判定: `src/lib/publicData/publicArtifactVisibility.ts`（テスト `publicArtifactVisibility.test.mjs`）、`public_visibility_fences`（`src/lib/db/schema.base.ts:1044`）、検査 `npm run check:public-visibility-fences`。
-- CPU 目標: gateway p50<1.5ms, p95<3ms, p99<5ms（`TASK_CARDS_4_5.md` MIG-0405）。
+- CPU 目標: gateway p50<1.5ms, p95<3ms, p99<5ms（`TASK_CARDS_4_5.md` MIG-0405）に加え、**最大値 < 5ms**（`ZERO_1102.md` §3 の S1。合否は最大値で判定）。
 - 本番 Route / Custom Domain の変更は明示承認事項（`CLAUDE.md`）。
 #### Owned paths
 - 新規: `+apps/site/src/gateway/index.ts`, `+apps/site/src/gateway/visibility.ts`, `+scripts/migration-gateway.test.mjs`
@@ -249,6 +259,8 @@ PRをrevert。非本番のみなので本番の戻しは不要。
 ### MIG-0406: CPU/build benchmark + bounded public fallback
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0405 の後。実データ件数での見積もり（作品・ユーザー・イベント数）を D1 の read-only 集計か既存 artifact から得る方法を決めてから
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0405 / **Decisions:** D-06 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -292,6 +304,8 @@ PRをrevert。
 ### MIG-0407: Phase 4 Gate（**0403 + 0406 両方の証跡が必要**）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0403, MIG-0406 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -373,6 +387,8 @@ Gate 文書のPRをrevert。
 ### MIG-0501: fixed/static routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0407（Phase 4 Gate）通過後。`/about` の統計（RH-026）を build snapshot から出すか Island で API を読むかを決める
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0407 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -413,6 +429,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0502: event routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0501 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0502
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0501 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -454,6 +472,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0503: group compat routes
 - **Model:** small
 - **Readiness:** NEEDS_REFINEMENT — MIG-0501 の後。Workers Static Assets の `_redirects` で 307 と `:slug` 置換が出せることを非本番で確認したら、lead がコード例を追記して READY_FOR_SMALL_MODEL にする
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0501 / **Decisions:** D-02 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -490,6 +510,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0504: user routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0501 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0504
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0501 / **Decisions:** D-02 DECIDED, D-03 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -529,6 +551,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0505: list/discover routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0501 の後。検索・並び替えを Island で既存 API（RH-032 `GET /api/videos`）から読むか、build 時の検索 projection にするかを決める
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0501 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -568,6 +592,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0506: root/top route
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0505 の後。トップの snapshot（棚・お知らせ・急上昇）の項目を確定してから
+- **Recipe:** R-PAGE
+- **Runtime:** S0
 - **Depends on:** MIG-0505 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -607,6 +633,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0507: `/[id]` video catch-all
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0502〜0506 の後で最後に行う。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0507
+- **Recipe:** R-PAGE, R-GATEWAY
+- **Runtime:** S0, S1
 - **Depends on:** MIG-0502, MIG-0503, MIG-0504, MIG-0505, MIG-0506 / **Decisions:** D-02 DECIDED, D-03 DECIDED, D-04 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -650,6 +678,8 @@ Phase 5 共通契約のとおり。
 ### MIG-0508: Phase 5 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0507, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot

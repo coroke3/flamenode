@@ -16,6 +16,30 @@ export function getWorkOrder(id,root=ROOT){
   const order=file?extractWorkOrder(readOptional(root,file),id):null;
   return {file,order,smallReady:order?.model==="small"&&order?.readiness==="READY_FOR_SMALL_MODEL"};
 }
+// Recipe sections and runtime budgets that a work order points to, so the packet carries the code shape and the 1102 budget.
+function markdownSection(text,heading){
+  const start=text.indexOf("\n"+heading);
+  if(start===-1)return null;
+  const next=text.indexOf("\n## ",start+1);
+  return text.slice(start+1,next===-1?undefined:next).trim();
+}
+export function getRecipeContext(orderText,root=ROOT){
+  if(!orderText)return [];
+  const recipes=readOptional(root,"docs/migration/IMPLEMENTATION_RECIPES.md")??"";
+  const zero=readOptional(root,"docs/migration/ZERO_1102.md")??"";
+  const names=(orderText.match(/\*\*Recipe:\*\*([^\n]*)/)?.[1].match(/R-[A-Z]+/g))??[];
+  const runtimes=(orderText.match(/\*\*Runtime:\*\*([^\n]*)/)?.[1].split(/[,、\s]+/).filter(Boolean))??[];
+  const sections=["## 全レシピ共通",...names.map(n=>"## "+n+":")].map(h=>markdownSection(recipes,h)).filter(Boolean);
+  const budgetRows=zero.split("\n").filter(line=>runtimes.some(r=>line.startsWith("| `"+r+"` |")));
+  return [
+    "## Recipe (docs/migration/IMPLEMENTATION_RECIPES.md)",
+    ...(sections.length?sections:["No Recipe line: NEEDS_REFINEMENT."]),
+    "",
+    "## Runtime budget (docs/migration/ZERO_1102.md §3; design rules §4)",
+    ...(budgetRows.length?["| ID | 種別 | 例 | Worker | CPU 最大値の予算 | 構造上の上限 |","| --- | --- | --- | --- | --- | --- |",...budgetRows]:["No Runtime line: NEEDS_REFINEMENT."]),
+    "",
+  ];
+}
 export function getTaskContext(id,root=ROOT){
   if(!/^MIG-\d{4}$/.test(id))throw new Error("Provide one exact MIG-XXXX task ID");
   const status=read(root,"docs/migration/STATUS.md");
@@ -50,6 +74,7 @@ export function getTaskContext(id,root=ROOT){
     "## Work order ("+(specFile??"no phase spec")+")",
     order?.text??("No '### "+id+":' work order section yet: NEEDS_REFINEMENT. A lead must write it (IMPLEMENTATION_RUNBOOK.md Work Order format) before a small model starts."),
     "",
+    ...getRecipeContext(order?.text,root),
     "## Assigned source-file rows ("+owned.length+"; full ledger remains authoritative)",
     ...owned.map(row=>" - "+row.path+" | "+row.kind+" | "+row.state+" | "+row.target),
     "",

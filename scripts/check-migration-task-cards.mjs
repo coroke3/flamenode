@@ -151,9 +151,37 @@ export function validateWorkOrders({ status, specs }) {
         if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": small-model work order missing #### " + section);
       }
       if (!/\*\*U01\b/.test(order.text)) errors.push(id + ": small-model work order has no U01 micro-unit");
+      errors.push(...validateSmallModelOrder(id, order.text));
     }
   }
   return errors;
+}
+
+// A small model executes the order literally, so everything it needs must be decided in the text.
+const VAGUE_PHRASES = ["適宜", "必要に応じて", "可能なら", "TBD", "検討する", "うまく"];
+
+function workOrderSection(text, name) {
+  return text.split(new RegExp("^####\\s+" + name + "\\s*$", "m"))[1]?.split(/^####\s/m)[0] ?? "";
+}
+
+export function validateSmallModelOrder(id, text) {
+  const errors = [];
+  const units = workOrderSection(text, "Micro-units");
+  if (!/```bash/.test(units)) errors.push(id + ": small-model Micro-units need a ```bash command block");
+  if (!/期待/.test(units)) errors.push(id + ": small-model Micro-units need an expected result (期待)");
+  for (const phrase of VAGUE_PHRASES) {
+    if (text.includes(phrase)) errors.push(id + ": small-model work order contains undecided wording: " + phrase);
+  }
+  for (const line of workOrderSection(text, "Owned paths").split("\n")) {
+    if (/^- (新規|変更|削除)/.test(line) && line.includes("*")) errors.push(id + ": small-model Owned paths must list exact files, not globs: " + line.trim());
+  }
+  return errors;
+}
+
+export const RUNTIME_CLASSES = Object.freeze(["S0", "S1", "S2", "S3", "S4", "B", "N"]);
+
+export function parseRecipeIds(recipesText) {
+  return new Set([...(recipesText ?? "").matchAll(/^## (R-[A-Z]+):/gm)].map((m) => m[1]));
 }
 
 // Plan completeness: every unfinished tracked task has a full work order whose
@@ -177,7 +205,8 @@ function parseAllMigrationStates(status) {
   return states;
 }
 
-export function validatePlanCompleteness({ status, specs }) {
+export function validatePlanCompleteness({ status, specs, recipes }) {
+  const recipeIds = recipes === undefined ? null : parseRecipeIds(recipes);
   const errors = [];
   const tasks = parseTrackedMigrationTasks(status);
   const states = parseAllMigrationStates(status);
@@ -202,6 +231,19 @@ export function validatePlanCompleteness({ status, specs }) {
     if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.text)) errors.push(id + ": work order needs Verified against `<sha>`");
     for (const section of WORK_ORDER_SECTIONS) {
       if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": work order missing #### " + section);
+    }
+    const recipeLine = order.text.match(/\*\*Recipe:\*\*([^\n]*)/)?.[1];
+    if (recipeLine === undefined) errors.push(id + ": work order missing Recipe (IMPLEMENTATION_RECIPES.md)");
+    else if (recipeIds) {
+      const named = recipeLine.match(/R-[A-Z]+/g) ?? [];
+      if (!named.length) errors.push(id + ": Recipe names no R-* section");
+      for (const r of named) if (!recipeIds.has(r)) errors.push(id + ": Recipe " + r + " is not a section of IMPLEMENTATION_RECIPES.md");
+    }
+    const runtimeLine = order.text.match(/\*\*Runtime:\*\*([^\n]*)/)?.[1];
+    if (runtimeLine === undefined) errors.push(id + ": work order missing Runtime (ZERO_1102.md)");
+    else {
+      const classes = runtimeLine.split(/[,、\s]+/).filter(Boolean);
+      if (!classes.length || classes.some((c) => !RUNTIME_CLASSES.includes(c))) errors.push(id + ": Runtime must list ZERO_1102.md classes " + RUNTIME_CLASSES.join("/") + ", got: " + runtimeLine.trim());
     }
     const dependsLine = order.text.match(/\*\*Depends on:\*\*([^\n]*)/)?.[1];
     if (dependsLine === undefined) { errors.push(id + ": work order missing Depends on"); continue; }
@@ -237,7 +279,7 @@ if(invoked){
     microUnits:read("docs/migration/TASK_MICRO_UNITS.md"),
   });
   errors.push(...validateWorkOrders({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
-  errors.push(...validatePlanCompleteness({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
+  errors.push(...validatePlanCompleteness({status:read("docs/migration/STATUS.md"),specs:readSpecs(read),recipes:read("docs/migration/IMPLEMENTATION_RECIPES.md")}));
   for(const error of errors)console.error("[migration-task-cards] "+error);
   if(errors.length)process.exitCode=1;
   else console.log("[migration-task-cards] OK: "+TASK_CARD_FILES.length+" card files cover all "+parseTrackedMigrationTasks(read("docs/migration/STATUS.md")).size+" active/future MIG tasks.");
