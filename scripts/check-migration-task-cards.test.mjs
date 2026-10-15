@@ -105,3 +105,25 @@ test("READY task requires a complete work order before small-model execution", (
   const duplicate = { "docs/migration/PHASE_3_SPEC.md": completeOrder("MIG-0301") + "\n" + completeOrder("MIG-0301") };
   assert.match(validateWorkOrders({ status, specs: duplicate }).join(" "), /duplicate work order heading MIG-0301/);
 });
+
+import { validatePlanCompleteness } from "./check-migration-task-cards.mjs";
+
+test("every unfinished task needs a full work order whose dependencies match STATUS", () => {
+  const graph = `| ID | Task | State | Depends on |
+| --- | --- | --- | --- |
+| MIG-0108 | gate | DONE | MIG-0102..MIG-0107 |
+| MIG-0301 | extraction | READY | MIG-0108 |
+| MIG-0302 | read | BLOCKED | MIG-0301 |
+| MIG-0303 | write | BLOCKED | MIG-0302 |
+`;
+  const order = (id, depends) => completeOrder(id, "lead", "NEEDS_REFINEMENT — x").replace("- **Verified against:**", "- **Depends on:** " + depends + " / **Decisions:** none\n- **Verified against:**");
+  const spec = (o303) => ({ "docs/migration/PHASE_3_SPEC.md": [order("MIG-0301", "MIG-0108"), order("MIG-0302", "MIG-0301"), o303].join("\n") });
+  assert.deepEqual(validatePlanCompleteness({ status: graph, specs: spec(order("MIG-0303", "MIG-0302")) }), []);
+  // transitive dependency already implied by STATUS is allowed
+  assert.deepEqual(validatePlanCompleteness({ status: graph, specs: spec(order("MIG-0303", "MIG-0302, MIG-0301")) }), []);
+  assert.match(validatePlanCompleteness({ status: graph, specs: spec(order("MIG-0303", "MIG-0301")) }).join(" "), /MIG-0303: work order Depends on omits STATUS dependency MIG-0302/);
+  assert.match(validatePlanCompleteness({ status: graph.replace("| MIG-0302 | read | BLOCKED | MIG-0301 |", "| MIG-0302 | read | BLOCKED | MIG-0108 |"), specs: spec(order("MIG-0303", "MIG-0302, MIG-0301")) }).join(" "), /MIG-0303: work order depends on MIG-0301 but STATUS has no such dependency path/);
+  assert.match(validatePlanCompleteness({ status: graph, specs: spec("") }).join(" "), /MIG-0303: unfinished task has no work order/);
+  assert.match(validatePlanCompleteness({ status: graph, specs: spec(order("MIG-0303", "MIG-0302").replace("#### Rollback", "#### Notes")) }).join(" "), /MIG-0303: work order missing #### Rollback/);
+  assert.match(validatePlanCompleteness({ status: graph.replace("| MIG-0302 | read | BLOCKED |", "| MIG-0302 | read | READY |"), specs: spec(order("MIG-0303", "MIG-0302")) }).join(" "), /MIG-0302: READY but dependency MIG-0301 is READY/);
+});

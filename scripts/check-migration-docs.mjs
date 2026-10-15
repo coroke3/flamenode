@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { validateMigrationExecution, CHECKPOINT_POLICY_FILES } from "./check-migration-execution.mjs";
-import { validateTaskCards, validateWorkOrders, readSpecs, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
+import { validateTaskCards, validateWorkOrders, validatePlanCompleteness, readSpecs, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
 import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
 import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
 import { validateWorkItems, readWorkItems, gitCommitExists } from "./check-migration-work-items.mjs";
@@ -1195,6 +1195,7 @@ if (errors.length === 0) {
     microUnits: read("docs/migration/TASK_MICRO_UNITS.md"),
   }));
   errors.push(...validateWorkOrders({ status, specs: readSpecs(read) }));
+  errors.push(...validatePlanCompleteness({ status, specs: readSpecs(read) }));
 
   errors.push(...validateFileProgress({
     matrix: read("docs/migration/FILE_MIGRATION_MATRIX.md"),

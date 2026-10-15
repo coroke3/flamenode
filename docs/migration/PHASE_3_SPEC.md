@@ -62,106 +62,382 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 
 ### MIG-0301: extraction/DI pattern（抽出パターンの確立）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — packages/domainのテスト実行経路（node strip-types/exports）を確定する
+- **Readiness:** NEEDS_REFINEMENT — `packages/domain` のテスト実行経路（Node の strip-types と package `exports`）を U01 で確定する。確定後の抽出規約（§4）が MIG-0302 以降の小型モデル向け手順になる
 - **Depends on:** MIG-0108 / **Decisions:** none
-- **Verified against:** `5d15922f` (2026-10-13)
-
-- **目的**: Tier 1 の抽出方式（ファイル配置・import 規約・ブリッジ・テスト）を、1 モジュールで実証して固定する。
-- **PoC 対象**: `src/lib/slots/slotReservationLimit.ts`（`MAX_SLOT_RESERVATIONS_PER_XID`, `normalizeSlotReservationLimit`, `slotReservationLimitMessage`。import なし）
-- **作業**:
-  1. `packages/domain` に実行可能なテスト経路を作る（`test` script と、`node --test --experimental-strip-types` で `.ts` を解決できる `exports` 設計）。
-  2. `` `+packages/domain/src/slots/reservationLimit.ts` `` へ実装を移し、`src/lib/slots/slotReservationLimit.ts` を同じ export 名の再 export ブリッジにする。
-  3. 既存テスト（`src/lib/slots/` 配下の既存 `*.test.mjs`）が無変更で通ることを確認する。
-  4. `packages/domain/src/permissions.ts` のプレースホルダーを削除し、`packages/domain/src/index.ts` の export を整理する（上記注意点）。
-  5. 決定した方式を本書 §4（抽出規約）へ追記する。
-- **やらないこと**: MIG-0308の前にDB package移設を先走ること。新domainから旧`src/`のdrizzle schemaへ相対importすること。
-- **受け入れ条件**:
-  - ブリッジ越しに `npm run test:unit`・`npm run typecheck`・Next の build 経路（`npm run cf:cloud-build` が使う経路）で解決できる。
-  - `packages/domain` に禁止 import がない（MIG-0307 で自動チェックを追加するまで、grep で確認する）。
-- **検証**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  npm run verify:fast
-  npm run check:project-docs
-  ```
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- `src/lib/slots/slotReservationLimit.ts:1` `MAX_SLOT_RESERVATIONS_PER_XID = 100`、`:3-10` `normalizeSlotReservationLimit`（`Number(value ?? 0)`、非有限は0、`Math.floor` 後 0〜100 に clamp）、`:12-17` `slotReservationLimitMessage`。import 無し。
+- 既存テスト: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`。
+- `packages/domain/src/index.ts:1` は `export * from "./permissions"`（拡張子なし）。`tsconfig.base.json` は `moduleResolution: "bundler"` なので `tsc` は通るが、Node の ESM は拡張子なしの相対 import を解決しない。
+- `packages/domain/src/permissions.ts:1-7` の `canEditVideo` は `isOwner || isCollabEditor || isEventStaff` を返す偽の権限判定。`apps/**`, `packages/**` に呼び出し元は無い（2026-10-15 `rg -n canEditVideo apps packages`）。
+- `packages/domain/package.json`: `main` / `types` は `dist/`、test script 無し。
+#### Owned paths
+- 新規: `+packages/domain/src/slots/reservationLimit.ts`, `+packages/domain/test/reservationLimit.test.mjs`
+- 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`（`exports` と `test` script）
+- 変更（bridge化のみ）: `src/lib/slots/slotReservationLimit.ts`
+- 削除: `packages/domain/src/permissions.ts`（呼び出し元0件を再確認してから）
+- 変更: `docs/migration/PHASE_3_SPEC.md` §4（決めた規約を記録）
+- 触らない: `src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）
+#### Micro-units
+- **U01 test path**: `packages/domain` の相対 import に `.ts` 拡張子を付けるか、`exports` で source を指すかを決め、`node --test --experimental-strip-types packages/domain/test/*.test.mjs` が動く状態にする。テストが dist と source のどちらを import しているかをPRに書く。
+- **U02 move**: 実装を意味を変えず `packages/domain/src/slots/reservationLimit.ts` へ移し、旧pathを同名 export の bridge にする。検証: 既存3テストが移動前と同数PASS。
+- **U03 permissions**: 偽の `canEditVideo` を削除し、`index.ts` の export を整理する。
+- **U04 rules**: 配置・export・bridge の書き方・テストの場所と実行コマンド・Node/TS/Next の3経路の解決方法を §4 に記録する。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `null`, `undefined`, `-1`, `2.9`, `150`, `Infinity`, `NaN` | `0, 0, 0, 2, 100, 0, 0` |
+| T02 | `slotReservationLimitMessage(3)` | 「このイベントでは、1つのX IDにつき最大3件まで枠を確保できます。連続枠は1件として数えます。」と完全一致 |
+| T03 | `slotReservationLimitMessage(0)` | 空文字 |
+| T04 | 旧pathから import | 既存3テストが無変更でPASS |
+| T05 | `packages/domain` の import | `src/**`, `next/*`, `server-only` が0件 |
+#### Commands
+```bash
+node --test --experimental-strip-types packages/domain/test/*.test.mjs
+npm run build --workspace=@flamenode/domain
+npm run typecheck
+npm run test:unit
+npm run verify:fast
+npm run check:project-docs
+```
+期待: すべて終了コード0、`test:unit` の件数が移動前と同じ。
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: `src/lib/slots/slotReservationLimit.ts` を `BRIDGED`、Future files 表の `packages/domain/src/slots/reservationLimit.ts` を作成済みへ。
+#### DONE checklist
+- [ ] Node / TypeScript / Next build の3経路で bridge 越しに解決できる（実行ログをPRに貼る）
+- [ ] 偽の `canEditVideo` が無い
+- [ ] §4 の抽出規約が埋まっている
+#### STOP
+- Node が dist 未生成で失敗する、型 export が消える、Next が条件付き exports を解決できない場合は REVIEW に進めない。
+- 移す対象が DB・`server-only`・`@/` alias を import していたら止める。
+#### Rollback
+PRをrevert。bridge は revert で元実装に戻る。
 
 ### MIG-0302: low-risk read domain（低リスク参照系）
-
-- **対象（Tier 1 のみ）**: 副作用・DB アクセスのない純粋ロジック。
-  - `src/lib/utils/softwareLabels.ts`（`normalizeSoftwareLabels`, `normalizeSoftwareKey`, `normalizeSoftwareCatalogName`, `SOFTWARE_LABEL_MAX_ITEMS`, `SOFTWARE_LABEL_MAX_LENGTH`）
-  - `src/lib/slots/limits.ts`（`normalizeMaxSlotsPerVideo`, `MIN_SLOTS_PER_VIDEO`, `MAX_SLOTS_PER_VIDEO`）
-  - 公開 read の DTO 整形のうち `@/` import を持たないもの（候補選定は `route-handlers/README.md` の RH-029 `/api/software/suggestions` を起点にする）
-- **作成**: `` `+packages/domain/src/software/labels.ts` ``, `` `+packages/domain/src/slots/limits.ts` `` と対応するテスト。ブリッジは MIG-0301 の方式。
-- **MIG-0308 待ち**: DB を読むread（`videoDetailQueries.ts` 等）は別のTier2。
-- **検証**: MIG-0301 と同じ。
+- **Model:** small
+- **Readiness:** NEEDS_REFINEMENT — MIG-0301 の merge で「packages/domain へ移す書き方・bridge・テスト実行経路」（本仕様 §4）が確定したら、lead が U01/U02 のコード例を追記して READY_FOR_SMALL_MODEL にする
+- **Depends on:** MIG-0301 / **Decisions:** none
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- `src/lib/utils/softwareLabels.ts:1-2` `SOFTWARE_LABEL_MAX_ITEMS = 20`, `SOFTWARE_LABEL_MAX_LENGTH = 80`。`:4` `normalizeSoftwareCatalogName`、`:12` `normalizeSoftwareKey`、`:16` `normalizeSoftwareLabels`。import 無し。
+- `src/lib/slots/limits.ts:1-2` `MIN_SLOTS_PER_VIDEO = 1`, `MAX_SLOTS_PER_VIDEO = 20`。`:4` `normalizeMaxSlotsPerVideo(value: unknown): number`。import 無し。
+- 利用側（2026-10-15時点）: `softwareLabels` を import するファイル 3件、`slots/limits` を import するファイル 7件（`rg -l 'softwareLabels"|slots/limits"' src app` で再確認）。
+- DB を読む read（`src/lib/db/videoDetailQueries.ts` 等）は対象外（MIG-0308 の後）。
+#### Owned paths
+- 新規: `+packages/domain/src/software/labels.ts`, `+packages/domain/src/slots/limits.ts` と各テスト
+- 変更（bridge化のみ）: `src/lib/utils/softwareLabels.ts`, `src/lib/slots/limits.ts`
+- 変更: `packages/domain/src/index.ts`（export 追加のみ）
+- 触らない: 利用側ファイル（import path を書き換えない。bridge で吸収する）
+#### Micro-units
+- **U01 software labels**: 実装を意味を変えず移し、旧pathを同名 export の bridge にする（書き方は §4）。検証: 移動前後で `node --test --experimental-strip-types "src/**/*software*.test.mjs"` のPASS件数が同じ。
+- **U02 slot limits**: 同様に移す。検証: `node --test --experimental-strip-types src/lib/slots/limits.test.mjs` が同数PASS。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `normalizeMaxSlotsPerVideo(0)` / `(21)` / `("x")` | 移動前と同じ戻り値 |
+| T02 | 81文字のラベル、21個のラベル、重複ラベル | 移動前と同じ正規化結果 |
+| T03 | 旧pathから import | 既存テストが無変更でPASS |
+| T04 | `packages/domain/src/**` の import | `src/**` と `next/*` への参照が0件 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/domain
+npm run typecheck
+npm run test:unit
+npm run verify:fast
+npm run check:project-docs
+```
+期待: すべて終了コード0、`test:unit` の件数が移動前と同じ。
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: `src/lib/utils/softwareLabels.ts`, `src/lib/slots/limits.ts` を `BRIDGED`（target は新パス、evidence に PR/テスト件数）。RH-029 の行は変えない（API は MIG-0601）。
+#### DONE checklist
+- [ ] 2ファイルが bridge になり、利用側の import は変わっていない
+- [ ] `test:unit` の件数が移動前と同じ
+- [ ] `packages/domain` から `src/**` を参照していない
+#### STOP
+- 移す対象が DB・`server-only`・`@/` alias を import していたら止める（Tier 2）。
+- §4 の抽出規約が空のままなら止める（MIG-0301 未完了）。
+#### Rollback
+PRをrevert。bridge は revert で元実装に戻る。
 
 ### MIG-0308: packages/db schema extraction（D-01 A / MIG-0302後）
-
-- **専用PR**: [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)に従って`+packages/db`へbase/canonical/schemaを一括移設、旧schemaを再exportブリッジにする。
-- **必須**: `drizzle.config.ts` / DB checker / TS path / package-lock / Next・Hono・Workers build importを整合させる。
-- **禁止**: 既存SQL migration改変、Remote D1操作、schema変更を伴うコード整理、本番deploy。
-- **Gate**: named exportの同一性・生成SQL差分ゼロ・型/各build/test/独立reviewが証明されるまでDONEにしない。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — 高リスク（schema）。手順の正本は [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)。小型モデルには渡さない
+- **Depends on:** MIG-0302 / **Decisions:** D-01 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- `src/lib/db/schema.ts:8,34`: `schema.base.ts` と `schema.canonical.ts` を明示的に re-export する2ブロック。
+- `schema.canonical.ts` は `schema.base.ts` から `eventGroups, softwareCatalog, users` を import（`DB_PACKAGE_EXTRACTION_PLAN.md` §1）。片方だけ移すと循環が壊れる。
+- `drizzle.config.ts` の `schema` は `./src/lib/db/schema.ts`、`out` は `./migrations`。
+- `scripts/check-db-schema.mjs` は旧3ファイルの存在と fragment import を検査する（2026-10-15 実行: 31 migrations, 46 tables, 474 columns, 114 indexes, 52 foreign keys, 43 checks）。
+#### Owned paths
+- 新規: `+packages/db/package.json`, `+packages/db/tsconfig.json`, `+packages/db/src/schema/base.ts`, `+packages/db/src/schema/canonical.ts`, `+packages/db/src/schema/index.ts`
+- 変更: `src/lib/db/schema.ts`（re-export bridge）, `drizzle.config.ts`, `scripts/check-db-schema.mjs`, `package-lock.json`
+- 削除しない: `src/lib/db/schema.base.ts`, `src/lib/db/schema.canonical.ts` は bridge として残すか、checker を新pathへ合わせた上で同PRで移す（どちらにするかPRに理由を書く）
+- 触らない: `migrations/**`（既存SQLは不変）、`src/lib/db/client.ts` と query 群
+#### Micro-units
+- **U01 baseline**: 移設前に `npm run check:db-schema` の出力（件数）と `drizzle-kit generate` の dry-run 差分（空であること）を記録。
+- **U02 move**: base/canonical を同時に `packages/db/src/schema/` へ移し、`index.ts` を唯一の公開 entry にする。旧 `schema.ts` は `@flamenode/db` からの re-export。検証: 全 named export の一覧が移設前と一致（スクリプトで比較しPRに貼る）。
+- **U03 tooling**: `drizzle.config.ts` と `check-db-schema.mjs` を新pathに合わせる。検証: U01 と同じ件数、dry-run 差分ゼロ。
+- **U04 builds**: Next / Workers / Hono の import 解決を確認。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | named export 一覧の比較 | 移設前後で完全一致 |
+| T02 | `drizzle-kit generate` dry-run | 生成SQL差分ゼロ |
+| T03 | `npm run check:db-schema` | U01 と同じ件数 |
+| T04 | `packages/db` の import | `src/**` への参照0件、循環0件 |
+#### Commands
+```bash
+npm ci
+npm run check:db-schema
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+npm run build --workspace=@flamenode/api
+npm run cf:build
+```
+期待: すべて終了コード0。`cf:build` は非本番buildのみ（deployしない）。
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: `src/lib/db/schema*.ts` を `BRIDGED`、`packages/db/src/schema/*` 行を追加。
+#### DONE checklist
+- [ ] 生成SQL差分ゼロの証跡がPRにある
+- [ ] named export が完全一致
+- [ ] Remote D1 を操作していない
+- [ ] schema の独立レビュー（他agentまたは人間）の APPROVE がある
+#### STOP
+- テーブル・列・index・FK・check・default のいずれかが変わる差分が出たら止める。
+- `migrations/**` を変更する必要が出たら止める。
+- Remote D1 / 本番deploy が必要に見えたら止める（明示承認事項）。
+#### Rollback
+PRをrevert（schema 定義は移設のみでDDLが無いため、D1 側の戻しは不要）。
 
 ### MIG-0303: low-risk mutation domain（低リスク更新系）
-
-- **対象**: [`server-actions/README.md`](server-actions/README.md) のうち、単一テーブル・admin write・監査あり・外部副作用が小さいもの。
-  - SA-004〜006 announcements（`src/lib/actions/announcement.ts`）
-  - SA-007〜008 api-endpoints（`src/lib/actions/api-endpoints.ts`）
-  - SA-035〜037 event templates（`src/lib/actions/event-template-admin.ts`）
-- **前提**: これらは `mutateWithAudit` と DB を使うため **Tier 2 に該当し、MIG-0308のpackages/db移設待ち**（`BLOCKED(MIG-0308)`）。
-  回答前にできるのは「入力検証・正規化・error 契約」だけを純粋関数として切り出す作業である。
-- **作成**: MIG-0308完成後に確定。それまでは `` `+packages/domain/src/announcement/validation.ts` `` のような**検証のみ**を対象にする。
-- **不変条件**: 監査（`strict`）、expected-row CAS、public rebuild の enqueue、`revalidatePath` の意味分解（API_MATRIX.md の Side-effect parity）。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0308 の `@flamenode/db` と、監査付き mutation を domain/adapter のどこで分けるか（`mutateWithAudit` の置き場）を MIG-0301/0308 の結果で確定してから
+- **Depends on:** MIG-0308 / **Decisions:** D-01 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- SA-004〜006: `src/lib/actions/announcement.ts`（検証の契約テスト `src/lib/actions/announcement.validation.contract.test.mjs`）。
+- SA-007〜008: `src/lib/actions/api-endpoints.ts`。
+- SA-035〜037: `src/lib/actions/event-template-admin.ts`（`src/lib/actions/event-template-admin.execution.test.mjs`）。一次抽出は本MIG。MIG-0305/0604 は消費側として検証のみ。
+- `src/lib/audit/mutate.ts:1-3` は `drizzle-orm` と `@/lib/db/client` を import する（Tier 2）。
+#### Owned paths
+- 新規: `+packages/domain/src/announcement/*.ts`, `+packages/domain/src/apiEndpoints/*.ts`, `+packages/domain/src/eventTemplate/*.ts`（入力検証・正規化・権限判定・結果型）
+- 変更: 上記3つの action ファイル（domain を呼ぶ形へ。D1 session/binding、`revalidatePath`、redirect は action 側に残す）
+- 触らない: `src/lib/audit/mutate.ts` の監査の意味（strict / expected-row CAS）
+#### Micro-units
+- **U01 announcements**: SA-004〜006 の入力検証と結果型を domain へ。DB 書き込みと監査は adapter 側。検証: `announcement.validation.contract.test.mjs` が同数PASS。
+- **U02 api-endpoints**: SA-007〜008 を同様に。
+- **U03 event templates**: SA-035〜037 を同様に。検証: `event-template-admin.execution.test.mjs` が同数PASS。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 未ログイン / 非admin で各SA | 移動前と同じエラー結果、DB書き込み0、監査0 |
+| T02 | expected-row CAS 競合 | 移動前と同じ競合結果 |
+| T03 | 成功 | 監査1件、公開反映の enqueue が移動前と同じ |
+| T04 | 書き込み失敗 | 監査が残らない |
+#### Commands
+```bash
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: 3 action ファイルを `IN_PROGRESS`（domain 抽出済み、API 移行は Phase 6）。`API_MATRIX.md` の該当 SA 行に domain 側の関数名を追記。
+#### DONE checklist
+- [ ] SA-004〜008, 035〜037 の各SAで、成功・拒否・競合の結果と監査・Queue が移動前と一致
+- [ ] domain に `revalidatePath` / `redirect` / D1 binding が無い
+- [ ] 対象外の admin mutation を変更していない
+#### STOP
+- 監査の strict / CAS の意味を変える必要が出たら止める。
+- 対象外のSAに波及したら止める。
+#### Rollback
+PRをrevert。
 
 ### MIG-0304: video domain group（動画ドメイン）
-
-- **対象**（[`server-actions/README.md`](server-actions/README.md) の SA-*）:
-  - 可視性遷移: SA-001〜003（admin）、SA-040〜042（manage）— 共通 core を共有し、adapter は role 別に残す
-  - chapter: SA-012〜015
-  - collab/member: SA-082〜085
-  - 提出・更新: SA-086, SA-088, SA-089
-  - interaction: SA-087（**Active X 移行の対象**。[`ACTIVE_X_MIGRATION_PLAN.md`](ACTIVE_X_MIGRATION_PLAN.md) を先に読むこと）
-- **Tier 1（先行可）**: `src/lib/auth/ownershipCore.ts`（`resolveVideoOwnershipSync`, `decideCanEditVideoFromAccessContext`, `adminPolicyAllows`, `ownerPolicyAllows`, `creatorOwnerCanManagePermissions`, `resolveAdminOrEventVideoPrivilegeMode`）。
-  推移的 import（`src/lib/auth/videoEditSections.ts`, `src/lib/auth/permissions/aliases.ts`, `src/lib/video/generalEditPermissionsCore.ts`）も同時に移す。
-- **Tier 2（MIG-0308 待ち）**: `src/lib/video/videoVisibilityTransition.ts`（`server-only`、`next/navigation`、`@/lib/db/*` を import）、`src/lib/video/computeEditSections.ts`（`@/lib/db/*` を import）、`src/lib/auth/ownership.ts` の `canEditVideo`（DB 経路）。
-  `next/navigation` の `redirect` はドメインへ持ち込まず、結果型（`unauthenticated | forbidden | ...`）で返して adapter が redirect する。
-- **不変条件**: PR #265 で一本化した作品編集権限判定（権限源ごとの判定）、「creator owner のみが collaborator 権限を委譲できる」、dangerous key の常時 deny。
-- **チャプターコメント**: 親チャプター削除時、コメントは物理削除せず論理保持する（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md) Chapter/comment model）。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0304。Tier 2 は MIG-0308 後の DB adapter 方針が決まってから
+- **Depends on:** MIG-0303 / **Decisions:** D-03 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- Tier 1: `src/lib/auth/ownershipCore.ts`（`:43` `resolveAdminOrEventVideoPrivilegeMode`, `:76` `resolveVideoOwnershipSync`, `:94` `adminPolicyAllows`, `:109` `creatorOwnerCanManagePermissions`, `:120` `ownerPolicyAllows`, `:131` `decideCanEditVideoFromAccessContext`, `:152` `eventStaffCandidatePermissionKeys`）。`:6-11` で `./videoEditSections`, `./permissions/aliases.ts`, `../video/generalEditPermissionsCore.ts` を import。
+- `src/lib/video/generalEditPermissionsCore.ts:1` は `@/lib/auth/videoEditSections` を `@/` alias で import する。Node の strip-types では解決できないため、移すときに相対 import へ直す。
+- Tier 2: `src/lib/video/videoVisibilityTransition.ts:1,3` は `server-only` と `next/navigation` の `unstable_rethrow` を import。`src/lib/video/computeEditSections.ts:1-2` は `@/lib/db/client` と `@/lib/db/schema` を import。
+- 不変条件: PR #265 で一本化した作品編集権限判定、creator owner だけが collaborator 権限を委譲できる、dangerous key は常に拒否、event モードは `eventStaffCandidatePermissionKeys` の和集合だけで判定（`optimize/loop-state.md` iteration 40 の P0 修正）。
+#### Owned paths
+- 新規: `+packages/domain/src/video/ownership.ts`, `+packages/domain/src/video/editSections.ts`, `+packages/domain/src/video/generalEditPermissions.ts`, `+packages/domain/src/video/visibility.ts`（Tier 2 は U02 以降）
+- 変更（bridge化）: `src/lib/auth/ownershipCore.ts`, `src/lib/auth/videoEditSections.ts`, `src/lib/auth/permissions/aliases.ts`, `src/lib/video/generalEditPermissionsCore.ts`
+- 変更: `src/lib/actions/admin.ts`（SA-001〜003）, `src/lib/actions/manage-video.ts`（SA-040〜042）, `src/lib/actions/chapter.ts`（SA-012〜015）— U02/U03 で domain 呼び出しへ
+- 触らない: `src/lib/auth/ownership.ts` の DB 経路の判定結果（意味を変えない）
+#### Micro-units
+- U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0304 の定義に従う。各unitの検証は下の Commands を unit 範囲のテストで実行する。
+- **U01** の検証: `node --test --experimental-strip-types src/lib/auth/ownershipCore.test.mjs src/lib/auth/ownershipAccessContext.test.mjs src/lib/auth/ownershipEventMode.sqlite.execution.test.mjs src/lib/auth/videoEditSections.test.mjs` が移動前と同数PASS。
+- **U02** の検証: `src/lib/video/videoVisibilityTransition.test.mjs`, `videoVisibilityCompensation.execution.test.mjs`, `videoVisibilityNotificationsPostCommit.execution.test.mjs` が同数PASS。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | creator owner / collaborator / event staff / admin / banned × normal・event・admin モード | 許可・拒否が移動前と一致 |
+| T02 | dangerous key を含む権限 | 常に拒否 |
+| T03 | collaborator が権限を委譲 | 拒否 |
+| T04 | 公開→非公開の遷移 | CAS・フェンス・通知・静的反映 enqueue が移動前と一致 |
+| T05 | チャプター削除 | コメントが論理保持される |
+#### Commands
+```bash
+npm run test:critical
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: 移したファイルを `BRIDGED`。`API_MATRIX.md` の SA-001〜003, 012〜015, 040〜042, 082〜089 に domain 側の関数名を追記。
+#### DONE checklist
+- [ ] `TASK_MICRO_UNITS.md` の U01〜U04 と Final audit が全部 DONE
+- [ ] `test:critical` の件数とPASSが移動前と同じ
+- [ ] 対象SAの許可・拒否と副作用が移動前と一致
+#### STOP
+- 権限判定の結果が1件でも変わったら止める。
+- owner/admin を event モードへ暗黙に fallback させる変更が必要に見えたら止める。
+- Active X の過去履歴移行（D-03 fan-out）と新規操作を同じコードにまとめる必要が出たら止める。
+#### Rollback
+PRをrevert。bridge により利用側の import は不変。
 
 ### MIG-0305: event/slot domain group（イベント・枠）
-
-- **対象**: SA-021〜039（event / event group / staff / template / playlist）、SA-056〜068（slot）。
-- **Tier 1（先行可）**: `src/lib/event/eventOwnershipCore.ts`（`assertEventWillRetainOwner`, `validateEventStaffUniqueness`, `validateEventStaffSubject`, `assertOwnershipTransferInput`, `assertSelfChangeConfirmation`, `isEventOwner`, `planXIdMergeEventStaffOwnerProtection`）、`src/lib/slots/slotReservationLimit.ts`。
-- **Tier 2（MIG-0308 待ち）**: `src/lib/event/eventVisibilityTransition.ts`, `src/lib/event/eventGroupVisibilityTransition.ts`。
-- **不変条件**: `FN-X-001` event は常に operable owner を 1 人以上保持する（条件付き SQL/CAS を含む。UI 検証だけにしない）。
-- **intentional exception（汎用 CRUD 化しない）**: SA-021 `renameEventId`, SA-056/057 slot の破壊的 release。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0305。Tier 2 は MIG-0308 後
+- **Depends on:** MIG-0303 / **Decisions:** none
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- Tier 1: `src/lib/event/eventOwnershipCore.ts`（`:22` `LAST_OWNER_ERROR`, `:25` `isEventOwner`, `:31` `validateEventStaffSubject`, `:39` `validateEventStaffUniqueness`, `:54` `assertEventWillRetainOwner`, `:69` `planXIdMergeEventStaffOwnerProtection`, `:103` `assertSelfChangeConfirmation`）。`:3` で `../utils/xid.ts` を import（一緒に移すか、`packages/domain` 側に同等の純粋関数を置く）。テスト `src/lib/event/eventOwnershipCore.test.mjs`。
+- Tier 2: `src/lib/event/eventVisibilityTransition.ts:1,3-5`（`server-only`, `drizzle-orm`, `@/lib/db/client`）、`src/lib/event/eventGroupVisibilityTransition.ts:1,3-4`。
+- slot: `src/lib/actions/slot.ts`, `src/lib/actions/slot-admin.ts`, `src/lib/actions/slot-admin-danger.ts`。原子性テスト `src/lib/actions/slot.atomicity.execution.test.mjs`。
+- 不変条件 `FN-X-001`: event は常に操作可能な owner を1人以上持つ（条件付きSQL/CAS。UIの検証だけにしない）。
+#### Owned paths
+- 新規: `+packages/domain/src/event/ownership.ts`, `+packages/domain/src/event/visibility.ts`, `+packages/domain/src/slots/*.ts`
+- 変更（bridge化）: `src/lib/event/eventOwnershipCore.ts`
+- 変更: `src/lib/actions/event-*.ts`, `src/lib/actions/slot*.ts`（domain 呼び出しへ。transaction 境界は action/adapter 側に残す）
+- 触らない: SA-021 `renameEventId`、SA-056/057 の破壊的 release（汎用CRUDに吸収しない）、SA-035〜037（MIG-0303 の所有）
+#### Micro-units
+- U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0305 の定義に従う。
+- **U01** の検証: `node --test --experimental-strip-types src/lib/event/eventOwnershipCore.test.mjs` が同数PASS、`npm run check:event-owners` が終了コード0。
+- **U03** の検証: `src/lib/actions/slot.atomicity.execution.test.mjs`, `slotIntegrity.execution.test.mjs`, `slotNotificationsPostCommit.execution.test.mjs` が同数PASS。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 最後の owner を解任 | 拒否（`LAST_OWNER_ERROR`） |
+| T02 | 2つの解任を同時実行 | owner が0にならない |
+| T03 | 同じ枠を同時予約 | 1件だけ成功 |
+| T04 | 連続枠の上限超過 | 移動前と同じ拒否メッセージ |
+| T05 | DM 送信失敗 | outbox の再試行と監査が移動前と一致 |
+#### Commands
+```bash
+npm run test:critical
+npm run check:event-owners
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: 移したファイルを `BRIDGED`。`API_MATRIX.md` の SA-021〜034, 038〜039, 056〜068 に domain 側の関数名を追記。
+#### DONE checklist
+- [ ] U01〜U04 と Final audit が全部 DONE
+- [ ] owner 0 防止が DB transaction を含むテストで実証されている
+- [ ] SA-021 と SA-056/057 が個別実装のまま
+#### STOP
+- owner 0 防止を UI 検証だけで済ませる変更が必要に見えたら止める。
+- 予約の transaction 境界を変える必要が出たら止める。
+#### Rollback
+PRをrevert。
 
 ### MIG-0306: user/X/admin domain group（ユーザー・X・管理）
-
-- **対象**: SA-016〜020（CostGuard）、SA-043〜055（moderation / notification-admin / terms）、SA-069〜081（static-rebuild / terms / user-admin）、SA-090〜106（X ID・merge・Active X・YouTube sync）。
-- **Tier 1（先行可）**: `src/lib/xid/mergeBudget.ts`（`planXIdMergeD1Budget`）は `@/lib/audit/mutate` に依存するため audit core の分離が前提。単独では先行不可。
-- **Tier 2（MIG-0308 待ち）**: `src/lib/xid/xUserVisibilityTransition.ts`（`server-only`）、`src/lib/xid/mergeSafety.ts`（drizzle `sql` を import）、`src/lib/xid/merge.ts`。
-- **Auth User を Active X へ機械置換しない**: `approved_by_auth_user_id`, `edit_granted_by_auth_user_id`, audit `actor_user_id`, session/security 識別子は Auth User のまま（[`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md)）。
-- **intentional exception**: SA-092〜097 X-ID merge/revert（安全な primitive のみ共有）、SA-011 audit restore、SA-050 public visibility repair。
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0306。`src/lib/xid/mergeBudget.ts` が audit core に依存するため、MIG-0303 で audit の分け方が決まってから
+- **Depends on:** MIG-0303 / **Decisions:** D-03 DECIDED, D-04 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- `src/lib/xid/mergeBudget.ts:1-4` は `@/lib/audit/mutate` から `planAtomicAuditMutationBudget` を import。単独では Tier 1 にならない。
+- Tier 2: `src/lib/xid/merge.ts:1,3-4`（`server-only`, `drizzle-orm`, `@/lib/db/client`、1328行）、`src/lib/xid/mergeSafety.ts:1`（`drizzle-orm`）、`src/lib/xid/xUserVisibilityTransition.ts:1,3-4`。
+- テスト: `src/lib/xid/merge*.test.mjs`（7件）, `src/lib/xid/xUserVisibilityTransition.contract.test.mjs`。
+- Auth User と Active X: `approved_by_auth_user_id`, `edit_granted_by_auth_user_id`, 監査の `actor_user_id`, session 識別子は Auth User のまま（`PRODUCT_REQUIREMENTS.md`）。
+#### Owned paths
+- 新規: `+packages/domain/src/xid/*.ts`, `+packages/domain/src/admin/*.ts`, `+packages/domain/src/user/*.ts`
+- 変更: `src/lib/actions/cost-guard.ts`, `moderation-admin.ts`, `notification-admin.ts`, `terms.ts`, `static-rebuild-admin.ts`, `user-admin.ts`（domain 呼び出しへ）
+- 触らない: SA-092〜097 X-ID merge/revert の本体（安全な primitive だけ共有）、SA-011 audit restore、SA-050 public visibility repair（個別実装として残す）
+#### Micro-units
+- U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0306 の定義に従う。
+- **U02** の検証: `node --test --experimental-strip-types "src/lib/xid/merge*.test.mjs"` が同数PASS、`npm run check:x-link-dependencies` と `npm run check:audit-actor-x` が終了コード0。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | owner が重なる X ID の merge と revert | 帰属が元に戻り、再実行しても同じ結果 |
+| T02 | 1つの X に複数の Auth User | 重複拒否が移動前と一致 |
+| T03 | BAN した利用者の操作 | 拒否 |
+| T04 | 監査の actor | Auth User のまま |
+#### Commands
+```bash
+npm run check:x-link-dependencies
+npm run check:audit-actor-x
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md`: 変更した action ファイルを `IN_PROGRESS` または `BRIDGED`。`API_MATRIX.md` の SA-016〜020, 043〜055, 069〜081, 090〜106 に domain 側の関数名を追記。
+#### DONE checklist
+- [ ] U01〜U04 と Final audit が全部 DONE
+- [ ] X merge の rollback と再実行の結果が移動前と一致
+- [ ] Auth User を Active X へ置き換えた箇所が0件
+#### STOP
+- Auth User 識別子を Active X へ置き換える変更が必要に見えたら止める。
+- D-03 の過去履歴 fan-out を live mutation と同じ経路にする必要が出たら止める。
+#### Rollback
+PRをrevert。
 
 ### MIG-0307: Phase 3 Gate（完了判定）
-
-- **完了チェックリスト**:
-  - [ ] `packages/domain` に `next/*` / `react` / `hono` / `astro` / `server-only` の import がない（静的チェックを `scripts/` に追加し `check:project-docs` へ接続）
-  - [ ] Tier 1 の対象がすべて `packages/domain` へ移り、`src/lib/**` は同名 export のブリッジである
-  - [ ] MIG-0308で `packages/db` 移行が完了し、DB schema差分ゼロ、循環依存ゼロ、Next/Hono/Workersのビルド/テストを実証。Tier2を単に `BLOCKED/SKIPPED` と記録しただけでPhase Gateを通さない（例外はユーザー承認と代替タスクの追加が必須）
-  - [ ] 既存テスト（`npm run test:unit`・`npm run test:integration`）が**無変更で**全件パスする（件数は固定せず、移行前後で同数であることを確認する）
-  - [ ] `npm run verify:fast` が PASS
-  - [ ] `STATUS.md` の Phase 3 を `DONE` に更新し、Phase 6 の MIG-0601 を `READY` にする
-- **検証**:
-  ```bash
-  npm run typecheck
-  npm run test:unit
-  npm run test:integration
-  npm run verify:fast
-  npm run check:project-docs
-  ```
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Depends on:** MIG-0304, MIG-0305, MIG-0306, MIG-0308 / **Decisions:** D-01 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+- MIG-0301〜0306, 0308 の merge 済みPRと、本仕様 §4 の抽出規約。
+- `packages/domain/src/permissions.ts` の偽権限実装が MIG-0301 で無効化済みであること。
+#### Owned paths
+- 新規: `+scripts/check-domain-imports.mjs`（`packages/domain` と `packages/db` から `next/*`, `react`, `hono`, `astro`, `server-only`, `src/**` への import を禁止）
+- 変更: `scripts/check-project-docs.mjs`（上の checker を接続）, `docs/migration/STATUS.md`（承認後の merge 統合時だけ）
+#### Micro-units
+- **U01 checker**: 禁止 import の checker を追加し `check:project-docs` へ接続。違反を1件含む fixture で失敗することをテストする。
+- **U02 evidence**: Tier 1 の移動先一覧、Tier 2 の完了状況、テスト件数の移動前後比較をPRにまとめ、独立レビューと人間の Gate 承認を依頼。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `packages/domain` に `import "next/navigation"` を足す | checker が失敗 |
+| T02 | `test:unit` / `test:integration` の件数 | Phase 3 開始前と同じかそれ以上、テストの削除0件 |
+| T03 | Tier 2 を BLOCKED/SKIPPED のまま Gate | 不可（例外はユーザー承認と代替task が必要） |
+#### Commands
+```bash
+npm ci
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run verify:fast
+npm run check:db-schema
+npm run check:project-docs
+```
+#### Ledger updates
+承認後に `STATUS.md` の MIG-0307 を DONE、MIG-0601 の依存解消を反映。
+#### DONE checklist
+- [ ] 禁止 import の checker が CI で動く
+- [ ] MIG-0308 が DONE
+- [ ] 独立レビューの APPROVE と人間の Phase Gate 承認がPRにある
+#### STOP
+- 人間の承認なしに STATUS を DONE にしない。
+#### Rollback
+checker 追加のPRをrevert。
 
 ---
 

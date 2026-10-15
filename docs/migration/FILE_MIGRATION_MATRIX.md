@@ -97,10 +97,10 @@
 | `app/(public)/event/[id]/page.tsx` | PAGE | /event/[id] (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/release/page.tsx` | PAGE | /event/[id]/release (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/release.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/slots/page.tsx` | PAGE | /event/[id]/slots (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/slots.astro | NOT_STARTED | — |
-| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event.astro (logical /event query parity; no separate twin required) | NOT_STARTED | — |
-| `app/(public)/event/page.tsx` | PAGE | /event (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event.astro | NOT_STARTED | — |
-| `app/(public)/groups/[slug]/page.tsx` | PAGE | /groups/[slug] (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups/[slug].astro | NOT_STARTED | — |
-| `app/(public)/groups/page.tsx` | PAGE | /groups (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups.astro | NOT_STARTED | — |
+| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event/index.astro (logical /event query parity; no separate twin required) | NOT_STARTED | — |
+| `app/(public)/event/page.tsx` | PAGE | /event (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/index.astro | NOT_STARTED | — |
+| `app/(public)/groups/[slug]/page.tsx` | PAGE | /groups/[slug] (COMPAT_REDIRECT) | MIG-0503 | +apps/site/public/_redirects (307 to /event#event-group-{slug}; no page) | NOT_STARTED | — |
+| `app/(public)/groups/page.tsx` | PAGE | /groups (COMPAT_REDIRECT) | MIG-0503 | +apps/site/public/_redirects (307 to /event; no page) | NOT_STARTED | — |
 | `app/(public)/list/~query/page.tsx` | PAGE | /list/~query (SYSTEM_SURFACE) | MIG-0505 | +apps/site/src/pages/list.astro (logical /list query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/list/page.tsx` | PAGE | /list (VISUAL_SCREEN) | MIG-0505 | +apps/site/src/pages/list.astro | NOT_STARTED | — |
 | `app/(public)/maintenance/page.tsx` | PAGE | /maintenance (SYSTEM_SURFACE) | MIG-0901 | RETAIN/REVIEW in MIG-0901 | NOT_STARTED | — |
@@ -111,8 +111,8 @@
 | `app/(public)/user/[id]/page.tsx` | PAGE | /user/[id] (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/user/[id]/paged/page.tsx` | PAGE | /user/[id]/paged (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro (logical profile pagination parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/[id]/portfolio/page.tsx` | PAGE | /user/[id]/portfolio (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/portfolio.astro | NOT_STARTED | — |
-| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
-| `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user.astro | NOT_STARTED | — |
+| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/index.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
+| `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/index.astro | NOT_STARTED | — |
 | `app/api/account/summary/route.ts` | ROUTE_HANDLER | RH-001:GET | MIG-0605 | +apps/api/src/routes/account/summary.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/import/legacy/route.ts` | ROUTE_HANDLER | RH-002:POST | MIG-0605 | +apps/api/src/routes/admin/import/legacy.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/spreadsheet/data/route.ts` | ROUTE_HANDLER | RH-003:GET,RH-004:PATCH,RH-005:POST,RH-006:DELETE | MIG-0605 | +apps/api/src/routes/admin/spreadsheet/data.ts (candidate, verify router) | NOT_STARTED | — |
@@ -232,6 +232,7 @@
 | `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
 | `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | +packages/domain/src/software/labels.ts (legacy bridge) | NOT_STARTED | — |
 | `src/lib/slots/limits.ts` | HELPER | slot pure limits | MIG-0302 | +packages/domain/src/slots/limits.ts (legacy bridge) | NOT_STARTED | — |
+| `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | +apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | NOT_STARTED | — |
 | `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain ownership policy (exact file TBD) | NOT_STARTED | — |
 | `src/lib/video/videoVisibilityTransition.ts` | HELPER | video visibility CAS audit Queue | MIG-0304 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |

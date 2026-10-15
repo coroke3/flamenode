@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-13
+> Last updated: 2026-10-15
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0200
 Last Task PR: #284
-Merged READY: MIG-0201, MIG-0301, MIG-0401
+Merged READY: MIG-0201, MIG-0301, MIG-0401, MIG-0801
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -285,7 +285,9 @@ Validation:
 | MIG-0505 | list/search/recommend/trending | BLOCKED | MIG-0501 |
 | MIG-0506 | root/top | BLOCKED | MIG-0505 |
 | MIG-0507 | `/:id` video catch-all | BLOCKED | MIG-0502..MIG-0506 |
-| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507 |
+| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507, MIG-0607 |
+
+公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
 ## Phase 6 — Hono API
 
@@ -294,12 +296,15 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
-| MIG-0602 | low-risk mutations | BLOCKED | MIG-0601 |
+| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | BLOCKED | MIG-0801, MIG-0107 |
+| MIG-0602 | low-risk mutations | BLOCKED | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | BLOCKED | MIG-0602 |
 | MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
 | MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
+
+MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
 ## Phase 7 — Private SPA
 
@@ -308,9 +313,9 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601 |
-| MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0701 |
-| MIG-0703 | entry | BLOCKED | MIG-0702 |
+| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601, MIG-0608 |
+| MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
+| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703 |
 | MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
@@ -321,7 +326,7 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0801 | Auth baseline fixtures/tests | BLOCKED | MIG-0008 |
+| MIG-0801 | Auth baseline fixtures/tests | READY | MIG-0008 |
 | MIG-0802 | Web Standard/Auth integration PoC | BLOCKED | MIG-0801, MIG-0607 |
 | MIG-0803 | Discord/account-linking parity | BLOCKED | MIG-0802 |
 | MIG-0804 | CPU/security review | BLOCKED | MIG-0803 |
