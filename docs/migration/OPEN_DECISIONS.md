@@ -23,7 +23,7 @@
 | D-06 | **A: 無料SSG優先。容量超過時はR2事前生成HTML優先、限定SSRは例外** | DECIDED | MIG-0406/0501..0508 | 静的出力実数・CPU・1102/visibility/SEO検証 |
 | D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
 | D-08 | **A: HTMLモックを先に確定してからUIを移行** | DECIDED | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | デザインモック受領・登録完了（docs/migration/mock/、UI_REFERENCE.md）。Phase 2抽出アンロック。 |
-| D-09 | 背景処理（Queue / Cron）を 1102 ゼロにする方式（下の D-09 節の A/B/C） | PROVISIONAL | 未作成（決定後に追加）。`ZERO_1102.md` G2 | ユーザーの選択。決まるまで G2 は未達 |
+| D-09 | **A: 公開データの生成を build 時へ移し、更新は deploy hook で build を起こす。残る背景処理は 1回 8ms 未満に分ける** | DECIDED | MIG-0409, MIG-0410, MIG-0509, MIG-0609, MIG-0610, MIG-0907。`ZERO_1102.md` G2 | build 時の D1 読み取り用 token と deploy hook URL（どちらも secret）の作成、本番の Cron / Queue 変更は作業直前の明示承認 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -113,13 +113,34 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 - D-07: 既存auth cookie/session/OAuth契約の非本番PoC。
 - D-08: HTMLモックの受領・UI_REFERENCE.md登録完了（MIG-0200完了）。
 
-## D-09 — 背景処理の 1102 ゼロ化（PROVISIONAL、2026-10-15 追加）
+## D-09 — 背景処理の 1102 ゼロ化（A、2026-10-15 決定）
 
-根拠: 背景処理の Worker（`flamenode-content-jobs`、`flamenode-fast-jobs`、`flamenode-sync-jobs`）は、どの MIG task でも「触らない」になっている。CURRENT の CPU は content の queue が p95 107ms・max 148ms、sync の scheduled が max 83ms（[cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md) の Four-Worker 表）。Workers Free の Cron Trigger の上限は 10ms（https://developers.cloudflare.com/workers/platform/limits/ ）。詳細は [ZERO_1102.md](ZERO_1102.md) §6。
+ユーザーが 2026-10-15 の決定カードで A を選んだ。
+
+根拠: 背景処理の Worker（`flamenode-content-jobs`、`flamenode-fast-jobs`、`flamenode-sync-jobs`）は、どの MIG task でも「触らない」になっていた。CURRENT の CPU は content の queue が p95 107ms・max 148ms、sync の scheduled が max 83ms（[cloudflare/PERFORMANCE_BASELINE.md](cloudflare/PERFORMANCE_BASELINE.md) の Four-Worker 表）。Workers Free の Cron Trigger の上限は 10ms（https://developers.cloudflare.com/workers/platform/limits/ ）。詳細は [ZERO_1102.md](ZERO_1102.md) §6。
 
 | 案 | 内容 | 代償 |
 | --- | --- | --- |
-| A | 公開データ（一覧・検索索引・人気順など）の生成を Worker から build 時（Astro の build）へ移し、内容の更新は deploy hook で build を起こす。残る小さな処理（通知など）は B の方法で 8ms 未満に分ける | 作品の追加・修正が公開ページに出るまで、build 1回分（数分）かかる。build 回数に上限がある |
+| **A（採用）** | 公開データ（一覧・検索索引・人気順など）の生成を Worker から build 時（Astro の build）へ移し、内容の更新は deploy hook で build を起こす。残る小さな処理（通知など）は B の方法で 8ms 未満に分ける | 作品の追加・修正が公開ページに出るまで、build 1回分以上かかる。build 回数に上限がある |
 | B | 背景処理をすべて Worker のまま、1 message あたり 8ms 未満になるよう分割する | 検索索引の作成（CURRENT で 350ms〜1.6s）を数十〜数百の message に分ける必要があり、仕組みが複雑になる。Queue の無料枠（1日 10,000 operations）を圧迫する |
 | C | Workers Paid（月 $5〜）にし、背景処理の CPU 上限を 30秒〜15分にする | 費用がかかる。web の request は Paid でも予算どおり 10ms 未満を守る |
 
+### A を実装するときの制約（出典付き）
+
+- **build の上限（Workers Builds、Free）:** build 時間は月 3,000 分、同時 1、1回 20分まで。Deploy Hook は Worker ごとに 10回/分。出典: https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/
+- **Deploy Hook:** branch ごとの URL に `POST` すると build と deploy が走る。最初の build が始まる前に重ねて呼ぶと、重複分は省かれる。Cron の Worker から呼べる。出典: https://developers.cloudflare.com/changelog/post/2026-04-01-deploy-hooks/
+- **公開までの遅れ:** 月 3,000 分をコードの push と分け合う。例えば 1回 5分なら、データ更新の build は1日 14回前後が上限で、間隔は約 100分になる（計算: 3,000分 × 0.8 の余裕 − push 分 300分 = 2,100分、÷ 5分 ÷ 30日）。実際の値は MIG-0409 で build 時間を測ってから決める。
+- **鮮度が要るデータは build に載せない。** CURRENT で 30秒ほどで反映しているもの（枠の空き、いいね数、viewer overlay など）は、ページは build で作り、値は Hono API（S2）からブラウザが読む。分け方は MIG-0409 で表にする。
+- **非公開化は build を待たない。** 公開→非公開の切替は、更新 API（S3）が同じ request の中で可視性の拒否 entry を書き、gateway（S1、MIG-0405）が読む。KV に置く場合、他の地域へ反映されるまで最大 60秒かかる（出典: https://developers.cloudflare.com/kv/api/write-key-value-pairs/ ）。60秒が許されない場合は MIG-0409 で止めてユーザーに確認する。
+- **secret:** build 環境から D1 を読む API token と deploy hook の URL は secret。作成・登録は作業直前の明示承認事項（`CLAUDE.md`）。deploy hook の URL が漏れると、誰でも build 時間を使い切れる。
+
+### task への割り当て
+
+| task | 内容 |
+| --- | --- |
+| MIG-0409 | build 時に D1 から公開データを作る PoC。build 時間の実測、build に載せるデータと API で読むデータの分類表 |
+| MIG-0410 | deploy hook を呼ぶ小さな Cron（1回 8ms 未満）。build 間隔と1日の上限を名前付き定数で持つ |
+| MIG-0509 | 全公開データの生成を build 時へ移し、`apps/site` の読み取りを切り替える |
+| MIG-0609 | 残る背景処理（状態を更新する job）の CPU を非本番で測る |
+| MIG-0610 | 予算を超えた job を、1回 8ms 未満になるよう分割する |
+| MIG-0907 | 本番切替と観測の後、`workers/json-generator` と static rebuild queue を消す |

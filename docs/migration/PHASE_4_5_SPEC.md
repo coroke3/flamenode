@@ -301,12 +301,123 @@ node scripts/check-public-site-build-budget.mjs
 #### Rollback
 PRをrevert。
 
+### MIG-0409: build 時に D1 から公開データを作る PoC と build 時間の予算（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0404 の merge 後。build 環境が D1 を読む方法（D1 の read-only API token か、build 前の `wrangler d1 export`）を決め、token の作成についてユーザーの承認を得てから
+- **Recipe:** R-BUILD
+- **Runtime:** N
+- **Depends on:** MIG-0404 / **Decisions:** D-06 DECIDED, D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- CURRENT の公開データは `workers/json-generator` が D1 から作って R2 に書く。入口は `workers/json-generator/queue.ts:122` → `optimizedRebuild.ts:862` → `rebuild.ts:330`。主な key は `top.json`（`rebuild.ts:1076`）、`list/recent.json`（`:1142`）、`list/popular.json`（`:1164`）、`events/index.json`（`:1189`）、`search-index-lite.json`（`:1482`）、`recommend.json`（`:3564`）。
+- CURRENT の読み手: `src/lib/publicData/loader.ts`（`events/index.json` :1064、`list/recent.json` :1113、`top.json` :1733 ほか）。
+- 再生成のきっかけ: `src/lib/staticRebuild/enqueue.ts:122`（`static_rebuild_queue` に1行）と `src/lib/queues/wakeStaticRebuildQueueAfterCommit.ts:13`。
+- CURRENT の鮮度: 公開ページの ISR は 30〜300秒（`app/(public)/event/[id]/slots/page.tsx:32` の `revalidate = 30`、`app/(public)/page.tsx:53` の `120`、`app/(public)/recommend/page.tsx:27` の `300`）。
+- 上限: Workers Builds（Free）は月 3,000分・同時1・1回 20分。Static Assets は1 version 20,000 files。出典は `OPEN_DECISIONS.md` の D-09 節と `ZERO_1102.md` §1。
+#### Owned paths
+- 新規: `+apps/site/scripts/readPublicData.ts`（build 時に D1 を読む。`LIMIT` は `MAX_` 定数）、`+apps/site/scripts/readPublicData.test.mjs`、`+docs/migration/static-delivery/BUILD_TIME_DATA.md`
+- 触らない: `workers/json-generator/**`（CURRENT はそのまま動かす。比較の相手として読むだけ）、`src/lib/publicData/**`、本番の D1・token・deploy hook
+#### Micro-units
+- **U01 one family**: `events/index.json` と同じ内容を、build 時に D1（ローカル D1 の fixture）から作る純粋関数と CLI。CURRENT の生成関数に同じ fixture を入れた出力と、key 順を揃えて一致することを test で確かめる。
+- **U02 freshness table**: `BUILD_TIME_DATA.md` に、公開データの項目ごとに「build で作る」か「Island が API（S2）で読む」かを表にする。CURRENT の `revalidate` と、どの操作で変わるかを列にし、build の間隔（U03）より速く変わる項目（枠の空き、いいね数、viewer overlay）は API にする。
+- **U03 build budget**: 合成データ（作品 3,000、イベント 20、各イベントの枠 120。`ZERO_1102.md` §3 の参考表と同じ条件）で `apps/site` を build し、時間を5回測る。次の式で1日の build 上限と最短の間隔を出し、表に書く: `データ build の上限/日 = floor((3,000 × 0.8 − コード push の build 分/月) ÷ build 1回の分 ÷ 30)`。コード push の分は直近30日の main への merge 数 × build 1回の分で見積もり、根拠の URL を付ける。
+- **U04 new and private**: 次の2つの扱いを決め、表に書く。(a) build の前に登録された作品の URL: 静的な共通 shell HTML を返し、中身は Island が API で読む案を既定にし、gateway（MIG-0405）で動くかを確かめる。(b) build の後に非公開になったもの: 更新 API が同じ request で書く拒否 entry（KV の key）を gateway が読む。KV の反映に最大 60秒かかることを書く。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 同じ fixture を CURRENT の生成関数と新しい関数に入れる | 出力の JSON が一致 |
+| T02 | 非公開・削除済みの行を含む fixture | 出力に含まれない |
+| T03 | `MAX_` 定数ちょうどの件数 | 出力できる。上限 + 1 件で build が失敗する |
+| T04 | 同じ入力で2回 build | 出力の byte が一致 |
+#### Commands
+```bash
+node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
+npm run build --workspace=@flamenode/site
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の Future files 表に `apps/site/scripts/readPublicData.ts` を追加。`PERF_HOTPATH_MATRIX.md` に build 時間（合成データ、5回）を条件付きで記録。
+#### DONE checklist
+- [ ] 1 family の出力が CURRENT と一致する test が PASS
+- [ ] 全項目に「build / API」の分類があり、API の項目は担当の MIG-06xx が書いてある
+- [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある
+- [ ] 新規作品と非公開化の扱いが表にある
+#### STOP
+- 最短間隔が CURRENT の鮮度（30〜300秒）より大きく延びるので、計算した「公開までの最大の遅れ」を PR とスレッドでユーザーに示し、承認を得るまで MIG-0410 の定数を決めない。
+- 非公開化に 60秒を超える遅れが出る設計になったら止める。
+- 本番 D1 の読み取り、token や deploy hook の作成が必要になったら止める（明示承認事項）。
+#### Rollback
+PRをrevert。本番には影響しない。
+
+### MIG-0410: deploy hook を呼ぶ build 要求の確認（Cron、D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0409 で build 間隔と1日の上限をユーザーが承認した後。値が決まれば下の関数と test をそのまま書けるので、lead が値を埋めて READY_FOR_SMALL_MODEL にする
+- **Recipe:** R-JOB
+- **Runtime:** B
+- **Depends on:** MIG-0409 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- Deploy Hook: branch ごとの URL に `POST` すると build と deploy が走る。最初の build が始まる前の重複は省かれる。Worker ごとに 10回/分まで（`OPEN_DECISIONS.md` D-09 節の出典）。
+- Cron Trigger は Free で account あたり 5個まで。CURRENT は4個（`workers/content-jobs/wrangler.toml:12`、`workers/fast-jobs/wrangler.toml:12`、`workers/sync-jobs/wrangler.toml:12` の2個）。新しい cron 式は足さず、`flamenode-fast-jobs` の毎時の Cron（`workers/fast-jobs/index.ts:114` の `runJob`）に1段足す。
+- schema の置き場所: MIG-0308 が DONE なら `packages/db/src/schema/`、まだなら `src/lib/db/schema.base.ts` と drizzle の migration。
+#### Owned paths
+- 新規: `+workers/fast-jobs/publicBuildTrigger.ts`, `+workers/fast-jobs/publicBuildTrigger.test.mjs`, `+drizzle/<次の番号>_public_build_state.sql`
+- 変更: `workers/fast-jobs/index.ts`（Cron に1段足すだけ）、schema の file（上の Source snapshot のどちらか1つ）
+- 触らない: `workers/fast-jobs/wrangler.toml` の `crons`、本番の secret、本番の D1
+#### Micro-units
+- **U01 table**: 1行だけの表を足す。
+  ```sql
+  CREATE TABLE public_build_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    requested_at INTEGER NOT NULL DEFAULT 0,
+    last_hook_at INTEGER NOT NULL DEFAULT 0,
+    hooks_day TEXT NOT NULL DEFAULT '',
+    hooks_today INTEGER NOT NULL DEFAULT 0
+  );
+  INSERT INTO public_build_state (id) VALUES (1);
+  ```
+  `requested_at` は公開データが最後に変わった時刻（ms）、`last_hook_at` は deploy hook を最後に呼んだ時刻（ms）、`hooks_day` は `hooks_today` を数えている UTC の日付（`YYYY-MM-DD`）。
+- **U02 decision**: 純粋関数 `decidePublicBuild({ requestedAt, lastHookAt, hooksDay, hooksToday, now })` を書く。戻り値は `"trigger"` か `"skip"`。`requestedAt <= lastHookAt` なら skip、`now - lastHookAt < MIN_BUILD_INTERVAL_MS` なら skip、同じ UTC 日で `hooksToday >= MAX_DATA_BUILDS_PER_DAY` なら skip、それ以外は trigger。2つの定数は MIG-0409 で承認された値にし、上に計算式を1行で書く。
+- **U03 handler**: D1 から1行読む → `decidePublicBuild` → trigger なら条件付き UPDATE（`WHERE id = 1 AND last_hook_at = ?`）で `last_hook_at` と回数を更新し、`changes()` が 1 のときだけ `fetch(env.PUBLIC_BUILD_DEPLOY_HOOK_URL, { method: "POST" })`。URL が無い環境では何もしない。D1 は2 statement まで。
+- **U04 wire**: `workers/fast-jobs/index.ts` の Cron に1段足す。他の段の順番と lease は変えない。
+  ```bash
+  node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs
+  ```
+  期待: 下の T01〜T07 がすべて pass。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 前回の hook の後に変更なし | skip、fetch 0回 |
+| T02 | 変更あり、前回から `MIN_BUILD_INTERVAL_MS` 未満 | skip |
+| T03 | 変更あり、間隔を満たす | trigger、fetch 1回、`last_hook_at` が更新 |
+| T04 | 同じ日に `MAX_DATA_BUILDS_PER_DAY` 回呼んだ後 | skip |
+| T05 | UTC の日付が変わった | 回数が 0 から数え直される |
+| T06 | 2つの invocation が同時に trigger と判断 | 条件付き UPDATE により fetch は1回だけ |
+| T07 | hook の URL が未設定 | 何もしない、例外なし |
+#### Commands
+```bash
+node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs
+npm run test:unit
+npm run typecheck
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に `workers/fast-jobs/publicBuildTrigger.ts` を追加。`background-jobs/README.md` の Cron の表に1段を追記。
+#### DONE checklist
+- [ ] T01〜T07 が PASS
+- [ ] 段を足した後の fast-jobs Cron 1回の CPU 最大値を非本番で測り、8ms 未満（`ZERO_1102.md` §5）
+- [ ] 本番の D1 に表を作っていない、hook の URL を登録していない
+#### STOP
+- 本番の D1 migration、secret（hook の URL）の登録、本番 Worker の deploy は明示承認事項なので止める。
+- 新しい cron 式が必要に見えたら止める（Free の上限 5個）。
+#### Rollback
+PRをrevert。表は未使用のまま残っても害はない（本番に作るのは承認後）。
+
 ### MIG-0407: Phase 4 Gate（**0403 + 0406 両方の証跡が必要**）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0403, MIG-0406 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
+- **Depends on:** MIG-0403, MIG-0406, MIG-0410 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - MIG-0401〜0406 の merge 済みPRと各PRの測定値・比較証跡。
@@ -331,6 +442,7 @@ npm run check:project-docs
 #### Ledger updates
 承認後に `STATUS.md` の MIG-0407 を DONE、MIG-0501 を READY。
 #### DONE checklist
+- [ ] MIG-0409 の「公開までの最大の遅れ」をユーザーが承認している
 - [ ] 独立レビューの APPROVE
 - [ ] 人間の Phase Gate 承認
 - [ ] CI green
@@ -675,12 +787,59 @@ npm run typecheck
 #### Rollback
 Phase 5 共通契約のとおり。
 
+### MIG-0509: 全公開データの生成を build 時へ移す（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0501〜0507 の merge 後。MIG-0409 の分類表で「build」とした family を1つずつ micro-unit に分けてから
+- **Recipe:** R-BUILD
+- **Runtime:** N
+- **Depends on:** MIG-0507 / **Decisions:** D-06 DECIDED, D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- CURRENT の R2 artifact と生成箇所: `workers/json-generator/rebuild.ts`（`top.json` :1076、`list/*.json` :1142・:1164、`events/*` :1189・:1978〜2326、`search-index-lite.json` :1482、検索 posting :1626、`videos/{id}.json` :3186、`users/*` :3236〜3730、`rules/current.json` :3501、`recommend*.json` :3539・:3564）。
+- 生成を起こすだけの段（build へ移すと不要になる）: `workers/content-jobs/index.ts:201`（deploy 後の全体再生成）、`:211〜269`（不足 artifact の補充）、`:303`（event playlist の backfill）、`:318`（top の日替わり）、`workers/sync-jobs/index.ts:205`（score 後の人気順の再生成）。
+- GA4 の人気順は `workers/ga-analytics/sync.ts:156` が R2 の `list/recent.json` を読み、`:206` で `analytics/trending.json` を書く。
+- build 要求の記録先: MIG-0410 の `public_build_state.requested_at`。CURRENT の再生成の入口は `src/lib/audit/mutate.ts:472`、`src/lib/staticRebuild/enqueue.ts:327`、`src/lib/staticRebuild/directEnqueue.ts:172`。
+#### Owned paths
+- 新規: `+apps/site/scripts/readPublicData/<family>.ts`（family ごとに1 file）と同名の `*.test.mjs`
+- 変更: `apps/site/src/lib/publicDataLoader.ts`（読み先を R2 artifact から build 時の D1 読み取りへ）、`workers/ga-analytics/sync.ts`（入力を R2 の `list/recent.json` から D1 の `LIMIT` 付き query へ）、`src/lib/audit/mutate.ts`（`requested_at` の更新を1行足す）
+- 触らない: `workers/json-generator/**`（CURRENT の Next が読む間は動かす。消すのは MIG-0907）
+#### Micro-units
+- **U01..Unn family**: MIG-0409 の表で「build」とした family ごとに1 unit。各 unit は U01 of MIG-0409 と同じ形（CURRENT の生成関数と同じ fixture で出力が一致する test）で作り、`publicDataLoader.ts` の読み先を切り替える。
+- **Unn+1 request mark**: 公開データを変える CURRENT の更新が、static rebuild の enqueue と同じ場所で `public_build_state.requested_at` も更新するようにする（新旧の両方が動く期間のため）。
+- **Unn+2 GA4**: GA4 の同期 job の入力を D1 の query に変える。出力（`analytics/trending.json`、最大 200件。`workers/ga-analytics/ranking.ts:29`）は変えない。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | family ごとの fixture | CURRENT の artifact と一致 |
+| T02 | 非公開・削除済み | どの family の出力にも含まれない |
+| T03 | 公開データを変える更新 | `requested_at` が更新される |
+| T04 | 公開データを変えない更新（下書きなど） | `requested_at` が変わらない |
+| T05 | `rg -n "env\.(BUCKET\|R2)" apps/site/src` | 0件（`apps/site` が R2 artifact を読まない） |
+#### Commands
+```bash
+node --test --experimental-strip-types apps/site/scripts/readPublicData/*.test.mjs
+npm run build --workspace=@flamenode/site
+node scripts/check-public-site-build-budget.mjs
+npm run test:unit
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の各 family の行を BRIDGED にし、PR・SHA・test を記入。`BUILD_TIME_DATA.md` の表に移した PR を記入。
+#### DONE checklist
+- [ ] 「build」に分類した全 family の一致 test が PASS
+- [ ] `apps/site` が R2 artifact を読まない
+- [ ] build 時間が MIG-0409 で承認した値の範囲内（5回の実測）
+#### STOP
+- family の出力が CURRENT と一致しない理由が CURRENT の不具合に見えたら、直さずに PR の「ブラッシュアップ提案」に書く（`CODE_QUALITY.md`）。privacy に関わる場合は止めて報告する。
+- build 時間が承認した値を超えたら止める。
+#### Rollback
+PRをrevert。CURRENT の json-generator は動いたままなので、公開ページは影響を受けない。
+
 ### MIG-0508: Phase 5 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0507, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED
+- **Depends on:** MIG-0507, MIG-0509, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `CURRENT_ROUTES.md` の Public 16 ルート（VISUAL_SCREEN 13 + COMPAT_REDIRECT 3）と `ROUTE_MATRIX.md`。
@@ -708,6 +867,7 @@ npm run check:project-docs
 承認後に `STATUS.md` の MIG-0508 を DONE。
 #### DONE checklist
 - [ ] 16ルートの証跡が揃っている
+- [ ] 公開データがすべて build 時に作られている（MIG-0509）
 - [ ] 独立レビューの APPROVE と人間の Phase Gate 承認
 - [ ] 旧 Next の Auth/API/非公開経路に触れていない
 #### STOP

@@ -363,6 +363,106 @@ npm run check:project-docs
 #### Rollback
 PRをrevert。
 
+### MIG-0609: 残る背景処理の CPU を測る（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0606 の計測 script が merge された後。同じ script で Cron と Queue consumer を呼べるかを確かめてから
+- **Recipe:** R-BUILD
+- **Runtime:** N
+- **Depends on:** MIG-0606 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- build 時へ移さずに残る job（状態を更新するもの）と、1回の上限:
+
+  | job | 入口 | 1回の上限（CURRENT） |
+  | --- | --- | --- |
+  | OpenNext cache の掃除 | `workers/cleanup/incrementalCache.ts:29` | `SCAN_LIMIT=200`（`:4`） |
+  | 保持期限の削除 | `workers/cleanup/index.ts:36` | `AUDIT_CLEANUP_BATCH_LIMIT=500`（`workers/cleanup/retention.ts:6`） |
+  | X ID の枠の紐付け回復 | `workers/content-jobs/xIdSlotBindRecovery.ts:674` | `REQUEST_LIMIT=5`、`SLOT_LIMIT=30`（`:11〜16`） |
+  | 通知の lease 回復・配信 | `workers/notification-dispatcher/dispatch.ts:1005`、`:1065` | `MAX_NOTIFICATION_BATCH=6`、外部 request 12（`:46〜55`） |
+  | 枠の締切リマインダー | `workers/notification-dispatcher/reminders.ts:131` | `REMINDER_LIMIT=50`（`:7`） |
+  | YouTube metadata 同期 | `workers/youtube-sync/index.ts:1080` | API 4回、50件（`:93〜97`） |
+  | YouTube 非公開の再確認 | `workers/sync-jobs/index.ts:582` | 10件（`workers/youtube-sync/index.ts:110`） |
+  | score の再計算 | `workers/score-recalc/index.ts:39` | 150件（`:29`） |
+  | YouTube playlist 同期 | `workers/youtube-playlist-sync/index.ts:2173` | event 1、外部 request 12、元の作品 5,000（`:127〜143`） |
+  | GA4 人気順 | `workers/ga-analytics/sync.ts:215` | 200件（`workers/ga-analytics/ranking.ts:29`） |
+
+- CURRENT の計測値（本番、Four-Worker 表）: sync の scheduled が max 83ms、fast の scheduled が max 25ms（`cloudflare/PERFORMANCE_BASELINE.md`）。
+- Queue consumer は `max_batch_size = 10`（`workers/*/wrangler.toml`）。batch 全体が1回の invocation。
+#### Owned paths
+- 新規: `+docs/migration/cloudflare/BACKGROUND_CPU.md`
+- 変更: `scripts/benchmark-api-cpu.mjs`（Cron と Queue consumer を呼ぶ入口を足すだけ）
+- 触らない: `workers/**`（直すのは MIG-0610）
+#### Micro-units
+- **U01 harness**: MIG-0606 の script に、非本番の Worker の `scheduled` と `queue` を呼ぶ入口を足す。
+- **U02 measure**: 上の表の job ごとに、1件あたりの CPU と、CURRENT の上限ちょうどの入力での CPU p50/p95/max を測る（`ZERO_1102.md` §5 の4種類、各 50回以上）。
+- **U03 table**: `BACKGROUND_CPU.md` に、job ごとの測定値と「max < 8ms にする1回の上限 = floor(7ms ÷ 1件の max CPU)」を書く（1ms は起動と D1 の結果処理の余裕）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 表の全 job | 測定値と条件がある |
+| T02 | 予算を超える job | 新しい上限の計算がある |
+#### Commands
+```bash
+node scripts/benchmark-api-cpu.mjs --background
+npm run check:project-docs
+```
+#### Ledger updates
+`BACKGROUND_CPU.md` を新規作成。`cloudflare/PERFORMANCE_BASELINE.md` から link する。
+#### DONE checklist
+- [ ] 全 job の測定値（max を含む）と条件がある
+- [ ] 予算を超える job ごとに、新しい上限の計算がある
+- [ ] 測定値を本番値と書いていない
+#### STOP
+- job の code を直し始めたら止める（MIG-0610）。
+- 本番の Worker を計測のために呼ぶ必要が出たら止める（明示承認事項）。
+#### Rollback
+PRをrevert。
+
+### MIG-0610: 予算を超える背景処理を1回 8ms 未満に分ける（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0609 の表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる
+- **Recipe:** R-JOB
+- **Runtime:** B
+- **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作る）。
+- Cron の入口: `workers/content-jobs/index.ts:111`、`workers/fast-jobs/index.ts:114`、`workers/sync-jobs/index.ts:170`。CURRENT は1回の Cron の中で複数の job を順に動かす。
+- 仕事の正本は D1 の行、Queue は doorbell だけ（`background-jobs/README.md` の最重要原則）。
+#### Owned paths
+- 変更: MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
+- 触らない: `workers/json-generator/**`（MIG-0907 で消す）、`crons` の式、本番の Queue 設定
+#### Micro-units
+- **U01 cron fan-out**: 3つの Cron を「job ごとに doorbell を1つ enqueue する」形にし、Cron 自体は D1 を読まない（MIG-0410 の build 要求の確認だけは例外）。
+- **U02 batch size**: 各 Queue consumer の `max_batch_size` を「8ms ÷ 1 message の max CPU」以下にする（計算を PR に書く）。
+- **U03..Unn job**: 予算を超えた job ごとに1 unit。定数を MIG-0609 の値に下げ、残りを D1 に残して続きの doorbell を enqueue する。R-JOB の5種の test を足す。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 各 job の上限ちょうどの入力 | 非本番の max < 8ms |
+| T02 | 上限 + 1 件 | 続きの doorbell が1つ enqueue され、D1 に残りがある |
+| T03 | 同じ doorbell が2回 | 二重に処理しない |
+| T04 | 外部 API（YouTube・Discord・GA4）の失敗 | D1 の状態が retry 可能なまま残る |
+| T05 | 1日の message 数 | Queue の無料枠（1日 10,000 operations）の 50%以下の見積もりが PR にある |
+#### Commands
+```bash
+npm run test:unit
+node scripts/benchmark-api-cpu.mjs --background
+npm run typecheck
+```
+#### Ledger updates
+`BACKGROUND_CPU.md` に分割後の測定値。`background-jobs/README.md` の上限の表を更新。
+#### DONE checklist
+- [ ] 全 job の非本番 max < 8ms（上限ちょうどの入力、50回以上）
+- [ ] 通知・同期の到達時間が CURRENT より延びる場合、その値を PR に書き、ユーザーが承認している
+- [ ] Queue の1日の message 数の見積もりがある
+#### STOP
+- 本番の Queue 設定・Cron・Worker の deploy は明示承認事項なので止める。
+- 分割すると通知や同期の遅れが CURRENT より大きく延びる場合は、実装前に値を示してユーザーに確認する。
+- 外部 API の呼び出し回数が CURRENT より増える分割になったら止める（YouTube の quota）。
+#### Rollback
+PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cron が拾う。
+
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない

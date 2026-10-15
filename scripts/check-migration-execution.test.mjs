@@ -33,6 +33,7 @@ const decisions = `| ID | Decision | State | Needed by |
 | D-06 | scale | OPEN | MIG-0406 |
 | D-07 | auth | PROVISIONAL | MIG-0802 |
 | D-08 | mock | BLOCKED_ON_USER | MIG-0200 |
+| D-09 | background 1102 | DECIDED | MIG-0409 |
 `;
 const routing = "Phase 8まで /api/auth/* を旧Workerに維持。/api/* 一括切替は禁止。 /_ops_assets/* /_personal_assets/*";
 const vite = 'export default defineConfig({base: "/", build: {assetsDir: "_personal_assets"}});';
@@ -147,7 +148,9 @@ const performanceDagStatus = status
  + "| MIG-0401 | snapshot | READY | MIG-0105 |\n"
  + "| MIG-0403 | visual representatives | BLOCKED | MIG-0402, MIG-0404 |\n"
  + "| MIG-0404 | route manifest | BLOCKED | MIG-0401 |\n"
- + "| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |\n";
+ + "| MIG-0409 | build-time data | BLOCKED | MIG-0404 |\n"
+ + "| MIG-0410 | build scheduler | BLOCKED | MIG-0409 |\n"
+ + "| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410 |\n";
 test("1102 performance PoC can be READY while visual D-08 is BLOCKED", () => {
  const actual=performanceDagStatus.replace("| MIG-0406 | budget | BLOCKED | MIG-0405 |","| MIG-0406 | budget | BLOCKED | MIG-0405 |");
  assert.deepEqual(run({statusText:actual}),[]);
@@ -163,4 +166,8 @@ test("real performance PoC may become BLOCKED for a discovered blocker without f
 test("0401 cannot silently acquire the visual HTML dependency",()=>{
  const changed=performanceDagStatus.replace("| MIG-0401 | snapshot | READY | MIG-0105 |","| MIG-0401 | snapshot | BLOCKED | MIG-0206 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0401 performance\/visual DAG/);
+});
+test("Phase 4 Gate cannot drop the D-09 build scheduler",()=>{
+ const changed=performanceDagStatus.replace("| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410 |","| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |");
+ assert.match(run({statusText:changed}).join("\n"),/MIG-0407 performance\/visual DAG/);
 });

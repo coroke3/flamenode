@@ -103,7 +103,7 @@ export const eventRoutes = new Hono<AppEnv>().get("/", async (c) => {
 });
 ```
 
-handler の中の順番は固定: 1. 入力の検証（`packages/contracts` の schema）→ 2. session 解決（`S4`、MIG-0608）→ 3. 権限判定（`packages/domain`）→ 4. D1（`LIMIT` 付き）→ 5. DTO へ詰め替え → 6. `c.json`。更新系（`S3`）は 4 を `batch` 1回にし、波及は Queue へ enqueue するだけにする。
+handler の中の順番は固定: 1. 入力の検証（`packages/contracts` の schema）→ 2. session 解決（`S4`、MIG-0608）→ 3. 権限判定（`packages/domain`）→ 4. D1（`LIMIT` 付き）→ 5. DTO へ詰め替え → 6. `c.json`。更新系（`S3`）は 4 を `batch` 1回にし、波及は Queue へ enqueue するだけにする。公開ページに出るデータを変える更新は、同じ `batch` に `UPDATE public_build_state SET requested_at = ? WHERE id = 1` を1つ足す（build 要求の記録。MIG-0410、D-09）。非公開への切替は、さらに gateway の拒否 entry を同じ request の中で書く（MIG-0409 で決める形）。
 
 error の返し方は CURRENT の Server Action / Route Handler の結果に合わせる（[`server-actions/README.md`](server-actions/README.md)、[`route-handlers/README.md`](route-handlers/README.md)）。共通の error 変換 module は、2つ目の route が同じ変換を必要としたときに `apps/api/src/http/errors.ts` として作る。
 
@@ -154,6 +154,7 @@ packages/ui/src/...                              ← 複数ページで使う部
 - データは frontmatter（`---` の中）で build 時に読む。`export const prerender = false` を書かない（書くと request 時の描画になる）。
 - 動きが必要な部分だけを React の Island にし、`client:visible` か `client:idle` を付ける。`client:load` はファーストビューで操作が必要な部品だけ。
 - 本人の状態（ログイン、予約済み、いいね）は HTML に焼かず、Island から API（`S2`）で取る。
+- build の間隔より速く変わる値（枠の空き、いいね数など。MIG-0409 の分類表で「API」とした項目）も HTML に焼かず、Island から API で取る（D-09）。
 - URL・query・redirect・404 は CURRENT と同じにする（[`ROUTE_MATRIX.md`](ROUTE_MATRIX.md)）。
 
 test に必ず入れるもの: build 出力にページの file がある / 非公開の fixture のページが出力されない / CURRENT と同じ title・canonical・OGP / query 付き URL の挙動。
@@ -192,19 +193,36 @@ Runtime: `N`（画面）。呼ぶ API は R-API の予算。
 - Worker の `fetch` は「URL → manifest で可視性と HTML の場所を引く → 返す / 404」だけにする。HTML は作らない。
 - manifest は build 時（MIG-0404）に作った、件数と byte に上限のあるデータ。request ごとに全体を `JSON.parse` しない（module scope で1回読むか、分割した key を1つ読む）。
 - 不明・非公開・manifest の欠落は 404（fail-closed）。D1 は読まない。
+- build の後に非公開へ変わったものは、manifest ではなく拒否 entry（更新 API が書く KV の key）で止める。読むのは request ごとに KV 1回まで（D-09）。
 - test: 公開 / 非公開 / 不明 / alias / manifest 欠落 / 古い HTML が残っている非公開 の6種を必ず入れる。
 
 Runtime: `S1`。
 
 ## R-BUILD: build 時に動く生成処理
 
-使う task: MIG-0201（tokens）、0401（public data）、0404（route map）、0406・0606（計測 script）。
+使う task: MIG-0201（tokens）、0401（public data）、0404（route map）、0406・0606・0609（計測 script）、0409・0509（D1 から公開データを作る）。
 
 - 純粋関数（入力 → 出力）と、file を読み書きする薄い CLI に分ける。test は純粋関数に対して書く。
 - 出力は決定的にする（key の順序を固定、日時を埋め込まない）。同じ入力から同じ byte が出ることを test で確認する。
 - 出力の件数と byte を記録し、上限を名前付き定数で持つ（Static Assets は1 version 20,000 files まで。D-06）。
 
 Runtime: `N`。
+
+## R-JOB: 背景処理（Queue consumer / Cron）を1回 8ms 未満にする
+
+使う task: MIG-0410（deploy hook を呼ぶ Cron）、0610（残る job の分割）。
+
+- 公開データ（一覧、検索索引、JSON artifact）を作らない。それは build 時（R-BUILD、D-09）。
+- 仕事の正本は D1 の行にする。Queue の message は「仕事がある」と知らせるだけで、中身を運ばない（[`background-jobs/README.md`](background-jobs/README.md) の最重要原則）。
+- 1回の処理量を `MAX_` で始まる名前付き定数で決める（例: `MAX_NOTIFICATIONS_PER_RUN`）。D1 の statement 数、外部 API の呼び出し数、扱う byte のすべてに上限を付ける。残りは D1 に残し、続きの message を1つ enqueue して返す。
+- 1つの job = 1つの file。中身は「D1 から上限件数を読む → 純粋関数で決める → D1 に書く・外部へ送る」の順に並べる。判断は純粋関数に分け、test はそれに対して書く。
+- 予算は invocation 1回の合計で判定する。Cron 1回の中で複数の job を順に動かすと合計になるので、Cron は job ごとの doorbell を enqueue するだけにする（例外は MIG-0410 の build 要求の確認のような D1 1〜2 statement の処理）。Queue consumer は batch 全体が1回の invocation なので、`max_batch_size` × 1件の最大 CPU < 8ms にする（CURRENT は 10。`workers/*/wrangler.toml`）。
+- Cron Trigger は Free で account あたり 5個まで（CURRENT は content 1・fast 1・sync 2 の計4個）。新しい cron 式を足さず、既存の Cron の中で doorbell を増やす。出典: https://developers.cloudflare.com/workers/platform/limits/
+- 同じ message が2回届いても結果が同じになるようにする（D1 の条件付き UPDATE と `changes()` の確認で二重処理を防ぐ）。
+- 上限の値は推測で決めない。MIG-0609 の計測で、1件あたりの CPU から「上限ちょうどの入力で最大値 < 8ms」になる値を計算し、その計算を定数の上に1行で書く。
+- test: 0件 / 上限ちょうど / 上限 + 1（続きが enqueue される）/ 同じ message の2回目 / 外部 API の失敗 の5種を必ず入れる。
+
+Runtime: `B`。
 
 ## R-TEST: CURRENT の挙動を test で固定する
 
@@ -228,7 +246,7 @@ Runtime: `N`。
 
 ## R-REMOVE: 旧コードを消す
 
-使う task: MIG-0901（消す前の棚卸し）、0903、0904。
+使う task: MIG-0901（消す前の棚卸し）、0903、0904、0907。
 
 - 消す前に `rg` で呼び出し元が 0件であることを示し、結果を PR に貼る。
 - 1 PR で消すのは1系統（例: ある Server Action の群）。消した結果 test が減る場合は、TARGET 側に同じ挙動の test があることを示す。

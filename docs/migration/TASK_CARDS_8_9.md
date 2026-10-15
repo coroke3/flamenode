@@ -81,6 +81,13 @@
 - 試験: all workspace builds, imports, CI/test/unit/integration, Wrangler compatible config, cost/CPU/visibility, rollback-old-worker archive。
 - DONE: build/deploy paths全件新runtimeへ向き、legacy Workerを停止してもPVSF user operationsが落ちない証拠。
 
+### MIG-0907 — remove json-generator / static rebuild queue + G2 observation (D-09)
+
+- 読む: `PHASE_8_9_SPEC.md` の MIG-0907 Work Order、`background-jobs/README.md`。
+- 変更: `workers/json-generator/**` と static rebuild の consumer・生成を起こす段を削除、`+docs/migration/BACKGROUND_OBSERVATION.md`。
+- 試験: 呼び出し元 0件、更新が build 要求だけを記録、7日間の観測。
+- DONE: 背景処理の Worker で Exceeded CPU / Memory が実観測7日 0件。本番資源の削除は承認後。
+
 ### MIG-0905 — final docs, UX/FN parity, operations
 
 - 読む: 全migration PR, `FEATURE_CATALOG.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`, `CURRENT_ROUTES.md`, `OPEN_DECISIONS.md`。
