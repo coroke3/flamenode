@@ -245,7 +245,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 .seg button.on{background:var(--surface-active);color:var(--ink)}
 .drop{display:flex;align-items:center;gap:16px;padding:24px;background:var(--surface-subtle);color:var(--ink-muted);cursor:pointer}
 .drop:hover{background:var(--surface-active);color:var(--ink)}
-.ok-i{color:var(--ink)} .no-i{color:var(--ink-muted);opacity:.6}
+.ok-i{color:var(--ink)} .no-i{color:var(--ink-muted)}
 .tl{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;background:transparent;color:var(--ink-muted);text-align:left;font:400 13px/1 var(--font-sans);cursor:pointer}
 .tl:hover{color:var(--ink);background:var(--surface-subtle)}
 .tl.on{color:var(--ink);background:var(--surface-active)}
@@ -542,7 +542,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 .cal-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px}
 .cal-m{display:block;font-size:13px;color:var(--ink-muted);margin-bottom:8px}
 .cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:2px 0}
-.cal-hd{font-size:11px;color:var(--ink-muted);text-align:center;padding-bottom:4px}
+.cal-hd{font-size:12px;color:var(--ink-muted);text-align:center;padding-bottom:4px}
 .cal-d{height:30px;border:0;background:transparent;color:var(--ink);font:400 13px/30px var(--font-sans);font-variant-numeric:tabular-nums;cursor:pointer;position:relative}
 .cal-d:hover:not(:disabled){box-shadow:inset 0 0 0 1px var(--ink)}
 .cal-d.pad{cursor:default}
@@ -605,7 +605,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 .hub-links{display:flex;flex-wrap:wrap;gap:2px;padding-bottom:4px}
 .hub-links .hub-out{font-size:10px;opacity:.6;margin-left:2px}
 .hub-body{margin-top:24px}
-.emb-root{background:transparent}
+.emb-root{background:var(--bg)}
 .emb-root .c-layout{display:block;min-height:0}
 .emb-root .c-main{padding:0}
 .emb-root .wrap{max-width:none;padding-left:0;padding-right:0;padding-top:0 !important}
@@ -625,7 +625,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 .hd-search input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:400 13px/20px var(--font-sans)}
 .hd-search input:focus{outline:none}
 .hd-search.on,.hd-search:focus-within{width:360px;box-shadow:none;background:var(--surface-active)}
-.hd-kbd{font-size:11px;padding:0 6px}
+.hd-kbd{font-size:12px;padding:0 6px}
 .hd-search-ic{display:none}
 .hd-acc-btn{display:flex;align-items:center;gap:8px;height:40px;padding:0 8px 0 4px;border:0;background:transparent;color:var(--ink);cursor:pointer;font:inherit}
 .hd-acc-btn:hover,.hd-acc-btn.on{background:var(--surface-subtle)}
@@ -1013,7 +1013,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 .srow2 .now-tag{display:none}
 .srow2.now{position:relative}
 .srow2.now>.tm{display:grid;line-height:16px}
-.srow2.now .now-tag{display:block;font:400 11px/14px var(--font-sans);color:var(--ink)}
+.srow2.now .now-tag{display:block;font:400 12px/16px var(--font-sans);color:var(--ink)}
 .srow2.now>.sl{box-shadow:none !important}
 .srow2.now::after{content:"";position:absolute;left:48px;right:0;top:40%;height:2px;background:var(--ink);pointer-events:none}
 .srow2.now::before{content:"";position:absolute;left:44px;top:calc(40% - 3px);width:8px;height:8px;background:var(--ink);pointer-events:none}
@@ -1107,7 +1107,7 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
   .t-h3{font-size:16px;line-height:24px}
   .t-body{font-size:14px;line-height:22px}
   .t-sm{font-size:12px;line-height:18px}
-  .t-label{font-size:11px;line-height:16px}
+  .t-label{font-size:12px;line-height:16px}
   .p-root [style*="font-size: 15px"]{font-size:14px !important;line-height:20px !important}
   .p-root [style*="font-size: 14px"]{font-size:13px !important;line-height:20px !important}
   .p-root .notice{padding:12px 16px}
@@ -1268,4 +1268,308 @@ html .fn-tab{padding:8px 16px;font-size:14px;line-height:20px}
 /* トップのヒーロー(スマホ): 左右に余裕を持たせ、企画名がほぼ中央に来る程度の余白に */
 @media (max-width:640px){.hero-txt{padding:0 56px 8px !important}}
 /* トップのヒーロー: 画像の下に文字が回る幅(〜1007px)でも、企画名がほぼ中央に来る左右余白に */
-@media (max-width:1007px){.hero-txt{padding:0 max(56px, calc((100vw - 360px) / 2)) 8px !important}}
+@media (max-width:1007px){.hero-txt{padding:0 max(16px, calc((100vw - 400px) / 2)) 8px !important}}
+
+/* ===== 作品詳細: 既存実装 app/(public)/[id]/page.module.css + FixedVideoPlayerFrame + VideoUtilityDock のレスポンシブ挙動に合わせる ===== */
+.vd .vd-layout{display:grid;grid-template-columns:minmax(0,1fr);grid-template-areas:"main" "side";gap:30px;align-items:start;box-sizing:border-box;width:100%;max-width:min(2100px,96vw);margin:0 auto;padding:0 clamp(24px,5vw,56px)}
+.vd .vd-main{grid-area:main;min-width:0}
+.vd .vd-side{grid-area:side;display:flex;flex-direction:column;gap:28px;min-width:0;max-width:none;padding:0 !important}
+.vd .vd-hero{display:grid;grid-template-columns:minmax(0,1fr);gap:0;min-width:0}
+.vd .vd-player-pane,.vd .vd-info{min-width:0}
+.vd .vd-info{display:flex;flex-direction:column;gap:20px;padding:14px 0 0 !important}
+.vd .vd-info>section,.vd .vd-main section{max-width:none !important}
+.vd .vd-title{font-size:clamp(22px,2.4vw,32px) !important;line-height:1.15 !important}
+.vd .vd-related{display:flex;flex-direction:column;gap:4px}
+/* 901px〜: 2カラム(本文 + 補助レール) */
+@media (min-width:901px){.vd .vd-layout{grid-template-columns:minmax(0,1fr) clamp(340px,23vw,420px);grid-template-areas:"main side";gap:clamp(28px,2.4vw,40px)}}
+@media (min-width:1280px){.vd .vd-layout{grid-template-columns:minmax(0,1fr) clamp(360px,22vw,440px);gap:36px}}
+/* 超横長(1600px〜 かつ 20:9 以上): 情報を左列(独立スクロール)、プレイヤーを右に画面高さいっぱい、関連動画は2列 */
+@media (min-width:1600px) and (min-aspect-ratio:20/9){
+  .vd .vd-layout{max-width:min(3200px,98vw);padding:0 clamp(16px,1.2vw,28px);grid-template-columns:minmax(0,1fr) clamp(390px,21vw,540px);gap:clamp(28px,1.8vw,48px)}
+  .vd .vd-main{height:calc(100svh - 64px - 32px)}
+  .vd .vd-hero{height:100%;grid-template-columns:clamp(300px,18vw,420px) minmax(0,1fr);gap:clamp(20px,1.4vw,36px);align-items:stretch}
+  .vd .vd-info{grid-column:1;grid-row:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 10px 0 0 !important}
+  .vd .vd-player-pane{grid-column:2;grid-row:1;align-self:center;justify-self:center;width:min(100%,calc((100svh - 96px) * 16 / 9))}
+  .vd .vd-title{font-size:clamp(20px,1.4vw,28px) !important}
+  .vd .vd-related{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+}
+/* 〜900px: 1カラム。プレイヤーはヘッダー直下に固定(下にスペーサー)、補助機能は下部ドック+シート */
+@media (max-width:900px){
+  .vd .vd-layout{gap:26px;padding:0 clamp(20px,4vw,40px)}
+  .vd .vd-hero{display:flex;flex-direction:column;padding-top:56.25vw}
+  .vd .vd-player-pane{position:fixed;top:52px;left:0;width:100%;z-index:15;background:#000;box-shadow:0 8px 24px rgba(0,0,0,.22)}
+  .vd .vd-player{position:static !important;box-shadow:none !important}
+  .vd .vd-info{padding:12px 0 0 !important;gap:16px !important}
+  .vd .vd-side{gap:30px}
+}
+/* スマホ横向き: 本文用に160pxを残してプレイヤーを高さで制限し中央に置く(useMobileVideoGeometry と同じ考え方) */
+@media (max-width:900px) and (orientation:landscape){
+  .vd .vd-player-pane{width:min(100vw,calc((100vh - 52px - 160px) * 16 / 9));left:50%;transform:translateX(-50%)}
+  .vd .vd-hero{padding-top:min(56.25vw,calc(100vh - 52px - 160px))}
+  .vd-sheet{top:calc(52px + min(56.25vw,calc(100vh - 52px - 160px))) !important}
+}
+@media (max-width:640px){.vd .vd-layout{padding:0 clamp(22px,6vw,32px)}.vd .vd-title{font-size:clamp(20px,5.5vw,26px) !important}}
+@media (max-width:360px){.vd .vd-layout{padding:0 22px}}
+/* 作品詳細 641〜900px: ヘッダー(64px)も固定し、プレイヤー・シートをその直下に揃える */
+@media (min-width:641px) and (max-width:900px){
+  .vd .hd2{position:fixed !important;left:0;right:0;top:0;z-index:28}
+  .vd.p-root{padding-top:64px}
+  .vd .vd-player-pane{top:64px}
+  .vd-sheet{top:calc(64px + 56.25vw) !important}
+}
+@media (min-width:641px) and (max-width:900px) and (orientation:landscape){
+  .vd .vd-player-pane{width:min(100vw,calc((100vh - 64px - 160px) * 16 / 9))}
+  .vd .vd-hero{padding-top:min(56.25vw,calc(100vh - 64px - 160px))}
+  .vd-sheet{top:calc(64px + min(56.25vw,calc(100vh - 64px - 160px))) !important}
+}
+
+/* ===== 横に広すぎる画面(ワイド・ウルトラワイド)での挙動 =====
+   ・本文幅は段階的に広げるが上限を設けて中央寄せ(1360 → 1600 → 1840px)
+   ・ヘッダー/フッター/横スクロール棚の左右端を本文の端に揃える
+   ・トップのヒーローは本文幅に収め、画像の高さが画面を超えないよう制限
+   ・管理/運営は本文を最大1680pxで中央寄せ
+   ・作品詳細は「高さに対して横が余る」ときプレイヤー列を高さ基準で制限し、32:9級では全体を中央にまとめる */
+:root{--wrap-max:1360px;--wrap-pad:40px;--edge:max(32px,calc((100vw - var(--wrap-max)) / 2 + var(--wrap-pad)))}
+@media (min-width:1920px){:root{--wrap-max:1600px}}
+@media (min-width:2560px){:root{--wrap-max:1840px}}
+.wrap{max-width:var(--wrap-max)}
+.shelf{--rail:var(--edge)}
+@media (min-width:1440px){
+  .hd-bar{padding-left:var(--edge);padding-right:var(--edge)}
+  .pub-foot{padding-left:var(--edge) !important;padding-right:var(--edge) !important}
+}
+@media (min-width:1600px){
+  section[aria-labelledby^="hero-"]{max-width:var(--wrap-max);margin-left:auto !important;margin-right:auto !important;padding:0 var(--wrap-pad);box-sizing:border-box;justify-content:center}
+  section[aria-labelledby^="hero-"]>a{max-width:calc((100svh - 220px) * 16 / 9)}
+  section[aria-labelledby^="hero-"]>.hero-txt{flex:0 1 440px !important;padding-right:0 !important}
+}
+@media (min-width:2000px){
+  .c-main>*{max-width:1680px;margin-left:auto;margin-right:auto}
+}
+/* 作品詳細: 横長でも高さが足りない画面ではプレイヤー列を高さ基準で制限し、レイアウトごと中央へ */
+@media (min-width:901px) and (max-aspect-ratio:20/9){
+  .vd .vd-layout{grid-template-columns:minmax(0,calc((100svh - 64px - 140px) * 16 / 9)) clamp(340px,23vw,420px);justify-content:center}
+}
+@media (min-width:1280px) and (max-aspect-ratio:20/9){
+  .vd .vd-layout{grid-template-columns:minmax(0,calc((100svh - 64px - 140px) * 16 / 9)) clamp(360px,22vw,440px)}
+}
+/* 32:9 級(3840x1080, 5120x1440 など): 3列(情報・プレイヤー・補助)を高さ基準の幅でまとめて中央に */
+@media (min-width:1600px) and (min-aspect-ratio:28/9){
+  .vd .vd-layout{max-width:calc((100svh - 96px) * 16 / 9 + clamp(300px,18vw,420px) + clamp(390px,21vw,540px) + 160px)}
+}
+/* 作品詳細: 本文の幅を変数化し、ワイド画面ではヘッダーの左右端もそれに揃える */
+.vd{--vd-max:min(2100px,96vw);--vd-pad:clamp(24px,5vw,56px)}
+@media (min-width:1600px) and (min-aspect-ratio:20/9){.vd{--vd-max:min(3200px,98vw);--vd-pad:clamp(16px,1.2vw,28px)}}
+@media (min-width:1600px) and (min-aspect-ratio:28/9){.vd{--vd-max:min(3200px,98vw,calc((100svh - 96px) * 16 / 9 + clamp(300px,18vw,420px) + clamp(390px,21vw,540px) + 160px))}}
+@media (min-width:901px){.vd .vd-layout{max-width:var(--vd-max);padding-left:var(--vd-pad);padding-right:var(--vd-pad)}}
+@media (min-width:1440px){.vd .hd-bar{padding-left:max(32px,calc((100vw - var(--vd-max)) / 2 + var(--vd-pad)));padding-right:max(32px,calc((100vw - var(--vd-max)) / 2 + var(--vd-pad)))}}
+
+/* ===== ユーザーページ UX(スマホで直感的に・情報を整理して詰める) ===== */
+/* アイコン選択: 候補表示中は現在アイコン列を消すので、パネルを1列で全幅に */
+.ic-body:has(.ic-grid){grid-template-columns:minmax(0,1fr)}
+@media (max-width:640px){
+  /* マイページのタブ(4つ以下)は均等割りのアイコン+ラベルにして横スクロールをなくす */
+  .subnav[role="tablist"]:not(:has(> :nth-child(5))){display:grid !important;grid-auto-flow:column;grid-auto-columns:minmax(max-content,1fr);overflow:visible !important;gap:0 !important}
+  .subnav[role="tablist"]:not(:has(> :nth-child(5)))>a{flex-direction:column;justify-content:center;gap:4px !important;height:auto !important;min-height:56px;padding:6px 2px !important;font-size:12px !important;line-height:16px !important;white-space:nowrap}
+  .subnav[role="tablist"]:not(:has(> :nth-child(5)))>a>i{font-size:18px}
+  .subnav[role="tablist"]:not(:has(> :nth-child(5)))>a .t-num{display:none}
+  /* ダッシュボード: 見出しまわりの空白を詰める */
+  .dash-head{margin-top:16px !important}
+  .dash-hero{margin-top:20px !important}
+  .split>.main.stack[style*="gap: 64px"],.split .main.stack[style*="gap: 64px"]{gap:40px !important}
+  .metrics[aria-label="アカウント統計"]{margin-top:28px !important}
+  .split[style*="margin-top: 64px"]{margin-top:40px !important}
+  /* 作品の行: サムネを小さく、タイトルは2行まで、状態はアイコンのみ、鉛筆は行全体がリンクなので省略 */
+  section[aria-labelledby="works"] .fn-row,section[aria-labelledby="collab"] .fn-row,section[aria-labelledby="done"] .fn-row{gap:12px;padding:8px 0;align-items:flex-start}
+  section[aria-labelledby="works"] .fn-row__thumb,section[aria-labelledby="collab"] .fn-row__thumb,section[aria-labelledby="done"] .fn-row__thumb{width:112px}
+  section[aria-labelledby="works"] .fn-row__title,section[aria-labelledby="collab"] .fn-row__title,section[aria-labelledby="done"] .fn-row__title{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  section[aria-labelledby="works"] .fn-row__meta,section[aria-labelledby="collab"] .fn-row__meta,section[aria-labelledby="done"] .fn-row__meta{font-size:12px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  section[aria-labelledby="works"] .fn-row__trail .fa-pen,section[aria-labelledby="collab"] .fn-row__trail .fa-pen{display:none}
+  section[aria-labelledby="works"] .fn-row__trail .st,section[aria-labelledby="done"] .fn-row__trail .st{font-size:0;gap:0}
+  section[aria-labelledby="works"] .fn-row__trail .st i,section[aria-labelledby="done"] .fn-row__trail .st i{font-size:14px}
+  /* 保存・次へなどの操作は画面下に常に出す */
+  .act-bar{position:sticky;bottom:0;z-index:10;margin:32px -16px 0 !important;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:var(--bg);box-shadow:0 -1px 0 var(--surface-subtle)}
+  .act-bar .t-sm{display:none}
+}
+@media (max-width:640px){
+  .wrap:has(> .hub-bar){padding-top:8px !important}
+  .hub-bar{margin-top:0}
+  .hub-body{margin-top:8px}
+  .hub-body .dash-head{margin-top:8px !important}
+  .hub-bar .subnav{width:100%}
+}
+
+/* トップのヒーロー: スマホでは「あと N 日」を省き締切日時だけ */
+@media (max-width:640px){.dl-sp-date .dl-v{display:none}}
+
+/* イベント一覧の注目イベント: 幅に余裕がある時は締切(あと N 日)を右端へ */
+@media (min-width:1024px){
+  .ev-feat:has(.ev-feat-dl){grid-template-columns:360px minmax(0,1fr) auto}
+  .ev-feat-dl{justify-items:end;text-align:right;align-self:end}
+}
+@media (min-width:721px) and (max-width:1023px){
+  .ev-feat:has(.ev-feat-dl){row-gap:16px}
+  .ev-feat:has(.ev-feat-dl)>img{grid-row:1/3}
+  .ev-feat:has(.ev-feat-dl)>.stack{align-self:end}
+  .ev-feat-dl{grid-column:2;align-self:start}
+}
+/* 締切表示のカーニング: 数字はプロポーショナル+詰め、単位は palt で約物・かなの余白を詰め、数字と単位の間隔を明示 */
+.dl-v{gap:0}
+.dl-n{font-variant-numeric:proportional-nums lining-nums;font-kerning:normal;letter-spacing:-.035em}
+.dl-u{font-feature-settings:"palt" 1;letter-spacing:.02em}
+.dl-v>.dl-u:first-child{margin-right:.2em}
+.dl-v>.dl-n+.dl-u{margin-left:.3em}
+.dl-k{font-feature-settings:"palt" 1;letter-spacing:.02em}
+.dl-k .t-num{letter-spacing:.01em}
+
+/* 上映枠: 別日の同時刻を同じ行に。休憩行も通常行と同じ高さ、埋め草行は空白。日が縦積みになる幅では埋め草を出さない */
+.srow2.brk>.sl{min-height:40px}
+.srow2.fill>.sl{background:transparent;box-shadow:inset 0 0 0 1px var(--surface-raised)}
+.srow2.fill>.tm{opacity:.4}
+.pgap.fill{background:transparent;box-shadow:inset 0 0 0 1px var(--surface-raised)}
+.plabel.fill{opacity:.4}
+.parts{container-type:inline-size}
+@container (max-width:567px){.srow2.fill,.pgap.fill,.plabel.fill{display:none}}
+
+/* 投稿フォーム(枠に提出・作品を投稿): 作品情報 → メンバー → 運営からの質問 → 確認・送信 */
+.es-layout{display:flex;flex-wrap:wrap;gap:32px;margin-top:32px}
+.es-layout>.es-steps{flex:1 1 200px;max-width:240px;align-self:flex-start;position:sticky;top:88px}
+.es-layout>.es-form{flex:999 1 560px;min-width:0}
+.es-left{margin:16px 0 0;padding:0 14px}
+.es-confirm{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:24px;align-items:start}
+.es-desc pre{margin:0;padding:16px;background:var(--surface-subtle);white-space:pre-wrap;color:var(--ink)}
+.rel-row:has(.rel-chg){grid-template-columns:28px minmax(0,1fr) auto auto}
+@media (max-width:900px){
+  .es-layout>.es-steps{max-width:none;flex:1 1 100%;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);grid-template-columns:none;gap:2px;position:sticky;top:56px;z-index:5;background:var(--bg);padding:8px 0}
+  .es-layout>.es-steps .wstep{flex-direction:column;align-items:flex-start;gap:4px;padding:8px;font-size:12px;line-height:16px;position:relative}
+  .es-layout>.es-steps .wstep>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .es-layout>.es-steps .wstep>i:last-child{position:absolute;top:8px;right:8px;margin:0}
+  .es-left{display:none}
+}
+@media (max-width:640px){
+  .es-confirm{grid-template-columns:1fr;gap:16px}
+  .es-saved{display:none}
+  .rel-row:has(.rel-chg){grid-template-columns:28px minmax(0,1fr) auto}
+  .rel-row:has(.rel-chg)>.rel-chg{grid-column:3;grid-row:1/3}
+}
+.es-confirm .kv{grid-template-columns:88px minmax(0,1fr)}
+
+/* 作品編集: スマホではプレビューを省く(公開ページへのリンクで確認) */
+.ve-soft-add>:first-child{flex:1;min-width:0}
+@media (max-width:640px){.ve-aside{display:none}}
+
+/* ダッシュボード: 次にやること → 統計 → 作品(自分+共同編集を1つに) */
+.dash-works .tag-c{padding:2px 6px;background:var(--surface-subtle);white-space:nowrap}
+.dash-more{margin-top:8px;gap:8px}
+@media (max-width:640px){.dash-works .tag-c{display:none}}
+/* 次にやること: 明示的なカード(背景付き) */
+.p-root .ent-next.raised{background:var(--surface-raised);padding:20px !important}
+@media (max-width:640px){.p-root .ent-next.raised{padding:16px !important;gap:12px !important}.ent-next>img{width:96px !important}}
+
+/* 運営: イベント設定の要約はスマホでは省く */
+@media (max-width:640px){.me-pv{display:none}}
+
+/* スタッフ: 表は div グリッド(テンプレートの繰り返しが表の中でも崩れない) */
+.sl-list{display:grid}
+.sl-h,.sl-r{display:grid;grid-template-columns:minmax(0,1.4fr) 200px minmax(0,1fr) 88px;gap:16px;align-items:center;padding:10px 12px}
+.sl-h{font:400 12px/16px var(--font-sans);color:var(--ink-muted);padding-top:0}
+.sl-r:hover{background:var(--surface-subtle)}
+.pmg{display:grid;font-size:13px;line-height:20px;min-width:max-content}
+.pmg-row{display:grid;grid-template-columns:180px 120px repeat(23,36px);align-items:center}
+.pmg-grp>span{font:400 12px/16px var(--font-sans);color:var(--ink-muted);padding:0 0 6px 8px;white-space:nowrap}
+.pmg-keys>span{font:400 12px/16px var(--font-sans);color:var(--ink-muted);align-self:end;padding-bottom:8px}
+.pmg-keys>.pm-k span{writing-mode:vertical-rl;display:inline-block;height:96px;padding:0 0 0 8px;white-space:nowrap}
+.pmg-body{padding:6px 0}
+.pmg-body:hover{background:var(--surface-subtle)}
+.pmg-body>.pm-c{text-align:center}
+.pm-pre-c{white-space:nowrap;padding-right:12px}
+@media (max-width:640px){
+  .sl-h{display:none}
+  .sl-r{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;padding:12px 0}
+  .sl-r>:nth-child(2){grid-column:1}
+  .sl-r>.sl-title{grid-column:1;grid-row:3}
+  .sl-r>.sl-acts{grid-column:2;grid-row:1}
+}
+
+/* ---- UX/UI brushup v128: a11y baseline (ui-ux-pro-max: focus-states / touch-target-size / color-contrast; design-for-ai: interaction states) ---- */
+:where(button,[role="tab"],[role="option"],[role="button"],summary,select,a[href],[tabindex]:not([tabindex="-1"])):focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.fn-field__control:focus,.en-desc:focus,.select:focus,.tinput:focus,.dinput:focus,.en-title:focus{outline:0;box-shadow:inset 0 -2px 0 var(--ink) !important}
+html .wstep .n{font-size:12px}
+.cal-d.pad{pointer-events:none;visibility:hidden}
+/* hit areas grow invisibly; visual size unchanged (::after is the tooltip on .ib) */
+.chip-x,.en-sw,a.il,button.il,a.p-link,.en-link{position:relative}
+.ib::before{content:"";position:absolute;inset:-4px}
+.ib:last-child::before{right:0}
+a.il::before,button.il::before,a.p-link::before,.en-link::before,.chip-x::before,.en-sw::before{content:"";position:absolute;inset:-6px 0}
+.chip-x::before{inset:-8px -6px}
+.en-sw::before{inset:-8px}
+@media (pointer:coarse),(max-width:640px){.ib.sm::before{inset:-6px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition-duration:.01ms !important;animation-duration:.01ms !important;scroll-behavior:auto !important}}
+@media (max-width:640px){.en-q{flex-wrap:wrap;row-gap:4px}.en-q-in{flex:1 1 160px}.en-q>.ib:last-child{margin-left:auto}}
+/* ---- v129 responsive: fluid type + reflow without orphans (design-for-ai responsive.md: fluid clamp(), content-driven breakpoints) ---- */
+.t-display{font-size:clamp(24px,calc(2.5vw + 14px),40px);line-height:calc(1em + 8px)}
+.t-h1{font-size:clamp(22px,calc(1.5vw + 16px),32px);line-height:calc(1em + 8px)}
+@media (max-width:420px){.metrics:has(>:nth-child(4):last-child){grid-template-columns:repeat(2,minmax(0,1fr)) !important}}
+/* intrinsic grids: card min-width scales with the viewport so mid widths (700–1000px) get one more column instead of a single wide column (design-for-ai responsive.md: auto-fit/minmax) */
+.grid-v{grid-template-columns:repeat(auto-fill,minmax(min(100%,clamp(200px,22vw,260px)),1fr))}
+.grid-v3{grid-template-columns:repeat(auto-fill,minmax(min(100%,clamp(280px,30vw,340px)),1fr))}
+/* header 641–860px: nav + search field don't fit side by side → search collapses to an icon (same pattern as mobile) */
+@media (min-width:641px) and (max-width:860px){
+  .hd-search{display:none}
+  .hd-search-ic{display:inline-flex}
+  .hd2.open-search .hd-search{display:flex;position:absolute;left:0;right:0;top:0;width:auto;height:100%;margin:0;padding:0 20px;z-index:31;background:var(--bg)}
+}
+/* line length: prose stays ≤45字 per line at any width (ui-ux-pro-max line-length-control / line-length; ja 35–45字) */
+.p-root p.muted,.p-root p.t-sm,.p-root p.t-body,.p-root p.sch-sum,.p-root p.sentence,.p-root .c-head p{max-width:45em}
+/* ---- v130 スマホメニュー: 使う頻度で強弱(見る=大 / 投稿=Primary / 自分=中 / 設定=小) ui-ux-pro-max primary-action・visual-hierarchy, design-for-ai chapter-07 */
+@media (max-width:640px){
+  .hd-menu{padding:4px 0 calc(20px + env(safe-area-inset-bottom));gap:0}
+  .hd-menu .hm-main{display:flex;flex-direction:column;padding:4px 0 8px}
+  .hd-menu .hm-main a{min-height:60px;padding:0 20px;justify-content:space-between;font:400 24px/32px var(--font-sans);letter-spacing:.01em;color:var(--ink)}
+  .hd-menu .hm-main a i{width:auto;font-size:16px;color:var(--ink-muted);transition:transform .15s}
+  .hd-menu .hm-main a:active i{transform:translateX(4px)}
+  .hd-menu .hm-main a[aria-current="page"]{background:var(--surface-subtle)}
+  .hd-menu .hm-main a:not([aria-current="page"]){color:var(--ink)}
+  .hd-menu a.hm-cta{display:flex;justify-content:center;gap:10px;margin:4px 20px 0;width:auto;min-height:52px;padding:0 20px;background:var(--brand);color:var(--on-brand);font:400 16px/22px var(--font-sans)}
+  .hd-menu a.hm-cta i{width:auto;color:var(--on-brand);font-size:15px}
+  .hd-menu .hm-note{margin:10px 20px 0;max-width:none}
+  .hd-menu .hm-me{display:flex;flex-direction:column;margin-top:28px;padding-top:20px;box-shadow:inset 0 1px 0 var(--surface-active)}
+  .hd-menu a.hm-who{display:grid;grid-template-columns:40px minmax(0,1fr) 16px;gap:12px;min-height:56px;padding:0 20px}
+  .hd-menu a.hm-who img{width:40px;height:40px}
+  .hd-menu a.hm-who i{font-size:12px}
+  .hd-menu .hm-name{font:400 17px/24px var(--font-sans);color:var(--ink)}
+  .hd-menu .hm-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:12px 12px 0}
+  .hd-menu .hm-quick a{position:relative;flex-direction:column;justify-content:center;gap:6px;min-height:68px;padding:8px 4px;font:400 12px/16px var(--font-sans);color:var(--ink-muted)}
+  .hd-menu .hm-quick a i{width:auto;font-size:20px;color:var(--ink)}
+  .hd-menu .hm-quick a:active{background:var(--surface-subtle)}
+  .hd-menu .hm-badge{position:absolute;top:8px;left:calc(50% + 8px);min-width:18px;height:18px;padding:0 5px;border-radius:0;background:var(--ink);color:var(--bg);font:400 12px/18px var(--font-sans);text-align:center;box-sizing:border-box}
+  .hd-menu .hm-h{padding:16px 20px 4px}
+  .hd-menu .hm-xids{display:flex;flex-direction:column}
+  .hd-menu .hm-xids .hd-xid{min-height:44px;padding:0 20px;font-size:14px}
+  .hd-menu .hm-foot{display:flex;flex-direction:column;gap:4px;margin-top:20px;padding-top:12px;box-shadow:inset 0 1px 0 var(--surface-active)}
+  .hd-menu .hm-theme{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:0 20px}
+  .hd-menu .hm-out{display:inline-flex;align-items:center;gap:10px;align-self:flex-start;min-height:44px;padding:0 20px;border:0;background:transparent;color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}
+  .hd-menu .hm-out i{font-size:13px}
+  .hd-menu a.hd-acc-sub{min-height:44px;padding:0 20px;gap:10px}
+}
+/* ---- v132 テーマ: ページ外側(body)とネイティブUI(スクロールバー・select・日付入力)もテーマに追従 ---- */
+body{background:#000}
+body:has([data-theme="light"]):not(:has([data-theme="dark"])){background:#fff}
+:root,[data-theme="dark"]{color-scheme:dark}
+[data-theme="light"]{color-scheme:light}
+/* 部品ボード(ヘッダー/フッター/ナビ)を単体で開いたときもリンクがテーマ色になるように(最弱の詳細度で既存ルールを上書きしない) */
+:where([data-theme]) a:where(:not(.fn-btn)){color:var(--ink);text-decoration:none}
+/* 右クリックメニュー: フラット化ルールで背景が透けていたのを修正(両テーマ) */
+.p-root .raised.ctxmenu{background:var(--surface-raised);padding-left:4px !important;padding-right:4px !important;box-shadow:var(--shadow-overlay) !important}
+.kbd:empty{visibility:hidden}
+/* トップのヒーロー: 横幅があるときは「募集締切〜操作」を2列目に(ヒーロー文字欄の幅で判定) */
+.hero-txt{container-type:inline-size}
+.hero-in,.hero-a,.hero-b{display:flex;flex-direction:column;gap:16px;min-width:0}
+@container (min-width:520px){
+  .hero-in{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:clamp(32px,6cqi,64px);align-items:end}
+  .hero-b{align-items:flex-end;text-align:right}
+  .hero-b .dl{justify-items:end;align-items:flex-end}
+  .hero-b .actions{margin-top:0 !important}
+}
+@media (max-width:1007px){.hero-txt{padding:0 40px 8px !important}}
+@media (max-width:640px){.hero-txt{padding:0 16px 8px !important}}

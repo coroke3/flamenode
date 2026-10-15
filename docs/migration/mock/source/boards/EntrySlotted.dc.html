@@ -22,11 +22,11 @@
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
 <style>
-body{margin:0;background:#000}
+body{margin:0}
 .wstep{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;border:0;background:transparent;color:var(--ink-muted);font:400 14px/20px var(--font-sans);cursor:pointer;text-align:left}
 .wstep:hover{color:var(--ink)}
 .wstep.on{background:var(--surface-subtle);color:var(--ink)}
-.wstep .n{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius: 0;background:var(--surface-active);font-size:11px;flex:none}
+.wstep .n{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius: 0;background:var(--surface-active);font-size:12px;flex:none}
 .chip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}
 .chip.on{background:var(--ink);color:var(--bg)}
 .es-bar{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:16px;align-items:center;margin-top:20px;padding:0}
@@ -38,7 +38,7 @@ body{margin:0;background:#000}
 </style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import>
 
   <div class="wrap" style="padding-top: 40px; max-width: 1280px;">
     <div class="wrap-row" style="gap: 8px; justify-content: space-between;">
@@ -56,31 +56,20 @@ body{margin:0;background:#000}
       <span class="dl" role="timer" aria-label="提出締切まであと3日(10.07 23:59)"><span class="dl-k t-xs muted">提出締切 <span class="t-num">10.07 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">3</b><span class="dl-u">日</span></span></span>
     </div>
 
-    <div style="display: flex; flex-wrap: wrap; gap: 32px; margin-top: 32px;">
-      <nav class="es-steps" aria-label="投稿ステップ" style="flex: 1 1 220px; max-width: 260px;">
+    <div class="es-layout">
+      <nav class="es-steps" aria-label="投稿ステップ">
         <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
           <button type="button" class="{{s.cls}}" aria-current="{{s.cur}}" disabled="{{s.off}}" onClick="{{s.go}}"><span class="n"><i class="{{s.mark}}" aria-hidden="true"></i>{{s.num}}</span><span style="flex: 1;">{{s.label}}</span><i class="{{s.flag}}" aria-label="{{s.flagLabel}}" style="color: var(--warning); font-size: 12px;"></i></button>
         </sc-for>
-        <div class="stack es-check" style="gap: 8px; margin-top: 24px; padding: 16px; background: var(--surface-raised);" aria-label="投稿前チェック">
-          <span class="il t-label muted"><i class="fa-solid fa-list-check" aria-hidden="true"></i>投稿前チェック</span>
-          <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>Active X ID 承認済み</span>
-          <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>利用規約 同意済み</span>
-          <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>枠は確保中</span>
-          <span class="il t-sm"><i class="fa-solid fa-circle-exclamation" aria-hidden="true" style="color: var(--warning);"></i>必須項目 残り2</span>
-        </div>
+        <p class="il t-sm es-left"><i class="fa-solid fa-circle-exclamation" aria-hidden="true" style="color: var(--warning);"></i>必須項目 残り2</p>
       </nav>
 
-      <form style="flex: 999 1 560px; min-width: 0;" onSubmit="{{prevent}}">
-        <sc-if value="{{s0}}" hint-placeholder-val="{{true}}">
-          <div class="form">
-            <h2 class="t-h2">提出者情報</h2>
-            <dc-import name="EntrySubmitter" mode="{{subMode}}" icon="{{icon}}" hint-size="100%,420px"></dc-import>
-          </div>
-        </sc-if>
-
-        <sc-if value="{{s1}}" hint-placeholder-val="{{false}}">
+      <form class="es-form" onSubmit="{{prevent}}">
+        <sc-if value="{{sWork}}" hint-placeholder-val="{{true}}">
           <div class="form">
             <h2 class="t-h2">作品情報</h2>
+            <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="YouTube URL(任意・限定公開可)" placeholder="URL をそのまま貼り付け" default-value="https://youtu.be/_UwLG4eJDgM?si=Xk2"></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
+            <sc-if value="{{ytOk}}" hint-placeholder-val="{{true}}"><div class="row es-yt" style="gap: 12px; align-items: center;"><img src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="" style="width: 96px; aspect-ratio: 16/9; object-fit: cover; display: block;"><span class="stack" style="gap: 2px; min-width: 0;"><span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>動画を認識しました</span><span class="t-sm muted t-mono ell">_UwLG4eJDgM</span></span></div></sc-if>
             <x-import component-from-global-scope="FlameNode.TextField" label="作品タイトル *" placeholder="例: First Light - 春の輪" error="タイトルを入力してください" hint="120文字まで。部は確保した枠から自動で決まります(1日目 第1部)"></x-import>
             
             <x-import component-from-global-scope="FlameNode.TextField" label="紹介コメント" multiline="{{yes}}" placeholder="作品の見どころを 1〜2 行で。"></x-import>
@@ -97,64 +86,62 @@ body{margin:0;background:#000}
               <x-import component-from-global-scope="FlameNode.TextField" aria-label="リストにないソフト" placeholder="リストにない場合は入力"></x-import>
             </div>
             <div class="form-sec" style="margin-top: 16px;">
-              <h3 class="t-h3">合作</h3>
-              <div class="seg" role="radiogroup" aria-label="合作"><button type="button" role="radio" class="{{soloCls}}" aria-checked="{{solo}}" onClick="{{setSolo}}"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</button><button type="button" role="radio" class="{{groupCls}}" aria-checked="{{group}}" onClick="{{setGroup}}"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</button></div>
-              <sc-if value="{{solo}}" hint-placeholder-val="{{false}}"><p class="t-sm muted" style="margin: 0;">複数人にすると、メンバーと担当区間(チャプター)を追加できます。</p></sc-if>
-              <sc-if value="{{group}}" hint-placeholder-val="{{true}}"><dc-import name="MemberEditor" hint-size="100%,620px"></dc-import></sc-if>
-            </div>
-            <div class="form-sec" style="margin-top: 16px;">
               <h3 class="t-h3">ほかのイベントにも紐づける</h3>
               <div class="wrap-row" style="gap: 4px;"><span class="chip on" aria-disabled="true"><i class="fa-solid fa-lock" aria-hidden="true"></i>PVSF2026S</span><button type="button" class="chip"><i class="fa-solid fa-plus" aria-hidden="true"></i>年越し合作 2026</button></div>
             </div>
-            <div class="form-sec" style="margin-top: 16px;">
-              <dc-import name="EntryQuestions" ev="{{evName}}" hint-size="100%,760px"></dc-import>
-              <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・素材の権利を確認しました *"></x-import>
             </div>
+        </sc-if>
+
+        <sc-if value="{{sMem}}" hint-placeholder-val="{{false}}">
+          <div class="form">
+            <h2 class="t-h2">メンバー</h2>
+            <div class="seg" role="radiogroup" aria-label="合作"><button type="button" role="radio" class="{{soloCls}}" aria-checked="{{solo}}" onClick="{{setSolo}}"><i class="fa-solid fa-user" aria-hidden="true"></i>個人</button><button type="button" role="radio" class="{{groupCls}}" aria-checked="{{group}}" onClick="{{setGroup}}"><i class="fa-solid fa-user-group" aria-hidden="true"></i>複数人</button></div>
+              <sc-if value="{{solo}}" hint-placeholder-val="{{false}}"><p class="t-sm muted" style="margin: 0;">複数人にすると、メンバーと担当区間(チャプター)を追加できます。</p></sc-if>
+              <sc-if value="{{group}}" hint-placeholder-val="{{true}}"><dc-import name="MemberEditor" theme="{{theme}}" hint-size="100%,620px"></dc-import></sc-if></div>
+        </sc-if>
+
+        <sc-if value="{{sQ}}" hint-placeholder-val="{{false}}">
+          <div class="form">
+            <h2 class="t-h2">運営からの質問</h2>
+            <dc-import name="EntryQuestions" theme="{{theme}}" ev="{{evName}}" hint-size="100%,760px"></dc-import>
           </div>
         </sc-if>
 
-        <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+        <sc-if value="{{sDone}}" hint-placeholder-val="{{false}}">
           <div class="form">
-            <h2 class="t-h2">YouTube URL</h2>
-            <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="YouTube URL または動画ID" placeholder="URL をそのまま貼り付け" default-value="https://youtu.be/_UwLG4eJDgM?si=Xk2" hint="任意。後から追加できます。限定公開でも登録可能です。"></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
-            <div class="row" style="gap: 16px; background: var(--surface-subtle); padding: 12px;">
-              <img src="/_blob/3d8d62bbac75243d266ec6e3de039e6d" alt="" style="width: 160px; aspect-ratio: 16/9; object-fit: cover; display: block;">
-              <div class="stack" style="gap: 6px; flex: 1; min-width: 0;">
-                <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>動画を認識しました</span>
-                <span class="row t-sm" style="gap: 8px;"><span class="muted">動画ID</span><span class="t-mono">_UwLG4eJDgM</span><span class="muted">· 共有用パラメータ(?si=)は自動で除去</span></span>
-                <a href="https://youtu.be/_UwLG4eJDgM" class="il t-sm muted"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>YouTube で開いて確認</a>
-              </div>
+            <h2 class="t-h2">確認・送信</h2>
+            <div class="notice" role="alert"><i class="fa-solid fa-circle-exclamation" aria-hidden="true" style="color: var(--warning); padding-top: 4px;"></i><span class="stack" style="gap: 4px;"><span>未入力の必須項目があります</span><button type="button" class="il t-sm" style="border: 0; background: none; padding: 0; color: var(--brand-text); cursor: pointer;" onClick="{{toWork}}"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>作品タイトル{{qMissing}}</button></span></div>
+            <div class="es-confirm">
+              <div><x-import component-from-global-scope="FlameNode.VideoCard" title="(未入力)" thumbnail="/_blob/3d8d62bbac75243d266ec6e3de039e6d" duration="08:02" creator="おたこ" creator-icon="/_blob/fc027fe6fe3a001a22a1933270ce72b9"></x-import></div>
+              <dl class="kv" style="font-size: 14px; align-content: start;">
+                <dt class="il"><i class="ms ms-event_seat" aria-hidden="true"></i>枠</dt><dd class="t-num">PVSF2026S · 11.03 18:24 · 連続2枠</dd>
+                <dt class="il"><i class="fa-brands fa-youtube" aria-hidden="true"></i>YouTube</dt><dd class="t-mono">_UwLG4eJDgM</dd>
+              </dl>
             </div>
-            <section class="stack" style="gap: 8px;">
-              <div class="row" style="justify-content: space-between;"><span class="il t-label muted"><i class="fa-solid fa-align-left" aria-hidden="true"></i>YouTube 説明文プレビュー</span><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-regular fa-copy" aria-hidden="true"></i>コピー</button></div>
-              <pre class="t-mono" style="margin: 0; padding: 16px; background: var(--surface-subtle); white-space: pre-wrap; color: var(--ink);">PVSF2026S 参加作品
+            <section class="stack" style="gap: 12px;">
+              <h3 class="t-h3">提出者</h3>
+              <dc-import name="EntrySubmitter" theme="{{theme}}" mode="{{subMode}}" icon="{{icon}}" hint-size="100%,220px"></dc-import>
+            </section>
+            <details class="es-desc">
+              <summary class="il t-sm" style="cursor: pointer;"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i>YouTube 説明文(自動作成)</summary>
+              <div class="stack" style="gap: 8px; margin-top: 12px;">
+                <pre class="t-mono" style="margin: 0; padding: 16px; background: var(--surface-subtle); white-space: pre-wrap; color: var(--ink);">PVSF2026S 参加作品
 1日目 第1部 11.03 18:24
 
 楽曲: Clock jitter / アーティスト: — / 作曲: まんぼう二等兵
 制作: おたこ (@012345rty)
 
 イベントページ: https://flamenode.net/event/pvsf2026s</pre>
-              <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>イベントが設定したテンプレートから自動で作られます。</p>
-            </section>
+                <div class="row" style="justify-content: space-between; gap: 12px;"><p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>イベントが設定したテンプレートから自動で作られます。</p><button type="button" class="fn-btn fn-btn--secondary fn-btn--sm"><i class="fa-regular fa-copy" aria-hidden="true"></i>コピー</button></div>
+              </div>
+            </details>
+            <x-import component-from-global-scope="FlameNode.Checkbox" label="楽曲・素材の権利を確認しました *"></x-import>
           </div>
         </sc-if>
 
-        <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
-          <div class="form">
-            <h2 class="t-h2">確認・送信</h2>
-            <div class="notice" role="alert"><i class="fa-solid fa-circle-exclamation" aria-hidden="true" style="color: var(--warning); padding-top: 4px;"></i><span class="stack" style="gap: 4px;"><span>未入力の必須項目があります</span><button type="button" class="il t-sm" style="border: 0; background: none; padding: 0; color: var(--brand-text); cursor: pointer;" onClick="{{toWork}}"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i>作品情報: 作品タイトル / 運営からの質問</button></span></div>
-            <div style="max-width: 420px;"><x-import component-from-global-scope="FlameNode.VideoCard" title="(未入力)" thumbnail="/_blob/3d8d62bbac75243d266ec6e3de039e6d" duration="08:02" creator="おたこ" creator-icon="/_blob/fc027fe6fe3a001a22a1933270ce72b9"></x-import></div>
-            <dl class="kv" style="font-size: 14px;">
-              <dt class="il"><i class="ms ms-event_seat" aria-hidden="true"></i>枠</dt><dd class="t-num">11.03 18:24 · 連続2枠</dd>
-              <dt class="il"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>名義</dt><dd>@012345rty</dd>
-              <dt class="il"><i class="fa-brands fa-youtube" aria-hidden="true"></i>YouTube</dt><dd class="t-mono">xxxxxxxxxxx</dd>
-            </dl>
-          </div>
-        </sc-if>
-
-        <div class="row" style="gap: 8px; margin-top: 40px;">
+        <div class="row act-bar" style="gap: 8px; margin-top: 40px;">
           <button type="button" class="fn-btn fn-btn--tertiary" onClick="{{back}}" disabled="{{isFirst}}"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>戻る</button>
-          <span class="il t-sm muted"><i class="fa-solid fa-cloud" aria-hidden="true"></i>下書き保存済み</span>
+          <span class="il t-sm muted es-saved"><i class="fa-solid fa-cloud" aria-hidden="true"></i>下書き保存済み</span>
           <span style="flex: 1;"></span>
           <sc-if value="{{notLast}}" hint-placeholder-val="{{true}}"><button type="button" class="fn-btn fn-btn--primary" onClick="{{next}}">次へ<i class="fa-solid fa-arrow-right" aria-hidden="true"></i></button></sc-if>
           <sc-if value="{{isLast}}" hint-placeholder-val="{{false}}"><button type="submit" class="fn-btn fn-btn--primary" disabled="{{yes}}">提出する</button></sc-if>
@@ -163,22 +150,23 @@ body{margin:0;background:#000}
     </div>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"sub":{"editor":"enum","options":["summary","edit"],"default":"summary"},"icon":{"editor":"enum","options":["select","crop","uploaded"],"default":"select"},"$preview":{"width":1440,"height":1800}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { step: 0, maxStep: 1, q1: '' }; }
+  constructor(p) { super(p); this.state = { step: 0, maxStep: 3, q1: '' }; }
   renderVals() {
-    const st = this.state.step;
-    const defs = [['提出者情報', ''], ['作品情報', 'warn'], ['YouTube URL', ''], ['確認・送信', '']];
+    const qOn = true;
+    const defs = [['作品情報', 'warn', 'work'], ['メンバー', '', 'mem']].concat(qOn ? [['運営からの質問', 'warn', 'q']] : []).concat([['確認・送信', '', 'done']]);
+    const st = Math.min(this.state.step, defs.length - 1); const key = defs[st][2];
     return Object.assign({ icon: this.props.icon || 'select', subMode: this.props.sub || 'summary' }, {
       evName: 'PVSF2026S', theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
       solo: this.state.collab === 'solo', group: this.state.collab !== 'solo', soloCls: this.state.collab === 'solo' ? 'on' : '', groupCls: this.state.collab !== 'solo' ? 'on' : '', q1n: this.state.q1 === 'n' ? 'on' : '', q1y: this.state.q1 === 'y' ? 'on' : '', q1nOn: this.state.q1 === 'n' ? 'true' : 'false', q1yOn: this.state.q1 === 'y' ? 'true' : 'false', setQ1n: () => this.setState({ q1: 'n' }), setQ1y: () => this.setState({ q1: 'y' }), setSolo: () => this.setState({ collab: 'solo' }), setGroup: () => this.setState({ collab: 'group' }),
       steps: defs.map((d, i) => ({ label: d[0], num: i < st ? '' : i + 1, mark: i < st ? 'fa-solid fa-check' : '', cls: i === st ? 'wstep on' : 'wstep', cur: i === st ? 'step' : 'false', flag: d[1] === 'warn' ? 'fa-solid fa-circle-exclamation' : '', flagLabel: d[1] === 'warn' ? '未入力の必須項目あり' : '', go: () => this.setState({ step: i }), off: i > Math.max(this.state.maxStep || 0, st) })),
-      s0: st === 0, s1: st === 1, s2: st === 2, s3: st === 3,
-      isFirst: st === 0, notLast: st < 3, isLast: st === 3,
-      back: () => this.setState({ step: Math.max(0, st - 1) }), next: () => this.setState({ step: Math.min(3, st + 1), maxStep: Math.max(this.state.maxStep || 0, st + 1) }), toWork: () => this.setState({ step: 1 })
+      sWork: key === 'work', sMem: key === 'mem', sQ: key === 'q', sDone: key === 'done', ytOk: true, qMissing: qOn ? ' / 運営からの質問' : '',
+      isFirst: st === 0, notLast: st < defs.length - 1, isLast: st === defs.length - 1,
+      back: () => this.setState({ step: Math.max(0, st - 1) }), next: () => this.setState({ step: Math.min(defs.length - 1, st + 1), maxStep: Math.max(this.state.maxStep || 0, st + 1) }), toWork: () => this.setState({ step: 0 })
     });
   }
 }

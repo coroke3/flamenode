@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="users" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="users" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
     <h1 class="t-display">ユーザー</h1>
     <div class="hub-bar">
@@ -33,9 +33,9 @@
       <div class="hub-links"></div>
     </div>
     <div class="hub-body">
-      <sc-if value="{{t_0}}" hint-placeholder-val="{{true}}"><dc-import name="AdminUsers" hint-size="100%,1500px"></dc-import></sc-if>
-      <sc-if value="{{t_1}}" hint-placeholder-val="{{false}}"><dc-import name="AdminXLink" hint-size="100%,1200px"></dc-import></sc-if>
-      <sc-if value="{{t_2}}" hint-placeholder-val="{{false}}"><dc-import name="AdminXIdMerges" hint-size="100%,1300px"></dc-import></sc-if>
+      <sc-if value="{{t_0}}" hint-placeholder-val="{{true}}"><dc-import name="AdminUsers" theme="{{theme}}" hint-size="100%,1500px"></dc-import></sc-if>
+      <sc-if value="{{t_1}}" hint-placeholder-val="{{false}}"><dc-import name="AdminXLink" theme="{{theme}}" hint-size="100%,1200px"></dc-import></sc-if>
+      <sc-if value="{{t_2}}" hint-placeholder-val="{{false}}"><dc-import name="AdminXIdMerges" theme="{{theme}}" hint-size="100%,1300px"></dc-import></sc-if>
     </div>
   </main>
 </div>
@@ -45,7 +45,7 @@
 class Component extends DCLogic {
   constructor(p) { super(p); this.state = { tab: null }; }
   renderVals() {
-    const T = [["AdminUsers", "ユーザー", "fa-brands fa-discord", ""], ["AdminXLink", "X ID連携申請", "fa-solid fa-at", "3"], ["AdminXIdMerges", "X ID統合申請", "ms ms-merge", "1"]];
+    const T = [["AdminUsers", "ユーザー", "fa-brands fa-discord", ""], ["AdminXLink", "X ID 連携申請", "fa-solid fa-at", "3"], ["AdminXIdMerges", "X ID 統合申請", "ms ms-merge", "1"]];
     const cur = this.state.tab || this.props.tab || T[0][0];
     const r = { theme: this.props.theme ?? 'dark',
       tabs: T.map(([id, label, icon, n]) => ({ label, icon, n, cur: id === cur ? 'page' : 'false', sel: id === cur ? 'true' : 'false', pick: (e) => { e.preventDefault(); this.setState({ tab: id }); } })) };

@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head">
       <div>
@@ -94,11 +94,11 @@ class Component extends DCLogic {
       ['STEL-LUMINA','赤嶺いずな','izuna_text','s','public',1,1,0,'03.28 19:36'],
       ['【みずのひと合作】マッドダイナー / 宮守文学','みずのひと合作2','mizunohito_10','g','voided',1,1,0,'03.28 19:30']
     ];
-    const S = { pending: ['承認待ち', 'dot warn'], public: ['公開', 'dot ok'], private: ['非公開', 'dot'], voided: ['一時停止', 'dot err'] };
+    const S = { pending: ['審査待ち', 'dot warn'], public: ['公開', 'dot ok'], private: ['非公開', 'dot'], voided: ['一時停止', 'dot err'] };
     return {
       theme: this.props.theme ?? 'dark',
       tab: this.state.tab, setTab: (id) => this.setState({ tab: id }),
-      tabs: [{ id: 'pending', label: '承認待ち 12' }, { id: 'public', label: '公開' }, { id: 'private', label: '非公開' }, { id: 'voided', label: '無効化' }, { id: 'all', label: 'すべて' }],
+      tabs: [{ id: 'pending', label: '審査待ち 12' }, { id: 'public', label: '公開' }, { id: 'private', label: '非公開' }, { id: 'voided', label: '無効化' }, { id: 'all', label: 'すべて' }],
       rows: D.map((d, i) => ({ title: d[0], creator: d[1], x: d[2], kindIcon: d[3] === 'g' ? 'fa-solid fa-user-group' : 'fa-solid fa-user', state: S[d[4]][0], dot: S[d[4]][1], yt: d[5] ? 'fa-brands fa-youtube' : 'fa-solid fa-link-slash', ytLabel: d[5] ? 'YouTube 登録済み' : 'URL未設定', ytColor: d[5] ? 'var(--ink)' : 'var(--ink-muted)', stage: d[6] ? 'fa-solid fa-check' : 'fa-solid fa-minus muted', req: d[7] ? 'fa-solid fa-circle-exclamation' : '', event: 'PVSF2026Sp', at: d[8], thumb: T[i % 8] }))
     };
   }

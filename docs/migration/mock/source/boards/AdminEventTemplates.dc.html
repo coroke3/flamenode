@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="templates" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="templates" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head">
       <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">テンプレート</h1></sc-if><p class="muted">イベントの枠・フォーム・権限などの設定を再利用します。開催日時や枠データはコピーしません。</p></div>
@@ -41,7 +41,7 @@
       <div class="dt-r"><span class="il"><i class="fa-regular fa-clone muted" aria-hidden="true"></i>PVSF 標準</span><span>PVSF2026Sp</span><span class="t-num muted">2026.04.02</span><span class="row" style="gap: 0; justify-content: flex-end;"><a href="ManageEventNew.dc.html" class="ib sm" aria-label="このテンプレートで作成"><i class="fa-solid fa-plus"></i></a><a href="ConfirmModal.dc.html" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></a></span></div>
       <div class="dt-r"><span class="il"><i class="fa-regular fa-clone muted" aria-hidden="true"></i>合作イベント</span><span>夏休み創作島　創作島合作</span><span class="t-num muted">2024.12.20</span><span class="row" style="gap: 0; justify-content: flex-end;"><a href="ManageEventNew.dc.html" class="ib sm" aria-label="このテンプレートで作成"><i class="fa-solid fa-plus"></i></a><a href="ConfirmModal.dc.html" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></a></span></div>
     </div>
-    <p class="il t-sm muted" style="margin-top: 24px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>テンプレートはイベント運営画面の「テンプレート化」から作成できます。</p>
+    <p class="il t-sm muted" style="margin-top: 24px;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>テンプレートは、イベント設定の「この設定をテンプレートとして保存」から作れます。</p>
   </main>
 </div>
 </div>

@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="inbox" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="inbox" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="inbox" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="inbox" hint-size="100%,96px"></dc-import>
 
     <div class="wrap-row" style="gap: 8px; margin: 24px 0 12px;">
       <div class="seg" role="tablist" aria-label="種類"><sc-for list="{{kinds}}" as="k" hint-placeholder-count="5"><button type="button" role="tab" class="{{k.cls}}" onClick="{{k.pick}}"><i class="{{k.icon}}" aria-hidden="true"></i>{{k.label}}<span class="t-num muted">{{k.n}}</span></button></sc-for></div>
@@ -84,13 +84,13 @@ class Component extends DCLogic {
   constructor(p) { super(p); this.state = { kind: 'all', sel: 0, checked: {} }; }
   renderVals() {
     const S = this.state;
-    const K = { review: ['審査', 'fa-solid fa-gavel'], mod: ['モデレーション', 'fa-solid fa-flag'], xid: ['X ID申請', 'fa-solid fa-at'], notif: ['通知失敗', 'fa-solid fa-bell-slash'] };
+    const K = { review: ['審査', 'fa-solid fa-gavel'], mod: ['モデレーション', 'fa-solid fa-flag'], xid: ['X ID 申請', 'fa-solid fa-at'], notif: ['通知失敗', 'fa-solid fa-bell-slash'] };
     const ALL = [
       { kind: 'review', title: '崇渦に関するお知らせ 前編', meta: 'おたこ · 枠 11.04 14:40 · 必須OK', age: '2時間前', hot: false, facts: [['提出', '10.04 11:02'], ['枠', '11.04 14:40 · 連続2枠'], ['必須項目', 'すべて入力済み'], ['ステージ許可', 'あり']], primary: '承認して公開', primaryIcon: 'fa-solid fa-check', secondary: '確認を依頼', href: 'ManageVideo.dc.html', note: '承認すると投稿者に通知されます。' },
       { kind: 'review', title: '模範囚', meta: 'hato · 枠 11.03 18:54 · 必須未回答 1', age: '9時間前', hot: false, facts: [['提出', '10.03 23:10'], ['必須項目', '未回答 1(使用ソフト)', 'color: var(--warning);'], ['YouTube', 'URL未設定(後から追加可)']], primary: '承認して公開', primaryIcon: 'fa-solid fa-check', secondary: '確認を依頼', href: 'ManageVideo.dc.html', note: '必須項目が未回答です。確認を依頼すると投稿者に通知されます。' },
-      { kind: 'mod', title: '祟渦に関するお知らせ 後編 — 重複投稿', meta: '新概念 · 期限 03.30 を超過', age: '期限超過', hot: true, facts: [['種別', '重複投稿'], ['期限', '03.30(超過)', 'color: var(--danger);'], ['公開理由', '同じ作品が2件登録されています']], primary: '解決にする', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '対応メモ(任意)', href: 'ManageVideo.dc.html', note: 'ケースはこの作品の「モデレーション」でも扱えます。' },
-      { kind: 'xid', title: '@sub_ajinori の X ID 連携申請', meta: '味付け海苔 · Discord ajinori', age: '1日前', hot: false, facts: [['種別', 'X ID連携'], ['申請者', 'ajinori(Discord)'], ['このイベント', '参加者・枠確保あり']], primary: '承認', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '却下理由(任意・履歴に残る)', href: 'ManageXLink.dc.html', note: 'このイベントの参加者に関係する申請だけを表示しています。' },
-      { kind: 'notif', title: '枠確保の通知が届いていません', meta: 'slot_reserved · @Ghx86L · 429 Too Many Requests', age: '3時間前', hot: false, facts: [['配送経路', 'Discord DM'], ['試行', '4 / 4'], ['エラー', '429 Too Many Requests', 'color: var(--danger);']], primary: '再送する', primaryIcon: 'fa-solid fa-paper-plane', secondary: 'このまま閉じる', href: 'ManageNotifications.dc.html', note: '同じ内容を再送キューに追加します。' }
+      { kind: 'mod', title: '祟渦に関するお知らせ 後編 — 重複投稿', meta: '新概念 · 期限 03.30 を超過', age: '期限超過', hot: true, facts: [['種別', '重複投稿'], ['期限', '03.30(超過)', 'color: var(--danger);'], ['公開理由', '同じ作品が2件登録されています']], primary: '解決済みにする', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '対応メモ(任意)', href: 'ManageVideo.dc.html', note: 'ケースはこの作品の「モデレーション」でも扱えます。' },
+      { kind: 'xid', title: '@sub_ajinori の X ID 連携申請', meta: '味付け海苔 · Discord ajinori', age: '1日前', hot: false, facts: [['種別', 'X ID 連携'], ['申請者', 'ajinori(Discord)'], ['このイベント', '参加者・枠確保あり']], primary: '承認', primaryIcon: 'fa-solid fa-check', secondary: '却下', needReason: true, reasonPh: '却下理由(任意・履歴に残る)', href: 'ManageXLink.dc.html', note: 'このイベントの参加者に関係する申請だけを表示しています。' },
+      { kind: 'notif', title: '枠確保の通知が届いていません', meta: 'slot_reserved · @Ghx86L · 429 Too Many Requests', age: '3時間前', hot: false, facts: [['配送経路', 'Discord DM'], ['試行', '4 / 4'], ['エラー', '429 Too Many Requests', 'color: var(--danger);']], primary: '再送する', primaryIcon: 'fa-solid fa-paper-plane', secondary: '再送せずに閉じる', href: 'ManageNotifications.dc.html', note: '同じ内容を再送キューに追加します。' }
     ];
     const list = (this.props.empty ?? false) ? [] : (S.kind === 'all' ? ALL : ALL.filter(x => x.kind === S.kind));
     const si = Math.min(S.sel, Math.max(0, list.length - 1));
@@ -101,7 +101,7 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'dark', items, hasItems: items.length > 0, empty: items.length === 0,
       cur: { ...cur, isVideo: cur.kind === 'review', needReason: !!cur.needReason, facts: (cur.facts || []).map(([k, v, style]) => ({ k, v, style: style || '' })) },
-      kinds: [['all', 'すべて', 'fa-solid fa-inbox'], ['review', '審査', 'fa-solid fa-gavel'], ['mod', 'モデレーション', 'fa-solid fa-flag'], ['xid', 'X ID申請', 'fa-solid fa-at'], ['notif', '通知失敗', 'fa-solid fa-bell-slash']].map(([id, label, icon]) => ({ label, icon, n: n(id), cls: S.kind === id ? 'on' : '', pick: () => this.setState({ kind: id, sel: 0, checked: {} }) })),
+      kinds: [['all', 'すべて', 'fa-solid fa-inbox'], ['review', '審査', 'fa-solid fa-gavel'], ['mod', 'モデレーション', 'fa-solid fa-flag'], ['xid', 'X ID 申請', 'fa-solid fa-at'], ['notif', '通知失敗', 'fa-solid fa-bell-slash']].map(([id, label, icon]) => ({ label, icon, n: n(id), cls: S.kind === id ? 'on' : '', pick: () => this.setState({ kind: id, sel: 0, checked: {} }) })),
       bulk: selCount > 0, selCount, clearSel: () => this.setState({ checked: {} }),
       done: () => this.setState({ sel: Math.min(si + 1, items.length - 1) })
     };

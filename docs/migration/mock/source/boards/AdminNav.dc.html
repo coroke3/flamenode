@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<nav class="{{navCls}}" aria-label="管理ナビゲーション" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+<nav class="{{navCls}}" aria-label="管理ナビゲーション" data-theme="{{theme}}" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
   <div class="c-mbar">
     <button type="button" class="ib" aria-label="{{mLabel}}" aria-expanded="{{mOpen}}" onClick="{{mToggle}}"><i class="{{mIcon}}"></i></button>
     <span class="c-mbar-t"><span class="t-label muted">{{mArea}}</span><span class="ell">{{mCur}}</span></span>
@@ -51,7 +51,7 @@
   </sc-for>
 </nav>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"text","default":"dashboard"},"$preview":{"width":264,"height":1240}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"active":{"editor":"text","default":"dashboard"},"$preview":{"width":264,"height":1240}}'>
 class Component extends DCLogic {
   constructor(p) { super(p); this.state = { m: false }; }
   renderVals() {
@@ -65,7 +65,8 @@ class Component extends DCLogic {
     ];
     const mOpen = !!this.state.m;
     const mx = { navCls: 'c-nav' + (mOpen ? ' open' : ''), mOpen: mOpen ? 'true' : 'false', mLabel: mOpen ? 'メニューを閉じる' : 'メニューを開く', mIcon: mOpen ? 'fa-solid fa-xmark' : 'fa-solid fa-bars', mToggle: () => this.setState({ m: !this.state.m }), mArea: '管理', mCur: (G.flatMap(g => g[1]).find(x => x[0] === a) || [0, 'ダッシュボード'])[1] };
-    return { ...mx,
+    return {
+      theme: this.props.theme ?? 'dark', ...mx,
       groups: G.map((g) => ({ title: g[0], items: g[1].map((x) => ({ key: x[0], label: x[1], icon: x[2], href: x[3], n: x[4], cls: x[0] === a ? 'on' : '', cur: x[0] === a ? 'page' : 'false' })) }))
     };
   }

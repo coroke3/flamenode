@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="videos" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main"><sc-if value="{{full}}" hint-placeholder-val="{{false}}">
     <a href="AdminVideoHub.dc.html" class="il t-sm muted"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>作品詳細</a>
     <h1 class="t-h1" style="margin-top: 8px;">空白合作 <span class="muted t-num" style="font: 400 15px/24px var(--font-sans);">13人</span></h1>
@@ -40,7 +40,7 @@
     <p class="il t-sm muted" style="margin: 20px 0 0;"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>公開参加者と合作設定を管理します。既存のメンバーチャプターも保持したまま保存します。</p>
 
     <div class="row" style="gap: 20px; margin-top: 24px;"><span class="t-label muted">作品形式</span><label class="radio"><input type="radio" name="collab">個人</label><label class="radio"><input type="radio" name="collab" checked="{{yes}}">合作</label></div>
-    <div style="margin-top: 16px;"><dc-import name="MemberEditor" hint-size="100%,620px"></dc-import></div>
+    <div style="margin-top: 16px;"><dc-import name="MemberEditor" theme="{{theme}}" hint-size="100%,620px"></dc-import></div>
 
     <div class="row" style="gap: 8px; margin-top: 40px;"><button type="button" class="fn-btn fn-btn--primary">参加者設定を保存</button></div>
   </main>

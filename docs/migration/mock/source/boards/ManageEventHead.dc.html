@@ -23,22 +23,21 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<header class="eh" lang="ja" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-sans);">
+<header class="eh" data-theme="{{theme}}" lang="ja" style="display: flex; flex-direction: column; gap: 6px; background: var(--bg); color: var(--ink); font-family: var(--font-sans);">
   <div class="wrap-row" style="gap: 16px; justify-content: space-between; align-items: center;">
-    <nav aria-label="パンくず" class="row t-sm muted" style="gap: 8px;"><span class="eh-ev row" style="gap: 8px;"><img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 20px; height: 20px;"><a href="ManageEvent.dc.html" class="p-link" style="color: var(--ink-muted);">PVSF2026S</a></span><span class="st"><span class="dot ok"></span>受付中</span><span class="t-num eh-date">11.03 — 11.04</span><span class="eh-left">受付終了まで 12日</span></nav>
+    <nav aria-label="パンくず" class="row t-sm muted" style="gap: 8px;"><span class="eh-ev row" style="gap: 8px;"><img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 20px; height: 20px;"><a href="ManageEvent.dc.html" class="p-link" style="color: var(--ink-muted);">PVSF2026S</a></span><span class="st"><span class="dot ok"></span>募集中</span><span class="t-num eh-date">11.03 – 11.04</span><span class="eh-left">募集締切まで 12日</span></nav>
     <div class="row eh-acts" style="gap: 4px;">
       <span class="t-sm muted eh-perm" style="margin-right: 8px;">あなたの権限:代表</span>
       <a href="EventDetail.dc.html" class="ib" aria-label="公開ページを開く"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
       <a href="CommandPalette.dc.html" class="ib" aria-label="移動・操作を検索(⌘K)"><i class="fa-solid fa-magnifying-glass"></i></a>
     </div>
   </div>
-  <div class="row" style="gap: 12px; align-items: baseline; flex-wrap: wrap;">
+  <sc-if value="{{showTitle}}" hint-placeholder-val="{{true}}"><div class="row" style="gap: 12px; align-items: baseline; flex-wrap: wrap;">
     <h1 class="t-display" style="margin: 0;">{{title}}</h1>
-    <span class="muted eh-desc">{{desc}}</span>
-  </div>
+  </div></sc-if>
 </header>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"tab":{"editor":"text","default":"overview"},"sub":{"editor":"text","default":""},"$preview":{"width":1100,"height":120}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"tab":{"editor":"text","default":"overview"},"sub":{"editor":"text","default":""},"$preview":{"width":1100,"height":120}}'>
 class Component extends DCLogic {
   renderVals() {
     const k = this.props.sub || this.props.tab || 'overview';
@@ -51,11 +50,12 @@ class Component extends DCLogic {
       audience: ['参加者', 'fa-solid fa-user-group', '登録者と提出状況'],
       playlist: ['配信・公開', 'ms ms-sensors', '再生リスト同期・作品情報API・公開データ更新'],
       delivery: ['配信・公開', 'ms ms-sensors', '再生リスト同期・作品情報API・公開データ更新'],
-      edit: ['イベント設定', 'fa-solid fa-sliders', '基本情報・受付・投稿フォーム・枠ルール'],
+      edit: ['イベント設定', 'fa-solid fa-sliders', '基本情報・募集・投稿フォーム・枠ルール'],
       staff: ['スタッフと権限', 'ms ms-admin_panel_settings', '誰が何をできるか'],
       history: ['履歴', 'fa-solid fa-clock-rotate-left', 'このイベントで行われた変更と復元']
     }[k] || ['概要', 'ms ms-dashboard', ''];
-    return { title: M[0], icon: M[1], desc: M[2] };
+    return {
+      theme: this.props.theme ?? 'dark', title: M[0], icon: M[1], desc: M[2], showTitle: !this.props.notitle };
   }
 }
 </script>

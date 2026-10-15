@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="audit" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="audit" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
     <h1 class="t-display">監査ログ</h1>
     <div class="hub-bar">
@@ -33,9 +33,9 @@
       <div class="hub-links"></div>
     </div>
     <div class="hub-body">
-      <sc-if value="{{t_0}}" hint-placeholder-val="{{true}}"><dc-import name="AdminAudit" hint-size="100%,1100px"></dc-import></sc-if>
-      <sc-if value="{{t_1}}" hint-placeholder-val="{{false}}"><dc-import name="AdminAuditSettings" hint-size="100%,900px"></dc-import></sc-if>
-      <sc-if value="{{t_2}}" hint-placeholder-val="{{false}}"><dc-import name="AdminAuditRestore" hint-size="100%,800px"></dc-import></sc-if>
+      <sc-if value="{{t_0}}" hint-placeholder-val="{{true}}"><dc-import name="AdminAudit" theme="{{theme}}" hint-size="100%,1100px"></dc-import></sc-if>
+      <sc-if value="{{t_1}}" hint-placeholder-val="{{false}}"><dc-import name="AdminAuditSettings" theme="{{theme}}" hint-size="100%,900px"></dc-import></sc-if>
+      <sc-if value="{{t_2}}" hint-placeholder-val="{{false}}"><dc-import name="AdminAuditRestore" theme="{{theme}}" hint-size="100%,800px"></dc-import></sc-if>
     </div>
   </main>
 </div>

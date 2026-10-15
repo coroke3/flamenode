@@ -1,12 +1,12 @@
 # FlameNode Migration UI Reference
 
 > Status: `REGISTERED_HTML`
-> Last updated: 2026-10-13
+> Last updated: 2026-10-16
 > Applies to: UI redesign / Phase 2 / route migration acceptance
 > Reference status: REGISTERED_HTML (APPROVED)
-> Reference file(s): [`docs/migration/mock/README.md`](mock/README.md) ([`pages.json`](mock/pages.json), `static/*.html`, `site/`, `source/`, `screenshots/`)
-> Received at: 2026-10-13
-> Version/hash: claude.ai Design artifact version `1791816999-f0e9` (2026-10-12)
+> Reference file(s): [`docs/migration/mock/README.md`](mock/README.md) ([`pages.json`](mock/pages.json), [`links.tsv`](mock/links.tsv), `static/*.html`, `site/`, `source/`, `screenshots/`)
+> Received at: 2026-10-13(初回登録) / 2026-10-16(更新)
+> Version/hash: claude.ai Design artifact version `1792048584-12ca` (2026-10-15)。前版 `1791816999-f0e9` (2026-10-12)
 > Scope: 全96ページ・パーツ（公開15、ユーザー8、運営14、管理24、タブ23、共通部品12）
 > Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプローブ（画面を持たないバックグラウンド処理）
 
@@ -38,9 +38,9 @@ Phase 2（MIG-0201: visual/IA抽出 + design tokens）は依存を満たして�
 
 ```text
 Reference status: REGISTERED_HTML (APPROVED)
-Reference file(s): docs/migration/mock/ (README.md, pages.json, static/*.html, site/, source/, screenshots/)
-Received at: 2026-10-13
-Version/hash: claude.ai Design artifact version 1791816999-f0e9 (2026-10-12)
+Reference file(s): docs/migration/mock/ (README.md, pages.json, links.tsv, static/*.html, site/, source/, screenshots/)
+Received at: 2026-10-13 (initial) / 2026-10-16 (update)
+Version/hash: claude.ai Design artifact version 1792048584-12ca (2026-10-15); previous 1791816999-f0e9 (2026-10-12)
 Scope: 公開15画面、ユーザー8画面、運営14画面、管理24画面、サブタブ23画面、共通部品12個（全96ページ・パーツ）
 Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプローブ（UIを持たないバックグラウンド処理）
 ```
@@ -49,7 +49,8 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
 
 | パス | 内容 | 役割 |
 |---|---|---|
-| [`pages.json`](mock/pages.json) | 全ページ一覧（名前・タイトル・ルート・区分・取り込み部品・リンク先） | 画面索引・ルーティング対応 |
+| [`pages.json`](mock/pages.json) | 全ページ一覧（名前・タイトル・ルート・区分・取り込み部品・リンク `links`（ラベル付き）/ `links_to`（リンク先ページ名）） | 画面索引・ルーティング対応 |
+| [`links.tsv`](mock/links.tsv) | ページ間リンク全件（リンク元・ラベル・リンク先。タブは `?tab=`） | 遷移設計・導線テストの基準 |
 | `static/*.html` | 各ページの初期状態静的HTML（マークアップ・クラス構造） | 実装マークアップ・DOM構造の参照 |
 | `site/` | 動作確認用HTML一式（`site/index.html` から全ページ遷移・タブ・入力確認可能） | 状態遷移・挙動の確認 |
 | `screenshots/*.desktop.jpg`, `*.mobile.jpg` | 各画面のPC（1440px）およびスマホ（390px）スクリーンショット | ビジュアル比較の正解基準 |
@@ -64,9 +65,10 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
 
 以下はmockの意図。公開surfaceへ適用し、非公開はCURRENT UIを維持する。投稿の自動遷移・メニュー操作などの振る舞いはmockだけで承認せず、CURRENTのUX/FNと照合する。
 
-1. **配色**:
+1. **配色・テーマ**:
    - ダークが既定（背景: 純黒 `#000000`、文字: 純白 `#ffffff`）。
    - アクセントカラー: ライム `#d6ec8a` を Primary ボタンの塗りにのみ使用。
+   - ダーク/ライトの両テーマに全ページ対応（各ボードの `theme` prop、埋め込み部品にも伝播）。色は `fn.css` 冒頭のトークン（`--bg` / `--ink` / `--ink-muted` / `--surface-*` / `--brand-text` 等）だけで指定し、固定色は画像・動画上のオーバーレイと色見本に限る。ページ外側の背景と `color-scheme` もテーマに追従。
 2. **角丸 (border-radius)**:
    - 面、ボタン、入力欄、サムネイルは**角丸なし (0px)**。
    - ただし、**アイコンは全て正円**（アバター、アイコンタイル、イベントアイコン、丸ボタン `.ib`）。
@@ -75,15 +77,19 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
    - ユーザーページの「次にやること」など、明示的に指定した箇所のみ背景付きカードを使用。
 4. **タイポグラフィ・数値強調**:
    - 太字は display / h1 / h2 のみ。
-   - スマホ（≤640px）は一段縮小（h1: 22px, 本文: 14px, 補助: 12px）。
+   - 見出しは画面幅で連続的に変化（display 24〜40px、h1 22〜32px、`clamp()`）。本文・補助はスマホ（≤640px）で一段縮小（本文: 14px, 補助: 12px）。
+   - 12px未満の文字は使わない。説明文は1行45字以内（`max-width: 45em`）。
    - 数字を見せる箇所は数字のみ大きく表示（例: 締切「あと **3** 日」、作品数）。
 5. **締切表示フォーマット**:
    - 「提出締切 日時」+「あと N 日（数字のみ拡大）」の形式をトップ、イベント、上映枠、参加投稿、ダッシュボードで共通化。
+   - トップのヒーローはスマホ幅（≤640px）では「あと N 日」を出さず締切日時のみ。
 6. **枠あり／枠なし投稿フロー**:
    - ユーザーに種別を手動選択させない。イベント選択後、枠が必要なイベントは枠選択へ、枠なしイベントは提出画面へ自動遷移。
 7. **モバイルヘッダー (≤640px)**:
    - 画面上部に固定配置。並びは「ロゴ・検索・アバター・≡」。
-   - アバターと ≡ はどちらも同一の統合ドロワーメニューを開く（名義切替、ナビ、ライブラリ/設定/運営/管理、テーマ切替、ログアウト）。下部タブバーは廃止。
+   - アバターと ≡ はどちらも同一の統合ドロワーメニューを開く。下部タブバーは廃止。
+   - 統合メニューは利用頻度で強弱をつけた4段構成: ①見る（作品/クリエイター/イベント、24px・行高60px）②主操作（Primary全幅ボタン1つ: ログイン時「作品を投稿する」/未ログイン時「Discord でログイン」）③自分（マイページ、ライブラリ/設定/運営/管理の4列タイル、活動名義の切替・追加）④設定系（テーマ切替・ログアウトを小さく下に）。
+   - 641〜860px は検索欄をアイコン化（押すとヘッダー全幅の検索欄）。
 8. **スクロールバー**:
    - 画面内スクロール領域ではスクロールバー非表示（スクロール操作自体は維持）。
 9. **テキスト省略**:
@@ -93,12 +99,20 @@ Excluded surfaces: 内部Cron/Queue Worker、内部ヘルスチェックプロ�
     - 下部ドックは「再生リスト / チャプター・コメント」。
 11. **運営・審査の詳細パネル**:
     - 固定フローティング表示にせず通常のスクロールに組み込む（スマホでは一覧の上部に配置）。
-12. **レスポンシブブレークポイント**:
+12. **アクセシビリティの下限（mockで全ページ確認済み）**:
+    - キーボード操作時の2pxフォーカス枠（`--focus-ring`。入力欄は下線2px）。
+    - 文字コントラスト4.5:1以上（大きい文字3:1）をダーク・ライト両方で確認。
+    - 押せる範囲は見た目を変えずに `::before` で拡張（スマホ・タッチ端末で44px相当）。
+    - `prefers-reduced-motion` でアニメーション停止。共通部品の `ariaLabel` 等は `aria-label` に変換。
+13. **レスポンシブブレークポイント**:
     - `≤ 1023px`: ヘッダー検索欄縮小、管理系一部1カラム化
-    - `≤ 1007px`: トップヒーロー画像下文字回り込み（360pxブロック中央寄せ）
+    - `≤ 1007px`: トップヒーロー画像下に文字（左右余白は本文と同じ40px/スマホ16px）。文字欄が520px以上なら「募集締切〜枠を確保」を右の2列目へ（container query）
     - `≤ 900px`: 作品詳細1カラム + 下部ドック、運営2カラム→1カラム
     - `≤ 700px` / `≤ 640px`: スマホ表示（固定ヘッダー、文字サイズ、フッター12px）
-    - 280〜1280px はmockの参考幅。移行実装で横スクロール・キーボード・フォーカスを改めて検証する。
+    - `641〜860px`: 公開ヘッダーの検索欄をアイコン化
+    - `≤ 420px`: 数値4つの並びを2×2
+    - 一覧グリッドは列の最小幅を画面幅で変える（作品 `clamp(200px,22vw,260px)`、イベント `clamp(280px,30vw,340px)`）
+    - mockは280〜2560pxで横はみ出し・文字切れ・重なり0を確認済み（参考）。移行実装で横スクロール・キーボード・フォーカスを改めて検証する。
 
 ---
 

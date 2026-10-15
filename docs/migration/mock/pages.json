@@ -1,5 +1,5 @@
 {
-  "generated_from": "FlameNode Design canvas (claude.ai artifact) version 1791816999-f0e9",
+  "generated_from": "FlameNode Design canvas (claude.ai artifact) version 1792048584-12ca",
   "pages": [
     {
       "name": "Main",
@@ -14,6 +14,84 @@
       "components": [
         "VideoCard"
       ],
+      "links": [
+        {
+          "label": "利用規約を改定しました(2026.10.01 施行) 2026.09.24",
+          "to": "Rules.html"
+        },
+        {
+          "label": "",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "枠を確保",
+          "to": "EventSlots.html"
+        },
+        {
+          "label": "イベント詳細",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "おたこ",
+          "to": "Creator.html"
+        },
+        {
+          "label": "再生",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "急上昇ランキング",
+          "to": "Trending.html"
+        },
+        {
+          "label": "ランキング",
+          "to": "Trending.html"
+        },
+        {
+          "label": "{{v.rank}}",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "一覧",
+          "to": "Recommend.html"
+        },
+        {
+          "label": "すべて",
+          "to": "Videos.html"
+        },
+        {
+          "label": "過去の作品",
+          "to": "Videos.html"
+        },
+        {
+          "label": "すべて",
+          "to": "Events.html"
+        },
+        {
+          "label": "{{e.title}} {{e.status}} {{e.date}} {{e.",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "枠を確保する",
+          "to": "EventSlots.html"
+        },
+        {
+          "label": "作品を投稿する",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "イベントを探す",
+          "to": "Events.html"
+        }
+      ],
+      "html_live": "site/Main.html",
+      "html_static": "static/Main.html",
+      "screenshot_desktop": "screenshots/Main.desktop.jpg",
+      "screenshot_mobile": "screenshots/Main.mobile.jpg",
       "links_to": [
         "Creator",
         "EventDetail",
@@ -25,11 +103,7 @@
         "Trending",
         "VideoDetail",
         "Videos"
-      ],
-      "html_live": "site/Main.html",
-      "html_static": "static/Main.html",
-      "screenshot_desktop": "screenshots/Main.desktop.jpg",
-      "screenshot_mobile": "screenshots/Main.mobile.jpg"
+      ]
     },
     {
       "name": "VideoDetail",
@@ -45,15 +119,41 @@
         "ProgressBar",
         "TextField"
       ],
-      "links_to": [
-        "Creator",
-        "EventDetail",
-        "VideoDetail"
+      "links": [
+        {
+          "label": "空白合作チーム @vIXyOepPI395671 · 公開 2026.03.29",
+          "to": "Creator.html"
+        },
+        {
+          "label": "FlameNode のプロフィールを開く",
+          "to": "Creator.html"
+        },
+        {
+          "label": "PVSF2026Sp",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "PVSF まとめ動画",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "{{m.name}}{{m.role}} {{m.ch}}",
+          "to": "Creator.html"
+        },
+        {
+          "label": "{{v.title}}{{v.meta}}",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/VideoDetail.html",
       "html_static": "static/VideoDetail.html",
       "screenshot_desktop": "screenshots/VideoDetail.desktop.jpg",
-      "screenshot_mobile": "screenshots/VideoDetail.mobile.jpg"
+      "screenshot_mobile": "screenshots/VideoDetail.mobile.jpg",
+      "links_to": [
+        "Creator",
+        "EventDetail",
+        "VideoDetail"
+      ]
     },
     {
       "name": "About",
@@ -66,14 +166,24 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "Events",
-        "Videos"
+      "links": [
+        {
+          "label": "作品を見る",
+          "to": "Videos.html"
+        },
+        {
+          "label": "イベントを見る",
+          "to": "Events.html"
+        }
       ],
       "html_live": "site/About.html",
       "html_static": "static/About.html",
       "screenshot_desktop": "screenshots/About.desktop.jpg",
-      "screenshot_mobile": "screenshots/About.mobile.jpg"
+      "screenshot_mobile": "screenshots/About.mobile.jpg",
+      "links_to": [
+        "Events",
+        "Videos"
+      ]
     },
     {
       "name": "Events",
@@ -86,13 +196,23 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "EventDetail"
+      "links": [
+        {
+          "label": "募集期間中 PVSF2026S 2026.11.03 – 11.04128 / ",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "{{e.title}}{{e.status}}{{e.date}}",
+          "to": "EventDetail.html"
+        }
       ],
       "html_live": "site/Events.html",
       "html_static": "static/Events.html",
       "screenshot_desktop": "screenshots/Events.desktop.jpg",
-      "screenshot_mobile": "screenshots/Events.mobile.jpg"
+      "screenshot_mobile": "screenshots/Events.mobile.jpg",
+      "links_to": [
+        "EventDetail"
+      ]
     },
     {
       "name": "EventDetail",
@@ -108,6 +228,40 @@
         "Status",
         "VideoCard"
       ],
+      "links": [
+        {
+          "label": "枠を確保",
+          "to": "EventSlots.html"
+        },
+        {
+          "label": "作品を提出",
+          "to": "EntryUnslotted.html"
+        },
+        {
+          "label": "枠表へ",
+          "to": "EventSlots.html"
+        },
+        {
+          "label": "投稿予定を見る",
+          "to": "EventRelease.html"
+        },
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "{{m.name}}{{m.role}}",
+          "to": "Creator.html"
+        },
+        {
+          "label": "PVSF シリーズ",
+          "to": "Events.html"
+        }
+      ],
+      "html_live": "site/EventDetail.html",
+      "html_static": "static/EventDetail.html",
+      "screenshot_desktop": "screenshots/EventDetail.desktop.jpg",
+      "screenshot_mobile": "screenshots/EventDetail.mobile.jpg",
       "links_to": [
         "Creator",
         "EntryUnslotted",
@@ -115,11 +269,7 @@
         "EventSlots",
         "Events",
         "VideoDetail"
-      ],
-      "html_live": "site/EventDetail.html",
-      "html_static": "static/EventDetail.html",
-      "screenshot_desktop": "screenshots/EventDetail.desktop.jpg",
-      "screenshot_mobile": "screenshots/EventDetail.mobile.jpg"
+      ]
     },
     {
       "name": "EventSlots",
@@ -135,14 +285,24 @@
         "Modal",
         "TextField"
       ],
-      "links_to": [
-        "EntrySlotted",
-        "EventDetail"
+      "links": [
+        {
+          "label": "PVSF2026S",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "作品を提出",
+          "to": "EntrySlotted.html"
+        }
       ],
       "html_live": "site/EventSlots.html",
       "html_static": "static/EventSlots.html",
       "screenshot_desktop": "screenshots/EventSlots.desktop.jpg",
-      "screenshot_mobile": "screenshots/EventSlots.mobile.jpg"
+      "screenshot_mobile": "screenshots/EventSlots.mobile.jpg",
+      "links_to": [
+        "EntrySlotted",
+        "EventDetail"
+      ]
     },
     {
       "name": "EventRelease",
@@ -155,14 +315,24 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "EventDetail",
-        "VideoDetail"
+      "links": [
+        {
+          "label": "PVSF2026S",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "作品の詳細",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/EventRelease.html",
       "html_static": "static/EventRelease.html",
       "screenshot_desktop": "screenshots/EventRelease.desktop.jpg",
-      "screenshot_mobile": "screenshots/EventRelease.mobile.jpg"
+      "screenshot_mobile": "screenshots/EventRelease.mobile.jpg",
+      "links_to": [
+        "EventDetail",
+        "VideoDetail"
+      ]
     },
     {
       "name": "Videos",
@@ -180,13 +350,19 @@
         "TextField",
         "VideoCard"
       ],
-      "links_to": [
-        "VideoDetail"
+      "links": [
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Videos.html",
       "html_static": "static/Videos.html",
       "screenshot_desktop": "screenshots/Videos.desktop.jpg",
-      "screenshot_mobile": "screenshots/Videos.mobile.jpg"
+      "screenshot_mobile": "screenshots/Videos.mobile.jpg",
+      "links_to": [
+        "VideoDetail"
+      ]
     },
     {
       "name": "Recommend",
@@ -201,13 +377,19 @@
       "components": [
         "VideoCard"
       ],
-      "links_to": [
-        "VideoDetail"
+      "links": [
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Recommend.html",
       "html_static": "static/Recommend.html",
       "screenshot_desktop": "screenshots/Recommend.desktop.jpg",
-      "screenshot_mobile": "screenshots/Recommend.mobile.jpg"
+      "screenshot_mobile": "screenshots/Recommend.mobile.jpg",
+      "links_to": [
+        "VideoDetail"
+      ]
     },
     {
       "name": "Trending",
@@ -220,13 +402,19 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "VideoDetail"
+      "links": [
+        {
+          "label": "{{v.rankStr}} {{v.title}} {{v.creator}} ",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Trending.html",
       "html_static": "static/Trending.html",
       "screenshot_desktop": "screenshots/Trending.desktop.jpg",
-      "screenshot_mobile": "screenshots/Trending.mobile.jpg"
+      "screenshot_mobile": "screenshots/Trending.mobile.jpg",
+      "links_to": [
+        "VideoDetail"
+      ]
     },
     {
       "name": "Creators",
@@ -241,13 +429,27 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "Creator"
+      "links": [
+        {
+          "label": "{{c.name}} {{c.x}}{{c.works}}",
+          "to": "Creator.html"
+        },
+        {
+          "label": "{{c.name}}@{{c.x}} {{c.works}} {{c.event",
+          "to": "Creator.html"
+        },
+        {
+          "label": "{{c.name}}@{{c.x}}{{c.works}}{{c.events}",
+          "to": "Creator.html"
+        }
       ],
       "html_live": "site/Creators.html",
       "html_static": "static/Creators.html",
       "screenshot_desktop": "screenshots/Creators.desktop.jpg",
-      "screenshot_mobile": "screenshots/Creators.mobile.jpg"
+      "screenshot_mobile": "screenshots/Creators.mobile.jpg",
+      "links_to": [
+        "Creator"
+      ]
     },
     {
       "name": "Creator",
@@ -262,15 +464,29 @@
       "components": [
         "VideoCard"
       ],
-      "links_to": [
-        "Creators",
-        "Portfolio",
-        "VideoDetail"
+      "links": [
+        {
+          "label": "クリエイター一覧",
+          "to": "Creators.html"
+        },
+        {
+          "label": "ポートフォリオ表示",
+          "to": "Portfolio.html"
+        },
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Creator.html",
       "html_static": "static/Creator.html",
       "screenshot_desktop": "screenshots/Creator.desktop.jpg",
-      "screenshot_mobile": "screenshots/Creator.mobile.jpg"
+      "screenshot_mobile": "screenshots/Creator.mobile.jpg",
+      "links_to": [
+        "Creators",
+        "Portfolio",
+        "VideoDetail"
+      ]
     },
     {
       "name": "Portfolio",
@@ -282,15 +498,29 @@
       "components": [
         "VideoCard"
       ],
-      "links_to": [
-        "Creator",
-        "Main",
-        "VideoDetail"
+      "links": [
+        {
+          "label": "プロフィール",
+          "to": "Creator.html"
+        },
+        {
+          "label": "FlameNode トップ",
+          "to": "Main.html"
+        },
+        {
+          "label": "",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Portfolio.html",
       "html_static": "static/Portfolio.html",
       "screenshot_desktop": "screenshots/Portfolio.desktop.jpg",
-      "screenshot_mobile": "screenshots/Portfolio.mobile.jpg"
+      "screenshot_mobile": "screenshots/Portfolio.mobile.jpg",
+      "links_to": [
+        "Creator",
+        "Main",
+        "VideoDetail"
+      ]
     },
     {
       "name": "Rules",
@@ -306,11 +536,12 @@
         "Button",
         "Checkbox"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/Rules.html",
       "html_static": "static/Rules.html",
       "screenshot_desktop": "screenshots/Rules.desktop.jpg",
-      "screenshot_mobile": "screenshots/Rules.mobile.jpg"
+      "screenshot_mobile": "screenshots/Rules.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "Maintenance",
@@ -323,11 +554,12 @@
         "Button",
         "Status"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/Maintenance.html",
       "html_static": "static/Maintenance.html",
       "screenshot_desktop": "screenshots/Maintenance.desktop.jpg",
-      "screenshot_mobile": "screenshots/Maintenance.mobile.jpg"
+      "screenshot_mobile": "screenshots/Maintenance.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "MyPage",
@@ -344,11 +576,12 @@
         "Settings"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/MyPage.html",
       "html_static": "static/MyPage.html",
       "screenshot_desktop": "screenshots/MyPage.desktop.jpg",
-      "screenshot_mobile": "screenshots/MyPage.mobile.jpg"
+      "screenshot_mobile": "screenshots/MyPage.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "VideoEdit",
@@ -369,16 +602,38 @@
         "TextField",
         "VideoCard"
       ],
+      "links": [
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "公開ページ",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "編集できる人",
+          "to": "VideoPermissions.html"
+        },
+        {
+          "label": "キャンセル",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "削除",
+          "to": "ConfirmModal.html"
+        }
+      ],
+      "html_live": "site/VideoEdit.html",
+      "html_static": "static/VideoEdit.html",
+      "screenshot_desktop": "screenshots/VideoEdit.desktop.jpg",
+      "screenshot_mobile": "screenshots/VideoEdit.mobile.jpg",
       "links_to": [
         "ConfirmModal",
         "MyPage",
         "VideoDetail",
         "VideoPermissions"
-      ],
-      "html_live": "site/VideoEdit.html",
-      "html_static": "static/VideoEdit.html",
-      "screenshot_desktop": "screenshots/VideoEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/VideoEdit.mobile.jpg"
+      ]
     },
     {
       "name": "VideoPermissions",
@@ -394,13 +649,19 @@
         "Modal",
         "TextField"
       ],
-      "links_to": [
-        "VideoEdit"
+      "links": [
+        {
+          "label": "作品編集へ戻る",
+          "to": "VideoEdit.html"
+        }
       ],
       "html_live": "site/VideoPermissions.html",
       "html_static": "static/VideoPermissions.html",
       "screenshot_desktop": "screenshots/VideoPermissions.desktop.jpg",
-      "screenshot_mobile": "screenshots/VideoPermissions.mobile.jpg"
+      "screenshot_mobile": "screenshots/VideoPermissions.mobile.jpg",
+      "links_to": [
+        "VideoEdit"
+      ]
     },
     {
       "name": "EntrySignIn",
@@ -412,11 +673,12 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/EntrySignIn.html",
       "html_static": "static/EntrySignIn.html",
       "screenshot_desktop": "screenshots/EntrySignIn.desktop.jpg",
-      "screenshot_mobile": "screenshots/EntrySignIn.mobile.jpg"
+      "screenshot_mobile": "screenshots/EntrySignIn.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "EntrySlotted",
@@ -436,14 +698,24 @@
         "TextField",
         "VideoCard"
       ],
-      "links_to": [
-        "EventDetail",
-        "MyPage"
+      "links": [
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "イベントページ",
+          "to": "EventDetail.html"
+        }
       ],
       "html_live": "site/EntrySlotted.html",
       "html_static": "static/EntrySlotted.html",
       "screenshot_desktop": "screenshots/EntrySlotted.desktop.jpg",
-      "screenshot_mobile": "screenshots/EntrySlotted.mobile.jpg"
+      "screenshot_mobile": "screenshots/EntrySlotted.mobile.jpg",
+      "links_to": [
+        "EventDetail",
+        "MyPage"
+      ]
     },
     {
       "name": "EntryUnslotted",
@@ -463,13 +735,19 @@
         "TextField",
         "VideoCard"
       ],
-      "links_to": [
-        "MyPage"
+      "links": [
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        }
       ],
       "html_live": "site/EntryUnslotted.html",
       "html_static": "static/EntryUnslotted.html",
       "screenshot_desktop": "screenshots/EntryUnslotted.desktop.jpg",
-      "screenshot_mobile": "screenshots/EntryUnslotted.mobile.jpg"
+      "screenshot_mobile": "screenshots/EntryUnslotted.mobile.jpg",
+      "links_to": [
+        "MyPage"
+      ]
     },
     {
       "name": "OnboardingTerms",
@@ -481,13 +759,19 @@
       "components": [
         "Checkbox"
       ],
-      "links_to": [
-        "OnboardingXId"
+      "links": [
+        {
+          "label": "同意して続ける",
+          "to": "OnboardingXId.html"
+        }
       ],
       "html_live": "site/OnboardingTerms.html",
       "html_static": "static/OnboardingTerms.html",
       "screenshot_desktop": "screenshots/OnboardingTerms.desktop.jpg",
-      "screenshot_mobile": "screenshots/OnboardingTerms.mobile.jpg"
+      "screenshot_mobile": "screenshots/OnboardingTerms.mobile.jpg",
+      "links_to": [
+        "OnboardingXId"
+      ]
     },
     {
       "name": "OnboardingXId",
@@ -499,14 +783,24 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "MyPage",
-        "OnboardingTerms"
+      "links": [
+        {
+          "label": "戻る",
+          "to": "OnboardingTerms.html"
+        },
+        {
+          "label": "ダッシュボードへ",
+          "to": "MyPage.html"
+        }
       ],
       "html_live": "site/OnboardingXId.html",
       "html_static": "static/OnboardingXId.html",
       "screenshot_desktop": "screenshots/OnboardingXId.desktop.jpg",
-      "screenshot_mobile": "screenshots/OnboardingXId.mobile.jpg"
+      "screenshot_mobile": "screenshots/OnboardingXId.mobile.jpg",
+      "links_to": [
+        "MyPage",
+        "OnboardingTerms"
+      ]
     },
     {
       "name": "Manage",
@@ -518,18 +812,56 @@
         "ManageNav"
       ],
       "components": [],
-      "links_to": [
-        "ManageEvent",
-        "ManageEventNew",
-        "ManageNotifications",
-        "ManageSlots",
-        "ManageVideos",
-        "ManageXLink"
+      "links": [
+        {
+          "label": "イベントを作成",
+          "to": "ManageEventNew.html"
+        },
+        {
+          "label": "審査待ち7PVSF2026S 6 · 年越し合作 1",
+          "to": "ManageInbox.html"
+        },
+        {
+          "label": "通知失敗1Discord 送信失敗",
+          "to": "ManageNotifications.html"
+        },
+        {
+          "label": "X ID 連携申請3担当イベント参加者",
+          "to": "ManageXLink.html"
+        },
+        {
+          "label": "未提出の確保枠18提出締切 10.07",
+          "to": "ManageSlots.html"
+        },
+        {
+          "label": "PVSF2026S",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "開く",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "年越し合作 2026",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "PVSF2026R",
+          "to": "ManageEvent.html"
+        }
       ],
       "html_live": "site/Manage.html",
       "html_static": "static/Manage.html",
       "screenshot_desktop": "screenshots/Manage.desktop.jpg",
-      "screenshot_mobile": "screenshots/Manage.mobile.jpg"
+      "screenshot_mobile": "screenshots/Manage.mobile.jpg",
+      "links_to": [
+        "ManageEvent",
+        "ManageEventNew",
+        "ManageInbox",
+        "ManageNotifications",
+        "ManageSlots",
+        "ManageXLink"
+      ]
     },
     {
       "name": "ManageEvent",
@@ -541,21 +873,44 @@
         "ManageEventHead",
         "ManageNav"
       ],
-      "components": [
-        "TextField"
-      ],
-      "links_to": [
-        "ManageAudience",
-        "ManageEdit",
-        "ManageNotifications",
-        "ManageSlots",
-        "ManageVideo",
-        "ManageVideos"
+      "components": [],
+      "links": [
+        {
+          "label": "受信箱5審査 2 · モデレーション 1 · 申請 1 · 通知失敗 1",
+          "to": "ManageInbox.html"
+        },
+        {
+          "label": "未提出の確保枠18締切 10.07 23:59",
+          "to": "ManageSlots.html"
+        },
+        {
+          "label": "枠の埋まり",
+          "to": "ManageSlots.html"
+        },
+        {
+          "label": "提出済み",
+          "to": "ManageAudience.html"
+        },
+        {
+          "label": "承認済み",
+          "to": "ManageVideos.html"
+        },
+        {
+          "label": "履歴",
+          "to": "ManageHistory.html"
+        }
       ],
       "html_live": "site/ManageEvent.html",
       "html_static": "static/ManageEvent.html",
       "screenshot_desktop": "screenshots/ManageEvent.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageEvent.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageEvent.mobile.jpg",
+      "links_to": [
+        "ManageAudience",
+        "ManageHistory",
+        "ManageInbox",
+        "ManageSlots",
+        "ManageVideos"
+      ]
     },
     {
       "name": "ManageVideos",
@@ -568,14 +923,24 @@
         "ManageNav"
       ],
       "components": [],
-      "links_to": [
-        "EventDetail",
-        "ManageVideo"
+      "links": [
+        {
+          "label": "公開ページを見る",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "詳細",
+          "to": "ManageVideo.html"
+        }
       ],
       "html_live": "site/ManageVideos.html",
       "html_static": "static/ManageVideos.html",
       "screenshot_desktop": "screenshots/ManageVideos.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageVideos.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageVideos.mobile.jpg",
+      "links_to": [
+        "EventDetail",
+        "ManageVideo"
+      ]
     },
     {
       "name": "ManageVideo",
@@ -591,16 +956,46 @@
       "components": [
         "TextField"
       ],
+      "links": [
+        {
+          "label": "作品一覧",
+          "to": "ManageVideos.html"
+        },
+        {
+          "label": "運営として編集",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "作品情報タイトル・楽曲・紹介文",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "投稿者情報表示名・アイコン・SNS",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "YouTube・提出名義運営だけが変更可能",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "編集できる人を追加・通知する",
+          "to": "VideoPermissions.html"
+        },
+        {
+          "label": "差分",
+          "to": "ManageHistory.html"
+        }
+      ],
+      "html_live": "site/ManageVideo.html",
+      "html_static": "static/ManageVideo.html",
+      "screenshot_desktop": "screenshots/ManageVideo.desktop.jpg",
+      "screenshot_mobile": "screenshots/ManageVideo.mobile.jpg",
       "links_to": [
         "ManageHistory",
         "ManageVideos",
         "VideoEdit",
         "VideoPermissions"
-      ],
-      "html_live": "site/ManageVideo.html",
-      "html_static": "static/ManageVideo.html",
-      "screenshot_desktop": "screenshots/ManageVideo.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageVideo.mobile.jpg"
+      ]
     },
     {
       "name": "ManageInbox",
@@ -615,11 +1010,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageInbox.html",
       "html_static": "static/ManageInbox.html",
       "screenshot_desktop": "screenshots/ManageInbox.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageInbox.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageInbox.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageEventNew",
@@ -631,13 +1027,19 @@
         "ManageNav"
       ],
       "components": [],
-      "links_to": [
-        "Manage"
+      "links": [
+        {
+          "label": "運営トップへ",
+          "to": "Manage.html"
+        }
       ],
       "html_live": "site/ManageEventNew.html",
       "html_static": "static/ManageEventNew.html",
       "screenshot_desktop": "screenshots/ManageEventNew.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageEventNew.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageEventNew.mobile.jpg",
+      "links_to": [
+        "Manage"
+      ]
     },
     {
       "name": "ManageSlots",
@@ -652,11 +1054,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageSlots.html",
       "html_static": "static/ManageSlots.html",
       "screenshot_desktop": "screenshots/ManageSlots.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageSlots.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageSlots.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageAudience",
@@ -671,11 +1074,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageAudience.html",
       "html_static": "static/ManageAudience.html",
       "screenshot_desktop": "screenshots/ManageAudience.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageAudience.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageAudience.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageEdit",
@@ -691,13 +1095,19 @@
         "Checkbox",
         "TextField"
       ],
-      "links_to": [
-        "ManageSlots"
+      "links": [
+        {
+          "label": "イベント枠を設定する 枠設定へのショートカット",
+          "to": "ManageSlots.html"
+        }
       ],
       "html_live": "site/ManageEdit.html",
       "html_static": "static/ManageEdit.html",
       "screenshot_desktop": "screenshots/ManageEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageEdit.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageEdit.mobile.jpg",
+      "links_to": [
+        "ManageSlots"
+      ]
     },
     {
       "name": "ManageStaff",
@@ -712,11 +1122,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageStaff.html",
       "html_static": "static/ManageStaff.html",
       "screenshot_desktop": "screenshots/ManageStaff.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageStaff.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageStaff.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageHistory",
@@ -731,11 +1142,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageHistory.html",
       "html_static": "static/ManageHistory.html",
       "screenshot_desktop": "screenshots/ManageHistory.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageHistory.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageHistory.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManagePlaylist",
@@ -750,11 +1162,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManagePlaylist.html",
       "html_static": "static/ManagePlaylist.html",
       "screenshot_desktop": "screenshots/ManagePlaylist.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManagePlaylist.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManagePlaylist.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageNotifications",
@@ -766,11 +1179,12 @@
         "ManageNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageNotifications.html",
       "html_static": "static/ManageNotifications.html",
       "screenshot_desktop": "screenshots/ManageNotifications.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageNotifications.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageNotifications.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "ManageXLink",
@@ -784,11 +1198,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/ManageXLink.html",
       "html_static": "static/ManageXLink.html",
       "screenshot_desktop": "screenshots/ManageXLink.desktop.jpg",
-      "screenshot_mobile": "screenshots/ManageXLink.mobile.jpg"
+      "screenshot_mobile": "screenshots/ManageXLink.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "Admin",
@@ -800,6 +1215,80 @@
         "AdminNav"
       ],
       "components": [],
+      "links": [
+        {
+          "label": "審査待ち作品12作品審査キュー",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "X ID 連携申請3Discord と X ID の連携",
+          "to": "AdminUsersHub.html?tab=AdminXLink"
+        },
+        {
+          "label": "X ID 統合申請1既存 X ID 同士の統合",
+          "to": "AdminUsersHub.html?tab=AdminXIdMerges"
+        },
+        {
+          "label": "統合取り消し申請0統合の取り消し確認",
+          "to": "AdminUsersHub.html?tab=AdminXIdMerges"
+        },
+        {
+          "label": "通知失敗1Discord 送信失敗",
+          "to": "AdminNotifications.html"
+        },
+        {
+          "label": "通知処理固着0処理中のまま15分以上",
+          "to": "AdminNotifications.html"
+        },
+        {
+          "label": "YouTube同期失敗0メタデータ同期",
+          "to": "AdminVideosHub.html?tab=AdminYoutubeSync"
+        },
+        {
+          "label": "未解決ケース2未解決のモデレーション",
+          "to": "AdminModeration.html"
+        },
+        {
+          "label": "期限切れケース0期限を過ぎたケース",
+          "to": "AdminModeration.html"
+        },
+        {
+          "label": "未提出予約枠18確保済みで未提出の枠",
+          "to": "AdminEventsHub.html"
+        },
+        {
+          "label": "募集中のイベント2PVSF2026S ほか",
+          "to": "AdminEventsHub.html"
+        },
+        {
+          "label": "運営へ",
+          "to": "Manage.html"
+        },
+        {
+          "label": "通常全機能をフル稼働",
+          "to": "AdminCostGuard.html"
+        },
+        {
+          "label": "ヘルスチェック",
+          "to": "AdminHealthHub.html"
+        },
+        {
+          "label": "Worker監視",
+          "to": "AdminHealthHub.html?tab=AdminWorkers"
+        },
+        {
+          "label": "セキュリティ",
+          "to": "AdminSecurity.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        }
+      ],
+      "html_live": "site/Admin.html",
+      "html_static": "static/Admin.html",
+      "screenshot_desktop": "screenshots/Admin.desktop.jpg",
+      "screenshot_mobile": "screenshots/Admin.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminCostGuard",
@@ -811,11 +1300,7 @@
         "AdminUsersHub",
         "AdminVideosHub",
         "Manage"
-      ],
-      "html_live": "site/Admin.html",
-      "html_static": "static/Admin.html",
-      "screenshot_desktop": "screenshots/Admin.desktop.jpg",
-      "screenshot_mobile": "screenshots/Admin.mobile.jpg"
+      ]
     },
     {
       "name": "AdminVideosHub",
@@ -830,11 +1315,12 @@
         "AdminYoutubeSync"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminVideosHub.html",
       "html_static": "static/AdminVideosHub.html",
       "screenshot_desktop": "screenshots/AdminVideosHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminVideosHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminVideosHub.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminVideoHub",
@@ -848,17 +1334,39 @@
         "AdminVideoMembers"
       ],
       "components": [],
+      "links": [
+        {
+          "label": "作品一覧",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "内容を編集",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "編集権限",
+          "to": "VideoPermissions.html"
+        },
+        {
+          "label": "公開ページ",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        }
+      ],
+      "html_live": "site/AdminVideoHub.html",
+      "html_static": "static/AdminVideoHub.html",
+      "screenshot_desktop": "screenshots/AdminVideoHub.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminVideoHub.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminVideosHub",
         "VideoDetail",
         "VideoEdit",
         "VideoPermissions"
-      ],
-      "html_live": "site/AdminVideoHub.html",
-      "html_static": "static/AdminVideoHub.html",
-      "screenshot_desktop": "screenshots/AdminVideoHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminVideoHub.mobile.jpg"
+      ]
     },
     {
       "name": "AdminUsersHub",
@@ -873,11 +1381,12 @@
         "AdminXLink"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminUsersHub.html",
       "html_static": "static/AdminUsersHub.html",
       "screenshot_desktop": "screenshots/AdminUsersHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminUsersHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminUsersHub.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminUserHub",
@@ -891,14 +1400,24 @@
         "AdminUserEdit"
       ],
       "components": [],
-      "links_to": [
-        "AdminAuditHub",
-        "AdminUsersHub"
+      "links": [
+        {
+          "label": "ユーザー管理",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "操作履歴",
+          "to": "AdminAuditHub.html"
+        }
       ],
       "html_live": "site/AdminUserHub.html",
       "html_static": "static/AdminUserHub.html",
       "screenshot_desktop": "screenshots/AdminUserHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminUserHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminUserHub.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub",
+        "AdminUsersHub"
+      ]
     },
     {
       "name": "AdminModeration",
@@ -913,11 +1432,12 @@
         "Checkbox",
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminModeration.html",
       "html_static": "static/AdminModeration.html",
       "screenshot_desktop": "screenshots/AdminModeration.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminModeration.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminModeration.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminEventsHub",
@@ -932,11 +1452,12 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminEventsHub.html",
       "html_static": "static/AdminEventsHub.html",
       "screenshot_desktop": "screenshots/AdminEventsHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminEventsHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminEventsHub.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminEventGroupEdit",
@@ -950,16 +1471,34 @@
       "components": [
         "TextField"
       ],
+      "links": [
+        {
+          "label": "グループ一覧",
+          "to": "AdminEventsHub.html?tab=AdminEventGroups"
+        },
+        {
+          "label": "公開ページ",
+          "to": "Events.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "グループを削除",
+          "to": "ConfirmModal.html"
+        }
+      ],
+      "html_live": "site/AdminEventGroupEdit.html",
+      "html_static": "static/AdminEventGroupEdit.html",
+      "screenshot_desktop": "screenshots/AdminEventGroupEdit.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminEventGroupEdit.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminEventsHub",
         "ConfirmModal",
         "Events"
-      ],
-      "html_live": "site/AdminEventGroupEdit.html",
-      "html_static": "static/AdminEventGroupEdit.html",
-      "screenshot_desktop": "screenshots/AdminEventGroupEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminEventGroupEdit.mobile.jpg"
+      ]
     },
     {
       "name": "AdminAnnouncements",
@@ -971,14 +1510,28 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminAnnouncementEdit",
-        "AdminAuditHub"
+      "links": [
+        {
+          "label": "新規お知らせ",
+          "to": "AdminAnnouncementEdit.html"
+        },
+        {
+          "label": "このお知らせの監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "編集",
+          "to": "AdminAnnouncementEdit.html"
+        }
       ],
       "html_live": "site/AdminAnnouncements.html",
       "html_static": "static/AdminAnnouncements.html",
       "screenshot_desktop": "screenshots/AdminAnnouncements.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAnnouncements.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAnnouncements.mobile.jpg",
+      "links_to": [
+        "AdminAnnouncementEdit",
+        "AdminAuditHub"
+      ]
     },
     {
       "name": "AdminAnnouncementEdit",
@@ -993,15 +1546,29 @@
         "Checkbox",
         "TextField"
       ],
-      "links_to": [
-        "AdminAnnouncements",
-        "AdminAuditHub",
-        "ConfirmModal"
+      "links": [
+        {
+          "label": "お知らせ一覧",
+          "to": "AdminAnnouncements.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "お知らせを削除",
+          "to": "ConfirmModal.html"
+        }
       ],
       "html_live": "site/AdminAnnouncementEdit.html",
       "html_static": "static/AdminAnnouncementEdit.html",
       "screenshot_desktop": "screenshots/AdminAnnouncementEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAnnouncementEdit.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAnnouncementEdit.mobile.jpg",
+      "links_to": [
+        "AdminAnnouncements",
+        "AdminAuditHub",
+        "ConfirmModal"
+      ]
     },
     {
       "name": "AdminRules",
@@ -1013,14 +1580,32 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminAuditHub",
-        "AdminRuleEdit"
+      "links": [
+        {
+          "label": "新規バージョン",
+          "to": "AdminRuleEdit.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "編集",
+          "to": "AdminRuleEdit.html"
+        },
+        {
+          "label": "表示",
+          "to": "AdminRuleEdit.html"
+        }
       ],
       "html_live": "site/AdminRules.html",
       "html_static": "static/AdminRules.html",
       "screenshot_desktop": "screenshots/AdminRules.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminRules.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminRules.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub",
+        "AdminRuleEdit"
+      ]
     },
     {
       "name": "AdminRuleEdit",
@@ -1034,13 +1619,19 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminRules"
+      "links": [
+        {
+          "label": "規約一覧",
+          "to": "AdminRules.html"
+        }
       ],
       "html_live": "site/AdminRuleEdit.html",
       "html_static": "static/AdminRuleEdit.html",
       "screenshot_desktop": "screenshots/AdminRuleEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminRuleEdit.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminRuleEdit.mobile.jpg",
+      "links_to": [
+        "AdminRules"
+      ]
     },
     {
       "name": "AdminYoutubeQuota",
@@ -1052,11 +1643,12 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminYoutubeQuota.html",
       "html_static": "static/AdminYoutubeQuota.html",
       "screenshot_desktop": "screenshots/AdminYoutubeQuota.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminYoutubeQuota.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminYoutubeQuota.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminNotifications",
@@ -1070,13 +1662,19 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditHub"
+      "links": [
+        {
+          "label": "この通知の監査ログ",
+          "to": "AdminAuditHub.html"
+        }
       ],
       "html_live": "site/AdminNotifications.html",
       "html_static": "static/AdminNotifications.html",
       "screenshot_desktop": "screenshots/AdminNotifications.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminNotifications.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminNotifications.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub"
+      ]
     },
     {
       "name": "AdminAuditHub",
@@ -1091,11 +1689,12 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminAuditHub.html",
       "html_static": "static/AdminAuditHub.html",
       "screenshot_desktop": "screenshots/AdminAuditHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAuditHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAuditHub.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminAuditDetail",
@@ -1109,15 +1708,33 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditDetail",
-        "AdminAuditHub",
-        "AdminVideoHub"
+      "links": [
+        {
+          "label": "監査ログ一覧",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "前のログ",
+          "to": "AdminAuditDetail.html"
+        },
+        {
+          "label": "次のログ",
+          "to": "AdminAuditDetail.html"
+        },
+        {
+          "label": "管理画面で開く",
+          "to": "AdminVideoHub.html"
+        }
       ],
       "html_live": "site/AdminAuditDetail.html",
       "html_static": "static/AdminAuditDetail.html",
       "screenshot_desktop": "screenshots/AdminAuditDetail.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAuditDetail.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAuditDetail.mobile.jpg",
+      "links_to": [
+        "AdminAuditDetail",
+        "AdminAuditHub",
+        "AdminVideoHub"
+      ]
     },
     {
       "name": "AdminCostGuard",
@@ -1131,11 +1748,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminCostGuard.html",
       "html_static": "static/AdminCostGuard.html",
       "screenshot_desktop": "screenshots/AdminCostGuard.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminCostGuard.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminCostGuard.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminStaticBuilds",
@@ -1149,11 +1767,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminStaticBuilds.html",
       "html_static": "static/AdminStaticBuilds.html",
       "screenshot_desktop": "screenshots/AdminStaticBuilds.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminStaticBuilds.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminStaticBuilds.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminHealthHub",
@@ -1168,11 +1787,12 @@
         "AdminWorkers"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminHealthHub.html",
       "html_static": "static/AdminHealthHub.html",
       "screenshot_desktop": "screenshots/AdminHealthHub.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminHealthHub.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminHealthHub.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminSecurity",
@@ -1184,11 +1804,12 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminSecurity.html",
       "html_static": "static/AdminSecurity.html",
       "screenshot_desktop": "screenshots/AdminSecurity.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminSecurity.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminSecurity.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminPermSim",
@@ -1202,13 +1823,23 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "ManageStaff"
+      "links": [
+        {
+          "label": "スタッフ管理で追加",
+          "to": "ManageStaff.html"
+        },
+        {
+          "label": "スタッフ管理へ",
+          "to": "ManageStaff.html"
+        }
       ],
       "html_live": "site/AdminPermSim.html",
       "html_static": "static/AdminPermSim.html",
       "screenshot_desktop": "screenshots/AdminPermSim.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminPermSim.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminPermSim.mobile.jpg",
+      "links_to": [
+        "ManageStaff"
+      ]
     },
     {
       "name": "AdminApi",
@@ -1220,11 +1851,12 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminApi.html",
       "html_static": "static/AdminApi.html",
       "screenshot_desktop": "screenshots/AdminApi.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminApi.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminApi.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminImport",
@@ -1238,11 +1870,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminImport.html",
       "html_static": "static/AdminImport.html",
       "screenshot_desktop": "screenshots/AdminImport.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminImport.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminImport.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminSpreadsheet",
@@ -1256,11 +1889,12 @@
       "components": [
         "TextField"
       ],
-      "links_to": [],
+      "links": [],
       "html_live": "site/AdminSpreadsheet.html",
       "html_static": "static/AdminSpreadsheet.html",
       "screenshot_desktop": "screenshots/AdminSpreadsheet.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminSpreadsheet.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminSpreadsheet.mobile.jpg",
+      "links_to": []
     },
     {
       "name": "AdminAudit",
@@ -1274,14 +1908,32 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditDetail",
-        "AdminAuditHub"
+      "links": [
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "ログ設定",
+          "to": "AdminAuditHub.html?tab=AdminAuditSettings"
+        },
+        {
+          "label": "復元履歴",
+          "to": "AdminAuditHub.html?tab=AdminAuditRestore"
+        },
+        {
+          "label": "{{l.at}} {{l.op}} {{l.table}} {{l.target",
+          "to": "AdminAuditDetail.html"
+        }
       ],
       "html_live": "site/AdminAudit.html",
       "html_static": "static/AdminAudit.html",
       "screenshot_desktop": "screenshots/AdminAudit.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAudit.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAudit.mobile.jpg",
+      "links_to": [
+        "AdminAuditDetail",
+        "AdminAuditHub"
+      ]
     },
     {
       "name": "AdminAuditSettings",
@@ -1295,13 +1947,27 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditHub"
+      "links": [
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "ログ設定",
+          "to": "AdminAuditHub.html?tab=AdminAuditSettings"
+        },
+        {
+          "label": "復元履歴",
+          "to": "AdminAuditHub.html?tab=AdminAuditRestore"
+        }
       ],
       "html_live": "site/AdminAuditSettings.html",
       "html_static": "static/AdminAuditSettings.html",
       "screenshot_desktop": "screenshots/AdminAuditSettings.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAuditSettings.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAuditSettings.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub"
+      ]
     },
     {
       "name": "AdminAuditRestore",
@@ -1313,14 +1979,36 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminAuditDetail",
-        "AdminAuditHub"
+      "links": [
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "ログ設定",
+          "to": "AdminAuditHub.html?tab=AdminAuditSettings"
+        },
+        {
+          "label": "復元履歴",
+          "to": "AdminAuditHub.html?tab=AdminAuditRestore"
+        },
+        {
+          "label": "aud_7f2310",
+          "to": "AdminAuditDetail.html"
+        },
+        {
+          "label": "aud_6a0c44",
+          "to": "AdminAuditDetail.html"
+        }
       ],
       "html_live": "site/AdminAuditRestore.html",
       "html_static": "static/AdminAuditRestore.html",
       "screenshot_desktop": "screenshots/AdminAuditRestore.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminAuditRestore.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminAuditRestore.mobile.jpg",
+      "links_to": [
+        "AdminAuditDetail",
+        "AdminAuditHub"
+      ]
     },
     {
       "name": "AdminEvents",
@@ -1334,17 +2022,51 @@
       "components": [
         "TextField"
       ],
+      "links": [
+        {
+          "label": "新規イベント",
+          "to": "ManageEventNew.html"
+        },
+        {
+          "label": "イベント一覧",
+          "to": "AdminEventsHub.html"
+        },
+        {
+          "label": "グループ",
+          "to": "AdminEventsHub.html?tab=AdminEventGroups"
+        },
+        {
+          "label": "テンプレート",
+          "to": "AdminEventsHub.html?tab=AdminEventTemplates"
+        },
+        {
+          "label": "{{e.name}}{{e.id}}",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "公開ページ",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "このイベントの監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "運営画面",
+          "to": "ManageEvent.html"
+        }
+      ],
+      "html_live": "site/AdminEvents.html",
+      "html_static": "static/AdminEvents.html",
+      "screenshot_desktop": "screenshots/AdminEvents.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminEvents.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminEventsHub",
         "EventDetail",
         "ManageEvent",
         "ManageEventNew"
-      ],
-      "html_live": "site/AdminEvents.html",
-      "html_static": "static/AdminEvents.html",
-      "screenshot_desktop": "screenshots/AdminEvents.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminEvents.mobile.jpg"
+      ]
     },
     {
       "name": "AdminEventGroups",
@@ -1356,14 +2078,36 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminEventGroupEdit",
-        "AdminEventsHub"
+      "links": [
+        {
+          "label": "新規グループ",
+          "to": "AdminEventGroupEdit.html"
+        },
+        {
+          "label": "イベント一覧",
+          "to": "AdminEventsHub.html"
+        },
+        {
+          "label": "グループ",
+          "to": "AdminEventsHub.html?tab=AdminEventGroups"
+        },
+        {
+          "label": "テンプレート",
+          "to": "AdminEventsHub.html?tab=AdminEventTemplates"
+        },
+        {
+          "label": "編集",
+          "to": "AdminEventGroupEdit.html"
+        }
       ],
       "html_live": "site/AdminEventGroups.html",
       "html_static": "static/AdminEventGroups.html",
       "screenshot_desktop": "screenshots/AdminEventGroups.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminEventGroups.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminEventGroups.mobile.jpg",
+      "links_to": [
+        "AdminEventGroupEdit",
+        "AdminEventsHub"
+      ]
     },
     {
       "name": "AdminEventTemplates",
@@ -1375,15 +2119,41 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminEventsHub",
-        "ConfirmModal",
-        "ManageEventNew"
+      "links": [
+        {
+          "label": "新規イベント",
+          "to": "ManageEventNew.html"
+        },
+        {
+          "label": "イベント一覧",
+          "to": "AdminEventsHub.html"
+        },
+        {
+          "label": "グループ",
+          "to": "AdminEventsHub.html?tab=AdminEventGroups"
+        },
+        {
+          "label": "テンプレート",
+          "to": "AdminEventsHub.html?tab=AdminEventTemplates"
+        },
+        {
+          "label": "このテンプレートで作成",
+          "to": "ManageEventNew.html"
+        },
+        {
+          "label": "削除",
+          "to": "ConfirmModal.html"
+        }
       ],
       "html_live": "site/AdminEventTemplates.html",
       "html_static": "static/AdminEventTemplates.html",
       "screenshot_desktop": "screenshots/AdminEventTemplates.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminEventTemplates.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminEventTemplates.mobile.jpg",
+      "links_to": [
+        "AdminEventsHub",
+        "ConfirmModal",
+        "ManageEventNew"
+      ]
     },
     {
       "name": "AdminHealth",
@@ -1395,13 +2165,27 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminHealthHub"
+      "links": [
+        {
+          "label": "ヘルスチェック",
+          "to": "AdminHealthHub.html"
+        },
+        {
+          "label": "DB整合性",
+          "to": "AdminHealthHub.html?tab=AdminIntegrity"
+        },
+        {
+          "label": "Worker監視",
+          "to": "AdminHealthHub.html?tab=AdminWorkers"
+        }
       ],
       "html_live": "site/AdminHealth.html",
       "html_static": "static/AdminHealth.html",
       "screenshot_desktop": "screenshots/AdminHealth.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminHealth.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminHealth.mobile.jpg",
+      "links_to": [
+        "AdminHealthHub"
+      ]
     },
     {
       "name": "AdminIntegrity",
@@ -1413,13 +2197,31 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminHealthHub"
+      "links": [
+        {
+          "label": "ヘルスチェック",
+          "to": "AdminHealthHub.html"
+        },
+        {
+          "label": "DB整合性",
+          "to": "AdminHealthHub.html?tab=AdminIntegrity"
+        },
+        {
+          "label": "Worker監視",
+          "to": "AdminHealthHub.html?tab=AdminWorkers"
+        },
+        {
+          "label": "ヘルスチェックへ",
+          "to": "AdminHealthHub.html"
+        }
       ],
       "html_live": "site/AdminIntegrity.html",
       "html_static": "static/AdminIntegrity.html",
       "screenshot_desktop": "screenshots/AdminIntegrity.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminIntegrity.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminIntegrity.mobile.jpg",
+      "links_to": [
+        "AdminHealthHub"
+      ]
     },
     {
       "name": "AdminWorkers",
@@ -1431,16 +2233,42 @@
         "AdminNav"
       ],
       "components": [],
+      "links": [
+        {
+          "label": "ヘルスチェック",
+          "to": "AdminHealthHub.html"
+        },
+        {
+          "label": "DB整合性",
+          "to": "AdminHealthHub.html?tab=AdminIntegrity"
+        },
+        {
+          "label": "Worker監視",
+          "to": "AdminHealthHub.html?tab=AdminWorkers"
+        },
+        {
+          "label": "operation_mode通常正常",
+          "to": "AdminCostGuard.html"
+        },
+        {
+          "label": "通知配信1最終失敗",
+          "to": "AdminNotifications.html"
+        },
+        {
+          "label": "静的JSON再生成1失敗",
+          "to": "AdminStaticBuilds.html"
+        }
+      ],
+      "html_live": "site/AdminWorkers.html",
+      "html_static": "static/AdminWorkers.html",
+      "screenshot_desktop": "screenshots/AdminWorkers.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminWorkers.mobile.jpg",
       "links_to": [
         "AdminCostGuard",
         "AdminHealthHub",
         "AdminNotifications",
         "AdminStaticBuilds"
-      ],
-      "html_live": "site/AdminWorkers.html",
-      "html_static": "static/AdminWorkers.html",
-      "screenshot_desktop": "screenshots/AdminWorkers.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminWorkers.mobile.jpg"
+      ]
     },
     {
       "name": "AdminVideos",
@@ -1454,15 +2282,41 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditHub",
-        "AdminVideoHub",
-        "AdminVideosHub"
+      "links": [
+        {
+          "label": "すべて",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "メタデータ同期",
+          "to": "AdminVideosHub.html?tab=AdminYoutubeSync"
+        },
+        {
+          "label": "再生リスト同期",
+          "to": "AdminVideosHub.html?tab=AdminPlaylists"
+        },
+        {
+          "label": "{{r.title}}{{r.event}}",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "この作品の監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "詳細",
+          "to": "AdminVideoHub.html"
+        }
       ],
       "html_live": "site/AdminVideos.html",
       "html_static": "static/AdminVideos.html",
       "screenshot_desktop": "screenshots/AdminVideos.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminVideos.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminVideos.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub",
+        "AdminVideoHub",
+        "AdminVideosHub"
+      ]
     },
     {
       "name": "AdminYoutubeSync",
@@ -1474,14 +2328,32 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminVideoHub",
-        "AdminVideosHub"
+      "links": [
+        {
+          "label": "すべて",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "メタデータ同期",
+          "to": "AdminVideosHub.html?tab=AdminYoutubeSync"
+        },
+        {
+          "label": "再生リスト同期",
+          "to": "AdminVideosHub.html?tab=AdminPlaylists"
+        },
+        {
+          "label": "作品を開く",
+          "to": "AdminVideoHub.html"
+        }
       ],
       "html_live": "site/AdminYoutubeSync.html",
       "html_static": "static/AdminYoutubeSync.html",
       "screenshot_desktop": "screenshots/AdminYoutubeSync.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminYoutubeSync.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminYoutubeSync.mobile.jpg",
+      "links_to": [
+        "AdminVideoHub",
+        "AdminVideosHub"
+      ]
     },
     {
       "name": "AdminPlaylists",
@@ -1493,14 +2365,32 @@
         "AdminNav"
       ],
       "components": [],
-      "links_to": [
-        "AdminVideosHub",
-        "ManagePlaylist"
+      "links": [
+        {
+          "label": "すべて",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "メタデータ同期",
+          "to": "AdminVideosHub.html?tab=AdminYoutubeSync"
+        },
+        {
+          "label": "再生リスト同期",
+          "to": "AdminVideosHub.html?tab=AdminPlaylists"
+        },
+        {
+          "label": "設定",
+          "to": "ManagePlaylist.html"
+        }
       ],
       "html_live": "site/AdminPlaylists.html",
       "html_static": "static/AdminPlaylists.html",
       "screenshot_desktop": "screenshots/AdminPlaylists.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminPlaylists.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminPlaylists.mobile.jpg",
+      "links_to": [
+        "AdminVideosHub",
+        "ManagePlaylist"
+      ]
     },
     {
       "name": "AdminUsers",
@@ -1515,15 +2405,45 @@
         "Checkbox",
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditHub",
-        "AdminUserHub",
-        "AdminUsersHub"
+      "links": [
+        {
+          "label": "Discordユーザー",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "権限管理",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "X ID 連携申請 3",
+          "to": "AdminUsersHub.html?tab=AdminXLink"
+        },
+        {
+          "label": "X ID 統合申請 1",
+          "to": "AdminUsersHub.html?tab=AdminXIdMerges"
+        },
+        {
+          "label": "{{u.name}}{{u.discord}}",
+          "to": "AdminUserHub.html"
+        },
+        {
+          "label": "このユーザーが実行した管理操作の監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "詳細",
+          "to": "AdminUserHub.html"
+        }
       ],
       "html_live": "site/AdminUsers.html",
       "html_static": "static/AdminUsers.html",
       "screenshot_desktop": "screenshots/AdminUsers.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminUsers.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminUsers.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub",
+        "AdminUserHub",
+        "AdminUsersHub"
+      ]
     },
     {
       "name": "AdminXLink",
@@ -1537,13 +2457,31 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminUsersHub"
+      "links": [
+        {
+          "label": "Discordユーザー",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "権限管理",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "X ID 連携申請 3",
+          "to": "AdminUsersHub.html?tab=AdminXLink"
+        },
+        {
+          "label": "X ID 統合申請 1",
+          "to": "AdminUsersHub.html?tab=AdminXIdMerges"
+        }
       ],
       "html_live": "site/AdminXLink.html",
       "html_static": "static/AdminXLink.html",
       "screenshot_desktop": "screenshots/AdminXLink.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminXLink.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminXLink.mobile.jpg",
+      "links_to": [
+        "AdminUsersHub"
+      ]
     },
     {
       "name": "AdminXIdMerges",
@@ -1557,13 +2495,31 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminUsersHub"
+      "links": [
+        {
+          "label": "Discordユーザー",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "権限管理",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "X ID 連携申請 3",
+          "to": "AdminUsersHub.html?tab=AdminXLink"
+        },
+        {
+          "label": "X ID 統合申請 1",
+          "to": "AdminUsersHub.html?tab=AdminXIdMerges"
+        }
       ],
       "html_live": "site/AdminXIdMerges.html",
       "html_static": "static/AdminXIdMerges.html",
       "screenshot_desktop": "screenshots/AdminXIdMerges.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminXIdMerges.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminXIdMerges.mobile.jpg",
+      "links_to": [
+        "AdminUsersHub"
+      ]
     },
     {
       "name": "AdminUser",
@@ -1575,16 +2531,46 @@
         "AdminNav"
       ],
       "components": [],
+      "links": [
+        {
+          "label": "ユーザー管理",
+          "to": "AdminUsersHub.html"
+        },
+        {
+          "label": "ユーザー詳細",
+          "to": "AdminUserHub.html"
+        },
+        {
+          "label": "設定編集",
+          "to": "AdminUserHub.html?tab=AdminUserEdit"
+        },
+        {
+          "label": "操作履歴",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "魔法少女 このは・グリモワール 最終決戦編PVSF2026Sp · 03.28 ",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "崇渦に関するお知らせ 前編PVSF2026Sp · 03.27 23:48 · ",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "設定を編集",
+          "to": "AdminUserHub.html?tab=AdminUserEdit"
+        }
+      ],
+      "html_live": "site/AdminUser.html",
+      "html_static": "static/AdminUser.html",
+      "screenshot_desktop": "screenshots/AdminUser.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminUser.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminUserHub",
         "AdminUsersHub",
         "AdminVideoHub"
-      ],
-      "html_live": "site/AdminUser.html",
-      "html_static": "static/AdminUser.html",
-      "screenshot_desktop": "screenshots/AdminUser.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminUser.mobile.jpg"
+      ]
     },
     {
       "name": "AdminUserEdit",
@@ -1598,14 +2584,28 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "AdminAuditHub",
-        "AdminUserHub"
+      "links": [
+        {
+          "label": "ユーザー詳細",
+          "to": "AdminUserHub.html"
+        },
+        {
+          "label": "設定編集",
+          "to": "AdminUserHub.html?tab=AdminUserEdit"
+        },
+        {
+          "label": "操作履歴",
+          "to": "AdminAuditHub.html"
+        }
       ],
       "html_live": "site/AdminUserEdit.html",
       "html_static": "static/AdminUserEdit.html",
       "screenshot_desktop": "screenshots/AdminUserEdit.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminUserEdit.mobile.jpg"
+      "screenshot_mobile": "screenshots/AdminUserEdit.mobile.jpg",
+      "links_to": [
+        "AdminAuditHub",
+        "AdminUserHub"
+      ]
     },
     {
       "name": "AdminVideo",
@@ -1619,6 +2619,44 @@
       "components": [
         "TextField"
       ],
+      "links": [
+        {
+          "label": "作品一覧",
+          "to": "AdminVideosHub.html"
+        },
+        {
+          "label": "管理詳細",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "メンバー",
+          "to": "AdminVideoHub.html?tab=AdminVideoMembers"
+        },
+        {
+          "label": "内容編集",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "編集権限",
+          "to": "VideoPermissions.html"
+        },
+        {
+          "label": "公開ページ",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        },
+        {
+          "label": "メンバーを編集",
+          "to": "AdminVideoHub.html?tab=AdminVideoMembers"
+        }
+      ],
+      "html_live": "site/AdminVideo.html",
+      "html_static": "static/AdminVideo.html",
+      "screenshot_desktop": "screenshots/AdminVideo.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminVideo.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminVideoHub",
@@ -1626,11 +2664,7 @@
         "VideoDetail",
         "VideoEdit",
         "VideoPermissions"
-      ],
-      "html_live": "site/AdminVideo.html",
-      "html_static": "static/AdminVideo.html",
-      "screenshot_desktop": "screenshots/AdminVideo.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminVideo.mobile.jpg"
+      ]
     },
     {
       "name": "AdminVideoMembers",
@@ -1643,17 +2677,47 @@
         "MemberEditor"
       ],
       "components": [],
+      "links": [
+        {
+          "label": "作品詳細",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "管理詳細",
+          "to": "AdminVideoHub.html"
+        },
+        {
+          "label": "メンバー",
+          "to": "AdminVideoHub.html?tab=AdminVideoMembers"
+        },
+        {
+          "label": "内容編集",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "編集権限",
+          "to": "VideoPermissions.html"
+        },
+        {
+          "label": "公開ページ",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "監査ログ",
+          "to": "AdminAuditHub.html"
+        }
+      ],
+      "html_live": "site/AdminVideoMembers.html",
+      "html_static": "static/AdminVideoMembers.html",
+      "screenshot_desktop": "screenshots/AdminVideoMembers.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminVideoMembers.mobile.jpg",
       "links_to": [
         "AdminAuditHub",
         "AdminVideoHub",
         "VideoDetail",
         "VideoEdit",
         "VideoPermissions"
-      ],
-      "html_live": "site/AdminVideoMembers.html",
-      "html_static": "static/AdminVideoMembers.html",
-      "screenshot_desktop": "screenshots/AdminVideoMembers.desktop.jpg",
-      "screenshot_mobile": "screenshots/AdminVideoMembers.mobile.jpg"
+      ]
     },
     {
       "name": "Dashboard",
@@ -1666,17 +2730,45 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "EntrySlotted",
-        "EventDetail",
-        "MyPage",
-        "VideoDetail",
-        "VideoEdit"
+      "links": [
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ライブラリ",
+          "to": "MyPage.html?tab=Library"
+        },
+        {
+          "label": "設定",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "作品を投稿する",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "続きから提出",
+          "to": "EntrySlotted.html"
+        },
+        {
+          "label": "{{w.title}}{{w.meta}} 共同編集{{w.state}}",
+          "to": "VideoEdit.html"
+        }
       ],
       "html_live": "site/Dashboard.html",
       "html_static": "static/Dashboard.html",
       "screenshot_desktop": "screenshots/Dashboard.desktop.jpg",
-      "screenshot_mobile": "screenshots/Dashboard.mobile.jpg"
+      "screenshot_mobile": "screenshots/Dashboard.mobile.jpg",
+      "links_to": [
+        "EntrySlotted",
+        "MyPage",
+        "VideoEdit"
+      ]
     },
     {
       "name": "Entry",
@@ -1689,16 +2781,41 @@
         "PublicHeader"
       ],
       "components": [],
-      "links_to": [
-        "EntrySlotted",
-        "EntryUnslotted",
-        "MyPage",
-        "VideoEdit"
+      "links": [
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ライブラリ",
+          "to": "MyPage.html?tab=Library"
+        },
+        {
+          "label": "設定",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "続きから提出",
+          "to": "EntrySlotted.html"
+        },
+        {
+          "label": "イベントに関係なく投稿する",
+          "to": "EntryUnslotted.html"
+        }
       ],
       "html_live": "site/Entry.html",
       "html_static": "static/Entry.html",
       "screenshot_desktop": "screenshots/Entry.desktop.jpg",
-      "screenshot_mobile": "screenshots/Entry.mobile.jpg"
+      "screenshot_mobile": "screenshots/Entry.mobile.jpg",
+      "links_to": [
+        "EntrySlotted",
+        "EntryUnslotted",
+        "MyPage"
+      ]
     },
     {
       "name": "Library",
@@ -1713,15 +2830,41 @@
       "components": [
         "VideoCard"
       ],
-      "links_to": [
-        "MyPage",
-        "VideoDetail",
-        "VideoEdit"
+      "links": [
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ライブラリ",
+          "to": "MyPage.html?tab=Library"
+        },
+        {
+          "label": "設定",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "編集",
+          "to": "VideoEdit.html"
+        },
+        {
+          "label": "{{c.video}}{{c.at}}{{c.body}} {{c.state}",
+          "to": "VideoDetail.html"
+        }
       ],
       "html_live": "site/Library.html",
       "html_static": "static/Library.html",
       "screenshot_desktop": "screenshots/Library.desktop.jpg",
-      "screenshot_mobile": "screenshots/Library.mobile.jpg"
+      "screenshot_mobile": "screenshots/Library.mobile.jpg",
+      "links_to": [
+        "MyPage",
+        "VideoDetail",
+        "VideoEdit"
+      ]
     },
     {
       "name": "Settings",
@@ -1738,14 +2881,36 @@
       "components": [
         "TextField"
       ],
-      "links_to": [
-        "Creator",
-        "MyPage"
+      "links": [
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "参加・投稿",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ライブラリ",
+          "to": "MyPage.html?tab=Library"
+        },
+        {
+          "label": "設定",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "公開プロフィール",
+          "to": "Creator.html"
+        }
       ],
       "html_live": "site/Settings.html",
       "html_static": "static/Settings.html",
       "screenshot_desktop": "screenshots/Settings.desktop.jpg",
-      "screenshot_mobile": "screenshots/Settings.mobile.jpg"
+      "screenshot_mobile": "screenshots/Settings.mobile.jpg",
+      "links_to": [
+        "Creator",
+        "MyPage"
+      ]
     },
     {
       "name": "PublicHeader",
@@ -1755,6 +2920,84 @@
       "source": "source/boards/PublicHeader.dc.html",
       "imports": [],
       "components": [],
+      "links": [
+        {
+          "label": "FlameNode トップ",
+          "to": "Main.html"
+        },
+        {
+          "label": "投稿する",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ログイン",
+          "to": "EntrySignIn.html"
+        },
+        {
+          "label": "崇渦に関するお知らせ 前編おたこ · PVSF2026S",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "空白合作空白合作チーム · PVSF2026Sp",
+          "to": "VideoDetail.html"
+        },
+        {
+          "label": "おたこ @012345rty",
+          "to": "Creator.html"
+        },
+        {
+          "label": "PVSF2026S 募集中",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "「空白」で作品をすべて検索Enter",
+          "to": "Videos.html"
+        },
+        {
+          "label": "X ID を追加・申請状況を見る",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "マイページ",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "ライブラリ",
+          "to": "MyPage.html?tab=Library"
+        },
+        {
+          "label": "設定",
+          "to": "MyPage.html?tab=Settings"
+        },
+        {
+          "label": "運営審査待ち 7",
+          "to": "Manage.html"
+        },
+        {
+          "label": "管理",
+          "to": "Admin.html"
+        },
+        {
+          "label": "作品を投稿する",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "Discord でログイン",
+          "to": "EntrySignIn.html"
+        },
+        {
+          "label": "おたこマイページ · Discord でログイン中",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "運営7",
+          "to": "Manage.html"
+        }
+      ],
+      "html_live": "site/PublicHeader.html",
+      "html_static": "static/PublicHeader.html",
+      "screenshot_desktop": "screenshots/PublicHeader.desktop.jpg",
+      "screenshot_mobile": "screenshots/PublicHeader.mobile.jpg",
       "links_to": [
         "Admin",
         "Creator",
@@ -1775,6 +3018,52 @@
       "source": "source/boards/PublicFooter.dc.html",
       "imports": [],
       "components": [],
+      "links": [
+        {
+          "label": "作品一覧",
+          "to": "Videos.html"
+        },
+        {
+          "label": "おすすめ",
+          "to": "Recommend.html"
+        },
+        {
+          "label": "クリエイター",
+          "to": "Creators.html"
+        },
+        {
+          "label": "イベント一覧",
+          "to": "Events.html"
+        },
+        {
+          "label": "投稿する",
+          "to": "MyPage.html?tab=Entry"
+        },
+        {
+          "label": "ダッシュボード",
+          "to": "MyPage.html"
+        },
+        {
+          "label": "ログイン / 新規登録",
+          "to": "EntrySignIn.html"
+        },
+        {
+          "label": "イベント開催相談",
+          "to": "About.html"
+        },
+        {
+          "label": "FlameNode について",
+          "to": "About.html"
+        },
+        {
+          "label": "利用規約",
+          "to": "Rules.html"
+        }
+      ],
+      "html_live": "site/PublicFooter.html",
+      "html_static": "static/PublicFooter.html",
+      "screenshot_desktop": "screenshots/PublicFooter.desktop.jpg",
+      "screenshot_mobile": "screenshots/PublicFooter.mobile.jpg",
       "links_to": [
         "About",
         "Creators",
@@ -1794,6 +3083,24 @@
       "source": "source/boards/AdminNav.dc.html",
       "imports": [],
       "components": [],
+      "links": [
+        {
+          "label": "移動・操作を検索",
+          "to": "CommandPalette.html"
+        },
+        {
+          "label": "運営へ",
+          "to": "Manage.html"
+        },
+        {
+          "label": "公開サイトへ",
+          "to": "Main.html"
+        }
+      ],
+      "html_live": "site/AdminNav.html",
+      "html_static": "static/AdminNav.html",
+      "screenshot_desktop": "screenshots/AdminNav.desktop.jpg",
+      "screenshot_mobile": "screenshots/AdminNav.mobile.jpg",
       "links_to": [
         "CommandPalette",
         "Main",
@@ -1808,6 +3115,44 @@
       "source": "source/boards/ManageNav.dc.html",
       "imports": [],
       "components": [],
+      "links": [
+        {
+          "label": "移動・操作を検索",
+          "to": "CommandPalette.html"
+        },
+        {
+          "label": "移動・操作を検索⌘K 移動・操作を検索(Ctrl+K)",
+          "to": "CommandPalette.html"
+        },
+        {
+          "label": "運営トップ",
+          "to": "Manage.html"
+        },
+        {
+          "label": "通知センター1",
+          "to": "ManageNotifications.html"
+        },
+        {
+          "label": "イベントを作成",
+          "to": "ManageEventNew.html"
+        },
+        {
+          "label": "{{e.title}}",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "X ID 連携申請(全体)3",
+          "to": "ManageXLink.html"
+        },
+        {
+          "label": "公開サイト",
+          "to": "Main.html"
+        }
+      ],
+      "html_live": "site/ManageNav.html",
+      "html_static": "static/ManageNav.html",
+      "screenshot_desktop": "screenshots/ManageNav.desktop.jpg",
+      "screenshot_mobile": "screenshots/ManageNav.mobile.jpg",
       "links_to": [
         "CommandPalette",
         "Main",
@@ -1826,6 +3171,24 @@
       "source": "source/boards/ManageEventHead.dc.html",
       "imports": [],
       "components": [],
+      "links": [
+        {
+          "label": "PVSF2026S",
+          "to": "ManageEvent.html"
+        },
+        {
+          "label": "公開ページを開く",
+          "to": "EventDetail.html"
+        },
+        {
+          "label": "移動・操作を検索(⌘K)",
+          "to": "CommandPalette.html"
+        }
+      ],
+      "html_live": "site/ManageEventHead.html",
+      "html_static": "static/ManageEventHead.html",
+      "screenshot_desktop": "screenshots/ManageEventHead.desktop.jpg",
+      "screenshot_mobile": "screenshots/ManageEventHead.mobile.jpg",
       "links_to": [
         "CommandPalette",
         "EventDetail",
@@ -1842,6 +3205,11 @@
       "components": [
         "Modal"
       ],
+      "links": [],
+      "html_live": "site/ConfirmModal.html",
+      "html_static": "static/ConfirmModal.html",
+      "screenshot_desktop": "screenshots/ConfirmModal.desktop.jpg",
+      "screenshot_mobile": "screenshots/ConfirmModal.mobile.jpg",
       "links_to": []
     },
     {
@@ -1854,6 +3222,11 @@
       "components": [
         "TextField"
       ],
+      "links": [],
+      "html_live": "site/MemberEditor.html",
+      "html_static": "static/MemberEditor.html",
+      "screenshot_desktop": "screenshots/MemberEditor.desktop.jpg",
+      "screenshot_mobile": "screenshots/MemberEditor.mobile.jpg",
       "links_to": []
     },
     {
@@ -1869,6 +3242,11 @@
       "components": [
         "TextField"
       ],
+      "links": [],
+      "html_live": "site/EntrySubmitter.html",
+      "html_static": "static/EntrySubmitter.html",
+      "screenshot_desktop": "screenshots/EntrySubmitter.desktop.jpg",
+      "screenshot_mobile": "screenshots/EntrySubmitter.mobile.jpg",
       "links_to": []
     },
     {
@@ -1879,6 +3257,11 @@
       "source": "source/boards/IconPicker.dc.html",
       "imports": [],
       "components": [],
+      "links": [],
+      "html_live": "site/IconPicker.html",
+      "html_static": "static/IconPicker.html",
+      "screenshot_desktop": "screenshots/IconPicker.desktop.jpg",
+      "screenshot_mobile": "screenshots/IconPicker.mobile.jpg",
       "links_to": []
     },
     {
@@ -1889,6 +3272,11 @@
       "source": "source/boards/EntryQuestions.dc.html",
       "imports": [],
       "components": [],
+      "links": [],
+      "html_live": "site/EntryQuestions.html",
+      "html_static": "static/EntryQuestions.html",
+      "screenshot_desktop": "screenshots/EntryQuestions.desktop.jpg",
+      "screenshot_mobile": "screenshots/EntryQuestions.mobile.jpg",
       "links_to": []
     },
     {
@@ -1899,6 +3287,11 @@
       "source": "source/boards/LinkEditor.dc.html",
       "imports": [],
       "components": [],
+      "links": [],
+      "html_live": "site/LinkEditor.html",
+      "html_static": "static/LinkEditor.html",
+      "screenshot_desktop": "screenshots/LinkEditor.desktop.jpg",
+      "screenshot_mobile": "screenshots/LinkEditor.mobile.jpg",
       "links_to": []
     },
     {
@@ -1909,6 +3302,11 @@
       "source": "source/boards/CommandPalette.dc.html",
       "imports": [],
       "components": [],
+      "links": [],
+      "html_live": "site/CommandPalette.html",
+      "html_static": "static/CommandPalette.html",
+      "screenshot_desktop": "screenshots/CommandPalette.desktop.jpg",
+      "screenshot_mobile": "screenshots/CommandPalette.mobile.jpg",
       "links_to": []
     }
   ]

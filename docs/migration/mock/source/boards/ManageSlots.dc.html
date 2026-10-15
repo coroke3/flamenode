@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="slots" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="slots" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="slots" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="slots" hint-size="100%,96px"></dc-import>
 
     <details class="raised" style="margin-top: 32px; padding: 20px 24px;">
       <summary class="il" style="cursor: pointer;"><i class="fa-solid fa-plus" aria-hidden="true"></i>枠を一括生成</summary>

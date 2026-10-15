@@ -21,10 +21,10 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000} .pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--surface-subtle);font-size:12px}</style>
+<style>body{margin:0} .pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--surface-subtle);font-size:12px}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import></sc-if>
 
   <div class="wrap" style="padding-top: 40px; max-width: 1200px;">
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="マイページ">
@@ -38,7 +38,7 @@
       <h1 class="t-display">参加・投稿</h1>
     </div></sc-if>
 
-    <section aria-labelledby="next" style="margin-top: 32px;">
+    <section aria-labelledby="next" style="margin-top: 8px;">
       <h2 id="next" class="vh">次にやること</h2>
       <div class="row ent-next raised" style="gap: 20px; flex-wrap: wrap; padding: 20px; align-items: center;">
         <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 120px; aspect-ratio: 16/9; object-fit: cover; display: block;">
@@ -72,19 +72,9 @@
       </a>
     </section>
 
-    <section aria-labelledby="done" style="margin-top: 56px;">
-      <h2 id="done" class="t-h2" style="margin-bottom: 12px;">提出済み</h2>
-      <sc-for list="{{done}}" as="w" hint-placeholder-count="2">
-        <a href="VideoEdit.dc.html" class="fn-row">
-          <img class="fn-row__thumb" src="{{w.thumb}}" alt="">
-          <span class="fn-row__body"><span class="fn-row__title">{{w.title}}</span><span class="fn-row__meta">{{w.meta}}</span></span>
-          <span class="fn-row__trail"><span class="st"><i class="{{w.dot}}" aria-hidden="true"></i>{{w.state}}</span></span>
-        </a>
-      </sc-for>
-    </section>
   </div>
   <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import></sc-if>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import></sc-if>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"embed":{"editor":"boolean","default":true},"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1500}}'>

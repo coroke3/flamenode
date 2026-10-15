@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}.chip.on{background:var(--ink);color:var(--bg)}</style>
+<style>body{margin:0} .chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;background:var(--surface-subtle);color:var(--ink-muted);font:400 13px/20px var(--font-sans);cursor:pointer}.chip.on{background:var(--ink);color:var(--bg)}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="users" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="users" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head">
       <div>
@@ -36,8 +36,8 @@
     <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><nav class="subnav" aria-label="ユーザー管理メニュー" style="margin-bottom: 24px;">
       <a href="AdminUsersHub.dc.html" class="il" aria-current="{{curUsers}}" onClick="{{showUsers}}"><i class="fa-brands fa-discord" aria-hidden="true"></i>Discordユーザー</a>
       <a href="AdminUsersHub.dc.html" class="il" aria-current="{{curPerm}}" onClick="{{showPerm}}"><i class="fa-solid fa-key" aria-hidden="true"></i>権限管理</a>
-      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID連携申請 <span class="t-num">3</span></a>
-      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID統合申請 <span class="t-num">1</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="fa-solid fa-at" aria-hidden="true"></i>X ID 連携申請 <span class="t-num">3</span></a>
+      <a href="AdminUsersHub.dc.html" class="il"><i class="ms ms-merge" aria-hidden="true"></i>X ID 統合申請 <span class="t-num">1</span></a>
     </nav></sc-if>
 
     <sc-if value="{{isUsers}}" hint-placeholder-val="{{true}}">
@@ -49,8 +49,8 @@
         <button type="button" class="chip"><i class="fa-solid fa-crown" aria-hidden="true"></i>admin</button>
         <button type="button" class="chip"><i class="fa-solid fa-shield" aria-hidden="true"></i>moderator</button>
         <button type="button" class="chip"><i class="fa-solid fa-calendar-plus" aria-hidden="true"></i>開催権限あり</button>
-        <button type="button" class="chip"><i class="fa-solid fa-scale-unbalanced" aria-hidden="true"></i>TOS未同意</button>
-        <button type="button" class="chip"><i class="fa-solid fa-user-slash" aria-hidden="true"></i>Active X ID なし</button>
+        <button type="button" class="chip"><i class="fa-solid fa-scale-unbalanced" aria-hidden="true"></i>規約未同意</button>
+        <button type="button" class="chip"><i class="fa-solid fa-user-slash" aria-hidden="true"></i>X ID なし</button>
       </div>
       <p class="t-sm muted t-num" style="margin: 16px 0 8px;">1,204 件</p>
       <div class="t-scroll">
@@ -117,7 +117,7 @@ class Component extends DCLogic {
       ['みずのひと', 'mizunohito_10', '@mizunohito_10', 'USER', 'ok', 1, 1, '2023.03.30'],
       ['スティックのり', 'sticknori', '@Sticknorikun', 'USER', 'ok', 0, 0, '2025.08.20'],
       ['幼虫', 'musivirus', '@MusiVirus', 'USER', 'ok', 0, 1, '2026.03.10'],
-      ['新規ユーザー', 'newbie_2026', 'active Xなし', 'USER', 'ok', 0, 0, '2026.10.03'],
+      ['新規ユーザー', 'newbie_2026', 'X ID なし', 'USER', 'ok', 0, 0, '2026.10.03'],
       ['(停止中)', 'spam_acc', '@spam_acc', 'USER', 'ban', 0, 1, '2025.11.02']
     ];
     const R = { ADMIN: 'fa-solid fa-crown', MOD: 'fa-solid fa-shield', USER: 'fa-regular fa-user' };

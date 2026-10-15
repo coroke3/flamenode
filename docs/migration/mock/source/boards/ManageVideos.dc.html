@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="videos" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="videos" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="videos" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="videos" hint-size="100%,96px"></dc-import>
     <div class="wrap-row" style="gap: 8px; margin: 32px 0 16px;">
       <div class="seg" role="group" aria-label="公開状態フィルタ"><sc-for list="{{tabs}}" as="t" hint-placeholder-count="5"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}<span class="t-num muted">{{t.n}}</span></button></sc-for></div>
       <span style="flex: 1;"></span>
@@ -71,10 +71,10 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1400}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { tab: 'pending' }; }
+  constructor(p) { super(p); this.state = { tab: 'all' }; }
   renderVals() {
     const T = ['/_blob/525c7209e503b8327cbd5bf4a64e5fc8','/_blob/191c3939aefb326fc04fd3ccf6db83a9','/_blob/fc027fe6fe3a001a22a1933270ce72b9','/_blob/6ecfc7b6882f277d815f563e873f25ee','/_blob/3d8d62bbac75243d266ec6e3de039e6d','/_blob/f5c1a8af077b887c7bb1d043f3cf69c1','/_blob/be71b2f744d470e10fb8c8ca733bbace','/_blob/755d245a064a6f5935c3dccd9a941048'];
-    const ST = { pending: ['公開待ち','dot warn'], public: ['公開','dot ok'], private: ['非公開','dot'], voided: ['無効化','dot err'] };
+    const ST = { pending: ['審査待ち','dot warn'], public: ['公開','dot ok'], private: ['非公開','dot'], voided: ['無効化','dot err'] };
     const all = [
       ['崇渦に関するお知らせ 前編','おたこ','012345rty','pending','10.04 11:02','あり',0,'設定済み'],
       ['模範囚','hato','Ghx86L','pending','10.03 23:10','あり',1,'URL未設定'],
@@ -92,7 +92,7 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'dark', rows, cur, hasRows: rows.length > 0, noRows: rows.length === 0,
       approveNext: () => this.setState({ sel: Math.min(si + 1, rows.length - 1) }),
-      tabs: [['all','すべて'],['pending','公開待ち'],['public','公開'],['private','非公開'],['voided','無効化']].map(([id, label]) => ({ label, n: n(id), cls: t === id ? 'on' : '', pick: () => this.setState({ tab: id, sel: 0 }) }))
+      tabs: [['all','すべて'],['pending','審査待ち'],['public','公開'],['private','非公開'],['voided','無効化']].map(([id, label]) => ({ label, n: n(id), cls: t === id ? 'on' : '', pick: () => this.setState({ tab: id, sel: 0 }) }))
     };
   }
 }

@@ -22,7 +22,7 @@
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>
-body{margin:0;background:#000}
+body{margin:0}
 .sub{display:grid;gap:20px}
 .sub-x{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:14px}
 .sub-x .t-xs{flex-basis:100%}
@@ -45,10 +45,9 @@ body{margin:0;background:#000}
 </helmet>
 <div class="p-root sub" data-theme="{{theme}}" lang="ja" style="min-height: 0; background: transparent; padding-bottom: 0;">
   <div class="sub-x">
-    <span class="muted">提出主体</span>
+    <span class="muted">提出名義</span>
     <img class="avatar" src="/_blob/fc027fe6fe3a001a22a1933270ce72b9" alt="" style="width: 24px; height: 24px;">
     <span>おたこ</span><span class="muted t-num">@012345rty</span>
-    <span class="t-xs muted">Active X ID で固定。変える場合はヘッダーのアカウントメニューで名義を切り替えます。</span>
   </div>
 
   <sc-if value="{{isSum}}" hint-placeholder-val="{{true}}">
@@ -61,16 +60,16 @@ body{margin:0;background:#000}
       </div>
       <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" onClick="{{toEdit}}">この作品用に変更</button>
     </div>
-    <sc-if value="{{iconOpen}}" hint-placeholder-val="{{false}}"><dc-import name="IconPicker" icon="{{icon}}" ctx="video" hint-size="100%,300px"></dc-import></sc-if>
-    <p class="sub-note">X ID の既定プロフィールを入れてあります。変更はこの作品だけに反映されます。</p>
+    <sc-if value="{{iconOpen}}" hint-placeholder-val="{{false}}"><dc-import name="IconPicker" theme="{{theme}}" icon="{{icon}}" ctx="video" hint-size="100%,300px"></dc-import></sc-if>
+    <p class="sub-note">X ID の既定プロフィールです。変更はこの作品だけに反映されます。</p>
   </sc-if>
 
   <sc-if value="{{isEdit}}" hint-placeholder-val="{{false}}">
     <x-import component-from-global-scope="FlameNode.TextField" label="表示名 *" default-value="おたこ" hint="80文字まで"></x-import>
-    <dc-import name="IconPicker" icon="{{icon}}" ctx="video" hint-size="100%,300px"></dc-import>
-    <x-import component-from-global-scope="FlameNode.TextField" label="自分・団体の概要" multiline="{{yes}}" default-value="{{profile}}"></x-import>
+    <dc-import name="IconPicker" theme="{{theme}}" icon="{{icon}}" ctx="video" hint-size="100%,300px"></dc-import>
+    <x-import component-from-global-scope="FlameNode.TextField" label="プロフィール" multiline="{{yes}}" default-value="{{profile}}"></x-import>
     <div class="field-i"><x-import component-from-global-scope="FlameNode.TextField" label="YouTube チャンネル" placeholder="https://www.youtube.com/@..." default-value="https://www.youtube.com/@otako"></x-import><i class="fa-brands fa-youtube" aria-hidden="true"></i></div>
-    <dc-import name="LinkEditor" hint-size="100%,180px"></dc-import>
+    <dc-import name="LinkEditor" theme="{{theme}}" hint-size="100%,180px"></dc-import>
     <div class="sub-acts">
       <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm" onClick="{{toSum}}"><i class="fa-solid fa-check" aria-hidden="true"></i>完了</button>
       <button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toSum}}"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i>既定プロフィールに戻す</button>

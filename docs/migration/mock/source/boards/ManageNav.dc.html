@@ -23,7 +23,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
 <style>body{margin:0}</style>
 </helmet>
-<nav class="{{navCls}}" aria-label="イベント運営ナビ" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
+<nav class="{{navCls}}" aria-label="イベント運営ナビ" data-theme="{{theme}}" lang="ja" style="background: var(--surface-raised); color: var(--ink); font-family: var(--font-sans); min-height: 100%;">
   <div class="c-mbar">
     <button type="button" class="ib" aria-label="{{mLabel}}" aria-expanded="{{mOpen}}" onClick="{{mToggle}}"><i class="{{mIcon}}"></i></button>
     <span class="c-mbar-t"><span class="t-label muted">{{mArea}}</span><span class="ell">{{mCur}}</span></span>
@@ -43,7 +43,7 @@
   <span class="grp">イベント</span>
   <button type="button" class="ev-switch" onClick="{{toggleSwitch}}" aria-expanded="{{switchOpen}}" aria-label="担当イベントを切り替え">
     <img class="ev-icon" src="/_blob/6ecfc7b6882f277d815f563e873f25ee" alt="" style="width: 28px; height: 28px;">
-    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>受付中</span></span>
+    <span class="stack" style="gap: 0; flex: 1; min-width: 0; text-align: left;"><span class="ell" style="font-size: 14px;">PVSF2026S</span><span class="st t-sm"><span class="dot ok"></span>募集中</span></span>
     <i class="fa-solid fa-chevron-down muted" aria-hidden="true"></i>
   </button>
   <sc-if value="{{switching}}" hint-placeholder-val="{{false}}">
@@ -62,7 +62,7 @@
   <a href="Main.dc.html"><span class="il" style="gap: 10px;"><i class="fa-solid fa-globe" aria-hidden="true"></i>公開サイト</span></a>
 </nav>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"text","default":"overview"},"$preview":{"width":264,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"active":{"editor":"text","default":"overview"},"$preview":{"width":264,"height":900}}'>
 class Component extends DCLogic {
   constructor(p) { super(p); this.state = { sw: false, m: false }; }
   renderVals() {
@@ -81,7 +81,8 @@ class Component extends DCLogic {
     ];
     const mOpen = !!this.state.m;
     const mx = { navCls: 'c-nav' + (mOpen ? ' open' : ''), mOpen: mOpen ? 'true' : 'false', mLabel: mOpen ? 'メニューを閉じる' : 'メニューを開く', mIcon: mOpen ? 'fa-solid fa-xmark' : 'fa-solid fa-bars', mToggle: () => this.setState({ m: !this.state.m }), mArea: '運営', mCur: a === 'top' ? '運営トップ' : a === 'new' ? 'イベントを作成' : a === 'notifications' ? '通知センター' : a === 'xlink' ? 'X ID 連携申請' : 'PVSF2026S · ' + ((S.find(x => x[0] === a) || [0, '概要'])[1]) };
-    return { ...mx,
+    return {
+      theme: this.props.theme ?? 'dark', ...mx,
       cTop: a === 'top' ? 'on' : '', cNew: a === 'new' ? 'on' : '', cNotif: a === 'notifications' ? 'on' : '', cX: a === 'xlink' ? 'on' : '',
       switching: this.state.sw, switchOpen: this.state.sw ? 'true' : 'false', toggleSwitch: () => this.setState({ sw: !this.state.sw }),
       events: [['年越し合作 2026', 'dot ok', '開催中'], ['PVSF2026R', 'dot', '募集開始前'], ['PVSF2026Sp', 'dot', '終了']].map((e, i) => ({ title: e[0], dot: e[1], state: e[2], icon: T[i + 1] })),

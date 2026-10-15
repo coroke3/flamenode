@@ -1,0 +1,330 @@
+from	label	to
+AdminAuditDetail	監査ログ一覧	AdminAuditHub.html
+AdminAuditDetail	前のログ	AdminAuditDetail.html
+AdminAuditDetail	次のログ	AdminAuditDetail.html
+AdminAuditDetail	管理画面で開く	AdminVideoHub.html
+AdminVideo	作品一覧	AdminVideosHub.html
+AdminVideo	管理詳細	AdminVideoHub.html
+AdminVideo	メンバー	AdminVideoHub.html?tab=AdminVideoMembers
+AdminVideo	内容編集	VideoEdit.html
+AdminVideo	編集権限	VideoPermissions.html
+AdminVideo	公開ページ	VideoDetail.html
+AdminVideo	監査ログ	AdminAuditHub.html
+AdminVideo	メンバーを編集	AdminVideoHub.html?tab=AdminVideoMembers
+PublicHeader	FlameNode トップ	Main.html
+PublicHeader	投稿する	MyPage.html?tab=Entry
+PublicHeader	ログイン	EntrySignIn.html
+PublicHeader	崇渦に関するお知らせ 前編おたこ · PVSF2026S	VideoDetail.html
+PublicHeader	空白合作空白合作チーム · PVSF2026Sp	VideoDetail.html
+PublicHeader	おたこ @012345rty	Creator.html
+PublicHeader	PVSF2026S 募集中	EventDetail.html
+PublicHeader	「空白」で作品をすべて検索Enter	Videos.html
+PublicHeader	X ID を追加・申請状況を見る	MyPage.html?tab=Settings
+PublicHeader	マイページ	MyPage.html
+PublicHeader	ライブラリ	MyPage.html?tab=Library
+PublicHeader	設定	MyPage.html?tab=Settings
+PublicHeader	運営審査待ち 7	Manage.html
+PublicHeader	管理	Admin.html
+PublicHeader	作品を投稿する	MyPage.html?tab=Entry
+PublicHeader	Discord でログイン	EntrySignIn.html
+PublicHeader	おたこマイページ · Discord でログイン中	MyPage.html
+PublicHeader	ライブラリ	MyPage.html?tab=Library
+PublicHeader	設定	MyPage.html?tab=Settings
+PublicHeader	運営7	Manage.html
+PublicHeader	管理	Admin.html
+PublicHeader	X ID を追加・申請状況を見る	MyPage.html?tab=Settings
+OnboardingXId	戻る	OnboardingTerms.html
+OnboardingXId	ダッシュボードへ	MyPage.html
+VideoEdit	ダッシュボード	MyPage.html
+VideoEdit	公開ページ	VideoDetail.html
+VideoEdit	編集できる人	VideoPermissions.html
+VideoEdit	キャンセル	MyPage.html
+VideoEdit	削除	ConfirmModal.html
+AdminWorkers	ヘルスチェック	AdminHealthHub.html
+AdminWorkers	DB整合性	AdminHealthHub.html?tab=AdminIntegrity
+AdminWorkers	Worker監視	AdminHealthHub.html?tab=AdminWorkers
+AdminWorkers	operation_mode通常正常	AdminCostGuard.html
+AdminWorkers	通知配信1最終失敗	AdminNotifications.html
+AdminWorkers	静的JSON再生成1失敗	AdminStaticBuilds.html
+Main	利用規約を改定しました(2026.10.01 施行) 2026.09.24	Rules.html
+Main		EventDetail.html
+Main	枠を確保	EventSlots.html
+Main	イベント詳細	EventDetail.html
+Main		VideoDetail.html
+Main	おたこ	Creator.html
+Main	再生	VideoDetail.html
+Main	急上昇ランキング	Trending.html
+Main	ランキング	Trending.html
+Main	{{v.rank}}	VideoDetail.html
+Main	一覧	Recommend.html
+Main		VideoDetail.html
+Main	すべて	Videos.html
+Main		VideoDetail.html
+Main	過去の作品	Videos.html
+Main		VideoDetail.html
+Main	すべて	Events.html
+Main	{{e.title}} {{e.status}} {{e.date}} {{e.	EventDetail.html
+Main	枠を確保する	EventSlots.html
+Main	作品を投稿する	MyPage.html?tab=Entry
+Main	イベントを探す	Events.html
+ManageEvent	受信箱5審査 2 · モデレーション 1 · 申請 1 · 通知失敗 1	ManageInbox.html
+ManageEvent	未提出の確保枠18締切 10.07 23:59	ManageSlots.html
+ManageEvent	枠の埋まり	ManageSlots.html
+ManageEvent	提出済み	ManageAudience.html
+ManageEvent	承認済み	ManageVideos.html
+ManageEvent	履歴	ManageHistory.html
+ManageVideo	作品一覧	ManageVideos.html
+ManageVideo	運営として編集	VideoEdit.html
+ManageVideo	作品情報タイトル・楽曲・紹介文	VideoEdit.html
+ManageVideo	投稿者情報表示名・アイコン・SNS	VideoEdit.html
+ManageVideo	YouTube・提出名義運営だけが変更可能	VideoEdit.html
+ManageVideo	編集できる人を追加・通知する	VideoPermissions.html
+ManageVideo	差分	ManageHistory.html
+ManageVideo	差分	ManageHistory.html
+AdminRuleEdit	規約一覧	AdminRules.html
+Portfolio	プロフィール	Creator.html
+Portfolio	FlameNode トップ	Main.html
+Portfolio		VideoDetail.html
+ManageEdit	イベント枠を設定する 枠設定へのショートカット	ManageSlots.html
+EntrySlotted	参加・投稿	MyPage.html?tab=Entry
+EntrySlotted	イベントページ	EventDetail.html
+AdminPlaylists	すべて	AdminVideosHub.html
+AdminPlaylists	メタデータ同期	AdminVideosHub.html?tab=AdminYoutubeSync
+AdminPlaylists	再生リスト同期	AdminVideosHub.html?tab=AdminPlaylists
+AdminPlaylists	設定	ManagePlaylist.html
+AdminPlaylists	設定	ManagePlaylist.html
+AdminPlaylists	設定	ManagePlaylist.html
+AdminPlaylists	設定	ManagePlaylist.html
+AdminPlaylists	設定	ManagePlaylist.html
+AdminPlaylists	設定	ManagePlaylist.html
+Trending	{{v.rankStr}} {{v.title}} {{v.creator}} 	VideoDetail.html
+AdminUserHub	ユーザー管理	AdminUsersHub.html
+AdminUserHub	操作履歴	AdminAuditHub.html
+About	作品を見る	Videos.html
+About	イベントを見る	Events.html
+Library	ダッシュボード	MyPage.html
+Library	参加・投稿	MyPage.html?tab=Entry
+Library	ライブラリ	MyPage.html?tab=Library
+Library	設定	MyPage.html?tab=Settings
+Library	編集	VideoEdit.html
+Library	{{c.video}}{{c.at}}{{c.body}} {{c.state}	VideoDetail.html
+Settings	ダッシュボード	MyPage.html
+Settings	参加・投稿	MyPage.html?tab=Entry
+Settings	ライブラリ	MyPage.html?tab=Library
+Settings	設定	MyPage.html?tab=Settings
+Settings	公開プロフィール	Creator.html
+AdminPermSim	スタッフ管理で追加	ManageStaff.html
+AdminPermSim	スタッフ管理へ	ManageStaff.html
+Creator	クリエイター一覧	Creators.html
+Creator	ポートフォリオ表示	Portfolio.html
+Creator		VideoDetail.html
+Creator		VideoDetail.html
+ManageVideos	公開ページを見る	EventDetail.html
+ManageVideos	詳細	ManageVideo.html
+AdminUserEdit	ユーザー詳細	AdminUserHub.html
+AdminUserEdit	ユーザー詳細	AdminUserHub.html
+AdminUserEdit	設定編集	AdminUserHub.html?tab=AdminUserEdit
+AdminUserEdit	操作履歴	AdminAuditHub.html
+ManageNav	移動・操作を検索	CommandPalette.html
+ManageNav	移動・操作を検索⌘K 移動・操作を検索(Ctrl+K)	CommandPalette.html
+ManageNav	運営トップ	Manage.html
+ManageNav	通知センター1	ManageNotifications.html
+ManageNav	イベントを作成	ManageEventNew.html
+ManageNav	{{e.title}}	ManageEvent.html
+ManageNav	X ID 連携申請(全体)3	ManageXLink.html
+ManageNav	公開サイト	Main.html
+Creators	{{c.name}} {{c.x}}{{c.works}}	Creator.html
+Creators	{{c.name}}@{{c.x}} {{c.works}} {{c.event	Creator.html
+Creators	{{c.name}}@{{c.x}}{{c.works}}{{c.events}	Creator.html
+AdminXLink	Discordユーザー	AdminUsersHub.html
+AdminXLink	権限管理	AdminUsersHub.html
+AdminXLink	X ID 連携申請 3	AdminUsersHub.html?tab=AdminXLink
+AdminXLink	X ID 統合申請 1	AdminUsersHub.html?tab=AdminXIdMerges
+EventSlots	PVSF2026S	EventDetail.html
+EventSlots	作品を提出	EntrySlotted.html
+AdminHealth	ヘルスチェック	AdminHealthHub.html
+AdminHealth	DB整合性	AdminHealthHub.html?tab=AdminIntegrity
+AdminHealth	Worker監視	AdminHealthHub.html?tab=AdminWorkers
+AdminAudit	監査ログ	AdminAuditHub.html
+AdminAudit	ログ設定	AdminAuditHub.html?tab=AdminAuditSettings
+AdminAudit	復元履歴	AdminAuditHub.html?tab=AdminAuditRestore
+AdminAudit	{{l.at}} {{l.op}} {{l.table}} {{l.target	AdminAuditDetail.html
+AdminVideoHub	作品一覧	AdminVideosHub.html
+AdminVideoHub	内容を編集	VideoEdit.html
+AdminVideoHub	編集権限	VideoPermissions.html
+AdminVideoHub	公開ページ	VideoDetail.html
+AdminVideoHub	監査ログ	AdminAuditHub.html
+AdminNav	移動・操作を検索	CommandPalette.html
+AdminNav	運営へ	Manage.html
+AdminNav	公開サイトへ	Main.html
+PublicFooter	作品一覧	Videos.html
+PublicFooter	おすすめ	Recommend.html
+PublicFooter	クリエイター	Creators.html
+PublicFooter	イベント一覧	Events.html
+PublicFooter	投稿する	MyPage.html?tab=Entry
+PublicFooter	ダッシュボード	MyPage.html
+PublicFooter	ログイン / 新規登録	EntrySignIn.html
+PublicFooter	イベント開催相談	About.html
+PublicFooter	FlameNode について	About.html
+PublicFooter	利用規約	Rules.html
+AdminUsers	Discordユーザー	AdminUsersHub.html
+AdminUsers	権限管理	AdminUsersHub.html
+AdminUsers	X ID 連携申請 3	AdminUsersHub.html?tab=AdminXLink
+AdminUsers	X ID 統合申請 1	AdminUsersHub.html?tab=AdminXIdMerges
+AdminUsers	{{u.name}}{{u.discord}}	AdminUserHub.html
+AdminUsers	このユーザーが実行した管理操作の監査ログ	AdminAuditHub.html
+AdminUsers	詳細	AdminUserHub.html
+EventDetail	枠を確保	EventSlots.html
+EventDetail	作品を提出	EntryUnslotted.html
+EventDetail	枠表へ	EventSlots.html
+EventDetail	投稿予定を見る	EventRelease.html
+EventDetail		VideoDetail.html
+EventDetail	{{m.name}}{{m.role}}	Creator.html
+EventDetail	PVSF シリーズ	Events.html
+ManageEventNew	運営トップへ	Manage.html
+Events	募集期間中 PVSF2026S 2026.11.03 – 11.04128 / 	EventDetail.html
+Events	{{e.title}}{{e.status}}{{e.date}}	EventDetail.html
+Events	{{e.title}}{{e.status}}{{e.date}}	EventDetail.html
+AdminVideoMembers	作品詳細	AdminVideoHub.html
+AdminVideoMembers	管理詳細	AdminVideoHub.html
+AdminVideoMembers	メンバー	AdminVideoHub.html?tab=AdminVideoMembers
+AdminVideoMembers	内容編集	VideoEdit.html
+AdminVideoMembers	編集権限	VideoPermissions.html
+AdminVideoMembers	公開ページ	VideoDetail.html
+AdminVideoMembers	監査ログ	AdminAuditHub.html
+EventRelease	PVSF2026S	EventDetail.html
+EventRelease	作品の詳細	VideoDetail.html
+EventRelease	作品の詳細	VideoDetail.html
+Dashboard	ダッシュボード	MyPage.html
+Dashboard	参加・投稿	MyPage.html?tab=Entry
+Dashboard	ライブラリ	MyPage.html?tab=Library
+Dashboard	設定	MyPage.html?tab=Settings
+Dashboard	作品を投稿する	MyPage.html?tab=Entry
+Dashboard	続きから提出	EntrySlotted.html
+Dashboard	{{w.title}}{{w.meta}} 共同編集{{w.state}}	VideoEdit.html
+AdminEventGroups	新規グループ	AdminEventGroupEdit.html
+AdminEventGroups	イベント一覧	AdminEventsHub.html
+AdminEventGroups	グループ	AdminEventsHub.html?tab=AdminEventGroups
+AdminEventGroups	テンプレート	AdminEventsHub.html?tab=AdminEventTemplates
+AdminEventGroups	編集	AdminEventGroupEdit.html
+AdminEventGroups	編集	AdminEventGroupEdit.html
+AdminEventGroups	編集	AdminEventGroupEdit.html
+AdminXIdMerges	Discordユーザー	AdminUsersHub.html
+AdminXIdMerges	権限管理	AdminUsersHub.html
+AdminXIdMerges	X ID 連携申請 3	AdminUsersHub.html?tab=AdminXLink
+AdminXIdMerges	X ID 統合申請 1	AdminUsersHub.html?tab=AdminXIdMerges
+AdminEventGroupEdit	グループ一覧	AdminEventsHub.html?tab=AdminEventGroups
+AdminEventGroupEdit	公開ページ	Events.html
+AdminEventGroupEdit	監査ログ	AdminAuditHub.html
+AdminEventGroupEdit	グループを削除	ConfirmModal.html
+Admin	審査待ち作品12作品審査キュー	AdminVideosHub.html
+Admin	X ID 連携申請3Discord と X ID の連携	AdminUsersHub.html?tab=AdminXLink
+Admin	X ID 統合申請1既存 X ID 同士の統合	AdminUsersHub.html?tab=AdminXIdMerges
+Admin	統合取り消し申請0統合の取り消し確認	AdminUsersHub.html?tab=AdminXIdMerges
+Admin	通知失敗1Discord 送信失敗	AdminNotifications.html
+Admin	通知処理固着0処理中のまま15分以上	AdminNotifications.html
+Admin	YouTube同期失敗0メタデータ同期	AdminVideosHub.html?tab=AdminYoutubeSync
+Admin	未解決ケース2未解決のモデレーション	AdminModeration.html
+Admin	期限切れケース0期限を過ぎたケース	AdminModeration.html
+Admin	未提出予約枠18確保済みで未提出の枠	AdminEventsHub.html
+Admin	募集中のイベント2PVSF2026S ほか	AdminEventsHub.html
+Admin	運営へ	Manage.html
+Admin	通常全機能をフル稼働	AdminCostGuard.html
+Admin	ヘルスチェック	AdminHealthHub.html
+Admin	Worker監視	AdminHealthHub.html?tab=AdminWorkers
+Admin	セキュリティ	AdminSecurity.html
+Admin	監査ログ	AdminAuditHub.html
+AdminRules	新規バージョン	AdminRuleEdit.html
+AdminRules	監査ログ	AdminAuditHub.html
+AdminRules	編集	AdminRuleEdit.html
+AdminRules	監査ログ	AdminAuditHub.html
+AdminRules	表示	AdminRuleEdit.html
+AdminRules	監査ログ	AdminAuditHub.html
+AdminRules	表示	AdminRuleEdit.html
+AdminAuditRestore	監査ログ	AdminAuditHub.html
+AdminAuditRestore	ログ設定	AdminAuditHub.html?tab=AdminAuditSettings
+AdminAuditRestore	復元履歴	AdminAuditHub.html?tab=AdminAuditRestore
+AdminAuditRestore	aud_7f2310	AdminAuditDetail.html
+AdminAuditRestore	aud_6a0c44	AdminAuditDetail.html
+Manage	イベントを作成	ManageEventNew.html
+Manage	審査待ち7PVSF2026S 6 · 年越し合作 1	ManageInbox.html
+Manage	通知失敗1Discord 送信失敗	ManageNotifications.html
+Manage	X ID 連携申請3担当イベント参加者	ManageXLink.html
+Manage	未提出の確保枠18提出締切 10.07	ManageSlots.html
+Manage	PVSF2026S	ManageEvent.html
+Manage	開く	ManageEvent.html
+Manage	年越し合作 2026	ManageEvent.html
+Manage	開く	ManageEvent.html
+Manage	PVSF2026R	ManageEvent.html
+Manage	開く	ManageEvent.html
+AdminIntegrity	ヘルスチェック	AdminHealthHub.html
+AdminIntegrity	DB整合性	AdminHealthHub.html?tab=AdminIntegrity
+AdminIntegrity	Worker監視	AdminHealthHub.html?tab=AdminWorkers
+AdminIntegrity	ヘルスチェックへ	AdminHealthHub.html
+Videos		VideoDetail.html
+AdminAuditSettings	監査ログ	AdminAuditHub.html
+AdminAuditSettings	ログ設定	AdminAuditHub.html?tab=AdminAuditSettings
+AdminAuditSettings	復元履歴	AdminAuditHub.html?tab=AdminAuditRestore
+Entry	ダッシュボード	MyPage.html
+Entry	参加・投稿	MyPage.html?tab=Entry
+Entry	ライブラリ	MyPage.html?tab=Library
+Entry	設定	MyPage.html?tab=Settings
+Entry	続きから提出	EntrySlotted.html
+Entry	イベントに関係なく投稿する	EntryUnslotted.html
+ManageEventHead	PVSF2026S	ManageEvent.html
+ManageEventHead	公開ページを開く	EventDetail.html
+ManageEventHead	移動・操作を検索(⌘K)	CommandPalette.html
+AdminVideos	すべて	AdminVideosHub.html
+AdminVideos	メタデータ同期	AdminVideosHub.html?tab=AdminYoutubeSync
+AdminVideos	再生リスト同期	AdminVideosHub.html?tab=AdminPlaylists
+AdminVideos	{{r.title}}{{r.event}}	AdminVideoHub.html
+AdminVideos	この作品の監査ログ	AdminAuditHub.html
+AdminVideos	詳細	AdminVideoHub.html
+AdminUser	ユーザー管理	AdminUsersHub.html
+AdminUser	ユーザー詳細	AdminUserHub.html
+AdminUser	設定編集	AdminUserHub.html?tab=AdminUserEdit
+AdminUser	操作履歴	AdminAuditHub.html
+AdminUser	魔法少女 このは・グリモワール 最終決戦編PVSF2026Sp · 03.28 	AdminVideoHub.html
+AdminUser	崇渦に関するお知らせ 前編PVSF2026Sp · 03.27 23:48 · 	AdminVideoHub.html
+AdminUser	設定を編集	AdminUserHub.html?tab=AdminUserEdit
+AdminAnnouncementEdit	お知らせ一覧	AdminAnnouncements.html
+AdminAnnouncementEdit	監査ログ	AdminAuditHub.html
+AdminAnnouncementEdit	お知らせを削除	ConfirmModal.html
+AdminYoutubeSync	すべて	AdminVideosHub.html
+AdminYoutubeSync	メタデータ同期	AdminVideosHub.html?tab=AdminYoutubeSync
+AdminYoutubeSync	再生リスト同期	AdminVideosHub.html?tab=AdminPlaylists
+AdminYoutubeSync	作品を開く	AdminVideoHub.html
+AdminAnnouncements	新規お知らせ	AdminAnnouncementEdit.html
+AdminAnnouncements	このお知らせの監査ログ	AdminAuditHub.html
+AdminAnnouncements	編集	AdminAnnouncementEdit.html
+AdminAnnouncements	このお知らせの監査ログ	AdminAuditHub.html
+AdminAnnouncements	編集	AdminAnnouncementEdit.html
+AdminAnnouncements	このお知らせの監査ログ	AdminAuditHub.html
+AdminAnnouncements	編集	AdminAnnouncementEdit.html
+OnboardingTerms	同意して続ける	OnboardingXId.html
+AdminNotifications	この通知の監査ログ	AdminAuditHub.html
+VideoPermissions	作品編集へ戻る	VideoEdit.html
+AdminEventTemplates	新規イベント	ManageEventNew.html
+AdminEventTemplates	イベント一覧	AdminEventsHub.html
+AdminEventTemplates	グループ	AdminEventsHub.html?tab=AdminEventGroups
+AdminEventTemplates	テンプレート	AdminEventsHub.html?tab=AdminEventTemplates
+AdminEventTemplates	このテンプレートで作成	ManageEventNew.html
+AdminEventTemplates	削除	ConfirmModal.html
+AdminEventTemplates	このテンプレートで作成	ManageEventNew.html
+AdminEventTemplates	削除	ConfirmModal.html
+VideoDetail	空白合作チーム @vIXyOepPI395671 · 公開 2026.03.29	Creator.html
+VideoDetail	FlameNode のプロフィールを開く	Creator.html
+VideoDetail	PVSF2026Sp	EventDetail.html
+VideoDetail	PVSF まとめ動画	EventDetail.html
+VideoDetail	{{m.name}}{{m.role}} {{m.ch}}	Creator.html
+VideoDetail	{{v.title}}{{v.meta}}	VideoDetail.html
+EntryUnslotted	参加・投稿	MyPage.html?tab=Entry
+Recommend		VideoDetail.html
+AdminEvents	新規イベント	ManageEventNew.html
+AdminEvents	イベント一覧	AdminEventsHub.html
+AdminEvents	グループ	AdminEventsHub.html?tab=AdminEventGroups
+AdminEvents	テンプレート	AdminEventsHub.html?tab=AdminEventTemplates
+AdminEvents	{{e.name}}{{e.id}}	ManageEvent.html
+AdminEvents	公開ページ	EventDetail.html
+AdminEvents	このイベントの監査ログ	AdminAuditHub.html
+AdminEvents	運営画面	ManageEvent.html

@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="delivery" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="delivery" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="delivery" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="delivery" hint-size="100%,96px"></dc-import>
 
     <nav class="subnav" aria-label="配信・公開" style="margin-top: 24px;">
       <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><a href="#" class="il" aria-current="{{t.cur}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}<span class="t-num muted">{{t.n}}</span></a></sc-for>
@@ -171,7 +171,7 @@
           <section class="raised stack" style="gap: 10px; padding: 20px;">
             <h2 class="t-label muted" style="margin: 0;">公開ページへの反映</h2>
             <p class="t-sm" style="margin: 0; line-height: 1.8;">作品・枠・イベント設定の変更は自動でキューに入り、数分で公開ページに反映されます。急ぐときだけ「今すぐ反映」を使います。</p>
-            <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;"><dt>最終生成</dt><dd class="t-num">10.04 13:42</dd><dt>対象</dt><dd>イベント・公開作品 94・公開X ID</dd></dl>
+            <dl class="kv" style="grid-template-columns: 96px 1fr; font-size: 13px; gap: 6px 12px;"><dt>最終生成</dt><dd class="t-num">10.04 13:42</dd><dt>対象</dt><dd>イベント・公開作品 94・公開 X ID</dd></dl>
           </section>
           <p class="il t-sm muted" style="margin: 0;"><i class="fa-solid fa-key" aria-hidden="true"></i>必要な権限: 静的JSON再生成</p>
         </aside>
@@ -215,7 +215,7 @@ class Component extends DCLogic {
       ['video_v2', '崇渦に関するお知らせ 前編', '作品の公開状態の変更', '高', '13:55'],
       ['video_v2', '【文字PV】スチールワンダー', '作品メンバーの更新', '通常', '13:51'],
       ['video_v2', '模範囚', '枠の更新', '通常', '13:47'],
-      ['user_profile', '@012345rty', 'X ID承認', '低', '13:44']
+      ['user_profile', '@012345rty', 'X ID 承認', '低', '13:44']
     ];
     const qState = js === 'done' ? 'done' : js === 'failed' ? 'failed' : (kicked ? 'running' : 'pending');
     const queue = js === 'done' ? [] : base.map(([k, t, r, p, a], i) => {
@@ -224,7 +224,7 @@ class Component extends DCLogic {
     });
     const J = {
       pending: ['dot info', '未反映の変更 5 件', '数分以内に自動で反映されます。', '今すぐ反映'],
-      running: ['dot info', '反映中 5 件', '公開ページ向けJSONを再生成しています。', '反映中…'],
+      running: ['dot info', '反映中 5 件', '公開ページを更新しています。', '反映中…'],
       done: ['dot ok', '最新', '未反映の変更はありません。', '再生成する'],
       failed: ['dot err', '1 件失敗', '「崇渦に関するお知らせ 前編」の再生成に失敗しました。もう一度実行してください。', '失敗分を再実行']
     }[js === 'pending' && kicked ? 'running' : js];

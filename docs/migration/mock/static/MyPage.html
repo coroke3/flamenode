@@ -19,7 +19,7 @@
 
 </style>
 
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 
 <div class="p-root" data-theme="dark" lang="ja">
   <div class="dc-import" data-board="PublicHeader">
@@ -34,14 +34,14 @@
 
 <style>body{margin:0}</style>
 
-<header class="hd2" lang="ja">
+<header class="hd2" data-theme="dark" lang="ja">
   <div class="hd-bar">
     <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
       <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
       <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
     </a>
     <nav class="hd-nav" aria-label="メインナビゲーション">
-      <a href="Videos.dc.html" aria-current="false">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="false">イベント</a>
+      <a href="Videos.html" aria-current="false">作品</a><a href="Creators.html" aria-current="false">クリエイター</a><a href="Events.html" aria-current="false">イベント</a>
     </nav>
     <div class="hd-right">
       <label class="hd-search">
@@ -52,7 +52,7 @@
       <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
       
         <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
-        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <a href="MyPage.html?tab=Entry" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
         <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
         <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
       
@@ -72,7 +72,7 @@
 
   
   <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
-    <a href="Videos.dc.html" aria-current="false" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="page" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+    <a href="Videos.html" aria-current="false" aria-label="作品" title="作品"><i class="fa-solid fa-film" aria-hidden="true"></i><span>作品</span></a><a href="Creators.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.html" aria-current="page" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
   </nav>
 </header>
 </div>
@@ -92,7 +92,7 @@
 
 </style>
 
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 
 <div class="p-root emb-root" data-theme="dark" lang="ja">
   
@@ -100,7 +100,7 @@
   <div class="wrap" style="padding-top: 32px;">
     
 
-    <div class="wrap-row dash-head" style="justify-content: space-between; gap: 24px; margin-top: 40px; align-items: center;">
+    <div class="wrap-row dash-head" style="justify-content: space-between; gap: 24px; margin-top: 8px; align-items: center;">
       <div class="row" style="gap: 16px;">
         <img class="avatar pf-av" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 96px; height: 96px;">
         <div class="stack" style="gap: 2px;">
@@ -109,133 +109,71 @@
         </div>
       </div>
       <div class="row" style="gap: 8px;">
-        <a href="MyPage.html" class="ib" aria-label="設定"><i class="fa-solid fa-gear"></i></a>
-        <a href="MyPage.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i><span class="dh-long">作品を</span>投稿する</a>
+        <a href="MyPage.html?tab=Entry" class="fn-btn fn-btn--primary"><i class="fa-solid fa-plus" aria-hidden="true"></i><span class="dh-long">作品を</span>投稿する</a>
       </div>
     </div>
 
     
 
     
-    <section aria-labelledby="hero" class="raised dash-hero" style="margin-top: 32px;">
-      <div class="stack" style="gap: 8px;">
-        <span class="il t-label muted" id="hero"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>エントリーした枠</span>
-        <span class="t-h2">PVSF2026S</span>
-        <span class="meta-i t-sm"><span>11.03 13:15</span><span>1日目 第2部</span><span class="st"><i class="fa-solid fa-clock st-ic info" aria-hidden="true"></i>確保済み · 未提出</span></span>
-      </div>
-      <div class="dl" role="timer" aria-label="提出締切まであと3日(10.07 23:59)">
-        <span class="dl-k t-xs muted">提出締切 <span class="t-num">10.07 23:59</span></span>
-        <span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">3</b><span class="dl-u">日</span></span>
-      </div>
-      <div class="row" style="gap: 8px;">
-        <a href="EventDetail.html" class="ib" aria-label="イベントへ"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-        <a href="EntrySlotted.html" class="fn-btn fn-btn--primary"><i class="fa-solid fa-upload" aria-hidden="true"></i>作品を提出</a>
+    <section aria-labelledby="next" style="margin-top: 32px;">
+      <h2 id="next" class="vh">次にやること</h2>
+      <div class="row ent-next raised" style="gap: 20px; flex-wrap: wrap; padding: 20px; align-items: center;">
+        <img src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 120px; aspect-ratio: 16/9; object-fit: cover; display: block;">
+        <span class="stack" style="gap: 6px; flex: 1 1 180px;">
+          <span style="font-size: 18px;">PVSF2026S に作品を提出</span>
+          <span class="meta-i"><span class="t-num">11.03 18:24 – 18:36(連続2枠)</span></span>
+          <div class="dl dl-sm" role="timer" aria-label="提出締切まであと3日(10.07 23:59)"><span class="dl-k t-xs muted">提出締切 <span class="t-num">10.07 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">3</b><span class="dl-u">日</span></span></div>
+        </span>
+        <a href="EntrySlotted.html" class="fn-btn fn-btn--primary">続きから提出</a>
       </div>
     </section>
 
-    <div class="metrics" style="margin-top: 48px;" aria-label="アカウント統計">
+    <div class="metrics" style="margin-top: 40px;" aria-label="アカウント統計">
       <div class="metric"><b>1,284</b><span>累計いいね</span></div>
       <div class="metric"><b>86,320</b><span>累計再生数</span></div>
       <div class="metric"><b>10</b><span>投稿作品</span></div>
       <div class="metric"><b>9</b><span>参加イベント</span></div>
     </div>
 
-    <div class="split" style="margin-top: 64px;">
-      <div class="main stack" style="gap: 64px;">
-        <section aria-labelledby="works">
-          <div class="sec-head"><h2 id="works" class="t-h2">自分の作品</h2><a href="MyPage.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">魔法少女 このは・グリモワール 最終決戦編</span><span class="fn-row__meta">PVSF2026Sp · 2026.03.29</span></span>
-              <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/755d245a064a6f5935c3dccd9a941048.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">崇渦に関するお知らせ 前編</span><span class="fn-row__meta">PVSF2026Sp · 2026.03.28</span></span>
-              <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">【短編アニメ】魔法少女vs改造人間</span><span class="fn-row__meta">PVSF2025Sp · 2025.03.30</span></span>
-              <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">【自主制作アニメ】めざした空の向こう側</span><span class="fn-row__meta">PVSF2025Sp · 2025.03.30</span></span>
-              <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye-slash st-ic mute" aria-hidden="true"></i>非公開</span><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-        </section>
-
-        <section aria-labelledby="collab">
-          <div class="sec-head"><h2 id="collab" class="t-h2">共同編集できる作品</h2><a href="MyPage.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">祟渦に関するお知らせ 後編</span><span class="fn-row__meta">ホラー映画合作 · PVSF2026Sp</span></span>
-              <span class="fn-row__trail"><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">Mitchie Mメドレー合作</span><span class="fn-row__meta">Mitchie Mメドレー合作 · PVSF2025S</span></span>
-              <span class="fn-row__trail"><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-            <a href="VideoEdit.html" class="fn-row">
-              <img class="fn-row__thumb" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="">
-              <span class="fn-row__body"><span class="fn-row__title">ホラー映画ロケ下見.mp4</span><span class="fn-row__meta">ホラー映画合作 · PVSF2025S</span></span>
-              <span class="fn-row__trail"><i class="fa-solid fa-pen muted" aria-label="編集"></i></span>
-            </a>
-          
-        </section>
-
-        <section aria-labelledby="chap">
-          <div class="sec-head"><h2 id="chap" class="t-h2">自分のチャプターコメント</h2><a href="MyPage.html" class="il t-sm muted">すべて見る<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></a></div>
-          
-            <a href="VideoDetail.html" class="row" style="gap: 16px; padding: 14px 0; align-items: flex-start;">
-              <span class="t-mono t-sm" style="width: 48px; flex: none; padding-top: 2px;">1:42</span>
-              <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="t-sm">このはの変身シーン、作画を全部描き直しました</span><span class="t-sm muted ell">魔法少女 このは・グリモワール 最終決戦編</span></span>
-              <span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span>
-            </a>
-          
-            <a href="VideoDetail.html" class="row" style="gap: 16px; padding: 14px 0; align-items: flex-start;">
-              <span class="t-mono t-sm" style="width: 48px; flex: none; padding-top: 2px;">0:18</span>
-              <span class="stack" style="gap: 2px; flex: 1; min-width: 0;"><span class="t-sm">ロケ地の下見映像を担当</span><span class="t-sm muted ell">ホラー映画ロケ下見.mp4</span></span>
-              <span class="st t-sm"><i class="fa-solid fa-eye-slash st-ic mute" aria-hidden="true"></i>非公開</span>
-            </a>
-          
-        </section>
+    <section aria-labelledby="works" class="dash-works" style="margin-top: 56px;">
+      <div class="sec-head" style="align-items: center; flex-wrap: wrap; gap: 12px;">
+        <h2 id="works" class="t-h2">作品 <span class="t-num muted t-sm" style="font-weight: 400;">07</span></h2>
+        <div class="seg sm" role="tablist" aria-label="作品の絞り込み"><button type="button" role="tab" class="on" aria-selected="true">すべて</button><button type="button" role="tab" class="" aria-selected="false">自分</button><button type="button" role="tab" class="" aria-selected="false">共同編集</button></div>
       </div>
-
-      <aside class="side stack" style="gap: 40px;">
-        <section aria-labelledby="xids">
-          <div class="sec-head" style="margin-bottom: 8px;"><h2 id="xids" class="t-h3">連携 X ID</h2><a href="MyPage.html" class="ib sm" aria-label="X ID を管理"><i class="fa-solid fa-gear"></i></a></div>
-          
-            <a href="MyPage.html" class="row" style="gap: 12px; padding: 10px 0;">
-              <img class="avatar" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt="" style="width: 36px; height: 36px;">
-              <span class="stack" style="gap: 0; flex: 1; min-width: 0;"><span class="t-sm ell">おたこ</span><span class="t-sm muted">@012345rty</span></span>
-              <span class="st t-sm"><i class="fa-solid fa-check st-ic ok" aria-hidden="true"></i>アクティブ</span>
-            </a>
-          
-            <a href="MyPage.html" class="row" style="gap: 12px; padding: 10px 0;">
-              <img class="avatar" src="../site/assets/img/6ecfc7b6882f277d815f563e873f25ee.jpg" alt="" style="width: 36px; height: 36px;">
-              <span class="stack" style="gap: 0; flex: 1; min-width: 0;"><span class="t-sm ell">おたこ(サブ)</span><span class="t-sm muted">@otako_sub</span></span>
-              <span class="st t-sm"><i class="ms ms-pending_actions st-ic warn" aria-hidden="true"></i>承認待ち</span>
-            </a>
-          
-          <a href="MyPage.html" class="il t-sm muted" style="margin-top: 8px;"><i class="fa-solid fa-plus" aria-hidden="true"></i>X ID を連携する</a>
-        </section>
-        <section aria-labelledby="ev">
-          <h2 id="ev" class="t-h3" style="margin-bottom: 8px;">受付中のイベント</h2>
-          <a href="EventDetail.html" class="row" style="gap: 12px; padding: 10px 0;"><img class="ev-icon" src="../site/assets/img/525c7209e503b8327cbd5bf4a64e5fc8.jpg" alt="" style="width: 36px; height: 36px;"><span class="stack" style="gap: 0; flex: 1;"><span class="t-sm">PVSF2026S</span><span class="t-sm muted">受付 〜 10.31 · 残り 42 枠</span></span><i class="fa-solid fa-chevron-right muted" aria-hidden="true"></i></a>
-        </section>
-      </aside>
-    </div>
+      
+        <a href="VideoEdit.html" class="fn-row">
+          <img class="fn-row__thumb" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">崇渦に関するお知らせ 前編</span><span class="fn-row__meta">PVSF2026S · 提出 10.04</span></span>
+          <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="ms ms-pending_actions st-ic warn" aria-hidden="true"></i>審査待ち</span></span>
+        </a>
+      
+        <a href="VideoEdit.html" class="fn-row">
+          <img class="fn-row__thumb" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">魔法少女 このは・グリモワール 最終決戦編</span><span class="fn-row__meta">PVSF2026Sp · 2026.03.29</span></span>
+          <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span></span>
+        </a>
+      
+        <a href="VideoEdit.html" class="fn-row">
+          <img class="fn-row__thumb" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">祟渦に関するお知らせ 後編</span><span class="fn-row__meta">ホラー映画合作 · PVSF2026Sp</span></span>
+          <span class="fn-row__trail row" style="gap: 12px;"><span class="tag-c t-xs muted">共同編集</span><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span></span>
+        </a>
+      
+        <a href="VideoEdit.html" class="fn-row">
+          <img class="fn-row__thumb" src="../site/assets/img/f5c1a8af077b887c7bb1d043f3cf69c1.jpg" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">【短編アニメ】魔法少女vs改造人間</span><span class="fn-row__meta">PVSF2025Sp · 2025.03.30</span></span>
+          <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye st-ic ok" aria-hidden="true"></i>公開</span></span>
+        </a>
+      
+        <a href="VideoEdit.html" class="fn-row">
+          <img class="fn-row__thumb" src="../site/assets/img/191c3939aefb326fc04fd3ccf6db83a9.jpg" alt="">
+          <span class="fn-row__body"><span class="fn-row__title">【自主制作アニメ】めざした空の向こう側</span><span class="fn-row__meta">PVSF2025Sp · 2025.03.30</span></span>
+          <span class="fn-row__trail row" style="gap: 12px;"><span class="st t-sm"><i class="fa-solid fa-eye-slash st-ic mute" aria-hidden="true"></i>非公開</span></span>
+        </a>
+      
+      <button type="button" class="fn-btn fn-btn--tertiary dash-more">すべて表示<span class="t-num muted">2</span></button>
+    </section>
   </div>
   
 </div>
@@ -258,7 +196,7 @@
 
 <style>body{margin:0}</style>
 
-<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+<footer class="pub-foot" data-theme="dark" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
   <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
     <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
     <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
@@ -271,7 +209,7 @@
     <a href="Events.html" class="il">イベント一覧</a>
   </nav>
   <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
-    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html?tab=Entry" class="il">投稿する</a>
     <a href="MyPage.html" class="il">ダッシュボード</a>
     <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
     <a href="About.html" class="il">イベント開催相談</a>

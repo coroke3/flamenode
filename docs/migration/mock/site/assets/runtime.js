@@ -108,5 +108,36 @@
     window.scrollTo(sx, sy);
   }
   function schedule() { if (!scheduled && rootEl) { scheduled = true; requestAnimationFrame(render); } }
-  window.FN_RENDER = function (name, props) { entry = name; entryProps = props || {}; rootEl = document.getElementById('fn-root'); render(); };
+  window.FN_RENDER = function (name, props) { entry = name; entryProps = Object.assign({}, props || {}); try { const q = new URLSearchParams(location.search); if (q.get('tab')) entryProps.tab = q.get('tab'); } catch (e) {} rootEl = document.getElementById('fn-root'); render(); };
+
+  // ---- link design: deep-link tab sync + overlays (palette / confirm) ----
+  window.FN_TAB = function (id) { try { const u = new URL(location.href); u.searchParams.set('tab', id); history.replaceState(null, '', u); } catch (e) {} };
+  const OVERLAYS = { 'CommandPalette.html': [960, 640], 'ConfirmModal.html': [880, 560] };
+  const isOverlay = new URLSearchParams(location.search).has('overlay');
+  function closeOverlay() { const o = document.getElementById('fn-ov'); if (o) { o.remove(); document.documentElement.style.overflow = ''; } }
+  function openOverlay(file) {
+    closeOverlay(); const [w, h] = OVERLAYS[file];
+    const o = document.createElement('div'); o.id = 'fn-ov'; o.setAttribute('role', 'dialog'); o.setAttribute('aria-modal', 'true');
+    o.style.cssText = 'position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:rgba(0,0,0,.6)';
+    const f = document.createElement('iframe'); f.src = file + '?overlay=1'; f.title = file.replace('.html', '');
+    f.style.cssText = `border:0;width:min(${w}px,100vw);height:min(${h}px,100dvh);background:transparent`;
+    o.append(f); o.addEventListener('click', (e) => { if (e.target === o) closeOverlay(); });
+    document.body.append(o); document.documentElement.style.overflow = 'hidden'; f.addEventListener('load', () => { try { f.contentWindow.focus(); } catch (e) {} });
+  }
+  window.addEventListener('message', (e) => { if (e.data === 'fn-close') closeOverlay(); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { if (isOverlay) parent.postMessage('fn-close', '*'); else closeOverlay(); }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !isOverlay && document.querySelector('a[href="CommandPalette.html"]')) { e.preventDefault(); openOverlay('CommandPalette.html'); }
+  });
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('a[href]');
+    if (isOverlay) {
+      if (a && !a.getAttribute('href').startsWith('#')) { e.preventDefault(); top.location.href = a.getAttribute('href'); return; }
+      if (e.target.matches && e.target.matches('html,body,#fn-root,.p-root,.fn-modal-backdrop')) { parent.postMessage('fn-close', '*'); return; }
+      const b = e.target.closest && e.target.closest('button'); if (b && !b.closest('input')) parent.postMessage('fn-close', '*');
+      return;
+    }
+    if (a && OVERLAYS[a.getAttribute('href')] && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openOverlay(a.getAttribute('href')); }
+  }, true);
+  if (isOverlay) document.documentElement.classList.add('fn-overlay');
 })();

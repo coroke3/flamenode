@@ -20,11 +20,11 @@
 @font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000}</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="" hint-size="100%,72px"></dc-import>
 
   <a href="Rules.dc.html" class="wrap meta-i" style="padding-top: 8px; padding-bottom: 8px;">
     <span style="color: var(--ink);">利用規約を改定しました(2026.10.01 施行)</span>
@@ -38,17 +38,23 @@
         <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="PVSF2026S メインビジュアル" style="display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; background: var(--surface-raised);">
       </a>
       <div class="hero-txt" style="flex: 1 1 320px; min-width: 0; padding: 0 40px 0 0; display: flex; flex-direction: column; gap: 16px;">
+        <div class="hero-in">
+        <div class="hero-a">
         <span class="st"><i class="ms ms-event_available st-ic ok" aria-hidden="true"></i>募集期間中</span>
         <h2 id="hero-ev" class="t-h1" style="font-size: 40px; line-height: 48px;">PVSF2026S</h2>
         <div class="meta-i">
-          <span class="t-num">11.03 — 11.04</span>
+          <span class="t-num">11.03 – 11.04</span>
           <span class="t-num">128 / 160 枠</span>
         </div>
         <div class="bar" aria-label="枠の埋まり 80%"><i style="width: 80%; background: var(--ink);"></i></div>
-        <div class="dl dl-sm" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
+        </div>
+        <div class="hero-b">
+        <div class="dl dl-sm dl-sp-date" role="timer" aria-label="募集締切まであと12日(10.16 23:59)"><span class="dl-k t-xs muted">募集締切 <span class="t-num">10.16 23:59</span></span><span class="dl-v" aria-hidden="true"><span class="dl-u">あと</span><b class="dl-n t-num">12</b><span class="dl-u">日</span></span></div>
         <div class="actions" style="margin-top: 8px;">
           <a href="EventSlots.dc.html" class="fn-btn fn-btn--primary">枠を確保</a>
           <a href="EventDetail.dc.html" class="ib" aria-label="イベント詳細"><i class="fa-solid fa-arrow-right"></i></a>
+        </div>
+        </div>
         </div>
       </div>
     </section>
@@ -85,7 +91,7 @@
     <form role="search" action="Events.dc.html" method="get" class="top-search" style="max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 16px; background: var(--surface-raised);">
       <i class="fa-solid fa-magnifying-glass" aria-hidden="true" style="font-size: 16px; color: var(--ink-muted);"></i>
       <label for="top-search" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">イベントを検索</label>
-      <input id="top-search" name="q" type="search" placeholder="イベント・動画・クリエイターを検索" style="flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 22px;">
+      <input id="top-search" name="q" type="search" placeholder="作品・イベント・クリエイターを検索" style="flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 22px;">
     </form>
   </section>
   <div class="wrap">
@@ -194,10 +200,10 @@
     </nav>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"hero":{"editor":"enum","options":["event","trending"],"default":"event"},"$preview":{"width":1440,"height":2600}}'>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;light&quot;},&quot;hero&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;event&quot;,&quot;trending&quot;],&quot;default&quot;:&quot;event&quot;},&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:2600}}">
 class Component extends DCLogic {
   constructor(p) { super(p); this.state = { n: {} }; }
   renderVals() {
@@ -207,8 +213,8 @@ class Component extends DCLogic {
       ['個々々々々々人 / Sohbana','あいこーすふぃあ','PVSF2026Sp'],['模範囚','hato','PVSF2026Sp'],['未来線～ミライン～','てつどうふぁん','PVSF2026Sp'],['おゆする合作','おゆする','PVSF2026Sp']
     ].map((a, i) => ({ title: a[0], creator: a[1], cicon: a[1] === 'おたこ' ? '/_blob/fc027fe6fe3a001a22a1933270ce72b9' : '', event: a[2], dur: '', thumb: T[i % 8] }));
     const events = [
-      { title: 'PVSF2026S', status: '受付中', dot: 'ms ms-event_available st-ic ok', date: '11.03 — 11.04', slots: '128 / 160 枠', img: T[6], icon: T[3] },
-      { title: '年越し合作 2026', status: '開催中', dot: 'ms ms-sensors st-ic live', date: '10.01 — 10.31', slots: '', img: T[1], icon: T[5] },
+      { title: 'PVSF2026S', status: '募集中', dot: 'ms ms-event_available st-ic ok', date: '11.03 – 11.04', slots: '128 / 160 枠', img: T[6], icon: T[3] },
+      { title: '年越し合作 2026', status: '開催中', dot: 'ms ms-sensors st-ic live', date: '10.01 – 10.31', slots: '', img: T[1], icon: T[5] },
       { title: 'PVSF2026R', status: '募集開始前', dot: 'fa-solid fa-clock st-ic info', date: '12.20', slots: '0 / 60 枠', img: T[2], icon: T[0] }
     ];
     const hero = this.props.hero ?? 'event';

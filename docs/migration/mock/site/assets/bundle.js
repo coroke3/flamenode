@@ -19,6 +19,10 @@
   function omit(props, keys) {
     var rest = Object.assign({}, props);
     keys.forEach(function (k) { delete rest[k]; });
+    /* x-import camelCases attributes: ariaLabel -> aria-label, ariaDescribedby -> aria-describedby */
+    Object.keys(rest).forEach(function (k) {
+      if (/^aria[A-Z]/.test(k)) { rest["aria-" + k.slice(4).toLowerCase()] = rest[k]; delete rest[k]; }
+    });
     return rest;
   }
 
@@ -54,7 +58,8 @@
       className: "fn-field__control",
       "aria-invalid": props.error ? "true" : undefined,
       "aria-describedby": (props.error || props.hint) ? msgId : undefined,
-      rows: props.multiline ? 4 : undefined
+      rows: props.multiline ? 4 : undefined,
+      "aria-label": props.label ? undefined : (props.placeholder || undefined)
     }, rest));
     var msg = null;
     if (props.error) {

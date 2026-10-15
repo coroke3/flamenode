@@ -21,14 +21,14 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="notifications" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="notifications" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
     <div class="c-head">
-      <div><h1 class="t-display">通知配信</h1><p class="t-sm muted">notification_outbox の直近100件。Queue wake で即時起動し1回最大6件を処理、毎時 Recovery Cron がバックアップ。失敗時は1/5/15分間隔で最大4回試行します。</p></div>
+      <div><h1 class="t-display">通知配信</h1><p class="t-sm muted">直近100件の通知です。失敗した通知は 1・5・15 分後に自動で再送します(最大4回)。</p></div>
       <button type="button" class="fn-btn fn-btn--secondary">失敗分を一括再送(上限 50)</button>
     </div>
     <div class="wrap-row" style="gap: 8px; margin-bottom: 8px;">

@@ -21,15 +21,15 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="AdminNav" active="moderation" hint-size="100%,1240px"></dc-import></div>
+  <div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="moderation" hint-size="100%,1240px"></dc-import></div>
   <main class="c-main">
-    <div class="c-head"><div><h1 class="t-display">モデレーション</h1><p class="muted">重複・権利・一時停止・X ID再申請などの未解決ケースを最大100件表示します。解決済みのケースは状態フィルタで表示できます。</p></div></div>
+    <div class="c-head"><div><h1 class="t-display">モデレーション</h1><p class="muted">重複・権利・一時停止・X ID 再申請などの未解決ケースを最大100件表示します。解決済みのケースは状態フィルタで表示できます。</p></div></div>
     <div class="wrap-row" style="gap: 8px; margin-bottom: 20px;">
-      <span class="sel-i"><i class="fa-solid fa-tag" aria-hidden="true"></i><select class="select i" aria-label="種別"><option>種別 すべて</option><option>権利・楽曲・素材確認</option><option>重複投稿</option><option>一時停止・確認中</option><option>X ID再申請</option><option>運営判断</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-tag" aria-hidden="true"></i><select class="select i" aria-label="種別"><option>種別 すべて</option><option>権利・楽曲・素材確認</option><option>重複投稿</option><option>一時停止・確認中</option><option>X ID 再申請</option><option>運営判断</option></select></span>
       <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="状態"><option>対応中</option><option>状態 すべて</option><option>解決</option><option>却下</option><option>期限切れ</option><option>キャンセル</option></select></span>
       <x-import component-from-global-scope="FlameNode.Checkbox" label="期限超過のみ"></x-import>
     </div>
@@ -43,7 +43,7 @@
           <span class="il t-sm muted ell"><i class="fa-brands fa-x-twitter" aria-hidden="true"></i>{{c.x}}</span>
         </summary>
         <div class="split" style="padding: 0 20px 20px; gap: 24px;">
-          <dl class="kv main" style="font-size: 13px; grid-template-columns: 96px 1fr;"><dt>公開理由</dt><dd>{{c.reason}}</dd><dt>運営メモ</dt><dd>{{c.note}}</dd></dl>
+          <dl class="kv main" style="font-size: 13px; grid-template-columns: 96px 1fr;"><dt>投稿者への理由</dt><dd>{{c.reason}}</dd><dt>運営メモ</dt><dd>{{c.note}}</dd></dl>
           <form class="side stack" style="gap: 10px;">
             <div class="row" style="gap: 6px;">
               <span class="sel-i" style="flex: 1;"><i class="ms ms-inventory_2" aria-hidden="true"></i><select class="select i" aria-label="ケース状態" style="width: 100%;"><option>解決</option><option>却下</option><option>キャンセル</option><option>期限切れ</option></select></span>

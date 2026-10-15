@@ -19,7 +19,7 @@
 
 </style>
 
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 
 <div class="p-root" data-theme="dark" lang="ja" style="position: relative;">
   <div class="dc-import" data-board="PublicHeader">
@@ -34,14 +34,14 @@
 
 <style>body{margin:0}</style>
 
-<header class="hd2" lang="ja">
+<header class="hd2" data-theme="dark" lang="ja">
   <div class="hd-bar">
     <a href="Main.html" class="hd-logo" aria-label="FlameNode トップ">
       <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode">
       <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode">
     </a>
     <nav class="hd-nav" aria-label="メインナビゲーション">
-      <a href="Videos.dc.html" aria-current="false">動画</a><a href="Creators.dc.html" aria-current="false">クリエイター</a><a href="Events.dc.html" aria-current="false">イベント</a>
+      <a href="Videos.html" aria-current="false">作品</a><a href="Creators.html" aria-current="false">クリエイター</a><a href="Events.html" aria-current="false">イベント</a>
     </nav>
     <div class="hd-right">
       <label class="hd-search">
@@ -52,7 +52,7 @@
       <button type="button" class="ib hd-search-ic" aria-label="検索"><i class="fa-solid fa-magnifying-glass"></i></button>
       
         <button type="button" class="ib hd-theme" aria-label="テーマを切り替え"><i class="fa-solid fa-circle-half-stroke"></i></button>
-        <a href="MyPage.html" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
+        <a href="MyPage.html?tab=Entry" class="ib hd-post" aria-label="投稿する"><i class="fa-solid fa-paper-plane"></i></a>
         <button type="button" class="ib hd-me-d" aria-haspopup="menu" aria-label="アカウントメニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
         <button type="button" class="ib hd-me-m" aria-haspopup="menu" aria-controls="hd-menu" aria-label="メニューを開く(おたこ · @012345rty)"><img class="hd-me" src="../site/assets/img/fc027fe6fe3a001a22a1933270ce72b9.jpg" alt=""></button>
       
@@ -72,7 +72,7 @@
 
   
   <nav class="hd-tabbar" aria-label="メインナビゲーション(スマホ)">
-    <a href="Videos.dc.html" aria-current="false" aria-label="動画" title="動画"><i class="fa-solid fa-film" aria-hidden="true"></i><span>動画</span></a><a href="Creators.dc.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.dc.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.dc.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
+    <a href="Videos.html" aria-current="false" aria-label="作品" title="作品"><i class="fa-solid fa-film" aria-hidden="true"></i><span>作品</span></a><a href="Creators.html" aria-current="false" aria-label="クリエイター" title="クリエイター"><i class="fa-solid fa-user-group" aria-hidden="true"></i><span>クリエイター</span></a><a href="Events.html" aria-current="false" aria-label="イベント" title="イベント"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>イベント</span></a><a href="MyPage.html" aria-current="false" aria-label="投稿" title="投稿"><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>投稿</span></a><a href="MyPage.html" aria-current="false" aria-label="マイページ" title="マイページ"><i class="fa-solid fa-user" aria-hidden="true"></i><span>マイページ</span></a>
   </nav>
 </header>
 </div>
@@ -88,11 +88,11 @@
         <li>権限は X ID に付与します。その X ID がログインアカウントに承認済みで連携されると編集できます。</li>
         <li>未連携でも先に付与でき、連携完了までは編集できません。</li>
         <li>付与・解除できるのは作者と、権限を持つ運営・管理者です。合作メンバーは他の人へ再付与できません。</li>
-        <li>提出主体・YouTube ID・公開状態は、管理者またはイベント運営の権限が必要です。</li>
+        <li>提出名義・YouTube ID・公開状態は、管理者またはイベント運営の権限が必要です。</li>
       </ul>
     </details>
 
-    <div class="notice" style="margin-top: 24px;"><i class="fa-solid fa-link-slash" aria-hidden="true" style="color: var(--info); padding-top: 4px;"></i><span class="stack t-sm" style="gap: 2px;"><b>X ID連携待ちの編集者が 1 人います</b><span class="muted">権限は保存済みです。X ID とログインアカウントの連携が承認されると編集できます。</span></span></div>
+    <div class="notice" style="margin-top: 24px;"><i class="fa-solid fa-link-slash" aria-hidden="true" style="color: var(--info); padding-top: 4px;"></i><span class="stack t-sm" style="gap: 2px;"><b>X ID 連携待ちの編集者が 1 人います</b><span class="muted">権限は保存済みです。X ID とログインアカウントの連携が承認されると編集できます。</span></span></div>
 
     <section class="c-sec" aria-labelledby="now" style="margin-top: 40px;">
       <h2 id="now" class="t-h3" style="margin-bottom: 8px;">現在編集できる人</h2>
@@ -121,7 +121,7 @@
           <img class="avatar" src="../site/assets/img/3d8d62bbac75243d266ec6e3de039e6d.jpg" alt="" style="width: 40px; height: 40px;">
           <span class="stack" style="gap: 2px; flex: 1; min-width: 0;">
             <span class="row" style="gap: 8px;"><span>編集補助</span><span class="t-sm muted">@horror_edit</span></span>
-            <span class="meta-i t-sm"><span>非公開編集者</span><span class="st"><i class="fa-solid fa-link-slash st-ic info" aria-hidden="true"></i>権限付与済み · X ID連携待ち</span></span>
+            <span class="meta-i t-sm"><span>非公開編集者</span><span class="st"><i class="fa-solid fa-link-slash st-ic info" aria-hidden="true"></i>権限付与済み · X ID 連携待ち</span></span>
           </span>
           
           <button type="button" class="ib sm" aria-label="権限を解除"><i class="fa-solid fa-user-minus"></i></button>
@@ -131,16 +131,16 @@
 
     <section class="c-sec" aria-labelledby="cand">
       <h2 id="cand" class="t-h3" style="margin-bottom: 4px;">公開メンバー</h2>
-      <p class="t-sm muted" style="margin: 0 0 8px;">メンバー欄に載っているが、まだ編集権がない人です。</p>
+      <p class="t-sm muted" style="margin: 0 0 8px;">作品ページに載っているメンバーのうち、まだ編集できない人です。</p>
       <div class="row" style="gap: 16px; padding: 14px 0;">
         <img class="avatar" src="../site/assets/img/be71b2f744d470e10fb8c8ca733bbace.jpg" alt="" style="width: 40px; height: 40px;">
         <span class="stack" style="gap: 2px; flex: 1;"><span class="row" style="gap: 8px;"><span>味付け海苔</span><span class="t-sm muted">@sub_ajinori</span></span><span class="t-sm muted">撮影</span></span>
-        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">編集権を付与</button>
+        <button type="button" class="fn-btn fn-btn--secondary fn-btn--sm">編集権限を付与</button>
       </div>
     </section>
 
     <section class="c-sec" aria-labelledby="hid">
-      <h2 id="hid" class="t-h3" style="margin-bottom: 4px;">表示されない編集者を追加</h2>
+      <h2 id="hid" class="t-h3" style="margin-bottom: 4px;">メンバー欄に出さない編集者を追加</h2>
       <p class="t-sm muted" style="margin: 0 0 12px;">作品ページのメンバー欄には載せずに、編集だけを任せます。</p>
       <form class="row" style="gap: 8px; flex-wrap: wrap; align-items: flex-end;">
         <span style="flex: 1 1 200px;"><div style="display: contents;"><div class="fn-field"><label class="fn-field__label" for=":r0:">表示名</label><div class="fn-field__wrap"><input id=":r0:" class="fn-field__control" placeholder="表示名"></div></div></div></span>
@@ -166,7 +166,7 @@
 
 <style>body{margin:0}</style>
 
-<footer class="pub-foot" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
+<footer class="pub-foot" data-theme="dark" lang="ja" style="display: flex; flex-wrap: wrap; gap: 48px 96px; padding: 64px 40px 48px; background: var(--surface-raised); color: var(--ink); font: 400 14px/22px var(--font-sans);">
   <div style="display: flex; flex-direction: column; gap: 16px; flex: 1 1 240px;">
     <img class="logo-d" src="../site/assets/img/eee88ecd1bced2fd7ce508f977487e59.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
     <img class="logo-l" src="../site/assets/img/eded756c59dbc57e0b63d862e98d3177.png" alt="FlameNode" style="height: 24px; width: auto; align-self: flex-start;">
@@ -179,7 +179,7 @@
     <a href="Events.html" class="il">イベント一覧</a>
   </nav>
   <nav aria-label="参加する" style="display: flex; flex-direction: column; gap: 10px; min-width: 160px;">
-    <a href="MyPage.html" class="il">投稿する</a>
+    <a href="MyPage.html?tab=Entry" class="il">投稿する</a>
     <a href="MyPage.html" class="il">ダッシュボード</a>
     <a href="EntrySignIn.html" class="il">ログイン / 新規登録</a>
     <a href="About.html" class="il">イベント開催相談</a>

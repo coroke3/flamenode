@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="{{rootCls}}" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" active="events" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{full}}" hint-placeholder-val="{{false}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="events" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main">
     <div class="c-head">
       <div><sc-if value="{{full}}" hint-placeholder-val="{{false}}"><h1 class="t-display">イベント</h1></sc-if><p class="muted">イベントの作成・公開設定・運営メンバー管理を行います。</p></div>
@@ -38,7 +38,7 @@
     </nav></sc-if>
     <div class="wrap-row" style="gap: 8px; margin-bottom: 16px;">
       <div class="field-i" style="width: 280px;"><x-import component-from-global-scope="FlameNode.TextField" type="search" aria-label="検索" placeholder="タイトル / ID で検索"></x-import><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></div>
-      <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="絞り込み"><option>全イベント</option><option>公開のみ</option><option>非公開のみ</option><option>受付中のみ</option></select></span>
+      <span class="sel-i"><i class="fa-solid fa-filter" aria-hidden="true"></i><select class="select i" aria-label="絞り込み"><option>全イベント</option><option>公開のみ</option><option>非公開のみ</option><option>募集中のみ</option></select></span>
       <span class="sel-i"><i class="fa-solid fa-arrow-down-wide-short" aria-hidden="true"></i><select class="select i" aria-label="並び替え"><option>開催日 新→旧</option><option>開催日 旧→新</option><option>開催日 早い順</option></select></span>
     </div>
     <div class="t-scroll">
@@ -80,7 +80,7 @@ class Component extends DCLogic {
       ['年越し合作', 'toshikoshi', '2022.12.31', 'done', 'public', 1],
       ['PVSF2027Sp(準備中)', 'PVSF2027Sp', '未設定', 'before', 'private', 0]
     ];
-    const S = { recruit: ['受付中', 'dot ok'], done: ['終了', 'dot'], before: ['準備中', 'dot info'] };
+    const S = { recruit: ['募集中', 'dot ok'], done: ['終了', 'dot'], before: ['準備中', 'dot info'] };
     return {
       theme: this.props.theme ?? 'dark',
       events: E.map((e, i) => ({ name: e[0], id: e[1], period: e[2], state: S[e[3]][0], dot: S[e[3]][1], vis: e[4] === 'public' ? '公開' : '非公開', visIcon: e[4] === 'public' ? 'fa-solid fa-globe' : 'fa-solid fa-lock', n: e[5], icon: T[i % 4] }))

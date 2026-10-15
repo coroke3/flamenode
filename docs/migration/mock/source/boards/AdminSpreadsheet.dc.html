@@ -21,11 +21,11 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <sc-if value="{{showNav}}" hint-placeholder-val="{{true}}"><div class="c-side"><dc-import name="AdminNav" active="spreadsheet" hint-size="100%,1240px"></dc-import></div></sc-if>
+  <sc-if value="{{showNav}}" hint-placeholder-val="{{true}}"><div class="c-side"><dc-import name="AdminNav" theme="{{theme}}" active="spreadsheet" hint-size="100%,1240px"></dc-import></div></sc-if>
   <main class="c-main" style="max-width: none;">
     <div class="c-head"><div><h1 class="t-display">DB スプレッドシート</h1><p class="muted">D1 の管理対象テーブルを表形式で閲覧します。認証・権限・システム系は読み取り専用、コンテンツ系のみ緊急時の編集ができます。変更は audit_logs に記録され、認証トークン列はマスク表示です。</p></div></div>
 
@@ -112,7 +112,7 @@ class Component extends DCLogic {
     const s = this.state;
     const reg = [
       ['認証', [['user','ユーザー','r'],['account','OAuth アカウント','r'],['session','セッション','r'],['verificationToken','検証トークン','r']]],
-      ['X ID', [['x_users','X ID','e'],['x_user_aliases','X ID エイリアス','r'],['x_identity_requests','X ID申請','r'],['x_user_account_links','X名義・認証ユーザー紐付け','r']]],
+      ['X ID', [['x_users','X ID','e'],['x_user_aliases','X ID エイリアス','r'],['x_identity_requests','X ID 申請','r'],['x_user_account_links','X名義・認証ユーザー紐付け','r']]],
       ['イベント', [['event_groups','イベントグループ','e'],['events','イベント','e'],['event_staff','イベントスタッフ','r'],['slots','枠','e']]],
       ['作品', [['videos','作品','e'],['video_youtube_metadata','YouTube メタ','e'],['video_moderation_cases','モデレーション','e'],['video_events','作品×イベント','e'],['video_members','作品メンバー','e'],['video_chapters','チャプター','e'],['video_interactions','インタラクション','e']]],
       ['マスタ', [['software_catalog','ソフトカタログ','e'],['software_aliases','ソフト別名','e']]],

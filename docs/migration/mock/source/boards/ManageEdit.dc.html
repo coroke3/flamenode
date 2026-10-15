@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="edit" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="edit" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="edit" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="edit" hint-size="100%,96px"></dc-import>
 
     <div class="split" style="margin-top: 32px;">
       <form class="main" onSubmit="{{prevent}}">
@@ -35,8 +35,6 @@
 
         <sc-if value="{{s_basic}}" hint-placeholder-val="{{true}}">
           <div class="form" style="margin-top: 32px;">
-            <label class="field"><span>種別</span><span class="sel-i"><i class="ms ms-category" aria-hidden="true"></i><select class="select i"><option>通常イベント</option><option>コラボ</option><option>タイプ別</option><option>その他</option></select></span></label>
-            <div class="field"><span>ID</span><div class="row" style="gap: 0; background: var(--surface-subtle); height: 36px;"><i class="fa-solid fa-hashtag muted" aria-hidden="true" style="padding: 0 12px;"></i><span class="t-mono t-sm" style="flex: 1;">PVSF2026S</span><span class="t-sm muted" style="padding: 0 12px;">変更は「注意が必要な操作」から</span></div></div>
             <x-import component-from-global-scope="FlameNode.TextField" label="タイトル *" default-value="PVSF2026S"></x-import>
             <x-import component-from-global-scope="FlameNode.TextField" label="説明" multiline="{{yes}}"></x-import>
             <div class="cols2">
@@ -44,29 +42,31 @@
               <div class="field"><span>バナー画像</span><div class="row" style="gap: 12px;"><img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="" style="width: 96px; height: 48px; object-fit: cover;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="バナー画像URL" placeholder="バナー画像URL" style="flex: 1;"></x-import></div></div>
             </div>
             <div class="field" style="max-width: 240px;"><span>アクセントカラー</span><div class="row" style="gap: 8px;"><span style="width: 36px; height: 36px; background: #ffd400; flex: none;"></span><x-import component-from-global-scope="FlameNode.TextField" aria-label="アクセントカラー" placeholder="#ffd400" style="flex: 1;"></x-import></div></div>
+            <label class="field"><span>種別</span><span class="sel-i"><i class="ms ms-category" aria-hidden="true"></i><select class="select i"><option>通常イベント</option><option>コラボ</option><option>タイプ別</option><option>その他</option></select></span></label>
+            <div class="field"><span>ID</span><div class="row" style="gap: 0; background: var(--surface-subtle); height: 36px;"><i class="fa-solid fa-hashtag muted" aria-hidden="true" style="padding: 0 12px;"></i><span class="t-mono t-sm" style="flex: 1;">PVSF2026S</span><span class="t-sm muted" style="padding: 0 12px;">変更は「注意が必要な操作」から</span></div></div>
           </div>
         </sc-if>
         <sc-if value="{{s_pub}}" hint-placeholder-val="{{false}}">
           <div class="form" style="margin-top: 32px;">
             <div class="sched" aria-label="スケジュール">
               <div class="sc-axis"><span style="left: 0%;">9月</span><span style="left: 33.3%;">10月</span><span style="left: 66.6%;">11月</span><span class="sc-today" style="left: 34.4%;">今日 10/04</span></div>
-              <div class="sc-row"><span class="sc-lbl">受付期間</span><span class="sc-bar" style="left: 0%; width: 50.5%;"><i class="rb-hd"></i><span>09/01 – 10/16</span><i class="rb-hd r"></i></span></div>
+              <div class="sc-row"><span class="sc-lbl">募集期間</span><span class="sc-bar" style="left: 0%; width: 50.5%;"><i class="rb-hd"></i><span>09/01 – 10/16</span><i class="rb-hd r"></i></span></div>
               <div class="sc-row"><span class="sc-lbl">開催期間</span><span class="sc-bar strong" style="left: 68.8%; width: 2.2%;"><i class="rb-hd"></i><i class="rb-hd r"></i></span><span class="t-sm" style="position: absolute; left: 72%; top: 6px;">11/03 – 11/04</span></div>
             </div>
             <div class="stack" style="gap: 10px;">
-              <div class="prow"><span class="t-label muted">受付期間</span><input class="dinput t-num" value="2026/09/01 00:00" aria-label="募集開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/10/16 23:59" aria-label="募集終了日時"><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">今日から</button><button type="button" class="chip">開催の2週間前まで</button></span></div>
+              <div class="prow"><span class="t-label muted">募集期間</span><input class="dinput t-num" value="2026/09/01 00:00" aria-label="募集開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/10/16 23:59" aria-label="募集終了日時"><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">今日から</button><button type="button" class="chip">開催の2週間前まで</button></span></div>
               <div class="prow"><span class="t-label muted">開催期間</span><input class="dinput t-num" value="2026/11/03 18:00" aria-label="開始日時"><span class="muted">→</span><input class="dinput t-num" value="2026/11/04 23:00" aria-label="終了日時"><span class="wrap-row" style="gap: 2px;"><button type="button" class="chip">1日</button><button type="button" class="chip on">2日間</button><button type="button" class="chip">3日間</button></span></div>
-              <span class="il t-sm muted"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>「11/3 18時」「1103 1800」のような短い入力も読み取ります。年は省略すると次に来る日付で補完します。</span>
-              <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>受付終了(10/16)は開催開始(11/03)より前です</span>
+              <span class="il t-sm muted"><i class="fa-solid fa-keyboard" aria-hidden="true"></i>「11/3 18時」「1103 1800」のような短い書き方でも入力できます。年を省くと直近の日付になります。</span>
+              <span class="il t-sm"><i class="fa-solid fa-circle-check" aria-hidden="true" style="color: var(--success);"></i>募集終了(10/16)は開催開始(11/03)より前です</span>
             </div>
             <div class="field"><span>公開状態</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="pub">非公開</label><label class="radio"><input type="radio" name="pub" checked="{{yes}}">公開</label></div></div>
           </div>
         </sc-if>
         <sc-if value="{{s_perm}}" hint-placeholder-val="{{false}}">
           <div class="form" style="margin-top: 32px;">
-            <div class="field"><span>一般ユーザーの追加紐付け</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="link" checked="{{yes}}">運営承認制</label><label class="radio"><input type="radio" name="link">許可</label></div></div>
-            <div class="field"><span>枠なし投稿の紐付け</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="free">不許可</label><label class="radio"><input type="radio" name="free" checked="{{yes}}">許可</label></div></div>
-            <div class="field"><span>所有者の一般作品権限</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="own" checked="{{ownDefault}}" onChange="{{setOwnDefault}}">既定(イベント個別設定なし)</label><label class="radio"><input type="radio" name="own" checked="{{ownCustom}}" onChange="{{setOwnCustom}}">個別指定</label></div></div>
+            <div class="field"><span>投稿済みの作品をこのイベントに加えるのは</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="link" checked="{{yes}}">運営の承認後</label><label class="radio"><input type="radio" name="link">すぐにできる</label></div></div>
+            <div class="field"><span>枠を取っていない作品の紐付けを</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="free">許可しない</label><label class="radio"><input type="radio" name="free" checked="{{yes}}">許可する</label></div></div>
+            <div class="field"><span>作品の持ち主が編集できる範囲は</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="own" checked="{{ownDefault}}" onChange="{{setOwnDefault}}">既定のまま</label><label class="radio"><input type="radio" name="own" checked="{{ownCustom}}" onChange="{{setOwnCustom}}">個別指定</label></div></div>
             <sc-if value="{{ownCustom}}" hint-placeholder-val="{{false}}">
               <div class="raised stack" style="gap: 10px; padding: 16px 20px;">
                 <span class="t-label muted">編集対象フィールド</span>
@@ -87,18 +87,18 @@
             <div class="field"><span>枠タイプ</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="st" checked="{{yes}}">時間枠</label><label class="radio"><input type="radio" name="st">件数枠</label></div></div>
             <div class="cols2">
               <x-import component-from-global-scope="FlameNode.TextField" label="1作品あたり最大枠数" type="number" default-value="2"></x-import>
-              <x-import component-from-global-scope="FlameNode.TextField" label="1 X IDあたりの確保上限" type="number" default-value="2"></x-import>
-              <x-import component-from-global-scope="FlameNode.TextField" label="枠同士の間隔(分)" type="number" default-value="6"></x-import>
-              <x-import component-from-global-scope="FlameNode.TextField" label="部の分割閾値(分)" type="number" default-value="15"></x-import>
+              <x-import component-from-global-scope="FlameNode.TextField" label="1 X ID あたりの確保上限" type="number" default-value="2"></x-import>
             </div>
             <div class="field"><span>確保者表示</span><div class="row" style="gap: 20px;"><label class="radio"><input type="radio" name="disp" checked="{{yes}}">公開名</label><label class="radio"><input type="radio" name="disp">匿名</label><label class="radio"><input type="radio" name="disp">非表示</label></div></div>
             <x-import component-from-global-scope="FlameNode.TextField" label="部(1行1件)" multiline="{{yes}}" default-value="1日目 第1部&#10;1日目 第2部&#10;1日目 第3部"></x-import>
+            <details><summary class="il t-sm" style="cursor: pointer;"><i class="fa-solid fa-chevron-down" aria-hidden="true"></i>細かい設定(枠の間隔・部の分割)</summary><div class="cols2" style="margin-top: 16px;"><x-import component-from-global-scope="FlameNode.TextField" label="枠同士の間隔(分)" type="number" default-value="6"></x-import><x-import component-from-global-scope="FlameNode.TextField" label="部の分割閾値(分)" type="number" default-value="15"></x-import></div></details>
             <a href="ManageSlots.dc.html" class="il t-sm" style="color: var(--brand-text);" aria-label="枠設定へのショートカット"><i class="ms ms-view_timeline" aria-hidden="true"></i>イベント枠を設定する</a>
           </div>
         </sc-if>
         <sc-if value="{{s_req}}" hint-placeholder-val="{{false}}">
           <div class="form" style="margin-top: 32px;">
-            <p class="t-sm muted" style="margin: 0;">表示名と作品タイトルは常に必須です。ここで選んだ項目は、このイベントへの投稿・枠提出・作品編集でも必須になります。</p>
+            <h3 class="t-h3">必須項目</h3>
+            <p class="t-sm muted" style="margin: 0;">表示名と作品タイトルは常に必須です。ここで選んだ項目も、このイベントの投稿と編集で必須になります。</p>
             <sc-for list="{{reqGroups}}" as="g" hint-placeholder-count="3">
               <div class="stack" style="gap: 10px;">
                 <span class="il t-label muted"><i class="{{g.icon}}" aria-hidden="true"></i>{{g.label}}</span>
@@ -112,14 +112,14 @@
           </div>
         </sc-if>
         <sc-if value="{{s_q}}" hint-placeholder-val="{{false}}">
-          <div class="form" style="margin-top: 32px;">
+          <div class="form" style="margin-top: 48px;">
             <h3 class="t-h3">ステージ・権利確認</h3>
             <div class="raised stack" style="gap: 12px; padding: 16px 20px;">
               <div class="row" style="gap: 8px;"><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問名" default-value="楽曲・素材の権利を確認しました" style="flex: 1;"></x-import><x-import component-from-global-scope="FlameNode.Checkbox" label="必須" default-checked="{{yes}}"></x-import></div>
             </div>
             <h3 class="t-h3" style="margin-top: 16px;">カスタム質問</h3>
             <div class="raised stack" style="gap: 12px; padding: 16px 20px;">
-              <div class="row" style="gap: 8px;"><i class="fa-solid fa-grip-vertical muted" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問名" default-value="ステージで流す際の音量調整は必要ですか?" style="flex: 1;"></x-import><span class="sel-i"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><select class="select i" aria-label="回答形式"><option>短文</option><option selected="{{yes}}">選択</option><option>チェック</option></select></span><button type="button" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></button></div>
+              <div class="row" style="gap: 8px;"><i class="fa-solid fa-grip-vertical muted" aria-hidden="true"></i><x-import component-from-global-scope="FlameNode.TextField" aria-label="質問名" default-value="ステージで流す際の音量調整は必要ですか？" style="flex: 1;"></x-import><span class="sel-i"><i class="fa-solid fa-list-ul" aria-hidden="true"></i><select class="select i" aria-label="回答形式"><option>短文</option><option selected="{{yes}}">選択</option><option>チェック</option></select></span><button type="button" class="ib sm" aria-label="削除"><i class="fa-regular fa-trash-can"></i></button></div>
               <div class="stack" style="gap: 4px; padding-left: 24px;">
                 <span class="t-label muted">選択肢</span>
                 <div class="wrap-row" style="gap: 4px;"><span class="chip">不要<i class="fa-solid fa-xmark" aria-hidden="true"></i></span><span class="chip">必要<i class="fa-solid fa-xmark" aria-hidden="true"></i></span><button type="button" class="chip"><i class="fa-solid fa-plus" aria-hidden="true"></i>追加</button></div>
@@ -186,14 +186,24 @@
       </form>
 
       <aside class="side stack" style="gap: 32px;">
-        <section aria-labelledby="pv">
+        <section aria-labelledby="pv" class="me-pv">
           <h2 id="pv" class="t-h3" style="margin-bottom: 12px;">設定プレビュー</h2>
           <div class="raised stack" style="gap: 10px; padding: 16px; font-size: 13px;">
             <span class="il"><i class="ms ms-view_timeline muted" aria-hidden="true"></i>時間枠 · 6分間隔 · 3部</span>
-            <span class="il"><i class="ms ms-event_seat muted" aria-hidden="true"></i>1 X ID 2枠まで</span>
-            <span class="il"><i class="fa-solid fa-link muted" aria-hidden="true"></i>枠なし投稿を許可</span>
-            <span class="il"><i class="fa-solid fa-user-check muted" aria-hidden="true"></i>追加紐付けは運営承認制</span>
+            <span class="il"><i class="ms ms-event_seat muted" aria-hidden="true"></i>X ID ごとに 2 枠まで</span>
+            <span class="il"><i class="fa-solid fa-link muted" aria-hidden="true"></i>枠なしの作品も紐付け可</span>
+            <span class="il"><i class="fa-solid fa-user-check muted" aria-hidden="true"></i>作品の追加は運営の承認後</span>
           </div>
+        </section>
+        <section>
+          <button type="button" class="il t-sm" style="border: 0; background: none; padding: 0; color: var(--ink); cursor: pointer; font: inherit;" onClick="{{toggleTpl}}" aria-expanded="{{tplStr}}"><i class="fa-regular fa-clone" aria-hidden="true"></i>この設定をテンプレートとして保存</button>
+          <sc-if value="{{tplOpen}}" hint-placeholder-val="{{false}}">
+            <form class="raised stack" style="gap: 12px; padding: 16px; margin-top: 8px;" onSubmit="{{saveTpl}}">
+              <x-import component-from-global-scope="FlameNode.TextField" label="テンプレート名 *" placeholder="例: PVSF 標準セット" default-value="PVSF 標準セット(2026)"></x-import>
+              <span class="t-sm muted">基本情報・投稿フォーム・枠ルール・概要欄を保存します。日程は含みません。</span>
+              <div class="row" style="gap: 8px;"><button type="submit" class="fn-btn fn-btn--primary fn-btn--sm">保存</button><button type="button" class="fn-btn fn-btn--tertiary fn-btn--sm" onClick="{{toggleTpl}}">キャンセル</button></div>
+            </form>
+          </sc-if>
         </section>
         <details class="danger-zone">
           <summary class="il t-sm muted"><i class="fa-solid fa-chevron-right dz-chev" aria-hidden="true"></i>注意が必要な操作<span class="t-num">3</span></summary>
@@ -219,7 +229,7 @@
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":1600}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { sec: 'basic', own: 'default', preset: 'event', renaming: false, lines: null, sel: null, ed: 'block' }; }
+  constructor(p) { super(p); this.state = { tpl: false, sec: 'basic', own: 'default', preset: 'event', renaming: false, lines: null, sel: null, ed: 'block' }; }
   renderVals() {
     const r = this.__rv();
     r._nav = (r.secs || []).map(x => ({ label: x.label, cur: x.id === r.sec ? 'page' : 'false', cls: x.id === r.sec ? 'on' : '', pick: (e) => { e && e.preventDefault && e.preventDefault(); r.setSec(x.id); } }));
@@ -257,7 +267,7 @@ class Component extends DCLogic {
       : l.segs.map(g => g.k ? '{{' + g.k + '}}' : g.v).join('')).join('\n');
     const lines0 = S.lines || parse(P[S.preset]);
     const tpl = ser(lines0);
-    const V = { 'イベント': [['event_title','イベント名'],['event_id','イベントID'],['event_url','イベントURL'],['part','部']], '作品': [['title','作品タイトル'],['youtube_url','YouTube URL'],['youtube_video_id','YouTube動画ID'],['collaboration_type','作品形式'],['music','楽曲'],['music_reference_url','楽曲参照URL'],['credit','クレジット'],['used_software','使用ソフト']], '投稿者': [['creator_name','投稿者名'],['creator_x_id','投稿者X ID'],['creator_channel_url','YouTubeチャンネル'],['creator_profile','プロフィール'],['creator_social_links','SNSリンク']], '共同制作者': [['members','共同制作者'],['member_names','共同制作者名'],['member_x_ids','X ID'],['member_roles','役割'],['member_comments','コメント']], 'コメント・作品情報': [['intro_comment','作品紹介'],['highlights','見どころ'],['production_story','制作エピソード'],['closing_comment','あとがき']], '追加質問': [['stage_permissions','ステージ・権利回答'],['custom_answers','カスタム質問回答']] };
+    const V = { 'イベント': [['event_title','イベント名'],['event_id','イベントID'],['event_url','イベントURL'],['part','部']], '作品': [['title','作品タイトル'],['youtube_url','YouTube URL'],['youtube_video_id','YouTube動画ID'],['collaboration_type','作品形式'],['music','楽曲'],['music_reference_url','楽曲参照URL'],['credit','クレジット'],['used_software','使用ソフト']], '投稿者': [['creator_name','投稿者名'],['creator_x_id','投稿者 X ID'],['creator_channel_url','YouTubeチャンネル'],['creator_profile','プロフィール'],['creator_social_links','SNSリンク']], '共同制作者': [['members','共同制作者'],['member_names','共同制作者名'],['member_x_ids','X ID'],['member_roles','役割'],['member_comments','コメント']], 'コメント・作品情報': [['intro_comment','作品紹介'],['highlights','見どころ'],['production_story','制作エピソード'],['closing_comment','あとがき']], '追加質問': [['stage_permissions','ステージ・権利回答'],['custom_answers','カスタム質問回答']] };
     const VL = Object.fromEntries(Object.values(V).flat().map(([k, l]) => [k, l]));
     const R = [
       ['提出者情報', 'fa-solid fa-user', [['表示名', true, true], ['アイコン', true, false], ['自分・団体の概要', false, false], ['YouTubeチャンネル', false, false], ['その他のSNSリンク', false, false]]],
@@ -267,8 +277,9 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'dark', yes: true, prevent: (e) => e.preventDefault(),
       sec: s, setSec: (id) => this.setState({ sec: id }),
-      secs: [{ id: 'basic', label: '基本情報' }, { id: 'pub', label: '公開・受付' }, { id: 'perm', label: '投稿・権限' }, { id: 'req', label: '必須項目' }, { id: 'q', label: '質問' }, { id: 'slot', label: '枠' }, { id: 'yt', label: '概要欄' }],
-      s_basic: s === 'basic', s_pub: s === 'pub', s_perm: s === 'perm', s_slot: s === 'slot', s_req: s === 'req', s_q: s === 'q', s_yt: s === 'yt',
+      tplOpen: !!S.tpl, tplStr: S.tpl ? 'true' : 'false', toggleTpl: () => this.setState({ tpl: !S.tpl }), saveTpl: (e) => { e.preventDefault(); this.setState({ tpl: false }); },
+      secs: [{ id: 'basic', label: '基本情報' }, { id: 'pub', label: '日程・公開' }, { id: 'slot', label: '枠' }, { id: 'perm', label: '参加のルール' }, { id: 'form', label: '投稿フォーム' }, { id: 'yt', label: '概要欄' }],
+      s_basic: s === 'basic', s_pub: s === 'pub', s_perm: s === 'perm', s_slot: s === 'slot', s_req: s === 'form', s_q: s === 'form', s_yt: s === 'yt',
       ownDefault: S.own === 'default', ownCustom: S.own === 'custom', setOwnDefault: () => this.setState({ own: 'default' }), setOwnCustom: () => this.setState({ own: 'custom' }),
       reqGroups: R.map(([label, icon, items]) => ({ label, icon, items: items.map(([l, on, always]) => ({ label: always ? l + '(常に必須)' : l, on, always })) })),
       presets: [['simple','シンプル'],['event','イベント標準'],['collab','合作'],['collab-chapter','合作＋チャプター']].map(([id, label]) => ({ label, cls: S.preset === id ? 'on' : '', pick: () => this.setState({ preset: id, lines: null, sel: null }) })),

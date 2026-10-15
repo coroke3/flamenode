@@ -21,13 +21,13 @@
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
-<style>body{margin:0;background:#000}</style>
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
 <div class="c-layout">
-  <div class="c-side"><dc-import name="ManageNav" active="history" hint-size="100%,900px"></dc-import></div>
+  <div class="c-side"><dc-import name="ManageNav" theme="{{theme}}" active="history" hint-size="100%,900px"></dc-import></div>
   <main class="c-main">
-    <dc-import name="ManageEventHead" tab="history" hint-size="100%,96px"></dc-import>
+    <dc-import name="ManageEventHead" theme="{{theme}}" tab="history" hint-size="100%,96px"></dc-import>
 
     <div class="wrap-row" style="gap: 8px; margin: 24px 0 8px;">
       <div class="seg" role="tablist" aria-label="対象"><sc-for list="{{targets}}" as="t" hint-placeholder-count="5"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}"><i class="{{t.icon}}" aria-hidden="true"></i>{{t.label}}</button></sc-for></div>
@@ -79,7 +79,7 @@ class Component extends DCLogic {
       ['今日 10/04', [
         ['a0', '11:02', 'おたこ', 0, 'video', '作品「崇渦に関するお知らせ 前編」の YouTube URL を設定', [['youtube_video_id', '(未設定)', 'xxxxxxxxxxx']], true, ''],
         ['a1', '09:40', 'おたこ', 0, 'slot', '11.03 18:18 の枠を確保', [['確保者', '(空き)', 'おたこ']], false, '枠の確保は確保者本人が解放します'],
-        ['a2', '09:12', '新概念', 2, 'setting', '受付終了日時を変更', [['受付終了', '10/12 23:59', '10/16 23:59']], true, '']
+        ['a2', '09:12', '新概念', 2, 'setting', '募集終了日時を変更', [['募集終了', '10/12 23:59', '10/16 23:59']], true, '']
       ]],
       ['昨日 10/03', [
         ['b0', '22:40', '新概念', 2, 'video', '作品「崇渦に関するお知らせ 前編」のメンバーを 2 人追加', [['メンバー', 'おたこ', 'おたこ / 新概念 / 味付け海苔'], ['チャプター', '0:00', '0:00 / 2:10']], true, ''],

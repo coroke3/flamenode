@@ -20,11 +20,11 @@
 @font-face{font-family:"Jost";font-weight:700;font-display:swap;src:url("/_blob/415003f31448401e8d02e499fd68afc2") format("woff2")}
 @font-face{font-family:"FlameNode Sans";font-weight:400 700;font-display:swap;src:url("/_blob/3078d2f682e1734e5b2022850e88ec9f") format("opentype")}
 </style>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&amp;display=swap">
-<style>body{margin:0;background:#000}</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@400;700&display=swap">
+<style>body{margin:0}</style>
 </helmet>
 <div class="p-root" data-theme="{{theme}}" lang="ja">
-  <dc-import name="PublicHeader" active="event" hint-size="100%,72px"></dc-import>
+  <dc-import name="PublicHeader" theme="{{theme}}" active="event" hint-size="100%,72px"></dc-import>
 
   <img src="/_blob/be71b2f744d470e10fb8c8ca733bbace" alt="PVSF2026S メインビジュアル" style="display: block; width: 100%; aspect-ratio: 4/1; object-fit: cover; background: var(--surface-raised);">
 
@@ -35,7 +35,7 @@
         <div class="stack" style="gap: 8px;">
           <span class="wrap-row t-sm" style="gap: 16px;">
             <x-import component-from-global-scope="FlameNode.Status" status="public" label="募集期間中"></x-import>
-            <span class="muted t-num">2026.11.03 — 11.04</span>
+            <span class="muted t-num">2026.11.03 – 11.04</span>
           </span>
           <h1 class="t-display">PVSF2026S</h1>
         </div>
@@ -97,9 +97,9 @@
         <section>
           <h2 class="vh t-h3" style="margin-bottom: 16px;">日程</h2>
           <dl class="kv" style="grid-template-columns: 96px 1fr;">
-            <dt>募集期間</dt><dd class="t-num">2026.09.01 — 10.16</dd>
-            <dt>投稿期間</dt><dd class="t-num">2026.10.01 — 10.30</dd>
-            <dt>開催</dt><dd class="t-num">2026.11.03 — 11.04</dd>
+            <dt>募集期間</dt><dd class="t-num">2026.09.01 – 10.16</dd>
+            <dt>提出期間</dt><dd class="t-num">2026.10.01 – 10.30</dd>
+            <dt>開催</dt><dd class="t-num">2026.11.03 – 11.04</dd>
           </dl>
         </section>
         <section>
@@ -119,7 +119,7 @@
     </div>
   </div>
   <div class="foot-spacer"></div>
-  <dc-import name="PublicFooter" hint-size="100%,280px"></dc-import>
+  <dc-import name="PublicFooter" theme="{{theme}}" hint-size="100%,280px"></dc-import>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["dark","light"],"default":"dark"},"$preview":{"width":1440,"height":2200}}'>
