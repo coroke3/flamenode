@@ -241,8 +241,8 @@
 | `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
 | `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0505 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
-| `src/lib/auth/authBaseline.fixture.mjs` | HELPER | Auth.js baseline synthetic session/account/cookie fixtures | MIG-0801 | SAME (synthetic test fixtures) | IN_PROGRESS | PR#307 SHA=07fa159dbdb5b2c1eca1ed12743a58312eda0ff2 |
-| `src/lib/auth/authBaseline.characterization.test.mjs` | TEST | Auth.js session resolution, account link atomicity, cookie contract characterization | MIG-0801 | SAME (characterization test suite) | IN_PROGRESS | PR#307 SHA=07fa159dbdb5b2c1eca1ed12743a58312eda0ff2 |
+| `src/lib/auth/authBaseline.fixture.mjs` | HELPER | Auth.js baseline synthetic session/account/cookie fixtures | MIG-0801 | SAME (synthetic test fixtures) | RETAINED | PR#307 SHA=650c8b473da0e695ec9267fcba63a3fe8742fb64 TEST=node --test --experimental-strip-types src/lib/auth/authBaseline.characterization.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38909222803 |
+| `src/lib/auth/authBaseline.characterization.test.mjs` | TEST | Auth.js session resolution, account link atomicity, cookie contract characterization | MIG-0801 | SAME (characterization test suite) | RETAINED | PR#307 SHA=650c8b473da0e695ec9267fcba63a3fe8742fb64 TEST=node --test --experimental-strip-types src/lib/auth/authBaseline.characterization.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38909222803 |
 | `src/components/layout/bodyScrollLock.ts` | HELPER | modal/drawer body scroll lock primitive | MIG-0202 | packages/ui/src/layout/bodyScrollLock.ts (retain scroll restoration) | NOT_STARTED | — |
 | `src/components/layout/bodyScrollLock.contract.test.mjs` | TEST | bodyScrollLock export & instant restoration contract | MIG-0202 | SAME (layout utility parity) | NOT_STARTED | — |
 
