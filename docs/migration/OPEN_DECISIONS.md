@@ -134,6 +134,15 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 - Next の ISR は再生成1回 16〜71ms だった（`docs/operations/workers.md`、ローカル計測）。React SSR を含むためで、Astro の1ページ生成（`experimental_AstroContainer.renderToString`、`node_modules/astro/dist/container/index.d.ts:227`、astro 5.18.2）は未計測。
 - 一覧・検索索引・人気順など、多数の行から作るデータは build のまま（約 100分の遅れは下の制約のとおり）。
 
+### 反映の速さの方針（ユーザー、2026-10-16）
+
+「実測しながら、できるだけリアルタイムで反映できる方向で」。各データは次の順に試し、**実測で max < 8ms を満たす最も速いもの**を選ぶ。遅い方へ下げるときは計測値を PR に残す。
+
+1. Island が API（S2）で読む（即時）
+2. Queue で1件だけ作り直す（数分以内。個別ページ、MIG-0411）
+3. Queue で分割して作り直す（一覧・検索索引を件数の上限付きの shard に分け、変わった shard だけを作る。数分〜）
+4. build で作る（deploy hook、約 100分。MIG-0410）
+
 ### A を実装するときの制約（出典付き）
 
 - **build の上限（Workers Builds、Free）:** build 時間は月 3,000 分、同時 1、1回 20分まで。Deploy Hook は Worker ごとに 10回/分。出典: https://developers.cloudflare.com/workers/ci-cd/builds/limits-and-pricing/
