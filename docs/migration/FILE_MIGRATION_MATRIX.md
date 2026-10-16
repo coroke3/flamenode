@@ -263,6 +263,7 @@
 | `packages/ui/src/data/Pagination.tsx` | HELPER | accessible pagination with query preservation | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
 | `packages/ui/src/data/TableScroll.tsx` | HELPER | horizontal table scroll region container | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
 | `packages/ui/src/forms/ImeSafeGetForm.tsx` | HELPER | search form with IME composition Enter guard | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
+| `packages/ui/src/forms/AutoSubmitSelect.tsx` | HELPER | GET select/checkbox immediate navigation and IME composition guard (CURRENT parity) | MIG-0204 | SAME | IN_PROGRESS | PR#311 SHA=79894603427426f60967850b1ff5a92b9748afd7 TEST=packages/ui/test/dataAndForms.test.mjs (CI pending) |
 | `packages/ui/test/feedback.test.mjs` | TEST | feedback components unit tests | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
 | `packages/ui/test/dataAndForms.test.mjs` | TEST | pagination, scroll and IME guard tests | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
 
