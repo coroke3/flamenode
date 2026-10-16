@@ -11,23 +11,45 @@ export interface GatewayEnv {
     get: (key: string) => Promise<{
       body: ReadableStream;
       httpMetadata?: { contentType?: string };
+      customMetadata?: { generation?: string };
+      size?: number;
     } | null>;
   };
+  // Explicit service binding to the existing Auth.js origin; never return a fake auth 404.
+  AUTH_ORIGIN?: { fetch: (request: Request) => Promise<Response> };
   VISIBILITY_KV?: {
     get: (key: string) => Promise<string | null>;
   };
   ROUTE_MANIFEST?: string | RouteManifest;
 }
 
+// Workers isolates are reused: deserialize a large manifest only on binding change.
+let cachedRawManifest: string | undefined;
+let cachedParsedManifest: RouteManifest | null = null;
+
+function isValidManifest(value: unknown): value is RouteManifest {
+  if (!value || typeof value !== "object") return false;
+  const m = value as Partial<RouteManifest>;
+  return m.schemaVersion === 1 && typeof m.generation === "string" &&
+    m.generation.trim().length > 0 &&
+    typeof m.sha256 === "string" && /^[a-f0-9]{64}$/i.test(m.sha256) &&
+    Number.isSafeInteger(m.totalEntries) && (m.totalEntries ?? -1) >= 0 &&
+    !!m.routes && typeof m.routes === "object" && !Array.isArray(m.routes);
+}
+
 function parseManifest(raw: unknown): RouteManifest | null {
   if (!raw) return null;
-  if (typeof raw === "object") return raw as RouteManifest;
+  if (typeof raw === "object") return isValidManifest(raw) ? raw : null;
   if (typeof raw === "string") {
+    if (cachedRawManifest === raw) return cachedParsedManifest;
     try {
-      return JSON.parse(raw) as RouteManifest;
+      const parsed: unknown = JSON.parse(raw);
+      cachedParsedManifest = isValidManifest(parsed) ? parsed : null;
     } catch {
-      return null;
+      cachedParsedManifest = null;
     }
+    cachedRawManifest = raw;
+    return cachedParsedManifest;
   }
   return null;
 }
@@ -43,6 +65,17 @@ export function createKvRevocationChecker(
   };
 }
 
+function unavailableResponse(): Response {
+  return new Response("Service Unavailable", {
+    status: 503,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store, private",
+      "X-Robots-Tag": "noindex, nofollow",
+    },
+  });
+}
+
 export default {
   async fetch(request: Request, env: GatewayEnv): Promise<Response> {
     const url = new URL(request.url);
@@ -51,11 +84,22 @@ export default {
     const manifest = parseManifest(env.ROUTE_MANIFEST);
     const revocationChecker = createKvRevocationChecker(env.VISIBILITY_KV);
 
-    const decision = await evaluateVisibility(path, manifest, revocationChecker);
+    // Missing a revocation fence must never expose prebuilt public HTML.
+    // Keep auth passthrough independent of the manifest/fence.
+    let decision;
+    try {
+      decision = await evaluateVisibility(path, manifest, revocationChecker);
+    } catch {
+      return unavailableResponse();
+    }
 
     if (decision.action === "bypass") {
-      // Pass through or return 404 if no downstream bound
-      return new Response("Auth endpoint handled by origin", { status: 404 });
+      if (!env.AUTH_ORIGIN) return unavailableResponse();
+      try {
+        return await env.AUTH_ORIGIN.fetch(request);
+      } catch {
+        return unavailableResponse();
+      }
     }
 
     if (decision.action === "redirect") {
@@ -89,26 +133,41 @@ export default {
     }
 
     if (decision.action === "serve") {
+      if (!revocationChecker) return unavailableResponse();
       // 1. Try serving from Static Assets
       if (env.ASSETS) {
         const assetUrl = new URL(decision.assetPath, request.url);
         const assetRequest = new Request(assetUrl.toString(), request);
-        const assetResponse = await env.ASSETS.fetch(assetRequest);
-        if (assetResponse.status !== 404) {
-          return assetResponse;
+        try {
+          const assetResponse = await env.ASSETS.fetch(assetRequest);
+          if (assetResponse.status !== 404) return assetResponse;
+        } catch {
+          return unavailableResponse();
         }
       }
 
       // 2. Try pre-generated R2 HTML if assets misses (D-06)
       if (env.R2_STORAGE) {
         const r2Key = decision.assetPath.replace(/^\//, "");
-        const r2Object = await env.R2_STORAGE.get(r2Key);
+        let r2Object;
+        try {
+          r2Object = await env.R2_STORAGE.get(r2Key);
+        } catch {
+          return unavailableResponse();
+        }
         if (r2Object) {
+          // A stale, untyped, or empty R2 object is not public content.
+          if (r2Object.customMetadata?.generation !== manifest?.generation ||
+              (r2Object.size !== undefined && r2Object.size <= 0) ||
+              !r2Object.body ||
+              !/^text\/html(?:\s*;|$)/i.test(r2Object.httpMetadata?.contentType ?? "")) {
+            return unavailableResponse();
+          }
           return new Response(r2Object.body, {
             status: 200,
             headers: {
               "Content-Type":
-                r2Object.httpMetadata?.contentType ?? "text/html; charset=utf-8",
+                r2Object.httpMetadata!.contentType!,
               "Cache-Control": "public, max-age=0, must-revalidate",
             },
           });
