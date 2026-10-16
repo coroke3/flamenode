@@ -4,7 +4,7 @@
 
 ## Autonomous one-wake operation (self-driving agent)
 
-Start with `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, drops READY tasks already owned by an open `migration/mig-XXXX-*` PR when `gh` is available (`--offline` skips that lookup), and prefers independent MIG-0401 performance preflight when READY and unowned. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`. The packet includes the task's Work Order (`### MIG-XXXX:` section of the phase spec). **Small models (Haiku / Luna / Flash) run `npm run migration:next -- --model small`**, which offers only Work Orders marked `Model: small` + `READY_FOR_SMALL_MODEL`, then follow [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) "1 wake のコマンド手順" literally.
+First inspect all open PRs and any owned task checkpoint (via `gh` or GitHub MCP); resume an existing IN_PROGRESS/REVIEW/DONE-but-unmerged PR before selecting new work. For an unclaimed task, run `node scripts/print-migration-task-context.mjs --next` (or `npm run migration:next`). The selector reads the **merged** `STATUS.md` graph, filters unfinished dependencies and unresolved required decisions, drops READY tasks owned by an open `migration/mig-XXXX-*` PR when `gh` is available or verified branch names are supplied via `--open-pr-branches` (branch names alone do not prove file ownership; do not claim with `--offline`), and prioritizes the Phase 4 performance/route-map track when dependency-ready. **It is not a GitHub lock or an approval.** For an explicit user-selected task, use `node scripts/print-migration-task-context.mjs MIG-XXXX`. The packet includes the task's Work Order (`### MIG-XXXX:` section of the phase spec). **Small models (Haiku / Luna / Flash) run `npm run migration:next -- --model small`**, which offers only Work Orders marked `Model: small` + `READY_FOR_SMALL_MODEL`, then follow [IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md) "1 wake のコマンド手順" literally.
 
 First apply [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) §Wake decision to choose **one** writer unit, merge integration, eligible independent review, or no action. The steps below describe the selected writer/merge stages; they do not require creating a PR on every wake. A review-only wake leaves evidence in the reviewed PR and never edits its branch/work-item/STATUS. A wait/no-action wake reports the gate without a checkpoint-only push.
 
@@ -12,17 +12,30 @@ First apply [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) §Wake decision to choose **o
 2. If unclaimed: confirm `READY`, dependencies `DONE` on main, required D-xx decisions and non-overlapping file ownership. Create `migration/mig-xxxx-...` from latest main, open Draft PR, then check for duplicate PRs again. A race or overlap is `BLOCKED`, never a silent override.
 3. For a writer unit, read one task card/one micro-unit and exact code/tests. Implement only that scope with characterization, parity, permissions, visibility and side effects. Update only your own `work-items/MIG-XXXX.md` and the **owned** file/UX/FN rows. Continue the same Draft PR across wakes; healthy unfinished units remain `IN_PROGRESS`. Don't update shared `STATUS.md` during normal implementation checkpoints.
 4. Run `npm run check:migration-work-items`, `npm run check:project-docs`, scoped tests, typecheck/build and required CI. Save actual command/results, source SHA, PR, rollback and next micro-unit in the work-item. On failure: repair within scope; otherwise record `BLOCKED` with reproducible failure and safe recovery. Never claim success from skipped tests.
-5. When every unit passes: mark `REVIEW` on the work-item and request an **independent reviewer**. A later merge-integration wake checks required CI, review and human/Lead approvals (where applicable), syncs latest main and reconciles affected `STATUS.md` task DONE/next READY and shared rows. Re-run required validation/review on a changed Head before squash merge. On reviewer/permissions/CI waits, leave the PR at REVIEW and keep working on dependency-independent tasks (REVIEW PRs may accumulate; at most one IN_PROGRESS per agent). A fresh-context subagent on a higher-tier model than the builder counts as independent review; never auto-merge without the required gate.
+5. When every unit passes: mark `REVIEW` on the work-item and request an **independent reviewer**. A later integration wake checks CI and review, syncs latest main and reconciles affected `STATUS.md` task DONE/next READY and shared rows. Re-run CI and independent review on the **final Head** (including STATUS-only commits). Record `Merge requested:` in the PR; **a human merges only after reviewing that PR**. On reviewer/permissions/CI waits, leave the PR at REVIEW and keep working on dependency-independent tasks (REVIEW PRs may accumulate; at most one IN_PROGRESS per agent). A fresh-context subagent on a higher-tier model than the builder counts as independent review; never auto-merge without the required gate.
 6. On the next externally triggered wake, reload merged main and repeat. One wake = at most one MIG/micro-unit; never run another MIG in the same wake merely because capacity remains.
 
 **Unattended limits:** The Markdown and CLI do not create a timer, cloud job or daemon. A supported host's actual `/loop` / scheduled invocation or external runner must provide future wakes and credentials. Autonomous code/PR progress is allowed; Phase Gates, production DNS/Route, Remote D1, Auth/permission policy changes, destructive schema work, secrets and other explicitly gated operations **still require real human approval**. No browser automation or fake CI/review evidence. Source of truth for all policy is [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md), [GIT_WORKFLOW.md](GIT_WORKFLOW.md) and [work-items/README.md](work-items/README.md).
 
+## Start-ready lanes after #301 (2026-10-16)
+
+As of main including #283/#298/#300/#301, the initial READY tasks are **MIG-0301** (domain; `Model: small` / `READY_FOR_SMALL_MODEL`, lead + Haiku trial), **MIG-0201** (design tokens; lead) and **MIG-0404** (route-map; lead). Read current `STATUS.md` and live PR ownership every wake; this dated checkpoint never replaces the state ledger. MIG-0401 is DONE and must not be claimed again.
+
+**実際の移行開始条件:** taskを選んだだけでは未開始。依存・Decision・既存全open PRのownershipを確認し、単一のownerがDraft PRを作ってbranchの`work-items/MIG-XXXX.md`にclaimを残し、CURRENTのソースとテストを読んで最初の1 micro-unitを実装・検証する。文書の試走は本実装の開始ではない。利用するhostの`/loop`等は外部の実行トリガーが必要で、Markdownだけでは自走しない。
+
+mainへのmergeはWorkers Builds等の本番deployを起こす可能性がある。移行ループは自動mergeせず、最終Headの独立レビュー・CI greenと`Merge requested:`を揃えて人間に引き渡す。Phase Gate、Route/Custom Domain、Remote D1、Secrets、権限・可視性変更を包括承認しない。
+
 ## Quick context packet (do not paste whole Markdown set)
 
 ```bash
-npm run migration:next
-# or choose a concrete MIG explicitly:
-node scripts/print-migration-task-context.mjs MIG-0401
+# `gh` が使えて全open PRを確認済みの場合:
+npm run migration:next -- --model small
+# `gh` が無い場合は GitHub MCP で全open PRを取得してから:
+npm run migration:next -- --model small --open-pr-branches "<branch1>,<branch2>"
+# open PRが0件であると確認できた場合だけ空文字:
+npm run migration:next -- --model lead --open-pr-branches ""
+# 明示MIGのパケット閲覧（claim権限は付与しない）:
+node scripts/print-migration-task-context.mjs MIG-0301
 ```
 
 The output contains **one task, its dependency states, matching decisions, one work card and assigned source-file paths**. It does not execute a task, omit permissions, or replace reading current code/test. For large MIGs select one unit from [TASK_MICRO_UNITS.md](TASK_MICRO_UNITS.md). CI tests the packet size and the MIG-0401 READY state.
