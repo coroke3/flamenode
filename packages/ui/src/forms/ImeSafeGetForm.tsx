@@ -1,4 +1,5 @@
 import React from "react";
+import { navigateGetForm } from "./AutoSubmitSelect.js";
 
 export const IME_COMPOSING_ATTR = "data-fn-ime-composing";
 
@@ -12,10 +13,7 @@ export interface SearchKeyGuardInput {
 
 export function shouldBlockSearchKeySubmit(input: SearchKeyGuardInput): boolean {
   if (input.key !== "Enter") return false;
-  if (input.isCompositionSession) return true;
-  if (input.isComposing) return true;
-  if (input.keyCode === 229) return true;
-  return false;
+  return Boolean(input.isCompositionSession || input.isComposing || input.keyCode === 229);
 }
 
 export function shouldBlockSearchFormSubmit(input: {
@@ -30,7 +28,8 @@ export interface ImeSafeGetFormProps
 }
 
 /**
- * Form component that prevents unintentional submission while IME is actively composing.
+ * CURRENTの GET 検索契約:
+ * IME確定Enterでは送信せず、確定後のEnter・Shift+Enter・検索ボタンは同じGET検索に統一。
  */
 export function ImeSafeGetForm({
   children,
@@ -45,16 +44,37 @@ export function ImeSafeGetForm({
 }: ImeSafeGetFormProps): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
   const composingRef = React.useRef(false);
-  const compositionEndTimerRef = React.useRef<number | null>(null);
+  // compositionstart が到達しないIME環境でも、native.isComposing / keyCode=229
+  // のEnter直後の暗黙的submitを禁止する。
+  const suppressSubmitRef = React.useRef(false);
+  const compositionEndTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submitGuardTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearCompositionEndTimer = () => {
-    if (compositionEndTimerRef.current != null) {
-      clearTimeout(compositionEndTimerRef.current);
-      compositionEndTimerRef.current = null;
+  const clearTimer = (ref: { current: ReturnType<typeof setTimeout> | null }) => {
+    if (ref.current != null) {
+      clearTimeout(ref.current);
+      ref.current = null;
     }
   };
 
-  React.useEffect(() => () => clearCompositionEndTimer(), []);
+  React.useEffect(() => () => {
+    clearTimer(compositionEndTimerRef);
+    clearTimer(submitGuardTimerRef);
+  }, []);
+
+  const armSubmitGuard = () => {
+    clearTimer(submitGuardTimerRef);
+    suppressSubmitRef.current = true;
+    submitGuardTimerRef.current = window.setTimeout(() => {
+      suppressSubmitRef.current = false;
+      submitGuardTimerRef.current = null;
+    }, 0);
+  };
+
+  const runSearch = (form: HTMLFormElement) => {
+    navigateGetForm(form);
+    onNavigated?.();
+  };
 
   return (
     <form
@@ -63,53 +83,55 @@ export function ImeSafeGetForm({
       method={method}
       target={target}
       onCompositionStart={(event) => {
-        clearCompositionEndTimer();
+        clearTimer(compositionEndTimerRef);
+        clearTimer(submitGuardTimerRef);
+        suppressSubmitRef.current = true;
         composingRef.current = true;
         event.currentTarget.setAttribute(IME_COMPOSING_ATTR, "");
         onCompositionStart?.(event);
       }}
       onCompositionEnd={(event) => {
         onCompositionEnd?.(event);
-        clearCompositionEndTimer();
+        clearTimer(compositionEndTimerRef);
         const form = event.currentTarget;
+        // IME確定Enterと同じtickに届くsubmitは必ず抑止。
         compositionEndTimerRef.current = window.setTimeout(() => {
           composingRef.current = false;
+          suppressSubmitRef.current = false;
           form.removeAttribute(IME_COMPOSING_ATTR);
           compositionEndTimerRef.current = null;
         }, 0);
       }}
       onKeyDown={(event) => {
         onKeyDown?.(event);
-        if (event.defaultPrevented) return;
-        if (event.key !== "Enter") return;
-
+        if (event.defaultPrevented || event.key !== "Enter") return;
         const native = event.nativeEvent;
-        const block = shouldBlockSearchKeySubmit({
+        if (shouldBlockSearchKeySubmit({
           key: event.key,
           shiftKey: event.shiftKey,
           isComposing: native.isComposing,
           keyCode: native.keyCode,
           isCompositionSession: composingRef.current,
-        });
-
-        if (block) {
-          // IME composition Enter should not trigger form submit
+        })) {
+          // IME変換確定キー自体はpreventDefaultしない。
+          // onSubmitで、暗黙的submitのみを阻止する。
+          armSubmitGuard();
           return;
         }
 
-        if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })) {
-          event.preventDefault();
-          return;
+        event.preventDefault();
+        if (!shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })
+            && !suppressSubmitRef.current) {
+          runSearch(event.currentTarget);
         }
-
-        onNavigated?.();
       }}
       onSubmit={(event) => {
-        if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })) {
-          event.preventDefault();
-          return;
-        }
         onSubmit?.(event);
+        if (event.defaultPrevented) return;
+        event.preventDefault();
+        if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })
+            || suppressSubmitRef.current) return;
+        runSearch(event.currentTarget);
       }}
     >
       {children}
