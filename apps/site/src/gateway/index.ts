@@ -76,12 +76,24 @@ function unavailableResponse(): Response {
   });
 }
 
+// A single Worker binding object is stable within one request environment.
+// Reuse its validated, parsed manifest instead of traversing megabytes of JSON per fetch.
+const manifestByEnv = new WeakMap<GatewayEnv, { raw: unknown; parsed: RouteManifest | null }>();
+function manifestForEnv(env: GatewayEnv): RouteManifest | null {
+  const raw = env.ROUTE_MANIFEST;
+  const cached = manifestByEnv.get(env);
+  if (cached?.raw === raw) return cached.parsed;
+  const parsed = parseManifest(raw);
+  manifestByEnv.set(env, { raw, parsed });
+  return parsed;
+}
+
 export default {
   async fetch(request: Request, env: GatewayEnv): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    const manifest = parseManifest(env.ROUTE_MANIFEST);
+    const manifest = manifestForEnv(env);
     const revocationChecker = createKvRevocationChecker(env.VISIBILITY_KV);
 
     // Missing a revocation fence must never expose prebuilt public HTML.
