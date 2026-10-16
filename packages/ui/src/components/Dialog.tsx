@@ -1,5 +1,5 @@
 import React from "react";
-import { acquireBodyScrollLock } from "../layout/bodyScrollLock.ts";
+import { acquireBodyScrollLock } from "../layout/bodyScrollLock.js";
 
 export interface DialogProps {
   open: boolean;
