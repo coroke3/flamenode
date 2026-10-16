@@ -18,12 +18,13 @@ The user HTML mock is registered in `UI_REFERENCE.md` (MIG-0200 DONE, D-08 DECID
 - 試験: fileの実在/hash、未掲載画面一覧、scope/excludedを手動review。新デザインの推測禁止。
 - DONE: `UI_REFERENCE.md` の記載とHTML実体、ユーザーの採用確認が一致。D-08の状態更新は**HTML受領後**のみ。
 
-### MIG-0201 — visual hierarchy / IA / tokens extraction
+### MIG-0201 — design tokens extraction
 
-- 読む: 登録済みHTML、`UI_REFERENCE.md`、`CURRENT_ROUTES.md`、`frontend/PUBLIC.md`。
-- 変更: `+packages/ui/src/styles/tokens.css` 等に色/余白/タイポ/密度/ブレークポイントを数値で抽出。既存ページごとにHTMLでの情報階層・ナビゲーション・戻るリンクを`+docs/migration/design/IA_MAPPING.md`へ表で対応付ける。
-- 試験: 全tokenにHTML原本の場所とスクリーンショット参照を持たせる。ダーク/ライト、モバイル幅・ズームを確認。推定値と確認済み値を分離。
-- DONE: 明示的source付きtokenと全Public surfaceのIA mappingがあり、勝手な機能削除なし。
+- 読む: `PHASE_2_SPEC.md` の MIG-0201 Work Order（正本。script と test の全文あり）、`docs/migration/mock/source/design-system/tokens.json`。
+- 変更: `+scripts/generate-ui-tokens.mjs` で tokens.json から `+packages/ui/src/styles/tokens.css` を生成し、`+scripts/generate-ui-tokens.test.mjs` で一致を検査する。route と mock の対応表は `UI_REFERENCE.md` に既にあるので別表を作らない。
+- 試験: 生成物の sha256 一致、test 3件 PASS、`npm run test:unit`。
+- DONE: Work Order の DONE checklist。
+- 停止: tokens.json の version・件数が Work Order と違う、sha256 が合わない。
 
 ### MIG-0202 — shared UI primitives
 
@@ -62,26 +63,11 @@ The user HTML mock is registered in `UI_REFERENCE.md` (MIG-0200 DONE, D-08 DECID
 
 ### MIG-0301 — domain extraction / import resolution PoC
 
-- 読む: `src/lib/slots/slotReservationLimit.ts`, 配下の`*.test.mjs`, `packages/domain/{package.json,tsconfig.json,src/index.ts,src/permissions.ts}`, `PHASE_3_SPEC.md`。
-- 変更 1: 元`slotReservationLimit.ts`の実装（`MAX_SLOT_RESERVATIONS_PER_XID`, `normalizeSlotReservationLimit`, `slotReservationLimitMessage`）を `+packages/domain/src/slots/reservationLimit.ts`へ**意味を変えず**移す。
-- 変更 2: 元ファイルを同名exportのcompat bridgeにする。packageの`exports`/subpathとNode ESM module解決を整備、`packages/domain`のtest script/必要テストを追加。
-- 変更 3: `packages/domain/src/permissions.ts`の`isOwner || isCollabEditor || isEventStaff`偽権限実装を消すか、危険なexportを無効化して本来のmode別権限へ誤使用されないようにする。
-- 試験: **Node `node --test --experimental-strip-types`、`npm run typecheck`、`npm run test:unit`、`npm run verify:fast`、Nextの非本番build**。移動前後の既存テスト/エラー文言/export名を比較。
-- DONE: import解決3経路（Node/TS/Next）が実行ログで成功、`packages/domain`から`src/**`参照なし、次MIGの再利用可能なbridge例をPhase3 specへ記録。
-- 停止: Nodeがdist未生成で失敗、同名型export消失、NextにNode条件付きexportが噛み合わない場合は`REVIEW`に進めない。
-
-#### MIG-0301 concrete source snapshot (verified 2026-10-09)
-
-小型モデル向けにPoCをファイル/コード挙動まで固定する。このsnapshotと実際のmainが違えばsourceを読み直し、推測で進めない。
-
-- 元source: `src/lib/slots/slotReservationLimit.ts`。export3件: `MAX_SLOT_RESERVATIONS_PER_XID = 100`, `normalizeSlotReservationLimit(value: unknown): number`, `slotReservationLimitMessage(limit: number): string`。
-- numeric契約: `Number(value ?? 0)`。NaN/infinityは0、有限値は`Math.floor`後に0〜100 clamp。負数0、小数floor、100超100。
-- メッセージ契約: 正規化後0なら空文字。>0なら「このイベントでは、1つのX IDにつき最大{N}件まで枠を確保できます。連続枠は1件として数えます。」を一字一句維持。
-- 既存cross-module tests: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`; 予約処理は `src/lib/slots/slotReservationLimitGuard.ts` と `src/lib/actions/slot.ts` に依存。
-- **移さない**: `slotReservationLimitGuard.ts`のDrizzle SQL/DB/CAS/Batchは今回の純粋moduleではない。実ファイルを開くと `server-only` と `@/lib/db/schema` をimportするのでTier2へ送る。
-- Permission危険箇所: `packages/domain/src/permissions.ts`の `return params.isOwner || params.isCollabEditor || params.isEventStaff;` は本来の`normal/event/admin`privilege-mode契約ではない。実際に参照しているcallerを検索してから無効化/削除、必要なら旧owner policyに影響しない方法へ置換。
-- 新関数のテスト例: `null -> 0`, `undefined -> 0`, `-1 -> 0`, `2.9 -> 2`, `150 -> 100`, `Infinity -> 0`, `NaN -> 0`; normalized message exact-match。
-- 循環依存/Node importを検証するために**テストがdist/sourceのどちらをimportしているか**を報告してから、package exports/bridge方針を確定する。TypeScript aliasesだけでNode解決できたと判断しない。
+- 読む: `PHASE_3_SPEC.md` の MIG-0301 Work Order（正本。手順は実コードで確認済み）、`IMPLEMENTATION_RECIPES.md` の R-DOMAIN。
+- 変更: `src/lib/slots/slotReservationLimit.ts` の実装を `+packages/domain/src/slots/reservationLimit.ts` へ意味を変えずに移し、旧 path を re-export の bridge にする。`packages/domain/src/permissions.ts` の偽の `canEditVideo` を消す。`packages/domain` を source 参照の `exports` と test script にし、CI で test を回す。
+- 試験: 既存3 file の test が `# pass 6`、domain の test、`npm run typecheck`、`npm run test:unit`、`npm run verify:fast`。
+- DONE: Work Order の DONE checklist。
+- 停止: 偽の `canEditVideo` に呼び出し元がある、既存 test の件数が変わる、`@flamenode/domain/slots/reservationLimit` が解決できない。
 
 ### MIG-0302 — pure read helpers
 

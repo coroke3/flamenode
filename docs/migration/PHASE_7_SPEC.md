@@ -39,6 +39,8 @@
 ### MIG-0701: dashboard read-only（Personal 参照系画面）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608（session 読み取り）の merge 後
+- **Recipe:** R-SCREEN
+- **Runtime:** N
 - **Depends on:** MIG-0102, MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -79,6 +81,8 @@ Phase 7 共通契約のとおり。
 ### MIG-0702: dashboard mutations（Personal 更新系機能）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602・MIG-0605・MIG-0701 の merge 後（Active X / profile の API は MIG-0605）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
 - **Depends on:** MIG-0602, MIG-0605, MIG-0701 / **Decisions:** D-03 DECIDED, D-04 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -117,6 +121,8 @@ Phase 7 共通契約のとおり。
 ### MIG-0703: entry（Entry 画面群）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿は MIG-0603、枠は MIG-0604 の API を使う
+- **Recipe:** R-SCREEN
+- **Runtime:** N
 - **Depends on:** MIG-0603, MIG-0604, MIG-0702 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -154,6 +160,8 @@ Phase 7 共通契約のとおり。
 ### MIG-0704: manage（Manage イベント運営画面群）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0604 と MIG-0703 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
+- **Recipe:** R-SCREEN
+- **Runtime:** N
 - **Depends on:** MIG-0604, MIG-0703 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -193,6 +201,8 @@ Phase 7 共通契約のとおり。
 ### MIG-0705: admin（Admin 全体管理者画面群）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
+- **Recipe:** R-SCREEN
+- **Runtime:** N
 - **Depends on:** MIG-0605, MIG-0704 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -229,6 +239,8 @@ Phase 7 共通契約のとおり。
 ### MIG-0706: Phase 7 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0705 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot

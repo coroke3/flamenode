@@ -6,17 +6,42 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS } from "./check-migration-execution.mjs";
 import { parseFileRows } from "./check-migration-file-progress.mjs";
-import { TASK_CARD_FILES, collectTaskCards, specFileFor, extractWorkOrder } from "./check-migration-task-cards.mjs";
+import { TASK_CARD_FILES, collectTaskCards, specFileFor, extractWorkOrder, validateWorkOrder } from "./check-migration-task-cards.mjs";
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const read=(root,file)=>fs.readFileSync(path.join(root,file),"utf8");
-const readOptional=(root,file)=>{try{return read(root,file);}catch{return undefined;}};
+const readOptional=(root,file)=>{try{return read(root,file);}catch(error){if(error.code==="ENOENT")return undefined;throw error;}};
 export function getWorkOrder(id,root=ROOT){
   const file=specFileFor(id);
   const order=file?extractWorkOrder(readOptional(root,file),id):null;
-  return {file,order,smallReady:order?.model==="small"&&order?.readiness==="READY_FOR_SMALL_MODEL"};
+  const errors=validateWorkOrder(id,order);
+  return {file,order,errors,smallReady:errors.length===0&&order?.model==="small"&&order?.readiness==="READY_FOR_SMALL_MODEL"};
 }
-export function getTaskContext(id,root=ROOT){
+// Recipe sections and runtime budgets that a work order points to, so the packet carries the code shape and the 1102 budget.
+function markdownSection(text,heading){
+  const start=text.indexOf("\n"+heading);
+  if(start===-1)return null;
+  const next=text.indexOf("\n## ",start+1);
+  return text.slice(start+1,next===-1?undefined:next).trim();
+}
+export function getRecipeContext(orderText,root=ROOT){
+  if(!orderText)return [];
+  const recipes=readOptional(root,"docs/migration/IMPLEMENTATION_RECIPES.md")??"";
+  const zero=readOptional(root,"docs/migration/ZERO_1102.md")??"";
+  const names=(orderText.match(/\*\*Recipe:\*\*([^\n]*)/)?.[1].match(/R-[A-Z]+/g))??[];
+  const runtimes=(orderText.match(/\*\*Runtime:\*\*([^\n]*)/)?.[1].split(/[,、\s]+/).filter(Boolean))??[];
+  const sections=["## 全レシピ共通",...names.map(n=>"## "+n+":")].map(h=>markdownSection(recipes,h)).filter(Boolean);
+  const budgetRows=zero.split("\n").filter(line=>runtimes.some(r=>line.startsWith("| `"+r+"` |")));
+  return [
+    "## Recipe (docs/migration/IMPLEMENTATION_RECIPES.md)",
+    ...(sections.length?sections:["No Recipe line: NEEDS_REFINEMENT."]),
+    "",
+    "## Runtime budget (docs/migration/ZERO_1102.md §3; design rules §4)",
+    ...(budgetRows.length?["| ID | 種別 | 例 | Worker | CPU 最大値の予算 | 構造上の上限 |","| --- | --- | --- | --- | --- | --- |",...budgetRows]:["No Runtime line: NEEDS_REFINEMENT."]),
+    "",
+  ];
+}
+export function getTaskContext(id,root=ROOT,{smallOnly=false}={}){
   if(!/^MIG-\d{4}$/.test(id))throw new Error("Provide one exact MIG-XXXX task ID");
   const status=read(root,"docs/migration/STATUS.md");
   const tasks=parseTaskRows(status),task=tasks.get(id);
@@ -30,14 +55,15 @@ export function getTaskContext(id,root=ROOT){
   const decisionIds=[...(REQUIRED_DECISIONS[id]||[])];
   const visualGateIsInformational=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"].includes(id);
   const decisionRows=decisions.split("\n").filter(line=>decisionIds.some(d=>new RegExp("^\\|\\s*"+d+"\\s*\\|").test(line)));
-  const {file:specFile,order,smallReady}=getWorkOrder(id,root);
+  const {file:specFile,order,smallReady,errors}=getWorkOrder(id,root);
+  if(smallOnly&&!smallReady)throw new Error(id+": no complete READY_FOR_SMALL_MODEL work order; "+errors.join("; "));
   const dir="docs/migration/";
   const lines=[
     "# "+id+" — narrow source-of-truth navigation packet",
     "> Read root AGENTS.md, the relevant AGENT_PROTOCOL.md and GIT_WORKFLOW.md rules. This output is a **locator**, not permission to omit CURRENT code/test or independent review.",
     "",
     "## STATUS: "+task.state+" — "+task.title,
-    "Work order: Model="+(order?.model??"unset")+" Readiness="+(order?.readiness??"unset")+(smallReady?" -> a small model may execute it":" -> lead only (small models must not claim it)"),
+    "Work order: Model="+(order?.model??"unset")+" Readiness="+(order?.readiness??"unset")+(smallReady?" -> structurally complete for small models; dependencies/live owners/approvals still required":" -> lead only (small models must not claim it)"),
     "Dependencies: "+(dependencies.map(d=>d+":"+String(tasks.get(d)?.state??"UNKNOWN")).join("; ")||"none"),
     "Required decisions / approval (inspect full relevant subsection):",
     ...(decisionRows.length?decisionRows:["none explicit for this task; production approvals remain separate"]),
@@ -50,6 +76,7 @@ export function getTaskContext(id,root=ROOT){
     "## Work order ("+(specFile??"no phase spec")+")",
     order?.text??("No '### "+id+":' work order section yet: NEEDS_REFINEMENT. A lead must write it (IMPLEMENTATION_RUNBOOK.md Work Order format) before a small model starts."),
     "",
+    ...getRecipeContext(order?.text,root),
     "## Assigned source-file rows ("+owned.length+"; full ledger remains authoritative)",
     ...owned.map(row=>" - "+row.path+" | "+row.kind+" | "+row.state+" | "+row.target),
     "",
@@ -106,6 +133,7 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
   return {selected:candidates.find(id=>!owned.has(id))??null,candidates,ownedByPr};
 }
 export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smallOnly=false}={}){
+  if (!owners.live && !owners.offline) throw new Error("Open PRs could not be read; use --offline only after checking active PR ownership separately");
   const eligible=smallOnly?(id=>getWorkOrder(id,root).smallReady):()=>true;
   const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned,eligible);
   const ownedNote=next.ownedByPr.map(id=>id+"=PR#"+owners.owned.get(id)).join(",");
@@ -113,18 +141,32 @@ export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smal
     if(ownedNote)throw new Error("Every dependency-ready MIG is owned by an open PR ("+ownedNote+"); resume your own PR, review another agent's REVIEW PR, or stop");
     throw new Error(smallOnly?"No dependency-ready MIG with a READY_FOR_SMALL_MODEL work order; a lead must refine one (AGENT_PROTOCOL.md Wake decision 4) or stop":"No dependency-ready MIG in merged STATUS; check blockers, approvals and active owner PRs");
   }
-  const result=getTaskContext(next.selected,root);
+  const result=getTaskContext(next.selected,root,{smallOnly});
   return {...result,selected:next.selected,candidates:next.candidates,ownedNote,live:owners.live};
+}
+
+export function parseContextArgs(args){
+  let task=null,automatic=false,offline=false,model=null;
+  for(let i=0;i<args.length;i++){
+    const arg=args[i];
+    if(arg==="--next"&&!automatic&&!task)automatic=true;
+    else if(arg==="--offline"&&!offline)offline=true;
+    else if(arg==="--model"&&model===null){
+      model=args[++i];
+      if(!["small","lead"].includes(model))throw new Error("--model must be small or lead");
+    }else if(/^MIG-\d{4}$/.test(arg)&&!task&&!automatic)task=arg;
+    else throw new Error("Unknown or duplicate argument: "+arg);
+  }
+  if(!automatic&&!task)throw new Error("Provide --next or one exact MIG-XXXX task ID");
+  return {task,automatic,offline,smallOnly:model==="small"};
 }
 
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(invoked){
  try{
-  const automatic=process.argv[2]==="--next";
-  const owners=process.argv.includes("--offline")?{owned:new Map(),live:false}:undefined;
-  const modelAt=process.argv.indexOf("--model");
-  const smallOnly=modelAt>0&&process.argv[modelAt+1]==="small";
-  const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(process.argv[2]);
+  const {task,automatic,offline,smallOnly}=parseContextArgs(process.argv.slice(2));
+  const owners=offline?{owned:new Map(),live:false,offline:true}:undefined;
+  const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(task,ROOT,{smallOnly});
   if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");
   process.stdout.write(output);
   process.stderr.write("[migration-context] chars="+chars+" assigned source rows="+fileRows+" (source/test and policy are additional required reads)\n");

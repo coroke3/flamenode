@@ -69,6 +69,27 @@
 - 試験: 20,000 asset境界の上下、大量dynamic slug、R2 partial upload/old generation/stale/private/corrupt HTML, fallback 404/503/rebuild enqueue; worker p50/p95/p99・tail spike・1102 countの**実測**。
 - DONE: 1 version当たりfileの内訳（HTML/JS/CSS/font/redirect/etc）、R2 cost/build時間、CPU/headroom、SEO/OGP/cache parity evidence。SSR採用は独立reviewと現実測定合格時だけ。Free 10ms中の1102=0を`機械的に保証`と書かない。
 
+### MIG-0409 — build-time public data from D1 + build budget (D-09)
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0409 Work Order、`OPEN_DECISIONS.md` D-09、`ZERO_1102.md`。
+- 変更: `+apps/site/scripts/readPublicData.ts`（1 family の PoC）、`+docs/migration/static-delivery/BUILD_TIME_DATA.md`（build / API の分類表、build 時間と1日の上限）。
+- 試験: CURRENT の生成関数と同じ fixture で出力一致、非公開の除外、`MAX_` 境界、同じ入力で同じ byte。
+- DONE: 公開までの最大の遅れをユーザーが承認。Queue consumer の CPU 上限を非本番で確かめ（U07、作る前に承認）、`ZERO_1102.md` §1 の暫定予算を確定か見直しにした。token・deploy hook・本番 D1 には触れていない。
+
+### MIG-0410 — deploy-hook build scheduler (D-09)
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0410 Work Order、`IMPLEMENTATION_RECIPES.md` R-JOB。
+- 変更: `+workers/fast-jobs/publicBuildTrigger.ts`（`decidePublicBuild` と handler）、`public_build_state` 表、fast-jobs の毎時 Cron に1段。
+- 試験: T01〜T07（変更なし / 間隔未満 / trigger / 1日の上限 / 日付の切替 / 同時実行 / URL 未設定）。
+- DONE: fast-jobs Cron 1回の max < 8ms（非本番）。本番の migration・secret・deploy は承認待ち。
+
+### MIG-0411 — per-page R2 HTML regeneration via Queue (ISR equivalent, D-09)
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0411 Work Order、`OPEN_DECISIONS.md` D-09 の 2026-10-16 改訂、`IMPLEMENTATION_RECIPES.md` R-JOB / R-PAGE。
+- 変更: `+apps/site/src/gateway/renderPublicPage.ts`、`+apps/site/src/gateway/pageRenderQueue.ts`、`public_page_renders` 表、gateway の `queue` handler、既存 Cron の回復段。
+- 試験: 1ページだけ作り直す / 非公開化 / 生成中の再更新 / 同じ doorbell 2回 / R2 失敗 / 上限ちょうどの max < 8ms。
+- DONE: 種類ごとの max CPU と対象外の種類が PR にある。本番の D1・Queue・R2 は承認待ち。
+
 ### MIG-0407 — Phase 4 Gate
 
 - **独立両Gate:** MIG-0403の承認済み実HTMLによる3画面UX/可視性/SEO証跡 **AND** MIG-0406のCPU/R2/Queue/容量証跡が揃うまでREVIEW/DONEにしない。性能トラックのPASSで視覚/UX受入をDONEにしない。移行後web `exceededCpu` **90%以上削減は達成目標であり予測/合格の自動保証ではない**。
@@ -127,6 +148,13 @@
 - 変更: root slugのresolveを固定ルートやasset pathより後に適用。静的作品情報 + player/chapters/Active X like/bookmark Islandを組み込み、既存APIの状態/403/202/503/リトライを維持。
 - 試験: collision with /event,/admin,/api,/user,/dashboard, unknown slug, video private→public and reverse, banned, 0X/複数X, chapter, editing, video canonical/OGP & share thumbnail。
 - DONE: LAST route migrationとして全Public UX/FN、SEO/OGP、visibility/cache/dynamic path parity。catch-all RouteをそのままCloudflareへ登録禁止。
+
+### MIG-0509 — all public data generated at build time (D-09)
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0509 Work Order、`static-delivery/BUILD_TIME_DATA.md`。
+- 変更: family ごとの `+apps/site/scripts/readPublicData/<family>.ts`、`apps/site/src/lib/publicDataLoader.ts` の読み先、GA4 同期の入力、CURRENT の更新での `requested_at` 記録。
+- 試験: family ごとの CURRENT 一致、非公開の除外、`requested_at` の更新有無、`apps/site` が R2 を読まない。
+- DONE: 「build」の全 family が移り、build 時間が承認した範囲内。`workers/json-generator` は残す（MIG-0907）。
 
 ### MIG-0508 — Phase 5 Gate
 

@@ -18,6 +18,8 @@ Next.js 固有のラッパーから Web Standards 準拠の Auth.js（`@auth/cor
 ### MIG-0801: Auth baseline fixtures/tests
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0008）は DONE。lead が cookie 名・属性の実測方法（非本番 build で `Set-Cookie` を記録）を U01 に書き足したら着手可。認証は高リスクなので小型モデルに渡さない
+- **Recipe:** R-TEST
+- **Runtime:** N
 - **Depends on:** MIG-0008 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -61,6 +63,8 @@ PRをrevert（テスト追加のみ）。
 ### MIG-0802: Web Standard/Auth integration PoC
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0801 と MIG-0607 の後。`@auth/core` と `next-auth@5.0.0-beta.32` の cookie・CSRF の互換を非本番で確かめる
+- **Recipe:** R-API
+- **Runtime:** S4
 - **Depends on:** MIG-0801, MIG-0607 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -100,6 +104,8 @@ PRをrevert。本番の認証は旧 Next のまま。
 ### MIG-0803: Discord/account-linking parity
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0802 の後
+- **Recipe:** R-API
+- **Runtime:** S3, S4
 - **Depends on:** MIG-0802 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -135,10 +141,12 @@ PRをrevert。
 ### MIG-0804: CPU/security review
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0803 の後
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0803 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- 目標: auth の request p95 < 9ms（本仕様 MIG-0804 目的）。基準は `cloudflare/PERFORMANCE_BASELINE.md`。
+- 目標: `ZERO_1102.md` §3 の最大値。session 解決（S4）は 2ms 以内、それを含む API 全体は S2 < 7ms / S3 < 8ms。p95 は参考として記録する。
 - 既存の安全なリダイレクト: `src/lib/auth/origin.ts`, `#utils/next` の `sanitizeNextPath`。
 #### Owned paths
 - 新規: `+docs/migration/auth/SECURITY_REVIEW.md`
@@ -172,6 +180,8 @@ PRをrevert。
 ### MIG-0805: production cutover proposal
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 手順書だけを作る task。本番の Route・Discord 設定の変更は別の明示承認
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0804 / **Decisions:** D-02 DECIDED, D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -207,6 +217,8 @@ npm run check:project-docs
 ### MIG-0806: Phase 8 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0805 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -252,6 +264,8 @@ Gate のPRをrevert。
 ### MIG-0901: residual dependency inventory
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase 5〜8 の Gate 通過と、各ルートの本番切替が承認・実施済みであることが前提
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0508, MIG-0607, MIG-0706, MIG-0806 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -287,6 +301,8 @@ npm run check:project-docs
 ### MIG-0902: rollback observation window
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 観測期間の長さ（最低7日を候補）と責任者を人間が決める
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0901 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -318,6 +334,8 @@ npm run check:project-docs
 ### MIG-0903: remove legacy Server Actions/routes
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0902 の後
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0902 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -355,6 +373,8 @@ node scripts/check-migration-file-progress.mjs
 ### MIG-0904: remove OpenNext/Next deploy path
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0903 の後
+- **Recipe:** R-REMOVE
+- **Runtime:** N
 - **Depends on:** MIG-0903 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -394,10 +414,54 @@ npm run build --workspace=@flamenode/api
 #### Rollback
 PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 
+### MIG-0907: 旧 rebuild 経路を消し、背景処理の 1102 を7日観測する（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後。消す前の呼び出し元 0件を `rg` で示してから
+- **Recipe:** R-REMOVE
+- **Runtime:** N
+- **Depends on:** MIG-0904, MIG-0610 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- 消す対象: `workers/json-generator/**`、static rebuild queue の consumer（`workers/content-jobs/staticRebuildWakeQueue.ts`）、生成を起こすだけの段（`workers/content-jobs/index.ts:201〜318`、`workers/sync-jobs/index.ts:205`）、`src/lib/staticRebuild/**` と `src/lib/queues/wakeStaticRebuildQueueAfterCommit.ts`（MIG-0903・0904 で残っていれば）。
+- 残す: `public_build_state`（MIG-0410）、MIG-0610 で分けた job。
+- Queue `flamenode-static-rebuild-wake` と DLQ、D1 の `static_rebuild_queue` 表は本番の資源なので、消すのはユーザーの承認後（`background-jobs/README.md` の Queue の表）。
+#### Owned paths
+- 削除: `workers/json-generator/**`、`workers/content-jobs/staticRebuildWakeQueue.ts` とその test
+- 変更: `workers/content-jobs/index.ts`、`workers/content-jobs/wrangler.toml`（consumer と producer の削除）、`workers/sync-jobs/index.ts`、`workers/sync-jobs/wrangler.toml`
+- 新規: `+docs/migration/BACKGROUND_OBSERVATION.md`
+#### Micro-units
+- **U01 inventory**: 消す file の export ごとに `rg` で呼び出し元を数え、0件の結果を PR に貼る。
+- **U02 remove**: 1 PR で消すのは1系統（R-REMOVE）。順番は consumer → 生成を起こす段 → `workers/json-generator`。
+- **U03 observe**: 本番へ反映（承認後）してから7日間、背景処理の Worker ごと・日ごとの Exceeded CPU / Exceeded Memory を `BACKGROUND_OBSERVATION.md` に記録する（`ZERO_1102.md` の G2）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 消す export の呼び出し元 | 0件 |
+| T02 | 公開データを変える更新 | build 要求だけが記録され、R2 artifact は書かれない |
+| T03 | 7日間の観測 | 背景処理の Worker で Exceeded CPU / Memory が 0件 |
+#### Commands
+```bash
+npm run test:unit
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の消した file を REMOVED。`background-jobs/README.md` の Queue の表から static rebuild を消す。`BACKGROUND_OBSERVATION.md` に7日分。
+#### DONE checklist
+- [ ] 呼び出し元 0件の証跡
+- [ ] 実観測7日で G2 を満たす（推定ではなく実測）
+#### STOP
+- 本番の Queue・D1 の表・Worker の削除や deploy は明示承認事項なので止める。
+- 観測中に 1102 が出たら数え直さず、該当の job を MIG-0610 の形で直す task をユーザーに提案する。
+#### Rollback
+PRをrevert して再 deploy（承認後）。D1 の `static_rebuild_queue` を消していなければ、旧経路はそのまま戻る。
+
 ### MIG-0905: final architecture/docs consolidation
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後
-- **Depends on:** MIG-0904 / **Decisions:** none
+- **Readiness:** NEEDS_REFINEMENT — MIG-0907 の後
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
+- **Depends on:** MIG-0907 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `FEATURE_CATALOG.md`, `FRONTEND_FEATURES.md`, `FUNCTION_INVENTORY.md`（432 UX / 136 FN）、`CURRENT_ROUTES.md`、`AGENTS.md`、`docs/operations/**`。
@@ -430,10 +494,12 @@ PRをrevert。
 ### MIG-0906: Final Gate & Migration Complete
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 人間の最終承認が必要
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0905 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- MIG-0901〜0905 の merge 済みPRと観測期間の記録。
+- MIG-0901〜0905・0907 の merge 済みPRと観測期間の記録（`OBSERVATION_WINDOW.md`、`BACKGROUND_OBSERVATION.md`）。
 #### Owned paths
 - 新規: `+docs/migration/FINAL_GATE.md`
 - 変更: `docs/migration/STATUS.md`（承認後だけ）
@@ -443,7 +509,7 @@ PRをrevert。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | 本番の 1102 | 観測期間で0件（推定ではなく実測） |
+| T01 | 本番の 1102 | web 系は MIG-0902、背景処理は MIG-0907 の観測期間で0件（`ZERO_1102.md` の G1・G2。推定ではなく実測） |
 | T02 | 欠けた証跡 | BLOCKED と担当・次の行動を記録 |
 #### Commands
 ```bash

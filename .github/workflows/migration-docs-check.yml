@@ -67,7 +67,7 @@ jobs:
         run: |
           node --test scripts/print-migration-task-context.test.mjs
           node scripts/print-migration-task-context.mjs MIG-0401 > /dev/null
-          node scripts/print-migration-task-context.mjs --next > /dev/null
+          node scripts/print-migration-task-context.mjs --next --offline > /dev/null
       - name: MD相互リンク検証と回帰テスト
         run: |
           node scripts/check-migration-links.mjs
