@@ -165,7 +165,7 @@
 | `packages/domain/src/index.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/domain/src/permissions.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/domain/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
-| `packages/ui/src/styles/tokens.css` | TARGET_SKELETON | generated from registered HTML design token JSON; no CURRENT counterpart | MIG-0201 | SAME (reproducible CSS artifact; used by future MIG-0202) | IN_PROGRESS | PR#303 SHA=c7030b509b6e45b6d0355cfae65b863f5a3d8eae |
+| `packages/ui/src/styles/tokens.css` | TARGET_SKELETON | generated from registered HTML design token JSON; no CURRENT counterpart | MIG-0201 | SAME (reproducible CSS artifact; used by future MIG-0202) | RETAINED | PR#303 SHA=57939bffe38d3a19bda4c54194eeaba88a28abc5 TEST=node --test scripts/generate-ui-tokens.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38854581371 |
 | `packages/ui/package.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/src/adapters/index.tsx` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/src/components/Button.tsx` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |

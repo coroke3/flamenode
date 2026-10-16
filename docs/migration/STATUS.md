@@ -23,9 +23,9 @@ Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0401
-Last Task PR: #283
-Merged READY: MIG-0201, MIG-0301, MIG-0404, MIG-0801
+Last Completed Task: MIG-0201
+Last Task PR: #303
+Merged READY: MIG-0202, MIG-0301, MIG-0404, MIG-0801
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,7 +106,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201 DONE / MIG-0202 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401 DONE / MIG-0404 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -220,7 +220,7 @@ Validation:
 
 ## Phase 2 — Design System / HTML mock integration
 
-> 2026-10-13: ユーザーより新HTMLモック一式を受領し、`docs/migration/mock/` へ配置および `UI_REFERENCE.md` への登録完了（MIG-0200 DONE）。MIG-0201 が READY。
+> 2026-10-13: ユーザーより新HTMLモック一式を受領し、`docs/migration/mock/` へ配置および `UI_REFERENCE.md` への登録完了（MIG-0200 DONE）。MIG-0201 は PR #303 で DONE。MIG-0202 が READY（Work Order は NEEDS_REFINEMENT のため lead の精緻化が必要）。
 
 > ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
 > UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
@@ -228,8 +228,8 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | DONE | user input |
-| MIG-0201 | visual/IA extraction + design tokens | READY | MIG-0108, MIG-0200 |
-| MIG-0202 | primitives | BLOCKED | MIG-0201 |
+| MIG-0201 | visual/IA extraction + design tokens | DONE | MIG-0108, MIG-0200 |
+| MIG-0202 | primitives | READY | MIG-0201 |
 | MIG-0203 | navigation/layout | BLOCKED | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | BLOCKED | MIG-0202 |
 | MIG-0205 | representative responsive screens + UX mapping | BLOCKED | MIG-0203, MIG-0204 |
@@ -254,7 +254,7 @@ Validation:
 
 > **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、視覚系の **MIG-0402/0403と正式UI移行** はPhase 2 Gate（MIG-0206）の完了待ち（D-08はDECIDED、mock登録済み）。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
 >
-> **並行READY (2026-10-16):** MIG-0201 (Design system)、MIG-0301 (Domain)、MIG-0404 (Public route-map) は依存解決済みで別担当・別PRで進められる。MIG-0401 は PR #283 で DONE。各taskのWork OrderのModel/Readinessと全open PRのownershipを必ず再確認し、小型モデルは `READY_FOR_SMALL_MODEL` 以外をclaimしない。`Current Task`は別タスクの自動claimを許可しない。
+> **並行READY (2026-10-16):** MIG-0202 (Design system)、MIG-0301 (Domain)、MIG-0404 (Public route-map) は依存解決済みで別担当・別PRで進められる。MIG-0401 は PR #283 で DONE。各taskのWork OrderのModel/Readinessと全open PRのownershipを必ず再確認し、小型モデルは `READY_FOR_SMALL_MODEL` 以外をclaimしない。`Current Task`は別タスクの自動claimを許可しない。
 >
 > Performance measurement/protocol: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md) / [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) 。
 

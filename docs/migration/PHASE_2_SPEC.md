@@ -169,9 +169,9 @@ CSSは新規TARGETファイルでCURRENTの対応元は無いが、`scripts/chec
 
 最初は `IN_PROGRESS` で実際のPR番号と既存のU01 Headを記録する。実際に `node --test scripts/generate-ui-tokens.test.mjs` と最初のCIが成功したあと、同じ行だけ `RETAINED` に変更し、`TEST=node --test scripts/generate-ui-tokens.test.mjs CI=<successful run URL>` を証拠へ追加する。CI未完了・失敗の時点ではRETAINEDにしない。既存のUX/FN stateや公開Routeのparityは更新しない。
 #### DONE checklist
-- [ ] `packages/ui/src/styles/tokens.css` の sha256 が `affa3789bb7c49a25d9d8abcd9d8a10af5537b83aaba6a2d5533bde496e42f25`
-- [ ] `scripts/generate-ui-tokens.test.mjs` が `test:unit` で走る（件数 +3）
-- [ ] PR 本文に fn.css と tokens.json の light shadow の違いを1行で書いた
+- [x] `packages/ui/src/styles/tokens.css` の sha256 が `affa3789bb7c49a25d9d8abcd9d8a10af5537b83aaba6a2d5533bde496e42f25`
+- [x] `scripts/generate-ui-tokens.test.mjs` が `test:unit` で走る（件数 +3）
+- [x] PR 本文に fn.css と tokens.json の light shadow の違いを1行で書いた
 #### STOP
 - `tokens.json` の version が 1 でない、または token の件数が Source snapshot と違う（mock が更新された）。
 - sha256 が合わない（2回直しても）。
