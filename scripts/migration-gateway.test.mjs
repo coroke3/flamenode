@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { performance } from "node:perf_hooks";
 import { buildRouteMap } from "../apps/site/src/lib/routeMap.ts";
 import gateway, {
   createKvRevocationChecker,
@@ -141,7 +140,15 @@ test("T03: /api/auth/* bypasses the visibility gateway", async () => {
 
   const req = new Request("https://flamenode.net/api/auth/session");
   const res = await gateway.fetch(req, { ROUTE_MANIFEST: manifest });
-  assert.equal(res.status, 404); // Not handled by public gateway
+  assert.equal(res.status, 503); // Explicit origin binding is required, never fake 404
+  const passed = await gateway.fetch(req, {
+    ROUTE_MANIFEST: manifest,
+    AUTH_ORIGIN: { fetch: async (incoming) => {
+      assert.equal(new URL(incoming.url).pathname, "/api/auth/session");
+      return new Response("real upstream", { status: 200 });
+    } },
+  });
+  assert.equal(await passed.text(), "real upstream");
 });
 
 test("T04: Path traversal is denied with 404 and noindex", async () => {
@@ -163,6 +170,7 @@ test("Gateway Worker fetch serves from ASSETS and falls back to R2", async () =>
   let assetFetched = false;
   const envAssets = {
     ROUTE_MANIFEST: manifest,
+    VISIBILITY_KV: { get: async () => null },
     ASSETS: {
       fetch: async (r) => {
         assetFetched = true;
@@ -180,6 +188,7 @@ test("Gateway Worker fetch serves from ASSETS and falls back to R2", async () =>
   let r2Fetched = false;
   const envR2 = {
     ROUTE_MANIFEST: manifest,
+    VISIBILITY_KV: { get: async () => null },
     ASSETS: {
       fetch: async () => new Response("Not Found", { status: 404 }),
     },
@@ -195,6 +204,8 @@ test("Gateway Worker fetch serves from ASSETS and falls back to R2", async () =>
             },
           }),
           httpMetadata: { contentType: "text/html; charset=utf-8" },
+          customMetadata: { generation: manifest.generation },
+          size: 23,
         };
       },
     },
@@ -205,42 +216,62 @@ test("Gateway Worker fetch serves from ASSETS and falls back to R2", async () =>
   assert.ok(r2Fetched);
 });
 
-test("T05: Gateway CPU budget complies with S1 (< 5ms max CPU budget)", async () => {
+test("Gateway fails closed without KV, on KV faults, and on R2 corruption", async () => {
   const manifest = createSampleManifest();
-  const kvStore = new Map();
-  const mockKv = { get: async (k) => kvStore.get(k) ?? null };
   const req = new Request("https://flamenode.net/video-public-1");
-  const env = {
+  const goodAsset = { fetch: async () => new Response("<html>stored</html>") };
+  assert.equal((await gateway.fetch(req, { ROUTE_MANIFEST: manifest, ASSETS: goodAsset })).status, 503);
+  assert.equal((await gateway.fetch(req, {
     ROUTE_MANIFEST: manifest,
-    VISIBILITY_KV: mockKv,
-    ASSETS: {
-      fetch: async () => new Response("OK", { status: 200 }),
-    },
+    VISIBILITY_KV: { get: async () => { throw Error("KV unavailable"); } },
+    ASSETS: goodAsset,
+  })).status, 503);
+
+  for (const storage of [
+    { get: async () => { throw Error("R2 unavailable"); } },
+    { get: async () => ({ body: "<html>stale</html>", size: 18, httpMetadata: { contentType: "text/html" }, customMetadata: { generation: "old" } }) },
+    { get: async () => ({ body: "<html>not html type</html>", size: 26, httpMetadata: { contentType: "application/json" }, customMetadata: { generation: manifest.generation } }) },
+    { get: async () => ({ body: "", size: 0, httpMetadata: { contentType: "text/html" }, customMetadata: { generation: manifest.generation } }) },
+  ]) {
+    const response = await gateway.fetch(req, {
+      ROUTE_MANIFEST: manifest,
+      VISIBILITY_KV: { get: async () => null },
+      ASSETS: { fetch: async () => new Response("", { status: 404 }) },
+      R2_STORAGE: storage,
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Cache-Control"), "no-store, private");
+  }
+});
+
+test("T05: cache a production-sized manifest and measure JS CPU (not wall time)", async () => {
+  // 52k routes: representative large manifest, built outside the timed section.
+  const manifest = buildRouteMap(
+    Array.from({ length: 52000 }, (_, i) => ({ kind: "video", id: "clip-" + i })),
+    "gen-cpu-large",
+  );
+  const serialized = JSON.stringify(manifest);
+  const req = new Request("https://flamenode.net/clip-1");
+  const env = {
+    ROUTE_MANIFEST: serialized,
+    VISIBILITY_KV: { get: async () => null },
+    ASSETS: { fetch: async () => new Response("OK") },
   };
 
-  const latencies = [];
-  const iterations = 1000;
-
-  // Warmup
-  for (let i = 0; i < 50; i++) {
-    await gateway.fetch(req, env);
+  // First parse is initialization; steady-state request budget excludes it.
+  assert.equal((await gateway.fetch(req, env)).status, 200);
+  const samples = [];
+  for (let i = 0; i < 200; i++) {
+    const before = process.cpuUsage();
+    assert.equal((await gateway.fetch(req, env)).status, 200);
+    const cpu = process.cpuUsage(before);
+    samples.push((cpu.user + cpu.system) / 1000);
   }
-
-  for (let i = 0; i < iterations; i++) {
-    const start = performance.now();
-    await gateway.fetch(req, env);
-    const duration = performance.now() - start;
-    latencies.push(duration);
-  }
-
-  latencies.sort((a, b) => a - b);
-  const p50 = latencies[Math.floor(iterations * 0.5)];
-  const p95 = latencies[Math.floor(iterations * 0.95)];
-  const p99 = latencies[Math.floor(iterations * 0.99)];
-  const max = latencies[latencies.length - 1];
-
-  console.log(`[CPU Benchmark] p50: ${p50.toFixed(4)}ms, p95: ${p95.toFixed(4)}ms, p99: ${p99.toFixed(4)}ms, max: ${max.toFixed(4)}ms`);
-
-  assert.ok(p99 < 5.0, `p99 latency (${p99}ms) must be under S1 budget (< 5ms)`);
-  assert.ok(max < 15.0, `max latency (${max}ms) must not show abnormal spikes`);
+  samples.sort((a, b) => a - b);
+  const p99 = samples[Math.floor(samples.length * 0.99)];
+  const max = samples.at(-1);
+  console.log("[Gateway JS CPU] route-count=" + manifest.totalEntries + " p99=" + p99 + "ms max=" + max + "ms");
+  assert.ok(p99 < 5, "p99 JS CPU exceeds S1 budget: " + p99 + "ms");
+  assert.ok(max < 5, "max JS CPU exceeds S1 budget: " + max + "ms");
+  // Node process CPU is not equivalent to Workers production CPU; non-production PoC evidence only.
 });
