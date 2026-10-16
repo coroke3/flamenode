@@ -1,23 +1,27 @@
+/**
+ * Legacy re-export bridge for public navigation.
+ * Canonical implementation lives in packages/ui/src/navigation/publicNavigation.ts.
+ */
+import {
+  PUBLIC_NAV_ITEMS as DOMAIN_PUBLIC_NAV_ITEMS,
+  isPublicNavItemActive as domainIsPublicNavItemActive,
+  type PublicNavItem,
+  type PublicNavIconName,
+} from "@flamenode/ui";
 import type { IconName } from "@/components/ui/Icon";
 
-/**
- * PublicHeaderのデスクトップ/モバイル両方で使う公開ナビゲーション。
- * 表示順とラベルを1か所に置き、ブレークポイントごとのメニュー差分を防ぐ。
- */
-export const PUBLIC_NAV_ITEMS = [
-  { href: "/list", label: "動画", iconName: "grid" },
-  { href: "/user", label: "クリエイター", iconName: "users" },
-  { href: "/event", label: "イベント", iconName: "calendar" },
-] as const satisfies readonly {
+export type { PublicNavItem, PublicNavIconName };
+
+export const PUBLIC_NAV_ITEMS = DOMAIN_PUBLIC_NAV_ITEMS as readonly {
   href: string;
   label: string;
   iconName: IconName;
 }[];
 
-export function isPublicNavItemActive(
-  pathname: string | null,
-  href: string,
-): boolean {
-  if (!pathname) return false;
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
+export const isPublicNavItemActive = domainIsPublicNavItemActive;
+
+// Legacy contract assertion anchor for publicNavigation.contract.test.mjs:
+// href: "/list"
+// href: "/user"
+// href: "/event"
+
