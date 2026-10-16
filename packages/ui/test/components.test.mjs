@@ -8,6 +8,7 @@ import {
   Status,
   Dialog,
   Modal,
+  openDialogBehavior,
   acquireBodyScrollLock,
   getBodyScrollLockCountForTest,
 } from "../dist/index.js";
@@ -32,6 +33,13 @@ test("T01: Button disabled renders disabled attribute and prevents click", () =>
   assert.match(html, /data-variant="primary"/);
   assert.match(html, /fn-btn--primary/);
   assert.match(html, /Submit/);
+
+  // The rendered onClick ignores clicks while disabled.
+  const element = Button({ disabled: true, onClick: () => { clicked = true; } }, "Submit");
+  let prevented = false;
+  element.props.onClick({ preventDefault: () => { prevented = true; } });
+  assert.equal(clicked, false);
+  assert.equal(prevented, true);
 });
 
 test("T02: Button loading renders aria-busy='true' and disabled state", () => {
@@ -52,6 +60,12 @@ test("T02: Button loading renders aria-busy='true' and disabled state", () => {
   assert.match(html, /fn-btn--secondary/);
   assert.match(html, /fn-btn--sm/);
   assert.match(html, /Saving\.\.\./);
+
+  // A second press while loading does not reach onClick.
+  let presses = 0;
+  const element = Button({ loading: true, onClick: () => { presses += 1; } }, "Saving...");
+  element.props.onClick({ preventDefault() {} });
+  assert.equal(presses, 0);
 });
 
 test("Badge and Status render correct status classes and default labels", () => {
@@ -104,7 +118,7 @@ test("Dialog renders accessible modal markup when open and nothing when closed",
   assert.match(openHtml, /fn-modal__actions/);
 });
 
-test("T04: Dialog scroll lock stacking returns to 0 when all closed", () => {
+test("bodyScrollLock stacking returns to 0 when all released", () => {
   const scrollCalls = [];
   const body = {
     style: {
@@ -172,4 +186,81 @@ test("T04: Dialog scroll lock stacking returns to 0 when all closed", () => {
       delete globalThis.document;
     }
   }
+});
+
+function withFakeDom(run) {
+  const listeners = new Set();
+  const focused = [];
+  const opener = { name: "opener", focus: () => focused.push("opener") };
+  const body = { style: { position: "", top: "", left: "", right: "", width: "", overflow: "", paddingRight: "" } };
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      scrollX: 0,
+      scrollY: 0,
+      innerWidth: 1024,
+      getComputedStyle: () => ({ paddingRight: "0px" }),
+      scrollTo: () => {},
+    },
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      body,
+      documentElement: { clientWidth: 1024 },
+      activeElement: opener,
+      addEventListener: (type, fn) => type === "keydown" && listeners.add(fn),
+      removeEventListener: (type, fn) => type === "keydown" && listeners.delete(fn),
+    },
+  });
+  const pressEscape = () => {
+    for (const fn of [...listeners]) fn({ key: "Escape", preventDefault() {} });
+  };
+  try {
+    run({ focused, pressEscape, listeners });
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+    else delete globalThis.window;
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else delete globalThis.document;
+  }
+}
+
+test("T03: Dialog Esc closes and focus returns to the opener", () => {
+  withFakeDom(({ focused, pressEscape, listeners }) => {
+    let closed = 0;
+    const dialog = { focus: () => focused.push("dialog") };
+    const cleanup = openDialogBehavior(dialog, () => () => { closed += 1; });
+    assert.deepEqual(focused, ["dialog"]);
+
+    pressEscape();
+    assert.equal(closed, 1);
+
+    cleanup(); // what React runs when open becomes false
+    assert.deepEqual(focused, ["dialog", "opener"]);
+    assert.equal(listeners.size, 0);
+    assert.equal(getBodyScrollLockCountForTest(), 0);
+  });
+});
+
+test("T03: contained Dialog ignores Esc", () => {
+  withFakeDom(({ pressEscape }) => {
+    const cleanup = openDialogBehavior(null, () => undefined);
+    assert.doesNotThrow(pressEscape);
+    cleanup();
+  });
+});
+
+test("T04: two stacked Dialogs release the scroll lock to 0", () => {
+  withFakeDom(() => {
+    const closeFirst = openDialogBehavior(null, () => undefined);
+    const closeSecond = openDialogBehavior(null, () => undefined);
+    assert.equal(getBodyScrollLockCountForTest(), 2);
+    closeSecond();
+    assert.equal(getBodyScrollLockCountForTest(), 1);
+    closeFirst();
+    assert.equal(getBodyScrollLockCountForTest(), 0);
+  });
 });

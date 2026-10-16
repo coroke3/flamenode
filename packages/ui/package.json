@@ -10,11 +10,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./layout/bodyScrollLock.ts": "./src/layout/bodyScrollLock.ts",
-    "./layout/bodyScrollLock": {
-      "types": "./dist/layout/bodyScrollLock.d.ts",
-      "default": "./dist/layout/bodyScrollLock.js"
-    }
+    "./layout/bodyScrollLock.ts": "./src/layout/bodyScrollLock.ts"
   },
   "scripts": {
     "build": "tsc",

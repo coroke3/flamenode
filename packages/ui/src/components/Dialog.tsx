@@ -17,6 +17,39 @@ function cx(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(" ");
 }
 
+type FocusTarget = { focus?: () => void } | null;
+
+/**
+ * Side effects of an open dialog: body scroll lock, focus moves into the dialog,
+ * Esc calls the latest onEscape, and closing restores focus to the opener.
+ * Exported so the behaviour can be tested without a DOM renderer.
+ */
+export function openDialogBehavior(
+  dialog: FocusTarget,
+  getOnEscape: () => (() => void) | undefined,
+): () => void {
+  if (typeof document === "undefined") return () => {};
+
+  const opener = document.activeElement as FocusTarget;
+  const releaseScrollLock = acquireBodyScrollLock();
+  dialog?.focus?.();
+
+  function onKeyDown(e: KeyboardEvent) {
+    const onEscape = getOnEscape();
+    if (e.key === "Escape" && onEscape) {
+      e.preventDefault();
+      onEscape();
+    }
+  }
+  document.addEventListener("keydown", onKeyDown);
+
+  return () => {
+    document.removeEventListener("keydown", onKeyDown);
+    releaseScrollLock();
+    opener?.focus?.();
+  };
+}
+
 export function Dialog({
   open,
   onClose,
@@ -30,46 +63,15 @@ export function Dialog({
 }: DialogProps) {
   const titleId = React.useId();
   const dialogRef = React.useRef<HTMLDivElement>(null);
-  const previousActiveElementRef = React.useRef<HTMLElement | null>(null);
+  // Read through a ref so a new onClose on each parent render does not
+  // re-run the effect (which would release the lock and move focus).
+  const onEscapeRef = React.useRef<(() => void) | undefined>(undefined);
+  onEscapeRef.current = contained ? undefined : onClose;
 
   React.useEffect(() => {
     if (!open) return undefined;
-
-    // Track previously active element for focus restoration
-    if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
-      previousActiveElementRef.current = document.activeElement;
-    }
-
-    // Acquire body scroll lock
-    const releaseScrollLock = acquireBodyScrollLock();
-
-    // Focus the dialog container
-    if (dialogRef.current) {
-      dialogRef.current.focus?.();
-    }
-
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && onClose && !contained) {
-        e.preventDefault();
-        onClose();
-      }
-    }
-
-    if (typeof document !== "undefined") {
-      document.addEventListener("keydown", onKeyDown);
-    }
-
-    return () => {
-      releaseScrollLock();
-      if (typeof document !== "undefined") {
-        document.removeEventListener("keydown", onKeyDown);
-      }
-      // Restore focus
-      if (previousActiveElementRef.current?.focus) {
-        previousActiveElementRef.current.focus();
-      }
-    };
-  }, [open, onClose, contained]);
+    return openDialogBehavior(dialogRef.current, () => onEscapeRef.current);
+  }, [open]);
 
   if (!open) return null;
 
