@@ -158,7 +158,7 @@ npm run test:unit
 node scripts/check-migration-file-progress.mjs
 npm run check:project-docs
 ```
-期待: すべて終了コード0。`git status` で変わっているのは Owned paths の3 file と `docs/migration/work-items/MIG-0201.md` だけ。
+期待: すべて終了コード0。`git diff --name-only origin/main...HEAD` の出力が Owned paths の3 file と `docs/migration/work-items/MIG-0201.md` の4行だけ。
 #### Ledger updates
 なし。`FILE_MIGRATION_MATRIX.md` は CURRENT の file の移行先を追う台帳で、tokens.css に対応する CURRENT の file は無い。UX / FN の state も変えない（部品はまだ使われていない）。
 #### DONE checklist

@@ -110,7 +110,8 @@ export function readOpenPrOwners(root=ROOT){
   }catch{return {owned:new Map(),live:false};}
 }
 
-export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0409","MIG-0411"];
+// Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
+export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0409","MIG-0410","MIG-0411","MIG-0406"];
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
 export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
   const tasks=parseTaskRows(statusText);
@@ -129,8 +130,7 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
     candidates.push(id);
   }
   // Optimize for 1102 first when independent performance PoC is already unblocked.
-  // The 1102 measurement path (performance PoC -> route map -> gateway -> build data -> per-page regeneration) blocks the
-  // Phase 4 Gate, so a lead takes it before other READY work; small models only ever see their READY_FOR_SMALL_MODEL tasks.
+  // A lead takes the Phase 4 measurement track before other READY work; small models only see READY_FOR_SMALL_MODEL tasks.
   const rank=id=>{const i=CRITICAL_PATH.indexOf(id);return i===-1?CRITICAL_PATH.length:i;};
   candidates.sort((a,b)=>rank(a)-rank(b)||a.localeCompare(b));
   const ownedByPr=candidates.filter(id=>owned.has(id));
@@ -177,7 +177,7 @@ if(invoked){
  try{
   const {task,automatic,offline,openPrBranches,smallOnly}=parseContextArgs(process.argv.slice(2));
   const owners=offline?{owned:new Map(),live:false,offline:true}
-    :openPrBranches?{owned:parseOwnedTasks(openPrBranches.map(headRefName=>({number:"open",headRefName}))),live:true}
+    :openPrBranches?{owned:parseOwnedTasks(openPrBranches.map(headRefName=>({number:"?("+headRefName+")",headRefName}))),live:true}
     :undefined;
   const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(task,ROOT,{smallOnly});
   if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");

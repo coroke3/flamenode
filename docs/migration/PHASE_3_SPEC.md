@@ -62,11 +62,11 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 
 ### MIG-0301: extraction/DI pattern（抽出パターンの確立）
 - **Model:** small
-- **Readiness:** READY_FOR_SMALL_MODEL — 2026-10-16 に lead が `60bdc88` の上で U01〜U04 を runbook C の手順どおり（unit ごとに `check:migration-work-items`・`check:project-docs`、`MIGRATION_FILE_BASE_SHA` 付きの file 検査も含む）実行し、全部終了コード0。`next build`・`apps/api` build・`verify:fast` も0。`test:unit` は変更前後とも 2499 件
+- **Readiness:** READY_FOR_SMALL_MODEL — 2026-10-16 に lead が `fcb68e3` の上でこの節の code block をそのまま使って U01〜U04 と F の STATUS 統合を実行し、各 commit の後の `check:migration-work-items`・`check:project-docs`・`MIGRATION_FILE_BASE_SHA` 付きの file 検査、F 後の `check:migration-docs`、`apps/api` build、`verify:fast` がすべて終了コード0。`test:unit` は変更前後とも 2510 件。Haiku の試走（同日）でも U01〜F まで通った
 - **Recipe:** R-DOMAIN
 - **Runtime:** N
 - **Depends on:** MIG-0108 / **Decisions:** none
-- **Verified against:** `60bdc88` (2026-10-16)
+- **Verified against:** `fcb68e3` (2026-10-16)
 #### Source snapshot
 - `src/lib/slots/slotReservationLimit.ts`（17行、import 無し）: `:1` `MAX_SLOT_RESERVATIONS_PER_XID = 100`、`:3-10` `normalizeSlotReservationLimit`、`:12-17` `slotReservationLimitMessage`。
 - 呼び出し元: `src/components/event/SlotGrid.tsx:40`、`src/lib/actions/slot.ts:56`（どちらも `@/lib/slots/slotReservationLimit`）、`src/lib/slots/slotReservationLimitGuard.ts:8`（`./slotReservationLimit`）。
@@ -75,13 +75,13 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 - `packages/domain/src/slots/` は存在しない。
 - `FILE_MIGRATION_MATRIX.md`: `packages/domain/{package.json,src/index.ts,src/permissions.ts,tsconfig.json}` の4行（owner MIG-0301, NOT_STARTED）、`src/lib/slots/slotReservationLimit.ts` の行、テスト2行（`slotReservationLimit.contract.test.mjs`, `slotReservationLimitGuard.execution.test.mjs`）、Future files 表の `packages/domain/src/slots/reservationLimit.ts` の行。
 - `.github/workflows/migration-docs-check.yml` に `npm run build --workspace=@flamenode/domain` の行がある（test の行は無い）。
-- `npm run test:unit` は `# pass 2499`（作業前に実行して数を控える。違っても STOP ではなく、その数を「変更前」とする）。
+- `npm run test:unit` は `# pass 2510`（作業前に実行して数を控える。違っても STOP ではなく、その数を「変更前」とする）。
 #### Owned paths
 - 新規: `+packages/domain/src/slots/reservationLimit.ts`（`git mv` で移す）, `+packages/domain/test/reservationLimit.test.mjs`
 - 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`, `packages/domain/tsconfig.json`, `.github/workflows/migration-docs-check.yml`（1行追加のみ）, `src/lib/slots/slotReservationLimit.ts`（bridge 化のみ）, `docs/migration/FILE_MIGRATION_MATRIX.md`（下の Ledger updates の行だけ）, `docs/migration/work-items/MIG-0301.md`
 - 触らない: `packages/domain/src/permissions.ts`（偽の `canEditVideo`。消すと台帳が RETIRED と承認を要するので、本物の権限判定を作る MIG-0306 へ owner を移すだけにする）、`src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）、上の呼び出し元3 file
 #### Micro-units
-各 unit の最後に runbook C のとおり `npm run check:migration-work-items` と `npm run check:project-docs` を実行し、両方 0 であることを確かめてから commit する。
+各 unit は runbook C のとおり commit し、commit の後に `npm run check:migration-work-items`・`npm run check:project-docs`・`MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs` が全部 0 であることを確かめる（file 検査は commit 済みの差分だけを見る）。台帳の行に書く `<sha>` は、その unit を始める前の `git rev-parse HEAD`。
 - **U01 package を source 参照にし、permissions.ts の owner を移す**
   1. `packages/domain/package.json` を次の全文にする:
      ```json
@@ -192,6 +192,10 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
      });
      ```
   2. `.github/workflows/migration-docs-check.yml` の `npm run build --workspace=@flamenode/domain` の次の行に、同じ字下げで `npm run test --workspace=@flamenode/domain` を足す。
+  3. `FILE_MIGRATION_MATRIX.md`: `packages/domain/src/slots/reservationLimit.ts` の行のすぐ下に次の1行を足す（新しい test file にも行が要る）:
+     ```text
+     | `packages/domain/test/reservationLimit.test.mjs` | TEST | domain reservation limit T01-T03 | MIG-0301 | SAME | IN_PROGRESS | PR#<n> SHA=<sha> |
+     ```
   ```bash
   npm run test --workspace=@flamenode/domain
   npm run test:unit
@@ -218,18 +222,18 @@ npm run check:project-docs
 ```
 期待: すべて終了コード0、`test:unit` の件数が変更前と同じ。
 #### Ledger updates
-U04 で `FILE_MIGRATION_MATRIX.md` の次の行を直す。`<n>` は PR 番号、`<sha>` はその時点の `git rev-parse HEAD`、`<url>` は green になった CI の run URL（実在しない値を書かない）。`<ev>` は `PR#<n> SHA=<sha> TEST=npm run test --workspace=@flamenode/domain CI=<url>`。
+U04 で `FILE_MIGRATION_MATRIX.md` の次の行を直す。`<n>` は PR 番号、`<sha>` は U04 を始める前の `git rev-parse HEAD`、`<url>` は green になった CI の run URL（実在しない値を書かない）。`<ev>` は `PR#<n> SHA=<sha> TEST=npm run test --workspace=@flamenode/domain CI=<url>`。
 1. `packages/domain/package.json`, `packages/domain/src/index.ts`, `packages/domain/tsconfig.json` の3行: 3列目を `domain package entry/config (source-referenced, tested in CI)`、状態を `RETAINED`、証跡を `<ev>`。
 2. `src/lib/slots/slotReservationLimit.ts` の行を次にする:
    ```text
    | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | packages/domain/src/slots/reservationLimit.ts | BRIDGED | <ev> |
    ```
-3. `packages/domain/src/slots/reservationLimit.ts` の行: 状態を `RETAINED`、証跡を `<ev>`。
+3. `packages/domain/src/slots/reservationLimit.ts` と `packages/domain/test/reservationLimit.test.mjs` の2行: 状態を `RETAINED`、証跡を `<ev>`。
 4. `src/lib/slots/slotReservationLimit.contract.test.mjs` と `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` の2行: 状態を `RETAINED`、証跡を `PR#<n> SHA=<sha> TEST=node --test --experimental-strip-types <その file の path> CI=<url>`（MIG-0301 が DONE になると、NOT_STARTED のままでは file 検査が落ちる）。
-5. merge 統合（runbook F）で `STATUS.md` を直すときは、表の MIG-0301 を `DONE`、MIG-0302 を `READY` にし、冒頭の `Current Task:` が `MIG-0301` なら `Task State:` も `DONE` にする（表と冒頭が違うと `check:migration-docs` が落ちる）。
+5. merge 統合（runbook F）で `STATUS.md` を直すときは、表の MIG-0301 を `DONE`、MIG-0302 を `READY` にし（MIG-0302 の Work Order は NEEDS_REFINEMENT のままなので、小型モデルの候補には出ない。lead が詰める）、冒頭の `Current Task:` が `MIG-0301` なら `Task State:` も `DONE` にする（表と冒頭が違うと `check:migration-docs` が落ちる）。
 #### DONE checklist
 - [ ] `src/lib/slots/slotReservationLimit.ts` が re-export の5行だけ
-- [ ] `packages/domain/src/slots/reservationLimit.ts` の中身が移動前と同一（`git diff -M origin/main -- packages/domain/src/slots/reservationLimit.ts` が rename だけ）
+- [ ] `packages/domain/src/slots/reservationLimit.ts` の中身が移動前と同一（`git show origin/main:src/lib/slots/slotReservationLimit.ts | diff - packages/domain/src/slots/reservationLimit.ts` が終了コード0）
 - [ ] `npm run test --workspace=@flamenode/domain` が CI の workspace job に入っている
 - [ ] Commands がすべて終了コード0（出力の末尾をPRに貼った）
 - [ ] PR 本文に「`permissions.ts` は消さず owner を MIG-0306 へ移した」と1行書いた

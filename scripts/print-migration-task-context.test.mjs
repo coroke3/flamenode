@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { getTaskContext, getWorkOrder, getNextTaskContext, parseContextArgs } from "./print-migration-task-context.mjs";
+import { CRITICAL_PATH } from "./print-migration-task-context.mjs";
+import { parseTaskRows, expandDependencies } from "./check-migration-execution.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -146,11 +148,37 @@ test("--open-pr-branches carries MCP-read ownership into the selector", () => {
  assert.deepEqual(parseContextArgs(["--next","--open-pr-branches",""]).openPrBranches,[]);
  assert.throws(()=>parseContextArgs(["--next","--open-pr-branches"]),/comma-separated/);
  assert.throws(()=>parseContextArgs(["--next","--offline","--open-pr-branches",""]),/exclusive/);
- const owned=parseOwnedTasks(a.openPrBranches.map(headRefName=>({number:"open",headRefName})));
+ const owned=parseOwnedTasks(a.openPrBranches.map(headRefName=>({number:"?("+headRefName+")",headRefName})));
  assert.deepEqual([...owned.keys()],["MIG-0201"]);
 });
 
 test("a lead takes the 1102 measurement path before other READY work", () => {
  const status=["| MIG-0108 | b | DONE | — |","| MIG-0401 | p | DONE | — |","| MIG-0201 | t | READY | MIG-0108 |","| MIG-0404 | r | READY | MIG-0401 |","| MIG-0801 | a | READY | MIG-0108 |"].join("\n");
  assert.deepEqual(pickNextTask(status,"| D-08 | HTML | DECIDED | user |").candidates,["MIG-0404","MIG-0201","MIG-0801"]);
+});
+
+test("CLI drops tasks owned by the branches passed with --open-pr-branches", () => {
+ const script=fileURLToPath(new URL("./print-migration-task-context.mjs",import.meta.url));
+ const status=fs.readFileSync(fileURLToPath(new URL("../docs/migration/STATUS.md",import.meta.url)),"utf8");
+ const ready=[...parseTaskRows(status)].filter(([,t])=>t.state==="READY").map(([id])=>id);
+ assert.ok(ready.length>0,"needs at least one READY task in STATUS");
+ const free=spawnSync(process.execPath,[script,"--next","--open-pr-branches",""],{encoding:"utf8"});
+ assert.equal(free.status,0,free.stderr);
+ const first=/advisory candidate=(MIG-\d{4})/.exec(free.stderr)[1];
+ const slug="migration/mig-"+first.slice(4)+"-x";
+ const owned=spawnSync(process.execPath,[script,"--next","--open-pr-branches",slug],{encoding:"utf8"});
+ assert.match(owned.stderr,new RegExp("owned-by-open-PR="+first+"=PR#\\?\\("+slug.replace(/[/]/g,"\\/")+"\\)"));
+ assert.doesNotMatch(owned.stderr,new RegExp("advisory candidate="+first+" "));
+});
+
+test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows", () => {
+ const status=fs.readFileSync(fileURLToPath(new URL("../docs/migration/STATUS.md",import.meta.url)),"utf8");
+ const tasks=parseTaskRows(status);
+ const ancestors=id=>{const seen=new Set(),stack=[id];while(stack.length){for(const d of expandDependencies(tasks.get(stack.pop())?.dependencies??""))if(!seen.has(d)){seen.add(d);stack.push(d);}}return seen;};
+ const gate=ancestors("MIG-0407");
+ CRITICAL_PATH.forEach((id,i)=>{
+  assert.ok(tasks.has(id),id+" missing from STATUS");
+  assert.ok(gate.has(id),id+" is not a Phase 4 Gate prerequisite");
+  for(const later of CRITICAL_PATH.slice(i+1))assert.ok(!ancestors(id).has(later),id+" depends on later "+later);
+ });
 });

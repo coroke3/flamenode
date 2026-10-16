@@ -169,30 +169,33 @@ git commit --allow-empty -m "MIG-XXXX: 作業開始"
 git push -u origin migration/mig-xxxx-<slug>
 ```
 
-slug は Work Order の title の `（` より前を英小文字 kebab-case にしたもの（例: `extraction/DI pattern（…）` → `extraction-di-pattern`）。
+slug は Work Order の title の `（` より前を英小文字 kebab-case にしたもの（例: `extraction/DI pattern（…）` → `extraction-di-pattern`）。同じ名前の branch が手元か origin に既にあれば、open PR が無い（A で確認済み）ので前回の失敗の残りとみなし、作らずに STOP して lead へ「残った branch <名前> の扱い」を聞く。
 
-PR 本文を scratch の file に次の形で書き、Draft PR を作る（上の表）。placeholder のまま投稿しない。
+PR 本文を scratch の file に [GIT_WORKFLOW.md](GIT_WORKFLOW.md) §5「Required PR body」の見出しのまま書き、Draft PR を作る（上の表）。placeholder のまま投稿しない。host が先頭に入れる行（attribution など）があれば、その下に書く。
 
-```text
-<!-- claude-projects-attribution などの host 指定行があれば先頭に -->
-MIG-XXXX: <Work Order の title>
-- Work Order: docs/migration/<PHASE>_SPEC.md の ### MIG-XXXX
-- Owned paths: <Work Order の Owned paths を file 単位で>
-- 検証: <Work Order の Commands>
-- Rollback: <Work Order の Rollback>
-- 本番影響: main への merge で Workers Builds の deploy が走る（AGENT_PROTOCOL.md §Mandatory stop の例外）。Route / D1 / secret の変更は無い
-```
+| 見出し | claim で書く値 | D で書き足す値 |
+| --- | --- | --- |
+| `Task:` / `Agent/Owner:` | `MIG-XXXX` / 自分の agent 名 | — |
+| `CURRENT:` / `TARGET:` / `Scope:` / `Non-scope:` | Work Order の Source snapshot・Owned paths（新規/変更）・「触らない」 | — |
+| `Affected function IDs:` / `Affected routes/APIs:` | packet に出た UX/FN/RH/SA。無ければ `none` | — |
+| `FILE_MIGRATION_MATRIX.md rows before/after:` | Work Order の Ledger updates の行（before） | 実際に書いた行（after） |
+| `Actual source -> target exports -> consumers:` | Source snapshot の呼び出し元 | — |
+| `Changed:` / `Preserved contracts:` | `未着手` | unit ごとの変更 / Test cases の T0n |
+| `Validation:` | `未実行` | Commands の実結果（コマンドと終了コード、件数） |
+| `Production impact:` | `main への merge で Workers Builds の deploy が走る。Route / D1 / secret の変更なし` | — |
+| `Rollback:` / `Dependencies / follow-up:` | Work Order の Rollback / 依存と後続 MIG | — |
 
-作成後にもう一度 open PR を読み、head branch が `migration/mig-xxxx-` で始まる PR が2件以上なら、作ったPRをcloseしてSTOP（後発が引く）。1件なら `docs/migration/work-items/MIG-XXXX.md` を [work-items/README.md](work-items/README.md) の形式で書く（既に file があれば上書きせず、その形式に合わせて値を更新する）。`State: IN_PROGRESS`、`Owner`、`Branch`、`PR: #<n>`、`Owned paths` はWork Orderの値、`Current unit: U01`。`npm run check:migration-work-items` が0になってから commit/push する。
+作成後にもう一度 open PR を読み、head branch が `migration/mig-xxxx-` で始まる PR が2件以上なら、作ったPRをcloseしてSTOP（後発が引く）。1件なら `docs/migration/work-items/MIG-XXXX.md` を [work-items/README.md](work-items/README.md) の形式で書く（既に file があれば上書きせず、その形式に合わせて値を更新する）。`State: IN_PROGRESS`、`Owner`、`Branch`、`PR: #<n>`（数字だけ。後ろに注記を書くと検査が落ちる）、`Owned paths` はWork Orderの値、`Current unit: U01`。`npm run check:migration-work-items` が0になってから commit/push する。
 
 **C. micro-unit 1つ**
 
 ```bash
 # Work Orderの U0n 手順を実行し、U0n の検証コマンドを実行する
-npm run check:migration-work-items
-npm run check:project-docs
 git add <Owned pathsのファイルだけ>
 git commit -m "MIG-XXXX U0n: <やったこと>"
+npm run check:migration-work-items
+npm run check:project-docs
+MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs   # commit 済みの差分だけを見るので commit の後に実行
 git rev-parse HEAD          # この値を work-item の Head に書く
 # work-item を更新: Current unit / Validation（実行コマンドと実結果）/ Head / Next（次unit）
 npm run check:migration-work-items
@@ -201,7 +204,7 @@ git commit -m "MIG-XXXX: U0n checkpoint"
 git push
 ```
 
-`check:project-docs` が落ちたら、出力の file 名が Work Order の Ledger updates にあるか確かめる。あればその行を直して再実行、無ければ STOP（lead へ「台帳の手順が足りない: <出力>」）。lint などが手元の環境だけで落ちる（親 directory の設定を読むなど）ときは、同じコマンドを CI の結果で確かめ、work-item に両方を書く。
+3つの検査のどれかが落ちたら、直して同じ unit の commit を足す（push 前なら `git commit --amend` でもよい）。`check:project-docs` や file 検査が落ちたら、出力の file 名が Work Order の Ledger updates にあるか確かめる。あればその行を直して再実行、無ければ STOP（lead へ「台帳の手順が足りない: <出力>」）。lint などが手元の環境だけで落ちる（親 directory の設定を読むなど）ときは、同じコマンドを CI の結果で確かめ、work-item に両方を書く。
 
 **D. 全unit完了時**
 
@@ -230,7 +233,7 @@ CI が green でなければ終了して次 wake。green なら:
 
 ```bash
 git switch migration/mig-xxxx-<slug> && git pull --ff-only
-git fetch origin && git rebase origin/main         # 競合したら git rebase --abort してSTOP（leadへ）
+git fetch origin && git merge --no-edit origin/main   # rebase しない（レビューした Head を履歴に残す）。競合したら git merge --abort してSTOP（leadへ）
 ```
 
 1. `docs/migration/STATUS.md`: 当該MIG行のStateを`DONE`にする。Depends onの全MIGが`DONE`になった行だけ`BLOCKED`→`READY`にする。冒頭の `Current Task:` が当該MIGなら `Task State:` も `DONE` にする。他の行は変えない。
@@ -249,7 +252,7 @@ git diff origin/main...HEAD -- . $X | git patch-id --stable
 npm run check:migration-work-items && npm run check:project-docs
 git add docs/migration/STATUS.md docs/migration/work-items/MIG-XXXX.md
 git commit -m "MIG-XXXX: STATUS統合"
-git push --force-with-lease
+git push
 ```
 
 main への merge は Workers Builds の本番 deploy を起こす。これはユーザーが許可済み（2026-10-16、AGENT_PROTOCOL.md §Mandatory stop の例外）なので止めない。host の権限設定が merge を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
