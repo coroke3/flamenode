@@ -93,6 +93,18 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Auth.js remains owned by the existing origin, even when the manifest or
+    // revocation KV is unavailable. Do not parse the large manifest on auth hits.
+    if (path === "/api/auth" || path.startsWith("/api/auth/")) {
+      if (!env.AUTH_ORIGIN) return unavailableResponse();
+      try {
+        return await env.AUTH_ORIGIN.fetch(request);
+      } catch {
+        return unavailableResponse();
+      }
+    }
+    if (!env.VISIBILITY_KV) return unavailableResponse();
+
     const manifest = manifestForEnv(env);
     const revocationChecker = createKvRevocationChecker(env.VISIBILITY_KV);
 
