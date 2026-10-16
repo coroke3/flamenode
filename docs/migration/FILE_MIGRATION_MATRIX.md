@@ -228,6 +228,7 @@
 
 | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | +packages/domain/src/slots/reservationLimit.ts (with legacy bridge) | NOT_STARTED | — |
 | `packages/domain/src/slots/reservationLimit.ts` | HELPER | pure numeric policy (moved from `src/lib/slots/slotReservationLimit.ts`) | MIG-0301 | SAME | IN_PROGRESS | PR#304 SHA=747008442ea79dadb21b82b751d778c3bc8a7473 |
+| `packages/domain/test/reservationLimit.test.mjs` | TEST | domain reservation limit T01-T03 | MIG-0301 | SAME | IN_PROGRESS | PR#304 SHA=53b27a06a665c2a972322d5fd794b55f1d329704 |
 | `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | NOT_STARTED | — |
 | `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | NOT_STARTED | — |
 | `src/lib/slots/limits.test.mjs` | TEST | slot range and rule edgecases | MIG-0302 | SAME (pure helper parity) | NOT_STARTED | — |
