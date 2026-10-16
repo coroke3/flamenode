@@ -106,23 +106,6 @@ function proseLines(text) {
   });
 }
 
-// Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
-function proseLines(text) {
-  let fence = null;
-  return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
-      return " ".repeat(line.length);
-    }
-    if (marker) {
-      fence = { char: marker[1][0], length: marker[1].length };
-      return " ".repeat(line.length);
-    }
-    return line;
-  });
-}
-
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
 function workOrderSections(specText) {
   const lines = specText.replace(/\r\n/g, "\n").split("\n");
