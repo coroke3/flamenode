@@ -130,7 +130,7 @@ test("every unfinished task needs a full work order whose dependencies match STA
   assert.match(validatePlanCompleteness({ status: graph.replace("| MIG-0302 | read | BLOCKED |", "| MIG-0302 | read | READY |"), specs: spec(order("MIG-0303", "MIG-0302")) }).join(" "), /MIG-0302: READY but dependency MIG-0301 is READY/);
 });
 
-import { validateSmallModelOrder, validateWorkOrder, readSpecs } from "./check-migration-task-cards.mjs";
+import { validateSmallModelOrder } from "./check-migration-task-cards.mjs";
 
 test("small-model work order must be decided: commands, expectations, exact paths, no vague wording", () => {
   assert.deepEqual(validateSmallModelOrder("MIG-0301", completeOrder("MIG-0301")), []);
