@@ -104,6 +104,7 @@ test("T02: loadR2PrebuiltHtml rejects stale generation with 503", async () => {
   const result = await loadR2PrebuiltHtml("video-123/index.html", {
     r2: mockR2,
     expectedGeneration: "gen-2026-10-17-new",
+    isRevoked: async () => false,
   });
 
   assert.equal(result.action, "unavailable");
@@ -122,6 +123,8 @@ test("T03: loadR2PrebuiltHtml fails closed with 503 on storage errors", async ()
 
   const result = await loadR2PrebuiltHtml("video-123/index.html", {
     r2: failingR2,
+    expectedGeneration: "gen-test",
+    isRevoked: async () => false,
   });
 
   assert.equal(result.action, "unavailable");
@@ -167,6 +170,7 @@ test("loadR2PrebuiltHtml serves valid pre-generated HTML with 200", async () => 
   const result = await loadR2PrebuiltHtml("video-public-789/index.html", {
     r2: mockR2,
     expectedGeneration: "gen-2026-10-17",
+    isRevoked: async () => false,
   });
 
   assert.equal(result.action, "serve");
@@ -175,4 +179,49 @@ test("loadR2PrebuiltHtml serves valid pre-generated HTML with 200", async () => 
     assert.equal(result.contentType, "text/html; charset=utf-8");
     assert.ok(result.headers["Cache-Control"].includes("public"));
   }
+});
+
+
+test("R2 safety fences are mandatory even for JS callers", async () => {
+  let calls = 0;
+  const r2 = { get: async () => { calls++; return { body: "<html>ok</html>", httpMetadata: { contentType: "text/html" }, customMetadata: { generation: "g" } }; } };
+  for (const options of [
+    { r2 },
+    { r2, expectedGeneration: "g" },
+    { r2, isRevoked: async () => false },
+    { r2, expectedGeneration: "", isRevoked: async () => false },
+  ]) {
+    const result = await loadR2PrebuiltHtml("clip/index.html", options);
+    assert.equal(result.status, 503);
+    assert.equal(result.reason, "missing_safety_guard");
+  }
+  assert.equal(calls, 0, "Missing safety gates must be rejected before R2 access");
+});
+
+test("R2 rejects corrupt content and empty streams", async () => {
+  const content = [
+    { body: "", customMetadata: { generation: "g" }, httpMetadata: { contentType: "text/html" } },
+    { body: "{}", customMetadata: { generation: "g" }, httpMetadata: { contentType: "application/json" } },
+    { body: new ReadableStream(), size: 0, customMetadata: { generation: "g" }, httpMetadata: { contentType: "text/html" } },
+    { body: "<html>ok</html>", customMetadata: { generation: "g" } },
+  ];
+  for (const record of content) {
+    const result = await loadR2PrebuiltHtml("clip/index.html", {
+      r2: { get: async () => record },
+      expectedGeneration: "g",
+      isRevoked: async () => false,
+    });
+    assert.equal(result.status, 503);
+    assert.equal(result.reason, "corrupt_data");
+  }
+});
+
+test("R2 revocation error and unsafe keys fail closed", async () => {
+  const r2 = { get: async () => ({ body: "<html>ok</html>", customMetadata: { generation: "g" }, httpMetadata: { contentType: "text/html" } }) };
+  const options = { r2, expectedGeneration: "g", isRevoked: async () => { throw Error("KV down"); } };
+  const result = await loadR2PrebuiltHtml("clip/index.html", options);
+  assert.equal(result.status, 503);
+  assert.equal(result.reason, "r2_read_failed");
+  const bad = await loadR2PrebuiltHtml("../secret.html", { ...options, isRevoked: async () => false });
+  assert.equal(bad.status, 503);
 });
