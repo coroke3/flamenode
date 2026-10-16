@@ -7,7 +7,7 @@ import {
   isPublicNavItemActive as domainIsPublicNavItemActive,
   type PublicNavItem,
   type PublicNavIconName,
-} from "@flamenode/ui";
+} from "@flamenode/ui/navigation/publicNavigation.ts";
 import type { IconName } from "@/components/ui/Icon";
 
 export type { PublicNavItem, PublicNavIconName };
