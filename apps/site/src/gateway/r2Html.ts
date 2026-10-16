@@ -6,6 +6,7 @@
 
 export type R2ObjectRecord = {
   body: ReadableStream | string;
+  size?: number;
   customMetadata?: Record<string, string>;
   httpMetadata?: {
     contentType?: string;
@@ -18,8 +19,8 @@ export type R2StorageClient = {
 
 export type R2FallbackOptions = {
   r2: R2StorageClient;
-  expectedGeneration?: string;
-  isRevoked?: (key: string) => boolean | Promise<boolean>;
+  expectedGeneration: string;
+  isRevoked: (key: string) => boolean | Promise<boolean>;
 };
 
 export type R2FallbackResult =
@@ -39,7 +40,7 @@ export type R2FallbackResult =
   | Readonly<{
       action: "unavailable";
       status: 503;
-      reason: "r2_read_failed" | "stale_generation" | "corrupt_data";
+      reason: "r2_read_failed" | "stale_generation" | "corrupt_data" | "missing_safety_guard";
       headers: Readonly<Record<string, string>>;
     }>;
 
@@ -62,28 +63,27 @@ export async function loadR2PrebuiltHtml(
   options: R2FallbackOptions,
 ): Promise<R2FallbackResult> {
   const normalizedKey = key.replace(/^\//, "");
+  // Runtime validation too: JavaScript callers must not be able to omit fences.
+  if (!options || typeof options.isRevoked !== "function" ||
+      typeof options.expectedGeneration !== "string" ||
+      !options.expectedGeneration.trim()) {
+    return { action: "unavailable", status: 503,
+      reason: "missing_safety_guard", headers: UNAVAILABLE_HEADERS };
+  }
+  if (!normalizedKey || normalizedKey.includes("..") || normalizedKey.includes("\\") ||
+      normalizedKey.startsWith("/") || /%2f|%2e|%5c/i.test(normalizedKey)) {
+    return { action: "unavailable", status: 503,
+      reason: "corrupt_data", headers: UNAVAILABLE_HEADERS };
+  }
 
   // 1. T04: Post-build revocation check (fail-closed 404)
-  if (options.isRevoked) {
-    try {
-      const revoked = await options.isRevoked(normalizedKey);
-      if (revoked) {
-        return {
-          action: "deny",
-          status: 404,
-          reason: "revoked",
-          headers: DENY_HEADERS,
-        };
-      }
-    } catch {
-      // If revocation check fails, fail-closed
-      return {
-        action: "unavailable",
-        status: 503,
-        reason: "r2_read_failed",
-        headers: UNAVAILABLE_HEADERS,
-      };
+  try {
+    if (await options.isRevoked(normalizedKey)) {
+      return { action: "deny", status: 404, reason: "revoked", headers: DENY_HEADERS };
     }
+  } catch {
+    return { action: "unavailable", status: 503,
+      reason: "r2_read_failed", headers: UNAVAILABLE_HEADERS };
   }
 
   // 2. Fetch object from R2
@@ -110,21 +110,21 @@ export async function loadR2PrebuiltHtml(
   }
 
   // 3. T02: Verify generation metadata if required
-  if (options.expectedGeneration) {
-    const objectGeneration = objectRecord.customMetadata?.generation;
-    if (!objectGeneration || objectGeneration !== options.expectedGeneration) {
-      return {
-        action: "unavailable",
-        status: 503,
-        reason: "stale_generation",
-        headers: UNAVAILABLE_HEADERS,
-      };
-    }
+  if (objectRecord.customMetadata?.generation !== options.expectedGeneration) {
+    return { action: "unavailable", status: 503,
+      reason: "stale_generation", headers: UNAVAILABLE_HEADERS };
   }
 
   // 4. Return pre-generated HTML with content-type
-  const contentType =
-    objectRecord.httpMetadata?.contentType ?? "text/html; charset=utf-8";
+  const contentType = objectRecord.httpMetadata?.contentType;
+  if (typeof contentType !== "string" || !/^text\/html(?:\s*;|$)/i.test(contentType) ||
+      !objectRecord.body ||
+      (typeof objectRecord.body === "string" && !objectRecord.body.trim()) ||
+      (typeof objectRecord.body !== "string" &&
+        (!Number.isFinite(objectRecord.size) || (objectRecord.size ?? 0) <= 0))) {
+    return { action: "unavailable", status: 503,
+      reason: "corrupt_data", headers: UNAVAILABLE_HEADERS };
+  }
 
   return {
     action: "serve",
