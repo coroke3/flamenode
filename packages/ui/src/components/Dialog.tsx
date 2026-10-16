@@ -15,7 +15,9 @@ export interface DialogProps {
 }
 
 type FocusTarget = { focus?: () => void } | null;
-type DialogElement = (FocusTarget & { contains?: (node: Node | null) => boolean }) | null;
+type DialogElement =
+  | (FocusTarget & { contains?: (node: Node | null) => boolean; isConnected?: boolean })
+  | null;
 
 // Open dialogs, innermost last. Only the innermost one answers Esc.
 const openDialogs: object[] = [];
@@ -24,7 +26,8 @@ const openDialogs: object[] = [];
  * Side effects of an open dialog: body scroll lock, focus moves into the dialog
  * (unless a child such as an autoFocus input already has it), Esc calls the latest
  * onEscape of the innermost dialog, and closing restores focus to the opener.
- * Exported so the behaviour can be tested without a DOM renderer.
+ * Focus is not restored while the dialog is still in the document, which is the
+ * StrictMode re-run of the effect, so an autoFocus child keeps its focus.
  */
 export function openDialogBehavior(
   dialog: DialogElement,
@@ -53,7 +56,7 @@ export function openDialogBehavior(
     document.removeEventListener("keydown", onKeyDown);
     openDialogs.splice(openDialogs.indexOf(token), 1);
     releaseScrollLock();
-    opener?.focus?.();
+    if (!dialog?.isConnected) opener?.focus?.();
   };
 }
 
@@ -73,16 +76,17 @@ export function Dialog({
   // Read through a ref so a new onClose on each parent render does not
   // re-run the effect (which would release the lock and move focus).
   const onEscapeRef = React.useRef<(() => void) | undefined>(undefined);
-  onEscapeRef.current = contained ? undefined : onClose;
+  React.useEffect(() => {
+    onEscapeRef.current = contained ? undefined : onClose;
+  });
 
-  // Record the opener while rendering the open state: by the time effects run,
-  // an autoFocus child inside the dialog has already taken focus.
+  // The opener is read when this first child's ref attaches. React attaches it
+  // before a later child's autoFocus runs, and both happen at commit, not render.
   const openerRef = React.useRef<FocusTarget>(null);
-  const wasOpenRef = React.useRef(false);
-  if (open && !wasOpenRef.current && typeof document !== "undefined") {
-    openerRef.current = document.activeElement as FocusTarget;
-  }
-  wasOpenRef.current = open;
+  const recordOpener = React.useCallback((node: HTMLSpanElement | null) => {
+    const active = node ? document.activeElement : null;
+    if (active && !node?.parentElement?.contains(active)) openerRef.current = active as FocusTarget;
+  }, []);
 
   React.useEffect(() => {
     if (!open) return undefined;
@@ -107,6 +111,7 @@ export function Dialog({
       )}
       onClick={handleBackdropClick}
     >
+      <span ref={recordOpener} hidden />
       <div
         ref={dialogRef}
         tabIndex={-1}
