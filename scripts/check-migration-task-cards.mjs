@@ -198,6 +198,19 @@ export function validateWorkOrders({ status, specs }) {
 }
 
 
+function sectionBodies(text, name) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const prose = proseLines(text);
+  const found = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (prose[i].trim() !== "#### " + name) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^#{1,4}\s/.test(prose[end])) end++;
+    found.push(lines.slice(i + 1, end).join("\n"));
+  }
+  return found;
+}
+
 // A small model executes the order literally, so everything it needs must be decided in the text.
 const VAGUE_PHRASES = ["適宜", "必要に応じて", "可能なら", "TBD", "検討する", "うまく"];
 
