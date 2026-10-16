@@ -200,7 +200,7 @@ Do not move the entire current tree up-front. Add boundaries only when the activ
 Use lightweight agents/models for bounded inventory, search, docs and mechanical edits.
 Use stronger reasoning/review for architecture, DB, auth, permissions, security, visibility, routing, destructive changes, gates and final review.
 
-Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. Writing or refining Work Orders, reviewing other agents' PRs, high-risk merges and Phase Gates stay with a stronger model or a human; a lightweight model may get its own PR reviewed by a higher-tier subagent and merge-integrate it (runbook steps E/F).
+Migration writes by lightweight models (Haiku / Luna / Flash) are limited to MIG tasks whose Work Order (`### MIG-XXXX:` in the phase spec) declares `Model: small` and `Readiness: READY_FOR_SMALL_MODEL`; select them with `npm run migration:next -- --model small` and follow `docs/migration/IMPLEMENTATION_RUNBOOK.md` exactly. First verify all live open PRs via `gh` or GitHub MCP; when `gh` is unavailable use verified `--open-pr-branches`, never `--offline` for new-task claims. Writing or refining Work Orders, reviewing other agents' PRs, high-risk merges and Phase Gates stay with a stronger model or a human; a lightweight model may get a fresh-context higher-tier review and prepare its PR for human merge (runbook E/F); **migration loop agents never auto-merge**.
 
 Stop/escalate when:
 

@@ -85,7 +85,7 @@ No agent may start a second implementation PR for a MIG task that already has an
 - The open Draft PR is a discoverable *advisory* owner lock, not an atomic lock: search again immediately after PR creation. Stop on duplicate MIG PR.
 - Agents on different tasks may only edit their **own** work-item checkpoint. Concurrent changes to the same code path, migration file matrix row, UX/FN/Route/API ledger or permission/schema/auth boundary are prohibited.
 - Before merge, fetch latest main; reconcile dependency/Phase state and any other merged task; only then update the **affected task and newly unblocked tasks** in `STATUS.md`. Do not overwrite the full summary with a stale copy.
-- Re-run required CI/contract checks and independent review on the integrated head. Move the work-item to DONE with actual evidence, then squash merge. Next wake reads the new main.
+- Re-run required CI/contract checks and independent review on the integrated final head. Move the work-item to DONE with pre-integration evidence; record final CI/review links in a PR comment (not a new work-item commit), then request human squash merge. Next wake reads the new main.
 - `node scripts/check-migration-work-items.mjs` validates local record structure/declared duplicate paths/source commits. A fresh squash clone may need the explicit `--fetch-pr-history` preparation described in `work-items/README.md`; actual live PR state, reviewer identity and CI must still be inspected.
 
 ---
@@ -240,7 +240,7 @@ Before final review/merge:
 - resolve conflicts against current source-of-truth files
 - rerun relevant validation after conflict resolution
 
-Prefer rebasing a short-lived single-owner branch onto `main` before review.
+Prefer merging `origin/main` without rewriting history before final review. Do not erase reviewed commits or force-push after a review.
 
 If rewriting a remote branch is required, use **force-with-lease only**. Never blind-force-push.
 
@@ -498,7 +498,7 @@ The next agent re-reads the branch state and continues from there.
 9. mark work-item REVIEW, request independent review
 10. address findings + rerun validation
 11. after independent review, update work-item DONE and reconcile STATUS task DONE + next READY against latest main
-12. CI成功・独立レビュー（別agent/人間、またはbuilderより上位モデルのsubagent）・必要な人間承認を確認した場合だけsquash merge。レビュー待ちの間はREVIEWのまま、依存の無い別taskへ進む
+12. 最終HeadのCI成功・独立レビューを確認して `Merge requested:` をPRに記録。移行ループのagentはmergeせず、人間が対象PRを確認してsquash mergeする。レビュー/merge待ちの間も依存の無い別taskへ進む
 13. delete branch
 14. next loop starts from updated main
 ```
