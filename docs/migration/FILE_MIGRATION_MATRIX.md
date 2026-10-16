@@ -248,7 +248,7 @@
 
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 | `apps/site/src/pages/migration-fixture-poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
-| `apps/site/src/lib/routeMap.ts` | HELPER | build-time route-map table generator and O(1) lookup | MIG-0404 | apps/site/src/lib/routeMap.ts (build-time route table) | PARITY_VERIFIED | PR#305 SHA=c40b616cca6c2fc3103a5a0a867796c48ec33001 TEST=node --test --experimental-strip-types scripts/migration-route-map.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38901049206 |
+| `apps/site/src/lib/routeMap.ts` | HELPER | build-time route-map table generator and lookup (new file, no CURRENT counterpart; CURRENT `src/lib/db/videoIdLookup.ts` stays) | MIG-0404 | SAME (build-time route table) | RETAINED | PR#305 SHA=c32030816c219e1a05b32e9c6989edbfc11a7e29 TEST=node --test --experimental-strip-types scripts/migration-route-map.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38912028631 |
 
 ## Future files requiring source/target registration
 
@@ -257,7 +257,6 @@
 | `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
-| `apps/site/src/lib/routeMap.ts` | MIG-0404 | PARITY_VERIFIED | deterministic build-time route-map table and O(1) lookup (PR#305) |
 | `apps/site/src/gateway/**` | MIG-0405 | NOT_CREATED | visibility manifest/cache/fail-closed + Route PoC |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | NOT_CREATED | SSG file count → R2 pre-generated HTML fallback (no unmeasured SSR) |
 
