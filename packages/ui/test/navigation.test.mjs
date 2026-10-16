@@ -106,7 +106,7 @@ test("T04: openDialogBehavior simulates Esc key dismiss and restores focus to op
   };
 
   let escaped = false;
-  const cleanup = openDialogBehavior(fakeDialog, () => () => {
+  const cleanup = openDialogBehavior(fakeDialog, fakeOpener, () => () => {
     escaped = true;
   });
 
