@@ -1,8 +1,8 @@
 # FlameNode 小型エージェント実装ランブック（必読・共通）
 
 > Status: Active / operational instructions, not a replacement for AGENT_PROTOCOL.md
-> Updated: 2026-10-13
-> Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
+> Updated: 2026-10-16
+> Authority: 現行挙動の事実は `CURRENT code/tests`。進捗は `STATUS.md` と `work-items/MIG-XXXX.md`、採用判断は `OPEN_DECISIONS.md`、実装手順は `PHASE_*_SPEC.md` の Work Order、`TASK_CARDS_*.md` は索引・要約。衝突時は停止する。
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
 Checkpoint policy: WORK_ITEM_ONLY
@@ -10,6 +10,8 @@ Checkpoint policy: WORK_ITEM_ONLY
 ## 最初の90秒に行うこと
 
 **実行環境:** `package.json`のNode要件（22系）を先に確認する。Windowsで標準Nodeが異なる場合は、導入済みfnmの例として `fnm exec --using 22 node --version`、`fnm exec --using 22 npm.cmd ci --no-audit --no-fund` を使い、以降のnpm/node検証も同じ22系で実行する。engine checkを無効化せず、ホスト全体の既定バージョンを変更する必要はない。
+
+**競合する正本:** `TASK_CARDS_*.md` は要約カード、実行するコード・検査の詳細は `PHASE_*_SPEC.md` のWork Order、現実の挙動は CURRENT のコードとテストで判定する。役割が衝突する場合は STOP してLeadが正本を修正する。
 
 **コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READY。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
 
@@ -126,10 +128,12 @@ DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on`
 
 ```bash
 git fetch origin
-git switch main && git pull --ff-only origin main
-npm run migration:next -- --model small
+git rev-parse origin/main  # mainをcheckoutせず最新コミットを特定
 gh pr list --state open --json number,headRefName,title,isDraft
+npm run migration:next -- --model small
 ```
+
+**worktree安全性:** `main` が他のworktreeで使用中でも `git switch main` を要求しない。`git show origin/main:docs/migration/STATUS.md` で正本を確認し、`git worktree list --porcelain` で利用中のブランチを確認する。作業ツリーがdirtyなら勝手にstash/resetせずSTOP。候補選定は全open PRのtask・Owned paths・共有domain/台帳行・依存PRまで照合してから行う。`gh pr list`の取得に失敗した場合は自動claimを停止する。`--offline`は別経路で所有者確認済みの場合だけ使い、その根拠をwork-itemへ記録する。
 
 上から順に判定する（自分 = work-itemの`Owner`が自分のPR）。
 
@@ -145,7 +149,10 @@ gh pr list --state open --json number,headRefName,title,isDraft
 git switch -c migration/mig-xxxx-<slug> origin/main
 git commit --allow-empty -m "MIG-XXXX: 作業開始"
 git push -u origin migration/mig-xxxx-<slug>
-gh pr create --draft --base main --title "MIG-XXXX: <日本語の短い説明>" --body "GIT_WORKFLOW.md §5 の必須項目を記入"
+PR_BODY_FILE=/tmp/mig-xxxx-pr.md  # 実在するファイルに CURRENT/TARGET・scope・affected IDs・検証・rollback を実値で作成
+ test -s "$PR_BODY_FILE" || { echo "PR body missing"; exit 1; }
+ ! grep -Eq 'MIG-XXXX|<[^>]+>|TBD|記入待ち' "$PR_BODY_FILE" || { echo "PR body contains placeholders"; exit 1; }
+gh pr create --draft --base main --title "MIG-XXXX: <日本語の短い説明>" --body-file "$PR_BODY_FILE"
 gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("migration/mig-xxxx-")) | .number'
 ```
 
@@ -206,10 +213,11 @@ git commit -m "MIG-XXXX: STATUS統合"
 git push --force-with-lease
 gh pr ready <n>
 gh pr checks <n> --watch                           # 最終HeadのCIがpassしてから
+# このHeadを対象とした独立レビューを再度確認し、APPROVEとSHA一致を記録してからmerge
 gh pr merge <n> --squash
 ```
 
-統合commit（`STATUS.md`と自分のwork-itemだけの変更、競合の無いrebase）は再レビュー不要だが、CIは最終Headでpassが必要。hostの権限設定が`gh pr merge`を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
+**最終Headの例外なしルール:** rebase・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPR/work-itemへ記録する。hostの権限設定が`gh pr merge`を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
 
 ## 最小検証コマンド
 
