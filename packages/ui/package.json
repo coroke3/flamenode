@@ -5,9 +5,21 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./layout/bodyScrollLock.ts": "./src/layout/bodyScrollLock.ts",
+    "./layout/bodyScrollLock": {
+      "types": "./dist/layout/bodyScrollLock.d.ts",
+      "default": "./dist/layout/bodyScrollLock.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs"
   },
   "peerDependencies": {
     "react": "^18.3.1 || ^19.0.0",
