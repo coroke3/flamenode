@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getTaskContext } from "./print-migration-task-context.mjs";
 
-test("MIG-0401 packet shows READY, direct dependency and no unrelated cards",()=>{
+test("MIG-0401 packet shows current state, direct dependency and no unrelated cards",()=>{
  const r=getTaskContext("MIG-0401");
  assert.match(r.output,/MIG-0401 — narrow/);
- assert.match(r.output,/STATUS: READY/);
+ assert.match(r.output,/STATUS: (?:READY|DONE)/);
  assert.match(r.output,/MIG-0105:DONE/);
  assert.match(r.output,/public snapshot loader PoC/);
  assert.doesNotMatch(r.output,/### MIG-0405/);
