@@ -18,8 +18,9 @@ export function shouldBlockSearchKeySubmit(input: SearchKeyGuardInput): boolean 
 
 export function shouldBlockSearchFormSubmit(input: {
   isCompositionSession?: boolean;
+  isNativeGuardActive?: boolean;
 }): boolean {
-  return Boolean(input.isCompositionSession);
+  return Boolean(input.isCompositionSession || input.isNativeGuardActive);
 }
 
 export interface ImeSafeGetFormProps
@@ -120,8 +121,8 @@ export function ImeSafeGetForm({
         }
 
         event.preventDefault();
-        if (!shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })
-            && !suppressSubmitRef.current) {
+        if (!shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current,
+          isNativeGuardActive: suppressSubmitRef.current })) {
           runSearch(event.currentTarget);
         }
       }}
@@ -129,8 +130,8 @@ export function ImeSafeGetForm({
         onSubmit?.(event);
         if (event.defaultPrevented) return;
         event.preventDefault();
-        if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current })
-            || suppressSubmitRef.current) return;
+        if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current,
+          isNativeGuardActive: suppressSubmitRef.current })) return;
         runSearch(event.currentTarget);
       }}
     >
