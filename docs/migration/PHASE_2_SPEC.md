@@ -159,7 +159,7 @@ npm run test:unit
 node scripts/check-migration-file-progress.mjs
 npm run check:project-docs
 ```
-期待: すべて終了コード0。`git diff --name-only origin/main...HEAD` はgenerator、生成CSS、test、work-item、`FILE_MIGRATION_MATRIX.md`、`PHASE_2_SPEC.md` の6 fileだけ。
+期待: すべて終了コード0。実装のU01/U02時点の `git diff --name-only origin/main...HEAD` はgenerator、生成CSS、test、work-item、`FILE_MIGRATION_MATRIX.md`、`PHASE_2_SPEC.md` の6 fileだけ。runbook Fでmerge直前に `STATUS.md` の当該行と次READYを統合した後は、その1 fileを加えた計7 fileだけであること。
 #### Ledger updates
 CSSは新規TARGETファイルでCURRENTの対応元は無いが、`scripts/check-migration-file-progress.mjs` は `packages/**` のPR差分を台帳へ登録する。そのため `FILE_MIGRATION_MATRIX.md` の Migration ledger に次の1行を追加する（既存の行は変更しない）。
 
