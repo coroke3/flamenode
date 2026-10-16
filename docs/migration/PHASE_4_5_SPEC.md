@@ -324,6 +324,7 @@ PRをrevert。
 - **U04 new and private**: 次の2つの扱いを決め、表に書く。(a) R2 HTML ができる前の新しい作品の URL: MIG-0411 の Queue が作るまでの数分間、静的な共通 shell HTML を返し、中身は Island が API で読む案を既定にし、gateway（MIG-0405）で動くかを確かめる。(b) build の後に非公開になったもの: 更新 API が同じ request で書く拒否 entry（KV の key）を gateway が読む。KV の反映に最大 60秒かかることを書く。
 - **U05 page render**: 作品・ユーザー・イベントについて、次の2つの CPU を種類ごとに測る（MIG-0411 の形を決めるため）。(a) ページ全体を `experimental_AstroContainer.renderToString` で HTML にする。(b) ページのデータだけを JSON にし、HTML は title・canonical・OGP を入れた最小の `<head>` と固定の本体（JSON を読んで Island が描く）にする。CURRENT は (b) に近く、イベント・ユーザーの JSON 1件の生成で 6〜11ms かかっている（`ZERO_1102.md` §3 の背景処理の参考表）。費用の大半は D1 の行を DTO にして stringify する部分なので、(a) と (b) の差と内訳（D1 結果の処理 / DTO / stringify / HTML）を分けて記録する。
 - **U06 list shards**: 一覧（新着・人気）と検索索引を、件数の上限（`MAX_` 定数）付きの shard に分け、1件の更新で変わる shard だけを作り直す形の CPU を測る。CURRENT は全体の作り直しで 129〜178ms（一覧）、350ms〜1.6秒（検索索引）かかる（`ZERO_1102.md` §3 の背景処理の参考表）。shard 1つが max < 8ms なら、その family は build ではなく Queue に分類する（`OPEN_DECISIONS.md` D-09「反映の速さの方針」の3）。
+- **U07 queue budget**: Queue consumer の CPU 上限を非本番で確かめる（`ZERO_1102.md` §1 の食い違い）。CPU を 20ms / 100ms / 1秒使う consumer を非本番の Worker に置き、各 50 message 送って `exceededCpu` の件数を記録する。結果を `ZERO_1102.md` §1 に出典付きで書く。20ms で止まるなら `B` の 8ms を確定とし、1秒でも止まらないなら一覧・検索の shard の上限を見直す案を PR に書く（決めるのは lead とユーザー）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -346,10 +347,12 @@ npm run check:project-docs
 - [ ] 新規作品と非公開化の扱いが表にある
 - [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある
 - [ ] 一覧・検索の shard 1つの作り直しの CPU（max）と、各 family を「API / Queue 1件 / Queue 分割 / build」のどれにしたかが PR にある
+- [ ] U07 の Queue consumer の 3条件それぞれの `exceededCpu` 件数が `ZERO_1102.md` §1 にある
 #### STOP
 - 最短間隔が CURRENT の鮮度（30〜300秒）より大きく延びるので、計算した「公開までの最大の遅れ」を PR とスレッドでユーザーに示し、承認を得るまで MIG-0410 の定数を決めない。
 - 非公開化に 60秒を超える遅れが出る設計になったら止める。
 - 本番 D1 の読み取り、token や deploy hook の作成が必要になったら止める（明示承認事項）。
+- U07 の非本番 Worker と Queue を作る前に止め、作る resource 名と消す手順を示して承認を得る（Cloudflare の設定変更）。
 #### Rollback
 PRをrevert。本番には影響しない。
 

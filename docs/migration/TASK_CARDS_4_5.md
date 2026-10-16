@@ -74,7 +74,7 @@
 - 読む: `PHASE_4_5_SPEC.md` の MIG-0409 Work Order、`OPEN_DECISIONS.md` D-09、`ZERO_1102.md`。
 - 変更: `+apps/site/scripts/readPublicData.ts`（1 family の PoC）、`+docs/migration/static-delivery/BUILD_TIME_DATA.md`（build / API の分類表、build 時間と1日の上限）。
 - 試験: CURRENT の生成関数と同じ fixture で出力一致、非公開の除外、`MAX_` 境界、同じ入力で同じ byte。
-- DONE: 公開までの最大の遅れをユーザーが承認。token・deploy hook・本番 D1 には触れていない。
+- DONE: 公開までの最大の遅れをユーザーが承認。Queue consumer の CPU 上限を非本番で確かめ（U07、作る前に承認）、`ZERO_1102.md` §1 の暫定予算を確定か見直しにした。token・deploy hook・本番 D1 には触れていない。
 
 ### MIG-0410 — deploy-hook build scheduler (D-09)
 

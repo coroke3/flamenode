@@ -130,7 +130,7 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 ユーザーが 2026-10-16 の決定カードで「個別は ISR 相当」を選んだ。元の要件（[PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) の「Astro SSG Build Trigger & Free Tier Budget」）と D-06 の②（R2 に保存した事前生成 HTML）に合わせる。
 
 - 作品・ユーザー・イベントの個別ページは、更新のたびにそのページだけを Queue consumer が作り直して R2 に置き、gateway（S1）が返す（MIG-0411）。反映は数分以内。
-- 条件: 1ページの生成が **max < 8ms**。Queue consumer も 10ms の上限として扱う（[ZERO_1102.md](ZERO_1102.md) §1 の本番実測）。MIG-0409 で測り、超えるページの種類は build（MIG-0410 の deploy hook）に回す。
+- 条件: 1ページの生成が **max < 8ms**。Queue consumer も 10ms の上限として扱う（[ZERO_1102.md](ZERO_1102.md) §1 の本番実測）。この 8ms は安全側の暫定予算で、MIG-0409 の U07（非本番の試験）と MIG-0906 の G2（本番の観測）で確定させる。MIG-0409 で測り、超えるページの種類は build（MIG-0410 の deploy hook）に回す。
 - Next の ISR は再生成1回 16〜71ms だった（`docs/operations/workers.md`、ローカル計測）。React SSR を含むためで、Astro の1ページ生成（`experimental_AstroContainer.renderToString`、`node_modules/astro/dist/container/index.d.ts:227`、astro 5.18.2）は未計測。
 - 一覧・検索索引・人気順など、多数の行から作るデータは build のまま（約 100分の遅れは下の制約のとおり）。
 
