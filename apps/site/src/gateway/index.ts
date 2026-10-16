@@ -170,7 +170,7 @@ export default {
         if (r2Object) {
           // A stale, untyped, or empty R2 object is not public content.
           if (r2Object.customMetadata?.generation !== manifest?.generation ||
-              (r2Object.size !== undefined && r2Object.size <= 0) ||
+              !Number.isFinite(r2Object.size) || (r2Object.size ?? 0) <= 0 ||
               !r2Object.body ||
               !/^text\/html(?:\s*;|$)/i.test(r2Object.httpMetadata?.contentType ?? "")) {
             return unavailableResponse();
