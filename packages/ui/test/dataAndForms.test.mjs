@@ -9,6 +9,7 @@ import {
   shouldBlockSearchFormSubmit,
   IME_COMPOSING_ATTR,
   AutoSubmitSelect,
+  navigateGetForm,
   AutoSubmitCheckbox,
 } from "../dist/index.js";
 
@@ -171,5 +172,45 @@ test("U03: AutoSubmitSelect preserves GET values and ignores IME composing forms
     else delete globalThis.window;
     if (prevFormData) Object.defineProperty(globalThis, "FormData", prevFormData);
     else delete globalThis.FormData;
+  }
+});
+
+
+test("non-GET navigation preserves constraint validation and submit handlers", () => {
+  let nativeSubmit = 0;
+  let requestSubmit = 0;
+  const form = {
+    getAttribute: (key) => key === "method" ? "post" : null,
+    requestSubmit: () => { requestSubmit++; },
+    submit: () => { nativeSubmit++; },
+  };
+  navigateGetForm(form);
+  assert.equal(requestSubmit, 1, "POST forms must use requestSubmit");
+  assert.equal(nativeSubmit, 0, "never bypass validation with submit()");
+
+  const originalEvent = Object.getOwnPropertyDescriptor(globalThis, "Event");
+  let checked = 0;
+  let dispatched = 0;
+  let reported = 0;
+  try {
+    Object.defineProperty(globalThis, "Event", { configurable: true, value: class {
+      constructor(type, options) { this.type = type; this.options = options; }
+    }});
+    form.requestSubmit = undefined;
+    form.checkValidity = () => { checked++; return false; };
+    form.reportValidity = () => { reported++; };
+    form.dispatchEvent = () => { dispatched++; };
+    navigateGetForm(form);
+    assert.equal(checked, 1);
+    assert.equal(reported, 1);
+    assert.equal(dispatched, 0, "invalid forms must not send");
+
+    form.checkValidity = () => true;
+    navigateGetForm(form);
+    assert.equal(dispatched, 1, "valid fallback must dispatch submit event");
+    assert.equal(nativeSubmit, 0);
+  } finally {
+    if (originalEvent) Object.defineProperty(globalThis, "Event", originalEvent);
+    else delete globalThis.Event;
   }
 });
