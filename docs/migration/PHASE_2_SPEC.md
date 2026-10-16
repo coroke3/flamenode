@@ -61,6 +61,7 @@
 - `packages/ui/src/styles/` は存在しない。`test:unit`（`package.json` の scripts）は `scripts/**/*.test.mjs` を含む。
 #### Owned paths
 - 新規: `+scripts/generate-ui-tokens.mjs`, `+scripts/generate-ui-tokens.test.mjs`, `+packages/ui/src/styles/tokens.css`（script の出力。手で編集しない）
+- 変更: `docs/migration/FILE_MIGRATION_MATRIX.md`（新規 tokens.css の1行だけ追加し、完了時に RETAINED + evidence）、`docs/migration/PHASE_2_SPEC.md`（本検証で見つかった台帳要件の反映）
 - 触らない: `docs/migration/mock/**`（登録済み mock）、`packages/ui/src/components/**`（MIG-0202）
 - 対象外: `@font-face`（font file の置き場所が未決定。lead が MIG-0202 の refinement で決める）、breakpoint（tokens.json に無い）
 #### Micro-units
@@ -158,9 +159,15 @@ npm run test:unit
 node scripts/check-migration-file-progress.mjs
 npm run check:project-docs
 ```
-期待: すべて終了コード0。`git diff --name-only origin/main...HEAD` の出力が Owned paths の3 file と `docs/migration/work-items/MIG-0201.md` の4行だけ。
+期待: すべて終了コード0。`git diff --name-only origin/main...HEAD` はgenerator、生成CSS、test、work-item、`FILE_MIGRATION_MATRIX.md`、`PHASE_2_SPEC.md` の6 fileだけ。
 #### Ledger updates
-なし。`FILE_MIGRATION_MATRIX.md` は CURRENT の file の移行先を追う台帳で、tokens.css に対応する CURRENT の file は無い。UX / FN の state も変えない（部品はまだ使われていない）。
+CSSは新規TARGETファイルでCURRENTの対応元は無いが、`scripts/check-migration-file-progress.mjs` は `packages/**` のPR差分を台帳へ登録する。そのため `FILE_MIGRATION_MATRIX.md` の Migration ledger に次の1行を追加する（既存の行は変更しない）。
+
+```text
+| `packages/ui/src/styles/tokens.css` | TARGET_SKELETON | generated from registered HTML design token JSON; no CURRENT counterpart | MIG-0201 | SAME (reproducible CSS artifact; used by future MIG-0202) | IN_PROGRESS | PR#<n> SHA=<40hex U01 Head> |
+```
+
+最初は `IN_PROGRESS` で実際のPR番号と既存のU01 Headを記録する。実際に `node --test scripts/generate-ui-tokens.test.mjs` と最初のCIが成功したあと、同じ行だけ `RETAINED` に変更し、`TEST=node --test scripts/generate-ui-tokens.test.mjs CI=<successful run URL>` を証拠へ追加する。CI未完了・失敗の時点ではRETAINEDにしない。既存のUX/FN stateや公開Routeのparityは更新しない。
 #### DONE checklist
 - [ ] `packages/ui/src/styles/tokens.css` の sha256 が `affa3789bb7c49a25d9d8abcd9d8a10af5537b83aaba6a2d5533bde496e42f25`
 - [ ] `scripts/generate-ui-tokens.test.mjs` が `test:unit` で走る（件数 +3）
