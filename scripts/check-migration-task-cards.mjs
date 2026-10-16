@@ -106,6 +106,23 @@ function proseLines(text) {
   });
 }
 
+// Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
+function proseLines(text) {
+  let fence = null;
+  return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      return " ".repeat(line.length);
+    }
+    if (marker) {
+      fence = { char: marker[1][0], length: marker[1].length };
+      return " ".repeat(line.length);
+    }
+    return line;
+  });
+}
+
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
 function workOrderSections(specText) {
   const lines = specText.replace(/\r\n/g, "\n").split("\n");
@@ -145,17 +162,6 @@ export function extractWorkOrder(specText, id) {
   return sections.length === 1 ? parseWorkOrder(sections[0].text) : null;
 }
 
-// Body of each `#### name` heading found in prose (fenced examples never count). The body keeps its
-// original text, so a section that holds only a command fence still has content.
-function sectionBodies(text, name) {
-  const prose = proseLines(text).join("\n");
-  return [...prose.matchAll(new RegExp("^####\\s+" + name + "\\s*$", "gm"))].map((match) => {
-    const start = match.index + match[0].length;
-    const next = prose.slice(start).search(/^####\s/m);
-    return text.slice(start, next < 0 ? undefined : start + next).trim();
-  });
-}
-
 export function validateWorkOrder(id, order) {
   if (!order) return [id + ": missing or duplicate work order"];
   const errors = [];
@@ -166,12 +172,17 @@ export function validateWorkOrder(id, order) {
     if (order.model !== "small") errors.push(id + ": READY_FOR_SMALL_MODEL requires Model: small");
     if (!/^(?:- )?\*\*Verified against:\*\*[^\S\n]*`[0-9a-f]{7,40}`(?:\s|$)/m.test(order.prose)) errors.push(id + ": small-model work order needs Verified against `<sha>`");
     for (const section of WORK_ORDER_SECTIONS) {
-      const bodies = sectionBodies(order.text, section);
-      if (bodies.length !== 1) {
-        errors.push(id + ": small-model work order " + (bodies.length ? "duplicate" : "missing") + " #### " + section);
+      const heading = new RegExp("^####\\s+" + section + "\\s*$", "gm");
+      const matches = [...order.prose.matchAll(heading)];
+      if (matches.length !== 1) {
+        errors.push(id + ": small-model work order " + (matches.length ? "duplicate" : "missing") + " #### " + section);
         continue;
       }
-      if (!bodies[0] || /^(?:[-*]\s*)?(?:TBD|TODO|pending|未定|後で)$/i.test(bodies[0])) errors.push(id + ": empty #### " + section);
+      // Use the original text here: a section containing a command fence has real content.
+      const start = matches[0].index + matches[0][0].length;
+      const next = order.prose.slice(start).search(/^####\s/m);
+      const content = order.text.slice(start, next < 0 ? undefined : start + next).trim();
+      if (!content || /^(?:[-*]\s*)?(?:TBD|TODO|pending|未定|後で)$/i.test(content)) errors.push(id + ": empty #### " + section);
     }
     if (!/^[-*] \*\*U01\b/m.test(order.prose)) errors.push(id + ": small-model work order has no U01 micro-unit");
     errors.push(...validateSmallModelOrder(id, order.text));
@@ -202,6 +213,7 @@ export function validateWorkOrders({ status, specs }) {
   }
   return errors;
 }
+
 
 // A small model executes the order literally, so everything it needs must be decided in the text.
 const VAGUE_PHRASES = ["適宜", "必要に応じて", "可能なら", "TBD", "検討する", "うまく"];
