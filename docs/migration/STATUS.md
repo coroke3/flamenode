@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-09
+> Last updated: 2026-10-16
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -17,17 +17,19 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 ## Overall
 
 ```text
-Current Phase: 3 — Domain extraction
+Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
 Current Task: MIG-0301
 Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0108
-Last Task PR: #276
-Active Task PR: none
-Next: MIG-0301 extraction/DI pattern
+Last Completed Task: MIG-0401
+Last Task PR: #283
+Merged READY: MIG-0201, MIG-0301, MIG-0404, MIG-0801
+Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
+
+この節はmerge済み状態だけを表す。owner・Active PR・IN_PROGRESS/REVIEWのlive状態はGitHubのopen PRとそのbranchの`work-items/MIG-XXXX.md`で確認する（`npm run migration:next`がopen PR所有のtaskを除外して候補を出す）。
 
 ## State definitions
 
@@ -64,7 +66,7 @@ Next: MIG-0301 extraction/DI pattern
 | Route Handler APIs | 28 route files / 33 methods | 33 CURRENT_VERIFIED | 0 | all `route.ts` methods disposed |
 | CURRENT Worker scripts | 4 | 4 CURRENT_VERIFIED topology + CPU/request + Queue/Cron/job semantics | 0 | bindings/routes/jobs fixed |
 | Human-readable full feature catalog | 432 UX + 136 FN | canonical ledgersとcheckerで一致確認対象 | n/a | catalog drift 0 |
-| New UI visual source | HTML mock pending | `UI_REFERENCE.md = PENDING_HTML` | n/a | user HTML mock登録前にvisual targetを確定しない |
+| New UI visual source | HTML mock registered | `UI_REFERENCE.md = READY (docs/migration/mock/)` | n/a | デザインモック受領済み。MIG-0201以降で抽出・実装可能 |
 
 Current FN state summary:
 
@@ -94,7 +96,7 @@ Total                           432
 432は現在確認済みのCURRENT frontend baseline。以後コードから新たなobservable behaviorを発見した場合は、実装前にcanonical ledgerと `FEATURE_CATALOG.md` を同時更新する。
 MIG-0011は全件disposition・統合validation済み。2026-10-07のユーザー明示指示により、独立レビュー未達を記録した上でmerge承認され `DONE` とする。独立レビュー要件自体はMIG-0012 Phase 0 Gateで再評価する。
 
-Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentが残る限りCLOSED。
+Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backend disposition・requirement reconciliation・optimization blocker assessmentの完了を確認済み）。
 
 ---
 
@@ -104,7 +106,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | BLOCKED (`PENDING_HTML`, Phase 4/5前提) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -140,7 +142,7 @@ Phase 0 Gateは、未監査必須機能・UX/FN mapping・backend disposition・
 - [x] CURRENT technical compatibility routes separated from user-visible features
 - [x] global error/404/robots/sitemap/shell behaviors represented
 - [x] old `docs/design-redesign` removed from migration sources
-- [x] new visual source set to `UI_REFERENCE.md = PENDING_HTML`
+- [x] Phase 0 established `UI_REFERENCE.md = PENDING_HTML`; MIG-0200 subsequently registered the approved HTML. Current visual scope is in UI_REFERENCE.
 - [x] existing design/product requirement reconciliation policy fixed
 - [x] Claude / Codex / Antigravity shared protocol fixed
 - [x] migration Git/branch/PR/squash workflow is mandatory
@@ -179,7 +181,7 @@ Frontend / Backend の分割監査は main に統合済み。
 - 性能/architecture最適化のためにfrontend product behavior変更が必須となるblockerは0。
 - Active X interaction ownershipは性能都合ではなく、明示済みTARGET semantic requirement。
 - `docs/design-redesign/` は存在せず、移行入力として使用しない。
-- 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録するまで `PENDING_HTML`。
+- 新UIはユーザー提供HTML mockを `UI_REFERENCE.md` へ登録完了（MIG-0200 DONE、`READY`）。
 - Cloudflare CURRENT production topologyはread-only再確認済み: `flamenode-web` + fast/content/sync jobs、root/www Custom Domain、`flamenode_db`、`flamenode-storage`、3 wake Queue + 3 DLQ。production mutationは0。
 - GitHub Copilot reviewは要求したがquota超過で実レビューされなかったため、独立レビュー済みとは扱わない。
 - 2026-10-07、ユーザーから「mainに合流」の明示指示を受けたため、これはPR #250のmergeに対するLead/human approvalとして記録する。
@@ -201,8 +203,6 @@ Validation:
 
 # Phases 1–9
 
-Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as safe preparatory work.
-
 ## Phase 1 — Repository boundaries
 
 > タスク別詳細仕様書: [`PHASE_1_SPEC.md`](PHASE_1_SPEC.md)（Luna / Flash 等の軽量モデル向け完全仕様・コード例）
@@ -220,15 +220,15 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 2 — Design System / HTML mock integration
 
-> D-08はHTMLモック先行を選択済み。ただし実ファイル未受領のため BLOCKED_ON_USER。勝手にREADYへ変更しない。
+> 2026-10-13: ユーザーより新HTMLモック一式を受領し、`docs/migration/mock/` へ配置および `UI_REFERENCE.md` への登録完了（MIG-0200 DONE）。MIG-0201 が READY。
 
 > ※デザイン適用戦略（案A）に基づき、本Phaseは公開画面（Phase 4/5）の前提条件となります。
 > UI/デザインに依存しない Phase 3（ドメイン抽出）は先行して着手可能です。
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | BLOCKED | user input |
-| MIG-0201 | visual/IA extraction + design tokens | BLOCKED | MIG-0108, MIG-0200 |
+| MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | DONE | user input |
+| MIG-0201 | visual/IA extraction + design tokens | READY | MIG-0108, MIG-0200 |
 | MIG-0202 | primitives | BLOCKED | MIG-0201 |
 | MIG-0203 | navigation/layout | BLOCKED | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | BLOCKED | MIG-0202 |
@@ -252,9 +252,9 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 ## Phase 4 — Public PoC
 
-> **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、D-08 HTMLモック待ちは **MIG-0402/0403と正式UI移行** だけ。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
+> **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、視覚系の **MIG-0402/0403と正式UI移行** はPhase 2 Gate（MIG-0206）の完了待ち（D-08はDECIDED、mock登録済み）。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
 >
-> **並行READY:** MIG-0301 (Domain) と MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
+> **並行READY:** MIG-0201 (Design system)、MIG-0301 (Domain)、MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
 >
 > Performance measurement/protocol: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md) / [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) 。
 
@@ -264,10 +264,10 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | READY | MIG-0105 |
+| MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | DONE | MIG-0105 |
 | MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
 | MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
-| MIG-0404 | route-map generator (mock-independent) | BLOCKED | MIG-0401 |
+| MIG-0404 | route-map generator (mock-independent) | READY | MIG-0401 |
 | MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
 | MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406 |
@@ -285,7 +285,9 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | MIG-0505 | list/search/recommend/trending | BLOCKED | MIG-0501 |
 | MIG-0506 | root/top | BLOCKED | MIG-0505 |
 | MIG-0507 | `/:id` video catch-all | BLOCKED | MIG-0502..MIG-0506 |
-| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507 |
+| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0507, MIG-0607 |
+
+公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
 ## Phase 6 — Hono API
 
@@ -294,12 +296,15 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
-| MIG-0602 | low-risk mutations | BLOCKED | MIG-0601 |
+| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | BLOCKED | MIG-0801, MIG-0107 |
+| MIG-0602 | low-risk mutations | BLOCKED | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | BLOCKED | MIG-0602 |
 | MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
 | MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
+
+MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
 ## Phase 7 — Private SPA
 
@@ -308,9 +313,9 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601 |
-| MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0701 |
-| MIG-0703 | entry | BLOCKED | MIG-0702 |
+| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601, MIG-0608 |
+| MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
+| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703 |
 | MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
@@ -321,7 +326,7 @@ Phase 1+ remains blocked until MIG-0012 unless a task is explicitly marked as sa
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0801 | Auth baseline fixtures/tests | BLOCKED | MIG-0008 |
+| MIG-0801 | Auth baseline fixtures/tests | READY | MIG-0008 |
 | MIG-0802 | Web Standard/Auth integration PoC | BLOCKED | MIG-0801, MIG-0607 |
 | MIG-0803 | Discord/account-linking parity | BLOCKED | MIG-0802 |
 | MIG-0804 | CPU/security review | BLOCKED | MIG-0803 |
@@ -345,86 +350,8 @@ MIG-0805 requires explicit user approval before production action.
 
 ---
 
-# Last completed task
+# Completed task history
 
-## MIG-0010 — 86 CURRENT screens + cross-route shells → UX/FN mapping
+完了taskの詳細（変更・validation・rollback）は各PRと`work-items/MIG-XXXX.md`、およびgit履歴を正本とする。直近: MIG-0200（PR #284、HTML mock登録）、MIG-0108（PR #276、Phase 1 Gate）、MIG-0011/0012（Phase 0）。
 
-```text
-State: DONE
-Owner: chatgpt
-PR: #246
-Production action required: no
-Runtime behavior changed: no
-```
-
-Completed:
-
-- 86 CURRENT USER_SCREENを全件route-local UX/FNへmapping
-- 16 cross-route shellを定義
-- 432 UX capabilitiesの170 distinct Surface tokenをCURRENT routeまたはshellへ完全解決
-- screenごとに permission profile / dynamic-state profile / URL-query-history profile / responsive-a11y profile / TARGET render ownershipを固定
-- public technical twin:
-  - /list/~query -> Q-LIST(q,event,sort,page,view)
-  - /user/~query -> Q-USER(q,sort,page)
-  - /event/~query -> Q-EVENT(q,status,sort)
-  - /user/[id]/paged -> Q-USER-PAGED(worksPage,collabPage)
-  のlogical URL contractを固定
-- searchParamsを読むCURRENT pageをQ-DIRECT扱いしないdrift ruleを追加
-- error/global-error/not-found/robots/sitemapを86 screen外のglobal surfacesとしてshell mapping
-- visual sourceはUI_REFERENCE=PENDING_HTMLのまま維持し、target layout/componentは捏造しない
-- `screen-mapping/README.md` をROUTE_MATRIX / FRONTEND_FEATURES / architecture / shared protocol / Claude / Codex / Antigravity / checkerへ接続
-- production runtime/Cloudflare/D1/R2/KV/Queue mutation 0
-
-Validation evidence:
-
-- CURRENT routes: 86
-- screen mapping rows: 86
-- UX capabilities: 432
-- distinct UX Surface tokens: 170
-- Surface resolution rows: 170
-- cross-route shells: 16
-- screen routes with no local UX: 0
-- unresolved Surface tokens: 0
-- unknown route/shell owners: 0
-- malformed permission/state/query/RA rows: 0
-- CURRENT page searchParams vs Q profile mismatches: 0
-- migration checker JavaScript syntax parse: OK
-- branch behind main=0 at final review
-- GitHub status checks: none
-- author self-review only; independent approval is not represented
-
-Optimization conclusions:
-
-- backend commonization may not erase screen-specific permission/state/query/deep-link contracts
-- responsive/a11y requirements are migration contracts independent of future visual mock
-- technical query twin routes may disappear only after logical URL replacement evidence exists
-- frontend product-contract change required for current optimization candidates: 0
-
-Rollback:
-
-- revert PR #246 squash commit; production rollback action is unnecessary because MIG-0010 is documentation/checker-only
-
-
-## MIG-0011 checkpoint merged before completion
-
-- Progress saved in `gap-scan/CHECKPOINT.md`.
-- MIG-0011 is **not DONE**; it is returned to READY/unassigned for safe handoff.
-- Confirmed redirect-only route classification gaps must be reconciled before Phase 0 completion.
-- Last completed task is MIG-0108 / Phase 1 Gate passed.
-
-# Next task claim template
-
-Phase 1 (Repository boundaries) is fully complete.
-All skeleton packages (`packages/ui`, `packages/contracts`, `packages/domain`) and apps (`apps/site`, `apps/app`, `apps/api`) are established and typechecked without affecting existing Next.js logic.
-
-Next tasks:
-- **Phase 2 (MIG-0200)**: Waiting for user HTML mock registration (`UI_REFERENCE.md = PENDING_HTML`).
-- **Phase 3 (MIG-0301)**: Domain extraction can proceed safely once approved.
-
-
-
-
-
-
-
-
+<!-- MIG-0401 #283: synthetic-only public snapshot PoC integrated; no production deployment, routing, Remote D1 or secret changes. Independent review note: https://github.com/coroke3/flamenode/pull/283#pullrequestreview-5541888183 ; user authorized merge 2026-10-16. Latest pre-integration CI: https://github.com/coroke3/flamenode/actions/runs/38200639532. -->
