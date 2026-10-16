@@ -89,15 +89,31 @@ export const SPEC_FILES = Object.freeze({
 export const WORK_ORDER_SECTIONS = Object.freeze(["Source snapshot", "Owned paths", "Micro-units", "Test cases", "Commands", "Ledger updates", "DONE checklist", "STOP", "Rollback"]);
 export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 
+// Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
+function proseLines(text) {
+  let fence = null;
+  return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      return " ".repeat(line.length);
+    }
+    if (marker) {
+      fence = { char: marker[1][0], length: marker[1].length };
+      return " ".repeat(line.length);
+    }
+    return line;
+  });
+}
+
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
 function workOrderSections(specText) {
   const lines = specText.replace(/\r\n/g, "\n").split("\n");
+  const prose = proseLines(specText);
   const sections = [];
-  let fenced = false;
   let current = null;
-  for (const line of lines) {
-    if (/^\s*```/.test(line)) fenced = !fenced;
-    const heading = !fenced && /^#{1,3}\s/.test(line);
+  for (const [index, line] of lines.entries()) {
+    const heading = /^#{1,3}\s/.test(prose[index]);
     if (heading) {
       if (current) sections.push(current);
       const id = line.match(/^###\s+(MIG-\d{4})\b/)?.[1];
@@ -109,18 +125,58 @@ function workOrderSections(specText) {
 }
 
 export function parseWorkOrder(text) {
+  text = text.replace(/\r\n/g, "\n");
+  const prose = proseLines(text).join("\n");
+  const values = (field) => [...prose.matchAll(new RegExp("^(?:- )?\\*\\*" + field + ":\\*\\*[^\\S\\n]*([^\\n]+)$", "gm"))].map((match) => match[1].trim());
+  const models = values("Model"), readiness = values("Readiness");
   return {
     text,
-    model: text.match(/\*\*Model:\*\*\s*(small|lead)\b/)?.[1] ?? null,
-    readiness: text.match(/\*\*Readiness:\*\*\s*(READY_FOR_SMALL_MODEL|NEEDS_REFINEMENT)\b/)?.[1] ?? null,
-    declaresModel: /\*\*Model:\*\*/.test(text),
-    declaresReadiness: /\*\*Readiness:\*\*/.test(text),
+    prose,
+    model: models.length === 1 && /^(small|lead)$/.test(models[0]) ? models[0] : null,
+    readiness: readiness.length === 1 ? readiness[0].match(/^(READY_FOR_SMALL_MODEL|NEEDS_REFINEMENT)(?:\s+—\s+.+)?$/)?.[1] ?? null : null,
+    declaresModel: models.length > 0,
+    declaresReadiness: readiness.length > 0,
+    metadataDuplicates: models.length > 1 || readiness.length > 1,
   };
 }
 
 export function extractWorkOrder(specText, id) {
-  const section = workOrderSections(specText ?? "").find((s) => s.id === id);
-  return section ? parseWorkOrder(section.text) : null;
+  const sections = workOrderSections(specText ?? "").filter((s) => s.id === id);
+  return sections.length === 1 ? parseWorkOrder(sections[0].text) : null;
+}
+
+// Body of each `#### name` heading found in prose (fenced examples never count). The body keeps its
+// original text, so a section that holds only a command fence still has content.
+function sectionBodies(text, name) {
+  const prose = proseLines(text).join("\n");
+  return [...prose.matchAll(new RegExp("^####\\s+" + name + "\\s*$", "gm"))].map((match) => {
+    const start = match.index + match[0].length;
+    const next = prose.slice(start).search(/^####\s/m);
+    return text.slice(start, next < 0 ? undefined : start + next).trim();
+  });
+}
+
+export function validateWorkOrder(id, order) {
+  if (!order) return [id + ": missing or duplicate work order"];
+  const errors = [];
+  if (order.metadataDuplicates) errors.push(id + ": duplicate Model/Readiness metadata");
+  if (!order.model) errors.push(id + ": Model must be small or lead");
+  if (!order.readiness) errors.push(id + ": Readiness must be READY_FOR_SMALL_MODEL or NEEDS_REFINEMENT");
+  if (order.readiness === "READY_FOR_SMALL_MODEL") {
+    if (order.model !== "small") errors.push(id + ": READY_FOR_SMALL_MODEL requires Model: small");
+    if (!/^(?:- )?\*\*Verified against:\*\*[^\S\n]*`[0-9a-f]{7,40}`(?:\s|$)/m.test(order.prose)) errors.push(id + ": small-model work order needs Verified against `<sha>`");
+    for (const section of WORK_ORDER_SECTIONS) {
+      const bodies = sectionBodies(order.text, section);
+      if (bodies.length !== 1) {
+        errors.push(id + ": small-model work order " + (bodies.length ? "duplicate" : "missing") + " #### " + section);
+        continue;
+      }
+      if (!bodies[0] || /^(?:[-*]\s*)?(?:TBD|TODO|pending|未定|後で)$/i.test(bodies[0])) errors.push(id + ": empty #### " + section);
+    }
+    if (!/^[-*] \*\*U01\b/m.test(order.prose)) errors.push(id + ": small-model work order has no U01 micro-unit");
+    errors.push(...validateSmallModelOrder(id, order.text));
+  }
+  return errors;
 }
 
 export function validateWorkOrders({ status, specs }) {
@@ -141,18 +197,8 @@ export function validateWorkOrders({ status, specs }) {
       if (task.state === "READY") errors.push(id + ": READY task has no work order section in " + file);
       continue;
     }
-    if (order.declaresModel && !order.model) errors.push(id + ": Model must be small or lead");
-    if (order.declaresReadiness && !order.readiness) errors.push(id + ": Readiness must be READY_FOR_SMALL_MODEL or NEEDS_REFINEMENT");
     if (task.state === "READY" && (!order.model || !order.readiness)) errors.push(id + ": READY task work order must declare Model and Readiness");
-    if (order.readiness === "READY_FOR_SMALL_MODEL") {
-      if (order.model !== "small") errors.push(id + ": READY_FOR_SMALL_MODEL requires Model: small");
-      if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.text)) errors.push(id + ": small-model work order needs Verified against `<sha>`");
-      for (const section of WORK_ORDER_SECTIONS) {
-        if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": small-model work order missing #### " + section);
-      }
-      if (!/\*\*U01\b/.test(order.text)) errors.push(id + ": small-model work order has no U01 micro-unit");
-      errors.push(...validateSmallModelOrder(id, order.text));
-    }
+    if (task.state === "READY" || order.declaresModel || order.declaresReadiness) errors.push(...validateWorkOrder(id, order));
   }
   return errors;
 }
@@ -160,19 +206,16 @@ export function validateWorkOrders({ status, specs }) {
 // A small model executes the order literally, so everything it needs must be decided in the text.
 const VAGUE_PHRASES = ["適宜", "必要に応じて", "可能なら", "TBD", "検討する", "うまく"];
 
-function workOrderSection(text, name) {
-  return text.split(new RegExp("^####\\s+" + name + "\\s*$", "m"))[1]?.split(/^####\s/m)[0] ?? "";
-}
 
 export function validateSmallModelOrder(id, text) {
   const errors = [];
-  const units = workOrderSection(text, "Micro-units");
+  const units = sectionBodies(text, "Micro-units").join("\n");
   if (!/```bash/.test(units)) errors.push(id + ": small-model Micro-units need a ```bash command block");
   if (!/期待/.test(units)) errors.push(id + ": small-model Micro-units need an expected result (期待)");
   for (const phrase of VAGUE_PHRASES) {
     if (text.includes(phrase)) errors.push(id + ": small-model work order contains undecided wording: " + phrase);
   }
-  for (const line of workOrderSection(text, "Owned paths").split("\n")) {
+  for (const line of sectionBodies(text, "Owned paths").join("\n").split("\n")) {
     if (/^- (新規|変更|削除)/.test(line) && line.includes("*")) errors.push(id + ": small-model Owned paths must list exact files, not globs: " + line.trim());
   }
   return errors;
@@ -228,24 +271,25 @@ export function validatePlanCompleteness({ status, specs, recipes }) {
     const order = file ? extractWorkOrder(specs[file], id) : null;
     if (!order) { errors.push(id + ": unfinished task has no work order in " + file); continue; }
     if (!order.model || !order.readiness) errors.push(id + ": work order must declare valid Model and Readiness");
-    if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.text)) errors.push(id + ": work order needs Verified against `<sha>`");
+    if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.prose)) errors.push(id + ": work order needs Verified against `<sha>`");
     for (const section of WORK_ORDER_SECTIONS) {
-      if (!new RegExp("^####\\s+" + section + "\\s*$", "m").test(order.text)) errors.push(id + ": work order missing #### " + section);
+      const count = sectionBodies(order.text, section).length;
+      if (count !== 1) errors.push(id + ": work order " + (count ? "duplicate" : "missing") + " #### " + section);
     }
-    const recipeLine = order.text.match(/\*\*Recipe:\*\*([^\n]*)/)?.[1];
+    const recipeLine = order.prose.match(/\*\*Recipe:\*\*([^\n]*)/)?.[1];
     if (recipeLine === undefined) errors.push(id + ": work order missing Recipe (IMPLEMENTATION_RECIPES.md)");
     else if (recipeIds) {
       const named = recipeLine.match(/R-[A-Z]+/g) ?? [];
       if (!named.length) errors.push(id + ": Recipe names no R-* section");
       for (const r of named) if (!recipeIds.has(r)) errors.push(id + ": Recipe " + r + " is not a section of IMPLEMENTATION_RECIPES.md");
     }
-    const runtimeLine = order.text.match(/\*\*Runtime:\*\*([^\n]*)/)?.[1];
+    const runtimeLine = order.prose.match(/\*\*Runtime:\*\*([^\n]*)/)?.[1];
     if (runtimeLine === undefined) errors.push(id + ": work order missing Runtime (ZERO_1102.md)");
     else {
       const classes = runtimeLine.split(/[,、\s]+/).filter(Boolean);
       if (!classes.length || classes.some((c) => !RUNTIME_CLASSES.includes(c))) errors.push(id + ": Runtime must list ZERO_1102.md classes " + RUNTIME_CLASSES.join("/") + ", got: " + runtimeLine.trim());
     }
-    const dependsLine = order.text.match(/\*\*Depends on:\*\*([^\n]*)/)?.[1];
+    const dependsLine = order.prose.match(/\*\*Depends on:\*\*([^\n]*)/)?.[1];
     if (dependsLine === undefined) { errors.push(id + ": work order missing Depends on"); continue; }
     const declared = expandMigRefs(dependsLine.split("**Decisions:**")[0]);
     for (const dep of deps.get(id)) {
@@ -261,7 +305,7 @@ export function validatePlanCompleteness({ status, specs, recipes }) {
 
 export function readSpecs(read) {
   return Object.fromEntries([...new Set(Object.values(SPEC_FILES))].map((p) => {
-    try { return [p, read(p)]; } catch { return [p, undefined]; }
+    try { return [p, read(p)]; } catch (error) { if (error.code === "ENOENT") return [p, undefined]; throw error; }
   }));
 }
 

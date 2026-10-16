@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getTaskContext } from "./print-migration-task-context.mjs";
+import { getTaskContext, getWorkOrder, getNextTaskContext, parseContextArgs } from "./print-migration-task-context.mjs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 test("MIG-0401 packet shows READY, direct dependency and no unrelated cards",()=>{
  const r=getTaskContext("MIG-0401");
@@ -88,4 +93,48 @@ test("packet carries the recipe shape and the 1102 budget named by the work orde
  const domain=getTaskContext("MIG-0301").output;
  assert.match(domain,/## R-DOMAIN:/);
  assert.match(domain,/## 全レシピ共通/);
+});
+
+test("small-model selection requires the full recipe, not only readiness labels", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"migration-context-"));
+ try {
+  fs.mkdirSync(path.join(root,"docs/migration"),{recursive:true});
+  const file=path.join(root,"docs/migration/PHASE_3_SPEC.md");
+  const labels="### MIG-0301: incomplete\n- **Model:** small\n- **Readiness:** READY_FOR_SMALL_MODEL\n";
+  fs.writeFileSync(file,labels);
+  assert.equal(getWorkOrder("MIG-0301",root).smallReady,false);
+  fs.writeFileSync(file,labels+"\n"+labels);
+  assert.equal(getWorkOrder("MIG-0301",root).smallReady,false);
+ } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test("explicit MIG IDs cannot bypass the small-model restriction", () => {
+ assert.throws(()=>getTaskContext("MIG-0401",undefined,{smallOnly:true}),/no complete READY_FOR_SMALL_MODEL/);
+});
+
+test("unknown, missing and duplicate CLI model options are rejected", () => {
+ assert.deepEqual(parseContextArgs(["--next","--model","small","--offline"]),{task:null,automatic:true,offline:true,smallOnly:true});
+ assert.equal(parseContextArgs(["MIG-0301","--model","small"]).smallOnly,true);
+ for(const args of [["--next","--model"],["--next","--model","smal"],["--next","--model","small","--model","lead"],["--next","--nonsense"],["--next","MIG-0301"]]){
+  assert.throws(()=>parseContextArgs(args),/--model must|Unknown or duplicate/);
+ }
+});
+
+test("--next fails closed when open PRs were not read, unless --offline was given", () => {
+ assert.throws(()=>getNextTaskContext(undefined,{owned:new Map(),live:false}),/Open PRs could not be read/);
+ assert.doesNotThrow(()=>{try{getNextTaskContext(undefined,{owned:new Map(),live:false,offline:true});}catch(error){if(/Open PRs could not be read/.test(error.message))throw error;}});
+});
+
+test("CLI exits non-zero for a misspelled model and for an explicit lead task under --model small", () => {
+ const script=fileURLToPath(new URL("./print-migration-task-context.mjs",import.meta.url));
+ const run=(...args)=>spawnSync(process.execPath,[script,...args],{encoding:"utf8"});
+ for(const args of [["--next","--model","smal","--offline"],["--next","--model"],["MIG-0401","--next"]]){
+  const r=run(...args);
+  assert.equal(r.status,1,args.join(" "));
+  assert.match(r.stderr,/--model must|Unknown or duplicate/);
+ }
+ const lead=run("MIG-0401","--model","small");
+ assert.equal(lead.status,1);
+ assert.match(lead.stderr,/MIG-0401: no complete READY_FOR_SMALL_MODEL/);
+ assert.equal(lead.stdout,"");
 });

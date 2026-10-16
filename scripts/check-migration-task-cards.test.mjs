@@ -72,7 +72,7 @@ test("large task must have micro-unit recipe", () => {
   assert.match(validateTaskCards({...base,microUnits:"# no packets"}).join(" "),/MIG-0705: large task/);
 });
 
-import { extractWorkOrder, validateWorkOrders, WORK_ORDER_SECTIONS } from "./check-migration-task-cards.mjs";
+import { extractWorkOrder, validateWorkOrder, validateWorkOrders, WORK_ORDER_SECTIONS, readSpecs } from "./check-migration-task-cards.mjs";
 
 const completeOrder = (id, model = "small", readiness = "READY_FOR_SMALL_MODEL") => [
   "### " + id + ": title",
@@ -151,4 +151,36 @@ test("unfinished work orders name a known recipe and runtime class", () => {
   assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("R-DOMAIN", "R-MAGIC")), recipes }).join(" "), /Recipe R-MAGIC is not a section/);
   assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("- **Runtime:** N", "- **Runtime:** fast")), recipes }).join(" "), /Runtime must list/);
   assert.match(validatePlanCompleteness({ status: graph, specs: specs(order.replace("- **Recipe:** R-DOMAIN\n", "")), recipes }).join(" "), /missing Recipe/);
+});
+
+test("code examples cannot declare work-order readiness or required sections", () => {
+  for (const fence of ["```", "~~~~"]) {
+    const example = "### MIG-0301: example\n" + fence + "markdown\n" + completeOrder("MIG-0301") + "\n" + fence;
+    const order = extractWorkOrder(example, "MIG-0301");
+    assert.equal(order.model, null);
+    assert.equal(order.readiness, null);
+    assert.ok(validateWorkOrder("MIG-0301", order).length > 0);
+  }
+  const missingStop = completeOrder("MIG-0301").replace("#### STOP\n- item", "```markdown\n#### STOP\n- item\n```");
+  assert.match(validateWorkOrder("MIG-0301", extractWorkOrder(missingStop, "MIG-0301")).join(" "), /missing #### STOP/);
+});
+
+test("duplicate metadata, sections and empty recipes fail closed", () => {
+  for (const suffix of ["\n- **Model:** small", "\n- **Readiness:** READY_FOR_SMALL_MODEL", "\n#### STOP\n- another rule"]) {
+    const order = extractWorkOrder(completeOrder("MIG-0301") + suffix, "MIG-0301");
+    assert.match(validateWorkOrder("MIG-0301", order).join(" "), /duplicate/);
+  }
+  const empty = completeOrder("MIG-0301").replace("#### STOP\n- item", "#### STOP\n");
+  assert.match(validateWorkOrder("MIG-0301", extractWorkOrder(empty, "MIG-0301")).join(" "), /empty #### STOP/);
+  assert.equal(extractWorkOrder(completeOrder("MIG-0301") + "\n" + completeOrder("MIG-0301"), "MIG-0301"), null);
+});
+
+test("spec read errors cannot silently hide invalid work orders", () => {
+  assert.throws(() => readSpecs(() => { throw Object.assign(new Error("access denied"), { code: "EACCES" }); }), /access denied/);
+  assert.ok(Object.values(readSpecs(() => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); })).every(value => value === undefined));
+});
+
+test("the work order validator also applies the small-model content checks", () => {
+  const vague = extractWorkOrder(completeOrder("MIG-0301").replace("- item", "- 必要に応じて直す"), "MIG-0301");
+  assert.match(validateWorkOrder("MIG-0301", vague).join(" "), /undecided wording/);
 });
