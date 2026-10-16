@@ -319,9 +319,10 @@ PRをrevert。
 - 触らない: `workers/json-generator/**`（CURRENT はそのまま動かす。比較の相手として読むだけ）、`src/lib/publicData/**`、本番の D1・token・deploy hook
 #### Micro-units
 - **U01 one family**: `events/index.json` と同じ内容を、build 時に D1（ローカル D1 の fixture）から作る純粋関数と CLI。CURRENT の生成関数に同じ fixture を入れた出力と、key 順を揃えて一致することを test で確かめる。
-- **U02 freshness table**: `BUILD_TIME_DATA.md` に、公開データの項目ごとに「build で作る」か「Island が API（S2）で読む」かを表にする。CURRENT の `revalidate` と、どの操作で変わるかを列にし、build の間隔（U03）より速く変わる項目（枠の空き、いいね数、viewer overlay）は API にする。
+- **U02 freshness table**: `BUILD_TIME_DATA.md` に、公開データの項目ごとに「build で作る」「Queue で1件ずつ作る（作品・ユーザー・イベントの個別ページ、MIG-0411）」「Island が API（S2）で読む」のどれかを表にする。CURRENT の `revalidate` と、どの操作で変わるかを列にし、build の間隔（U03）より速く変わる項目（枠の空き、いいね数、viewer overlay）は API にする。
 - **U03 build budget**: 合成データ（作品 3,000、イベント 20、各イベントの枠 120。`ZERO_1102.md` §3 の参考表と同じ条件）で `apps/site` を build し、時間を5回測る。次の式で1日の build 上限と最短の間隔を出し、表に書く: `データ build の上限/日 = floor((3,000 × 0.8 − コード push の build 分/月) ÷ build 1回の分 ÷ 30)`。コード push の分は直近30日の main への merge 数 × build 1回の分で見積もり、根拠の URL を付ける。
-- **U04 new and private**: 次の2つの扱いを決め、表に書く。(a) build の前に登録された作品の URL: 静的な共通 shell HTML を返し、中身は Island が API で読む案を既定にし、gateway（MIG-0405）で動くかを確かめる。(b) build の後に非公開になったもの: 更新 API が同じ request で書く拒否 entry（KV の key）を gateway が読む。KV の反映に最大 60秒かかることを書く。
+- **U04 new and private**: 次の2つの扱いを決め、表に書く。(a) R2 HTML ができる前の新しい作品の URL: MIG-0411 の Queue が作るまでの数分間、静的な共通 shell HTML を返し、中身は Island が API で読む案を既定にし、gateway（MIG-0405）で動くかを確かめる。(b) build の後に非公開になったもの: 更新 API が同じ request で書く拒否 entry（KV の key）を gateway が読む。KV の反映に最大 60秒かかることを書く。
+- **U05 page render**: 作品・ユーザー・イベントのページを `experimental_AstroContainer.renderToString` で1件ずつ HTML にし、CPU を種類ごとに測る（MIG-0411 の対象を決めるため）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -342,6 +343,7 @@ npm run check:project-docs
 - [ ] 全項目に「build / API」の分類があり、API の項目は担当の MIG-06xx が書いてある
 - [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある
 - [ ] 新規作品と非公開化の扱いが表にある
+- [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある
 #### STOP
 - 最短間隔が CURRENT の鮮度（30〜300秒）より大きく延びるので、計算した「公開までの最大の遅れ」を PR とスレッドでユーザーに示し、承認を得るまで MIG-0410 の定数を決めない。
 - 非公開化に 60秒を超える遅れが出る設計になったら止める。
@@ -412,12 +414,74 @@ npm run typecheck
 #### Rollback
 PRをrevert。表は未使用のまま残っても害はない（本番に作るのは承認後）。
 
+### MIG-0411: 個別ページを1件ずつ Queue で R2 HTML に作り直す（ISR 相当、D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0405（gateway）と MIG-0409（1ページ生成の CPU 計測）の merge 後。計測で max < 8ms を満たしたページの種類だけを対象にする
+- **Recipe:** R-JOB, R-PAGE
+- **Runtime:** B, S1
+- **Depends on:** MIG-0405, MIG-0409 / **Decisions:** D-06 DECIDED, D-09 DECIDED
+- **Verified against:** `6dd695a` (2026-10-16)
+#### Source snapshot
+- 要件: 作品個別ページは ISR / On-Demand（`docs/migration/PRODUCT_REQUIREMENTS.md` の「Astro SSG Build Trigger & Free Tier Budget」）。D-06 の②（R2 に保存した事前生成 HTML を gateway が返す）。D-09 の 2026-10-16 改訂。
+- CURRENT の鮮度: `/[id]`・`/user/[id]`・`/event/[id]/slots` は `revalidate = 30`、`/event/[id]` は `60`（`app/(public)/[id]/page.tsx:65`、`app/(public)/user/[id]/page.tsx:9`、`app/(public)/event/[id]/slots/page.tsx:32`、`app/(public)/event/[id]/page.tsx:61`）。
+- 1ページの生成: `experimental_AstroContainer.renderToString`（`node_modules/astro/dist/container/index.d.ts:150`、`:227`、astro 5.18.2）。
+- Next の ISR 再生成は 16〜71ms だった（`docs/operations/workers.md:12`）。Queue consumer も 10ms の上限として扱う（`ZERO_1102.md` §1）。
+- 仕事の正本は D1、Queue は doorbell（`background-jobs/README.md`）。Queue の無料枠は1日 10,000 operations（`OPEN_DECISIONS.md` D-09 節）。
+#### Owned paths
+- 新規: `+apps/site/src/gateway/renderPublicPage.ts`, `+apps/site/src/gateway/pageRenderQueue.ts`, `+apps/site/src/gateway/pageRenderQueue.test.mjs`, `+drizzle/<次の番号>_public_page_renders.sql`
+- 変更: `apps/site/src/gateway/index.ts`（`queue` handler を足す）、schema の file（MIG-0410 と同じ規則で置き場所を選ぶ）
+- 触らない: `workers/json-generator/**`、本番の Queue・R2・D1
+#### Micro-units
+- **U01 table**: 再生成の要求を持つ表を足す。
+  ```sql
+  CREATE TABLE public_page_renders (
+    entity TEXT NOT NULL CHECK (entity IN ('video', 'user', 'event')),
+    entity_id TEXT NOT NULL,
+    requested_at INTEGER NOT NULL,
+    rendered_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (entity, entity_id)
+  );
+  ```
+  更新 API（S3）は同じ `batch` で `INSERT ... ON CONFLICT DO UPDATE SET requested_at = excluded.requested_at` を1つ足し、doorbell を1つ enqueue する。
+- **U02 render**: `renderPublicPage(entity, row)` は、R-PAGE のページ component を `renderToString` で HTML にする純粋な関数にする。入力の行は `LIMIT` 付きの query（`MAX_` 定数）で読む。
+- **U03 consumer**: 1 message で1ページだけ処理する（`max_batch_size = 1`）。手順: `requested_at > rendered_at` の行を1つ読む → 公開なら HTML を作り R2 の `pages/<entity>/<id>.html` に PUT、非公開・削除済みなら R2 から消す → 条件付き UPDATE（`WHERE requested_at = ?`）で `rendered_at` を進める。処理の途中で新しい更新が来た行は、条件が外れて次の message で作り直される。
+- **U04 recovery**: 既存の Cron（新しい cron 式は足さない。R-JOB）に、未処理の行があれば doorbell を1つ enqueue する段を足す。D1 は1 statement。
+- **U05 measure**: 作品・ユーザー・イベントのそれぞれで、上限ちょうどの入力（関連作品・枠の数が最大のページ）の CPU を `ZERO_1102.md` §5 の方法で測る。max ≥ 8ms の種類は対象から外し、MIG-0509 の build に回す（PR に記録）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 公開の作品を更新 | その作品の R2 HTML だけが作り直される |
+| T02 | 公開→非公開 | R2 HTML が消え、gateway が 404 を返す（拒否 entry は MIG-0409 U04 の形） |
+| T03 | 生成中に同じ作品がもう一度更新 | 2回目の更新が次の message で反映される |
+| T04 | 同じ doorbell が2回 | 2回目は何もしない |
+| T05 | R2 の PUT が失敗 | `rendered_at` が進まず、次の Cron が拾う |
+| T06 | 上限ちょうどのページ | 非本番の max < 8ms |
+#### Commands
+```bash
+node --test --experimental-strip-types apps/site/src/gateway/pageRenderQueue.test.mjs
+npm run build --workspace=@flamenode/site
+npm run typecheck
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に新規 file を追加。`PERF_HOTPATH_MATRIX.md` に1ページ生成の CPU を種類別に記録。`BUILD_TIME_DATA.md` の表で、個別ページを「Queue」に分類。
+#### DONE checklist
+- [ ] T01〜T06 が PASS
+- [ ] 種類ごとの max CPU と、対象から外した種類が PR にある
+- [ ] 1日の message 数の見積もりが Queue の無料枠の 50% 以下
+- [ ] 本番の D1・Queue・R2 に触れていない
+#### STOP
+- 1ページの生成が 8ms を切らない種類しか無い場合は止めて、計測値をユーザーに示す。
+- 非公開化が R2 HTML の削除を待つ設計になったら止める（拒否 entry で即時に止める）。
+- 本番の migration・Queue の作成・deploy は明示承認事項なので止める。
+#### Rollback
+PRをrevert。個別ページは build 時の HTML（MIG-0509）に戻る。
+
 ### MIG-0407: Phase 4 Gate（**0403 + 0406 両方の証跡が必要**）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0403, MIG-0406, MIG-0410 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
+- **Depends on:** MIG-0403, MIG-0406, MIG-0410, MIG-0411 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - MIG-0401〜0406 の merge 済みPRと各PRの測定値・比較証跡。
@@ -789,7 +853,7 @@ Phase 5 共通契約のとおり。
 
 ### MIG-0509: 全公開データの生成を build 時へ移す（D-09）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0501〜0507 の merge 後。MIG-0409 の分類表で「build」とした family を1つずつ micro-unit に分けてから
+- **Readiness:** NEEDS_REFINEMENT — MIG-0501〜0507 の merge 後。MIG-0409 の分類表で「build」とした family を1つずつ micro-unit に分けてから。「Queue」とした個別ページは MIG-0411 の仕組みで作り、この task では build に入れない
 - **Recipe:** R-BUILD
 - **Runtime:** N
 - **Depends on:** MIG-0507 / **Decisions:** D-06 DECIDED, D-09 DECIDED

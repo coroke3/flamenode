@@ -83,6 +83,13 @@
 - 試験: T01〜T07（変更なし / 間隔未満 / trigger / 1日の上限 / 日付の切替 / 同時実行 / URL 未設定）。
 - DONE: fast-jobs Cron 1回の max < 8ms（非本番）。本番の migration・secret・deploy は承認待ち。
 
+### MIG-0411 — per-page R2 HTML regeneration via Queue (ISR equivalent, D-09)
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0411 Work Order、`OPEN_DECISIONS.md` D-09 の 2026-10-16 改訂、`IMPLEMENTATION_RECIPES.md` R-JOB / R-PAGE。
+- 変更: `+apps/site/src/gateway/renderPublicPage.ts`、`+apps/site/src/gateway/pageRenderQueue.ts`、`public_page_renders` 表、gateway の `queue` handler、既存 Cron の回復段。
+- 試験: 1ページだけ作り直す / 非公開化 / 生成中の再更新 / 同じ doorbell 2回 / R2 失敗 / 上限ちょうどの max < 8ms。
+- DONE: 種類ごとの max CPU と対象外の種類が PR にある。本番の D1・Queue・R2 は承認待ち。
+
 ### MIG-0407 — Phase 4 Gate
 
 - **独立両Gate:** MIG-0403の承認済み実HTMLによる3画面UX/可視性/SEO証跡 **AND** MIG-0406のCPU/R2/Queue/容量証跡が揃うまでREVIEW/DONEにしない。性能トラックのPASSで視覚/UX受入をDONEにしない。移行後web `exceededCpu` **90%以上削減は達成目標であり予測/合格の自動保証ではない**。

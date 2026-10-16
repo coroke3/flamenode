@@ -155,6 +155,7 @@ packages/ui/src/...                              ← 複数ページで使う部
 - 動きが必要な部分だけを React の Island にし、`client:visible` か `client:idle` を付ける。`client:load` はファーストビューで操作が必要な部品だけ。
 - 本人の状態（ログイン、予約済み、いいね）は HTML に焼かず、Island から API（`S2`）で取る。
 - build の間隔より速く変わる値（枠の空き、いいね数など。MIG-0409 の分類表で「API」とした項目）も HTML に焼かず、Island から API で取る（D-09）。
+- 作品・ユーザー・イベントの個別ページは `getStaticPaths` で全件を出さず、MIG-0411 の Queue が1件ずつ R2 HTML にする（ISR 相当、D-09 の 2026-10-16 改訂）。ページの component は build と Queue の両方から同じものを使う。
 - URL・query・redirect・404 は CURRENT と同じにする（[`ROUTE_MATRIX.md`](ROUTE_MATRIX.md)）。
 
 test に必ず入れるもの: build 出力にページの file がある / 非公開の fixture のページが出力されない / CURRENT と同じ title・canonical・OGP / query 付き URL の挙動。
@@ -210,7 +211,7 @@ Runtime: `N`。
 
 ## R-JOB: 背景処理（Queue consumer / Cron）を1回 8ms 未満にする
 
-使う task: MIG-0410（deploy hook を呼ぶ Cron）、0610（残る job の分割）。
+使う task: MIG-0410（deploy hook を呼ぶ Cron）、0411（個別ページの R2 HTML 生成）、0610（残る job の分割）。
 
 - 公開データ（一覧、検索索引、JSON artifact）を作らない。それは build 時（R-BUILD、D-09）。
 - 仕事の正本は D1 の行にする。Queue の message は「仕事がある」と知らせるだけで、中身を運ばない（[`background-jobs/README.md`](background-jobs/README.md) の最重要原則）。

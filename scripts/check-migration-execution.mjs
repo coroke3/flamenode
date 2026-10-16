@@ -24,6 +24,7 @@ export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0406": ["D-06"],
   "MIG-0409": ["D-06", "D-09"],
   "MIG-0410": ["D-09"],
+  "MIG-0411": ["D-06", "D-09"],
   "MIG-0509": ["D-06", "D-09"],
   "MIG-0609": ["D-09"],
   "MIG-0610": ["D-09"],
@@ -164,7 +165,7 @@ export function validateMigrationExecution({
     }
   }
   // Performance-first path is a fixed DAG; a docs-only change must not silently relock 1102 PoCs behind D-08 visuals.
-  if (["MIG-0401","MIG-0402","MIG-0403","MIG-0404","MIG-0405","MIG-0406","MIG-0407","MIG-0409","MIG-0410"].every(id => tasks.has(id))) {
+  if (["MIG-0401","MIG-0402","MIG-0403","MIG-0404","MIG-0405","MIG-0406","MIG-0407","MIG-0409","MIG-0410","MIG-0411"].every(id => tasks.has(id))) {
     const expected = {
       "MIG-0401": ["MIG-0105"],
       "MIG-0404": ["MIG-0401"],
@@ -174,8 +175,9 @@ export function validateMigrationExecution({
       "MIG-0403": ["MIG-0402", "MIG-0404"],
       "MIG-0409": ["MIG-0404"],
       "MIG-0410": ["MIG-0409"],
-      // D-09: the Phase 4 Gate also needs the build-time data path and its build scheduler.
-      "MIG-0407": ["MIG-0403", "MIG-0406", "MIG-0410"],
+      "MIG-0411": ["MIG-0405", "MIG-0409"],
+      // D-09: the Phase 4 Gate also needs the build-time data path, its build scheduler and per-page regeneration.
+      "MIG-0407": ["MIG-0403", "MIG-0406", "MIG-0410", "MIG-0411"],
     };
     for (const [id, deps] of Object.entries(expected)) {
       const actual = dependencyGraph.get(id) ?? [];
