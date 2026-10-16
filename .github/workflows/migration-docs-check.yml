@@ -103,3 +103,5 @@ jobs:
           npm run build --workspace=@flamenode/site
           npm run build --workspace=@flamenode/app
           npm run build --workspace=@flamenode/api
+      - name: MIG-0401 synthetic public-only HTML verification
+        run: node scripts/check-migration-public-poc-build.mjs

@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-15
+> Last updated: 2026-10-16
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -23,9 +23,9 @@ Current Owner: unassigned
 Task State: READY
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0200
-Last Task PR: #284
-Merged READY: MIG-0201, MIG-0301, MIG-0401, MIG-0801
+Last Completed Task: MIG-0401
+Last Task PR: #283
+Merged READY: MIG-0201, MIG-0301, MIG-0404, MIG-0801
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -264,10 +264,10 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | READY | MIG-0105 |
+| MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | DONE | MIG-0105 |
 | MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
 | MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
-| MIG-0404 | route-map generator (mock-independent) | BLOCKED | MIG-0401 |
+| MIG-0404 | route-map generator (mock-independent) | READY | MIG-0401 |
 | MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
 | MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406 |
@@ -353,3 +353,5 @@ MIG-0805 requires explicit user approval before production action.
 # Completed task history
 
 完了taskの詳細（変更・validation・rollback）は各PRと`work-items/MIG-XXXX.md`、およびgit履歴を正本とする。直近: MIG-0200（PR #284、HTML mock登録）、MIG-0108（PR #276、Phase 1 Gate）、MIG-0011/0012（Phase 0）。
+
+<!-- MIG-0401 #283: synthetic-only public snapshot PoC integrated; no production deployment, routing, Remote D1 or secret changes. Independent review note: https://github.com/coroke3/flamenode/pull/283#pullrequestreview-5541888183 ; user authorized merge 2026-10-16. Latest pre-integration CI: https://github.com/coroke3/flamenode/actions/runs/38200639532. -->
