@@ -255,7 +255,8 @@
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 | `apps/site/src/pages/migration-fixture-poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
 | `apps/site/src/lib/routeMap.ts` | HELPER | build-time route-map table generator and lookup (new file, no CURRENT counterpart; CURRENT `src/lib/db/videoIdLookup.ts` stays) | MIG-0404 | SAME (build-time route table) | RETAINED | PR#305 SHA=c32030816c219e1a05b32e9c6989edbfc11a7e29 TEST=node --test --experimental-strip-types scripts/migration-route-map.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38912028631 |
-| `apps/api/src/auth/session.ts` | HELPER | read-only session resolution and Hono middleware from Auth.js cookie | MIG-0608 | SAME (Hono auth session resolver) | RETAINED | PR#312 SHA=b29bbd18467acb5225fe3e0b28faf1505b8abc2e TEST=node --test --experimental-strip-types apps/api/test/authSession.test.mjs LOG=local |
+| `apps/api/src/auth/session.ts` | HELPER | read-only session resolution and Hono middleware from Auth.js cookie | MIG-0608 | SAME (Hono auth session resolver) | RETAINED | PR#312 SHA=d4171a007787fc90fa9d2b270776fc4242aa88ad TEST=node --test --experimental-strip-types apps/api/test/authSession.test.mjs LOG=local |
+| `apps/api/test/authSession.test.mjs` | TEST | Hono read-only session resolution unit tests covering T01-T05 | MIG-0608 | SAME (Hono auth test suite) | RETAINED | PR#312 SHA=d4171a007787fc90fa9d2b270776fc4242aa88ad TEST=node --test --experimental-strip-types apps/api/test/authSession.test.mjs LOG=local |
 
 ## Future files requiring source/target registration
 
