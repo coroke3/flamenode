@@ -97,10 +97,10 @@
 | `app/(public)/event/[id]/page.tsx` | PAGE | /event/[id] (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/release/page.tsx` | PAGE | /event/[id]/release (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/release.astro | NOT_STARTED | — |
 | `app/(public)/event/[id]/slots/page.tsx` | PAGE | /event/[id]/slots (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/[id]/slots.astro | NOT_STARTED | — |
-| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event.astro (logical /event query parity; no separate twin required) | NOT_STARTED | — |
-| `app/(public)/event/page.tsx` | PAGE | /event (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event.astro | NOT_STARTED | — |
-| `app/(public)/groups/[slug]/page.tsx` | PAGE | /groups/[slug] (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups/[slug].astro | NOT_STARTED | — |
-| `app/(public)/groups/page.tsx` | PAGE | /groups (COMPAT_REDIRECT) | MIG-0503 | +apps/site/src/pages/groups.astro | NOT_STARTED | — |
+| `app/(public)/event/~query/page.tsx` | PAGE | /event/~query (SYSTEM_SURFACE) | MIG-0502 | +apps/site/src/pages/event/index.astro (logical /event query parity; no separate twin required) | NOT_STARTED | — |
+| `app/(public)/event/page.tsx` | PAGE | /event (VISUAL_SCREEN) | MIG-0502 | +apps/site/src/pages/event/index.astro | NOT_STARTED | — |
+| `app/(public)/groups/[slug]/page.tsx` | PAGE | /groups/[slug] (COMPAT_REDIRECT) | MIG-0503 | +apps/site/public/_redirects (307 to /event#event-group-{slug}; no page) | NOT_STARTED | — |
+| `app/(public)/groups/page.tsx` | PAGE | /groups (COMPAT_REDIRECT) | MIG-0503 | +apps/site/public/_redirects (307 to /event; no page) | NOT_STARTED | — |
 | `app/(public)/list/~query/page.tsx` | PAGE | /list/~query (SYSTEM_SURFACE) | MIG-0505 | +apps/site/src/pages/list.astro (logical /list query parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/list/page.tsx` | PAGE | /list (VISUAL_SCREEN) | MIG-0505 | +apps/site/src/pages/list.astro | NOT_STARTED | — |
 | `app/(public)/maintenance/page.tsx` | PAGE | /maintenance (SYSTEM_SURFACE) | MIG-0901 | RETAIN/REVIEW in MIG-0901 | NOT_STARTED | — |
@@ -111,8 +111,8 @@
 | `app/(public)/user/[id]/page.tsx` | PAGE | /user/[id] (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro | NOT_STARTED | — |
 | `app/(public)/user/[id]/paged/page.tsx` | PAGE | /user/[id]/paged (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/[id]/index.astro (logical profile pagination parity; no separate twin required) | NOT_STARTED | — |
 | `app/(public)/user/[id]/portfolio/page.tsx` | PAGE | /user/[id]/portfolio (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/[id]/portfolio.astro | NOT_STARTED | — |
-| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
-| `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user.astro | NOT_STARTED | — |
+| `app/(public)/user/~query/page.tsx` | PAGE | /user/~query (SYSTEM_SURFACE) | MIG-0504 | +apps/site/src/pages/user/index.astro (logical /user query parity; no separate twin required) | NOT_STARTED | — |
+| `app/(public)/user/page.tsx` | PAGE | /user (VISUAL_SCREEN) | MIG-0504 | +apps/site/src/pages/user/index.astro | NOT_STARTED | — |
 | `app/api/account/summary/route.ts` | ROUTE_HANDLER | RH-001:GET | MIG-0605 | +apps/api/src/routes/account/summary.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/import/legacy/route.ts` | ROUTE_HANDLER | RH-002:POST | MIG-0605 | +apps/api/src/routes/admin/import/legacy.ts (candidate, verify router) | NOT_STARTED | — |
 | `app/api/admin/spreadsheet/data/route.ts` | ROUTE_HANDLER | RH-003:GET,RH-004:PATCH,RH-005:POST,RH-006:DELETE | MIG-0605 | +apps/api/src/routes/admin/spreadsheet/data.ts (candidate, verify router) | NOT_STARTED | — |
@@ -151,9 +151,9 @@
 | `apps/app/src/main.tsx` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0701 | SAME (extend in owner task) | NOT_STARTED | — |
 | `apps/app/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0701 | SAME (extend in owner task) | NOT_STARTED | — |
 | `apps/app/vite.config.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0701 | SAME (extend in owner task) | NOT_STARTED | — |
-| `apps/site/astro.config.mjs` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0401 | SAME (extend in owner task) | NOT_STARTED | — |
-| `apps/site/package.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0401 | SAME (extend in owner task) | NOT_STARTED | — |
-| `apps/site/src/pages/index.astro` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0401 | SAME (extend in owner task) | NOT_STARTED | — |
+| `apps/site/astro.config.mjs` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0403 | SAME (extend in owner task) | NOT_STARTED | — |
+| `apps/site/package.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0403 | SAME (extend in owner task) | NOT_STARTED | — |
+| `apps/site/src/pages/index.astro` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0506 | SAME (extend in owner task) | NOT_STARTED | — |
 | `drizzle.config.ts` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0308 | SAME (review owner and package graph) | NOT_STARTED | — |
 | `package-lock.json` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 | `package.json` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
@@ -223,7 +223,7 @@
 | `workers/youtube-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `wrangler.toml` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 
-| `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0401 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
+| `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0509 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
 
 | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | +packages/domain/src/slots/reservationLimit.ts (with legacy bridge) | NOT_STARTED | — |
 | `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | NOT_STARTED | — |
@@ -232,16 +232,18 @@
 | `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
 | `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | +packages/domain/src/software/labels.ts (legacy bridge) | NOT_STARTED | — |
 | `src/lib/slots/limits.ts` | HELPER | slot pure limits | MIG-0302 | +packages/domain/src/slots/limits.ts (legacy bridge) | NOT_STARTED | — |
+| `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | +apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | NOT_STARTED | — |
 | `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain ownership policy (exact file TBD) | NOT_STARTED | — |
 | `src/lib/video/videoVisibilityTransition.ts` | HELPER | video visibility CAS audit Queue | MIG-0304 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |
 | `src/lib/event/eventVisibilityTransition.ts` | HELPER | event visibility fail closed | MIG-0305 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
-| `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0401 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
+| `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0509 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
+| `src/components/layout/bodyScrollLock.ts` | HELPER | modal/drawer body scroll lock primitive | MIG-0202 | packages/ui/src/layout/bodyScrollLock.ts (retain scroll restoration) | NOT_STARTED | — |
+| `src/components/layout/bodyScrollLock.contract.test.mjs` | TEST | bodyScrollLock export & instant restoration contract | MIG-0202 | SAME (layout utility parity) | NOT_STARTED | — |
 
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
-
 | `apps/site/src/pages/migration-fixture-poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
 
 ## Future files requiring source/target registration
@@ -256,3 +258,5 @@
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | NOT_CREATED | SSG file count → R2 pre-generated HTML fallback (no unmeasured SSR) |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
+
+<!-- MIG-0401 #283 owns ONLY nonproduction fixture files. Unchanged planned source ownership transferred: astro.config/package -> MIG-0403, index.astro -> MIG-0506, legacy publicData loader/test -> MIG-0509, before marking MIG-0401 DONE. PR review: https://github.com/coroke3/flamenode/pull/283#pullrequestreview-5541888183 -->
