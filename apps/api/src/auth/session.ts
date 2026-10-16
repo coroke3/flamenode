@@ -176,10 +176,10 @@ export async function resolveSessionUser(
       is_banned: row.user_is_banned === 1 ? 1 : 0,
       active_x_user_id: row.user_active_x_user_id ?? null,
     };
-  } catch (err: unknown) {
-    // SECURITY CRITICAL: never log or expose sessionToken in logs or error messages
-    const message = err instanceof Error ? err.message : "unknown database error";
-    console.error(`[auth:session] Failed to resolve session: ${message}`);
+  } catch {
+    // D1/adapter errors may include bound session tokens in their message/stack.
+    // Emit a fixed code only; do not serialize the underlying exception.
+    console.error("[auth:session] D1_LOOKUP_FAILED");
     return null;
   }
 }
