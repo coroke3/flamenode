@@ -1,4 +1,5 @@
 import React from "react";
+import { cx } from "../cx.js";
 import { acquireBodyScrollLock } from "../layout/bodyScrollLock.js";
 
 export interface DialogProps {
@@ -13,30 +14,35 @@ export interface DialogProps {
   className?: string;
 }
 
-function cx(...classes: (string | boolean | undefined | null)[]): string {
-  return classes.filter(Boolean).join(" ");
-}
-
 type FocusTarget = { focus?: () => void } | null;
+type DialogElement = (FocusTarget & { contains?: (node: Node | null) => boolean }) | null;
+
+// Open dialogs, innermost last. Only the innermost one answers Esc.
+const openDialogs: object[] = [];
 
 /**
- * Side effects of an open dialog: body scroll lock, focus moves into the dialog,
- * Esc calls the latest onEscape, and closing restores focus to the opener.
+ * Side effects of an open dialog: body scroll lock, focus moves into the dialog
+ * (unless a child such as an autoFocus input already has it), Esc calls the latest
+ * onEscape of the innermost dialog, and closing restores focus to the opener.
  * Exported so the behaviour can be tested without a DOM renderer.
  */
 export function openDialogBehavior(
-  dialog: FocusTarget,
+  dialog: DialogElement,
+  opener: FocusTarget,
   getOnEscape: () => (() => void) | undefined,
 ): () => void {
   if (typeof document === "undefined") return () => {};
 
-  const opener = document.activeElement as FocusTarget;
+  const token = {};
+  openDialogs.push(token);
   const releaseScrollLock = acquireBodyScrollLock();
-  dialog?.focus?.();
+  if (!dialog?.contains?.(document.activeElement as Node | null)) dialog?.focus?.();
 
   function onKeyDown(e: KeyboardEvent) {
+    if (e.key !== "Escape" || e.isComposing) return; // IME conversion uses Esc
+    if (openDialogs[openDialogs.length - 1] !== token) return;
     const onEscape = getOnEscape();
-    if (e.key === "Escape" && onEscape) {
+    if (onEscape) {
       e.preventDefault();
       onEscape();
     }
@@ -45,6 +51,7 @@ export function openDialogBehavior(
 
   return () => {
     document.removeEventListener("keydown", onKeyDown);
+    openDialogs.splice(openDialogs.indexOf(token), 1);
     releaseScrollLock();
     opener?.focus?.();
   };
@@ -68,9 +75,18 @@ export function Dialog({
   const onEscapeRef = React.useRef<(() => void) | undefined>(undefined);
   onEscapeRef.current = contained ? undefined : onClose;
 
+  // Record the opener while rendering the open state: by the time effects run,
+  // an autoFocus child inside the dialog has already taken focus.
+  const openerRef = React.useRef<FocusTarget>(null);
+  const wasOpenRef = React.useRef(false);
+  if (open && !wasOpenRef.current && typeof document !== "undefined") {
+    openerRef.current = document.activeElement as FocusTarget;
+  }
+  wasOpenRef.current = open;
+
   React.useEffect(() => {
     if (!open) return undefined;
-    return openDialogBehavior(dialogRef.current, () => onEscapeRef.current);
+    return openDialogBehavior(dialogRef.current, openerRef.current, () => onEscapeRef.current);
   }, [open]);
 
   if (!open) return null;
@@ -118,5 +134,3 @@ export function Dialog({
   );
 }
 
-// Alias matching mock component naming
-export const Modal = Dialog;

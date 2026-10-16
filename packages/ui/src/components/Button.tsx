@@ -1,4 +1,5 @@
 import React from "react";
+import { cx } from "../cx.js";
 
 export type ButtonVariant = "primary" | "secondary" | "danger" | "tertiary";
 export type ButtonSize = "sm" | "md";
@@ -9,10 +10,6 @@ export interface ButtonProps
   size?: ButtonSize;
   loading?: boolean;
   icon?: React.ReactNode;
-}
-
-function cx(...classes: (string | boolean | undefined | null)[]): string {
-  return classes.filter(Boolean).join(" ");
 }
 
 export function Button({
