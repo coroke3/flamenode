@@ -22,7 +22,7 @@ export function PublicHeader({
 
   React.useEffect(() => {
     if (!mobileOpen) return;
-    return openDialogBehavior(panelRef.current, () => () => setMobileOpen(false));
+    return openDialogBehavior(panelRef.current, triggerRef.current, () => () => setMobileOpen(false));
   }, [mobileOpen]);
 
   const toggleMobileNav = () => {
