@@ -261,7 +261,7 @@ git push
 Merge requested: integrated | Head: <40hex> | Review: <最終Headの再レビューcommentのURL> | CI: <CI runのURL>
 ```
 
-**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPR/work-itemへ記録する。agent は merge しない（上の F の暫定規則）。
+**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPRへ記録する（work-itemへ書いてcommitするとHeadが変わるので書かない）。agent は merge しない（上の F の暫定規則）。
 
 ## 最小検証コマンド
 
