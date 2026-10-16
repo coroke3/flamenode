@@ -110,6 +110,8 @@ export function readOpenPrOwners(root=ROOT){
   }catch{return {owned:new Map(),live:false};}
 }
 
+// Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
+export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0409","MIG-0410","MIG-0411","MIG-0406"];
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
 export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
   const tasks=parseTaskRows(statusText);
@@ -128,12 +130,14 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
     candidates.push(id);
   }
   // Optimize for 1102 first when independent performance PoC is already unblocked.
-  candidates.sort((a,b)=>(a==="MIG-0401"?-1:b==="MIG-0401"?1:a.localeCompare(b)));
+  // A lead takes the Phase 4 measurement track before other READY work; small models only see READY_FOR_SMALL_MODEL tasks.
+  const rank=id=>{const i=CRITICAL_PATH.indexOf(id);return i===-1?CRITICAL_PATH.length:i;};
+  candidates.sort((a,b)=>rank(a)-rank(b)||a.localeCompare(b));
   const ownedByPr=candidates.filter(id=>owned.has(id));
   return {selected:candidates.find(id=>!owned.has(id))??null,candidates,ownedByPr};
 }
 export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smallOnly=false}={}){
-  if (!owners.live && !owners.offline) throw new Error("Open PRs could not be read; use --offline only after checking active PR ownership separately");
+  if (!owners.live && !owners.offline) throw new Error("Open PRs could not be read with gh. Read the head branch of every open PR with the GitHub MCP (list_pull_requests state=open) and rerun with --open-pr-branches \"<branch>,<branch>\" (\"\" when none), or stop. --offline is for docs/CI checks only");
   const eligible=smallOnly?(id=>getWorkOrder(id,root).smallReady):()=>true;
   const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned,eligible);
   const ownedNote=next.ownedByPr.map(id=>id+"=PR#"+owners.owned.get(id)).join(",");
@@ -146,11 +150,17 @@ export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smal
 }
 
 export function parseContextArgs(args){
-  let task=null,automatic=false,offline=false,model=null;
+  let task=null,automatic=false,offline=false,model=null,openPrBranches=null;
   for(let i=0;i<args.length;i++){
     const arg=args[i];
     if(arg==="--next"&&!automatic&&!task)automatic=true;
     else if(arg==="--offline"&&!offline)offline=true;
+    else if(arg==="--open-pr-branches"&&openPrBranches===null){
+      // Head branch names of open PRs, read with the GitHub MCP when gh is unavailable ("" = no open PR).
+      const value=args[++i];
+      if(value===undefined)throw new Error("--open-pr-branches needs a comma-separated list (\"\" when no PR is open)");
+      openPrBranches=value.split(",").map(x=>x.trim()).filter(Boolean);
+    }
     else if(arg==="--model"&&model===null){
       model=args[++i];
       if(!["small","lead"].includes(model))throw new Error("--model must be small or lead");
@@ -158,14 +168,17 @@ export function parseContextArgs(args){
     else throw new Error("Unknown or duplicate argument: "+arg);
   }
   if(!automatic&&!task)throw new Error("Provide --next or one exact MIG-XXXX task ID");
-  return {task,automatic,offline,smallOnly:model==="small"};
+  if(offline&&openPrBranches)throw new Error("--offline and --open-pr-branches are exclusive");
+  return {task,automatic,offline,openPrBranches,smallOnly:model==="small"};
 }
 
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(invoked){
  try{
-  const {task,automatic,offline,smallOnly}=parseContextArgs(process.argv.slice(2));
-  const owners=offline?{owned:new Map(),live:false,offline:true}:undefined;
+  const {task,automatic,offline,openPrBranches,smallOnly}=parseContextArgs(process.argv.slice(2));
+  const owners=offline?{owned:new Map(),live:false,offline:true}
+    :openPrBranches?{owned:parseOwnedTasks(openPrBranches.map(headRefName=>({number:"?("+headRefName+")",headRefName}))),live:true}
+    :undefined;
   const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(task,ROOT,{smallOnly});
   if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");
   process.stdout.write(output);

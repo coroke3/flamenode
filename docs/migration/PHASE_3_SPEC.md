@@ -62,48 +62,78 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 
 ### MIG-0301: extraction/DI pattern（抽出パターンの確立）
 - **Model:** small
-- **Readiness:** READY_FOR_SMALL_MODEL — 手順は 2026-10-15 に実コードで試し、`node --test`・root の `tsc --noEmit`・`packages/domain` の `tsc`・`next build`・`npm run test:unit`（2484件）がすべて通った
+- **Readiness:** READY_FOR_SMALL_MODEL — 2026-10-16 に lead が `fcb68e3` の上でこの節の code block をそのまま使って U01〜U04 と F の STATUS 統合を実行し、各 commit の後の `check:migration-work-items`・`check:project-docs`・`MIGRATION_FILE_BASE_SHA` 付きの file 検査、F 後の `check:migration-docs`、`apps/api` build、`verify:fast` がすべて終了コード0。`test:unit` は変更前後とも 2510 件。Haiku の試走（同日）でも U01〜F まで通った
 - **Recipe:** R-DOMAIN
 - **Runtime:** N
 - **Depends on:** MIG-0108 / **Decisions:** none
-- **Verified against:** `7e1deb5` (2026-10-15)
+- **Verified against:** `fcb68e3` (2026-10-16)
 #### Source snapshot
 - `src/lib/slots/slotReservationLimit.ts`（17行、import 無し）: `:1` `MAX_SLOT_RESERVATIONS_PER_XID = 100`、`:3-10` `normalizeSlotReservationLimit`、`:12-17` `slotReservationLimitMessage`。
 - 呼び出し元: `src/components/event/SlotGrid.tsx:40`、`src/lib/actions/slot.ts:56`（どちらも `@/lib/slots/slotReservationLimit`）、`src/lib/slots/slotReservationLimitGuard.ts:8`（`./slotReservationLimit`）。
-- 既存テスト: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`（3 file で 6 test、2026-10-15 全PASS）。
-- `packages/domain/package.json`: `main` / `types` が `dist/` を指し、test script 無し。`packages/domain/tsconfig.json`: `outDir: ./dist`, `rootDir: ./src`。
-- `packages/domain/src/index.ts:1` `export * from "./permissions"`。`packages/domain/src/permissions.ts:1-7` の `canEditVideo` は3値を OR するだけの偽の権限判定で、`apps/**`, `packages/**` に呼び出し元は無い。
-- `.github/workflows/migration-docs-check.yml:101` に `npm run build --workspace=@flamenode/domain` がある（test の行は無い）。
+- 既存テスト: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`（3 file で 6 test）。
+- `packages/domain/package.json`: `main` / `types` が `dist/` を指し、`scripts` は `build` と `typecheck` だけ。`packages/domain/tsconfig.json`: `outDir: ./dist`, `rootDir: ./src`。`packages/domain/src/index.ts` は `export * from "./permissions";` の1行。
+- `packages/domain/src/slots/` は存在しない。
+- `FILE_MIGRATION_MATRIX.md`: `packages/domain/{package.json,src/index.ts,src/permissions.ts,tsconfig.json}` の4行（owner MIG-0301, NOT_STARTED）、`src/lib/slots/slotReservationLimit.ts` の行、テスト2行（`slotReservationLimit.contract.test.mjs`, `slotReservationLimitGuard.execution.test.mjs`）、Future files 表の `packages/domain/src/slots/reservationLimit.ts` の行。
+- `.github/workflows/migration-docs-check.yml` に `npm run build --workspace=@flamenode/domain` の行がある（test の行は無い）。
+- `npm run test:unit` は `# pass 2510`（作業前に実行して数を控える。違っても STOP ではなく、その数を「変更前」とする）。
 #### Owned paths
-- 新規: `+packages/domain/src/slots/reservationLimit.ts`, `+packages/domain/test/reservationLimit.test.mjs`
-- 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`, `packages/domain/tsconfig.json`, `.github/workflows/migration-docs-check.yml`（1行追加のみ）
-- 変更（bridge 化のみ）: `src/lib/slots/slotReservationLimit.ts`
-- 削除: `packages/domain/src/permissions.ts`
-- 触らない: `src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）、上の呼び出し元3 file
+- 新規: `+packages/domain/src/slots/reservationLimit.ts`（`git mv` で移す）, `+packages/domain/test/reservationLimit.test.mjs`
+- 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`, `packages/domain/tsconfig.json`, `.github/workflows/migration-docs-check.yml`（1行追加のみ）, `src/lib/slots/slotReservationLimit.ts`（bridge 化のみ）, `docs/migration/FILE_MIGRATION_MATRIX.md`（下の Ledger updates の行だけ）, `docs/migration/work-items/MIG-0301.md`
+- 触らない: `packages/domain/src/permissions.ts`（偽の `canEditVideo`。消すと台帳が RETIRED と承認を要するので、本物の権限判定を作る MIG-0306 へ owner を移すだけにする）、`src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）、上の呼び出し元3 file
 #### Micro-units
-- **U01 偽の権限判定を消し、package を source 参照にする**
-  1. 呼び出し元が無いことを確認する。`rg -n "canEditVideo" apps packages` の出力が `packages/domain/src/permissions.ts` の1行だけであること。違えば STOP。
-  2. `git rm packages/domain/src/permissions.ts`
-  3. `packages/domain/src/index.ts` の中身を `export {};` の1行にする。
-  4. `packages/domain/package.json` から `main` と `types` の2行を消し、次を足す（`scripts` は置き換え）:
+各 unit は runbook C のとおり commit し、commit の後に `npm run check:migration-work-items`・`npm run check:project-docs`・`MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs` が全部 0 であることを確かめる（file 検査は commit 済みの差分だけを見る）。台帳の行に書く `<sha>` は、その unit を始める前の `git rev-parse HEAD`。
+- **U01 package を source 参照にし、permissions.ts の owner を移す**
+  1. `packages/domain/package.json` を次の全文にする:
      ```json
-     "exports": {
-       ".": "./src/index.ts"
-     },
-     "scripts": {
-       "build": "tsc",
-       "typecheck": "tsc --noEmit",
-       "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
-     },
+     {
+       "name": "@flamenode/domain",
+       "version": "0.1.0",
+       "private": true,
+       "type": "module",
+       "exports": {
+         ".": "./src/index.ts"
+       },
+       "scripts": {
+         "build": "tsc",
+         "typecheck": "tsc --noEmit",
+         "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
+       },
+       "dependencies": {
+         "@flamenode/contracts": "*"
+       },
+       "devDependencies": {
+         "typescript": "^5.7.0"
+       }
+     }
      ```
-  5. `packages/domain/tsconfig.json` の `compilerOptions` に `"rewriteRelativeImportExtensions": true` を足す。
+  2. `packages/domain/tsconfig.json` を次の全文にする:
+     ```json
+     {
+       "extends": "../../tsconfig.base.json",
+       "compilerOptions": {
+         "outDir": "./dist",
+         "rootDir": "./src",
+         "rewriteRelativeImportExtensions": true
+       },
+       "include": ["src/**/*"]
+     }
+     ```
+  3. `packages/domain/src/index.ts` を `export * from "./permissions.ts";` の1行にする。
+  4. `FILE_MIGRATION_MATRIX.md` の `packages/domain/src/permissions.ts` の行を次にする（owner を MIG-0306 へ）:
+     ```text
+     | `packages/domain/src/permissions.ts` | TARGET_SKELETON | placeholder `canEditVideo` (no caller); replace or retire with the real policy | MIG-0306 | SAME (extend in owner task) | NOT_STARTED | — |
+     ```
   ```bash
   npm run build --workspace=@flamenode/domain && rm -rf packages/domain/dist
   npm run typecheck
   ```
   期待: どちらも終了コード0。
 - **U02 実装を移し、旧 path を bridge にする**
-  1. `git mv src/lib/slots/slotReservationLimit.ts packages/domain/src/slots/reservationLimit.ts`（中身は1文字も変えない）
+  1. 移す（移動先の directory は無いので先に作る。中身は1文字も変えない）:
+     ```bash
+     mkdir -p packages/domain/src/slots
+     git mv src/lib/slots/slotReservationLimit.ts packages/domain/src/slots/reservationLimit.ts
+     ```
   2. `src/lib/slots/slotReservationLimit.ts` を新しく作り、中身を次の5行にする:
      ```ts
      export {
@@ -112,23 +142,66 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
        slotReservationLimitMessage,
      } from "@flamenode/domain/slots/reservationLimit";
      ```
-  3. `packages/domain/package.json` の `exports` に `"./slots/reservationLimit": "./src/slots/reservationLimit.ts"` を足す。
-  4. `packages/domain/src/index.ts` を `export * from "./slots/reservationLimit.ts";` の1行にする。
+  3. `packages/domain/package.json` の `exports` を次にする:
+     ```json
+     "exports": {
+       ".": "./src/index.ts",
+       "./slots/reservationLimit": "./src/slots/reservationLimit.ts"
+     },
+     ```
+  4. `packages/domain/src/index.ts` を次の2行にする:
+     ```ts
+     export * from "./permissions.ts";
+     export * from "./slots/reservationLimit.ts";
+     ```
+  5. `FILE_MIGRATION_MATRIX.md`: `src/lib/slots/slotReservationLimit.ts` の行のすぐ下に次の1行を足し（`<n>` は PR 番号、`<sha>` は U02 を始める前の `git rev-parse HEAD`）、Future files 表の `packages/domain/src/slots/reservationLimit.ts` の行を消す（file ができたので、残すと file 検査が落ちる）:
+     ```text
+     | `packages/domain/src/slots/reservationLimit.ts` | HELPER | pure numeric policy (moved from `src/lib/slots/slotReservationLimit.ts`) | MIG-0301 | SAME | IN_PROGRESS | PR#<n> SHA=<sha> |
+     ```
   ```bash
   node --test --experimental-strip-types src/lib/slots/slotReservationLimit.contract.test.mjs src/lib/slots/slotReservationLimitGuard.execution.test.mjs src/lib/slots/limits.test.mjs
   npm run typecheck
+  MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs
   ```
-  期待: `# pass 6` と `# fail 0`。typecheck は終了コード0。
+  期待: 出力の末尾近くに `# pass 6` と `# fail 0`。typecheck と file 検査は終了コード0。
 - **U03 domain の test を足し、CI で回す**
-  1. `packages/domain/test/reservationLimit.test.mjs` を作る。中身は下の Test cases T01〜T03 を `node:test` と `node:assert/strict` で書いたもの。import は `@flamenode/domain/slots/reservationLimit` から（相対 path にしない）。
+  1. `packages/domain/test/reservationLimit.test.mjs` を次の全文で作る:
+     ```js
+     import assert from "node:assert/strict";
+     import test from "node:test";
+     import {
+       MAX_SLOT_RESERVATIONS_PER_XID,
+       normalizeSlotReservationLimit,
+       slotReservationLimitMessage,
+     } from "@flamenode/domain/slots/reservationLimit";
+
+     test("T01 normalizeSlotReservationLimit clamps to 0..MAX and floors", () => {
+       const inputs = [null, undefined, -1, 2.9, 150, Infinity, NaN];
+       assert.deepEqual(inputs.map(normalizeSlotReservationLimit), [0, 0, 0, 2, MAX_SLOT_RESERVATIONS_PER_XID, 0, 0]);
+     });
+
+     test("T02 slotReservationLimitMessage names the limit", () => {
+       assert.equal(
+         slotReservationLimitMessage(3),
+         "このイベントでは、1つのX IDにつき最大3件まで枠を確保できます。連続枠は1件として数えます。",
+       );
+     });
+
+     test("T03 slotReservationLimitMessage is empty when unlimited", () => {
+       assert.equal(slotReservationLimitMessage(0), "");
+     });
+     ```
   2. `.github/workflows/migration-docs-check.yml` の `npm run build --workspace=@flamenode/domain` の次の行に、同じ字下げで `npm run test --workspace=@flamenode/domain` を足す。
+  3. `FILE_MIGRATION_MATRIX.md`: `packages/domain/src/slots/reservationLimit.ts` の行のすぐ下に次の1行を足す（新しい test file にも行が要る）:
+     ```text
+     | `packages/domain/test/reservationLimit.test.mjs` | TEST | domain reservation limit T01-T03 | MIG-0301 | SAME | IN_PROGRESS | PR#<n> SHA=<sha> |
+     ```
   ```bash
   npm run test --workspace=@flamenode/domain
   npm run test:unit
-  npm run check:project-docs
   ```
-  期待: domain の test が `# fail 0`。`test:unit` の `# fail 0`（件数は変更前と同じ）。check:project-docs は終了コード0。
-- **U04 台帳を更新する**: 下の Ledger updates を反映する。
+  期待: domain の test の末尾が `# pass 3` と `# fail 0`。`test:unit` の末尾が `# fail 0` で、`# pass` は変更前と同じ数（domain の test は `test:unit` の対象外）。
+- **U04 台帳を DONE 用に直す**（CI が green になった後、`REVIEW` にする直前）。下の Ledger updates を反映し、`MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs` が終了コード0。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -136,11 +209,12 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 | T02 | `slotReservationLimitMessage(3)` | 「このイベントでは、1つのX IDにつき最大3件まで枠を確保できます。連続枠は1件として数えます。」と完全一致 |
 | T03 | `slotReservationLimitMessage(0)` | 空文字 |
 | T04 | 旧 path から import する既存3 file | 無変更で `# pass 6` |
-| T05 | `rg -n "from \"(next|react|server-only|@/)" packages/domain/src` | 0件 |
+| T05 | `rg -n 'from "(next|react|server-only|@/)' packages/domain/src` | 0件（終了コード1） |
 #### Commands
 ```bash
 npm run test --workspace=@flamenode/domain
 npm run build --workspace=@flamenode/domain && rm -rf packages/domain/dist
+npm run build --workspace=@flamenode/contracts && npm run build --workspace=@flamenode/api
 npm run typecheck
 npm run test:unit
 npm run verify:fast
@@ -148,25 +222,28 @@ npm run check:project-docs
 ```
 期待: すべて終了コード0、`test:unit` の件数が変更前と同じ。
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` を merge 前の最後の commit で次のように直す（`<n>` は PR 番号、`<sha>` はその時点の Head の40桁、`<url>` は green になった CI の run URL。実在しない値を書かない）。
-1. Migration ledger の `src/lib/slots/slotReservationLimit.ts` の行を次にする:
+U04 で `FILE_MIGRATION_MATRIX.md` の次の行を直す。`<n>` は PR 番号、`<sha>` は U04 を始める前の `git rev-parse HEAD`、`<url>` は green になった CI の run URL（実在しない値を書かない）。`<ev>` は `PR#<n> SHA=<sha> TEST=npm run test --workspace=@flamenode/domain CI=<url>`。
+1. `packages/domain/package.json`, `packages/domain/src/index.ts`, `packages/domain/tsconfig.json` の3行: 3列目を `domain package entry/config (source-referenced, tested in CI)`、状態を `RETAINED`、証跡を `<ev>`。
+2. `src/lib/slots/slotReservationLimit.ts` の行を次にする:
    ```text
-   | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | packages/domain/src/slots/reservationLimit.ts | BRIDGED | PR#<n> SHA=<sha> TEST=npm run test --workspace=@flamenode/domain CI=<url> |
+   | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | packages/domain/src/slots/reservationLimit.ts | BRIDGED | <ev> |
    ```
-2. Future files 表の `packages/domain/src/slots/reservationLimit.ts` の行を消す（file ができ、上の行の target に入ったため）。
-3. `node scripts/check-migration-file-progress.mjs` を実行し、終了コード0を確認する。
+3. `packages/domain/src/slots/reservationLimit.ts` と `packages/domain/test/reservationLimit.test.mjs` の2行: 状態を `RETAINED`、証跡を `<ev>`。
+4. `src/lib/slots/slotReservationLimit.contract.test.mjs` と `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` の2行: 状態を `RETAINED`、証跡を `PR#<n> SHA=<sha> TEST=node --test --experimental-strip-types <その file の path> CI=<url>`（MIG-0301 が DONE になると、NOT_STARTED のままでは file 検査が落ちる）。
+5. merge 統合（runbook F）で `STATUS.md` を直すときは、表の MIG-0301 を `DONE`、MIG-0302 を `READY` にし（MIG-0302 の Work Order は NEEDS_REFINEMENT のままなので、小型モデルの候補には出ない。lead が詰める）、冒頭の `Current Task:` が `MIG-0301` なら `Task State:` も `DONE` にする（表と冒頭が違うと `check:migration-docs` が落ちる）。
 #### DONE checklist
-- [ ] `packages/domain/src/permissions.ts` が無い
 - [ ] `src/lib/slots/slotReservationLimit.ts` が re-export の5行だけ
+- [ ] `packages/domain/src/slots/reservationLimit.ts` の中身が移動前と同一（`git show origin/main:src/lib/slots/slotReservationLimit.ts | diff - packages/domain/src/slots/reservationLimit.ts` が終了コード0）
 - [ ] `npm run test --workspace=@flamenode/domain` が CI の workspace job に入っている
 - [ ] Commands がすべて終了コード0（出力の末尾をPRに貼った）
+- [ ] PR 本文に「`permissions.ts` は消さず owner を MIG-0306 へ移した」と1行書いた
 #### STOP
-- U01 の `rg` の結果が1行でない。
+- Source snapshot の1行でも実物と違う（`test:unit` の件数を除く）。
 - 既存3 file の test が `# pass 6` にならない（2回直しても）。
 - `next build` や CI で `@flamenode/domain/slots/reservationLimit` が解決できないと出た。
 - 手順に無い file を変える必要が出た。
 #### Rollback
-PR を revert。bridge は revert で元の実装に戻る。
+PR を revert。bridge は revert で元の実装に戻り、台帳の行も元に戻る。
 
 ### MIG-0302: low-risk read domain（低リスク参照系）
 - **Model:** small
@@ -432,6 +509,7 @@ PRをrevert。
 - Auth User と Active X: `approved_by_auth_user_id`, `edit_granted_by_auth_user_id`, 監査の `actor_user_id`, session 識別子は Auth User のまま（`PRODUCT_REQUIREMENTS.md`）。
 #### Owned paths
 - 新規: `+packages/domain/src/xid/*.ts`, `+packages/domain/src/admin/*.ts`, `+packages/domain/src/user/*.ts`
+- 置換または削除: `packages/domain/src/permissions.ts`（MIG-0301 から owner を引き継いだ偽の `canEditVideo`。本物の判定に置き換えるか、呼び出し元0件を示して `RETIRED`（`APPROVAL=` が要る）にする）
 - 変更: `src/lib/actions/cost-guard.ts`, `moderation-admin.ts`, `notification-admin.ts`, `terms.ts`, `static-rebuild-admin.ts`, `user-admin.ts`（domain 呼び出しへ）
 - 触らない: SA-092〜097 X-ID merge/revert の本体（安全な primitive だけ共有）、SA-011 audit restore、SA-050 public visibility repair（個別実装として残す）
 #### Micro-units
