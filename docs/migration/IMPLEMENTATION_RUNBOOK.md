@@ -13,7 +13,7 @@ Checkpoint policy: WORK_ITEM_ONLY
 
 **競合する正本:** `TASK_CARDS_*.md` は要約カード、実行するコード・検査の詳細は `PHASE_*_SPEC.md` のWork Order、現実の挙動は CURRENT のコードとテストで判定する。役割が衝突する場合は STOP してLeadが正本を修正する。
 
-**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READY。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
+**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401の非visual性能PoCはPR #283でDONE。後続MIG-0404は最新STATUSのREADY条件を確認。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
 
 1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`work-items/MIG-XXXX.md`とopen PRを読んでownerを特定する。**作業中のPRがあるMIGを横取りしない**。
 2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
@@ -130,7 +130,6 @@ DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on`
 git fetch origin
 git rev-parse origin/main  # mainをcheckoutせず最新コミットを特定
 gh pr list --state open --json number,headRefName,title,isDraft
-npm run migration:next -- --model small
 ```
 
 **worktree安全性:** `main` が他のworktreeで使用中でも `git switch main` を要求しない。`git show origin/main:docs/migration/STATUS.md` で正本を確認し、`git worktree list --porcelain` で利用中のブランチを確認する。作業ツリーがdirtyなら勝手にstash/resetせずSTOP。候補選定は全open PRのtask・Owned paths・共有domain/台帳行・依存PRまで照合してから行う。`gh pr list`の取得に失敗した場合は自動claimを停止する。`--offline`は別経路で所有者確認済みの場合だけ使い、その根拠をwork-itemへ記録する。
@@ -140,7 +139,7 @@ npm run migration:next -- --model small
 1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
 2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
 3. 自分のPRが`IN_PROGRESS` → **C**（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）
-4. 自分の`IN_PROGRESS` PRが無く、候補が出た → **B**（自分の`REVIEW`待ちPRがあっても進める）
+4. 自分の`IN_PROGRESS` PRが無く、最新`origin/main`の内容を読めるclean checkout/worktreeで `npm run migration:next -- --model small` を実行し、既存ownerと共有領域の重複がない候補が出た場合だけ → **B**（自分の`REVIEW`待ちPRがあっても進める）
 5. どれも無い → 何もせず「進められる作業無し」とREVIEW待ちPR一覧を報告して終了
 
 **B. claim（新規taskのみ）**
