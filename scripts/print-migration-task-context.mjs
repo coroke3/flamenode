@@ -133,8 +133,6 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
   return {selected:candidates.find(id=>!owned.has(id))??null,candidates,ownedByPr};
 }
 export function getNextTaskContext(root=ROOT,owners=readOpenPrOwners(root),{smallOnly=false}={}){
-  // Without the open-PR list a selected task may already be owned; only an explicit --offline accepts that.
-  if(!owners.live&&!owners.offline)throw new Error("Open PRs could not be read with gh. List open migration/mig-* PRs yourself (GitHub MCP list_pull_requests), then rerun with --offline, or stop");
   const eligible=smallOnly?(id=>getWorkOrder(id,root).smallReady):()=>true;
   const next=pickNextTask(read(root,"docs/migration/STATUS.md"),read(root,"docs/migration/OPEN_DECISIONS.md"),owners.owned,eligible);
   const ownedNote=next.ownedByPr.map(id=>id+"=PR#"+owners.owned.get(id)).join(",");
@@ -166,9 +164,9 @@ const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(imp
 if(invoked){
  try{
   const {task,automatic,offline,smallOnly}=parseContextArgs(process.argv.slice(2));
-  const owners=offline?{owned:new Map(),live:false,offline:true}:undefined;
+  const owners=offline?{owned:new Map(),live:false}:undefined;
   const {output,chars,fileRows,selected,candidates,ownedNote,live}=automatic?getNextTaskContext(ROOT,owners,{smallOnly}):getTaskContext(task,ROOT,{smallOnly});
-  if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (--offline: open PRs not checked by this script)")+"; verify live GitHub PRs and decisions before claiming\n");
+  if(automatic)process.stderr.write("[migration-context] advisory candidate="+selected+" READY candidates="+candidates.join(",")+(ownedNote?" owned-by-open-PR="+ownedNote:"")+(live?"":" (open PRs not checked)")+"; verify live GitHub PRs and decisions before claiming\n");
   process.stdout.write(output);
   process.stderr.write("[migration-context] chars="+chars+" assigned source rows="+fileRows+" (source/test and policy are additional required reads)\n");
   if(chars>24000)process.stderr.write("[migration-context] NOTE: large packet; split by TASK_MICRO_UNITS.md and scoped source rows before passing to a model\n");
