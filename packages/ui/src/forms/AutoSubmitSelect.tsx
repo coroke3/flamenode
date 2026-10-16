@@ -4,7 +4,16 @@ import React from "react";
 export function navigateGetForm(form: HTMLFormElement): void {
   const method = (form.getAttribute("method") ?? "get").toLowerCase();
   if (method !== "get") {
-    HTMLFormElement.prototype.submit.call(form);
+    // requestSubmit preserves native validation and React submit handlers.
+    // Older browsers need a cancelable submit event after constraint validation.
+    if (typeof form.requestSubmit === "function") {
+      form.requestSubmit();
+    } else if (form.noValidate || !form.checkValidity || form.checkValidity()) {
+      const SubmitEvent = form.ownerDocument?.defaultView?.Event ?? Event;
+      form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    } else {
+      form.reportValidity?.();
+    }
     return;
   }
 
