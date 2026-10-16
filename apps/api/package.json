@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "test": "node --test --experimental-strip-types test/**/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

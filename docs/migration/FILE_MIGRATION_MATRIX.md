@@ -239,7 +239,7 @@
 | `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
 | `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | +packages/domain/src/software/labels.ts (legacy bridge) | NOT_STARTED | — |
 | `src/lib/slots/limits.ts` | HELPER | slot pure limits | MIG-0302 | +packages/domain/src/slots/limits.ts (legacy bridge) | NOT_STARTED | — |
-| `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | +apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | NOT_STARTED | — |
+| `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | IN_PROGRESS | PR#312 SHA=b29bbd18467acb5225fe3e0b28faf1505b8abc2e TEST=node --test --experimental-strip-types apps/api/test/authSession.test.mjs LOG=local |
 | `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain ownership policy (exact file TBD) | NOT_STARTED | — |
 | `src/lib/video/videoVisibilityTransition.ts` | HELPER | video visibility CAS audit Queue | MIG-0304 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |
@@ -255,6 +255,7 @@
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 | `apps/site/src/pages/migration-fixture-poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
 | `apps/site/src/lib/routeMap.ts` | HELPER | build-time route-map table generator and lookup (new file, no CURRENT counterpart; CURRENT `src/lib/db/videoIdLookup.ts` stays) | MIG-0404 | SAME (build-time route table) | RETAINED | PR#305 SHA=c32030816c219e1a05b32e9c6989edbfc11a7e29 TEST=node --test --experimental-strip-types scripts/migration-route-map.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38912028631 |
+| `apps/api/src/auth/session.ts` | HELPER | read-only session resolution and Hono middleware from Auth.js cookie | MIG-0608 | SAME (Hono auth session resolver) | RETAINED | PR#312 SHA=b29bbd18467acb5225fe3e0b28faf1505b8abc2e TEST=node --test --experimental-strip-types apps/api/test/authSession.test.mjs LOG=local |
 
 ## Future files requiring source/target registration
 
