@@ -1,8 +1,8 @@
 # FlameNode 小型エージェント実装ランブック（必読・共通）
 
 > Status: Active / operational instructions, not a replacement for AGENT_PROTOCOL.md
-> Updated: 2026-10-13
-> Authority: `STATUS.md`（merge済み状態と依存） + `work-items/MIG-XXXX.md`（作業中PRのcheckpoint）→ `OPEN_DECISIONS.md`（決定）→ `TASK_CARDS_*.md`（手順）→ `CURRENT code/tests`（実行時の事実）
+> Updated: 2026-10-16
+> Authority: 現行挙動の事実は `CURRENT code/tests`。進捗は `STATUS.md` と `work-items/MIG-XXXX.md`、採用判断は `OPEN_DECISIONS.md`、実装手順は `PHASE_*_SPEC.md` の Work Order、`TASK_CARDS_*.md` は索引・要約。衝突時は停止する。
 > Audience: Claude Haiku / Luna / Flash / Codex / Antigravity / human reviewer
 
 Checkpoint policy: WORK_ITEM_ONLY
@@ -11,7 +11,9 @@ Checkpoint policy: WORK_ITEM_ONLY
 
 **実行環境:** `package.json`のNode要件（22系）を先に確認する。Windowsで標準Nodeが異なる場合は、導入済みfnmの例として `fnm exec --using 22 node --version`、`fnm exec --using 22 npm.cmd ci --no-audit --no-fund` を使い、以降のnpm/node検証も同じ22系で実行する。engine checkを無効化せず、ホスト全体の既定バージョンを変更する必要はない。
 
-**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401非visual性能PoCはMIG-0301と並行READY。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
+**競合する正本:** `TASK_CARDS_*.md` は要約カード、実行するコード・検査の詳細は `PHASE_*_SPEC.md` のWork Order、現実の挙動は CURRENT のコードとテストで判定する。役割が衝突する場合は STOP してLeadが正本を修正する。
+
+**コンテキスト予算:** まず[MIGRATION_START_HERE.md](MIGRATION_START_HERE.md)で対象MIG行・カード・関連ownerファイル行を絞る。**STATUS/AGENT_PROTOCOL/README/台帳全文の一括読込は禁止**。ルールの正本は維持したまま、対象節・根拠ソースを検索して読む。MIG-0401の非visual性能PoCはPR #283でDONE。後続MIG-0404は最新STATUSのREADY条件を確認。HTMLモック受領（MIG-0200完了）に伴いD-08はDECIDEDとなりMIG-0201（デザイントークン）もREADY。後続のvisual画面実装は先行する基盤タスク完了に依存する。
 
 1. GitHubの最新`main` commitを読む。変更が作業ブランチ上にしか無い場合、そのbranchの`work-items/MIG-XXXX.md`とopen PRを読んでownerを特定する。**作業中のPRがあるMIGを横取りしない**。
 2. `AGENTS.md`と`AGENT_PROTOCOL.md`の関連ルール、`GIT_WORKFLOW.md`の現段階の操作手順、`STATUS.md`の該当行・依存行のみ読む。移行台帳や過去MIGを全件取り込まない。
@@ -140,10 +142,12 @@ branch・diff・Head は `gh` を使わず git で読む（`git fetch origin <br
 **A. 状況確認（毎wake）**
 
 ```bash
-git status --short           # 何か出たら前 wake の残り。自分の branch なら commit して push、そうでなければ STOP
+git status --short           # 何か出たら STOP（下の worktree安全性）
 git fetch origin
 git switch --detach origin/main   # main を他の worktree が使っていても動く。判定は常に最新の origin/main で行う
 ```
+
+**worktree安全性:** `main` が他のworktreeで使用中でも `git switch main` を要求しない。`git worktree list --porcelain` で利用中のブランチを確認する。作業ツリーがdirtyなら勝手にcommit/stash/resetせずSTOPし、`git status --short` の出力をそのまま報告する。
 
 open PR の head branch を全部読み（上の表）、カンマ区切りで渡す（open PR が無ければ `""`）。
 
@@ -151,14 +155,14 @@ open PR の head branch を全部読み（上の表）、カンマ区切りで�
 npm run migration:next -- --model small --open-pr-branches "<branch>,<branch>"
 ```
 
-`gh` が使える host では `--open-pr-branches` を省いてよい（script が `gh` で読む）。どちらも無いと script は終了コード1で止まる。`--offline` は文書検査用で、claim の判定には使わない。
+`gh` が使える host では `--open-pr-branches` を省いてよい（script が `gh` で読む）。どちらも無いと script は終了コード1で止まる。`--offline` は別経路で所有者確認済みの場合だけ使い、その根拠をwork-itemへ記録する。script が見るのは `migration/mig-XXXX-*` という branch 名だけなので、排他の保証ではない。候補を claim する前に、全 open PR の変更 file（`pull_request_read` method=get_files か `git diff --name-only origin/main...origin/<branch>`）と候補の Owned paths・共有 domain・台帳行・依存 PR が重ならないことを照合する。
 
-自分の PR（`migration/mig-*` branch の `docs/migration/work-items/MIG-XXXX.md` の `Owner` が自分）は `git show origin/<branch>:docs/migration/work-items/MIG-XXXX.md` で状態を読む。上から順に判定する。
+自分の PR（`migration/mig-*` branch の `docs/migration/work-items/MIG-XXXX.md` の `Owner` が自分）は `git show origin/<branch>:docs/migration/work-items/MIG-XXXX.md` で状態を読む。上から順に判定する（自分 = work-itemの`Owner`が自分のPR）。
 
 1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
 2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
 3. 自分のPRが`IN_PROGRESS` → **C**（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）
-4. 自分の`IN_PROGRESS` PRが無く、候補が出た → **B**（自分の`REVIEW`待ちPRがあっても進める）。候補が複数なら script が最初に出したものを選ぶ
+4. 自分の`IN_PROGRESS` PRが無く、上の selector と照合で既存ownerと共有領域の重複がない候補が出た場合だけ → **B**（自分の`REVIEW`待ちPRがあっても進める）。候補が複数なら script が最初に出したものを選ぶ
 5. どれも無い → 何もせず「進められる作業無し」とREVIEW待ちPR一覧を報告して終了
 
 **B. claim（新規taskのみ）**
@@ -171,7 +175,7 @@ git push -u origin migration/mig-xxxx-<slug>
 
 slug は Work Order の title の `（` より前を英小文字 kebab-case にしたもの（例: `extraction/DI pattern（…）` → `extraction-di-pattern`）。同じ名前の branch が手元か origin に既にあれば、open PR が無い（A で確認済み）ので前回の失敗の残りとみなし、作らずに STOP して lead へ「残った branch <名前> の扱い」を聞く。
 
-PR 本文を scratch の file に [GIT_WORKFLOW.md](GIT_WORKFLOW.md) §5「Required PR body」の見出しのまま書き、Draft PR を作る（上の表）。placeholder のまま投稿しない。host が先頭に入れる行（attribution など）があれば、その下に書く。
+PR 本文を scratch の file に [GIT_WORKFLOW.md](GIT_WORKFLOW.md) §5「Required PR body」の見出しのまま書き、Draft PR を作る（上の表）。placeholder のまま投稿しない（`grep -Eq 'MIG-XXXX|<[^>]+>|TBD|記入待ち' <file>` が一致したら直す）。host が先頭に入れる行（attribution など）があれば、その下に書く。
 
 | 見出し | claim で書く値 | D で書き足す値 |
 | --- | --- | --- |
@@ -238,15 +242,7 @@ git fetch origin && git merge --no-edit origin/main   # rebase しない（レ�
 
 1. `docs/migration/STATUS.md`: 当該MIG行のStateを`DONE`にする。Depends onの全MIGが`DONE`になった行だけ`BLOCKED`→`READY`にする。冒頭の `Current Task:` が当該MIGなら `Task State:` も `DONE` にする。他の行は変えない。
 2. `docs/migration/work-items/MIG-XXXX.md`: `State: DONE`、`Evidence`にレビューcommentのURLとCI runのURL。
-3. レビューした Head 以降に、統合以外の変更が入っていないことを確かめる。2つの出力が同じでなければ再レビュー（**E**）。
-
-```bash
-X=":(exclude)docs/migration/STATUS.md :(exclude)docs/migration/work-items"
-git diff origin/main...<reviewed Head> -- . $X | git patch-id --stable
-git diff origin/main...HEAD -- . $X | git patch-id --stable
-```
-
-4. 検証して統合commitをpushし、最終 Head の CI が green になってから squash merge する（上の表）。
+3. 検証して統合commitをpushする。統合で Head が変わるので、下の「最終Headの例外なしルール」のとおり最終 Head を再レビューする（自分の PR なら **E** をもう一度）。
 
 ```bash
 npm run check:migration-work-items && npm run check:project-docs
@@ -255,7 +251,9 @@ git commit -m "MIG-XXXX: STATUS統合"
 git push
 ```
 
-main への merge は Workers Builds の本番 deploy を起こす。これはユーザーが許可済み（2026-10-16、AGENT_PROTOCOL.md §Mandatory stop の例外）なので止めない。host の権限設定が merge を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
+PR を Ready にし、最終 Head の CI が green になってから merge する（上の表）。
+
+**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPR/work-itemへ記録する。main への merge は Workers Builds の本番 deploy を起こすので、agent が merge してよいかは `AGENT_PROTOCOL.md` の production gate に従う。hostの権限設定がmergeを拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
 
 ## 最小検証コマンド
 
