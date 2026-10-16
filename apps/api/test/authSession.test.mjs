@@ -219,7 +219,7 @@ test("T05: safe logging never leaks sessionToken on database errors", async (t) 
         bind() {
           return {
             first: async () => {
-              throw new Error("simulated D1 storage failure");
+              throw new Error(`D1 lookup failed for bound token: ${secretToken}`);
             },
           };
         },
@@ -237,7 +237,7 @@ test("T05: safe logging never leaks sessionToken on database errors", async (t) 
     const user = await resolveSessionUser(failingDb, secretToken);
     assert.equal(user, null);
     assert.ok(
-      loggedOutput.includes("Failed to resolve session"),
+      loggedOutput.includes("D1_LOOKUP_FAILED"),
       "error should be logged",
     );
     assert.ok(
