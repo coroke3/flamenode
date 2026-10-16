@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getTaskContext, getWorkOrder, getNextTaskContext, parseContextArgs } from "./print-migration-task-context.mjs";
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { getTaskContext, getWorkOrder, parseContextArgs } from "./print-migration-task-context.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -84,6 +82,32 @@ test("small-model advisory only offers tasks whose work order is READY_FOR_SMALL
  assert.deepEqual(next.candidates,["MIG-0301"]);
  assert.equal(pickNextTask(status,"",new Map(),()=>false).selected,null);
 });
+
+test("small-model selection requires the full recipe, not only readiness labels", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"migration-context-"));
+ try {
+  fs.mkdirSync(path.join(root,"docs/migration"),{recursive:true});
+  const file=path.join(root,"docs/migration/PHASE_3_SPEC.md");
+  const labels="### MIG-0301: incomplete\n- **Model:** small\n- **Readiness:** READY_FOR_SMALL_MODEL\n";
+  fs.writeFileSync(file,labels);
+  assert.equal(getWorkOrder("MIG-0301",root).smallReady,false);
+  fs.writeFileSync(file,labels+"\n"+labels);
+  assert.equal(getWorkOrder("MIG-0301",root).smallReady,false);
+ } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test("explicit MIG IDs cannot bypass the small-model restriction", () => {
+ assert.throws(()=>getTaskContext("MIG-0401",undefined,{smallOnly:true}),/no complete READY_FOR_SMALL_MODEL/);
+});
+
+test("unknown, missing and duplicate CLI model options are rejected", () => {
+ assert.deepEqual(parseContextArgs(["--next","--model","small","--offline"]),{task:null,automatic:true,offline:true,smallOnly:true});
+ assert.equal(parseContextArgs(["MIG-0301","--model","small"]).smallOnly,true);
+ for(const args of [["--next","--model"],["--next","--model","smal"],["--next","--model","small","--model","lead"],["--next","--nonsense"],["--next","MIG-0301"]]){
+  assert.throws(()=>parseContextArgs(args),/--model must|Unknown or duplicate/);
+ }
+});
+
 test("packet carries the recipe shape and the 1102 budget named by the work order",()=>{
  const api=getTaskContext("MIG-0603").output;
  assert.match(api,/## R-API:/);
