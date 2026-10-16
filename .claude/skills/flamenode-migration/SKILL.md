@@ -16,9 +16,10 @@ Thin adapter. The shared execution contract is `docs/migration/AGENT_PROTOCOL.md
 5. `docs/migration/STATUS.md` — only the chosen MIG row and its dependency rows
 6. `docs/migration/OPEN_DECISIONS.md` — only the D-xx tied to the task
 7. `docs/migration/IMPLEMENTATION_RUNBOOK.md` and exactly one matching `docs/migration/TASK_CARDS_*.md` card
-8. `docs/migration/FEATURE_CATALOG.md` / `FUNCTION_INVENTORY.md` / `ROUTE_MATRIX.md` / `API_MATRIX.md` — only the affected UX/FN rows
-9. Subsystem baseline only when touched: `screen-mapping/README.md` (screen/UI/route), `cloudflare/TOPOLOGY.md` (Worker/ingress/binding/build/job), `cloudflare/PERFORMANCE_BASELINE.md` (CPU/1102), `auth/README.md` (auth/session/permission/owner/Active X), `background-jobs/README.md` (Queue/Cron/retry/DLQ), `static-delivery/README.md` (static artifact/visibility), `UI_REFERENCE.md` (visual work)
-10. CURRENT code and tests of the owned files
+8. `docs/migration/IMPLEMENTATION_RECIPES.md` — only the Work Order's `Recipe` sections; `docs/migration/ZERO_1102.md` — its `Runtime` row (§3) and design rules (§4); `docs/migration/CODE_QUALITY.md` — 「移行で守る簡潔さ」「機能維持とブラッシュアップの線引き」 (the `migration:next` packet already includes the recipe and budget)
+9. `docs/migration/FEATURE_CATALOG.md` / `FUNCTION_INVENTORY.md` / `ROUTE_MATRIX.md` / `API_MATRIX.md` — only the affected UX/FN rows
+10. Subsystem baseline only when touched: `screen-mapping/README.md` (screen/UI/route), `cloudflare/TOPOLOGY.md` (Worker/ingress/binding/build/job), `cloudflare/PERFORMANCE_BASELINE.md` (CPU/1102), `auth/README.md` (auth/session/permission/owner/Active X), `background-jobs/README.md` (Queue/Cron/retry/DLQ), `static-delivery/README.md` (static artifact/visibility), `UI_REFERENCE.md` (visual work)
+11. CURRENT code and tests of the owned files
 
 ## Execute
 
@@ -30,5 +31,7 @@ Checkpoint policy: WORK_ITEM_ONLY
 - Independent review: another agent (Codex / Antigravity) or a human; or, when this session runs on a model below Opus, spawn `flamenode-architecture-reviewer` with `model: "opus"` in a fresh context, pass it the PR diff, Work Order and affected contracts, and record its verdict as a PR comment in the protocol format. A same-or-lower-model subagent does not count. APPROVE + green CI on the reviewed Head (+ user approval for high-risk / Phase Gate) → merge-integrate. Otherwise leave the PR in `REVIEW` and continue other dependency-independent work.
 - Never auto-cross a Phase Gate or perform production deploy, Worker Route / Custom Domain, Remote D1 or secret changes without explicit user approval.
 - UI redesign: visual completion is not functional completion; verify the affected function IDs in `FUNCTION_INVENTORY.md`.
+- Write the code in the shape of the Work Order's recipe. Do not add an abstraction with one caller, and do not port CURRENT exports that `node scripts/find-unused-exports.mjs <file>` reports as `UNUSED` / `TEST_ONLY`. Keep behavior identical to CURRENT; list behavior-changing ideas under 「ブラッシュアップ提案」 in the PR body instead of implementing them.
+- Record the runtime class and measured max CPU against `ZERO_1102.md` §3 (write 「未計測」 before MIG-0606's harness exists; never estimate).
 
 Report in the CLAUDE.md migration output format.

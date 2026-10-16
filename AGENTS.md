@@ -45,6 +45,8 @@ Migration work must distinguish **CURRENT** production behavior from **TARGET** 
 | backend/domain/platform parity | `docs/migration/FUNCTION_INVENTORY.md` + `docs/migration/functions/*.md` |
 | requirement reconciliation | `docs/migration/PRODUCT_REQUIREMENTS.md` |
 | migration code quality | `docs/migration/CODE_QUALITY.md` |
+| migration code shape (recipes) | `docs/migration/IMPLEMENTATION_RECIPES.md` |
+| migration 1102 budgets | `docs/migration/ZERO_1102.md` |
 | backend optimization | `docs/migration/BACKEND_OPTIMIZATION.md` |
 | new visual UI input | `docs/migration/UI_REFERENCE.md` |
 | route migration | `docs/migration/ROUTE_MATRIX.md` |
@@ -147,6 +149,8 @@ Follow `docs/migration/PRODUCT_REQUIREMENTS.md`.
 ## Code quality
 
 Every migration implementation follows `docs/migration/CODE_QUALITY.md`.
+
+Each Work Order names a `Recipe` (code shape in `docs/migration/IMPLEMENTATION_RECIPES.md`) and a `Runtime` class (max-CPU budget in `docs/migration/ZERO_1102.md`). Write in that shape, stay under that budget, do not add single-caller abstractions or port CURRENT exports with zero callers (`node scripts/find-unused-exports.mjs <file>`), and keep behavior identical to CURRENT — behavior-changing improvements go to the PR as proposals, not code.
 
 Required standard:
 

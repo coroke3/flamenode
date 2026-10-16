@@ -36,6 +36,8 @@
 ### MIG-0601: low-risk reads（低リスク参照系 API）
 - **Model:** small
 - **Readiness:** NEEDS_REFINEMENT — MIG-0307 の merge 後、lead が Hono の route 登録とテストの書き方（U01 のコード例）を `apps/api/src/index.ts` の実物に合わせて追記したら READY_FOR_SMALL_MODEL
+- **Recipe:** R-API
+- **Runtime:** S2
 - **Depends on:** MIG-0307, MIG-0107 / **Decisions:** D-02 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -47,9 +49,12 @@
 | software suggestions | RH-029 | `app/api/software/suggestions/route.ts`（`src/lib/api/softwareSuggestions.contract.test.mjs`） |
 #### Owned paths
 - 新規: `+apps/api/src/routes/health.ts`, `+apps/api/src/routes/publicAboutStats.ts`, `+apps/api/src/routes/softwareSuggestions.ts`, `+packages/contracts/src/health.ts` ほか DTO
-- 変更: `apps/api/src/index.ts`（route 登録のみ）
+- 新規: `+apps/api/src/env.ts`, `+apps/api/src/app.ts`, `+apps/api/test/*.test.mjs`（形は `IMPLEMENTATION_RECIPES.md` の R-API）
+- 変更: `apps/api/src/index.ts`（`export default app` だけにする）
+- 削除: `apps/api/src/types/hono.d.ts`（`any` を返す手書きの型 shim。本物の hono の型を隠す）
 - 触らない: `app/api/**`（本番切替まで旧実装を維持）
 #### Micro-units
+- **U00 土台**: `apps/api/src/types/hono.d.ts` を消し、R-API の配置（`env.ts` / `app.ts` / `index.ts`）を作る。`npm run build --workspace=@flamenode/api` が本物の hono の型で通ることを確認する。zod を `apps/api` の bundle に入れる場合は、build 後の bundle で zod の版を確認し、3.x なら `ZERO_1102.md` §4 の 10 に従って非本番で memory を測り、結果を PR に書く（更新はこの task でしない）。
 - **U01 health**: RH-018 と RH-017。deep は token 不一致で CURRENT と同じ status。検証: 既存 `route.test.mjs` と同じケースを Hono の `app.request()` で実行。
 - **U02 about-stats**: RH-026。R2 binding 名を CURRENT と同じにする。
 - **U03 software**: RH-029。MIG-0302 の domain 関数を使う。
@@ -82,6 +87,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0608: Hono read-only session resolution（Auth.js database session 互換）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0801 の baseline テスト（cookie 名・属性・期限・失効）が入ってから。高リスク（認証）なので小型モデルに渡さない
+- **Recipe:** R-API
+- **Runtime:** S4
 - **Depends on:** MIG-0801, MIG-0107 / **Decisions:** D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -125,6 +132,8 @@ PRをrevert。旧 Next の認証は変わらない。
 ### MIG-0602: low-risk mutations（低リスク更新系 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608 の merge 後。transaction・監査を Hono → application service のどこで行うかを MIG-0303 の結果で確定
+- **Recipe:** R-API
+- **Runtime:** S3
 - **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-01 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -169,6 +178,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0603: video APIs（動画・チャプター API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0304 の merge 後
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0304 / **Decisions:** D-03 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -217,6 +228,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0305 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -263,6 +276,8 @@ Phase 6 共通契約のとおり。
 ### MIG-0605: user/X/admin APIs（ユーザー・X・管理 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0306 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
+- **Recipe:** R-API
+- **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0306 / **Decisions:** D-03 DECIDED, D-04 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -315,10 +330,12 @@ Phase 6 共通契約のとおり。
 ### MIG-0606: API CPU benchmark
 - **Model:** small
 - **Readiness:** NEEDS_REFINEMENT — MIG-0603〜0605 の merge 後、lead が測定スクリプトの雛形と測定条件（ローカル `wrangler dev` / 非本番、サンプル数）を確定したら READY_FOR_SMALL_MODEL
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0603, MIG-0604, MIG-0605 / **Decisions:** D-06 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- 予算: 単純 read p95 < 5ms、mutation p95 < 8ms、上限 10ms（Free）。基準は `cloudflare/PERFORMANCE_BASELINE.md`。
+- 予算: `ZERO_1102.md` §3 の**最大値**で判定する（参照 S2 < 7ms、更新 S3 < 8ms、session 解決 S4 は 2ms 以内）。p50/p95/p99 は記録するが合否に使わない。入力は §5 の4種類（通常・上限ちょうど・不正・cold）を各 50回以上。
 - 対象: RH-010/011 を除く 31 メソッドの Hono 実装（`apps/api/src/routes/**`）。
 #### Owned paths
 - 新規: `+scripts/benchmark-api-cpu.mjs`, `+docs/migration/cloudflare/API_CPU_BENCHMARK.md`
@@ -339,16 +356,118 @@ npm run check:project-docs
 #### Ledger updates
 `API_CPU_BENCHMARK.md` を新規作成。`API_MATRIX.md` の各メソッドに測定値。
 #### DONE checklist
-- [ ] 31メソッドの測定値と条件が記録されている
+- [ ] 31メソッドの測定値（max を含む）と条件が記録され、max が `ZERO_1102.md` §3 の予算未満か、超過の担当MIGが記録されている
 - [ ] 測定値を本番値と書いていない
 #### STOP
 - 予算超過を直すためにエンドポイントを書き換え始めたら止める（担当MIGへ）。
 #### Rollback
 PRをrevert。
 
+### MIG-0609: 残る背景処理の CPU を測る（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0606 の計測 script が merge された後。同じ script で Cron と Queue consumer を呼べるかを確かめてから
+- **Recipe:** R-BUILD
+- **Runtime:** N
+- **Depends on:** MIG-0606 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- build 時へ移さずに残る job（状態を更新するもの）と、1回の上限:
+
+  | job | 入口 | 1回の上限（CURRENT） |
+  | --- | --- | --- |
+  | OpenNext cache の掃除 | `workers/cleanup/incrementalCache.ts:29` | `SCAN_LIMIT=200`（`:4`） |
+  | 保持期限の削除 | `workers/cleanup/index.ts:36` | `AUDIT_CLEANUP_BATCH_LIMIT=500`（`workers/cleanup/retention.ts:6`） |
+  | X ID の枠の紐付け回復 | `workers/content-jobs/xIdSlotBindRecovery.ts:674` | `REQUEST_LIMIT=5`、`SLOT_LIMIT=30`（`:11〜16`） |
+  | 通知の lease 回復・配信 | `workers/notification-dispatcher/dispatch.ts:1005`、`:1065` | `MAX_NOTIFICATION_BATCH=6`、外部 request 12（`:46〜55`） |
+  | 枠の締切リマインダー | `workers/notification-dispatcher/reminders.ts:131` | `REMINDER_LIMIT=50`（`:7`） |
+  | YouTube metadata 同期 | `workers/youtube-sync/index.ts:1080` | API 4回、50件（`:93〜97`） |
+  | YouTube 非公開の再確認 | `workers/sync-jobs/index.ts:582` | 10件（`workers/youtube-sync/index.ts:110`） |
+  | score の再計算 | `workers/score-recalc/index.ts:39` | 150件（`:29`） |
+  | YouTube playlist 同期 | `workers/youtube-playlist-sync/index.ts:2173` | event 1、外部 request 12、元の作品 5,000（`:127〜143`） |
+  | GA4 人気順 | `workers/ga-analytics/sync.ts:215` | 200件（`workers/ga-analytics/ranking.ts:29`） |
+
+- CURRENT の計測値（本番、Four-Worker 表）: sync の scheduled が max 83ms、fast の scheduled が max 25ms（`cloudflare/PERFORMANCE_BASELINE.md`）。
+- Queue consumer は `max_batch_size = 10`（`workers/*/wrangler.toml`）。batch 全体が1回の invocation。
+#### Owned paths
+- 新規: `+docs/migration/cloudflare/BACKGROUND_CPU.md`
+- 変更: `scripts/benchmark-api-cpu.mjs`（Cron と Queue consumer を呼ぶ入口を足すだけ）
+- 触らない: `workers/**`（直すのは MIG-0610）
+#### Micro-units
+- **U01 harness**: MIG-0606 の script に、非本番の Worker の `scheduled` と `queue` を呼ぶ入口を足す。
+- **U02 measure**: 上の表の job ごとに、1件あたりの CPU と、CURRENT の上限ちょうどの入力での CPU p50/p95/max を測る（`ZERO_1102.md` §5 の4種類、各 50回以上）。
+- **U03 table**: `BACKGROUND_CPU.md` に、job ごとの測定値と「max < 8ms にする1回の上限 = floor(7ms ÷ 1件の max CPU)」を書く（1ms は起動と D1 の結果処理の余裕）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 表の全 job | 測定値と条件がある |
+| T02 | 予算を超える job | 新しい上限の計算がある |
+#### Commands
+```bash
+node scripts/benchmark-api-cpu.mjs --background
+npm run check:project-docs
+```
+#### Ledger updates
+`BACKGROUND_CPU.md` を新規作成。`cloudflare/PERFORMANCE_BASELINE.md` から link する。
+#### DONE checklist
+- [ ] 全 job の測定値（max を含む）と条件がある
+- [ ] 予算を超える job ごとに、新しい上限の計算がある
+- [ ] 測定値を本番値と書いていない
+#### STOP
+- job の code を直し始めたら止める（MIG-0610）。
+- 本番の Worker を計測のために呼ぶ必要が出たら止める（明示承認事項）。
+#### Rollback
+PRをrevert。
+
+### MIG-0610: 予算を超える背景処理を1回 8ms 未満に分ける（D-09）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0609 の表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる
+- **Recipe:** R-JOB
+- **Runtime:** B
+- **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED
+- **Verified against:** `96f20dc` (2026-10-15)
+#### Source snapshot
+- 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作る）。
+- Cron の入口: `workers/content-jobs/index.ts:111`、`workers/fast-jobs/index.ts:114`、`workers/sync-jobs/index.ts:170`。CURRENT は1回の Cron の中で複数の job を順に動かす。
+- 仕事の正本は D1 の行、Queue は doorbell だけ（`background-jobs/README.md` の最重要原則）。
+#### Owned paths
+- 変更: MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
+- 触らない: `workers/json-generator/**`（MIG-0907 で消す）、`crons` の式、本番の Queue 設定
+#### Micro-units
+- **U01 cron fan-out**: 3つの Cron を「job ごとに doorbell を1つ enqueue する」形にし、Cron 自体は D1 を読まない（MIG-0410 の build 要求の確認だけは例外）。
+- **U02 batch size**: 各 Queue consumer の `max_batch_size` を「8ms ÷ 1 message の max CPU」以下にする（計算を PR に書く）。
+- **U03..Unn job**: 予算を超えた job ごとに1 unit。定数を MIG-0609 の値に下げ、残りを D1 に残して続きの doorbell を enqueue する。R-JOB の5種の test を足す。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 各 job の上限ちょうどの入力 | 非本番の max < 8ms |
+| T02 | 上限 + 1 件 | 続きの doorbell が1つ enqueue され、D1 に残りがある |
+| T03 | 同じ doorbell が2回 | 二重に処理しない |
+| T04 | 外部 API（YouTube・Discord・GA4）の失敗 | D1 の状態が retry 可能なまま残る |
+| T05 | 1日の message 数 | Queue の無料枠（1日 10,000 operations）の 50%以下の見積もりが PR にある |
+#### Commands
+```bash
+npm run test:unit
+node scripts/benchmark-api-cpu.mjs --background
+npm run typecheck
+```
+#### Ledger updates
+`BACKGROUND_CPU.md` に分割後の測定値。`background-jobs/README.md` の上限の表を更新。
+#### DONE checklist
+- [ ] 全 job の非本番 max < 8ms（上限ちょうどの入力、50回以上）
+- [ ] 通知・同期の到達時間が CURRENT より延びる場合、その値を PR に書き、ユーザーが承認している
+- [ ] Queue の1日の message 数の見積もりがある
+#### STOP
+- 本番の Queue 設定・Cron・Worker の deploy は明示承認事項なので止める。
+- 分割すると通知や同期の遅れが CURRENT より大きく延びる場合は、実装前に値を示してユーザーに確認する。
+- 外部 API の呼び出し回数が CURRENT より増える分割になったら止める（YouTube の quota）。
+#### Rollback
+PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cron が拾う。
+
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0606 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot

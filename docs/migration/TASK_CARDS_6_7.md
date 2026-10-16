@@ -64,6 +64,20 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: large pagination/invalid input/rate limit/banned, D1 unavailable, R2/cache cold/miss, concurrent writes。Free 10ms/request前提でmutation p95<8ms/read p95<5ms目標（実際の1102=0を別監視）。
 - DONE: すべての公開/private endpointのCPUの実測・最大ケース・修正とerror rate、閾値逸脱時のBLOCKED理由を記録。
 
+### MIG-0609 — background job CPU measurement (D-09)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0609 Work Order、`ZERO_1102.md` §5。
+- 変更: `scripts/benchmark-api-cpu.mjs` に Cron / Queue consumer の入口、`+docs/migration/cloudflare/BACKGROUND_CPU.md`。
+- 試験: 残る job すべての p50/p95/max（4種類の入力、各 50回以上）。
+- DONE: 予算を超える job ごとに、max < 8ms にする上限の計算がある。
+
+### MIG-0610 — split background jobs under 8ms (D-09)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0610 Work Order、`IMPLEMENTATION_RECIPES.md` R-JOB、`BACKGROUND_CPU.md`。
+- 変更: Cron を doorbell の enqueue だけにする、`max_batch_size`、予算を超えた job の `MAX_` 定数と続きの enqueue。
+- 試験: 上限ちょうど / 上限 + 1 / 2回目の doorbell / 外部 API の失敗 / Queue の1日の message 数。
+- DONE: 全 job の非本番 max < 8ms。遅れが延びる場合はユーザーの承認がある。
+
 ### MIG-0607 — Phase 6 API Gate
 
 - 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606のPR。

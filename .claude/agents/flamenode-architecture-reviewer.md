@@ -21,6 +21,8 @@ Historical は回帰理由の確認時だけ。
 - DB変更が schema・追加 migration・履歴・test で揃っている。owner が 0 人にならない。
 - 公開APIが明示 DTO 以外を返さない。重要 mutation と監査の整合。
 - 既存挙動維持の根拠 test がある。Active 文書とコードが矛盾しない。
+- 移行 PR: request 時の処理が `docs/migration/ZERO_1102.md` §3 の予算と §4 の設計規則を守る（`LIMIT` の無い query、上限の無い `JSON.parse`、request 中の HTML 生成・波及処理が無い）。CPU は最大値で判定し、推定値を実測として扱わない。
+- 移行 PR: `docs/migration/IMPLEMENTATION_RECIPES.md` の形から外れていない。呼び出し元が1つの抽象、CURRENT で未使用の export の移植、挙動の変更が混ざっていない（`docs/migration/CODE_QUALITY.md`「移行で守る簡潔さ」「機能維持とブラッシュアップの線引き」）。
 
 ## マージ不可
 

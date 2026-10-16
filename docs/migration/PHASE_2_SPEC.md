@@ -36,7 +36,7 @@
 | タスク ID | 名称 | 対象境界 | 主な成果物 |
 | --- | --- | --- | --- |
 | `MIG-0200` | 承認済み HTML モック登録（DONE） | `docs/migration/` | `UI_REFERENCE.md`, `OPEN_DECISIONS.md` |
-| `MIG-0201` | IA・デザイントークン抽出 | `packages/ui/src/styles/` | `tokens.css`, `IA_MAPPING.md` |
+| `MIG-0201` | デザイントークン抽出 | `packages/ui/src/styles/` | `tokens.css`（`tokens.json` から生成） |
 | `MIG-0202` | 汎用 UI プリミティブ実装 | `packages/ui/src/components/` | Button, Link, Badge, Dialog, `bodyScrollLock.ts` |
 | `MIG-0203` | 公開ナビゲーション・レイアウト | `packages/ui/src/layout/` | Header, Footer, SideNav, Layout Context |
 | `MIG-0204` | フォーム・フィードバック・データ表示 | `packages/ui/src/` | Form controls, Toast, Alert, Table, Skeleton |
@@ -48,41 +48,135 @@
 # 3. Work Orders
 
 ### MIG-0201: visual hierarchy / IA / tokens extraction
-- **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — tokens.cssの数値・セレクタ規約とIA mappingのフォーマットを実コードで確定する
+- **Model:** small
+- **Readiness:** READY_FOR_SMALL_MODEL — 下の生成 script と test は 2026-10-15 に実行し、出力の sha256 と test 3件 PASS を確認した
+- **Recipe:** R-BUILD
+- **Runtime:** N
 - **Depends on:** MIG-0108, MIG-0200 / **Decisions:** D-08 DECIDED
-- **Verified against:** `5d15922f` (2026-10-13)
+- **Verified against:** `7e1deb5` (2026-10-15)
 #### Source snapshot
-`docs/migration/mock/` に登録された HTML モックおよび `docs/migration/UI_REFERENCE.md`。
+- `docs/migration/mock/source/design-system/tokens.json`（version 1）: `color.tokens` 27件（パレット12件は文字列、テーマ別15件は `{"dark","light"}`、値の `{black}` はパレット参照）、`spacing.tokens` 7件、`radius.tokens` 1件、`shadow.tokens` 1件（テーマ別）、`type.families` 3件、`type.groups` 3群・9スタイル。
+- mock の CSS `docs/migration/mock/source/fn.css:9-19` も同じ値を `:root,[data-theme="dark"]` と `[data-theme="light"]` に持つ。違いは1点だけ: light の `--shadow-overlay` を2回書いており、後の `0 8px 24px rgba(16,18,15,.18)` が効く（tokens.json は `rgba(0,0,0,0.16)`）。**この task では tokens.json を正とする**。
+- route と mock の対応表は `docs/migration/UI_REFERENCE.md` の「CURRENT route と mock の対応」に既にある。別の対応表（旧計画の `IA_MAPPING.md`）は重複なので作らない。
+- `packages/ui/src/styles/` は存在しない。`test:unit`（`package.json` の scripts）は `scripts/**/*.test.mjs` を含む。
 #### Owned paths
-- `+packages/ui/src/styles/tokens.css`
-- `+docs/migration/design/IA_MAPPING.md`
+- 新規: `+scripts/generate-ui-tokens.mjs`, `+scripts/generate-ui-tokens.test.mjs`, `+packages/ui/src/styles/tokens.css`（script の出力。手で編集しない）
+- 触らない: `docs/migration/mock/**`（登録済み mock）、`packages/ui/src/components/**`（MIG-0202）
+- 対象外: `@font-face`（font file の置き場所が未決定。lead が MIG-0202 の refinement で決める）、breakpoint（tokens.json に無い）
 #### Micro-units
-- **U01**: HTML モックの CSS からカラーパレット、フォントファミリ、サイズスケール、スペーシング、角丸、シャドウを抽出し `tokens.css` を作成。
-- **U02**: CURRENT visual routes（74件）とモック画面の対応表を `IA_MAPPING.md` に作成。
+- **U01 生成 script を作る**: `scripts/generate-ui-tokens.mjs` を次の内容で作る（1文字も変えない）。
+  ```js
+#!/usr/bin/env node
+// tokens.json（登録済み mock のデザイントークン）から packages/ui の CSS 変数を作る。
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+
+export const TOKENS_JSON = "docs/migration/mock/source/design-system/tokens.json";
+export const TOKENS_CSS = "packages/ui/src/styles/tokens.css";
+
+const cssValue = (value) => value.replace(/^\{(.+)\}$/, "var(--$1)");
+const declaration = (name, value) => `  --${name}: ${cssValue(String(value))};`;
+
+export function renderTokensCss(tokens) {
+  const shared = [];
+  const themed = { dark: [], light: [] };
+  for (const token of [...tokens.color.tokens, ...tokens.shadow.tokens]) {
+    if (typeof token.value === "string") shared.push(declaration(token.name, token.value));
+    else for (const theme of ["dark", "light"]) themed[theme].push(declaration(token.name, token.value[theme]));
+  }
+  for (const token of [...tokens.spacing.tokens, ...tokens.radius.tokens]) shared.push(declaration(token.name, token.value));
+  for (const [name, stack] of Object.entries(tokens.type.families)) shared.push(`  --font-${name}: ${stack};`);
+  for (const group of tokens.type.groups) {
+    for (const style of group.styles) {
+      shared.push(`  --text-${style.name}-family: var(--font-${style.family ?? group.family});`);
+      shared.push(declaration(`text-${style.name}-size`, style.fontSize));
+      shared.push(declaration(`text-${style.name}-line-height`, style.lineHeight));
+      shared.push(declaration(`text-${style.name}-weight`, style.fontWeight));
+      if (style.letterSpacing) shared.push(declaration(`text-${style.name}-letter-spacing`, style.letterSpacing));
+    }
+  }
+  return [
+    `/* 生成元: ${TOKENS_JSON}（version ${tokens.version}）。手で編集しない。再生成: node scripts/generate-ui-tokens.mjs */`,
+    ":root {", ...shared, "}", "",
+    ":root,", '[data-theme="dark"] {', ...themed.dark, "}", "",
+    '[data-theme="light"] {', ...themed.light, "}", "",
+  ].join("\n");
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const tokens = JSON.parse(fs.readFileSync(TOKENS_JSON, "utf8"));
+  fs.mkdirSync("packages/ui/src/styles", { recursive: true });
+  fs.writeFileSync(TOKENS_CSS, renderTokensCss(tokens));
+}
+  ```
+  ```bash
+  node scripts/generate-ui-tokens.mjs
+  sha256sum packages/ui/src/styles/tokens.css
+  wc -l packages/ui/src/styles/tokens.css
+  ```
+  期待: sha256 が `affa3789bb7c49a25d9d8abcd9d8a10af5537b83aaba6a2d5533bde496e42f25`、行数 103。違えば script を見直し、2回直しても合わなければ STOP。
+- **U02 test を作る**: `scripts/generate-ui-tokens.test.mjs` を次の内容で作る。
+  ```js
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { renderTokensCss, TOKENS_CSS, TOKENS_JSON } from "./generate-ui-tokens.mjs";
+
+const tokens = JSON.parse(fs.readFileSync(TOKENS_JSON, "utf8"));
+
+test("committed tokens.css matches tokens.json", () => {
+  assert.equal(fs.readFileSync(TOKENS_CSS, "utf8"), renderTokensCss(tokens));
+});
+
+test("theme tokens reference palette variables in both themes", () => {
+  const css = renderTokensCss(tokens);
+  assert.match(css, /\[data-theme="dark"\] \{\n  --bg: var\(--black\);/);
+  assert.match(css, /\[data-theme="light"\] \{\n  --bg: var\(--white\);/);
+});
+
+test("rendering is deterministic", () => {
+  assert.equal(renderTokensCss(tokens), renderTokensCss(structuredClone(tokens)));
+});
+  ```
+  ```bash
+  node --test scripts/generate-ui-tokens.test.mjs
+  npm run test:unit
+  ```
+  期待: 1行目は `# pass 3` と `# fail 0`。`test:unit` は `# fail 0` で、件数が変更前より3件多い。
 #### Test cases
-| ID | 入力/操作 | 期待結果 |
+| ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | `tokens.css` の CSS 変数検証 | 主要トークン（color, space, font）が定義されている |
-| T02 | `IA_MAPPING.md` の URL 網羅性 | CURRENT visual routes の全件がマッピングされている |
+| T01 | `node scripts/generate-ui-tokens.mjs` を2回実行 | 2回とも sha256 `affa3789…2f25` |
+| T02 | 生成された file の `[data-theme="light"]` 節 | `--bg: var(--white);` で始まり `--shadow-overlay: 0 8px 24px rgba(0,0,0,0.16);` で終わる |
+| T03 | tokens.json を書き換えずに test 実行 | 3件 PASS |
+| T04 | tokens.css を手で1文字変えて test 実行 | 1件目が FAIL（戻してから commit） |
 #### Commands
 ```bash
+node scripts/generate-ui-tokens.mjs
+node --test scripts/generate-ui-tokens.test.mjs
+npm run test:unit
+node scripts/check-migration-file-progress.mjs
 npm run check:project-docs
-npm run typecheck
 ```
+期待: すべて終了コード0。`git status` で変わっているのは Owned paths の3 file だけ。
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` に `packages/ui/src/styles/tokens.css` を追加。
+なし。`FILE_MIGRATION_MATRIX.md` は CURRENT の file の移行先を追う台帳で、tokens.css に対応する CURRENT の file は無い。UX / FN の state も変えない（部品はまだ使われていない）。
 #### DONE checklist
-- [ ] `tokens.css` が作成され、主要トークンが CSS 変数として定義されている
-- [ ] `IA_MAPPING.md` に全公開画面の情報階層・ナビゲーション対応が記録されている
+- [ ] `packages/ui/src/styles/tokens.css` の sha256 が `affa3789bb7c49a25d9d8abcd9d8a10af5537b83aaba6a2d5533bde496e42f25`
+- [ ] `scripts/generate-ui-tokens.test.mjs` が `test:unit` で走る（件数 +3）
+- [ ] PR 本文に fn.css と tokens.json の light shadow の違いを1行で書いた
 #### STOP
-モックに未定義のスタイルを勝手に創作して追加しない。不明な値は推定値として明記する。
+- `tokens.json` の version が 1 でない、または token の件数が Source snapshot と違う（mock が更新された）。
+- sha256 が合わない（2回直しても）。
+- 手順に無い token（breakpoint、font file、density）を足したくなった。
 #### Rollback
-作成したファイル（`tokens.css`, `IA_MAPPING.md`）を削除。
+PR を revert（新規 file の追加と台帳1行だけ）。
 
 ### MIG-0202: shared UI primitives
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0201 の `tokens.css` 変数名と、`packages/ui` のコンポーネントテスト実行経路（U01）が確定するまで小型モデルへ渡さない
+- **Recipe:** R-UI
+- **Runtime:** N
 - **Depends on:** MIG-0201 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -120,7 +214,7 @@ npm run check:project-docs
 ```
 期待: すべて終了コード0。
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` に `src/components/layout/bodyScrollLock.ts`（state `BRIDGED`, target `packages/ui/src/layout/bodyScrollLock.ts`）と新規 `packages/ui/src/components/*.tsx` 行を追加。UX ID は MIG-0201 の `IA_MAPPING.md` で対応付けたものだけを記録する。
+`FILE_MIGRATION_MATRIX.md` に `src/components/layout/bodyScrollLock.ts`（state `BRIDGED`, target `packages/ui/src/layout/bodyScrollLock.ts`）と新規 `packages/ui/src/components/*.tsx` 行を追加。UX ID は `UI_REFERENCE.md` の「CURRENT route と mock の対応」と `screen-mapping/README.md` で対応付けたものだけを記録する。
 #### DONE checklist
 - [ ] `npm run test --workspace=@flamenode/ui` が CI の workspace job で実行される
 - [ ] 作った primitive がすべて mock の部品定義に存在する（存在しない部品は作っていない）
@@ -136,6 +230,8 @@ PRをrevert。bridge化した `src/components/layout/bodyScrollLock.ts` は reve
 ### MIG-0203: public navigation / layout
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0202 の primitive と、mock の header/footer/スマホメニューの階層（mock差し替え後の版）を確定してから
+- **Recipe:** R-UI
+- **Runtime:** N
 - **Depends on:** MIG-0202 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -183,6 +279,8 @@ PRをrevert。bridge化した `publicNavigation.ts` は revert で元実装に�
 ### MIG-0204: forms / feedback / data display
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0202 の test 経路と、mock に存在する form/feedback 部品の一覧を確定してから
+- **Recipe:** R-UI
+- **Runtime:** N
 - **Depends on:** MIG-0202 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -227,6 +325,8 @@ PRをrevert。新規ファイルだけなので既存画面への影響は無い
 ### MIG-0205: representative responsive public screens
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0203/0204 の部品と、MIG-0401 の snapshot 型（PR #283）が main に入ってから
+- **Recipe:** R-UI
+- **Runtime:** N
 - **Depends on:** MIG-0203, MIG-0204 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -271,22 +371,24 @@ PRをrevert。新規ファイルだけ。
 ### MIG-0206: Phase 2 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない。MIG-0201..0205 の merge 後に lead が証跡をまとめる
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0205 / **Decisions:** D-08 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `UI_REFERENCE.md` の `Version/hash` と `docs/migration/mock/` の実体（Gate 時点の版）。
-- MIG-0201..0205 の merge 済みPRと、`docs/migration/design/IA_MAPPING.md`, `docs/migration/design/REPRESENTATIVE_SCREENS.md`。
+- MIG-0201..0205 の merge 済みPRと、`docs/migration/UI_REFERENCE.md` の「CURRENT route と mock の対応」、`docs/migration/design/REPRESENTATIVE_SCREENS.md`。
 #### Owned paths
 - 新規: `+docs/migration/design/PHASE_2_GATE.md`（チェックリストと証跡リンク）
 - 変更: `docs/migration/STATUS.md`（Gate 承認後の merge 統合時だけ）
 #### Micro-units
-- **U01 evidence**: Gate 文書に、mock 版の一致、`IA_MAPPING.md` の公開画面網羅、primitive の状態テスト、代表3画面のスクリーンショット、未対応 UX ID の一覧と次MIGを記録する。
+- **U01 evidence**: Gate 文書に、mock 版の一致、`UI_REFERENCE.md` の対応表の公開画面網羅、primitive の状態テスト、代表3画面のスクリーンショット、未対応 UX ID の一覧と次MIGを記録する。
 - **U02 review**: 独立レビュー（他agentまたは人間）を依頼し、結果をPRに記録。人間の Phase Gate 承認を待つ。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | `UI_REFERENCE.md` の版と mock 実体 | 一致 |
-| T02 | `IA_MAPPING.md` の公開ルート | `CURRENT_ROUTES.md` の公開 VISUAL_SCREEN 全件を含む |
+| T02 | `UI_REFERENCE.md` の対応表の公開ルート | `CURRENT_ROUTES.md` の公開 VISUAL_SCREEN 全件を含む |
 | T03 | UX ID の削除 | 0件（未対応は次MIG付きで残る） |
 #### Commands
 ```bash

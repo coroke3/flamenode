@@ -20,6 +20,44 @@
 6. code volume
 ```
 
+## 移行で守る簡潔さ（diff で判定できる規則）
+
+小型モデルを含む全 agent が、レビューを待たずに自分で判定できる規則。違反しないと書けない場合は書かずに STOP する。形の例は [`IMPLEMENTATION_RECIPES.md`](IMPLEMENTATION_RECIPES.md)。
+
+1. **呼び出し元が1つの抽象を作らない。** interface、factory、registry、汎用関数、option 引数、設定項目は、同じ意味で使う呼び出し元が2つ以上になってから作る。
+2. **CURRENT で使われていないものを移植しない。** 移す file ごとに `node scripts/find-unused-exports.mjs <file>...` を実行し、結果を PR に貼る。
+   - `UNUSED`（どこからも参照なし）と `TEST_ONLY`（test からだけ参照）は移さない。例外は、移す test が使う test 用の関数（名前が `ForTest` / `ForTests` で終わる）。
+   - `LOCAL_ONLY`（同じ file の中だけで使う）は移すが export しない。
+   - 識別子の一致だけを見る粗い走査なので、文字列で参照される可能性がある場合は `rg` で確かめ、移さなかったものを PR 本文に列挙する。
+   - export されていない引数・分岐・feature flag は、呼び出し元の渡す値を `rg` で確かめ、常に同じ値なら分岐ごと移さない。
+3. **移行先で起きない問題への対策を持ち込まない。** CURRENT には、Next/OpenNext の request 時描画や Free 枠を避けるための仕組みがある。移行先の設計（[`ZERO_1102.md`](ZERO_1102.md)）で同じ問題が起きないなら移さない。移す場合は、移行先でも必要な理由を PR に書く。
+4. **型をごまかさない。** 手書きの型 shim、`any`、`as unknown as`、`@ts-ignore` を足さない。
+5. **関数は1つのことをする。** 40行、ネスト3段、引数3個のどれかを超えたら、分けるか、超える理由を1行のコメントで書く（レビューで確認する）。
+6. **diff は Work Order の Owned paths の中だけ。** 気付いた別の問題は直さず、PR 本文に書く。
+7. **似ているが意味が違うコードは分けたままにする。** 共通化の条件は下の「Commonization」。
+
+## 機能維持とブラッシュアップの線引き
+
+移行中は「CURRENT と同じに動く」ことで正しさを判定する。挙動を同時に変えると、その判定ができなくなる。そのため変更を3種類に分ける。
+
+| 種類 | 例 | 移行 task の中で |
+| --- | --- | --- |
+| コードの改善（挙動は同じ） | 未使用コードを移さない、名前を domain 用語にする、同じ意味の重複を1つにする、[`ZERO_1102.md`](ZERO_1102.md) の予算に収める | **行う**（上の規則と Work Order の範囲で） |
+| 見た目の改善 | 登録済み mock（D-08）に合わせた公開画面 | **行う**（[`UI_REFERENCE.md`](UI_REFERENCE.md) が公開 mock とした画面だけ） |
+| 挙動の変更 | 機能の追加・削除、仕様・文言・URL・権限の変更、CURRENT の不具合の修正 | **行わない。** PR 本文の「ブラッシュアップ提案」に書き、ユーザーが承認したら別 task にする |
+
+- 維持の確認: 影響する FN / UX ID（[`FUNCTION_INVENTORY.md`](FUNCTION_INVENTORY.md)）ごとに、CURRENT と TARGET の両方で通る test か、同じ入力で同じ結果になる証跡を PR に付ける。
+- 例外: CURRENT に security・privacy・データ破損の不具合を見つけたら、移行を止めてユーザーに報告する（提案に回さない）。
+
+## 既知の過剰設計（2026-10-15 時点）
+
+| 対象 | 根拠 | 扱い |
+| --- | --- | --- |
+| `apps/api/src/types/hono.d.ts` | hono の `Context` / `Hono` を `any` 付きで手書きした型 shim。本物の hono（4.13.13）の型を隠す（2026-10-15、`apps/api` で `new Hono().route(...)` が `TS2339: Property 'route' does not exist` になることを確認） | MIG-0601 U00 で削除 |
+| `packages/domain/src/permissions.ts` の `canEditVideo` | 3値の OR だけの偽の権限判定。呼び出し元 0件 | MIG-0301 U01 で削除 |
+| 旧計画の `IA_MAPPING.md` | `UI_REFERENCE.md` の「CURRENT route と mock の対応」と同じ表を作る計画だった | MIG-0201 から外した |
+| `src/**`, `app/**` の未使用 export | `scripts/find-unused-exports.mjs` 相当の走査で、export 2,115件のうち参照0件が43件、test からだけが63件（DB schema の table 定義や test 用 reset 関数を含む粗い値）。例: `src/lib/db/queries.ts` の `fetchLatestVideos` ほか4件、`src/lib/db/videoDetailQueries.ts` の `fetchVideoDetail` / `fetchRelatedVideos`、`src/lib/actions/mutationResult.ts` の3件 | 各 file を移す task が規則2で判定する（移行前に CURRENT から消す task は作らない） |
+
 ## Professional-quality requirements
 
 ### Naming
@@ -182,6 +220,9 @@ PR reviewerは最低限以下を確認する。
 [ ] Commonization makes semantics clearer, not merely shorter
 [ ] Tests cover important behavior/invariants
 [ ] CPU/I/O implications are considered
+[ ] Runtime class and max CPU are recorded against ZERO_1102.md (or "未計測" before MIG-0606)
+[ ] No abstraction with a single caller; no CURRENT code with zero callers was ported
+[ ] No behavior change hidden in the migration (proposals are listed, not implemented)
 [ ] Rollback/compatibility path is understandable
 [ ] An experienced engineer can reason locally about the changed code
 ```
@@ -200,6 +241,9 @@ Code quality review:
 - framework coupling:
 - tests/invariants:
 - performance implications:
+- runtime class / max CPU (ZERO_1102.md):
+- not ported (zero callers):
+- ブラッシュアップ提案（未実装）:
 ```
 
 `特になし`は許可する。形だけの抽象化を追加しない。

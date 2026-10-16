@@ -96,6 +96,15 @@ Work Orderの必須形式（見出しは一字一句この通り。checkerが解
 #### Rollback
 ```
 
+header には `- **Recipe:** R-...`（[IMPLEMENTATION_RECIPES.md](IMPLEMENTATION_RECIPES.md) の節）と `- **Runtime:** S0|S1|S2|S3|S4|B|N`（[ZERO_1102.md](ZERO_1102.md) §3 の実行種別）も書く。
+
+`READY_FOR_SMALL_MODEL` にできるのは、次をすべて満たす Work Order だけ（`validateSmallModelOrder` が検査する）。
+
+- lead が手順を実コードで試し、結果（終了コード・件数・hash）を `期待` に書いた。
+- 各 Micro-unit に、そのまま実行できる ```bash のコマンドと `期待` がある。新しく書くコードは、全文か、test で一意に決まる形で示す。
+- Owned paths の新規・変更・削除は file 単位で列挙し、glob を使わない。
+- 「適宜」「必要に応じて」「可能なら」「検討する」「TBD」のような、判断を小型モデルに残す言葉が無い。
+
 DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on` はSTATUSの依存を全部含み、STATUSに無い依存経路を足さない。READYのtaskは依存が全部DONEであること。`node scripts/check-migration-task-cards.mjs`（`validatePlanCompleteness`）がCIで検証する。
 
 小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**）まで行ってよい。

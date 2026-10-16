@@ -61,61 +61,118 @@ D-01の方針はAで決定済み。**MIG-0308による実際のschema移設・�
 # 3. タスク別仕様
 
 ### MIG-0301: extraction/DI pattern（抽出パターンの確立）
-- **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — `packages/domain` のテスト実行経路（Node の strip-types と package `exports`）を U01 で確定する。確定後の抽出規約（§4）が MIG-0302 以降の小型モデル向け手順になる
+- **Model:** small
+- **Readiness:** READY_FOR_SMALL_MODEL — 手順は 2026-10-15 に実コードで試し、`node --test`・root の `tsc --noEmit`・`packages/domain` の `tsc`・`next build`・`npm run test:unit`（2484件）がすべて通った
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0108 / **Decisions:** none
-- **Verified against:** `aacf4fd` (2026-10-15)
+- **Verified against:** `7e1deb5` (2026-10-15)
 #### Source snapshot
-- `src/lib/slots/slotReservationLimit.ts:1` `MAX_SLOT_RESERVATIONS_PER_XID = 100`、`:3-10` `normalizeSlotReservationLimit`（`Number(value ?? 0)`、非有限は0、`Math.floor` 後 0〜100 に clamp）、`:12-17` `slotReservationLimitMessage`。import 無し。
-- 既存テスト: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`。
-- `packages/domain/src/index.ts:1` は `export * from "./permissions"`（拡張子なし）。`tsconfig.base.json` は `moduleResolution: "bundler"` なので `tsc` は通るが、Node の ESM は拡張子なしの相対 import を解決しない。
-- `packages/domain/src/permissions.ts:1-7` の `canEditVideo` は `isOwner || isCollabEditor || isEventStaff` を返す偽の権限判定。`apps/**`, `packages/**` に呼び出し元は無い（2026-10-15 `rg -n canEditVideo apps packages`）。
-- `packages/domain/package.json`: `main` / `types` は `dist/`、test script 無し。
+- `src/lib/slots/slotReservationLimit.ts`（17行、import 無し）: `:1` `MAX_SLOT_RESERVATIONS_PER_XID = 100`、`:3-10` `normalizeSlotReservationLimit`、`:12-17` `slotReservationLimitMessage`。
+- 呼び出し元: `src/components/event/SlotGrid.tsx:40`、`src/lib/actions/slot.ts:56`（どちらも `@/lib/slots/slotReservationLimit`）、`src/lib/slots/slotReservationLimitGuard.ts:8`（`./slotReservationLimit`）。
+- 既存テスト: `src/lib/slots/slotReservationLimit.contract.test.mjs`, `src/lib/slots/slotReservationLimitGuard.execution.test.mjs`, `src/lib/slots/limits.test.mjs`（3 file で 6 test、2026-10-15 全PASS）。
+- `packages/domain/package.json`: `main` / `types` が `dist/` を指し、test script 無し。`packages/domain/tsconfig.json`: `outDir: ./dist`, `rootDir: ./src`。
+- `packages/domain/src/index.ts:1` `export * from "./permissions"`。`packages/domain/src/permissions.ts:1-7` の `canEditVideo` は3値を OR するだけの偽の権限判定で、`apps/**`, `packages/**` に呼び出し元は無い。
+- `.github/workflows/migration-docs-check.yml:101` に `npm run build --workspace=@flamenode/domain` がある（test の行は無い）。
 #### Owned paths
 - 新規: `+packages/domain/src/slots/reservationLimit.ts`, `+packages/domain/test/reservationLimit.test.mjs`
-- 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`（`exports` と `test` script）
-- 変更（bridge化のみ）: `src/lib/slots/slotReservationLimit.ts`
-- 削除: `packages/domain/src/permissions.ts`（呼び出し元0件を再確認してから）
-- 変更: `docs/migration/PHASE_3_SPEC.md` §4（決めた規約を記録）
-- 触らない: `src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）
+- 変更: `packages/domain/src/index.ts`, `packages/domain/package.json`, `packages/domain/tsconfig.json`, `.github/workflows/migration-docs-check.yml`（1行追加のみ）
+- 変更（bridge 化のみ）: `src/lib/slots/slotReservationLimit.ts`
+- 削除: `packages/domain/src/permissions.ts`
+- 触らない: `src/lib/slots/slotReservationLimitGuard.ts`（`server-only` と DB を import する Tier 2）、上の呼び出し元3 file
 #### Micro-units
-- **U01 test path**: `packages/domain` の相対 import に `.ts` 拡張子を付けるか、`exports` で source を指すかを決め、`node --test --experimental-strip-types packages/domain/test/*.test.mjs` が動く状態にする。テストが dist と source のどちらを import しているかをPRに書く。
-- **U02 move**: 実装を意味を変えず `packages/domain/src/slots/reservationLimit.ts` へ移し、旧pathを同名 export の bridge にする。検証: 既存3テストが移動前と同数PASS。
-- **U03 permissions**: 偽の `canEditVideo` を削除し、`index.ts` の export を整理する。
-- **U04 rules**: 配置・export・bridge の書き方・テストの場所と実行コマンド・Node/TS/Next の3経路の解決方法を §4 に記録する。
+- **U01 偽の権限判定を消し、package を source 参照にする**
+  1. 呼び出し元が無いことを確認する。`rg -n "canEditVideo" apps packages` の出力が `packages/domain/src/permissions.ts` の1行だけであること。違えば STOP。
+  2. `git rm packages/domain/src/permissions.ts`
+  3. `packages/domain/src/index.ts` の中身を `export {};` の1行にする。
+  4. `packages/domain/package.json` から `main` と `types` の2行を消し、次を足す（`scripts` は置き換え）:
+     ```json
+     "exports": {
+       ".": "./src/index.ts"
+     },
+     "scripts": {
+       "build": "tsc",
+       "typecheck": "tsc --noEmit",
+       "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
+     },
+     ```
+  5. `packages/domain/tsconfig.json` の `compilerOptions` に `"rewriteRelativeImportExtensions": true` を足す。
+  ```bash
+  npm run build --workspace=@flamenode/domain && rm -rf packages/domain/dist
+  npm run typecheck
+  ```
+  期待: どちらも終了コード0。
+- **U02 実装を移し、旧 path を bridge にする**
+  1. `git mv src/lib/slots/slotReservationLimit.ts packages/domain/src/slots/reservationLimit.ts`（中身は1文字も変えない）
+  2. `src/lib/slots/slotReservationLimit.ts` を新しく作り、中身を次の5行にする:
+     ```ts
+     export {
+       MAX_SLOT_RESERVATIONS_PER_XID,
+       normalizeSlotReservationLimit,
+       slotReservationLimitMessage,
+     } from "@flamenode/domain/slots/reservationLimit";
+     ```
+  3. `packages/domain/package.json` の `exports` に `"./slots/reservationLimit": "./src/slots/reservationLimit.ts"` を足す。
+  4. `packages/domain/src/index.ts` を `export * from "./slots/reservationLimit.ts";` の1行にする。
+  ```bash
+  node --test --experimental-strip-types src/lib/slots/slotReservationLimit.contract.test.mjs src/lib/slots/slotReservationLimitGuard.execution.test.mjs src/lib/slots/limits.test.mjs
+  npm run typecheck
+  ```
+  期待: `# pass 6` と `# fail 0`。typecheck は終了コード0。
+- **U03 domain の test を足し、CI で回す**
+  1. `packages/domain/test/reservationLimit.test.mjs` を作る。中身は下の Test cases T01〜T03 を `node:test` と `node:assert/strict` で書いたもの。import は `@flamenode/domain/slots/reservationLimit` から（相対 path にしない）。
+  2. `.github/workflows/migration-docs-check.yml` の `npm run build --workspace=@flamenode/domain` の次の行に、同じ字下げで `npm run test --workspace=@flamenode/domain` を足す。
+  ```bash
+  npm run test --workspace=@flamenode/domain
+  npm run test:unit
+  npm run check:project-docs
+  ```
+  期待: domain の test が `# fail 0`。`test:unit` の `# fail 0`（件数は変更前と同じ）。check:project-docs は終了コード0。
+- **U04 台帳を更新する**: 下の Ledger updates を反映する。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | `null`, `undefined`, `-1`, `2.9`, `150`, `Infinity`, `NaN` | `0, 0, 0, 2, 100, 0, 0` |
+| T01 | `normalizeSlotReservationLimit` に `null`, `undefined`, `-1`, `2.9`, `150`, `Infinity`, `NaN` | `0, 0, 0, 2, 100, 0, 0` |
 | T02 | `slotReservationLimitMessage(3)` | 「このイベントでは、1つのX IDにつき最大3件まで枠を確保できます。連続枠は1件として数えます。」と完全一致 |
 | T03 | `slotReservationLimitMessage(0)` | 空文字 |
-| T04 | 旧pathから import | 既存3テストが無変更でPASS |
-| T05 | `packages/domain` の import | `src/**`, `next/*`, `server-only` が0件 |
+| T04 | 旧 path から import する既存3 file | 無変更で `# pass 6` |
+| T05 | `rg -n "from \"(next|react|server-only|@/)" packages/domain/src` | 0件 |
 #### Commands
 ```bash
-node --test --experimental-strip-types packages/domain/test/*.test.mjs
-npm run build --workspace=@flamenode/domain
+npm run test --workspace=@flamenode/domain
+npm run build --workspace=@flamenode/domain && rm -rf packages/domain/dist
 npm run typecheck
 npm run test:unit
 npm run verify:fast
 npm run check:project-docs
 ```
-期待: すべて終了コード0、`test:unit` の件数が移動前と同じ。
+期待: すべて終了コード0、`test:unit` の件数が変更前と同じ。
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md`: `src/lib/slots/slotReservationLimit.ts` を `BRIDGED`、Future files 表の `packages/domain/src/slots/reservationLimit.ts` を作成済みへ。
+`FILE_MIGRATION_MATRIX.md` を merge 前の最後の commit で次のように直す（`<n>` は PR 番号、`<sha>` はその時点の Head の40桁、`<url>` は green になった CI の run URL。実在しない値を書かない）。
+1. Migration ledger の `src/lib/slots/slotReservationLimit.ts` の行を次にする:
+   ```text
+   | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | packages/domain/src/slots/reservationLimit.ts | BRIDGED | PR#<n> SHA=<sha> TEST=npm run test --workspace=@flamenode/domain CI=<url> |
+   ```
+2. Future files 表の `packages/domain/src/slots/reservationLimit.ts` の行を消す（file ができ、上の行の target に入ったため）。
+3. `node scripts/check-migration-file-progress.mjs` を実行し、終了コード0を確認する。
 #### DONE checklist
-- [ ] Node / TypeScript / Next build の3経路で bridge 越しに解決できる（実行ログをPRに貼る）
-- [ ] 偽の `canEditVideo` が無い
-- [ ] §4 の抽出規約が埋まっている
+- [ ] `packages/domain/src/permissions.ts` が無い
+- [ ] `src/lib/slots/slotReservationLimit.ts` が re-export の5行だけ
+- [ ] `npm run test --workspace=@flamenode/domain` が CI の workspace job に入っている
+- [ ] Commands がすべて終了コード0（出力の末尾をPRに貼った）
 #### STOP
-- Node が dist 未生成で失敗する、型 export が消える、Next が条件付き exports を解決できない場合は REVIEW に進めない。
-- 移す対象が DB・`server-only`・`@/` alias を import していたら止める。
+- U01 の `rg` の結果が1行でない。
+- 既存3 file の test が `# pass 6` にならない（2回直しても）。
+- `next build` や CI で `@flamenode/domain/slots/reservationLimit` が解決できないと出た。
+- 手順に無い file を変える必要が出た。
 #### Rollback
-PRをrevert。bridge は revert で元実装に戻る。
+PR を revert。bridge は revert で元の実装に戻る。
 
 ### MIG-0302: low-risk read domain（低リスク参照系）
 - **Model:** small
-- **Readiness:** NEEDS_REFINEMENT — MIG-0301 の merge で「packages/domain へ移す書き方・bridge・テスト実行経路」（本仕様 §4）が確定したら、lead が U01/U02 のコード例を追記して READY_FOR_SMALL_MODEL にする
+- **Readiness:** NEEDS_REFINEMENT — 形は `IMPLEMENTATION_RECIPES.md` の R-DOMAIN で決まった。MIG-0301 の merge 後、lead が実ファイルで Source snapshot を確かめて READY_FOR_SMALL_MODEL にする
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0301 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -129,7 +186,7 @@ PRをrevert。bridge は revert で元実装に戻る。
 - 変更: `packages/domain/src/index.ts`（export 追加のみ）
 - 触らない: 利用側ファイル（import path を書き換えない。bridge で吸収する）
 #### Micro-units
-- **U01 software labels**: 実装を意味を変えず移し、旧pathを同名 export の bridge にする（書き方は §4）。検証: 移動前後で `node --test --experimental-strip-types "src/**/*software*.test.mjs"` のPASS件数が同じ。
+- **U01 software labels**: 実装を意味を変えず移し、旧pathを同名 export の bridge にする（書き方は `IMPLEMENTATION_RECIPES.md` の R-DOMAIN）。検証: 移動前後で `node --test --experimental-strip-types "src/**/*software*.test.mjs"` のPASS件数が同じ。
 - **U02 slot limits**: 同様に移す。検証: `node --test --experimental-strip-types src/lib/slots/limits.test.mjs` が同数PASS。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -155,13 +212,15 @@ npm run check:project-docs
 - [ ] `packages/domain` から `src/**` を参照していない
 #### STOP
 - 移す対象が DB・`server-only`・`@/` alias を import していたら止める（Tier 2）。
-- §4 の抽出規約が空のままなら止める（MIG-0301 未完了）。
+- MIG-0301 が DONE でなければ止める（R-DOMAIN の形が main に無い）。
 #### Rollback
 PRをrevert。bridge は revert で元実装に戻る。
 
 ### MIG-0308: packages/db schema extraction（D-01 A / MIG-0302後）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 高リスク（schema）。手順の正本は [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)。小型モデルには渡さない
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0302 / **Decisions:** D-01 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -215,6 +274,8 @@ PRをrevert（schema 定義は移設のみでDDLが無いため、D1 側の戻�
 ### MIG-0303: low-risk mutation domain（低リスク更新系）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — MIG-0308 の `@flamenode/db` と、監査付き mutation を domain/adapter のどこで分けるか（`mutateWithAudit` の置き場）を MIG-0301/0308 の結果で確定してから
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0308 / **Decisions:** D-01 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -260,6 +321,8 @@ PRをrevert。
 ### MIG-0304: video domain group（動画ドメイン）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0304。Tier 2 は MIG-0308 後の DB adapter 方針が決まってから
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0303 / **Decisions:** D-03 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -308,6 +371,8 @@ PRをrevert。bridge により利用側の import は不変。
 ### MIG-0305: event/slot domain group（イベント・枠）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0305。Tier 2 は MIG-0308 後
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0303 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -356,6 +421,8 @@ PRをrevert。
 ### MIG-0306: user/X/admin domain group（ユーザー・X・管理）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0306。`src/lib/xid/mergeBudget.ts` が audit core に依存するため、MIG-0303 で audit の分け方が決まってから
+- **Recipe:** R-DOMAIN
+- **Runtime:** N
 - **Depends on:** MIG-0303 / **Decisions:** D-03 DECIDED, D-04 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
@@ -401,10 +468,12 @@ PRをrevert。
 ### MIG-0307: Phase 3 Gate（完了判定）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
 - **Depends on:** MIG-0304, MIG-0305, MIG-0306, MIG-0308 / **Decisions:** D-01 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- MIG-0301〜0306, 0308 の merge 済みPRと、本仕様 §4 の抽出規約。
+- MIG-0301〜0306, 0308 の merge 済みPRと、`IMPLEMENTATION_RECIPES.md` の R-DOMAIN。
 - `packages/domain/src/permissions.ts` の偽権限実装が MIG-0301 で無効化済みであること。
 #### Owned paths
 - 新規: `+scripts/check-domain-imports.mjs`（`packages/domain` と `packages/db` から `next/*`, `react`, `hono`, `astro`, `server-only`, `src/**` への import を禁止）
@@ -441,12 +510,6 @@ checker 追加のPRをrevert。
 
 ---
 
-# 4. 抽出規約（MIG-0301 で確定後に追記）
+# 4. 抽出規約
 
-MIG-0301 完了時に、次を本節へ記録する。
-
-- 配置: `packages/domain/src/<domain>/<module>.ts`
-- 公開 export: `packages/domain/src/index.ts`（サブパス export の有無）
-- ブリッジ: `src/lib/...` の元ファイルを再 export にする書き方
-- テスト: 移動したテストの置き場所と実行コマンド
-- 3 経路（node test / next build / tsc）の解決方法
+形の正本は [`IMPLEMENTATION_RECIPES.md`](IMPLEMENTATION_RECIPES.md) の R-DOMAIN（MIG-0301 の手順を実コードで試して決めた）。この節には書かない。
