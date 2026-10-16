@@ -47,10 +47,10 @@ export function ImeSafeGetForm({
   // compositionstart が到達しないIME環境でも、native.isComposing / keyCode=229
   // のEnter直後の暗黙的submitを禁止する。
   const suppressSubmitRef = React.useRef(false);
-  const compositionEndTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const submitGuardTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const compositionEndTimerRef = React.useRef<number | null>(null);
+  const submitGuardTimerRef = React.useRef<number | null>(null);
 
-  const clearTimer = (ref: { current: ReturnType<typeof setTimeout> | null }) => {
+  const clearTimer = (ref: { current: number | null }) => {
     if (ref.current != null) {
       clearTimeout(ref.current);
       ref.current = null;
