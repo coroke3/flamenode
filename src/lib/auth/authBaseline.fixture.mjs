@@ -1,163 +1,63 @@
 /**
- * Auth baseline synthetic fixtures for FlameNode characterization testing (MIG-0801).
- *
- * INVARIANTS:
- * - ZERO live secrets, access tokens, or real production credentials.
- * - All tokens are deterministic synthetic identifiers.
- * - Cookie definitions represent Auth.js v5 contracts.
+ * Synthetic rows and recorded CURRENT cookie baseline for MIG-0801.
+ * No real token, secret or production value is stored here.
  */
 
-export const AUTH_COOKIE_DEFINITIONS = {
-  production: {
-    sessionToken: {
-      name: "__Secure-authjs.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-      },
-    },
-    callbackUrl: {
-      name: "__Secure-authjs.callback-url",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-      },
-    },
-    csrfToken: {
-      name: "__Host-authjs.csrf-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: true,
-      },
-    },
-  },
-  development: {
-    sessionToken: {
-      name: "authjs.session-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false,
-      },
-    },
-    callbackUrl: {
-      name: "authjs.callback-url",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false,
-      },
-    },
-    csrfToken: {
-      name: "authjs.csrf-token",
-      options: {
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        secure: false,
-      },
-    },
-  },
+export const BASELINE_NOW_MS = Date.now();
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const AUTH_BASELINE_ENV = {
+  AUTH_URL: "https://flamenode.example",
+  NEXT_PUBLIC_SITE_URL: "https://flamenode.example",
+  AUTH_SECRET: "synthetic-auth-secret-for-characterization-only",
+  AUTH_DISCORD_ID: "synthetic-discord-client-id",
+  AUTH_DISCORD_SECRET: "synthetic-discord-client-secret",
 };
 
-export const MOCK_AUTH_USERS = {
-  validUser: {
-    id: "usr_valid_001",
-    email: "test-user-1@example.com",
-    name: "Valid Test User",
-    role: "user",
-    is_banned: 0,
-    discord_id: "discord_uid_1001",
-    active_x_user_id: "x_usr_001",
-  },
-  adminUser: {
-    id: "usr_admin_002",
-    email: "admin@example.com",
-    name: "Admin Test User",
-    role: "admin",
-    is_banned: 0,
-    discord_id: "discord_uid_1002",
-    active_x_user_id: null,
-  },
-  bannedUser: {
-    id: "usr_banned_003",
-    email: "banned@example.com",
-    name: "Banned Test User",
-    role: "user",
-    is_banned: 1,
-    discord_id: "discord_uid_1003",
-    active_x_user_id: null,
-  },
-  noXUser: {
-    id: "usr_nox_004",
-    email: "nox@example.com",
-    name: "No X User",
-    role: "user",
-    is_banned: 0,
-    discord_id: "discord_uid_1004",
-    active_x_user_id: null,
-  },
-  multiXUser: {
-    id: "usr_multix_005",
-    email: "multix@example.com",
-    name: "Multi X User",
-    role: "user",
-    is_banned: 0,
-    discord_id: "discord_uid_1005",
-    active_x_user_id: "x_usr_primary",
-  },
+export const USERS = {
+  valid: { id: "user-mock-valid", name: "Valid", email: "valid@example.com", role: "user", is_banned: 0, discord_id: "discord-mock-1", active_x_user_id: "x-mock-1" },
+  banned: { id: "user-mock-banned", name: "Banned", email: "banned@example.com", role: "user", is_banned: 1, discord_id: "discord-mock-2", active_x_user_id: null },
+  noX: { id: "user-mock-nox", name: "No X", email: "nox@example.com", role: "user", is_banned: 0, discord_id: "discord-mock-3", active_x_user_id: null },
+  multiX: { id: "user-mock-multix", name: "Multi X", email: "multix@example.com", role: "user", is_banned: 0, discord_id: "discord-mock-4", active_x_user_id: "x-mock-primary" },
 };
 
-export const MOCK_SESSIONS = {
-  validSession: {
-    sessionToken: "synthetic_sess_token_valid_12345",
-    userId: "usr_valid_001",
-    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // +30 days
-  },
-  expiredSession: {
-    sessionToken: "synthetic_sess_token_expired_67890",
-    userId: "usr_valid_001",
-    expires: new Date(Date.now() - 24 * 60 * 60 * 1000), // -1 day
-  },
-  bannedUserSession: {
-    sessionToken: "synthetic_sess_token_banned_11223",
-    userId: "usr_banned_003",
-    expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-  },
-  revokedSessionToken: "synthetic_sess_token_nonexistent_99999",
+export const SESSIONS = {
+  valid: { sessionToken: "synthetic_session_valid", userId: USERS.valid.id, expiresMs: BASELINE_NOW_MS + 30 * DAY_MS },
+  expired: { sessionToken: "synthetic_session_expired", userId: USERS.valid.id, expiresMs: BASELINE_NOW_MS - DAY_MS },
+  banned: { sessionToken: "synthetic_session_banned", userId: USERS.banned.id, expiresMs: BASELINE_NOW_MS + 30 * DAY_MS },
+  noX: { sessionToken: "synthetic_session_nox", userId: USERS.noX.id, expiresMs: BASELINE_NOW_MS + 30 * DAY_MS },
+  multiX: { sessionToken: "synthetic_session_multix", userId: USERS.multiX.id, expiresMs: BASELINE_NOW_MS + 30 * DAY_MS },
+  deletedToken: "synthetic_session_not_in_db",
 };
 
-export const MOCK_DISCORD_ACCOUNTS = {
-  linkedAccount1: {
-    userId: "usr_valid_001",
-    type: "oauth",
-    provider: "discord",
-    providerAccountId: "discord_uid_1001",
-    scope: "identify email",
-    token_type: "Bearer",
+export const DISCORD_ACCOUNTS = {
+  linked: { userId: USERS.valid.id, type: "oauth", provider: "discord", providerAccountId: USERS.valid.discord_id },
+  // Same Discord id as USERS.valid, claimed by another user.
+  ownedByOther: { userId: USERS.noX.id, type: "oauth", provider: "discord", providerAccountId: USERS.valid.discord_id },
+};
+
+/**
+ * Set-Cookie recorded from CURRENT buildAuthConfig() over https (useSecureCookies).
+ * `Expires` is excluded because it depends on the clock; `hasExpires` records its presence.
+ */
+export const BASELINE_COOKIES = {
+  sessionToken: {
+    name: "__Secure-authjs.session-token",
+    // Set on every session read (sliding expiry, Auth.js default maxAge 30 days).
+    observedOnRead: {
+      attributes: { httponly: true, path: "/", samesite: "Lax", secure: true },
+      hasExpires: true,
+    },
+    observedOnSignOut: {
+      attributes: { "max-age": "0", httponly: true, path: "/", samesite: "Lax", secure: true },
+      hasExpires: false,
+    },
   },
-  unlinkedAccount: {
-    userId: "usr_nox_004",
-    type: "oauth",
-    provider: "discord",
-    providerAccountId: "discord_uid_new_9999",
-    scope: "identify email",
-    token_type: "Bearer",
-  },
-  duplicateDiscordAccount: {
-    userId: "usr_banned_003",
-    type: "oauth",
-    provider: "discord",
-    providerAccountId: "discord_uid_1001", // Conflicts with usr_valid_001
-    scope: "identify email",
-    token_type: "Bearer",
+  csrfToken: {
+    name: "__Host-authjs.csrf-token",
+    observed: {
+      attributes: { httponly: true, path: "/", samesite: "Lax", secure: true },
+      hasExpires: false,
+    },
   },
 };
