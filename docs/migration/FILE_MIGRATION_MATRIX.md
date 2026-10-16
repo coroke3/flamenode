@@ -161,10 +161,10 @@
 | `packages/contracts/src/index.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0601 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/contracts/src/video.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0601 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/contracts/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0601 | SAME (extend in owner task) | NOT_STARTED | — |
-| `packages/domain/package.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
-| `packages/domain/src/index.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
-| `packages/domain/src/permissions.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
-| `packages/domain/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0301 | SAME (extend in owner task) | NOT_STARTED | — |
+| `packages/domain/package.json` | TARGET_SKELETON | domain package entry/config (source-referenced, tested in CI) | MIG-0301 | SAME (extend in owner task) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `packages/domain/src/index.ts` | TARGET_SKELETON | domain package entry/config (source-referenced, tested in CI) | MIG-0301 | SAME (extend in owner task) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `packages/domain/src/permissions.ts` | TARGET_SKELETON | placeholder `canEditVideo` (no caller); replace or retire with the real policy | MIG-0306 | SAME (extend in owner task) | NOT_STARTED | — |
+| `packages/domain/tsconfig.json` | TARGET_SKELETON | domain package entry/config (source-referenced, tested in CI) | MIG-0301 | SAME (extend in owner task) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
 | `packages/ui/src/styles/tokens.css` | TARGET_SKELETON | generated from registered HTML design token JSON; no CURRENT counterpart | MIG-0201 | SAME (reproducible CSS artifact; used by future MIG-0202) | RETAINED | PR#303 SHA=57939bffe38d3a19bda4c54194eeaba88a28abc5 TEST=node --test scripts/generate-ui-tokens.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38854581371 |
 | `packages/ui/package.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/src/adapters/index.tsx` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
@@ -226,9 +226,11 @@
 
 | `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0505 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
 
-| `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | +packages/domain/src/slots/reservationLimit.ts (with legacy bridge) | NOT_STARTED | — |
-| `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | NOT_STARTED | — |
-| `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | NOT_STARTED | — |
+| `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | packages/domain/src/slots/reservationLimit.ts | BRIDGED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `packages/domain/src/slots/reservationLimit.ts` | HELPER | pure numeric policy (moved from `src/lib/slots/slotReservationLimit.ts`) | MIG-0301 | SAME | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `packages/domain/test/reservationLimit.test.mjs` | TEST | domain reservation limit T01-T03 | MIG-0301 | SAME | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=node --test --experimental-strip-types src/lib/slots/slotReservationLimit.contract.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=node --test --experimental-strip-types src/lib/slots/slotReservationLimitGuard.execution.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
 | `src/lib/slots/limits.test.mjs` | TEST | slot range and rule edgecases | MIG-0302 | SAME (pure helper parity) | NOT_STARTED | — |
 | `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
 | `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | +packages/domain/src/software/labels.ts (legacy bridge) | NOT_STARTED | — |
@@ -253,7 +255,6 @@
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
 | `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
-| `packages/domain/src/slots/reservationLimit.ts` | MIG-0301 | NOT_CREATED | `src/lib/slots/slotReservationLimit.ts` legacy export bridge |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/lib/routeMap.ts` | MIG-0404 | PARITY_VERIFIED | deterministic build-time route-map table and O(1) lookup (PR#305) |

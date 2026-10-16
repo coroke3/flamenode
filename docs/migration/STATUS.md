@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0301
+Current Task: MIG-0404
 Current Owner: unassigned
-Task State: READY
+Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0201
-Last Task PR: #303
-Merged READY: MIG-0202, MIG-0301, MIG-0405, MIG-0409, MIG-0801
+Last Completed Task: MIG-0404
+Last Task PR: #305
+Merged READY: MIG-0202, MIG-0302, MIG-0405, MIG-0409, MIG-0801
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -241,8 +241,8 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0301 | extraction/DI pattern | READY | MIG-0108 |
-| MIG-0302 | low-risk read domain | BLOCKED | MIG-0301 |
+| MIG-0301 | extraction/DI pattern | DONE | MIG-0108 |
+| MIG-0302 | low-risk read domain | READY | MIG-0301 |
 | MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
 | MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
