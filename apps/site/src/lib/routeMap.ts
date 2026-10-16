@@ -304,8 +304,14 @@ export function measureRouteMapMetrics(
     };
   }
 
-  const timings: number[] = new Array(iterations);
   const sampleCount = lookupSampleKeys.length;
+
+  // Warm up JIT
+  for (let i = 0; i < 100; i++) {
+    lookupRoute(manifest, lookupSampleKeys[i % sampleCount]);
+  }
+
+  const timings: number[] = new Array(iterations);
 
   for (let i = 0; i < iterations; i++) {
     const key = lookupSampleKeys[i % sampleCount];

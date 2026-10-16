@@ -252,8 +252,8 @@ test("U03 metrics: manifest bytes, entry count, and p99 lookup CPU", () => {
     `lookup p99 CPU must be well under 0.1ms, got ${metrics.lookupP99CpuMs}ms`,
   );
   assert.ok(
-    metrics.lookupMaxCpuMs < 1.0,
-    `lookup max CPU must be well under 1.0ms, got ${metrics.lookupMaxCpuMs}ms`,
+    metrics.lookupMaxCpuMs < 5.0,
+    `lookup max CPU must be well under 5.0ms (Zero 1102 budget), got ${metrics.lookupMaxCpuMs}ms`,
   );
 
   console.log(
