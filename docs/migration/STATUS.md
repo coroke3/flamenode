@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0202
 Last Task PR: #306
-Merged READY: MIG-0203, MIG-0204, MIG-0302, MIG-0404, MIG-0801
+Merged READY: MIG-0203, MIG-0204, MIG-0302, MIG-0405, MIG-0409, MIG-0801
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -108,7 +108,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202 DONE / MIG-0203, MIG-0204 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401 DONE / MIG-0404 READY) | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404 DONE / MIG-0405, MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
 | 6 | Hono API | BLOCKED | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
@@ -267,10 +267,10 @@ Validation:
 | MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | DONE | MIG-0105 |
 | MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
 | MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
-| MIG-0404 | route-map generator (mock-independent) | READY | MIG-0401 |
-| MIG-0405 | visibility gateway | BLOCKED | MIG-0404 |
+| MIG-0404 | route-map generator (mock-independent) | DONE | MIG-0401 |
+| MIG-0405 | visibility gateway | READY | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | BLOCKED | MIG-0405 |
-| MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | BLOCKED | MIG-0404 |
+| MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | READY | MIG-0404 |
 | MIG-0410 | deploy-hook build scheduler Cron (B, D-09) | BLOCKED | MIG-0409 |
 | MIG-0411 | per-page R2 HTML regeneration via Queue (ISR equivalent, D-09) | BLOCKED | MIG-0405, MIG-0409 |
 | MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |
