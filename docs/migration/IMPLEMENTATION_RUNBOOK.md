@@ -110,7 +110,7 @@ header には `- **Recipe:** R-...`（[IMPLEMENTATION_RECIPES.md](IMPLEMENTATION
 
 DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on` はSTATUSの依存を全部含み、STATUSに無い依存経路を足さない。READYのtaskは依存が全部DONEであること。`node scripts/check-migration-task-cards.mjs`（`validatePlanCompleteness`）がCIで検証する。
 
-小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**）まで行ってよい。
+小型モデル（Haiku / Luna / Flash 等）は、Work Orderが **`Model: small` かつ `Readiness: READY_FOR_SMALL_MODEL`** のtaskだけをwriterとして実行する（`npm run migration:next -- --model small` はそれ以外を候補から外す）。それ以外のtask、他agent PRの独立レビュー、Phase Gate、高リスクPRのmerge、Work Orderの作成・更新はlead（上位モデルまたは人間）の担当。小型モデルは自分のPRについて、上位モデルsubagentによるレビュー（下記 **E**）とmerge統合（**F**、merge 自体はしない）まで行ってよい。
 
 小型モデルの実行規則:
 
@@ -135,7 +135,7 @@ GitHub の操作は `gh` か GitHub MCP のどちらかで行う。`gh auth stat
 | Draft PR 作成 | `gh pr create --draft --base main --title ... --body-file <file>` | `create_pull_request` draft=true, base=main, body=<file の中身> |
 | comment | `gh pr comment <n> --body-file <file>` | `add_issue_comment` issue_number=<n> |
 | Ready にする | `gh pr ready <n>` | `update_pull_request` draft=false |
-| squash merge | `gh pr merge <n> --squash` | `merge_pull_request` merge_method=squash |
+| squash merge（ユーザーだけ。F の暫定規則） | `gh pr merge <n> --squash` | `merge_pull_request` merge_method=squash |
 
 branch・diff・Head は `gh` を使わず git で読む（`git fetch origin <branch>`、`git show origin/<branch>:<path>`、`git diff origin/main...HEAD`、`git rev-parse HEAD`）。一時 file は `/tmp` ではなく host の scratch directory（Claude Code なら scratchpad）に書く。
 
@@ -159,6 +159,10 @@ npm run migration:next -- --model small --open-pr-branches "<branch>,<branch>"
 
 自分の PR（`migration/mig-*` branch の `docs/migration/work-items/MIG-XXXX.md` の `Owner` が自分）は `git show origin/<branch>:docs/migration/work-items/MIG-XXXX.md` で状態を読む。上から順に判定する（自分 = work-itemの`Owner`が自分のPR）。
 
+0. 自分のPRの work-item が `State: DONE`（F で統合済み、未 merge）:
+   - 現在の Head への APPROVE が無く、上位モデルを subagent として起動できる → **E**（最終 Head の再レビュー）
+   - 現在の Head への APPROVE があり CI が green で、PR に現在の Head の `Merge requested:` comment が無い → F の最後の comment だけ書いて終了
+   - それ以外（再レビュー待ち・CI 待ち・merge 待ち）→ この PR は REVIEW 待ちと同じ扱いで下へ進む
 1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
 2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
 3. 自分のPRが`IN_PROGRESS` → **C**（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）
@@ -175,7 +179,7 @@ git push -u origin migration/mig-xxxx-<slug>
 
 slug は Work Order の title の `（` より前を英小文字 kebab-case にしたもの（例: `extraction/DI pattern（…）` → `extraction-di-pattern`）。同じ名前の branch が手元か origin に既にあれば、open PR が無い（A で確認済み）ので前回の失敗の残りとみなし、作らずに STOP して lead へ「残った branch <名前> の扱い」を聞く。
 
-PR 本文を scratch の file に [GIT_WORKFLOW.md](GIT_WORKFLOW.md) §5「Required PR body」の見出しのまま書き、Draft PR を作る（上の表）。placeholder のまま投稿しない（`grep -Eq 'MIG-XXXX|<[^>]+>|TBD|記入待ち' <file>` が一致したら直す）。host が先頭に入れる行（attribution など）があれば、その下に書く。
+PR 本文を scratch の file に [GIT_WORKFLOW.md](GIT_WORKFLOW.md) §5「Required PR body」の見出しのまま書き、Draft PR を作る（上の表）。placeholder のまま投稿しない（`sed '/^<!--.*-->$/d' <file> | grep -Eq 'MIG-XXXX|<[^>]+>|TBD|記入待ち'` が一致したら直す。`<!-- ... -->` だけの行は host の attribution なので除く）。host が先頭に入れる行（attribution など）があれば、その下に書く。
 
 | 見出し | claim で書く値 | D で書き足す値 |
 | --- | --- | --- |
@@ -229,9 +233,9 @@ Independent review: <agent>/<model> (fresh-context subagent of <自分のmodel>)
 <確認した項目と指摘>
 ```
 
-CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
+CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し（F で `STATUS.md` を `DONE` にしていたら当該行と `Task State:` も `IN_PROGRESS` に戻す）、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。work-item が既に `DONE`（最終 Head の再レビュー）なら **F** はやり直さず、A の 0 の `Merge requested:` comment を書く。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
 
-**F. merge統合（Model: small のPRのみ。leadのPR・高リスク・Phase Gateはleadとユーザー承認）**
+**F. merge統合（Model: small のPRのみ。leadのPR・高リスク・Phase Gateはleadとユーザー承認。merge 自体はユーザー）**
 
 CI が green でなければ終了して次 wake。green なら:
 
@@ -251,9 +255,13 @@ git commit -m "MIG-XXXX: STATUS統合"
 git push
 ```
 
-PR を Ready にし、最終 Head の CI が green になってから merge する（上の表）。
+**merge はしない**（暫定。main への merge は Workers Builds の本番 deploy を起こし、`AGENT_PROTOCOL.md` の merge 規則と Mandatory stop「production actionの明示承認待ち」のどちらが優先かが決まっていないため。規則が改訂されるまでこの手順に従う）。PR を Ready にして終了する。次の wake の **A** の 0 で、最終 Head の再レビュー（**E**）と CI green を確かめ、揃ったら PR へ次の comment を1回だけ書いて終了する。merge はユーザーが行う。
 
-**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPR/work-itemへ記録する。main への merge は Workers Builds の本番 deploy を起こすので、agent が merge してよいかは `AGENT_PROTOCOL.md` の production gate に従う。hostの権限設定がmergeを拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
+```text
+Merge requested: integrated | Head: <40hex> | Review: <最終Headの再レビューcommentのURL> | CI: <CI runのURL>
+```
+
+**最終Headの例外なしルール:** rebase・merge・競合解消・STATUS/work-item統合commitを含めてHeadが変わったら、変更後の**最終Head SHA**を対象に別agent/人間（または **E** の上位モデル）が独立レビューし、同じSHAで必須CIを通す。レビュー済みの旧Headに対する承認やCIでマージしない。再レビューのAPPROVE・該当SHA・CI URLをPR/work-itemへ記録する。agent は merge しない（上の F の暫定規則）。
 
 ## 最小検証コマンド
 
