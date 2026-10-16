@@ -103,7 +103,7 @@ test("explicit MIG IDs cannot bypass the small-model restriction", () => {
 });
 
 test("unknown, missing and duplicate CLI model options are rejected", () => {
- assert.deepEqual(parseContextArgs(["--next","--model","small","--offline"]),{task:null,automatic:true,offline:true,smallOnly:true});
+ assert.deepEqual(parseContextArgs(["--next","--model","small","--offline"]),{task:null,automatic:true,offline:true,openPrBranches:null,smallOnly:true});
  assert.equal(parseContextArgs(["MIG-0301","--model","small"]).smallOnly,true);
  for(const args of [["--next","--model"],["--next","--model","smal"],["--next","--model","small","--model","lead"],["--next","--nonsense"],["--next","MIG-0301"]]){
   assert.throws(()=>parseContextArgs(args),/--model must|Unknown or duplicate/);
@@ -138,4 +138,19 @@ test("CLI exits non-zero for a misspelled model and for an explicit lead task un
  assert.equal(lead.status,1);
  assert.match(lead.stderr,/MIG-0401: no complete READY_FOR_SMALL_MODEL/);
  assert.equal(lead.stdout,"");
+});
+
+test("--open-pr-branches carries MCP-read ownership into the selector", () => {
+ const a=parseContextArgs(["--next","--model","small","--open-pr-branches","migration/mig-0201-tokens, fix/docs"]);
+ assert.deepEqual(a.openPrBranches,["migration/mig-0201-tokens","fix/docs"]);
+ assert.deepEqual(parseContextArgs(["--next","--open-pr-branches",""]).openPrBranches,[]);
+ assert.throws(()=>parseContextArgs(["--next","--open-pr-branches"]),/comma-separated/);
+ assert.throws(()=>parseContextArgs(["--next","--offline","--open-pr-branches",""]),/exclusive/);
+ const owned=parseOwnedTasks(a.openPrBranches.map(headRefName=>({number:"open",headRefName})));
+ assert.deepEqual([...owned.keys()],["MIG-0201"]);
+});
+
+test("a lead takes the 1102 measurement path before other READY work", () => {
+ const status=["| MIG-0108 | b | DONE | — |","| MIG-0401 | p | DONE | — |","| MIG-0201 | t | READY | MIG-0108 |","| MIG-0404 | r | READY | MIG-0401 |","| MIG-0801 | a | READY | MIG-0108 |"].join("\n");
+ assert.deepEqual(pickNextTask(status,"| D-08 | HTML | DECIDED | user |").candidates,["MIG-0404","MIG-0201","MIG-0801"]);
 });

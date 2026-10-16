@@ -100,7 +100,8 @@ header には `- **Recipe:** R-...`（[IMPLEMENTATION_RECIPES.md](IMPLEMENTATION
 
 `READY_FOR_SMALL_MODEL` にできるのは、次をすべて満たす Work Order だけ（`validateSmallModelOrder` が検査する）。
 
-- lead が手順を実コードで試し、結果（終了コード・件数・hash）を `期待` に書いた。
+- lead が手順を実コードで試し、結果（終了コード・件数・hash）を `期待` に書いた。試すときは下の **C** のとおり unit ごとに `npm run check:migration-work-items`・`npm run check:project-docs`・`MIGRATION_FILE_BASE_SHA=$(git rev-parse origin/main) node scripts/check-migration-file-progress.mjs` まで実行し、merge 統合（**F**）後の台帳・STATUS で `node scripts/check-migration-docs.mjs` が通ることも確かめる（台帳の行を Ledger updates に書き切るため）。
+- file を消す・移す手順は、台帳の行の扱い（どの unit でどの状態にするか）まで書く。消す file は `RETIRED` に `APPROVAL=` が要るので、承認が無ければ消さずに owner を移す。
 - 各 Micro-unit に、そのまま実行できる ```bash のコマンドと `期待` がある。新しく書くコードは、全文か、test で一意に決まる形で示す。
 - Owned paths の新規・変更・削除は file 単位で列挙し、glob を使わない。
 - 「適宜」「必要に応じて」「可能なら」「検討する」「TBD」のような、判断を小型モデルに残す言葉が無い。
@@ -122,21 +123,42 @@ DONE/SKIPPED以外の全taskはこの形式のWork Orderを持ち、`Depends on`
 
 `MIG-XXXX` / `mig-xxxx-<slug>` / `<n>` は実値に置き換える。slugはWork Orderのtitleを英小文字kebab-caseにしたもの。
 
+GitHub の操作は `gh` か GitHub MCP のどちらかで行う。`gh auth status` が終了コード0なら `gh`、そうでなければ MCP を使う（Claude Code の cloud session では `gh` は使えない）。
+
+| 操作 | `gh` | GitHub MCP（owner `coroke3`, repo `flamenode`） |
+| --- | --- | --- |
+| open PR 一覧 | `gh pr list --state open --json number,headRefName,title,isDraft` | `list_pull_requests` state=open（`head.ref` が branch） |
+| PR の comment | `gh pr view <n> --comments` | `pull_request_read` method=get_comments |
+| CI の結果 | `gh pr checks <n>` | `pull_request_read` method=get_check_runs（全部 `conclusion: success` なら green） |
+| Draft PR 作成 | `gh pr create --draft --base main --title ... --body-file <file>` | `create_pull_request` draft=true, base=main, body=<file の中身> |
+| comment | `gh pr comment <n> --body-file <file>` | `add_issue_comment` issue_number=<n> |
+| Ready にする | `gh pr ready <n>` | `update_pull_request` draft=false |
+| squash merge | `gh pr merge <n> --squash` | `merge_pull_request` merge_method=squash |
+
+branch・diff・Head は `gh` を使わず git で読む（`git fetch origin <branch>`、`git show origin/<branch>:<path>`、`git diff origin/main...HEAD`、`git rev-parse HEAD`）。一時 file は `/tmp` ではなく host の scratch directory（Claude Code なら scratchpad）に書く。
+
 **A. 状況確認（毎wake）**
 
 ```bash
+git status --short           # 何か出たら前 wake の残り。自分の branch なら commit して push、そうでなければ STOP
 git fetch origin
-git switch main && git pull --ff-only origin main
-npm run migration:next -- --model small
-gh pr list --state open --json number,headRefName,title,isDraft
+git switch --detach origin/main   # main を他の worktree が使っていても動く。判定は常に最新の origin/main で行う
 ```
 
-上から順に判定する（自分 = work-itemの`Owner`が自分のPR）。
+open PR の head branch を全部読み（上の表）、カンマ区切りで渡す（open PR が無ければ `""`）。
+
+```bash
+npm run migration:next -- --model small --open-pr-branches "<branch>,<branch>"
+```
+
+`gh` が使える host では `--open-pr-branches` を省いてよい（script が `gh` で読む）。どちらも無いと script は終了コード1で止まる。`--offline` は文書検査用で、claim の判定には使わない。
+
+自分の PR（`migration/mig-*` branch の `docs/migration/work-items/MIG-XXXX.md` の `Owner` が自分）は `git show origin/<branch>:docs/migration/work-items/MIG-XXXX.md` で状態を読む。上から順に判定する。
 
 1. 自分のPRに、現在のHeadへの `Independent review: ... | Verdict: APPROVE` commentがあり、CIがgreen → **F**
 2. 自分のPRが`REVIEW`でレビューが無く、自分より上位のモデルをsubagentとして起動できる → **E**
 3. 自分のPRが`IN_PROGRESS` → **C**（`git switch migration/mig-xxxx-<slug> && git pull --ff-only`）
-4. 自分の`IN_PROGRESS` PRが無く、候補が出た → **B**（自分の`REVIEW`待ちPRがあっても進める）
+4. 自分の`IN_PROGRESS` PRが無く、候補が出た → **B**（自分の`REVIEW`待ちPRがあっても進める）。候補が複数なら script が最初に出したものを選ぶ
 5. どれも無い → 何もせず「進められる作業無し」とREVIEW待ちPR一覧を報告して終了
 
 **B. claim（新規taskのみ）**
@@ -145,11 +167,23 @@ gh pr list --state open --json number,headRefName,title,isDraft
 git switch -c migration/mig-xxxx-<slug> origin/main
 git commit --allow-empty -m "MIG-XXXX: 作業開始"
 git push -u origin migration/mig-xxxx-<slug>
-gh pr create --draft --base main --title "MIG-XXXX: <日本語の短い説明>" --body "GIT_WORKFLOW.md §5 の必須項目を記入"
-gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith("migration/mig-xxxx-")) | .number'
 ```
 
-最後のコマンドが2件以上を返したら、作ったPRをcloseしてSTOP（後発が引く）。1件なら `docs/migration/work-items/MIG-XXXX.md` を [work-items/README.md](work-items/README.md) の形式で作成（`State: IN_PROGRESS`、`Owner`、`Branch`、`PR: #<n>`、`Owned paths` はWork Orderの値、`Current unit: U01`）し、commit/pushする。
+slug は Work Order の title の `（` より前を英小文字 kebab-case にしたもの（例: `extraction/DI pattern（…）` → `extraction-di-pattern`）。
+
+PR 本文を scratch の file に次の形で書き、Draft PR を作る（上の表）。placeholder のまま投稿しない。
+
+```text
+<!-- claude-projects-attribution などの host 指定行があれば先頭に -->
+MIG-XXXX: <Work Order の title>
+- Work Order: docs/migration/<PHASE>_SPEC.md の ### MIG-XXXX
+- Owned paths: <Work Order の Owned paths を file 単位で>
+- 検証: <Work Order の Commands>
+- Rollback: <Work Order の Rollback>
+- 本番影響: main への merge で Workers Builds の deploy が走る（AGENT_PROTOCOL.md §Mandatory stop の例外）。Route / D1 / secret の変更は無い
+```
+
+作成後にもう一度 open PR を読み、head branch が `migration/mig-xxxx-` で始まる PR が2件以上なら、作ったPRをcloseしてSTOP（後発が引く）。1件なら `docs/migration/work-items/MIG-XXXX.md` を [work-items/README.md](work-items/README.md) の形式で書く（既に file があれば上書きせず、その形式に合わせて値を更新する）。`State: IN_PROGRESS`、`Owner`、`Branch`、`PR: #<n>`、`Owned paths` はWork Orderの値、`Current unit: U01`。`npm run check:migration-work-items` が0になってから commit/push する。
 
 **C. micro-unit 1つ**
 
@@ -161,55 +195,64 @@ git add <Owned pathsのファイルだけ>
 git commit -m "MIG-XXXX U0n: <やったこと>"
 git rev-parse HEAD          # この値を work-item の Head に書く
 # work-item を更新: Current unit / Validation（実行コマンドと実結果）/ Head / Next（次unit）
+npm run check:migration-work-items
 git add docs/migration/work-items/MIG-XXXX.md
 git commit -m "MIG-XXXX: U0n checkpoint"
 git push
 ```
 
+`check:project-docs` が落ちたら、出力の file 名が Work Order の Ledger updates にあるか確かめる。あればその行を直して再実行、無ければ STOP（lead へ「台帳の手順が足りない: <出力>」）。lint などが手元の環境だけで落ちる（親 directory の設定を読むなど）ときは、同じコマンドを CI の結果で確かめ、work-item に両方を書く。
+
 **D. 全unit完了時**
 
-Work Orderの `Commands` と `DONE checklist` を全部実行・確認し、work-itemを `State: REVIEW` にしてpush。`gh pr ready <n>` の後、PRへ「Independent review requested: Head <40hex>」とcommentして終了する。次のwakeからは **A** の判定に従い、レビュー待ちの間も別taskへ進む。
+Work Orderの `Commands` と `DONE checklist` を全部実行・確認し、work-itemを `State: REVIEW` にしてpush。PR を Ready にし（上の表）、PRへ「Independent review requested: Head <40hex>」とcommentして終了する。次のwakeからは **A** の判定に従い、レビュー待ちの間も別taskへ進む。
 
 **E. 上位モデルによる独立レビュー（自分のPR、1件）**
 
 ```bash
-gh pr view <n> --json headRefOid --jq .headRefOid     # Head
-gh pr diff <n> > /tmp/mig-xxxx.diff
-node scripts/print-migration-task-context.mjs MIG-XXXX > /tmp/mig-xxxx-packet.md
+git rev-parse HEAD                                   # Head
+git diff origin/main...HEAD > <scratch>/mig-xxxx.diff
+node scripts/print-migration-task-context.mjs MIG-XXXX > <scratch>/mig-xxxx-packet.md
 ```
 
-自分より上位のモデル（例: Haiku/Sonnet/Luna/Flashで動作中なら Opus）を新しいcontextのsubagentとして起動し、Head・diff・packetを渡して「Work OrderのTest cases・DONE checklist・STOPとCURRENT契約（UX/FN/permission/visibility/side effect/rollback）に照らしてレビューし、APPROVEかCHANGES_REQUESTEDと理由を返せ。branchは編集するな」と依頼する。結果をそのままPRへ記録する。
+自分より上位のモデル（例: Haiku/Sonnet/Luna/Flashで動作中なら Opus）を新しいcontextのsubagentとして起動し、Head・diff・packetを渡して「Work OrderのTest cases・DONE checklist・STOPとCURRENT契約（UX/FN/permission/visibility/side effect/rollback）に照らしてレビューし、APPROVEかCHANGES_REQUESTEDと理由を返せ。branchは編集するな」と依頼する。結果をそのままPRへ comment する（上の表）。
 
-```bash
-gh pr comment <n> --body "Independent review: <agent>/<model> (fresh-context subagent of <自分のmodel>) | Head: <40hex> | Verdict: <APPROVE|CHANGES_REQUESTED>
-<確認した項目と指摘>"
+```text
+Independent review: <agent>/<model> (fresh-context subagent of <自分のmodel>) | Head: <40hex> | Verdict: <APPROVE|CHANGES_REQUESTED>
+<確認した項目と指摘>
 ```
 
 CHANGES_REQUESTEDならwork-itemを`IN_PROGRESS`に戻し、`Next`に指摘を書いて終了（次wakeで **C**）。APPROVEでCIがgreenなら同じwakeで **F** へ進んでよい。同等以下のモデルしか起動できない場合は **E** を行わず、他agentか人間のレビューを待つ。
 
 **F. merge統合（Model: small のPRのみ。leadのPR・高リスク・Phase Gateはleadとユーザー承認）**
 
+CI が green でなければ終了して次 wake。green なら:
+
 ```bash
-gh pr checks <n>                                   # 全てpassでなければ終了して次wake
 git switch migration/mig-xxxx-<slug> && git pull --ff-only
 git fetch origin && git rebase origin/main         # 競合したら git rebase --abort してSTOP（leadへ）
 ```
 
-1. `docs/migration/STATUS.md`: 当該MIG行のStateを`DONE`にする。Depends onの全MIGが`DONE`になった行だけ`BLOCKED`→`READY`にする。他の行は変えない。
+1. `docs/migration/STATUS.md`: 当該MIG行のStateを`DONE`にする。Depends onの全MIGが`DONE`になった行だけ`BLOCKED`→`READY`にする。冒頭の `Current Task:` が当該MIGなら `Task State:` も `DONE` にする。他の行は変えない。
 2. `docs/migration/work-items/MIG-XXXX.md`: `State: DONE`、`Evidence`にレビューcommentのURLとCI runのURL。
-3. 検証して統合commitをpushする。
+3. レビューした Head 以降に、統合以外の変更が入っていないことを確かめる。2つの出力が同じでなければ再レビュー（**E**）。
+
+```bash
+X=":(exclude)docs/migration/STATUS.md :(exclude)docs/migration/work-items"
+git diff origin/main...<reviewed Head> -- . $X | git patch-id --stable
+git diff origin/main...HEAD -- . $X | git patch-id --stable
+```
+
+4. 検証して統合commitをpushし、最終 Head の CI が green になってから squash merge する（上の表）。
 
 ```bash
 npm run check:migration-work-items && npm run check:project-docs
 git add docs/migration/STATUS.md docs/migration/work-items/MIG-XXXX.md
 git commit -m "MIG-XXXX: STATUS統合"
 git push --force-with-lease
-gh pr ready <n>
-gh pr checks <n> --watch                           # 最終HeadのCIがpassしてから
-gh pr merge <n> --squash
 ```
 
-統合commit（`STATUS.md`と自分のwork-itemだけの変更、競合の無いrebase）は再レビュー不要だが、CIは最終Headでpassが必要。hostの権限設定が`gh pr merge`を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
+main への merge は Workers Builds の本番 deploy を起こす。これはユーザーが許可済み（2026-10-16、AGENT_PROTOCOL.md §Mandatory stop の例外）なので止めない。host の権限設定が merge を拒否したら、PRに「merge待ち（統合済み）」とcommentしてユーザーへ委ね、他の作業へ進む。
 
 ## 最小検証コマンド
 

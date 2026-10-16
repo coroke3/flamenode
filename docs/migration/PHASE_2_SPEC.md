@@ -142,7 +142,7 @@ test("rendering is deterministic", () => {
   node --test scripts/generate-ui-tokens.test.mjs
   npm run test:unit
   ```
-  期待: 1行目は `# pass 3` と `# fail 0`。`test:unit` は `# fail 0` で、件数が変更前より3件多い。
+  期待: 出力の末尾近くに `# pass 3` と `# fail 0`（1行目は `TAP version 13`）。`test:unit` は `# fail 0` で、`# pass` が変更前より3件多い（作業前に `npm run test:unit` を実行して数を控える）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -158,7 +158,7 @@ npm run test:unit
 node scripts/check-migration-file-progress.mjs
 npm run check:project-docs
 ```
-期待: すべて終了コード0。`git status` で変わっているのは Owned paths の3 file だけ。
+期待: すべて終了コード0。`git status` で変わっているのは Owned paths の3 file と `docs/migration/work-items/MIG-0201.md` だけ。
 #### Ledger updates
 なし。`FILE_MIGRATION_MATRIX.md` は CURRENT の file の移行先を追う台帳で、tokens.css に対応する CURRENT の file は無い。UX / FN の state も変えない（部品はまだ使われていない）。
 #### DONE checklist
