@@ -108,7 +108,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401) | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401 DONE / MIG-0404 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
 | 6 | Hono API | BLOCKED | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
@@ -254,7 +254,7 @@ Validation:
 
 > **1102優先の2トラック (2026-10-09):** MIG-0401 → 0404 → 0405 → 0406 は既存projection/fixtureで実行可能、視覚系の **MIG-0402/0403と正式UI移行** はPhase 2 Gate（MIG-0206）の完了待ち（D-08はDECIDED、mock登録済み）。0405は実Gatewayの非本番PoCであり本番Worker Route変更を許可しない。0407 Phase Gateは0403+0406完了・独立レビュー・人間承認を要求する。性能がPASSでも視覚/UX受入を勝手にDONEへ進めない。
 >
-> **並行READY:** MIG-0201 (Design system)、MIG-0301 (Domain)、MIG-0401 (Public performance PoC) は別担当・別PRで進められる。CURRENTの`Current Task`は主たる進捗であり、別のREADYタスクを自動claimする指示ではない。最初に既存open PRを確認する。
+> **並行READY (2026-10-16):** MIG-0201 (Design system)、MIG-0301 (Domain)、MIG-0404 (Public route-map) は依存解決済みで別担当・別PRで進められる。MIG-0401 は PR #283 で DONE。各taskのWork OrderのModel/Readinessと全open PRのownershipを必ず再確認し、小型モデルは `READY_FOR_SMALL_MODEL` 以外をclaimしない。`Current Task`は別タスクの自動claimを許可しない。
 >
 > Performance measurement/protocol: [PERF_HOTPATH_MATRIX.md](PERF_HOTPATH_MATRIX.md) / [PERFORMANCE_IMPLEMENTATION_PLAN.md](PERFORMANCE_IMPLEMENTATION_PLAN.md) 。
 

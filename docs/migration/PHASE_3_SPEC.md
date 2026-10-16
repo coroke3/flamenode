@@ -6,7 +6,7 @@
 > 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md), [`CODE_QUALITY.md`](CODE_QUALITY.md), [`FEATURE_CATALOG.md`](FEATURE_CATALOG.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md), [`server-actions/README.md`](server-actions/README.md)
 
 この仕様書は、各タスクの目的・対象ソース・作成ファイル・禁止事項・検証コマンドを具体化したものである。
-> **タスク正本:** 個別タスクの実行指示（読む・変える・試す・DONE条件）の正本は [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md) です。`npm run migration:next` がその内容を自動抽出します。本仕様書はPhase 3全体のアーキテクチャ背景と設計意図を補足します。
+> **実行の正本:** 個別MIGの手順・停止条件・検証は本仕様書の `### MIG-XXXX:` Work Order。[`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md) は概要索引、CURRENT code/tests は実挙動の正本、[`STATUS.md`](STATUS.md) はmainへ統合済み進捗の正本。`npm run migration:next` はWork Orderと対応カードを併記し、矛盾時はLead確認までSTOP。
 
 **D-01は A（新規packages/dbへschema移設）と決定済み。** 実装は専用 `MIG-0308` で行い、完了まではTier2を開始しない。詳細は [`DB_PACKAGE_EXTRACTION_PLAN.md`](DB_PACKAGE_EXTRACTION_PLAN.md)。
 

@@ -5,7 +5,7 @@
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
 > 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md), [`auth/README.md`](auth/README.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-02, D-07)
 >
-> **タスク正本:** 個別タスクの実行指示（読む・変える・試す・DONE条件）の正本は [`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md) です。本仕様書は Phase 8 & 9 のスコープ・方針・完了条件を規定する仕様書です。
+> **実行の正本:** 個別MIGの手順・停止条件・検証は本仕様書の `### MIG-XXXX:` Work Order。[`TASK_CARDS_8_9.md`](TASK_CARDS_8_9.md) は概要索引、CURRENT code/tests は実挙動の正本、[`STATUS.md`](STATUS.md) はmainへ統合済み進捗の正本。`npm run migration:next` はWork Orderと対応カードを併記し、矛盾時はLead確認までSTOP。
 
 ---
 

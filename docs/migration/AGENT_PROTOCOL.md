@@ -314,7 +314,7 @@ merge直前の統合で同じPRに含める:
 - `ROUTE_MATRIX.md`
 - `API_MATRIX.md`
 
-独立レビューと必須CIの合格後、merge直前に最新mainから`STATUS.md`を統合する。その時だけtask DONE + next dependency-ready task READYを同じPRへ記録してsquash mergeする。新pushでレビュー/CIが古くなった場合は再評価する。
+独立レビューと必須CIの合格後、merge統合wakeで最新mainから`STATUS.md`を統合する。その時だけtask DONE + next dependency-ready task READYを同じPRへ記録し、**最終Headを再レビュー・再検証**して人間へmergeを依頼する。新pushでレビュー/CIが古くなった場合は再評価する。
 
 ---
 
@@ -350,12 +350,14 @@ Markdown/skill自体はschedulerではない。Claude `/loop`等、hostに実在
 
 ```text
 WAKE:
-  0. git fetch origin main。gh pr list --state open で migration/mig-* PRと各branchの work-items/MIG-XXXX.md、
+  0. git fetch origin main。gh pr list または GitHub MCP で**全open PR**と各branchの work-items/MIG-XXXX.md、
      PR comment上のレビュー、OPEN_DECISIONS、依存状態、CIを読み直す（前wakeや会話の判断を再利用しない）
-  1. 自agentのPRで、reviewed Headに独立レビューAPPROVE + 必須CI green（高リスク/Phase Gateはユーザー承認も）
-       -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE、squash merge
-  2. 自agentのPRがREVIEWで現在のHeadに独立レビューが無く、builderより上位のモデルをsubagentとして起動できる
-       -> 上位モデルsubagentでレビュー1件（PR commentへ記録）。APPROVEかつCI greenなら同じwakeで1まで行ってよい
+  0a. 自agentのPRがすでに統合済みDONE（未merge）:
+       -> 現在のHeadへの独立APPROVE・必須CI greenを確認し、`Merge requested:` commentが無ければ記録して終了。未達なら2のレビュー/CI待ちへ進む。二度とSTATUS統合commitを追加しない。
+  1. 自agentのREVIEW PRでレビュー済みHeadに独立レビューAPPROVE + 必須CI greenを確認
+       -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE。更新後の最終Headで再レビュー・CIを要求し、mergeせず `Merge requested:` をPRへ記録して人間へ引き渡す
+  2. 自agentのPRがREVIEWまたは統合済みDONE（未merge）で最終Headに独立レビューが無く、builderより上位のモデルをsubagentとして起動できる
+       -> 上位モデルsubagentでレビュー1件（PR commentへ記録）。APPROVEとCI green後は次wakeに統合確認または `Merge requested:` の記録を行う
   3. 自agentのPRがIN_PROGRESS -> 次のmicro-unitを1つ進めてwork-itemへcheckpoint
   4. 他agentのPRがREVIEWで、現在のHeadに独立レビューが無く、自分が独立レビュアーの条件を満たす
        -> reviewer laneとしてレビュー1件
@@ -364,12 +366,12 @@ WAKE:
   6. leadのみ: Work OrderがNEEDS_REFINEMENTのtaskを1件詰める（docs/mig-xxxx-work-order branch、実コードで検証。
      手順は実際に試し、コード・コマンド・期待値を書く。形はIMPLEMENTATION_RECIPES.md、予算はZERO_1102.md。
      READY_FOR_SMALL_MODELにする前に `node scripts/check-migration-task-cards.mjs` の小型モデル検査を通す）
-  7. 該当なし -> 理由とREVIEW待ちPR一覧を報告して終了
+  7. 該当なし -> 理由とREVIEW/merge待ちPR一覧を報告して終了
 ```
 
 - Work Order = 各`PHASE_*_SPEC.md`の`### MIG-XXXX:`節。必須形式と小型モデルの実行規則は`IMPLEMENTATION_RUNBOOK.md`「Work Order（仕様節）と小型モデルの実行条件」。
 - Work Orderは依存taskのmerge結果で変わるため、先のPhaseまで一度に書かない（rolling wave）。依存taskがmergeされたら、leadが後続のSource snapshot/Owned paths/Micro-unitsを実コードで更新してからREADY_FOR_SMALL_MODELにする。
-- `npm run migration:next`はmerge済みSTATUSと（取得できれば）open PRのbranch名だけを見るadvisory。ownerの最終確認はGitHubの現物で行う。
+- `npm run migration:next` はmerge済みSTATUSと（取得できれば）open PRのbranch名を見るadvisory。gh不可時はGitHub MCPで全open PRを取得し `npm run migration:next -- --open-pr-branches "<branch>,..."` とする。選定前に自分のIN_PROGRESS/REVIEW/DONE未merge PRを確認する。branch名は排他ロックではなく、Owned paths・共有台帳・依存も照合する。`--offline` はCIの非claim用途だけ。
 
 ## REVIEW待ちを貯めて並行に進める規則
 
@@ -386,8 +388,8 @@ WAKE:
 - 基本: 独立レビュー = builderと別のagent（Claude / Codex・ChatGPT / Antigravity）または人間。
 - 上位モデルsubagent: builderより上位のモデル（Claudeでは Haiku < Sonnet < Opus。Luna / Flash 等の軽量モデルはHaiku相当）を、新しいcontextのsubagentとして起動し、PR diff・Work Order・関連するCURRENT契約（UX/FN/permission/visibility/side effect）を渡してレビューさせた場合は独立レビューとして数える。同等以下のモデルのsubagent、builder自身の見直しは数えない。builderが最上位モデル（例: Opus）の場合は、他agentまたは人間のレビューが必要。
 - PR commentに `Independent review: <agent>/<model> (<separate agent | fresh-context subagent of <builder model> | human>) | Head: <40hex> | Verdict: APPROVE or CHANGES_REQUESTED` と、確認した契約・テスト・rollbackを書く。全agentが同じGitHubアカウントのためGitHub上のApproveは使わない。
-- reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。reviewed Head以降のpushは再レビューとCIを要する。ただしmerge統合のcommit（`STATUS.md`と自work-itemだけの変更、競合の無い最新mainへのrebase）は再レビュー不要で、最終HeadのCI passだけを要する。
-- merge: 上記証拠 + reviewed Headで必須CI greenなら、owner agentがsquash mergeしてよい。`GIT_WORKFLOW.md` §9の高リスク対象とPhase Gateは、加えてユーザーの明示承認（PR comment等）が必要。hostの権限設定がmergeを拒否した場合はPRに記録してユーザーへ委ね、他の作業を続ける。人間はいつでもmergeできる。
+- reviewerはbranchを編集せず、CHANGES_REQUESTEDの修正はbuilderが行う。**reviewed Head以降のpushは例外なく最終Headで独立レビューと必須CIを要する。** STATUS/work-itemだけの統合commitやmain同期も免除しない。最終のレビュー・CI証跡はPR commentへ記録する（work-itemへ追記commitするとHeadが変わるため）。
+- merge: 最終Headで独立レビューAPPROVEと必須CI greenなら、owner agentは `Merge requested: integrated | Head: <40hex> | Review: <URL> | CI: <URL>` をPRへ書き停止する。**移行ループから自動mergeはせず、人間が対象PRごとに個別判断してmergeする。** 本番Deploy・Remote D1・Route・Secrets・権限変更・Phase Gate等はその操作への別途の明示承認を要する。特定PRのマージ依頼を今後のPRへの包括承認と解釈しない。
 
 ## Pacing（自己ペースのhost向け）
 
