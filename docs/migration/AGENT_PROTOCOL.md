@@ -352,7 +352,9 @@ Markdown/skill自体はschedulerではない。Claude `/loop`等、hostに実在
 WAKE:
   0. git fetch origin main。gh pr list または GitHub MCP で**全open PR**と各branchの work-items/MIG-XXXX.md、
      PR comment上のレビュー、OPEN_DECISIONS、依存状態、CIを読み直す（前wakeや会話の判断を再利用しない）
-  1. 自agentのPRでレビュー済みHeadに独立レビューAPPROVE + 必須CI greenを確認
+  0a. 自agentのPRがすでに統合済みDONE（未merge）:
+       -> 現在のHeadへの独立APPROVE・必須CI greenを確認し、`Merge requested:` commentが無ければ記録して終了。未達なら2のレビュー/CI待ちへ進む。二度とSTATUS統合commitを追加しない。
+  1. 自agentのREVIEW PRでレビュー済みHeadに独立レビューAPPROVE + 必須CI greenを確認
        -> latest mainへ同期、STATUS統合（当該DONE + 依存解消taskのREADY）、work-item DONE。更新後の最終Headで再レビュー・CIを要求し、mergeせず `Merge requested:` をPRへ記録して人間へ引き渡す
   2. 自agentのPRがREVIEWまたは統合済みDONE（未merge）で最終Headに独立レビューが無く、builderより上位のモデルをsubagentとして起動できる
        -> 上位モデルsubagentでレビュー1件（PR commentへ記録）。APPROVEとCI green後は次wakeに統合確認または `Merge requested:` の記録を行う

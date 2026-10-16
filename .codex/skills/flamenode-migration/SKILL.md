@@ -33,3 +33,5 @@ Do not auto-cross a Phase Gate or perform production deploy, Worker Route, Custo
 When UI redesign is involved, feature parity is mandatory: use `FUNCTION_INVENTORY.md` and do not treat visual completion as functional completion.
 
 Persist `IN_PROGRESS` when healthy units remain, `REVIEW` after all units pass, or `BLOCKED` with recovery conditions. This skill creates no scheduler; the next external wake re-reads main and live PR checkpoints.
+
+- In a GitHub environment without authenticated `gh`, use the connected GitHub MCP to list **all** open PRs and compare their owned files/domain before passing verified branch names through `--open-pr-branches`. Never claim from `--offline`. Migration loop agents stop at `Merge requested:`; human review/merge is required per `AGENT_PROTOCOL.md` and `IMPLEMENTATION_RUNBOOK.md`. A scheduler/loop requires a real host trigger.

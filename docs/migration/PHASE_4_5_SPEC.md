@@ -4,7 +4,7 @@
 > 最終検証: 2026-10-09（`CURRENT_ROUTES.md` の Public 16 ルートおよび `ROUTE_MATRIX.md` に基づき改定）
 > 対象モデル: Claude / Codex / Antigravity / GPT-5.6-luna / Gemini Flash 等の全エージェント
 > 関連ドキュメント: [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`CURRENT_ROUTES.md`](CURRENT_ROUTES.md), [`ROUTE_MATRIX.md`](ROUTE_MATRIX.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-02, D-06, D-08)
-> **タスク正本:** 個別タスクの実行指示（読む・変える・試す・DONE条件）の正本は [`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md) です。`npm run migration:next` がその内容を自動抽出します。本仕様書はPhase 4 & 5全体のアーキテクチャ背景と設計意図を補足します。
+> **実行の正本:** 個別MIGの手順・停止条件・検証は本仕様書の `### MIG-XXXX:` Work Order。[`TASK_CARDS_4_5.md`](TASK_CARDS_4_5.md) は概要索引、CURRENT code/tests は実挙動の正本、[`STATUS.md`](STATUS.md) はmainへ統合済み進捗の正本。`npm run migration:next` はWork Orderと対応カードを併記し、矛盾時はLead確認までSTOP。
 
 ---
 
@@ -45,7 +45,7 @@
 #### Source snapshot
 - main の `apps/site` は `astro.config.mjs`（`output: "static"`）と疎通用 `src/pages/index.astro` だけ。
 - CURRENT の公開データ読み込み: `src/lib/publicData/loader.ts`（`:42,46` で `publicVisibilityManifest` / `publicVisibilityManifestCore` を import）。
-- PR #283 の変更（未merge）: `apps/site/src/lib/publicDataLoader.ts`（manifest の allow/deny、generation、sha256、`{kind,id,title}` だけの strict projection）、`apps/site/src/pages/migration-fixture-poc/[id].astro`、`scripts/migration-public-snapshot.test.mjs`、`scripts/check-migration-public-poc-build.mjs`。
+- PR #283 の変更（2026-10-16 merge済み、MIG-0401 DONE）: `apps/site/src/lib/publicDataLoader.ts`（manifest の allow/deny、generation、sha256、`{kind,id,title}` だけの strict projection）、`apps/site/src/pages/migration-fixture-poc/[id].astro`、`scripts/migration-public-snapshot.test.mjs`、`scripts/check-migration-public-poc-build.mjs`。
 #### Owned paths
 - PR #283 の work-item の `Owned paths` が正本（`apps/site/src/lib/publicDataLoader.ts`, `apps/site/src/pages/migration-fixture-poc/[id].astro`, `scripts/migration-public-snapshot.test.mjs`, `scripts/check-migration-public-poc-build.mjs`, `.github/workflows/migration-docs-check.yml`, `docs/migration/FILE_MIGRATION_MATRIX.md`）。
 #### Micro-units
@@ -130,7 +130,7 @@ PRをrevert。
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(public)/[id]/page.tsx`, `app/(public)/event/[id]/page.tsx`, `app/(public)/user/[id]/page.tsx`。データは `src/lib/publicData/loader.ts`、可視性は `src/lib/publicData/publicArtifactVisibility.ts`。
-- PR #283（未merge）の `apps/site/src/lib/publicDataLoader.ts` は manifest の allow/deny・generation・sha256 を検証し、`{ kind, id, title }` だけを返す。
+- PR #283（merge済み）の `apps/site/src/lib/publicDataLoader.ts` は manifest の allow/deny・generation・sha256 を検証し、`{ kind, id, title }` だけを返す。
 - 表示部品は MIG-0205 の `packages/ui/src/screens/*`。
 - `optimize/free-tier-1102-blockers.md`（共有フォルダ）のローカル計測: `/{作品ID}` 15.5〜21ms、`/event/{id}` 16〜21ms、`/user/{id}` 16〜19ms を毎回SSR（Free の上限 10ms 超）。
 #### Owned paths
@@ -168,7 +168,7 @@ PRをrevert。本番には影響しない。
 
 ### MIG-0404: route-map generator（**0401の直後、0403を待たない**）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0401（PR #283）の merge 後。canonical/alias の出所（R2 artifact か build 時 D1 read-only か）を決める
+- **Readiness:** NEEDS_REFINEMENT — MIG-0401（PR #283）は DONE。canonical/alias の出所（R2 artifact か build 時 D1 read-only か）を決める
 - **Recipe:** R-BUILD
 - **Runtime:** N
 - **Depends on:** MIG-0401 / **Decisions:** D-02 DECIDED

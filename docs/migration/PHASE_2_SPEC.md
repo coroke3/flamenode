@@ -7,7 +7,7 @@
 
 この仕様書は、Phase 2（デザインシステム・UI Primitives・IA抽出）のアーキテクチャ方針と各タスクの実行境界を定める。
 
-> **タスク正本:** 個別タスクの実行指示（読む・変える・試す・DONE条件）の正本は [`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md) です。`npm run migration:next` がその内容を自動抽出します。
+> **実行の正本:** 個別MIGの手順・停止条件・検証は本仕様書の `### MIG-XXXX:` Work Order。[`TASK_CARDS_2_3.md`](TASK_CARDS_2_3.md) は概要索引、CURRENT code/tests は実挙動の正本、[`STATUS.md`](STATUS.md) はmainへ統合済み進捗の正本。`npm run migration:next` はWork Orderと対応カードを併記し、矛盾時はLead確認までSTOP。
 
 ---
 

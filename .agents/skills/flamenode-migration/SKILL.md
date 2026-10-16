@@ -39,3 +39,5 @@ Do not remove or change user-visible behavior merely to simplify the backend. Do
 Checkpoint policy: WORK_ITEM_ONLY. Writer wakes checkpoint only their own task-specific work-item, affected ledgers/matrices and real validation evidence. Review-only wakes leave evidence in the reviewed PR without branch/checkpoint edits; wait/no-action wakes report the gate without a checkpoint-only push. Keep STATUS unchanged during implementation; reconcile it just before merge after independent review/CI.
 
 Never auto-cross Phase Gates or perform production deploy, Worker Route, Custom Domain, Remote D1, or secret changes without explicit approval.
+
+- In a GitHub environment without authenticated `gh`, use the connected GitHub MCP to list **all** open PRs and compare their owned files/domain before passing verified branch names through `--open-pr-branches`. Never claim from `--offline`. Migration loop agents stop at `Merge requested:`; human review/merge is required per `AGENT_PROTOCOL.md` and `IMPLEMENTATION_RUNBOOK.md`. A scheduler/loop requires a real host trigger.
