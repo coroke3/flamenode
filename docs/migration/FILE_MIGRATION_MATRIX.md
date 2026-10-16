@@ -227,6 +227,7 @@
 | `src/lib/publicData/loader.test.mjs` | TEST | legacy public data loader caching/visibility regression | MIG-0505 | SAME (CURRENT regression; future Astro loader test TBD) | NOT_STARTED | — |
 
 | `src/lib/slots/slotReservationLimit.ts` | HELPER | pure numeric policy | MIG-0301 | +packages/domain/src/slots/reservationLimit.ts (with legacy bridge) | NOT_STARTED | — |
+| `packages/domain/src/slots/reservationLimit.ts` | HELPER | pure numeric policy (moved from `src/lib/slots/slotReservationLimit.ts`) | MIG-0301 | SAME | IN_PROGRESS | PR#304 SHA=747008442ea79dadb21b82b751d778c3bc8a7473 |
 | `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | NOT_STARTED | — |
 | `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | NOT_STARTED | — |
 | `src/lib/slots/limits.test.mjs` | TEST | slot range and rule edgecases | MIG-0302 | SAME (pure helper parity) | NOT_STARTED | — |
@@ -252,7 +253,6 @@
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
 | `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
-| `packages/domain/src/slots/reservationLimit.ts` | MIG-0301 | NOT_CREATED | `src/lib/slots/slotReservationLimit.ts` legacy export bridge |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | NOT_CREATED | visibility manifest/cache/fail-closed + Route PoC |
