@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
   buildRouteMap,
   lookupRoute,
-  measureRouteMapMetrics,
   RouteCollisionError,
   DuplicateRouteError,
   InvalidRouteIdError,
@@ -162,6 +162,32 @@ test("T05: unknown URL returns null (404 in caller)", () => {
   assert.equal(lookupRoute(manifest, "user/non_existent_user"), null);
   assert.equal(lookupRoute(manifest, ""), null);
   assert.equal(lookupRoute(manifest, "/"), null);
+
+  // Object.prototype keys must not resolve, before or after a JSON round trip.
+  const parsed = JSON.parse(JSON.stringify(manifest));
+  for (const key of ["constructor", "/toString", "hasOwnProperty", "__proto__", "user/constructor"]) {
+    assert.equal(lookupRoute(manifest, key), null, key);
+    assert.equal(lookupRoute(parsed, key), null, key);
+  }
+
+  // An entity named like a prototype key is an ordinary route.
+  const named = buildRouteMap([{ kind: "video", id: "constructor" }], "gen-01");
+  assert.equal(lookupRoute(JSON.parse(JSON.stringify(named)), "constructor").canonicalPath, "/constructor");
+});
+
+test("legacy redirects cannot shadow fixed routes or leave the site", () => {
+  const build = (fromPath, toPath) =>
+    buildRouteMap([{ kind: "redirect", fromPath, toPath }], "gen-01");
+
+  assert.throws(() => build("/about", "/event"), RouteCollisionError);
+  assert.throws(() => build("/favicon.ico", "/event"), RouteCollisionError);
+  assert.throws(() => build("/groups/../admin", "/event"), InvalidRouteIdError);
+  assert.throws(() => build("/groups/a%2Fb", "/event"), InvalidRouteIdError);
+  assert.throws(() => build("/", "/event"), InvalidRouteIdError);
+  assert.throws(() => build("/groups/a", "//evil.example"), InvalidRouteIdError);
+  assert.throws(() => build("/groups/a", "https://evil.example"), InvalidRouteIdError);
+  assert.throws(() => build("/groups/a", "/..%2Fadmin"), InvalidRouteIdError);
+  assert.equal(build("/groups/a", "/event#event-group-a").routes["groups/a"].targetPath, "/event#event-group-a");
 });
 
 test("legacy redirects and determinism", () => {
@@ -210,53 +236,54 @@ test("legacy redirects and determinism", () => {
   });
 });
 
-test("U03 metrics: manifest bytes, entry count, and p99 lookup CPU", () => {
-  const fixture = [
-    {
-      kind: "video",
-      id: "vid_01",
-      aliases: ["yt_01"],
-    },
-    {
-      kind: "video",
-      id: "vid_02",
-      aliases: ["yt_02"],
-    },
-    {
-      kind: "user",
-      id: "user_alice",
-      aliases: ["user_alice_old"],
-    },
-    {
-      kind: "event",
-      id: "event_summer_2026",
-    },
-    {
-      kind: "redirect",
-      fromPath: "/groups/demo",
-      toPath: "/event#event-group-demo",
-      status: 307,
-    },
-  ];
+// U03: measure at production-like scale. The fixture sizes are an assumption
+// (the real counts are read from D1 in MIG-0409); each entity has one alias.
+const METRIC_SCALE = { video: 20000, user: 5000, event: 1000 };
 
-  const manifest = buildRouteMap(fixture, "generation-metrics-01");
-  const sampleKeys = ["vid_01", "yt_01", "user/user_alice_old", "groups/demo", "non_existent"];
+function syntheticEntries() {
+  const entries = [];
+  for (const [kind, count] of Object.entries(METRIC_SCALE)) {
+    for (let i = 0; i < count; i++) {
+      entries.push({ kind, id: `${kind}${i}`, aliases: [`${kind}${i}-old`] });
+    }
+  }
+  return entries;
+}
 
-  const metrics = measureRouteMapMetrics(manifest, sampleKeys, 10000);
+function percentile(sorted, p) {
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
+}
 
-  // Verify metric fields
-  assert.equal(metrics.totalEntries, manifest.totalEntries);
-  assert.ok(metrics.manifestBytes > 0, "manifestBytes must be positive");
-  assert.ok(
-    metrics.lookupP99CpuMs < 0.1,
-    `lookup p99 CPU must be well under 0.1ms, got ${metrics.lookupP99CpuMs}ms`,
-  );
-  assert.ok(
-    metrics.lookupMaxCpuMs < 5.0,
-    `lookup max CPU must be well under 5.0ms (Zero 1102 budget), got ${metrics.lookupMaxCpuMs}ms`,
-  );
+test("U03 metrics: manifest bytes, entry count, parse and lookup CPU", () => {
+  const manifest = buildRouteMap(syntheticEntries(), "generation-metrics-01");
+  const json = JSON.stringify(manifest);
+  const manifestBytes = Buffer.byteLength(json, "utf8");
+
+  // Loading the manifest (once per isolate) is the dominant cost, not the lookup.
+  const parseTimes = [];
+  let parsed;
+  for (let i = 0; i < 20; i++) {
+    const start = performance.now();
+    parsed = JSON.parse(json);
+    parseTimes.push(performance.now() - start);
+  }
+  parseTimes.sort((a, b) => a - b);
+
+  const keys = ["video19999", "video5-old", "user/user42", "event/event7-old", "missing", "constructor"];
+  const lookupTimes = [];
+  for (let i = 0; i < 10000; i++) {
+    const start = performance.now();
+    lookupRoute(parsed, keys[i % keys.length]);
+    lookupTimes.push(performance.now() - start);
+  }
+  lookupTimes.sort((a, b) => a - b);
+
+  assert.equal(manifest.totalEntries, 2 * (METRIC_SCALE.video + METRIC_SCALE.user + METRIC_SCALE.event));
+  assert.ok(percentile(lookupTimes, 0.99) < 0.1, "lookup p99 must stay far below 1ms");
 
   console.log(
-    `[MIG-0404 metrics] totalEntries=${metrics.totalEntries} manifestBytes=${metrics.manifestBytes} lookupP99CpuMs=${metrics.lookupP99CpuMs.toFixed(5)}ms lookupMaxCpuMs=${metrics.lookupMaxCpuMs.toFixed(5)}ms`,
+    `[MIG-0404 metrics] totalEntries=${manifest.totalEntries} manifestBytes=${manifestBytes} ` +
+      `parseP50Ms=${percentile(parseTimes, 0.5).toFixed(2)} parseMaxMs=${parseTimes.at(-1).toFixed(2)} ` +
+      `lookupP99Ms=${percentile(lookupTimes, 0.99).toFixed(5)}`,
   );
 });

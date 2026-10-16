@@ -3,24 +3,12 @@
  * Resolves canonical, alias, and legacy routes deterministically without request-time D1 scans.
  */
 import { createHash } from "node:crypto";
-import { performance } from "node:perf_hooks";
 
 export type RouteEntityKind = "video" | "user" | "event";
+export type RedirectStatus = 301 | 302 | 307 | 308;
 
-export type VideoRouteEntry = Readonly<{
-  kind: "video";
-  id: string;
-  aliases?: readonly string[];
-}>;
-
-export type UserRouteEntry = Readonly<{
-  kind: "user";
-  id: string;
-  aliases?: readonly string[];
-}>;
-
-export type EventRouteEntry = Readonly<{
-  kind: "event";
+export type EntityRouteEntry = Readonly<{
+  kind: RouteEntityKind;
   id: string;
   aliases?: readonly string[];
 }>;
@@ -29,14 +17,10 @@ export type LegacyRedirectEntry = Readonly<{
   kind: "redirect";
   fromPath: string;
   toPath: string;
-  status?: 301 | 302 | 307 | 308;
+  status?: RedirectStatus;
 }>;
 
-export type RouteInputEntry =
-  | VideoRouteEntry
-  | UserRouteEntry
-  | EventRouteEntry
-  | LegacyRedirectEntry;
+export type RouteInputEntry = EntityRouteEntry | LegacyRedirectEntry;
 
 export type RouteResolution =
   | Readonly<{
@@ -48,7 +32,7 @@ export type RouteResolution =
   | Readonly<{
       type: "redirect";
       targetPath: string;
-      status: 301 | 302 | 307 | 308;
+      status: RedirectStatus;
       reason: "alias" | "legacy";
     }>;
 
@@ -58,13 +42,6 @@ export type RouteManifest = Readonly<{
   sha256: string;
   totalEntries: number;
   routes: Readonly<Record<string, RouteResolution>>;
-}>;
-
-export type RouteMapMetrics = Readonly<{
-  totalEntries: number;
-  manifestBytes: number;
-  lookupP99CpuMs: number;
-  lookupMaxCpuMs: number;
 }>;
 
 export class RouteMapError extends Error {
@@ -128,17 +105,15 @@ export const RESERVED_ASSET_PATHS: ReadonlySet<string> = new Set([
 
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
+function hasTraversal(value: string): boolean {
+  return value.includes("..") || value.includes("\\") || /%2f|%2e|%5c/i.test(value);
+}
+
 export function validateRouteId(id: string): string {
   if (typeof id !== "string" || id.length === 0) {
     throw new InvalidRouteIdError(String(id), "ID must be a non-empty string");
   }
-  // Check for path traversal or encoded slashes
-  if (
-    id.includes("..") ||
-    id.includes("/") ||
-    id.includes("\\") ||
-    /%2f|%2e/i.test(id)
-  ) {
+  if (hasTraversal(id) || id.includes("/")) {
     throw new InvalidRouteIdError(id, "ID contains forbidden traversal or path characters");
   }
   if (!SAFE_ID_PATTERN.test(id)) {
@@ -148,14 +123,47 @@ export function validateRouteId(id: string): string {
 }
 
 export function normalizeLookupPath(pathOrSlug: string): string {
-  let cleaned = pathOrSlug.trim();
-  if (cleaned.startsWith("/")) {
-    cleaned = cleaned.slice(1);
+  return pathOrSlug.trim().replace(/^\//, "").replace(/\/$/, "");
+}
+
+function assertRootSlugFree(slug: string): void {
+  if (RESERVED_ROOT_SLUGS.has(slug) || RESERVED_ASSET_PATHS.has(slug)) {
+    throw new RouteCollisionError(slug, "collides with reserved root route or asset");
   }
-  if (cleaned.endsWith("/")) {
-    cleaned = cleaned.slice(0, -1);
+}
+
+/** Key in the manifest for an entity slug: root for videos, `user/` and `event/` otherwise. */
+function entityKey(kind: RouteEntityKind, slug: string): string {
+  if (kind === "video") {
+    assertRootSlugFree(slug);
+    return slug;
   }
-  return cleaned;
+  return `${kind}/${slug}`;
+}
+
+/** Legacy source paths obey the same rules as entity keys, so they cannot shadow fixed routes. */
+function legacyKey(fromPath: string): string {
+  const key = normalizeLookupPath(fromPath);
+  const segments = key.split("/");
+  if (key.length === 0 || segments.some((s) => s.length === 0)) {
+    throw new InvalidRouteIdError(fromPath, "legacy path must be a non-empty path");
+  }
+  for (const segment of segments) validateRouteId(segment);
+  if (segments.length === 1) assertRootSlugFree(key);
+  return key;
+}
+
+/** Redirect targets must stay on this site: a path, never `//host` or a full URL. */
+function validateRedirectTarget(toPath: string): string {
+  if (
+    typeof toPath !== "string" ||
+    !toPath.startsWith("/") ||
+    toPath.startsWith("//") ||
+    hasTraversal(toPath)
+  ) {
+    throw new InvalidRouteIdError(String(toPath), "redirect target must be a same-site path");
+  }
+  return toPath;
 }
 
 export function buildRouteMap(
@@ -166,169 +174,65 @@ export function buildRouteMap(
     throw new RouteMapError("INVALID_GENERATION", "Generation must be a non-empty string");
   }
 
-  const routes: Record<string, RouteResolution> = {};
+  // Map, not a plain object: keys such as `constructor` must not hit Object.prototype.
+  const routes = new Map<string, RouteResolution>();
+  const add = (key: string, resolution: RouteResolution) => {
+    if (routes.has(key)) throw new DuplicateRouteError(key);
+    routes.set(key, resolution);
+  };
 
   for (const entry of entries) {
     if (entry.kind === "redirect") {
-      const fromKey = normalizeLookupPath(entry.fromPath);
-      if (routes[fromKey]) {
-        throw new DuplicateRouteError(fromKey);
-      }
-      routes[fromKey] = {
+      add(legacyKey(entry.fromPath), {
         type: "redirect",
-        targetPath: entry.toPath,
+        targetPath: validateRedirectTarget(entry.toPath),
         status: entry.status ?? 307,
         reason: "legacy",
-      };
+      });
       continue;
     }
 
-    const validatedId = validateRouteId(entry.id);
+    const id = validateRouteId(entry.id);
+    const key = entityKey(entry.kind, id);
+    const canonicalPath = `/${key}`;
+    add(key, { type: "canonical", kind: entry.kind, id, canonicalPath });
 
-    // Root video uses root slug `/[id]`. User uses `/user/[id]`. Event uses `/event/[id]`.
-    let canonicalKey: string;
-    let canonicalPath: string;
-
-    if (entry.kind === "video") {
-      if (RESERVED_ROOT_SLUGS.has(validatedId) || RESERVED_ASSET_PATHS.has(validatedId)) {
-        throw new RouteCollisionError(validatedId, "Video slug collides with reserved root route or asset");
-      }
-      canonicalKey = validatedId;
-      canonicalPath = `/${validatedId}`;
-    } else if (entry.kind === "user") {
-      canonicalKey = `user/${validatedId}`;
-      canonicalPath = `/user/${validatedId}`;
-    } else {
-      canonicalKey = `event/${validatedId}`;
-      canonicalPath = `/event/${validatedId}`;
-    }
-
-    if (routes[canonicalKey]) {
-      throw new DuplicateRouteError(canonicalKey);
-    }
-
-    routes[canonicalKey] = {
-      type: "canonical",
-      kind: entry.kind,
-      id: validatedId,
-      canonicalPath,
-    };
-
-    if (entry.aliases) {
-      for (const rawAlias of entry.aliases) {
-        const validatedAlias = validateRouteId(rawAlias);
-        let aliasKey: string;
-        if (entry.kind === "video") {
-          if (RESERVED_ROOT_SLUGS.has(validatedAlias) || RESERVED_ASSET_PATHS.has(validatedAlias)) {
-            throw new RouteCollisionError(validatedAlias, "Video alias collides with reserved root route or asset");
-          }
-          aliasKey = validatedAlias;
-        } else if (entry.kind === "user") {
-          aliasKey = `user/${validatedAlias}`;
-        } else {
-          aliasKey = `event/${validatedAlias}`;
-        }
-
-        if (routes[aliasKey]) {
-          throw new DuplicateRouteError(aliasKey);
-        }
-
-        routes[aliasKey] = {
-          type: "redirect",
-          targetPath: canonicalPath,
-          status: 308,
-          reason: "alias",
-        };
-      }
+    for (const alias of entry.aliases ?? []) {
+      add(entityKey(entry.kind, validateRouteId(alias)), {
+        type: "redirect",
+        targetPath: canonicalPath,
+        status: 308,
+        reason: "alias",
+      });
     }
   }
 
-  // Deterministic sorting of keys
-  const sortedKeys = Object.keys(routes).sort();
   const sortedRoutes: Record<string, RouteResolution> = {};
-  for (const k of sortedKeys) {
-    sortedRoutes[k] = routes[k];
+  for (const key of [...routes.keys()].sort()) {
+    sortedRoutes[key] = routes.get(key)!;
   }
-
-  const payloadString = JSON.stringify(sortedRoutes);
-  const sha256 = createHash("sha256").update(payloadString).digest("hex");
+  const sha256 = createHash("sha256").update(JSON.stringify(sortedRoutes)).digest("hex");
 
   return {
     schemaVersion: 1,
     generation,
     sha256,
-    totalEntries: sortedKeys.length,
+    totalEntries: routes.size,
     routes: sortedRoutes,
   };
 }
 
+/** Returns null for anything not in the manifest; the caller answers 404. */
 export function lookupRoute(
   manifest: RouteManifest,
   pathOrSlug: string,
 ): RouteResolution | null {
-  if (typeof pathOrSlug !== "string") {
+  if (typeof pathOrSlug !== "string" || hasTraversal(pathOrSlug)) {
     return null;
   }
-
-  // Traversal and encoding sanity check
-  if (
-    pathOrSlug.includes("..") ||
-    /%2f|%2e/i.test(pathOrSlug) ||
-    pathOrSlug.includes("\\")
-  ) {
-    return null;
-  }
-
   const key = normalizeLookupPath(pathOrSlug);
-  if (!key) {
+  if (!key || !Object.hasOwn(manifest.routes, key)) {
     return null;
   }
-
-  return manifest.routes[key] ?? null;
-}
-
-export function measureRouteMapMetrics(
-  manifest: RouteManifest,
-  lookupSampleKeys: readonly string[],
-  iterations = 10000,
-): RouteMapMetrics {
-  const json = JSON.stringify(manifest);
-  const manifestBytes = Buffer.byteLength(json, "utf-8");
-
-  if (lookupSampleKeys.length === 0) {
-    return {
-      totalEntries: manifest.totalEntries,
-      manifestBytes,
-      lookupP99CpuMs: 0,
-      lookupMaxCpuMs: 0,
-    };
-  }
-
-  const sampleCount = lookupSampleKeys.length;
-
-  // Warm up JIT
-  for (let i = 0; i < 100; i++) {
-    lookupRoute(manifest, lookupSampleKeys[i % sampleCount]);
-  }
-
-  const timings: number[] = new Array(iterations);
-
-  for (let i = 0; i < iterations; i++) {
-    const key = lookupSampleKeys[i % sampleCount];
-    const start = performance.now();
-    lookupRoute(manifest, key);
-    timings[i] = performance.now() - start;
-  }
-
-  timings.sort((a, b) => a - b);
-  const p99Index = Math.floor(iterations * 0.99);
-  const lookupP99CpuMs = timings[Math.min(p99Index, iterations - 1)];
-  const lookupMaxCpuMs = timings[iterations - 1];
-
-  return {
-    totalEntries: manifest.totalEntries,
-    manifestBytes,
-    lookupP99CpuMs,
-    lookupMaxCpuMs,
-  };
+  return manifest.routes[key];
 }
