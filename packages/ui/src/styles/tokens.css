@@ -1,0 +1,103 @@
+/* 生成元: docs/migration/mock/source/design-system/tokens.json（version 1）。手で編集しない。再生成: node scripts/generate-ui-tokens.mjs */
+:root {
+  --white: #ffffff;
+  --black: #000000;
+  --gray-50: #f5f5f5;
+  --gray-100: #ebebeb;
+  --gray-200: #d6d6d6;
+  --gray-400: #999999;
+  --gray-600: #525252;
+  --gray-850: #1f1f1f;
+  --gray-900: #141414;
+  --lime-300: #d6ec8a;
+  --lime-500: #c8f21f;
+  --lime-800: #4a6300;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --radius-none: 0;
+  --font-display: "FlameNode Sans", "Jost", "LINE Seed JP", system-ui, sans-serif;
+  --font-sans: "Jost", "LINE Seed JP", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --text-display-family: var(--font-display);
+  --text-display-size: 40px;
+  --text-display-line-height: 48px;
+  --text-display-weight: 700;
+  --text-display-letter-spacing: -0.01em;
+  --text-h1-family: var(--font-display);
+  --text-h1-size: 32px;
+  --text-h1-line-height: 40px;
+  --text-h1-weight: 700;
+  --text-h2-family: var(--font-display);
+  --text-h2-size: 24px;
+  --text-h2-line-height: 32px;
+  --text-h2-weight: 700;
+  --text-h3-family: var(--font-sans);
+  --text-h3-size: 18px;
+  --text-h3-line-height: 26px;
+  --text-h3-weight: 400;
+  --text-body-family: var(--font-sans);
+  --text-body-size: 15px;
+  --text-body-line-height: 24px;
+  --text-body-weight: 400;
+  --text-ui-family: var(--font-sans);
+  --text-ui-size: 14px;
+  --text-ui-line-height: 20px;
+  --text-ui-weight: 400;
+  --text-body-sm-family: var(--font-sans);
+  --text-body-sm-size: 13px;
+  --text-body-sm-line-height: 20px;
+  --text-body-sm-weight: 400;
+  --text-label-family: var(--font-sans);
+  --text-label-size: 12px;
+  --text-label-line-height: 16px;
+  --text-label-weight: 400;
+  --text-label-letter-spacing: 0.04em;
+  --text-code-family: var(--font-mono);
+  --text-code-size: 13px;
+  --text-code-line-height: 20px;
+  --text-code-weight: 400;
+}
+
+:root,
+[data-theme="dark"] {
+  --bg: var(--black);
+  --surface-subtle: var(--gray-900);
+  --surface-active: var(--gray-850);
+  --surface-raised: var(--gray-900);
+  --ink: var(--white);
+  --ink-muted: var(--gray-400);
+  --brand: var(--lime-300);
+  --on-brand: var(--black);
+  --brand-text: var(--lime-300);
+  --brand-vivid: var(--lime-500);
+  --focus-ring: var(--white);
+  --danger: #ff7a6b;
+  --warning: #f2b53a;
+  --info: #6db5ff;
+  --success: #4fd1a5;
+  --shadow-overlay: 0 8px 24px rgba(0,0,0,0.6);
+}
+
+[data-theme="light"] {
+  --bg: var(--white);
+  --surface-subtle: var(--gray-50);
+  --surface-active: var(--gray-100);
+  --surface-raised: var(--white);
+  --ink: var(--black);
+  --ink-muted: var(--gray-600);
+  --brand: var(--lime-300);
+  --on-brand: var(--black);
+  --brand-text: var(--lime-800);
+  --brand-vivid: var(--lime-500);
+  --focus-ring: var(--black);
+  --danger: #b3261e;
+  --warning: #8a5a00;
+  --info: #0b5cad;
+  --success: #0d6b4f;
+  --shadow-overlay: 0 8px 24px rgba(0,0,0,0.16);
+}
