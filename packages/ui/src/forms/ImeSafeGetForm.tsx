@@ -23,6 +23,11 @@ export function shouldBlockSearchFormSubmit(input: {
   return Boolean(input.isCompositionSession || input.isNativeGuardActive);
 }
 
+/** Only GET forms use the client-side search navigation path. */
+export function isGetSearchFormMethod(method: string | null): boolean {
+  return (method ?? "get").trim().toLowerCase() === "get";
+}
+
 export interface ImeSafeGetFormProps
   extends React.FormHTMLAttributes<HTMLFormElement> {
   onNavigated?: () => void;
@@ -120,6 +125,9 @@ export function ImeSafeGetForm({
           return;
         }
 
+        // Leave non-GET methods to the browser's native submit path.
+        // Calling navigateGetForm on POST would requestSubmit() again and recurse.
+        if (!isGetSearchFormMethod(event.currentTarget.getAttribute("method"))) return;
         event.preventDefault();
         if (!shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current,
           isNativeGuardActive: suppressSubmitRef.current })) {
@@ -129,6 +137,14 @@ export function ImeSafeGetForm({
       onSubmit={(event) => {
         onSubmit?.(event);
         if (event.defaultPrevented) return;
+        if (!isGetSearchFormMethod(event.currentTarget.getAttribute("method"))) {
+          // Respect native POST submission while still suppressing IME implicit submits.
+          if (shouldBlockSearchFormSubmit({
+            isCompositionSession: composingRef.current,
+            isNativeGuardActive: suppressSubmitRef.current,
+          })) event.preventDefault();
+          return;
+        }
         event.preventDefault();
         if (shouldBlockSearchFormSubmit({ isCompositionSession: composingRef.current,
           isNativeGuardActive: suppressSubmitRef.current })) return;
