@@ -224,6 +224,7 @@
 | `workers/cleanup/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/content-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/fast-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
+| `workers/fast-jobs/publicBuildTrigger.ts` | HELPER | D-09 deploy hook build scheduler | MIG-0410 | SAME | IN_PROGRESS | PR#325 SHA=02ac97add9e0085c370bd531c5f9b8a4d2683311 TEST=node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs LOG=workers/fast-jobs/publicBuildTrigger.ts |
 | `workers/score-recalc/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/sync-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/youtube-playlist-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
