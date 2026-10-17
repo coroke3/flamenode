@@ -7,7 +7,6 @@ import {
   resolveSessionUser,
   sessionMiddleware,
   requireAuth,
-  SESSION_COOKIE_NAMES,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -109,23 +108,38 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(parsed["authjs.session-token"], "dev-token");
   });
 
-  await t.test("prioritizes secure session cookie over dev cookie", () => {
-    const token = extractSessionToken(
-      "authjs.session-token=dev-token; __Secure-authjs.session-token=secure-token",
-    );
-    assert.equal(token, "secure-token");
+  await t.test("https reads only the __Secure- cookie, like Auth.js useSecureCookies", () => {
+    const header = "authjs.session-token=dev-token; __Secure-authjs.session-token=secure-token";
+    assert.equal(extractSessionToken(header, { secure: true }), "secure-token");
+    assert.equal(extractSessionToken("authjs.session-token=tossed", { secure: true }), null);
   });
 
-  await t.test("falls back to dev cookie when secure cookie is absent", () => {
-    const token = extractSessionToken("authjs.session-token=dev-token; other=123");
-    assert.equal(token, "dev-token");
+  await t.test("http reads only the unprefixed cookie", () => {
+    const header = "__Secure-authjs.session-token=secure-token; authjs.session-token=dev-token";
+    assert.equal(extractSessionToken(header, { secure: false }), "dev-token");
+  });
+
+  await t.test("Auth.js v4 cookie names are not read (CURRENT never reads them)", () => {
+    assert.equal(extractSessionToken("__Secure-next-auth.session-token=v4", { secure: true }), null);
+    assert.equal(extractSessionToken("next-auth.session-token=v4", { secure: false }), null);
+  });
+
+  await t.test("first occurrence of a duplicated cookie wins", () => {
+    const header = "__Secure-authjs.session-token=FIRST; __Secure-authjs.session-token=SECOND";
+    assert.equal(parseCookieHeader(header)["__Secure-authjs.session-token"], "FIRST");
+    assert.equal(extractSessionToken(header, { secure: true }), "FIRST");
+  });
+
+  await t.test("prototype keys are ordinary cookie names", () => {
+    const parsed = parseCookieHeader("__proto__=x; constructor=y");
+    assert.equal(parsed["__proto__"], "x");
+    assert.equal(parsed["constructor"], "y");
   });
 
   await t.test("returns null for empty or missing cookie header", () => {
-    assert.equal(extractSessionToken(null), null);
-    assert.equal(extractSessionToken(undefined), null);
-    assert.equal(extractSessionToken(""), null);
-    assert.equal(extractSessionToken("theme=dark; visitor=anon"), null);
+    for (const header of [null, undefined, "", "theme=dark; visitor=anon"]) {
+      assert.equal(extractSessionToken(header, { secure: true }), null);
+    }
   });
 });
 
@@ -259,6 +273,7 @@ test("Hono sessionMiddleware attaches user and session per-request", async (t) =
     const contextMap = new Map();
     const mockContext = {
       req: {
+        url: "https://flamenode.net/api/me",
         header: (name) =>
           name.toLowerCase() === "cookie"
             ? `${BASELINE_COOKIES.sessionToken.name}=${SESSIONS.valid.sessionToken}`
@@ -285,6 +300,7 @@ test("Hono sessionMiddleware attaches user and session per-request", async (t) =
     const contextMap = new Map();
     const mockContext = {
       req: {
+        url: "https://flamenode.net/api/me",
         header: () => undefined,
       },
       env: { DB: d1 },

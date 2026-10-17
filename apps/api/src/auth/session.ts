@@ -36,19 +36,25 @@ export interface D1DatabaseLike {
   prepare(query: string): D1PreparedStatementLike;
 }
 
-export const SESSION_COOKIE_NAMES = [
-  "__Secure-authjs.session-token",
-  "authjs.session-token",
-  "__Secure-next-auth.session-token",
-  "next-auth.session-token",
-] as const;
+/**
+ * Auth.js reads exactly one session cookie name, chosen by `useSecureCookies`
+ * (`url.protocol === "https:"`, @auth/core lib/init.js). Accepting any other
+ * name would let Hono resolve a user that Next does not (e.g. a tossed
+ * non-`__Secure-` cookie on https), so the same rule applies here.
+ */
+export const SECURE_SESSION_COOKIE_NAME = "__Secure-authjs.session-token";
+export const INSECURE_SESSION_COOKIE_NAME = "authjs.session-token";
+
+export function sessionCookieName(secure: boolean): string {
+  return secure ? SECURE_SESSION_COOKIE_NAME : INSECURE_SESSION_COOKIE_NAME;
+}
 
 /**
  * Parses raw Cookie header string into key-value map.
  * Safely decodes URI components while handling malformed values gracefully.
  */
 export function parseCookieHeader(header?: string | null): Record<string, string> {
-  const result: Record<string, string> = {};
+  const result: Record<string, string> = Object.create(null);
   if (!header || typeof header !== "string") {
     return result;
   }
@@ -69,6 +75,9 @@ export function parseCookieHeader(header?: string | null): Record<string, string
       val = val.slice(1, -1);
     }
 
+    // First occurrence wins, like the cookie parser Auth.js uses
+    // (@auth/core lib/vendored/cookie.js), so both read the same token.
+    if (Object.hasOwn(result, key)) continue;
     try {
       result[key] = decodeURIComponent(val);
     } catch {
@@ -80,21 +89,15 @@ export function parseCookieHeader(header?: string | null): Record<string, string
 }
 
 /**
- * Extracts sessionToken from Cookie header, respecting security precedence:
- * __Secure-authjs.session-token > authjs.session-token > legacy fallback names.
+ * Extracts the sessionToken Auth.js would read for a request of this scheme.
  */
-export function extractSessionToken(cookieHeader?: string | null): string | null {
+export function extractSessionToken(
+  cookieHeader: string | null | undefined,
+  options: { secure: boolean },
+): string | null {
   if (!cookieHeader) return null;
-  const cookies = parseCookieHeader(cookieHeader);
-
-  for (const cookieName of SESSION_COOKIE_NAMES) {
-    const token = cookies[cookieName];
-    if (token && typeof token === "string" && token.trim().length > 0) {
-      return token.trim();
-    }
-  }
-
-  return null;
+  const token = parseCookieHeader(cookieHeader)[sessionCookieName(options.secure)];
+  return token ? token : null;
 }
 
 export interface ResolveSessionOptions {
@@ -197,14 +200,15 @@ export interface SessionMiddlewareOptions {
 export function sessionMiddleware(options?: SessionMiddlewareOptions) {
   return async (
     c: {
-      req: { header(name: string): string | undefined };
+      req: { url: string; header(name: string): string | undefined };
       env?: { DB?: D1DatabaseLike };
       set(key: string, value: unknown): void;
     },
     next: () => Promise<void>,
   ): Promise<void> => {
     const cookieHeader = c.req.header("cookie");
-    const token = extractSessionToken(cookieHeader);
+    const secure = new URL(c.req.url).protocol === "https:";
+    const token = extractSessionToken(cookieHeader, { secure });
     const db = c.env?.DB;
 
     if (!db || !token) {
