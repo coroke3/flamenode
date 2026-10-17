@@ -277,7 +277,9 @@ export async function buildEventsIndexData(
          FROM events
          WHERE visibility_status = 'public'
            AND ${NON_POINT_EVENT_PERIOD_SQL}
-         ORDER BY start_time DESC, created_at DESC, id ASC
+         -- Match CURRENT workers/json-generator/rebuild.ts::rebuildEventsIndex.
+         -- Do not impose additional tie-breakers here: they change legacy ordering.
+         ORDER BY start_time DESC
          LIMIT ?`,
       )
       .bind(rowLimit)
