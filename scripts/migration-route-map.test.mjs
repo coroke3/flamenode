@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
 import {
@@ -188,6 +189,50 @@ test("legacy redirects cannot shadow fixed routes or leave the site", () => {
   assert.throws(() => build("/groups/a", "https://evil.example"), InvalidRouteIdError);
   assert.throws(() => build("/groups/a", "/..%2Fadmin"), InvalidRouteIdError);
   assert.equal(build("/groups/a", "/event#event-group-a").routes["groups/a"].targetPath, "/event#event-group-a");
+
+  // Browsers strip tab/CR/LF while parsing, so these would become `//evil.example`.
+  for (const toPath of ["/\t/evil.example/x", "/\n/evil.example", "/\r/evil.example", "/ /evil.example", "/\u0000x"]) {
+    assert.throws(() => build("/groups/a", toPath), InvalidRouteIdError, JSON.stringify(toPath));
+  }
+});
+
+test("CURRENT id formats are accepted: X handles with `_`, YouTube ids with `-` / `_`", () => {
+  const manifest = buildRouteMap(
+    [
+      { kind: "user", id: "_flame", aliases: ["__init__", "_"] },
+      { kind: "video", id: "1234", aliases: ["-dQw4w9WgXc", "_dQw4w9WgXc"] },
+      { kind: "user", id: "__proto__" },
+    ],
+    "gen-01",
+  );
+  const parsed = JSON.parse(JSON.stringify(manifest));
+  assert.equal(lookupRoute(parsed, "/user/_flame").type, "canonical");
+  assert.equal(lookupRoute(parsed, "/user/__init__").targetPath, "/user/_flame");
+  assert.equal(lookupRoute(parsed, "-dQw4w9WgXc").targetPath, "/1234");
+  assert.equal(lookupRoute(parsed, "user/__proto__").id, "__proto__");
+  assert.equal(lookupRoute(parsed, "__proto__"), null);
+  assert.throws(() => buildRouteMap([{ kind: "video", id: "_next" }], "gen-01"), RouteCollisionError);
+});
+
+test("reserved lists cover every CURRENT top-level route segment and public/ entry", () => {
+  const root = new URL("../", import.meta.url);
+  const segments = new Set();
+  const collect = (dir) => {
+    for (const entry of readdirSync(new URL(dir, root), { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (/^\(.+\)$/.test(entry.name)) collect(`${dir}${entry.name}/`); // route group
+      else if (!entry.name.startsWith("[") && !entry.name.startsWith("_")) segments.add(entry.name);
+    }
+  };
+  collect("app/");
+  for (const segment of segments) {
+    assert.ok(RESERVED_ROOT_SLUGS.has(segment), `app/ segment '${segment}' missing from RESERVED_ROOT_SLUGS`);
+  }
+  for (const name of readdirSync(new URL("public/", root))) {
+    assert.ok(RESERVED_ASSET_PATHS.has(name), `public/${name} missing from RESERVED_ASSET_PATHS`);
+  }
+  // Metadata routes generated from app/robots.ts and app/sitemap.ts.
+  for (const name of ["robots.txt", "sitemap.xml", "favicon.ico"]) assert.ok(RESERVED_ASSET_PATHS.has(name), name);
 });
 
 test("legacy redirects and determinism", () => {
