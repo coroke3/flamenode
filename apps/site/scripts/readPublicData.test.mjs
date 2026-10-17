@@ -204,6 +204,38 @@ describe("readPublicData", () => {
     assert.strictEqual(okData.items.length, 3);
   });
 
+  it("T01 parity: index ordering agrees with CURRENT SQL when event start times tie", async () => {
+    const rawDb = new DatabaseSync(":memory:");
+    initTestSchema(rawDb);
+    try {
+      rawDb.exec(`
+        INSERT INTO events (id, title, start_time, end_time, created_at, visibility_status)
+        VALUES ('ev-latest', 'Latest', 200, 210, 1, 'public'),
+               ('ev-b', 'Earlier created', 100, 110, 1, 'public'),
+               ('ev-a', 'Later created', 100, 110, 999, 'public');
+      `);
+      // This is the literal CURRENT rebuildEventsIndex list query ordering.
+      const currentOrder = rawDb.prepare(`
+        SELECT id FROM events
+        WHERE visibility_status = 'public'
+          AND ((start_time IS NULL AND end_time IS NULL)
+               OR (start_time IS NOT NULL AND end_time IS NOT NULL))
+        ORDER BY start_time DESC
+        LIMIT ?
+      `).all(EVENTS_INDEX_MAX_ROWS).map((row) => row.id);
+      const migrated = await buildEventsIndexData(createMockD1(rawDb), {
+        generatedAt: 1715000000,
+      });
+      assert.deepStrictEqual(
+        migrated.items.map((row) => row.id),
+        currentOrder,
+        "the migrated index must preserve CURRENT's tie ordering rather than introducing created_at sorting",
+      );
+    } finally {
+      rawDb.close();
+    }
+  });
+
   it("T04: produces deterministic byte output across multiple runs", async () => {
     const rawDb = new DatabaseSync(":memory:");
     initTestSchema(rawDb);
