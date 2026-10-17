@@ -83,6 +83,29 @@ function initTestSchema(db) {
 }
 
 describe("readPublicData", () => {
+  it("preserves deeply nested event fields while sorting keys deterministically", () => {
+    const payload = {
+      generated_at: 123,
+      items: [{ id: "ev-01", title: "Festival", public_operator_names: ["A", "B"] }],
+      group_sections: [{ id: "group-01", name: "Group", events: [{ id: "ev-01", title: "Festival" }] }],
+    };
+    const reordered = {
+      items: [{ title: "Festival", public_operator_names: ["A", "B"], id: "ev-01" }],
+      group_sections: [{ events: [{ title: "Festival", id: "ev-01" }], name: "Group", id: "group-01" }],
+      generated_at: 123,
+    };
+
+    const serialized = deterministicStringify(payload);
+    assert.deepStrictEqual(JSON.parse(serialized), payload, "nested fields must not be discarded");
+    assert.strictEqual(serialized, deterministicStringify(reordered), "key insertion order must not change output");
+    assert.deepStrictEqual(JSON.parse(serialized).items[0].public_operator_names, ["A", "B"]);
+  });
+
+  it("preserves array ordering, nulls and escaped Unicode text", () => {
+    const source = { rows: [{ z: null, a: "日本語\\n改行" }, { z: 1, a: "two" }] };
+    const encoded = deterministicStringify(source);
+    assert.deepStrictEqual(JSON.parse(encoded), source);
+  });
   it("T01: produces valid events/index.json output matching CURRENT structure", async () => {
     const rawDb = new DatabaseSync(":memory:");
     initTestSchema(rawDb);
