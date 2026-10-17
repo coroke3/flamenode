@@ -7,6 +7,7 @@ import {
   TableScroll,
   shouldBlockSearchKeySubmit,
   shouldBlockSearchFormSubmit,
+  isGetSearchFormMethod,
   IME_COMPOSING_ATTR,
   AutoSubmitSelect,
   navigateGetForm,
@@ -175,6 +176,15 @@ test("U03: AutoSubmitSelect preserves GET values and ignores IME composing forms
   }
 });
 
+
+test("ImeSafeGetForm only intercepts GET and leaves native POST submission intact", () => {
+  assert.equal(isGetSearchFormMethod(null), true, "default method is GET");
+  assert.equal(isGetSearchFormMethod("GET"), true);
+  assert.equal(isGetSearchFormMethod(" get "), true);
+  assert.equal(isGetSearchFormMethod("post"), false, "POST must not be routed through navigateGetForm");
+  assert.equal(isGetSearchFormMethod("POST"), false);
+  assert.equal(isGetSearchFormMethod("dialog"), false);
+});
 
 test("non-GET navigation preserves constraint validation and submit handlers", () => {
   let nativeSubmit = 0;
