@@ -211,9 +211,14 @@
 | `src/lib/actions/xidPendingInsert.ts` | ACTION_HELPER | no SA export; inspect callers | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/xidRequestReliabilityCore.ts` | ACTION_HELPER | no SA export; inspect callers | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/youtube-sync-admin.ts` | SERVER_ACTION | SA-106 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/db/schema.base.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
-| `src/lib/db/schema.canonical.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
-| `src/lib/db/schema.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
+| `src/lib/db/schema.base.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/base.ts | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `src/lib/db/schema.canonical.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/canonical.ts | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `src/lib/db/schema.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/index.ts | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `packages/db/package.json` | TARGET_SKELETON | D-01 @flamenode/db package config | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `packages/db/tsconfig.json` | TARGET_SKELETON | D-01 @flamenode/db tsconfig | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `packages/db/src/schema/base.ts` | DB_SCHEMA | D-01 unmutated table fragment | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `packages/db/src/schema/canonical.ts` | DB_SCHEMA | D-01 canonical table definitions | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
+| `packages/db/src/schema/index.ts` | DB_SCHEMA | D-01 canonical schema single entrypoint | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=6bcb54d7e5d8a90ec4c3ea89d53347c617bdfdb9 |
 | `tsconfig.base.json` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 | `workers/cleanup/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/content-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
@@ -257,7 +262,6 @@
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
-| `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | NOT_CREATED | visibility manifest/cache/fail-closed + Route PoC |
