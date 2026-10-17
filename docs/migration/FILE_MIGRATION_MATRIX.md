@@ -278,6 +278,12 @@
 | `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |
 | `src/lib/event/eventVisibilityTransition.ts` | HELPER | event visibility fail closed | MIG-0305 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
+| `src/lib/auth/activeXSnapshotCore.ts` | HELPER | active X snapshot validation | MIG-0306 | packages/domain/src/xid/activeXSnapshot.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
+| `src/lib/auth/writeGuardCore.ts` | HELPER | write identity and cost guard evaluation | MIG-0306 | packages/domain/src/admin/costGuard.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
+| `src/lib/auth/xIdentityRequestCore.ts` | HELPER | X identity request validation and DTO | MIG-0306 | packages/domain/src/xid/requests.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
+| `src/lib/auth/xIdentityResolutionCore.ts` | HELPER | canonical X user resolution | MIG-0306 | packages/domain/src/xid/resolution.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
+| `src/lib/utils/xid.ts` | HELPER | X identity format and parsing | MIG-0306 | packages/domain/src/xid/format.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
+| `src/lib/xid/entries.ts` | HELPER | X identity entries normalization and sort | MIG-0306 | packages/domain/src/xid/entries.ts (legacy bridge) | IN_PROGRESS | PR#320 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
 | `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0505 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
 | `src/lib/audit/mutate.ts` | HELPER | strict audit/transaction | MIG-0303 | DB application adapter (retain atomicity) | NOT_STARTED | — |
 | `src/components/layout/bodyScrollLock.ts` | HELPER | modal/drawer body scroll lock primitive | MIG-0202 | packages/ui/src/layout/bodyScrollLock.ts (retain scroll restoration) | NOT_STARTED | — |
