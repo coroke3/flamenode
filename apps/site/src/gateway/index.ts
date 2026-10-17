@@ -1,12 +1,29 @@
 /**
  * Cloudflare visibility gateway entrypoint (MIG-0405 / Recipe R-GATEWAY / Runtime S1).
- * Thin Worker layer routing public requests to Static Assets / prebuilt R2 HTML.
+ * Thin Worker in front of Static Assets / prebuilt R2 HTML. Per request it reads at most
+ * one route shard (Static Assets), one KV revocation entry and one R2 object (ZERO_1102.md S1).
+ * Non-production PoC: no wrangler.toml, Route or Custom Domain uses it yet.
  */
-import type { RouteManifest } from "../lib/routeMap.ts";
-import { evaluateVisibility, type GatewayRevocationChecker } from "./visibility.ts";
+import type { RouteResolution } from "../lib/routeMap.ts";
+import {
+  parseRouteShard,
+  revocationKey,
+  shardAssetPath,
+  shardIndexForKey,
+  type RouteShard,
+} from "./routeShards.ts";
+import {
+  evaluateVisibility,
+  type GatewayDecision,
+  type GatewayRevocationChecker,
+  type RouteLookup,
+} from "./visibility.ts";
+
+type Fetcher = { fetch: (request: Request) => Promise<Response> };
 
 export interface GatewayEnv {
-  ASSETS?: { fetch: (request: Request) => Promise<Response> };
+  /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
+  ASSETS?: Fetcher;
   R2_STORAGE?: {
     get: (key: string) => Promise<{
       body: ReadableStream;
@@ -16,76 +33,136 @@ export interface GatewayEnv {
     } | null>;
   };
   // Explicit service binding to the existing Auth.js origin; never return a fake auth 404.
-  AUTH_ORIGIN?: { fetch: (request: Request) => Promise<Response> };
+  AUTH_ORIGIN?: Fetcher;
   VISIBILITY_KV?: {
     get: (key: string) => Promise<string | null>;
   };
-  ROUTE_MANIFEST?: string | RouteManifest;
 }
 
-// Workers isolates are reused: deserialize a large manifest only on binding change.
-let cachedRawManifest: string | undefined;
-let cachedParsedManifest: RouteManifest | null = null;
+const NO_STORE = "no-store, private";
+const NOINDEX = "noindex, nofollow";
 
-function isValidManifest(value: unknown): value is RouteManifest {
-  if (!value || typeof value !== "object") return false;
-  const m = value as Partial<RouteManifest>;
-  return m.schemaVersion === 1 && typeof m.generation === "string" &&
-    m.generation.trim().length > 0 &&
-    typeof m.sha256 === "string" && /^[a-f0-9]{64}$/i.test(m.sha256) &&
-    Number.isSafeInteger(m.totalEntries) && (m.totalEntries ?? -1) >= 0 &&
-    !!m.routes && typeof m.routes === "object" && !Array.isArray(m.routes);
+function textResponse(status: number, body: string, extra: Record<string, string> = {}): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": NO_STORE,
+      "X-Robots-Tag": NOINDEX,
+      ...extra,
+    },
+  });
 }
 
-function parseManifest(raw: unknown): RouteManifest | null {
-  if (!raw) return null;
-  if (typeof raw === "object") return isValidManifest(raw) ? raw : null;
-  if (typeof raw === "string") {
-    if (cachedRawManifest === raw) return cachedParsedManifest;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      cachedParsedManifest = isValidManifest(parsed) ? parsed : null;
-    } catch {
-      cachedParsedManifest = null;
-    }
-    cachedRawManifest = raw;
-    return cachedParsedManifest;
+const unavailable = () => textResponse(503, "Service Unavailable");
+const notFound = () => textResponse(404, "Not Found");
+
+// Parsed shards are small (~20 KB at 52k routes); keep a bounded number per isolate.
+// A shard belongs to one Static Assets version, so it cannot go stale within an isolate.
+const SHARD_CACHE_LIMIT = 64;
+const shardCache = new Map<number, RouteShard>();
+
+function rememberShard(index: number, shard: RouteShard): void {
+  if (shardCache.size >= SHARD_CACHE_LIMIT) {
+    const oldest = shardCache.keys().next().value;
+    if (oldest !== undefined) shardCache.delete(oldest);
   }
-  return null;
+  shardCache.set(index, shard);
+}
+
+/** Test hook: forget cached shards so each test starts cold. */
+export function resetGatewayCaches(): void {
+  shardCache.clear();
+}
+
+function createShardLookup(assets: Fetcher, origin: string): RouteLookup {
+  return async (key) => {
+    const index = shardIndexForKey(key);
+    let shard = shardCache.get(index);
+    if (!shard) {
+      let response: Response;
+      try {
+        response = await assets.fetch(new Request(new URL(shardAssetPath(index), origin)));
+      } catch {
+        return undefined;
+      }
+      if (response.status !== 200) return undefined;
+      const parsed = parseRouteShard(await response.text(), index);
+      if (!parsed) return undefined;
+      shard = parsed;
+      rememberShard(index, shard);
+    }
+    const resolution: RouteResolution | null = Object.hasOwn(shard.routes, key)
+      ? shard.routes[key]
+      : null;
+    return { resolution, generation: shard.generation };
+  };
 }
 
 export function createKvRevocationChecker(
   kv?: { get: (key: string) => Promise<string | null> },
 ): GatewayRevocationChecker | undefined {
   if (!kv) return undefined;
-  return async (kind: string, id: string): Promise<boolean> => {
-    // D-09: Single KV read per request to check post-build revocation entry
-    const value = await kv.get(`deny:${kind}:${id}`);
-    return value !== null;
-  };
+  // D-09: one KV read per served page for the post-build revocation entry.
+  return async (kind, id) => (await kv.get(revocationKey(kind, id))) !== null;
 }
 
-function unavailableResponse(): Response {
-  return new Response("Service Unavailable", {
-    status: 503,
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store, private",
-      "X-Robots-Tag": "noindex, nofollow",
-    },
-  });
+async function forwardToAuth(request: Request, env: GatewayEnv): Promise<Response> {
+  if (!env.AUTH_ORIGIN) return unavailable();
+  try {
+    return await env.AUTH_ORIGIN.fetch(request);
+  } catch {
+    return unavailable();
+  }
 }
 
-// A single Worker binding object is stable within one request environment.
-// Reuse its validated, parsed manifest instead of traversing megabytes of JSON per fetch.
-const manifestByEnv = new WeakMap<GatewayEnv, { raw: unknown; parsed: RouteManifest | null }>();
-function manifestForEnv(env: GatewayEnv): RouteManifest | null {
-  const raw = env.ROUTE_MANIFEST;
-  const cached = manifestByEnv.get(env);
-  if (cached?.raw === raw) return cached.parsed;
-  const parsed = parseManifest(raw);
-  manifestByEnv.set(env, { raw, parsed });
-  return parsed;
+/** Static Assets first, then the prebuilt R2 HTML (D-06). */
+async function servePage(
+  decision: Extract<GatewayDecision, { action: "serve" }>,
+  request: Request,
+  env: GatewayEnv,
+): Promise<Response> {
+  const url = new URL(request.url);
+  if (env.ASSETS) {
+    // Ask for the directory form: with the default html_handling
+    // (auto-trailing-slash) `/x/index.html` and `/x` answer with a redirect.
+    const assetUrl = new URL(`/${decision.key}/`, url.origin);
+    let asset: Response;
+    try {
+      asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method, headers: request.headers }));
+    } catch {
+      return unavailable();
+    }
+    if (asset.status === 200 || asset.status === 304) return asset;
+    // Anything but a miss (a redirect, an error) is not known-good public HTML.
+    if (asset.status !== 404) return unavailable();
+  }
+
+  if (env.R2_STORAGE) {
+    let object;
+    try {
+      object = await env.R2_STORAGE.get(`${decision.key}/index.html`);
+    } catch {
+      return unavailable();
+    }
+    if (object) {
+      // A stale, untyped, or empty R2 object is not public content.
+      const contentType = object.httpMetadata?.contentType ?? "";
+      if (object.customMetadata?.generation !== decision.generation ||
+          !Number.isFinite(object.size) || (object.size ?? 0) <= 0 || !object.body ||
+          !/^text\/html(?:\s*;|$)/i.test(contentType)) {
+        return unavailable();
+      }
+      return new Response(request.method === "HEAD" ? null : object.body, {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=0, must-revalidate",
+        },
+      });
+    }
+  }
+  return notFound();
 }
 
 export default {
@@ -93,121 +170,42 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // Auth.js remains owned by the existing origin, even when the manifest or
-    // revocation KV is unavailable. Do not parse the large manifest on auth hits.
-    if (path === "/api/auth" || path.startsWith("/api/auth/")) {
-      if (!env.AUTH_ORIGIN) return unavailableResponse();
-      try {
-        return await env.AUTH_ORIGIN.fetch(request);
-      } catch {
-        return unavailableResponse();
-      }
+    // Auth.js stays on the existing origin, independent of route data and KV.
+    if (path === "/api/auth" || path.startsWith("/api/auth/")) return forwardToAuth(request, env);
+
+    // Public pages are read-only here; CURRENT Server Action POSTs need the Phase 6 APIs first.
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return textResponse(405, "Method Not Allowed", { Allow: "GET, HEAD" });
     }
-    if (!env.VISIBILITY_KV) return unavailableResponse();
+    if (!env.ASSETS || !env.VISIBILITY_KV) return unavailable();
 
-    const manifest = manifestForEnv(env);
-    const revocationChecker = createKvRevocationChecker(env.VISIBILITY_KV);
-
-    // Missing a revocation fence must never expose prebuilt public HTML.
-    // Keep auth passthrough independent of the manifest/fence.
-    let decision;
+    let decision: GatewayDecision;
     try {
-      decision = await evaluateVisibility(path, manifest, revocationChecker);
+      decision = await evaluateVisibility(
+        path,
+        createShardLookup(env.ASSETS, url.origin),
+        createKvRevocationChecker(env.VISIBILITY_KV),
+      );
     } catch {
-      return unavailableResponse();
+      return unavailable();
     }
 
-    if (decision.action === "bypass") {
-      if (!env.AUTH_ORIGIN) return unavailableResponse();
-      try {
-        return await env.AUTH_ORIGIN.fetch(request);
-      } catch {
-        return unavailableResponse();
-      }
+    switch (decision.action) {
+      case "redirect":
+        return new Response(null, {
+          status: decision.status,
+          headers: {
+            // Keep the query, as CURRENT Next redirects do (e.g. `?tab=works`).
+            Location: decision.targetPath + url.search,
+            "Cache-Control": "public, max-age=300",
+          },
+        });
+      case "deny":
+        return notFound();
+      case "unavailable":
+        return unavailable();
+      case "serve":
+        return servePage(decision, request, env);
     }
-
-    if (decision.action === "redirect") {
-      return new Response(null, {
-        status: decision.status,
-        headers: {
-          Location: decision.targetPath,
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-    }
-
-    if (decision.action === "unavailable") {
-      return new Response("Service Unavailable", {
-        status: 503,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store, private",
-        },
-      });
-    }
-
-    if (decision.action === "deny") {
-      return new Response("Not Found", {
-        status: 404,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          ...decision.headers,
-        },
-      });
-    }
-
-    if (decision.action === "serve") {
-      if (!revocationChecker) return unavailableResponse();
-      // 1. Try serving from Static Assets
-      if (env.ASSETS) {
-        const assetUrl = new URL(decision.assetPath, request.url);
-        const assetRequest = new Request(assetUrl.toString(), request);
-        try {
-          const assetResponse = await env.ASSETS.fetch(assetRequest);
-          if (assetResponse.status !== 404) return assetResponse;
-        } catch {
-          return unavailableResponse();
-        }
-      }
-
-      // 2. Try pre-generated R2 HTML if assets misses (D-06)
-      if (env.R2_STORAGE) {
-        const r2Key = decision.assetPath.replace(/^\//, "");
-        let r2Object;
-        try {
-          r2Object = await env.R2_STORAGE.get(r2Key);
-        } catch {
-          return unavailableResponse();
-        }
-        if (r2Object) {
-          // A stale, untyped, or empty R2 object is not public content.
-          if (r2Object.customMetadata?.generation !== manifest?.generation ||
-              !Number.isFinite(r2Object.size) || (r2Object.size ?? 0) <= 0 ||
-              !r2Object.body ||
-              !/^text\/html(?:\s*;|$)/i.test(r2Object.httpMetadata?.contentType ?? "")) {
-            return unavailableResponse();
-          }
-          return new Response(r2Object.body, {
-            status: 200,
-            headers: {
-              "Content-Type":
-                r2Object.httpMetadata!.contentType!,
-              "Cache-Control": "public, max-age=0, must-revalidate",
-            },
-          });
-        }
-      }
-
-      // If neither asset nor R2 has the content, fail-closed 404
-      return new Response("Not Found", {
-        status: 404,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "X-Robots-Tag": "noindex, nofollow",
-        },
-      });
-    }
-
-    return new Response("Not Found", { status: 404 });
   },
 };
