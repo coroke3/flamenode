@@ -254,6 +254,11 @@ export async function buildEventsIndexData(
   options?: { generatedAt?: number; rowLimit?: number },
 ): Promise<EventsIndexPayload> {
   const rowLimit = options?.rowLimit ?? EVENTS_INDEX_MAX_ROWS;
+  // A negative SQLite LIMIT means "unlimited". Reject invalid overrides before
+  // touching D1 so this build-time reader always stays within its fixed budget.
+  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > EVENTS_INDEX_MAX_ROWS) {
+    throw new RangeError(`Invalid events index rowLimit: expected integer 1..${EVENTS_INDEX_MAX_ROWS}`);
+  }
 
   const countResult = await db
     .prepare(
