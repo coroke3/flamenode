@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -14,8 +14,8 @@ import {
 } from "./authBaseline.fixture.mjs";
 
 // Characterizes CURRENT Auth.js behaviour: the real buildAuthConfig() from
-// src/lib/auth/index.ts runs through @auth/core against an in-memory D1 copy of
-// migrations/0000_flame_node_baseline.sql. Nothing here reimplements auth logic.
+// src/lib/auth/index.ts runs through @auth/core against an in-memory D1 built from
+// every file in migrations/. Nothing here reimplements auth logic.
 if (runTestWithTsx(import.meta.url)) {
   globalThis.__authBaselineContext = { env: {} };
   registerHooks({
@@ -40,13 +40,15 @@ if (runTestWithTsx(import.meta.url)) {
   const { Auth } = await import("@auth/core");
   const { buildAuthConfig } = await import("./index.ts");
   const { linkDiscordAccountAtomically } = await import("./accountLinkAdapter.ts");
+  const { resolveActiveXUserId } = await import("./resolveActiveXId.ts");
   const { drizzle } = await import("drizzle-orm/d1");
   const schema = await import("../db/schema.ts");
 
-  const baseline = readFileSync(
-    new URL("../../../migrations/0000_flame_node_baseline.sql", import.meta.url),
-    "utf8",
-  );
+  const migrationsDir = new URL("../../../migrations/", import.meta.url);
+  const migrations = readdirSync(migrationsDir)
+    .filter((name) => name.endsWith(".sql"))
+    .sort()
+    .map((name) => readFileSync(new URL(name, migrationsDir), "utf8"));
 
   function createD1Client(sqlite) {
     const meta = (changes = 0) => ({ duration: 0, changes, last_row_id: 0, changed_db: changes > 0 });
@@ -92,7 +94,7 @@ if (runTestWithTsx(import.meta.url)) {
 
   function createHarness(t) {
     const sqlite = new DatabaseSync(":memory:");
-    sqlite.exec(baseline);
+    for (const sql of migrations) sqlite.exec(sql);
     for (const user of Object.values(USERS)) {
       sqlite
         .prepare(
@@ -254,13 +256,40 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(body.user.is_banned, 1);
   });
 
-  test("U02: user without X gets active_x_user_id=null; multi-X user gets the stored primary", async (t) => {
+  test("U02: session exposes the stored active_x_user_id as-is (not trusted downstream)", async (t) => {
     createHarness(t);
     assert.equal((await readSession(SESSIONS.noX.sessionToken)).body.user.active_x_user_id, null);
     assert.equal(
       (await readSession(SESSIONS.multiX.sessionToken)).body.user.active_x_user_id,
       USERS.multiX.active_x_user_id,
     );
+  });
+
+  // currentUser.ts ignores the session value and resolves Active X from approved links.
+  function linkX(sqlite, authUserId, xUserId, approval) {
+    sqlite
+      .prepare(`INSERT OR IGNORE INTO "x_users" (id, x_name, approval_status) VALUES (?, ?, ?)`)
+      .run(xUserId, xUserId, approval);
+    sqlite
+      .prepare(`INSERT INTO "x_user_account_links" (x_user_id, auth_user_id) VALUES (?, ?)`)
+      .run(xUserId, authUserId);
+  }
+
+  test("U02: Active X resolution with 0, 1 and several linked X accounts", async (t) => {
+    const { sqlite, db } = createHarness(t);
+    const user = USERS.multiX.id;
+
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-primary"), null, "0 links");
+
+    linkX(sqlite, user, "x-mock-primary", "approved");
+    assert.equal(await resolveActiveXUserId(db, user, null), "x-mock-primary", "1 link, none selected");
+
+    linkX(sqlite, user, "x-mock-second", "approved");
+    linkX(sqlite, user, "x-mock-pending", "pending");
+    assert.equal(await resolveActiveXUserId(db, user, "X-Mock-Primary"), "x-mock-primary", "selected, case-insensitive");
+    assert.equal(await resolveActiveXUserId(db, user, null), null, "several links, none selected");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-pending"), null, "selected but not approved");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-other"), null, "selected but not linked");
   });
 
   test("T02/U03: linking a Discord account owned by another user is rejected", async (t) => {
