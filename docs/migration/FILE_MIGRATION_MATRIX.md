@@ -217,9 +217,14 @@
 | `src/lib/actions/xidPendingInsert.ts` | ACTION_HELPER | no SA export; inspect callers | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/xidRequestReliabilityCore.ts` | ACTION_HELPER | no SA export; inspect callers | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/youtube-sync-admin.ts` | SERVER_ACTION | SA-106 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/db/schema.base.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
-| `src/lib/db/schema.canonical.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
-| `src/lib/db/schema.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
+| `src/lib/db/schema.base.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/base.ts | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `src/lib/db/schema.canonical.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/canonical.ts | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `src/lib/db/schema.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | packages/db/src/schema/index.ts | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `packages/db/package.json` | TARGET_SKELETON | D-01 @flamenode/db package config | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `packages/db/tsconfig.json` | TARGET_SKELETON | D-01 @flamenode/db tsconfig | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `packages/db/src/schema/base.ts` | DB_SCHEMA | D-01 unmutated table fragment | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `packages/db/src/schema/canonical.ts` | DB_SCHEMA | D-01 canonical table definitions | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `packages/db/src/schema/index.ts` | DB_SCHEMA | D-01 canonical schema single entrypoint | MIG-0308 | SAME | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
 | `tsconfig.base.json` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 | `workers/cleanup/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/content-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
@@ -237,6 +242,9 @@
 | `packages/domain/test/reservationLimit.test.mjs` | TEST | domain reservation limit T01-T03 | MIG-0301 | SAME | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
 | `src/lib/slots/slotReservationLimit.contract.test.mjs` | TEST | slot normalization contract | MIG-0301 | SAME (legacy+new parity) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=node --test --experimental-strip-types src/lib/slots/slotReservationLimit.contract.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
 | `src/lib/slots/slotReservationLimitGuard.execution.test.mjs` | TEST | reservation D1 atomicity | MIG-0301 | SAME (legacy DB guard proof) | RETAINED | PR#304 SHA=ed8eda0603d50b3e87feba1f71f3d678574c49ce TEST=node --test --experimental-strip-types src/lib/slots/slotReservationLimitGuard.execution.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38897360861 |
+| `src/lib/auth/xIdentityCanonical.contract.test.mjs` | TEST | canonical schema and X identity contract | MIG-0308 | SAME (legacy+new parity) | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `src/lib/publicData/xUsersLowerIdIndex.test.mjs` | TEST | canonical schema lower(id) index contract | MIG-0308 | SAME (legacy+new parity) | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
+| `workers/youtube-playlist-sync/slotOrder.contract.test.mjs` | TEST | canonical schema slot order contract | MIG-0308 | SAME (legacy+new parity) | IN_PROGRESS | PR#315 SHA=354f884ea21356f9a42a5e68b562bfb7c0490fa4 |
 | `packages/domain/src/software/labels.ts` | HELPER | pure software label normalization logic | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `packages/domain/src/slots/limits.ts` | HELPER | pure slot limit normalization logic | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `packages/domain/test/softwareLabels.test.mjs` | TEST | softwareLabels T01-T03 normalization tests | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
@@ -266,7 +274,6 @@
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
-| `packages/db/src/schema/{base,canonical,index}.ts` | MIG-0308 | NOT_CREATED | 3 old schema rows + canonical exports + Drizzle/config checker |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | NOT_CREATED | visibility manifest/cache/fail-closed + Route PoC |
