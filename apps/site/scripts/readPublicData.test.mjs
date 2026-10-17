@@ -177,6 +177,25 @@ describe("readPublicData", () => {
     assert.ok(!ids.includes("ev-point-2"));
   });
 
+  it("T03: rejects invalid row limits before any D1 query", async () => {
+    let queryCount = 0;
+    const db = {
+      prepare() {
+        queryCount += 1;
+        throw new Error("D1 must not be accessed for invalid limits");
+      },
+    };
+
+    for (const rowLimit of [-1, 0, 1.5, NaN, Infinity, EVENTS_INDEX_MAX_ROWS + 1]) {
+      await assert.rejects(
+        buildEventsIndexData(db, { rowLimit }),
+        /Invalid events index rowLimit: expected integer/,
+        `rowLimit=${String(rowLimit)} must be rejected`,
+      );
+    }
+    assert.strictEqual(queryCount, 0, "invalid inputs must perform zero D1 reads");
+  });
+
   it("T03: fails build when row count exceeds MAX limit", async () => {
     const rawDb = new DatabaseSync(":memory:");
     initTestSchema(rawDb);
