@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-16
+> Last updated: 2026-10-17
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0801
+Current Task: MIG-0203
 Current Owner: unassigned
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0801
-Last Task PR: #307
-Merged READY: MIG-0203, MIG-0204, MIG-0302, MIG-0405, MIG-0409, MIG-0608
+Last Completed Task: MIG-0203
+Last Task PR: #309
+Merged READY: MIG-0204, MIG-0302, MIG-0405, MIG-0409, MIG-0608
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,7 +106,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202 DONE / MIG-0203, MIG-0204 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203 DONE / MIG-0204 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404 DONE / MIG-0405, MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -230,7 +230,7 @@ Validation:
 | MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | DONE | user input |
 | MIG-0201 | visual/IA extraction + design tokens | DONE | MIG-0108, MIG-0200 |
 | MIG-0202 | primitives | DONE | MIG-0201 |
-| MIG-0203 | navigation/layout | READY | MIG-0202 |
+| MIG-0203 | navigation/layout | DONE | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | READY | MIG-0202 |
 | MIG-0205 | representative responsive screens + UX mapping | BLOCKED | MIG-0203, MIG-0204 |
 | MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
