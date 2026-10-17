@@ -298,8 +298,24 @@ export async function buildEventsIndexData(
   };
 }
 
+/** Stable JSON for build artifacts: sort object keys recursively, never filter fields. */
 export function deterministicStringify(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as object).sort(), 2);
+  return JSON.stringify(
+    value,
+    (_key, nested: unknown) => {
+      if (nested === null || typeof nested !== "object" || Array.isArray(nested)) {
+        return nested;
+      }
+      // A replacer *array* would whitelist keys at every nesting level and discard
+      // event details. A replacer function sorts each object without losing fields.
+      return Object.fromEntries(
+        Object.entries(nested).sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0,
+        ),
+      );
+    },
+    2,
+  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
