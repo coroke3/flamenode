@@ -266,6 +266,11 @@
 | `packages/ui/src/forms/AutoSubmitSelect.tsx` | HELPER | GET select/checkbox immediate navigation and IME composition guard (CURRENT parity) | MIG-0204 | SAME | IN_PROGRESS | PR#311 SHA=79894603427426f60967850b1ff5a92b9748afd7 TEST=packages/ui/test/dataAndForms.test.mjs (CI pending) |
 | `packages/ui/test/feedback.test.mjs` | TEST | feedback components unit tests | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
 | `packages/ui/test/dataAndForms.test.mjs` | TEST | pagination, scroll and IME guard tests | MIG-0204 | SAME | RETAINED | PR#311 SHA=d6dd37a6b7e193237eecba393273ee0a81180cf7 TEST=npm run test --workspace=@flamenode/ui LOG=local |
+| `packages/ui/src/screens/VideoDetailView.tsx` | HELPER | representative video detail responsive screen component | MIG-0205 | SAME | IN_PROGRESS | PR#317 SHA=dfb67564d2d6b38c227362df2eef0fe9ca86fcb8 |
+| `packages/ui/src/screens/EventDetailView.tsx` | HELPER | representative event detail responsive screen component | MIG-0205 | SAME | IN_PROGRESS | PR#317 SHA=dfb67564d2d6b38c227362df2eef0fe9ca86fcb8 |
+| `packages/ui/src/screens/CreatorView.tsx` | HELPER | representative creator profile responsive screen component | MIG-0205 | SAME | IN_PROGRESS | PR#317 SHA=dfb67564d2d6b38c227362df2eef0fe9ca86fcb8 |
+| `packages/ui/src/screens/index.ts` | HELPER | representative screens package entrypoint | MIG-0205 | SAME | IN_PROGRESS | PR#317 SHA=dfb67564d2d6b38c227362df2eef0fe9ca86fcb8 |
+| `packages/ui/test/screens.test.mjs` | TEST | representative screens unit and responsiveness tests | MIG-0205 | SAME | IN_PROGRESS | PR#317 SHA=dfb67564d2d6b38c227362df2eef0fe9ca86fcb8 |
 
 | `apps/site/src/lib/publicDataLoader.ts` | HELPER | build-only synthetic/read-only R2 snapshot DTO; deny-first manifest, generation and hash | MIG-0401 | SAME (Astro build-time source) | IN_PROGRESS | PR#283 SHA=34f8b2fae839de06c42841693c0fc11327d2bb71 |
 | `apps/site/src/pages/migration-fixture-poc/[id].astro` | TARGET_SKELETON | nonproduction fixture SSG route; public DTO only; no production ingress | MIG-0401 | SAME (Astro getStaticPaths fixture PoC) | IN_PROGRESS | PR#283 SHA=36bf4c67d197c47b7c3eae3b56f2c1e7cb2a01a9 |
