@@ -7,7 +7,10 @@
     ".": "./src/index.ts",
     "./slots/reservationLimit": "./src/slots/reservationLimit.ts",
     "./slots/limits": "./src/slots/limits.ts",
-    "./software/labels": "./src/software/labels.ts"
+    "./software/labels": "./src/software/labels.ts",
+    "./announcements": "./src/announcements/index.ts",
+    "./apiEndpoints": "./src/apiEndpoints/index.ts",
+    "./eventTemplates": "./src/eventTemplates/index.ts"
   },
   "scripts": {
     "build": "tsc",
