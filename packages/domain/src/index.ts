@@ -5,3 +5,6 @@ export * from "./software/labels.ts";
 export * from "./announcements/index.ts";
 export * from "./apiEndpoints/index.ts";
 export * from "./eventTemplates/index.ts";
+export * from "./xid/index.ts";
+export * from "./admin/index.ts";
+export * from "./user/index.ts";
