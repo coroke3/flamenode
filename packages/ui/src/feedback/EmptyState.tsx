@@ -6,7 +6,15 @@ export type EmptyStateTone = "neutral" | "success" | "warning" | "danger";
 export interface EmptyStateAction {
   href: string;
   label: string;
+  /** CURRENT `EmptyStateAction.variant`; default primary. */
+  variant?: "primary" | "ghost" | "danger";
 }
+
+const ACTION_CLASS = {
+  primary: "fn-btn fn-btn--primary",
+  ghost: "fn-btn fn-btn--tertiary",
+  danger: "fn-btn fn-btn--danger",
+} as const;
 
 export interface EmptyStateProps {
   title: string;
@@ -34,10 +42,7 @@ export function EmptyState({
   const allActions = actions ?? (action ? [action] : []);
 
   return (
-    <section
-      className={cx("fn-empty-state", `fn-empty-state--${tone}`, className)}
-      aria-label={title}
-    >
+    <section className={cx("fn-empty-state", `fn-empty-state--${tone}`, className)}>
       {icon ? (
         <div className="fn-empty-state-icon" aria-hidden="true">
           {icon}
@@ -53,7 +58,7 @@ export function EmptyState({
             <Link
               key={`${act.href}-${act.label}`}
               href={act.href}
-              className="fn-btn fn-btn--primary"
+              className={ACTION_CLASS[act.variant ?? "primary"]}
             >
               {act.label}
             </Link>
