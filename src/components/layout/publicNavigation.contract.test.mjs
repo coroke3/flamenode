@@ -7,18 +7,20 @@ const root = process.cwd();
 const read = (file) =>
   fs.readFileSync(path.join(root, file), "utf8");
 
-test("public header menus share one navigation source", () => {
+test("public header menus share one navigation source", async () => {
   const header = read("src/components/layout/PublicHeader.tsx");
   const account = read("src/components/layout/PublicAccountIsland.tsx");
-  const navigation = read("src/components/layout/publicNavigation.ts");
 
   assert.match(header, /from ["']\.\/publicNavigation["']/);
   assert.match(account, /from ["']\.\/publicNavigation["']/);
   assert.doesNotMatch(header, /const PUBLIC_NAV_ITEMS/);
   assert.doesNotMatch(account, /const MOBILE_NAV_ITEMS/);
-  assert.equal(
-    (navigation.match(/href: "\/(?:list|user|event)"/g) ?? []).length,
-    3,
+  // MIG-0203: the data moved to packages/ui behind a bridge, so check the values
+  // the module exports instead of the text of one file.
+  const { PUBLIC_NAV_ITEMS } = await import("./publicNavigation.ts");
+  assert.deepEqual(
+    PUBLIC_NAV_ITEMS.map((item) => item.href),
+    ["/list", "/user", "/event"],
   );
 });
 

@@ -18,7 +18,11 @@ type StoredBodyState = {
   };
 };
 
-let state: StoredBodyState | null = null;
+// Kept on globalThis so every copy of this module (the source imported by the Next
+// app through its bridge, and the `@flamenode/ui` dist build) shares one lock.
+const STATE_KEY = Symbol.for("flamenode.bodyScrollLock");
+type LockHolder = { [STATE_KEY]?: StoredBodyState | null };
+const holder = globalThis as LockHolder;
 
 export function acquireBodyScrollLock(): () => void {
   if (typeof window === "undefined" || typeof document === "undefined") {
@@ -27,6 +31,7 @@ export function acquireBodyScrollLock(): () => void {
 
   const body = document.body;
 
+  let state = holder[STATE_KEY] ?? null;
   if (!state) {
     const scrollX = window.scrollX;
     const scrollY = window.scrollY;
@@ -53,6 +58,7 @@ export function acquireBodyScrollLock(): () => void {
         paddingRight: body.style.paddingRight,
       },
     };
+    holder[STATE_KEY] = state;
 
     body.style.position = "fixed";
     body.style.top = `-${scrollY}px`;
@@ -67,22 +73,23 @@ export function acquireBodyScrollLock(): () => void {
   }
 
   state.count += 1;
+  const lock = state;
   let released = false;
 
   return () => {
-    if (released || !state) {
+    if (released || holder[STATE_KEY] !== lock) {
       return;
     }
 
     released = true;
-    state.count -= 1;
+    lock.count -= 1;
 
-    if (state.count > 0) {
+    if (lock.count > 0) {
       return;
     }
 
-    const snapshot = state;
-    state = null;
+    const snapshot = lock;
+    holder[STATE_KEY] = null;
 
     body.style.position = snapshot.styles.position;
     body.style.top = snapshot.styles.top;
@@ -101,5 +108,5 @@ export function acquireBodyScrollLock(): () => void {
 }
 
 export function getBodyScrollLockCountForTest(): number {
-  return state?.count ?? 0;
+  return holder[STATE_KEY]?.count ?? 0;
 }

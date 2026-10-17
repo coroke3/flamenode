@@ -10,14 +10,19 @@ const root = path.resolve(
   "../../..",
 );
 
-test("bodyScrollLock exports acquireBodyScrollLock", () => {
-  const source = readFileSync(
+test("bodyScrollLock bridge re-exports the canonical ui implementation", () => {
+  const bridge = readFileSync(
     path.join(root, "src/components/layout/bodyScrollLock.ts"),
     "utf8",
   );
-  assert.match(source, /export function\s*\n?acquireBodyScrollLock/);
-  assert.match(source, /state\.count/);
-  assert.match(source, /window\.scrollTo/);
+  assert.match(bridge, /acquireBodyScrollLock[\s\S]*from "@flamenode\/ui\/layout\/bodyScrollLock\.ts"/);
+  const canonical = readFileSync(
+    path.join(root, "packages/ui/src/layout/bodyScrollLock.ts"),
+    "utf8",
+  );
+  assert.match(canonical, /export function\s*\n?acquireBodyScrollLock/);
+  assert.match(canonical, /state\.count/);
+  assert.match(canonical, /window\.scrollTo/);
 });
 
 test("VideoUtilityDock uses acquireBodyScrollLock", () => {

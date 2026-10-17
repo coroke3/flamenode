@@ -1,4 +1,5 @@
 import React from "react";
+import { cx } from "../cx.js";
 
 export type BadgeStatus =
   | "public"
@@ -8,9 +9,15 @@ export type BadgeStatus =
   | "error"
   | "live";
 
-export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+export interface BadgeProps
+  extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
   status?: BadgeStatus;
+  /** Empty or missing uses the status's default label, as in the mock. */
   label?: string;
+  /**
+   * The mock always draws a Font Awesome icon per status. The project has no icon
+   * font yet, so the icon is passed in until MIG-0203/0204 decide the icon set.
+   */
   icon?: React.ReactNode;
 }
 
@@ -23,24 +30,13 @@ const DEFAULT_LABELS: Record<BadgeStatus, string> = {
   live: "LIVE",
 };
 
-function cx(...classes: (string | boolean | undefined | null)[]): string {
-  return classes.filter(Boolean).join(" ");
-}
-
-export function Badge({
-  status = "draft",
-  label,
-  icon,
-  className,
-  children,
-  ...props
-}: BadgeProps) {
-  const displayLabel = label ?? (children ? null : DEFAULT_LABELS[status]);
-
+export function Badge({ status, label, icon, className, ...props }: BadgeProps) {
+  // Unknown statuses fall back to draft, as in the mock.
+  const known: BadgeStatus = status && status in DEFAULT_LABELS ? status : "draft";
   return (
     <span
-      className={cx("fn-status", `fn-status--${status}`, className)}
-      data-status={status}
+      className={cx("fn-status", `fn-status--${known}`, className)}
+      data-status={known}
       {...props}
     >
       {icon ? (
@@ -48,11 +44,7 @@ export function Badge({
           {icon}
         </span>
       ) : null}
-      {displayLabel ? <span>{displayLabel}</span> : null}
-      {children}
+      <span>{label || DEFAULT_LABELS[known]}</span>
     </span>
   );
 }
-
-// Alias matching mock component naming
-export const Status = Badge;
