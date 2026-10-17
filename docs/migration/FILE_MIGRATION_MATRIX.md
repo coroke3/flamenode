@@ -172,8 +172,8 @@
 | `packages/ui/src/index.ts` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `packages/ui/tsconfig.json` | TARGET_SKELETON | existing baseline; never assume feature migrated | MIG-0202 | SAME (extend in owner task) | NOT_STARTED | — |
 | `src/lib/actions/admin.ts` | SERVER_ACTION | SA-001,SA-002,SA-003 | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/actions/announcement.ts` | SERVER_ACTION | SA-004,SA-005,SA-006 | MIG-0303 | packages/domain/src/announcements/index.ts | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `src/lib/actions/api-endpoints.ts` | SERVER_ACTION | SA-007,SA-008 | MIG-0303 | packages/domain/src/apiEndpoints/index.ts | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
+| `src/lib/actions/announcement.ts` | SERVER_ACTION | SA-004,SA-005,SA-006 | MIG-0303 | packages/domain/src/announcements/index.ts | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `src/lib/actions/api-endpoints.ts` | SERVER_ACTION | SA-007,SA-008 | MIG-0303 | packages/domain/src/apiEndpoints/index.ts | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
 | `src/lib/actions/audit-admin.ts` | SERVER_ACTION | SA-009,SA-010,SA-011 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/chapter.ts` | SERVER_ACTION | SA-012,SA-013,SA-014,SA-015 | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/chapterLimits.ts` | ACTION_HELPER | no SA export; inspect callers | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
@@ -182,7 +182,7 @@
 | `src/lib/actions/event-admin.ts` | SERVER_ACTION | SA-022,SA-023,SA-024 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/event-group-admin.ts` | SERVER_ACTION | SA-025,SA-026,SA-027,SA-028,SA-029,SA-030 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/event-staff-admin.ts` | SERVER_ACTION | SA-031,SA-032,SA-033,SA-034 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/actions/event-template-admin.ts` | SERVER_ACTION | SA-035,SA-036,SA-037 | MIG-0303 | packages/domain/src/eventTemplates/index.ts | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
+| `src/lib/actions/event-template-admin.ts` | SERVER_ACTION | SA-035,SA-036,SA-037 | MIG-0303 | packages/domain/src/eventTemplates/index.ts | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
 | `src/lib/actions/event-youtube-playlist.ts` | SERVER_ACTION | SA-038,SA-039 | MIG-0305 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/manage-video.ts` | SERVER_ACTION | SA-040,SA-041,SA-042 | MIG-0304 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/actions/moderation-admin.ts` | SERVER_ACTION | SA-043,SA-044 | MIG-0306 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |
@@ -246,19 +246,19 @@
 | `src/lib/slots/limits.test.mjs` | TEST | slot range and rule edgecases | MIG-0302 | SAME (pure helper parity) | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=node --test --experimental-strip-types src/lib/slots/limits.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `src/lib/slots/slotReservationLimitGuard.ts` | HELPER | reservation SQL guard/transaction | MIG-0305 | DB adapter (Tier2, not MIG-0301) | NOT_STARTED | — |
 | `src/lib/utils/softwareLabels.ts` | HELPER | software label pure policies | MIG-0302 | packages/domain/src/software/labels.ts (legacy bridge) | BRIDGED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
-| `packages/domain/src/announcements/index.ts` | HELPER | announcement domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/announcements/types.ts` | HELPER | announcement domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/announcements/validation.ts` | HELPER | announcement input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/apiEndpoints/index.ts` | HELPER | apiEndpoints domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/apiEndpoints/types.ts` | HELPER | apiEndpoints domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/apiEndpoints/validation.ts` | HELPER | apiEndpoints input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/eventTemplates/index.ts` | HELPER | eventTemplates domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/eventTemplates/types.ts` | HELPER | eventTemplates domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/src/eventTemplates/validation.ts` | HELPER | eventTemplates input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/test/announcements.test.mjs` | TEST | announcements domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/test/apiEndpoints.test.mjs` | TEST | apiEndpoints domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `packages/domain/test/eventTemplates.test.mjs` | TEST | eventTemplates domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
-| `src/lib/actions/announcement.validation.contract.test.mjs` | TEST | announcement validation contract | MIG-0303 | SAME (legacy+new parity) | IN_PROGRESS | PR#316 SHA=449fd963b29335bb49e4b4a7ed3cbdae08676c0a |
+| `packages/domain/src/announcements/index.ts` | HELPER | announcement domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/announcements/types.ts` | HELPER | announcement domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/announcements/validation.ts` | HELPER | announcement input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/apiEndpoints/index.ts` | HELPER | apiEndpoints domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/apiEndpoints/types.ts` | HELPER | apiEndpoints domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/apiEndpoints/validation.ts` | HELPER | apiEndpoints input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/eventTemplates/index.ts` | HELPER | eventTemplates domain entrypoint | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/eventTemplates/types.ts` | HELPER | eventTemplates domain types | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/src/eventTemplates/validation.ts` | HELPER | eventTemplates input validation | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/test/announcements.test.mjs` | TEST | announcements domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/test/apiEndpoints.test.mjs` | TEST | apiEndpoints domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `packages/domain/test/eventTemplates.test.mjs` | TEST | eventTemplates domain tests | MIG-0303 | SAME | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
+| `src/lib/actions/announcement.validation.contract.test.mjs` | TEST | announcement validation contract | MIG-0303 | SAME (legacy+new parity) | IN_PROGRESS | PR#316 SHA=16112f4865ac28ed587fab646c8c06ba0cecec92 |
 | `src/lib/slots/limits.ts` | HELPER | slot pure limits | MIG-0302 | packages/domain/src/slots/limits.ts (legacy bridge) | BRIDGED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | +apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | NOT_STARTED | — |
 | `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain ownership policy (exact file TBD) | NOT_STARTED | — |
