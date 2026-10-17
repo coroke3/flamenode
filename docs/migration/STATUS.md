@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0302
+Current Task: MIG-0608
 Current Owner: unassigned
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0302
-Last Task PR: #308
-Merged READY: MIG-0203, MIG-0204, MIG-0308, MIG-0405, MIG-0409, MIG-0608
+Last Completed Task: MIG-0608
+Last Task PR: #312
+Merged READY: MIG-0203, MIG-0204, MIG-0308, MIG-0405, MIG-0409
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -110,7 +110,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404 DONE / MIG-0405, MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0608 READY) | CLOSED |
+| 6 | Hono API | IN_PROGRESS (MIG-0608 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -300,7 +300,7 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
-| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | READY | MIG-0801, MIG-0107 |
+| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
 | MIG-0602 | low-risk mutations | BLOCKED | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | BLOCKED | MIG-0602 |
 | MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
