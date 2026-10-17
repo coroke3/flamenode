@@ -272,7 +272,10 @@
 | `src/lib/auth/index.ts` | HELPER | Auth.js config (`session: { strategy: "database" }`), RH-010/011 provider | MIG-0608 | +apps/api/src/auth/session.ts (read-only session lookup, MIG-0608); +apps/api/src/auth/authjs.ts (@auth/core, MIG-0802) | NOT_STARTED | — |
 | `src/lib/auth/ownershipCore.ts` | HELPER | normal/event/admin privilege modes | MIG-0304 | packages/domain/src/video/ownership.ts (legacy bridge) | IN_PROGRESS | PR#318 SHA=ed47d888754e078ae626b96439cbcf17ca7b3f4c |
 | `src/lib/video/videoVisibilityTransition.ts` | HELPER | video visibility CAS audit Queue | MIG-0304 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
-| `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain event owner policy (exact file TBD) | NOT_STARTED | — |
+| `src/lib/event/eventOwnershipCore.ts` | HELPER | event owner>=1 | MIG-0305 | packages/domain/src/event/ownership.ts (legacy bridge) | IN_PROGRESS | PR#319 SHA=2ceded45d15265b47a43b9007536ba0896d8ebc4 |
+| `packages/domain/src/event/index.ts` | HELPER | event domain module entrypoint | MIG-0305 | SAME | IN_PROGRESS | PR#319 SHA=2ceded45d15265b47a43b9007536ba0896d8ebc4 |
+| `packages/domain/src/event/ownership.ts` | HELPER | event ownership and representative policies | MIG-0305 | SAME | IN_PROGRESS | PR#319 SHA=2ceded45d15265b47a43b9007536ba0896d8ebc4 |
+| `packages/domain/test/eventOwnership.test.mjs` | TEST | event ownership and last owner protection tests | MIG-0305 | SAME | IN_PROGRESS | PR#319 SHA=2ceded45d15265b47a43b9007536ba0896d8ebc4 |
 | `src/lib/event/eventVisibilityTransition.ts` | HELPER | event visibility fail closed | MIG-0305 | application service/DB adapter (exact file TBD) | NOT_STARTED | — |
 | `src/lib/xid/merge.ts` | HELPER | X merge and rollback | MIG-0306 | domain + DB adapter merge (exact file TBD) | NOT_STARTED | — |
 | `src/lib/publicData/loader.ts` | HELPER | public request/cache projection | MIG-0505 | apps/site public snapshot loader + R2 (exact file TBD) | NOT_STARTED | — |
