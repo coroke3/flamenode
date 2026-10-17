@@ -136,42 +136,58 @@ test("T04: openDialogBehavior simulates Esc key dismiss and restores focus to op
   }
 });
 
-test("T05: PublicHeader renders all canonical PUBLIC_NAV_ITEMS entries", () => {
+test("T05: PublicHeader keeps every CURRENT public entry point", () => {
   const html = renderToStaticMarkup(
-    React.createElement(PublicHeader, { currentPath: "/event" }),
+    React.createElement(PublicHeader, {
+      currentPath: "/event/abc",
+      themeToggle: React.createElement("button", { type: "button", id: "theme" }, "テーマ"),
+      account: React.createElement("a", { href: "/entry", id: "login" }, "ログイン"),
+    }),
   );
-
-  // Verify all 3 navigation items are present
-  for (const item of PUBLIC_NAV_ITEMS) {
-    assert.match(html, new RegExp(`href="${item.href}"`));
-    assert.match(html, new RegExp(item.label));
-  }
-
-  // Verify active state for /event
-  assert.match(html, /href="\/event"[^>]*class="[^"]*is-active[^"]*"/);
+  // logo + the 3 nav items, nothing else as a link in the bar
+  const hrefs = [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(hrefs, ["/", ...PUBLIC_NAV_ITEMS.map((item) => item.href), "/entry"]);
+  for (const item of PUBLIC_NAV_ITEMS) assert.match(html, new RegExp(`>${item.label}</a>`));
+  // CURRENT search: GET /list with field q
+  const form = html.match(/<form [^>]*>/)?.[0] ?? "";
+  for (const attr of ['action="/list"', 'method="get"', 'role="search"']) assert.ok(form.includes(attr), `${attr} in ${form}`);
+  assert.match(html, /<input [^>]*type="search"[^>]*name="q"/);
+  // theme and account slots are rendered, the header reads no auth state itself
+  assert.match(html, /id="theme"/);
+  assert.match(html, /id="login"/);
+  // active state from isPublicNavItemActive, as aria-current only
   assert.match(html, /href="\/event"[^>]*aria-current="page"/);
-
-  // Non-active links do not have is-active or aria-current
-  assert.doesNotMatch(html, /href="\/list"[^>]*is-active/);
-  assert.doesNotMatch(html, /href="\/list"[^>]*aria-current="page"/);
+  assert.doesNotMatch(html, /href="\/list"[^>]*aria-current/);
+  // the mobile menu is closed until opened
+  assert.doesNotMatch(html, /role="dialog"/);
+  assert.match(html, /aria-expanded="false"[^>]*aria-controls="[^"]+-menu"/);
 });
 
-test("PublicFooter renders all required public navigation targets", () => {
+test("two headers on one page get different control ids", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(React.Fragment, null, React.createElement(PublicHeader), React.createElement(PublicHeader)),
+  );
+  const ids = [...html.matchAll(/aria-controls="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(ids.length, 4);
+  assert.equal(new Set(ids).size, 4);
+});
+
+test("PublicFooter keeps CURRENT links and year", () => {
   const html = renderToStaticMarkup(React.createElement(PublicFooter));
+  const hrefs = [...html.matchAll(/<a [^>]*href="([^"]+)"/g)].map((m) => m[1]).sort();
+  // CURRENT src/components/layout/PublicFooter.tsx: 10 links (two to /entry) + the logo
+  assert.deepEqual(hrefs, ["/", "/about", "/dashboard", "/entry", "/entry", "/event", "/list", "/recommend", "/rules", "/rules#event-host", "/user"].sort());
+  assert.match(html, new RegExp(`© ${new Date().getFullYear()} FlameNode`));
+  assert.match(renderToStaticMarkup(React.createElement(PublicFooter, { year: 2030 })), /© 2030 FlameNode/);
+});
 
-  const expectedLinks = [
-    "/list",
-    "/recommend",
-    "/user",
-    "/event",
-    "/entry",
-    "/dashboard",
-    "/rules#event-host",
-    "/about",
-    "/rules",
-  ];
-
-  for (const link of expectedLinks) {
-    assert.match(html, new RegExp(`href="${link.replace("#", "\\#")}"`));
-  }
+test("every class the header and footer render has a rule in styles/layout.css", async () => {
+  const fs = await import("node:fs");
+  const css = fs.readFileSync(new URL("../src/styles/layout.css", import.meta.url), "utf8");
+  const html =
+    renderToStaticMarkup(React.createElement(PublicHeader, { themeToggle: "t", account: "a" })) +
+    renderToStaticMarkup(React.createElement(PublicFooter));
+  const classes = new Set([...html.matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(" ")));
+  for (const name of ["hd-menu", "hm-main", "hm-me", "hd-menu-scrim", "open-search", "on"]) classes.add(name);
+  for (const name of classes) assert.match(css, new RegExp(`\\.${name}(?![\\w-])`), `no rule for .${name}`);
 });

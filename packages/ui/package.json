@@ -11,7 +11,8 @@
       "default": "./dist/index.js"
     },
     "./layout/bodyScrollLock.ts": "./src/layout/bodyScrollLock.ts",
-    "./navigation/publicNavigation.ts": "./src/navigation/publicNavigation.ts"
+    "./navigation/publicNavigation.ts": "./src/navigation/publicNavigation.ts",
+    "./styles/layout.css": "./src/styles/layout.css"
   },
   "scripts": {
     "build": "tsc",
