@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-16
+> Last updated: 2026-10-17
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0801
+Current Task: MIG-0302
 Current Owner: unassigned
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0801
-Last Task PR: #307
-Merged READY: MIG-0203, MIG-0204, MIG-0302, MIG-0405, MIG-0409, MIG-0608
+Last Completed Task: MIG-0302
+Last Task PR: #308
+Merged READY: MIG-0203, MIG-0204, MIG-0308, MIG-0405, MIG-0409, MIG-0608
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -242,8 +242,8 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction/DI pattern | DONE | MIG-0108 |
-| MIG-0302 | low-risk read domain | READY | MIG-0301 |
-| MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
+| MIG-0302 | low-risk read domain | DONE | MIG-0301 |
+| MIG-0308 | `packages/db` schema extraction (zero DDL) | READY | MIG-0302 |
 | MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
 | MIG-0304 | video domain group | BLOCKED | MIG-0303 |
 | MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
