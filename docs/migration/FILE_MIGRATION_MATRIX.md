@@ -220,11 +220,13 @@
 | `src/lib/db/schema.base.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
 | `src/lib/db/schema.canonical.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
 | `src/lib/db/schema.ts` | DB_SCHEMA | D-01 / schema compatibility | MIG-0308 | +packages/db/src/schema (MIG-0308 plan) | NOT_STARTED | — |
+| `src/lib/health/schemaContract.ts` | HELPER | runtime schema contract table list | MIG-0410 | SAME | IN_PROGRESS | PR#325 SHA=02ac97add9e0085c370bd531c5f9b8a4d2683311 TEST=node --test --experimental-strip-types src/lib/health/deepHealth.test.mjs LOG=src/lib/health/schemaContract.ts |
 | `tsconfig.base.json` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
 | `workers/cleanup/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/content-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/fast-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/fast-jobs/publicBuildTrigger.ts` | HELPER | D-09 deploy hook build scheduler | MIG-0410 | SAME | IN_PROGRESS | PR#325 SHA=02ac97add9e0085c370bd531c5f9b8a4d2683311 TEST=node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs LOG=workers/fast-jobs/publicBuildTrigger.ts |
+| `workers/fast-jobs/publicBuildTrigger.test.mjs` | TEST | MIG-0410 T01-T07 unit tests | MIG-0410 | SAME | IN_PROGRESS | PR#325 SHA=02ac97add9e0085c370bd531c5f9b8a4d2683311 TEST=node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs LOG=workers/fast-jobs/publicBuildTrigger.test.mjs |
 | `workers/score-recalc/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/sync-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/youtube-playlist-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
