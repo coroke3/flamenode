@@ -1416,3 +1416,15 @@ export const legacyImportBatchItems = sqliteTable(
     ),
   }),
 );
+
+export const publicBuildState = sqliteTable(
+  "public_build_state",
+  {
+    id: integer("id").primaryKey(),
+    requested_at: integer("requested_at").notNull().default(0),
+    last_hook_at: integer("last_hook_at").notNull().default(0),
+    hooks_day: text("hooks_day").notNull().default(""),
+    hooks_today: integer("hooks_today").notNull().default(0),
+  },
+);
+

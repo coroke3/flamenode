@@ -124,7 +124,7 @@ Read-only Cloudflare schedules reverified 2026-10-07.
 
 | Worker | Cron | Primary role |
 | --- | --- | --- |
-| `flamenode-fast-jobs` | `0 * * * *` | notification lease recovery, slot deadline reminders, Queue wake/fallback drain |
+| `flamenode-fast-jobs` | `0 * * * *` | notification lease recovery, slot deadline reminders, Queue wake/fallback drain, deploy hook build trigger check (MIG-0410) |
 | `flamenode-content-jobs` | `15 * * * *` | static-rebuild recovery/repair, cleanup, shared artifact repair, recovery fanout |
 | `flamenode-sync-jobs` | `7 * * * *` | GA4 trending + scheduled YouTube metadata + score/ranking + daily related repair + pending recovery |
 | `flamenode-sync-jobs` | `52 * * * *` | event YouTube playlist sync recovery |

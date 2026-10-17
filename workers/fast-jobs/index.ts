@@ -31,6 +31,7 @@ import {
   throwIfJobFailed,
 } from "../shared/runJob.ts";
 import { handleNotificationWakeQueue } from "./notificationQueueConsumer.ts";
+import { checkAndTriggerPublicBuild } from "./publicBuildTrigger.ts";
 
 export interface Env {
   DB: D1Database;
@@ -47,6 +48,7 @@ export interface Env {
   };
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
+  PUBLIC_BUILD_DEPLOY_HOOK_URL?: string;
 }
 
 const REMINDER_INTERVAL_SEC = 3600;
@@ -192,9 +194,29 @@ export async function runNotificationRecovery(
             reminders = { failed: 1 };
           }
 
+          let publicBuild: unknown;
+          try {
+            publicBuild = await runJob(
+              "fast-jobs",
+              "public-build-trigger",
+              async () => {
+                const res = await checkAndTriggerPublicBuild(budgetEnv, { signal });
+                return {
+                  processed: res.triggered ? 1 : 0,
+                  skipped: res.decision === "skip" || !res.triggered ? 1 : 0,
+                  d1_changes: res.d1_changes,
+                };
+              },
+              { commitSha: budgetEnv.BUILD_COMMIT_SHA },
+            );
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            publicBuild = { failed: 1 };
+          }
+
           signal?.throwIfAborted();
           if (!(await hasDuePendingNotifications(budgetEnv, signal))) {
-            return combineJobCounters(reminders, { skipped: 1 });
+            return combineJobCounters(reminders, publicBuild, { skipped: 1 });
           }
 
           // Queue wake成功時は配送を別invocationへ分離し、CronのCPU/D1予算と共有しない。
@@ -212,7 +234,7 @@ export async function runNotificationRecovery(
               sentKinds: wakeSentKinds,
             }));
           if (delegatedToQueue) {
-            return combineJobCounters(reminders, {
+            return combineJobCounters(reminders, publicBuild, {
               processed: 0,
               failed: 0,
               skipped: 1,
@@ -224,7 +246,7 @@ export async function runNotificationRecovery(
           );
           if (fallbackLimit <= 0) {
             // pending rowはD1正本に残るため、危険な半端配送をせず次回Recoveryへ繰り越す。
-            return combineJobCounters(reminders, { skipped: 1 });
+            return combineJobCounters(reminders, publicBuild, { skipped: 1 });
           }
 
           let notificationAbortError: Error | undefined;
@@ -251,7 +273,7 @@ export async function runNotificationRecovery(
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
-            combineJobCounters(reminders, notifications),
+            combineJobCounters(reminders, notifications, publicBuild),
           );
         },
       );
