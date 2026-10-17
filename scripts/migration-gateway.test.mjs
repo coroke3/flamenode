@@ -5,6 +5,7 @@ import { runInNewContext } from "node:vm";
 import { PerformanceObserver } from "node:perf_hooks";
 import { buildRouteMap } from "../apps/site/src/lib/routeMap.ts";
 import gateway, { resetGatewayCaches } from "../apps/site/src/gateway/index.ts";
+import { resetRebuildMemory } from "../apps/site/src/gateway/r2Html.ts";
 import {
   ROUTE_SHARD_COUNT,
   buildRouteShards,
@@ -36,11 +37,11 @@ function sampleManifest() {
  * default html_handling (auto-trailing-slash) does: `/x/` → x/index.html,
  * while `/x` and `/x/index.html` redirect.
  */
-function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new Map(), r2, auth, assets } = {}) {
+function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new Map(), r2, auth, assets, queue } = {}) {
   const files = new Map(
     (shards ?? buildRouteShards(manifest)).map((s) => [s.path, s.body]),
   );
-  const calls = { assets: [], kv: [], r2: [], auth: 0 };
+  const calls = { assets: [], kv: [], r2: [], auth: 0, rebuild: [] };
   const env = {
     ASSETS: assets ?? {
       fetch: async (req) => {
@@ -76,11 +77,20 @@ function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new M
     };
   }
   if (auth !== undefined) env.AUTH_ORIGIN = auth;
+  if (queue) {
+    env.REBUILD_QUEUE = {
+      send: async (message) => {
+        calls.rebuild.push(message);
+        if (queue === "throws") throw new Error("queue down");
+      },
+    };
+  }
   return { env, calls };
 }
 
 async function get(path, env, init) {
   resetGatewayCaches();
+  resetRebuildMemory();
   return gateway.fetch(new Request(`https://flamenode.net${path}`, init), env);
 }
 
@@ -225,7 +235,7 @@ test("an Assets redirect or error is not forwarded as public content", async () 
   }
 });
 
-test("R2 fallback: served only for the same generation, typed and non-empty; otherwise 503 or 404", async () => {
+test("MIG-0406 T02/T03: R2 HTML is served only for the same generation, typed and non-empty; otherwise 503", async () => {
   const html = (overrides = {}) => async () => ({
     body: new Response("<html>r2</html>").body,
     size: 15,
@@ -250,8 +260,57 @@ test("R2 fallback: served only for the same generation, typed and non-empty; oth
   for (const [name, r2] of Object.entries(cases)) {
     assert.equal((await get("/event/spring-fest-2026", createEnv({ r2 }).env)).status, 503, name);
   }
-  assert.equal((await get("/event/spring-fest-2026", createEnv({ r2: async () => null }).env)).status, 404);
-  assert.equal((await get("/event/spring-fest-2026", createEnv().env)).status, 404, "no R2 binding");
+  // The route data says the page is public, so a missing page is a build gap (503), not a 404.
+  assert.equal((await get("/event/spring-fest-2026", createEnv({ r2: async () => null }).env)).status, 503);
+  assert.equal((await get("/event/spring-fest-2026", createEnv().env)).status, 503, "no R2 binding");
+});
+
+test("MIG-0406 U02: missing, stale or unreadable R2 HTML asks for one rebuild per key, and the answer stays 503", async () => {
+  const stale = async () => ({
+    body: new Response("<html>old</html>").body,
+    size: 16,
+    httpMetadata: { contentType: "text/html" },
+    customMetadata: { generation: "gen-old" },
+  });
+  for (const [reason, r2] of [["html_missing", async () => null], ["stale_generation", stale], ["r2_read_failed", async () => { throw new Error("down"); }]]) {
+    const { env, calls } = createEnv({ r2, queue: true });
+    const res = await get("/event/spring-fest-2026", env);
+    assert.equal(res.status, 503, reason);
+    assert.equal(res.headers.get("cache-control"), "no-store, private");
+    assert.deepEqual(calls.rebuild, [{
+      type: "rebuild-page",
+      key: "event/spring-fest-2026",
+      kind: "event",
+      id: "spring-fest-2026",
+      generation: GENERATION,
+      reason,
+    }]);
+  }
+
+  // Repeated visitors do not flood the queue from one isolate.
+  const { env, calls } = createEnv({ r2: async () => null, queue: true });
+  resetRebuildMemory();
+  for (let i = 0; i < 5; i++) {
+    resetGatewayCaches();
+    assert.equal((await gateway.fetch(new Request("https://flamenode.net/event/spring-fest-2026"), env)).status, 503);
+  }
+  assert.equal(calls.rebuild.length, 1);
+
+  // A failing queue does not turn the 503 into an error, and waitUntil carries the send.
+  const failing = createEnv({ r2: async () => null, queue: "throws" });
+  const pending = [];
+  resetGatewayCaches();
+  resetRebuildMemory();
+  const res = await gateway.fetch(new Request("https://flamenode.net/event/spring-fest-2026"), failing.env, { waitUntil: (p) => pending.push(p) });
+  assert.equal(res.status, 503);
+  assert.equal(pending.length, 1);
+  await Promise.all(pending);
+
+  // A revoked page never reaches R2 or the queue.
+  const revoked = createEnv({ r2: async () => null, queue: true, kv: new Map([[revocationKey("event", "spring-fest-2026"), "1"]]) });
+  assert.equal((await get("/event/spring-fest-2026", revoked.env)).status, 404);
+  assert.deepEqual(revoked.calls.r2, []);
+  assert.deepEqual(revoked.calls.rebuild, []);
 });
 
 test("HEAD is answered like GET without a body from R2", async () => {
@@ -342,4 +401,69 @@ test("T05: per-request time with a 52k-route manifest, every request on a cold s
   assert.ok(largest < 64 * 1024, `largest shard ${largest} B`);
   assert.ok(clean.length >= 250, `too few samples without GC: ${clean.length}`);
   assert.ok(stats.max < 5, `S1 is judged by the maximum: ${stats.max}ms`);
+});
+
+test("MIG-0406 U03: per-family time and reads with 52k routes, cold and warm shard cache (local Node, not Workers production)", async () => {
+  const { files } = largeShardFiles();
+  const counts = { shard: 0, page: 0, kv: 0, r2: 0 };
+  const r2Path = (i) => `/clip-${1000 + i}`;
+  const r2Pages = new Set(Array.from({ length: 200 }, (_, i) => `${r2Path(i)}/`));
+  const env = {
+    ASSETS: {
+      fetch: async (req) => {
+        const { pathname } = new URL(req.url);
+        if (files.has(pathname)) {
+          counts.shard += 1;
+          return new Response(files.get(pathname), { status: 200 });
+        }
+        counts.page += 1;
+        // The "video (R2)" family stands for pages that live in R2 instead of Static Assets.
+        return r2Pages.has(pathname) ? new Response("missing", { status: 404 }) : new Response("ok", { status: 200 });
+      },
+    },
+    VISIBILITY_KV: { get: async () => { counts.kv += 1; return null; } },
+    R2_STORAGE: {
+      get: async () => {
+        counts.r2 += 1;
+        return { body: new Response("<html>r2</html>").body, size: 15, httpMetadata: { contentType: "text/html" }, customMetadata: { generation: "gen-cpu-large" } };
+      },
+    },
+  };
+  setFlagsFromString("--expose-gc");
+  runInNewContext("gc")();
+
+  const families = {
+    "video (Assets)": (i) => `/clip-${2000 + i * 53}`,
+    "video (R2)": r2Path,
+    user: (i) => `/user/Creator_${i * 13}`,
+    event: (i) => `/event/event-${i * 3}`,
+    "alias 308": (i) => `/clip-alias-${i * 61}`,
+  };
+  const REPEATS = 5;
+  const lines = [];
+  for (const [family, pathFor] of Object.entries(families)) {
+    for (const cache of ["cold", "warm"]) {
+      const times = [];
+      Object.keys(counts).forEach((k) => (counts[k] = 0));
+      for (let i = 0; i < 200; i++) {
+        let best = Infinity;
+        for (let r = 0; r < REPEATS; r++) {
+          if (cache === "cold") resetGatewayCaches();
+          const start = performance.now();
+          const res = await gateway.fetch(new Request(`https://flamenode.net${pathFor(i)}`), env);
+          await res.arrayBuffer();
+          best = Math.min(best, performance.now() - start);
+          assert.ok(res.status === 200 || res.status === 308, `${family} ${pathFor(i)} ${res.status}`);
+        }
+        times.push(best);
+      }
+      times.sort((a, b) => a - b);
+      const q = (p) => times[Math.min(times.length - 1, Math.floor(times.length * p))].toFixed(3);
+      const per = (n) => (n / (200 * REPEATS)).toFixed(2);
+      lines.push(`${family} ${cache}: p50=${q(0.5)} p95=${q(0.95)} p99=${q(0.99)} max=${times.at(-1).toFixed(3)}ms; per request shard=${per(counts.shard)} kv=${per(counts.kv)} r2=${per(counts.r2)} d1=0`);
+      assert.ok(times.at(-1) < 5, `${family} ${cache}: S1 is judged by the maximum: ${times.at(-1)}ms`);
+      assert.ok(counts.kv <= 200 * REPEATS && counts.r2 <= 200 * REPEATS, `${family}: at most 1 KV and 1 R2 read per request`);
+    }
+  }
+  console.log(`[gateway-families] routes=52000 n=200 repeats=${REPEATS}(min kept)\n${lines.join("\n")}`);
 });
