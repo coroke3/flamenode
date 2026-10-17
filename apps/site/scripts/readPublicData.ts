@@ -85,8 +85,9 @@ const NON_POINT_EVENT_PERIOD_SQL = `(
 )`;
 
 function normalizeNumber(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  // Match CURRENT rebuild.ts for group sort_order and latest event times.
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.floor(number) : null;
 }
 
 function latestEventStart(events: readonly Record<string, unknown>[]): number | null {
