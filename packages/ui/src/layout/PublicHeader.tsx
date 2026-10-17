@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "../adapters/index.js";
 import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "../navigation/publicNavigation.js";
 import { openDialogBehavior } from "../components/Dialog.js";
+import { ImeSafeGetForm } from "../forms/ImeSafeGetForm.js";
 
 /**
  * Public header from the registered mock (`docs/migration/mock/source/boards/PublicHeader.dc.html`,
@@ -82,16 +83,15 @@ export function PublicHeader({
         </nav>
 
         <div className="hd-right">
-          {/* Same target as CURRENT ImeSafeGetForm: GET /list?q=. A native submit works
-              before hydration and does not fire while an IME composition is open. */}
-          <form
+          {/* CURRENT: ImeSafeGetForm GET /list?q=. Before hydration it is a plain GET form. */}
+          <ImeSafeGetForm
             id={searchId}
             className="hd-search"
             action="/list"
             method="get"
             role="search"
             aria-label="作品検索"
-            onSubmit={() => setSearchOpen(false)}
+            onNavigated={() => setSearchOpen(false)}
           >
             <label htmlFor={`${searchId}-q`} className="fn-sr-only">作品を検索</label>
             <input
@@ -106,7 +106,7 @@ export function PublicHeader({
                 if (e.key === "Escape" && !e.nativeEvent.isComposing) setSearchOpen(false);
               }}
             />
-          </form>
+          </ImeSafeGetForm>
           <button
             type="button"
             className="ib hd-search-ic"
