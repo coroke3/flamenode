@@ -236,6 +236,26 @@ describe("readPublicData", () => {
     }
   });
 
+  it("T01 parity: group numbers use CURRENT's integer flooring semantics", async () => {
+    const rawDb = new DatabaseSync(":memory:");
+    initTestSchema(rawDb);
+    try {
+      rawDb.exec(`
+        INSERT INTO events (id, title, start_time, end_time, visibility_status)
+        VALUES ('e-fraction', 'Fractional start', 100.9, 110.9, 'public');
+        INSERT INTO event_groups (id, slug, name, sort_order, visibility_status)
+        VALUES ('g-fraction', 'fraction', 'Fraction', 1.8, 'public');
+        INSERT INTO event_group_events (event_group_id, event_id)
+        VALUES ('g-fraction', 'e-fraction');
+      `);
+      const output = await buildEventsIndexData(createMockD1(rawDb), { generatedAt: 123 });
+      assert.strictEqual(output.group_sections[0].sort_order, 1);
+      assert.strictEqual(output.group_sections[0].latest_event_start_time, 100);
+    } finally {
+      rawDb.close();
+    }
+  });
+
   it("T04: produces deterministic byte output across multiple runs", async () => {
     const rawDb = new DatabaseSync(":memory:");
     initTestSchema(rawDb);
