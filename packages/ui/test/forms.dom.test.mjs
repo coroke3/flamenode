@@ -42,10 +42,14 @@ test("T04: Enter during IME composition and the submit right after it do not sea
   const input = form.querySelector("input");
   await fire(input, new CompositionEvent("compositionstart", { bubbles: true }));
   assert.ok(form.hasAttribute("data-fn-ime-composing"));
-  await fire(input, enter({ isComposing: true }));
-  await fire(form, submit()); // implicit submit some browsers send with the confirming Enter
-  await fire(input, new CompositionEvent("compositionend", { bubbles: true }));
-  await fire(form, submit()); // same tick as compositionend
+  await act(() => {
+    input.dispatchEvent(enter({ isComposing: true }));
+    form.dispatchEvent(submit()); // implicit submit some browsers send with the confirming Enter
+  });
+  await act(() => {
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    form.dispatchEvent(submit()); // same tick as compositionend
+  });
   assert.deepEqual(pushed, []);
 
   await act(tick);
@@ -58,8 +62,10 @@ test("T04: Enter during IME composition and the submit right after it do not sea
 test("T04: an IME Enter without compositionstart (keyCode 229) is blocked too", async () => {
   const { root, pushed, form } = await mount(h("input", { name: "q", defaultValue: "x" }));
   const input = form.querySelector("input");
-  await fire(input, enter({ keyCode: 229 }));
-  await fire(form, submit());
+  await act(() => {
+    input.dispatchEvent(enter({ keyCode: 229 }));
+    form.dispatchEvent(submit());
+  });
   assert.deepEqual(pushed, []);
   await act(tick);
   await fire(form, submit()); // the search button after the IME closed
