@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0406
+Current Task: MIG-0205
 Current Owner: unassigned
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0406
-Last Task PR: #314
-Merged READY: MIG-0205, MIG-0304, MIG-0305, MIG-0306, MIG-0409
+Last Completed Task: MIG-0205
+Last Task PR: #317
+Merged READY: MIG-0206, MIG-0304, MIG-0305, MIG-0306, MIG-0409
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,7 +106,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203, MIG-0204 DONE / MIG-0205 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203, MIG-0204, MIG-0205 DONE / MIG-0206 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406 DONE / MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -232,8 +232,8 @@ Validation:
 | MIG-0202 | primitives | DONE | MIG-0201 |
 | MIG-0203 | navigation/layout | DONE | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | DONE | MIG-0202 |
-| MIG-0205 | representative responsive screens + UX mapping | READY | MIG-0203, MIG-0204 |
-| MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
+| MIG-0205 | representative responsive screens + UX mapping | DONE | MIG-0203, MIG-0204 |
+| MIG-0206 | Phase 2 Gate | READY | MIG-0205 |
 
 ## Phase 3 — Domain extraction
 
