@@ -4,7 +4,7 @@
 > Task: MIG-0206（Recipe R-EVIDENCE）
 > Work Order: [`PHASE_2_SPEC.md`](../PHASE_2_SPEC.md) `### MIG-0206`
 > Decision: D-08 DECIDED（登録済み HTML mock）
-> Last verified: 2026-10-18（origin/main `a996b5d`、PR #317 `269cfb5`）
+> Last verified: 2026-10-18（origin/main `1e435c4`、PR #317 `dc16b9e`）
 
 エージェントは Gate を承認しない。この文書は判定材料の一覧で、承認は PR #321 に人間が記録する。証跡が欠けている項目は「未達」とし、該当 MIG へ差し戻す。
 
@@ -17,7 +17,7 @@
 | MIG-0202 | primitives | merge 済み | `11b1cda`（#306）, `5f3526c` |
 | MIG-0203 | 公開ナビゲーション・レイアウト | merge 済み | `d8b86ba`（#309） |
 | MIG-0204 | フォーム・フィードバック・データ表示 | merge 済み | `a996b5d`（#311 squash） |
-| MIG-0205 | 代表3画面 | **未 merge**（PR #317、base を main に変更、head `269cfb5`。作り直し `adfe19f` の独立レビュー待ち） | main の STATUS は BLOCKED |
+| MIG-0205 | 代表3画面 | **未 merge**（PR #317、base を main に変更、head `dc16b9e`。作り直し `adfe19f` の独立レビュー待ち） | main の STATUS は BLOCKED |
 
 → Work Order の「MIG-0201..0205 の merge 後に証跡をまとめる」は **未達**（MIG-0205 が残り）。#317 の merge 後に本表を更新する。
 
@@ -32,7 +32,7 @@
 | 代表3画面のスクリーンショット | 用意済み・**人間の目視判定が必要** | 1440px / 390px の全ページ画像を mock の画像と並べて `project-files/migration-review/pr317-screens/` に保存。横はみ出し 0（scrollWidth = 幅）・Tab 順を計測した LOG=`project-files/migration-review/pr317-screens-browser.log`。GitHub への画像添付は人間が行う |
 | 未対応 UX ID と次MIG | 達成 | `REPRESENTATIVE_SCREENS.md` 1〜3章（作品詳細の操作系は MIG-0507、イベントのライブ枠は MIG-0502、クリエイターの query は MIG-0504、可視性は MIG-0405、head/JSON-LD は MIG-0403） |
 | 独立レビュー APPROVE | **未達** | #317 の APPROVE は 2026-10-17 の issuecomment-6229186076 だけで、builder（Antigravity）自身のもの・作り直し前の `9b26485` が対象。#317 / #321 に GitHub review は 0件（2026-10-18 確認）。作り直し `adfe19f` 以降と本文書を builder 以外（Codex / 人間）がレビューする必要がある |
-| CI green | **再実行待ち** | 引用されていた run `39110475849`（#317 `5b9b220`）と `39110488344`（#321 `8d68761`）は古い head のもの。#317 の現 head `269cfb5`（run `39120646687`）と本 PR の現 head で取り直す。#311 は main に merge 済み |
+| CI green | **再実行待ち** | 引用されていた run `39110475849`（#317 `5b9b220`）と `39110488344`（#321 `8d68761`）は古い head のもの。#317 の現 head `dc16b9e` と本 PR の現 head で取り直す。#311 は main に merge 済み |
 | 人間の Phase Gate 承認 | **未達** | PR #321 に記録が無い。PR の merge は Gate 承認の代わりにならない |
 
 ## 3. Phase 2 で見つかった持ち越し
