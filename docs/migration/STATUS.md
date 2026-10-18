@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0405
 Last Task PR: #313
-Merged READY: MIG-0203, MIG-0204, MIG-0303, MIG-0406, MIG-0409
+Merged READY: MIG-0203, MIG-0204, MIG-0304, MIG-0305, MIG-0306, MIG-0406, MIG-0409
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -244,10 +244,10 @@ Validation:
 | MIG-0301 | extraction/DI pattern | DONE | MIG-0108 |
 | MIG-0302 | low-risk read domain | DONE | MIG-0301 |
 | MIG-0308 | `packages/db` schema extraction (zero DDL) | DONE | MIG-0302 |
-| MIG-0303 | low-risk mutation domain | READY | MIG-0308 |
-| MIG-0304 | video domain group | BLOCKED | MIG-0303 |
-| MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
-| MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
+| MIG-0303 | low-risk mutation domain | DONE | MIG-0308 |
+| MIG-0304 | video domain group | READY | MIG-0303 |
+| MIG-0305 | event/slot domain group | READY | MIG-0303 |
+| MIG-0306 | user/X/admin domain group | READY | MIG-0303 |
 | MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306, MIG-0308 |
 
 ## Phase 4 — Public PoC
