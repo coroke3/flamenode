@@ -27,11 +27,12 @@ import {
   SAME_VIDEO_STATUS_MESSAGE,
   type VideoStatusActionResult,
 } from "@/lib/video/videoVisibilityStatusAction";
-import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
+import {
+  validateAdminVideoStatusInput,
+  validateVideoPublicEligibility,
+} from "@flamenode/domain/video";
 
 export type AdminActionResult = VideoStatusActionResult & PendingPublicReflection;
-
-const VALID_STATUS = new Set(["pending", "public", "private", "voided"]);
 
 function revalidateVideoStatusPaths(videoId: string, youtubeVideoId: string | null): void {
   revalidatePath(`/admin/videos/${videoId}`);
@@ -90,9 +91,8 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
   const reviewEventId = String(formData.get("review_event_id") ?? "").trim();
   const adminEventFilter =
     reviewEventId && reviewEventId.length <= 128 ? reviewEventId : undefined;
-  if (!videoId || videoId.length > 128) return { ok: false, message: "video_idが不正です。" };
-  if (!VALID_STATUS.has(status)) return { ok: false, message: "不正なステータスです。" };
-  if (status === "voided" && !reason) return { ok: false, message: "voidedへの変更には理由が必要です。" };
+  const input = validateAdminVideoStatusInput({ videoId, status, reason });
+  if (!input.ok) return { ok: false, message: input.message };
   const { db } = guard;
   const before = (await db.select().from(videos).where(eq(videos.id, videoId)).limit(1))[0];
   if (!before) return { ok: false, message: "対象作品が見つかりません。" };

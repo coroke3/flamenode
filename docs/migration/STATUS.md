@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0406
+Current Task: MIG-0206
 Current Owner: unassigned
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0406
-Last Task PR: #314
-Merged READY: MIG-0205, MIG-0304, MIG-0305, MIG-0306, MIG-0409
+Last Completed Task: MIG-0206
+Last Task PR: #321
+Merged READY: MIG-0402, MIG-0409, MIG-0601
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,11 +106,11 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203, MIG-0204 DONE / MIG-0205 READY) | CLOSED |
-| 3 | Domain extraction | READY | CLOSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406 DONE / MIG-0409 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
+| 3 | Domain extraction | DONE | PASSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406 DONE / MIG-0402, MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0608 READY) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0608 DONE / MIG-0601 READY) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -232,8 +232,8 @@ Validation:
 | MIG-0202 | primitives | DONE | MIG-0201 |
 | MIG-0203 | navigation/layout | DONE | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | DONE | MIG-0202 |
-| MIG-0205 | representative responsive screens + UX mapping | READY | MIG-0203, MIG-0204 |
-| MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
+| MIG-0205 | representative responsive screens + UX mapping | DONE | MIG-0203, MIG-0204 |
+| MIG-0206 | Phase 2 Gate | DONE | MIG-0205 |
 
 ## Phase 3 — Domain extraction
 
@@ -242,13 +242,13 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction/DI pattern | DONE | MIG-0108 |
-| MIG-0302 | low-risk read domain | READY | MIG-0301 |
-| MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
-| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
-| MIG-0304 | video domain group | BLOCKED | MIG-0303 |
-| MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
-| MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
-| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306, MIG-0308 |
+| MIG-0302 | low-risk read domain | DONE | MIG-0301 |
+| MIG-0308 | `packages/db` schema extraction (zero DDL) | DONE | MIG-0302 |
+| MIG-0303 | low-risk mutation domain | DONE | MIG-0308 |
+| MIG-0304 | video domain group | DONE | MIG-0303 |
+| MIG-0305 | event/slot domain group | DONE | MIG-0303 |
+| MIG-0306 | user/X/admin domain group | DONE | MIG-0303 |
+| MIG-0307 | Phase 3 Gate | DONE | MIG-0304..MIG-0306, MIG-0308 |
 
 ## Phase 4 — Public PoC
 
@@ -265,7 +265,7 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | DONE | MIG-0105 |
-| MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
+| MIG-0402 | shared React UI in Astro | READY | MIG-0206, MIG-0401 |
 | MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
 | MIG-0404 | route-map generator (mock-independent) | DONE | MIG-0401 |
 | MIG-0405 | visibility gateway | DONE | MIG-0404 |
@@ -299,8 +299,8 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
-| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | READY | MIG-0801, MIG-0107 |
+| MIG-0601 | low-risk reads | READY | MIG-0307, MIG-0107 |
+| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
 | MIG-0602 | low-risk mutations | BLOCKED | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | BLOCKED | MIG-0602 |
 | MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
