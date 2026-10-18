@@ -30,9 +30,9 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
 | Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
-| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | **Queue, one page per message → R2 HTML** | MIG-0411 |
-| User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML | MIG-0411 |
-| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | Queue → R2 HTML | MIG-0411 |
+| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | **Queue, one page per message → R2 HTML**; body = Island shell (approved fallback: upper-bound `renderToString` 25–49 ms) | MIG-0411 |
+| User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
+| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | Queue → R2 HTML; body = Island shell (approved fallback: max 5.4–8.7 ms, 5 of 6 runs ≥ 8 ms) | MIG-0411 |
 | Slot vacancy (`/event/[id]/slots`) | 30 s (`slots/page.tsx:32`) | reservation / release | **API (S2) from an Island** | MIG-06xx (slots) |
 | Like count, viewer overlay | per request | like, session | API (S2) from an Island | MIG-06xx |
 
@@ -148,9 +148,24 @@ video and the event release section exceed it even without D1 time; user and eve
 below it; event base and the composer are borderline. Not a final classification: ZERO_1102 §5
 requires a workerd profile.
 
-U05 (a) full `experimental_AstroContainer.renderToString` per kind: **NOT MEASURED** — no Astro
-page components for video / user / event exist yet (Phase 5). Restart: when R-PAGE components
-land, render the same inputs with this harness.
+U05 (a) server-rendered page per kind — **measured in MIG-0411 (PR #326)**: React `renderToString`
+of the shared `@flamenode/ui` screens (MIG-0205) inside the site adapters (MIG-0402), which is
+what Astro itself calls for React components; `experimental_AstroContainer` was not used because
+no `.astro` R-PAGE page exists yet (MIG-0403) and the gateway Worker bundles no Astro runtime.
+Upper-bound inputs (video 100 members / 128 chapters / 30 related; event 8 works / 20 staff /
+20 slot parts; user 8 + 8 works; 1,000-char titles, 10,000-char bodies), NODE_ENV=production,
+max of 300 warm renders, 6 runs (`project-files/migration-review/pr326-u05a-render-to-string.log`):
+
+| Kind | p50 | p95 | max | HTML | Format chosen |
+| --- | --- | --- | --- | --- | --- |
+| Video | 1.7–2.8 ms | 5.4–6.8 ms | 25.3–48.8 ms | 591 KB | Island shell (approved fallback) |
+| User | 0.3–0.6 ms | 0.9–1.9 ms | 4.4–5.8 ms | 166 KB | server-rendered |
+| Event | 0.5–0.8 ms | 1.0–1.5 ms | 5.4–8.7 ms | 157 KB | Island shell (approved fallback; borderline) |
+
+The first render in a fresh isolate also evaluates React and the UI (8.7–12.0 ms for the
+wrangler-like bundle), which alone exceeds 8 ms; whether that counts against the consumer's CPU
+is part of the U07 / workerd check. Behaviour difference (approved): no-JS readers and crawlers
+see no body text on video / event pages rendered by the Queue until the Island reads it.
 
 ### U06 list / search shards
 
