@@ -11,6 +11,7 @@
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
+    "./datetime": "./src/datetime/jst.ts",
     "./xid": "./src/xid/index.ts",
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts"
@@ -21,7 +22,8 @@
     "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
   },
   "dependencies": {
-    "@flamenode/contracts": "*"
+    "@flamenode/contracts": "*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0"
