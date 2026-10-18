@@ -11,7 +11,7 @@
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
-    "./datetime": "./src/datetime/jst.ts",
+    "./datetime": "./src/datetime.ts",
     "./xid": "./src/xid/index.ts",
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts"
