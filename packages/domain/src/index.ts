@@ -5,6 +5,7 @@ export * from "./software/labels.ts";
 export * from "./announcements/index.ts";
 export * from "./apiEndpoints/index.ts";
 export * from "./eventTemplates/index.ts";
+export * from "./auth/permissions/index.ts";
 export * from "./video/index.ts";
 export * from "./event/index.ts";
 export * from "./xid/index.ts";

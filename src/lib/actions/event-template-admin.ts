@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { z } from "zod";
 import { snapshotFromEvent } from "@/lib/admin/eventTemplateSettings";
 import { eventCustomQuestions, eventTemplates, events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -16,13 +15,11 @@ import { generateId } from "@/lib/utils/id";
 
 import {
   type EventTemplateActionResult,
-  saveEventTemplateSchema as saveSchema,
   validateDeleteEventTemplateId,
   validateSaveEventTemplateInput,
 } from "@flamenode/domain/eventTemplates";
 
 export type { EventTemplateActionResult };
-export { saveSchema };
 
 function eventTemplateMutationError(
   error: unknown,

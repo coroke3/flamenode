@@ -30,7 +30,8 @@ CURRENT auth configuration:
 - production requires `AUTH_SECRET`, Discord client ID/secret, validated `AUTH_URL`, validated `NEXT_PUBLIC_SITE_URL`;
 - configured auth and site origins must be equal;
 - loopback origins are rejected in production;
-- Auth.js Host trust is enabled for platform routing, but redirect destination is independently restricted to the configured origin.
+- Auth.js Host trust is enabled for platform routing, but redirect destination is independently restricted to the configured origin;
+- Hono（apps/api）は session を読むだけであり、cookie の発行・更新・削除は Phase 8 まで旧 Next が担当する（MIG-0608）。
 
 The provider currently enables `allowDangerousEmailAccountLinking` because partial/imported users can pre-exist by email. This must not be interpreted as “merge by email without checks”: the custom adapter link path owns the security boundary described below.
 

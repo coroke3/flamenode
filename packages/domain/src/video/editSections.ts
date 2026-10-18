@@ -42,19 +42,3 @@ export type EventEditSectionKey =
 export type CollaboratorPermissionKey =
   | VideoEditSectionKey
   | EventEditSectionKey;
-
-export type EventPermissionKey = EventEditSectionKey;
-
-export type VideoPermissionKey =
-  | "video.basics"
-  | "video.descriptions"
-  | "video.credits"
-  | "video.members"
-  | "video.member_chapters"
-  | "video.status"
-  | "video.primary_event"
-  | "video.youtube_id"
-  | "video.identity"
-  | "video.permissions";
-
-export type PermissionKey = EventPermissionKey | VideoPermissionKey;
