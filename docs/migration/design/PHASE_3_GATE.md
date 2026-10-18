@@ -1,6 +1,6 @@
 # Phase 3 Gate (MIG-0307): evidence and open criteria
 
-> Status: REVIEW (evidence only). **The task dependencies are met; the Gate is NOT approved.** Gate approval is a human decision; no agent may approve it.
+> Status: **PASSED — approved by the owner (Yugo) on 2026-10-18T16:38:49Z** in the project chat: "すべて承認してよい　進めて", answering the three decisions in §3 (T03 counts as met, the `permissions.ts` retirement is approved, the Gate is approved). No independent review of this PR's final head exists; the owner approved without one.
 > Last verified: 2026-10-18 on `main` c996c1c (after #318 / #319 / #320) plus this PR #322
 > Work Order: [`PHASE_3_SPEC.md`](../PHASE_3_SPEC.md) §MIG-0307. Merged task state: [`STATUS.md`](../STATUS.md)
 
@@ -28,9 +28,9 @@ None of #318 / #319 / #320 had an independent review: Claude implemented and int
 | DONE-2 | MIG-0308 DONE | MET | STATUS.md, #315 |
 | Depends on | MIG-0304, MIG-0305, MIG-0306 DONE | MET | STATUS.md on main c996c1c |
 | T02 | `test:unit` / `test:integration` ≥ Phase 3 start, 0 tests deleted | MET | Phase 3 start `fe211b2`: unit 2514/0, integration 55/55. main c996c1c + this PR: unit 2575/0 (1 skipped), integration 55/55. The moved-code source-text tests read the new domain files with the same assertions (listed in each PR). |
-| T03 | Tier 2 not left BLOCKED/SKIPPED | **For the owner to judge** | The decision logic of every named Tier 2 file now lives in `packages/domain`: video fence `planVideoVisibilityFence`, event fence `planEventVisibilityFence`, edit-section policy `resolveAllowedVideoEditSections`, X merge state planner `xid/mergeState.ts`. The DB, `server-only` and `next/navigation` parts of those files stay in `src` as adapters until the Hono API tasks (MIG-0603..0605), which is what PHASE_3_SPEC §Tier 2 (no `packages/*` → `src/*`) requires. Whether this counts as "Tier 2 done" is the owner's call. |
-| §3 source | `permissions.ts` placeholder neutralised | MET, approval unconfirmed | Deleted in #320 (caller=0). The RETIRED row cites `APPROVAL=user-approved-2026-10-18`, written by the Antigravity agent; Claude could not find that approval and asks the owner to confirm it. |
-| DONE-3 | Independent review APPROVE + human Phase Gate approval | **NOT MET** | No independent review of this PR's final head; no human Gate approval. |
+| T03 | Tier 2 not left BLOCKED/SKIPPED | MET (owner decision 2026-10-18) | The decision logic of every named Tier 2 file now lives in `packages/domain`: video fence `planVideoVisibilityFence`, event fence `planEventVisibilityFence`, edit-section policy `resolveAllowedVideoEditSections`, X merge state planner `xid/mergeState.ts`. The DB, `server-only` and `next/navigation` parts of those files stay in `src` as adapters until the Hono API tasks (MIG-0603..0605), which is what PHASE_3_SPEC §Tier 2 (no `packages/*` → `src/*`) requires. Whether this counts as "Tier 2 done" is the owner's call. |
+| §3 source | `permissions.ts` placeholder neutralised | MET (owner confirmed 2026-10-18) | Deleted in #320 (caller=0). The RETIRED row cites `APPROVAL=user-approved-2026-10-18`, written by the Antigravity agent; Claude could not find that approval and asks the owner to confirm it. |
+| DONE-3 | Independent review APPROVE + human Phase Gate approval | Gate approved by the owner; **no independent review** | The owner approved the Gate on 2026-10-18 without an independent review of the final head. |
 
 ### Not met / open (explicit list)
 
