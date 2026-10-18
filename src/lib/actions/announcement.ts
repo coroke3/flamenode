@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
@@ -12,25 +11,12 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { buildAnnouncementChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
-import { parseJstDatetimeLocalStrict } from "@/lib/utils/dateInput";
+import {
+  type AnnouncementResult,
+  validateAnnouncementInput,
+} from "@flamenode/domain/announcements";
 
-export interface AnnouncementResult {
-  ok: boolean;
-  message?: string;
-  id?: string;
-}
-
-const schema = z.object({
-  id: z.string().trim().optional(),
-  base_updated_at: z.coerce.number().int().nonnegative().optional().nullable(),
-  title: z.string().trim().min(1).max(200),
-  body: z.string().trim().min(1).max(8000),
-  severity: z.enum(["info", "warning", "danger"]).default("info"),
-  target_audience: z.enum(["all", "creators", "admins"]).default("all"),
-  is_published: z.coerce.number().int().min(0).max(1).default(0),
-  publish_at: z.string().optional().nullable(),
-  expire_at: z.string().optional().nullable(),
-});
+export type { AnnouncementResult };
 
 function announcementMutationError(error: unknown): AnnouncementResult {
   unstable_rethrow(error);
@@ -56,32 +42,6 @@ async function revalidateAnnouncementPathsBestEffort(
   );
 }
 
-function parseAnnouncementDates(
-  publishAt: string | null | undefined,
-  expireAt: string | null | undefined,
-):
-  | { ok: true; publishAt: number | null; expireAt: number | null }
-  | { ok: false; message: string } {
-  const publish = parseJstDatetimeLocalStrict(publishAt);
-  const expire = parseJstDatetimeLocalStrict(expireAt);
-  if (!publish.ok || !expire.ok) {
-    return {
-      ok: false,
-      message: "掲載日時の形式が正しくありません。",
-    };
-  }
-  if (
-    publish.value != null &&
-    expire.value != null &&
-    expire.value <= publish.value
-  ) {
-    return {
-      ok: false,
-      message: "掲載終了日時は掲載開始日時より後にしてください。",
-    };
-  }
-  return { ok: true, publishAt: publish.value, expireAt: expire.value };
-}
 
 async function requireAdmin(): Promise<
   | { ok: true; userId: string; db: DB }
@@ -99,16 +59,9 @@ export async function createAnnouncement(
 ): Promise<AnnouncementResult> {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
-  const parsed = schema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力内容を確認してください。",
-    };
-  }
-  const data = parsed.data;
-  const dates = parseAnnouncementDates(data.publish_at, data.expire_at);
-  if (!dates.ok) return dates;
+  const validated = validateAnnouncementInput(Object.fromEntries(formData));
+  if (!validated.ok) return validated;
+  const { data, dates } = validated;
   const id = data.id?.trim() || generateId("anc");
   const now = Math.floor(Date.now() / 1000);
 
@@ -170,16 +123,9 @@ export async function updateAnnouncement(
 ): Promise<AnnouncementResult> {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.result;
-  const parsed = schema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力内容を確認してください。",
-    };
-  }
-  const data = parsed.data;
-  const dates = parseAnnouncementDates(data.publish_at, data.expire_at);
-  if (!dates.ok) return dates;
+  const validated = validateAnnouncementInput(Object.fromEntries(formData));
+  if (!validated.ok) return validated;
+  const { data, dates } = validated;
   const id = data.id?.trim();
   if (!id) return { ok: false, message: "お知らせIDが必要です。" };
   let existing: typeof announcements.$inferSelect | undefined;

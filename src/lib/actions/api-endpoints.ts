@@ -11,11 +11,13 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { invalidateEventExportCache } from "@/lib/api/eventExportCache";
 
-export interface ApiEndpointResult {
-  ok: boolean;
-  message?: string;
-  id?: string;
-}
+import {
+  type ApiEndpointResult,
+  validateApiEndpointEventId,
+  validateEventForApiActivation,
+} from "@flamenode/domain/apiEndpoints";
+
+export type { ApiEndpointResult };
 
 async function setPublicApi(
   eventId: string,
@@ -23,18 +25,16 @@ async function setPublicApi(
 ): Promise<ApiEndpointResult> {
   const guard = await requireAdminWrite("admin_api_endpoints");
   if (!guard.ok) return { ok: false, message: guard.message };
-  if (!eventId || eventId.length > 128) {
-    return { ok: false, message: "event_idが不正です。" };
-  }
+  const validatedEventId = validateApiEndpointEventId(eventId);
+  if (!validatedEventId.ok) return validatedEventId;
+  const targetEventId = validatedEventId.eventId;
 
   const { db } = guard;
   const before = (
-    await db.select().from(events).where(eq(events.id, eventId)).limit(1)
+    await db.select().from(events).where(eq(events.id, targetEventId)).limit(1)
   )[0];
-  if (!before) return { ok: false, message: "イベントが見つかりません。" };
-  if (enabled === 1 && before.visibility_status !== "public") {
-    return { ok: false, message: "公開イベントだけAPIを有効化できます。" };
-  }
+  const activationCheck = validateEventForApiActivation(before, enabled);
+  if (!activationCheck.ok) return activationCheck;
 
   const now = Math.max(Math.floor(Date.now() / 1000), before.updated_at + 1);
   const after = {
