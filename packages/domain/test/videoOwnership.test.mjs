@@ -8,6 +8,9 @@ import {
   decideCanEditVideoFromAccessContext,
   shouldWarnManageActiveXMismatch,
   eventStaffCandidatePermissionKeys,
+  resolveAdminOrEventVideoPrivilegeMode,
+  sectionAllowedByGeneralFields,
+  resolveGeneralEditableFieldsFromPolicy,
 } from "@flamenode/domain/video";
 import {
   ALL_PERMISSION_KEYS,
@@ -162,3 +165,113 @@ test("permission key registry is the single source for alias canonicalization", 
     assert.equal(isValidPermissionKey(canonicalizePermissionKey(legacy)), true, legacy);
   }
 });
+
+test("resolveVideoOwnershipSync boundary and edge cases", () => {
+  // Empty or whitespace-only creator ID
+  assert.deepEqual(
+    resolveVideoOwnershipSync({
+      approvedXUserIds: ["123"],
+      creatorXUserId: "",
+      hasCollaboratorEdit: false,
+    }),
+    { isCreatorOwner: false, isCollaboratorOwner: false, isOwner: false },
+  );
+  assert.deepEqual(
+    resolveVideoOwnershipSync({
+      approvedXUserIds: ["123"],
+      creatorXUserId: "   ",
+      hasCollaboratorEdit: false,
+    }),
+    { isCreatorOwner: false, isCollaboratorOwner: false, isOwner: false },
+  );
+  assert.deepEqual(
+    resolveVideoOwnershipSync({
+      approvedXUserIds: ["123"],
+      creatorXUserId: null,
+      hasCollaboratorEdit: false,
+    }),
+    { isCreatorOwner: false, isCollaboratorOwner: false, isOwner: false },
+  );
+  // Trimming creator ID match
+  assert.deepEqual(
+    resolveVideoOwnershipSync({
+      approvedXUserIds: ["123"],
+      creatorXUserId: "  123  ",
+      hasCollaboratorEdit: false,
+    }),
+    { isCreatorOwner: true, isCollaboratorOwner: false, isOwner: true },
+  );
+  // Empty approved list
+  assert.deepEqual(
+    resolveVideoOwnershipSync({
+      approvedXUserIds: [],
+      creatorXUserId: "123",
+      hasCollaboratorEdit: true,
+    }),
+    { isCreatorOwner: false, isCollaboratorOwner: true, isOwner: true },
+  );
+});
+
+test("resolveAdminOrEventVideoPrivilegeMode boundary and fail-closed checks", () => {
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("admin"), "admin");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("user"), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode(null), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode(undefined), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode(""), "event");
+  assert.equal(resolveAdminOrEventVideoPrivilegeMode("Admin"), "event");
+});
+
+test("sectionAllowedByGeneralFields and general field policies boundary cases", () => {
+  const emptyFields = new Set();
+  assert.equal(sectionAllowedByGeneralFields("video.status", emptyFields), false);
+  assert.equal(sectionAllowedByGeneralFields("video.chapter_admin", emptyFields), false);
+  assert.equal(sectionAllowedByGeneralFields("unknown.section", emptyFields), false);
+  assert.equal(sectionAllowedByGeneralFields("video.basics", emptyFields), false);
+
+  const globalFields = new Set(["title", "display_name"]);
+  // allowUserVideoEdits != 1 returns globalFields
+  assert.deepEqual(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 0,
+      policyJson: JSON.stringify({ version: 2, fallback: "deny", allow: [], deny: [], inherit: [] }),
+      globalFields,
+    }),
+    globalFields,
+  );
+
+  // allowUserVideoEdits == 1 with empty or invalid json fails closed to empty set
+  assert.deepEqual(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 1,
+      policyJson: null,
+      globalFields,
+    }),
+    new Set(),
+  );
+  assert.deepEqual(
+    resolveGeneralEditableFieldsFromPolicy({
+      allowUserVideoEdits: 1,
+      policyJson: "{ malformed json",
+      globalFields,
+    }),
+    new Set(),
+  );
+
+  // v2 policy override
+  const policyJson = JSON.stringify({
+    version: 2,
+    fallback: "inherit",
+    allow: ["music"],
+    deny: ["title"],
+    inherit: [],
+  });
+  const resolved = resolveGeneralEditableFieldsFromPolicy({
+    allowUserVideoEdits: 1,
+    policyJson,
+    globalFields,
+  });
+  assert.equal(resolved.has("music"), true);
+  assert.equal(resolved.has("title"), false);
+  assert.equal(resolved.has("display_name"), true);
+});
+
