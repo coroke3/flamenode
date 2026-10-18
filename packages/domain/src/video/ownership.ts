@@ -4,7 +4,7 @@
  */
 
 import type { VideoEditSectionKey } from "./editSections.ts";
-import { expandPermissionAliases } from "./aliases.ts";
+import { expandPermissionAliases } from "../auth/permissions/aliases.ts";
 import {
   sectionAllowedByGeneralFields,
   type GeneralEditableFieldKey,

@@ -291,7 +291,9 @@ function isGeneralEditableFieldKey(value: string): value is GeneralEditableField
 }
 
 export function normalizeGeneralEditableFields(
-  values: readonly (string | { toString(): string } | unknown)[],
+  // Framework-free stand-in for `FormDataEntryValue` (string | File); each
+  // value is coerced with String() exactly as before.
+  values: readonly unknown[],
 ): GeneralEditableFieldKey[] {
   const selected = new Set<string>();
   for (const value of values) {
