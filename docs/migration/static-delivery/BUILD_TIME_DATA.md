@@ -5,7 +5,8 @@
 > Source of truth: `docs/migration/OPEN_DECISIONS.md` (D-06, D-09), `docs/migration/ZERO_1102.md` (§1, §3, §5), `docs/migration/PHASE_4_5_SPEC.md` §MIG-0409
 
 Every number below is either measured (with the command that produced it) or marked
-**NOT MEASURED**. A 2026-10-18 review removed earlier figures (build 0.35 min, page render
+**NOT MEASURED**. Measured numbers are local (one Linux VM, Node 22) and are not Workers
+Builds, workerd or production figures. A 2026-10-18 review removed earlier figures (build 0.35 min, page render
 4.2–6.8 ms / 18–35 ms, shard < 4.5 ms) because no measurement or log backed them.
 
 ## 1. Delivery classification (U02)
@@ -25,23 +26,48 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | Slot vacancy (`/event/[id]/slots`) | 30 s (`slots/page.tsx:32`) | reservation / release | **API (S2) from an Island** | MIG-06xx (slots) |
 | Like count, viewer overlay | per request | like, session | API (S2) from an Island | MIG-06xx |
 
-## 2. Build budget (U03) — NOT MEASURED
+## 2. Build budget (U03) — local measurement only
 
 Formula (Work Order): `data builds/day = floor((3,000 × 0.8 − code-push build minutes/month) ÷ minutes per build ÷ 30)`.
 
-- Minutes per build: **NOT MEASURED.** U03 requires 5 builds of `apps/site` with the synthetic
-  data set (3,000 works, 20 events, 120 slots each). `apps/site` does not consume that data
-  yet, so a local `astro build` time would not represent the target build.
-- Code-push builds: `git log --since=2026-09-18 origin/main` shows 53 commits on `main` in the
-  30 days before 2026-10-18 (each push to `main` is one Workers Build). Minutes per push are
-  not measured.
-- Consequence: the MIG-0410 constants (`MIN_BUILD_INTERVAL_MS = 480_000`,
-  `MAX_DATA_BUILDS_PER_DAY = 180`) are **provisional placeholders, not derived values**. The
-  Work Order STOP applies: the "maximum publish delay" must be shown to the user and
-  approved before those constants are fixed.
-- The MIG-0410 check runs inside the hourly `flamenode-fast-jobs` Cron (`0 * * * *`), so in
-  practice at most 24 deploy hooks/day are sent and the delay from a change to the start of a
-  build is up to ~60 min plus the build time, regardless of `MIN_BUILD_INTERVAL_MS`.
+**Local measurement, 2026-10-18** (not Workers Builds; log
+`project-files/migration-review/pr323-u03-build-timing.log`). Machine: Intel Xeon 2.80 GHz,
+4 cores, Node v22.22.0, Linux. Clean `git clone` of the branch; synthetic snapshot written by
+`apps/site/scripts/measurePublicData.mjs --snapshot` (real `migrations/` schema, 3,000 works,
+20 events, 120 slots each, 1,000 users). One run = `npm run build -w @flamenode/ui` →
+`readPublicData.ts --sqlite <snapshot>` → `npm run build -w @flamenode/site`, with `dist` and
+`.astro` removed first.
+
+| Run | ui build | data (events index) | site build | total |
+| --- | --- | --- | --- | --- |
+| 1 | 4.98 s | 0.19 s | 10.99 s | 16.17 s |
+| 2 | 5.82 s | 0.26 s | 12.61 s | 18.69 s |
+| 3 | 8.92 s | 0.27 s | 13.46 s | 22.66 s |
+| 4 | 6.27 s | 0.35 s | 12.43 s | 19.06 s |
+| 5 | 4.61 s | 0.13 s | 9.51 s | 14.25 s |
+
+`npm ci` on an empty `node_modules` (one run): 62.40 s. The five events-index files are
+byte-identical (T04). `dist` is 5 files / 192,915 B.
+
+Calculation with these local figures (minutes per build `m` = install + slowest build =
+(62.40 + 22.66) s = 1.418 min):
+
+- Code-push builds: 125 PRs merged into `main` from 2026-09-18 to 2026-10-18
+  (`GET https://api.github.com/repos/coroke3/flamenode/pulls?state=closed&base=main`, `merged_at`
+  in the window; 158 commits on `main` in the same window) → 125 × 1.418 = 177.2 min/month.
+- Data builds/day = floor((2,400 − 177.2) ÷ 1.418 ÷ 30) = **52**; shortest interval =
+  1,440 ÷ 52 = **27.7 min**.
+- The MIG-0410 check runs in the hourly `flamenode-fast-jobs` Cron (`0 * * * *`), so the
+  effective cap is **24 builds/day** and the maximum publish delay is about **60 min + one
+  build (~1.5 min locally)**, against CURRENT's 30–300 s `revalidate`.
+
+Limits of this figure: Workers Builds machine speed, clone, queueing and the deploy upload are
+not included; `apps/site` renders 2 pages today and does not yet render the detail pages
+(Phase 5), so the real build will be longer and the daily cap lower. Re-measure on Workers
+Builds once a non-production build project exists (needs approval).
+
+The MIG-0410 constants (`MIN_BUILD_INTERVAL_MS`, `MAX_DATA_BUILDS_PER_DAY`) stay **unset**: the
+Work Order STOP requires the user to approve the maximum publish delay first.
 
 ## 3. New and unpublished pages (U04)
 
@@ -71,12 +97,70 @@ user decision.
 
 ## 4. CPU measurements (U05, U06, U07)
 
-| Unit | Status |
-| --- | --- |
-| U05 (a) full `renderToString` page per kind | **NOT MEASURED** — no Astro page components exist yet (Phase 5). |
-| U05 (b) data JSON + minimal head shell per kind | Local Node only, see MIG-0411 (`apps/site/src/gateway/pageRenderQueue.test.mjs`); not a production or workerd CPU figure. |
-| U06 list / search shard rebuild | **NOT MEASURED.** |
-| U07 Queue consumer CPU limit (20 ms / 100 ms / 1 s × 50 messages) | **NOT RUN** — needs a non-production Worker and Queue (account change, requires approval). |
+**Local Node measurement, 2026-10-18** — not workerd and not production. Command:
+`node --experimental-strip-types --no-warnings apps/site/scripts/measurePublicData.mjs --runs 50 --out <result.json>`
+(two runs; log `project-files/migration-review/pr323-u05-u06-cpu.log`; same machine as §2).
+The harness runs CURRENT `workers/json-generator/rebuild.ts` `rebuildTarget` on the synthetic
+set above, one cold run then 50 warm runs (20 for whole families), each from the same R2 state
+so CURRENT's "same generation" skip never shortcuts a sample. CPU = `process.cpuUsage()` of the
+process. SQLite runs in-process, so "total" includes SQL execution that a Worker would wait for
+remotely, and "excl. D1" subtracts the time inside the D1 shim (which also removes result
+materialisation, which is CPU on Workers): the Workers figure is expected between the two.
+Values are max over 50 samples (range across the two runs).
+
+### U05 (b) CURRENT JSON for one page, largest synthetic input per kind
+
+| Kind (target) | total p50 | total max | excl. D1 max | D1 statements | output |
+| --- | --- | --- | --- | --- | --- |
+| Video `video` (3 members, related lists) | 17.5–18.1 ms | 28.6–29.3 ms | 15.8–18.2 ms | 18 | 27,056 B, 2 objects |
+| User `user` (busiest creator, 3 works) | 5.8 ms | 10.0–10.6 ms | 0.9–1.0 ms | 6 | 3,669 B |
+| Event `event_base` | 5.4–5.5 ms | 10.6–10.7 ms | 5.4–5.8 ms | 7 | 33,354 B |
+| Event `event_slots` (120 slots) | 0.9 ms | 1.5–1.8 ms | 1.1–1.2 ms | 5 | 9,496 B |
+| Event `event_release` (100 works) | 9.0–9.3 ms | 19.5–28.2 ms | 11.0–17.0 ms | 5 | 79,340 B |
+| Event composer `event` | 1.2–1.6 ms | 5.7–7.1 ms | 5.4–6.6 ms | 4 | 41,472 B |
+
+Indicative reading against the 8 ms `B` budget (MIG-0411 keeps only kinds with max < 8 ms):
+video and the event release section exceed it even without D1 time; user and event slots stay
+below it; event base and the composer are borderline. Not a final classification: ZERO_1102 §5
+requires a workerd profile.
+
+U05 (a) full `experimental_AstroContainer.renderToString` per kind: **NOT MEASURED** — no Astro
+page components for video / user / event exist yet (Phase 5). Restart: when R-PAGE components
+land, render the same inputs with this harness.
+
+### U06 list / search shards
+
+Whole family (CURRENT, 3,000 works, 2,850 public):
+
+| Family | total p50 | total max | output |
+| --- | --- | --- | --- |
+| `list_recent` | 24.2–26.7 ms | 48.9–58.1 ms | 856,470 B |
+| `list_popular` | 26.6–27.6 ms | 31.9–34.1 ms | 856,470 B |
+| `search_index` | 1,007–1,082 ms | 1,302–1,633 ms | 41,101,106 B in 967 objects |
+
+Shard proxy (the same CURRENT producer over a database holding only S public works, i.e. the
+cost of one shard of S items with CURRENT's SQL, DTO and stringify; the shard format itself is
+not designed yet):
+
+| S | `list_recent` p95 / max | `search_index` p95 / max |
+| --- | --- | --- |
+| 50 | 1.3 / 4.1–4.7 ms | 27.6–35.7 / 44.6–45.5 ms |
+| 100 | 1.6–2.9 / 4.7–4.9 ms | 47.2–53.5 / 49.0–75.4 ms |
+| 250 | 6.3–6.9 / 12.1–13.4 ms | 98.4–102.1 / 119.3–119.6 ms |
+| 500 | 12.4–13.9 / 12.9–20.7 ms | 188.5–219.2 / 195.0–234.2 ms |
+
+Indicative classification by the D-09 rule (shard max < 8 ms → Queue): new / popular lists →
+**Queue, split into shards of ≤ 100 items** (max 4.9 ms; 250 already exceeds 8 ms); search
+index in CURRENT's format → **build** (even 50 works cost > 40 ms); events index → build (this
+PR). Pending a workerd profile and the user's review; nothing here changes MIG-0410 / MIG-0411.
+
+### U07 Queue consumer CPU limit — NOT RUN (BLOCKED)
+
+Needs a non-production Worker and Queue in the Cloudflare account (20 ms / 100 ms / 1 s
+consumers × 50 messages, count `exceededCpu`). Restart condition: the user approves creating
+and later deleting those resources (names and deletion steps shown in the PR first); results go
+to `ZERO_1102.md` §1. A local run cannot answer it: workerd does not enforce or report the
+production CPU limit.
 
 ## 5. How the build reads D1
 
