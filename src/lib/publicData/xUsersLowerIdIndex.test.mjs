@@ -7,7 +7,7 @@ import { SQLiteSyncDialect, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const migration = read("../../../migrations/0064_x_users_lower_id_index.sql");
-const canonicalSchema = read("../db/schema.canonical.ts");
+const canonicalSchema = read("../../../packages/db/src/schema/canonical.ts");
 const probeSource = read("./publicStaticTargetProbe.ts");
 const degradedQueriesSource = read("./degradedQueries.ts");
 
