@@ -75,7 +75,7 @@ function collectSourceFiles(dir, result = []) {
   return result;
 }
 
-export function extractImportSpecifiers(content) {
+function extractImportSpecifiers(content) {
   const { importedFiles } = ts.preProcessFile(content, true, true);
   return importedFiles.map((file) => ({
     specifier: file.fileName,
