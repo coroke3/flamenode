@@ -1,0 +1,199 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
+import { loadAuthBaseline } from "./authBaselineHarness.mjs";
+import {
+  AUTH_BASELINE_ENV,
+  BASELINE_COOKIES,
+  BASELINE_NOW_MS,
+  DISCORD_ACCOUNTS,
+  SESSIONS,
+  USERS,
+} from "./authBaseline.fixture.mjs";
+
+// Characterizes CURRENT Auth.js behaviour: the real buildAuthConfig() from
+// src/lib/auth/index.ts runs through @auth/core against an in-memory D1 built from
+// every file in migrations/. Nothing here reimplements auth logic.
+if (runTestWithTsx(import.meta.url)) {
+  const { buildAuthConfig, createHarness, authRequest, setCookies } = await loadAuthBaseline();
+  const { linkDiscordAccountAtomically } = await import("./accountLinkAdapter.ts");
+  const { resolveActiveXUserId } = await import("./resolveActiveXId.ts");
+
+  function withoutVolatile(cookie) {
+    const { expires, ...attributes } = cookie.attributes;
+    return { attributes, hasExpires: expires !== undefined };
+  }
+
+  const SESSION_COOKIE = BASELINE_COOKIES.sessionToken.name;
+
+  async function readSession(token) {
+    const response = await authRequest("session", { cookies: { [SESSION_COOKIE]: token } });
+    return { response, body: await response.json() };
+  }
+
+  test("U01: CSRF request sets the CURRENT cookie names and attributes", async (t) => {
+    createHarness(t);
+    const response = await authRequest("csrf");
+    const cookies = setCookies(response);
+
+    const csrf = cookies[BASELINE_COOKIES.csrfToken.name];
+    assert.ok(csrf, `missing ${BASELINE_COOKIES.csrfToken.name}: ${Object.keys(cookies)}`);
+    assert.deepEqual(withoutVolatile(csrf), BASELINE_COOKIES.csrfToken.observed);
+  });
+
+  test("U01: sign-out clears the session cookie and deletes the session row", async (t) => {
+    const { sqlite } = createHarness(t);
+    const csrfResponse = await authRequest("csrf");
+    const csrfCookie = setCookies(csrfResponse)[BASELINE_COOKIES.csrfToken.name].value;
+    const { csrfToken } = await csrfResponse.json();
+
+    const response = await authRequest("signout", {
+      method: "POST",
+      cookies: {
+        [SESSION_COOKIE]: SESSIONS.valid.sessionToken,
+        [BASELINE_COOKIES.csrfToken.name]: csrfCookie,
+      },
+      body: { csrfToken },
+    });
+    const cleared = setCookies(response)[SESSION_COOKIE];
+
+    assert.ok(cleared, "sign-out must send a Set-Cookie for the session token");
+    assert.equal(cleared.value, "");
+    assert.deepEqual(withoutVolatile(cleared), BASELINE_COOKIES.sessionToken.observedOnSignOut);
+    const row = sqlite
+      .prepare(`SELECT 1 FROM "session" WHERE "sessionToken" = ?`)
+      .get(SESSIONS.valid.sessionToken);
+    assert.equal(row, undefined);
+  });
+
+  test("T01/U02: valid session resolves the user with role, ban flag and Active X", async (t) => {
+    createHarness(t);
+    const { response, body } = await readSession(SESSIONS.valid.sessionToken);
+    const cookie = setCookies(response)[SESSION_COOKIE];
+    assert.equal(cookie?.value, SESSIONS.valid.sessionToken);
+    assert.deepEqual(withoutVolatile(cookie), BASELINE_COOKIES.sessionToken.observedOnRead);
+    const expiresInDays = (Date.parse(cookie.attributes.expires) - Date.now()) / 86_400_000;
+    assert.ok(expiresInDays > 29 && expiresInDays <= 30, `session cookie expiry ${expiresInDays} days`);
+    assert.deepEqual(
+      {
+        id: body.user.id,
+        role: body.user.role,
+        is_banned: body.user.is_banned,
+        active_x_user_id: body.user.active_x_user_id,
+      },
+      {
+        id: USERS.valid.id,
+        role: "user",
+        is_banned: 0,
+        active_x_user_id: USERS.valid.active_x_user_id,
+      },
+    );
+  });
+
+  test("T01/U02: expired session is signed out and the row is deleted", async (t) => {
+    const { sqlite } = createHarness(t);
+    const { response, body } = await readSession(SESSIONS.expired.sessionToken);
+    assert.equal(body, null);
+    assert.equal(setCookies(response)[SESSION_COOKIE]?.value, "");
+    const row = sqlite
+      .prepare(`SELECT 1 FROM "session" WHERE "sessionToken" = ?`)
+      .get(SESSIONS.expired.sessionToken);
+    assert.equal(row, undefined);
+  });
+
+  test("U02: deleted (unknown) session token is signed out", async (t) => {
+    createHarness(t);
+    const { body } = await readSession(SESSIONS.deletedToken);
+    assert.equal(body, null);
+  });
+
+  test("U02: banned user still gets a session with is_banned=1 (ban is enforced later)", async (t) => {
+    createHarness(t);
+    const { body } = await readSession(SESSIONS.banned.sessionToken);
+    assert.equal(body.user.id, USERS.banned.id);
+    assert.equal(body.user.is_banned, 1);
+  });
+
+  test("U02: session exposes the stored active_x_user_id as-is (not trusted downstream)", async (t) => {
+    createHarness(t);
+    assert.equal((await readSession(SESSIONS.noX.sessionToken)).body.user.active_x_user_id, null);
+    assert.equal(
+      (await readSession(SESSIONS.multiX.sessionToken)).body.user.active_x_user_id,
+      USERS.multiX.active_x_user_id,
+    );
+  });
+
+  // currentUser.ts ignores the session value and resolves Active X from approved links.
+  function linkX(sqlite, authUserId, xUserId, approval) {
+    sqlite
+      .prepare(`INSERT OR IGNORE INTO "x_users" (id, x_name, approval_status) VALUES (?, ?, ?)`)
+      .run(xUserId, xUserId, approval);
+    sqlite
+      .prepare(`INSERT INTO "x_user_account_links" (x_user_id, auth_user_id) VALUES (?, ?)`)
+      .run(xUserId, authUserId);
+  }
+
+  test("U02: Active X resolution with 0, 1 and several linked X accounts", async (t) => {
+    const { sqlite, db } = createHarness(t);
+    const user = USERS.multiX.id;
+
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-primary"), null, "0 links");
+
+    linkX(sqlite, user, "x-mock-primary", "approved");
+    assert.equal(await resolveActiveXUserId(db, user, null), "x-mock-primary", "1 link, none selected");
+
+    linkX(sqlite, user, "x-mock-second", "approved");
+    linkX(sqlite, user, "x-mock-pending", "pending");
+    assert.equal(await resolveActiveXUserId(db, user, "X-Mock-Primary"), "x-mock-primary", "selected, case-insensitive");
+    assert.equal(await resolveActiveXUserId(db, user, null), null, "several links, none selected");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-pending"), null, "selected but not approved");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-other"), null, "selected but not linked");
+  });
+
+  test("T02/U03: linking a Discord account owned by another user is rejected", async (t) => {
+    const { db } = createHarness(t);
+    await assert.rejects(
+      linkDiscordAccountAtomically(db, DISCORD_ACCOUNTS.ownedByOther),
+      /AUTH_DISCORD_ID_CONFLICT/,
+    );
+  });
+
+  test("U03: re-linking the same Discord account to its owner succeeds without a duplicate row", async (t) => {
+    const { db, sqlite } = createHarness(t);
+    await linkDiscordAccountAtomically(db, DISCORD_ACCOUNTS.linked);
+    const { count } = sqlite
+      .prepare(`SELECT COUNT(*) AS count FROM "account" WHERE provider = 'discord' AND "providerAccountId" = ?`)
+      .get(DISCORD_ACCOUNTS.linked.providerAccountId);
+    assert.equal(count, 1);
+  });
+
+  test("T03: redirect callback keeps relative paths on the auth origin and rejects other hosts", async (t) => {
+    createHarness(t);
+    const { callbacks } = await buildAuthConfig();
+    const origin = AUTH_BASELINE_ENV.AUTH_URL;
+    const redirect = (url) => callbacks.redirect({ url, baseUrl: origin });
+
+    assert.equal(await redirect("/manage/events?tab=1"), `${origin}/manage/events?tab=1`);
+    assert.equal(await redirect(`${origin}/profile?x=1`), `${origin}/profile?x=1`);
+    assert.equal(await redirect("https://evil.example/steal"), `${origin}/dashboard`);
+    assert.equal(await redirect(`https://evil.example/?next=${origin}`), `${origin}/dashboard`);
+    assert.equal(await redirect(`${origin}.evil.example/`), `${origin}/dashboard`);
+    assert.equal(await redirect("javascript:alert(1)"), `${origin}/dashboard`);
+    // CURRENT quirk, recorded as-is: a protocol-relative URL starts with "/" and is
+    // concatenated onto the origin, which keeps it on the auth host.
+    assert.equal(await redirect("//evil.example/x"), `${origin}//evil.example/x`);
+  });
+
+  test("T04: fixture contains no real token or secret", () => {
+    const all = JSON.stringify({ USERS, SESSIONS, DISCORD_ACCOUNTS, AUTH_BASELINE_ENV });
+    assert.doesNotMatch(all, /eyJ[a-zA-Z0-9_-]{20,}/);
+    for (const [key, value] of Object.entries(AUTH_BASELINE_ENV)) {
+      if (/SECRET/.test(key)) assert.match(value, /^synthetic-/);
+    }
+    for (const session of Object.values(SESSIONS)) {
+      const token = typeof session === "string" ? session : session.sessionToken;
+      assert.match(token, /^synthetic_/);
+    }
+    assert.ok(BASELINE_NOW_MS > 0);
+  });
+}
