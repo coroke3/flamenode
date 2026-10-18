@@ -11,7 +11,7 @@ const migration = fs.readFileSync(
   "migrations/0059_event_slot_reservation_limits.sql",
   "utf8",
 );
-const schema = fs.readFileSync("src/lib/db/schema.canonical.ts", "utf8");
+const schema = fs.readFileSync("packages/db/src/schema/canonical.ts", "utf8");
 
 test("X ID limit uses slots as source of truth and an atomic post-update guard", () => {
   assert.match(slotAction, /loadLogicalReservationCountForXId/);
