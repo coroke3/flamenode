@@ -64,7 +64,7 @@ test("X名義ランタイムは旧申請表・単一リンク列・旧候補表�
 });
 
 test("X名義と認証ユーザーは複合主キーで多対多、承認時に由来とroleを保存する", () => {
-  const schema = read("src/lib/db/schema.canonical.ts");
+  const schema = read("packages/db/src/schema/canonical.ts");
   assert.match(schema, /primaryKey\(\{ columns: \[t\.x_user_id, t\.auth_user_id\] \}\)/);
   assert.doesNotMatch(schema, /uniqueIndex\([^)]*x_user_account_links[^)]*\)\s*\.on\(t\.x_user_id\)/s);
 

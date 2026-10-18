@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./slots/reservationLimit": "./src/slots/reservationLimit.ts"
+    "./slots/reservationLimit": "./src/slots/reservationLimit.ts",
+    "./slots/limits": "./src/slots/limits.ts",
+    "./software/labels": "./src/software/labels.ts"
   },
   "scripts": {
     "build": "tsc",
