@@ -13,6 +13,7 @@ import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type { VideoActionResult } from "@/lib/video/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { nextVideoAppLikeCount } from "@flamenode/domain/video";
 
 type InteractionKind = "like" | "bookmark";
 type RequestedState = boolean | "toggle";
@@ -161,9 +162,7 @@ async function mutateVideoInteraction(
 
   let staticRebuildWakeSource: "web" | undefined;
   if (kind === "like") {
-    const nextLikeCount = active
-      ? target.app_like_count + 1
-      : Math.max(0, target.app_like_count - 1);
+    const nextLikeCount = nextVideoAppLikeCount(target.app_like_count, active);
     const videoAfter = {
       ...target,
       app_like_count: nextLikeCount,
