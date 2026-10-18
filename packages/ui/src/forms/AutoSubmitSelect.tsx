@@ -4,10 +4,9 @@ import { useNavigateAdapter } from "../adapters/index.js";
 /** Where a GET form leads (CURRENT query string contract); null when it is the current URL. */
 export function getFormNavigationHref(form: HTMLFormElement): string | null {
   const action = form.getAttribute("action")?.trim();
-  const base = typeof window !== "undefined" && window.location.origin && window.location.origin !== "null"
-    ? window.location.origin
-    : "https://flamenode.test";
-  const url = new URL(action || (typeof window !== "undefined" ? window.location.pathname : "/"), base);
+  // Resolve against the page URL itself (CURRENT used location.origin), so no host is invented
+  // for opaque origins such as file: pages.
+  const url = new URL(action || window.location.pathname, window.location.href);
   url.search = "";
 
   const data = new FormData(form);
