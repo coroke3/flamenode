@@ -30,11 +30,17 @@ const description = event.description ?? "";
 const eventData: EventDetailData = {
   id: event.id,
   title: event.title,
-  bannerUrl: event.bannerUrl,
-  iconUrl: event.iconUrl,
-  status: (event.status as EventDetailData["status"]) ?? "upcoming",
-  periodText: event.periodText,
-  aboutText: event.description,
+  imageUrl: event.bannerUrl ?? null,
+  iconUrl: event.iconUrl ?? null,
+  explanation: event.description ?? null,
+  statusLabel: event.status === "upcoming" ? "募集期間中" : "開催中",
+  statusTone: "info",
+  periodLabel: event.periodText ?? null,
+  entryAction: "reserve",
+  videoTotal: 0,
+  creatorTotal: 0,
+  slotFilled: 0,
+  slotTotal: 0,
 };
 ---
 <!doctype html>
