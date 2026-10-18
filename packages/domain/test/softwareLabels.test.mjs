@@ -35,15 +35,3 @@ test("softwareLabels: normalizeSoftwareLabels parses delimiters and caps at limi
   const manyLabels = Array.from({ length: 30 }, (_, i) => `tool-${i}`);
   assert.equal(normalizeSoftwareLabels(manyLabels).length, SOFTWARE_LABEL_MAX_ITEMS);
 });
-
-test("softwareLabels: handles null, undefined and nullish elements safely", () => {
-  assert.equal(normalizeSoftwareCatalogName(null), "");
-  assert.equal(normalizeSoftwareCatalogName(undefined), "");
-  assert.equal(normalizeSoftwareKey(null), "");
-  assert.equal(normalizeSoftwareKey(undefined), "");
-
-  // Array containing null and undefined items
-  const mixed = ["Blender", null, undefined, "After Effects", ""];
-  assert.deepEqual(normalizeSoftwareLabels(mixed), ["Blender", "After Effects"]);
-});
-

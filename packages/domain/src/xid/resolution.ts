@@ -43,17 +43,16 @@ export function isUsableCanonicalXUserStatus(
  * direct row may intentionally be an old merged identity, so a valid alias
  * can resolve it; a live canonical ID and a different alias target cannot.
  */
-export function decideCanonicalXUserResolution(input?: {
-  candidate?: string | null | undefined;
-  aliases?: readonly (CanonicalAliasResolutionRow | null | undefined)[];
-  directRows?: readonly (CanonicalDirectResolutionRow | null | undefined)[];
+export function decideCanonicalXUserResolution(input: {
+  candidate: string | null | undefined;
+  aliases: readonly CanonicalAliasResolutionRow[];
+  directRows: readonly CanonicalDirectResolutionRow[];
 }): CanonicalXUserResolution {
-  if (!input) return { value: null, reason: "empty" };
   const candidate = normalizeXId(input.candidate);
   if (!candidate) return { value: null, reason: "empty" };
 
-  const directRows = (input.directRows ?? []).filter(
-    (row): row is CanonicalDirectResolutionRow => Boolean(row && normalizeXId(row.id) === candidate),
+  const directRows = input.directRows.filter(
+    (row) => normalizeXId(row.id) === candidate,
   );
   const directIds = new Set(directRows.map((row) => normalizeXId(row.id)));
   if (directIds.size > 1 || directRows.length > 1) {
@@ -61,8 +60,8 @@ export function decideCanonicalXUserResolution(input?: {
   }
   const direct = directRows[0] ?? null;
 
-  const aliases = (input.aliases ?? []).filter(
-    (row): row is CanonicalAliasResolutionRow => Boolean(row && normalizeXId(row.alias_x_id) === candidate),
+  const aliases = input.aliases.filter(
+    (row) => normalizeXId(row.alias_x_id) === candidate,
   );
   if (aliases.length > 0) {
     if (
