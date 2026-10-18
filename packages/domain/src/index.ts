@@ -9,3 +9,8 @@ export * from "./auth/permissions/index.ts";
 export * from "./video/index.ts";
 export * from "./event/index.ts";
 export * from "./xid/index.ts";
+export * from "./slots/slotIdentity.ts";
+export * from "./slots/releaseGroups.ts";
+export * from "./slots/reservationIdentity.ts";
+export * from "./slots/reservationBind.ts";
+export * from "./slots/reservationGroups.ts";

@@ -15,7 +15,12 @@
     "./auth/permissions": "./src/auth/permissions/index.ts",
     "./video": "./src/video/index.ts",
     "./event": "./src/event/index.ts",
-    "./xid": "./src/xid/index.ts"
+    "./xid": "./src/xid/index.ts",
+    "./slots/slotIdentity": "./src/slots/slotIdentity.ts",
+    "./slots/releaseGroups": "./src/slots/releaseGroups.ts",
+    "./slots/reservationIdentity": "./src/slots/reservationIdentity.ts",
+    "./slots/reservationBind": "./src/slots/reservationBind.ts",
+    "./slots/reservationGroups": "./src/slots/reservationGroups.ts"
   },
   "scripts": {
     "build": "tsc",
