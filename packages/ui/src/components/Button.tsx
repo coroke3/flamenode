@@ -25,6 +25,10 @@ export function Button({
   ...props
 }: ButtonProps) {
   const isIconOnly = Boolean(icon && (children == null || children === ""));
+  // An icon-only button has no text, so it needs an accessible name (MIG-0202 carry-over).
+  if (isIconOnly && !props["aria-label"] && !props["aria-labelledby"] && !props.title) {
+    throw new Error("Button: an icon-only button needs aria-label, aria-labelledby or title");
+  }
   const isDisabled = disabled || loading;
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
