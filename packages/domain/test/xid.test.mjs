@@ -37,9 +37,20 @@ describe("xid/format", () => {
   it("parses UI inputs and URLs", () => {
     assert.equal(parseXIdentityInput("https://x.com/flamenode"), "flamenode");
     assert.equal(parseXIdentityInput("https://twitter.com/flamenode"), "flamenode");
-    assert.equal(parseXIdentityInput("@flamenode"), "flamenode");
+    assert.equal(parseXIdentityInput("https://x.com/flamenode/"), "flamenode");
+    assert.equal(parseXIdentityInput("https://x.com/flamenode?ref_src=twsrc"), "flamenode");
+    assert.equal(parseXIdentityInput("https://x.com/flamenode#profile"), "flamenode");
+    assert.equal(parseXIdentityInput("https://x.com/flamenode/status/12345"), null);
+    assert.equal(parseXIdentityInput("https://evil.com/flamenode"), null);
+    assert.equal(parseXIdentityInput("@@@@flamenode"), "flamenode");
+    assert.equal(parseXIdentityInput("@FLAMENODE"), "flamenode");
     assert.equal(parseXIdentityInput(""), null);
+    assert.equal(parseXIdentityInput("   "), null);
+    assert.equal(parseXIdentityInput("user-with-hyphens"), null);
     assert.equal(parseCanonicalXId("https://x.com/valid_id"), "valid_id");
+    assert.equal(parseCanonicalXId("invalid-id"), null);
+    assert.equal(parseCanonicalXId(null), null);
+    assert.equal(parseCanonicalXId(undefined), null);
   });
 });
 
@@ -111,6 +122,18 @@ describe("xid/resolution", () => {
     });
     assert.equal(resAlias.value, "newalice");
     assert.equal(resAlias.reason, "resolved_alias");
+
+    // Null safety & sparse arrays
+    assert.deepEqual(decideCanonicalXUserResolution(undefined), { value: null, reason: "empty" });
+    assert.deepEqual(decideCanonicalXUserResolution({}), { value: null, reason: "empty" });
+    assert.deepEqual(
+      decideCanonicalXUserResolution({
+        candidate: "sparse",
+        aliases: [null, undefined],
+        directRows: [null, undefined, { id: "sparse", approval_status: "approved" }],
+      }),
+      { value: "sparse", reason: "resolved_canonical" },
+    );
   });
 });
 
