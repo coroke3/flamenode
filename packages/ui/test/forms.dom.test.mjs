@@ -90,9 +90,11 @@ test("a POST form keeps the browser's own submit, still without IME implicit sub
   const s = submit();
   await fire(form, s);
   assert.equal(s.defaultPrevented, false);
-  await fire(form.querySelector("input"), enter({ isComposing: true }));
   const blocked = submit();
-  await fire(form, blocked);
+  await act(() => {
+    form.querySelector("input").dispatchEvent(enter({ isComposing: true }));
+    form.dispatchEvent(blocked);
+  });
   assert.equal(blocked.defaultPrevented, true);
   assert.deepEqual(pushed, []);
   await act(() => root.unmount());
