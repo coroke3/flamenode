@@ -13,3 +13,8 @@ CREATE TABLE public_page_renders (
   rendered_at INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (entity, entity_id)
 );
+-- Recovery reads pending rows only (requested_at > rendered_at); without this partial
+-- index the bounded LIMIT query would still scan every rendered page.
+CREATE INDEX public_page_renders_pending_idx
+  ON public_page_renders (requested_at)
+  WHERE requested_at > rendered_at;

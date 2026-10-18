@@ -1,201 +1,211 @@
 /**
- * Queue consumer for queue-driven ISR page regeneration (MIG-0411 / Recipe R-JOB / Runtime B).
- * Processes one page per message (max_batch_size = 1), bounded CPU (< 8ms), fail-closed CAS updates.
- * Work truth is in D1 (public_page_renders), Queue is a doorbell (ZERO_1102.md).
+ * Queue consumer: rebuild one public detail page per message into R2 (MIG-0411 /
+ * R-JOB / Runtime B). Runs in the gateway Worker, so it reads the same route shards
+ * (Static Assets) and writes exactly what `r2Html.ts` serves:
+ *   key  = r2HtmlKey(<route key>)            e.g. `abc/index.html`, `user/x/index.html`
+ *   meta = { generation: <route shard generation> }
+ *
+ * Accepted messages (anything else is acked as invalid):
+ *   - RebuildRequest from r2Html.ts (gateway, HTML missing / stale / unreadable)
+ *   - PageRenderDoorbell `{ type: "render-page", kind, id }` (update API S3, recovery)
+ *
+ * Per message, bounded: D1 ≤ 3 statements (tracker, entity row LIMIT 1, CAS update),
+ * 1 route shard read, 1 KV read, 1 R2 PUT or DELETE. Nothing is written for a page that
+ * is not positively public: not in the route shards, revoked (deny:<kind>:<id>), or not
+ * public in D1 by CURRENT's rules — its R2 HTML is deleted instead.
+ *
+ * Ordering: the queue must be consumed with max_batch_size = 1 and max_concurrency = 1.
+ * With one consumer at a time, a render that raced an unpublish loses its CAS and the
+ * unpublish doorbell, processed next, deletes the HTML; meanwhile the gateway already
+ * refuses the page through the revocation entry.
  */
 import {
-  renderPublicPage,
-  type PageRenderEntityKind,
-  type PublicPageRow,
-} from "./renderPublicPage.ts";
+  isPublicVideoDirect,
+  normalizePublicEventVisibility,
+} from "../../../../src/lib/publicData/visibility.ts";
+import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
+import { r2HtmlKey, type RebuildRequest } from "./r2Html.ts";
+import { renderPublicPage, type PageRenderEntityKind, type PublicPageRow } from "./renderPublicPage.ts";
+import { canonicalEntityId, revocationKey, routeKeyFromPath } from "./routeShards.ts";
+import type { RouteLookup } from "./visibility.ts";
+
+export const MAX_PAGE_RENDERS_PER_INVOCATION = 1;
+export const MAX_RECOVERY_DOORBELLS = 5;
 
 export interface PageRenderR2Bucket {
   put: (
     key: string,
-    value: string | ReadableStream | ArrayBuffer,
-    options?: {
-      httpMetadata?: { contentType?: string };
-      customMetadata?: Record<string, string>;
-    },
+    value: string,
+    options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
   ) => Promise<unknown>;
-  delete: (key: string | string[]) => Promise<unknown>;
+  delete: (key: string) => Promise<unknown>;
 }
 
 export interface D1PreparedStatementLike {
   bind: (...values: unknown[]) => D1PreparedStatementLike;
   first: <T = unknown>(colName?: string) => Promise<T | null>;
-  all: <T = unknown>() => Promise<{ results?: T[]; success?: boolean; meta?: { changes?: number } }>;
-  run: () => Promise<{ success?: boolean; meta?: { changes?: number }; changes?: number }>;
+  all: <T = unknown>() => Promise<{ results?: T[] }>;
+  run: () => Promise<{ meta?: { changes?: number }; changes?: number }>;
 }
 
 export interface D1DatabaseLike {
   prepare: (query: string) => D1PreparedStatementLike;
 }
 
+export type PageRenderQueueSender = { send: (message: PageRenderDoorbell) => Promise<unknown> };
+
 export interface PageRenderEnv {
   DB?: D1DatabaseLike;
-  D1?: D1DatabaseLike;
   R2_STORAGE?: PageRenderR2Bucket;
-  PAGE_RENDER_QUEUE?: { send: (msg: unknown) => Promise<unknown> };
-  REBUILD_QUEUE?: { send: (msg: unknown) => Promise<unknown> };
-  DEFAULT_GENERATION?: string;
+  VISIBILITY_KV?: { get: (key: string) => Promise<string | null> };
+  /** Site origin for canonical / og:url, e.g. https://example.org. Required. */
+  PUBLIC_SITE_URL?: string;
 }
+
+export type PageRenderDoorbell = Readonly<{ type: "render-page"; kind: PageRenderEntityKind; id: string }>;
+
+export type PageRenderMessage =
+  | Readonly<{ source: "gateway"; kind: PageRenderEntityKind; id: string; key: string }>
+  | Readonly<{ source: "doorbell"; kind: PageRenderEntityKind; id: string; key: string }>;
 
 export type PageRenderOutcome =
-  | { action: "rendered"; entity: PageRenderEntityKind; id: string; key: string }
-  | { action: "deleted"; entity: PageRenderEntityKind; id: string; key: string }
-  | { action: "skipped_up_to_date"; entity: PageRenderEntityKind; id: string }
-  | { action: "skipped_invalid_message"; raw: unknown }
-  | { action: "conflict_retry_pending"; entity: PageRenderEntityKind; id: string };
+  | Readonly<{ action: "rendered"; kind: PageRenderEntityKind; id: string; key: string; generation: string }>
+  | Readonly<{ action: "deleted"; kind: PageRenderEntityKind; id: string; key: string; reason: "not_routed" | "revoked" | "not_public" }>
+  | Readonly<{ action: "skipped_up_to_date"; kind: PageRenderEntityKind; id: string }>
+  | Readonly<{ action: "conflict_newer_request"; kind: PageRenderEntityKind; id: string }>
+  | Readonly<{ action: "skipped_invalid_message" }>
+  | Readonly<{ action: "retry"; reason: string }>;
 
-/** Primary key read by the gateway's loadR2PrebuiltHtml (r2HtmlKey). */
-export function pageRenderGatewayKey(entity: PageRenderEntityKind, id: string): string {
-  switch (entity) {
-    case "video":
-      return `${id}/index.html`;
-    case "user":
-      return `user/${id}/index.html`;
-    case "event":
-      return `event/${id}/index.html`;
+const KINDS: ReadonlySet<string> = new Set(["video", "user", "event"]);
+
+/** Route key the build gives an entity (routeMap.ts entityKey + gateway normalisation). */
+export function canonicalRouteKey(kind: PageRenderEntityKind, id: string): string | null {
+  if (typeof id !== "string" || id.length === 0 || id.length > 128 || id.includes("/") || id.includes("%")) {
+    return null;
   }
+  return routeKeyFromPath(kind === "video" ? `/${id}` : `/${kind}/${id}`);
 }
 
-/** Spec-compatible path pages/<entity>/<id>.html mentioned in PHASE_4_5_SPEC.md. */
-export function pageRenderSpecKey(entity: PageRenderEntityKind, id: string): string {
-  return `pages/${entity}/${id}.html`;
-}
-
-export function parsePageRenderMessage(
-  body: unknown,
-): { entity: PageRenderEntityKind; id: string } | null {
+export function parsePageRenderMessage(body: unknown): PageRenderMessage | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-
-  const rawEntity = b.entity ?? b.kind;
-  const rawId = b.entity_id ?? b.id;
-
-  if (
-    (rawEntity === "video" || rawEntity === "user" || rawEntity === "event") &&
-    typeof rawId === "string" &&
-    rawId.length > 0
-  ) {
-    return { entity: rawEntity as PageRenderEntityKind, id: rawId };
+  if (typeof b.kind !== "string" || !KINDS.has(b.kind) || typeof b.id !== "string") return null;
+  const kind = b.kind as PageRenderEntityKind;
+  const key = canonicalRouteKey(kind, b.id);
+  if (!key) return null;
+  if (b.type === "rebuild-page") {
+    // The gateway sends its decision key; it must be this entity's canonical key.
+    const request = b as Partial<RebuildRequest>;
+    if (request.key !== key) return null;
+    return { source: "gateway", kind, id: b.id, key };
   }
+  if (b.type === "render-page") return { source: "doorbell", kind, id: b.id, key };
   return null;
 }
 
-interface RenderTrackerRow {
-  requested_at: number;
-  rendered_at: number;
+type Tracker = { requested_at: number; rendered_at: number };
+
+const ENTITY_SQL: Record<PageRenderEntityKind, string> = {
+  video: `SELECT id, title, creator_display_name, creator_icon_url, intro_comment, highlights, visibility_status
+          FROM videos WHERE id = ? LIMIT 1`,
+  // x_users ids are compared lower-cased, as CURRENT fences and routes do (x_users_lower_id_idx).
+  user: `SELECT id, x_name, icon_url, profile_text, approval_status
+         FROM x_users WHERE lower(id) = ? LIMIT 1`,
+  event: `SELECT id, title, explanation, icon_url, img_url, visibility_status
+          FROM events WHERE id = ? LIMIT 1`,
+};
+
+const LISTABLE_USER: ReadonlySet<string> = new Set(PUBLIC_LISTABLE_X_APPROVAL_STATUSES);
+
+/** CURRENT's public rules (src/lib/publicData/visibility.ts, src/lib/utils/publicXUser.ts). Fail-closed. */
+function isPublicRow(kind: PageRenderEntityKind, row: Record<string, unknown> | null): boolean {
+  if (!row) return false;
+  switch (kind) {
+    case "video":
+      return isPublicVideoDirect(row.visibility_status);
+    case "event":
+      return normalizePublicEventVisibility(row.visibility_status) === "public";
+    case "user":
+      return typeof row.approval_status === "string" && LISTABLE_USER.has(row.approval_status);
+  }
+}
+
+function changesOf(result: { meta?: { changes?: number }; changes?: number }): number {
+  return result.meta?.changes ?? result.changes ?? 0;
 }
 
 /**
- * Process a single page regeneration request with CAS atomicity.
- * 1. Checks public_page_renders: if requested_at <= rendered_at, no-op (T04).
- * 2. Fetches row from D1: checks visibility (public vs private/deleted).
- * 3. If public: renders HTML shell, puts to R2 (T01).
- * 4. If private/deleted: deletes HTML from R2 (T02).
- * 5. Conditional UPDATE on public_page_renders (WHERE requested_at = ?):
- *    if modified concurrently, rendered_at is NOT advanced so next message re-renders (T03).
+ * Rebuild or delete one page. Throws only for conditions a retry can fix (missing
+ * binding or configuration, route data / KV / D1 / R2 unavailable).
  */
-export async function processPageRenderItem(
-  entity: PageRenderEntityKind,
-  id: string,
+export async function processPageRender(
+  message: PageRenderMessage,
   env: PageRenderEnv,
+  lookup: RouteLookup,
   now = Date.now(),
 ): Promise<PageRenderOutcome> {
-  const db = env.DB ?? env.D1;
+  const db = env.DB;
   const r2 = env.R2_STORAGE;
+  const kv = env.VISIBILITY_KV;
+  const origin = env.PUBLIC_SITE_URL?.trim();
+  if (!db || !r2 || !kv || !origin) throw new Error("page render: DB, R2_STORAGE, VISIBILITY_KV and PUBLIC_SITE_URL are required");
 
-  if (!db || !r2) {
-    throw new Error("[processPageRenderItem] Missing DB or R2_STORAGE binding");
-  }
+  const { kind, key } = message;
+  const entityId = canonicalEntityId(kind, message.id);
 
-  const gatewayKey = pageRenderGatewayKey(entity, id);
-  const specKey = pageRenderSpecKey(entity, id);
-  const generation = env.DEFAULT_GENERATION ?? "isr-v1";
-
-  // Step 1: Query requested_at and rendered_at
   const tracker = await db
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = ? AND entity_id = ?")
-    .bind(entity, id)
-    .first<RenderTrackerRow>();
-
-  if (tracker && tracker.requested_at <= tracker.rendered_at) {
-    return { action: "skipped_up_to_date", entity, id };
+    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = ? AND entity_id = ? LIMIT 1")
+    .bind(kind, entityId)
+    .first<Tracker>();
+  // A doorbell with nothing newer than the last render is a duplicate (T04). A gateway
+  // request is not: the HTML can be missing or from an older build although rendered.
+  if (message.source === "doorbell" && tracker && Number(tracker.requested_at) <= Number(tracker.rendered_at)) {
+    return { action: "skipped_up_to_date", kind, id: entityId };
   }
 
-  const expectedReqAt = tracker ? tracker.requested_at : now;
-
-  // Step 2: Query entity and determine visibility
-  let row: PublicPageRow | null = null;
-  let isPublic = false;
-
-  if (entity === "video") {
-    const video = await db
-      .prepare("SELECT id, title, description, creator_name, thumbnail_url, visibility FROM videos WHERE id = ?")
-      .bind(id)
-      .first<Record<string, unknown>>();
-    if (video && video.visibility === "public") {
-      row = video;
-      isPublic = true;
-    }
-  } else if (entity === "user") {
-    const user = await db
-      .prepare("SELECT id, name, handle, bio, icon_url FROM x_users WHERE id = ?")
-      .bind(id)
-      .first<Record<string, unknown>>();
-    if (user) {
-      row = user;
-      isPublic = true;
-    }
-  } else if (entity === "event") {
-    const event = await db
-      .prepare("SELECT id, title, description, icon_url, visibility FROM events WHERE id = ?")
-      .bind(id)
-      .first<Record<string, unknown>>();
-    if (event && (event.visibility === "public" || event.visibility === undefined || event.visibility === null)) {
-      row = event;
-      isPublic = true;
-    }
-  }
-
-  // Step 3: Put or Delete R2 HTML
-  if (isPublic && row) {
-    const html = renderPublicPage(entity, row, { generation });
-    await r2.put(gatewayKey, html, {
-      httpMetadata: { contentType: "text/html; charset=utf-8" },
-      customMetadata: { generation },
-    });
-    await r2.put(specKey, html, {
-      httpMetadata: { contentType: "text/html; charset=utf-8" },
-      customMetadata: { generation },
-    });
-  } else {
-    await r2.delete(gatewayKey);
-    await r2.delete(specKey);
-  }
-
-  // Step 4: Conditional CAS update to record rendered_at
-  const updateRes = await db
-    .prepare(
-      "UPDATE public_page_renders SET rendered_at = ? WHERE entity = ? AND entity_id = ? AND requested_at = ?",
-    )
-    .bind(now, entity, id, expectedReqAt)
-    .run();
-
-  const changes = updateRes.meta?.changes ?? updateRes.changes ?? 0;
-  if (tracker && changes === 0) {
-    // A newer update arrived between step 1 and step 4; do not advance rendered_at
-    return { action: "conflict_retry_pending", entity, id };
-  }
-
-  return {
-    action: isPublic ? "rendered" : "deleted",
-    entity,
-    id,
-    key: gatewayKey,
+  const finish = async (outcome: PageRenderOutcome): Promise<PageRenderOutcome> => {
+    if (!tracker) return outcome;
+    const updated = await db
+      .prepare(
+        "UPDATE public_page_renders SET rendered_at = ? WHERE entity = ? AND entity_id = ? AND requested_at = ?",
+      )
+      .bind(now, kind, entityId, tracker.requested_at)
+      .run();
+    // A newer request arrived while this one ran: leave rendered_at behind so its own
+    // doorbell (or recovery) rebuilds the page (T03).
+    return changesOf(updated) === 1 ? outcome : { action: "conflict_newer_request", kind, id: entityId };
   };
+  const remove = async (reason: "not_routed" | "revoked" | "not_public") => {
+    await r2.delete(r2HtmlKey(key));
+    return finish({ action: "deleted", kind, id: entityId, key, reason });
+  };
+
+  const route = await lookup(key);
+  if (!route) throw new Error("page render: route data unavailable");
+  const resolution = route.resolution;
+  if (
+    !resolution ||
+    resolution.type !== "canonical" ||
+    resolution.kind !== kind ||
+    canonicalEntityId(kind, resolution.id) !== entityId
+  ) {
+    // The gateway would answer 404 or redirect for this key; HTML there is never served.
+    return remove("not_routed");
+  }
+  if ((await kv.get(revocationKey(kind, entityId))) !== null) return remove("revoked");
+
+  const row = await db.prepare(ENTITY_SQL[kind]).bind(entityId).first<Record<string, unknown>>();
+  if (!isPublicRow(kind, row)) return remove("not_public");
+
+  const html = renderPublicPage(kind, row as PublicPageRow, {
+    origin,
+    canonicalPath: resolution.canonicalPath,
+  });
+  await r2.put(r2HtmlKey(key), html, {
+    httpMetadata: { contentType: "text/html; charset=utf-8" },
+    customMetadata: { generation: route.generation },
+  });
+  return finish({ action: "rendered", kind, id: entityId, key, generation: route.generation });
 }
 
 export interface QueueMessage<T = unknown> {
@@ -209,57 +219,58 @@ export interface QueueBatch<T = unknown> {
 }
 
 /**
- * Queue handler entrypoint for Cloudflare Workers.
- * Processes each message in the batch (configured with max_batch_size = 1 in production).
+ * Queue handler. Handles MAX_PAGE_RENDERS_PER_INVOCATION messages and retries the rest,
+ * so one invocation stays within the per-message CPU budget even if the consumer is
+ * misconfigured with a larger batch. Never throws: a failure retries that message only.
  */
 export async function handlePageRenderQueue(
   batch: QueueBatch,
   env: PageRenderEnv,
+  lookup: RouteLookup,
 ): Promise<PageRenderOutcome[]> {
   const outcomes: PageRenderOutcome[] = [];
-
-  for (const message of batch.messages) {
+  batch.messages.forEach((message, index) => {
+    if (index >= MAX_PAGE_RENDERS_PER_INVOCATION) message.retry?.();
+  });
+  for (const message of batch.messages.slice(0, MAX_PAGE_RENDERS_PER_INVOCATION)) {
     const parsed = parsePageRenderMessage(message.body);
     if (!parsed) {
-      outcomes.push({ action: "skipped_invalid_message", raw: message.body });
-      if (typeof message.ack === "function") message.ack();
+      outcomes.push({ action: "skipped_invalid_message" });
+      message.ack?.();
       continue;
     }
-
     try {
-      const outcome = await processPageRenderItem(parsed.entity, parsed.id, env);
-      outcomes.push(outcome);
-      if (typeof message.ack === "function") message.ack();
+      outcomes.push(await processPageRender(parsed, env, lookup));
+      message.ack?.();
     } catch (error) {
-      if (typeof message.retry === "function") {
-        message.retry();
-      }
-      throw error;
+      outcomes.push({ action: "retry", reason: error instanceof Error ? error.message : "error" });
+      message.retry?.();
     }
   }
-
   return outcomes;
 }
 
 /**
- * U04 recovery: inspects pending page renders where requested_at > rendered_at
- * and enqueues doorbell messages for any unprocessed items. Bounded (limit).
+ * U04 recovery: one bounded statement (partial index public_page_renders_pending_idx),
+ * then one doorbell per pending row. NOT WIRED: the gateway has no Cron, and the
+ * existing Cron Workers have no binding to this queue (adding one is a Cloudflare
+ * configuration change that needs approval).
  */
 export async function recoverPendingPageRenders(
   db: D1DatabaseLike,
-  queue: { send: (msg: unknown) => Promise<unknown> },
-  limit = 5,
+  queue: PageRenderQueueSender,
+  limit = MAX_RECOVERY_DOORBELLS,
 ): Promise<number> {
+  const bounded = Math.min(Math.max(1, Math.floor(limit)), MAX_RECOVERY_DOORBELLS);
   const res = await db
     .prepare(
       "SELECT entity, entity_id FROM public_page_renders WHERE requested_at > rendered_at ORDER BY requested_at ASC LIMIT ?",
     )
-    .bind(limit)
+    .bind(bounded)
     .all<{ entity: PageRenderEntityKind; entity_id: string }>();
-
   const rows = res.results ?? [];
   for (const row of rows) {
-    await queue.send({ entity: row.entity, entity_id: row.entity_id });
+    await queue.send({ type: "render-page", kind: row.entity, id: row.entity_id });
   }
   return rows.length;
 }

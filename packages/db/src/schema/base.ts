@@ -1438,5 +1438,8 @@ export const publicPageRenders = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.entity, t.entity_id] }),
+    pendingIdx: index("public_page_renders_pending_idx")
+      .on(t.requested_at)
+      .where(sql`requested_at > rendered_at`),
   }),
 );

@@ -26,8 +26,8 @@ import {
 import {
   handlePageRenderQueue,
   type D1DatabaseLike,
-  type PageRenderEnv,
   type PageRenderOutcome,
+  type PageRenderR2Bucket,
   type QueueBatch,
 } from "./pageRenderQueue.ts";
 
@@ -36,8 +36,8 @@ type Fetcher = { fetch: (request: Request) => Promise<Response> };
 export interface GatewayEnv {
   /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
   ASSETS?: Fetcher;
-  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06). */
-  R2_STORAGE?: R2HtmlBucket;
+  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06); the MIG-0411 consumer writes it. */
+  R2_STORAGE?: R2HtmlBucket & Partial<PageRenderR2Bucket>;
   /** Non-production only: rebuild requests for the MIG-0411 consumer. */
   REBUILD_QUEUE?: RebuildQueue;
   // Explicit service binding to the existing Auth.js origin; never return a fake auth 404.
@@ -45,10 +45,10 @@ export interface GatewayEnv {
   VISIBILITY_KV?: {
     get: (key: string) => Promise<string | null>;
   };
-  /** D1 database for queue-driven ISR page render state (MIG-0411). */
+  /** MIG-0411 consumer only: public_page_renders and the entity rows. Never read by fetch(). */
   DB?: D1DatabaseLike;
-  D1?: D1DatabaseLike;
-  PAGE_RENDER_QUEUE?: { send: (msg: unknown) => Promise<unknown> };
+  /** MIG-0411 consumer only: site origin for canonical / og:url. */
+  PUBLIC_SITE_URL?: string;
 }
 
 const NO_STORE = "no-store, private";
@@ -224,7 +224,18 @@ export default {
         return servePage(decision, request, env, ctx);
     }
   },
+  /** MIG-0411: the REBUILD_QUEUE consumer (max_batch_size = 1, max_concurrency = 1). Non-production. */
   async queue(batch: QueueBatch, env: GatewayEnv): Promise<PageRenderOutcome[]> {
-    return handlePageRenderQueue(batch, env as PageRenderEnv);
+    const r2 = env.R2_STORAGE;
+    const writable = r2?.put && r2.delete ? (r2 as PageRenderR2Bucket) : undefined;
+    // Same shard lookup as fetch(): the Assets binding ignores the origin.
+    const lookup: RouteLookup = env.ASSETS
+      ? createShardLookup(env.ASSETS, "https://gateway.invalid")
+      : async () => undefined;
+    return handlePageRenderQueue(
+      batch,
+      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV, PUBLIC_SITE_URL: env.PUBLIC_SITE_URL },
+      lookup,
+    );
   },
 };

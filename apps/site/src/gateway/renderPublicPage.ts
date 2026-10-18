@@ -1,48 +1,50 @@
 /**
- * Minimal HTML shell generator for queue-driven ISR page regeneration (MIG-0411 / Recipe R-PAGE / Runtime S1).
- * Approved Option B: minimal HTML head shell (title, canonical, OGP) + client Island root (< 8ms CPU budget).
- * Pure function with zero external I/O, strict escaping, and deterministic output.
+ * Minimal HTML shell for queue-driven page regeneration (MIG-0411 / R-PAGE / Runtime B).
+ * Pure: no I/O, deterministic, every value escaped.
+ *
+ * NOT APPROVED AS THE PAGE FORMAT. The Work Order (U02) asks for the R-PAGE page
+ * component rendered with `renderToString`; this shell (title / canonical / OGP + an
+ * empty Island root) is the "(b)" variant whose STOP requires the user's approval
+ * because the body would be drawn by JS (no-JS and crawler text differ from CURRENT).
+ * Head values follow the real D1 columns but are not verified against CURRENT
+ * `generateMetadata` output.
  */
 
 export type PageRenderEntityKind = "video" | "user" | "event";
 
-export interface PublicPageVideoRow {
+/** Columns read by pageRenderQueue.ts (real D1 names, see packages/db/src/schema/base.ts). */
+export type PublicPageVideoRow = {
   id: string;
   title: string;
-  description?: string | null;
-  creator_name?: string | null;
-  thumbnail_url?: string | null;
-  visibility?: string | null;
-}
+  creator_display_name?: string | null;
+  creator_icon_url?: string | null;
+  intro_comment?: string | null;
+  highlights?: string | null;
+};
 
-export interface PublicPageUserRow {
+export type PublicPageUserRow = {
   id: string;
-  name?: string | null;
-  handle?: string | null;
-  bio?: string | null;
+  x_name?: string | null;
   icon_url?: string | null;
-}
+  profile_text?: string | null;
+};
 
-export interface PublicPageEventRow {
+export type PublicPageEventRow = {
   id: string;
   title: string;
-  description?: string | null;
+  explanation?: string | null;
   icon_url?: string | null;
-  visibility?: string | null;
-}
+  img_url?: string | null;
+};
 
-export type PublicPageRow =
-  | PublicPageVideoRow
-  | PublicPageUserRow
-  | PublicPageEventRow
-  | Record<string, unknown>;
+export type PublicPageRow = PublicPageVideoRow | PublicPageUserRow | PublicPageEventRow;
 
-export interface RenderPublicPageOptions {
-  canonicalOrigin?: string;
-  generation?: string;
-}
-
-const DEFAULT_ORIGIN = "https://flamenode.net";
+export type RenderPublicPageOptions = {
+  /** Site origin from configuration (e.g. env PUBLIC_SITE_URL). Required: no default. */
+  origin: string;
+  /** canonicalPath from the route shard entry, e.g. `/abc`, `/user/x`, `/event/y`. */
+  canonicalPath: string;
+};
 
 function escapeHtml(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -54,79 +56,68 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-export function buildCanonicalUrl(
-  entity: PageRenderEntityKind,
-  id: string,
-  origin = DEFAULT_ORIGIN,
-): string {
-  const cleanOrigin = origin.replace(/\/$/, "");
-  switch (entity) {
-    case "video":
-      return `${cleanOrigin}/${id}`;
-    case "user":
-      return `${cleanOrigin}/user/${id}`;
-    case "event":
-      return `${cleanOrigin}/event/${id}`;
+function text(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function buildCanonicalUrl(origin: string, canonicalPath: string): string {
+  const base = new URL(origin);
+  if (base.protocol !== "https:" && base.protocol !== "http:") {
+    throw new Error("[renderPublicPage] origin must be http(s)");
   }
+  if (!canonicalPath.startsWith("/") || canonicalPath.startsWith("//")) {
+    throw new Error("[renderPublicPage] canonicalPath must be a same-site path");
+  }
+  return new URL(canonicalPath, base.origin).toString();
 }
 
 export function renderPublicPage(
   entity: PageRenderEntityKind,
   row: PublicPageRow,
-  options: RenderPublicPageOptions = {},
+  options: RenderPublicPageOptions,
 ): string {
-  const id = String((row as Record<string, unknown>).id ?? "");
-  if (!id) {
-    throw new Error(`[renderPublicPage] Missing required id for entity '${entity}'`);
-  }
+  const id = text(row.id);
+  if (!id) throw new Error(`[renderPublicPage] Missing required id for entity '${entity}'`);
+  const canonicalUrl = buildCanonicalUrl(options.origin, options.canonicalPath);
 
-  const origin = options.canonicalOrigin ?? DEFAULT_ORIGIN;
-  const canonicalUrl = buildCanonicalUrl(entity, id, origin);
-
-  let title = "FlameNode";
-  let description = "";
-  let ogType = "website";
-  let ogImage: string | undefined = undefined;
-
+  let title: string;
+  let description: string;
+  let ogType: string;
+  let ogImage: string;
   switch (entity) {
     case "video": {
       const v = row as PublicPageVideoRow;
-      const rawTitle = v.title || "Video";
-      title = `${rawTitle} - FlameNode`;
-      description = v.description ?? "";
+      const creator = text(v.creator_display_name);
+      title = creator ? `${text(v.title) || id} - ${creator}` : text(v.title) || id;
+      description = text(v.intro_comment) || text(v.highlights);
       ogType = "video.other";
-      ogImage = v.thumbnail_url ?? undefined;
+      ogImage = text(v.creator_icon_url);
       break;
     }
     case "user": {
       const u = row as PublicPageUserRow;
-      const rawName = u.name || u.handle || "User";
-      title = `${rawName} - FlameNode`;
-      description = u.bio ?? "";
+      title = text(u.x_name) || id;
+      description = text(u.profile_text);
       ogType = "profile";
-      ogImage = u.icon_url ?? undefined;
+      ogImage = text(u.icon_url);
       break;
     }
     case "event": {
       const e = row as PublicPageEventRow;
-      const rawTitle = e.title || "Event";
-      title = `${rawTitle} - FlameNode`;
-      description = e.description ?? "";
+      title = text(e.title) || id;
+      description = text(e.explanation);
       ogType = "website";
-      ogImage = e.icon_url ?? undefined;
+      ogImage = text(e.img_url) || text(e.icon_url);
       break;
     }
     default:
-      throw new Error(`[renderPublicPage] Unsupported entity kind '${entity}'`);
+      throw new Error(`[renderPublicPage] Unsupported entity kind '${String(entity)}'`);
   }
 
   const titleEsc = escapeHtml(title);
   const canonicalEsc = escapeHtml(canonicalUrl);
-  const ogTypeEsc = escapeHtml(ogType);
   const descEsc = escapeHtml(description);
-  const ogImageEsc = ogImage ? escapeHtml(ogImage) : "";
-  const idEsc = escapeHtml(id);
-  const entityEsc = escapeHtml(entity);
+  const imageEsc = escapeHtml(ogImage);
 
   return `<!DOCTYPE html>
 <html lang="ja">
@@ -136,10 +127,9 @@ export function renderPublicPage(
   <title>${titleEsc}</title>
   <link rel="canonical" href="${canonicalEsc}"/>
   <meta property="og:title" content="${titleEsc}"/>
-  <meta property="og:type" content="${ogTypeEsc}"/>
-  <meta property="og:url" content="${canonicalEsc}"/>
-  <meta property="og:site_name" content="FlameNode"/>${
-    ogImageEsc ? `\n  <meta property="og:image" content="${ogImageEsc}"/>` : ""
+  <meta property="og:type" content="${escapeHtml(ogType)}"/>
+  <meta property="og:url" content="${canonicalEsc}"/>${
+    imageEsc ? `\n  <meta property="og:image" content="${imageEsc}"/>` : ""
   }${
     descEsc
       ? `\n  <meta name="description" content="${descEsc}"/>\n  <meta property="og:description" content="${descEsc}"/>`
@@ -147,7 +137,7 @@ export function renderPublicPage(
   }
 </head>
 <body>
-  <div id="island-root" data-entity="${entityEsc}" data-id="${idEsc}"></div>
+  <div id="island-root" data-entity="${escapeHtml(entity)}" data-id="${escapeHtml(id)}"></div>
 </body>
 </html>
 `;

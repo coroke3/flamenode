@@ -1,417 +1,409 @@
+// MIG-0411 consumer tests on the real D1 schema (every file in migrations/ applied),
+// real route shards, and the real gateway reading what the consumer wrote.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
+  MAX_RECOVERY_DOORBELLS,
+  canonicalRouteKey,
   handlePageRenderQueue,
-  pageRenderGatewayKey,
-  pageRenderSpecKey,
-  processPageRenderItem,
+  parsePageRenderMessage,
+  processPageRender,
   recoverPendingPageRenders,
 } from "./pageRenderQueue.ts";
 import { renderPublicPage } from "./renderPublicPage.ts";
 import gateway, { resetGatewayCaches } from "./index.ts";
-import { resetRebuildMemory } from "./r2Html.ts";
+import { r2HtmlKey, resetRebuildMemory } from "./r2Html.ts";
 import { buildRouteMap } from "../lib/routeMap.ts";
 import { buildRouteShards, revocationKey } from "./routeShards.ts";
 
-function createTestDb() {
+const GENERATION = "gen-mig-0411-test";
+const ORIGIN = "https://site.example";
+const MIGRATIONS = fileURLToPath(new URL("../../../../migrations/", import.meta.url));
+
+function realSchema() {
   const sqlite = new DatabaseSync(":memory:");
-
-  sqlite.exec(`
-    CREATE TABLE public_page_renders (
-      entity TEXT NOT NULL CHECK (entity IN ('video', 'user', 'event')),
-      entity_id TEXT NOT NULL,
-      requested_at INTEGER NOT NULL,
-      rendered_at INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY (entity, entity_id)
-    );
-
-    CREATE TABLE videos (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      creator_name TEXT,
-      thumbnail_url TEXT,
-      visibility TEXT NOT NULL DEFAULT 'public'
-    );
-
-    CREATE TABLE x_users (
-      id TEXT PRIMARY KEY,
-      name TEXT,
-      handle TEXT,
-      bio TEXT,
-      icon_url TEXT
-    );
-
-    CREATE TABLE events (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      icon_url TEXT,
-      visibility TEXT NOT NULL DEFAULT 'public'
-    );
-  `);
-
-  return {
-    raw: sqlite,
-    prepare(query) {
-      return {
-        bind(...args) {
-          return {
-            async first() {
-              const stmt = sqlite.prepare(query);
-              const row = stmt.get(...args);
-              return row ?? null;
-            },
-            async all() {
-              const stmt = sqlite.prepare(query);
-              const rows = stmt.all(...args);
-              return { results: rows, success: true };
-            },
-            async run() {
-              const stmt = sqlite.prepare(query);
-              const info = stmt.run(...args);
-              const changes = Number(info.changes);
-              return { success: true, meta: { changes }, changes };
-            },
-          };
-        },
-      };
-    },
-  };
+  for (const file of fs.readdirSync(MIGRATIONS).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()) {
+    sqlite.exec(fs.readFileSync(path.join(MIGRATIONS, file), "utf8"));
+  }
+  return sqlite;
 }
 
-function createTestR2() {
-  const store = new Map();
-  return {
-    store,
-    async put(key, value, options) {
-      store.set(key, { value: String(value), options });
-    },
-    async get(key) {
-      if (!store.has(key)) return null;
-      const item = store.get(key);
-      return {
-        body: new Response(item.value).body,
-        httpMetadata: item.options?.httpMetadata,
-        customMetadata: item.options?.customMetadata,
-        size: Buffer.byteLength(item.value),
-      };
-    },
-    async delete(key) {
-      if (Array.isArray(key)) {
-        for (const k of key) store.delete(k);
-      } else {
-        store.delete(key);
-      }
-    },
-  };
+function d1(sqlite, log = []) {
+  const statement = (sql, args = []) => ({
+    bind: (...next) => statement(sql, next),
+    async first() { log.push(sql); return sqlite.prepare(sql).get(...args) ?? null; },
+    async all() { log.push(sql); return { results: sqlite.prepare(sql).all(...args) }; },
+    async run() { log.push(sql); return { meta: { changes: Number(sqlite.prepare(sql).run(...args).changes) } }; },
+  });
+  return { prepare: (sql) => statement(sql) };
 }
 
-test("T01: 公開の作品を更新 -> その作品の R2 HTML だけが作り直される", async () => {
-  const db = createTestDb();
-  const r2 = createTestR2();
-  const env = { DB: db, R2_STORAGE: r2, DEFAULT_GENERATION: "gen-2026-t01" };
+function seed(sqlite) {
+  sqlite.exec(`INSERT INTO "user" (id, name) VALUES ('u1', 'Submitter')`);
+  const user = sqlite.prepare("INSERT INTO x_users (id, x_name, icon_url, profile_text, approval_status) VALUES (?, ?, ?, ?, ?)");
+  user.run("creator-alpha", "Alpha <b>", "https://img.example/a.png", "Bio & more", "approved");
+  user.run("pending-user", "Pending", null, null, "pending");
+  user.run("rejected-user", "Rejected", null, null, "rejected");
+  user.run("Mixed_Case", "Mixed", null, null, "approved");
+  const video = sqlite.prepare(
+    `INSERT INTO videos (id, submitted_by_user_id, creator_display_name, title, intro_comment, visibility_status)
+     VALUES (?, 'u1', ?, ?, ?, ?)`,
+  );
+  video.run("vid-public", "Alpha", "Public \"clip\" <script>", "Intro", "public");
+  video.run("vid-private", "Alpha", "Private clip", null, "private");
+  video.run("vid-pending", "Alpha", "Pending clip", null, "pending");
+  const event = sqlite.prepare("INSERT INTO events (id, title, explanation, visibility_status) VALUES (?, ?, ?, ?)");
+  event.run("ev-public", "Spring Fest", "Desc", "public");
+  event.run("ev-private", "Hidden Fest", null, "private");
+}
 
-  db.raw.exec(`
-    INSERT INTO videos (id, title, description, visibility)
-    VALUES ('vid-t01', 'Test Public Video 1', 'A description', 'public');
+function manifest() {
+  return buildRouteMap(
+    [
+      { kind: "video", id: "vid-public", aliases: ["vid-alias"] },
+      { kind: "video", id: "vid-private" },
+      { kind: "video", id: "vid-pending" },
+      { kind: "video", id: "vid-missing-row" },
+      { kind: "user", id: "creator-alpha" },
+      { kind: "user", id: "pending-user" },
+      { kind: "user", id: "rejected-user" },
+      { kind: "user", id: "mixed_case" },
+      { kind: "event", id: "ev-public" },
+      { kind: "event", id: "ev-private" },
+    ],
+    GENERATION,
+  );
+}
 
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('video', 'vid-t01', 1000, 0);
-  `);
-
-  const outcome = await processPageRenderItem("video", "vid-t01", env, 1050);
-  assert.equal(outcome.action, "rendered");
-  assert.equal(outcome.entity, "video");
-  assert.equal(outcome.id, "vid-t01");
-
-  const gatewayKey = pageRenderGatewayKey("video", "vid-t01");
-  const specKey = pageRenderSpecKey("video", "vid-t01");
-  assert.equal(gatewayKey, "vid-t01/index.html");
-  assert.equal(specKey, "pages/video/vid-t01.html");
-
-  assert.ok(r2.store.has(gatewayKey));
-  assert.ok(r2.store.has(specKey));
-
-  const savedHtml = r2.store.get(gatewayKey).value;
-  assert.ok(savedHtml.includes("<title>Test Public Video 1 - FlameNode</title>"));
-  assert.ok(savedHtml.includes('href="https://flamenode.net/vid-t01"'));
-  assert.ok(savedHtml.includes('data-entity="video" data-id="vid-t01"'));
-
-  const tracker = db.raw
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = 'video' AND entity_id = 'vid-t01'")
-    .get();
-  assert.equal(tracker.rendered_at, 1050);
-  assert.ok(tracker.rendered_at >= tracker.requested_at);
-});
-
-test("T02: 公開→非公開 -> R2 HTML が消え、gateway が 404 を返す", async () => {
-  const db = createTestDb();
-  const r2 = createTestR2();
-  const env = { DB: db, R2_STORAGE: r2, DEFAULT_GENERATION: "gen-2026-t02" };
-
-  // First render as public
-  db.raw.exec(`
-    INSERT INTO videos (id, title, description, visibility)
-    VALUES ('vid-t02', 'Initially Public', 'Desc', 'public');
-
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('video', 'vid-t02', 1000, 0);
-  `);
-  await processPageRenderItem("video", "vid-t02", env, 1050);
-  assert.ok(r2.store.has("vid-t02/index.html"));
-
-  // Now change to private and set requested_at = 2000
-  db.raw.exec(`
-    UPDATE videos SET visibility = 'private' WHERE id = 'vid-t02';
-    UPDATE public_page_renders SET requested_at = 2000 WHERE entity = 'video' AND entity_id = 'vid-t02';
-  `);
-
-  const outcome = await processPageRenderItem("video", "vid-t02", env, 2050);
-  assert.equal(outcome.action, "deleted");
-  assert.equal(r2.store.has("vid-t02/index.html"), false);
-  assert.equal(r2.store.has("pages/video/vid-t02.html"), false);
-
-  const tracker = db.raw
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = 'video' AND entity_id = 'vid-t02'")
-    .get();
-  assert.equal(tracker.rendered_at, 2050);
-
-  // Gateway integration test: verify that when route is revoked or not in manifest, gateway denies (404)
-  const manifest = buildRouteMap([{ kind: "video", id: "vid-t02" }], "gen-2026-t02");
-  const shards = buildRouteShards(manifest);
-  const shardFiles = new Map(shards.map((s) => [s.path, s.body]));
-
-  const gatewayEnv = {
+function harness({ kv = new Map(), env: extra = {} } = {}) {
+  const sqlite = realSchema();
+  seed(sqlite);
+  const files = new Map(buildRouteShards(manifest()).map((s) => [s.path, s.body]));
+  const r2 = new Map();
+  const ops = [];
+  const sent = [];
+  const env = {
     ASSETS: {
       fetch: async (req) => {
         const { pathname } = new URL(req.url);
-        if (shardFiles.has(pathname)) return new Response(shardFiles.get(pathname), { status: 200 });
-        return new Response("not found", { status: 404 });
+        return files.has(pathname)
+          ? new Response(files.get(pathname), { status: 200 })
+          : new Response("nf", { status: 404 }); // no detail page in Assets: R2 only
       },
     },
-    VISIBILITY_KV: {
-      get: async (key) => {
-        if (key === revocationKey("video", "vid-t02")) return "1"; // Revoked in KV
-        return null;
+    VISIBILITY_KV: { get: async (key) => kv.get(key) ?? null },
+    R2_STORAGE: {
+      async get(key) {
+        const o = r2.get(key);
+        if (!o) return null;
+        return {
+          body: new Response(o.body).body,
+          size: Buffer.byteLength(o.body),
+          httpMetadata: o.httpMetadata,
+          customMetadata: o.customMetadata,
+        };
       },
+      async put(key, body, options) { ops.push(["put", key]); r2.set(key, { body, ...options }); },
+      async delete(key) { ops.push(["delete", key]); r2.delete(key); },
     },
-    R2_STORAGE: r2,
+    REBUILD_QUEUE: { send: async (m) => { sent.push(m); } },
+    DB: d1(sqlite),
+    PUBLIC_SITE_URL: ORIGIN,
+    ...extra,
   };
-
-  resetGatewayCaches();
-  resetRebuildMemory();
-  const res = await gateway.fetch(new Request("https://flamenode.net/vid-t02"), gatewayEnv);
-  assert.equal(res.status, 404);
-});
-
-test("T03: 生成中に同じ作品がもう一度更新 -> 2回目の更新が次の message で反映される", async () => {
-  const db = createTestDb();
-  const r2 = createTestR2();
-  const env = { DB: db, R2_STORAGE: r2 };
-
-  db.raw.exec(`
-    INSERT INTO videos (id, title, description, visibility)
-    VALUES ('vid-t03', 'Initial Version', 'Desc 1', 'public');
-
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('video', 'vid-t03', 1000, 0);
-  `);
-
-  // Simulate concurrent update during render:
-  // Step 1 queries requested_at = 1000.
-  // Before Step 4 runs, an external API updates title and requested_at to 2000.
-  const originalPrepare = db.prepare.bind(db);
-  let intercepted = false;
-
-  db.prepare = (query) => {
-    const prepared = originalPrepare(query);
-    if (query.includes("UPDATE public_page_renders") && !intercepted) {
-      intercepted = true;
-      // Mutate table to simulate concurrent update:
-      db.raw.exec(`
-        UPDATE videos SET title = 'Updated Mid Flight Version' WHERE id = 'vid-t03';
-        UPDATE public_page_renders SET requested_at = 2000 WHERE entity = 'video' AND entity_id = 'vid-t03';
-      `);
-    }
-    return prepared;
+  const request = (kind, id, at = 1000) =>
+    sqlite.prepare(
+      `INSERT INTO public_page_renders (entity, entity_id, requested_at) VALUES (?, ?, ?)
+       ON CONFLICT (entity, entity_id) DO UPDATE SET requested_at = excluded.requested_at`,
+    ).run(kind, id, at);
+  const tracker = (kind, id) =>
+    sqlite.prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = ? AND entity_id = ?").get(kind, id);
+  const consume = async (...bodies) => {
+    const acks = [];
+    const outcomes = await gateway.queue(
+      { messages: bodies.map((body, i) => ({ body, ack: () => acks.push(["ack", i]), retry: () => acks.push(["retry", i]) })) },
+      env,
+    );
+    return { outcomes, acks };
   };
-
-  const outcome1 = await processPageRenderItem("video", "vid-t03", env, 1500);
-  assert.equal(outcome1.action, "conflict_retry_pending");
-
-  // rendered_at remains 0 because CAS failed!
-  const tracker1 = db.raw
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = 'video' AND entity_id = 'vid-t03'")
-    .get();
-  assert.equal(tracker1.requested_at, 2000);
-  assert.equal(tracker1.rendered_at, 0);
-
-  // Restore prepare and process the 2nd message (next message)
-  db.prepare = originalPrepare;
-  const outcome2 = await processPageRenderItem("video", "vid-t03", env, 2100);
-  assert.equal(outcome2.action, "rendered");
-
-  const tracker2 = db.raw
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = 'video' AND entity_id = 'vid-t03'")
-    .get();
-  assert.equal(tracker2.rendered_at, 2100);
-
-  // The final saved HTML reflects the 2nd update!
-  const finalHtml = r2.store.get("vid-t03/index.html").value;
-  assert.ok(finalHtml.includes("Updated Mid Flight Version"));
-});
-
-test("T04: 同じ doorbell が2回 -> 2回目は何もしない", async () => {
-  const db = createTestDb();
-  const r2 = createTestR2();
-  const env = { DB: db, R2_STORAGE: r2 };
-
-  db.raw.exec(`
-    INSERT INTO videos (id, title, description, visibility)
-    VALUES ('vid-t04', 'Title 4', 'Desc 4', 'public');
-
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('video', 'vid-t04', 1000, 0);
-  `);
-
-  // First doorbell
-  const outcome1 = await processPageRenderItem("video", "vid-t04", env, 1050);
-  assert.equal(outcome1.action, "rendered");
-
-  const putCountBefore = r2.store.size;
-
-  // Second doorbell with identical state (requested_at <= rendered_at)
-  const outcome2 = await processPageRenderItem("video", "vid-t04", env, 1060);
-  assert.equal(outcome2.action, "skipped_up_to_date");
-  assert.equal(r2.store.size, putCountBefore);
-});
-
-test("T05: R2 の PUT が失敗 -> rendered_at が進まず、次の Cron が拾う", async () => {
-  const db = createTestDb();
-  const failingR2 = {
-    async put() {
-      throw new Error("R2 storage network outage");
-    },
-    async delete() {},
+  const get = async (p) => {
+    resetGatewayCaches();
+    resetRebuildMemory();
+    return gateway.fetch(new Request(`${ORIGIN}${p}`), env);
   };
-  const env = { DB: db, R2_STORAGE: failingR2 };
+  return { sqlite, env, r2, ops, sent, kv, request, tracker, consume, get };
+}
 
-  db.raw.exec(`
-    INSERT INTO videos (id, title, description, visibility)
-    VALUES ('vid-t05', 'Title 5', 'Desc 5', 'public');
+const doorbell = (kind, id) => ({ type: "render-page", kind, id });
 
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('video', 'vid-t05', 1000, 0);
-  `);
+test("contract: a missing page -> gateway rebuild-page message -> consumer -> gateway serves it", async () => {
+  const h = harness();
+  const first = await h.get("/vid-public");
+  assert.equal(first.status, 503, "public route without HTML is a build gap");
+  assert.equal(h.sent.length, 1);
+  assert.deepEqual(Object.keys(h.sent[0]).sort(), ["generation", "id", "key", "kind", "reason", "type"]);
 
-  await assert.rejects(
-    async () => {
-      await processPageRenderItem("video", "vid-t05", env, 1050);
-    },
-    /R2 storage network outage/,
-  );
-
-  // rendered_at remains 0!
-  const tracker = db.raw
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = 'video' AND entity_id = 'vid-t05'")
-    .get();
-  assert.equal(tracker.rendered_at, 0);
-  assert.equal(tracker.requested_at, 1000);
-
-  // U04: recoverPendingPageRenders detects the pending row and re-enqueues doorbell
-  const enqueued = [];
-  const mockQueue = {
-    async send(msg) {
-      enqueued.push(msg);
-    },
-  };
-
-  const recoveredCount = await recoverPendingPageRenders(db, mockQueue, 5);
-  assert.equal(recoveredCount, 1);
-  assert.deepEqual(enqueued, [{ entity: "video", entity_id: "vid-t05" }]);
-});
-
-test("T06: 上限ちょうどのページ (max-size page) -> 非本番の max < 8ms CPU budget", async () => {
-  const maxSizeRow = {
-    id: "vid-large-max-size",
-    title: "Very Long Video Title With Special Characters & <tag> Symbols ".repeat(5),
-    description: "Detailed description paragraph with rich details. ".repeat(100), // ~5KB description
-    creator_name: "Prominent Creator Name",
-    thumbnail_url: "https://cdn.example.com/thumbnails/vid-large-max-size.webp",
-    visibility: "public",
-  };
-
-  const iterations = 100;
-  const times = [];
-
-  // Warmup
-  for (let i = 0; i < 10; i++) {
-    renderPublicPage("video", maxSizeRow);
-  }
-
-  // Measure pure render function
-  for (let i = 0; i < iterations; i++) {
-    const start = process.hrtime.bigint();
-    const html = renderPublicPage("video", maxSizeRow);
-    const end = process.hrtime.bigint();
-    times.push(Number(end - start) / 1_000_000); // ms
-    assert.ok(html.length > 5000);
-  }
-
-  const maxMs = Math.max(...times);
-  const p95Ms = times.sort((a, b) => a - b)[Math.floor(iterations * 0.95)];
-  const avgMs = times.reduce((acc, t) => acc + t, 0) / iterations;
-
-  console.log(`[T06 Benchmark] max-size page render: max=${maxMs.toFixed(3)}ms, p95=${p95Ms.toFixed(3)}ms, avg=${avgMs.toFixed(3)}ms`);
-
-  // Option B CPU budget is < 8ms (ZERO_1102.md Runtime B).
-  assert.ok(maxMs < 8.0, `Max CPU ${maxMs}ms exceeds 8ms budget`);
-  assert.ok(maxMs < 1.0, `Pure render is comfortably under 1ms (actual=${maxMs.toFixed(3)}ms)`);
-});
-
-test("Queue batch handler processes messages and acks them", async () => {
-  const db = createTestDb();
-  const r2 = createTestR2();
-  const env = { DB: db, R2_STORAGE: r2 };
-
-  db.raw.exec(`
-    INSERT INTO x_users (id, name, handle, bio)
-    VALUES ('usr-001', 'Alice User', '@alice', 'Bio here');
-
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('user', 'usr-001', 500, 0);
-
-    INSERT INTO events (id, title, description)
-    VALUES ('ev-001', 'Summer Fest', 'Event desc');
-
-    INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at)
-    VALUES ('event', 'ev-001', 600, 0);
-  `);
-
-  let ack1 = false;
-  let ack2 = false;
-  let ack3 = false;
-
-  const batch = {
-    messages: [
-      { body: { entity: "user", entity_id: "usr-001" }, ack: () => { ack1 = true; } },
-      { body: { kind: "event", id: "ev-001" }, ack: () => { ack2 = true; } },
-      { body: { invalid: "junk" }, ack: () => { ack3 = true; } },
-    ],
-  };
-
-  const outcomes = await handlePageRenderQueue(batch, env);
-  assert.equal(outcomes.length, 3);
+  const { outcomes, acks } = await h.consume(h.sent[0]);
   assert.equal(outcomes[0].action, "rendered");
-  assert.equal(outcomes[1].action, "rendered");
-  assert.equal(outcomes[2].action, "skipped_invalid_message");
+  assert.deepEqual(acks, [["ack", 0]]);
+  const stored = h.r2.get(r2HtmlKey("vid-public"));
+  assert.equal(stored.customMetadata.generation, GENERATION, "stamped with the route shard generation");
+  assert.match(stored.httpMetadata.contentType, /^text\/html/);
+  assert.deepEqual([...h.r2.keys()], ["vid-public/index.html"], "one key layout: <route key>/index.html only");
 
-  assert.equal(ack1, true);
-  assert.equal(ack2, true);
-  assert.equal(ack3, true);
+  const served = await h.get("/vid-public");
+  assert.equal(served.status, 200);
+  const html = await served.text();
+  assert.match(html, /<link rel="canonical" href="https:\/\/site\.example\/vid-public"\/>/);
+  assert.ok(!html.includes("<script>"), "row text is escaped");
+  assert.ok(!html.includes("flamenode.net"));
+});
 
-  assert.ok(r2.store.has("user/usr-001/index.html"));
-  assert.ok(r2.store.has("event/ev-001/index.html"));
+test("T01: a doorbell for an updated public page rebuilds only that page and advances rendered_at", async () => {
+  const h = harness();
+  h.request("video", "vid-public", 5000);
+  const { outcomes } = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(outcomes[0].action, "rendered");
+  assert.deepEqual(h.ops, [["put", "vid-public/index.html"]]);
+  assert.equal(h.tracker("video", "vid-public").rendered_at > 0, true);
+});
+
+test("T02: unpublish -> R2 HTML deleted and the gateway answers 404 at once (deny entry)", async () => {
+  const h = harness();
+  await h.consume(doorbell("video", "vid-public"));
+  assert.equal((await h.get("/vid-public")).status, 200);
+  // S3 unpublish: D1 row, revocation entry and tracker in the same request.
+  h.sqlite.exec("UPDATE videos SET visibility_status = 'private' WHERE id = 'vid-public'");
+  h.kv.set(revocationKey("video", "vid-public"), "1");
+  h.request("video", "vid-public", 9000);
+  assert.equal((await h.get("/vid-public")).status, 404, "blocked before the consumer runs");
+  const { outcomes } = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(outcomes[0].action, "deleted");
+  assert.equal(outcomes[0].reason, "revoked");
+  assert.equal(h.r2.size, 0);
+  const res = await h.get("/vid-public");
+  assert.equal(res.status, 404);
+  assert.match(res.headers.get("X-Robots-Tag"), /noindex/);
+});
+
+test("fail-closed visibility: never writes a page that is not public by CURRENT's rules", async () => {
+  const h = harness({ kv: new Map([[revocationKey("user", "creator-alpha"), "1"]]) });
+  const cases = [
+    [doorbell("video", "vid-private"), "not_public"],
+    [doorbell("video", "vid-pending"), "not_public"], // CURRENT isPublicVideoDirect: only "public"
+    [doorbell("video", "vid-missing-row"), "not_public"],
+    [doorbell("event", "ev-private"), "not_public"],
+    [doorbell("user", "rejected-user"), "not_public"],
+    [doorbell("user", "creator-alpha"), "revoked"], // public in D1, revoked after the build
+    [doorbell("video", "not-in-shards"), "not_routed"],
+    [doorbell("event", "vid-public"), "not_routed"], // wrong kind for the key
+  ];
+  for (const [body, reason] of cases) {
+    const { outcomes } = await h.consume(body);
+    assert.equal(outcomes[0].action, "deleted", JSON.stringify(body));
+    assert.equal(outcomes[0].reason, reason, JSON.stringify(body));
+  }
+  assert.ok(h.ops.every(([op]) => op === "delete"), "no PUT for any non-public page");
+  assert.equal(h.r2.size, 0);
+});
+
+test("users: CURRENT listable approval statuses and case-insensitive ids; events: public only", async () => {
+  const h = harness();
+  for (const body of [doorbell("user", "pending-user"), doorbell("user", "Mixed_Case"), doorbell("event", "ev-public")]) {
+    const { outcomes } = await h.consume(body);
+    assert.equal(outcomes[0].action, "rendered", JSON.stringify(body));
+  }
+  assert.deepEqual([...h.r2.keys()].sort(), ["event/ev-public/index.html", "user/mixed_case/index.html", "user/pending-user/index.html"]);
+  assert.equal((await h.get("/user/Mixed_Case")).status, 200);
+  assert.equal((await h.get("/event/ev-public")).status, 200);
+});
+
+test("T03: an update during the render is rebuilt by the next message", async () => {
+  const h = harness();
+  h.request("video", "vid-public", 1000);
+  const originalPut = h.env.R2_STORAGE.put;
+  h.env.R2_STORAGE.put = async (...args) => {
+    h.request("video", "vid-public", 2000); // S3 writes a newer request mid-render
+    return originalPut(...args);
+  };
+  const first = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(first.outcomes[0].action, "conflict_newer_request");
+  assert.equal(h.tracker("video", "vid-public").rendered_at, 0, "rendered_at not advanced");
+  h.env.R2_STORAGE.put = originalPut;
+  const second = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(second.outcomes[0].action, "rendered");
+  assert.ok(h.tracker("video", "vid-public").rendered_at > 0);
+});
+
+test("T04: the same doorbell twice: the second does nothing; a gateway request still rebuilds", async () => {
+  const h = harness();
+  h.request("video", "vid-public", 1000);
+  await h.consume(doorbell("video", "vid-public"));
+  const opsAfterFirst = h.ops.length;
+  const { outcomes } = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(outcomes[0].action, "skipped_up_to_date");
+  assert.equal(h.ops.length, opsAfterFirst);
+  // After a new build the gateway reports the HTML stale although rendered_at is current.
+  h.r2.get(r2HtmlKey("vid-public")).customMetadata.generation = "older-build";
+  assert.equal((await h.get("/vid-public")).status, 503);
+  const again = await h.consume(h.sent.at(-1));
+  assert.equal(again.outcomes[0].action, "rendered");
+  assert.equal((await h.get("/vid-public")).status, 200);
+});
+
+test("T05: R2 PUT failure retries the message and leaves rendered_at for recovery", async () => {
+  const h = harness();
+  h.request("video", "vid-public", 1000);
+  h.env.R2_STORAGE.put = async () => { throw new Error("r2 down"); };
+  const { outcomes, acks } = await h.consume(doorbell("video", "vid-public"));
+  assert.equal(outcomes[0].action, "retry");
+  assert.deepEqual(acks, [["retry", 0]]);
+  assert.equal(h.tracker("video", "vid-public").rendered_at, 0);
+  const sent = [];
+  assert.equal(await recoverPendingPageRenders(h.env.DB, { send: async (m) => sent.push(m) }), 1);
+  assert.deepEqual(sent, [{ type: "render-page", kind: "video", id: "vid-public" }]);
+  assert.ok(parsePageRenderMessage(sent[0]), "recovery doorbells are accepted by the consumer");
+});
+
+test("bindings / configuration missing, route data or KV unavailable: retry, nothing written", async () => {
+  for (const extra of [{ PUBLIC_SITE_URL: undefined }, { DB: undefined }, { VISIBILITY_KV: undefined }, { ASSETS: undefined }]) {
+    const h = harness({ env: extra });
+    const { outcomes, acks } = await h.consume(doorbell("video", "vid-public"));
+    assert.equal(outcomes[0].action, "retry", JSON.stringify(Object.keys(extra)));
+    assert.deepEqual(acks, [["retry", 0]]);
+    assert.equal(h.r2.size, 0);
+  }
+  const h = harness();
+  h.env.VISIBILITY_KV = { get: async () => { throw new Error("kv down"); } };
+  assert.equal((await h.consume(doorbell("video", "vid-public"))).outcomes[0].action, "retry");
+  assert.equal(h.r2.size, 0);
+});
+
+test("messages: only the gateway RebuildRequest and the render-page doorbell are accepted", () => {
+  const ok = { type: "rebuild-page", key: "user/mixed_case", kind: "user", id: "Mixed_Case", generation: "g", reason: "html_missing" };
+  assert.deepEqual(parsePageRenderMessage(ok), { source: "gateway", kind: "user", id: "Mixed_Case", key: "user/mixed_case" });
+  for (const bad of [
+    { ...ok, key: "user/other" },
+    { ...ok, type: "rebuild" },
+    { type: "render-page", kind: "video", id: "a/b" },
+    { type: "render-page", kind: "video", id: "..%2f" },
+    { type: "render-page", kind: "group", id: "x" },
+    { type: "render-page", kind: "video", id: "" },
+    { entity: "video", entity_id: "vid-public" }, // the old ad-hoc shape
+    null,
+    "vid-public",
+  ]) {
+    assert.equal(parsePageRenderMessage(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(canonicalRouteKey("video", "abc"), "abc");
+  assert.equal(canonicalRouteKey("event", "e1"), "event/e1");
+});
+
+test("one message per invocation: the rest of a larger batch is retried", async () => {
+  const h = harness();
+  const { outcomes, acks } = await h.consume(doorbell("video", "vid-public"), doorbell("event", "ev-public"), { junk: 1 });
+  assert.equal(outcomes.length, 1);
+  assert.deepEqual(acks.sort(), [["ack", 0], ["retry", 1], ["retry", 2]].sort());
+});
+
+test("U04 recovery: bounded LIMIT, served by the partial pending index", async () => {
+  const h = harness();
+  for (let i = 0; i < 7; i += 1) h.request("video", `v-${i}`, 1000 + i);
+  h.sqlite.prepare("INSERT INTO public_page_renders (entity, entity_id, requested_at, rendered_at) VALUES ('video', 'done', 5, 9)").run();
+  const sent = [];
+  assert.equal(await recoverPendingPageRenders(h.env.DB, { send: async (m) => sent.push(m) }, 100), MAX_RECOVERY_DOORBELLS);
+  assert.deepEqual(sent.map((m) => m.id), ["v-0", "v-1", "v-2", "v-3", "v-4"]);
+  const plan = h.sqlite.prepare(
+    "EXPLAIN QUERY PLAN SELECT entity, entity_id FROM public_page_renders WHERE requested_at > rendered_at ORDER BY requested_at ASC LIMIT ?",
+  ).all(5).map((r) => r.detail).join(" ");
+  assert.match(plan, /public_page_renders_pending_idx/);
+});
+
+test("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
+  const h = harness();
+  h.request("video", "vid-public", 1000);
+  const log = [];
+  h.env.DB = d1(h.sqlite, log);
+  let kvReads = 0;
+  const kv = h.env.VISIBILITY_KV;
+  h.env.VISIBILITY_KV = { get: async (k) => { kvReads += 1; return kv.get(k); } };
+  await h.consume(doorbell("video", "vid-public"));
+  assert.ok(log.length <= 3, `D1 statements ${log.length}`);
+  assert.ok(log.every((sql) => /LIMIT 1|WHERE entity = \? AND entity_id = \? AND requested_at = \?/.test(sql)), log.join("\n"));
+  assert.equal(kvReads, 1);
+  assert.equal(h.ops.length, 1);
+});
+
+test("render: canonical comes from configuration + route canonicalPath, never a built-in domain", () => {
+  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: "", canonicalPath: "/x" }));
+  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: "javascript:alert(1)", canonicalPath: "/x" }));
+  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: ORIGIN, canonicalPath: "//evil.example/x" }));
+  const html = renderPublicPage("user", { id: "u", x_name: "\"><img src=x onerror=1>" }, { origin: ORIGIN, canonicalPath: "/user/u" });
+  assert.ok(!/<img/.test(html));
+  assert.match(html, /href="https:\/\/site\.example\/user\/u"/);
+});
+
+test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue budget (local Node)", async () => {
+  // Same method as scripts/migration-gateway.test.mjs: mocks resolve in a microtask,
+  // fastest of 5 repeats per sample; local wall time, not workerd CPU. Max-size row:
+  // 1,000-char title / name, 10,000-char intro / profile.
+  const shard = buildRouteShards(manifest());
+  const files = new Map(shard.map((s) => [s.path, s.body]));
+  const big = "長".repeat(1000);
+  const rows = {
+    video: { id: "vid-public", title: big, creator_display_name: big, creator_icon_url: "https://img.example/a.png", intro_comment: "説".repeat(10_000), visibility_status: "public" },
+    user: { id: "creator-alpha", x_name: big, icon_url: "https://img.example/a.png", profile_text: "説".repeat(10_000), approval_status: "approved" },
+    event: { id: "ev-public", title: big, explanation: "説".repeat(10_000), icon_url: null, img_url: null, visibility_status: "public" },
+  };
+  const results = {};
+  for (const kind of ["video", "user", "event"]) {
+    const row = rows[kind];
+    const db = {
+      prepare(sql) {
+        const stmt = {
+          bind: () => stmt,
+          first: async () => (sql.includes("public_page_renders") ? { requested_at: 2, rendered_at: 1 } : row),
+          all: async () => ({ results: [] }),
+          run: async () => ({ meta: { changes: 1 } }),
+        };
+        return stmt;
+      },
+    };
+    const env = {
+      DB: db,
+      R2_STORAGE: { put: async () => {}, delete: async () => {} },
+      VISIBILITY_KV: { get: async () => null },
+      PUBLIC_SITE_URL: ORIGIN,
+    };
+    const parsedShards = new Map();
+    const lookup = async (key) => {
+      for (const [p, body] of files) {
+        let parsed = parsedShards.get(p);
+        if (!parsed) { parsed = JSON.parse(body); parsedShards.set(p, parsed); }
+        if (Object.hasOwn(parsed.routes, key)) return { resolution: parsed.routes[key], generation: parsed.generation };
+      }
+      return { resolution: null, generation: GENERATION };
+    };
+    const message = parsePageRenderMessage(doorbell(kind, row.id));
+    await processPageRender(message, env, lookup); // warm the parsed-shard map (lookup is not under test)
+    const samples = [];
+    for (let i = 0; i < 200; i += 1) {
+      let best = Infinity;
+      for (let r = 0; r < 5; r += 1) {
+        const start = performance.now();
+        await processPageRender(message, env, lookup);
+        best = Math.min(best, performance.now() - start);
+      }
+      samples.push(best);
+    }
+    samples.sort((a, b) => a - b);
+    results[kind] = { p50: samples[100], p99: samples[197], max: samples.at(-1) };
+    assert.ok(results[kind].max < 8, `${kind} max ${results[kind].max}ms`);
+  }
+  console.log(`[MIG-0411 CPU] n=200 fastest-of-5 local Node: ${Object.entries(results)
+    .map(([k, v]) => `${k} p50=${v.p50.toFixed(3)} p99=${v.p99.toFixed(3)} max=${v.max.toFixed(3)}ms`).join("; ")}`);
 });
