@@ -74,36 +74,49 @@ export class InvalidRouteIdError extends RouteMapError {
   }
 }
 
+/**
+ * Root path segments that belong to fixed routes or static files. A test checks this
+ * list against CURRENT `app/` top-level segments and `public/` entries.
+ */
 export const RESERVED_ROOT_SLUGS: ReadonlySet<string> = new Set([
   "about",
-  "rules",
-  "event",
-  "user",
-  "list",
-  "recommend",
-  "trending",
-  "groups",
   "admin",
-  "manage",
-  "dashboard",
-  "entry",
   "api",
   "auth",
+  "dashboard",
+  "dev",
+  "entry",
+  "event",
+  "fonts",
+  "groups",
+  "list",
   "maintenance",
+  "manage",
+  "onboarding",
+  "recommend",
+  "rules",
+  "trending",
+  "user",
 ]);
 
 export const RESERVED_ASSET_PATHS: ReadonlySet<string> = new Set([
-  "favicon.ico",
-  "robots.txt",
-  "sitemap.xml",
-  "manifest.json",
   "_astro",
+  "_headers",
   "_next",
   "assets",
+  "brand",
+  "favicon.ico",
+  "logo.png",
+  "manifest.json",
+  "manifest.webmanifest",
   "public",
+  "robots.txt",
+  "sitemap.xml",
 ]);
 
-const SAFE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+// Covers CURRENT ids: X handles `[a-z0-9_]{1,20}` (may start with `_`) and YouTube
+// ids `[A-Za-z0-9_-]{11}` (may start with `-` or `_`). `..`, `/` and backslash are rejected separately.
+const SAFE_ID_PATTERN = /^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,127}$/;
 
 function hasTraversal(value: string): boolean {
   return value.includes("..") || value.includes("\\") || /%2f|%2e|%5c/i.test(value);
@@ -153,14 +166,22 @@ function legacyKey(fromPath: string): string {
   return key;
 }
 
-/** Redirect targets must stay on this site: a path, never `//host` or a full URL. */
+const REDIRECT_BASE = "https://route-map.invalid";
+
+/**
+ * Redirect targets must stay on this site. Browsers drop tab/CR/LF while parsing,
+ * so `/\t/evil.example` would become `//evil.example`: reject control characters and
+ * whitespace, and require the parsed URL to keep the same origin.
+ */
 function validateRedirectTarget(toPath: string): string {
-  if (
-    typeof toPath !== "string" ||
-    !toPath.startsWith("/") ||
-    toPath.startsWith("//") ||
-    hasTraversal(toPath)
-  ) {
+  const sameSite =
+    typeof toPath === "string" &&
+    toPath.startsWith("/") &&
+    !toPath.startsWith("//") &&
+    !/[\u0000-\u0020\u007f]/.test(toPath) &&
+    !hasTraversal(toPath) &&
+    new URL(toPath, REDIRECT_BASE).origin === REDIRECT_BASE;
+  if (!sameSite) {
     throw new InvalidRouteIdError(String(toPath), "redirect target must be a same-site path");
   }
   return toPath;
@@ -207,7 +228,8 @@ export function buildRouteMap(
     }
   }
 
-  const sortedRoutes: Record<string, RouteResolution> = {};
+  // Null prototype so an id such as `__proto__` becomes an ordinary key.
+  const sortedRoutes: Record<string, RouteResolution> = Object.create(null);
   for (const key of [...routes.keys()].sort()) {
     sortedRoutes[key] = routes.get(key)!;
   }
