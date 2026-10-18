@@ -110,3 +110,10 @@ jobs:
         run: node scripts/check-migration-public-poc-build.mjs
       - name: MIG-0404 route-map generator verification
         run: node --test --experimental-strip-types scripts/migration-route-map.test.mjs
+      - name: MIG-0405 visibility gateway verification
+        run: node --test --experimental-strip-types scripts/migration-gateway.test.mjs
+      - name: MIG-0406 CPU/build benchmark verification
+        run: |
+          node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
+          node scripts/check-public-site-build-budget.mjs
+
