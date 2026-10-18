@@ -4,3 +4,7 @@ export * from "./ownership.ts";
 export * from "./visibility.ts";
 export * from "./editSectionAccess.ts";
 export * from "./chapterTime.ts";
+export * from "./requiredFields.ts";
+export * from "./fieldChangeGuard.ts";
+export * from "./auditSnapshot.ts";
+export * from "./interactions.ts";
