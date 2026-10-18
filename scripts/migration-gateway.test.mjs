@@ -3,10 +3,13 @@ import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { PerformanceObserver } from "node:perf_hooks";
-import { buildRouteMap } from "../apps/site/src/lib/routeMap.ts";
+import { existsSync } from "node:fs";
+import { RESERVED_ROOT_SLUGS, buildRouteMap } from "../apps/site/src/lib/routeMap.ts";
 import gateway, { resetGatewayCaches } from "../apps/site/src/gateway/index.ts";
 import { resetRebuildMemory } from "../apps/site/src/gateway/r2Html.ts";
 import {
+  FIXED_PUBLIC_PAGES,
+  PUBLIC_ASSET_FILES,
   ROUTE_SHARD_COUNT,
   buildRouteShards,
   revocationKey,
@@ -340,6 +343,171 @@ function largeShardFiles() {
     manifestBytes: JSON.stringify(manifest).length,
   };
 }
+
+function redirectManifest() {
+  return buildRouteMap(
+    [
+      { kind: "video", id: "video-public-1", aliases: ["video-alias-1"] },
+      { kind: "video", id: "video-revoked-2", aliases: ["revoked-alias"] },
+      { kind: "user", id: "hidden-user", aliases: ["hidden-old"] },
+      { kind: "redirect", fromPath: "/legacy/to-alias", toPath: "/revoked-alias?x=1", status: 301 },
+      { kind: "redirect", fromPath: "/legacy/to-public-alias", toPath: "/video-alias-1", status: 301 },
+      { kind: "redirect", fromPath: "/legacy/cycle-a", toPath: "/legacy/cycle-b", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/cycle-b", toPath: "/legacy/cycle-a", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/gone", toPath: "/not-in-manifest", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/about", toPath: "/about", status: 308 },
+      { kind: "redirect", fromPath: "/legacy/admin", toPath: "/admin", status: 308 },
+      { kind: "redirect", fromPath: "/legacy/h1", toPath: "/legacy/h2", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/h2", toPath: "/legacy/h3", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/h3", toPath: "/legacy/h4", status: 307 },
+      { kind: "redirect", fromPath: "/legacy/h4", toPath: "/video-public-1", status: 307 },
+    ],
+    GENERATION,
+  );
+}
+
+test("fixed public page allowlist matches CURRENT app/(public) pages and public/ files", () => {
+  for (const page of FIXED_PUBLIC_PAGES) {
+    if (page === "/") {
+      assert.ok(existsSync(new URL("../app/(public)/page.tsx", import.meta.url)));
+      continue;
+    }
+    const segment = page.slice(1);
+    assert.ok(RESERVED_ROOT_SLUGS.has(segment), `${page} must be reserved so no video slug can take it`);
+    assert.ok(existsSync(new URL(`../app/(public)/${segment}/page.tsx`, import.meta.url)), `${page} is a CURRENT public page`);
+  }
+  for (const file of PUBLIC_ASSET_FILES) {
+    if (file === "/robots.txt") continue; // CURRENT serves it from app/robots.ts
+    assert.ok(existsSync(new URL(`../public${file}`, import.meta.url)), `${file} is a CURRENT public file`);
+  }
+});
+
+test("fixed public pages and build assets are served from Static Assets without shards or KV", async () => {
+  const pages = {
+    "/": "<html>home</html>",
+    "/about/": "<html>about</html>",
+    "/_astro/index.abc123.js": "js",
+    "/favicon.ico": "ico",
+    "/brand/flamenode-icon-512.png": "png",
+  };
+  const { env, calls } = createEnv({
+    assets: {
+      fetch: async (req) => {
+        const { pathname } = new URL(req.url);
+        calls.assets.push(pathname);
+        if (pathname.startsWith("/_fn/routes/")) return new Response("{}", { status: 404 });
+        // Like html_handling auto-trailing-slash: `/about` redirects, `/about/` serves.
+        if (Object.hasOwn(pages, `${pathname}/`)) return new Response(null, { status: 307, headers: { Location: `${pathname}/` } });
+        const page = pages[pathname];
+        return page ? new Response(page, { status: 200 }) : new Response("nf", { status: 404 });
+      },
+    },
+  });
+  for (const [path, body] of [
+    ["/", "<html>home</html>"],
+    ["/about", "<html>about</html>"],
+    ["/about/", "<html>about</html>"],
+    ["/_astro/index.abc123.js", "js"],
+    ["/favicon.ico", "ico"],
+    ["/brand/flamenode-icon-512.png", "png"],
+  ]) {
+    const res = await get(path, env);
+    assert.equal(res.status, 200, path);
+    assert.equal(await res.text(), body, path);
+  }
+  assert.equal(calls.kv.length, 0, "fixed pages need no revocation read");
+  assert.ok(!calls.assets.some((p) => p.startsWith("/_fn/routes/")), "fixed pages need no route shard");
+  // HEAD passes through too.
+  assert.equal((await gateway.fetch(new Request("https://flamenode.test/about", { method: "HEAD" }), env)).status, 200);
+  // Works without KV: the fixed allowlist does not depend on the revocation store.
+  delete env.VISIBILITY_KV;
+  assert.equal((await get("/", env)).status, 200);
+  assert.equal((await get("/video-public-1", env)).status, 503, "detail pages still need KV");
+});
+
+test("only the exact allowlist bypasses the gate: detail, private, config and smuggled paths do not", async () => {
+  const { env, calls } = createEnv({ pages: { "/video-public-1/": "<html>v1</html>" } });
+  const bypassing = [];
+  const inner = env.ASSETS.fetch;
+  env.ASSETS.fetch = async (req) => {
+    const { pathname } = new URL(req.url);
+    if (!pathname.startsWith("/_fn/routes/") && !pathname.endsWith("/")) bypassing.push(pathname);
+    return inner(req);
+  };
+  for (const path of [
+    "/admin", "/dashboard", "/manage", "/dev", "/api/videos", "/_headers", "/_next/static/x.js",
+    "/_fn/routes/0.json", "/user/creator-alpha", "/event/spring-fest-2026", "/groups/some-group",
+    "/about/../admin", "/%61bout", "/_astro/../_headers", "/_astro/%2e%2e/_headers", "/_astro/.hidden",
+    "/_astro/", "/brand//x.png", "/about/extra", "/favicon.ico/", "/robots.txt.bak",
+  ]) {
+    const res = await get(path, env);
+    assert.notEqual(res.status, 200, path);
+  }
+  assert.deepEqual(bypassing, [], "no non-allowlisted path may be fetched from Assets directly");
+  assert.ok(calls.kv.length > 0, "detail pages still read the revocation entry");
+});
+
+test("redirects apply the canonical target's revocation fence and are never cacheable", async () => {
+  const kv = new Map([
+    [revocationKey("video", "video-revoked-2"), "1"],
+    [revocationKey("user", "hidden-user"), "1"],
+  ]);
+  const { env, calls } = createEnv({ manifest: redirectManifest(), kv });
+
+  const ok = await get("/video-alias-1?t=1", env);
+  assert.equal(ok.status, 308);
+  assert.equal(ok.headers.get("Location"), "/video-public-1?t=1");
+  assert.match(ok.headers.get("Cache-Control"), /no-store/);
+  assert.doesNotMatch(ok.headers.get("Cache-Control"), /max-age=[1-9]/);
+  assert.deepEqual(calls.kv, ["deny:video:video-public-1"], "one KV read for the resolved canonical target");
+
+  for (const path of ["/revoked-alias", "/user/hidden-old", "/legacy/to-alias"]) {
+    const res = await get(path, env);
+    assert.equal(res.status, 404, path);
+    assert.equal(res.headers.get("Location"), null, `${path} must not reveal the target`);
+    assert.match(res.headers.get("X-Robots-Tag"), /noindex/);
+    assert.match(res.headers.get("Cache-Control"), /no-store/);
+    assert.equal(await res.text(), "Not Found");
+  }
+
+  // legacy -> public alias -> canonical: two hops, allowed; the first hop is returned.
+  const chained = await get("/legacy/to-public-alias", env);
+  assert.equal(chained.status, 301);
+  assert.equal(chained.headers.get("Location"), "/video-alias-1");
+  // A legacy redirect to a fixed public page needs no lookup; to a non-public fixed route it fails closed.
+  assert.equal((await get("/legacy/about", env)).status, 308);
+  assert.equal((await get("/legacy/admin", env)).status, 404);
+  // Cycle, missing target and an over-long chain fail closed.
+  for (const path of ["/legacy/cycle-a", "/legacy/gone", "/legacy/h1"]) {
+    const res = await get(path, env);
+    assert.equal(res.status, 404, path);
+    assert.equal(res.headers.get("Location"), null, path);
+  }
+  assert.equal((await get("/legacy/h2", env)).status, 307, "3 hops is the limit and still resolves");
+});
+
+test("redirects fail closed when KV is missing or failing, or a hop's shard is unavailable", async () => {
+  const { env } = createEnv({ manifest: redirectManifest() });
+  env.VISIBILITY_KV = { get: async () => { throw new Error("kv down"); } };
+  const failing = await get("/video-alias-1", env);
+  assert.equal(failing.status, 503);
+  assert.equal(failing.headers.get("Location"), null);
+  assert.match(failing.headers.get("Cache-Control"), /no-store/);
+  delete env.VISIBILITY_KV;
+  assert.equal((await get("/video-alias-1", env)).status, 503);
+
+  const manifest = redirectManifest();
+  const shards = buildRouteShards(manifest);
+  const target = shardAssetPath(shardIndexForKey("legacy/cycle-b"));
+  const source = shardAssetPath(shardIndexForKey("legacy/cycle-a"));
+  if (target !== source) {
+    const { env: env2 } = createEnv({ shards: shards.filter((s) => s.path !== target) });
+    resetGatewayCaches();
+    const res = await get("/legacy/cycle-a", env2);
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("Location"), null);
+  }
+});
 
 test("T05: per-request time with a 52k-route manifest, every request on a cold shard cache (local Node, not Workers production)", async () => {
   const { files, manifestBytes } = largeShardFiles();
