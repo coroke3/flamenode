@@ -1,9 +1,8 @@
 /**
- * FlameNode D1 schemaの唯一の公開正本。
+ * FlameNode D1 schemaの互換性bridge。
  *
- * `schema.base.ts` は未変更テーブルの内部定義fragment、
- * `schema.canonical.ts` は今回のDB再編で確定したテーブル定義である。
- * アプリ・Worker・テストは必ずこのmoduleからimportする。
+ * 唯一の公開正本は @flamenode/db/schema (`packages/db/src/schema/`) に移設済み。
+ * 既存の Next / Worker / テスト呼び出し元との後方互換性のために再exportを提供する。
  */
 export {
   accounts,
@@ -31,9 +30,6 @@ export {
   videoEvents,
   videoModerationCases,
   xUserAliases,
-} from "./schema.base.ts";
-
-export {
   eventGroupEvents,
   eventStaff,
   eventYoutubePlaylistItems,
@@ -57,4 +53,4 @@ export {
   xIdentityRequests,
   xUserAccountLinks,
   xUsers,
-} from "./schema.canonical.ts";
+} from "@flamenode/db/schema";

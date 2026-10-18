@@ -61,40 +61,51 @@ function collectSourceFiles(dir, result = []) {
 }
 
 function assertSchemaEntryPoint(root) {
-  const entryPath = path.join(root, "src", "lib", "db", "schema.ts");
-  const fragmentPath = path.join(root, "src", "lib", "db", "schema.base.ts");
-  const canonicalPath = path.join(root, "src", "lib", "db", "schema.canonical.ts");
-  if (!fs.existsSync(entryPath)) throw new Error("src/lib/db/schema.tsがありません。");
-  if (!fs.existsSync(fragmentPath)) throw new Error("内部schema fragmentがありません。");
-  if (!fs.existsSync(canonicalPath)) throw new Error("確定schema定義がありません。");
+  const bridgePath = path.join(root, "src", "lib", "db", "schema.ts");
+  const pkgEntryPath = path.join(root, "packages", "db", "src", "schema", "index.ts");
+  const fragmentPath = path.join(root, "packages", "db", "src", "schema", "base.ts");
+  const canonicalPath = path.join(root, "packages", "db", "src", "schema", "canonical.ts");
+  if (!fs.existsSync(bridgePath)) throw new Error("src/lib/db/schema.ts互換bridgeがありません。");
+  if (!fs.existsSync(pkgEntryPath)) throw new Error("packages/db/src/schema/index.tsがありません。");
+  if (!fs.existsSync(fragmentPath)) throw new Error("packages/db内部schema fragmentがありません。");
+  if (!fs.existsSync(canonicalPath)) throw new Error("packages/db確定schema定義がありません。");
 
-  const entry = fs.readFileSync(entryPath, "utf8");
+  const bridge = fs.readFileSync(bridgePath, "utf8");
+  if (!/from\s+["']@flamenode\/db\/schema["']/.test(bridge)) {
+    throw new Error("schema.tsは@flamenode/db/schemaからre-exportしてください。");
+  }
+
+  const entry = fs.readFileSync(pkgEntryPath, "utf8");
   if (!/唯一の公開正本/.test(entry)) {
-    throw new Error("schema.tsへ唯一の公開正本であることを明示してください。");
+    throw new Error("packages/db/src/schema/index.tsへ唯一の公開正本であることを明示してください。");
   }
-  if (/export\s+\*\s+from\s+["']\.\/schema\.base\.ts["']/.test(entry)) {
-    throw new Error("schema.tsからschema.base.tsを一括再exportできません。確定テーブルだけを明示exportしてください。");
+  if (/export\s+\*\s+from\s+["']\.\/base\.ts["']/.test(entry)) {
+    throw new Error("index.tsからbase.tsを一括再exportできません。確定テーブルだけを明示exportしてください。");
   }
-  if (!/from\s+["']\.\/schema\.base\.ts["']/.test(entry)) {
-    throw new Error("schema.tsは未変更テーブルをschema.base.tsから明示exportしてください。");
+  if (!/from\s+["']\.\/base\.ts["']/.test(entry)) {
+    throw new Error("index.tsは未変更テーブルをbase.tsから明示exportしてください。");
   }
-  if (!/from\s+["']\.\/schema\.canonical\.ts["']/.test(entry)) {
-    throw new Error("schema.tsは確定テーブルをschema.canonical.tsから明示exportしてください。");
+  if (!/from\s+["']\.\/canonical\.ts["']/.test(entry)) {
+    throw new Error("index.tsは確定テーブルをcanonical.tsから明示exportしてください。");
   }
 
+  const legacyFragmentPath = path.join(root, "src", "lib", "db", "schema.base.ts");
+  const legacyCanonicalPath = path.join(root, "src", "lib", "db", "schema.canonical.ts");
   const allowed = new Set([
-    path.normalize(entryPath),
+    path.normalize(bridgePath),
+    path.normalize(legacyFragmentPath),
+    path.normalize(legacyCanonicalPath),
     path.normalize(canonicalPath),
     path.normalize(path.join(root, "scripts", "check-db-schema.mjs")),
   ]);
-  for (const sourceRoot of ["app", "src", "workers", "scripts"]) {
+  for (const sourceRoot of ["app", "src", "workers", "scripts", "packages"]) {
     for (const sourceFile of collectSourceFiles(path.join(root, sourceRoot))) {
       const normalized = path.normalize(sourceFile);
       if (allowed.has(normalized)) continue;
       const body = fs.readFileSync(sourceFile, "utf8");
       if (FRAGMENT_IMPORT_PATTERN.test(body)) {
         throw new Error(
-          `${path.relative(root, sourceFile)}: schema.base.tsを直接参照できません。src/lib/db/schema.tsからimportしてください。`,
+          `${path.relative(root, sourceFile)}: schema.base.tsを直接参照できません。src/lib/db/schema.tsまたは@flamenode/db/schemaからimportしてください。`,
         );
       }
     }
@@ -171,12 +182,12 @@ export function validateDbSchema(root = process.cwd()) {
     fs.mkdirSync(tempDbDir, { recursive: true });
 
     const fragmentText = fs.readFileSync(
-      path.join(root, "src", "lib", "db", "schema.base.ts"),
+      path.join(root, "packages", "db", "src", "schema", "base.ts"),
       "utf8",
     );
     const canonicalText = normalizeSchemaForManifest(
       fs.readFileSync(
-        path.join(root, "src", "lib", "db", "schema.canonical.ts"),
+        path.join(root, "packages", "db", "src", "schema", "canonical.ts"),
         "utf8",
       ),
     );

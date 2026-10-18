@@ -25,7 +25,7 @@ assert.match(migration, /CREATE TABLE IF NOT EXISTS slot_reservation_groups/);
 assert.match(migration, /reserved_by_auth_user_id/);
 
 const schema = fs.readFileSync(
-  path.join(root, "src/lib/db/schema.canonical.ts"),
+  path.join(root, "packages/db/src/schema/canonical.ts"),
   "utf8",
 );
 assert.match(schema, /slotReservationGroups/);
