@@ -1,659 +1,442 @@
-import * as React from "react";
+import React from "react";
+import { Image, Link } from "../adapters/index.js";
+import { Badge, type BadgeStatus } from "../components/Badge.js";
 import { EmptyState } from "../feedback/EmptyState.js";
-import { StatusNotice } from "../feedback/StatusNotice.js";
-import { Badge } from "../components/Badge.js";
-import { Button } from "../components/Button.js";
 import { TableScroll } from "../data/TableScroll.js";
+import { cx } from "../cx.js";
+import { Avatar, EXTERNAL, ScreenIcon } from "./parts.js";
+
+/*
+ * Video detail (`/[id]`) from the registered mock `docs/migration/mock/static/VideoDetail.html`
+ * (classes `vd-*`, styles in `styles/screens.css`). Entry points follow CURRENT
+ * `app/(public)/[id]/page.tsx`. Display only: the caller passes public data that already passed
+ * the visibility gateway (MIG-0405) and every href decision CURRENT makes from data
+ * (e.g. the profile link only for creators with a public profile). Player, like/save,
+ * chapter seek, member sort/view switch and the viewer dock are Islands (MIG-0507); this
+ * component only leaves slots for them.
+ */
+
+export interface VideoDetailCreator {
+  name: string;
+  /** CURRENT `creator_x_user_id`; shown as `@id` and used for the X link. */
+  xUserId?: string | null;
+  iconUrl?: string | null;
+  /** `/user/{id}` only when the creator has a public profile (CURRENT `creatorHref`), else null. */
+  profileHref?: string | null;
+  youtubeChannelUrl?: string | null;
+}
+
+export interface VideoDetailEvent {
+  id: string;
+  title: string;
+  iconUrl?: string | null;
+  /** CURRENT `eventStatusLabel(computeEventStatus(event))`. */
+  statusLabel?: string | null;
+  statusTone?: BadgeStatus;
+  /** CURRENT `isAcceptingEntries(event)` adds a separate 受付中 badge. */
+  accepting?: boolean;
+  /** Only when the event has a YouTube playlist. */
+  playlistUrl?: string | null;
+}
 
 export interface VideoDetailMember {
+  id: string;
   name: string;
-  xHandle?: string;
-  role: string;
-  chapter?: string;
-  comment?: string;
-  avatarUrl?: string;
+  xUserId?: string | null;
+  iconUrl?: string | null;
+  role?: string | null;
+  comment?: string | null;
+  /** `/user/{id}` only when the member has a public profile. */
+  profileHref?: string | null;
+  /** Chapter times (e.g. `0:24`) linked to this member. */
+  chapterTimes?: readonly string[];
 }
 
 export interface VideoDetailChapter {
-  time: string;
+  id: string;
+  timeLabel: string;
   label: string;
-  author?: string;
-  type?: string;
+  authorName?: string | null;
+  /** `member` = member part, `comment` = viewer chapter comment (mock icon only). */
+  kind?: "member" | "comment";
 }
 
-export interface VideoDetailEventInfo {
-  id: string;
+export interface VideoDetailRelated {
+  href: string;
   title: string;
-  statusLabel?: string;
-  playlistUrl?: string;
-  iconUrl?: string;
+  creatorName?: string | null;
+  thumbnailUrl?: string | null;
 }
 
 export interface VideoDetailData {
   id: string;
   title: string;
-  creatorName: string;
-  creatorHandle?: string;
-  creatorAvatarUrl?: string;
-  publishedAt?: string;
-  youtubeVideoId?: string | null;
-  introComment?: string;
-  highlights?: string;
-  musicTitle?: string;
-  musicUrl?: string;
-  softwareUsed?: string;
-  productionEpisode?: string;
-  afterword?: string;
-  events?: VideoDetailEventInfo[];
-  members?: VideoDetailMember[];
-  chapters?: VideoDetailChapter[];
+  creator: VideoDetailCreator;
+  /** e.g. `2026.03.29` (CURRENT formats `scheduled_time` date only). */
+  publishedLabel?: string | null;
+  /** Poster for the player placeholder. */
+  thumbnailUrl?: string | null;
+  hasYoutube: boolean;
+  music?: string | null;
+  credit?: string | null;
+  musicReferenceUrl?: string | null;
+  introComment?: string | null;
+  softwareLabel?: string | null;
+  highlights?: string | null;
+  productionStory?: string | null;
+  closingComment?: string | null;
+  primaryEvent?: VideoDetailEvent | null;
+  /** Other public events, without the primary one. */
+  otherEvents?: readonly { id: string; title: string }[];
+  members?: readonly VideoDetailMember[];
+  chapters?: readonly VideoDetailChapter[];
+  related?: readonly VideoDetailRelated[];
+  /** CURRENT shows a degraded notice when the shared related data is unavailable. */
+  relatedUnavailable?: boolean;
   likeCount?: number;
-  isLiked?: boolean;
-  isSaved?: boolean;
-  isBlocked?: boolean;
-  isUnavailable?: boolean;
 }
 
 export interface VideoDetailViewProps {
-  video?: VideoDetailData | null;
-  emptyTitle?: string;
-  emptyDescription?: string;
+  /** null when the caller found no public video; the gateway decides, not this view. */
+  video: VideoDetailData | null;
+  /** YouTube player Island (CURRENT `YoutubePlayer` + `VideoViewTracker`). */
+  player?: React.ReactNode;
+  /** Like / save Island (CURRENT `VideoInteractionActions`). */
+  interactions?: React.ReactNode;
+  /** Member table Island with sort and table/card switch (CURRENT `MemberSection`). */
+  members?: React.ReactNode;
+  /** Chapter list Island with seek, composer and viewer dock (CURRENT `VideoViewerUtilityDock`). */
+  chapters?: React.ReactNode;
+  className?: string;
 }
+
+/** CURRENT `RelatedList firstCount`. */
+export const VIDEO_RELATED_LIMIT = 12;
 
 export function VideoDetailView({
   video,
-  emptyTitle = "作品が見つかりません",
-  emptyDescription = "指定された作品は非公開か、存在しないか、削除された可能性があります。",
-}: VideoDetailViewProps): React.JSX.Element {
-  const [memberViewMode, setMemberViewMode] = React.useState<"table" | "card">("table");
-  const [isDetailsOpen, setIsDetailsOpen] = React.useState(false);
-
-  if (!video || video.isBlocked || video.isUnavailable) {
+  player,
+  interactions,
+  members,
+  chapters,
+  className,
+}: VideoDetailViewProps): React.ReactElement {
+  if (!video) {
     return (
-      <main
-        className="vd-screen vd-screen--empty"
-        style={{
-          padding: "var(--space-8, 32px) var(--space-4, 16px)",
-          maxWidth: "1280px",
-          margin: "0 auto",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <EmptyState
-          title={emptyTitle}
-          description={emptyDescription}
-          action={{ href: "/list", label: "作品一覧へ戻る" }}
-        />
-      </main>
+      <div className={cx("p-root fn-screen", className)}>
+        <div className="wrap scr-empty">
+          <EmptyState
+            title="作品が見つかりません"
+            description="非公開か、削除された作品の可能性があります。"
+            action={{ href: "/list", label: "作品一覧へ" }}
+          />
+        </div>
+      </div>
     );
   }
 
-  const primaryEvent = video.events && video.events.length > 0 ? video.events[0] : null;
-  const otherEvents = video.events && video.events.length > 1 ? video.events.slice(1) : [];
+  const { creator } = video;
+  const memberRows = video.members ?? [];
+  const chapterRows = video.chapters ?? [];
+  const related = (video.related ?? []).slice(0, VIDEO_RELATED_LIMIT);
+  const hasDetailComments = Boolean(video.highlights || video.productionStory || video.closingComment);
+  const musicText = video.music ? `${video.music}${video.credit ? ` / ${video.credit}` : ""}` : null;
+  const creatorBlock = (
+    <>
+      <Avatar src={creator.iconUrl} size={40} />
+      <span className="stack">
+        <span>{creator.name}</span>
+        <span className="t-sm muted t-num">
+          {[creator.xUserId ? `@${creator.xUserId}` : null, video.publishedLabel ? `公開 ${video.publishedLabel}` : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </span>
+    </>
+  );
 
   return (
-    <main
-      className="vd-screen"
-      style={{
-        maxWidth: "1440px",
-        margin: "0 auto",
-        padding: "var(--space-4, 16px) var(--space-4, 16px) var(--space-12, 48px)",
-        width: "100%",
-        boxSizing: "border-box",
-        color: "var(--ink, #ffffff)",
-      }}
-    >
-      <div
-        className="vd-layout"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 360px)",
-          gap: "var(--space-6, 24px)",
-          alignItems: "start",
-        }}
-      >
-        {/* Main Column */}
-        <div
-          className="vd-main"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-6, 24px)",
-            minWidth: 0,
-          }}
-        >
-          {/* Player Hero Pane */}
-          <section
-            aria-label="動画プレイヤー"
-            className="vd-player-pane"
-            style={{
-              width: "100%",
-              aspectRatio: "16 / 9",
-              background: "var(--black, #000000)",
-              borderRadius: "var(--radius-none, 0)",
-              overflow: "hidden",
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {video.youtubeVideoId ? (
-              <iframe
-                title={video.title}
-                src={`https://www.youtube-nocookie.com/embed/${encodeURIComponent(video.youtubeVideoId)}?enablejsapi=1`}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  border: "none",
-                }}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            ) : (
-              <div
-                className="vd-player-fallback"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "var(--space-3, 12px)",
-                  padding: "var(--space-6, 24px)",
-                  textAlign: "center",
-                  background: "var(--surface-raised, #1f1f1f)",
-                  color: "var(--ink-muted, #999999)",
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                <span style={{ fontSize: "32px" }}>▶</span>
-                <p style={{ margin: 0, fontSize: "var(--text-ui-size, 14px)", lineHeight: "20px" }}>
-                  YouTube の動画はまだ登録されていません。作品情報は公開中です。
-                </p>
-              </div>
-            )}
-          </section>
-
-          {/* Info Section */}
-          <section aria-label="作品基本情報" className="vd-info" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4, 16px)" }}>
-            <h1
-              className="vd-title"
-              style={{
-                margin: 0,
-                fontSize: "var(--text-h1-size, 32px)",
-                lineHeight: "var(--text-h1-line-height, 40px)",
-                fontWeight: 700,
-                wordBreak: "break-word",
-              }}
-            >
-              {video.title}
-            </h1>
-
-            {/* Creator Bar & Actions */}
-            <div
-              className="vd-meta-bar"
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "var(--space-3, 12px) var(--space-4, 16px)",
-              }}
-            >
-              {/* Creator details */}
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3, 12px)", minWidth: 0 }}>
-                {video.creatorAvatarUrl ? (
-                  <img
-                    src={video.creatorAvatarUrl}
-                    alt={video.creatorName}
-                    style={{ width: "40px", height: "40px", borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      borderRadius: "50%",
-                      background: "var(--surface-active, #333333)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    👤
-                  </div>
-                )}
-                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                  <a
-                    href={`/user/${encodeURIComponent(video.creatorHandle ?? video.creatorName)}`}
-                    style={{
-                      color: "var(--ink, #ffffff)",
-                      fontWeight: 600,
-                      textDecoration: "none",
-                      fontSize: "var(--text-ui-size, 14px)",
-                    }}
-                  >
-                    {video.creatorName}
-                  </a>
-                  <span style={{ fontSize: "var(--text-label-size, 12px)", color: "var(--ink-muted, #999999)" }}>
-                    {video.creatorHandle ? `@${video.creatorHandle} · ` : ""}
-                    {video.publishedAt ? `公開 ${video.publishedAt}` : ""}
-                  </span>
+    <div className={cx("p-root fn-screen vd", className)}>
+      <div className="vd-layout">
+        <main className="vd-main">
+          <div className="vd-hero">
+            <div className="vd-player-pane" data-island="video-player">
+              {player ?? (
+                <div className="vd-player">
+                  {video.hasYoutube && video.thumbnailUrl ? (
+                    <Image className="cover" src={video.thumbnailUrl} alt="" />
+                  ) : (
+                    <p className="vd-player-empty">
+                      {video.hasYoutube
+                        ? "プレイヤーを読み込んでいます。"
+                        : "YouTube動画は未登録ですが、作品情報を公開しています。"}
+                    </p>
+                  )}
                 </div>
-              </div>
-
-              {/* Actions (Like, Save) */}
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2, 8px)" }}>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  aria-pressed={video.isLiked}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1, 4px)" }}
-                >
-                  <span>♥</span>
-                  <span>{video.likeCount ?? 0}</span>
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  aria-pressed={video.isSaved}
-                  aria-label="セーブ"
-                >
-                  <span>★</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Event Tag Bar */}
-            {primaryEvent && (
-              <div
-                className="vd-event-bar"
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: "var(--space-2, 8px) var(--space-4, 16px)",
-                  fontSize: "var(--text-ui-size, 14px)",
-                  padding: "var(--space-2, 8px) var(--space-3, 12px)",
-                  background: "var(--surface-subtle, #141414)",
-                  borderRadius: "var(--radius-none, 0)",
-                }}
-              >
-                <span style={{ fontWeight: 600 }}>イベント:</span>
-                <a
-                  href={`/event/${encodeURIComponent(primaryEvent.id)}`}
-                  style={{ color: "var(--brand, #d6ec8a)", textDecoration: "none", fontWeight: 600 }}
-                >
-                  {primaryEvent.title}
-                </a>
-                {primaryEvent.statusLabel && (
-                  <Badge status="draft" label={primaryEvent.statusLabel} />
-                )}
-                {primaryEvent.playlistUrl && (
-                  <a
-                    href={primaryEvent.playlistUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    style={{
-                      color: "var(--ink-muted, #999999)",
-                      textDecoration: "none",
-                      fontSize: "var(--text-label-size, 12px)",
-                      marginLeft: "auto",
-                    }}
-                  >
-                    YouTube 再生リスト ↗
-                  </a>
-                )}
-              </div>
-            )}
-
-            {/* Other Events */}
-            {otherEvents.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "var(--space-2, 8px)", fontSize: "var(--text-label-size, 12px)" }}>
-                <span style={{ color: "var(--ink-muted, #999999)" }}>他の所属:</span>
-                {otherEvents.map((ev) => (
-                  <a
-                    key={ev.id}
-                    href={`/event/${encodeURIComponent(ev.id)}`}
-                    style={{
-                      color: "var(--ink, #ffffff)",
-                      padding: "2px 8px",
-                      background: "var(--surface-active, #1f1f1f)",
-                      textDecoration: "none",
-                    }}
-                  >
-                    {ev.title}
-                  </a>
-                ))}
-              </div>
-            )}
-
-            {/* Description & Metadata */}
-            <div
-              className="vd-description-box"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-3, 12px)",
-                padding: "var(--space-4, 16px)",
-                background: "var(--surface-raised, #1f1f1f)",
-                fontSize: "var(--text-ui-size, 14px)",
-                lineHeight: "22px",
-              }}
-            >
-              {video.introComment && <p style={{ margin: 0 }}>{video.introComment}</p>}
-
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "var(--space-2, 8px) var(--space-6, 24px)",
-                  color: "var(--ink-muted, #999999)",
-                  fontSize: "var(--text-body-sm-size, 13px)",
-                }}
-              >
-                {video.musicTitle && (
-                  <span>
-                    使用楽曲:{" "}
-                    {video.musicUrl ? (
-                      <a href={video.musicUrl} target="_blank" rel="noreferrer noopener" style={{ color: "var(--ink, #ffffff)" }}>
-                        {video.musicTitle} ↗
-                      </a>
-                    ) : (
-                      <strong style={{ color: "var(--ink, #ffffff)" }}>{video.musicTitle}</strong>
-                    )}
-                  </span>
-                )}
-                {video.softwareUsed && (
-                  <span>
-                    使用ソフト: <strong style={{ color: "var(--ink, #ffffff)" }}>{video.softwareUsed}</strong>
-                  </span>
-                )}
-              </div>
-
-              {(video.highlights || video.productionEpisode || video.afterword) && (
-                <details
-                  open={isDetailsOpen}
-                  onToggle={(e) => setIsDetailsOpen(e.currentTarget.open)}
-                  style={{ marginTop: "var(--space-2, 8px)" }}
-                >
-                  <summary style={{ cursor: "pointer", color: "var(--brand, #d6ec8a)", fontWeight: 600 }}>
-                    詳細コメント {isDetailsOpen ? "▲" : "▼"}
-                  </summary>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "120px minmax(0, 1fr)",
-                      gap: "var(--space-2, 8px) var(--space-4, 16px)",
-                      marginTop: "var(--space-3, 12px)",
-                      paddingTop: "var(--space-2, 8px)",
-                      borderTop: "1px solid var(--surface-active, #333333)",
-                    }}
-                  >
-                    {video.highlights && (
-                      <>
-                        <span style={{ color: "var(--ink-muted, #999999)" }}>みどころ</span>
-                        <span>{video.highlights}</span>
-                      </>
-                    )}
-                    {video.productionEpisode && (
-                      <>
-                        <span style={{ color: "var(--ink-muted, #999999)" }}>制作エピソード</span>
-                        <span>{video.productionEpisode}</span>
-                      </>
-                    )}
-                    {video.afterword && (
-                      <>
-                        <span style={{ color: "var(--ink-muted, #999999)" }}>あとがき</span>
-                        <span>{video.afterword}</span>
-                      </>
-                    )}
-                  </div>
-                </details>
               )}
             </div>
-          </section>
 
-          {/* Members Section */}
-          {video.members && video.members.length > 0 && (
-            <section
-              aria-labelledby="vd-members-heading"
-              className="vd-members"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-3, 12px)",
-                marginTop: "var(--space-4, 16px)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <h2
-                  id="vd-members-heading"
-                  style={{
-                    margin: 0,
-                    fontSize: "var(--text-h2-size, 24px)",
-                    fontWeight: 700,
-                  }}
-                >
-                  参加メンバー <span style={{ color: "var(--ink-muted, #999999)", fontSize: "16px", fontWeight: 400 }}>{video.members.length}</span>
-                </h2>
-                <div style={{ display: "flex", gap: "2px" }} role="group" aria-label="メンバー表示切替">
-                  <Button
-                    variant={memberViewMode === "table" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setMemberViewMode("table")}
-                    aria-pressed={memberViewMode === "table"}
-                  >
-                    テーブル
-                  </Button>
-                  <Button
-                    variant={memberViewMode === "card" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setMemberViewMode("card")}
-                    aria-pressed={memberViewMode === "card"}
-                  >
-                    カード
-                  </Button>
-                </div>
+            <div className="vd-info">
+              <h1 className="t-display vd-title">{video.title}</h1>
+
+              <div className="wrap-row vd-creator-row">
+                {creator.profileHref ? (
+                  <Link href={creator.profileHref} className="row vd-creator">
+                    {creatorBlock}
+                  </Link>
+                ) : (
+                  <span className="row vd-creator">{creatorBlock}</span>
+                )}
+                {creator.profileHref || creator.xUserId || creator.youtubeChannelUrl ? (
+                  <span className="row vd-links" role="group" aria-label="投稿者へのリンク">
+                    {creator.profileHref ? (
+                      <Link href={creator.profileHref} className="ib sm" aria-label="FlameNode のプロフィールを開く">
+                        <ScreenIcon name="user" />
+                      </Link>
+                    ) : null}
+                    {creator.xUserId ? (
+                      <a
+                        href={`https://x.com/${encodeURIComponent(creator.xUserId)}`}
+                        {...EXTERNAL}
+                        className="ib sm"
+                        aria-label={`X (@${creator.xUserId}) を開く`}
+                      >
+                        <ScreenIcon name="x" />
+                      </a>
+                    ) : null}
+                    {creator.youtubeChannelUrl ? (
+                      <a href={creator.youtubeChannelUrl} {...EXTERNAL} className="ib sm" aria-label="YouTube チャンネルを開く">
+                        <ScreenIcon name="youtube" />
+                      </a>
+                    ) : null}
+                  </span>
+                ) : null}
+                <span className="vd-spacer" />
+                <span className="row vd-acts" data-island="video-interactions">
+                  {interactions ?? (
+                    <span className="vd-like-count il t-num" aria-label={`いいね ${video.likeCount ?? 0}件`}>
+                      <ScreenIcon name="heart" />
+                      {video.likeCount ?? 0}
+                    </span>
+                  )}
+                </span>
               </div>
 
-              {memberViewMode === "table" ? (
-                <TableScroll ariaLabel="参加メンバー一覧">
-                  <table
-                    style={{
-                      width: "100%",
-                      minWidth: "540px",
-                      borderCollapse: "collapse",
-                      fontSize: "var(--text-ui-size, 14px)",
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid var(--surface-active, #333333)", color: "var(--ink-muted, #999999)", textAlign: "left" }}>
-                        <th style={{ padding: "8px 12px" }}>活動名</th>
-                        <th style={{ padding: "8px 12px" }}>役割</th>
-                        <th style={{ padding: "8px 12px" }}>チャプター</th>
-                        <th style={{ padding: "8px 12px" }}>コメント</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {video.members.map((m, idx) => (
-                        <tr key={idx} style={{ borderBottom: "1px solid var(--surface-subtle, #1f1f1f)" }}>
-                          <td style={{ padding: "8px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                            {m.avatarUrl && (
-                              <img src={m.avatarUrl} alt="" style={{ width: "24px", height: "24px", borderRadius: "50%" }} />
-                            )}
-                            <div>
-                              <span>{m.name}</span>
-                              {m.xHandle && (
-                                <span style={{ color: "var(--ink-muted, #999999)", fontSize: "11px", display: "block" }}>
-                                  @{m.xHandle}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ padding: "8px 12px" }}>{m.role}</td>
-                          <td style={{ padding: "8px 12px", color: "var(--brand, #d6ec8a)", fontFamily: "var(--font-mono)" }}>
-                            {m.chapter ?? "—"}
-                          </td>
-                          <td style={{ padding: "8px 12px", color: "var(--ink-muted, #999999)" }}>{m.comment ?? "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </TableScroll>
-              ) : (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                    gap: "var(--space-3, 12px)",
-                  }}
-                >
-                  {video.members.map((m, idx) => (
-                    <div
-                      key={idx}
-                      style={{
-                        padding: "var(--space-3, 12px)",
-                        background: "var(--surface-raised, #1f1f1f)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "var(--space-2, 8px)",
-                      }}
+              {video.primaryEvent ? (
+                <div className="wrap-row vd-event">
+                  {video.primaryEvent.iconUrl ? (
+                    <Image className="ev-icon" src={video.primaryEvent.iconUrl} alt="" width={24} height={24} />
+                  ) : null}
+                  <Link href={`/event/${encodeURIComponent(video.primaryEvent.id)}`}>{video.primaryEvent.title}</Link>
+                  {video.primaryEvent.statusLabel ? (
+                    <Badge status={video.primaryEvent.statusTone ?? "draft"} label={video.primaryEvent.statusLabel} />
+                  ) : null}
+                  {video.primaryEvent.accepting ? <Badge status="public" label="受付中" /> : null}
+                  <span className="vd-spacer" />
+                  {video.primaryEvent.playlistUrl ? (
+                    <a href={video.primaryEvent.playlistUrl} {...EXTERNAL} className="il t-sm">
+                      <ScreenIcon name="youtube" />
+                      YouTube再生リスト
+                      <ScreenIcon name="external" />
+                    </a>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {video.otherEvents && video.otherEvents.length > 0 ? (
+                <div className="wrap-row t-sm vd-other-events" role="group" aria-label="その他の所属イベント">
+                  <span className="muted">他の所属</span>
+                  {video.otherEvents.map((event) => (
+                    <Link
+                      key={event.id}
+                      href={`/event/${encodeURIComponent(event.id)}`}
+                      className="fn-btn fn-btn--secondary fn-btn--sm"
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        {m.avatarUrl && (
-                          <img src={m.avatarUrl} alt="" style={{ width: "36px", height: "36px", borderRadius: "50%" }} />
-                        )}
-                        <div>
-                          <strong style={{ fontSize: "var(--text-ui-size, 14px)" }}>{m.name}</strong>
-                          {m.xHandle && (
-                            <span style={{ color: "var(--ink-muted, #999999)", fontSize: "12px", display: "block" }}>
-                              @{m.xHandle}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Badge status="draft" label={m.role} />
-                      {m.comment && (
-                        <p style={{ margin: 0, fontSize: "var(--text-body-sm-size, 13px)", color: "var(--ink-muted, #999999)" }}>
-                          {m.comment}
-                        </p>
-                      )}
-                    </div>
+                      {event.title}
+                    </Link>
                   ))}
                 </div>
+              ) : null}
+
+              <section aria-label="作品情報" className="vd-about">
+                {video.introComment ? <p className="vd-intro">{video.introComment}</p> : null}
+                {musicText || video.softwareLabel ? (
+                  <div className="meta-i">
+                    {musicText ? (
+                      video.musicReferenceUrl ? (
+                        <a href={video.musicReferenceUrl} {...EXTERNAL}>
+                          <ScreenIcon name="music" />
+                          <span className="fn-sr-only">楽曲: </span>
+                          {musicText}
+                          <ScreenIcon name="external" />
+                        </a>
+                      ) : (
+                        <span>
+                          <ScreenIcon name="music" />
+                          <span className="fn-sr-only">楽曲: </span>
+                          {musicText}
+                        </span>
+                      )
+                    ) : null}
+                    {video.softwareLabel ? (
+                      <span>
+                        <ScreenIcon name="software" />
+                        <span className="fn-sr-only">使用ソフト: </span>
+                        {video.softwareLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+                {hasDetailComments ? (
+                  <details className="vd-details">
+                    <summary className="il t-sm">
+                      <ScreenIcon name="chevronDown" />
+                      詳細コメント
+                    </summary>
+                    <dl className="kv">
+                      {video.highlights ? (
+                        <>
+                          <dt>みどころ</dt>
+                          <dd>{video.highlights}</dd>
+                        </>
+                      ) : null}
+                      {video.productionStory ? (
+                        <>
+                          <dt>制作エピソード</dt>
+                          <dd>{video.productionStory}</dd>
+                        </>
+                      ) : null}
+                      {video.closingComment ? (
+                        <>
+                          <dt>あとがき</dt>
+                          <dd>{video.closingComment}</dd>
+                        </>
+                      ) : null}
+                    </dl>
+                  </details>
+                ) : null}
+              </section>
+
+              {members ?? (memberRows.length > 0 ? <MemberTable members={memberRows} /> : null)}
+            </div>
+          </div>
+        </main>
+
+        <aside className="vd-side" aria-label="作品の補足情報">
+          {chapters ?? (
+            <section aria-labelledby="vd-ch" className="vd-panel" data-island="video-chapters">
+              <div className="row vd-panel-head">
+                <h2 id="vd-ch" className="t-h3">
+                  チャプター <span className="muted t-num">{chapterRows.length}</span>
+                </h2>
+              </div>
+              {chapterRows.length > 0 ? (
+                <ol className="vd-chapters">
+                  {chapterRows.map((chapter) => (
+                    <li key={chapter.id} className="fn-row vd-chapter">
+                      <span className="t-num vd-chapter-time">{chapter.timeLabel}</span>
+                      <span className="fn-row__body">
+                        <span className="fn-row__title">{chapter.label}</span>
+                        {chapter.authorName ? (
+                          <span className="fn-row__meta il">
+                            <ScreenIcon name={chapter.kind === "comment" ? "comment" : "group"} />
+                            {chapter.authorName}
+                          </span>
+                        ) : null}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="t-sm muted vd-panel-note">チャプターはまだありません。</p>
               )}
             </section>
           )}
-        </div>
 
-        {/* Aside Sidebar (Chapters) */}
-        <aside
-          aria-label="チャプターと再生リスト"
-          className="vd-sidebar"
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-4, 16px)",
-            minWidth: 0,
-          }}
-        >
-          <div
-            style={{
-              padding: "var(--space-4, 16px)",
-              background: "var(--surface-raised, #1f1f1f)",
-              borderRadius: "var(--radius-none, 0)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "var(--space-3, 12px)",
-              }}
-            >
-              <h2
-                style={{
-                  margin: 0,
-                  fontSize: "var(--text-h3-size, 18px)",
-                  fontWeight: 600,
-                }}
-              >
-                チャプター{" "}
-                <span style={{ color: "var(--ink-muted, #999999)", fontSize: "14px", fontWeight: 400 }}>
-                  {video.chapters?.length ?? 0}
-                </span>
-              </h2>
-            </div>
-
-            {video.chapters && video.chapters.length > 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "var(--space-1, 4px)",
-                  maxHeight: "420px",
-                  overflowY: "auto",
-                }}
-              >
-                {video.chapters.map((ch, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "var(--space-3, 12px)",
-                      padding: "var(--space-2, 8px)",
-                      background: "transparent",
-                      border: "none",
-                      color: "inherit",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      width: "100%",
-                      borderRadius: "var(--radius-none, 0)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        color: "var(--brand, #d6ec8a)",
-                        fontSize: "var(--text-body-sm-size, 13px)",
-                        flexShrink: 0,
-                        width: "44px",
-                      }}
-                    >
-                      {ch.time}
+          <section aria-labelledby="vd-rel">
+            <h2 id="vd-rel" className="vh t-h3">
+              関連動画
+            </h2>
+            {video.relatedUnavailable ? (
+              <p className="t-sm muted" role="status">
+                関連動画用の共有データを一時的に利用できません。時間をおいて再読み込みしてください。
+              </p>
+            ) : related.length === 0 ? (
+              <p className="t-sm muted">関連動画はまだありません。</p>
+            ) : (
+              <div className="vd-related">
+                {related.map((item) => (
+                  <Link key={item.href} href={item.href} className="fn-row fn-row--compact">
+                    {item.thumbnailUrl ? (
+                      <Image className="fn-row__thumb" src={item.thumbnailUrl} alt="" />
+                    ) : (
+                      <span className="fn-row__thumb" aria-hidden="true" />
+                    )}
+                    <span className="fn-row__body">
+                      <span className="fn-row__title">{item.title}</span>
+                      {item.creatorName ? <span className="fn-row__meta">{item.creatorName}</span> : null}
                     </span>
-                    <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                      <span style={{ fontSize: "var(--text-ui-size, 14px)", fontWeight: 500 }}>{ch.label}</span>
-                      {ch.author && (
-                        <span style={{ fontSize: "var(--text-label-size, 12px)", color: "var(--ink-muted, #999999)" }}>
-                          {ch.author}
-                        </span>
-                      )}
-                    </div>
-                  </button>
+                  </Link>
                 ))}
               </div>
-            ) : (
-              <p style={{ margin: 0, fontSize: "var(--text-ui-size, 14px)", color: "var(--ink-muted, #999999)" }}>
-                チャプター情報はまだ登録されていません。
-              </p>
             )}
-          </div>
+          </section>
         </aside>
       </div>
-    </main>
+    </div>
+  );
+}
+
+/** Static member table (mock `vd-mtable`); the sortable / card view is the Island. */
+function MemberTable({ members }: { members: readonly VideoDetailMember[] }): React.ReactElement {
+  return (
+    <section aria-labelledby="vd-members" className="vd-members">
+      <div className="sec-head">
+        <h2 id="vd-members" className="t-h3">
+          参加メンバー <span className="muted t-num">{members.length}</span>
+        </h2>
+      </div>
+      <TableScroll ariaLabel="参加メンバー" className="t-scroll">
+        <table className="vd-mtable">
+          <thead>
+            <tr className="t-label muted vd-mhead">
+              <th scope="col">活動名</th>
+              <th scope="col">役割</th>
+              <th scope="col">チャプター</th>
+              <th scope="col">コメント</th>
+            </tr>
+          </thead>
+          <tbody>
+            {members.map((member) => (
+              <tr key={member.id} className="vd-mrow">
+                <td>
+                  <span className="row vd-member">
+                    <Avatar src={member.iconUrl} size={28} />
+                    <span className="stack">
+                      {member.profileHref ? <Link href={member.profileHref}>{member.name}</Link> : <span>{member.name}</span>}
+                      {member.xUserId ? (
+                        <a
+                          href={`https://x.com/${encodeURIComponent(member.xUserId)}`}
+                          {...EXTERNAL}
+                          className="t-sm muted"
+                          aria-label={`X (@${member.xUserId}) を開く`}
+                        >
+                          @{member.xUserId}
+                        </a>
+                      ) : null}
+                    </span>
+                  </span>
+                </td>
+                <td>{member.role || "—"}</td>
+                <td className="t-num vd-mchapter">
+                  {member.chapterTimes && member.chapterTimes.length > 0 ? member.chapterTimes.join(", ") : "—"}
+                </td>
+                <td className="muted">{member.comment || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </TableScroll>
+    </section>
   );
 }
