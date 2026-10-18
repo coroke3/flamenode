@@ -55,6 +55,39 @@ describe("admin/costGuard", () => {
       now: 1000,
     });
     assert.deepEqual(emergency, { blocked: true, reason: "mode" });
+
+    // Exception window allows feature even during emergency_read_only
+    const excepted = evaluateCostGuardCore({
+      feature: "post_video_unslotted",
+      operationMode: "emergency_read_only",
+      disabledFeaturesJson: '["post_video_unslotted"]',
+      exceptionUntil: 2000,
+      exceptionFeaturesJson: '["post_video_unslotted"]',
+      now: 1500,
+    });
+    assert.deepEqual(excepted, { blocked: false });
+
+    // Expired exception window fails closed
+    const expired = evaluateCostGuardCore({
+      feature: "post_video_unslotted",
+      operationMode: "emergency_read_only",
+      disabledFeaturesJson: "[]",
+      exceptionUntil: 1000,
+      exceptionFeaturesJson: '["post_video_unslotted"]',
+      now: 1000,
+    });
+    assert.deepEqual(expired, { blocked: true, reason: "mode" });
+
+    // Malformed JSON fails closed
+    const malformed = evaluateCostGuardCore({
+      feature: "post_video_unslotted",
+      operationMode: "normal",
+      disabledFeaturesJson: "{ not an array }",
+      exceptionUntil: null,
+      exceptionFeaturesJson: "[]",
+      now: 1000,
+    });
+    assert.deepEqual(malformed, { blocked: true, reason: "feature" });
   });
 });
 
