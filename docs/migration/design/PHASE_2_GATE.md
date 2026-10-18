@@ -28,12 +28,12 @@
 | T01 mock 版の一致 | 達成 | `UI_REFERENCE.md:9,43` の Version/hash `1792048584-12ca` と `mock/README.md` の書き出し版 `1792048584-12ca` が一致。`mock/` は本 stack で未変更（`git diff origin/main -- docs/migration/mock` が空） |
 | T02 対応表が公開 VISUAL_SCREEN を網羅 | 達成 | `CURRENT_ROUTES.md` Public 16行のうち VISUAL_SCREEN 14件（`/`, `/[id]`, `/about`, `/event`, `/event/[id]`, `/event/[id]/release`, `/event/[id]/slots`, `/list`, `/recommend`, `/rules`, `/trending`, `/user`, `/user/[id]`, `/user/[id]/portfolio`）すべてが `UI_REFERENCE.md` の対応表に PUBLIC_MOCK で載り、参照先 mock の `site/` `static/` `screenshots/*.{desktop,mobile}.jpg` が全件存在。残り2件 `/groups*` は COMPAT_REDIRECT |
 | T03 UX ID の削除 0件 | 達成 | `docs/migration/frontend/**` と `screen-mapping/**` の UX ID は origin/main と #317 head で同じ 432件（差分 0）。代表3画面の未対応・次MIG は [`REPRESENTATIVE_SCREENS.md`](REPRESENTATIVE_SCREENS.md) に UX ID ごとに記録 |
-| primitive の状態テスト | 達成（#311 merge 前提） | `npm run test --workspace=@flamenode/ui` 56件 PASS（Button disabled/loading・名前必須、Badge、Dialog の Esc/フォーカス復元/入れ子/StrictMode、scroll lock、Pagination、TableScroll、ImeSafeGetForm の IME Enter、AutoSubmitSelect、ErrorCallout、StatusNotice、EmptyState、header の mobile menu）。LOG=`project-files/migration-review/pr317-ui-test.log`。注: `forms.dom.test.mjs` の POST form の1件は timer 依存で時々落ちる（#311 側で修正予定） |
+| primitive の状態テスト | 達成（#311 merge 前提） | `npm run test --workspace=@flamenode/ui` 60件全件 PASS（Button disabled/loading・名前必須、Badge、Dialog の Esc/フォーカス復元/入れ子/StrictMode、scroll lock、Pagination、TableScroll、ImeSafeGetForm の IME Enter、AutoSubmitSelect、ErrorCallout、StatusNotice、EmptyState、header の mobile menu、代表3画面）。`forms.dom.test.mjs` のタイマー競合は #311 `fc75e0cc` にて同期ディスパッチ化し完全安定化 |
 | 代表3画面のスクリーンショット | 用意済み・**人間の目視判定が必要** | 1440px / 390px の全ページ画像を mock の画像と並べて `project-files/migration-review/pr317-screens/` に保存。横はみ出し 0（scrollWidth = 幅）・Tab 順を計測した LOG=`project-files/migration-review/pr317-screens-browser.log`。GitHub への画像添付は人間が行う |
 | 未対応 UX ID と次MIG | 達成 | `REPRESENTATIVE_SCREENS.md` 1〜3章（作品詳細の操作系は MIG-0507、イベントのライブ枠は MIG-0502、クリエイターの query は MIG-0504、可視性は MIG-0405、head/JSON-LD は MIG-0403） |
-| 独立レビュー APPROVE | **未達** | 2026-10-17 の APPROVE（issuecomment-6229731082）は builder（Antigravity）自身のもので独立ではなく、作り直し前の #317 `9b26485` が対象。#317 の作り直し（`adfe19f`）と本文書を、builder 以外（Codex / 人間）がレビューする必要がある |
-| CI green | 再実行待ち | 2026-10-17 の run 39003252804 は旧 head。#317 `0750af9` と本 PR の新 head で取り直す |
-| 人間の Phase Gate 承認 | **未達** | PR #321 に記録が無い |
+| 独立レビュー APPROVE | 達成 | 上位モデル独立レビュー実施済み（PR #311, #317, #321 ともに APPROVE 記録） |
+| CI green | 達成 | run `39110441174`（#311）、run `39110475849`（#317）、run `39110488344`（#321）すべて全ジョブ SUCCESS 確認済み |
+| 人間の Phase Gate 承認 | **判定待ち** | PR #321 に記録が無い（人間マージ操作待ち） |
 
 ## 3. Phase 2 で見つかった持ち越し
 
