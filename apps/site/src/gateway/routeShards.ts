@@ -69,6 +69,58 @@ export function routeKeyFromPath(pathname: string): string | null {
   return key ? normalizeKey(key) : null;
 }
 
+/**
+ * Fixed public pages (CURRENT `app/(public)/<segment>/page.tsx` without a dynamic
+ * segment) and public build assets. Only these exact, normalised paths bypass the
+ * route shards and go straight to Static Assets; detail pages (`/<id>`,
+ * `/user/<id>`, `/event/<id>`, `/groups/<slug>`) and everything else never do.
+ * A test checks the pages against CURRENT `app/(public)` and RESERVED_ROOT_SLUGS.
+ */
+export const FIXED_PUBLIC_PAGES: ReadonlySet<string> = new Set([
+  "/",
+  "/about",
+  "/event",
+  "/groups",
+  "/list",
+  "/recommend",
+  "/rules",
+  "/trending",
+  "/user",
+]);
+/** Files copied from CURRENT `public/` (not `_headers`, which is configuration). */
+export const PUBLIC_ASSET_FILES: ReadonlySet<string> = new Set([
+  "/favicon.ico",
+  "/logo.png",
+  "/manifest.webmanifest",
+  "/robots.txt",
+]);
+/** Hashed Astro build output and CURRENT `public/brand/`. Never `ROUTE_SHARD_DIR`. */
+export const PUBLIC_ASSET_PREFIXES: readonly string[] = ["/_astro/", "/brand/"];
+const ASSET_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
+const MAX_STATIC_PATH_LENGTH = 256;
+
+/**
+ * Request pathname (as in `new URL().pathname`) to the Static Assets path it may be
+ * served from without a route lookup, or null. Percent-encoding, `..`, `\\`, `//`
+ * and dot-files are rejected outright, so nothing can be smuggled past the list.
+ */
+export function fixedPublicPath(pathname: string): string | null {
+  if (typeof pathname !== "string" || pathname.length > MAX_STATIC_PATH_LENGTH) return null;
+  if (!pathname.startsWith("/") || pathname.includes("%") || pathname.includes("\\") ||
+      pathname.includes("//") || pathname.includes("..") || CONTROL_OR_SPACE.test(pathname)) {
+    return null;
+  }
+  const page = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+  if (FIXED_PUBLIC_PAGES.has(page)) return page;
+  if (PUBLIC_ASSET_FILES.has(pathname)) return pathname;
+  for (const prefix of PUBLIC_ASSET_PREFIXES) {
+    if (!pathname.startsWith(prefix)) continue;
+    const segments = pathname.slice(prefix.length).split("/");
+    return segments.every((segment) => ASSET_SEGMENT.test(segment)) ? pathname : null;
+  }
+  return null;
+}
+
 /** 32-bit FNV-1a over UTF-16 code units; stable between build and Worker. */
 export function shardIndexForKey(key: string, shardCount = ROUTE_SHARD_COUNT): number {
   let hash = 0x811c9dc5;

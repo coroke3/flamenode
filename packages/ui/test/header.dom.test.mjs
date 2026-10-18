@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
-const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true });
+const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test/list", pretendToBeVisual: true });
 dom.window.scrollTo = () => {}; // jsdom does not implement scrolling
 // jsdom has no matchMedia; this stub lets a test cross the 641px menu breakpoint.
 const wideQuery = { matches: false, listeners: new Set() };
@@ -16,7 +16,7 @@ function setWide(matches) {
   wideQuery.matches = matches;
   for (const fn of [...wideQuery.listeners]) fn({ matches });
 }
-for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "KeyboardEvent", "MouseEvent", "Event", "CompositionEvent"]) {
+for (const key of ["window", "document", "navigator", "HTMLElement", "Node", "KeyboardEvent", "MouseEvent", "Event", "CompositionEvent", "FormData", "SubmitEvent"]) {
   Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] });
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -24,7 +24,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const React = (await import("react")).default;
 const { createRoot } = await import("react-dom/client");
 const { act } = React;
-const { PublicHeader, getBodyScrollLockCountForTest } = await import("../dist/index.js");
+const { PublicHeader, AdapterProvider, getBodyScrollLockCountForTest } = await import("../dist/index.js");
 
 async function mount(props = {}) {
   document.body.innerHTML = "";
@@ -91,22 +91,35 @@ async function submit(form) {
 }
 const compose = (el, type) => act(() => el.dispatchEvent(new CompositionEvent(type, { bubbles: true })));
 
-test("IME: a submit during composition or in the same task as compositionend is blocked (CURRENT ImeSafeGetForm)", async () => {
-  const { root } = await mount();
+test("IME: the header search goes through ImeSafeGetForm, so the IME confirm Enter does not search (CURRENT)", async () => {
+  document.body.innerHTML = "";
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const pushed = [];
+  const navigator = { push: (href) => pushed.push(href), replace() {}, back() {} };
+  await act(() =>
+    root.render(React.createElement(AdapterProvider, { navigator }, React.createElement(PublicHeader, { currentPath: "/list" }))),
+  );
   await click(document.querySelector(".hd-search-ic"));
   const form = document.querySelector("form.hd-search");
   const input = form.querySelector('input[name="q"]');
   const header = document.querySelector("header");
+  input.value = "猫";
 
   await compose(input, "compositionstart");
-  assert.equal(await submit(form), true, "submit while composing is prevented");
-  await compose(input, "compositionend");
-  assert.equal(await submit(form), true, "submit in the same task as compositionend is prevented");
+  assert.equal(await submit(form), true, "no native submit while composing");
+  await act(() => {
+    // compositionend and the submit of the confirming Enter arrive in one task
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  assert.deepEqual(pushed, [], "neither submit searches");
   assert.match(header.className, /open-search/, "the search stays open after a blocked submit");
 
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(await submit(form), false, "a later Enter submits natively to GET /list");
-  assert.equal(form.getAttribute("action"), "/list");
+  await submit(form);
+  assert.deepEqual(pushed, ["/list?q=%E7%8C%AB"], "a later Enter searches GET /list?q=");
   assert.doesNotMatch(header.className, /open-search/);
   await act(() => root.unmount());
 });
