@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0405
 Last Task PR: #313
-Merged READY: MIG-0203, MIG-0204, MIG-0304, MIG-0305, MIG-0306, MIG-0406, MIG-0409
+Merged READY: MIG-0204, MIG-0304, MIG-0305, MIG-0306, MIG-0406, MIG-0409
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,7 +106,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202 DONE / MIG-0203, MIG-0204 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203 DONE / MIG-0204 READY) | CLOSED |
 | 3 | Domain extraction | READY | CLOSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405 DONE / MIG-0406, MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
@@ -230,7 +230,7 @@ Validation:
 | MIG-0200 | register user-provided HTML mock in `UI_REFERENCE.md` | DONE | user input |
 | MIG-0201 | visual/IA extraction + design tokens | DONE | MIG-0108, MIG-0200 |
 | MIG-0202 | primitives | DONE | MIG-0201 |
-| MIG-0203 | navigation/layout | READY | MIG-0202 |
+| MIG-0203 | navigation/layout | DONE | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | READY | MIG-0202 |
 | MIG-0205 | representative responsive screens + UX mapping | BLOCKED | MIG-0203, MIG-0204 |
 | MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
