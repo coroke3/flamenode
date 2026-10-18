@@ -1,7 +1,13 @@
 #!/usr/bin/env node
+// MIG-0307 U01: packages/domain and packages/db must stay framework-free and
+// must not depend on the legacy Next tree. Specifiers are extracted with the
+// TypeScript scanner (ts.preProcessFile), so multi-line imports, `import type`,
+// `export ... from`, side-effect imports, dynamic import() and require() are
+// all covered, while comments and string literals are ignored.
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const FORBIDDEN_RULES = [
   {
@@ -36,25 +42,24 @@ const FORBIDDEN_RULES = [
   {
     name: "legacy src/** or @/*",
     test: (spec, filePath, rootDir) => {
-      if (spec.startsWith("@/")) return true;
-      if (/(?:^|[\\/])src[\\/]/.test(spec) && (spec.startsWith(".") || spec.startsWith("/"))) {
+      // tsconfig.json path aliases that point into the legacy Next tree.
+      if (spec.startsWith("@/") || spec.startsWith("@app/") || spec.startsWith("#utils/")) {
         return true;
       }
-      if (spec.startsWith(".")) {
+      if (spec.startsWith(".") || path.isAbsolute(spec)) {
         const resolved = path.resolve(path.dirname(filePath), spec);
-        const legacySrcDir = path.resolve(rootDir, "src");
-        if (resolved.startsWith(legacySrcDir)) {
-          return true;
+        for (const legacyDir of ["src", "app"]) {
+          const relative = path.relative(path.resolve(rootDir, legacyDir), resolved);
+          if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+            return true;
+          }
         }
       }
       return false;
     },
-    message: "Imports pointing to legacy Next 'src/**' are forbidden in domain and db packages",
+    message: "Imports pointing to the legacy Next tree (src/**, app/**, @/*) are forbidden in domain and db packages",
   },
 ];
-
-const IMPORT_EXPORT_REGEX =
-  /(?:import\s+(?:(?:[\w*\s{},]*)\s+from\s+)?|export\s+(?:(?:[\w*\s{},]*)\s+from\s+)|import\s*\(\s*|require\s*\(\s*)["']([^"']+)["']/g;
 
 function collectSourceFiles(dir, result = []) {
   if (!fs.existsSync(dir)) return result;
@@ -63,63 +68,54 @@ function collectSourceFiles(dir, result = []) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       collectSourceFiles(full, result);
-    } else if (entry.isFile() && /\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/.test(entry.name)) {
+    } else if (entry.isFile() && /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name)) {
       result.push(full);
     }
   }
   return result;
 }
 
+export function extractImportSpecifiers(content) {
+  const { importedFiles } = ts.preProcessFile(content, true, true);
+  return importedFiles.map((file) => ({
+    specifier: file.fileName,
+    line: content.slice(0, file.pos).split("\n").length,
+  }));
+}
+
 export function validateDomainImports(options = {}) {
   const rootDir = options.rootDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  // Whole packages (src, tests, config), not only src/: tests must not reach
+  // into the legacy tree either.
   const targetDirs = options.targetDirs ?? [
-    path.join(rootDir, "packages", "domain", "src"),
-    path.join(rootDir, "packages", "db", "src"),
+    path.join(rootDir, "packages", "domain"),
+    path.join(rootDir, "packages", "db"),
   ];
 
   const errors = [];
-  const filesChecked = [];
+  let filesCheckedCount = 0;
 
   for (const targetDir of targetDirs) {
-    const files = collectSourceFiles(targetDir);
-    for (const file of files) {
-      filesChecked.push(file);
+    for (const file of collectSourceFiles(targetDir)) {
+      filesCheckedCount += 1;
       const content = fs.readFileSync(file, "utf8");
-      const lines = content.split("\n");
-
-      for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-        const line = lines[lineIndex];
-        // Skip comment lines
-        const trimmed = line.trim();
-        if (trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
-          continue;
-        }
-
-        let match;
-        IMPORT_EXPORT_REGEX.lastIndex = 0;
-        while ((match = IMPORT_EXPORT_REGEX.exec(line)) !== null) {
-          const specifier = match[1];
-          for (const rule of FORBIDDEN_RULES) {
-            if (rule.test(specifier, file, rootDir)) {
-              errors.push({
-                file: path.relative(rootDir, file).replace(/\\/g, "/"),
-                line: lineIndex + 1,
-                specifier,
-                rule: rule.name,
-                message: rule.message,
-              });
-            }
+      for (const { specifier, line } of extractImportSpecifiers(content)) {
+        for (const rule of FORBIDDEN_RULES) {
+          if (rule.test(specifier, file, rootDir)) {
+            errors.push({
+              file: path.relative(rootDir, file).replace(/\\/g, "/"),
+              line,
+              specifier,
+              rule: rule.name,
+              message: rule.message,
+            });
           }
         }
       }
     }
   }
 
-  return {
-    ok: errors.length === 0,
-    errors,
-    filesCheckedCount: filesChecked.length,
-  };
+  return { ok: errors.length === 0, errors, filesCheckedCount };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -129,6 +125,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const err of result.errors) {
       console.error(`  - ${err.file}:${err.line} imports "${err.specifier}" -> ${err.message}`);
     }
+    process.exit(1);
+  }
+  if (result.filesCheckedCount === 0) {
+    console.error("[check:domain-imports] FAILED: no files checked (wrong root?)");
     process.exit(1);
   }
   console.log(`[check:domain-imports] OK (${result.filesCheckedCount} files checked)`);

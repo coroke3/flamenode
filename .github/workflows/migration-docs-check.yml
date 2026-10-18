@@ -10,6 +10,7 @@ on:
       - "scripts/check-migration*.mjs"
       - "scripts/print-migration-task-context*.mjs"
       - "scripts/check-project-docs.mjs"
+      - "scripts/check-domain-imports*.mjs"
       - ".claude/**"
       - ".codex/**"
       - ".agents/**"

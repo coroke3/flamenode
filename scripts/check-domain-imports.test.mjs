@@ -70,4 +70,47 @@ describe("check-domain-imports", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+  it("detects multi-line, type-only, re-export, dynamic and relative legacy imports; ignores comments and strings", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-domain-test-multi-"));
+    try {
+      const pkgDir = path.join(tempDir, "packages", "domain", "src", "video");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "src", "lib"), { recursive: true });
+      fs.writeFileSync(
+        path.join(pkgDir, "bad.ts"),
+        [
+          "// import { x } from \"next/headers\";",
+          "/* import \"react\"; */",
+          "const text = \"import 'server-only'\";",
+          "import {",
+          "  redirect,",
+          "  notFound,",
+          "} from \"next/navigation\";",
+          "import type { Context } from \"hono\";",
+          "export * from \"astro/zod\";",
+          "export async function load() { return import(\"server-only\"); }",
+          "import { db } from \"../../../../src/lib/db\";",
+          "import { ok } from \"./sibling.ts\";",
+        ].join("\n"),
+        "utf8",
+      );
+      const result = validateDomainImports({
+        rootDir: tempDir,
+        targetDirs: [path.join(tempDir, "packages", "domain")],
+      });
+      assert.strictEqual(result.ok, false);
+      assert.deepStrictEqual(
+        result.errors.map((e) => [e.specifier, e.line]),
+        [
+          ["next/navigation", 7],
+          ["hono", 8],
+          ["astro/zod", 9],
+          ["server-only", 10],
+          ["../../../../src/lib/db", 11],
+        ],
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
