@@ -85,8 +85,9 @@ const NON_POINT_EVENT_PERIOD_SQL = `(
 )`;
 
 function normalizeNumber(value: unknown): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  // Match CURRENT rebuild.ts for group sort_order and latest event times.
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? Math.floor(number) : null;
 }
 
 function latestEventStart(events: readonly Record<string, unknown>[]): number | null {
@@ -233,18 +234,14 @@ export async function readEventGroupSections(db: D1Like): Promise<PublicEventGro
   return groupRows.map((group) => {
     const id = String(group.id ?? "");
     const events = eventsByGroup.get(id) ?? [];
+    // Same shape as CURRENT rebuildEventGroupSections: the selected row as-is
+    // (no string coercion), then the three derived fields.
     return {
-      id,
-      slug: String(group.slug ?? ""),
-      name: String(group.name ?? ""),
-      description: group.description != null ? String(group.description) : null,
-      group_type: String(group.group_type ?? ""),
-      icon_url: group.icon_url != null ? String(group.icon_url) : null,
-      accent_color: group.accent_color != null ? String(group.accent_color) : null,
+      ...group,
       sort_order: normalizeNumber(group.sort_order) ?? 0,
       latest_event_start_time: latestEventStart(events),
       events,
-    };
+    } as PublicEventGroupSection;
   });
 }
 
@@ -253,6 +250,11 @@ export async function buildEventsIndexData(
   options?: { generatedAt?: number; rowLimit?: number },
 ): Promise<EventsIndexPayload> {
   const rowLimit = options?.rowLimit ?? EVENTS_INDEX_MAX_ROWS;
+  // A negative SQLite LIMIT means "unlimited". Reject invalid overrides before
+  // touching D1 so this build-time reader always stays within its fixed budget.
+  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > EVENTS_INDEX_MAX_ROWS) {
+    throw new RangeError(`Invalid events index rowLimit: expected integer 1..${EVENTS_INDEX_MAX_ROWS}`);
+  }
 
   const countResult = await db
     .prepare(
@@ -277,7 +279,9 @@ export async function buildEventsIndexData(
          FROM events
          WHERE visibility_status = 'public'
            AND ${NON_POINT_EVENT_PERIOD_SQL}
-         ORDER BY start_time DESC, created_at DESC, id ASC
+         -- Match CURRENT workers/json-generator/rebuild.ts::rebuildEventsIndex.
+         -- Do not impose additional tie-breakers here: they change legacy ordering.
+         ORDER BY start_time DESC
          LIMIT ?`,
       )
       .bind(rowLimit)
@@ -318,6 +322,63 @@ export function deterministicStringify(value: unknown): string {
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  console.log("[readPublicData] CLI entry point ready for build time execution");
+/**
+ * Read-only D1Like over a local SQLite file (a `wrangler d1 export` snapshot or a
+ * local D1 fixture). Build time only: nothing here runs in a Worker request.
+ */
+export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; close: () => void }> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const sqlite = new DatabaseSync(file, { readOnly: true });
+  const statement = (sql: string, args: unknown[] = []): D1PreparedStatementLike => ({
+    bind: (...next: unknown[]) => statement(sql, next),
+    async all<T>() {
+      return { results: sqlite.prepare(sql).all(...(args as never[])) as T[] };
+    },
+  });
+  return { db: { prepare: (sql) => statement(sql) }, close: () => sqlite.close() };
+}
+
+export const READ_PUBLIC_DATA_USAGE =
+  "usage: node --experimental-strip-types apps/site/scripts/readPublicData.ts " +
+  "--sqlite <snapshot.sqlite> --out <events-index.json> [--generated-at <unix seconds>]";
+
+function parseCliArgs(argv: readonly string[]): { sqlite: string; out: string; generatedAt?: number } {
+  const values = new Map<string, string>();
+  for (let i = 0; i < argv.length; i += 2) {
+    const flag = argv[i];
+    const value = argv[i + 1];
+    if (!["--sqlite", "--out", "--generated-at"].includes(flag) || value === undefined || values.has(flag)) {
+      throw new Error(READ_PUBLIC_DATA_USAGE);
+    }
+    values.set(flag, value);
+  }
+  const sqlite = values.get("--sqlite");
+  const out = values.get("--out");
+  if (!sqlite || !out) throw new Error(READ_PUBLIC_DATA_USAGE);
+  const rawGeneratedAt = values.get("--generated-at");
+  if (rawGeneratedAt === undefined) return { sqlite, out };
+  const generatedAt = Number(rawGeneratedAt);
+  if (!Number.isSafeInteger(generatedAt) || generatedAt < 0) throw new Error(READ_PUBLIC_DATA_USAGE);
+  return { sqlite, out, generatedAt };
+}
+
+/** CLI: local SQLite snapshot -> `events/index.json` (deterministic bytes for a fixed --generated-at). */
+export async function runReadPublicDataCli(argv: readonly string[]): Promise<void> {
+  const args = parseCliArgs(argv);
+  if (!fs.existsSync(args.sqlite)) throw new Error(`SQLite snapshot not found: ${args.sqlite}`);
+  const { db, close } = await openLocalSqliteD1(args.sqlite);
+  try {
+    const payload = await buildEventsIndexData(db, { generatedAt: args.generatedAt });
+    fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });
+    fs.writeFileSync(args.out, `${deterministicStringify(payload)}\n`);
+  } finally {
+    close();
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runReadPublicDataCli(process.argv.slice(2)).catch((error: unknown) => {
+    console.error(`[readPublicData] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
 }

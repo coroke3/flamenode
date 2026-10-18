@@ -105,6 +105,7 @@ jobs:
           npm run build --workspace=@flamenode/site
           npm run build --workspace=@flamenode/app
           npm run build --workspace=@flamenode/api
+          npm run test --workspace=@flamenode/api
       - name: MIG-0401 synthetic public-only HTML verification
         run: node scripts/check-migration-public-poc-build.mjs
       - name: MIG-0404 route-map generator verification
@@ -115,4 +116,6 @@ jobs:
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
           node scripts/check-public-site-build-budget.mjs
+      - name: MIG-0409 build-time public data parity with CURRENT
+        run: node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
 

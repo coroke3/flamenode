@@ -23,6 +23,10 @@
     "paths": {
       "@/*": ["./src/*"],
       "@app/*": ["./app/*"],
+      "@flamenode/db": ["./packages/db/src/schema/index.ts"],
+      "@flamenode/db/*": ["./packages/db/src/*"],
+      "@flamenode/domain": ["./packages/domain/src/index.ts"],
+      "@flamenode/domain/*": ["./packages/domain/src/*"],
       "#utils/delimited": ["./src/lib/utils/delimited.ts"],
       "#utils/url": ["./src/lib/utils/url.ts"],
       "#utils/xid": ["./src/lib/utils/xid.ts"],
