@@ -5,7 +5,7 @@ import test from "node:test";
 const [worker, schema] = await Promise.all([
   readFile(new URL("./index.ts", import.meta.url), "utf8"),
   readFile(
-    new URL("../../src/lib/db/schema.canonical.ts", import.meta.url),
+    new URL("../../packages/db/src/schema/canonical.ts", import.meta.url),
     "utf8",
   ),
 ]);
