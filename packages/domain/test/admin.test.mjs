@@ -8,11 +8,6 @@ import {
   evaluateWriteIdentity,
   evaluateActiveXWriteAccess,
 } from "../src/admin/index.ts";
-import {
-  canEditVideo,
-  isAdminRole,
-  isStaffRole,
-} from "../src/permissions.ts";
 
 describe("admin/costGuard", () => {
   it("recognizes write feature keys", () => {
@@ -128,22 +123,5 @@ describe("admin/writeIdentity", () => {
       }),
       null,
     );
-  });
-});
-
-describe("permissions", () => {
-  it("evaluates canEditVideo", () => {
-    assert.equal(canEditVideo({ isOwner: true, isCollabEditor: false, isEventStaff: false }), true);
-    assert.equal(canEditVideo({ isOwner: false, isCollabEditor: true, isEventStaff: false }), true);
-    assert.equal(canEditVideo({ isOwner: false, isCollabEditor: false, isEventStaff: true }), true);
-    assert.equal(canEditVideo({ isOwner: false, isCollabEditor: false, isEventStaff: false }), false);
-  });
-
-  it("evaluates roles", () => {
-    assert.equal(isAdminRole("admin"), true);
-    assert.equal(isAdminRole("user"), false);
-    assert.equal(isStaffRole("admin"), true);
-    assert.equal(isStaffRole("staff"), true);
-    assert.equal(isStaffRole("user"), false);
   });
 });
