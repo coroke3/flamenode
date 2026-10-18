@@ -5,9 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   Button,
   Badge,
-  Status,
   Dialog,
-  Modal,
   openDialogBehavior,
   acquireBodyScrollLock,
   getBodyScrollLockCountForTest,
@@ -68,7 +66,7 @@ test("T02: Button loading renders aria-busy='true' and disabled state", () => {
   assert.equal(presses, 0);
 });
 
-test("Badge and Status render correct status classes and default labels", () => {
+test("Badge renders status classes and default labels like the mock", () => {
   const htmlPublic = renderToStaticMarkup(
     React.createElement(Badge, { status: "public" }),
   );
@@ -76,7 +74,7 @@ test("Badge and Status render correct status classes and default labels", () => 
   assert.match(htmlPublic, /PUBLIC/);
 
   const htmlLive = renderToStaticMarkup(
-    React.createElement(Status, { status: "live", label: "ON AIR" }),
+    React.createElement(Badge, { status: "live", label: "ON AIR" }),
   );
   assert.match(htmlLive, /fn-status--live/);
   assert.match(htmlLive, /ON AIR/);
@@ -188,6 +186,13 @@ test("bodyScrollLock stacking returns to 0 when all released", () => {
   }
 });
 
+test("Badge falls back like the mock: empty label and unknown status", () => {
+  assert.match(renderToStaticMarkup(React.createElement(Badge, { status: "public", label: "" })), /PUBLIC/);
+  const unknown = renderToStaticMarkup(React.createElement(Badge, { status: "nope" }));
+  assert.match(unknown, /fn-status--draft/);
+  assert.match(unknown, /DRAFT/);
+});
+
 function withFakeDom(run) {
   const listeners = new Set();
   const focused = [];
@@ -205,21 +210,19 @@ function withFakeDom(run) {
       scrollTo: () => {},
     },
   });
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: {
-      body,
-      documentElement: { clientWidth: 1024 },
-      activeElement: opener,
-      addEventListener: (type, fn) => type === "keydown" && listeners.add(fn),
-      removeEventListener: (type, fn) => type === "keydown" && listeners.delete(fn),
-    },
-  });
-  const pressEscape = () => {
-    for (const fn of [...listeners]) fn({ key: "Escape", preventDefault() {} });
+  const doc = {
+    body,
+    documentElement: { clientWidth: 1024 },
+    activeElement: opener,
+    addEventListener: (type, fn) => type === "keydown" && listeners.add(fn),
+    removeEventListener: (type, fn) => type === "keydown" && listeners.delete(fn),
+  };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: doc });
+  const pressEscape = (extra = {}) => {
+    for (const fn of [...listeners]) fn({ key: "Escape", preventDefault() {}, ...extra });
   };
   try {
-    run({ focused, pressEscape, listeners });
+    run({ focused, opener, doc, pressEscape, listeners });
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
     else delete globalThis.window;
@@ -228,11 +231,15 @@ function withFakeDom(run) {
   }
 }
 
+const fakeDialog = (focused, name = "dialog", inside = []) => ({
+  focus: () => focused.push(name),
+  contains: (node) => inside.includes(node),
+});
+
 test("T03: Dialog Esc closes and focus returns to the opener", () => {
-  withFakeDom(({ focused, pressEscape, listeners }) => {
+  withFakeDom(({ focused, opener, pressEscape, listeners }) => {
     let closed = 0;
-    const dialog = { focus: () => focused.push("dialog") };
-    const cleanup = openDialogBehavior(dialog, () => () => { closed += 1; });
+    const cleanup = openDialogBehavior(fakeDialog(focused), opener, () => () => { closed += 1; });
     assert.deepEqual(focused, ["dialog"]);
 
     pressEscape();
@@ -245,22 +252,46 @@ test("T03: Dialog Esc closes and focus returns to the opener", () => {
   });
 });
 
-test("T03: contained Dialog ignores Esc", () => {
-  withFakeDom(({ pressEscape }) => {
-    const cleanup = openDialogBehavior(null, () => undefined);
-    assert.doesNotThrow(pressEscape);
+test("T03: an autoFocus child keeps focus, and closing returns to the recorded opener", () => {
+  withFakeDom(({ focused, opener, doc }) => {
+    const input = { name: "input", focus: () => focused.push("input") };
+    doc.activeElement = input; // autoFocus ran before the effect
+    const cleanup = openDialogBehavior(fakeDialog(focused, "dialog", [input]), opener, () => undefined);
+    assert.deepEqual(focused, []); // dialog did not steal focus from the input
+    cleanup();
+    assert.deepEqual(focused, ["opener"]);
+  });
+});
+
+test("T03: contained Dialog and IME conversion ignore Esc", () => {
+  withFakeDom(({ focused, opener, pressEscape }) => {
+    const contained = openDialogBehavior(fakeDialog(focused), opener, () => undefined);
+    assert.doesNotThrow(() => pressEscape());
+    contained();
+
+    let closed = 0;
+    const cleanup = openDialogBehavior(fakeDialog(focused), opener, () => () => { closed += 1; });
+    pressEscape({ isComposing: true });
+    assert.equal(closed, 0);
     cleanup();
   });
 });
 
-test("T04: two stacked Dialogs release the scroll lock to 0", () => {
-  withFakeDom(() => {
-    const closeFirst = openDialogBehavior(null, () => undefined);
-    const closeSecond = openDialogBehavior(null, () => undefined);
+test("T04: one Esc closes only the innermost of two stacked Dialogs; locks return to 0", () => {
+  withFakeDom(({ focused, opener, pressEscape }) => {
+    const closed = [];
+    const closeOuter = openDialogBehavior(fakeDialog(focused, "outer"), opener, () => () => closed.push("outer"));
+    const closeInner = openDialogBehavior(fakeDialog(focused, "inner"), opener, () => () => closed.push("inner"));
     assert.equal(getBodyScrollLockCountForTest(), 2);
-    closeSecond();
+
+    pressEscape();
+    assert.deepEqual(closed, ["inner"]);
+    closeInner();
     assert.equal(getBodyScrollLockCountForTest(), 1);
-    closeFirst();
+
+    pressEscape();
+    assert.deepEqual(closed, ["inner", "outer"]);
+    closeOuter();
     assert.equal(getBodyScrollLockCountForTest(), 0);
   });
 });
