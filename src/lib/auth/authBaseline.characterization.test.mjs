@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { registerHooks } from "node:module";
-import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { runTestWithTsx } from "../testing/runTestWithTsx.mjs";
+import { loadAuthBaseline } from "./authBaselineHarness.mjs";
 import {
   AUTH_BASELINE_ENV,
   BASELINE_COOKIES,
@@ -14,150 +12,12 @@ import {
 } from "./authBaseline.fixture.mjs";
 
 // Characterizes CURRENT Auth.js behaviour: the real buildAuthConfig() from
-// src/lib/auth/index.ts runs through @auth/core against an in-memory D1 copy of
-// migrations/0000_flame_node_baseline.sql. Nothing here reimplements auth logic.
+// src/lib/auth/index.ts runs through @auth/core against an in-memory D1 built from
+// every file in migrations/. Nothing here reimplements auth logic.
 if (runTestWithTsx(import.meta.url)) {
-  globalThis.__authBaselineContext = { env: {} };
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      if (specifier === "server-only") {
-        return { url: "data:text/javascript,export%20{}", shortCircuit: true };
-      }
-      if (specifier === "@opennextjs/cloudflare") {
-        return {
-          url:
-            "data:text/javascript," +
-            encodeURIComponent(
-              "export async function getCloudflareContext() { return globalThis.__authBaselineContext; }",
-            ),
-          shortCircuit: true,
-        };
-      }
-      return nextResolve(specifier, context);
-    },
-  });
-
-  const { Auth } = await import("@auth/core");
-  const { buildAuthConfig } = await import("./index.ts");
+  const { buildAuthConfig, createHarness, authRequest, setCookies } = await loadAuthBaseline();
   const { linkDiscordAccountAtomically } = await import("./accountLinkAdapter.ts");
-  const { drizzle } = await import("drizzle-orm/d1");
-  const schema = await import("../db/schema.ts");
-
-  const baseline = readFileSync(
-    new URL("../../../migrations/0000_flame_node_baseline.sql", import.meta.url),
-    "utf8",
-  );
-
-  function createD1Client(sqlite) {
-    const meta = (changes = 0) => ({ duration: 0, changes, last_row_id: 0, changed_db: changes > 0 });
-    function execute(query, params, method) {
-      const statement = sqlite.prepare(query);
-      if (method === "run") {
-        const info = statement.run(...params);
-        return { success: true, results: [], meta: meta(Number(info.changes)) };
-      }
-      return { success: true, results: statement.all(...params), meta: meta() };
-    }
-    function prepared(query, params = []) {
-      return {
-        query,
-        params,
-        bind: (...values) => prepared(query, values),
-        run: async () => execute(query, params, "run"),
-        all: async () => execute(query, params, "all"),
-        raw: async () => execute(query, params, "all").results.map((row) => Object.values(row)),
-        first: async (column) => {
-          const row = execute(query, params, "all").results[0];
-          return row ? (column ? row[column] : row) : null;
-        },
-      };
-    }
-    return {
-      prepare: (query) => prepared(query),
-      async batch(statements) {
-        sqlite.exec("BEGIN");
-        try {
-          const results = statements.map((s) =>
-            execute(s.query, s.params, sqlite.prepare(s.query).columns().length > 0 ? "all" : "run"),
-          );
-          sqlite.exec("COMMIT");
-          return results;
-        } catch (error) {
-          sqlite.exec("ROLLBACK");
-          throw error;
-        }
-      },
-    };
-  }
-
-  function createHarness(t) {
-    const sqlite = new DatabaseSync(":memory:");
-    sqlite.exec(baseline);
-    for (const user of Object.values(USERS)) {
-      sqlite
-        .prepare(
-          `INSERT INTO "user" (id, name, email, role, is_banned, discord_id, active_x_user_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(user.id, user.name, user.email, user.role, user.is_banned, user.discord_id, user.active_x_user_id);
-    }
-    for (const session of Object.values(SESSIONS)) {
-      if (typeof session === "string") continue;
-      sqlite
-        .prepare(`INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)`)
-        .run(session.sessionToken, session.userId, session.expiresMs);
-    }
-    const account = DISCORD_ACCOUNTS.linked;
-    sqlite
-      .prepare(
-        `INSERT INTO "account" ("userId", type, provider, "providerAccountId") VALUES (?, ?, ?, ?)`,
-      )
-      .run(account.userId, account.type, account.provider, account.providerAccountId);
-
-    const d1 = createD1Client(sqlite);
-    // BUCKET and KV are required by getEnvAsync() but auth never calls them.
-    const unused = () => {
-      throw new Error("auth baseline must not touch R2/KV");
-    };
-    const storage = { get: unused, put: unused, delete: unused };
-    globalThis.__authBaselineContext = {
-      env: { ...AUTH_BASELINE_ENV, DB: d1, BUCKET: storage, KV: storage },
-    };
-    t.after(() => sqlite.close());
-    return { sqlite, db: drizzle(d1, { schema }) };
-  }
-
-  async function authRequest(path, { method = "GET", cookies = {}, body } = {}) {
-    const config = await buildAuthConfig();
-    const headers = new Headers();
-    const cookieHeader = Object.entries(cookies)
-      .map(([name, value]) => `${name}=${value}`)
-      .join("; ");
-    if (cookieHeader) headers.set("cookie", cookieHeader);
-    if (body) headers.set("content-type", "application/x-www-form-urlencoded");
-    const request = new Request(`${AUTH_BASELINE_ENV.AUTH_URL}/api/auth/${path}`, {
-      method,
-      headers,
-      body: body ? new URLSearchParams(body) : undefined,
-    });
-    return Auth(request, { ...config, basePath: "/api/auth" });
-  }
-
-  /** Parses Set-Cookie into {name: {value, attributes}} with lower-cased attribute names. */
-  function setCookies(response) {
-    const out = {};
-    for (const line of response.headers.getSetCookie()) {
-      const [pair, ...attrs] = line.split(";").map((part) => part.trim());
-      const eq = pair.indexOf("=");
-      const attributes = {};
-      for (const attr of attrs) {
-        const [key, ...rest] = attr.split("=");
-        attributes[key.toLowerCase()] = rest.length ? rest.join("=") : true;
-      }
-      out[pair.slice(0, eq)] = { value: pair.slice(eq + 1), attributes };
-    }
-    return out;
-  }
+  const { resolveActiveXUserId } = await import("./resolveActiveXId.ts");
 
   function withoutVolatile(cookie) {
     const { expires, ...attributes } = cookie.attributes;
@@ -254,13 +114,40 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(body.user.is_banned, 1);
   });
 
-  test("U02: user without X gets active_x_user_id=null; multi-X user gets the stored primary", async (t) => {
+  test("U02: session exposes the stored active_x_user_id as-is (not trusted downstream)", async (t) => {
     createHarness(t);
     assert.equal((await readSession(SESSIONS.noX.sessionToken)).body.user.active_x_user_id, null);
     assert.equal(
       (await readSession(SESSIONS.multiX.sessionToken)).body.user.active_x_user_id,
       USERS.multiX.active_x_user_id,
     );
+  });
+
+  // currentUser.ts ignores the session value and resolves Active X from approved links.
+  function linkX(sqlite, authUserId, xUserId, approval) {
+    sqlite
+      .prepare(`INSERT OR IGNORE INTO "x_users" (id, x_name, approval_status) VALUES (?, ?, ?)`)
+      .run(xUserId, xUserId, approval);
+    sqlite
+      .prepare(`INSERT INTO "x_user_account_links" (x_user_id, auth_user_id) VALUES (?, ?)`)
+      .run(xUserId, authUserId);
+  }
+
+  test("U02: Active X resolution with 0, 1 and several linked X accounts", async (t) => {
+    const { sqlite, db } = createHarness(t);
+    const user = USERS.multiX.id;
+
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-primary"), null, "0 links");
+
+    linkX(sqlite, user, "x-mock-primary", "approved");
+    assert.equal(await resolveActiveXUserId(db, user, null), "x-mock-primary", "1 link, none selected");
+
+    linkX(sqlite, user, "x-mock-second", "approved");
+    linkX(sqlite, user, "x-mock-pending", "pending");
+    assert.equal(await resolveActiveXUserId(db, user, "X-Mock-Primary"), "x-mock-primary", "selected, case-insensitive");
+    assert.equal(await resolveActiveXUserId(db, user, null), null, "several links, none selected");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-pending"), null, "selected but not approved");
+    assert.equal(await resolveActiveXUserId(db, user, "x-mock-other"), null, "selected but not linked");
   });
 
   test("T02/U03: linking a Discord account owned by another user is rejected", async (t) => {

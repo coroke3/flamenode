@@ -6,7 +6,7 @@
 
 ## 測り方
 
-テストは CURRENT の `buildAuthConfig()`（`src/lib/auth/index.ts`）を `@auth/core` の `Auth()` にそのまま渡し、`https://flamenode.example` 宛ての Request を送る。D1 は `migrations/0000_flame_node_baseline.sql` を流した in-memory SQLite。`@opennextjs/cloudflare` だけを差し替え、secret はすべて `synthetic-` で始まる偽値。auth のロジックはテスト側で書き直していないので、CURRENT が変わればテストが落ちる（`redirect` の既定先と `session` callback の `is_banned` を書き換えると T03 と U02 が落ちることを確認済み）。
+テストは CURRENT の `buildAuthConfig()`（`src/lib/auth/index.ts`）を `@auth/core` の `Auth()` にそのまま渡し、`https://flamenode.example` 宛ての Request を送る。D1 は `migrations/*.sql` を名前順にすべて流した in-memory SQLite（本番と同じ schema）。`@opennextjs/cloudflare` だけを差し替え、secret はすべて `synthetic-` で始まる偽値。auth のロジックはテスト側で書き直していないので、CURRENT が変わればテストが落ちる（`redirect` の既定先と `session` callback の `is_banned` を書き換えると T03 と U02 が落ちることを確認済み）。
 
 ## Cookie（https, next-auth 5.0.0-beta.32 / @auth/core 0.41.3, `cookies` の上書き無し）
 
@@ -24,7 +24,20 @@
 | 期限切れ | `null`。session cookie を空にし、D1 の行を消す |
 | D1 に無い token | `null` |
 | BAN された user | session は返る（`is_banned: 1`）。拒否は route 側（`routeGuard` など）で行う |
-| X が0件 / 複数 | `active_x_user_id` は user 行の値そのまま（0件なら `null`） |
+| X の名義 | `active_x_user_id` は user 行の値そのまま。session callback は検証しない |
+
+
+## Active X の解決（`resolveActiveXUserId`、`currentUser.ts` と `headerUser.ts` が呼ぶ）
+
+承認済みの `x_user_account_links` だけを見る。DB は更新しない。
+
+| 連携 | 結果 |
+| --- | --- |
+| 0件 | `null` |
+| 1件 | その X ID（`active_x_user_id` が空でも） |
+| 複数で `active_x_user_id` が連携済み | その X ID。大文字小文字は区別せず、D1 の表記で返す |
+| 複数で未選択 | `null` |
+| `pending` の連携、または連携していない ID | `null` |
 
 ## Discord 連携（`linkDiscordAccountAtomically` を実 D1 で実行）
 

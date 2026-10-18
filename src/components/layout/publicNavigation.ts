@@ -1,10 +1,10 @@
 /**
- * Legacy re-export bridge for public navigation.
- * Canonical implementation lives in packages/ui/src/navigation/publicNavigation.ts.
+ * Legacy bridge: the navigation data lives in packages/ui (MIG-0203).
+ * The annotation below makes tsc reject a packages/ui icon name that CURRENT `Icon` cannot draw.
  */
 import {
-  PUBLIC_NAV_ITEMS as DOMAIN_PUBLIC_NAV_ITEMS,
-  isPublicNavItemActive as domainIsPublicNavItemActive,
+  PUBLIC_NAV_ITEMS as UI_PUBLIC_NAV_ITEMS,
+  isPublicNavItemActive,
   type PublicNavItem,
   type PublicNavIconName,
 } from "@flamenode/ui/navigation/publicNavigation.ts";
@@ -12,16 +12,10 @@ import type { IconName } from "@/components/ui/Icon";
 
 export type { PublicNavItem, PublicNavIconName };
 
-export const PUBLIC_NAV_ITEMS = DOMAIN_PUBLIC_NAV_ITEMS as readonly {
-  href: string;
-  label: string;
-  iconName: IconName;
-}[];
+export const PUBLIC_NAV_ITEMS: readonly {
+  readonly href: string;
+  readonly label: string;
+  readonly iconName: IconName;
+}[] = UI_PUBLIC_NAV_ITEMS;
 
-export const isPublicNavItemActive = domainIsPublicNavItemActive;
-
-// Legacy contract assertion anchor for publicNavigation.contract.test.mjs:
-// href: "/list"
-// href: "/user"
-// href: "/event"
-
+export { isPublicNavItemActive };

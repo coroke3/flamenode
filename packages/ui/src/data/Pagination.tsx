@@ -58,7 +58,7 @@ export function Pagination({
           <Link
             href={buildHref(currentPage - 1)}
             className="fn-btn fn-btn--secondary fn-btn--sm fn-pagination-prev"
-            aria-label="前のページへ"
+            aria-label="前のページ"
           >
             前へ
           </Link>
@@ -110,7 +110,7 @@ export function Pagination({
           <Link
             href={buildHref(currentPage + 1)}
             className="fn-btn fn-btn--secondary fn-btn--sm fn-pagination-next"
-            aria-label="次のページへ"
+            aria-label="次のページ"
           >
             次へ
           </Link>
@@ -124,11 +124,13 @@ export function Pagination({
         )}
       </div>
 
+      {/* CURRENT text: "21〜40 / 全 95 件 (2 / 5 ページ)" */}
       {total !== undefined ? (
         <span className="fn-pagination-total">
-          {pageSize
-            ? `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} / 全${total}${unitLabel}`
-            : `全${total}${unitLabel}`}
+          {pageSize && total > 0
+            ? `${(currentPage - 1) * pageSize + 1}〜${Math.min(currentPage * pageSize, total)} / 全 ${total} ${unitLabel}`
+            : `全 ${total} ${unitLabel}`}
+          {` (${currentPage} / ${totalPages} ページ)`}
         </span>
       ) : null}
     </nav>

@@ -1,461 +1,191 @@
-import * as React from "react";
+import React from "react";
+import { Link } from "../adapters/index.js";
+import { Pagination } from "../data/Pagination.js";
 import { EmptyState } from "../feedback/EmptyState.js";
-import { Button } from "../components/Button.js";
+import { cx } from "../cx.js";
+import { Avatar, EXTERNAL, ScreenIcon, VideoCardLink, type ScreenVideoCard } from "./parts.js";
 
-export interface CreatorVideoItem {
-  id: string;
-  title: string;
-  thumbnailUrl?: string;
-  eventName?: string;
-  duration?: string;
-  creatorName?: string;
-  creatorIconUrl?: string;
+/*
+ * Creator profile (`/user/[id]`) from the registered mock `docs/migration/mock/static/Creator.html`
+ * (classes `cr-wrap`, `pf-head`, `split`, styles in `styles/screens.css`). Entry points follow CURRENT
+ * `app/(public)/user/[id]/UserProfilePage.tsx` (`StaticUserProfileView`). Display only: the caller
+ * passes a public profile, the current page of works / collabs and the page hrefs CURRENT builds
+ * (page 1 = bare profile URL, else `?worksPage=` / `?collabPage=`).
+ */
+
+export interface CreatorSocialLink {
+  /** Accessible name, e.g. `Web サイト` (CURRENT `formatSocialLinkLabel`). */
+  label: string;
+  url: string;
+}
+
+export interface CreatorVideoPage {
+  items: readonly ScreenVideoCard[];
+  total: number;
+  currentPage: number;
+  totalPages: number;
+  pageSize: number;
+  buildHref: (page: number) => string;
 }
 
 export interface CreatorProfileData {
+  /** X user ID; the profile URL key. */
   id: string;
+  /** CURRENT `x_name || id`. */
   name: string;
-  handle?: string;
-  avatarUrl?: string;
-  xUrl?: string;
-  youtubeUrl?: string;
-  websiteUrl?: string;
-  bio?: string;
-  contactInfo?: string;
-  ownVideos?: CreatorVideoItem[];
-  collabVideos?: CreatorVideoItem[];
-  isBlocked?: boolean;
-  isUnavailable?: boolean;
+  iconUrl?: string | null;
+  youtubeChannelUrl?: string | null;
+  /** Other header links (CURRENT `profileHeaderSocialLinks`). `mailto:` opens in place. */
+  socialLinks?: readonly CreatorSocialLink[];
+  profileText?: string | null;
+  contact?: string | null;
+  works: CreatorVideoPage;
+  collabs: CreatorVideoPage;
 }
 
 export interface CreatorViewProps {
-  creator?: CreatorProfileData | null;
-  emptyTitle?: string;
-  emptyDescription?: string;
+  /** null when the caller found no public profile. */
+  creator: CreatorProfileData | null;
+  className?: string;
 }
 
-export function CreatorView({
-  creator,
-  emptyTitle = "クリエイターが見つかりません",
-  emptyDescription = "指定されたクリエイターは非公開か、存在しない可能性があります。",
-}: CreatorViewProps): React.JSX.Element {
-  if (!creator || creator.isBlocked || creator.isUnavailable) {
+export function CreatorView({ creator, className }: CreatorViewProps): React.ReactElement {
+  if (!creator) {
     return (
-      <main
-        className="cr-screen cr-screen--empty"
-        style={{
-          padding: "var(--space-8, 32px) var(--space-4, 16px)",
-          maxWidth: "1280px",
-          margin: "0 auto",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <EmptyState
-          title={emptyTitle}
-          description={emptyDescription}
-          action={{ href: "/user", label: "クリエイター一覧へ戻る" }}
-        />
-      </main>
+      <div className={cx("p-root fn-screen", className)}>
+        <main className="wrap scr-empty">
+          <EmptyState
+            title="クリエイターが見つかりません"
+            description="非公開か、存在しないクリエイターの可能性があります。"
+            action={{ href: "/user", label: "クリエイター一覧へ" }}
+          />
+        </main>
+      </div>
     );
   }
 
+  const base = `/user/${encodeURIComponent(creator.id)}`;
+  const { works, collabs } = creator;
+
   return (
-    <main
-      className="cr-screen"
-      style={{
-        maxWidth: "1280px",
-        margin: "0 auto",
-        padding: "var(--space-8, 32px) var(--space-4, 16px) var(--space-12, 48px)",
-        width: "100%",
-        boxSizing: "border-box",
-        color: "var(--ink, #ffffff)",
-      }}
-    >
-      {/* Back to list */}
-      <a
-        href="/user"
-        style={{
-          color: "var(--ink-muted, #999999)",
-          textDecoration: "none",
-          fontSize: "var(--text-ui-size, 14px)",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "6px",
-          marginBottom: "var(--space-6, 24px)",
-        }}
-      >
-        <span>←</span>
-        <span>クリエイター一覧</span>
-      </a>
-
-      {/* Creator Header */}
-      <header
-        className="cr-header"
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "var(--space-6, 24px) var(--space-8, 32px)",
-          alignItems: "flex-end",
-          marginBottom: "var(--space-8, 32px)",
-        }}
-      >
-        {creator.avatarUrl ? (
-          <img
-            src={creator.avatarUrl}
-            alt={creator.name}
-            style={{
-              width: "128px",
-              height: "128px",
-              borderRadius: "50%",
-              objectFit: "cover",
-              flexShrink: 0,
-              background: "var(--surface-raised, #1f1f1f)",
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: "128px",
-              height: "128px",
-              borderRadius: "50%",
-              background: "var(--surface-active, #333333)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "48px",
-              flexShrink: 0,
-            }}
-          >
-            👤
+    <div className={cx("p-root fn-screen", className)}>
+      <main className="wrap cr-wrap">
+        <Link href="/user" className="il t-sm muted">
+          <ScreenIcon name="arrowLeft" />
+          クリエイター一覧
+        </Link>
+        <header className="pf-head">
+          <Avatar src={creator.iconUrl} size={160} className="pf-av" />
+          <div className="stack pf-titles">
+            <h1 className="t-display">{creator.name}</h1>
+            <span className="row pf-links">
+              <a
+                href={`https://x.com/${encodeURIComponent(creator.id)}`}
+                {...EXTERNAL}
+                className="ib"
+                aria-label={`X @${creator.id}`}
+              >
+                <ScreenIcon name="x" />
+              </a>
+              {creator.youtubeChannelUrl ? (
+                <a href={creator.youtubeChannelUrl} {...EXTERNAL} className="ib" aria-label="YouTube">
+                  <ScreenIcon name="youtube" />
+                </a>
+              ) : null}
+              {(creator.socialLinks ?? []).map((link) => (
+                <a
+                  key={link.url}
+                  href={link.url}
+                  {...(link.url.startsWith("mailto:") ? {} : EXTERNAL)}
+                  className="ib"
+                  aria-label={link.label}
+                >
+                  <ScreenIcon name="globe" />
+                </a>
+              ))}
+              <span className="t-sm muted pf-handle">@{creator.id}</span>
+            </span>
           </div>
-        )}
+        </header>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2, 8px)", minWidth: 0, flex: "1 1 320px" }}>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "var(--text-display-size, 36px)",
-              lineHeight: "44px",
-              fontWeight: 700,
-              wordBreak: "break-word",
-            }}
-          >
-            {creator.name}
-          </h1>
-
-          {/* Social Links & Handle */}
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "var(--space-2, 8px)" }}>
-            {creator.xUrl && (
-              <a
-                href={creator.xUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "32px",
-                  height: "32px",
-                  background: "var(--surface-raised, #1f1f1f)",
-                  color: "var(--ink, #ffffff)",
-                  textDecoration: "none",
-                  fontWeight: 600,
-                  fontSize: "14px",
-                }}
-                aria-label={`X ${creator.handle ? `@${creator.handle}` : ""}`}
-              >
-                𝕏
-              </a>
-            )}
-            {creator.youtubeUrl && (
-              <a
-                href={creator.youtubeUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "32px",
-                  height: "32px",
-                  background: "var(--surface-raised, #1f1f1f)",
-                  color: "var(--ink, #ffffff)",
-                  textDecoration: "none",
-                  fontSize: "14px",
-                }}
-                aria-label="YouTube"
-              >
-                ▶
-              </a>
-            )}
-            {creator.websiteUrl && (
-              <a
-                href={creator.websiteUrl}
-                target="_blank"
-                rel="noreferrer noopener"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "32px",
-                  height: "32px",
-                  background: "var(--surface-raised, #1f1f1f)",
-                  color: "var(--ink, #ffffff)",
-                  textDecoration: "none",
-                  fontSize: "14px",
-                }}
-                aria-label="Web サイト"
-              >
-                🌐
-              </a>
-            )}
-            {creator.handle && (
-              <span style={{ fontSize: "var(--text-ui-size, 14px)", color: "var(--ink-muted, #999999)", marginLeft: "4px" }}>
-                @{creator.handle}
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Body Split */}
-      <div
-        className="cr-body"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) minmax(240px, 300px)",
-          gap: "var(--space-8, 32px)",
-          alignItems: "start",
-        }}
-      >
-        {/* Main Column (Works & Collaborations) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-8, 32px)", minWidth: 0 }}>
-          {/* Own Works */}
-          <section aria-labelledby="cr-works-heading" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4, 16px)" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <h2 id="cr-works-heading" style={{ margin: 0, fontSize: "var(--text-h2-size, 24px)", fontWeight: 700 }}>
-                作品{" "}
-                <span style={{ color: "var(--ink-muted, #999999)", fontSize: "16px", fontWeight: 400 }}>
-                  {creator.ownVideos?.length ?? 0}
-                </span>
-              </h2>
-              <a
-                href={`/user/${encodeURIComponent(creator.id)}/portfolio`}
-                style={{
-                  color: "var(--brand, #d6ec8a)",
-                  textDecoration: "none",
-                  fontSize: "var(--text-ui-size, 14px)",
-                  fontWeight: 600,
-                }}
-              >
-                ポートフォリオ表示 ↗
-              </a>
-            </div>
-
-            {creator.ownVideos && creator.ownVideos.length > 0 ? (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                  gap: "var(--space-4, 16px)",
-                }}
-              >
-                {creator.ownVideos.map((v) => (
-                  <a
-                    key={v.id}
-                    href={`/${encodeURIComponent(v.id)}`}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
-                      textDecoration: "none",
-                      color: "inherit",
-                      background: "var(--surface-raised, #1f1f1f)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        aspectRatio: "16 / 9",
-                        background: "var(--black, #000000)",
-                        position: "relative",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {v.thumbnailUrl ? (
-                        <img src={v.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <div
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "var(--ink-muted, #999999)",
-                          }}
-                        >
-                          No Image
-                        </div>
-                      )}
-                      {v.duration && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            right: "6px",
-                            bottom: "6px",
-                            background: "rgba(0,0,0,0.8)",
-                            color: "var(--white, #ffffff)",
-                            fontSize: "11px",
-                            padding: "2px 4px",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {v.duration}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <span style={{ fontSize: "var(--text-ui-size, 14px)", fontWeight: 600, lineHeight: "20px" }}>
-                        {v.title}
-                      </span>
-                      {v.eventName && (
-                        <span style={{ fontSize: "var(--text-label-size, 12px)", color: "var(--ink-muted, #999999)" }}>
-                          {v.eventName}
-                        </span>
-                      )}
-                    </div>
-                  </a>
-                ))}
+        <div className="split cr-body">
+          <div className="main stack cr-main">
+            <section aria-labelledby="works">
+              <div className="sec-head">
+                <h2 id="works" className="t-h2">
+                  作品 <span className="t-num muted cr-count">{works.total}</span>
+                </h2>
+                <Link href={`${base}/portfolio`} className="ib" aria-label="ポートフォリオ表示">
+                  <ScreenIcon name="idCard" />
+                </Link>
               </div>
-            ) : (
-              <p style={{ margin: 0, fontSize: "var(--text-ui-size, 14px)", color: "var(--ink-muted, #999999)" }}>
-                まだ投稿された作品はありません。
-              </p>
-            )}
-          </section>
-
-          {/* Collaborations */}
-          {creator.collabVideos && creator.collabVideos.length > 0 && (
-            <section aria-labelledby="cr-collab-heading" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4, 16px)" }}>
-              <h2 id="cr-collab-heading" style={{ margin: 0, fontSize: "var(--text-h2-size, 24px)", fontWeight: 700 }}>
-                参加作品{" "}
-                <span style={{ color: "var(--ink-muted, #999999)", fontSize: "16px", fontWeight: 400 }}>
-                  {creator.collabVideos.length}
-                </span>
-              </h2>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                  gap: "var(--space-4, 16px)",
-                }}
-              >
-                {creator.collabVideos.map((v) => (
-                  <a
-                    key={v.id}
-                    href={`/${encodeURIComponent(v.id)}`}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "8px",
-                      textDecoration: "none",
-                      color: "inherit",
-                      background: "var(--surface-raised, #1f1f1f)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        aspectRatio: "16 / 9",
-                        background: "var(--black, #000000)",
-                        position: "relative",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {v.thumbnailUrl ? (
-                        <img src={v.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      ) : (
-                        <div
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "var(--ink-muted, #999999)",
-                          }}
-                        >
-                          No Image
-                        </div>
-                      )}
-                      {v.duration && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            right: "6px",
-                            bottom: "6px",
-                            background: "rgba(0,0,0,0.8)",
-                            color: "var(--white, #ffffff)",
-                            fontSize: "11px",
-                            padding: "2px 4px",
-                            fontFamily: "var(--font-mono)",
-                          }}
-                        >
-                          {v.duration}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <span style={{ fontSize: "var(--text-ui-size, 14px)", fontWeight: 600, lineHeight: "20px" }}>
-                        {v.title}
-                      </span>
-                      <span style={{ fontSize: "var(--text-label-size, 12px)", color: "var(--ink-muted, #999999)" }}>
-                        {v.creatorName ? `${v.creatorName} · ` : ""}
-                        {v.eventName ?? ""}
-                      </span>
-                    </div>
-                  </a>
-                ))}
-              </div>
+              {works.items.length === 0 ? (
+                <p className="muted">まだ公開されている作品がありません。</p>
+              ) : (
+                <>
+                  <div className="grid-v">
+                    {works.items.map((video, index) => (
+                      <VideoCardLink key={`${video.href}-${index}`} video={video} />
+                    ))}
+                  </div>
+                  <Pagination
+                    className="cr-pager"
+                    currentPage={works.currentPage}
+                    totalPages={works.totalPages}
+                    total={works.total}
+                    pageSize={works.pageSize}
+                    buildHref={works.buildHref}
+                    unitLabel="件"
+                  />
+                </>
+              )}
             </section>
-          )}
+
+            {collabs.total > 0 ? (
+              <section aria-labelledby="collab">
+                <h2 id="collab" className="t-h2 cr-collab-h">
+                  参加作品 <span className="t-num muted cr-count">{collabs.total}</span>
+                </h2>
+                <div className="grid-v">
+                  {collabs.items.map((video, index) => (
+                    <VideoCardLink key={`${video.href}-${index}`} video={video} />
+                  ))}
+                </div>
+                <Pagination
+                  className="cr-pager"
+                  currentPage={collabs.currentPage}
+                  totalPages={collabs.totalPages}
+                  total={collabs.total}
+                  pageSize={collabs.pageSize}
+                  buildHref={collabs.buildHref}
+                  unitLabel="件"
+                />
+              </section>
+            ) : null}
+          </div>
+
+          {creator.profileText || creator.contact ? (
+            <aside className="side stack cr-side">
+              {creator.profileText ? (
+                <section aria-labelledby="cr-about">
+                  <h2 id="cr-about" className="vh t-h3">
+                    About
+                  </h2>
+                  <p className="muted">{creator.profileText}</p>
+                </section>
+              ) : null}
+              {creator.contact ? (
+                <section aria-labelledby="cr-contact">
+                  <h2 id="cr-contact" className="vh t-h3">
+                    Contact
+                  </h2>
+                  <p className="muted">{creator.contact}</p>
+                </section>
+              ) : null}
+            </aside>
+          ) : null}
         </div>
-
-        {/* Aside Sidebar (About & Contact) */}
-        <aside
-          aria-label="クリエイター情報"
-          style={{
-            padding: "var(--space-4, 16px)",
-            background: "var(--surface-raised, #1f1f1f)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--space-6, 24px)",
-          }}
-        >
-          {/* About */}
-          <div>
-            <h2 style={{ margin: "0 0 8px 0", fontSize: "var(--text-h3-size, 18px)", fontWeight: 600 }}>
-              About
-            </h2>
-            <p style={{ margin: 0, fontSize: "var(--text-ui-size, 14px)", lineHeight: "22px", color: "var(--ink-muted, #999999)" }}>
-              {creator.bio || "自己紹介は登録されていません。"}
-            </p>
-          </div>
-
-          {/* Contact */}
-          <div>
-            <h2 style={{ margin: "0 0 8px 0", fontSize: "var(--text-h3-size, 18px)", fontWeight: 600 }}>
-              Contact
-            </h2>
-            <p style={{ margin: 0, fontSize: "var(--text-ui-size, 14px)", lineHeight: "22px", color: "var(--ink-muted, #999999)" }}>
-              {creator.contactInfo || "連絡先は登録されていません。"}
-            </p>
-          </div>
-        </aside>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

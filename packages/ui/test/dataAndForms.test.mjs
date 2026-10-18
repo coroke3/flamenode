@@ -4,14 +4,13 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   Pagination,
+  pageNumbers,
   TableScroll,
   shouldBlockSearchKeySubmit,
   shouldBlockSearchFormSubmit,
   isGetSearchFormMethod,
   IME_COMPOSING_ATTR,
-  AutoSubmitSelect,
   navigateGetForm,
-  AutoSubmitCheckbox,
 } from "../dist/index.js";
 
 test("T03: Pagination preserves query parameters in buildHref across page links", () => {
@@ -37,7 +36,8 @@ test("T03: Pagination preserves query parameters in buildHref across page links"
   assert.match(html, /aria-current="page">2</);
 
   // Total count formatted correctly
-  assert.match(html, /11–20 \/ 全50件/);
+  // CURRENT src/components/ui/Pagination.tsx text
+  assert.match(html, /11〜20 \/ 全 50 件 \(2 \/ 5 ページ\)/);
 });
 
 test("Pagination returns null when totalPages <= 1", () => {
@@ -50,7 +50,59 @@ test("Pagination returns null when totalPages <= 1", () => {
     }),
   );
   assert.equal(html, "");
+
+  const htmlZero = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: 0,
+      total: 0,
+      buildHref: (p) => `/?page=${p}`,
+    }),
+  );
+  assert.equal(htmlZero, "");
+
+  const htmlNegative = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: -5,
+      buildHref: (p) => `/?page=${p}`,
+    }),
+  );
+  assert.equal(htmlNegative, "");
 });
+
+test("pageNumbers computes boundary ellipses and ranges accurately", () => {
+  // First page of large set: [1, 2, 3, "…", 10]
+  assert.deepEqual(pageNumbers(1, 10), [1, 2, 3, "…", 10]);
+
+  // Last page of large set: [1, "…", 8, 9, 10]
+  assert.deepEqual(pageNumbers(10, 10), [1, "…", 8, 9, 10]);
+
+  // Middle page of large set: [1, "…", 3, 4, 5, 6, 7, "…", 10]
+  assert.deepEqual(pageNumbers(5, 10), [1, "…", 3, 4, 5, 6, 7, "…", 10]);
+
+  // Small set (5 pages): no ellipses
+  assert.deepEqual(pageNumbers(3, 5), [1, 2, 3, 4, 5]);
+
+  // 2 pages: [1, 2]
+  assert.deepEqual(pageNumbers(1, 2), [1, 2]);
+});
+
+test("Pagination handles custom unitLabel and total without pageSize", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: 3,
+      total: 30,
+      unitLabel: "作品",
+      buildHref: (p) => `/videos?page=${p}`,
+      className: "custom-pagination",
+    }),
+  );
+  assert.match(html, /custom-pagination/);
+  assert.match(html, /全 30 作品 \(1 \/ 3 ページ\)/);
+});
+
 
 test("TableScroll renders accessible region container with tabIndex 0", () => {
   const html = renderToStaticMarkup(
@@ -131,51 +183,7 @@ test("T04: shouldBlockSearchKeySubmit blocks Enter submission during IME composi
 });
 
 
-test("U03: AutoSubmitSelect preserves GET values and ignores IME composing forms", () => {
-  const assigned = [];
-  const prevWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const prevFormData = Object.getOwnPropertyDescriptor(globalThis, "FormData");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { origin: "https://example.test", pathname: "/list", search: "", hash: "", assign: (url) => assigned.push(url) } },
-  });
-  Object.defineProperty(globalThis, "FormData", {
-    configurable: true,
-    value: class {
-      constructor() {}
-      *entries() {
-        yield ["q", "a b"];
-        yield ["sort", "popular"];
-      }
-    },
-  });
-  const form = {
-    getAttribute: (key) => key === "action" ? "/list" : key === "method" ? "get" : null,
-    hasAttribute: () => false,
-  };
-  try {
-    let changes = 0;
-    const select = AutoSubmitSelect({ onChange: () => { changes += 1; }, children: "options" });
-    select.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(changes, 1);
-    assert.deepEqual(assigned, ["/list?q=a+b&sort=popular"]);
-
-    form.hasAttribute = (key) => key === "data-fn-ime-composing";
-    select.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(changes, 2);
-    assert.equal(assigned.length, 1, "IME conversion must not auto-submit");
-
-    const checkbox = AutoSubmitCheckbox({});
-    checkbox.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(assigned.length, 1);
-  } finally {
-    if (prevWindow) Object.defineProperty(globalThis, "window", prevWindow);
-    else delete globalThis.window;
-    if (prevFormData) Object.defineProperty(globalThis, "FormData", prevFormData);
-    else delete globalThis.FormData;
-  }
-});
-
+// AutoSubmitSelect / ImeSafeGetForm behaviour in a real DOM: forms.dom.test.mjs
 
 test("ImeSafeGetForm only intercepts GET and leaves native POST submission intact", () => {
   assert.equal(isGetSearchFormMethod(null), true, "default method is GET");
