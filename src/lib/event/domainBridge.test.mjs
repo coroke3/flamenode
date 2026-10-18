@@ -51,3 +51,16 @@ test("eventEditPermissions.ts uses the domain section policy (U02)", async () =>
   assert.match(source, /export \{ hasAnyEventEditPermission \} from "@flamenode\/domain\/event";/);
   assert.doesNotMatch(source, /expandPermissionAliases/);
 });
+
+test("eventIdReuseCore.ts re-exports the domain event id reuse policy (U04)", async () => {
+  const legacyIdReuse = await import("./eventIdReuseCore.ts");
+  assertBridge(legacyIdReuse, domainEvent, "eventIdReuseCore");
+  assert.deepEqual(Object.keys(legacyIdReuse).sort(), [
+    "EVENT_ID_RENAME_CLEANUP_REASON",
+    "EVENT_ID_RENAME_CLEANUP_TARGETS",
+    "EVENT_ID_REUSE_DELAY_SECONDS",
+    "eventIdRenameCleanupTargets",
+    "hasCompletedEventIdRenameCleanup",
+    "isEventIdReuseDelayElapsed",
+  ]);
+});
