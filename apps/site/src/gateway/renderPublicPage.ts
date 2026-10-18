@@ -1,25 +1,59 @@
 /**
- * Minimal HTML shell for queue-driven page regeneration (MIG-0411 / R-PAGE / Runtime B).
- * Pure: no I/O, deterministic, every value escaped.
+ * Server-rendered HTML for queue-driven page regeneration (MIG-0411 U02 / R-PAGE / Runtime B).
  *
- * NOT APPROVED AS THE PAGE FORMAT. The Work Order (U02) asks for the R-PAGE page
- * component rendered with `renderToString`; this shell (title / canonical / OGP + an
- * empty Island root) is the "(b)" variant whose STOP requires the user's approval
- * because the body would be drawn by JS (no-JS and crawler text differ from CURRENT).
- * Head values follow the real D1 columns but are not verified against CURRENT
- * `generateMetadata` output.
+ * Format (owner approval 2026-10-18, default applied): (a) the page body is the shared
+ * `@flamenode/ui` screen (VideoDetailView / CreatorView / EventDetailView, MIG-0205) rendered
+ * to HTML with React `renderToString` inside the site adapters (MIG-0402), so no-JS readers
+ * and crawlers get the text as with CURRENT. (b) — an empty Island root, body drawn by JS — is
+ * the approved fallback for a kind whose (a) render cannot meet the 8 ms per-message budget at
+ * its upper-bound input. PAGE_BODY_FORMAT records the result per kind; the measurement is
+ * `renderPublicPage.measure.mjs` and docs/migration/work-items/MIG-0411.md.
+ *
+ * Not `experimental_AstroContainer`: no R-PAGE `.astro` page exists yet (MIG-0403) and the
+ * gateway Worker bundles no Astro runtime. For React screens Astro calls the same React
+ * server renderer, so this is the dominant cost.
+ *
+ * React and the UI package are loaded on the first render only (dynamic import), so the
+ * gateway's request path and the tests that import the gateway do not load them.
+ *
+ * Data: `screenDataFromRow` maps the one entity row the consumer reads. Lists and totals
+ * (members, chapters, related works, event works / staff / slots, creator works) come from
+ * the MIG-0403 page loader; until it exists they are empty, the consumer is not wired to a
+ * Queue (no binding) and nothing is served from it in production.
  */
+import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 
 export type PageRenderEntityKind = "video" | "user" | "event";
+
+/**
+ * Local Node, NODE_ENV=production, upper-bound input, max of 300 warm renders, 11 runs
+ * (2026-10-18, project-files/migration-review/pr326-u05a-render-to-string.log):
+ * video 24.7–65.3 ms (100 members, 128 chapters, 30 related) -> (b); event 5.4–8.9 ms
+ * (8 of 11 runs ≥ 8 ms) -> (b); user 4.4–7.5 ms -> (a). Not workerd CPU: re-check with a
+ * workerd profile (ZERO_1102 §5) before relying on it.
+ */
+export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "island-shell">> = {
+  video: "island-shell",
+  user: "server-rendered",
+  event: "island-shell",
+};
 
 /** Columns read by pageRenderQueue.ts (real D1 names, see packages/db/src/schema/base.ts). */
 export type PublicPageVideoRow = {
   id: string;
   title: string;
   creator_display_name?: string | null;
+  creator_x_user_id?: string | null;
   creator_icon_url?: string | null;
+  creator_youtube_channel_url?: string | null;
+  youtube_video_id?: string | null;
+  music?: string | null;
+  credit?: string | null;
+  music_reference_url?: string | null;
   intro_comment?: string | null;
   highlights?: string | null;
+  production_story?: string | null;
+  closing_comment?: string | null;
 };
 
 export type PublicPageUserRow = {
@@ -27,6 +61,8 @@ export type PublicPageUserRow = {
   x_name?: string | null;
   icon_url?: string | null;
   profile_text?: string | null;
+  portfolio_contact?: string | null;
+  youtube_channel_url?: string | null;
 };
 
 export type PublicPageEventRow = {
@@ -35,15 +71,85 @@ export type PublicPageEventRow = {
   explanation?: string | null;
   icon_url?: string | null;
   img_url?: string | null;
+  visibility_status?: string | null;
+  start_time?: number | null;
+  end_time?: number | null;
+  entry_start_time?: number | null;
+  entry_end_time?: number | null;
 };
 
 export type PublicPageRow = PublicPageVideoRow | PublicPageUserRow | PublicPageEventRow;
+
+// Structural copies of the screen props used here (the full types live in @flamenode/ui).
+type Text = string | null | undefined;
+type VideoCard = { href: string; title: string; thumbnailUrl?: Text; creatorName?: Text; creatorIconUrl?: Text; durationLabel?: Text; metaLabel?: Text };
+export type VideoScreenData = {
+  id: string;
+  title: string;
+  creator: { name: string; xUserId?: Text; iconUrl?: Text; profileHref?: Text; youtubeChannelUrl?: Text };
+  hasYoutube: boolean;
+  thumbnailUrl?: Text;
+  publishedLabel?: Text;
+  music?: Text;
+  credit?: Text;
+  musicReferenceUrl?: Text;
+  introComment?: Text;
+  softwareLabel?: Text;
+  highlights?: Text;
+  productionStory?: Text;
+  closingComment?: Text;
+  primaryEvent?: Record<string, unknown> | null;
+  otherEvents?: readonly { id: string; title: string }[];
+  members?: readonly Record<string, unknown>[];
+  chapters?: readonly Record<string, unknown>[];
+  related?: readonly { href: string; title: string; creatorName?: Text; thumbnailUrl?: Text }[];
+  likeCount?: number;
+};
+type CreatorPage = { items: readonly VideoCard[]; total: number; currentPage: number; totalPages: number; pageSize: number; buildHref: (page: number) => string };
+export type CreatorScreenData = {
+  id: string;
+  name: string;
+  iconUrl?: Text;
+  youtubeChannelUrl?: Text;
+  socialLinks?: readonly { label: string; url: string }[];
+  profileText?: Text;
+  contact?: Text;
+  works: CreatorPage;
+  collabs: CreatorPage;
+};
+export type EventScreenData = {
+  id: string;
+  title: string;
+  imageUrl?: Text;
+  iconUrl?: Text;
+  explanation?: Text;
+  statusLabel: string;
+  statusTone?: string;
+  periodLabel?: Text;
+  entryAction: "reserve" | "submit" | null;
+  playlistUrl?: Text;
+  videoTotal: number;
+  creatorTotal: number;
+  slotFilled: number;
+  slotTotal: number;
+  schedule?: readonly { label: string; value: string }[];
+  slotParts?: readonly { label: string; filled: number; total: number }[];
+  staff?: readonly Record<string, unknown>[];
+  videos?: readonly Record<string, unknown>[];
+};
+
+export type PublicPageInput =
+  | { entity: "video"; video: VideoScreenData }
+  | { entity: "user"; creator: CreatorScreenData }
+  | { entity: "event"; event: EventScreenData };
 
 export type RenderPublicPageOptions = {
   /** Site origin from configuration (e.g. env PUBLIC_SITE_URL). Required: no default. */
   origin: string;
   /** canonicalPath from the route shard entry, e.g. `/abc`, `/user/x`, `/event/y`. */
   canonicalPath: string;
+  /** Unix seconds for the event status label; defaults to now. */
+  nowSeconds?: number;
 };
 
 function escapeHtml(value: unknown): string {
@@ -60,6 +166,10 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function orNull(value: unknown): string | null {
+  return text(value) || null;
+}
+
 export function buildCanonicalUrl(origin: string, canonicalPath: string): string {
   const base = new URL(origin);
   if (base.protocol !== "https:" && base.protocol !== "http:") {
@@ -71,49 +181,161 @@ export function buildCanonicalUrl(origin: string, canonicalPath: string): string
   return new URL(canonicalPath, base.origin).toString();
 }
 
-export function renderPublicPage(
+function emptyPage(base: string, param: string): CreatorPage {
+  return { items: [], total: 0, currentPage: 1, totalPages: 1, pageSize: 8, buildHref: (page) => (page <= 1 ? base : `${base}?${param}=${page}`) };
+}
+
+/** Screen data from the single entity row (see the file header for what is not loaded yet). */
+export function screenDataFromRow(
   entity: PageRenderEntityKind,
   row: PublicPageRow,
-  options: RenderPublicPageOptions,
-): string {
+  options: Pick<RenderPublicPageOptions, "canonicalPath" | "nowSeconds"> = { canonicalPath: "/" },
+): PublicPageInput {
   const id = text(row.id);
   if (!id) throw new Error(`[renderPublicPage] Missing required id for entity '${entity}'`);
-  const canonicalUrl = buildCanonicalUrl(options.origin, options.canonicalPath);
-
-  let title: string;
-  let description: string;
-  let ogType: string;
-  let ogImage: string;
   switch (entity) {
     case "video": {
       const v = row as PublicPageVideoRow;
-      const creator = text(v.creator_display_name);
-      title = creator ? `${text(v.title) || id} - ${creator}` : text(v.title) || id;
-      description = text(v.intro_comment) || text(v.highlights);
-      ogType = "video.other";
-      ogImage = text(v.creator_icon_url);
-      break;
+      return {
+        entity,
+        video: {
+          id,
+          title: text(v.title) || id,
+          creator: {
+            name: text(v.creator_display_name),
+            xUserId: orNull(v.creator_x_user_id),
+            iconUrl: orNull(v.creator_icon_url),
+            // CURRENT links the profile only for a public profile; not known from this row.
+            profileHref: null,
+            youtubeChannelUrl: orNull(v.creator_youtube_channel_url),
+          },
+          hasYoutube: Boolean(text(v.youtube_video_id)),
+          music: orNull(v.music),
+          credit: orNull(v.credit),
+          musicReferenceUrl: orNull(v.music_reference_url),
+          introComment: orNull(v.intro_comment),
+          highlights: orNull(v.highlights),
+          productionStory: orNull(v.production_story),
+          closingComment: orNull(v.closing_comment),
+        },
+      };
     }
     case "user": {
       const u = row as PublicPageUserRow;
-      title = text(u.x_name) || id;
-      description = text(u.profile_text);
-      ogType = "profile";
-      ogImage = text(u.icon_url);
-      break;
+      const base = options.canonicalPath;
+      return {
+        entity,
+        creator: {
+          id,
+          name: text(u.x_name) || id,
+          iconUrl: orNull(u.icon_url),
+          youtubeChannelUrl: orNull(u.youtube_channel_url),
+          profileText: orNull(u.profile_text),
+          contact: orNull(u.portfolio_contact),
+          works: emptyPage(base, "worksPage"),
+          collabs: emptyPage(base, "collabPage"),
+        },
+      };
     }
     case "event": {
       const e = row as PublicPageEventRow;
-      title = text(e.title) || id;
-      description = text(e.explanation);
-      ogType = "website";
-      ogImage = text(e.img_url) || text(e.icon_url);
-      break;
+      const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
+      const statusInput = {
+        visibility_status: e.visibility_status,
+        start_time: e.start_time ?? null,
+        end_time: e.end_time ?? null,
+        entry_start_time: e.entry_start_time ?? null,
+        entry_end_time: e.entry_end_time ?? null,
+      };
+      const accepting = isAcceptingEntries(statusInput, now);
+      return {
+        entity,
+        event: {
+          id,
+          title: text(e.title) || id,
+          imageUrl: orNull(e.img_url) ?? orNull(e.icon_url),
+          iconUrl: orNull(e.icon_url),
+          explanation: orNull(e.explanation),
+          statusLabel: accepting ? "募集期間中" : eventStatusLabel(computeEventStatus(statusInput, now)),
+          entryAction: accepting ? "reserve" : null,
+          videoTotal: 0,
+          creatorTotal: 0,
+          slotFilled: 0,
+          slotTotal: 0,
+        },
+      };
     }
     default:
       throw new Error(`[renderPublicPage] Unsupported entity kind '${String(entity)}'`);
   }
+}
 
+function headOf(input: PublicPageInput): { title: string; description: string; ogType: string; ogImage: string } {
+  switch (input.entity) {
+    case "video": {
+      const v = input.video;
+      const creator = text(v.creator.name);
+      return {
+        title: creator ? `${v.title} - ${creator}` : v.title,
+        description: text(v.introComment) || text(v.highlights),
+        ogType: "video.other",
+        ogImage: text(v.thumbnailUrl) || text(v.creator.iconUrl),
+      };
+    }
+    case "user":
+      return { title: input.creator.name, description: text(input.creator.profileText), ogType: "profile", ogImage: text(input.creator.iconUrl) };
+    case "event":
+      return { title: input.event.title, description: text(input.event.explanation), ogType: "website", ogImage: text(input.event.imageUrl) || text(input.event.iconUrl) };
+  }
+}
+
+type Renderer = (input: PublicPageInput) => string;
+let rendererPromise: Promise<Renderer> | undefined;
+
+/** Loads React, the UI screens and the site adapters once per isolate. */
+export function loadScreenRenderer(): Promise<Renderer> {
+  rendererPromise ??= (async () => {
+    const [{ createElement }, { renderToString }, ui, { SiteAdapterProvider }] = await Promise.all([
+      import("react"),
+      import("react-dom/server"),
+      import("@flamenode/ui"),
+      import("../components/SiteAdapterProvider.ts"),
+    ]);
+    return (input: PublicPageInput) => {
+      const screen =
+        input.entity === "video"
+          ? createElement(ui.VideoDetailView, { video: input.video as never })
+          : input.entity === "user"
+            ? createElement(ui.CreatorView, { creator: input.creator as never })
+            : createElement(ui.EventDetailView, { event: input.event as never });
+      return renderToString(createElement(SiteAdapterProvider, null, screen));
+    };
+  })();
+  rendererPromise.catch(() => {
+    rendererPromise = undefined;
+  });
+  return rendererPromise;
+}
+
+function entityId(input: PublicPageInput): string {
+  return input.entity === "video" ? input.video.id : input.entity === "user" ? input.creator.id : input.event.id;
+}
+
+/**
+ * Full document: escaped head (title / canonical / OGP) + body in the given format
+ * (default PAGE_BODY_FORMAT for the kind).
+ */
+export async function renderPublicPageHtml(
+  input: PublicPageInput,
+  options: RenderPublicPageOptions,
+  format = PAGE_BODY_FORMAT[input.entity],
+): Promise<string> {
+  const canonicalUrl = buildCanonicalUrl(options.origin, options.canonicalPath);
+  const body =
+    format === "server-rendered"
+      ? `<div id="page-root" data-entity="${escapeHtml(input.entity)}">${(await loadScreenRenderer())(input)}</div>`
+      : `<div id="island-root" data-entity="${escapeHtml(input.entity)}" data-id="${escapeHtml(entityId(input))}"></div>`;
+  const { title, description, ogType, ogImage } = headOf(input);
   const titleEsc = escapeHtml(title);
   const canonicalEsc = escapeHtml(canonicalUrl);
   const descEsc = escapeHtml(description);
@@ -137,8 +359,16 @@ export function renderPublicPage(
   }
 </head>
 <body>
-  <div id="island-root" data-entity="${escapeHtml(entity)}" data-id="${escapeHtml(id)}"></div>
+${body}
 </body>
 </html>
 `;
+}
+
+export async function renderPublicPage(
+  entity: PageRenderEntityKind,
+  row: PublicPageRow,
+  options: RenderPublicPageOptions,
+): Promise<string> {
+  return renderPublicPageHtml(screenDataFromRow(entity, row, options), options);
 }

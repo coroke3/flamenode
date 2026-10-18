@@ -106,12 +106,15 @@ export function parsePageRenderMessage(body: unknown): PageRenderMessage | null 
 type Tracker = { requested_at: number; rendered_at: number };
 
 const ENTITY_SQL: Record<PageRenderEntityKind, string> = {
-  video: `SELECT id, title, creator_display_name, creator_icon_url, intro_comment, highlights, visibility_status
+  video: `SELECT id, title, creator_display_name, creator_x_user_id, creator_icon_url, creator_youtube_channel_url,
+                 youtube_video_id, music, credit, music_reference_url, intro_comment, highlights,
+                 production_story, closing_comment, visibility_status
           FROM videos WHERE id = ? LIMIT 1`,
   // x_users ids are compared lower-cased, as CURRENT fences and routes do (x_users_lower_id_idx).
-  user: `SELECT id, x_name, icon_url, profile_text, approval_status
+  user: `SELECT id, x_name, icon_url, profile_text, portfolio_contact, youtube_channel_url, approval_status
          FROM x_users WHERE lower(id) = ? LIMIT 1`,
-  event: `SELECT id, title, explanation, icon_url, img_url, visibility_status
+  event: `SELECT id, title, explanation, icon_url, img_url, visibility_status,
+                 start_time, end_time, entry_start_time, entry_end_time
           FROM events WHERE id = ? LIMIT 1`,
 };
 
@@ -197,9 +200,10 @@ export async function processPageRender(
   const row = await db.prepare(ENTITY_SQL[kind]).bind(entityId).first<Record<string, unknown>>();
   if (!isPublicRow(kind, row)) return remove("not_public");
 
-  const html = renderPublicPage(kind, row as PublicPageRow, {
+  const html = await renderPublicPage(kind, row as PublicPageRow, {
     origin,
     canonicalPath: resolution.canonicalPath,
+    nowSeconds: Math.floor(now / 1000),
   });
   await r2.put(r2HtmlKey(key), html, {
     httpMetadata: { contentType: "text/html; charset=utf-8" },

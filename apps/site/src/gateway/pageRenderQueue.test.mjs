@@ -14,7 +14,8 @@ import {
   processPageRender,
   recoverPendingPageRenders,
 } from "./pageRenderQueue.ts";
-import { renderPublicPage } from "./renderPublicPage.ts";
+import { PAGE_BODY_FORMAT, renderPublicPage, renderPublicPageHtml, screenDataFromRow } from "./renderPublicPage.ts";
+import { maxInputs } from "./renderPublicPage.measure.mjs";
 import gateway, { resetGatewayCaches } from "./index.ts";
 import { r2HtmlKey, resetRebuildMemory } from "./r2Html.ts";
 import { buildRouteMap } from "../lib/routeMap.ts";
@@ -338,12 +339,12 @@ test("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
   assert.equal(h.ops.length, 1);
 });
 
-test("render: canonical comes from configuration + route canonicalPath, never a built-in domain", () => {
-  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: "", canonicalPath: "/x" }));
-  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: "javascript:alert(1)", canonicalPath: "/x" }));
-  assert.throws(() => renderPublicPage("video", { id: "x", title: "t" }, { origin: ORIGIN, canonicalPath: "//evil.example/x" }));
-  const html = renderPublicPage("user", { id: "u", x_name: "\"><img src=x onerror=1>" }, { origin: ORIGIN, canonicalPath: "/user/u" });
-  assert.ok(!/<img/.test(html));
+test("render: canonical comes from configuration + route canonicalPath, never a built-in domain", async () => {
+  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: "", canonicalPath: "/x" }));
+  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: "javascript:alert(1)", canonicalPath: "/x" }));
+  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: ORIGIN, canonicalPath: "//evil.example/x" }));
+  const html = await renderPublicPage("user", { id: "u", x_name: "\"><img src=x onerror=1>" }, { origin: ORIGIN, canonicalPath: "/user/u" });
+  assert.ok(!/<img src=x/.test(html));
   assert.match(html, /href="https:\/\/site\.example\/user\/u"/);
 });
 
@@ -406,4 +407,34 @@ test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue
   }
   console.log(`[MIG-0411 CPU] n=200 fastest-of-5 local Node: ${Object.entries(results)
     .map(([k, v]) => `${k} p50=${v.p50.toFixed(3)} p99=${v.p99.toFixed(3)} max=${v.max.toFixed(3)}ms`).join("; ")}`);
+});
+
+test("U02 format: user pages are server-rendered (text in the HTML without JS); video / event use the approved Island shell", async () => {
+  assert.deepEqual(PAGE_BODY_FORMAT, { video: "island-shell", user: "server-rendered", event: "island-shell" });
+  const user = await renderPublicPage("user", { id: "creator-alpha", x_name: "<b>Alpha</b>", profile_text: "プロフィール本文 & <script>x</script>", portfolio_contact: "DM" }, { origin: ORIGIN, canonicalPath: "/user/creator-alpha" });
+  assert.match(user, /<div id="page-root" data-entity="user">/);
+  assert.match(user, /プロフィール本文 &amp; &lt;script&gt;x&lt;\/script&gt;/);
+  assert.match(user, /&lt;b&gt;Alpha&lt;\/b&gt;/);
+  assert.ok(!/<script>x/.test(user) && !/<b>Alpha/.test(user));
+  for (const [kind, row, pathName] of [["video", { id: "vid-public", title: "T", intro_comment: "本文" }, "/vid-public"], ["event", { id: "ev-public", title: "E", visibility_status: "public" }, "/event/ev-public"]]) {
+    const html = await renderPublicPage(kind, row, { origin: ORIGIN, canonicalPath: pathName });
+    assert.match(html, new RegExp(`<div id="island-root" data-entity="${kind}" data-id="${row.id}"></div>`));
+    assert.ok(!html.includes("page-root"));
+  }
+});
+
+test("U02 server-rendered body: every kind renders its screen at the upper-bound input (MIG-0409 U05 (a) harness)", async () => {
+  const inputs = maxInputs();
+  for (const kind of ["video", "user", "event"]) {
+    const html = await renderPublicPageHtml(inputs[kind], { origin: ORIGIN, canonicalPath: kind === "video" ? "/vid-max" : `/${kind}/x` }, "server-rendered");
+    assert.match(html, /<div id="page-root"/);
+    assert.ok(html.length > 50_000, `${kind} ${html.length}`);
+  }
+  // Event status comes from CURRENT eventStatusCore at render time.
+  const now = 1_800_000_000;
+  const accepting = screenDataFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now + 10, end_time: now + 20, entry_start_time: now - 10, entry_end_time: now + 5 }, { canonicalPath: "/event/e", nowSeconds: now });
+  assert.equal(accepting.event.statusLabel, "募集期間中");
+  assert.equal(accepting.event.entryAction, "reserve");
+  const ended = screenDataFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now - 20, end_time: now - 10 }, { canonicalPath: "/event/e", nowSeconds: now });
+  assert.equal(ended.event.statusLabel, "終了済");
 });
