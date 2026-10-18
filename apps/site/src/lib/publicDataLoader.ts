@@ -7,7 +7,49 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 export type SnapshotKind = "video" | "user" | "event";
-export type PublicSnapshot = Readonly<{ kind: SnapshotKind; id: string; title: string }>;
+
+export interface BasePublicSnapshot {
+  readonly kind: SnapshotKind;
+  readonly id: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly canonicalUrl?: string;
+  readonly ogImageUrl?: string;
+  readonly aliasOf?: string;
+}
+
+export interface VideoPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "video";
+  readonly creatorName?: string;
+  readonly creatorHandle?: string;
+  readonly creatorAvatarUrl?: string;
+  readonly thumbnailUrl?: string;
+  readonly publishedAt?: string;
+  readonly youtubeVideoId?: string;
+}
+
+export interface UserPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "user";
+  readonly name?: string;
+  readonly handle?: string;
+  readonly bio?: string;
+  readonly avatarUrl?: string;
+}
+
+export interface EventPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "event";
+  readonly bannerUrl?: string;
+  readonly iconUrl?: string;
+  readonly status?: string;
+  readonly periodText?: string;
+}
+
+export type PublicSnapshot =
+  | VideoPublicSnapshot
+  | UserPublicSnapshot
+  | EventPublicSnapshot
+  | BasePublicSnapshot;
+
 export type SnapshotSource = Readonly<{
   read(key: string): Promise<Uint8Array | null>;
 }>;
@@ -74,8 +116,39 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
     typeof id !== "string" || !ID_PATTERN.test(id) ||
     typeof title !== "string" || title.length === 0 || title.length > 300
   ) return null;
+
+  const base: Record<string, unknown> = {
+    kind: kind as SnapshotKind,
+    id,
+    title,
+  };
+
+  if (typeof value.description === "string") base.description = value.description.slice(0, 5000);
+  if (typeof value.canonicalUrl === "string") base.canonicalUrl = value.canonicalUrl;
+  if (typeof value.ogImageUrl === "string") base.ogImageUrl = value.ogImageUrl;
+  if (typeof value.aliasOf === "string") base.aliasOf = value.aliasOf;
+
+  if (kind === "video") {
+    if (typeof value.creatorName === "string") base.creatorName = value.creatorName.slice(0, 100);
+    if (typeof value.creatorHandle === "string") base.creatorHandle = value.creatorHandle.slice(0, 100);
+    if (typeof value.creatorAvatarUrl === "string") base.creatorAvatarUrl = value.creatorAvatarUrl;
+    if (typeof value.thumbnailUrl === "string") base.thumbnailUrl = value.thumbnailUrl;
+    if (typeof value.publishedAt === "string") base.publishedAt = value.publishedAt;
+    if (typeof value.youtubeVideoId === "string") base.youtubeVideoId = value.youtubeVideoId;
+  } else if (kind === "user") {
+    if (typeof value.name === "string") base.name = value.name.slice(0, 100);
+    if (typeof value.handle === "string") base.handle = value.handle.slice(0, 100);
+    if (typeof value.bio === "string") base.bio = value.bio.slice(0, 2000);
+    if (typeof value.avatarUrl === "string") base.avatarUrl = value.avatarUrl;
+  } else if (kind === "event") {
+    if (typeof value.bannerUrl === "string") base.bannerUrl = value.bannerUrl;
+    if (typeof value.iconUrl === "string") base.iconUrl = value.iconUrl;
+    if (typeof value.status === "string") base.status = value.status;
+    if (typeof value.periodText === "string") base.periodText = value.periodText.slice(0, 200);
+  }
+
   // Strict projection. Never forward unknown metadata or private attributes.
-  return { kind: kind as SnapshotKind, id, title };
+  return base as unknown as PublicSnapshot;
 }
 
 function checkedManifest(manifest: SnapshotManifest | null, generation: string, metrics: SnapshotBuildMetrics): SnapshotManifest {

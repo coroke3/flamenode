@@ -1,0 +1,58 @@
+---
+/**
+ * Representative Creator SSG Page (MIG-0403 / Recipe R-PAGE / Runtime S0).
+ * Pre-renders public creator profile HTML with full OGP and Island hydration.
+ * Private and deleted fixtures are strictly excluded at build time.
+ */
+import { CreatorView, type CreatorProfileData } from "@flamenode/ui";
+import { IslandWrapper } from "../../../components/IslandWrapper.ts";
+import { getPublicRepresentativeUsers } from "../../../lib/representativeFixtures.ts";
+import type { UserPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+
+export async function getStaticPaths() {
+  const users = getPublicRepresentativeUsers();
+  return users.map((user) => ({
+    params: { id: user.id },
+    props: { user },
+  }));
+}
+
+interface Props {
+  user: UserPublicSnapshot;
+}
+
+const { user } = Astro.props;
+const title = `${user.title} - FlameNode`;
+const canonicalUrl = user.canonicalUrl ?? `https://flamenode.net/user/${user.id}`;
+const ogImageUrl = user.ogImageUrl ?? user.avatarUrl ?? "https://flamenode.net/brand/ogp-default.png";
+const description = user.bio ?? user.description ?? "";
+
+const creatorData: CreatorProfileData = {
+  id: user.id,
+  name: user.name ?? user.title,
+  handle: user.handle,
+  avatarUrl: user.avatarUrl,
+  bio: user.bio,
+};
+---
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <link rel="canonical" href={canonicalUrl} />
+    <meta property="og:title" content={title} />
+    <meta property="og:type" content="profile" />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:site_name" content="FlameNode" />
+    {description && <meta name="description" content={description} />}
+    {description && <meta property="og:description" content={description} />}
+  </head>
+  <body>
+    <IslandWrapper client:load>
+      <CreatorView creator={creatorData} />
+    </IslandWrapper>
+  </body>
+</html>

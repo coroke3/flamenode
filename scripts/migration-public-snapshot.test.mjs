@@ -52,3 +52,94 @@ test("source failures never allow implicit live D1 fallback",async()=>{
  await assert.rejects(()=>loadPublicBuildSnapshot({read:()=>Promise.reject(Error("R2 failed"))},key,options()),
   e=>e instanceof SnapshotBuildError&&e.code==="SOURCE_UNAVAILABLE");
 });
+
+test("MIG-0403 U01: video, user and event extended DTO strictly projects public attributes and drops private fields", async () => {
+  const videoPayload = {
+    kind: "video",
+    id: "public_demo",
+    title: "Video 1",
+    description: "Sample video description",
+    creatorName: "Creator Alpha",
+    creatorHandle: "@alpha",
+    thumbnailUrl: "https://example.com/thumb.jpg",
+    publishedAt: "2026-10-18T00:00:00Z",
+    youtubeVideoId: "yt123456789",
+    privateEmail: "secret@example.com",
+    internalFlags: { adminOnly: true },
+  };
+  const snapshot = await loadPublicBuildSnapshot(source(pack(videoPayload)), key, options());
+  assert.equal(snapshot.creatorName, "Creator Alpha");
+  assert.equal(snapshot.thumbnailUrl, "https://example.com/thumb.jpg");
+  assert.equal(snapshot.youtubeVideoId, "yt123456789");
+  assert.equal(snapshot.description, "Sample video description");
+  assert.equal("privateEmail" in snapshot, false);
+  assert.equal("internalFlags" in snapshot, false);
+
+  // User snapshot
+  const userKey = "snapshot/user/user_demo.json";
+  const userPayload = {
+    kind: "user",
+    id: "user_demo",
+    title: "Alice Profile",
+    name: "Alice",
+    handle: "@alice",
+    bio: "User bio",
+    avatarUrl: "https://example.com/alice.jpg",
+    secretToken: "xyz",
+  };
+  const userBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 1, generation, key: userKey, visibility: "public",
+    payload: userPayload, sha256: sha256(userPayload)
+  }));
+  const userOpts = options({ schemaVersion: 1, generation, allowedKeys: [userKey], blockedKeys: [] });
+  const userSnapshot = await loadPublicBuildSnapshot(source(userBytes), userKey, userOpts);
+  assert.equal(userSnapshot.kind, "user");
+  assert.equal(userSnapshot.name, "Alice");
+  assert.equal(userSnapshot.handle, "@alice");
+  assert.equal(userSnapshot.bio, "User bio");
+  assert.equal("secretToken" in userSnapshot, false);
+
+  // Event snapshot
+  const eventKey = "snapshot/event/event_demo.json";
+  const eventPayload = {
+    kind: "event",
+    id: "event_demo",
+    title: "FlameCon 2026",
+    bannerUrl: "https://example.com/banner.jpg",
+    iconUrl: "https://example.com/icon.jpg",
+    status: "upcoming",
+    periodText: "2026-11-01 - 2026-11-03",
+    internalBudget: 100000,
+  };
+  const eventBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 1, generation, key: eventKey, visibility: "public",
+    payload: eventPayload, sha256: sha256(eventPayload)
+  }));
+  const eventOpts = options({ schemaVersion: 1, generation, allowedKeys: [eventKey], blockedKeys: [] });
+  const eventSnapshot = await loadPublicBuildSnapshot(source(eventBytes), eventKey, eventOpts);
+  assert.equal(eventSnapshot.kind, "event");
+  assert.equal(eventSnapshot.bannerUrl, "https://example.com/banner.jpg");
+  assert.equal(eventSnapshot.status, "upcoming");
+  assert.equal(eventSnapshot.periodText, "2026-11-01 - 2026-11-03");
+  assert.equal("internalBudget" in eventSnapshot, false);
+});
+
+test("MIG-0403 T02: alias fixture correctly points to primary canonical ID", async () => {
+  const aliasKey = "snapshot/video/public_alias.json";
+  const aliasPayload = {
+    kind: "video",
+    id: "public_alias",
+    title: "Video Alias Title",
+    canonicalUrl: "https://flamenode.net/public_demo",
+    aliasOf: "public_demo",
+  };
+  const aliasBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 1, generation, key: aliasKey, visibility: "public",
+    payload: aliasPayload, sha256: sha256(aliasPayload)
+  }));
+  const aliasOpts = options({ schemaVersion: 1, generation, allowedKeys: [aliasKey], blockedKeys: [] });
+  const aliasSnapshot = await loadPublicBuildSnapshot(source(aliasBytes), aliasKey, aliasOpts);
+  assert.equal(aliasSnapshot.canonicalUrl, "https://flamenode.net/public_demo");
+  assert.equal(aliasSnapshot.aliasOf, "public_demo");
+});
+
