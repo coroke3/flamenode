@@ -32,7 +32,17 @@ This file replaces an earlier draft that described MIG-0301..0306 as complete. T
 | §3 source | `permissions.ts` placeholder `canEditVideo` neutralised | **NOT MET** | Still exported from `@flamenode/domain` with OR semantics and no caller. MIG-0306 owns the replace-or-retire decision; retiring it needs `APPROVAL=`. |
 | DONE-3 | Independent review APPROVE + human Phase Gate approval on the PR | **NOT MET** | Antigravity's "APPROVE" on #322 is a builder self-review, so it does not count under AGENT_PROTOCOL. The GPT review on #322 was CHANGES_REQUESTED (now addressed). The "independent review APPROVE posted" claims on #318 and #319 have no review comment behind them. New pushes require a fresh independent review on the final heads. |
 
-Other checks on the #322 head: `npm run check:db-schema` OK (31 migrations, 46 tables, 474 columns, 114 indexes, 52 FKs, 43 checks); `npm run check:project-docs` OK; `npm run typecheck` OK.
+### Criteria NOT met (explicit list)
+
+1. MIG-0304 is not DONE. Missing: U02 video visibility (`src/lib/video/videoVisibilityTransition.ts`, SA-001..003 / SA-040..042, Tier 2), U03 edit/member/chapter (`src/lib/video/computeEditSections.ts`, SA-012..015 / SA-082..085), U04 submission/interactions (SA-086..089, D-03 fan-out split), the Final audit, and the API_MATRIX domain function names.
+2. MIG-0305 is not DONE. Missing: the U01 DB-transaction race test for operable owner>=1, U02 event visibility (`src/lib/event/eventVisibilityTransition.ts`, `eventGroupVisibilityTransition.ts`, Tier 2), U03 slot reservation SA-056..068 (`+packages/domain/src/slots/*.ts`), U04 SA-021..034 / SA-038..039, the Final audit, and API_MATRIX.
+3. MIG-0306 is not DONE. Missing: the U01 remainder (approved/manager/owner link policy, duplicate/account-link CAS), U02 X merge/revert (`src/lib/xid/merge.ts`, `mergeSafety.ts`, `mergeBudget.ts`, Tier 2), U03 SA-016..020 / SA-043..055, U04 SA-069..081 / SA-090..106, the Final audit, the action files switched to domain calls, and API_MATRIX.
+4. T03: Tier 2 has not started, and no approved exception exists.
+5. `packages/domain/src/permissions.ts` still exports the placeholder `canEditVideo`; the replace-or-retire decision is open.
+6. There is no valid independent APPROVE on the final heads of #318 / #319 / #320 / #322, and there is no human Phase Gate approval.
+7. `npm run check:event-owners`, `check:x-link-dependencies` and `check:audit-actor-x` read a local D1 database. The first two could not run in the review container, so they still need to run against a real local D1.
+
+Other checks on the #322 head: commit bd6538d was reverted on this branch. It changed shipped code in `software/labels.ts`, `xid/resolution.ts` and the placeholder `permissions.ts` under a test-only subject, which breaks the rule that moved code stays identical. After the revert, `packages/` equals the #320 head. `npm run check:db-schema` OK (31 migrations, 46 tables, 474 columns, 114 indexes, 52 FKs, 43 checks); `npm run check:project-docs` OK; `npm run typecheck` OK.
 
 ## 3. Decisions for the human owner
 
