@@ -11,7 +11,19 @@
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
-    "./datetime": "./src/datetime.ts"
+    "./datetime": "./src/datetime.ts",
+    "./auth/permissions": "./src/auth/permissions/index.ts",
+    "./video": "./src/video/index.ts",
+    "./event": "./src/event/index.ts",
+    "./xid": "./src/xid/index.ts",
+    "./slots/slotIdentity": "./src/slots/slotIdentity.ts",
+    "./slots/releaseGroups": "./src/slots/releaseGroups.ts",
+    "./slots/reservationIdentity": "./src/slots/reservationIdentity.ts",
+    "./slots/reservationBind": "./src/slots/reservationBind.ts",
+    "./slots/reservationGroups": "./src/slots/reservationGroups.ts",
+    "./admin": "./src/admin/index.ts",
+    "./user": "./src/user/index.ts",
+    "./db/transientError": "./src/db/transientError.ts"
   },
   "scripts": {
     "build": "tsc",
