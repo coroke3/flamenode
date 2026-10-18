@@ -60,6 +60,22 @@ export function PublicHeader({
     return openDialogBehavior(menuRef.current, menuButtonRef.current, () => () => setMenuOpen(false));
   }, [menuOpen]);
 
+  // The menu exists only below 641px (styles/layout.css). Widening the viewport hides it with CSS,
+  // so close it here too, or the body scroll lock and the focus trap would stay on.
+  React.useEffect(() => {
+    if (!menuOpen || typeof window.matchMedia !== "function") return;
+    const wide = window.matchMedia("(min-width: 641px)");
+    if (wide.matches) {
+      setMenuOpen(false);
+      return;
+    }
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setMenuOpen(false);
+    };
+    wide.addEventListener("change", onChange);
+    return () => wide.removeEventListener("change", onChange);
+  }, [menuOpen]);
+
   React.useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
