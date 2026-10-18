@@ -2,6 +2,7 @@ import React from "react";
 import { Link } from "../adapters/index.js";
 import { PUBLIC_NAV_ITEMS, isPublicNavItemActive } from "../navigation/publicNavigation.js";
 import { openDialogBehavior } from "../components/Dialog.js";
+import { ImeSafeGetForm } from "../forms/ImeSafeGetForm.js";
 
 /**
  * Public header from the registered mock (`docs/migration/mock/source/boards/PublicHeader.dc.html`,
@@ -49,10 +50,6 @@ export function PublicHeader({
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
-  // CURRENT ImeSafeGetForm: true from compositionstart until one task after compositionend,
-  // so the Enter that confirms an IME conversion never submits the search.
-  const composingRef = React.useRef(false);
-  const compositionEndTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Unique per header, so two headers on one page never share ids.
   const baseId = React.useId();
   const menuId = `${baseId}-menu`;
@@ -83,13 +80,6 @@ export function PublicHeader({
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
 
-  React.useEffect(
-    () => () => {
-      if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
-    },
-    [],
-  );
-
   return (
     <header className={cx("hd2", searchOpen && "open-search", className)} lang="ja">
       <div className="hd-bar">
@@ -109,35 +99,15 @@ export function PublicHeader({
         </nav>
 
         <div className="hd-right">
-          {/* Same target and IME rule as CURRENT ImeSafeGetForm: GET /list?q=, and no submit
-              while a composition is open or in the same task as compositionend. A native
-              submit keeps the search working before hydration. */}
-          <form
+          {/* CURRENT: ImeSafeGetForm GET /list?q=. Before hydration it is a plain GET form. */}
+          <ImeSafeGetForm
             id={searchId}
             className="hd-search"
             action="/list"
             method="get"
             role="search"
             aria-label="作品検索"
-            onCompositionStart={() => {
-              if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
-              compositionEndTimerRef.current = null;
-              composingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
-              compositionEndTimerRef.current = setTimeout(() => {
-                composingRef.current = false;
-                compositionEndTimerRef.current = null;
-              }, 0);
-            }}
-            onSubmit={(event) => {
-              if (composingRef.current) {
-                event.preventDefault();
-                return;
-              }
-              setSearchOpen(false);
-            }}
+            onNavigated={() => setSearchOpen(false)}
           >
             <label htmlFor={`${searchId}-q`} className="fn-sr-only">作品を検索</label>
             <input
@@ -152,7 +122,7 @@ export function PublicHeader({
                 if (e.key === "Escape" && !e.nativeEvent.isComposing) setSearchOpen(false);
               }}
             />
-          </form>
+          </ImeSafeGetForm>
           <button
             type="button"
             className="ib hd-search-ic"
