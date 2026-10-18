@@ -49,6 +49,10 @@ export function PublicHeader({
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  // CURRENT ImeSafeGetForm: true from compositionstart until one task after compositionend,
+  // so the Enter that confirms an IME conversion never submits the search.
+  const composingRef = React.useRef(false);
+  const compositionEndTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Unique per header, so two headers on one page never share ids.
   const baseId = React.useId();
   const menuId = `${baseId}-menu`;
@@ -59,9 +63,32 @@ export function PublicHeader({
     return openDialogBehavior(menuRef.current, menuButtonRef.current, () => () => setMenuOpen(false));
   }, [menuOpen]);
 
+  // The menu exists only below 641px (styles/layout.css). Widening the viewport hides it with CSS,
+  // so close it here too, or the body scroll lock and the focus trap would stay on.
+  React.useEffect(() => {
+    if (!menuOpen || typeof window.matchMedia !== "function") return;
+    const wide = window.matchMedia("(min-width: 641px)");
+    if (wide.matches) {
+      setMenuOpen(false);
+      return;
+    }
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) setMenuOpen(false);
+    };
+    wide.addEventListener("change", onChange);
+    return () => wide.removeEventListener("change", onChange);
+  }, [menuOpen]);
+
   React.useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
+
+  React.useEffect(
+    () => () => {
+      if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
+    },
+    [],
+  );
 
   return (
     <header className={cx("hd2", searchOpen && "open-search", className)} lang="ja">
@@ -82,8 +109,9 @@ export function PublicHeader({
         </nav>
 
         <div className="hd-right">
-          {/* Same target as CURRENT ImeSafeGetForm: GET /list?q=. A native submit works
-              before hydration and does not fire while an IME composition is open. */}
+          {/* Same target and IME rule as CURRENT ImeSafeGetForm: GET /list?q=, and no submit
+              while a composition is open or in the same task as compositionend. A native
+              submit keeps the search working before hydration. */}
           <form
             id={searchId}
             className="hd-search"
@@ -91,7 +119,25 @@ export function PublicHeader({
             method="get"
             role="search"
             aria-label="作品検索"
-            onSubmit={() => setSearchOpen(false)}
+            onCompositionStart={() => {
+              if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
+              compositionEndTimerRef.current = null;
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              if (compositionEndTimerRef.current != null) clearTimeout(compositionEndTimerRef.current);
+              compositionEndTimerRef.current = setTimeout(() => {
+                composingRef.current = false;
+                compositionEndTimerRef.current = null;
+              }, 0);
+            }}
+            onSubmit={(event) => {
+              if (composingRef.current) {
+                event.preventDefault();
+                return;
+              }
+              setSearchOpen(false);
+            }}
           >
             <label htmlFor={`${searchId}-q`} className="fn-sr-only">作品を検索</label>
             <input
