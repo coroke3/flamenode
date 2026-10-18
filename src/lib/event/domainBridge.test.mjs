@@ -37,3 +37,17 @@ test("utils/xid.ts re-exports the domain X handle format", () => {
   // The domain event module must not define its own copy of isCanonicalXId.
   assert.equal("isCanonicalXId" in domainEvent, false);
 });
+
+test("eventEditPermissions.ts uses the domain section policy (U02)", async () => {
+  const source = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("./eventEditPermissions.ts", import.meta.url), "utf8"),
+  );
+  // Admin short-circuits before the staff DB read; staff go through the domain policy.
+  assert.match(
+    source,
+    /if \(user\.role === "admin"\) \{\s*return adminEventEditPermissions\(\);\s*\}\s*const permissions = await getCollaboratorPermissions/,
+  );
+  assert.match(source, /return delegatedEventEditPermissions\(permissions\);/);
+  assert.match(source, /export \{ hasAnyEventEditPermission \} from "@flamenode\/domain\/event";/);
+  assert.doesNotMatch(source, /expandPermissionAliases/);
+});

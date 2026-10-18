@@ -5,6 +5,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import type { DB } from "@/lib/db/client";
 import { events } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
+import { planEventVisibilityFence } from "@flamenode/domain/event";
 import {
   readPublicVisibilityBlockedEntitiesManifest,
   writePublicVisibilityBlockedEntitiesManifest,
@@ -76,7 +77,8 @@ export function planEventVisibilityTransition(input: {
   reason?: string | null;
   now: number;
 }): EventVisibilityTransitionPlan {
-  if (input.previousStatus === input.nextStatus) {
+  const fence = planEventVisibilityFence(input);
+  if (!fence) {
     return {
       mutationStatements: [],
       expectedMutationChanges: [],
@@ -86,8 +88,7 @@ export function planEventVisibilityTransition(input: {
   }
 
   const fenceToken = generateId("vf");
-  const depublicizedFromPublic = input.previousStatus === "public";
-  const state = input.nextStatus === "public" ? "release_pending" : "blocked";
+  const { state, depublicizedFromPublic } = fence;
 
   return {
     mutationStatements: [
