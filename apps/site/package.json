@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "astro build && node --test --experimental-strip-types src/components/*.test.mjs"
   },
   "dependencies": {
     "@flamenode/contracts": "*",

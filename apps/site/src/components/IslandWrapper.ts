@@ -1,5 +1,20 @@
 import React from "react";
+import { ErrorCallout } from "@flamenode/ui";
 import { SiteAdapterProvider } from "./SiteAdapterProvider.ts";
+
+/**
+ * Wrapper for React Islands on the Astro static site (MIG-0402).
+ *
+ * Use it inside a React component that Astro hydrates (`client:load`,
+ * `client:visible`), never around children written in a `.astro` file: Astro
+ * renders such children as a static `<astro-slot>`, so they are not hydrated
+ * and do not see this provider or this boundary. See `ButtonIsland.ts`.
+ *
+ * The file is `.ts` with `React.createElement` (not `.tsx` as in the Work
+ * Order) so that `node --test --experimental-strip-types` can load it.
+ */
+
+export const ISLAND_ERROR_MESSAGE = "この領域の読み込みに失敗しました。";
 
 export interface IslandErrorBoundaryProps {
   children?: React.ReactNode;
@@ -8,79 +23,49 @@ export interface IslandErrorBoundaryProps {
 
 interface IslandErrorBoundaryState {
   hasError: boolean;
-  error?: Error;
 }
 
 export class IslandErrorBoundary extends React.Component<
   IslandErrorBoundaryProps,
   IslandErrorBoundaryState
 > {
-  constructor(props: IslandErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  state: IslandErrorBoundaryState = { hasError: false };
 
-  static getDerivedStateFromError(error: Error): IslandErrorBoundaryState {
-    return { hasError: true, error };
+  static getDerivedStateFromError(): IslandErrorBoundaryState {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    if (typeof console !== "undefined" && console.error) {
-      console.error("[IslandErrorBoundary] Caught error in Island:", error.message, errorInfo.componentStack);
-    }
+    console.error("[IslandErrorBoundary]", error, errorInfo.componentStack);
   }
 
   render(): React.ReactNode {
-    if (this.state.hasError) {
-      if (this.props.fallback) {
-        return this.props.fallback;
-      }
-      return React.createElement(
-        "div",
-        {
-          className: "fn-island-error",
-          role: "alert",
-          style: {
-            padding: "1rem",
-            margin: "0.5rem 0",
-            borderRadius: "0.375rem",
-            backgroundColor: "rgba(239, 68, 68, 0.1)",
-            color: "#ef4444",
-            fontSize: "0.875rem",
-            border: "1px solid rgba(239, 68, 68, 0.2)",
-          },
-        },
-        React.createElement("p", { style: { margin: 0 } }, "この領域の読み込みに失敗しました。")
-      );
-    }
-    return this.props.children;
+    if (!this.state.hasError) return this.props.children;
+    if (this.props.fallback !== undefined) return this.props.fallback;
+    // Shared ErrorCallout (role=alert); colours come from the shared CSS tokens.
+    return React.createElement(ErrorCallout, {
+      message: ISLAND_ERROR_MESSAGE,
+      className: "fn-island-error",
+    });
   }
 }
 
 export interface IslandWrapperProps {
   children?: React.ReactNode;
   fallback?: React.ReactNode;
-  className?: string;
 }
 
 /**
- * IslandWrapper integrates React Islands inside Astro static pages.
- * It provides Context-based UI adapters (SiteAdapterProvider) and an Error Boundary
- * so that any client-side exception in the Island does not collapse or hide the surrounding static HTML.
+ * Gives one Island its own Context adapters (Link / Image / Navigator) and an
+ * error boundary. A thrown error replaces only this Island; the static HTML
+ * around it stays. The provider is outside the boundary so the fallback also
+ * uses the site adapters.
  */
-export function IslandWrapper({
-  children,
-  fallback,
-  className,
-}: IslandWrapperProps): React.ReactElement {
-  const content = className
-    ? React.createElement("div", { className }, children)
-    : children;
-
+export function IslandWrapper({ children, fallback }: IslandWrapperProps): React.ReactElement {
   return React.createElement(
-    IslandErrorBoundary,
-    { fallback },
-    React.createElement(SiteAdapterProvider, null, content)
+    SiteAdapterProvider,
+    null,
+    React.createElement(IslandErrorBoundary, { fallback }, children),
   );
 }
 
