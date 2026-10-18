@@ -1,23 +1,21 @@
+/**
+ * Legacy bridge: the navigation data lives in packages/ui (MIG-0203).
+ * The annotation below makes tsc reject a packages/ui icon name that CURRENT `Icon` cannot draw.
+ */
+import {
+  PUBLIC_NAV_ITEMS as UI_PUBLIC_NAV_ITEMS,
+  isPublicNavItemActive,
+  type PublicNavItem,
+  type PublicNavIconName,
+} from "@flamenode/ui/navigation/publicNavigation.ts";
 import type { IconName } from "@/components/ui/Icon";
 
-/**
- * PublicHeaderのデスクトップ/モバイル両方で使う公開ナビゲーション。
- * 表示順とラベルを1か所に置き、ブレークポイントごとのメニュー差分を防ぐ。
- */
-export const PUBLIC_NAV_ITEMS = [
-  { href: "/list", label: "動画", iconName: "grid" },
-  { href: "/user", label: "クリエイター", iconName: "users" },
-  { href: "/event", label: "イベント", iconName: "calendar" },
-] as const satisfies readonly {
-  href: string;
-  label: string;
-  iconName: IconName;
-}[];
+export type { PublicNavItem, PublicNavIconName };
 
-export function isPublicNavItemActive(
-  pathname: string | null,
-  href: string,
-): boolean {
-  if (!pathname) return false;
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
+export const PUBLIC_NAV_ITEMS: readonly {
+  readonly href: string;
+  readonly label: string;
+  readonly iconName: IconName;
+}[] = UI_PUBLIC_NAV_ITEMS;
+
+export { isPublicNavItemActive };
