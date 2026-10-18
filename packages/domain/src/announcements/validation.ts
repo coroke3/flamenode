@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseJstDatetimeLocalStrict } from "../datetime/jst.ts";
+import { parseJstDatetimeLocalStrict } from "../datetime.ts";
 import type { ParsedAnnouncementDates } from "./types.ts";
 
 export const announcementInputSchema = z.object({
