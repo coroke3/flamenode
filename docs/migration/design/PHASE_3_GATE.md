@@ -1,50 +1,47 @@
 # Phase 3 Gate (MIG-0307): evidence and open criteria
 
-> Status: REVIEW (evidence only). **Phase 3 Gate is NOT met.** Gate approval is a human decision; no agent may approve it.
-> Last verified: 2026-10-18, on `main` 8211de6 plus the open PRs #318 / #319 / #320 / #322 at their review-fix heads
+> Status: REVIEW (evidence only). **The task dependencies are met; the Gate is NOT approved.** Gate approval is a human decision; no agent may approve it.
+> Last verified: 2026-10-18 on `main` c996c1c (after #318 / #319 / #320) plus this PR #322
 > Work Order: [`PHASE_3_SPEC.md`](../PHASE_3_SPEC.md) §MIG-0307. Merged task state: [`STATUS.md`](../STATUS.md)
-
-This file replaces an earlier draft that described MIG-0301..0306 as complete. That was wrong: MIG-0304/0305/0306 have only part of U01 implemented. The earlier draft also described MIG-0304 as "chapters, overlays, metadata" and MIG-0305 as "double reservation protection", and neither of those was implemented.
 
 ## 1. Task inventory
 
-| Task | Merged state on `main` | What actually exists | Remaining before DONE |
+| Task | Merged state on `main` | What exists | Left in the adapter (by design) |
 | --- | --- | --- | --- |
-| MIG-0301 extraction/DI pattern | DONE (#304) | bridge pattern PoC | — (but see §3: `packages/domain/src/permissions.ts` placeholder `canEditVideo` is still present) |
-| MIG-0302 low-risk read domain | DONE (#308) | slots limits / reservationLimit, software labels | — |
-| MIG-0308 `packages/db` schema | DONE (#315, 541f65a) | `@flamenode/db` schema, zero DDL | — |
-| MIG-0303 low-risk mutation domain | DONE (#316, 8211de6) | announcements, apiEndpoints, eventTemplates, datetime | — |
-| MIG-0304 video domain | READY (PR #318 open) | U01 only: `packages/domain/src/video/{ownership,editSections,generalEditPermissions}.ts`, `packages/domain/src/auth/permissions/{keys,aliases}.ts` + legacy bridges | U02 video visibility (Tier 2), U03 edit/member/chapter, U04 submission/interactions, Final audit, API_MATRIX SA-001..003/012..015/040..042/082..089 |
-| MIG-0305 event/slot domain | READY (PR #319 open) | U01 partial: `packages/domain/src/event/ownership.ts` (+ shared `xid/format.ts`) + bridge | U01 DB race test (owner>=1), U02 event visibility (Tier 2), U03 slot reservation SA-056..068 (`+packages/domain/src/slots/*.ts`), U04 SA-021..034/038..039, Final audit, API_MATRIX |
-| MIG-0306 user/X/admin domain | READY (PR #320 open) | U01 partial: `packages/domain/src/xid/*`, `admin/{costGuard,writeIdentity}.ts`, `user/index.ts` + bridges | U01 remainder, U02 X merge/revert (`src/lib/xid/merge.ts`, `mergeSafety.ts`, `mergeBudget.ts`, Tier 2), U03 SA-016..020/043..055, U04 SA-069..081/090..106, Final audit, action files switched to domain calls, `permissions.ts` replace-or-retire, API_MATRIX |
-| MIG-0307 Phase 3 Gate | BLOCKED | this PR #322: `scripts/check-domain-imports.mjs` checker + this evidence | everything in §2 |
+| MIG-0301 extraction/DI pattern | DONE (#304) | bridge pattern | — |
+| MIG-0302 low-risk read domain | DONE (#308) | slot limits / reservationLimit, software labels | — |
+| MIG-0308 `packages/db` schema | DONE (#315) | `@flamenode/db` schema, zero DDL | — |
+| MIG-0303 low-risk mutation domain | DONE (#316) | announcements, apiEndpoints, eventTemplates, datetime | strict audit `mutateWithAudit` (RETAINED) |
+| MIG-0304 video domain | DONE (#318, cbe080c) | U01–U04 + Final: `packages/domain/src/video/*` (ownership, visibility fence, edit-section policy, chapter time, required fields, field-change guard, audit snapshot, interactions) | D1 batch/CAS, audit, R2 fence write, notifications, Queue; per-key `canEditVideo` DB reads |
+| MIG-0305 event/slot domain | DONE (#319, c5cc280) | U01–U04 + Final: `packages/domain/src/event/*`, `slots/*`; owner-0 DB race test `src/lib/event/eventOwnerZero.sqlite.execution.test.mjs` | owner-0 SQL guard, slot CAS/transactions, SA-021 / SA-056/057 own implementations |
+| MIG-0306 user/X/admin domain | DONE (#320, c996c1c) | U01–U04 + Final: `packages/domain/src/{xid,admin,user,db}/*`; `permissions.ts` placeholder RETIRED | SA-092..097 merge/revert bodies, SA-011, SA-050, X-link SQL/CAS |
+| MIG-0307 Phase 3 Gate | READY | this PR: `scripts/check-domain-imports.mjs` + this evidence | — |
+
+None of #318 / #319 / #320 had an independent review: Claude implemented and integrated them, and they were merged on the owner's explicit instruction (2026-10-18, "レビューしてすべてを修正。仕様に基づいてmerge"). Each PR's merge comment says so.
 
 ## 2. Gate criteria (PHASE_3_SPEC §MIG-0307)
 
 | # | Criterion | Status | Evidence |
 | --- | --- | --- | --- |
-| DONE-1 | Forbidden-import checker runs in CI | MET (once #322 merges) | `scripts/check-domain-imports.mjs` is wired into `npm run check:project-docs`, which runs in the `migration-contract` job. It uses the TypeScript scanner, so multi-line, `import type`, re-export, dynamic `import()` and `require()` are all covered, and comments and strings are ignored. The earlier per-line regex missed multi-line imports (reported in the CHANGES_REQUESTED review on #322). |
-| U01 / T01 | A fixture with `import "next/navigation"` fails | MET | `scripts/check-domain-imports.test.mjs` has 4 tests, including a multi-line, type-only, re-export, dynamic and relative-legacy fixture |
+| DONE-1 | Forbidden-import checker runs in CI | MET once this PR merges | `scripts/check-domain-imports.mjs` (TypeScript scanner: multi-line, `import type`, re-export, dynamic `import()`, `require()`; comments/strings ignored) runs in `npm run check:project-docs` (`migration-contract` job). On main c996c1c + this PR: OK, 63 files. |
+| U01 / T01 | A fixture with `import "next/navigation"` fails | MET | `scripts/check-domain-imports.test.mjs` 4/4 |
 | DONE-2 | MIG-0308 DONE | MET | STATUS.md, #315 |
-| Depends on | MIG-0304, MIG-0305, MIG-0306 DONE | **NOT MET** | §1: only U01 (partial) exists; STATUS shows READY |
-| T02 | `test:unit` / `test:integration` counts ≥ the Phase 3 start, with 0 tests deleted | MET for the current heads | Phase 3 start `fe211b2` (parent of MIG-0301): `test:unit` 2514 pass / 0 fail, `test:integration` 55/55. #320 head: `test:unit` 2530/0. #322 head (stacked on #320): `test:unit` 2534/0 (the 4 extra are the checker tests), `test:integration` 55/55. #318 head: 2531/0. #319 head: 2533/0. |
-| T03 | Tier 2 not left BLOCKED/SKIPPED | **NOT MET** | No Tier 2 extraction (video/event/X-user visibility transitions, `computeEditSections.ts`, X merge) has started. MIG-0308 is DONE, so it is no longer blocked, but it is not done. The only exception is an explicit user approval plus a named alternative task. |
-| §3 source | `permissions.ts` placeholder `canEditVideo` neutralised | MET | Deleted from `@flamenode/domain` with caller=0 proof and user approval in PR #320; `FILE_MIGRATION_MATRIX.md` updated to RETIRED with `APPROVAL=user-approved-2026-10-18`. |
-| DONE-3 | Independent review APPROVE + human Phase Gate approval on the PR | **NOT MET** | Antigravity's "APPROVE" on #322 is a builder self-review, so it does not count under AGENT_PROTOCOL. The GPT review on #322 was CHANGES_REQUESTED (now addressed). The "independent review APPROVE posted" claims on #318 and #319 have no review comment behind them. New pushes require a fresh independent review on the final heads. |
+| Depends on | MIG-0304, MIG-0305, MIG-0306 DONE | MET | STATUS.md on main c996c1c |
+| T02 | `test:unit` / `test:integration` ≥ Phase 3 start, 0 tests deleted | MET | Phase 3 start `fe211b2`: unit 2514/0, integration 55/55. main c996c1c + this PR: unit 2575/0 (1 skipped), integration 55/55. The moved-code source-text tests read the new domain files with the same assertions (listed in each PR). |
+| T03 | Tier 2 not left BLOCKED/SKIPPED | **For the owner to judge** | The decision logic of every named Tier 2 file now lives in `packages/domain`: video fence `planVideoVisibilityFence`, event fence `planEventVisibilityFence`, edit-section policy `resolveAllowedVideoEditSections`, X merge state planner `xid/mergeState.ts`. The DB, `server-only` and `next/navigation` parts of those files stay in `src` as adapters until the Hono API tasks (MIG-0603..0605), which is what PHASE_3_SPEC §Tier 2 (no `packages/*` → `src/*`) requires. Whether this counts as "Tier 2 done" is the owner's call. |
+| §3 source | `permissions.ts` placeholder neutralised | MET, approval unconfirmed | Deleted in #320 (caller=0). The RETIRED row cites `APPROVAL=user-approved-2026-10-18`, written by the Antigravity agent; Claude could not find that approval and asks the owner to confirm it. |
+| DONE-3 | Independent review APPROVE + human Phase Gate approval | **NOT MET** | No independent review of this PR's final head; no human Gate approval. |
 
-### Criteria NOT met (explicit list)
+### Not met / open (explicit list)
 
-1. MIG-0304 is not DONE. Missing: U02 video visibility (`src/lib/video/videoVisibilityTransition.ts`, SA-001..003 / SA-040..042, Tier 2), U03 edit/member/chapter (`src/lib/video/computeEditSections.ts`, SA-012..015 / SA-082..085), U04 submission/interactions (SA-086..089, D-03 fan-out split), the Final audit, and the API_MATRIX domain function names.
-2. MIG-0305 is not DONE. Missing: the U01 DB-transaction race test for operable owner>=1, U02 event visibility (`src/lib/event/eventVisibilityTransition.ts`, `eventGroupVisibilityTransition.ts`, Tier 2), U03 slot reservation SA-056..068 (`+packages/domain/src/slots/*.ts`), U04 SA-021..034 / SA-038..039, the Final audit, and API_MATRIX.
-3. MIG-0306 is not DONE. Missing: the U01 remainder (approved/manager/owner link policy, duplicate/account-link CAS), U02 X merge/revert (`src/lib/xid/merge.ts`, `mergeSafety.ts`, `mergeBudget.ts`, Tier 2), U03 SA-016..020 / SA-043..055, U04 SA-069..081 / SA-090..106, the Final audit, the action files switched to domain calls, and API_MATRIX.
-4. T03: Tier 2 has not started, and no approved exception exists.
-5. There is no valid independent APPROVE on the final heads of #318 / #319 / #320 / #322, and there is no human Phase Gate approval.
-6. `npm run check:event-owners`, `check:x-link-dependencies` and `check:audit-actor-x` read a local D1 database. The first two could not run in the review container, so they still need to run against a real local D1.
-
-Other checks on the #322 head: commit bd6538d was reverted on this branch. It changed shipped code in `software/labels.ts`, `xid/resolution.ts` and the placeholder `permissions.ts` under a test-only subject, which breaks the rule that moved code stays identical. After the revert, `packages/` equals the #320 head. `npm run check:db-schema` OK (31 migrations, 46 tables, 474 columns, 114 indexes, 52 FKs, 43 checks); `npm run check:project-docs` OK; `npm run typecheck` OK.
+1. DONE-3: an independent review of the final head of this PR, and the owner's Phase Gate approval.
+2. T03: the owner decides whether domain-side Tier 2 decision logic with DB adapters retained in `src` satisfies T03.
+3. `permissions.ts` retirement: the owner confirms `APPROVAL=user-approved-2026-10-18`.
+4. SA-009/010 (`src/lib/actions/audit-admin.ts`) are in no Phase 3 micro-unit; re-owned to MIG-0605 at #320 integration, so they get no Phase 3 domain extraction.
+5. `npm run check:video-interactions-auth` fails on main (a `voided` assertion about the dashboard library page) and is not run by CI. It predates this phase's domain PRs (it fails on c47b962).
 
 ## 3. Decisions for the human owner
 
-1. **Merge #318/#319/#320 as partial U01 steps, or require U02..U04 first?** (User Decision 2026-10-18: Proceed with Strategy A — merge as partial U01 steps under IN_PROGRESS, then implement U02 Tier 2 in follow-up tasks).
-2. **Tier 2 (T03):** schedule the Tier 2 extraction now that MIG-0308 is DONE, or approve an explicit exception that names the alternative task(s).
-3. **Phase 3 Gate:** it can be approved only after Tier 2 and U02..U04 of MIG-0304/0305/0306 are DONE on main with independent reviews.
+1. Approve or reject the Phase 3 Gate.
+2. T03 judgment (above).
+3. Confirm or revert the `permissions.ts` retirement approval.

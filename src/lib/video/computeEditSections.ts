@@ -5,39 +5,19 @@ import {
   type VideoEditAccessContext,
   type CanEditVideoPrivilegeMode,
 } from "@/lib/auth/ownership";
-import { canAttachInitialYoutubeToSlottedVideo } from "@/lib/video/youtubeAttachEligibility";
+import {
+  resolveAllowedVideoEditSections,
+  VIDEO_EDIT_SECTION_PERMISSION_KEYS,
+  type AllowedVideoEditSections,
+} from "@flamenode/domain/video";
 
-export type VideoEditSectionKey =
-  | "identity"
-  | "basics"
-  | "youtube"
-  | "credits"
-  | "descriptions"
-  | "members"
-  | "member_chapters"
-  | "primary_event";
-
-export interface AllowedVideoEditSections {
-  identity: boolean;
-  basics: boolean;
-  youtube: boolean;
-  credits: boolean;
-  descriptions: boolean;
-  members: boolean;
-  member_chapters: boolean;
-  primary_event: boolean;
-}
-
-const SECTION_KEYS: Array<{ section: VideoEditSectionKey; key: Parameters<typeof canEditVideo>[0]["requiredKey"] }> = [
-  { section: "identity", key: "video.identity" },
-  { section: "basics", key: "video.basics" },
-  { section: "youtube", key: "video.youtube_id" },
-  { section: "credits", key: "video.credits" },
-  { section: "descriptions", key: "video.descriptions" },
-  { section: "members", key: "video.members" },
-  { section: "member_chapters", key: "video.member_chapters" },
-  { section: "primary_event", key: "video.primary_event" },
-];
+// Section table and result combination live in @flamenode/domain/video
+// (editSectionAccess.ts); this adapter only runs the per-key DB checks.
+export {
+  type VideoEditSection as VideoEditSectionKey,
+  type AllowedVideoEditSections,
+  hasAnyVideoEditSection,
+} from "@flamenode/domain/video";
 
 export async function computeAllowedVideoEditSections(args: {
   db: DB;
@@ -48,7 +28,7 @@ export async function computeAllowedVideoEditSections(args: {
   accessContext: VideoEditAccessContext;
 }): Promise<AllowedVideoEditSections> {
   const results = await Promise.all(
-    SECTION_KEYS.map(async ({ section, key }) => ({
+    VIDEO_EDIT_SECTION_PERMISSION_KEYS.map(async ({ section, key }) => ({
       section,
       allowed: await canEditVideo({
         db: args.db,
@@ -60,34 +40,10 @@ export async function computeAllowedVideoEditSections(args: {
       }),
     })),
   );
-  const out: AllowedVideoEditSections = {
-    identity: false,
-    basics: false,
-    youtube: false,
-    credits: false,
-    descriptions: false,
-    members: false,
-    member_chapters: false,
-    primary_event: false,
-  };
-  for (const { section, allowed } of results) {
-    out[section] = allowed;
-  }
-  // When the general registry denies YouTube, retain the historical narrow
-  // first-attachment exception for slotted creator submissions.
-  out.youtube =
-    out.youtube ||
-    canAttachInitialYoutubeToSlottedVideo({
-      sourceType: args.video.source_type,
-      schedulingType: args.video.scheduling_type,
-      visibilityStatus: args.video.visibility_status,
-      youtubeVideoId: args.video.youtube_video_id,
-      privilegeMode: args.privilegeMode,
-      isCreatorOwner: args.accessContext.ownership.isCreatorOwner,
-    });
-  return out;
-}
-
-export function hasAnyVideoEditSection(sections: AllowedVideoEditSections): boolean {
-  return Object.values(sections).some(Boolean);
+  return resolveAllowedVideoEditSections({
+    results,
+    video: args.video,
+    privilegeMode: args.privilegeMode,
+    isCreatorOwner: args.accessContext.ownership.isCreatorOwner,
+  });
 }

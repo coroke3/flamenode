@@ -6,6 +6,11 @@ const transitionSource = await readFile(
   new URL("./eventVisibilityTransition.ts", import.meta.url),
   "utf8",
 );
+// MIG-0305 U02: the fence-state decision lives in @flamenode/domain/event.
+const fenceDecisionSource = await readFile(
+  new URL("../../../packages/domain/src/event/visibility.ts", import.meta.url),
+  "utf8",
+);
 const actionSource = await readFile(
   new URL("../actions/event-admin.ts", import.meta.url),
   "utf8",
@@ -54,7 +59,8 @@ test("event ID rename leaves an old-id R2 tombstone and compensates it on D1 fai
 });
 
 test("イベント再公開も release_pending と manifest block を経由する", () => {
-  assert.match(transitionSource, /state = input\.nextStatus === "public" \? "release_pending" : "blocked"/);
+  assert.match(fenceDecisionSource, /state = input\.nextStatus === "public" \? "release_pending" : "blocked"/);
+  assert.match(transitionSource, /planEventVisibilityFence\(input\)/);
   assert.match(transitionSource, /expectedMutationChanges: \[1\]/);
   assert.match(actionSource, /planEventVisibilityTransition/);
 });
