@@ -3,9 +3,6 @@ import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  REPRESENTATIVE_VIDEOS,
-  REPRESENTATIVE_EVENTS,
-  REPRESENTATIVE_USERS,
   getPublicRepresentativeVideos,
   getPublicRepresentativeEvents,
   getPublicRepresentativeUsers,
@@ -40,7 +37,7 @@ test("MIG-0403 T01: private and deleted fixtures are never emitted to public SSG
 });
 
 test("MIG-0403 T02: alias fixture has canonical pointing to canonical primary URL", () => {
-  const aliasVideo = REPRESENTATIVE_VIDEOS.find((v) => v.id === "sample-video-alias");
+  const aliasVideo = getPublicRepresentativeVideos().find((v) => v.id === "sample-video-alias");
   assert.ok(aliasVideo);
   assert.equal(aliasVideo.canonicalUrl, "https://flamenode.net/sample-video-1");
   assert.equal(aliasVideo.aliasOf, "sample-video-1");

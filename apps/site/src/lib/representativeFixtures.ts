@@ -24,7 +24,7 @@ export interface RepresentativeUserFixture extends UserPublicSnapshot {
   readonly isDeleted?: boolean;
 }
 
-export const REPRESENTATIVE_VIDEOS: readonly RepresentativeVideoFixture[] = [
+const REPRESENTATIVE_VIDEOS: readonly RepresentativeVideoFixture[] = [
   {
     kind: "video",
     id: "sample-video-1",
@@ -62,7 +62,7 @@ export const REPRESENTATIVE_VIDEOS: readonly RepresentativeVideoFixture[] = [
   },
 ];
 
-export const REPRESENTATIVE_EVENTS: readonly RepresentativeEventFixture[] = [
+const REPRESENTATIVE_EVENTS: readonly RepresentativeEventFixture[] = [
   {
     kind: "event",
     id: "autumn-collab-2026",
@@ -89,7 +89,7 @@ export const REPRESENTATIVE_EVENTS: readonly RepresentativeEventFixture[] = [
   },
 ];
 
-export const REPRESENTATIVE_USERS: readonly RepresentativeUserFixture[] = [
+const REPRESENTATIVE_USERS: readonly RepresentativeUserFixture[] = [
   {
     kind: "user",
     id: "miku-producer",
