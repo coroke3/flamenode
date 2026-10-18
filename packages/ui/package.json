@@ -12,7 +12,10 @@
     },
     "./layout/bodyScrollLock.ts": "./src/layout/bodyScrollLock.ts",
     "./navigation/publicNavigation.ts": "./src/navigation/publicNavigation.ts",
-    "./styles/layout.css": "./src/styles/layout.css"
+    "./styles/layout.css": "./src/styles/layout.css",
+    "./styles/tokens.css": "./src/styles/tokens.css",
+    "./styles/components.css": "./src/styles/components.css",
+    "./styles/screens.css": "./src/styles/screens.css"
   },
   "scripts": {
     "build": "tsc",
