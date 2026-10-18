@@ -10,6 +10,7 @@ import * as legacySnapshot from "./activeXSnapshotCore.ts";
 import * as legacyRequest from "./xIdentityRequestCore.ts";
 import * as legacyResolution from "./xIdentityResolutionCore.ts";
 import * as legacyWriteGuard from "./writeGuardCore.ts";
+import * as legacyMergeSafety from "../xid/mergeSafety.ts";
 
 function assertBridge(legacy, domain, label, { except = [] } = {}) {
   const names = Object.keys(legacy).filter((name) => !except.includes(name));
@@ -26,6 +27,10 @@ test("X identity legacy modules re-export @flamenode/domain/xid", () => {
   assertBridge(legacySnapshot, domainXid, "activeXSnapshotCore");
   assertBridge(legacyRequest, domainXid, "xIdentityRequestCore");
   assertBridge(legacyResolution, domainXid, "xIdentityResolutionCore");
+  // xIdMergeStateMatchesSql is the D1 CAS adapter and intentionally stays local.
+  assertBridge(legacyMergeSafety, domainXid, "xid/mergeSafety", {
+    except: ["xIdMergeStateMatchesSql"],
+  });
 });
 
 test("writeGuardCore re-exports @flamenode/domain/admin", () => {
