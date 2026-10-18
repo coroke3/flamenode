@@ -20,7 +20,10 @@
     "./slots/releaseGroups": "./src/slots/releaseGroups.ts",
     "./slots/reservationIdentity": "./src/slots/reservationIdentity.ts",
     "./slots/reservationBind": "./src/slots/reservationBind.ts",
-    "./slots/reservationGroups": "./src/slots/reservationGroups.ts"
+    "./slots/reservationGroups": "./src/slots/reservationGroups.ts",
+    "./admin": "./src/admin/index.ts",
+    "./user": "./src/user/index.ts",
+    "./db/transientError": "./src/db/transientError.ts"
   },
   "scripts": {
     "build": "tsc",

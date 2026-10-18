@@ -14,6 +14,7 @@ import { generateId } from "@/lib/utils/id";
 import { sanitizeNextPath } from "#utils/next";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { AuditMutationError, mutateWithAudit } from "@/lib/audit/mutate";
+import { isLatestTermsAlreadyAccepted } from "@flamenode/domain/user";
 import {
   createTraceId,
   logFlowTrace,
@@ -44,21 +45,6 @@ function termsCasCondition(userBefore: {
       terms_reaccept_required: userBefore.terms_reaccept_required ?? 0,
     },
   });
-}
-
-function alreadyAccepted(
-  userBefore: {
-    accepted_terms_version_id: string | null;
-    is_tos_accepted: number | null;
-    terms_reaccept_required: number | null;
-  },
-  termsVersionId: string,
-): boolean {
-  return (
-    userBefore.accepted_terms_version_id === termsVersionId &&
-    (userBefore.is_tos_accepted ?? 0) === 1 &&
-    (userBefore.terms_reaccept_required ?? 0) === 0
-  );
 }
 
 /** Commitのみ。Navigationは呼び出し側。 */
@@ -100,7 +86,7 @@ export async function commitAcceptLatestTerms(
       .limit(1)
   )[0];
 
-  if (alreadyAccepted(userBefore, termsVersionId)) {
+  if (isLatestTermsAlreadyAccepted(userBefore, termsVersionId)) {
     return { kind: "already_accepted", termsVersionId };
   }
 
@@ -197,7 +183,7 @@ export async function commitAcceptLatestTerms(
       const again = (
         await db.select().from(users).where(eq(users.id, userId)).limit(1)
       )[0];
-      if (again && alreadyAccepted(again, termsVersionId)) {
+      if (again && isLatestTermsAlreadyAccepted(again, termsVersionId)) {
         return { kind: "already_accepted", termsVersionId };
       }
       return { kind: "concurrent_update", retryable: true };

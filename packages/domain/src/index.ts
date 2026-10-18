@@ -1,4 +1,3 @@
-export * from "./permissions.ts";
 export * from "./slots/reservationLimit.ts";
 export * from "./slots/limits.ts";
 export * from "./software/labels.ts";
@@ -14,3 +13,5 @@ export * from "./slots/releaseGroups.ts";
 export * from "./slots/reservationIdentity.ts";
 export * from "./slots/reservationBind.ts";
 export * from "./slots/reservationGroups.ts";
+export * from "./admin/index.ts";
+export * from "./user/index.ts";
