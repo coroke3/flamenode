@@ -108,6 +108,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isSafeUrl(url: unknown): url is string {
+  if (typeof url !== "string") return false;
+  const trimmed = url.trim();
+  return /^https?:\/\/[^\s<>"']+$/i.test(trimmed) || (/^\/[^\/\s<>"']+/i.test(trimmed) && !trimmed.startsWith("//"));
+}
+
 function validatedPublicDto(value: unknown): PublicSnapshot | null {
   if (!isRecord(value)) return null;
   const { kind, id, title } = value;
@@ -124,26 +130,28 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
   };
 
   if (typeof value.description === "string") base.description = value.description.slice(0, 5000);
-  if (typeof value.canonicalUrl === "string") base.canonicalUrl = value.canonicalUrl;
-  if (typeof value.ogImageUrl === "string") base.ogImageUrl = value.ogImageUrl;
-  if (typeof value.aliasOf === "string") base.aliasOf = value.aliasOf;
+  if (isSafeUrl(value.canonicalUrl)) base.canonicalUrl = value.canonicalUrl.trim();
+  if (isSafeUrl(value.ogImageUrl)) base.ogImageUrl = value.ogImageUrl.trim();
+  if (typeof value.aliasOf === "string" && ID_PATTERN.test(value.aliasOf)) base.aliasOf = value.aliasOf;
 
   if (kind === "video") {
     if (typeof value.creatorName === "string") base.creatorName = value.creatorName.slice(0, 100);
     if (typeof value.creatorHandle === "string") base.creatorHandle = value.creatorHandle.slice(0, 100);
-    if (typeof value.creatorAvatarUrl === "string") base.creatorAvatarUrl = value.creatorAvatarUrl;
-    if (typeof value.thumbnailUrl === "string") base.thumbnailUrl = value.thumbnailUrl;
-    if (typeof value.publishedAt === "string") base.publishedAt = value.publishedAt;
-    if (typeof value.youtubeVideoId === "string") base.youtubeVideoId = value.youtubeVideoId;
+    if (isSafeUrl(value.creatorAvatarUrl)) base.creatorAvatarUrl = value.creatorAvatarUrl.trim();
+    if (isSafeUrl(value.thumbnailUrl)) base.thumbnailUrl = value.thumbnailUrl.trim();
+    if (typeof value.publishedAt === "string") base.publishedAt = value.publishedAt.slice(0, 50);
+    if (typeof value.youtubeVideoId === "string" && /^[a-zA-Z0-9_-]{6,15}$/.test(value.youtubeVideoId)) {
+      base.youtubeVideoId = value.youtubeVideoId;
+    }
   } else if (kind === "user") {
     if (typeof value.name === "string") base.name = value.name.slice(0, 100);
     if (typeof value.handle === "string") base.handle = value.handle.slice(0, 100);
     if (typeof value.bio === "string") base.bio = value.bio.slice(0, 2000);
-    if (typeof value.avatarUrl === "string") base.avatarUrl = value.avatarUrl;
+    if (isSafeUrl(value.avatarUrl)) base.avatarUrl = value.avatarUrl.trim();
   } else if (kind === "event") {
-    if (typeof value.bannerUrl === "string") base.bannerUrl = value.bannerUrl;
-    if (typeof value.iconUrl === "string") base.iconUrl = value.iconUrl;
-    if (typeof value.status === "string") base.status = value.status;
+    if (isSafeUrl(value.bannerUrl)) base.bannerUrl = value.bannerUrl.trim();
+    if (isSafeUrl(value.iconUrl)) base.iconUrl = value.iconUrl.trim();
+    if (typeof value.status === "string") base.status = value.status.slice(0, 50);
     if (typeof value.periodText === "string") base.periodText = value.periodText.slice(0, 200);
   }
 

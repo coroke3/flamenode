@@ -143,3 +143,49 @@ test("MIG-0403 T02: alias fixture correctly points to primary canonical ID", asy
   assert.equal(aliasSnapshot.aliasOf, "public_demo");
 });
 
+test("MIG-0403 hardening: validatedPublicDto sanitizes malicious URL schemes and prevents XSS/protocol injection", async () => {
+  const badUrlKey = "snapshot/video/bad_url_video.json";
+  const badPayload = {
+    kind: "video",
+    id: "bad_url_video",
+    title: "Bad URL Video",
+    canonicalUrl: "javascript:alert(document.cookie)",
+    ogImageUrl: "data:text/html,<script>alert(1)</script>",
+    thumbnailUrl: "//evil.com/phish.png",
+    creatorAvatarUrl: "vbscript:malicious()",
+    aliasOf: "invalid/id/with/traversal",
+    youtubeVideoId: "malicious<script>",
+  };
+  const badBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 1, generation, key: badUrlKey, visibility: "public",
+    payload: badPayload, sha256: sha256(badPayload)
+  }));
+  const opts = options({ schemaVersion: 1, generation, allowedKeys: [badUrlKey], blockedKeys: [] });
+  const snapshot = await loadPublicBuildSnapshot(source(badBytes), badUrlKey, opts);
+
+  assert.equal("canonicalUrl" in snapshot, false, "javascript: URL must be dropped");
+  assert.equal("ogImageUrl" in snapshot, false, "data: URL must be dropped");
+  assert.equal("thumbnailUrl" in snapshot, false, "protocol-relative // URL must be dropped");
+  assert.equal("creatorAvatarUrl" in snapshot, false, "vbscript: URL must be dropped");
+  assert.equal("aliasOf" in snapshot, false, "traversal alias must be dropped");
+  assert.equal("youtubeVideoId" in snapshot, false, "malformed youtubeVideoId must be dropped");
+});
+
+test("MIG-0403 hardening: validatedPublicDto clamps boundary strings and rejects oversized/empty title", async () => {
+  const overKey = "snapshot/user/over_user.json";
+  const overPayload = {
+    kind: "user",
+    id: "over_user",
+    title: "A".repeat(301), // over limit > 300
+  };
+  const overBytes = Buffer.from(JSON.stringify({
+    schemaVersion: 1, generation, key: overKey, visibility: "public",
+    payload: overPayload, sha256: sha256(overPayload)
+  }));
+  const opts = options({ schemaVersion: 1, generation, allowedKeys: [overKey], blockedKeys: [] });
+  await assert.rejects(
+    () => loadPublicBuildSnapshot(source(overBytes), overKey, opts),
+    { code: "INVALID_PAYLOAD" }
+  );
+});
+
