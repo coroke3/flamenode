@@ -1428,3 +1428,17 @@ export const publicBuildState = sqliteTable(
   },
 );
 
+export const publicPageRenders = sqliteTable(
+  "public_page_renders",
+  {
+    entity: text("entity", { enum: ["video", "user", "event"] }).notNull(),
+    entity_id: text("entity_id").notNull(),
+    requested_at: integer("requested_at").notNull(),
+    rendered_at: integer("rendered_at").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.entity, t.entity_id] }),
+  }),
+);
+
+

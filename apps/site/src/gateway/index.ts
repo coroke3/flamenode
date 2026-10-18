@@ -21,6 +21,14 @@ import {
   type RouteLookup,
 } from "./visibility.ts";
 
+import {
+  handlePageRenderQueue,
+  type D1DatabaseLike,
+  type PageRenderEnv,
+  type PageRenderOutcome,
+  type QueueBatch,
+} from "./pageRenderQueue.ts";
+
 type Fetcher = { fetch: (request: Request) => Promise<Response> };
 
 export interface GatewayEnv {
@@ -35,6 +43,10 @@ export interface GatewayEnv {
   VISIBILITY_KV?: {
     get: (key: string) => Promise<string | null>;
   };
+  /** D1 database for queue-driven ISR page render state (MIG-0411). */
+  DB?: D1DatabaseLike;
+  D1?: D1DatabaseLike;
+  PAGE_RENDER_QUEUE?: { send: (msg: unknown) => Promise<unknown> };
 }
 
 const NO_STORE = "no-store, private";
@@ -192,5 +204,8 @@ export default {
       case "serve":
         return servePage(decision, request, env, ctx);
     }
+  },
+  async queue(batch: QueueBatch, env: GatewayEnv): Promise<PageRenderOutcome[]> {
+    return handlePageRenderQueue(batch, env as PageRenderEnv);
   },
 };
