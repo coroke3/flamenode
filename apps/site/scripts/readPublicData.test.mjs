@@ -301,3 +301,248 @@ describe("readPublicData", () => {
     assert.strictEqual(Buffer.byteLength(str1), Buffer.byteLength(str2));
   });
 });
+
+// ---------------------------------------------------------------------------
+// T01 against the real CURRENT producer. The fixture is the real D1 schema
+// (every file in migrations/ applied in order), and CURRENT is
+// workers/json-generator/rebuild.ts `rebuildTarget(env, "events_index")` itself,
+// so a drift in either SQL or DTO shaping fails here.
+// ---------------------------------------------------------------------------
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import * as CURRENT from "../../../workers/json-generator/rebuild.ts";
+import * as MIGRATED from "./readPublicData.ts";
+
+const MIGRATIONS_DIR = fileURLToPath(new URL("../../../migrations/", import.meta.url));
+
+function realSchemaDb() {
+  const sqlite = new DatabaseSync(":memory:");
+  for (const file of fs.readdirSync(MIGRATIONS_DIR).filter((f) => /^\d{4}_.*\.sql$/.test(f)).sort()) {
+    sqlite.exec(fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8"));
+  }
+  return sqlite;
+}
+
+/** D1 surface used by CURRENT rebuild.ts (all / first / run / batch). */
+function sqliteD1(sqlite, log = []) {
+  const statement = (sql, args = []) => ({
+    bind: (...next) => statement(sql, next),
+    async all() {
+      log.push(sql);
+      return { results: sqlite.prepare(sql).all(...args), meta: {} };
+    },
+    async first(column) {
+      log.push(sql);
+      const row = sqlite.prepare(sql).get(...args) ?? null;
+      return row && column ? row[column] : row;
+    },
+    async run() {
+      log.push(sql);
+      const info = sqlite.prepare(sql).run(...args);
+      return { meta: { changes: Number(info.changes) } };
+    },
+  });
+  return {
+    prepare: (sql) => statement(sql),
+    async batch(list) {
+      const out = [];
+      for (const item of list) out.push(await item.run());
+      return out;
+    },
+  };
+}
+
+async function currentEventsIndex(sqlite) {
+  const puts = [];
+  const env = {
+    DB: sqliteD1(sqlite),
+    R2: {
+      head: async () => null,
+      get: async () => null,
+      put: async (key, body) => { puts.push({ key, body: JSON.parse(String(body)) }); },
+      delete: async () => {},
+    },
+    KV: { get: async () => null, put: async () => {} },
+  };
+  await CURRENT.rebuildTarget(env, "events_index", "global");
+  const written = puts.filter((p) => p.key === "events/index.json");
+  assert.equal(written.length, 1, "CURRENT must write events/index.json exactly once");
+  return written[0].body;
+}
+
+function withoutGeneratedAt(payload) {
+  const { generated_at: _ignored, ...rest } = payload;
+  return deterministicStringify(rest);
+}
+
+function seedXUsers(sqlite, ids) {
+  const insert = sqlite.prepare("INSERT OR IGNORE INTO x_users (id, x_name) VALUES (?, ?)");
+  for (const id of ids) insert.run(id, id);
+}
+
+function seedParityFixture(sqlite) {
+  seedXUsers(sqlite, [...Array.from({ length: 25 }, (_, i) => `u${i}`), "ub1", "ub2", "ub3", "uc1"]);
+  const event = sqlite.prepare(
+    `INSERT INTO events (id, title, explanation, icon_url, img_url, accent_color, event_type,
+       slot_type, slot_visibility_mode, max_slots_per_video, start_time, end_time,
+       entry_start_time, entry_end_time, visibility_status, created_at)
+     VALUES (?, ?, ?, ?, NULL, ?, 'event', 'time', 'public_name', 3, ?, ?, ?, NULL, ?, ?)`,
+  );
+  // Ties on start_time, NULL periods, point events, private rows (the real schema
+  // only allows private / public, see the events visibility trigger).
+  for (let i = 0; i < 60; i += 1) {
+    const start = 1_700_000_000 + Math.floor(i / 3) * 3600; // 3-way ties
+    event.run(`ev-${String(i).padStart(3, "0")}`, `Event ${i} 日本語`, i % 4 ? `Ex ${i}` : null,
+      i % 5 ? null : `https://img.example/${i}.png`, i % 2 ? "#ff0000" : null,
+      start, start + 7200, start - 86400, i % 7 === 0 ? "private" : "public", 1_690_000_000 + ((i * 37) % 60));
+  }
+  event.run("ev-null-period", "No period", null, null, null, null, null, null, "public", 1);
+  event.run("ev-point-start", "Point", null, null, null, 1_700_100_000, null, null, "public", 2);
+  event.run("ev-point-end", "Point", null, null, null, null, 1_700_100_000, null, "public", 3);
+  event.run("ev-private", "Private", null, null, null, 1_700_200_000, 1_700_300_000, null, "private", 5);
+
+  const staff = sqlite.prepare(
+    `INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  // 25 public staff on one event (cap 20), duplicate names, whitespace, private staff.
+  for (let i = 0; i < 25; i += 1) staff.run(`st-a-${i}`, "ev-001", `u${i}`, `Staff ${i % 15}`, 1, 100 + (24 - i));
+  staff.run("st-b-1", "ev-002", "ub1", "  Spaced  ", 1, 10);
+  staff.run("st-b-2", "ev-002", "ub2", "Hidden", 0, 11);
+  staff.run("st-b-3", "ev-002", "ub3", "   ", 1, 12);
+  staff.run("st-c-1", "ev-private", "uc1", "Private staff", 1, 13);
+
+  const group = sqlite.prepare(
+    `INSERT INTO event_groups (id, slug, name, description, group_type, icon_url, accent_color,
+       sort_order, visibility_status)
+     VALUES (?, ?, ?, ?, 'series', ?, ?, ?, ?)`,
+  );
+  group.run("g-b", "b", "Beta", null, null, null, 2, "public");
+  group.run("g-a", "a", "Alpha", "desc", "https://img.example/g.png", "#00ff00", 2, "public");
+  group.run("g-frac", "frac", "Fraction", null, null, null, 1.7, "public");
+  group.run("g-private", "p", "Private group", null, null, null, 0, "private");
+  group.run("g-empty", "e", "Empty", null, null, null, 9, "public");
+
+  const link = sqlite.prepare("INSERT INTO event_group_events (event_group_id, event_id) VALUES (?, ?)");
+  for (let i = 0; i < 30; i += 1) link.run("g-a", `ev-${String(i).padStart(3, "0")}`); // > 20 per group
+  for (const id of ["ev-001", "ev-002", "ev-point-start", "ev-private", "ev-null-period"]) link.run("g-b", id);
+  link.run("g-frac", "ev-010");
+  link.run("g-private", "ev-001");
+}
+
+describe("readPublicData parity with CURRENT rebuild.ts", () => {
+  it("T01: MAX_ constants are CURRENT's constants", () => {
+    for (const name of [
+      "EVENTS_INDEX_MAX_ROWS",
+      "EVENT_GROUP_MAX_ROWS",
+      "EVENT_GROUP_EVENT_MAX_PER_GROUP",
+      "EVENT_GROUP_EVENT_MAX_ROWS",
+      "PUBLIC_STAFF_MAX_PER_EVENT",
+      "PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE",
+    ]) {
+      assert.equal(MIGRATED[name], CURRENT[name], `${name} must match CURRENT`);
+    }
+  });
+
+  it("T01/T02: same real-schema fixture -> byte-identical key-sorted JSON (minus generated_at)", async () => {
+    const sqlite = realSchemaDb();
+    try {
+      seedParityFixture(sqlite);
+      const current = await currentEventsIndex(sqlite);
+      const migrated = await buildEventsIndexData(sqliteD1(sqlite), { generatedAt: 1 });
+      assert.equal(withoutGeneratedAt(migrated), withoutGeneratedAt(current));
+      // The fixture really exercises the edges it claims to.
+      const ids = migrated.items.map((row) => row.id);
+      assert.ok(ids.includes("ev-null-period"));
+      for (const hidden of ["ev-point-start", "ev-point-end", "ev-private", "ev-000"]) {
+        assert.ok(!ids.includes(hidden), `${hidden} must not be published`);
+      }
+      const ev001 = migrated.items.find((row) => row.id === "ev-001");
+      // Top 20 by created_at hold 5 repeated names: 15 distinct, as CURRENT.
+      assert.equal(ev001.public_operator_names.length, 15);
+      const alpha = migrated.group_sections.find((g) => g.id === "g-a");
+      assert.equal(alpha.events.length, MIGRATED.EVENT_GROUP_EVENT_MAX_PER_GROUP);
+      assert.ok(!migrated.group_sections.some((g) => g.id === "g-private"));
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("T01: parity holds at exactly EVENTS_INDEX_MAX_ROWS public events (> 2 staff chunks)", async () => {
+    const sqlite = realSchemaDb();
+    try {
+      const insert = sqlite.prepare(
+        `INSERT INTO events (id, title, start_time, end_time, visibility_status, created_at)
+         VALUES (?, ?, ?, ?, 'public', ?)`,
+      );
+      for (let i = 0; i < EVENTS_INDEX_MAX_ROWS; i += 1) {
+        insert.run(`max-${i}`, `Max ${i}`, 1_700_000_000 + i, 1_700_000_100 + i, i);
+      }
+      const staff = sqlite.prepare(
+        `INSERT INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at)
+         VALUES (?, ?, 'u', ?, 1, 1)`,
+      );
+      seedXUsers(sqlite, ["u"]);
+      for (let i = 0; i < EVENTS_INDEX_MAX_ROWS; i += 1) staff.run(`s-${i}`, `max-${i}`, `S${i}`);
+      const current = await currentEventsIndex(sqlite);
+      const migrated = await buildEventsIndexData(sqliteD1(sqlite), { generatedAt: 1 });
+      assert.equal(migrated.items.length, EVENTS_INDEX_MAX_ROWS);
+      assert.equal(withoutGeneratedAt(migrated), withoutGeneratedAt(current));
+      // T03: one more public event fails the build instead of silently dropping it.
+      insert.run("max-over", "Over", 1, 2, 0);
+      await assert.rejects(buildEventsIndexData(sqliteD1(sqlite)), /exceeds limit: 201 > 200/);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("every D1 statement is bounded (LIMIT or a fixed-size IN / window cap)", async () => {
+    const sqlite = realSchemaDb();
+    try {
+      seedParityFixture(sqlite);
+      const log = [];
+      await buildEventsIndexData(sqliteD1(sqlite, log), { generatedAt: 1 });
+      const chunks = (n) => Math.ceil(n / MIGRATED.PUBLIC_STAFF_EVENT_ID_CHUNK_SIZE);
+      const maxStatements = 4 + chunks(EVENTS_INDEX_MAX_ROWS) + chunks(MIGRATED.EVENT_GROUP_EVENT_MAX_ROWS);
+      assert.equal(maxStatements, 19);
+      assert.ok(log.length > 0 && log.length <= maxStatements, `statement count ${log.length}`);
+      for (const sql of log) {
+        assert.ok(/COUNT\(\*\)|LIMIT \?|staff_rank <= \?/.test(sql), `unbounded statement: ${sql}`);
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("CLI: local SQLite snapshot -> deterministic events index file (T04)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "read-public-data-"));
+    try {
+      const file = path.join(dir, "snapshot.sqlite");
+      const sqlite = realSchemaDb();
+      seedParityFixture(sqlite);
+      sqlite.exec(`VACUUM INTO '${file.replaceAll("'", "''")}'`);
+      sqlite.close();
+      const script = fileURLToPath(new URL("./readPublicData.ts", import.meta.url));
+      const run = (out) => execFileSync(process.execPath, [
+        "--experimental-strip-types", "--no-warnings", script,
+        "--sqlite", file, "--out", out, "--generated-at", "1715000000",
+      ], { stdio: "pipe" });
+      run(path.join(dir, "a.json"));
+      run(path.join(dir, "b.json"));
+      const a = fs.readFileSync(path.join(dir, "a.json"));
+      assert.ok(a.equals(fs.readFileSync(path.join(dir, "b.json"))), "two builds must be byte-identical");
+      const parsed = JSON.parse(a.toString("utf8"));
+      assert.equal(parsed.generated_at, 1715000000);
+      assert.ok(parsed.items.length > 0 && parsed.group_sections.length > 0);
+      assert.throws(() => execFileSync(process.execPath, [
+        "--experimental-strip-types", "--no-warnings", script, "--sqlite", path.join(dir, "missing.sqlite"), "--out", path.join(dir, "c.json"),
+      ], { stdio: "pipe" }), /SQLite snapshot not found|Command failed/);
+      assert.ok(!fs.existsSync(path.join(dir, "c.json")));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
