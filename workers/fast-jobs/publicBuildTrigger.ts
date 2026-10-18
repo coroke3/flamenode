@@ -31,13 +31,12 @@ export interface BuildDecisionInput {
 
 export type BuildDecision = "trigger" | "skip";
 
-// PROVISIONAL — not approved. MIG-0409 U03 (build minutes) is not measured, so these
-// are placeholders, not results of the Work Order formula
-//   floor((3,000 × 0.8 − code-push build minutes/month) ÷ minutes per build ÷ 30).
-// The MIG-0409 STOP requires the user to approve the resulting publish delay first.
-// With the hourly Cron the effective ceiling is 24 hooks/day whatever these say.
-export const MAX_DATA_BUILDS_PER_DAY = 180;
-export const MIN_BUILD_INTERVAL_MS = 480_000;
+// Approved by the owner 2026-10-18 with the ~60 min + build publish delay (MIG-0409 STOP).
+// floor((3,000 × 0.8 − 125 PRs × 1.418 min) ÷ 1.418 min ÷ 30) = 52 builds/day, local U03
+// figures (BUILD_TIME_DATA.md §2); interval = ceil(1 day ÷ 52) = 27.7 min. The hourly Cron is
+// the binding limit (24 hooks/day). Re-derive when Workers Builds timing is measured.
+export const MAX_DATA_BUILDS_PER_DAY = 52;
+export const MIN_BUILD_INTERVAL_MS = Math.ceil(86_400_000 / MAX_DATA_BUILDS_PER_DAY);
 
 /**
  * Pure decision function evaluating if a public site rebuild hook should be triggered.
