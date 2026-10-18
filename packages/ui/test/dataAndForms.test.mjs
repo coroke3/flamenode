@@ -4,6 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   Pagination,
+  pageNumbers,
   TableScroll,
   shouldBlockSearchKeySubmit,
   shouldBlockSearchFormSubmit,
@@ -49,7 +50,59 @@ test("Pagination returns null when totalPages <= 1", () => {
     }),
   );
   assert.equal(html, "");
+
+  const htmlZero = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: 0,
+      total: 0,
+      buildHref: (p) => `/?page=${p}`,
+    }),
+  );
+  assert.equal(htmlZero, "");
+
+  const htmlNegative = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: -5,
+      buildHref: (p) => `/?page=${p}`,
+    }),
+  );
+  assert.equal(htmlNegative, "");
 });
+
+test("pageNumbers computes boundary ellipses and ranges accurately", () => {
+  // First page of large set: [1, 2, 3, "…", 10]
+  assert.deepEqual(pageNumbers(1, 10), [1, 2, 3, "…", 10]);
+
+  // Last page of large set: [1, "…", 8, 9, 10]
+  assert.deepEqual(pageNumbers(10, 10), [1, "…", 8, 9, 10]);
+
+  // Middle page of large set: [1, "…", 3, 4, 5, 6, 7, "…", 10]
+  assert.deepEqual(pageNumbers(5, 10), [1, "…", 3, 4, 5, 6, 7, "…", 10]);
+
+  // Small set (5 pages): no ellipses
+  assert.deepEqual(pageNumbers(3, 5), [1, 2, 3, 4, 5]);
+
+  // 2 pages: [1, 2]
+  assert.deepEqual(pageNumbers(1, 2), [1, 2]);
+});
+
+test("Pagination handles custom unitLabel and total without pageSize", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(Pagination, {
+      currentPage: 1,
+      totalPages: 3,
+      total: 30,
+      unitLabel: "作品",
+      buildHref: (p) => `/videos?page=${p}`,
+      className: "custom-pagination",
+    }),
+  );
+  assert.match(html, /custom-pagination/);
+  assert.match(html, /全 30 作品 \(1 \/ 3 ページ\)/);
+});
+
 
 test("TableScroll renders accessible region container with tabIndex 0", () => {
   const html = renderToStaticMarkup(
