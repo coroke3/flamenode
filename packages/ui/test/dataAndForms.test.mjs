@@ -9,9 +9,7 @@ import {
   shouldBlockSearchFormSubmit,
   isGetSearchFormMethod,
   IME_COMPOSING_ATTR,
-  AutoSubmitSelect,
   navigateGetForm,
-  AutoSubmitCheckbox,
 } from "../dist/index.js";
 
 test("T03: Pagination preserves query parameters in buildHref across page links", () => {
@@ -37,7 +35,8 @@ test("T03: Pagination preserves query parameters in buildHref across page links"
   assert.match(html, /aria-current="page">2</);
 
   // Total count formatted correctly
-  assert.match(html, /11–20 \/ 全50件/);
+  // CURRENT src/components/ui/Pagination.tsx text
+  assert.match(html, /11〜20 \/ 全 50 件 \(2 \/ 5 ページ\)/);
 });
 
 test("Pagination returns null when totalPages <= 1", () => {
@@ -131,51 +130,7 @@ test("T04: shouldBlockSearchKeySubmit blocks Enter submission during IME composi
 });
 
 
-test("U03: AutoSubmitSelect preserves GET values and ignores IME composing forms", () => {
-  const assigned = [];
-  const prevWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-  const prevFormData = Object.getOwnPropertyDescriptor(globalThis, "FormData");
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { location: { origin: "https://example.test", pathname: "/list", search: "", hash: "", assign: (url) => assigned.push(url) } },
-  });
-  Object.defineProperty(globalThis, "FormData", {
-    configurable: true,
-    value: class {
-      constructor() {}
-      *entries() {
-        yield ["q", "a b"];
-        yield ["sort", "popular"];
-      }
-    },
-  });
-  const form = {
-    getAttribute: (key) => key === "action" ? "/list" : key === "method" ? "get" : null,
-    hasAttribute: () => false,
-  };
-  try {
-    let changes = 0;
-    const select = AutoSubmitSelect({ onChange: () => { changes += 1; }, children: "options" });
-    select.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(changes, 1);
-    assert.deepEqual(assigned, ["/list?q=a+b&sort=popular"]);
-
-    form.hasAttribute = (key) => key === "data-fn-ime-composing";
-    select.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(changes, 2);
-    assert.equal(assigned.length, 1, "IME conversion must not auto-submit");
-
-    const checkbox = AutoSubmitCheckbox({});
-    checkbox.props.onChange({ currentTarget: { form }, defaultPrevented: false });
-    assert.equal(assigned.length, 1);
-  } finally {
-    if (prevWindow) Object.defineProperty(globalThis, "window", prevWindow);
-    else delete globalThis.window;
-    if (prevFormData) Object.defineProperty(globalThis, "FormData", prevFormData);
-    else delete globalThis.FormData;
-  }
-});
-
+// AutoSubmitSelect / ImeSafeGetForm behaviour in a real DOM: forms.dom.test.mjs
 
 test("ImeSafeGetForm only intercepts GET and leaves native POST submission intact", () => {
   assert.equal(isGetSearchFormMethod(null), true, "default method is GET");
