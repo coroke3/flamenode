@@ -2,9 +2,11 @@
  * Cloudflare visibility gateway entrypoint (MIG-0405 / Recipe R-GATEWAY / Runtime S1).
  * Thin Worker in front of Static Assets / prebuilt R2 HTML. Per request it reads at most
  * one route shard (Static Assets), one KV revocation entry and one R2 object (ZERO_1102.md S1).
+ * A missing, stale or unreadable R2 page answers 503 and asks for a rebuild (MIG-0406 U02).
  * Non-production PoC: no wrangler.toml, Route or Custom Domain uses it yet.
  */
 import type { RouteResolution } from "../lib/routeMap.ts";
+import { loadR2PrebuiltHtml, type R2HtmlBucket, type RebuildQueue, type ServeDecision } from "./r2Html.ts";
 import {
   FIXED_PUBLIC_PAGES,
   fixedPublicPath,
@@ -26,14 +28,10 @@ type Fetcher = { fetch: (request: Request) => Promise<Response> };
 export interface GatewayEnv {
   /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
   ASSETS?: Fetcher;
-  R2_STORAGE?: {
-    get: (key: string) => Promise<{
-      body: ReadableStream;
-      httpMetadata?: { contentType?: string };
-      customMetadata?: { generation?: string };
-      size?: number;
-    } | null>;
-  };
+  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06). */
+  R2_STORAGE?: R2HtmlBucket;
+  /** Non-production only: rebuild requests for the MIG-0411 consumer. */
+  REBUILD_QUEUE?: RebuildQueue;
   // Explicit service binding to the existing Auth.js origin; never return a fake auth 404.
   AUTH_ORIGIN?: Fetcher;
   VISIBILITY_KV?: {
@@ -118,11 +116,14 @@ async function forwardToAuth(request: Request, env: GatewayEnv): Promise<Respons
   }
 }
 
+type ExecutionContext = { waitUntil: (promise: Promise<unknown>) => void };
+
 /** Static Assets first, then the prebuilt R2 HTML (D-06). */
 async function servePage(
-  decision: Extract<GatewayDecision, { action: "serve" }>,
+  decision: ServeDecision,
   request: Request,
   env: GatewayEnv,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (env.ASSETS) {
@@ -140,35 +141,19 @@ async function servePage(
     if (asset.status !== 404) return unavailable();
   }
 
-  if (env.R2_STORAGE) {
-    let object;
-    try {
-      object = await env.R2_STORAGE.get(`${decision.key}/index.html`);
-    } catch {
-      return unavailable();
-    }
-    if (object) {
-      // A stale, untyped, or empty R2 object is not public content.
-      const contentType = object.httpMetadata?.contentType ?? "";
-      if (object.customMetadata?.generation !== decision.generation ||
-          !Number.isFinite(object.size) || (object.size ?? 0) <= 0 || !object.body ||
-          !/^text\/html(?:\s*;|$)/i.test(contentType)) {
-        return unavailable();
-      }
-      return new Response(request.method === "HEAD" ? null : object.body, {
-        status: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=0, must-revalidate",
-        },
-      });
-    }
+  // The route data says the page is public; without its HTML the answer is 503, not 404.
+  if (!env.R2_STORAGE) return unavailable();
+  const result = await loadR2PrebuiltHtml(env.R2_STORAGE, decision, request.method, env.REBUILD_QUEUE);
+  if (result.action === "serve") return result.response;
+  if (result.rebuild) {
+    if (ctx) ctx.waitUntil(result.rebuild);
+    else await result.rebuild;
   }
-  return notFound();
+  return unavailable();
 }
 
 export default {
-  async fetch(request: Request, env: GatewayEnv): Promise<Response> {
+  async fetch(request: Request, env: GatewayEnv, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -224,7 +209,7 @@ export default {
       case "unavailable":
         return unavailable();
       case "serve":
-        return servePage(decision, request, env);
+        return servePage(decision, request, env, ctx);
     }
   },
 };
