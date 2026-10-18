@@ -203,7 +203,8 @@ export async function runNotificationRecovery(
                 const res = await checkAndTriggerPublicBuild(budgetEnv, { signal });
                 return {
                   processed: res.triggered ? 1 : 0,
-                  skipped: res.decision === "skip" || !res.triggered ? 1 : 0,
+                  skipped: res.decision === "skip" ? 1 : 0,
+                  failed: res.hookFailed ? 1 : 0,
                   d1_changes: res.d1_changes,
                 };
               },
