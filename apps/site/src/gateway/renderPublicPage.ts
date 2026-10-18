@@ -26,10 +26,10 @@ import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../
 export type PageRenderEntityKind = "video" | "user" | "event";
 
 /**
- * Local Node, NODE_ENV=production, upper-bound input, max of 300 warm renders, 11 runs
+ * Local Node, NODE_ENV=production, upper-bound input, max of 300 warm renders, 6 logged runs
  * (2026-10-18, project-files/migration-review/pr326-u05a-render-to-string.log):
- * video 24.7–65.3 ms (100 members, 128 chapters, 30 related) -> (b); event 5.4–8.9 ms
- * (8 of 11 runs ≥ 8 ms) -> (b); user 4.4–7.5 ms -> (a). Not workerd CPU: re-check with a
+ * video 25.3–48.8 ms (100 members, 128 chapters, 30 related) -> (b); event 5.4–8.7 ms
+ * (5 of 6 runs ≥ 8 ms) -> (b); user 4.4–5.8 ms -> (a). Not workerd CPU: re-check with a
  * workerd profile (ZERO_1102 §5) before relying on it.
  */
 export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "island-shell">> = {
