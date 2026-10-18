@@ -11,6 +11,7 @@
     "./announcements": "./src/announcements/index.ts",
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
+    "./datetime": "./src/datetime/jst.ts",
     "./video": "./src/video/index.ts"
   },
   "scripts": {
@@ -19,7 +20,8 @@
     "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
   },
   "dependencies": {
-    "@flamenode/contracts": "*"
+    "@flamenode/contracts": "*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

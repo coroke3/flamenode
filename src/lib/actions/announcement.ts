@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import type { DB } from "@/lib/db/client";
 import { announcements } from "@/lib/db/schema";
@@ -14,13 +13,10 @@ import { buildAnnouncementChangeQueueBatch } from "@/lib/staticRebuild/hooks";
 import { generateId } from "@/lib/utils/id";
 import {
   type AnnouncementResult,
-  announcementInputSchema as schema,
-  parseAnnouncementDates,
   validateAnnouncementInput,
 } from "@flamenode/domain/announcements";
 
 export type { AnnouncementResult };
-export { schema, parseAnnouncementDates };
 
 function announcementMutationError(error: unknown): AnnouncementResult {
   unstable_rethrow(error);
