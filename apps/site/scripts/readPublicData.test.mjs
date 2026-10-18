@@ -546,3 +546,92 @@ describe("readPublicData parity with CURRENT rebuild.ts", () => {
     }
   });
 });
+
+describe("readPublicData option A: D1 REST API with a read-only token (no network)", () => {
+  const ACCOUNT = "0123456789abcdef0123456789abcdef";
+  const DATABASE = "00000000-0000-4000-8000-000000000000";
+  const TOKEN = "test-token-never-logged";
+
+  // A fake REST endpoint answering the documented /query shape from a local SQLite DB.
+  function fakeD1Api(sqlite, calls = []) {
+    return async (url, init) => {
+      const { sql, params } = JSON.parse(init.body);
+      calls.push({ url, method: init.method, auth: init.headers.Authorization, sql, params });
+      const results = sqlite.prepare(sql).all(...params);
+      return new Response(JSON.stringify({ success: true, errors: [], result: [{ success: true, results, meta: {} }] }), { status: 200 });
+    };
+  }
+
+  it("produces the same bytes as the local SQLite path and stays within the statement bound", async () => {
+    const sqlite = realSchemaDb();
+    try {
+      seedParityFixture(sqlite);
+      const calls = [];
+      const { db, statements } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: fakeD1Api(sqlite, calls) });
+      const viaApi = await buildEventsIndexData(db, { generatedAt: 7 });
+      const viaSqlite = await buildEventsIndexData(sqliteD1(sqlite), { generatedAt: 7 });
+      assert.equal(deterministicStringify(viaApi), deterministicStringify(viaSqlite));
+      assert.ok(statements() > 0 && statements() <= MIGRATED.MAX_D1_HTTP_STATEMENTS);
+      for (const call of calls) {
+        assert.equal(call.url, `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/d1/database/${DATABASE}/query`);
+        assert.equal(call.method, "POST");
+        assert.equal(call.auth, `Bearer ${TOKEN}`);
+        assert.ok(MIGRATED.isReadOnlyStatement(call.sql), call.sql);
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it("refuses non-read statements before any request", async () => {
+    let requests = 0;
+    const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: async () => { requests++; return new Response("{}"); } });
+    for (const sql of ["UPDATE events SET title = 'x'", "DELETE FROM events", "SELECT 1; DROP TABLE events", "PRAGMA table_info(events)", "INSERT INTO events DEFAULT VALUES"]) {
+      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/);
+    }
+    assert.equal(requests, 0);
+    assert.ok(MIGRATED.isReadOnlyStatement("  WITH a AS (SELECT 1) SELECT * FROM a;"));
+  });
+
+  it("caps the number of requests and never puts the token in an error", async () => {
+    const ok = async () => new Response(JSON.stringify({ success: true, result: [{ success: true, results: [] }] }));
+    const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: ok, maxStatements: 2 });
+    await db.prepare("SELECT 1").all();
+    await db.prepare("SELECT 1").all();
+    await assert.rejects(db.prepare("SELECT 1").all(), /exceeded 2 statements/);
+
+    const failing = [
+      async () => new Response(JSON.stringify({ success: false, errors: [{ code: 10000, message: `Authentication error ${TOKEN}` }] }), { status: 403 }),
+      async () => new Response("not json", { status: 500 }),
+      async () => { throw new Error(`connect failed ${TOKEN}`); },
+    ];
+    for (const fetchFn of failing) {
+      const reader = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn });
+      await assert.rejects(reader.db.prepare("SELECT 1").all(), (error) => {
+        assert.match(error.message, /D1 API/);
+        assert.ok(!error.message.includes(TOKEN), error.message);
+        return true;
+      });
+    }
+  });
+
+  it("CLI --d1-api needs all three variables and exactly one source", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "read-public-data-api-"));
+    const sqlite = realSchemaDb();
+    try {
+      seedParityFixture(sqlite);
+      const out = path.join(dir, "events.json");
+      const env = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, FLAMENODE_D1_DATABASE_ID: DATABASE, FLAMENODE_D1_READ_TOKEN: TOKEN };
+      await MIGRATED.runReadPublicDataCli(["--d1-api", "--out", out, "--generated-at", "1715000000"], env, fakeD1Api(sqlite));
+      const parsed = JSON.parse(fs.readFileSync(out, "utf8"));
+      assert.equal(parsed.generated_at, 1715000000);
+      assert.ok(parsed.items.length > 0);
+      await assert.rejects(MIGRATED.runReadPublicDataCli(["--d1-api", "--out", out], { ...env, FLAMENODE_D1_READ_TOKEN: "" }, fakeD1Api(sqlite)), /needs CLOUDFLARE_ACCOUNT_ID/);
+      await assert.rejects(MIGRATED.runReadPublicDataCli(["--d1-api", "--sqlite", "x.sqlite", "--out", out], env), /usage/);
+      await assert.rejects(MIGRATED.runReadPublicDataCli(["--out", out], env), /usage/);
+    } finally {
+      sqlite.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

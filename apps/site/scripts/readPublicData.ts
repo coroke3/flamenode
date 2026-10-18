@@ -338,14 +338,95 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
   return { db: { prepare: (sql) => statement(sql) }, close: () => sqlite.close() };
 }
 
+/**
+ * Option A (approved 2026-10-18): read D1 over the Cloudflare REST API with a token that
+ * has only the "D1 Read" permission on this account. Build time only. Every statement
+ * must be a single read (SELECT / WITH); anything else is refused before any request,
+ * so a mis-scoped token can still not be used to write. At most MAX_D1_HTTP_STATEMENTS
+ * requests per run; the token is never logged or put in an error message.
+ */
+export const MAX_D1_HTTP_STATEMENTS = 19;
+export const D1_HTTP_TIMEOUT_MS = 15_000;
+export const D1_HTTP_ENV = {
+  accountId: "CLOUDFLARE_ACCOUNT_ID",
+  databaseId: "FLAMENODE_D1_DATABASE_ID",
+  token: "FLAMENODE_D1_READ_TOKEN",
+} as const;
+
+const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
+const D1_ID = /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isReadOnlyStatement(sql: string): boolean {
+  // One statement only: no `;` except a trailing one.
+  return READ_ONLY_SQL.test(sql) && !/;\s*\S/.test(sql);
+}
+
+export function openD1HttpReader(options: {
+  accountId: string;
+  databaseId: string;
+  token: string;
+  fetchFn?: typeof fetch;
+  maxStatements?: number;
+}): { db: D1Like; statements: () => number } {
+  const { accountId, databaseId, token } = options;
+  if (!/^[0-9a-f]{32}$/i.test(accountId) || !D1_ID.test(databaseId) || !token) {
+    throw new Error(
+      `D1 API mode needs ${D1_HTTP_ENV.accountId}, ${D1_HTTP_ENV.databaseId} and ${D1_HTTP_ENV.token}`,
+    );
+  }
+  const fetchFn = options.fetchFn ?? fetch;
+  const max = options.maxStatements ?? MAX_D1_HTTP_STATEMENTS;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
+  let count = 0;
+  const statement = (sql: string, params: unknown[] = []): D1PreparedStatementLike => ({
+    bind: (...next: unknown[]) => statement(sql, next),
+    async all<T>() {
+      if (!isReadOnlyStatement(sql)) throw new Error("D1 API mode refuses a non-read statement");
+      if (++count > max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      let response: Response;
+      try {
+        response = await fetchFn(url, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ sql, params }),
+          signal: AbortSignal.timeout(D1_HTTP_TIMEOUT_MS),
+        });
+      } catch {
+        throw new Error("D1 API request failed (network or timeout)");
+      }
+      const body = (await response.json().catch(() => null)) as {
+        success?: boolean;
+        result?: { success?: boolean; results?: T[] }[];
+        errors?: { code?: number; message?: string }[];
+      } | null;
+      const first = body?.result?.[0];
+      if (!response.ok || !body?.success || !first?.success || !Array.isArray(first.results)) {
+        const codes = (body?.errors ?? []).map((e) => e.code).filter((c) => c !== undefined).join(",");
+        throw new Error(`D1 API query failed (status=${response.status}${codes ? `, codes=${codes}` : ""})`);
+      }
+      return { results: first.results };
+    },
+  });
+  return { db: { prepare: (sql) => statement(sql) }, statements: () => count };
+}
+
 export const READ_PUBLIC_DATA_USAGE =
   "usage: node --experimental-strip-types apps/site/scripts/readPublicData.ts " +
-  "--sqlite <snapshot.sqlite> --out <events-index.json> [--generated-at <unix seconds>]";
+  "(--sqlite <snapshot.sqlite> | --d1-api) --out <events-index.json> [--generated-at <unix seconds>]; " +
+  `--d1-api reads ${D1_HTTP_ENV.accountId}, ${D1_HTTP_ENV.databaseId}, ${D1_HTTP_ENV.token} from the environment`;
 
-function parseCliArgs(argv: readonly string[]): { sqlite: string; out: string; generatedAt?: number } {
+type CliArgs = { sqlite?: string; d1Api: boolean; out: string; generatedAt?: number };
+
+function parseCliArgs(argv: readonly string[]): CliArgs {
   const values = new Map<string, string>();
+  let d1Api = false;
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i];
+    if (flag === "--d1-api" && !d1Api) {
+      d1Api = true;
+      i -= 1;
+      continue;
+    }
     const value = argv[i + 1];
     if (!["--sqlite", "--out", "--generated-at"].includes(flag) || value === undefined || values.has(flag)) {
       throw new Error(READ_PUBLIC_DATA_USAGE);
@@ -354,19 +435,45 @@ function parseCliArgs(argv: readonly string[]): { sqlite: string; out: string; g
   }
   const sqlite = values.get("--sqlite");
   const out = values.get("--out");
-  if (!sqlite || !out) throw new Error(READ_PUBLIC_DATA_USAGE);
+  // Exactly one source.
+  if (!out || Boolean(sqlite) === d1Api) throw new Error(READ_PUBLIC_DATA_USAGE);
   const rawGeneratedAt = values.get("--generated-at");
-  if (rawGeneratedAt === undefined) return { sqlite, out };
+  if (rawGeneratedAt === undefined) return { sqlite, d1Api, out };
   const generatedAt = Number(rawGeneratedAt);
   if (!Number.isSafeInteger(generatedAt) || generatedAt < 0) throw new Error(READ_PUBLIC_DATA_USAGE);
-  return { sqlite, out, generatedAt };
+  return { sqlite, d1Api, out, generatedAt };
 }
 
-/** CLI: local SQLite snapshot -> `events/index.json` (deterministic bytes for a fixed --generated-at). */
-export async function runReadPublicDataCli(argv: readonly string[]): Promise<void> {
+async function openCliSource(
+  args: CliArgs,
+  env: Record<string, string | undefined>,
+  fetchFn?: typeof fetch,
+): Promise<{ db: D1Like; close: () => void }> {
+  if (args.d1Api) {
+    const { db } = openD1HttpReader({
+      accountId: env[D1_HTTP_ENV.accountId]?.trim() ?? "",
+      databaseId: env[D1_HTTP_ENV.databaseId]?.trim() ?? "",
+      token: env[D1_HTTP_ENV.token]?.trim() ?? "",
+      fetchFn,
+    });
+    return { db, close: () => undefined };
+  }
+  const file = args.sqlite as string;
+  if (!fs.existsSync(file)) throw new Error(`SQLite snapshot not found: ${file}`);
+  return openLocalSqliteD1(file);
+}
+
+/**
+ * CLI: local SQLite snapshot (option B/C) or the D1 REST API with a read-only token
+ * (option A) -> `events/index.json` (deterministic bytes for a fixed --generated-at).
+ */
+export async function runReadPublicDataCli(
+  argv: readonly string[],
+  env: Record<string, string | undefined> = process.env,
+  fetchFn?: typeof fetch,
+): Promise<void> {
   const args = parseCliArgs(argv);
-  if (!fs.existsSync(args.sqlite)) throw new Error(`SQLite snapshot not found: ${args.sqlite}`);
-  const { db, close } = await openLocalSqliteD1(args.sqlite);
+  const { db, close } = await openCliSource(args, env, fetchFn);
   try {
     const payload = await buildEventsIndexData(db, { generatedAt: args.generatedAt });
     fs.mkdirSync(path.dirname(path.resolve(args.out)), { recursive: true });

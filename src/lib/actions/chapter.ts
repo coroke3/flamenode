@@ -14,7 +14,7 @@ import { writeGuard } from "@/lib/auth/writeGuard";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { videoChapters, videos, videoYoutubeMetadata } from "@/lib/db/schema";
 import { generateId } from "@/lib/utils/id";
-import { validateChapterTime } from "@/lib/utils/chapterTime";
+import { validateChapterTime } from "@flamenode/domain/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
@@ -608,4 +608,4 @@ export async function createChaptersBulk(
  * "1:30" / "0:01:30" / "90" などのチャプター時刻文字列を秒数に変換する。
  * 不正なら null。負数や 24h 超は拒否する。
  */
-// validateChapterTime は src/lib/utils/chapterTime.ts に共通化済み。
+// validateChapterTime は @flamenode/domain/video (chapterTime.ts) に共通化済み。

@@ -99,7 +99,7 @@ test("T01: 前回の hook の後に変更なし -> skip, fetch 0回", async () =
 test("T02: 変更あり、前回から MIN_BUILD_INTERVAL_MS 未満 -> skip", async () => {
   const lastHookAt = 1700000000000;
   const requestedAt = lastHookAt + 10000; // 変更あり
-  const now = lastHookAt + MIN_BUILD_INTERVAL_MS - 1000; // 7分59秒経過 (未達)
+  const now = lastHookAt + MIN_BUILD_INTERVAL_MS - 1000; // 間隔の 1 秒手前 (未達)
 
   const decision = decidePublicBuild({
     requestedAt,
@@ -133,7 +133,7 @@ test("T02: 変更あり、前回から MIN_BUILD_INTERVAL_MS 未満 -> skip", as
 
 test("T03: 変更あり、間隔を満たす -> trigger, fetch 1回, last_hook_at が更新", async () => {
   const now = Date.parse("2026-10-17T12:00:00Z");
-  const lastHookAt = now - MIN_BUILD_INTERVAL_MS - 5000; // 8分05秒前
+  const lastHookAt = now - MIN_BUILD_INTERVAL_MS - 5000; // 間隔 + 5 秒前
   const requestedAt = lastHookAt + 10000;
 
   const decision = decidePublicBuild({
@@ -455,4 +455,22 @@ test("CPU: one stage run stays far below the 8ms Runtime B budget (local Node, m
   const max = samples.at(-1);
   console.log(`[MIG-0410 CPU] n=200 p50=${samples[100].toFixed(3)}ms p99=${p99.toFixed(3)}ms max=${max.toFixed(3)}ms`);
   assert.ok(max < 8, `max ${max}ms`);
+});
+
+test("approved constants (owner 2026-10-18): 52 builds/day, interval ceil(1 day / 52); hourly Cron caps at 24/day", () => {
+  assert.equal(MAX_DATA_BUILDS_PER_DAY, 52);
+  assert.equal(MIN_BUILD_INTERVAL_MS, 1_661_539);
+  // Simulate one UTC day of hourly Cron runs with a change before every run.
+  let state = { lastHookAt: 0, hooksDay: "", hooksToday: 0 };
+  const day = Date.UTC(2026, 9, 19);
+  let triggers = 0;
+  for (let hour = 0; hour < 24; hour++) {
+    const now = day + hour * 3_600_000;
+    if (decidePublicBuild({ requestedAt: now - 1, ...state, now }) === "trigger") {
+      triggers++;
+      const today = new Date(now).toISOString().slice(0, 10);
+      state = { lastHookAt: now, hooksDay: today, hooksToday: state.hooksDay === today ? state.hooksToday + 1 : 1 };
+    }
+  }
+  assert.equal(triggers, 24);
 });

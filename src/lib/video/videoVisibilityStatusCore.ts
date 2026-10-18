@@ -2,26 +2,15 @@ import { eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { videoEvents } from "@/lib/db/schema";
 import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
+import { mergeVideoRebuildEventIds } from "@flamenode/domain/video";
 
-export const SAME_VIDEO_STATUS_MESSAGE = "すでに同じ状態へ更新されています。";
-
-export function monotonicVideoUpdatedAt(
-  videoUpdatedAt: number,
-  nowSec = Math.floor(Date.now() / 1000),
-): number {
-  return Math.max(nowSec, videoUpdatedAt + 1);
-}
-
-export function mergeVideoRebuildEventIds(
-  primaryEventId: string | null | undefined,
-  linkedEventIds: readonly string[],
-): string[] {
-  return Array.from(
-    new Set(
-      [primaryEventId, ...linkedEventIds].filter((id): id is string => Boolean(id)),
-    ),
-  );
-}
+// Pure helpers live in @flamenode/domain/video (visibility.ts); re-exported for
+// existing importers. loadVideoRebuildEventIds stays here because it reads D1.
+export {
+  SAME_VIDEO_STATUS_MESSAGE,
+  mergeVideoRebuildEventIds,
+  monotonicVideoUpdatedAt,
+} from "@flamenode/domain/video";
 
 export async function loadVideoRebuildEventIds(
   db: DB,
