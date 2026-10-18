@@ -1,4 +1,4 @@
-export type PublicNavIconName = "grid" | "users" | "calendar" | string;
+export type PublicNavIconName = "grid" | "users" | "calendar";
 
 export interface PublicNavItem {
   readonly href: string;

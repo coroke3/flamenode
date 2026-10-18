@@ -11,7 +11,7 @@ function read(relativePath) {
 }
 
 const migration = read("migrations/0052_video_interactions_auth_expand.sql");
-const schema = read("src/lib/db/schema.canonical.ts");
+const schema = read("packages/db/src/schema/canonical.ts");
 const interaction = read("src/lib/actions/video/interaction.ts");
 const library = read("app/(auth)/dashboard/library/page.tsx");
 const pending = read("docs/database/pending/video-interactions-auth-contract.sql");

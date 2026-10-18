@@ -1,5 +1,6 @@
 import React from "react";
 import { navigateGetForm } from "./AutoSubmitSelect.js";
+import { useNavigateAdapter } from "../adapters/index.js";
 
 export const IME_COMPOSING_ATTR = "data-fn-ime-composing";
 
@@ -49,6 +50,8 @@ export function ImeSafeGetForm({
   ...props
 }: ImeSafeGetFormProps): React.ReactElement {
   const formRef = React.useRef<HTMLFormElement>(null);
+  // AdapterProvider can supply the router; without one this is a plain page load.
+  const navigator = useNavigateAdapter();
   const composingRef = React.useRef(false);
   // compositionstart が到達しないIME環境でも、native.isComposing / keyCode=229
   // のEnter直後の暗黙的submitを禁止する。
@@ -78,7 +81,7 @@ export function ImeSafeGetForm({
   };
 
   const runSearch = (form: HTMLFormElement) => {
-    navigateGetForm(form);
+    navigateGetForm(form, (href) => navigator.push(href));
     onNavigated?.();
   };
 

@@ -12,7 +12,10 @@
     "baseUrl": ".",
     "paths": {
       "@flamenode/contracts": ["./packages/contracts/src/index.ts"],
+      "@flamenode/db": ["./packages/db/src/schema/index.ts"],
+      "@flamenode/db/*": ["./packages/db/src/*"],
       "@flamenode/domain": ["./packages/domain/src/index.ts"],
+      "@flamenode/domain/*": ["./packages/domain/src/*"],
       "@flamenode/ui": ["./packages/ui/src/index.ts"]
     }
   }
