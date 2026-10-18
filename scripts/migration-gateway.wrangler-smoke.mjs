@@ -29,6 +29,7 @@ const manifest = {
     "clip-2": { type: "canonical", kind: "video", id: "clip-2", canonicalPath: "/clip-2" },
     "user/creator": { type: "canonical", kind: "user", id: "Creator", canonicalPath: "/user/creator" },
     "old-clip": { type: "redirect", targetPath: "/clip-1", status: 308, reason: "alias" },
+    "old-clip-2": { type: "redirect", targetPath: "/clip-2", status: 308, reason: "alias" },
   },
 };
 const write = (path, body) => {
@@ -37,6 +38,13 @@ const write = (path, body) => {
 };
 for (const { path, body } of buildRouteShards(manifest)) write(path, body);
 for (const page of ["clip-1", "clip-2", "user/creator"]) write(`${page}/index.html`, `<!doctype html><title>${page}</title>`);
+// Fixed public pages and build assets (served without shards or KV).
+write("index.html", "<!doctype html><title>home</title>");
+write("about/index.html", "<!doctype html><title>about</title>");
+write("_astro/app.abc123.js", "console.log(1)");
+write("favicon.ico", "ico");
+write("_headers", "/*\n  X-Test: 1\n");
+write("admin/index.html", "<!doctype html><title>admin</title>");
 
 writeFileSync(join(work, "wrangler.json"), JSON.stringify({
   name: "flamenode-gateway-smoke",
@@ -75,7 +83,17 @@ try {
     ["/clip-1", 200, (r, body) => assert.match(body, /<title>clip-1/)],
     ["/user/Creator", 200, (r, body) => assert.match(body, /<title>user\/creator/)],
     ["/user/@creator/", 200],
-    ["/old-clip?tab=works", 308, (r) => assert.equal(r.headers.get("location"), "/clip-1?tab=works")],
+    ["/old-clip?tab=works", 308, (r) => {
+      assert.equal(r.headers.get("location"), "/clip-1?tab=works");
+      assert.match(r.headers.get("cache-control"), /no-store/);
+    }],
+    ["/old-clip-2", 404, (r) => assert.equal(r.headers.get("location"), null)], // alias of a revoked page
+    ["/", 200, (r, body) => assert.match(body, /<title>home/)],
+    ["/about", 200, (r, body) => assert.match(body, /<title>about/)],
+    ["/_astro/app.abc123.js", 200],
+    ["/favicon.ico", 200],
+    ["/_headers", 404],
+    ["/admin", 404], // in Assets, but not on the fixed public allowlist
     ["/clip-2", 404, (r) => assert.equal(r.headers.get("x-robots-tag"), "noindex, nofollow")],
     ["/clip-404", 404],
     ["/../clip-1", 200], // the URL parser folds `..` before the Worker sees it
