@@ -5,9 +5,9 @@
 > Date: 2026-10-18
 > Type: additive
 > Data loss: none
-> Rollback: `DROP TABLE IF EXISTS public_page_renders`
+> Rollback: `DROP TABLE IF EXISTS public_page_renders`（index も同時に消える）
 > Change log: docs/database/change-log.d/0066_public_page_renders.md
-> Source of truth: `migrations/0066_public_page_renders.sql`, `src/lib/db/schema.ts`
+> Source of truth: `migrations/0066_public_page_renders.sql`, `packages/db/src/schema/base.ts`
 
 ## 目的 (Purpose)
 
@@ -17,6 +17,7 @@
 
 - `public_page_renders` テーブルを追加。
 - 複合主キー `(entity, entity_id)` を持ち、`entity`（'video', 'user', 'event'）、`entity_id`、`requested_at`（更新要求時刻）、`rendered_at`（R2生成完了時刻）を管理。
+- 部分 index `public_page_renders_pending_idx ON public_page_renders (requested_at) WHERE requested_at > rendered_at` を追加。未処理行の回収（`recoverPendingPageRenders`、`LIMIT` 付き）が全件走査しないため。
 - 更新APIは同一トランザクション内で `INSERT ... ON CONFLICT DO UPDATE SET requested_at = excluded.requested_at` を発行する。
 
 ## データ損失 (Data loss)
