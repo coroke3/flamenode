@@ -29,7 +29,7 @@ This file replaces an earlier draft that described MIG-0301..0306 as complete. T
 | Depends on | MIG-0304, MIG-0305, MIG-0306 DONE | **NOT MET** | §1: only U01 (partial) exists; STATUS shows READY |
 | T02 | `test:unit` / `test:integration` counts ≥ the Phase 3 start, with 0 tests deleted | MET for the current heads | Phase 3 start `fe211b2` (parent of MIG-0301): `test:unit` 2514 pass / 0 fail, `test:integration` 55/55. #320 head: `test:unit` 2530/0. #322 head (stacked on #320): `test:unit` 2534/0 (the 4 extra are the checker tests), `test:integration` 55/55. #318 head: 2531/0. #319 head: 2533/0. |
 | T03 | Tier 2 not left BLOCKED/SKIPPED | **NOT MET** | No Tier 2 extraction (video/event/X-user visibility transitions, `computeEditSections.ts`, X merge) has started. MIG-0308 is DONE, so it is no longer blocked, but it is not done. The only exception is an explicit user approval plus a named alternative task. |
-| §3 source | `permissions.ts` placeholder `canEditVideo` neutralised | **NOT MET** | Still exported from `@flamenode/domain` with OR semantics and no caller. MIG-0306 owns the replace-or-retire decision; retiring it needs `APPROVAL=`. |
+| §3 source | `permissions.ts` placeholder `canEditVideo` neutralised | MET | Deleted from `@flamenode/domain` with caller=0 proof and user approval in PR #320; `FILE_MIGRATION_MATRIX.md` updated to RETIRED with `APPROVAL=user-approved-2026-10-18`. |
 | DONE-3 | Independent review APPROVE + human Phase Gate approval on the PR | **NOT MET** | Antigravity's "APPROVE" on #322 is a builder self-review, so it does not count under AGENT_PROTOCOL. The GPT review on #322 was CHANGES_REQUESTED (now addressed). The "independent review APPROVE posted" claims on #318 and #319 have no review comment behind them. New pushes require a fresh independent review on the final heads. |
 
 ### Criteria NOT met (explicit list)
@@ -38,15 +38,13 @@ This file replaces an earlier draft that described MIG-0301..0306 as complete. T
 2. MIG-0305 is not DONE. Missing: the U01 DB-transaction race test for operable owner>=1, U02 event visibility (`src/lib/event/eventVisibilityTransition.ts`, `eventGroupVisibilityTransition.ts`, Tier 2), U03 slot reservation SA-056..068 (`+packages/domain/src/slots/*.ts`), U04 SA-021..034 / SA-038..039, the Final audit, and API_MATRIX.
 3. MIG-0306 is not DONE. Missing: the U01 remainder (approved/manager/owner link policy, duplicate/account-link CAS), U02 X merge/revert (`src/lib/xid/merge.ts`, `mergeSafety.ts`, `mergeBudget.ts`, Tier 2), U03 SA-016..020 / SA-043..055, U04 SA-069..081 / SA-090..106, the Final audit, the action files switched to domain calls, and API_MATRIX.
 4. T03: Tier 2 has not started, and no approved exception exists.
-5. `packages/domain/src/permissions.ts` still exports the placeholder `canEditVideo`; the replace-or-retire decision is open.
-6. There is no valid independent APPROVE on the final heads of #318 / #319 / #320 / #322, and there is no human Phase Gate approval.
-7. `npm run check:event-owners`, `check:x-link-dependencies` and `check:audit-actor-x` read a local D1 database. The first two could not run in the review container, so they still need to run against a real local D1.
+5. There is no valid independent APPROVE on the final heads of #318 / #319 / #320 / #322, and there is no human Phase Gate approval.
+6. `npm run check:event-owners`, `check:x-link-dependencies` and `check:audit-actor-x` read a local D1 database. The first two could not run in the review container, so they still need to run against a real local D1.
 
 Other checks on the #322 head: commit bd6538d was reverted on this branch. It changed shipped code in `software/labels.ts`, `xid/resolution.ts` and the placeholder `permissions.ts` under a test-only subject, which breaks the rule that moved code stays identical. After the revert, `packages/` equals the #320 head. `npm run check:db-schema` OK (31 migrations, 46 tables, 474 columns, 114 indexes, 52 FKs, 43 checks); `npm run check:project-docs` OK; `npm run typecheck` OK.
 
 ## 3. Decisions for the human owner
 
-1. **Merge #318/#319/#320 as partial U01 steps, or require U02..U04 first?** Merging them as partial steps is safe for behaviour: the bridges are re-export only, behaviour is unchanged, and the tests prove identity. But the MIGs must stay IN_PROGRESS, not DONE.
+1. **Merge #318/#319/#320 as partial U01 steps, or require U02..U04 first?** (User Decision 2026-10-18: Proceed with Strategy A — merge as partial U01 steps under IN_PROGRESS, then implement U02 Tier 2 in follow-up tasks).
 2. **Tier 2 (T03):** schedule the Tier 2 extraction now that MIG-0308 is DONE, or approve an explicit exception that names the alternative task(s).
-3. **`packages/domain/src/permissions.ts`:** replace it with the real policy (MIG-0306), or retire it (`APPROVAL=` required).
-4. **Phase 3 Gate:** it can be approved only after 1–3 are resolved and MIG-0304/0305/0306 are DONE with independent reviews.
+3. **Phase 3 Gate:** it can be approved only after Tier 2 and U02..U04 of MIG-0304/0305/0306 are DONE on main with independent reviews.
