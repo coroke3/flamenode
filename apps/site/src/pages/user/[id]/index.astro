@@ -30,9 +30,24 @@ const description = user.bio ?? user.description ?? "";
 const creatorData: CreatorProfileData = {
   id: user.id,
   name: user.name ?? user.title,
-  handle: user.handle,
-  avatarUrl: user.avatarUrl,
-  bio: user.bio,
+  iconUrl: user.avatarUrl ?? null,
+  profileText: user.bio ?? null,
+  works: {
+    items: [],
+    total: 0,
+    currentPage: 1,
+    totalPages: 1,
+    pageSize: 10,
+    buildHref: (p) => `/user/${user.id}?page=${p}`,
+  },
+  collabs: {
+    items: [],
+    total: 0,
+    currentPage: 1,
+    totalPages: 1,
+    pageSize: 10,
+    buildHref: (p) => `/user/${user.id}?tab=collab&page=${p}`,
+  },
 };
 ---
 <!doctype html>

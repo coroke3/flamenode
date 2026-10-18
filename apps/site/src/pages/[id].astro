@@ -30,13 +30,16 @@ const description = video.description ?? "";
 const videoData: VideoDetailData = {
   id: video.id,
   title: video.title,
-  creatorName: video.creatorName ?? "FlameNode Creator",
-  creatorHandle: video.creatorHandle,
-  creatorAvatarUrl: video.creatorAvatarUrl,
-  thumbnailUrl: video.thumbnailUrl,
-  publishedAt: video.publishedAt,
-  youtubeVideoId: video.youtubeVideoId,
-  introComment: video.description,
+  creator: {
+    name: video.creatorName ?? "FlameNode Creator",
+    xUserId: video.creatorHandle ? video.creatorHandle.replace(/^@/, "") : null,
+    iconUrl: video.creatorAvatarUrl ?? null,
+    profileHref: video.creatorHandle ? `/user/${video.creatorHandle.replace(/^@/, "")}` : null,
+  },
+  publishedLabel: video.publishedAt ? new Date(video.publishedAt).toLocaleDateString("ja-JP") : null,
+  thumbnailUrl: video.thumbnailUrl ?? null,
+  hasYoutube: Boolean(video.youtubeVideoId),
+  introComment: video.description ?? null,
 };
 ---
 <!doctype html>
