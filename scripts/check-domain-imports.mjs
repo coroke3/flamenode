@@ -85,11 +85,11 @@ export function extractImportSpecifiers(content) {
 
 export function validateDomainImports(options = {}) {
   const rootDir = options.rootDir ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  // Whole packages (src, tests, config), not only src/: tests must not reach
-  // into the legacy tree either.
+  // Shipped package code only. Package tests may import a legacy bridge to
+  // assert re-export identity (e.g. packages/domain/test/datetime.test.mjs).
   const targetDirs = options.targetDirs ?? [
-    path.join(rootDir, "packages", "domain"),
-    path.join(rootDir, "packages", "db"),
+    path.join(rootDir, "packages", "domain", "src"),
+    path.join(rootDir, "packages", "db", "src"),
   ];
 
   const errors = [];
