@@ -29,7 +29,7 @@ import { renderPublicPage, type PageRenderEntityKind, type PublicPageRow } from 
 import { canonicalEntityId, revocationKey, routeKeyFromPath } from "./routeShards.ts";
 import type { RouteLookup } from "./visibility.ts";
 
-export const MAX_PAGE_RENDERS_PER_INVOCATION = 1;
+const MAX_PAGE_RENDERS_PER_INVOCATION = 1;
 export const MAX_RECOVERY_DOORBELLS = 5;
 
 export interface PageRenderR2Bucket {
