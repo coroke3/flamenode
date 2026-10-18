@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, asc, desc, eq } from "drizzle-orm";
-import { z } from "zod";
 import { snapshotFromEvent } from "@/lib/admin/eventTemplateSettings";
 import { eventCustomQuestions, eventTemplates, events } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -14,17 +13,13 @@ import { createTraceId } from "@/lib/observability/flowTrace";
 import { loadStagePermissionFormSettingsJson } from "@/lib/video/stagePermissionQuestions";
 import { generateId } from "@/lib/utils/id";
 
-export interface EventTemplateActionResult {
-  ok: boolean;
-  message?: string;
-  templateId?: string;
-}
+import {
+  type EventTemplateActionResult,
+  validateDeleteEventTemplateId,
+  validateSaveEventTemplateInput,
+} from "@flamenode/domain/eventTemplates";
 
-const saveSchema = z.object({
-  event_id: z.string().trim().min(1).max(64),
-  name: z.string().trim().min(1).max(120),
-  description: z.string().trim().max(500).optional().nullable(),
-});
+export type { EventTemplateActionResult };
 
 function eventTemplateMutationError(
   error: unknown,
@@ -59,13 +54,11 @@ export async function saveEventAsTemplate(
   const guard = await requireAdminWrite("admin_event_templates");
   if (!guard.ok) return { ok: false, message: guard.message };
 
-  const parsed = saveSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return {
-      ok: false,
-      message: parsed.error.issues[0]?.message ?? "入力エラー",
-    };
+  const validated = validateSaveEventTemplateInput(Object.fromEntries(formData));
+  if (!validated.ok) {
+    return { ok: false, message: validated.message };
   }
+  const { data } = validated;
 
   const { db } = guard;
   const id = generateId("etmpl");
@@ -76,7 +69,7 @@ export async function saveEventAsTemplate(
       await db
         .select()
         .from(events)
-        .where(eq(events.id, parsed.data.event_id))
+        .where(eq(events.id, data.event_id))
         .limit(1)
     )[0];
     if (!event) {
@@ -113,8 +106,8 @@ export async function saveEventAsTemplate(
     const now = Math.floor(Date.now() / 1000);
     const after: typeof eventTemplates.$inferSelect = {
       id,
-      name: parsed.data.name,
-      description: parsed.data.description?.trim() || null,
+      name: data.name,
+      description: data.description ?? null,
       source_event_id: event.id,
       settings_json: JSON.stringify(snapshot),
       created_by_user_id: guard.user.id,
@@ -144,10 +137,11 @@ export async function deleteEventTemplate(
   const guard = await requireAdminWrite("admin_event_templates");
   if (!guard.ok) return { ok: false, message: guard.message };
 
-  const templateId = String(formData.get("template_id") ?? "").trim();
-  if (!templateId) {
-    return { ok: false, message: "template_id が必要です。" };
+  const validated = validateDeleteEventTemplateId(formData.get("template_id") as string);
+  if (!validated.ok) {
+    return { ok: false, message: validated.message };
   }
+  const templateId = validated.templateId;
 
   const { db } = guard;
 
