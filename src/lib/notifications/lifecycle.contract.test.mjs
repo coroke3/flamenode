@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const statusSource = await readFile(new URL("./status.ts", import.meta.url), "utf8");
+// MIG-0306 U03: status.ts is a re-export bridge of the domain package.
+const statusSource = await readFile(
+  new URL("../../../packages/domain/src/admin/notificationOutbox.ts", import.meta.url),
+  "utf8",
+);
 const displaySource = await readFile(new URL("./display.ts", import.meta.url), "utf8");
 const adminActionSource = await readFile(
   new URL("../actions/notification-admin.ts", import.meta.url),

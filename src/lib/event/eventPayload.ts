@@ -11,6 +11,7 @@ import {
   type EventFormData,
 } from "@/lib/event/eventForm";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
+import type { EventEditPermissions } from "@flamenode/domain/event";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
@@ -18,12 +19,7 @@ export function parseDateInput(raw: string | null | undefined): number | null {
   return parseJstDatetimeLocal(raw);
 }
 
-export interface EventEditPermissions {
-  basic: boolean;
-  publish: boolean;
-  questions: boolean;
-  slots: boolean;
-}
+export type { EventEditPermissions } from "@flamenode/domain/event";
 
 export function buildEventUpdatePayload(args: {
   data: EventFormData;

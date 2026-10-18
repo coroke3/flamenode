@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { z } from "zod";
 import { and, eq, gt } from "drizzle-orm";
 import { termsVersions, users } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
@@ -19,6 +18,12 @@ import {
   termsReacceptRequiredCondition,
 } from "@/lib/terms/reaccept";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
+import {
+  decideTermsPublish,
+  nextTermsPublishedAt,
+  parseTermsDraftInput,
+  parseTermsReacceptBroadcastInput,
+} from "@flamenode/domain/admin";
 import { createTraceId } from "@/lib/observability/flowTrace";
 
 export interface RulesResult extends PendingPublicReflection {
@@ -29,15 +34,7 @@ export interface RulesResult extends PendingPublicReflection {
 export interface RulesBroadcastResult extends RulesResult { enqueued?: number; cursor?: string; warning?: string }
 
 const TERMS_REACCEPT_BATCH_SIZE = 30;
-const TERMS_REACCEPT_MAX_CONTENT_LEN = 1000;
 type TermsRow = typeof termsVersions.$inferSelect;
-
-const draftSchema = z.object({
-  id: z.string().trim().optional(),
-  version_label: z.string().trim().min(1).max(80),
-  body_markdown: z.string().trim().min(1).max(40000),
-  severity: z.enum(["minor", "major"]).default("minor"),
-});
 
 function snapshot(row: object): Record<string, unknown> { return { ...row }; }
 function mutationError(error: unknown): RulesResult {
@@ -62,9 +59,9 @@ async function runRulesPostCommit(
 export async function createTermsVersion(formData: FormData): Promise<RulesResult> {
   const guard = await requireAdminWrite("admin_terms_create");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = draftSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  const d = parsed.data;
+  const parsed = parseTermsDraftInput(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
+  const d = parsed.draft;
   const id = d.id?.trim() || generateId("tv");
   const { db } = guard;
   const now = Math.floor(Date.now() / 1000);
@@ -89,9 +86,9 @@ export async function createTermsVersion(formData: FormData): Promise<RulesResul
 export async function updateTermsVersion(formData: FormData): Promise<RulesResult> {
   const guard = await requireAdminWrite("admin_terms_update");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = draftSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  const d = parsed.data;
+  const parsed = parseTermsDraftInput(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
+  const d = parsed.draft;
   if (!d.id) return { ok: false, message: "id が必要です。" };
   const { db } = guard;
   const before = (await db.select().from(termsVersions).where(eq(termsVersions.id, d.id)).limit(1))[0];
@@ -127,16 +124,13 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
   const { db } = guard;
   const target = (await db.select().from(termsVersions).where(eq(termsVersions.id, id)).limit(1))[0];
   if (!target) return { ok: false, message: "対象が見つかりません。" };
-  if (target.status === "archived") return { ok: false, message: "アーカイブ済みの規約は再公開できません。" };
-  if (target.status === "published") return { ok: true, id };
+  const decision = decideTermsPublish(target.status);
+  if (decision.kind === "rejected") return { ok: false, message: decision.message };
+  if (decision.kind === "already_published") return { ok: true, id };
   const published = await db.select().from(termsVersions).where(eq(termsVersions.status, "published")).limit(2);
   if (published.length > 1) return { ok: false, message: "公開中の規約が複数存在するため処理を停止しました。" };
   const current = published[0];
-  // 秒精度でも公開順序が曖昧にならないよう、公開時刻を単調増加させる。
-  const now = Math.max(
-    Math.floor(Date.now() / 1000),
-    (current?.published_at ?? 0) + 1,
-  );
+  const now = nextTermsPublishedAt(Math.floor(Date.now() / 1000), current?.published_at);
   const statements = [];
   const expected: number[] = [];
   const audits = [];
@@ -181,13 +175,14 @@ export async function publishTermsVersion(formData: FormData): Promise<RulesResu
 export async function broadcastTermsReaccept(formData: FormData): Promise<RulesBroadcastResult> {
   const guard = await requireAdminWrite("admin_terms_broadcast");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const termsId = String(formData.get("terms_id") ?? "").trim();
-  const confirm = String(formData.get("confirm") ?? "").trim();
-  const cursor = String(formData.get("cursor") ?? "").trim();
-  if (!termsId) return { ok: false, message: "terms_id が必要です。" };
-  if (confirm !== "TERMS") return { ok: false, message: "確認文字列 'TERMS' が一致しません。" };
-  if (cursor.length > 128) return { ok: false, message: "cursor が長すぎます。" };
-  const content = String(formData.get("content") ?? "").trim().slice(0, TERMS_REACCEPT_MAX_CONTENT_LEN);
+  const input = parseTermsReacceptBroadcastInput({
+    termsId: formData.get("terms_id"),
+    confirm: formData.get("confirm"),
+    cursor: formData.get("cursor"),
+    content: formData.get("content"),
+  });
+  if (!input.ok) return input;
+  const { termsId, cursor, content } = input;
   const { db } = guard;
   const target = (await db.select().from(termsVersions).where(eq(termsVersions.id, termsId)).limit(1))[0];
   if (!target || target.status !== "published") return { ok: false, message: "公開中の規約だけ通知できます。" };

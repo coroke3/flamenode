@@ -16,9 +16,12 @@ import {
   buildNotificationOutboxStatement,
 } from "@/lib/notifications/enqueue";
 import {
+  decideNotificationCancel,
   isTerminalNotificationFailure,
+  notificationCancelPatch,
+  notificationRetryPatch,
   TERMINAL_NOTIFICATION_FAILURE_STATUSES,
-} from "@/lib/notifications/status";
+} from "@flamenode/domain/admin";
 
 export interface NotificationAdminResult {
   ok: boolean;
@@ -68,25 +71,8 @@ async function updateRows(
   for (const before of rows) {
     const patch =
       kind === "retry"
-        ? {
-            status: "pending" as const,
-            attempt_count: 0,
-            processing_started_at: null,
-            lease_token: null,
-            lease_expires_at: null,
-            next_attempt_at: now,
-            last_error: null,
-            processed_at: null,
-          }
-        : {
-            status: "cancelled" as const,
-            processing_started_at: null,
-            lease_token: null,
-            lease_expires_at: null,
-            next_attempt_at: null,
-            last_error: reason || "manual cancel",
-            processed_at: now,
-          };
+        ? notificationRetryPatch(now)
+        : notificationCancelPatch(now, reason);
     const after = { ...before, ...patch };
 
     statements.push(
@@ -168,19 +154,10 @@ export async function cancelNotification(
     await db.select().from(notificationOutbox).where(eq(notificationOutbox.id, id)).limit(1)
   )[0];
   if (!row) return { ok: false, message: "通知が見つかりません。" };
-  if (row.status === "sent" || row.status === "cancelled") {
-    // 再送安全: 既に終端なら成功扱い
-    return { ok: true, message: `既に${row.status}です。` };
-  }
-
-  if (row.status === "processing") {
-    // A dispatcher can be between lease claim and the Discord request. Do
-    // not report cancelled while that in-flight delivery can still succeed.
-    return {
-      ok: false,
-      message: "配送中の通知はキャンセルできません。配送完了後に再度お試しください。",
-    };
-  }
+  const decision = decideNotificationCancel(row.status);
+  // 再送安全: 既に終端なら成功扱い。配送中は成功し得るためキャンセル扱いにしない。
+  if (decision.kind === "already_terminal") return { ok: true, message: decision.message };
+  if (decision.kind === "in_flight") return { ok: false, message: decision.message };
 
   const result = await updateRows(db, [row], guard.user.id, "cancel", reason);
   if (result.ok) await revalidateNotificationPagesBestEffort();
