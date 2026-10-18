@@ -8,6 +8,8 @@
 import type { RouteResolution } from "../lib/routeMap.ts";
 import { loadR2PrebuiltHtml, type R2HtmlBucket, type RebuildQueue, type ServeDecision } from "./r2Html.ts";
 import {
+  FIXED_PUBLIC_PAGES,
+  fixedPublicPath,
   parseRouteShard,
   revocationKey,
   shardAssetPath,
@@ -174,7 +176,23 @@ export default {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return textResponse(405, "Method Not Allowed", { Allow: "GET, HEAD" });
     }
-    if (!env.ASSETS || !env.VISIBILITY_KV) return unavailable();
+    if (!env.ASSETS) return unavailable();
+
+    // Fixed public pages and build assets: an exact allowlist, no route data or KV.
+    const fixed = fixedPublicPath(path);
+    if (fixed) {
+      // Pages in directory form, as servePage does: with the default html_handling
+      // `/about` would otherwise answer a redirect instead of the page.
+      const target = FIXED_PUBLIC_PAGES.has(fixed) && fixed !== "/"
+        ? new Request(new URL(`${fixed}/`, url.origin), { method: request.method, headers: request.headers })
+        : request;
+      try {
+        return await env.ASSETS.fetch(target);
+      } catch {
+        return unavailable();
+      }
+    }
+    if (!env.VISIBILITY_KV) return unavailable();
 
     let decision: GatewayDecision;
     try {
@@ -194,7 +212,8 @@ export default {
           headers: {
             // Keep the query, as CURRENT Next redirects do (e.g. `?tab=works`).
             Location: decision.targetPath + url.search,
-            "Cache-Control": "public, max-age=300",
+            // The target may be unpublished at any time; never let a cache keep it.
+            "Cache-Control": NO_STORE,
           },
         });
       case "deny":
