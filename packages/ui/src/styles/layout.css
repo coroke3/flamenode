@@ -1,0 +1,61 @@
+/*
+ * Public header / footer / mobile menu (MIG-0203).
+ * Ported from the registered mock docs/migration/mock/source/fn.css
+ * ("public header v2", hd-burger/hd-menu, pub-foot, the 641–860px search rule).
+ * Uses only tokens.css variables.
+ */
+.hd2{position:sticky;top:0;z-index:20;background:var(--bg);color:var(--ink);font-family:var(--font-sans)}
+.hd2 a{color:inherit;text-decoration:none}
+.hd-bar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:24px;min-height:64px;padding:0 32px}
+.hd-logo{display:inline-flex;align-items:center;font:700 18px/24px var(--font-display)}
+.hd-nav{display:flex;gap:4px}
+.hd-nav a{padding:20px 14px;font-size:15px;color:var(--ink-muted);transition:color .15s}
+.hd-nav a:hover{color:var(--ink)}
+.hd-nav a[aria-current="page"]{color:var(--ink);background:var(--surface-subtle)}
+.hd-right{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.hd-theme,.hd-account{display:flex;align-items:center}
+.hd-search{display:flex;align-items:center;gap:8px;width:220px;height:36px;margin:0;padding:0 10px;background:var(--surface-subtle);color:var(--ink-muted);transition:width .2s}
+.hd-search input{flex:1;min-width:0;border:0;background:transparent;color:var(--ink);font:400 13px/20px var(--font-sans)}
+.hd-search input:focus{outline:none}
+.hd-search:focus-within{width:360px;background:var(--surface-active)}
+.hd2 .ib{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;color:var(--ink-muted);background:transparent;border:0;border-radius:50%;cursor:pointer}
+.hd2 .ib:hover,.hd2 .ib.on{color:var(--ink);background:var(--surface-subtle)}
+.hd2 :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.hd-search-ic,.hd-burger,.hd-menu,.hd-menu-scrim{display:none}
+.hd2 svg{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.fn-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media (max-width:1023px){.hd-bar{grid-template-columns:auto minmax(0,1fr) auto;padding:0 20px}.hd-search{width:180px}}
+@media (min-width:641px) and (max-width:860px){
+  .hd-search{display:none}
+  .hd-search-ic{display:inline-flex}
+  .hd2.open-search .hd-search{display:flex;position:absolute;left:0;right:0;top:0;width:auto;height:100%;margin:0;padding:0 20px;z-index:31;background:var(--bg)}
+}
+@media (max-width:640px){
+  .hd2{position:fixed;left:0;right:0;top:0;z-index:28}
+  .hd-bar{grid-template-columns:auto 1fr auto;min-height:52px;padding:0 12px;gap:8px}
+  .hd-nav,.hd-search{display:none}
+  .hd-search-ic,.hd-burger{display:inline-flex}
+  .hd2.open-search .hd-search{display:flex;position:absolute;left:0;right:0;top:0;width:auto;height:52px;z-index:31;background:var(--bg)}
+  .hd-menu{display:flex;flex-direction:column;position:fixed;left:0;right:0;top:52px;z-index:30;padding:4px 0 calc(20px + env(safe-area-inset-bottom));background:var(--bg)}
+  .hd-menu:focus-visible{outline:0}
+  .hd-menu .hm-main{display:flex;flex-direction:column;padding:4px 0 8px}
+  .hd-menu .hm-main a{display:flex;align-items:center;min-height:60px;padding:0 20px;font:400 24px/32px var(--font-sans);letter-spacing:.01em;color:var(--ink)}
+  .hd-menu .hm-main a[aria-current="page"]{background:var(--surface-subtle)}
+  .hd-menu .hm-me{display:flex;flex-direction:column;margin-top:28px;padding-top:20px;box-shadow:inset 0 1px 0 var(--surface-active)}
+  .hd-menu-scrim{display:block;position:fixed;inset:52px 0 0;z-index:29;background:rgba(0,0,0,.5)}
+}
+@media (min-width:641px){.hd-menu,.hd-menu-scrim{display:none}}
+
+.pub-foot{display:flex;flex-wrap:wrap;gap:48px 96px;padding:64px 40px 48px;background:var(--surface-raised);color:var(--ink);font:400 14px/22px var(--font-sans)}
+.pub-foot a{color:inherit;text-decoration:none}
+.pub-foot a:hover{text-decoration:underline}
+.pub-foot-brand{display:flex;flex-direction:column;gap:16px;flex:1 1 240px}
+.pub-foot-logo{font:700 18px/24px var(--font-display);align-self:flex-start}
+.pub-foot-copy{color:var(--ink-muted);font-size:13px}
+.pub-foot nav{display:flex;flex-direction:column;gap:10px;min-width:160px}
+@media (max-width:640px){
+  .pub-foot{padding:40px 16px 32px;gap:24px 40px;font-size:12px;line-height:18px}
+  .pub-foot nav{gap:8px;min-width:120px}
+  .pub-foot nav a{color:var(--ink-muted)}
+  .pub-foot-copy{font-size:12px}
+}
