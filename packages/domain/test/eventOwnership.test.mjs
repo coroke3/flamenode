@@ -9,9 +9,9 @@ import {
   isActorTargetingSelf,
   assertSelfChangeConfirmation,
   assertOwnershipTransferInput,
-  isCanonicalXId,
   LAST_OWNER_ERROR,
 } from "@flamenode/domain/event";
+import { isCanonicalXId } from "@flamenode/domain/xid";
 
 test("isCanonicalXId validates X handle formats", () => {
   assert.equal(isCanonicalXId("valid_user_123"), true);

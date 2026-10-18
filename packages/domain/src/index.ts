@@ -7,3 +7,4 @@ export * from "./apiEndpoints/index.ts";
 export * from "./eventTemplates/index.ts";
 export * from "./video/index.ts";
 export * from "./event/index.ts";
+export * from "./xid/index.ts";

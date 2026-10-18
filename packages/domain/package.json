@@ -12,7 +12,8 @@
     "./apiEndpoints": "./src/apiEndpoints/index.ts",
     "./eventTemplates": "./src/eventTemplates/index.ts",
     "./video": "./src/video/index.ts",
-    "./event": "./src/event/index.ts"
+    "./event": "./src/event/index.ts",
+    "./xid": "./src/xid/index.ts"
   },
   "scripts": {
     "build": "tsc",

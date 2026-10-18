@@ -1,9 +1,4 @@
-const X_HANDLE_RE = /^[a-z0-9_]{1,20}$/;
-
-/** Return true only for a canonical, persistable X handle. */
-export function isCanonicalXId(value: string | null | undefined): value is string {
-  return typeof value === "string" && X_HANDLE_RE.test(value);
-}
+import { isCanonicalXId } from "../xid/format.ts";
 
 export type EventStaffPreset =
   | "owner"
