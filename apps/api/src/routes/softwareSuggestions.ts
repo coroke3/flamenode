@@ -37,11 +37,18 @@ function checkRateLimit(request: Request): Response | null {
   });
 }
 
-function parseBoundedPositiveInt(value: string | null | undefined, fallback: number, max: number): number {
+function parseBoundedPositiveInt(
+  value: string | null | undefined,
+  fallback: number,
+  min = 1,
+  max = 50,
+): number {
   if (!value) return fallback;
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed) || parsed < 1) return fallback;
-  return Math.min(parsed, max);
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
 }
 
 async function bodyEtag(body: string): Promise<string> {
@@ -72,6 +79,7 @@ softwareSuggestionsRoutes.get("/", async (c) => {
   const limit = parseBoundedPositiveInt(
     url.searchParams.get("limit"),
     DEFAULT_SOFTWARE_SUGGESTION_LIMIT,
+    1,
     MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
   );
 

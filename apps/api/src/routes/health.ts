@@ -103,6 +103,9 @@ healthRoutes.get("/deep", async (c) => {
     checks.r2 = "degraded";
   }
 
+  const rawGuardMode = c.env?.PUBLIC_VISIBILITY_GUARD_MODE?.trim()?.toLowerCase();
+  const guardMode = rawGuardMode === "enforce" || rawGuardMode === "observe" ? rawGuardMode : "off";
+
   const isDegraded = Object.values(checks).some((v) => v === "degraded");
 
   return c.json(
@@ -112,6 +115,7 @@ healthRoutes.get("/deep", async (c) => {
       service: "flamenode-web",
       commit,
       checks,
+      public_visibility_guard_mode: guardMode,
     },
     200,
     { "Cache-Control": "no-store" },

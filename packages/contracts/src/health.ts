@@ -28,13 +28,16 @@ export const DeepHealthChecksSchema = z.object({
   public_visibility: DeepHealthStatusSchema,
 });
 
+export const PublicVisibilityGuardModeSchema = z.enum(["off", "observe", "enforce"]);
+export type PublicVisibilityGuardMode = z.infer<typeof PublicVisibilityGuardModeSchema>;
+
 export const DeepHealthResultSchema = z.object({
   ok: z.boolean(),
   status: DeepHealthStatusSchema,
   service: z.literal("flamenode-web"),
   commit: z.string(),
   checks: DeepHealthChecksSchema,
-  public_visibility_guard_mode: z.enum(["enforce", "monitor"]).optional(),
+  public_visibility_guard_mode: PublicVisibilityGuardModeSchema.optional(),
   public_visibility_stuck_fence_candidates: z.number().optional(),
 });
 

@@ -18,6 +18,14 @@ function unavailable(c: { json: (data: unknown, status: any, headers: Record<str
   return c.json({ stats: null }, 503, UNAVAILABLE_HEADERS as unknown as Record<string, string>);
 }
 
+function cancelR2BodyBestEffort(object: { body?: ReadableStream | null } | null | undefined): void {
+  try {
+    object?.body?.cancel()?.catch(() => undefined);
+  } catch {
+    // Ignore best-effort cancellation error
+  }
+}
+
 function parseTopStatsJson(data: unknown) {
   if (!data || typeof data !== "object") return null;
   const obj = data as Record<string, unknown>;
@@ -66,12 +74,16 @@ publicAboutStatsRoutes.get("/", async (c) => {
       object.size < 0 ||
       object.size > MAX_STATS_BYTES
     ) {
+      cancelR2BodyBestEffort(object);
       return unavailable(c);
     }
 
     const json = await object.json<unknown>();
     const stats = parseTopStatsJson(json);
-    if (!stats) return unavailable(c);
+    if (!stats) {
+      cancelR2BodyBestEffort(object);
+      return unavailable(c);
+    }
 
     const response = c.json(
       { stats },

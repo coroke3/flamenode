@@ -150,3 +150,15 @@ test("GET /api/software/suggestions returns 304 on matching If-None-Match", asyn
   );
   assert.equal(res2.status, 304);
 });
+
+test("GET /api/software/suggestions clamps limit within [1, 50]", async () => {
+  const fakeDb = createTestD1();
+  const resClampedMin = await app.request(
+    "/api/software/suggestions?limit=0",
+    { method: "GET" },
+    { DB: fakeDb },
+  );
+  assert.equal(resClampedMin.status, 200);
+  const dataMin = await resClampedMin.json();
+  assert.equal(dataMin.length, 1);
+});

@@ -144,4 +144,21 @@ test("GET /api/health/deep returns health check status with valid token", async 
   assert.equal(data.checks.d1, "ok");
   assert.equal(data.checks.kv, "ok");
   assert.equal(data.checks.r2, "ok");
+  assert.equal(data.public_visibility_guard_mode, "off");
+
+  // With explicit PUBLIC_VISIBILITY_GUARD_MODE
+  const resObserve = await app.request(
+    "/api/health/deep",
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminToken}` },
+    },
+    {
+      WORKER_ADMIN_TOKEN: adminToken,
+      BUILD_COMMIT_SHA: commit,
+      PUBLIC_VISIBILITY_GUARD_MODE: "observe",
+    },
+  );
+  const dataObserve = await resObserve.json();
+  assert.equal(dataObserve.public_visibility_guard_mode, "observe");
 });
