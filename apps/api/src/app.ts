@@ -6,10 +6,7 @@ import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 
 export const app = new Hono<AppEnv>();
 
-// Register routes
+// URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
-
-// Fallback without /api prefix for health probe compatibility
-app.route("/health", healthRoutes);

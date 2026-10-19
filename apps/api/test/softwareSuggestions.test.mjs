@@ -151,14 +151,13 @@ test("GET /api/software/suggestions returns 304 on matching If-None-Match", asyn
   assert.equal(res2.status, 304);
 });
 
-test("GET /api/software/suggestions clamps limit within [1, 50]", async () => {
+test("GET /api/software/suggestions treats limit=0 as the default and negative as 1 (CURRENT)", async () => {
   const fakeDb = createTestD1();
-  const resClampedMin = await app.request(
-    "/api/software/suggestions?limit=0",
-    { method: "GET" },
-    { DB: fakeDb },
-  );
-  assert.equal(resClampedMin.status, 200);
-  const dataMin = await resClampedMin.json();
-  assert.equal(dataMin.length, 1);
+  const resZero = await app.request("/api/software/suggestions?limit=0", { method: "GET" }, { DB: fakeDb });
+  assert.equal(resZero.status, 200);
+  assert.equal((await resZero.json()).length, 3);
+
+  const resNegative = await app.request("/api/software/suggestions?limit=-5", { method: "GET" }, { DB: fakeDb });
+  assert.equal(resNegative.status, 200);
+  assert.equal((await resNegative.json()).length, 1);
 });

@@ -48,19 +48,9 @@ test("GET /api/health returns 503 when BUILD_COMMIT_SHA is missing or invalid", 
   });
 });
 
-test("GET /health (fallback without /api) behaves identically to /api/health", async () => {
-  const commit = "b".repeat(40);
-  const res = await app.request(
-    "/health",
-    { method: "GET" },
-    { BUILD_COMMIT_SHA: commit },
-  );
-
-  assert.equal(res.status, 200);
-  assert.equal(res.headers.get("Cache-Control"), "no-store");
-  const data = await res.json();
-  assert.equal(data.ok, true);
-  assert.equal(data.commit, commit);
+test("GET /health (no /api prefix) is not routed: URL set matches CURRENT", async () => {
+  const res = await app.request("/health", { method: "GET" }, { BUILD_COMMIT_SHA: "b".repeat(40) });
+  assert.equal(res.status, 404);
 });
 
 test("GET /api/health/deep rejects unauthorized or missing tokens", async () => {
@@ -103,62 +93,14 @@ test("GET /api/health/deep rejects unauthorized or missing tokens", async () => 
   assert.equal(res4.status, 401);
 });
 
-test("GET /api/health/deep returns health check status with valid token", async () => {
+test("GET /api/health/deep with a valid token fails closed until the CURRENT checks are ported", async () => {
   const adminToken = "secret-admin-token-12345";
-  const commit = "c".repeat(40);
-
-  const fakeDb = {
-    prepare: (_sql) => ({
-      first: async () => ({ "?": 1 }),
-    }),
-  };
-  const fakeKv = {
-    get: async (_key) => null,
-  };
-  const fakeBucket = {
-    head: async (_key) => null,
-  };
-
   const res = await app.request(
     "/api/health/deep",
-    {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminToken}` },
-    },
-    {
-      WORKER_ADMIN_TOKEN: adminToken,
-      BUILD_COMMIT_SHA: commit,
-      DB: fakeDb,
-      KV: fakeKv,
-      BUCKET: fakeBucket,
-    },
+    { method: "GET", headers: { Authorization: `Bearer ${adminToken}` } },
+    { WORKER_ADMIN_TOKEN: adminToken, BUILD_COMMIT_SHA: "c".repeat(40) },
   );
-
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 503);
   assert.equal(res.headers.get("Cache-Control"), "no-store");
-  const data = await res.json();
-  assert.equal(data.ok, true);
-  assert.equal(data.status, "ok");
-  assert.equal(data.service, "flamenode-web");
-  assert.equal(data.commit, commit);
-  assert.equal(data.checks.d1, "ok");
-  assert.equal(data.checks.kv, "ok");
-  assert.equal(data.checks.r2, "ok");
-  assert.equal(data.public_visibility_guard_mode, "off");
-
-  // With explicit PUBLIC_VISIBILITY_GUARD_MODE
-  const resObserve = await app.request(
-    "/api/health/deep",
-    {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminToken}` },
-    },
-    {
-      WORKER_ADMIN_TOKEN: adminToken,
-      BUILD_COMMIT_SHA: commit,
-      PUBLIC_VISIBILITY_GUARD_MODE: "observe",
-    },
-  );
-  const dataObserve = await resObserve.json();
-  assert.equal(dataObserve.public_visibility_guard_mode, "observe");
+  assert.deepEqual(await res.json(), { ok: false, service: "flamenode-web" });
 });

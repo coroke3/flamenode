@@ -5,50 +5,70 @@ import {
   normalizeSoftwareKey,
 } from "@flamenode/domain/software/labels";
 
+// CURRENT: app/api/software/suggestions/route.ts + src/lib/api/publicApi.ts
+// (rate limit, limit parsing, ETag/304, 503) + src/lib/api/publicDto.ts
+// (active-only DTO allowlist). D1: at most 2 bounded reads per request.
 const DEFAULT_SOFTWARE_SUGGESTION_LIMIT = 20;
 const MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT = 50;
 const MAX_QUERY_LENGTH = 64;
+const RATE_LIMIT_ENDPOINT = "/api/software/suggestions";
+const CACHE_CONTROL = "public, max-age=60, s-maxage=120, stale-while-revalidate=300";
 
-// Rate limiting state (best-effort isolate-level)
+// Isolate-level best-effort fixed window, same limits as CURRENT. The key
+// count is capped so a spray of client IPs cannot grow isolate memory.
 const RATE_LIMIT_WINDOW_SECONDS = 60;
 const RATE_LIMIT_MAX_REQUESTS = 60;
-const rateLimitBuckets = new Map<string, { windowStart: number; count: number }>();
+const MAX_RATE_LIMIT_KEYS = 2048;
+type RateLimitBucket = { windowStart: number; count: number };
+const rateLimitBuckets = new Map<string, RateLimitBucket>();
+let nextRateLimitCleanupAt = 0;
 
-function checkRateLimit(request: Request): Response | null {
-  const ip = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown";
-  const now = Math.floor(Date.now() / 1000);
-  const key = `suggestions:${ip.slice(0, 128)}`;
-
-  let bucket = rateLimitBuckets.get(key);
-  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_SECONDS) {
-    bucket = { windowStart: now, count: 0 };
-    rateLimitBuckets.set(key, bucket);
-  }
-  bucket.count += 1;
-  if (bucket.count <= RATE_LIMIT_MAX_REQUESTS) return null;
-
+function rateLimitedResponse(retryAfter: number): Response {
   return new Response(JSON.stringify({ error: "rate_limited" }), {
     status: 429,
     headers: {
       "Content-Type": "application/json",
-      "Retry-After": String(Math.max(1, RATE_LIMIT_WINDOW_SECONDS - (now - bucket.windowStart))),
+      "Retry-After": String(retryAfter),
       "Cache-Control": "no-store",
     },
   });
 }
 
-function parseBoundedPositiveInt(
-  value: string | null | undefined,
-  fallback: number,
-  min = 1,
-  max = 50,
-): number {
-  if (!value) return fallback;
-  const n = parseInt(value, 10);
-  if (Number.isNaN(n)) return fallback;
-  if (n < min) return min;
-  if (n > max) return max;
-  return n;
+function checkRateLimit(request: Request, now = Math.floor(Date.now() / 1000)): Response | null {
+  if (now >= nextRateLimitCleanupAt) {
+    nextRateLimitCleanupAt = now + RATE_LIMIT_WINDOW_SECONDS;
+    for (const [key, bucket] of rateLimitBuckets) {
+      if (now - bucket.windowStart >= RATE_LIMIT_WINDOW_SECONDS) rateLimitBuckets.delete(key);
+    }
+  }
+  const connectingIp = request.headers.get("CF-Connecting-IP")?.trim();
+  const forwarded = request.headers.get("X-Forwarded-For")?.split(",", 1)[0]?.trim();
+  const key = `${RATE_LIMIT_ENDPOINT}:${(connectingIp || forwarded || "unknown").slice(0, 128)}`;
+
+  let bucket = rateLimitBuckets.get(key);
+  if (!bucket || now - bucket.windowStart >= RATE_LIMIT_WINDOW_SECONDS) {
+    if (!bucket && rateLimitBuckets.size >= MAX_RATE_LIMIT_KEYS) {
+      return rateLimitedResponse(RATE_LIMIT_WINDOW_SECONDS);
+    }
+    bucket = { windowStart: now, count: 0 };
+    rateLimitBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count <= RATE_LIMIT_MAX_REQUESTS) return null;
+  return rateLimitedResponse(Math.max(1, RATE_LIMIT_WINDOW_SECONDS - (now - bucket.windowStart)));
+}
+
+export function clearSoftwareSuggestionRateLimitForTests(): void {
+  rateLimitBuckets.clear();
+  nextRateLimitCleanupAt = 0;
+}
+
+/** CURRENT parseBoundedPositiveInt: 0 / non-numeric -> fallback, negative -> 1, over max -> max. */
+function parseLimit(value: string | null | undefined): number {
+  const parsed = Number.parseInt(value ?? String(DEFAULT_SOFTWARE_SUGGESTION_LIMIT), 10);
+  const candidate = parsed || DEFAULT_SOFTWARE_SUGGESTION_LIMIT;
+  if (!Number.isFinite(candidate)) return DEFAULT_SOFTWARE_SUGGESTION_LIMIT;
+  return Math.min(MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT, Math.max(1, Math.floor(candidate)));
 }
 
 async function bodyEtag(body: string): Promise<string> {
@@ -56,6 +76,21 @@ async function bodyEtag(body: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
   return `"${hex}"`;
+}
+
+function etagMatches(value: string | undefined, etag: string): boolean {
+  if (!value) return false;
+  return value.split(",").some((candidate) => {
+    const normalized = candidate.trim();
+    return normalized === "*" || normalized.replace(/^W\//, "") === etag;
+  });
+}
+
+function databaseUnavailable(): Response {
+  return new Response(JSON.stringify({ error: "database_unavailable" }), {
+    status: 503,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": "30" },
+  });
 }
 
 type SoftwareSuggestionRow = {
@@ -76,20 +111,10 @@ softwareSuggestionsRoutes.get("/", async (c) => {
 
   const url = new URL(c.req.url);
   const q = (url.searchParams.get("q")?.trim() ?? "").slice(0, MAX_QUERY_LENGTH);
-  const limit = parseBoundedPositiveInt(
-    url.searchParams.get("limit"),
-    DEFAULT_SOFTWARE_SUGGESTION_LIMIT,
-    1,
-    MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT,
-  );
+  const limit = parseLimit(url.searchParams.get("limit"));
 
   const db = c.env?.DB;
-  if (!db) {
-    return new Response(JSON.stringify({ error: "database_unavailable" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": "30" },
-    });
-  }
+  if (!db) return databaseUnavailable();
 
   let rows: SoftwareSuggestionRow[] | null = null;
 
@@ -173,42 +198,30 @@ softwareSuggestionsRoutes.get("/", async (c) => {
     }
   } catch (error) {
     console.error("[software-suggestions] query failed", error);
-    return new Response(JSON.stringify({ error: "database_unavailable" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": "30" },
-    });
+    return databaseUnavailable();
   }
 
-  if (!rows) {
-    return new Response(JSON.stringify({ error: "database_unavailable" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": "30" },
-    });
-  }
+  if (!rows) return databaseUnavailable();
 
+  // DTO allowlist: inactive rows never leave even if a SQL branch regresses.
   const payload = rows
     .filter((r) => r.is_active === 1)
     .map((r) => ({
       id: r.id,
       name: r.name,
-      category: r.category ?? null,
-      usage_count: Number(r.usage_count) || 0,
-      is_verified: r.is_verified === 1 ? 1 : 0,
+      category: r.category,
+      usage_count: r.usage_count,
+      is_verified: r.is_verified,
     }));
 
   const body = JSON.stringify(payload);
   const etag = await bodyEtag(body);
-  const ifNoneMatch = c.req.header("If-None-Match");
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300",
-    ETag: etag,
-  };
-
-  if (ifNoneMatch && (ifNoneMatch === "*" || ifNoneMatch.replace(/^W\//, "") === etag)) {
+  const headers = { "Cache-Control": CACHE_CONTROL, ETag: etag };
+  if (etagMatches(c.req.header("If-None-Match"), etag)) {
     return new Response(null, { status: 304, headers });
   }
-
-  return new Response(body, { status: 200, headers });
+  return new Response(body, {
+    status: 200,
+    headers: { ...headers, "Content-Type": "application/json" },
+  });
 });

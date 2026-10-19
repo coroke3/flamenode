@@ -1,7 +1,16 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env.ts";
 
+// CURRENT: src/lib/health/publicHealth.ts, src/lib/health/deepHealth.ts
+// (authorizeDeepHealth), app/api/health/route.ts, app/api/health/deep/route.ts.
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/i;
+const NO_STORE = { "Cache-Control": "no-store" } as const;
+
+function stringBinding(env: unknown, key: string): string | undefined {
+  if (!env || typeof env !== "object") return undefined;
+  const value = (env as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+}
 
 function constantTimeEqual(left: string, right: string): boolean {
   const length = Math.max(left.length, right.length);
@@ -12,112 +21,58 @@ function constantTimeEqual(left: string, right: string): boolean {
   return mismatch === 0;
 }
 
+function deepHealthUnavailable(): Response {
+  return Response.json(
+    { ok: false, service: "flamenode-web" },
+    { status: 503, headers: NO_STORE },
+  );
+}
+
 export const healthRoutes = new Hono<AppEnv>();
 
-// RH-018: GET /api/health
+// RH-018: GET /api/health — exposes only the validated deployment commit.
 healthRoutes.get("/", (c) => {
-  const commitValue = c.env?.BUILD_COMMIT_SHA?.trim() ?? "";
-  if (!COMMIT_PATTERN.test(commitValue)) {
-    return c.json(
-      {
-        ok: false,
-        service: "flamenode-web",
-        runtime: "cloudflare-worker",
-      },
-      503,
-      { "Cache-Control": "no-store" },
+  const commit = stringBinding(c.env, "BUILD_COMMIT_SHA")?.trim() ?? "";
+  if (!COMMIT_PATTERN.test(commit)) {
+    return Response.json(
+      { ok: false, service: "flamenode-web", runtime: "cloudflare-worker" },
+      { status: 503, headers: NO_STORE },
     );
   }
-  return c.json(
+  return Response.json(
     {
       ok: true,
       service: "flamenode-web",
-      commit: commitValue.toLowerCase(),
+      commit: commit.toLowerCase(),
       runtime: "cloudflare-worker",
     },
-    200,
-    { "Cache-Control": "no-store" },
+    { headers: NO_STORE },
   );
 });
 
 // RH-017: GET /api/health/deep
-healthRoutes.get("/deep", async (c) => {
-  const configuredToken = c.env?.WORKER_ADMIN_TOKEN?.trim();
-  if (!configuredToken) {
-    return c.json(
+//
+// The token gate matches CURRENT exactly (503 when WORKER_ADMIN_TOKEN is not
+// configured, 401 for a missing/malformed/wrong Bearer token).
+//
+// The authorized check body (schema version + runtime tables, tracked detail
+// artifact SLO, global artifact SLO probes, queue configuration and the
+// public-visibility manifest/fence join) still lives only in
+// src/lib/health/deepHealth.ts and its ~2,000-line public-data normalizer
+// closure, which apps/api must not import. Until that logic moves into a
+// package, this route fails closed with CURRENT's own failure response
+// instead of reporting checks it did not run as "ok". It reads no D1/KV/R2.
+healthRoutes.get("/deep", (c) => {
+  const token = stringBinding(c.env, "WORKER_ADMIN_TOKEN")?.trim();
+  if (!token) return deepHealthUnavailable();
+
+  const match = /^Bearer ([^\s]+)$/.exec(c.req.header("Authorization") ?? "");
+  if (!match || !constantTimeEqual(match[1], token)) {
+    return Response.json(
       { ok: false, service: "flamenode-web" },
-      503,
-      { "Cache-Control": "no-store" },
+      { status: 401, headers: NO_STORE },
     );
   }
 
-  const authHeader = c.req.header("Authorization") ?? "";
-  const match = /^Bearer ([^\s]+)$/.exec(authHeader);
-  if (!match || !constantTimeEqual(match[1], configuredToken)) {
-    return c.json(
-      { ok: false, service: "flamenode-web" },
-      401,
-      { "Cache-Control": "no-store" },
-    );
-  }
-
-  const commit = (c.env?.BUILD_COMMIT_SHA?.trim() ?? "unknown").toLowerCase();
-
-  const checks = {
-    d1: "ok" as "ok" | "degraded",
-    kv: "ok" as "ok" | "degraded",
-    r2: "ok" as "ok" | "degraded",
-    schema: "ok" as "ok" | "degraded",
-    queues: "ok" as "ok" | "degraded",
-    static_artifacts: "ok" as "ok" | "degraded",
-    public_visibility: "ok" as "ok" | "degraded",
-  };
-
-  try {
-    if (c.env?.DB) {
-      await c.env.DB.prepare("SELECT 1").first();
-    } else {
-      checks.d1 = "degraded";
-    }
-  } catch {
-    checks.d1 = "degraded";
-  }
-
-  try {
-    if (c.env?.KV) {
-      await c.env.KV.get("__flamenode_read_only_health_probe__");
-    } else {
-      checks.kv = "degraded";
-    }
-  } catch {
-    checks.kv = "degraded";
-  }
-
-  try {
-    if (c.env?.BUCKET) {
-      await c.env.BUCKET.head("__flamenode_read_only_health_probe__");
-    } else {
-      checks.r2 = "degraded";
-    }
-  } catch {
-    checks.r2 = "degraded";
-  }
-
-  const rawGuardMode = c.env?.PUBLIC_VISIBILITY_GUARD_MODE?.trim()?.toLowerCase();
-  const guardMode = rawGuardMode === "enforce" || rawGuardMode === "observe" ? rawGuardMode : "off";
-
-  const isDegraded = Object.values(checks).some((v) => v === "degraded");
-
-  return c.json(
-    {
-      ok: !isDegraded,
-      status: isDegraded ? "degraded" : "ok",
-      service: "flamenode-web",
-      commit,
-      checks,
-      public_visibility_guard_mode: guardMode,
-    },
-    200,
-    { "Cache-Control": "no-store" },
-  );
+  return deepHealthUnavailable();
 });
