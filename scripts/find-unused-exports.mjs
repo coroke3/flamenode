@@ -35,7 +35,7 @@ function listSourceFiles(root) {
   const existing = SEARCH_DIRS.filter((dir) => fs.existsSync(path.join(root, dir)));
   return execFileSync("git", ["ls-files", "--", ...existing], { cwd: root, encoding: "utf8" })
     .split("\n")
-    .filter((file) => /\.(ts|tsx|mjs|js|cjs)$/.test(file));
+    .filter((file) => /\.(ts|tsx|mjs|js|cjs|astro)$/.test(file));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
