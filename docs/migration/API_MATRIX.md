@@ -326,3 +326,14 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
+
+## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
+
+Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.
+
+| RH | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | CPU p50 / p95 (local Node) | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| RH-017 | `GET /api/health/deep` | `apps/api/src/routes/health.ts` | Bearer token (`WORKER_ADMIN_TOKEN`) | token gate identical to CURRENT (503 unset / 401 missing, malformed or wrong; constant-time compare; no-store). Authorized requests fail closed with CURRENT's failure response `503 {ok:false, service}` and read no binding, because the check body (`src/lib/health/deepHealth.ts`: schema version + tables, artifact SLO, queue config, visibility manifest/fence join) is not ported. Do not route `/api/health/deep` to Hono until it is | 0.050ms / 0.130ms | BRIDGED (gate only) |
+| RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | only a 40-hex `BUILD_COMMIT_SHA` (lower-cased); 503 without one; no other binding read; no-store | 0.055ms / 0.131ms | BRIDGED |
+| RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | 1 R2 GET `top/sections/stats.v1.json` (<= 64 KiB, body cancelled when oversized), `normalizeTopStatsSection` semantics, 3 public counters only, fixed Cache API key, 503 `{stats:null}` no-store on any failure; no D1 | 0.038ms / 0.095ms | BRIDGED |
+| RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | isolate rate limit 60/min (key cap 2048), `q` <= 64 chars, limit 1..50 (0 / non-numeric -> 20), D1 <= 2 bounded reads, active-only DTO allowlist, SHA-256 ETag / 304, 503 `database_unavailable` | 0.228ms / 0.615ms | BRIDGED |
