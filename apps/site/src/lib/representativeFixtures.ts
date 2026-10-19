@@ -1,129 +1,136 @@
 /**
- * Representative fixtures for MIG-0403 (Recipe R-PAGE / Runtime S0).
- * Provides sample data for representative Video, Event, and User pages,
- * including public, alias, private, and deleted states to verify fail-closed SSG emission.
+ * Representative snapshot fixtures for MIG-0403 (Recipe R-PAGE / Runtime S0).
+ *
+ * One public entity per kind plus private, voided and deleted ones. They are read
+ * through the MIG-0401 loader (`loadPublicBuildSnapshot`) exactly like a real
+ * snapshot: only `visibility: "public"` keys are in the manifest allow list,
+ * private/voided keys are on the deny list (and marked so in the envelope), and
+ * a deleted entity is in neither list and has no object. A page is built only
+ * for what the loader accepts.
+ * Full data generation is Phase 5 (MIG-0411 / MIG-0509).
  */
-import type {
-  EventPublicSnapshot,
-  UserPublicSnapshot,
-  VideoPublicSnapshot,
+import { createHash } from "node:crypto";
+import {
+  loadPublicBuildSnapshot,
+  SnapshotBuildError,
+  type EventPublicSnapshot,
+  type PublicSnapshot,
+  type SnapshotKind,
+  type UserPublicSnapshot,
+  type VideoPublicSnapshot,
 } from "./publicDataLoader.ts";
 
-export interface RepresentativeVideoFixture extends VideoPublicSnapshot {
-  readonly isPrivate?: boolean;
-  readonly isDeleted?: boolean;
-}
+const GENERATION = "mig-0403-representative";
 
-export interface RepresentativeEventFixture extends EventPublicSnapshot {
-  readonly isPrivate?: boolean;
-  readonly isDeleted?: boolean;
-}
+type FixtureVisibility = "public" | "private" | "voided" | "deleted";
+type Fixture = Readonly<{ visibility: FixtureVisibility; payload: Record<string, unknown> & { kind: SnapshotKind; id: string } }>;
 
-export interface RepresentativeUserFixture extends UserPublicSnapshot {
-  readonly isPrivate?: boolean;
-  readonly isDeleted?: boolean;
-}
-
-const REPRESENTATIVE_VIDEOS: readonly RepresentativeVideoFixture[] = [
+const FIXTURES: readonly Fixture[] = [
   {
-    kind: "video",
-    id: "sample-video-1",
-    title: "代表動画: FlameNodeローンチ記念フェス",
-    description: "FlameNode公式ローンチ記念動画です。ボカロ・合成音声による共創フェス。",
-    creatorName: "FlameNode Official",
-    creatorHandle: "@flamenode_jp",
-    creatorAvatarUrl: "https://flamenode.net/brand/logo.png",
-    thumbnailUrl: "https://flamenode.net/brand/ogp-default.png",
-    publishedAt: "2026-10-18T00:00:00Z",
-    youtubeVideoId: "dKw1xV41f8s",
-    canonicalUrl: "https://flamenode.net/sample-video-1",
-    ogImageUrl: "https://flamenode.net/brand/ogp-default.png",
+    visibility: "public",
+    payload: {
+      kind: "video",
+      id: "repvideo01",
+      title: "代表作品: 合同作品のサンプル",
+      youtubeVideoId: "repYTid0001",
+      creatorName: "代表クリエイター",
+      creatorXUserId: "rep_creator",
+      creatorIconUrl: "/brand/flamenode-icon-192.png",
+      creatorHasPublicProfile: true,
+      scheduledTime: 1792238400, // 2026-10-17T12:00:00Z = 2026/10/17 21:00 JST
+      music: "代表楽曲",
+      credit: "代表アーティスト",
+      introComment: "MIG-0403 の代表 fixture です。公開作品の静的 HTML を確認します。",
+      // A field the DTO must drop even when a generator leaks it.
+      privateNote: "非公開メモ",
+    },
   },
+  { visibility: "private", payload: { kind: "video", id: "repvideo-private", title: "非公開作品" } },
+  { visibility: "voided", payload: { kind: "video", id: "repvideo-voided", title: "無効化作品" } },
+  { visibility: "deleted", payload: { kind: "video", id: "repvideo-deleted", title: "削除済み作品" } },
   {
-    kind: "video",
-    id: "sample-video-alias",
-    title: "代表動画: FlameNodeローンチ記念フェス（エイリアス）",
-    description: "エイリアスURLからのリダイレクト・canonical確認用",
-    creatorName: "FlameNode Official",
-    canonicalUrl: "https://flamenode.net/sample-video-1",
-    aliasOf: "sample-video-1",
+    visibility: "public",
+    payload: {
+      kind: "event",
+      id: "rep-event-2026",
+      title: "代表イベント 2026",
+      explanation: "MIG-0403 の代表イベント fixture です。",
+      iconUrl: "/brand/flamenode-icon-512.png",
+      statusLabel: "開始前",
+      periodLabel: "2026/11/01 〜 2026/11/30",
+      entryAction: "reserve",
+    },
   },
+  { visibility: "private", payload: { kind: "event", id: "rep-event-private", title: "非公開イベント" } },
+  { visibility: "deleted", payload: { kind: "event", id: "rep-event-deleted", title: "削除済みイベント" } },
   {
-    kind: "video",
-    id: "private-video-hidden",
-    title: "非公開動画（SSG生成禁止）",
-    isPrivate: true,
+    visibility: "public",
+    payload: {
+      kind: "user",
+      id: "rep_creator",
+      title: "代表クリエイター",
+      name: "代表クリエイター",
+      iconUrl: "/brand/flamenode-icon-512.png",
+      profileText: "MIG-0403 の代表クリエイター fixture です。",
+    },
   },
-  {
-    kind: "video",
-    id: "deleted-video-purged",
-    title: "削除済み動画（SSG生成禁止）",
-    isDeleted: true,
-  },
+  { visibility: "private", payload: { kind: "user", id: "rep_private_user", title: "非公開ユーザー" } },
+  { visibility: "deleted", payload: { kind: "user", id: "rep_deleted_user", title: "削除済みユーザー" } },
 ];
 
-const REPRESENTATIVE_EVENTS: readonly RepresentativeEventFixture[] = [
-  {
-    kind: "event",
-    id: "autumn-collab-2026",
-    title: "FlameNode Autumn Festival 2026",
-    description: "秋の音楽・動画クリエイター合同コラボレーションイベント。",
-    bannerUrl: "https://flamenode.net/brand/banner.png",
-    iconUrl: "https://flamenode.net/brand/icon.png",
-    status: "upcoming",
-    periodText: "2026-10-20 〜 2026-10-31",
-    canonicalUrl: "https://flamenode.net/event/autumn-collab-2026",
-    ogImageUrl: "https://flamenode.net/brand/banner.png",
-  },
-  {
-    kind: "event",
-    id: "draft-secret-event",
-    title: "下書きイベント（SSG生成禁止）",
-    isPrivate: true,
-  },
-  {
-    kind: "event",
-    id: "deleted-event",
-    title: "削除イベント（SSG生成禁止）",
-    isDeleted: true,
-  },
-];
-
-const REPRESENTATIVE_USERS: readonly RepresentativeUserFixture[] = [
-  {
-    kind: "user",
-    id: "miku-producer",
-    title: "初音P (Miku Producer)",
-    name: "初音P",
-    handle: "@miku_prod",
-    bio: "FlameNodeでボカロ楽曲・映像を制作しています。",
-    avatarUrl: "https://flamenode.net/brand/avatar-miku.png",
-    canonicalUrl: "https://flamenode.net/user/miku-producer",
-    ogImageUrl: "https://flamenode.net/brand/avatar-miku.png",
-  },
-  {
-    kind: "user",
-    id: "suspended-user",
-    title: "停止ユーザー（SSG生成禁止）",
-    isPrivate: true,
-  },
-  {
-    kind: "user",
-    id: "deleted-user",
-    title: "削除ユーザー（SSG生成禁止）",
-    isDeleted: true,
-  },
-];
-
-/** Filters out private and deleted items to guarantee fail-closed SSG emission */
-export function getPublicRepresentativeVideos(): VideoPublicSnapshot[] {
-  return REPRESENTATIVE_VIDEOS.filter((v) => !v.isPrivate && !v.isDeleted);
+function keyOf(fixture: Fixture): string {
+  return `snapshot/${fixture.payload.kind}/${fixture.payload.id}.json`;
 }
 
-export function getPublicRepresentativeEvents(): EventPublicSnapshot[] {
-  return REPRESENTATIVE_EVENTS.filter((e) => !e.isPrivate && !e.isDeleted);
+function envelope(fixture: Fixture): Uint8Array {
+  const { payload } = fixture;
+  const sha256 = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  return new TextEncoder().encode(JSON.stringify({
+    schemaVersion: 1,
+    generation: GENERATION,
+    key: keyOf(fixture),
+    visibility: fixture.visibility,
+    payload,
+    sha256,
+  }));
 }
 
-export function getPublicRepresentativeUsers(): UserPublicSnapshot[] {
-  return REPRESENTATIVE_USERS.filter((u) => !u.isPrivate && !u.isDeleted);
+const manifest = {
+  schemaVersion: 1 as const,
+  generation: GENERATION,
+  allowedKeys: FIXTURES.filter((f) => f.visibility === "public").map(keyOf),
+  blockedKeys: FIXTURES.filter((f) => f.visibility === "private" || f.visibility === "voided").map(keyOf),
+};
+
+const source = {
+  async read(key: string): Promise<Uint8Array | null> {
+    const fixture = FIXTURES.find((f) => keyOf(f) === key);
+    return fixture && fixture.visibility !== "deleted" ? envelope(fixture) : null;
+  },
+};
+
+
+async function loadKind(kind: SnapshotKind): Promise<PublicSnapshot[]> {
+  const loaded: PublicSnapshot[] = [];
+  for (const fixture of FIXTURES.filter((f) => f.payload.kind === kind)) {
+    try {
+      loaded.push(await loadPublicBuildSnapshot(source, keyOf(fixture), { manifest, generation: GENERATION }));
+    } catch (error) {
+      // Not public: no page. Any other rejection (missing object, bad hash, ...) fails the build.
+      if (!(error instanceof SnapshotBuildError) || error.code !== "NOT_PUBLIC") throw error;
+    }
+  }
+  return loaded;
+}
+
+export async function loadRepresentativeVideos(): Promise<VideoPublicSnapshot[]> {
+  return (await loadKind("video")) as VideoPublicSnapshot[];
+}
+
+export async function loadRepresentativeEvents(): Promise<EventPublicSnapshot[]> {
+  return (await loadKind("event")) as EventPublicSnapshot[];
+}
+
+export async function loadRepresentativeUsers(): Promise<UserPublicSnapshot[]> {
+  return (await loadKind("user")) as UserPublicSnapshot[];
 }

@@ -53,139 +53,52 @@ test("source failures never allow implicit live D1 fallback",async()=>{
   e=>e instanceof SnapshotBuildError&&e.code==="SOURCE_UNAVAILABLE");
 });
 
-test("MIG-0403 U01: video, user and event extended DTO strictly projects public attributes and drops private fields", async () => {
-  const videoPayload = {
-    kind: "video",
-    id: "public_demo",
-    title: "Video 1",
-    description: "Sample video description",
-    creatorName: "Creator Alpha",
-    creatorHandle: "@alpha",
-    thumbnailUrl: "https://example.com/thumb.jpg",
-    publishedAt: "2026-10-18T00:00:00Z",
-    youtubeVideoId: "yt123456789",
-    privateEmail: "secret@example.com",
-    internalFlags: { adminOnly: true },
-  };
-  const snapshot = await loadPublicBuildSnapshot(source(pack(videoPayload)), key, options());
-  assert.equal(snapshot.creatorName, "Creator Alpha");
-  assert.equal(snapshot.thumbnailUrl, "https://example.com/thumb.jpg");
-  assert.equal(snapshot.youtubeVideoId, "yt123456789");
-  assert.equal(snapshot.description, "Sample video description");
-  assert.equal("privateEmail" in snapshot, false);
-  assert.equal("internalFlags" in snapshot, false);
-
-  // User snapshot
-  const userKey = "snapshot/user/user_demo.json";
-  const userPayload = {
-    kind: "user",
-    id: "user_demo",
-    title: "Alice Profile",
-    name: "Alice",
-    handle: "@alice",
-    bio: "User bio",
-    avatarUrl: "https://example.com/alice.jpg",
-    secretToken: "xyz",
-  };
-  const userBytes = Buffer.from(JSON.stringify({
-    schemaVersion: 1, generation, key: userKey, visibility: "public",
-    payload: userPayload, sha256: sha256(userPayload)
-  }));
-  const userOpts = options({ schemaVersion: 1, generation, allowedKeys: [userKey], blockedKeys: [] });
-  const userSnapshot = await loadPublicBuildSnapshot(source(userBytes), userKey, userOpts);
-  assert.equal(userSnapshot.kind, "user");
-  assert.equal(userSnapshot.name, "Alice");
-  assert.equal(userSnapshot.handle, "@alice");
-  assert.equal(userSnapshot.bio, "User bio");
-  assert.equal("secretToken" in userSnapshot, false);
-
-  // Event snapshot
-  const eventKey = "snapshot/event/event_demo.json";
-  const eventPayload = {
-    kind: "event",
-    id: "event_demo",
-    title: "FlameCon 2026",
-    bannerUrl: "https://example.com/banner.jpg",
-    iconUrl: "https://example.com/icon.jpg",
-    status: "upcoming",
-    periodText: "2026-11-01 - 2026-11-03",
-    internalBudget: 100000,
-  };
-  const eventBytes = Buffer.from(JSON.stringify({
-    schemaVersion: 1, generation, key: eventKey, visibility: "public",
-    payload: eventPayload, sha256: sha256(eventPayload)
-  }));
-  const eventOpts = options({ schemaVersion: 1, generation, allowedKeys: [eventKey], blockedKeys: [] });
-  const eventSnapshot = await loadPublicBuildSnapshot(source(eventBytes), eventKey, eventOpts);
-  assert.equal(eventSnapshot.kind, "event");
-  assert.equal(eventSnapshot.bannerUrl, "https://example.com/banner.jpg");
-  assert.equal(eventSnapshot.status, "upcoming");
-  assert.equal(eventSnapshot.periodText, "2026-11-01 - 2026-11-03");
-  assert.equal("internalBudget" in eventSnapshot, false);
+// MIG-0403 U01: the representative-page fields are projected by allow list per kind.
+const loadAs=async(payload)=>{
+ const k=`snapshot/${payload.kind}/${payload.id}.json`;
+ const bytes=Buffer.from(JSON.stringify({schemaVersion:1,generation,key:k,visibility:"public",payload,sha256:sha256(payload)}));
+ return loadPublicBuildSnapshot(source(bytes),k,options(manifest({allowedKeys:[k]})));
+};
+test("MIG-0403 U01: video DTO keeps only the public page fields",async()=>{
+ const snapshot=await loadAs({
+  kind:"video",id:"public_demo",title:"Video 1",youtubeVideoId:"abcDEF12345",creatorName:"Creator",creatorXUserId:"creator_x",
+  creatorIconUrl:"https://example.com/icon.png",creatorHasPublicProfile:true,creatorYoutubeChannelUrl:"https://www.youtube.com/@c",
+  scheduledTime:1792238400,music:"Song",credit:"Artist",introComment:"Intro",highlights:"High",
+  visibility_status:"private",privateEmail:"secret@example.com",internalFlags:{adminOnly:true},
+ });
+ assert.deepEqual(snapshot,{
+  kind:"video",id:"public_demo",title:"Video 1",youtubeVideoId:"abcDEF12345",creatorName:"Creator",creatorXUserId:"creator_x",
+  creatorIconUrl:"https://example.com/icon.png",creatorHasPublicProfile:true,creatorYoutubeChannelUrl:"https://www.youtube.com/@c",
+  scheduledTime:1792238400,music:"Song",credit:"Artist",introComment:"Intro",highlights:"High",
+ });
 });
-
-test("MIG-0403 T02: alias fixture correctly points to primary canonical ID", async () => {
-  const aliasKey = "snapshot/video/public_alias.json";
-  const aliasPayload = {
-    kind: "video",
-    id: "public_alias",
-    title: "Video Alias Title",
-    canonicalUrl: "https://flamenode.net/public_demo",
-    aliasOf: "public_demo",
-  };
-  const aliasBytes = Buffer.from(JSON.stringify({
-    schemaVersion: 1, generation, key: aliasKey, visibility: "public",
-    payload: aliasPayload, sha256: sha256(aliasPayload)
-  }));
-  const aliasOpts = options({ schemaVersion: 1, generation, allowedKeys: [aliasKey], blockedKeys: [] });
-  const aliasSnapshot = await loadPublicBuildSnapshot(source(aliasBytes), aliasKey, aliasOpts);
-  assert.equal(aliasSnapshot.canonicalUrl, "https://flamenode.net/public_demo");
-  assert.equal(aliasSnapshot.aliasOf, "public_demo");
+test("MIG-0403 U01: user and event DTOs keep only the public page fields",async()=>{
+ assert.deepEqual(await loadAs({kind:"user",id:"user_demo",title:"Alice",name:"Alice",iconUrl:"/i.png",profileText:"Bio",
+  youtubeChannelUrl:"https://www.youtube.com/@a",secretToken:"xyz",approval_status:"approved"}),
+  {kind:"user",id:"user_demo",title:"Alice",name:"Alice",iconUrl:"/i.png",profileText:"Bio",youtubeChannelUrl:"https://www.youtube.com/@a"});
+ assert.deepEqual(await loadAs({kind:"event",id:"event_demo",title:"Ev",explanation:"Ex",imageUrl:"https://e.com/b.jpg",iconUrl:"/i.png",
+  statusLabel:"開始前",periodLabel:"2026/11/01 〜 11/30",entryAction:"reserve",internalBudget:100000}),
+  {kind:"event",id:"event_demo",title:"Ev",explanation:"Ex",imageUrl:"https://e.com/b.jpg",iconUrl:"/i.png",
+   statusLabel:"開始前",periodLabel:"2026/11/01 〜 11/30",entryAction:"reserve"});
 });
-
-test("MIG-0403 hardening: validatedPublicDto sanitizes malicious URL schemes and prevents XSS/protocol injection", async () => {
-  const badUrlKey = "snapshot/video/bad_url_video.json";
-  const badPayload = {
-    kind: "video",
-    id: "bad_url_video",
-    title: "Bad URL Video",
-    canonicalUrl: "javascript:alert(document.cookie)",
-    ogImageUrl: "data:text/html,<script>alert(1)</script>",
-    thumbnailUrl: "//evil.com/phish.png",
-    creatorAvatarUrl: "vbscript:malicious()",
-    aliasOf: "invalid/id/with/traversal",
-    youtubeVideoId: "malicious<script>",
-  };
-  const badBytes = Buffer.from(JSON.stringify({
-    schemaVersion: 1, generation, key: badUrlKey, visibility: "public",
-    payload: badPayload, sha256: sha256(badPayload)
-  }));
-  const opts = options({ schemaVersion: 1, generation, allowedKeys: [badUrlKey], blockedKeys: [] });
-  const snapshot = await loadPublicBuildSnapshot(source(badBytes), badUrlKey, opts);
-
-  assert.equal("canonicalUrl" in snapshot, false, "javascript: URL must be dropped");
-  assert.equal("ogImageUrl" in snapshot, false, "data: URL must be dropped");
-  assert.equal("thumbnailUrl" in snapshot, false, "protocol-relative // URL must be dropped");
-  assert.equal("creatorAvatarUrl" in snapshot, false, "vbscript: URL must be dropped");
-  assert.equal("aliasOf" in snapshot, false, "traversal alias must be dropped");
-  assert.equal("youtubeVideoId" in snapshot, false, "malformed youtubeVideoId must be dropped");
+test("MIG-0403 U01: fields of another kind are not projected",async()=>{
+ const snapshot=await loadAs({kind:"user",id:"user_demo",title:"Alice",youtubeVideoId:"abcDEF12345",explanation:"x",creatorName:"y"});
+ assert.deepEqual(snapshot,{kind:"user",id:"user_demo",title:"Alice"});
 });
-
-test("MIG-0403 hardening: validatedPublicDto clamps boundary strings and rejects oversized/empty title", async () => {
-  const overKey = "snapshot/user/over_user.json";
-  const overPayload = {
-    kind: "user",
-    id: "over_user",
-    title: "A".repeat(301), // over limit > 300
-  };
-  const overBytes = Buffer.from(JSON.stringify({
-    schemaVersion: 1, generation, key: overKey, visibility: "public",
-    payload: overPayload, sha256: sha256(overPayload)
-  }));
-  const opts = options({ schemaVersion: 1, generation, allowedKeys: [overKey], blockedKeys: [] });
-  await assert.rejects(
-    () => loadPublicBuildSnapshot(source(overBytes), overKey, opts),
-    { code: "INVALID_PAYLOAD" }
-  );
+test("MIG-0403 U01: unsafe URLs, malformed IDs and wrong types are dropped",async()=>{
+ const snapshot=await loadAs({
+  kind:"video",id:"bad_url_video",title:"Bad",creatorIconUrl:"javascript:alert(1)",creatorYoutubeChannelUrl:"//evil.example/x",
+  youtubeVideoId:"malicious<script>",creatorXUserId:"../admin",creatorHasPublicProfile:"yes",scheduledTime:"1792238400",
+  music:"",introComment:42,
+ });
+ assert.deepEqual(snapshot,{kind:"video",id:"bad_url_video",title:"Bad"});
+ const user=await loadAs({kind:"user",id:"u",title:"U",iconUrl:"data:text/html,<script>alert(1)</script>",youtubeChannelUrl:"/\\evil.example"});
+ assert.deepEqual(user,{kind:"user",id:"u",title:"U"});
+ const event=await loadAs({kind:"event",id:"e",title:"E",imageUrl:"vbscript:x",entryAction:"delete"});
+ assert.deepEqual(event,{kind:"event",id:"e",title:"E"});
 });
-
+test("MIG-0403 U01: long text is clamped and an oversized title is rejected",async()=>{
+ const snapshot=await loadAs({kind:"video",id:"v",title:"V",introComment:"a".repeat(6000),creatorName:"n".repeat(150)});
+ assert.equal(snapshot.introComment.length,5000);assert.equal(snapshot.creatorName.length,100);
+ await assert.rejects(()=>loadAs({kind:"user",id:"over_user",title:"A".repeat(301)}),e=>e instanceof SnapshotBuildError&&e.code==="INVALID_PAYLOAD");
+});
