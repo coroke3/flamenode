@@ -55,7 +55,10 @@ const EMPTY_QUEUE_BATCH: StaticRebuildQueueBatch = {
   acceptedTargetCount: 0,
 };
 import { generateId } from "@/lib/utils/id";
-import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
+import {
+  planVideoVisibilityFence,
+  validateVideoPublicEligibility,
+} from "@flamenode/domain/video";
 
 export type VideoVisibilityTransitionContext =
   | "admin_video_status"
@@ -78,10 +81,6 @@ export type VideoVisibilityTransitionPlan = {
   /** Validation failure is returned as data so every caller can surface it. */
   validationError?: string;
 };
-
-function isPublicVisibility(status: string): boolean {
-  return status === "public";
-}
 
 function videoPublicCacheKeys(video: VideoRow): string[] {
   const keys = new Set<string>([`videos/${video.id}.json`]);
@@ -167,22 +166,8 @@ export function planVideoVisibilityFenceTransition(
     now: number;
   },
 ): VideoVisibilityFenceTransitionPlan {
-  if (input.previousStatus === input.nextStatus) {
-    return {
-      mutationStatements: [],
-      expectedMutationChanges: [],
-      fenceToken: null,
-      depublicizedFromPublic: false,
-    };
-  }
-
-  const depublicizedFromPublic =
-    isPublicVisibility(input.previousStatus) &&
-    !isPublicVisibility(input.nextStatus);
-  const republished =
-    !isPublicVisibility(input.previousStatus) &&
-    isPublicVisibility(input.nextStatus);
-  if (!depublicizedFromPublic && !republished) {
+  const fence = planVideoVisibilityFence(input.previousStatus, input.nextStatus);
+  if (!fence) {
     return {
       mutationStatements: [],
       expectedMutationChanges: [],
@@ -197,16 +182,16 @@ export function planVideoVisibilityFenceTransition(
       buildFenceUpsertStatement(db, {
         videoId: input.videoId,
         fenceToken,
-        state: republished ? "release_pending" : "blocked",
+        state: fence.state,
         reason: input.reason ?? null,
         actorUserId: input.actorUserId,
         now: input.now,
-        blockedAt: depublicizedFromPublic ? input.now : null,
+        blockedAt: fence.depublicizedFromPublic ? input.now : null,
       }),
     ],
     expectedMutationChanges: [1],
     fenceToken,
-    depublicizedFromPublic,
+    depublicizedFromPublic: fence.depublicizedFromPublic,
   };
 }
 
@@ -289,37 +274,19 @@ export async function planVideoVisibilityTransition(
       strict: true,
     });
 
-    if (
-      isPublicVisibility(prevStatus) &&
-      !isPublicVisibility(input.nextStatus)
-    ) {
-      depublicizedFromPublic = true;
+    const fence = planVideoVisibilityFence(prevStatus, input.nextStatus);
+    if (fence) {
+      depublicizedFromPublic = fence.depublicizedFromPublic;
       fenceToken = generateId("vf");
       mutationStatements.push(
         buildFenceUpsertStatement(db, {
           videoId: input.video.id,
           fenceToken,
-          state: "blocked",
+          state: fence.state,
           reason: input.reason ?? null,
           actorUserId: input.actorUserId,
           now,
-          blockedAt: now,
-        }),
-      );
-      expectedMutationChanges.push(1);
-    } else if (
-      !isPublicVisibility(prevStatus) &&
-      isPublicVisibility(input.nextStatus)
-    ) {
-      fenceToken = generateId("vf");
-      mutationStatements.push(
-        buildFenceUpsertStatement(db, {
-          videoId: input.video.id,
-          fenceToken,
-          state: "release_pending",
-          reason: input.reason ?? null,
-          actorUserId: input.actorUserId,
-          now,
+          blockedAt: fence.depublicizedFromPublic ? now : null,
         }),
       );
       expectedMutationChanges.push(1);
