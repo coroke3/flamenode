@@ -6,7 +6,11 @@
  * to HTML with React `renderToString` inside the site adapters (MIG-0402), so no-JS readers
  * and crawlers get the text as with CURRENT. (b) — an empty Island root, body drawn by JS — is
  * the approved fallback for a kind whose (a) render cannot meet the 8 ms per-message budget at
- * its upper-bound input. PAGE_BODY_FORMAT records the result per kind; the measurement is
+ * its upper-bound input. (b) needs a client Island loader (a built script that reads the page
+ * data and mounts the screen); none exists yet (R-PAGE pages, MIG-0403), so a (b) page would be
+ * an empty body for every reader. Until it exists those kinds are "excluded": the consumer
+ * writes nothing for them and the build (MIG-0509) keeps serving them (Work Order U05).
+ * PAGE_BODY_FORMAT records the result per kind; the measurement is
  * `renderPublicPage.measure.mjs` and docs/migration/work-items/MIG-0411.md.
  *
  * Not `experimental_AstroContainer`: no R-PAGE `.astro` page exists yet (MIG-0403) and the
@@ -29,13 +33,14 @@ export type PageRenderEntityKind = "video" | "user" | "event";
  * Local Node, NODE_ENV=production, upper-bound input, max of 300 warm renders, 6 logged runs
  * (2026-10-18, project-files/migration-review/pr326-u05a-render-to-string.log):
  * video 25.3–48.8 ms (100 members, 128 chapters, 30 related) -> (b); event 5.4–8.7 ms
- * (5 of 6 runs ≥ 8 ms) -> (b); user 4.4–5.8 ms -> (a). Not workerd CPU: re-check with a
+ * (5 of 6 runs ≥ 8 ms) -> (b); user 4.4–5.8 ms -> (a). (b) has no Island loader yet, so
+ * video / event are "excluded" (see the file header). Not workerd CPU: re-check with a
  * workerd profile (ZERO_1102 §5) before relying on it.
  */
-export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "island-shell">> = {
-  video: "island-shell",
+export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "excluded">> = {
+  video: "excluded",
   user: "server-rendered",
-  event: "island-shell",
+  event: "excluded",
 };
 
 /** Columns read by pageRenderQueue.ts (real D1 names, see packages/db/src/schema/base.ts). */
@@ -317,24 +322,17 @@ export function loadScreenRenderer(): Promise<Renderer> {
   return rendererPromise;
 }
 
-function entityId(input: PublicPageInput): string {
-  return input.entity === "video" ? input.video.id : input.entity === "user" ? input.creator.id : input.event.id;
-}
-
 /**
- * Full document: escaped head (title / canonical / OGP) + body in the given format
- * (default PAGE_BODY_FORMAT for the kind).
+ * Full document: escaped head (title / canonical / OGP) + the server-rendered screen body.
+ * Callers decide whether a kind may be published (PAGE_BODY_FORMAT); the U05 harness
+ * renders every kind.
  */
 export async function renderPublicPageHtml(
   input: PublicPageInput,
   options: RenderPublicPageOptions,
-  format = PAGE_BODY_FORMAT[input.entity],
 ): Promise<string> {
   const canonicalUrl = buildCanonicalUrl(options.origin, options.canonicalPath);
-  const body =
-    format === "server-rendered"
-      ? `<div id="page-root" data-entity="${escapeHtml(input.entity)}">${(await loadScreenRenderer())(input)}</div>`
-      : `<div id="island-root" data-entity="${escapeHtml(input.entity)}" data-id="${escapeHtml(entityId(input))}"></div>`;
+  const body = `<div id="page-root" data-entity="${escapeHtml(input.entity)}">${(await loadScreenRenderer())(input)}</div>`;
   const { title, description, ogType, ogImage } = headOf(input);
   const titleEsc = escapeHtml(title);
   const canonicalEsc = escapeHtml(canonicalUrl);

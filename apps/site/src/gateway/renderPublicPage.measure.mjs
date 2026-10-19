@@ -78,15 +78,15 @@ export async function measure({ runs = 300, cold = false } = {}) {
     const opts = { origin: "https://site.example", canonicalPath: PATHS[kind] };
     if (cold) {
       const start = process.cpuUsage();
-      const html = await renderPublicPageHtml(inputs[kind], opts, "server-rendered");
+      const html = await renderPublicPageHtml(inputs[kind], opts);
       out.cold = { kind, cpuMs: cpuMs(start), bytes: Buffer.byteLength(html) };
       continue;
     }
-    const html = await renderPublicPageHtml(inputs[kind], opts, "server-rendered"); // warm (module load excluded)
+    const html = await renderPublicPageHtml(inputs[kind], opts); // warm (module load excluded)
     const samples = [];
     for (let i = 0; i < runs; i++) {
       const start = process.cpuUsage();
-      await renderPublicPageHtml(inputs[kind], opts, "server-rendered");
+      await renderPublicPageHtml(inputs[kind], opts);
       samples.push(cpuMs(start));
     }
     samples.sort((a, b) => a - b);

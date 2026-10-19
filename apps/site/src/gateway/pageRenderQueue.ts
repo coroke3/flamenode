@@ -9,6 +9,18 @@
  *   - RebuildRequest from r2Html.ts (gateway, HTML missing / stale / unreadable)
  *   - PageRenderDoorbell `{ type: "render-page", kind, id }` (update API S3, recovery)
  *
+ * Producer contract (update API S3): in the same D1 batch as the entity write, run
+ * `requestPageRenderStatement` (adds 1 to request_version), then send one doorbell after
+ * the commit. NOT WIRED: no CURRENT update path calls it yet (see the work item).
+ *
+ * Versions, not timestamps: the tracker CAS is `WHERE request_version = <read>` and a row
+ * is pending while `request_version > rendered_version`. requested_at / rendered_at are
+ * kept for ordering and diagnostics only.
+ *
+ * Kinds whose PAGE_BODY_FORMAT is "excluded" (no page body this consumer can produce) are
+ * never written: deletes for unpublished / revoked / unrouted pages still apply, a public
+ * page is left to the build (MIG-0509) and the request is marked done.
+ *
  * Per message, bounded: D1 ≤ 3 statements (tracker, entity row LIMIT 1, CAS update),
  * 1 route shard read, 1 KV read, 1 R2 PUT or DELETE. Nothing is written for a page that
  * is not positively public: not in the route shards, revoked (deny:<kind>:<id>), or not
@@ -25,7 +37,12 @@ import {
 } from "../../../../src/lib/publicData/visibility.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
 import { r2HtmlKey, type RebuildRequest } from "./r2Html.ts";
-import { renderPublicPage, type PageRenderEntityKind, type PublicPageRow } from "./renderPublicPage.ts";
+import {
+  PAGE_BODY_FORMAT,
+  renderPublicPage,
+  type PageRenderEntityKind,
+  type PublicPageRow,
+} from "./renderPublicPage.ts";
 import { canonicalEntityId, revocationKey, routeKeyFromPath } from "./routeShards.ts";
 import type { RouteLookup } from "./visibility.ts";
 
@@ -71,6 +88,7 @@ export type PageRenderMessage =
 export type PageRenderOutcome =
   | Readonly<{ action: "rendered"; kind: PageRenderEntityKind; id: string; key: string; generation: string }>
   | Readonly<{ action: "deleted"; kind: PageRenderEntityKind; id: string; key: string; reason: "not_routed" | "revoked" | "not_public" }>
+  | Readonly<{ action: "excluded_kind"; kind: PageRenderEntityKind; id: string }>
   | Readonly<{ action: "skipped_up_to_date"; kind: PageRenderEntityKind; id: string }>
   | Readonly<{ action: "conflict_newer_request"; kind: PageRenderEntityKind; id: string }>
   | Readonly<{ action: "skipped_invalid_message" }>
@@ -103,7 +121,26 @@ export function parsePageRenderMessage(body: unknown): PageRenderMessage | null 
   return null;
 }
 
-type Tracker = { requested_at: number; rendered_at: number };
+type Tracker = { request_version: number; rendered_version: number };
+
+const REQUEST_PAGE_RENDER_SQL = `INSERT INTO public_page_renders (entity, entity_id, requested_at, request_version)
+  VALUES (?, ?, ?, 1)
+  ON CONFLICT (entity, entity_id) DO UPDATE SET
+    request_version = public_page_renders.request_version + 1,
+    requested_at = excluded.requested_at`;
+
+/**
+ * Producer statement for the caller's D1 batch (same batch as the entity write). The id is
+ * stored canonical (user ids lower-cased), as the consumer reads it.
+ */
+export function requestPageRenderStatement(
+  db: D1DatabaseLike,
+  kind: PageRenderEntityKind,
+  id: string,
+  now = Date.now(),
+): D1PreparedStatementLike {
+  return db.prepare(REQUEST_PAGE_RENDER_SQL).bind(kind, canonicalEntityId(kind, id), now);
+}
 
 const ENTITY_SQL: Record<PageRenderEntityKind, string> = {
   video: `SELECT id, title, creator_display_name, creator_x_user_id, creator_icon_url, creator_youtube_channel_url,
@@ -157,12 +194,14 @@ export async function processPageRender(
   const entityId = canonicalEntityId(kind, message.id);
 
   const tracker = await db
-    .prepare("SELECT requested_at, rendered_at FROM public_page_renders WHERE entity = ? AND entity_id = ? LIMIT 1")
+    .prepare(
+      "SELECT request_version, rendered_version FROM public_page_renders WHERE entity = ? AND entity_id = ? LIMIT 1",
+    )
     .bind(kind, entityId)
     .first<Tracker>();
   // A doorbell with nothing newer than the last render is a duplicate (T04). A gateway
   // request is not: the HTML can be missing or from an older build although rendered.
-  if (message.source === "doorbell" && tracker && Number(tracker.requested_at) <= Number(tracker.rendered_at)) {
+  if (message.source === "doorbell" && tracker && Number(tracker.request_version) <= Number(tracker.rendered_version)) {
     return { action: "skipped_up_to_date", kind, id: entityId };
   }
 
@@ -170,12 +209,13 @@ export async function processPageRender(
     if (!tracker) return outcome;
     const updated = await db
       .prepare(
-        "UPDATE public_page_renders SET rendered_at = ? WHERE entity = ? AND entity_id = ? AND requested_at = ?",
+        "UPDATE public_page_renders SET rendered_version = request_version, rendered_at = ? WHERE entity = ? AND entity_id = ? AND request_version = ?",
       )
-      .bind(now, kind, entityId, tracker.requested_at)
+      .bind(now, kind, entityId, tracker.request_version)
       .run();
-    // A newer request arrived while this one ran: leave rendered_at behind so its own
-    // doorbell (or recovery) rebuilds the page (T03).
+    // A newer request arrived while this one ran (request_version moved on, even within the
+    // same millisecond): leave rendered_version behind so its own doorbell (or recovery)
+    // rebuilds the page (T03).
     return changesOf(updated) === 1 ? outcome : { action: "conflict_newer_request", kind, id: entityId };
   };
   const remove = async (reason: "not_routed" | "revoked" | "not_public") => {
@@ -199,6 +239,8 @@ export async function processPageRender(
 
   const row = await db.prepare(ENTITY_SQL[kind]).bind(entityId).first<Record<string, unknown>>();
   if (!isPublicRow(kind, row)) return remove("not_public");
+  // No page body for this kind (no Island loader yet): never publish an empty shell.
+  if (PAGE_BODY_FORMAT[kind] === "excluded") return finish({ action: "excluded_kind", kind, id: entityId });
 
   const html = await renderPublicPage(kind, row as PublicPageRow, {
     origin,
@@ -268,7 +310,7 @@ export async function recoverPendingPageRenders(
   const bounded = Math.min(Math.max(1, Math.floor(limit)), MAX_RECOVERY_DOORBELLS);
   const res = await db
     .prepare(
-      "SELECT entity, entity_id FROM public_page_renders WHERE requested_at > rendered_at ORDER BY requested_at ASC LIMIT ?",
+      "SELECT entity, entity_id FROM public_page_renders WHERE request_version > rendered_version ORDER BY requested_at ASC LIMIT ?",
     )
     .bind(bounded)
     .all<{ entity: PageRenderEntityKind; entity_id: string }>();

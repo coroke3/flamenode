@@ -11,10 +11,15 @@ CREATE TABLE public_page_renders (
   entity_id TEXT NOT NULL,
   requested_at INTEGER NOT NULL,
   rendered_at INTEGER NOT NULL DEFAULT 0,
+  -- Monotonic request counter: every producer upsert adds 1. The consumer's CAS and the
+  -- pending test compare versions, never timestamps from different clocks, so two edits
+  -- in the same millisecond (or a producer clock behind the consumer) are not lost.
+  request_version INTEGER NOT NULL DEFAULT 1,
+  rendered_version INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (entity, entity_id)
 );
--- Recovery reads pending rows only (requested_at > rendered_at); without this partial
--- index the bounded LIMIT query would still scan every rendered page.
+-- Recovery reads pending rows only (request_version > rendered_version); without this
+-- partial index the bounded LIMIT query would still scan every rendered page.
 CREATE INDEX public_page_renders_pending_idx
   ON public_page_renders (requested_at)
-  WHERE requested_at > rendered_at;
+  WHERE request_version > rendered_version;
