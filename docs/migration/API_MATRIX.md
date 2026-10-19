@@ -326,3 +326,12 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
+
+## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
+
+| RH | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | CPU (measured / local Node) | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| RH-017 | `GET /api/health/deep` | `apps/api/src/routes/health.ts` | Bearer token (`WORKER_ADMIN_TOKEN`) | internal status checks (D1, KV, R2), timing-safe token compare, no secret leakage | < 1.0ms | BRIDGED |
+| RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | 40-hex commit format verification, no internal data returned | < 0.2ms | BRIDGED |
+| RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | R2 bounded read (max 64KB), compact JSON normalization, Cache-Control, ETag | < 0.5ms | BRIDGED |
+| RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | rate-limited (60 req/min), domain normalization, bounded query (max 50), ETag, 304 | < 2.0ms | BRIDGED |
