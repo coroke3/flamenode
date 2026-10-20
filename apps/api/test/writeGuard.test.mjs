@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
+import { DatabaseSync } from "node:sqlite";
 import { evaluateWriteIdentity } from "@flamenode/domain/admin";
 import {
   evaluateAdminWriteGuard,
@@ -270,4 +271,121 @@ test("middleware: unconfigured site URL -> 503 origin_verification_unavailable",
   }, { DB: makeDb(cleanTosRow) });
   assert.equal(res.status, 503);
   assert.deepEqual(await res.json(), { ok: false, reason: "origin_verification_unavailable" });
+});
+
+// --- loadTosState: execute the real raw-D1 CASE SQL (CURRENT termsReacceptRequiredCondition mirror) ---
+// The unit tests above stub prepare().bind().first() with a canned row, so the
+// CASE expression is never executed. These drive the real SQL through
+// node:sqlite (same adapter pattern as softwareSuggestions.test.mjs) and assert
+// terms_reaccept_required for cases that would be a fail-open bug if the CASE
+// were inverted (letting through a user who must re-accept TOS).
+
+function createTosD1({ userRow, termsRows = [], consents = [] }) {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec(`
+    CREATE TABLE user (
+      id TEXT PRIMARY KEY,
+      is_tos_accepted INTEGER,
+      accepted_terms_version_id TEXT
+    );
+    CREATE TABLE terms_versions (
+      id TEXT PRIMARY KEY,
+      severity TEXT,
+      published_at INTEGER,
+      updated_at INTEGER
+    );
+    CREATE TABLE user_tos_consents (
+      id TEXT PRIMARY KEY,
+      user_id TEXT,
+      terms_version_id TEXT
+    );
+  `);
+  sqlite
+    .prepare("INSERT INTO user (id, is_tos_accepted, accepted_terms_version_id) VALUES (?, ?, ?)")
+    .run(userRow.id, userRow.is_tos_accepted, userRow.accepted_terms_version_id);
+  for (const t of termsRows) {
+    sqlite
+      .prepare("INSERT INTO terms_versions (id, severity, published_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(t.id, t.severity, t.published_at, t.updated_at);
+  }
+  for (const c of consents) {
+    sqlite
+      .prepare("INSERT INTO user_tos_consents (id, user_id, terms_version_id) VALUES (?, ?, ?)")
+      .run(c.id, c.user_id, c.terms_version_id);
+  }
+  return {
+    prepare(sql) {
+      return {
+        bind(...params) {
+          const stmt = sqlite.prepare(sql);
+          return {
+            first: async () => stmt.get(...params) ?? null,
+            all: async () => ({ results: stmt.all(...params) }),
+          };
+        },
+      };
+    },
+  };
+}
+
+const MAJOR_OLD = { id: "v-old", severity: "major", published_at: 100, updated_at: 100 };
+const MAJOR_NEW = { id: "v-new", severity: "major", published_at: 200, updated_at: 200 };
+
+async function postGuard(db) {
+  const { app, env } = makeApp({ user: user(), db });
+  return app.request("/api/admin/me", {
+    method: "POST",
+    headers: { Origin: SITE_URL },
+  }, env);
+}
+
+test("loadTosState: accepted an old major, no consent -> 403 tos_reaccept_required", async () => {
+  const db = createTosD1({
+    userRow: { id: "u-1", is_tos_accepted: 1, accepted_terms_version_id: "v-old" },
+    termsRows: [MAJOR_OLD, MAJOR_NEW],
+  });
+  const res = await postGuard(db);
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_reaccept_required" });
+});
+
+test("loadTosState: accepted the latest major -> passes", async () => {
+  const db = createTosD1({
+    userRow: { id: "u-1", is_tos_accepted: 1, accepted_terms_version_id: "v-new" },
+    termsRows: [MAJOR_OLD, MAJOR_NEW],
+  });
+  const res = await postGuard(db);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { role: "admin" });
+});
+
+test("loadTosState: mirror NULL but consent to latest major -> passes", async () => {
+  const db = createTosD1({
+    userRow: { id: "u-1", is_tos_accepted: 1, accepted_terms_version_id: null },
+    termsRows: [MAJOR_OLD, MAJOR_NEW],
+    consents: [{ id: "c-1", user_id: "u-1", terms_version_id: "v-new" }],
+  });
+  const res = await postGuard(db);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { role: "admin" });
+});
+
+test("loadTosState: no published major terms -> passes (reaccept 0)", async () => {
+  const db = createTosD1({
+    userRow: { id: "u-1", is_tos_accepted: 1, accepted_terms_version_id: null },
+    termsRows: [{ id: "v-draft", severity: "major", published_at: null, updated_at: 100 }],
+  });
+  const res = await postGuard(db);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { role: "admin" });
+});
+
+test("loadTosState: is_tos_accepted = 0 -> 403 tos_required", async () => {
+  const db = createTosD1({
+    userRow: { id: "u-1", is_tos_accepted: 0, accepted_terms_version_id: null },
+    termsRows: [MAJOR_NEW],
+  });
+  const res = await postGuard(db);
+  assert.equal(res.status, 403);
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_required" });
 });
