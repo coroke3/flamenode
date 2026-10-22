@@ -3,4 +3,7 @@ export * from "./EventDetailView.js";
 export * from "./CreatorView.js";
 export * from "./AboutView.js";
 export * from "./RulesView.js";
+export * from "./ListView.js";
+export * from "./RecommendView.js";
+export * from "./TrendingView.js";
 export type { ScreenVideoCard } from "./parts.js";
