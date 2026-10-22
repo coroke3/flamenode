@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Route, Routes } from "react-router-dom";
-import type { PersonalApi } from "../api/session.js";
+import type { PersonalApi } from "../api/personal.js";
 import { AuthErrorView } from "./guard.js";
 import { Dashboard } from "./dashboard/Dashboard.js";
 import { Library } from "./dashboard/Library.js";

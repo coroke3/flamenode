@@ -1,16 +1,11 @@
 import * as React from "react";
 import { Navigate } from "react-router-dom";
-import type { PersonalApi } from "../../api/session.js";
+import type { PersonalApi } from "../../api/personal.js";
 import { SessionGate } from "../guard.js";
 import { youtubePlaylistsTarget } from "../next.js";
+import { ExternalRedirect } from "../ui/AppLink.js";
 
-/** Leaves this SPA (admin is a separate SPA, D-05) with a full navigation. */
-function ExternalRedirect({ to }: { to: string }): null {
-  React.useEffect(() => {
-    window.location.replace(to);
-  }, [to]);
-  return null;
-}
+/** Admin is a separate SPA (D-05), so that target is a full navigation (ExternalRedirect). */
 
 /** CURRENT COMPAT_REDIRECT: admin -> /admin/youtube-sync/playlists, others -> /dashboard. */
 export function YoutubePlaylists({ api }: { api: PersonalApi }): React.ReactElement {

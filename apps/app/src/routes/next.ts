@@ -34,10 +34,18 @@ export function entryLoginHref(next?: string): string {
 }
 
 /** CURRENT settings/page.tsx:72-79: guard next = sanitized ?next unless it is settings itself. */
-export function settingsGateNext(rawNextParam: string | null | undefined): string {
+export function settingsNext(rawNextParam: string | null | undefined): string | null {
   const rawNext = rawNextParam?.trim();
-  const next = rawNext && rawNext !== "/dashboard/settings" ? sanitizeNextPath(rawNext, "/dashboard") : null;
-  return next ?? "/dashboard/settings";
+  return rawNext && rawNext !== "/dashboard/settings" ? sanitizeNextPath(rawNext, "/dashboard") : null;
+}
+
+export function settingsGateNext(rawNextParam: string | null | undefined): string {
+  return settingsNext(rawNextParam) ?? "/dashboard/settings";
+}
+
+/** CURRENT onboardingRulesHref (src/lib/auth/onboardingUrls.ts). */
+export function onboardingRulesHref(next: string): string {
+  return `/rules?next=${encodeURIComponent(sanitizeOnboardingNext(next, "/dashboard"))}`;
 }
 
 /** CURRENT dashboard/youtube-playlists/page.tsx: admin -> admin SPA, everyone else -> /dashboard. */

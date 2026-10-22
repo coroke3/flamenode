@@ -1,9 +1,11 @@
 import React from "react";
 import { BrowserRouter } from "react-router-dom";
-import { unwiredPersonalApi, type PersonalApi } from "./api/session.js";
+import { createPersonalApi, type PersonalApi } from "./api/personal.js";
 import { PersonalRoutes } from "./routes/router.js";
 
-export function App({ api = unwiredPersonalApi }: { api?: PersonalApi }) {
+const defaultApi = createPersonalApi();
+
+export function App({ api = defaultApi }: { api?: PersonalApi }) {
   return (
     <BrowserRouter>
       <PersonalRoutes api={api} />
