@@ -7,6 +7,9 @@ import {
   resolveSessionUser,
   sessionMiddleware,
   requireAuth,
+  MAX_SESSION_COOKIE_CHUNKS,
+  MAX_SESSION_TOKEN_LENGTH,
+  MAX_SESSION_COOKIE_NAMES,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -99,11 +102,11 @@ function createTestD1() {
 }
 
 test("Cookie extraction and parsing", async (t) => {
-  await t.test("parses cookies with various formats, whitespace, and quotes", () => {
+  await t.test("parses cookies with various formats and whitespace, keeping quotes like Auth.js", () => {
     const parsed = parseCookieHeader(
       '__Secure-authjs.session-token="token-with-quotes"; theme=dark; authjs.session-token=dev-token',
     );
-    assert.equal(parsed["__Secure-authjs.session-token"], "token-with-quotes");
+    assert.equal(parsed["__Secure-authjs.session-token"], '"token-with-quotes"');
     assert.equal(parsed["theme"], "dark");
     assert.equal(parsed["authjs.session-token"], "dev-token");
   });
@@ -128,6 +131,95 @@ test("Cookie extraction and parsing", async (t) => {
     const header = "__Secure-authjs.session-token=FIRST; __Secure-authjs.session-token=SECOND";
     assert.equal(parseCookieHeader(header)["__Secure-authjs.session-token"], "FIRST");
     assert.equal(extractSessionToken(header, { secure: true }), "FIRST");
+  });
+
+  await t.test("joins every cookie starting with the session name, by chunk index (Auth.js SessionStore)", () => {
+    const name = "__Secure-authjs.session-token";
+    assert.equal(extractSessionToken(`${name}=abc; ${name}.1=def`, { secure: true }), "abcdef");
+    assert.equal(extractSessionToken(`${name}.1=def; ${name}.0=abc`, { secure: true }), "abcdef");
+    assert.equal(extractSessionToken(`${name}.0=abc`, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${name}=abc; ${name}x=zzz`, { secure: true }), "abczzz");
+    assert.equal(extractSessionToken(`${name}=; theme=dark`, { secure: true }), null);
+  });
+
+  await t.test("a single matching cookie is returned as is, whatever its suffix", () => {
+    const name = "__Secure-authjs.session-token";
+    assert.equal(extractSessionToken(`theme=dark; ${name}.7=abc; visitor=anon`, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${name}=; ${name}.x=abc`, { secure: true }), "abc");
+  });
+
+  await t.test("chunk count cap: cap-1 and cap chunks join, cap+1 fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    // Header lists chunks in reverse index order; chunk k carries the digit k % 10.
+    const header = (count) =>
+      Array.from({ length: count }, (_, i) => count - 1 - i)
+        .map((k) => `${name}.${k}=${k % 10}`)
+        .join("; ");
+    const joined = (count) => Array.from({ length: count }, (_, k) => k % 10).join("");
+    for (const count of [MAX_SESSION_COOKIE_CHUNKS - 1, MAX_SESSION_COOKIE_CHUNKS]) {
+      assert.equal(extractSessionToken(header(count), { secure: true }), joined(count), String(count));
+    }
+    assert.equal(extractSessionToken(header(MAX_SESSION_COOKIE_CHUNKS + 1), { secure: true }), null);
+    // Empty chunks are not read by Auth.js and do not count.
+    const withEmpty = `${header(MAX_SESSION_COOKIE_CHUNKS)}; ${name}.999=`;
+    assert.equal(extractSessionToken(withEmpty, { secure: true }), joined(MAX_SESSION_COOKIE_CHUNKS));
+  });
+
+  await t.test("joined token length cap: cap chars are read, cap+1 fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    const atCap = "a".repeat(MAX_SESSION_TOKEN_LENGTH);
+    assert.equal(extractSessionToken(`${name}=${atCap}`, { secure: true }), atCap);
+    assert.equal(extractSessionToken(`${name}=${atCap}b`, { secure: true }), null);
+    const half = "a".repeat(MAX_SESSION_TOKEN_LENGTH / 2);
+    assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}`, { secure: true }), half + half);
+    assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}b`, { secure: true }), null);
+  });
+
+  await t.test("a 32KB header of ~900 shuffled chunks fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    const count = 900;
+    // 7919 is coprime with 900, so this visits every index once, out of order.
+    const header = Array.from({ length: count }, (_, i) => `${name}.${(i * 7919) % count}=xx`).join("; ");
+    assert.ok(header.length >= 32 * 1024, String(header.length));
+    assert.equal(extractSessionToken(header, { secure: true }), null);
+  });
+
+  await t.test("session-prefixed name cap counts empty and repeated names, and fails closed above it", () => {
+    const name = "__Secure-authjs.session-token";
+    const empties = (count) => Array.from({ length: count }, (_, i) => `${name}.${i + 1}=`).join("; ");
+    const atCap = `${empties(MAX_SESSION_COOKIE_NAMES - 1)}; ${name}=abc`;
+    assert.equal(extractSessionToken(atCap, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${empties(MAX_SESSION_COOKIE_NAMES)}; ${name}=abc`, { secure: true }), null);
+    const repeated = Array.from({ length: MAX_SESSION_COOKIE_NAMES + 1 }, () => `${name}=abc`).join("; ");
+    assert.equal(extractSessionToken(repeated, { secure: true }), null);
+  });
+
+  await t.test("a 128KB header (Cloudflare's request header limit) stays within the S4 2ms budget", () => {
+    const name = "__Secure-authjs.session-token";
+    const token = "t".repeat(36);
+    const junk = (count) => Array.from({ length: count }, (_, i) => `c${i}=v`).join("; ");
+    const cases = [
+      [junk(12000), null],
+      [`${junk(11000)}; ${name}=${token}`, token],
+      [`${name}=${"a".repeat(MAX_SESSION_TOKEN_LENGTH)}; ${junk(11000)}`, "a".repeat(MAX_SESSION_TOKEN_LENGTH)],
+      [Array.from({ length: 3400 }, (_, i) => `${name}.${(i * 7919) % 3400}=xx`).join("; "), null],
+      // Empty and repeated chunks are skipped by Auth.js but still matched by name.
+      [Array.from({ length: 3500 }, (_, i) => `${name}.${i}=`).join("; "), null],
+      [Array.from({ length: 3500 }, () => `${name}=${token}`).join("; "), null],
+    ];
+    for (const [header, expected] of cases) {
+      assert.ok(header.length >= 64 * 1024, String(header.length));
+      assert.equal(extractSessionToken(header, { secure: true }), expected);
+      // Best of 20, as in scripts/migration-gateway.test.mjs: the max of a wall clock is GC and
+      // parallel-runner noise here. This pins the per-header cost (the full parse cost 4-6ms).
+      let best = Infinity;
+      for (let r = 0; r < 20; r++) {
+        const start = performance.now();
+        extractSessionToken(header, { secure: true });
+        best = Math.min(best, performance.now() - start);
+      }
+      assert.ok(best < 2, `${header.length} bytes took ${best.toFixed(3)}ms`);
+    }
   });
 
   await t.test("prototype keys are ordinary cookie names", () => {
