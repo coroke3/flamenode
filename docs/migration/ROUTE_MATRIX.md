@@ -195,15 +195,15 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 | `/admin/rules/[id]/edit` | MIG-0626 | `GET /api/admin-read/rules/:id` | DONE |
 | `/admin/rules/new` | MIG-0626 | — | NONE (default terms are a source constant) |
 | `/admin/youtube-sync` | MIG-0626 | `GET /api/admin-read/ops/youtube-sync` | DONE |
-| `/admin` | MIG-0626 | — | TODO (adminPendingCounts) |
-| `/admin/api-endpoints` | MIG-0626 | — | TODO |
-| `/admin/health` | MIG-0626 | — | TODO (healthChecks.ts, 720 lines) |
-| `/admin/health/integrity` | MIG-0626 | — | TODO (integrityChecks.ts, 910 lines) |
-| `/admin/import` | MIG-0626 | — | TODO (inspect; client component only) |
-| `/admin/permissions/simulator` | MIG-0626 | — | TODO (permissionSimulator.ts) |
-| `/admin/security` | MIG-0626 | — | TODO (securityChecks.ts) |
-| `/admin/spreadsheet` | MIG-0626 | — | TODO unless MIG-0605 RH-003 / RH-007 / RH-009 own it |
-| `/admin/static-builds` | MIG-0626 | — | TODO (static-rebuild-admin.ts, 675 lines) |
-| `/admin/workers` | MIG-0626 | — | TODO (workerMonitoring.ts) |
-| `/admin/youtube-quota` | MIG-0626 | — | TODO (quotaPolicy.ts, env only) |
-| `/admin/youtube-sync/playlists` | MIG-0626 | — | TODO (playlistSyncHealth) |
+| `/admin` | MIG-0626 | `GET /api/admin-read/ops/top` | DONE |
+| `/admin/api-endpoints` | MIG-0626 | `GET /api/admin-read/api-endpoints` | DONE |
+| `/admin/health` | MIG-0626 | `GET /api/admin-read/ops/health` | PARTIAL (operational view DONE; deep=1/run=1 STOP -> 501, see work item) |
+| `/admin/health/integrity` | MIG-0626 | `GET /api/admin-read/ops/integrity` | PARTIAL (idle state only; run=1 STOP -> 501, per-check design in work item) |
+| `/admin/import` | MIG-0626 | — | NONE (static page + client component; writes are server actions) |
+| `/admin/permissions/simulator` | MIG-0626 | `GET /api/admin-read/permissions/simulator` | DONE |
+| `/admin/security` | MIG-0626 | `GET /api/admin-read/ops/security?run=1` | DONE |
+| `/admin/spreadsheet` | MIG-0605 (RH-003 / RH-007 / RH-009) | — | NOT MIG-0626 |
+| `/admin/static-builds` | MIG-0626 | `GET /api/admin-read/ops/static-builds` | PARTIAL (D1 + KV + R2 head DONE; shared-input diagnostics bodies STOP -> the R2-artifact-consumers task) |
+| `/admin/workers` | MIG-0626 | `GET /api/admin-read/ops/workers` | DONE |
+| `/admin/youtube-quota` | MIG-0626 | `GET /api/admin-read/ops/youtube-quota` | DONE |
+| `/admin/youtube-sync/playlists` | MIG-0626 | `GET /api/admin-read/ops/youtube-playlists` | DONE |
