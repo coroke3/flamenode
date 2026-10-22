@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import { personalDashboardRoutes } from "./dashboard.ts";
+import { personalEntryRoutes } from "./entry/index.ts";
 import { personalLibraryRoutes } from "./library.ts";
 import { personalOnboardingRoutes } from "./onboarding.ts";
 import { personalSessionRoutes } from "./session.ts";
@@ -25,6 +26,7 @@ personalRoutes.route("/dashboard", personalDashboardRoutes);
 personalRoutes.route("/library", personalLibraryRoutes);
 personalRoutes.route("/settings", personalSettingsRoutes);
 personalRoutes.route("/onboarding", personalOnboardingRoutes);
+personalRoutes.route("/entry", personalEntryRoutes); // MIG-0623
 
 // D1/R2 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.
 personalRoutes.onError((_error, c) => {
