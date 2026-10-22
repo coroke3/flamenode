@@ -115,7 +115,10 @@ test("F-06: unsafe or non-CURRENT ids are still rejected",async()=>{
   await assert.rejects(()=>loadPublicBuildSnapshot(source(pack({...data,id})),key,options()),
    e=>e instanceof SnapshotBuildError&&e.code==="INVALID_PAYLOAD",id);
  }
- for(const creatorXUserId of ["-foo","a".repeat(21),"../admin","a/b","a.b",""]){
+ for(const creatorXUserId of ["-foo","a".repeat(64)]){
+  assert.equal((await loadAs({kind:"video",id:"v1",title:"V",creatorXUserId})).creatorXUserId,creatorXUserId,creatorXUserId);
+ }
+ for(const creatorXUserId of ["a".repeat(129),"../admin","a/b","a.b",""]){
   assert.equal((await loadAs({kind:"video",id:"v1",title:"V",creatorXUserId})).creatorXUserId,undefined,creatorXUserId);
  }
 });
