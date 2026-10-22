@@ -7,6 +7,7 @@ import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
 import { manageStaffRoutes } from "./staff.ts";
+import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
 // is `Cache-Control: private, no-store`; nothing here writes to D1, R2, KV or cookies.
@@ -29,6 +30,7 @@ manageRoutes.route("/events/:id/staff", manageStaffRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
 manageRoutes.route("/events/:id", manageOverviewRoutes);
 manageRoutes.route("/notifications", manageNotificationCenterRoutes);
+manageRoutes.route("/x-link-requests", manageXLinkRequestRoutes);
 manageRoutes.route("/", manageDashboardRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.

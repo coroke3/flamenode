@@ -164,6 +164,30 @@ export function seed(sqlite) {
   }
   ins("notification_outbox", { id: "n-global", type: "x", payload_json: "{}", status: "failed", event_id: null, created_at: NOW });
 
+  // X link requests: icons (external, none -> video fallback, empty, internal approved/pending), legacy casing, targets
+  const xu = (id, status, icon) => ins("x_users", { id, x_name: `Req ${id}`, icon_url: icon, approval_status: status });
+  xu("req_a", "approved", "https://x.test/a.png");
+  xu("req_b", "pending", null);
+  xu("req_c", "approved", "");
+  xu("req_i", "approved", "/api/media/xicons/i.png");
+  xu("req_p", "pending", "/api/media/xicons/p.png");
+  xu(" LegacyD ", "approved", "https://x.test/legacy.png");
+  const v = (id, creator, icon, createdAt) =>
+    ins("videos", { id, title: id, submitted_by_user_id: "u_plain", creator_display_name: id, creator_x_user_id: creator, creator_icon_url: icon, visibility_status: "public", created_at: createdAt });
+  v("vi1", "req_b", "https://v.test/old.png", NOW - 500);
+  v("vi2", "req_b", "https://v.test/new.png", NOW - 100);
+  v("vi3", "req_b", "", NOW - 50);
+  v("vi4", " ReqLegacyV ", "https://v.test/legacyv.png", NOW - 10);
+  const xr = (id, type, requested, target, status, at) =>
+    ins("x_identity_requests", { id, request_type: type, requested_by_auth_user_id: "u_plain", requested_x_id: requested, target_x_user_id: target, status, requested_at: at, updated_at: at });
+  xr("xr1", "new_link", "@Req_A", null, "pending", NOW + 1);
+  xr("xr2", "existing_link", "req_b", "req_a", "pending", NOW + 2);
+  xr("xr3", "new_link", "req_c", "REQ_I", "pending", NOW + 3);
+  xr("xr4", "existing_link", "legacyd", "req_p", "pending", NOW + 4);
+  xr("xr5", "new_link", "reqlegacyv", "nobody", "pending", NOW + 5);
+  xr("xr7", "new_link", "req_a", null, "approved", NOW + 7);
+  for (let i = 0; i < 105; i += 1) xr(`xrbulk${i}`, "new_link", `bulk${i}`, null, "pending", NOW - 1000 + i);
+
   // slots: evA has 130 rows (paging, ties), evB a few, evC some
   ins("user", { id: "u_slotter", name: "Slotter", email: "slotter@example.test", role: "user", created_at: NOW, discord_id: "d_slotter" });
   for (let i = 0; i < 130; i += 1) {

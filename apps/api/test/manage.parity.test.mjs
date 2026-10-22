@@ -505,6 +505,56 @@ if (runUnderRootTsx(import.meta.url)) {
     };
   }
 
+  // app/(manage)/manage/x-link-requests/page.tsx
+  const { enrichXLinkPendingRows } = await import("../../../src/lib/admin/enrichXLinkPendingRows.ts");
+  async function refXLinks(name) {
+    const snapshot = await refSnapshot(name);
+    if (!snapshot.canManageXIdLinkRequests) return 404;
+    const base = await refDb
+      .select({
+        id: S.xIdentityRequests.id, requested_x_id: S.xIdentityRequests.requested_x_id, requested_by_auth_user_id: S.xIdentityRequests.requested_by_auth_user_id,
+        discord_name: S.users.name, discord_image: S.users.image, requested_at: S.xIdentityRequests.requested_at,
+        request_type: S.xIdentityRequests.request_type, target_x_user_id: S.xIdentityRequests.target_x_user_id,
+      })
+      .from(S.xIdentityRequests)
+      .leftJoin(S.users, eq(S.users.id, S.xIdentityRequests.requested_by_auth_user_id))
+      .where(and(eq(S.xIdentityRequests.status, "pending"), inArray(S.xIdentityRequests.request_type, ["new_link", "existing_link"])))
+      .orderBy(desc(S.xIdentityRequests.requested_at), desc(S.xIdentityRequests.id))
+      .limit(100);
+    const enriched = await enrichXLinkPendingRows(refDb, base, { includeVideoIconFallback: true });
+    return {
+      rows: await Promise.all(
+        enriched.map(async (row) => ({
+          ...row,
+          target_x_user_id: row.target_x_user_id ?? null,
+          requested_icon_url: await resolveManageXIconUrl({ iconUrl: row.requested_icon_url, approvalStatus: row.requested_approval_status, authSecret: "test-secret" }),
+          target_icon_url: await resolveManageXIconUrl({ iconUrl: row.target_icon_url, approvalStatus: row.target_approval_status, authSecret: "test-secret" }),
+        })),
+      ),
+    };
+  }
+
+  test("T-xlink: x-link-requests (enrichment, legacy ids, video icon fallback, signing) equals CURRENT; only xid reviewers and admins", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      const r = await call("/api/manage/x-link-requests", `tok-${name}`);
+      const ref = await refXLinks(name);
+      if (ref === 404) {
+        assert.equal(r.status, 404, name);
+        continue;
+      }
+      assert.equal(r.status, 200, name);
+      assert.deepEqual(r.body, canon(ref), name);
+      record("xlink", r);
+    }
+    const body = (await call("/api/manage/x-link-requests", "tok-admin")).body;
+    assert.equal(body.rows.length, 100, "pending list is capped at 100 (PENDING_LIMIT)");
+    assert.ok(body.rows.every((row) => row.request_type === "new_link" || row.request_type === "existing_link"));
+    assert.equal((await call("/api/manage/x-link-requests", "tok-owner")).status, 404);
+    assert.equal((await call("/api/manage/x-link-requests", "tok-plain")).status, 403);
+    const stats0 = (await call("/api/manage/x-link-requests", "tok-custom")).stats;
+    assert.equal(stats0.statements, 3);
+  });
+
   test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {
     for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
       for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "nope"]) {
