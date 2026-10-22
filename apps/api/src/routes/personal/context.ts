@@ -140,6 +140,7 @@ export function linkedXStatement(db: D1Database, userId: string): D1PreparedStat
        FROM x_user_account_links
        INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
        WHERE x_user_account_links.auth_user_id = ?
+       ORDER BY x_users.id
        LIMIT ?`,
     )
     .bind(userId, MAX_LINKED_X_USERS);
@@ -148,22 +149,11 @@ export function linkedXStatement(db: D1Database, userId: string): D1PreparedStat
 export interface ContextOptions {
   /** latest pending slot-reservation X request (CURRENT pendingSlotReservationXRequestWhere + limit 1) */
   pendingRequest?: boolean;
-  /** settings: profile columns + the creating request's requested_at (CURRENT getLinkedXUsersForAuthUser) */
-  profileColumns?: boolean;
   /** settings: own request history, newest first, MAX_REQUEST_HISTORY rows */
   requestHistory?: boolean;
 }
 
 const HEADER_LINKED_COLUMNS = ["x_user_id", "x_name", "icon_url", "approval_status"] as const;
-const PROFILE_LINKED_COLUMNS = [
-  ...HEADER_LINKED_COLUMNS,
-  "youtube_channel_url",
-  "profile_text",
-  "portfolio_contact",
-  "other_social_links",
-  "created_at",
-  "request_requested_at",
-] as const;
 const HISTORY_COLUMNS = [
   "id",
   "request_type",
@@ -191,27 +181,18 @@ export function contextStatement(
   options: ContextOptions,
 ): D1PreparedStatement {
   const params: unknown[] = [];
-  const profile = options.profileColumns === true;
-  const linkedColumns = profile ? PROFILE_LINKED_COLUMNS : HEADER_LINKED_COLUMNS;
-  const linkedInner = profile
-    ? `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
-           x_users.approval_status AS approval_status, x_users.youtube_channel_url AS youtube_channel_url,
-           x_users.profile_text AS profile_text, x_users.portfolio_contact AS portfolio_contact,
-           x_users.other_social_links AS other_social_links, x_user_account_links.created_at AS created_at,
-           x_identity_requests.requested_at AS request_requested_at
-         FROM x_user_account_links
-         INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
-         LEFT JOIN x_identity_requests ON x_identity_requests.id = x_user_account_links.created_by_request_id
-         WHERE x_user_account_links.auth_user_id = ?
-         LIMIT ?`
-    : `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
+  // Header columns only (id / name / icon / status are short). Profile text is read as ROWS by settings.
+  // json_group_array over an ordered FROM-subquery: SQLite aggregates in the subquery's row order (relied on,
+  // asserted by the parity tests for every ordered section).
+  const linkedInner = `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
            x_users.approval_status AS approval_status
          FROM x_user_account_links
          INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
          WHERE x_user_account_links.auth_user_id = ?
+         ORDER BY x_users.id
          LIMIT ?`;
   params.push(userId, MAX_LINKED_X_USERS);
-  const linked = `(SELECT json_group_array(json_object(${jsonObject(linkedColumns)})) FROM (${linkedInner}) q)`;
+  const linked = `(SELECT json_group_array(json_object(${jsonObject(HEADER_LINKED_COLUMNS)})) FROM (${linkedInner}) q)`;
 
   let pending = "NULL";
   if (options.pendingRequest) {

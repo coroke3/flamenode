@@ -630,11 +630,11 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(!JSON.stringify(body).includes("restore_snapshot_json"));
   });
 
-  test("S2 budget: settings = session + context (+ 1 candidates statement for the shown X panel)", async () => {
+  test("S2 budget: settings = session + context + 1 profile-rows statement (candidates ride along), always 3", async () => {
     const withPanel = await call("/api/personal/settings", "tok-alice");
     assert.deepEqual({ statements: withPanel.stats.statements, batches: withPanel.stats.batches }, { statements: 3, batches: 0 });
     const noPanel = await call("/api/personal/settings?tab=link", "tok-alice");
-    assert.deepEqual({ statements: noPanel.stats.statements, batches: noPanel.stats.batches }, { statements: 2, batches: 0 });
+    assert.deepEqual({ statements: noPanel.stats.statements, batches: noPanel.stats.batches }, { statements: 3, batches: 0 });
   });
 
   // ---------------- onboarding ----------------
@@ -688,6 +688,48 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       sqlite.exec("UPDATE terms_versions SET status = 'published' WHERE id = 'T2'");
     }
+  });
+
+  test("S2/Fable: 100 linked X with 2000-char profiles -> settings still 200 (profile read as rows, not JSON); >100 links are capped by id", async () => {
+    sqlite.exec(`INSERT INTO "user" (id, name, is_tos_accepted, accepted_terms_version_id, created_at) VALUES ('u_wide', 'wide', 1, 'T2', 1)`);
+    sqlite.exec(`INSERT INTO session ("sessionToken", "userId", expires) VALUES ('tok-wide', 'u_wide', ${Date.now() + 3_600_000})`);
+    const longText = "あ".repeat(2000);
+    const insertX = sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status, profile_text) VALUES (?, ?, 'approved', ?)");
+    const insertLink = sqlite.prepare("INSERT INTO x_user_account_links (x_user_id, auth_user_id, link_role, created_at, updated_at) VALUES (?, 'u_wide', 'owner', 1, 1)");
+    for (let i = 0; i < 101; i += 1) {
+      const id = `wide_${String(i).padStart(3, "0")}`;
+      insertX.run(id, `X ${id}`, longText);
+      insertLink.run(id);
+    }
+    try {
+      const settings = await call("/api/personal/settings", "tok-wide");
+      assert.equal(settings.status, 200);
+      assert.equal(settings.body.xIds.length, 100, "MAX_LINKED_X_USERS = 100");
+      assert.deepEqual(settings.body.xIds.map((x) => x.id), Array.from({ length: 100 }, (_, i) => `wide_${String(i).padStart(3, "0")}`), "kept rows are the first 100 by id");
+      assert.ok(settings.body.xIds.every((x) => x.profile_text === longText));
+      assert.equal(settings.stats.statements, 3);
+      // Known, recorded S2 exception: this response is far larger than 64 KiB, exactly as CURRENT renders it.
+      assert.ok(JSON.stringify(settings.body).length > 64 * 1024);
+      for (const endpoint of ["session", "dashboard", "library?tab=collab", "onboarding"]) {
+        const r = await call(`/api/personal/${endpoint}`, "tok-wide");
+        assert.equal(r.status, 200, endpoint);
+        assert.ok(r.stats.statements <= 3, endpoint);
+      }
+      assert.equal((await call("/api/personal/dashboard", "tok-wide")).body.linkedXUsers.length, 100);
+    } finally {
+      sqlite.exec(`DELETE FROM x_user_account_links WHERE auth_user_id = 'u_wide'; DELETE FROM x_users WHERE id LIKE 'wide_%'; DELETE FROM session WHERE "userId" = 'u_wide'; DELETE FROM "user" WHERE id = 'u_wide'`);
+    }
+  });
+
+  test("S2: an oversize D1 rules body is never transferred and never falls through to an older version", async () => {
+    sqlite.exec(`INSERT INTO terms_versions (id, version_label, body_markdown, status, severity, published_at, created_by_user_id, updated_at) VALUES ('T9', 'huge', '${"x".repeat(70 * 1024)}', 'published', 'minor', 5000, 'admin', 5000)`);
+    try {
+      const body = (await call("/api/personal/onboarding", "tok-carol")).body;
+      assert.equal(body.rules, null, "newest published body > 64 KiB -> null (client default terms)");
+    } finally {
+      sqlite.exec("DELETE FROM terms_versions WHERE id = 'T9'");
+    }
+    assert.equal((await call("/api/personal/onboarding", "tok-carol")).body.rules.versionLabel, "v2");
   });
 
   test("read-only: nothing wrote to D1 and no endpoint set a cookie", async () => {

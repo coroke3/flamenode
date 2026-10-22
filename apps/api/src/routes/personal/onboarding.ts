@@ -78,12 +78,18 @@ async function loadRules(env: AppEnv["Bindings"]): Promise<OnboardingRules | nul
   const fromR2 = await readRulesObject(env.BUCKET);
   if (fromR2 !== undefined && fromR2 !== null) return normalizeRules(fromR2);
   try {
+    // The body is only transferred when it fits the S2 bound (an oversize newest version yields null, it must
+    // not fall through to an older version).
     const row = await env.DB.prepare(
-      `SELECT version_label, body_markdown FROM terms_versions
+      `SELECT version_label,
+         CASE WHEN length(CAST(body_markdown AS BLOB)) <= ? THEN body_markdown END AS body_markdown
+       FROM terms_versions
        WHERE status = 'published'
        ORDER BY published_at DESC, updated_at DESC
        LIMIT 1`,
-    ).first<{ version_label: string; body_markdown: string }>();
+    )
+      .bind(MAX_RULES_OBJECT_BYTES)
+      .first<{ version_label: string; body_markdown: string | null }>();
     return row ? normalizeRules(row) : null;
   } catch {
     // CURRENT's loader does not throw to the page on a degraded-read failure; the page falls back to default terms.
