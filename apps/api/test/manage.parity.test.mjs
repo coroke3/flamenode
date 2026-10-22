@@ -569,6 +569,68 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(!a.audience.some((row) => row.x_user_id.trim() === ""), "blank snapshots are skipped");
   });
 
+  // app/(manage)/manage/events/[id]/youtube-playlist/page.tsx
+  const { derivePlaylistSyncHealth } = await import("../../../src/lib/youtube/playlistSyncHealth.ts");
+  async function refPlaylist(name, eventId) {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    if (!MA.canAccessManageEventFromSnapshot(snapshot, eventId)) return 404;
+    const ev = nav.events.find((e) => e.id === eventId);
+    if (!ev) return 404;
+    const user = (await refDb.select().from(S.users).where(eq(S.users.id, `u_${name}`)))[0];
+    const config = (await refDb.select().from(S.eventYoutubePlaylistSync).where(eq(S.eventYoutubePlaylistSync.event_id, eventId)).limit(1))[0];
+    const c = (
+      await refDb
+        .select({
+          linked_count: sql`COUNT(DISTINCT CASE WHEN ${S.videos.id} IS NOT NULL AND ${S.videos.visibility_status} <> 'voided' THEN ${S.videos.id} END)`,
+          eligible_count: sql`COUNT(DISTINCT CASE WHEN ${S.videos.visibility_status} = 'public' AND ${S.videos.youtube_video_id} IS NOT NULL AND ${S.videos.youtube_video_id} <> '' THEN ${S.videos.id} END)`,
+          synced_count: sql`COUNT(DISTINCT CASE WHEN ${S.eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL AND ${S.videos.visibility_status} = 'public' THEN ${S.videos.id} END)`,
+        })
+        .from(S.videoEvents)
+        .leftJoin(S.videos, eq(S.videos.id, S.videoEvents.video_id))
+        .leftJoin(S.eventYoutubePlaylistItems, and(eq(S.eventYoutubePlaylistItems.event_id, S.videoEvents.event_id), eq(S.eventYoutubePlaylistItems.youtube_video_id, S.videos.youtube_video_id)))
+        .where(eq(S.videoEvents.event_id, eventId))
+    )[0];
+    const counts = { linked: Number(c?.linked_count ?? 0), eligible: Number(c?.eligible_count ?? 0), synced: Number(c?.synced_count ?? 0) };
+    const linked = await getHeaderLinkedXUsersForAuthUser(refDb, user.id);
+    return {
+      isAdmin: snapshot.isAdmin,
+      event: { id: ev.id, title: ev.title, accent_color: ev.accent_color },
+      pendingCount: nav.pendingByEvent.get(eventId) ?? 0,
+      canEdit: MA.canEditEventFromSnapshot(snapshot, eventId, "event.publish"),
+      activeXUserId: await resolveActiveXUserId(refDb, user.id, normalizeXId(user.active_x_user_id) || null, linked),
+      manageStaffXUserIds: [...MA.getManageStaffXUserIdsFromSnapshot(snapshot)],
+      config: config
+        ? { playlist_id: config.playlist_id, enabled: config.enabled, sync_mode: config.sync_mode, sync_interval_minutes: config.sync_interval_minutes, sync_status: config.sync_status, next_sync_at: config.next_sync_at, last_synced_at: config.last_synced_at, last_full_scan_at: config.last_full_scan_at, last_error: config.last_error }
+        : null,
+      counts,
+      syncHealth: derivePlaylistSyncHealth({
+        enabled: config?.enabled ?? 0, syncStatus: config?.sync_status ?? "disabled", nextSyncAt: config?.next_sync_at ?? null, lastSyncedAt: config?.last_synced_at ?? null,
+        lastFullScanAt: config?.last_full_scan_at ?? null, lastError: config?.last_error ?? null, eligibleCount: counts.eligible, syncedCount: counts.synced, linkedCount: counts.linked, now: Math.floor(Date.now() / 1000),
+      }),
+    };
+  }
+
+  test("T-playlist: youtube playlist sync page (config, counts, health) equals CURRENT; IDOR", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const eventId of ["evA", "evB", "evC", "evD", "nope"]) {
+        const r = await call(`/api/manage/events/${eventId}/youtube-playlist`, `tok-${name}`);
+        const ref = await refPlaylist(name, eventId);
+        if (ref === 404) {
+          assert.equal(r.status, 404, `${name} ${eventId}`);
+          continue;
+        }
+        assert.equal(r.status, 200, `${name} ${eventId}`);
+        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+        record("playlist", r);
+      }
+    }
+    const a = (await call("/api/manage/events/evA/youtube-playlist", "tok-owner")).body;
+    assert.equal(a.canEdit, true);
+    assert.equal((await call("/api/manage/events/evA/youtube-playlist", "tok-rev")).body.canEdit, false);
+    assert.equal((await call("/api/manage/events/evC/youtube-playlist", "tok-outsider")).body.syncHealth.level, "critical");
+  });
+
   // app/(manage)/manage/x-link-requests/page.tsx
   const { enrichXLinkPendingRows } = await import("../../../src/lib/admin/enrichXLinkPendingRows.ts");
   async function refXLinks(name) {

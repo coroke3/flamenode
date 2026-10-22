@@ -188,6 +188,17 @@ export function seed(sqlite) {
   xr("xr7", "new_link", "req_a", null, "approved", NOW + 7);
   for (let i = 0; i < 105; i += 1) xr(`xrbulk${i}`, "new_link", `bulk${i}`, null, "pending", NOW - 1000 + i);
 
+  // youtube playlist sync: evA synced (one public video with a playlist item), evC failed, evB has no config row
+  ins("event_youtube_playlist_sync", { event_id: "evA", playlist_id: "PL1", enabled: 1, sync_mode: "all", sync_interval_minutes: 60, sync_status: "synced", next_sync_at: NOW + 1000, last_synced_at: NOW - 10, last_full_scan_at: NOW - 20 });
+  ins("event_youtube_playlist_sync", { event_id: "evC", playlist_id: "PL2", enabled: 1, sync_mode: "all", sync_status: "failed", last_error: "boom" });
+  ins("event_youtube_playlist_sync", { event_id: "evD", enabled: 0 });
+  ins("event_youtube_playlist_items", { event_id: "evA", playlist_item_id: "pi1", youtube_video_id: "yt-vi1", seen_at: NOW });
+  ins("event_youtube_playlist_items", { event_id: "evA", playlist_item_id: "pi2", youtube_video_id: "yt-v3", seen_at: NOW });
+  ins("videos", { id: "vyt1", title: "yt1", submitted_by_user_id: "u_plain", creator_display_name: "c", youtube_video_id: "yt-vi1", visibility_status: "public", created_at: NOW });
+  ins("videos", { id: "vyt2", title: "yt2", submitted_by_user_id: "u_plain", creator_display_name: "c", youtube_video_id: "yt-v3", visibility_status: "pending", created_at: NOW });
+  ins("video_events", { video_id: "vyt1", event_id: "evA" });
+  ins("video_events", { video_id: "vyt2", event_id: "evA" });
+
   // slots: evA has 130 rows (paging, ties), evB a few, evC some
   ins("user", { id: "u_slotter", name: "Slotter", email: "slotter@example.test", role: "user", created_at: NOW, discord_id: "d_slotter" });
   for (let i = 0; i < 130; i += 1) {
