@@ -117,6 +117,16 @@ async function forwardToAuth(request: Request, env: GatewayEnv): Promise<Respons
   }
 }
 
+const EVENT_SLOTS_PATH = /^\/event\/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\/slots\/?$/;
+const GROUP_SLUG_PATH = /^\/groups\/([^/]+)\/?$/;
+
+/** CURRENT `/groups` -> `/event`, `/groups/{slug}` -> `/event#event-group-{slug}`; null otherwise. */
+function groupCompatRedirect(path: string): string | null {
+  if (path === "/groups" || path === "/groups/") return "/event";
+  const match = GROUP_SLUG_PATH.exec(path);
+  return match ? `/event#event-group-${match[1]}` : null;
+}
+
 type ExecutionContext = { waitUntil: (promise: Promise<unknown>) => void };
 
 /** Static Assets first, then the prebuilt R2 HTML (D-06). */
@@ -133,7 +143,7 @@ async function servePage(
     const assetUrl = new URL(`/${decision.key}/`, url.origin);
     let asset: Response;
     try {
-      asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method, headers: request.headers }));
+      asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method, headers: request.headers, redirect: "manual" }));
     } catch {
       return unavailable();
     }
@@ -170,13 +180,28 @@ export default {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return textResponse(405, "Method Not Allowed", { Allow: "GET, HEAD" });
     }
+    // CURRENT group compat redirects (`app/(public)/groups/**`: redirect() = 307, query dropped).
+    const group = groupCompatRedirect(path);
+    if (group) {
+      return new Response(null, { status: 307, headers: { Location: group, "Cache-Control": NO_STORE } });
+    }
     if (!env.ASSETS) return unavailable();
+
+    // `/event/{id}/slots`: Static Assets `_redirects` owns it (generated 307 to `/event/{id}`);
+    // `redirect: "manual"` hands that answer to the client instead of following it here.
+    if (EVENT_SLOTS_PATH.test(path)) {
+      try {
+        return await env.ASSETS.fetch(new Request(request, { redirect: "manual" }));
+      } catch {
+        return unavailable();
+      }
+    }
 
     // The maintenance page itself: static, and exempt from the maintenance redirect above.
     if (path === "/maintenance" || path === "/maintenance/") {
       try {
         return await env.ASSETS.fetch(
-          new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers }),
+          new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers, redirect: "manual" }),
         );
       } catch {
         return unavailable();
@@ -189,8 +214,8 @@ export default {
       // Pages in directory form, as servePage does: with the default html_handling
       // `/about` would otherwise answer a redirect instead of the page.
       const target = FIXED_PUBLIC_PAGES.has(fixed) && fixed !== "/"
-        ? new Request(new URL(`${fixed}/`, url.origin), { method: request.method, headers: request.headers })
-        : request;
+        ? new Request(new URL(`${fixed}/`, url.origin), { method: request.method, headers: request.headers, redirect: "manual" })
+        : new Request(request, { redirect: "manual" });
       try {
         return await env.ASSETS.fetch(target);
       } catch {

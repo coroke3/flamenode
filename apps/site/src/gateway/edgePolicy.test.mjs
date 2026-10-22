@@ -193,3 +193,54 @@ test("the maintenance page texts are CURRENT's", async () => {
     assert.ok(view.includes(text), `view: ${text}`);
   }
 });
+
+// Table of MIG-0503 scripts/migration-groups-redirects.wrangler-smoke.mjs, with CURRENT's semantics
+// (Next redirect(): 307, query dropped), now answered by the gateway itself.
+test("group compat redirects: 307, Location, query dropped", async () => {
+  resetEdgePolicyCache();
+  const touched = [];
+  const env = { ASSETS: { fetch: async (r) => { touched.push(r.url); return new Response("asset"); } } };
+  const table = [
+    ["/groups", "/event"],
+    ["/groups/", "/event"],
+    ["/groups?x=1", "/event"],
+    ["/groups/spring", "/event#event-group-spring"],
+    ["/groups/spring/", "/event#event-group-spring"],
+    ["/groups/a%20b", "/event#event-group-a%20b"],
+    ["/groups/spring?x=1", "/event#event-group-spring"],
+  ];
+  for (const [path, location] of table) {
+    const res = await gateway.fetch(req(path), env);
+    assert.equal(res.status, 307, path);
+    assert.equal(res.headers.get("location"), location, path);
+  }
+  assert.deepEqual(touched, []);
+  const nested = await gateway.fetch(req("/groups/a/b"), { ...env, VISIBILITY_KV: kv(null) });
+  assert.notEqual(nested.status, 307);
+});
+
+test("Static Assets are fetched with redirect manual; /event/{id}/slots reaches Assets _redirects", async () => {
+  resetEdgePolicyCache();
+  const modes = [];
+  const env = {
+    ASSETS: {
+      fetch: async (r) => {
+        modes.push([new URL(r.url).pathname, r.redirect]);
+        if (new URL(r.url).pathname === "/event/spring/slots") {
+          return new Response(null, { status: 307, headers: { Location: "/event/spring" } });
+        }
+        return new Response("page");
+      },
+    },
+  };
+  const slots = await gateway.fetch(req("/event/spring/slots"), env);
+  assert.equal(slots.status, 307);
+  assert.equal(slots.headers.get("location"), "/event/spring");
+  await gateway.fetch(req("/about"), env);
+  await gateway.fetch(req("/maintenance"), env);
+  assert.deepEqual(modes, [
+    ["/event/spring/slots", "manual"],
+    ["/about/", "manual"],
+    ["/maintenance/", "manual"],
+  ]);
+});
