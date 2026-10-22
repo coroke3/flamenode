@@ -248,8 +248,11 @@ test("T05: safe logging never leaks sessionToken on database errors", async (t) 
   };
 
   try {
-    const user = await resolveSessionUser(failingDb, secretToken);
-    assert.equal(user, null);
+    // C-1: a D1 failure is "unavailable" (throws), never "no session" (null).
+    await assert.rejects(
+      () => resolveSessionUser(failingDb, secretToken),
+      (error) => error.name === "SessionUnavailableError" && error.code === "database_unavailable" && !String(error.stack).includes(secretToken) && error.cause === undefined,
+    );
     assert.ok(
       loggedOutput.includes("D1_LOOKUP_FAILED"),
       "error should be logged",

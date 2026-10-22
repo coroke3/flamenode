@@ -112,7 +112,8 @@ export interface ResolveSessionOptions {
  * 2. session has not expired (session.expires > now).
  * 3. associated "user" row exists.
  *
- * Returns SessionUser if valid, or null if expired / deleted / not found / error.
+ * Returns SessionUser if valid, or null if expired / deleted / not found.
+ * Throws SessionUnavailableError when D1 fails (tri-state: none / unavailable / user).
  * Banned users are returned with is_banned: 1 (consistent with CURRENT session contract).
  */
 export async function resolveSessionUser(
@@ -183,70 +184,125 @@ export async function resolveSessionUser(
     // D1/adapter errors may include bound session tokens in their message/stack.
     // Emit a fixed code only; do not serialize the underlying exception.
     console.error("[auth:session] D1_LOOKUP_FAILED");
-    return null;
+    // CURRENT currentUser.ts: a failed lookup is CurrentUserUnavailableError
+    // ("database_unavailable"), never "no session". Callers map it to 503.
+    throw new SessionUnavailableError();
   }
 }
+
+/** Reason code CURRENT CurrentUserUnavailableError uses for D1 failures. */
+export const SESSION_UNAVAILABLE_CODE = "database_unavailable";
+
+/** Thrown when the session cannot be resolved (D1 error). Carries no cause. */
+export class SessionUnavailableError extends Error {
+  readonly code = SESSION_UNAVAILABLE_CODE;
+  constructor() {
+    super(SESSION_UNAVAILABLE_CODE);
+    this.name = "SessionUnavailableError";
+  }
+}
+
+export type SessionState = "none" | "unavailable" | "user";
+
+/** Authenticated/auth-adjacent responses must never be shared-cached. */
+export const PRIVATE_NO_STORE = "private, no-store";
 
 export interface SessionMiddlewareOptions {
   now?: () => number;
 }
 
+type SessionContext = {
+  req: { url: string; header(name: string): string | undefined };
+  env?: { DB?: D1DatabaseLike };
+  set(key: string, value: unknown): void;
+  header?(name: string, value: string): void;
+};
+
 /**
- * Hono middleware resolving session for each request.
- * Sets `c.set("user", user)` and `c.set("session", user ? { user } : null)`.
+ * Hono middleware resolving session for each request (tri-state).
+ * Sets "user", "session" and "sessionState" ("none" | "unavailable" | "user").
  *
- * Never throws on unauthenticated requests; attaches null and proceeds to next handler.
+ * - no cookie token -> state "none" (user null), proceeds
+ * - token but D1 binding missing or D1 lookup failed -> state "unavailable"
+ *   (CURRENT CurrentUserUnavailableError "database_unavailable"); guards map
+ *   it to 503, never to "unauthenticated"
+ * - a request carrying a session token gets "Cache-Control: private, no-store"
+ *   (Next force-dynamic parity); requests without a token are untouched.
  */
 export function sessionMiddleware(options?: SessionMiddlewareOptions) {
-  return async (
-    c: {
-      req: { url: string; header(name: string): string | undefined };
-      env?: { DB?: D1DatabaseLike };
-      set(key: string, value: unknown): void;
-    },
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (c: SessionContext, next: () => Promise<void>): Promise<void> => {
     const cookieHeader = c.req.header("cookie");
     const secure = new URL(c.req.url).protocol === "https:";
     const token = extractSessionToken(cookieHeader, { secure });
     const db = c.env?.DB;
 
-    if (!db || !token) {
+    if (!token) {
       c.set("user", null);
       c.set("session", null);
+      c.set("sessionState", "none" satisfies SessionState);
+      await next();
+      return;
+    }
+    c.header?.("Cache-Control", PRIVATE_NO_STORE);
+
+    if (!db) {
+      console.error("[auth:session] D1_BINDING_MISSING");
+      c.set("user", null);
+      c.set("session", null);
+      c.set("sessionState", "unavailable" satisfies SessionState);
       await next();
       return;
     }
 
-    const user = await resolveSessionUser(db, token, {
-      now: options?.now ? options.now() : undefined,
-    });
+    let user: SessionUser | null;
+    try {
+      user = await resolveSessionUser(db, token, {
+        now: options?.now ? options.now() : undefined,
+      });
+    } catch (error) {
+      if (!(error instanceof SessionUnavailableError)) throw error;
+      c.set("user", null);
+      c.set("session", null);
+      c.set("sessionState", "unavailable" satisfies SessionState);
+      await next();
+      return;
+    }
 
     c.set("user", user);
     c.set("session", user ? { user } : null);
+    c.set("sessionState", (user ? "user" : "none") satisfies SessionState);
     await next();
   };
 }
 
 /**
  * Hono guard middleware that requires an authenticated, non-banned user.
- * Returns 401 if not logged in; 403 if user is banned.
+ * 503 database_unavailable if the session could not be resolved; 401 if not
+ * logged in; 403 if user is banned. Deny responses are private, no-store.
  */
 export function requireAuth() {
   return async (
     c: {
       get(key: string): unknown;
       json(data: unknown, status?: number): Response;
+      header?(name: string, value: string): void;
     },
     next: () => Promise<void>,
   ): Promise<Response | void> => {
+    if (c.get("sessionState") === "unavailable") {
+      c.header?.("Cache-Control", PRIVATE_NO_STORE);
+      return c.json({ error: SESSION_UNAVAILABLE_CODE }, 503);
+    }
     const user = c.get("user") as SessionUser | null;
     if (!user) {
+      c.header?.("Cache-Control", PRIVATE_NO_STORE);
       return c.json({ error: "Unauthorized" }, 401);
     }
     if (user.is_banned === 1) {
+      c.header?.("Cache-Control", PRIVATE_NO_STORE);
       return c.json({ error: "Forbidden", message: "User is banned" }, 403);
     }
     await next();
   };
 }
+

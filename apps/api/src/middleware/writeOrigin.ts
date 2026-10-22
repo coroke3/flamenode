@@ -30,6 +30,7 @@ export type WriteGuardDenyReason =
   | "origin_verification_unavailable"
   | "invalid_origin"
   | "unauthenticated"
+  | "database_unavailable"
   | "db_unavailable"
   | "banned"
   | "tos_required"
@@ -57,7 +58,18 @@ export const WRITE_GUARD_MESSAGES: Readonly<Record<string, string>> = {
   forbidden: "この操作を実行する権限がありません。",
 };
 
-/** JSON deny body: {ok:false, reason, message?} (message as CURRENT deny()). */
+/** Deny response: JSON body + "Cache-Control: private, no-store" (C-2). */
+export function writeGuardDenyResponse(
+  c: Context,
+  reason: string,
+  status: 401 | 403 | 503,
+): Response {
+  c.header("Content-Type", "application/json");
+  c.header("Cache-Control", "private, no-store");
+  return c.body(writeGuardDenyBody(reason), status);
+}
+
+/** JSON deny body:{ok:false, reason, message?} (message as CURRENT deny()). */
 export function writeGuardDenyBody(reason: string): string {
   const message = WRITE_GUARD_MESSAGES[reason];
   return JSON.stringify(
@@ -79,6 +91,8 @@ export async function evaluateAdminWriteGuard(options: {
   originOk: boolean;
   /** CURRENT: loadEnv 失敗 (origin_verification_unavailable) */
   originUnavailable?: boolean;
+  /** C-1: session could not be resolved (D1 error or missing binding with a token). */
+  sessionUnavailable?: boolean;
   loadTosState?: () => Promise<{ is_tos_accepted: number; terms_reaccept_required: number } | null>;
 }): Promise<WriteGuardOutcome> {
   if (options.originUnavailable) {
@@ -86,6 +100,10 @@ export async function evaluateAdminWriteGuard(options: {
   }
   if (!options.originOk) {
     return { ok: false, status: 403, reason: "invalid_origin" };
+  }
+  if (options.sessionUnavailable) {
+    // CURRENT: CurrentUserUnavailableError -> 503 with error.code.
+    return { ok: false, status: 503, reason: "database_unavailable" };
   }
   if (!options.user) {
     return { ok: false, status: 401, reason: "unauthenticated" };
@@ -296,14 +314,14 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       hasDb: db !== undefined,
       originOk,
       originUnavailable,
+      sessionUnavailable: c.get("sessionState") === "unavailable",
       loadTosState:
         user && db
           ? () => loadTosState(db, user.id)
           : undefined,
     });
     if (!outcome.ok) {
-      c.header("Content-Type", "application/json");
-      return c.body(writeGuardDenyBody(outcome.reason), outcome.status);
+      return writeGuardDenyResponse(c, outcome.reason, outcome.status);
     }
     await next();
   };
