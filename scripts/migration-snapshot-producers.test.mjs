@@ -66,9 +66,9 @@ function seed(sqlite) {
   xu.run("creator_a", "Creator A", "approved", "A のプロフィール", "https://example.com/a.png", "DM ください");
   xu.run("creator_b", "Creator B", "pending", null, null, null);
   xu.run("banned_c", "Banned C", "rejected", "非公開にすべきプロフィール", null, null);
-  const ev = sqlite.prepare(`INSERT INTO events (id, title, visibility_status, start_time, end_time) VALUES (?, ?, ?, ?, ?)`);
-  ev.run("public-event", "Public Event", "public", NOW - 86400, NOW + 86400 * 5);
-  ev.run("private-event", "Private Event", "private", NOW - 86400, NOW + 86400 * 5);
+  const ev = sqlite.prepare(`INSERT INTO events (id, title, visibility_status, start_time, end_time, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
+  ev.run("public-event", "Public Event", "public", NOW - 86400, NOW + 86400 * 5, NOW);
+  ev.run("private-event", "Private Event", "private", NOW - 86400, NOW + 86400 * 5, NOW);
   const vid = sqlite.prepare(
     `INSERT INTO videos (id, title, youtube_video_id, creator_display_name, creator_x_user_id, submitted_by_user_id, visibility_status, scheduled_time, primary_event_id, score, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -80,7 +80,12 @@ function seed(sqlite) {
   vid.run("b-1", "作品 B1", "ytb000000001", "Creator B", "creator_b", "auth-user", "public", NOW - 50, null, 5, NOW);
   vid.run("c-1", "作品 C1", "ytc000000001", "Banned C", "banned_c", "auth-user", "public", NOW - 60, null, 5, NOW);
   sqlite.prepare(`INSERT INTO video_events (video_id, event_id) VALUES (?, ?)`).run("a-1", "public-event");
-  sqlite.prepare(`INSERT INTO video_members (id, video_id, x_user_id, name, is_public_member) VALUES (?, ?, ?, ?, ?)`).run("m1", "b-1", "creator_a", "Creator A", 1);
+  const member = sqlite.prepare(`INSERT INTO video_members (id, video_id, x_user_id, name, is_public_member) VALUES (?, ?, ?, ?, ?)`);
+  member.run("m1", "b-1", "creator_a", "Creator A", 1);
+  member.run("m1b", "b-1", "creator_a", "Creator A again", 1); // duplicate member row: still one collab entry
+  member.run("m2", "a-5", "creator_b", "Creator B", 1);
+  member.run("m3", "a-6", "creator_b", "Creator B", 0); // not a public member
+  member.run("m4", "a-7", "creator_a", "Creator A", 1); // own work: never a collab
 }
 
 const TRENDING = {
@@ -194,6 +199,61 @@ test("trending is not derivable from D1: absent input is reported, never invente
   assert.equal(none.result.snapshots.some((s) => s.key === TRENDING_KEY), false);
   const rules = await loadRulesForBuild(rulesSourceFromEnv(env));
   assert.ok(rules.blocks.length > 0, "no rules row in the seed = CURRENT built-in terms");
+});
+
+function readOnly(sqlite, log) {
+  return {
+    prepare(sql) {
+      log.push(sql);
+      assert.match(sql, /^\s*(SELECT|WITH)\b/i, "a write reached the read-only reader");
+      let params = [];
+      const st = {
+        bind(...v) { params = v; return st; },
+        async all() { return { results: sqlite.prepare(sql).all(...params) }; },
+      };
+      return st;
+    },
+  };
+}
+
+test("C' parity: batched read-only producer output is byte-identical to the CURRENT-generator producer", async () => {
+  const oracle = await produce();
+  assert.ok(oracle.result.snapshots.some((s) => s.key.includes(".collabs.") || s.key === userProfileSnapshotKey("creator_a")));
+  for (const creatorsPerQuery of [1, 2, 25]) {
+    const sqlite = migrated();
+    seed(sqlite);
+    const log = [];
+    const batched = await produceSnapshots({ db: readOnly(sqlite, log), mode: "batched", creatorsPerQuery, generation: "gen-1", nowSec: NOW, trending: TRENDING });
+    const flat = (r) => r.snapshots.map((s) => `${s.key}\n${s.json}`);
+    const fb = flat(batched), fo = flat(oracle.result);
+    assert.equal(fb.length, fo.length);
+    const split = (s) => [s.slice(0, s.indexOf("\n")), JSON.parse(s.slice(s.indexOf("\n") + 1)).payload];
+    for (let i = 0; i < fo.length; i += 1) {
+      if (fb[i] === fo[i]) continue;
+      const [key, want] = split(fo[i]);
+      const got = split(fb[i])[1];
+      assert.fail(`${key} differs at: ${Object.keys(want).filter((k) => JSON.stringify(want[k]) !== JSON.stringify(got[k])).map((k) => k + " want=" + JSON.stringify(want[k]).slice(0, 300) + " got=" + JSON.stringify(got[k]).slice(0, 300)).join(" ; ")}`);
+    }
+    assert.deepEqual(batched.manifest, oracle.result.manifest);
+    assert.equal(log.some((sql) => /static_artifacts|static_rebuild_queue/.test(sql)), false, "tracking statements stay local");
+    assert.ok(batched.report.d1Statements <= 150, `statements ${batched.report.d1Statements}`);
+  }
+});
+
+test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per creator; the cap is enforced", async () => {
+  const sqlite = migrated();
+  seed(sqlite);
+  for (let i = 0; i < 40; i += 1) {
+    sqlite.prepare(`INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, 'approved')`).run(`bulk_${i}`, `Bulk ${i}`);
+    sqlite.prepare(`INSERT INTO videos (id, title, youtube_video_id, creator_display_name, creator_x_user_id, submitted_by_user_id, visibility_status, scheduled_time, updated_at) VALUES (?, ?, ?, ?, ?, 'auth-user', 'public', ?, ?)`).run(`bulk-v-${i}`, `Bulk ${i}`, `ytbulk${String(i).padStart(5, "0")}`, `Bulk ${i}`, `bulk_${i}`, NOW - i, NOW);
+  }
+  const log = [];
+  const ok = await produceSnapshots({ db: readOnly(sqlite, log), mode: "batched", creatorsPerQuery: 25, generation: "g", nowSec: NOW });
+  assert.equal(ok.report.creators, 42);
+  const oracleStatements = (await produce()).report?.d1Statements;
+  assert.ok(ok.report.d1Statements < 110, `batched: ${ok.report.d1Statements} statements for 42 creators`);
+  void oracleStatements;
+  await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
 });
 
 // Opt-in (about 15 s): a real Astro build against the produced directory. MIG0509_E2E=1

@@ -366,6 +366,7 @@
 | `packages/ui/src/screens/CreatorsView.tsx` | HELPER | mock Creators display view with CURRENT texts, search form and query contract | MIG-0504 | SAME | IN_PROGRESS | PR#352 SHA=3a853586fce9cef86f4365f2af7c2894dec32275 TEST=packages/ui/test/userScreens.dom.test.mjs LOG=local |
 | `packages/ui/src/screens/PortfolioView.tsx` | HELPER | mock Portfolio display view with CURRENT texts and links | MIG-0504 | SAME | IN_PROGRESS | PR#352 SHA=3a853586fce9cef86f4365f2af7c2894dec32275 TEST=packages/ui/test/userScreens.dom.test.mjs LOG=local |
 | `apps/site/scripts/produceSnapshots.ts` | HELPER | build-time snapshot producers: CURRENT R2 generators captured and wrapped as verified envelopes plus manifest (pre-work of MIG-0509) | MIG-0509 | SAME (Astro build script) | IN_PROGRESS | PR#354 SHA=3f7ba9c061512f5e43e3e0801cbc3ed10dc84d63 TEST=node --test --experimental-strip-types scripts/migration-snapshot-producers.test.mjs LOG=local |
+| `apps/site/scripts/batchedUserReader.ts` | HELPER | read-only set-based reader assembling the per-creator objects (byte-identical to the rebuildUser oracle; lead decision C') | MIG-0509 | SAME (Astro build script) | IN_PROGRESS | PR#354 SHA=3f7ba9c061512f5e43e3e0801cbc3ed10dc84d63 TEST=node --test --experimental-strip-types scripts/migration-snapshot-producers.test.mjs LOG=local |
 
 ## Future files requiring source/target registration
 

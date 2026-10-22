@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { rebuildTarget } from "../../../workers/json-generator/rebuild.ts";
+import { readUserObjects } from "./batchedUserReader.ts";
 import {
   ABOUT_STATS_KEY,
   LIST_FIRST_PAGE_KEY,
@@ -51,8 +52,18 @@ export interface D1Like {
 }
 
 export interface ProduceInput {
-  /** A scratch database: CURRENT's generators write tracking rows into it. */
+  /**
+   * oracle (default): a scratch database, CURRENT's generators write tracking rows into it and run per creator.
+   * batched: a READ-ONLY reader (MIG-0409 REST reader or a test wrapper); only SELECTs reach it, tracking
+   * statements go to `scratch`, and creators are read with set-based queries (lead decision C').
+   */
   db: D1Like;
+  mode?: "oracle" | "batched";
+  /** batched only: a schema-only database for CURRENT's tracking writes; default is a fresh migrated in-memory one. */
+  scratch?: D1Like;
+  creatorsPerQuery?: number;
+  /** batched only: hard cap on statements sent to `db` (the REST reader's request budget). */
+  maxRemoteStatements?: number;
   generation: string;
   /** Unix seconds recorded as `generated_at` where the generators read the clock. */
   nowSec?: number;
@@ -114,6 +125,85 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
   };
 }
 
+/** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
+export const DEFAULT_MAX_REMOTE_STATEMENTS = 150;
+
+/** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
+function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
+  return {
+    prepare(sql: string) {
+      if (!/^\s*(SELECT|WITH)\b/i.test(sql) || sql.trim().replace(/;\s*$/, "").includes(";")) {
+        throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
+      }
+      counter.n += 1;
+      if (counter.n > max) throw new Error(`read-only reader: request budget of ${max} statements exceeded`);
+      return db.prepare(sql);
+    },
+  };
+}
+
+/**
+ * CURRENT's generators also write tracking rows and read them back. Those statements (any write, and any read of a
+ * tracking table) run on the local scratch database; every other statement goes to the read-only reader.
+ */
+export const LOCAL_TRACKING_TABLES = ["static_artifacts", "static_rebuild_queue"] as const;
+const LOCAL_STATEMENT = new RegExp(
+  `^\\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\\b|\\b(${LOCAL_TRACKING_TABLES.join("|")})\\b`,
+  "i",
+);
+
+function overlayDb(remote: D1Like, local: D1Like): D1Like {
+  return {
+    prepare(sql: string) {
+      if (LOCAL_STATEMENT.test(sql)) return local.prepare(sql);
+      const base = remote.prepare(sql);
+      let bound: { all(): Promise<{ results?: unknown[] }> } | null = null;
+      const statement = {
+        bind(...values: unknown[]) {
+          bound = base.bind(...values) as typeof bound;
+          return statement;
+        },
+        async all() {
+          return (bound ?? (base.bind() as typeof bound))!.all();
+        },
+        async first() {
+          const rows = (await statement.all()).results ?? [];
+          return rows[0] ?? null;
+        },
+      };
+      return statement as never;
+    },
+  };
+}
+
+/** A fresh in-memory database with every migration applied (schema only), for the tracking statements. */
+export async function openMigratedScratch(migrationsDir: string = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../migrations")): Promise<D1Like> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const sqlite = new DatabaseSync(":memory:");
+  for (const name of fs.readdirSync(migrationsDir).filter((n) => n.endsWith(".sql")).sort((a, b) => a.localeCompare(b))) {
+    const sql = fs.readFileSync(path.join(migrationsDir, name), "utf8");
+    if (name !== "0043_db_canonical_migration.sql") {
+      sqlite.exec(sql);
+    } else {
+      sqlite.exec("BEGIN IMMEDIATE");
+      sqlite.exec(sql);
+      sqlite.exec("COMMIT");
+    }
+  }
+  return {
+    prepare(sql: string) {
+      let params: unknown[] = [];
+      const statement = {
+        bind(...values: unknown[]) { params = values; return statement; },
+        async first() { return sqlite.prepare(sql).get(...(params as never[])) ?? null; },
+        async all() { return { results: sqlite.prepare(sql).all(...(params as never[])) }; },
+        async run() { const r = sqlite.prepare(sql).run(...(params as never[])); return { meta: { changes: Number(r.changes) } }; },
+      };
+      return statement as never;
+    },
+  };
+}
+
 function captureEnv(db: D1Like) {
   const objects = new Map<string, unknown>();
   const kv = new Map<string, string>();
@@ -150,7 +240,11 @@ async function allRows(db: D1Like, sql: string, ...values: unknown[]): Promise<R
 export async function produceSnapshots(input: ProduceInput): Promise<ProduceResult> {
   const started = performance.now();
   const counter = { n: 0 };
-  const { env, objects } = captureEnv(countingDb(input.db, counter) as D1Like);
+  const batched = input.mode === "batched";
+  const maxRemote = input.maxRemoteStatements ?? DEFAULT_MAX_REMOTE_STATEMENTS;
+  const remote = batched ? limitedDb(input.db, counter, maxRemote) : countingDb(input.db, counter);
+  const generatorDb = batched ? overlayDb(remote, input.scratch ?? (await openMigratedScratch())) : remote;
+  const { env, objects } = captureEnv(generatorDb);
   const realNow = Date.now;
   if (input.nowSec !== undefined) Date.now = () => input.nowSec! * 1000;
   const skippedCreators: string[] = [];
@@ -168,10 +262,13 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
 
     const index = normalizeStaticUsersIndex((objects.get("users/index.json") ?? {}) as never);
     const creatorIds = [...new Set((index?.items ?? []).map((entry) => normalizeXId(entry.x_id)))].filter((id) => X_ID_PATTERN.test(id));
-    for (const id of creatorIds) {
-      await rebuildTarget(env as never, "user", id);
-      if (!objects.has(`users/${id}.json`)) skippedCreators.push(id);
+    if (batched) {
+      const userObjects = await readUserObjects(remote, creatorIds, Math.floor(Date.now() / 1000), input.creatorsPerQuery);
+      for (const [key, body] of userObjects) objects.set(key, body);
+    } else {
+      for (const id of creatorIds) await rebuildTarget(env as never, "user", id);
     }
+    for (const id of creatorIds) if (!objects.has(`users/${id}.json`)) skippedCreators.push(id);
 
     const out: ProducedSnapshot[] = [];
     const add = (key: string, payload: unknown | undefined): void => {
@@ -200,7 +297,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     // Visibility fence: creators that exist but are not publicly listable are named in blockedKeys so the loader
     // refuses them even if an object were ever left in the directory.
     const blocked = (await allRows(
-      input.db,
+      remote,
       `SELECT id FROM x_users WHERE approval_status NOT IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN}) LIMIT ?`,
       BLOCKED_USER_LIMIT,
     )).map((row) => normalizeXId(String(row.id))).filter((id) => X_ID_PATTERN.test(id));
@@ -307,6 +404,7 @@ export async function main(argv: string[]): Promise<void> {
   const nowArg = argValue(argv, "--now");
   const result = await produceSnapshots({
     db,
+    mode: argv.includes("--batched") ? "batched" : "oracle",
     generation,
     nowSec: nowArg ? Number(nowArg) : undefined,
     trending: trendingFile ? JSON.parse(fs.readFileSync(trendingFile, "utf-8")) : undefined,
