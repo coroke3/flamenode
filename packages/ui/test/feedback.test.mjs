@@ -5,6 +5,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   Button,
+  Dialog,
   EmptyState,
   ErrorCallout,
   FEEDBACK_MESSAGES,
@@ -104,4 +105,28 @@ test("an icon-only Button without an accessible name is rejected (MIG-0202 carry
   assert.throws(() => html(h(Button, { icon })), /icon-only button needs aria-label/);
   assert.match(html(h(Button, { icon, "aria-label": "閉じる" })), /aria-label="閉じる"/);
   assert.match(html(h(Button, { icon }, "閉じる")), />閉じる</);
+});
+
+test("every class Dialog and the feedback notices render has a rule in the shipped styles", () => {
+  // The CSS files apps/site loads (PublicPage.astro); before this the modal rendered inline.
+  const css = ["tokens", "layout", "components", "screens"]
+    .map((name) => fs.readFileSync(new URL(`../src/styles/${name}.css`, import.meta.url), "utf8"))
+    .join("\n");
+  const out = [
+    html(h(Dialog, { open: true, title: "t", icon: "i", actions: h(Button, null, "OK") }, "body")),
+    html(h(Dialog, { open: true, title: "t", contained: true })),
+    html(h(ErrorCallout, { message: "x", retry() {} })),
+    html(h(ErrorCallout, { reason: "maintenance_mode" })),
+    ...["degraded", "pending", "success", "info", "unavailable"].map((status) => html(h(StatusNotice, { status, title: "t" }))),
+    html(h(PartialFailureNotice, { items: ["a"] })),
+    html(h(ErrorCallout, { message: "x", className: "fn-island-error" })), // apps/site IslandWrapper fallback
+  ].join("");
+  const classes = new Set([...out.matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1].split(" ")));
+  for (const name of classes) assert.match(css, new RegExp(`\\.${name}(?![\\w-])`), `no rule for .${name}`);
+  // The modal is an overlay above the sticky/fixed header (layout.css .hd2 z-index 20-31).
+  const backdrop = css.match(/\.fn-modal-backdrop\{([^}]*)\}/)[1];
+  assert.match(backdrop, /position:fixed/);
+  assert.ok(Number(backdrop.match(/z-index:(\d+)/)[1]) > 31);
+  assert.match(css, /\.fn-error-callout--danger\{[^}]*var\(--danger\)/);
+  assert.match(css, /\.fn-error-callout--warning\{[^}]*var\(--warning\)/);
 });
