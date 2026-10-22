@@ -6,6 +6,7 @@
  * Non-production PoC: no wrangler.toml, Route or Custom Domain uses it yet.
  */
 import type { RouteResolution } from "../lib/routeMap.ts";
+import { applyEdgePolicy, type EdgePolicyEnv } from "./edgePolicy.ts";
 import { loadR2PrebuiltHtml, type R2HtmlBucket, type RebuildQueue, type ServeDecision } from "./r2Html.ts";
 import {
   FIXED_PUBLIC_PAGES,
@@ -25,7 +26,7 @@ import {
 
 type Fetcher = { fetch: (request: Request) => Promise<Response> };
 
-export interface GatewayEnv {
+export interface GatewayEnv extends EdgePolicyEnv {
   /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
   ASSETS?: Fetcher;
   /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06). */
@@ -157,6 +158,11 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Edge policy first, in CURRENT middleware order (MIG-0619): canonical host 308, then
+    // maintenance redirect. Auth.js and /api/health are reached only after it, as in CURRENT.
+    const policy = await applyEdgePolicy(request, env);
+    if (policy) return policy;
+
     // Auth.js stays on the existing origin, independent of route data and KV.
     if (path === "/api/auth" || path.startsWith("/api/auth/")) return forwardToAuth(request, env);
 
@@ -165,6 +171,17 @@ export default {
       return textResponse(405, "Method Not Allowed", { Allow: "GET, HEAD" });
     }
     if (!env.ASSETS) return unavailable();
+
+    // The maintenance page itself: static, and exempt from the maintenance redirect above.
+    if (path === "/maintenance" || path === "/maintenance/") {
+      try {
+        return await env.ASSETS.fetch(
+          new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers }),
+        );
+      } catch {
+        return unavailable();
+      }
+    }
 
     // Fixed public pages and build assets: an exact allowlist, no route data or KV.
     const fixed = fixedPublicPath(path);
