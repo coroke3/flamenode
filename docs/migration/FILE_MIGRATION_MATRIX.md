@@ -462,6 +462,8 @@
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
+| `scripts/benchmark-api-cpu.mjs`, `scripts/benchmark-api-cpu.test.mjs` | MIG-0606 | IN_PROGRESS | U01 harness (new, no CURRENT counterpart; Runtime N): LOCAL-only `wrangler dev --local` / in-process runs of `apps/api` that record CPU p50/p95/p99/max for 4 input kinds; judged by max against ZERO_1102 section 3; never writes production values. U02 full run waits for MIG-0603..0605 |
+| `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 
