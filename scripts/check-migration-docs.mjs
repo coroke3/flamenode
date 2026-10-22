@@ -778,7 +778,7 @@ if (errors.length === 0) {
   }
 
   // MIG-0007 static artifact / visibility baseline.
-  const staticRebuildTypesSource = read("src/lib/staticRebuild/types.ts");
+  const staticRebuildTypesSource = read("packages/server-core/src/staticRebuild/types.ts");
   const staticRebuildTypeBlock =
     staticRebuildTypesSource.match(/STATIC_REBUILD_TARGET_TYPES\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1] ?? "";
   const configuredStaticTargets = [...staticRebuildTypeBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);

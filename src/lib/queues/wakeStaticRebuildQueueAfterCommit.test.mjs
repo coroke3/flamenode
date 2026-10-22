@@ -16,7 +16,7 @@ test("producer helper: static rebuild wake を commit 後ヘルパへ集約す�
     "utf8",
   );
   const enqueue = await readFile(
-    new URL("../staticRebuild/enqueue.ts", import.meta.url),
+    new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url),
     "utf8",
   );
   assert.match(source, /sendQueueWakeBestEffort/);

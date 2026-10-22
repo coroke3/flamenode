@@ -33,7 +33,22 @@
     "./queues/wakeNotificationQueueAfterCommit": "./src/queues/wakeNotificationQueueAfterCommit.ts",
     "./queues/wakeStaticRebuildQueueAfterCommit": "./src/queues/wakeStaticRebuildQueueAfterCommit.ts",
     "./queues/youtubePlaylistSyncWake": "./src/queues/youtubePlaylistSyncWake.ts",
-    "./queues/youtubeSyncWake": "./src/queues/youtubeSyncWake.ts"
+    "./queues/youtubeSyncWake": "./src/queues/youtubeSyncWake.ts",
+    "./r2Body": "./src/r2Body.ts",
+    "./staticRebuild/types": "./src/staticRebuild/types.ts",
+    "./staticRebuild/priorityCore": "./src/staticRebuild/priorityCore.ts",
+    "./staticRebuild/activeLookupColumns": "./src/staticRebuild/activeLookupColumns.ts",
+    "./staticRebuild/enqueue": "./src/staticRebuild/enqueue.ts",
+    "./staticRebuild/directEnqueue": "./src/staticRebuild/directEnqueue.ts",
+    "./staticRebuild/hooks": "./src/staticRebuild/hooks.ts",
+    "./notifications/discordText": "./src/notifications/discordText.ts",
+    "./notifications/actor": "./src/notifications/actor.ts",
+    "./notifications/videoStatusNotify": "./src/notifications/videoStatusNotify.ts",
+    "./visibility/manifestCore": "./src/visibility/manifestCore.ts",
+    "./visibility/manifestR2": "./src/visibility/manifestR2.ts",
+    "./visibility/fenceStore": "./src/visibility/fenceStore.ts",
+    "./visibility/countablePublicVideoSql": "./src/visibility/countablePublicVideoSql.ts",
+    "./publicCache/delete": "./src/publicCache/delete.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

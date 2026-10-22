@@ -92,8 +92,8 @@ test("event question同期はbounded read、完全per-row snapshot、CASを持�
 test("manage statusは共通queue lease semanticsとcaller予約内のbounded readを使う", () => {
   const action = read("src/lib/actions/manage-video.ts");
   const transition = read("src/lib/video/videoVisibilityTransition.ts");
-  const hooks = read("src/lib/staticRebuild/hooks.ts");
-  const enqueue = read("src/lib/staticRebuild/enqueue.ts");
+  const hooks = read("packages/server-core/src/staticRebuild/hooks.ts");
+  const enqueue = read("packages/server-core/src/staticRebuild/enqueue.ts");
 
   assert.match(action, /planVideoVisibilityTransition/);
   assert.match(transition, /expectedRowCondition\(\{ expectedCurrent: \{ \.\.\.input\.video \} \}\)/);
