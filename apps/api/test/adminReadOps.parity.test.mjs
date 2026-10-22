@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -840,6 +840,81 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(failed.body.error, "query_failed");
     assert.equal(failed.body.usedUnits, 0);
     assert.doesNotMatch(failed.text, /secret-internal/);
+  });
+
+  test("T02 youtube playlists equals CURRENT page (filters, order, per-event counts, derived health sort)", async () => {
+    const { derivePlaylistSyncHealth } = await import("../../../src/lib/youtube/playlistSyncHealth.ts");
+    const sync = (event, o) =>
+      ins("event_youtube_playlist_sync", { event_id: event, playlist_id: `PL${event}`, enabled: o.enabled ?? 1, sync_mode: "append", sync_interval_minutes: o.interval ?? 1440, sync_status: o.status, next_sync_at: o.next === undefined ? nowS + 3600 : o.next, last_synced_at: o.synced === undefined ? nowS - 60 : o.synced, last_full_scan_at: o.scan === undefined ? nowS - 60 : o.scan, last_error: o.error ?? null });
+    sync("ev1", { status: "synced" });
+    sync("ev2", { status: "failed", error: "quota" });
+    sync("ev3", { status: "deferred", next: nowS + 10 });
+    sync("ev4", { status: "scanning", next: null });
+    sync("ev5", { status: "idle", enabled: 0 });
+    sync("api-0", { status: "synced", next: nowS - 9 * 3600 });
+    sync("api-1", { status: "idle", synced: null });
+    sync("api-2", { status: "weird" });
+    for (const v of ["va2", "va3", "va4", "va5"]) sqlite.exec("INSERT OR IGNORE INTO video_events (video_id, event_id) VALUES ('" + v + "', 'ev1')");
+    sqlite.exec("INSERT OR IGNORE INTO video_events (video_id, event_id) VALUES ('va6', 'ev3')");
+    ins("event_youtube_playlist_items", { event_id: "ev1", playlist_item_id: "pi1", youtube_video_id: "ytva2", seen_at: T0 });
+    ins("event_youtube_playlist_items", { event_id: "ev1", playlist_item_id: "pi2", youtube_video_id: "ytva3", seen_at: T0 });
+
+    const refPlaylists = async (sp) => {
+      const first = (v) => (typeof v === "string" ? v.trim() : "");
+      const enabledFilter = first(sp.enabled);
+      const statusFilter = first(sp.status);
+      const conds = [];
+      if (enabledFilter === "1" || enabledFilter === "0") conds.push(eq(S.eventYoutubePlaylistSync.enabled, Number(enabledFilter)));
+      if (["disabled", "idle", "scanning", "synced", "deferred", "failed"].includes(statusFilter)) conds.push(eq(S.eventYoutubePlaylistSync.sync_status, statusFilter));
+      const configResult = await refDb
+        .select({ event_id: S.eventYoutubePlaylistSync.event_id, event_title: S.events.title, playlist_id: S.eventYoutubePlaylistSync.playlist_id, enabled: S.eventYoutubePlaylistSync.enabled, sync_mode: S.eventYoutubePlaylistSync.sync_mode, sync_interval_minutes: S.eventYoutubePlaylistSync.sync_interval_minutes, sync_status: S.eventYoutubePlaylistSync.sync_status, next_sync_at: S.eventYoutubePlaylistSync.next_sync_at, last_synced_at: S.eventYoutubePlaylistSync.last_synced_at, last_full_scan_at: S.eventYoutubePlaylistSync.last_full_scan_at, last_error: S.eventYoutubePlaylistSync.last_error })
+        .from(S.eventYoutubePlaylistSync)
+        .innerJoin(S.events, eq(S.events.id, S.eventYoutubePlaylistSync.event_id))
+        .where(conds.length > 0 ? and(...conds) : undefined)
+        .orderBy(desc(sql`CASE ${S.eventYoutubePlaylistSync.sync_status} WHEN 'failed' THEN 4 WHEN 'deferred' THEN 3 WHEN 'scanning' THEN 2 ELSE 1 END`), asc(S.eventYoutubePlaylistSync.next_sync_at), asc(S.events.title))
+        .limit(101);
+      const visible = configResult.slice(0, 100);
+      const now = Math.floor(Date.now() / 1000);
+      const agg = visible.length === 0 ? [] : await refDb
+        .select({
+          event_id: S.videoEvents.event_id,
+          linked_count: sql`COUNT(DISTINCT CASE WHEN ${S.videos.id} IS NOT NULL AND ${S.videos.visibility_status} <> 'voided' THEN ${S.videos.id} END)`,
+          eligible_count: sql`COUNT(DISTINCT CASE WHEN ${S.videos.visibility_status} = 'public' AND ${S.videos.youtube_video_id} IS NOT NULL AND ${S.videos.youtube_video_id} <> '' THEN ${S.videos.id} END)`,
+          synced_count: sql`COUNT(DISTINCT CASE WHEN ${S.eventYoutubePlaylistItems.playlist_item_id} IS NOT NULL AND ${S.videos.visibility_status} = 'public' THEN ${S.videos.id} END)`,
+        })
+        .from(S.videoEvents)
+        .leftJoin(S.videos, eq(S.videos.id, S.videoEvents.video_id))
+        .leftJoin(S.eventYoutubePlaylistItems, and(eq(S.eventYoutubePlaylistItems.event_id, S.videoEvents.event_id), eq(S.eventYoutubePlaylistItems.youtube_video_id, S.videos.youtube_video_id)))
+        .where(inArray(S.videoEvents.event_id, visible.map((r) => r.event_id)))
+        .groupBy(S.videoEvents.event_id);
+      const counts = new Map(agg.map((r) => [r.event_id, { linked_count: Number(r.linked_count ?? 0), eligible_count: Number(r.eligible_count ?? 0), synced_count: Number(r.synced_count ?? 0) }]));
+      const rows = visible
+        .map((row, originalIndex) => {
+          const full = { ...row, ...(counts.get(row.event_id) ?? { linked_count: 0, eligible_count: 0, synced_count: 0 }) };
+          return { row: full, originalIndex, health: derivePlaylistSyncHealth({ enabled: full.enabled, syncStatus: full.sync_status, nextSyncAt: full.next_sync_at, lastSyncedAt: full.last_synced_at, lastFullScanAt: full.last_full_scan_at, lastError: full.last_error, eligibleCount: full.eligible_count, syncedCount: full.synced_count, linkedCount: full.linked_count, now }) };
+        })
+        .sort((l, r) => l.health.priority - r.health.priority || l.originalIndex - r.originalIndex)
+        .map(({ row, health }) => ({ ...row, health }));
+      return canon({ filters: { enabled: enabledFilter, status: statusFilter }, hasMore: configResult.length > 100, rows });
+    };
+    for (const sp of [{}, { enabled: "1" }, { enabled: "0" }, { status: "failed" }, { status: "synced" }, { status: "bogus" }, { enabled: "1", status: "idle" }]) {
+      const query = new URLSearchParams(sp).toString();
+      const r = await get(`/ops/youtube-playlists${query ? `?${query}` : ""}`);
+      assert.deepEqual(r.body, await refPlaylists(sp), JSON.stringify(sp));
+    }
+    const base = (await get("/ops/youtube-playlists")).body;
+    assert.equal(base.rows[0].health.level, "critical");
+    assert.ok(base.rows.some((x) => x.health.reason === "overdue") && base.rows.some((x) => x.health.reason === "unknown_status"));
+    const ev1 = base.rows.find((x) => x.event_id === "ev1");
+    assert.deepEqual([ev1.linked_count, ev1.eligible_count, ev1.synced_count], [4, 4, 2]);
+
+    // local health copy == real module on a grid of inputs
+    const { derivePlaylistSyncHealth: local } = await import("../src/routes/adminRead/playlistHealth.ts");
+    const nows = 1_700_000_000;
+    for (const enabled of [0, 1, true, false]) for (const syncStatus of [null, "", "idle", "synced", "failed", "deferred", "scanning", "x"]) for (const next of [null, nows - 8000, nows + 5]) for (const last of [null, nows]) for (const scan of [null, nows]) for (const error of [null, " ", "e"]) for (const [eligible, synced, linked] of [[1, 1, 1], [2, 1, 3], [3, 3, 2], [-1, 0, 0], [Number.NaN, 0, 0]]) {
+      const input = { enabled, syncStatus, nextSyncAt: next, lastSyncedAt: last, lastFullScanAt: scan, lastError: error, eligibleCount: eligible, syncedCount: synced, linkedCount: linked, now: nows };
+      assert.deepEqual(local(input), derivePlaylistSyncHealth(input));
+    }
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

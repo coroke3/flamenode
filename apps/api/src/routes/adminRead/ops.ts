@@ -3,9 +3,11 @@ import type {
   AdminCostGuardResponse,
   AdminNotificationsResponse,
   AdminTopResponse,
+  AdminYoutubePlaylistsResponse,
   AdminYoutubeQuotaResponse,
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
+import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
 import { resolveOperationMode } from "@flamenode/domain/admin";
 import type { AppEnv } from "../../env.ts";
 
@@ -202,6 +204,103 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/youtube-playlists (youtube-sync/playlists/page.tsx) ----
+// D1: session + configured events (LIMIT 101) + per-event counts for the visible <= 100 events (one statement,
+// ids passed as one json_each bind; CURRENT chunks the same ids by 80). Rows are ordered by derived health priority.
+const MAX_PLAYLIST_SYNC_ROWS = 100;
+
+adminOpsRoutes.get("/youtube-playlists", async (c) => {
+  const first = (name: string) => (c.req.query(name) ?? "").trim();
+  const enabledFilter = first("enabled");
+  const statusFilter = first("status");
+  const now = Math.floor(Date.now() / 1000);
+
+  const conds: string[] = [];
+  const params: unknown[] = [];
+  if (enabledFilter === "1" || enabledFilter === "0") {
+    conds.push("s.enabled = ?");
+    params.push(Number(enabledFilter));
+  }
+  if (["disabled", "idle", "scanning", "synced", "deferred", "failed"].includes(statusFilter)) {
+    conds.push("s.sync_status = ?");
+    params.push(statusFilter);
+  }
+  const where = conds.length > 0 ? " WHERE " + conds.join(" AND ") : "";
+  const config = await c.env.DB.prepare(
+    "SELECT s.event_id AS event_id, e.title AS event_title, s.playlist_id AS playlist_id, s.enabled AS enabled, " +
+      "s.sync_mode AS sync_mode, s.sync_interval_minutes AS sync_interval_minutes, s.sync_status AS sync_status, " +
+      "s.next_sync_at AS next_sync_at, s.last_synced_at AS last_synced_at, s.last_full_scan_at AS last_full_scan_at, " +
+      "s.last_error AS last_error FROM event_youtube_playlist_sync s INNER JOIN events e ON e.id = s.event_id" +
+      where +
+      " ORDER BY CASE s.sync_status WHEN 'failed' THEN 4 WHEN 'deferred' THEN 3 WHEN 'scanning' THEN 2 ELSE 1 END DESC, " +
+      "s.next_sync_at ASC, e.title ASC LIMIT ?",
+  )
+    .bind(...params, MAX_PLAYLIST_SYNC_ROWS + 1)
+    .all<Omit<AdminYoutubePlaylistsResponse["rows"][number], "linked_count" | "eligible_count" | "synced_count" | "health">>();
+  const visible = config.results.slice(0, MAX_PLAYLIST_SYNC_ROWS);
+  const hasMore = config.results.length > MAX_PLAYLIST_SYNC_ROWS;
+
+  let rows: AdminYoutubePlaylistsResponse["rows"] = [];
+  if (visible.length > 0) {
+    const eventIds = Array.from(new Set(visible.map((row) => row.event_id).filter(Boolean)));
+    const aggregate = await c.env.DB.prepare(
+      `SELECT ve.event_id AS event_id,
+         COUNT(DISTINCT CASE WHEN v.id IS NOT NULL AND v.visibility_status <> 'voided' THEN v.id END) AS linked_count,
+         COUNT(DISTINCT CASE WHEN v.visibility_status = 'public' AND v.youtube_video_id IS NOT NULL
+           AND v.youtube_video_id <> '' THEN v.id END) AS eligible_count,
+         COUNT(DISTINCT CASE WHEN i.playlist_item_id IS NOT NULL AND v.visibility_status = 'public' THEN v.id END) AS synced_count
+       FROM video_events ve
+       LEFT JOIN videos v ON v.id = ve.video_id
+       LEFT JOIN event_youtube_playlist_items i ON i.event_id = ve.event_id AND i.youtube_video_id = v.youtube_video_id
+       WHERE ve.event_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+       GROUP BY ve.event_id`,
+    )
+      .bind(JSON.stringify(eventIds))
+      .all<{ event_id: string; linked_count: number | null; eligible_count: number | null; synced_count: number | null }>();
+    const counts = new Map(
+      aggregate.results.map((row) => [
+        row.event_id,
+        {
+          linked_count: Number(row.linked_count ?? 0),
+          eligible_count: Number(row.eligible_count ?? 0),
+          synced_count: Number(row.synced_count ?? 0),
+        },
+      ]),
+    );
+    rows = visible
+      .map((row, originalIndex) => {
+        const withCounts = {
+          ...row,
+          ...(counts.get(row.event_id) ?? { linked_count: 0, eligible_count: 0, synced_count: 0 }),
+        };
+        return {
+          row: withCounts,
+          originalIndex,
+          health: derivePlaylistSyncHealth({
+            enabled: withCounts.enabled,
+            syncStatus: withCounts.sync_status,
+            nextSyncAt: withCounts.next_sync_at,
+            lastSyncedAt: withCounts.last_synced_at,
+            lastFullScanAt: withCounts.last_full_scan_at,
+            lastError: withCounts.last_error,
+            eligibleCount: withCounts.eligible_count,
+            syncedCount: withCounts.synced_count,
+            linkedCount: withCounts.linked_count,
+            now,
+          }),
+        };
+      })
+      .sort((a, b) => a.health.priority - b.health.priority || a.originalIndex - b.originalIndex)
+      .map(({ row, health }) => ({ ...row, health }));
+  }
+  const body: AdminYoutubePlaylistsResponse = {
+    filters: { enabled: enabledFilter, status: statusFilter },
+    hasMore,
+    rows,
+  };
   return c.json(body);
 });
 

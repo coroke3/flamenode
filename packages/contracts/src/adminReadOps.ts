@@ -345,7 +345,35 @@ export const AdminYoutubeQuotaResponseSchema = z.object({
   // CURRENT prints String(cause); the API returns a fixed code.
   error: z.literal("query_failed").nullable(),
 });
-export type AdminYoutubeQuotaResponse = z.infer<typeof AdminYoutubeQuotaResponseSchema>;
+export const AdminYoutubePlaylistsResponseSchema = z.object({
+  filters: z.object({ enabled: z.string(), status: z.string() }),
+  hasMore: z.boolean(),
+  rows: z.array(
+    z.object({
+      event_id: z.string(),
+      event_title: z.string(),
+      playlist_id: z.string().nullable(),
+      enabled: z.number(),
+      sync_mode: z.string(),
+      sync_interval_minutes: z.number(),
+      sync_status: z.string(),
+      next_sync_at: z.number().nullable(),
+      last_synced_at: z.number().nullable(),
+      last_full_scan_at: z.number().nullable(),
+      last_error: z.string().nullable(),
+      linked_count: z.number(),
+      eligible_count: z.number(),
+      synced_count: z.number(),
+      health: z.object({
+        level: z.enum(["ok", "warn", "critical", "unknown", "running"]),
+        reason: z.string(),
+        priority: z.number(),
+      }),
+    }),
+  ),
+});
+export type AdminYoutubePlaylistsResponse = z.infer<typeof AdminYoutubePlaylistsResponseSchema>;
+export type AdminYoutubeQuotaResponse =z.infer<typeof AdminYoutubeQuotaResponseSchema>;
 export type AdminApiEndpointsResponse =z.infer<typeof AdminApiEndpointsResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
