@@ -86,6 +86,11 @@ function seed(sqlite) {
   member.run("m2", "a-5", "creator_b", "Creator B", 1);
   member.run("m3", "a-6", "creator_b", "Creator B", 0); // not a public member
   member.run("m4", "a-7", "creator_a", "Creator A", 1); // own work: never a collab
+  // Column defaults read the wall clock; pin them so two runs of the same seed are byte-identical.
+  for (const { name } of sqlite.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).all()) {
+    const cols = sqlite.prepare(`PRAGMA table_info("${name}")`).all().map((c) => c.name);
+    for (const col of ["created_at", "updated_at"]) if (cols.includes(col)) sqlite.exec(`UPDATE "${name}" SET "${col}" = ${NOW}`);
+  }
 }
 
 const TRENDING = {
@@ -185,7 +190,8 @@ test("tampering is rejected by the loaders (digest, generation, blocked key)", a
 });
 
 test("budget: bounded D1 statements, small objects, deterministic output for the same seed and clock", async () => {
-  assert.ok(produced.result.report.d1Statements < 120, `statements: ${produced.result.report.d1Statements}`);
+  // The oracle issues about 6 statements per creator and about 15 per video/event: it only runs on a local copy.
+  assert.ok(produced.result.report.d1Statements < 1000, `statements: ${produced.result.report.d1Statements}`);
   for (const s of produced.result.snapshots) assert.ok(Buffer.byteLength(s.json) < MAX_SNAPSHOT_BYTES);
   const again = await produce();
   const strip = (r) => r.result.snapshots.map((s) => `${s.key}:${s.sha256}`).join("|");
@@ -236,8 +242,53 @@ test("C' parity: batched read-only producer output is byte-identical to the CURR
     }
     assert.deepEqual(batched.manifest, oracle.result.manifest);
     assert.equal(log.some((sql) => /static_artifacts|static_rebuild_queue/.test(sql)), false, "tracking statements stay local");
-    assert.ok(batched.report.d1Statements <= 150, `statements ${batched.report.d1Statements}`);
+    assert.ok(batched.report.d1Statements <= 200, `statements ${batched.report.d1Statements}`);
   }
+});
+
+test("event and video kinds: produced, accepted by the MIG-0502 / MIG-0507 loaders, private ones absent and fenced", async () => {
+  const keys = new Set(produced.result.snapshots.map((s) => s.key));
+  for (const key of ["snapshot/event-index/current.json", "snapshot/event-detail/public-event.json", "snapshot/event-release/public-event.json", "snapshot/video-detail/a-1.json", "snapshot/video-detail/b-1.json"]) assert.ok(keys.has(key), `missing ${key}`);
+  for (const key of ["snapshot/event-detail/private-event.json", "snapshot/event-release/private-event.json", "snapshot/video-detail/a-private.json"]) {
+    assert.equal(keys.has(key), false, key);
+    assert.ok(produced.result.manifest.blockedKeys.includes(key), `${key} is fenced`);
+  }
+  const { loadEventPayloadSnapshot, loadVideoDetailPayload, videoDetailKeys } = await import("../apps/site/src/lib/publicDataLoader.ts");
+  const access = { source: { read: async (k) => (fs.existsSync(path.join(dir, k)) ? new Uint8Array(fs.readFileSync(path.join(dir, k))) : null) }, options: { manifest: produced.result.manifest, generation: "gen-1" } };
+  const detail = await loadEventPayloadSnapshot(access.source, "snapshot/event-detail/public-event.json", access.options);
+  assert.equal(detail.event.id, "public-event");
+  const video = await loadVideoDetailPayload(access.source, "snapshot/video-detail/a-1.json", access.options);
+  assert.equal(video.video.id, "a-1");
+  assert.equal(JSON.stringify(video).includes("private-event"), false, "the private event id is not in a public video artifact");
+  assert.equal(videoDetailKeys(produced.result.manifest).includes("snapshot/video-detail/a-private.json"), false);
+});
+
+test("mirror covers every table the event and video generators read (tracking tables excepted)", async () => {
+  const { MIRRORED_TABLES } = await import("../apps/site/scripts/mirrorTables.ts");
+  const sqlite = migrated();
+  seed(sqlite);
+  const log = [];
+  await produceSnapshots({ db: d1(sqlite, log), generation: "g", nowSec: NOW });
+  const tables = new Set();
+  for (const sql of log) for (const m of sql.matchAll(/\b(?:FROM|JOIN)\s+"?([a-z_][a-z0-9_]*)"?/gi)) tables.add(m[1].toLowerCase());
+  // Tables of the fixed targets (top/list/recommend/users) are read remotely in batched mode; event/video SQL is the mirror's concern.
+  const evLog = [];
+  const sqlite2 = migrated();
+  seed(sqlite2);
+  const rebuild = await import("../workers/json-generator/rebuild.ts");
+  const objects = new Map();
+  const env = { DB: d1(sqlite2, evLog), R2: { async get(k) { const v = objects.get(k); return v === undefined ? null : { async json() { return structuredClone(v); } }; }, async head() { return null; }, async put(k, b) { objects.set(k, JSON.parse(String(b))); }, async delete(k) { objects.delete(k); } }, KV: { async get() { return null; }, async put() {} } };
+  for (const t of ["events_index"]) await rebuild.rebuildTarget(env, t, "global");
+  for (const t of ["event_base", "event_slots", "event_release", "event"]) await rebuild.rebuildTarget(env, t, "public-event");
+  await rebuild.rebuildTarget(env, "youtube_related_blocklist", "global");
+  await rebuild.rebuildTarget(env, "random_video_pool", "global");
+  await rebuild.rebuildTarget(env, "video", "a-1");
+  const used = new Set();
+  for (const sql of evLog) for (const m of sql.matchAll(/\b(?:FROM|JOIN)\s+"?([a-z_][a-z0-9_]*)"?/gi)) used.add(m[1].toLowerCase());
+  const known = new Set([...MIRRORED_TABLES, "static_artifacts", "static_rebuild_queue", "release_videos", "ranked_group_events", "ranked_public_staff", "json_each", "artifacts", "public_members"]); // CTE and table-function names
+  const missing = [...used].filter((t) => !known.has(t));
+  assert.deepEqual(missing, [], "tables read by the event/video generators but not mirrored");
+  void tables;
 });
 
 test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per creator; the cap is enforced", async () => {
@@ -270,4 +321,7 @@ test("e2e: astro build reads the produced snapshots and emits the user, list, to
   assert.ok(html("user/index.html").includes("Creator B"));
   assert.ok(html("index.html").includes("作品 A"));
   assert.ok(html("about/index.html").includes("32"));
+  assert.ok(html("event/public-event/index.html").includes("Public Event"));
+  assert.ok(html("yta00000001/index.html").includes("作品 A1"));
+  assert.equal(fs.existsSync(path.join(out, "ytprivate001/index.html")), false);
 });

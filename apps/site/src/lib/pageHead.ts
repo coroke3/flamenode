@@ -112,15 +112,6 @@ export type PageHead = Readonly<{
   ogType: "website" | "video.other" | "profile";
 }>;
 
-/** CURRENT `absoluteUrl`: absolute URLs stay, paths go under the site origin. */
-export function absoluteUrl(path: string, origin: string = siteOrigin()): string {
-  try {
-    return new URL(path).toString();
-  } catch {
-    return new URL(path.startsWith("/") ? path : `/${path}`, origin).toString();
-  }
-}
-
 export function buildPageHead(input: {
   path: string;
   title: string;

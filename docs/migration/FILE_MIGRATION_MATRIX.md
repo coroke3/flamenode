@@ -391,6 +391,7 @@
 | `packages/ui/src/screens/EventSlotsView.tsx` | HELPER | mock EventSlots display-only view (no reservation controls) | MIG-0502 | SAME | IN_PROGRESS | PR#355 SHA=b8475ec89759def4a1b353888f63941f0bdf31ed TEST=node --test --experimental-strip-types scripts/migration-event-routes.test.mjs LOG=local |
 | `packages/ui/src/screens/EventReleaseView.tsx` | HELPER | mock EventRelease display-only view, three modes, overflow ticker | MIG-0502 | SAME | IN_PROGRESS | PR#355 SHA=b8475ec89759def4a1b353888f63941f0bdf31ed TEST=node --test --experimental-strip-types scripts/migration-event-routes.test.mjs LOG=local |
 | `packages/ui/src/styles/events.css` | CONFIG | mock fn.css rules and board styles for Events/EventSlots/EventRelease | MIG-0502 | SAME (shared CSS) | IN_PROGRESS | PR#355 SHA=b8475ec89759def4a1b353888f63941f0bdf31ed TEST=node --test --experimental-strip-types scripts/migration-event-routes.test.mjs LOG=local |
+| `apps/site/scripts/mirrorTables.ts` | HELPER | keyset-paged read-only copy of the tables the event/video generators read into the scratch database (parity by construction; MIG-0509) | MIG-0509 | SAME (Astro build script) | IN_PROGRESS | PR#354 SHA=3f7ba9c061512f5e43e3e0801cbc3ed10dc84d63 TEST=node --test --experimental-strip-types scripts/migration-snapshot-producers.test.mjs LOG=local |
 
 ## Future files requiring source/target registration
 

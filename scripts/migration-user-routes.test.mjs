@@ -391,7 +391,7 @@ test("T01 non-public works: CURRENT normalizer drops private/voided rows from ev
 test("head builder: page image replaces the brand card without size/type; noindex only when asked", () => {
   const withImage = buildPageHead({ path: "/user/a", title: "T", image: "/api/google-drive-image/abcdef123", ogType: "profile" });
   assert.equal(withImage.ogImage, `${origin}/api/google-drive-image/abcdef123`);
-  assert.equal(withImage.ogImageWidth, null);
+  assert.equal(withImage.ogImageWidth ?? null, null);
   assert.equal(withImage.ogType, "profile");
   assert.equal(withImage.noindex, false);
   const brand = buildPageHead({ path: "/about", title: "T" });

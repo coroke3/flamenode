@@ -30,9 +30,20 @@ import {
   TOP_KEY,
   TRENDING_KEY,
   USERS_INDEX_KEY,
+  EVENT_INDEX_KEY,
+  eventDetailKey,
+  eventReleaseKey,
   userProfileSnapshotKey,
   type SnapshotManifest,
 } from "../src/lib/publicDataLoader.ts";
+import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
+import { mirrorTables } from "./mirrorTables.ts";
+
+const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+const ID_LIST_LIMIT = 5000;
+/** `snapshot/video-detail/ID.json` (MIG-0507): CURRENT `videos/ID.json`. */
+const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
 import { normalizeStaticUsersIndex } from "../../../src/lib/publicData/staticUsersIndexCore.ts";
 import { normalizeXId } from "../../../src/lib/utils/xid.ts";
@@ -62,6 +73,8 @@ export interface ProduceInput {
   /** batched only: a schema-only database for CURRENT's tracking writes; default is a fresh migrated in-memory one. */
   scratch?: D1Like;
   creatorsPerQuery?: number;
+  /** batched only: rows per keyset page when mirroring the event/video tables. */
+  mirrorPageSize?: number;
   /** batched only: hard cap on statements sent to `db` (the REST reader's request budget). */
   maxRemoteStatements?: number;
   generation: string;
@@ -83,6 +96,8 @@ export interface ProduceReport {
   bytes: number;
   d1Statements: number;
   creators: number;
+  /** batched: rows copied by the event/video table mirror. */
+  mirroredRows: number;
   skippedCreators: string[];
   blockedKeys: number;
   trending: "produced" | "missing";
@@ -126,7 +141,7 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 }
 
 /** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
-export const DEFAULT_MAX_REMOTE_STATEMENTS = 150;
+export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
 function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
@@ -248,6 +263,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
   const realNow = Date.now;
   if (input.nowSec !== undefined) Date.now = () => input.nowSec! * 1000;
   const skippedCreators: string[] = [];
+  let mirrorRows = 0;
   try {
     // Top sections first: CURRENT composes top.json from them (and about-stats reads top_stats).
     for (const target of ["top_recommended", "top_latest", "top_nostalgic", "top_events", "top_announcements", "top_stats", "top_slot_stats"]) {
@@ -269,6 +285,32 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       for (const id of creatorIds) await rebuildTarget(env as never, "user", id);
     }
     for (const id of creatorIds) if (!objects.has(`users/${id}.json`)) skippedCreators.push(id);
+
+    // Event and video kinds. oracle: CURRENT's generators on the source database. batched: the tables they read are
+    // mirrored into a scratch database (keyset-paged SELECTs through the read-only reader), then the same generators
+    // run on the scratch; ids come from the database the generators run on.
+    let evDb: D1Like = remote;
+    let evEnv = env;
+    let evObjects = objects;
+    if (batched) {
+      evDb = await openMigratedScratch();
+      const mirrored = await mirrorTables(remote as never, evDb as never, undefined, input.mirrorPageSize);
+      mirrorRows = mirrored.rows;
+      const captured = captureEnv(evDb);
+      evEnv = captured.env;
+      evObjects = captured.objects;
+    }
+    const eventIds = (await allRows(evDb, `SELECT id FROM events WHERE visibility_status = 'public' ORDER BY id ASC LIMIT ?`, ID_LIST_LIMIT))
+      .map((row) => String(row.id)).filter((id) => EVENT_ID_PATTERN.test(id));
+    await rebuildTarget(evEnv as never, "events_index", "global");
+    for (const id of eventIds) {
+      for (const target of ["event_base", "event_slots", "event_release", "event"]) await rebuildTarget(evEnv as never, target, id);
+    }
+    await rebuildTarget(evEnv as never, "youtube_related_blocklist", "global");
+    await rebuildTarget(evEnv as never, "random_video_pool", "global");
+    const videoIds = (await allRows(evDb, `SELECT id FROM videos WHERE visibility_status = 'public' ORDER BY id ASC LIMIT ?`, ID_LIST_LIMIT))
+      .map((row) => String(row.id)).filter((id) => VIDEO_ID_PATTERN.test(id));
+    for (const id of videoIds) await rebuildTarget(evEnv as never, "video", id);
 
     const out: ProducedSnapshot[] = [];
     const add = (key: string, payload: unknown | undefined): void => {
@@ -294,6 +336,13 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       }
     }
 
+    add(EVENT_INDEX_KEY, evObjects.get("events/index.json"));
+    for (const id of eventIds) {
+      add(eventDetailKey(id), evObjects.get(`events/${id}.json`));
+      add(eventReleaseKey(id), evObjects.get(eventReleaseObjectKey(id)));
+    }
+    for (const id of videoIds) add(videoDetailKey(id), evObjects.get(`videos/${id}.json`));
+
     // Visibility fence: creators that exist but are not publicly listable are named in blockedKeys so the loader
     // refuses them even if an object were ever left in the directory.
     const blocked = (await allRows(
@@ -301,7 +350,16 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       `SELECT id FROM x_users WHERE approval_status NOT IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN}) LIMIT ?`,
       BLOCKED_USER_LIMIT,
     )).map((row) => normalizeXId(String(row.id))).filter((id) => X_ID_PATTERN.test(id));
-    const blockedKeys = blocked.map((id) => userProfileSnapshotKey(id));
+    // Non-public events and videos are fenced the same way (bounded lists; ids that are not well-formed cannot match a key).
+    const hiddenEvents = (await allRows(remote, `SELECT id FROM events WHERE visibility_status <> 'public' LIMIT ?`, ID_LIST_LIMIT))
+      .map((row) => String(row.id)).filter((id) => EVENT_ID_PATTERN.test(id));
+    const hiddenVideos = (await allRows(remote, `SELECT id FROM videos WHERE visibility_status <> 'public' LIMIT ?`, ID_LIST_LIMIT))
+      .map((row) => String(row.id)).filter((id) => VIDEO_ID_PATTERN.test(id));
+    const blockedKeys = [
+      ...blocked.map((id) => userProfileSnapshotKey(id)),
+      ...hiddenEvents.flatMap((id) => [eventDetailKey(id), eventReleaseKey(id)]),
+      ...hiddenVideos.map((id) => videoDetailKey(id)),
+    ];
     const produced = new Set(out.map((s) => s.key));
     const manifest: SnapshotManifest = {
       schemaVersion: 1,
@@ -320,6 +378,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
         bytes: out.reduce((n, s) => n + Buffer.byteLength(s.json), 0),
         d1Statements: counter.n,
         creators: creatorIds.length - skippedCreators.length,
+        mirroredRows: mirrorRows,
         skippedCreators,
         blockedKeys: manifest.blockedKeys.length,
         trending: input.trending === undefined ? "missing" : "produced",
