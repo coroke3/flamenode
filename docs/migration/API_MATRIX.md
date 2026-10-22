@@ -337,3 +337,13 @@ Code landing only: no Worker Route / traffic change; the CURRENT Next handlers s
 | RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | only a 40-hex `BUILD_COMMIT_SHA` (lower-cased); 503 without one; no other binding read; no-store | 0.055ms / 0.131ms | BRIDGED |
 | RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | 1 R2 GET `top/sections/stats.v1.json` (<= 64 KiB, body cancelled when oversized), `normalizeTopStatsSection` semantics, 3 public counters only, fixed Cache API key, 503 `{stats:null}` no-store on any failure; no D1 | 0.038ms / 0.095ms | BRIDGED |
 | RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | isolate rate limit 60/min (key cap 2048), `q` <= 64 chars, limit 1..50 (0 / non-numeric -> 20), D1 <= 2 bounded reads, active-only DTO allowlist, SHA-256 ETag / 304, 503 `database_unavailable` | 0.228ms / 0.615ms | BRIDGED |
+
+## MIG-0604 Hono event/slot APIs (Phase 6, stacked on MIG-0602 / PR#334)
+
+Code landing only; the CURRENT Next handlers/actions stay. CPU not measured (MIG-0606 harness absent).
+
+| ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-020..022 | `GET /api/live/events/[id]/{slots,submissions,summary}` | `apps/api/src/routes/live/events.ts` | public | id 1..128 else 400; DB missing 503; `live_api_enabled` per request (FORCE_STATIC_ONLY > isolate 30s > KV mirror > D1 > normal); 15s isolate micro-cache after the gate, success only; success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`, errors JSON `no-store`; public events only; non `public_name` hides video_id/display_name; slots limit 6000, submissions 50; D1 <= 2 reads | IN_PROGRESS |
+| SA-036 | `deleteEventTemplate` | `DELETE /api/admin/event-templates/:id` (`apps/api/src/routes/events/templates.ts`) | admin (session -> writeGuard -> CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` validation; single D1 batch: CAS DELETE on every preflight scalar column + changes() assertion + strict audit (context `admin_event_templates`, reason as CURRENT, restore none); 400 / 404 / 409 / 500; `private, no-store` | IN_PROGRESS |
+| RH-012..015, RH-014 overlay, SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on public-data loader / current-user + ownership port / role-parameterised write guard / audit restore strategies | BLOCKED |
