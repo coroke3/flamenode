@@ -110,7 +110,8 @@ function readCookieValue(header: string, eqIdx: number, endIdx: number): string 
  * Parses raw Cookie header string into key-value map, with the same walk as the
  * cookie parser Auth.js uses (@auth/core lib/vendored/cookie.js parse): first
  * occurrence wins, and a segment without `=` is skipped by jumping to the
- * segment that holds the next `=`.
+ * segment that holds the next `=`. No request path uses it: it is the full-walk
+ * reference the tests compare readPrefixedCookies against.
  */
 export function parseCookieHeader(header?: string | null): Record<string, string> {
   const result: Record<string, string> = Object.create(null);

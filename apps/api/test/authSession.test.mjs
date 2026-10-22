@@ -148,6 +148,14 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(`${name}=; ${name}.x=abc`, { secure: true }), "abc");
   });
 
+  await t.test("the session name inside another cookie's value is not a cookie", () => {
+    const name = "__Secure-authjs.session-token";
+    for (const header of [`a= ${name}=abc`, `a=x ${name}=abc`, `a=\t${name}=abc`, `a=${name}=abc`]) {
+      assert.equal(extractSessionToken(header, { secure: true }), null, header);
+    }
+    assert.equal(extractSessionToken(`a=1; \t ${name}=abc`, { secure: true }), "abc");
+  });
+
   await t.test("chunk count cap: cap-1 and cap chunks join, cap+1 fails closed", () => {
     const name = "__Secure-authjs.session-token";
     // Header lists chunks in reverse index order; chunk k carries the digit k % 10.
