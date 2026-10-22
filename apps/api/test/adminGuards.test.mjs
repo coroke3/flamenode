@@ -209,14 +209,14 @@ function guardApp({ user, requiredRole, activeX, settings = "normal", seed }) {
 }
 const U = (role, x = null) => ({ name: "n", email: null, image: null, role, is_banned: 0, active_x_user_id: x });
 
-test("requiredRole default is admin; null allows any authenticated user; moderator allows moderator and admin", async () => {
+test("requiredRole default is admin (moderator denied); null allows any authenticated user", async () => {
   assert.equal((await guardApp({ user: U("user") }).post()).status, 403);
+  assert.equal((await guardApp({ user: U("moderator") }).post()).status, 403);
   assert.equal((await guardApp({ user: U("admin") }).post()).status, 200);
+  assert.equal((await guardApp({ user: U("admin"), requiredRole: "admin" }).post()).status, 200);
+  assert.equal((await guardApp({ user: U("moderator"), requiredRole: "admin" }).post()).status, 403);
   assert.equal((await guardApp({ user: U("user"), requiredRole: null }).post()).status, 200);
   assert.equal((await guardApp({ user: U("moderator"), requiredRole: null }).post()).status, 200);
-  assert.equal((await guardApp({ user: U("user"), requiredRole: "moderator" }).post()).status, 403);
-  assert.equal((await guardApp({ user: U("moderator"), requiredRole: "moderator" }).post()).status, 200);
-  assert.equal((await guardApp({ user: U("admin"), requiredRole: "moderator" }).post()).status, 200);
 });
 
 test("requiredRole null still enforces banned / TOS before role", async () => {

@@ -80,6 +80,20 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-040..042 | `validateManageVideoStatusInput`, `validateVideoPublicEligibility`, `monotonicVideoUpdatedAt`, `SAME_VIDEO_STATUS_MESSAGE`, `planVideoVisibilityFence` |
 | SA-012..015 | `validateChapterTime`, `resolveAdminOrEventVideoPrivilegeMode`, `decideCanEditVideoFromAccessContext` (`video.chapter_admin`) |
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
+
+### Hono endpoints (MIG-0602 U02, PR #331)
+
+Write guard order for every row: origin (pure) -> session -> origin/auth/identity (`writeGuardMiddleware`, admin) -> CostGuard (feature below). Body cap 64KB (413). Audit + `static_rebuild_queue` row are written in one D1 batch by `apps/api/src/audit/mutateWithAudit.ts` (D-0602-1 Option A). Contracts: `packages/contracts/src/admin/*`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Source |
+| --- | --- | --- | --- | --- |
+| SA-004 | `POST /api/admin/announcements` | `admin_announcement_broadcast` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/announcements.ts` |
+| SA-005 | `PUT /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 400 / 404 / 409 / 413 / 500 | same |
+| SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
+| SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
+| SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+
+SA-009 / SA-010 move to a follow-up micro-unit (U03) and SA-011 (audit restore) to a later task; see work-items/MIG-0602.md Decision (MIG-0602 split).
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
 | SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |

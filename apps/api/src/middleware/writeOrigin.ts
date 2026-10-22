@@ -94,7 +94,7 @@ export function writeGuardDenyBody(reason: string): string {
   );
 }
 
-export type WriteRequiredRole = "admin" | "moderator" | null;
+export type WriteRequiredRole = "admin" | null;
 
 /** CURRENT WriteGuardOptions.requireActiveXId / requireApprovedActiveXId. */
 export type WriteActiveXOptions = {
@@ -141,9 +141,8 @@ export async function evaluateAdminWriteGuard(options: {
   /** C-1: session could not be resolved (D1 error or missing binding with a token). */
   sessionUnavailable?: boolean;
   /**
-   * CURRENT WriteGuardOptions.requiredRole: "admin" (default here) or none.
-   * "moderator" is a Hono-only extension (CURRENT has no moderator write
-   * guard): role must be moderator or admin. null = any authenticated user.
+   * CURRENT WriteGuardOptions.requiredRole: "admin" (default here) or none
+   * (null = any authenticated user; banned / TOS checks still apply).
    */
   requiredRole?: WriteRequiredRole;
   loadTosState?: () => Promise<{ is_tos_accepted: number; terms_reaccept_required: number } | null>;
@@ -191,13 +190,6 @@ export async function evaluateAdminWriteGuard(options: {
       status: 403,
       reason: identityDeny,
     };
-  }
-  if (
-    requiredRole === "moderator" &&
-    options.user.role !== "moderator" &&
-    options.user.role !== "admin"
-  ) {
-    return { ok: false, status: 403, reason: "forbidden" };
   }
   return { ok: true, user: options.user };
 }
