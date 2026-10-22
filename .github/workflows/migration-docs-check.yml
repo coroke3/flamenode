@@ -1,27 +1,10 @@
 name: Migration contract and workspace verification
 
 on:
+  # No paths filter: root tsc (**/*.ts), test:unit (src/scripts/app), test:workers,
+  # D1 migration tests (migrations/) and check:cloudflare-template (wrangler.toml)
+  # read most of the repository, so a filter would leave such PRs with no CI.
   pull_request:
-    paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "docs/AI_CONTEXT.md"
-      - "docs/migration/**"
-      - "scripts/check-migration*.mjs"
-      - "scripts/print-migration-task-context*.mjs"
-      - "scripts/check-project-docs.mjs"
-      - "scripts/check-domain-imports*.mjs"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "apps/**"
-      - "packages/**"
-      - "src/lib/**"
-      - "app/**"
-      - "workers/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/migration-docs-check.yml"
   workflow_dispatch:
 
 concurrency:
