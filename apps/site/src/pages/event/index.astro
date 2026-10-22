@@ -1,0 +1,22 @@
+---
+/**
+ * `/event` (MIG-0502 U01 / Recipe R-PAGE / Runtime S0). Static HTML of CURRENT's default view; the
+ * `?q=&status=&sort=` keys are applied by the Island in the browser (CURRENT's `~query` twin route has no
+ * Astro page: the same URL, filtered after load). No request-time data.
+ */
+import PublicLayout from "../../layouts/PublicLayout.astro";
+import { EventsIndexIsland } from "../../components/EventsIndexIsland.ts";
+import { getEventBuildData } from "../../lib/eventData.ts";
+import { buildPageHead } from "../../lib/pageHead.ts";
+
+const head = buildPageHead({
+  path: "/event",
+  title: "イベント",
+  description: "FlameNodeで開催中・開催予定・アーカイブ済みの映像イベントを探せます。",
+});
+const { index } = await getEventBuildData();
+const builtAt = Math.floor(Date.now() / 1000);
+---
+<PublicLayout head={head} currentPath="/event">
+  <EventsIndexIsland client:load index={index} builtAt={builtAt} />
+</PublicLayout>
