@@ -85,6 +85,20 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
+### Hono endpoints (MIG-0602 U02, PR #331)
+
+Write guard order for every row: origin (pure) -> session -> origin/auth/identity (`writeGuardMiddleware`, admin) -> CostGuard (feature below). Body cap 64KB (413). Audit + `static_rebuild_queue` row are written in one D1 batch by `apps/api/src/audit/mutateWithAudit.ts` (D-0602-1 Option A). Contracts: `packages/contracts/src/admin/*`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Source |
+| --- | --- | --- | --- | --- |
+| SA-004 | `POST /api/admin/announcements` | `admin_announcement_broadcast` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/announcements.ts` |
+| SA-005 | `PUT /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 400 / 404 / 409 / 413 / 500 | same |
+| SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
+| SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
+| SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+
+SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.

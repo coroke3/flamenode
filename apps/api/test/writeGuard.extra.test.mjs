@@ -106,12 +106,13 @@ test("site URL: loadSiteUrl throws -> 503 origin_verification_unavailable", asyn
 function tosDb({ accepted = null, consents = [], terms }) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`
-    CREATE TABLE user (id TEXT PRIMARY KEY, is_tos_accepted INTEGER, accepted_terms_version_id TEXT);
+    CREATE TABLE user (id TEXT PRIMARY KEY, is_tos_accepted INTEGER, accepted_terms_version_id TEXT, discord_id TEXT, name TEXT, image TEXT, active_x_user_id TEXT);
+    CREATE TABLE x_users (id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT, approval_status TEXT);
     CREATE TABLE terms_versions (id TEXT PRIMARY KEY, severity TEXT, published_at INTEGER, updated_at INTEGER);
     CREATE TABLE user_tos_consents (id TEXT PRIMARY KEY, user_id TEXT, terms_version_id TEXT);
   `);
-  sqlite.prepare("INSERT INTO user VALUES ('u-1', 1, ?)").run(accepted);
-  sqlite.prepare("INSERT INTO user VALUES ('u-2', 1, NULL)").run();
+  sqlite.prepare("INSERT INTO user (id, is_tos_accepted, accepted_terms_version_id) VALUES ('u-1', 1, ?)").run(accepted);
+  sqlite.prepare("INSERT INTO user (id, is_tos_accepted) VALUES ('u-2', 1)").run();
   for (const t of terms) {
     sqlite.prepare("INSERT INTO terms_versions VALUES (?, ?, ?, ?)").run(t.id, t.severity, t.published_at, t.updated_at);
   }

@@ -18,7 +18,8 @@ export const SCHEMA = `
   CREATE TABLE "user" (id TEXT PRIMARY KEY, name TEXT, email TEXT, image TEXT, discord_id TEXT,
     role TEXT, is_banned INTEGER, is_tos_accepted INTEGER, accepted_terms_version_id TEXT,
     active_x_user_id TEXT);
-  CREATE TABLE x_users (id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT);
+  CREATE TABLE x_users (id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT, approval_status TEXT);
+  CREATE TABLE x_user_account_links (auth_user_id TEXT, x_user_id TEXT);
   CREATE TABLE terms_versions (id TEXT PRIMARY KEY, severity TEXT, published_at INTEGER, updated_at INTEGER);
   CREATE TABLE user_tos_consents (id TEXT PRIMARY KEY, user_id TEXT, terms_version_id TEXT);
   CREATE TABLE system_settings (id TEXT PRIMARY KEY, operation_mode TEXT, disabled_features_json TEXT,
@@ -43,22 +44,31 @@ export const SCHEMA = `
 `;
 
 export function createAdminD1({ onFirst } = {}) {
+  const stats = { reads: 0, batches: 0, prepares: 0 };
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(SCHEMA);
   const make = (sql, params) => ({
     _sql: sql,
     _params: params,
     first: async () => {
+      stats.reads += 1;
       const row = sqlite.prepare(sql).get(...params) ?? null;
       if (onFirst) onFirst(sql, sqlite);
       return row;
     },
-    all: async () => ({ results: sqlite.prepare(sql).all(...params) }),
+    all: async () => {
+      stats.reads += 1;
+      return { results: sqlite.prepare(sql).all(...params) };
+    },
     run: async () => ({ results: sqlite.prepare(sql).all(...params) }),
   });
   const db = {
-    prepare: (sql) => ({ bind: (...params) => make(sql, params) }),
+    prepare: (sql) => {
+      stats.prepares += 1;
+      return { bind: (...params) => make(sql, params) };
+    },
     batch: async (statements) => {
+      stats.batches += 1;
       sqlite.exec("BEGIN");
       try {
         const results = [];
@@ -71,7 +81,7 @@ export function createAdminD1({ onFirst } = {}) {
       }
     },
   };
-  return { db, sqlite };
+  return { db, sqlite, stats };
 }
 
 export function seedBase(sqlite, { role = "admin", settings = "normal" } = {}) {

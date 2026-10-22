@@ -13,11 +13,22 @@ import {
   type AnnouncementResult,
   validateAnnouncementInput,
 } from "@flamenode/domain/announcements";
+import { AnnouncementWriteBodySchema } from "@flamenode/contracts";
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { generateId, mutateWithAudit } from "../../audit/mutateWithAudit.ts";
+import {
+  generateId,
+  MAX_SINGLE_ROW_LIMIT,
+  mutateWithAudit,
+} from "../../audit/mutateWithAudit.ts";
+import {
+  auditPreloaded,
+  BODY_TOO_LARGE_MESSAGE,
+  readAdminJsonBody,
+} from "./body.ts";
 import { buildAnnouncementChangeQueueStatement } from "../../audit/staticRebuildQueue.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { onlyMutating } from "../../middleware/writeOrigin.ts";
 
 export const ANNOUNCEMENT_FAILURE_MESSAGE =
   "保存に失敗しました。再読み込みして、もう一度お試しください。";
@@ -42,17 +53,23 @@ type AnnouncementRow = Record<(typeof ANNOUNCEMENT_COLUMNS)[number], unknown> & 
   updated_at: number;
 };
 
-async function readJsonObject(
+/** Bounded JSON read (413) + contracts shape check (400). */
+async function readAnnouncementBody(
   request: Request,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const body = await request.json();
-    return body && typeof body === "object" && !Array.isArray(body)
-      ? (body as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
+): Promise<
+  | { ok: true; raw: Record<string, unknown> }
+  | { ok: false; status: 400 | 413; message: string }
+> {
+  const read = await readAdminJsonBody(request);
+  if (read.kind === "too_large") {
+    return { ok: false, status: 413, message: BODY_TOO_LARGE_MESSAGE };
   }
+  const shape =
+    read.kind === "ok" ? AnnouncementWriteBodySchema.safeParse(read.value) : null;
+  if (!shape || !shape.success) {
+    return { ok: false, status: 400, message: "入力内容を確認してください。" };
+  }
+  return { ok: true, raw: shape.data };
 }
 
 async function loadAnnouncement(
@@ -62,27 +79,31 @@ async function loadAnnouncement(
   return db
     .prepare(
       `SELECT ${ANNOUNCEMENT_COLUMNS.map((c) => `"${c}"`).join(", ")}
-       FROM announcements WHERE id = ? LIMIT 1`,
+       FROM announcements WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind(id)
     .first<AnnouncementRow>();
 }
 
-function failure(c: { json: (b: unknown, s: 400 | 404 | 409 | 500) => Response }, status: 400 | 404 | 409 | 500, message: string) {
+function failure(
+  c: { json: (b: unknown, s: 400 | 404 | 409 | 413 | 500) => Response },
+  status: 400 | 404 | 409 | 413 | 500,
+  message: string,
+) {
   const body: AnnouncementResult = { ok: false, message };
   return c.json(body, status);
 }
 
 export const announcementRoutes = new Hono<AppEnv>();
-announcementRoutes.use("*", costGuardMiddleware("admin_announcement_broadcast"));
+announcementRoutes.use("*", onlyMutating(costGuardMiddleware("admin_announcement_broadcast")));
 
 // SA-004 createAnnouncement
 announcementRoutes.post("/", async (c) => {
   const db = c.env.DB;
   const userId = c.get("user")!.id;
-  const raw = await readJsonObject(c.req.raw);
-  if (!raw) return failure(c, 400, "入力内容を確認してください。");
-  const validated = validateAnnouncementInput(raw);
+  const body0 = await readAnnouncementBody(c.req.raw);
+  if (!body0.ok) return failure(c, body0.status, body0.message);
+  const validated = validateAnnouncementInput(body0.raw);
   if (!validated.ok) return failure(c, 400, validated.message);
   const { data, dates } = validated;
   const id = data.id?.trim() || generateId("anc");
@@ -110,6 +131,7 @@ announcementRoutes.post("/", async (c) => {
         queue.statement,
       ],
       expectedMutationChanges: [1, queue.expectedChanges],
+      preloaded: auditPreloaded(c),
       audits: [
         {
           table_name: "announcements",
@@ -146,10 +168,10 @@ announcementRoutes.post("/", async (c) => {
 announcementRoutes.put("/:id", async (c) => {
   const db = c.env.DB;
   const userId = c.get("user")!.id;
-  const raw = await readJsonObject(c.req.raw);
-  if (!raw) return failure(c, 400, "入力内容を確認してください。");
+  const body0 = await readAnnouncementBody(c.req.raw);
+  if (!body0.ok) return failure(c, body0.status, body0.message);
   // The path id is authoritative (CURRENT reads it from the form field `id`).
-  const validated = validateAnnouncementInput({ ...raw, id: c.req.param("id") });
+  const validated = validateAnnouncementInput({ ...body0.raw, id: c.req.param("id") });
   if (!validated.ok) return failure(c, 400, validated.message);
   const { data, dates } = validated;
   const id = data.id?.trim();
@@ -194,6 +216,7 @@ announcementRoutes.put("/:id", async (c) => {
         queue.statement,
       ],
       expectedMutationChanges: [1, queue.expectedChanges],
+      preloaded: auditPreloaded(c),
       audits: [
         {
           table_name: "announcements",
@@ -256,6 +279,7 @@ announcementRoutes.delete("/:id", async (c) => {
         queue.statement,
       ],
       expectedMutationChanges: [1, queue.expectedChanges],
+      preloaded: auditPreloaded(c),
       audits: [
         {
           table_name: "announcements",

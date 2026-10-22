@@ -17,6 +17,14 @@ export type Variables = {
   user: SessionUser | null;
   session: AuthSession | null;
   sessionState: "none" | "unavailable" | "user";
+  /** True when writeGuardMiddleware({ activeX }) already evaluated CostGuard. */
+  costGuardEvaluated: boolean;
+  /** Active X and approved X IDs read in the same user query. */
+  activeX: { activeXId: string | null; approvedXIds: string[] };
+  /** Set by costGuardMiddleware from its single system_settings read. */
+  auditSettings: import("./audit/mutateWithAudit.ts").AuditLogSettings;
+  /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
+  actorSnapshotJsonById: Record<string, string>;
 };
 
 export type AppEnv = {
