@@ -1,7 +1,7 @@
 # FlameNode Migration Decisions — adopted options & remaining evidence
 
 > Status: Active / 仕様上の採用方針と実行ゲートの正本
-> Last updated: 2026-10-15
+> Last updated: 2026-10-23
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
@@ -194,5 +194,7 @@ owner Yugo の standing instruction「検討事項は推奨で進めて」に基
 | MIG-0616 | audit restore |
 | MIG-0617 | `apps/api` の Option A を core に置き換える |
 | MIG-0618 | xid merge core |
+
+決定の経緯: owner Yugo の standing instruction「検討事項は推奨で進めて」（推奨案と Fable の判断で決める）に基づく。lead の決定を Opus (high) と Fable が #338 でレビューして APPROVE した。
 
 承認境界: source code の移動だけ。Remote D1、production deploy、Route、secret は対象外。D-10 は DB package の D-01 を変えない（schema は `@flamenode/db` のまま）。
