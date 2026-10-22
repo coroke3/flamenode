@@ -1,73 +1,41 @@
 ---
 /**
- * Representative Creator SSG Page (MIG-0403 / Recipe R-PAGE / Runtime S0).
- * Pre-renders public creator profile HTML with full OGP and Island hydration.
- * Private and deleted fixtures are strictly excluded at build time.
+ * `/user/[id]` (MIG-0504 / Recipe R-PAGE / Runtime S0). One static page per creator that has a published,
+ * manifest-allowed profile snapshot; banned / merged / unapproved / private creators get no page (gateway 404).
+ * Page 1 of works and collabs is static HTML; `?worksPage=` / `?collabPage=` are applied by the Island.
  */
-import { CreatorView, type CreatorProfileData } from "@flamenode/ui";
-import { IslandWrapper } from "../../../components/IslandWrapper.ts";
-import { getPublicRepresentativeUsers } from "../../../lib/representativeFixtures.ts";
-import type { UserPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { CreatorProfileIsland } from "../../../components/CreatorProfileIsland.ts";
+import { serializeJsonLd } from "../../../lib/pageHead.ts";
+import { loadUserBuildData, type UserBuildEntry } from "../../../lib/userData.ts";
+import {
+  STATIC_USER_COLLABS_PAGE_SIZE,
+  STATIC_USER_WORKS_PAGE_SIZE,
+  USER_COLLAB_DISPLAY_PAGE_SIZE,
+  USER_WORKS_DISPLAY_PAGE_SIZE,
+  buildCreatorHeader,
+  buildPersonJsonLd,
+  buildProfileHead,
+  buildSectionPages,
+} from "../../../lib/userViews.ts";
 
 export async function getStaticPaths() {
-  const users = getPublicRepresentativeUsers();
-  return users.map((user) => ({
-    params: { id: user.id },
-    props: { user },
-  }));
+  const data = await loadUserBuildData();
+  return [...data.users].map(([id, entry]) => ({ params: { id }, props: { entry } }));
 }
 
 interface Props {
-  user: UserPublicSnapshot;
+  entry: UserBuildEntry;
 }
 
-const { user } = Astro.props;
-const title = `${user.title} - FlameNode`;
-const canonicalUrl = user.canonicalUrl ?? `https://flamenode.net/user/${user.id}`;
-const ogImageUrl = user.ogImageUrl ?? user.avatarUrl ?? "https://flamenode.net/brand/ogp-default.png";
-const description = user.bio ?? user.description ?? "";
-
-const creatorData: CreatorProfileData = {
-  id: user.id,
-  name: user.name ?? user.title,
-  iconUrl: user.avatarUrl ?? null,
-  profileText: user.bio ?? null,
-  works: {
-    items: [],
-    total: 0,
-    currentPage: 1,
-    totalPages: 1,
-    pageSize: 10,
-    buildHref: (p) => `/user/${user.id}?page=${p}`,
-  },
-  collabs: {
-    items: [],
-    total: 0,
-    currentPage: 1,
-    totalPages: 1,
-    pageSize: 10,
-    buildHref: (p) => `/user/${user.id}?tab=collab&page=${p}`,
-  },
-};
+const { profile, worksPages, collabsPages } = Astro.props.entry;
+const head = buildProfileHead(profile);
+const header = buildCreatorHeader(profile);
+const works = buildSectionPages(profile.works, worksPages, USER_WORKS_DISPLAY_PAGE_SIZE, STATIC_USER_WORKS_PAGE_SIZE);
+const collabs = buildSectionPages(profile.collabs, collabsPages, USER_COLLAB_DISPLAY_PAGE_SIZE, STATIC_USER_COLLABS_PAGE_SIZE);
+const jsonLd = buildPersonJsonLd(profile);
 ---
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title}</title>
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={title} />
-    <meta property="og:type" content="profile" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:site_name" content="FlameNode" />
-    {description && <meta name="description" content={description} />}
-    {description && <meta property="og:description" content={description} />}
-  </head>
-  <body>
-    <IslandWrapper client:load>
-      <CreatorView creator={creatorData} />
-    </IslandWrapper>
-  </body>
-</html>
+<PublicLayout head={head} currentPath="/user">
+  <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(jsonLd)}></script>
+  <CreatorProfileIsland client:load header={header} works={works} collabs={collabs} />
+</PublicLayout>

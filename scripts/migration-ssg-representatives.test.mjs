@@ -74,13 +74,15 @@ test("MIG-0403 T03: OGP metadata, title, and site_name follow CURRENT production
     assert.ok(eventHtml.includes('<meta property="og:image" content="https://flamenode.net/brand/banner.png">'));
 
     // 3. Creator Profile HTML verification
-    const userHtmlPath = path.join(DIST_DIR, "user/miku-producer/index.html");
-    assert.ok(fs.existsSync(userHtmlPath), "user/miku-producer/index.html must exist");
+    // MIG-0504 moved the user pages to CURRENT-shaped data (X ids have no hyphen) and CURRENT's head
+    // ("<name> - クリエイター | FlameNode"); the exhaustive checks are in migration-user-routes.test.mjs.
+    const userHtmlPath = path.join(DIST_DIR, "user/miku_producer/index.html");
+    assert.ok(fs.existsSync(userHtmlPath), "user/miku_producer/index.html must exist");
     const userHtml = fs.readFileSync(userHtmlPath, "utf-8");
-    assert.ok(userHtml.includes("<title>初音P (Miku Producer) - FlameNode</title>"));
-    assert.ok(userHtml.includes('<link rel="canonical" href="https://flamenode.net/user/miku-producer">'));
+    assert.ok(userHtml.includes("<title>初音P - クリエイター | FlameNode</title>"));
+    assert.ok(userHtml.includes('<link rel="canonical" href="https://flamenode.net/user/miku_producer">'));
     assert.ok(userHtml.includes('<meta property="og:type" content="profile">'));
-    assert.ok(userHtml.includes('<meta property="og:image" content="https://flamenode.net/brand/avatar-miku.png">'));
+    assert.ok(userHtml.includes('<meta property="og:image" content="https://example.com/miku.png">'));
   }
 });
 
