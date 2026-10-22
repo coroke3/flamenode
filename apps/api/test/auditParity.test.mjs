@@ -152,6 +152,23 @@ if (!underTsx) {
     assert.deepEqual([...apiEndpoints.EVENT_COLUMNS], Object.keys(getTableColumns(schema.events)));
   });
 
+  test("event export cache keys and public JSON cache Request equal CURRENT (pins EVENT_EXPORT_CACHE_VERSION)", async () => {
+    const exportCache = await import("../../../src/lib/api/eventExportCache.ts");
+    const publicCache = await import("../../../src/lib/publicData/publicCache.ts");
+    for (const id of ["ev-1", "日本語 id/with?chars"]) {
+      const expected = [];
+      for (const format of ["v5", "legacy"]) {
+        for (const minutes of exportCache.EVENT_EXPORT_REFRESH_MINUTES) {
+          expected.push(exportCache.eventExportPayloadCacheKey(id, format, minutes));
+        }
+      }
+      assert.deepEqual(apiEndpoints.eventExportCacheKeys(id), expected);
+      for (const key of expected) {
+        assert.equal(apiEndpoints.publicJsonCacheRequestUrl(key), publicCache.publicJsonCacheKey(key).url);
+      }
+    }
+  });
+
   test("static rebuild queue statement equals CURRENT buildAnnouncementChangeQueueBatch", async () => {
     const captured = [];
     const db = { run: (query) => { captured.push(dialect.sqlToQuery(query.getSQL ? query.getSQL() : query)); return { kind: "run" }; } };
