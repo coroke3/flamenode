@@ -48,6 +48,8 @@
     "./visibility/manifestR2": "./src/visibility/manifestR2.ts",
     "./visibility/fenceStore": "./src/visibility/fenceStore.ts",
     "./visibility/countablePublicVideoSql": "./src/visibility/countablePublicVideoSql.ts",
+    "./visibility/manifestHost": "./src/visibility/manifestHost.ts",
+    "./visibility/videoTransition": "./src/visibility/videoTransition.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts"
   },
   "scripts": {
