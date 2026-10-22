@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/permissions/simulator?event_id=ev1&x_user_id=sx",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -915,6 +915,29 @@ if (runUnderRootTsx(import.meta.url)) {
       const input = { enabled, syncStatus, nextSyncAt: next, lastSyncedAt: last, lastFullScanAt: scan, lastError: error, eligibleCount: eligible, syncedCount: synced, linkedCount: linked, now: nows };
       assert.deepEqual(local(input), derivePlaylistSyncHealth(input));
     }
+  });
+
+  test("T02 permission simulator equals CURRENT simulateEventPermissions (every preset, custom, alias, missing)", async () => {
+    const { simulateEventPermissions } = await import("../../../src/lib/admin/permissionSimulator.ts");
+    const presets = ["owner", "manager", "reviewer", "slot_manager", "content_editor", "xid_reviewer", "public_staff", "custom"];
+    presets.forEach((preset, i) => {
+      ins("event_staff", { id: `st-${preset}`, event_id: "ev1", x_user_id: `sx_${preset}`, display_name: `Staff ${preset}`, permission_preset: preset, custom_permission_keys_json: preset === "custom" ? JSON.stringify(["event.basic", "video.status", "xid.link_requests", 7, "bogus.key"]) : null, created_at: T0 + i, updated_at: T0 + i });
+    });
+    ins("event_staff", { id: "st-badjson", event_id: "ev1", x_user_id: "sx_badjson", display_name: "Bad", permission_preset: "custom", custom_permission_keys_json: "{not json", created_at: T0, updated_at: T0 });
+    ins("event_staff", { id: "st-unknown", event_id: "ev1", x_user_id: "sx_unknown", display_name: "Unknown", permission_preset: "legacy_role", created_at: T0, updated_at: T0 });
+    for (const [eventId, xUserId] of [
+      ...presets.map((p) => ["ev1", `sx_${p}`]), ["ev1", "sx_badjson"], ["ev1", "sx_unknown"], ["ev1", "@sx_owner"], ["ev1", "  sx_manager  "],
+      ["ev1", "nobody"], ["ev2", "sx_owner"], ["ev1", "@"], ["", "sx_owner"], ["ev1", ""],
+    ]) {
+      const query = new URLSearchParams({ event_id: eventId, x_user_id: xUserId }).toString();
+      const r = await get(`/permissions/simulator?${query}`);
+      const trimmedEvent = eventId.trim();
+      const trimmedX = xUserId.trim();
+      const expected = trimmedEvent && trimmedX ? canon(await simulateEventPermissions(refDb, { eventId: trimmedEvent, xUserId: trimmedX })) : null;
+      assert.deepEqual(r.body, { eventId: trimmedEvent, xUserId: trimmedX, result: expected }, `${eventId}/${xUserId}`);
+    }
+    assert.equal((await get("/permissions/simulator?event_id=ev1&x_user_id=sx_owner")).body.result.found, true);
+    assert.equal((await get("/permissions/simulator")).stats.statements, 1);
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

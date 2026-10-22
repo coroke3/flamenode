@@ -374,7 +374,26 @@ export const AdminYoutubePlaylistsResponseSchema = z.object({
 });
 export type AdminYoutubePlaylistsResponse = z.infer<typeof AdminYoutubePlaylistsResponseSchema>;
 export type AdminYoutubeQuotaResponse =z.infer<typeof AdminYoutubeQuotaResponseSchema>;
-export type AdminApiEndpointsResponse =z.infer<typeof AdminApiEndpointsResponseSchema>;
+export type AdminApiEndpointsResponse = z.infer<typeof AdminApiEndpointsResponseSchema>;
+export const AdminPermissionSimulatorResponseSchema = z.object({
+  eventId: z.string(),
+  xUserId: z.string(),
+  // null when event_id or x_user_id is empty (the page shows the empty panel without querying).
+  result: z
+    .object({
+      found: z.boolean(),
+      eventId: z.string(),
+      xUserId: z.string().nullable(),
+      displayName: z.string().nullable(),
+      preset: z.string().nullable(),
+      presetLabel: z.string().nullable(),
+      resolvedKeys: z.array(z.string()),
+      resolvedLabels: z.array(z.string()),
+      spotlight: z.array(z.object({ key: z.string(), label: z.string(), allowed: z.boolean() })),
+    })
+    .nullable(),
+});
+export type AdminPermissionSimulatorResponse = z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
 export type AdminNotificationsResponse =z.infer<typeof AdminNotificationsResponseSchema>;

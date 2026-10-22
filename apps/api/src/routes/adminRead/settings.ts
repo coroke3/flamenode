@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type {
   AdminApiEndpointsResponse,
+  AdminPermissionSimulatorResponse,
   AdminAnnouncementDetailResponse,
   AdminAnnouncementListResponse,
   AdminAuditSettingsResponse,
@@ -11,6 +12,7 @@ import type {
   AdminRulesResponse,
 } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
+import { SPOTLIGHT_KEYS, permissionLabel, presetLabel, resolveStaffPermissionKeys } from "./permissions.ts";
 
 // MIG-0626 settings-type admin screens. D1 budget (ZERO_1102 S2): <= 3 statements per request including the
 // session lookup. All reads are row reads with a named LIMIT; nothing is packed into a JSON column.
@@ -332,6 +334,62 @@ adminSettingsRoutes.get("/event-templates", async (c) => {
       .first<NonNullable<AdminEventTemplatesResponse["selected"]>>();
   }
   const body: AdminEventTemplatesResponse = { items: results, selected };
+  return c.json(body);
+});
+
+// ---- /permissions/simulator?event_id&x_user_id (permissions/simulator/page.tsx; simulateEventPermissions) ----
+// D1: session + 1 event_staff row. No input -> result null (the page renders the empty panel).
+adminSettingsRoutes.get("/permissions/simulator", async (c) => {
+  const eventId = (c.req.query("event_id") ?? "").trim();
+  const rawX = (c.req.query("x_user_id") ?? "").trim();
+  if (!eventId || !rawX) {
+    const none: AdminPermissionSimulatorResponse = { eventId, xUserId: rawX, result: null };
+    return c.json(none);
+  }
+  const xUserId = rawX.replace(/^@/, "") || null;
+  const spotlight = (resolved: Set<string>) =>
+    SPOTLIGHT_KEYS.map((key) => ({ key, label: permissionLabel(key), allowed: resolved.has(key) }));
+  const empty: NonNullable<AdminPermissionSimulatorResponse["result"]> = {
+    found: false,
+    eventId,
+    xUserId,
+    displayName: null,
+    preset: null,
+    presetLabel: null,
+    resolvedKeys: [],
+    resolvedLabels: [],
+    spotlight: spotlight(new Set()),
+  };
+  let result = empty;
+  if (xUserId) {
+    const row = await c.env.DB.prepare(
+      "SELECT x_user_id, display_name, permission_preset, custom_permission_keys_json FROM event_staff WHERE event_id = ? AND x_user_id = ? LIMIT 1",
+    )
+      .bind(eventId, xUserId)
+      .first<{
+        x_user_id: string;
+        display_name: string | null;
+        permission_preset: string | null;
+        custom_permission_keys_json: string | null;
+      }>();
+    if (row) {
+      const preset = row.permission_preset ?? "public_staff";
+      const resolved = resolveStaffPermissionKeys(row);
+      const resolvedKeys = [...resolved].sort();
+      result = {
+        found: true,
+        eventId,
+        xUserId: row.x_user_id,
+        displayName: row.display_name,
+        preset,
+        presetLabel: presetLabel(preset),
+        resolvedKeys,
+        resolvedLabels: resolvedKeys.map(permissionLabel),
+        spotlight: spotlight(resolved),
+      };
+    }
+  }
+  const body: AdminPermissionSimulatorResponse = { eventId, xUserId: rawX, result };
   return c.json(body);
 });
 
