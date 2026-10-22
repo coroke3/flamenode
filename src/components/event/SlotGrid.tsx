@@ -3,7 +3,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { unstable_rethrow, usePathname, useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
@@ -116,15 +116,6 @@ const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
 const COMMUNICATION_ERROR_MESSAGE =
   "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
 
-function isNextRedirectError(error: unknown): boolean {
-  return (
-    error != null &&
-    typeof error === "object" &&
-    "digest" in error &&
-    String((error as { digest?: unknown }).digest).startsWith("NEXT_REDIRECT")
-  );
-}
-
 async function runSlotAction<T>(
   action: () => Promise<T>,
   onCommunicationError: () => void,
@@ -132,7 +123,8 @@ async function runSlotAction<T>(
   try {
     return await action();
   } catch (error) {
-    if (isNextRedirectError(error)) throw error;
+    // NEXT_REDIRECT / notFound / forbidden / unauthorized など Next の制御例外は再 throw する。
+    unstable_rethrow(error);
     onCommunicationError();
     return null;
   }

@@ -11,7 +11,8 @@ test("SlotGrid catches rejected slot server actions", () => {
   assert.match(slotGridSource, /COMMUNICATION_ERROR_MESSAGE/);
   assert.match(slotGridSource, /通信エラーが発生しました/);
   assert.match(slotGridSource, /runSlotAction/);
-  assert.match(slotGridSource, /NEXT_REDIRECT/);
+  assert.match(slotGridSource, /unstable_rethrow\(error\)/);
+  assert.doesNotMatch(slotGridSource, /isNextRedirectError/);
   for (const actionName of [
     "reserveSlot",
     "releaseOwnSlot",
