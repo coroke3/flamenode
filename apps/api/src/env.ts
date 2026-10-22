@@ -7,6 +7,7 @@ export type Bindings = {
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
   PUBLIC_VISIBILITY_GUARD_MODE?: string;
+  YOUTUBE_DAILY_QUOTA_LIMIT?: string;
 };
 
 export type Variables = {

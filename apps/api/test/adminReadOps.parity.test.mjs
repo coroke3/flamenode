@@ -146,7 +146,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   async function call(path, token, options = {}) {
     const d1 = options.d1 ?? createD1(sqlite);
-    const response = await app.request(path, { method: options.method ?? "GET", headers: token ? cookie(token) : {} }, { DB: d1 });
+    const response = await app.request(path, { method: options.method ?? "GET", headers: token ? cookie(token) : {} }, { DB: d1, ...(options.env ?? {}) });
     const text = await response.text();
     return { status: response.status, headers: response.headers, text, body: text.startsWith("{") || text.startsWith("[") ? JSON.parse(text) : null, stats: d1.stats };
   }
@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -796,6 +796,50 @@ if (runUnderRootTsx(import.meta.url)) {
     const r = await get("/api-endpoints");
     assert.deepEqual(r.body, canon({ rows: enabledRows, eventOptions: publicEvents }));
     assert.deepEqual(r.body.rows.map((x) => x.id), ["api-2", "api-1"]);
+  });
+
+  test("T02 youtube quota equals CURRENT page maths (env fallback, stored row, bad env, query failure)", async () => {
+    const policy = await import("../../../src/lib/youtube/quotaPolicy.ts");
+    const refQuota = async (raw) => {
+      const now = Math.floor(Date.now() / 1000);
+      const quotaDay = policy.youtubeQuotaDay(new Date(now * 1_000));
+      const configuredFallback = policy.resolveYoutubeDailyQuotaUnits(raw);
+      const budgetFallback = policy.youtubeDailyBudgetUnits(raw);
+      const row = sqlite.prepare("SELECT used_units, limit_units, updated_at FROM external_api_quota_usage WHERE provider = ?1 AND quota_day = ?2 LIMIT 1").get(policy.YOUTUBE_PROVIDER_KEY, quotaDay) ?? null;
+      const rowBudget = Number(row?.limit_units ?? 0);
+      const budgetUnits = rowBudget > 0 ? rowBudget : budgetFallback;
+      const configuredUnits = rowBudget > 0 ? Math.ceil((rowBudget * 100) / policy.YOUTUBE_TARGET_USAGE_PERCENT) : configuredFallback;
+      const usedUnits = Math.max(0, Number(row?.used_units ?? 0));
+      return canon({
+        quotaDay, configuredUnits, budgetUnits, usedUnits, remainingUnits: Math.max(0, budgetUnits - usedUnits),
+        usagePercent: budgetUnits > 0 ? Math.min(100, Math.round((usedUnits / budgetUnits) * 1_000) / 10) : 0,
+        updatedAt: row?.updated_at ?? null, error: null,
+      });
+    };
+    const fetchQuota = async (env) => {
+      const r = await call("/api/admin-read/ops/youtube-quota", ADMIN, { env });
+      assert.equal(r.status, 200);
+      assert.equal(r.stats.statements, 2);
+      return r.body;
+    };
+    for (const raw of [undefined, "20000", "50", "abc", "10000001"]) {
+      assert.deepEqual(await fetchQuota({ YOUTUBE_DAILY_QUOTA_LIMIT: raw }), await refQuota(raw), String(raw));
+    }
+    const day = policy.youtubeQuotaDay(new Date());
+    ins("external_api_quota_usage", { provider: "youtube", quota_day: day, used_units: 1234, limit_units: 8000, updated_at: T0 });
+    assert.deepEqual(await fetchQuota({ YOUTUBE_DAILY_QUOTA_LIMIT: "20000" }), await refQuota("20000"));
+    assert.equal((await fetchQuota({})).usedUnits, 1234);
+    const d1 = createD1(sqlite);
+    const prepare = d1.prepare;
+    d1.prepare = (text) => {
+      if (/external_api_quota_usage/.test(text)) throw new Error("secret-internal");
+      return prepare(text);
+    };
+    const failed = await call("/api/admin-read/ops/youtube-quota", ADMIN, { d1 });
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.error, "query_failed");
+    assert.equal(failed.body.usedUnits, 0);
+    assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

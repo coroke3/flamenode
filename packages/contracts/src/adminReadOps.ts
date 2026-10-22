@@ -334,7 +334,19 @@ export const AdminApiEndpointsResponseSchema = z.object({
     z.object({ id: z.string(), title: z.string(), enabled: z.number().nullable() }),
   ),
 });
-export type AdminApiEndpointsResponse = z.infer<typeof AdminApiEndpointsResponseSchema>;
+export const AdminYoutubeQuotaResponseSchema = z.object({
+  quotaDay: z.string(),
+  configuredUnits: z.number(),
+  budgetUnits: z.number(),
+  usedUnits: z.number(),
+  remainingUnits: z.number(),
+  usagePercent: z.number(),
+  updatedAt: z.number().nullable(),
+  // CURRENT prints String(cause); the API returns a fixed code.
+  error: z.literal("query_failed").nullable(),
+});
+export type AdminYoutubeQuotaResponse = z.infer<typeof AdminYoutubeQuotaResponseSchema>;
+export type AdminApiEndpointsResponse =z.infer<typeof AdminApiEndpointsResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
 export type AdminNotificationsResponse =z.infer<typeof AdminNotificationsResponseSchema>;

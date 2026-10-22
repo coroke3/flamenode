@@ -3,6 +3,7 @@ import type {
   AdminCostGuardResponse,
   AdminNotificationsResponse,
   AdminTopResponse,
+  AdminYoutubeQuotaResponse,
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { resolveOperationMode } from "@flamenode/domain/admin";
@@ -201,6 +202,74 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/youtube-quota (youtube-quota/page.tsx; src/lib/youtube/quotaPolicy.ts) ----
+// D1: session + 1 row. No YouTube request is made (the page only reads the local usage counter).
+const YOUTUBE_PROVIDER_KEY = "youtube";
+const YOUTUBE_DEFAULT_DAILY_QUOTA_UNITS = 10_000;
+const YOUTUBE_TARGET_USAGE_PERCENT = 80;
+const MIN_CONFIGURED_DAILY_QUOTA_UNITS = 100;
+const MAX_CONFIGURED_DAILY_QUOTA_UNITS = 10_000_000;
+
+function resolveYoutubeDailyQuotaUnits(raw: string | undefined): number {
+  const parsed = Number.parseInt(raw?.trim() ?? "", 10);
+  if (
+    Number.isSafeInteger(parsed) &&
+    parsed >= MIN_CONFIGURED_DAILY_QUOTA_UNITS &&
+    parsed <= MAX_CONFIGURED_DAILY_QUOTA_UNITS
+  ) {
+    return parsed;
+  }
+  return YOUTUBE_DEFAULT_DAILY_QUOTA_UNITS;
+}
+
+/** America/Los_Angeles date, the YouTube quota reset basis. */
+function youtubeQuotaDay(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = new Map(parts.map((part) => [part.type, part.value]));
+  return values.get("year") + "-" + values.get("month") + "-" + values.get("day");
+}
+
+adminOpsRoutes.get("/youtube-quota", async (c) => {
+  const now = Math.floor(Date.now() / 1000);
+  const quotaDay = youtubeQuotaDay(new Date(now * 1_000));
+  const raw = c.env.YOUTUBE_DAILY_QUOTA_LIMIT;
+  const configuredFallback = resolveYoutubeDailyQuotaUnits(raw);
+  const budgetFallback = Math.floor((configuredFallback * YOUTUBE_TARGET_USAGE_PERCENT) / 100);
+  let row: { used_units: number | null; limit_units: number; updated_at: number } | null = null;
+  let error: AdminYoutubeQuotaResponse["error"] = null;
+  try {
+    row = await c.env.DB.prepare(
+      "SELECT used_units, limit_units, updated_at FROM external_api_quota_usage WHERE provider = ?1 AND quota_day = ?2 LIMIT 1",
+    )
+      .bind(YOUTUBE_PROVIDER_KEY, quotaDay)
+      .first();
+  } catch {
+    console.error("[adminRead] youtube-quota read failed");
+    error = "query_failed";
+  }
+  const rowBudget = Number(row?.limit_units ?? 0);
+  const budgetUnits = rowBudget > 0 ? rowBudget : budgetFallback;
+  const configuredUnits =
+    rowBudget > 0 ? Math.ceil((rowBudget * 100) / YOUTUBE_TARGET_USAGE_PERCENT) : configuredFallback;
+  const usedUnits = Math.max(0, Number(row?.used_units ?? 0));
+  const body: AdminYoutubeQuotaResponse = {
+    quotaDay,
+    configuredUnits,
+    budgetUnits,
+    usedUnits,
+    remainingUnits: Math.max(0, budgetUnits - usedUnits),
+    usagePercent: budgetUnits > 0 ? Math.min(100, Math.round((usedUnits / budgetUnits) * 1_000) / 10) : 0,
+    updatedAt: row?.updated_at ?? null,
+    error,
+  };
   return c.json(body);
 });
 
