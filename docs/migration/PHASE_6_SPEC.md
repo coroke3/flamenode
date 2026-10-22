@@ -539,6 +539,49 @@ npm run check:public-api-leaks
 #### Rollback
 PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・旧 Next は変わらない。
 
+### MIG-0626: Admin 読み取り API その B（settings・audit・ops・残り）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0625 の分担表の確定後
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
+- **Verified against:** `c5a62b4d` (2026-10-23)
+#### Source snapshot
+- G13 MIG-0625 に含まれない admin page: settings、audit、notifications、static-builds、workers、health、security、youtube-sync、quota など（`CURRENT_ROUTES.md` の Admin 45 の残り）。
+- 外部サービスの診断（Cloudflare、YouTube）を読む page は、API から外部へ出る request 数を `ZERO_1102.md` の予算内にする。
+#### Owned paths
+- 新規: `+apps/api/src/routes/adminRead/settings.ts`, `+apps/api/src/routes/adminRead/audit.ts`, `+apps/api/src/routes/adminRead/ops.ts`, `+apps/api/test/adminReadOps.parity.test.mjs`
+- 変更: `packages/contracts/src/adminRead.ts`（MIG-0625 で作成）
+- 触らない: `app/**`, `src/lib/actions/**`
+#### Micro-units
+- **U01 inventory**: 残り page の loader を列挙し、MIG-0625 と合わせて Admin 45 を漏れなく覆うことを表で示す。
+- **U02 contract** → **U03 routes** → **U04 parity**。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | Admin 45 すべて | MIG-0625 または本 task の endpoint がある |
+| T02 | 正常系 | CURRENT loader と DTO が一致 |
+| T03 | admin 以外 | 拒否 |
+| T04 | D1 statement 数 | 1 endpoint あたり3件以下 |
+| T05 | 外部診断が失敗 | CURRENT と同じ劣化表示 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/adminReadOps.parity.test.mjs
+npm run check:public-api-leaks
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` に行。Admin 45 の担当表を `ROUTE_MATRIX.md` に追記。
+#### DONE checklist
+- [ ] Admin 45 の全 page に read endpoint がある
+- [ ] secret・token が response に出ない
+#### STOP
+- 外部 request が budget を超えるなら lead に確認する。
+#### Rollback
+PRをrevert。
+
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない

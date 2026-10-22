@@ -15,22 +15,22 @@ import type { AppEnv } from "../../env.ts";
 // session lookup. All reads are row reads with a named LIMIT; nothing is packed into a JSON column.
 
 /** CURRENT app/(admin)/admin/announcements/page.tsx .limit(50). */
-export const MAX_ANNOUNCEMENTS = 50;
+const MAX_ANNOUNCEMENTS = 50;
 /** CURRENT app/(admin)/admin/rules/page.tsx .limit(20). */
-export const MAX_RULE_VERSIONS = 20;
+const MAX_RULE_VERSIONS = 20;
 /** CURRENT rules page counts at most 30 users (reads 31 to know whether it is a lower bound). */
-export const MAX_REACCEPT_COUNT = 30;
+const MAX_REACCEPT_COUNT = 30;
 /** CURRENT app/(admin)/admin/event-groups/page.tsx .limit(100). */
-export const MAX_EVENT_GROUPS = 100;
+const MAX_EVENT_GROUPS = 100;
 /**
  * DIVERGENCE: CURRENT reads every member event of a group; this keeps the first 100 (same order) so the
  * response and the statement stay bounded.
  */
-export const MAX_EVENT_GROUP_MEMBERS = 100;
+const MAX_EVENT_GROUP_MEMBERS = 100;
 /** CURRENT EVENT_GROUP_EVENT_PAGE_SIZE (src/lib/admin/eventGroupEventOptions.ts). */
 export const EVENT_GROUP_EVENT_PAGE_SIZE = 80;
 /** DIVERGENCE: CURRENT listEventTemplatesForAdmin() is unbounded; capped at 100 (newest first). */
-export const MAX_EVENT_TEMPLATES = 100;
+const MAX_EVENT_TEMPLATES = 100;
 
 // CURRENT src/lib/audit/retention.ts DEFAULT_AUDIT_LOG_SETTINGS (used when system_settings has no "default" row).
 const DEFAULT_AUDIT_LOG_SETTINGS = {

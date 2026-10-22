@@ -341,6 +341,29 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
 
+## MIG-0626 Hono Admin read APIs B (Phase 6)
+
+New authenticated, **admin-only**, read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT pages are Server Components reading D1). Mounted at `/api/admin-read/*`, deliberately not under `/api/admin` (MIG-0602 mutation router: guards only non-GET/HEAD/OPTIONS, no default read guard). No Worker Route / traffic change. Parity: `apps/api/test/adminReadOps.parity.test.mjs` runs the Hono routes and the real CURRENT loaders on the same seed. All responses `Cache-Control: private, no-store`; `sessionMiddleware` + `requireAuth` + `role === "admin"` (401 anonymous, 403 banned / non-admin); 503 `{error:"unavailable"}` where CURRENT throws to the error page. CPU: not measured (MIG-0606). the Admin read APIs part A task (users/videos/events/moderation/reports/X-ID requests) mounts its routes in the same `adminReadRoutes` router.
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/admin-read/announcements?audience&status` | `app/(admin)/admin/announcements/page.tsx` | `apps/api/src/routes/adminRead/settings.ts` | 2 | LIMIT 50, newest created first, rendered columns only | unmeasured | BRIDGED |
+| `GET /api/admin-read/announcements/:id` | `announcements/[id]/edit/page.tsx` | `settings.ts` | 2 | 404 = CURRENT notFound() | unmeasured | BRIDGED |
+| `GET /api/admin-read/rules?status` | `rules/page.tsx` | `settings.ts` | 3 | 20 versions + current published in one UNION ALL; re-accept count (<= 31 rows) failure swallowed as CURRENT | unmeasured | BRIDGED |
+| `GET /api/admin-read/rules/:id` | `rules/[id]/edit/page.tsx` | `settings.ts` | 2 | body_markdown is a row column (no JSON packing) | unmeasured | BRIDGED |
+| `GET /api/admin-read/event-groups?visibility&type` | `event-groups/page.tsx` | `settings.ts` | 2 | LIMIT 100, member counts | unmeasured | BRIDGED |
+| `GET /api/admin-read/event-groups/:id` | `event-groups/[id]/edit/page.tsx` | `settings.ts` | 3 | group + members (cap 100) in one join; add-event options 80 + cursor | unmeasured | BRIDGED |
+| `GET /api/admin-read/event-templates?template` | `events/templates/page.tsx`, `events/new/page.tsx` | `settings.ts` | 2-3 | cap 100; selected template returns raw settings_json (SPA builds the form initial) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit-settings` | `audit/settings/page.tsx` | `settings.ts` | 2 | defaults when no `default` row | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit?table&operation&actor&record&restore_status&limit&since&until` | `audit/page.tsx` | `apps/api/src/routes/adminRead/audit.ts` | 3 | rows as stored (no extra columns; payloads redacted at write time); truncated to 48 KiB (`truncated` flag) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit/:id` | `audit/[id]/page.tsx` | `audit.ts` | 3 | prev/next merged into one statement; one row can exceed 64 KiB (payload cap is the audit setting, default 120 KB) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit/restore` | `audit/restore/page.tsx` | `audit.ts` | 2 | 50 runs joined to table_name / target_id only | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/notifications?status&type&event&q&cat` | `notifications/page.tsx` | `apps/api/src/routes/adminRead/ops.ts` | 3 | list (100, recipient joined) + counts incl. unhealthy leases; query failure -> 200 `error:"query_failed"`; 48 KiB truncation | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/cost-guard` | `cost-guard/page.tsx` | `ops.ts` | 3 | read failure -> defaults (200) as CURRENT | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/youtube-sync?...` | `youtube-sync/page.tsx` | `ops.ts` | 2 | 100 + hasMore | unmeasured | BRIDGED |
+
+Divergences recorded: audit list / notifications / cost-guard history truncate to 48 KiB (`truncated` flag; CURRENT renders all rows); event group members capped at 100 and event templates at 100 (CURRENT unbounded); `listEventTemplatesForAdmin` write-guard (`requireAdminWrite`) is not run for the read; the layout's `loadManagementAccess` enrichment query is not run (an admin role needs no management lookup); notification query errors return a fixed code instead of `String(cause)`.
+
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 
 Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.

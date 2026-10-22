@@ -169,3 +169,41 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 
 `UI_REFERENCE.md` が `PENDING_HTML` の間はTarget layout/componentsを確定しない。
 旧`app/(redesign)`や削除済み`docs/design-redesign`を新UIの根拠にしない。
+
+## Admin read endpoint ownership (Admin read APIs part A / MIG-0626)
+
+`CURRENT_ROUTES.md` Admin 45 のうち、MIG-0626 の `/api/admin-read/*` 担当分。Admin 読み取り API その A（users 等）の担当は users / videos / events 一覧 / moderation / x-id-merges / x-link-requests。`DONE` は parity test PASS、`TODO` は MIG-0626 の次 unit（loader 未移行）、`NONE` は API 不要（loader 無し、または CURRENT が redirect / 静的フォーム）。
+
+| Route | Owner | Endpoint | State |
+| --- | --- | --- | --- |
+| `/admin/announcements` | MIG-0626 | `GET /api/admin-read/announcements` | DONE |
+| `/admin/announcements/[id]/edit` | MIG-0626 | `GET /api/admin-read/announcements/:id` | DONE |
+| `/admin/announcements/new` | MIG-0626 | — | NONE (static form) |
+| `/admin/audit` | MIG-0626 | `GET /api/admin-read/audit` | DONE |
+| `/admin/audit/[id]` | MIG-0626 | `GET /api/admin-read/audit/:id` | DONE |
+| `/admin/audit/restore` | MIG-0626 | `GET /api/admin-read/audit/restore` | DONE |
+| `/admin/audit/settings` | MIG-0626 | `GET /api/admin-read/audit-settings` | DONE |
+| `/admin/cost-guard` | MIG-0626 | `GET /api/admin-read/ops/cost-guard` | DONE |
+| `/admin/event-groups` | MIG-0626 | `GET /api/admin-read/event-groups` | DONE |
+| `/admin/event-groups/[id]/edit` | MIG-0626 | `GET /api/admin-read/event-groups/:id` | DONE |
+| `/admin/event-groups/new` | MIG-0626 | — | NONE (static form) |
+| `/admin/events/new` | MIG-0626 | `GET /api/admin-read/event-templates?template=` | DONE (template list + selection; form initial built client-side) |
+| `/admin/events/templates` | MIG-0626 | `GET /api/admin-read/event-templates` | DONE |
+| `/admin/events/[id]`, `/edit`, `/slots`, `/staff`, `/admin/history` | MIG-0626 | — | NONE (COMPAT_REDIRECT) |
+| `/admin/notifications` | MIG-0626 | `GET /api/admin-read/ops/notifications` | DONE |
+| `/admin/rules` | MIG-0626 | `GET /api/admin-read/rules` | DONE |
+| `/admin/rules/[id]/edit` | MIG-0626 | `GET /api/admin-read/rules/:id` | DONE |
+| `/admin/rules/new` | MIG-0626 | — | NONE (default terms are a source constant) |
+| `/admin/youtube-sync` | MIG-0626 | `GET /api/admin-read/ops/youtube-sync` | DONE |
+| `/admin` | MIG-0626 | — | TODO (adminPendingCounts) |
+| `/admin/api-endpoints` | MIG-0626 | — | TODO |
+| `/admin/health` | MIG-0626 | — | TODO (healthChecks.ts, 720 lines) |
+| `/admin/health/integrity` | MIG-0626 | — | TODO (integrityChecks.ts, 910 lines) |
+| `/admin/import` | MIG-0626 | — | TODO (inspect; client component only) |
+| `/admin/permissions/simulator` | MIG-0626 | — | TODO (permissionSimulator.ts) |
+| `/admin/security` | MIG-0626 | — | TODO (securityChecks.ts) |
+| `/admin/spreadsheet` | MIG-0626 | — | TODO unless MIG-0605 RH-003 / RH-007 / RH-009 own it |
+| `/admin/static-builds` | MIG-0626 | — | TODO (static-rebuild-admin.ts, 675 lines) |
+| `/admin/workers` | MIG-0626 | — | TODO (workerMonitoring.ts) |
+| `/admin/youtube-quota` | MIG-0626 | — | TODO (quotaPolicy.ts, env only) |
+| `/admin/youtube-sync/playlists` | MIG-0626 | — | TODO (playlistSyncHealth) |

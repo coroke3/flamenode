@@ -85,6 +85,13 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 上限ちょうど / 上限 + 1 / 2回目の doorbell / 外部 API の失敗 / Queue の1日の message 数。
 - DONE: 全 job の非本番 max < 8ms。遅れが延びる場合はユーザーの承認がある。
 
+### MIG-0626 — Admin read APIs part B
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0626 Work Order、MIG-0625 の分担表、`app/(admin)/admin/**` の残り。
+- 変更: settings / audit / ops / 残りの読み取り endpoint と DTO。
+- 試験: Admin 45 の網羅、parity、admin 以外の拒否、外部診断失敗の劣化。
+- DONE: Admin 45 の全 page に read endpoint がある。
+
 ### MIG-0607 — Phase 6 API Gate
 
 - 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606のPR。

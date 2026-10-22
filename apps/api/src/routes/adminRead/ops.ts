@@ -11,17 +11,17 @@ import type { AppEnv } from "../../env.ts";
 // diagnostics); everything is bounded D1 row reads.
 
 /** CURRENT notifications/page.tsx .limit(100) on the latest notifications. */
-export const MAX_NOTIFICATIONS = 100;
+const MAX_NOTIFICATIONS = 100;
 /** CURRENT notifications/page.tsx q filter: .trim().slice(0, 100). */
-export const MAX_NOTIFICATION_QUERY_CHARS = 100;
+const MAX_NOTIFICATION_QUERY_CHARS = 100;
 /** CURRENT cost-guard/page.tsx history .limit(20). */
-export const MAX_COST_GUARD_HISTORY = 20;
+const MAX_COST_GUARD_HISTORY = 20;
 /** CURRENT youtube-sync/page.tsx LIMIT (it reads LIMIT + 1 to know hasMore). */
-export const MAX_YOUTUBE_SYNC_ROWS = 100;
+const MAX_YOUTUBE_SYNC_ROWS = 100;
 /** CURRENT youtube-sync/page.tsx STALE_SECONDS. */
-export const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
+const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
 /** ZERO_1102 S2: keep each list response under 64 KiB (payloads / errors are the large columns). */
-export const MAX_OPS_LIST_BYTES = 48 * 1024;
+const MAX_OPS_LIST_BYTES = 48 * 1024;
 
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
 const NOTIFICATION_STATUSES = ["pending", "processing", "sent", "failed", "cancelled"];

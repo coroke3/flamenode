@@ -11,12 +11,12 @@ import type { AppEnv } from "../../env.ts";
 // D1 budget: list = session + rows + actor join (3); detail = session + row + prev/next (3); restore = session + 1.
 
 /** CURRENT audit/page.tsx MAX_LIMIT / DEFAULT_LIMIT. */
-export const MAX_AUDIT_LIMIT = 100;
-export const DEFAULT_AUDIT_LIMIT = 50;
+const MAX_AUDIT_LIMIT = 100;
+const DEFAULT_AUDIT_LIMIT = 50;
 /** ZERO_1102 S2 response budget for the list (64 KiB minus room for the operator rows and envelope). */
-export const MAX_AUDIT_LIST_BYTES = 48 * 1024;
+const MAX_AUDIT_LIST_BYTES = 48 * 1024;
 /** CURRENT audit/restore/page.tsx MAX_ROWS. */
-export const MAX_RESTORE_RUNS = 50;
+const MAX_RESTORE_RUNS = 50;
 
 const OPERATIONS = ["CREATE", "UPDATE", "DELETE", "RESTORE", "STATUS_CHANGE", "MERGE", "SYSTEM"];
 const RESTORE_STATUSES = ["restorable", "restored", "expired", "not_restorable", "blocked", "failed"];
