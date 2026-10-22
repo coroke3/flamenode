@@ -15,6 +15,7 @@ import {
   parseCostGuardOverrideInput,
   parseDisabledFeaturesInput,
   parseMaintenanceModeInput,
+  parseModerationDueAt,
   parseTermsDraftInput,
   parseTermsReacceptBroadcastInput,
   resolveMaintenanceTargetMode,
@@ -113,4 +114,48 @@ test("SA-051..055 terms lifecycle", () => {
   });
   assert.equal(parseTermsReacceptBroadcastInput({ termsId: "t", confirm: "terms", cursor: "", content: "" }).message, "確認文字列 'TERMS' が一致しません。");
   assert.equal(parseTermsReacceptBroadcastInput({ termsId: "t", confirm: "TERMS", cursor: "c".repeat(129), content: "" }).message, "cursor が長すぎます。");
+});
+
+// The only producer is <input type="datetime-local" name="due_at"> in
+// src/components/admin/CreateModerationCaseForm.tsx (YYYY-MM-DDTHH:mm[:ss]).
+test("SA-043 parseModerationDueAt keeps datetime-local values as JST", () => {
+  assert.equal(parseModerationDueAt("2026-05-30T12:00"), 1780110000);
+  assert.equal(parseModerationDueAt("2026-05-30T12:00:30"), 1780110030);
+  assert.equal(parseModerationDueAt(" 2026-01-01T00:00 "), Date.UTC(2025, 11, 31, 15, 0) / 1000);
+  assert.equal(parseModerationDueAt("2028-02-29T23:59"), Date.UTC(2028, 1, 29, 14, 59) / 1000);
+  assert.equal(parseModerationDueAt(""), null);
+  assert.equal(parseModerationDueAt("   "), null);
+  assert.equal(parseModerationDueAt(null), null);
+  assert.equal(parseModerationDueAt(undefined), null);
+});
+
+test("SA-043 parseModerationDueAt rejects calendar overflow instead of normalising it", () => {
+  for (const bad of [
+    "2026-02-30T10:00",
+    "2027-02-29T10:00",
+    "2026-04-31T00:00",
+    "2026-13-01T00:00",
+    "2026-00-10T00:00",
+    "2026-01-00T00:00",
+    "2026-01-01T24:00",
+    "2026-01-01T23:60",
+    "2026-01-01T23:59:60",
+  ]) {
+    assert.equal(parseModerationDueAt(bad), null, bad);
+  }
+});
+
+test("SA-043 parseModerationDueAt has no Date.parse fallback for other formats", () => {
+  for (const bad of [
+    "not-date",
+    "2026-01-01",
+    "2026-01-01T00:00Z",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00+09:00",
+    "2026/01/01 10:00",
+    "Jan 1, 2026",
+    "1767193200",
+  ]) {
+    assert.equal(parseModerationDueAt(bad), null, bad);
+  }
 });

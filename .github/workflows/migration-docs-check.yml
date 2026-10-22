@@ -121,4 +121,6 @@ jobs:
         run: node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
       - name: MIG-0411 queue page renders on the real schema and gateway
         run: node --test --experimental-strip-types apps/site/src/gateway/pageRenderQueue.test.mjs
+      - name: MIG-0409 U07 non-production CPU probe auth and error regression
+        run: node --test --experimental-strip-types apps/site/scripts/queue-cpu-probe/worker.test.mjs
 
