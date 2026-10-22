@@ -480,7 +480,7 @@ PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cr
 
 - 決定は [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-10、形は [`IMPLEMENTATION_RECIPES.md`](IMPLEMENTATION_RECIPES.md) R-CORE。`packages/server-core`（`@flamenode/server-core`）が drizzle handle と ports を引数で受け、Next（`src/lib/**` の bridge）と Hono が同じ関数を呼ぶ。
 - 呼び出し側 file は変えない。CURRENT の `mutateWithAudit` 81 箇所・34 file は bridge の signature を維持する。
-- 各 task の最初の commit は、移動前の挙動を固定する golden test（batch の SQL 文字列 + params と `audit_logs` の行。`id` / `created_at` を除く）。移動後も byte 単位で一致させる。1 byte でも違えば STOP。
+- 各 task の最初の commit は、移動前の挙動を固定する golden test（batch の SQL 文字列 + params と `audit_logs` の行。時刻と乱数 id を固定して `id` / `created_at` も比較する）。移動後も byte 単位で一致させる。1 byte でも違えば STOP。
 - 実行順（D1 `batch` → 成功後に best-effort の wake）と strict / CAS の意味を変えない。変える必要が出たら STOP。
 - `src/lib/publicData/loader.ts` は移さない（[`ZERO_1102.md`](ZERO_1102.md) §4.1 / §4.7 と D-09 に反する）。`revalidatePath` は Next の Server Action に残す。
 - MIG-0602 の `apps/api` 内の写し（Option A）は MIG-0617 まで暫定 bridge として残す。
@@ -555,7 +555,7 @@ PR を revert。実装コードの変更が無いので他に戻すものは無�
 - 変更: `src/lib/audit/*.ts`, `src/lib/queues/*.ts`（re-export bridge 化。`restore.ts` と `*.test.mjs` は移さない）, `src/lib/utils/id.ts`, `src/lib/observability/flowTrace.ts`, `src/lib/video/memberSetSnapshot.ts`
 - 触らない: 呼び出し側（`src/lib/actions/**` など）
 #### Micro-units
-- **U01 golden**: 移動前の commit で、代表入力の batch SQL + params と `audit_logs` 行（`id` / `created_at` を除く）を固定する test。
+- **U01 golden**: 移動前の commit で、代表入力の batch SQL + params と `audit_logs` 行を固定する test（時刻と乱数 id を固定するので `id` / `created_at` も比較する）。
 - **U02 move**: audit を `packages/server-core/src/audit/**` へ、queues を `src/queues/**` へ移し、ports を引数にする。
 - **U03 bridge**: `src/lib/audit/*.ts` と `src/lib/queues/*.ts` を re-export にし、`nextPorts.ts` が env / KV / Queue / `waitUntil` を供給する。
 #### Test cases
@@ -580,7 +580,7 @@ npm run build
 #### Ledger updates
 STATUS は merge 直前の統合でだけ更新する。移した file は `FILE_MIGRATION_MATRIX.md` の行の target を bridge と core の場所に更新する。
 #### DONE checklist
-- [ ] golden の diff が 0（`id` / `created_at` 以外）
+- [ ] golden の diff が 0（`id` / `created_at` を含む）
 - [ ] 既存 test の件数が移動前と同じ
 - [ ] 呼び出し側 file の diff が 0
 - [ ] `check-audit-actor-x` など、source の text を読む script が新しい場所を読んでいる
