@@ -286,8 +286,10 @@ function createTosD1({ userRow, termsRows = [], consents = [] }) {
     CREATE TABLE user (
       id TEXT PRIMARY KEY,
       is_tos_accepted INTEGER,
-      accepted_terms_version_id TEXT
+      accepted_terms_version_id TEXT,
+      discord_id TEXT, name TEXT, image TEXT, active_x_user_id TEXT
     );
+    CREATE TABLE x_users (id TEXT PRIMARY KEY, x_name TEXT, icon_url TEXT, approval_status TEXT);
     CREATE TABLE terms_versions (
       id TEXT PRIMARY KEY,
       severity TEXT,

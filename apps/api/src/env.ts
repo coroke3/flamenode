@@ -17,6 +17,14 @@ export type Variables = {
   user: SessionUser | null;
   session: AuthSession | null;
   sessionState: "none" | "unavailable" | "user";
+  /** Deferred active X denial (writeGuard -> applied by costGuard). */
+  activeXDeny: "active_x_required" | "active_x_rejected" | "active_x_not_approved" | null;
+  /** Active X and approved X IDs read in the same user query. */
+  activeX: { activeXId: string | null; approvedXIds: string[] };
+  /** Set by costGuardMiddleware from its single system_settings read. */
+  auditSettings: import("./audit/mutateWithAudit.ts").AuditLogSettings;
+  /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
+  actorSnapshotJsonById: Record<string, string>;
 };
 
 export type AppEnv = {

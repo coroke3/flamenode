@@ -22,9 +22,17 @@
  * The middleware expects sessionMiddleware (MIG-0608) to have run first,
  * setting the "user" request variable.
  */
-import { evaluateWriteIdentity } from "@flamenode/domain/admin";
+import {
+  evaluateActiveXWriteAccess,
+  evaluateWriteIdentity,
+} from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
 import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
+import {
+  actorSnapshotJsonFromRow,
+  MAX_SINGLE_ROW_LIMIT,
+  type ActorSnapshotRow,
+} from "../audit/mutateWithAudit.ts";
 
 export type WriteGuardDenyReason =
   | "origin_verification_unavailable"
@@ -35,7 +43,10 @@ export type WriteGuardDenyReason =
   | "banned"
   | "tos_required"
   | "tos_reaccept_required"
-  | "forbidden";
+  | "forbidden"
+  | "active_x_required"
+  | "active_x_rejected"
+  | "active_x_not_approved";
 
 export type WriteGuardOutcome =
   | { ok: true; user: SessionUser }
@@ -56,6 +67,10 @@ export const WRITE_GUARD_MESSAGES: Readonly<Record<string, string>> = {
     "現在、書き込みを一時停止しています (コストガード)。しばらく時間をおいてからお試しください。",
   cost_guard_blocked: "現在、この機能の書き込みは一時的に無効化されています。",
   forbidden: "この操作を実行する権限がありません。",
+  active_x_required: "X ID を選択してから操作してください。",
+  active_x_rejected:
+    "選択中の X ID は却下されています。別の X ID を選択してください。",
+  active_x_not_approved: "承認済みの X ID が必要です。",
 };
 
 /** Deny response: JSON body + "Cache-Control: private, no-store" (C-2). */
@@ -79,6 +94,38 @@ export function writeGuardDenyBody(reason: string): string {
   );
 }
 
+export type WriteRequiredRole = "admin" | "moderator" | null;
+
+/** CURRENT WriteGuardOptions.requireActiveXId / requireApprovedActiveXId. */
+export type WriteActiveXOptions = {
+  requireActiveXId?: boolean;
+  requireApprovedActiveXId?: boolean;
+};
+
+export type ActiveXRow = {
+  activeXId: string | null;
+  approvalStatus: string | null;
+  approvedXIds: string[];
+};
+
+/**
+ * CURRENT evaluateActiveXWriteAccess (domain) on the values the guard read.
+ * Denials are HTTP 403 (CURRENT writeGuardHttpStatus default) and are applied
+ * AFTER CostGuard to keep CURRENT order (identity -> CostGuard -> active X).
+ */
+export function evaluateActiveXAccess(
+  options: WriteActiveXOptions,
+  row: ActiveXRow,
+) {
+  return evaluateActiveXWriteAccess({
+    requireActiveXId: options.requireActiveXId === true,
+    requireApprovedActiveXId: options.requireApprovedActiveXId === true,
+    activeXId: row.activeXId,
+    approvalStatus: row.approvalStatus,
+    approvedXIds: row.approvedXIds,
+  });
+}
+
 export type OriginChecker = (originHeader: string | null) => boolean;
 
 /**
@@ -93,6 +140,12 @@ export async function evaluateAdminWriteGuard(options: {
   originUnavailable?: boolean;
   /** C-1: session could not be resolved (D1 error or missing binding with a token). */
   sessionUnavailable?: boolean;
+  /**
+   * CURRENT WriteGuardOptions.requiredRole: "admin" (default here) or none.
+   * "moderator" is a Hono-only extension (CURRENT has no moderator write
+   * guard): role must be moderator or admin. null = any authenticated user.
+   */
+  requiredRole?: WriteRequiredRole;
   loadTosState?: () => Promise<{ is_tos_accepted: number; terms_reaccept_required: number } | null>;
 }): Promise<WriteGuardOutcome> {
   if (options.originUnavailable) {
@@ -111,6 +164,8 @@ export async function evaluateAdminWriteGuard(options: {
   if (!options.hasDb) {
     return { ok: false, status: 503, reason: "db_unavailable" };
   }
+  const requiredRole: WriteRequiredRole =
+    options.requiredRole === undefined ? "admin" : options.requiredRole;
   let tos: { is_tos_accepted: number; terms_reaccept_required: number } | null;
   try {
     tos = options.loadTosState ? await options.loadTosState() : null;
@@ -128,7 +183,7 @@ export async function evaluateAdminWriteGuard(options: {
       is_tos_accepted: tos.is_tos_accepted,
       terms_reaccept_required: tos.terms_reaccept_required,
     },
-    "admin",
+    requiredRole === "admin" ? "admin" : undefined,
   );
   if (identityDeny) {
     return {
@@ -136,6 +191,13 @@ export async function evaluateAdminWriteGuard(options: {
       status: 403,
       reason: identityDeny,
     };
+  }
+  if (
+    requiredRole === "moderator" &&
+    options.user.role !== "moderator" &&
+    options.user.role !== "admin"
+  ) {
+    return { ok: false, status: 403, reason: "forbidden" };
   }
   return { ok: true, user: options.user };
 }
@@ -152,7 +214,34 @@ export async function evaluateAdminWriteGuard(options: {
 async function loadTosState(
   db: D1DatabaseLike,
   userId: string,
-): Promise<{ is_tos_accepted: number; terms_reaccept_required: number } | null> {
+  activeX: WriteActiveXOptions | undefined = undefined,
+): Promise<{
+  is_tos_accepted: number;
+  terms_reaccept_required: number;
+  actor_snapshot_json: string;
+  active_x: ActiveXRow | null;
+} | null> {
+  const needActive = Boolean(
+    activeX?.requireActiveXId || activeX?.requireApprovedActiveXId,
+  );
+  // Folded into the same user read (no extra D1 query): approval_status of
+  // the active X (users.active_x_user_id LEFT JOIN x_users) and, for
+  // requireApprovedActiveXId, the approved linked X IDs as a JSON array
+  // (CURRENT getApprovedXIds = x_user_account_links INNER JOIN x_users
+  // WHERE approval_status = 'approved', distinct).
+  const activeXColumns = !needActive
+    ? ""
+    : `,
+         x."approval_status" AS x_approval_status${
+           activeX?.requireApprovedActiveXId
+             ? `,
+         (SELECT json_group_array(DISTINCT l."x_user_id")
+            FROM "x_user_account_links" l
+            INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
+           WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
+         ) AS approved_x_ids_json`
+             : ""
+         }`;
   const row = await db
     .prepare(
       `SELECT
@@ -203,18 +292,46 @@ async function loadTosState(
               )
             )
            THEN 1 ELSE 0
-         END AS terms_reaccept_required
+         END AS terms_reaccept_required,
+         u."discord_id" AS discord_id, u."name" AS discord_name,
+         u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
+         x."x_name" AS x_name, x."icon_url" AS x_icon_url${activeXColumns}
        FROM "user" u
+       LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
        WHERE u."id" = ?
-       LIMIT 1`,
+       LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind(userId)
-    .first<{ is_tos_accepted: number | null; terms_reaccept_required: number | null }>();
+    .first<
+      {
+        is_tos_accepted: number | null;
+        terms_reaccept_required: number | null;
+        x_approval_status?: string | null;
+        approved_x_ids_json?: string | null;
+      } & ActorSnapshotRow
+    >();
 
   if (!row) return null;
+  let approvedXIds: string[] = [];
+  if (row.approved_x_ids_json) {
+    const parsed: unknown = JSON.parse(row.approved_x_ids_json);
+    approvedXIds = Array.isArray(parsed)
+      ? parsed.filter((v): v is string => typeof v === "string")
+      : [];
+  }
   return {
+    active_x: needActive
+      ? {
+          activeXId: row.active_x_user_id ?? null,
+          approvalStatus: row.x_approval_status ?? null,
+          approvedXIds,
+        }
+      : null,
     is_tos_accepted: row.is_tos_accepted === 1 ? 1 : 0,
     terms_reaccept_required: row.terms_reaccept_required === 1 ? 1 : 0,
+    // Same user row the audit actor snapshot needs: saves a second D1 read
+    // (ZERO_1102 S3: at most 3 pre-reads).
+    actor_snapshot_json: actorSnapshotJsonFromRow(row),
   };
 }
 
@@ -282,7 +399,69 @@ export type WriteGuardMiddlewareOptions = {
    * the Hono boundary is intentionally stricter).
    */
   allowLocalPreview: () => boolean;
+  /** Default "admin" (CURRENT requireAdminWrite). null = any authenticated user. */
+  requiredRole?: WriteRequiredRole;
+  /**
+   * CURRENT requireActiveXId / requireApprovedActiveXId. The decision is made
+   * from the same user read (no extra D1 query) but applied by the CostGuard
+   * middleware after its own check, as CURRENT does.
+   */
+  activeX?: WriteActiveXOptions;
 };
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/**
+ * Apply a write-side middleware (origin / writeGuard / CostGuard) only to
+ * mutating methods, so future admin GET reads mounted under the same router
+ * are not blocked by write-only checks (they mount their own read guard).
+ */
+export function onlyMutating<M extends (c: Context, next: Next) => Promise<Response | void>>(
+  middleware: M,
+): (c: Context, next: Next) => Promise<Response | void> {
+  return (c, next) =>
+    SAFE_METHODS.has(c.req.method.toUpperCase()) ? next() : middleware(c, next);
+}
+
+/** Pure origin verification (no D1): CURRENT requireSameOriginWrite. */
+function checkOrigin(
+  c: Context,
+  options: WriteGuardMiddlewareOptions,
+): { originUnavailable: boolean; originOk: boolean } {
+  let configuredOrigin: string | null = null;
+  let originUnavailable = false;
+  try {
+    // CURRENT: getEnvAsync() throws when NEXT_PUBLIC_SITE_URL is missing,
+    // which requireSameOriginWrite surfaces as 503 origin_verification_unavailable.
+    configuredOrigin = configuredHttpOrigin(options.loadSiteUrl(), {
+      allowLoopback: options.allowLocalPreview(),
+    });
+  } catch {
+    originUnavailable = true;
+  }
+  const originOk =
+    !originUnavailable &&
+    configuredOrigin !== null &&
+    requestHasSameOrigin(c.req.header("Origin") ?? null, configuredOrigin);
+  return { originUnavailable, originOk };
+}
+
+/**
+ * Origin-only middleware to mount BEFORE session resolution so a cross-origin
+ * request never costs a D1 read (CURRENT checks origin first). Same 503/403
+ * bodies as writeGuardMiddleware; writeGuardMiddleware repeats the (pure)
+ * check so it stays safe when mounted alone.
+ */
+export function originGuardMiddleware(options: WriteGuardMiddlewareOptions) {
+  return async (c: Context, next: Next): Promise<Response | void> => {
+    const { originUnavailable, originOk } = checkOrigin(c, options);
+    if (originUnavailable) {
+      return writeGuardDenyResponse(c, "origin_verification_unavailable", 503);
+    }
+    if (!originOk) return writeGuardDenyResponse(c, "invalid_origin", 403);
+    await next();
+  };
+}
 
 /**
  * Hono middleware factory. Run after sessionMiddleware. Reads the "user"
@@ -290,38 +469,45 @@ export type WriteGuardMiddlewareOptions = {
  */
 export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
   return async (c: Context, next: Next): Promise<Response | void> => {
-    let configuredOrigin: string | null = null;
-    let originUnavailable = false;
-    try {
-      // CURRENT: getEnvAsync() throws when NEXT_PUBLIC_SITE_URL is missing,
-      // which requireSameOriginWrite surfaces as 503 origin_verification_unavailable.
-      configuredOrigin = configuredHttpOrigin(options.loadSiteUrl(), {
-        allowLoopback: options.allowLocalPreview(),
-      });
-    } catch {
-      originUnavailable = true;
-    }
+    const { originUnavailable, originOk } = checkOrigin(c, options);
 
     const user = c.get("user") as SessionUser | null;
     const db = (c.env as { DB?: D1DatabaseLike }).DB;
-    const originOk =
-      !originUnavailable &&
-      configuredOrigin !== null &&
-      requestHasSameOrigin(c.req.header("Origin") ?? null, configuredOrigin);
 
+    let actorSnapshotJson: string | undefined;
+    let activeXRow: ActiveXRow | null = null;
     const outcome = await evaluateAdminWriteGuard({
       user,
       hasDb: db !== undefined,
       originOk,
       originUnavailable,
       sessionUnavailable: c.get("sessionState") === "unavailable",
+      requiredRole: options.requiredRole,
       loadTosState:
         user && db
-          ? () => loadTosState(db, user.id)
+          ? async () => {
+              const state = await loadTosState(db, user.id, options.activeX);
+              actorSnapshotJson = state?.actor_snapshot_json;
+              activeXRow = state?.active_x ?? null;
+              return state;
+            }
           : undefined,
     });
     if (!outcome.ok) {
       return writeGuardDenyResponse(c, outcome.reason, outcome.status);
+    }
+    // Deferred to costGuardMiddleware (CURRENT order: identity -> CostGuard -> active X).
+    const activeXState = activeXRow as ActiveXRow | null;
+    if (options.activeX && activeXState) {
+      c.set("activeXDeny", evaluateActiveXAccess(options.activeX, activeXState));
+      c.set("activeX", {
+        activeXId: activeXState.activeXId,
+        approvedXIds: activeXState.approvedXIds,
+      });
+    }
+    // Consumed by mutateWithAudit as the audit actor snapshot (no extra read).
+    if (user && actorSnapshotJson !== undefined) {
+      c.set("actorSnapshotJsonById", { [user.id]: actorSnapshotJson });
     }
     await next();
   };
