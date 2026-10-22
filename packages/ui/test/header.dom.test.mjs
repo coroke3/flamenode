@@ -115,7 +115,7 @@ test("UX-GLOBAL-015: a pointerdown outside the search field and its button close
   await act(() => root.unmount());
 });
 
-test("UX-GLOBAL-016: Tab and Shift+Tab cycle inside the aria-modal mobile menu (CURRENT)", async () => {
+test("UX-GLOBAL-016: Tab and Shift+Tab cycle inside the aria-modal mobile menu (CURRENT; Shift+Tab from the menu itself also stays inside)", async () => {
   const mobileAccount = React.createElement("button", { type: "button", className: "acc" }, "ログイン");
   const { root, burger, menu } = await mount({ mobileAccount });
   await click(burger());
@@ -142,6 +142,12 @@ test("UX-GLOBAL-015: a pointerdown outside the mobile menu and its button closes
   assert.ok(menu(), "inside the menu keeps it open");
   await pointerDown(burger());
   assert.ok(menu(), "the menu button handles its own toggle");
+  const scrim = document.querySelector(".hd-menu-scrim");
+  await pointerDown(scrim);
+  assert.ok(menu(), "the scrim closes on its click, so the tap does not reach the page under it");
+  await click(scrim);
+  assert.ok(menu() === null, "a scrim click closes the menu");
+  await click(burger());
   await pointerDown(document.querySelector(".hd-logo"));
   assert.ok(menu() === null, "outside closes the menu");
   assert.equal(getBodyScrollLockCountForTest(), 0);

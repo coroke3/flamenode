@@ -70,6 +70,7 @@ export function PublicHeader({
   const [searchOpen, setSearchOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const menuScrimRef = React.useRef<HTMLDivElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const searchButtonRef = React.useRef<HTMLButtonElement>(null);
   // Unique per header, so two headers on one page never share ids.
@@ -110,8 +111,9 @@ export function PublicHeader({
       }
     };
     window.addEventListener("keydown", onKeyDown);
+    // The scrim closes on its own click, so that tap is not passed to the page under it (touch).
     const stopOutsideClose = closeOnOutsidePointerDown(
-      () => [panel, menuButtonRef.current],
+      () => [panel, menuButtonRef.current, menuScrimRef.current],
       () => setMenuOpen(false),
     );
     return () => {
@@ -264,7 +266,7 @@ export function PublicHeader({
             </nav>
             {mobileAccount ? <div className="hm-me">{mobileAccount}</div> : null}
           </div>
-          <div className="hd-menu-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />
+          <div ref={menuScrimRef} className="hd-menu-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />
         </>
       )}
     </header>
