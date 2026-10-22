@@ -7,3 +7,4 @@ export * from "./ListView.js";
 export * from "./RecommendView.js";
 export * from "./TrendingView.js";
 export type { ScreenVideoCard } from "./parts.js";
+export * from "./TopView.js";

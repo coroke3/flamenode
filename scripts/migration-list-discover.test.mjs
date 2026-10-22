@@ -14,7 +14,7 @@ import { JSDOM } from "jsdom";
 import { ListView } from "@flamenode/ui";
 import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } from "../apps/site/src/lib/listQuery.ts";
 import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
-import { LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
+import { LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, TOP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 import { formatUnix } from "../src/lib/utils/format.ts";
 
 const DIST = path.resolve("apps/site/dist");
@@ -114,7 +114,10 @@ function writeSnapshot(dir, { list, recommend, trending }, over = {}) {
   fs.writeFileSync(path.join(dir, LIST_FIRST_PAGE_KEY), JSON.stringify(envelope(LIST_FIRST_PAGE_KEY, list, over.list)));
   fs.writeFileSync(path.join(dir, RECOMMEND_KEY), JSON.stringify(envelope(RECOMMEND_KEY, recommend, over.recommend)));
   fs.writeFileSync(path.join(dir, TRENDING_KEY), JSON.stringify(envelope(TRENDING_KEY, trending, over.trending)));
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: [LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY], blockedKeys: [] }));
+  // `/` is built from the same snapshot set (MIG-0506); a configured build is all-or-nothing.
+  fs.mkdirSync(path.join(dir, "snapshot/top"), { recursive: true });
+  fs.writeFileSync(path.join(dir, TOP_KEY), JSON.stringify(envelope(TOP_KEY, { generated_at: 1, recommended: [row(1)] })));
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: [LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, TOP_KEY], blockedKeys: [] }));
   return { FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
 }
 const fixture = () => ({

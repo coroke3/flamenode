@@ -267,7 +267,9 @@ export async function loadPublicBuildSnapshot(
 export const LIST_FIRST_PAGE_KEY = "snapshot/list/first-page.json";
 export const RECOMMEND_KEY = "snapshot/recommend/current.json";
 export const TRENDING_KEY = "snapshot/trending/current.json";
-const LISTING_KEY_PATTERN = /^snapshot\/(list\/first-page|recommend\/current|trending\/current)\.json$/;
+/** CURRENT `top.json` as one build-time object for `/` (MIG-0506). */
+export const TOP_KEY = "snapshot/top/current.json";
+const LISTING_KEY_PATTERN = /^snapshot\/(list\/first-page|recommend\/current|trending\/current|top\/current)\.json$/;
 
 /**
  * Verified payload of a listing snapshot (same manifest/generation/sha256/visibility checks as every kind).

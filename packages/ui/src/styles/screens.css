@@ -378,6 +378,45 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .ab-entry .t-h3{display:inline-flex;align-items:center;gap:8px}
 .mt-wrap{gap:24px;padding-top:96px;padding-bottom:96px}
 
+/* top (MIG-0506): mock Main.html; the shelf streams to the screen edge (owner decision), native scroll */
+.tp-intro{display:flex;flex-wrap:wrap;align-items:flex-end;gap:32px 48px;padding-top:56px}
+.tp-copy{flex:1 1 420px;min-width:0;gap:24px}
+.tp-accent{color:var(--brand-text)}
+.tp-lead{margin:0;font-size:18px;line-height:30px;max-width:640px}
+.tp-aside{flex:1 1 420px;min-width:0}
+.tp-news{display:flex;flex-direction:column;gap:12px;margin-top:32px}
+.tp-news-item{gap:4px}
+.tp-recruits{margin-top:40px;display:flex;flex-direction:column;align-items:flex-start;gap:16px}
+.tp-recruit-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:32px 48px;width:100%}
+.tp-rec{display:flex;flex-direction:column;gap:16px;min-width:0}
+.tp-rec-visual img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--surface-raised)}
+.tp-rec-body{gap:12px}
+.tp-rec-code{color:var(--ink-muted);letter-spacing:.04em}
+.tp-rec-primary .tp-rec-status{font-size:32px;line-height:40px}
+.tp-rec-title{margin:0}
+.tp-rec-count{gap:4px}
+.tp-rec-num{font:400 32px/40px var(--font-sans)}
+.tp-rec-num small{margin-left:4px;font-size:14px;color:var(--ink-muted)}
+.tp-rec-slots{gap:8px}
+.tp-sec{margin-top:80px}
+.tp-sec .sec-head .stack{gap:4px}
+.tp-empty{margin:0}
+.shelf{margin-inline:calc(50% - 50vw);padding-inline:calc(50vw - 50%);overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-padding-inline:calc(50vw - 50%);outline-offset:-2px}
+.shelf-track{display:flex;gap:24px;width:max-content;padding:0 0 8px}
+.shelf-i{position:relative;flex:none;width:clamp(220px,22vw,300px);scroll-snap-align:start}
+.shelf-rank{position:absolute;top:8px;left:8px;z-index:1;min-width:28px;padding:2px 8px;background:var(--bg);color:var(--ink);font-size:14px;line-height:20px;text-align:center}
+.tp-evcard{display:flex;flex-direction:column;gap:8px}
+.tp-evposter{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--surface-raised)}
+.tp-evtop{justify-content:space-between;gap:8px}
+.tp-closing{display:flex;flex-direction:column;gap:12px;padding-bottom:32px}
+.tp-closing p{margin:0}
+@media (max-width:640px){
+  .tp-intro{padding-top:32px}
+  .tp-rec-primary .tp-rec-status{font-size:24px;line-height:32px}
+  .tp-sec{margin-top:40px}
+  .shelf-i{width:62vw}
+}
+
 /* list / recommend / trending (MIG-0505): mock Videos.html, Recommend.html, Trending.html */
 .lv-wrap,.rc-wrap,.tr-wrap{padding-top:56px;padding-bottom:96px}
 .lv-head{justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
