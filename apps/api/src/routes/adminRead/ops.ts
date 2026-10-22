@@ -3,6 +3,7 @@ import type {
   AdminCostGuardResponse,
   AdminNotificationsResponse,
   AdminSecurityResponse,
+  AdminStaticBuildsResponse,
   AdminTopResponse,
   AdminWorkersResponse,
   AdminYoutubePlaylistsResponse,
@@ -11,7 +12,14 @@ import type {
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
-import { resolveOperationMode } from "@flamenode/domain/admin";
+import {
+  STATIC_BACKFILL_KINDS,
+  STATIC_BACKFILL_KV_KEY,
+  createEmptyStaticBackfillState,
+  parseStaticBackfillState,
+  resolveOperationMode,
+  type StaticBackfillKind,
+} from "@flamenode/domain/admin";
 import type { AppEnv } from "../../env.ts";
 
 // MIG-0626 operations admin screens. No external service is called from this file (no Cloudflare / YouTube
@@ -207,6 +215,131 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/static-builds (static-builds/page.tsx) ----
+// D1: session + queue rows (80) + one UNION ALL of the 4 aggregates (CURRENT 5 statements); KV: 1 get (backfill state,
+// empty state on any failure as CURRENT); R2: 4 head() calls for the shared-input object state.
+//
+// STOP (recorded, not implemented): CURRENT also runs loadStaticSharedInputDiagnostics(), i.e. 4 R2 get + JSON.parse of
+// artifacts up to 2-16 MiB through the Cache API to report loadStatus / generatedAt / itemCount. That exceeds the S2
+// budget (JSON <= 64 KiB) and is exactly the R2 artifact reader MIG-0627 replaces with build-time snapshots, so only
+// the object state (head) is returned and the SPA shows the rest as "not evaluated" until MIG-0627.
+const MAX_STATIC_QUEUE_ROWS = 80;
+const MAX_BACKFILL_FAILURE_ROWS = 20;
+/** CURRENT src/lib/operationMode/policy.ts STATIC_REBUILD_ITEMS_PER_RUN (json-generator runs 1 target per run). */
+const STATIC_REBUILD_ITEMS_PER_RUN = 1;
+const SHARED_INPUT_OBJECTS = [
+  { kind: "youtube_related_blocklist", objectKey: "youtube/related-blocklist.v1.json" },
+  { kind: "random_video_pool", objectKey: "videos/random-pool.v1.json" },
+  { kind: "pickup_creators", objectKey: "users/pickup-creators.v1.json" },
+  { kind: "top_slot_stats", objectKey: "top/slot-stats.v1.json" },
+] as const;
+
+function backfillKindFromReason(reason: string): StaticBackfillKind | null {
+  return (
+    STATIC_BACKFILL_KINDS.find((kind) => reason === "backfill_" + kind || reason.startsWith("backfill_" + kind + "_")) ??
+    null
+  );
+}
+
+adminOpsRoutes.get("/static-builds", async (c) => {
+  const [queue, aggregates, backfillState, sharedInputs] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT id, status, target_type, target_id, reason, priority, attempt_count, updated_at, error " +
+        "FROM static_rebuild_queue ORDER BY updated_at DESC LIMIT ?",
+    )
+      .bind(MAX_STATIC_QUEUE_ROWS)
+      .all<AdminStaticBuildsResponse["rows"][number]>(),
+    c.env.DB.prepare(
+      `SELECT 'bf_count' AS kind, reason AS a, status AS b, COUNT(*) AS n
+         FROM static_rebuild_queue WHERE reason LIKE 'backfill_%' GROUP BY reason, status
+       UNION ALL
+       SELECT 'bf_fail' AS kind, reason AS a, error AS b, NULL AS n FROM (
+         SELECT reason, error FROM static_rebuild_queue
+          WHERE reason LIKE 'backfill_%' AND status IN ('failed', 'dead_letter')
+          ORDER BY updated_at DESC LIMIT ?)
+       UNION ALL
+       SELECT 'count' AS kind, status AS a, NULL AS b, COUNT(*) AS n FROM static_rebuild_queue GROUP BY status
+       UNION ALL
+       SELECT 'mode' AS kind, operation_mode AS a, NULL AS b, NULL AS n FROM (SELECT operation_mode FROM system_settings LIMIT 1)`,
+    )
+      .bind(MAX_BACKFILL_FAILURE_ROWS)
+      .all<{ kind: string; a: string | null; b: string | null; n: number | null }>(),
+    (async () => {
+      try {
+        const raw = await c.env.KV?.get(STATIC_BACKFILL_KV_KEY);
+        return raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+      } catch {
+        return createEmptyStaticBackfillState();
+      }
+    })(),
+    Promise.all(
+      SHARED_INPUT_OBJECTS.map(async ({ kind, objectKey }) => {
+        try {
+          const object = await c.env.BUCKET?.head(objectKey);
+          if (c.env.BUCKET === undefined) return { kind, objectKey, objectState: "unavailable" as const };
+          return { kind, objectKey, objectState: object ? ("present" as const) : ("missing" as const) };
+        } catch {
+          return { kind, objectKey, objectState: "unavailable" as const };
+        }
+      }),
+    ),
+  ]);
+
+  const counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
+  let operationMode = resolveOperationMode(null);
+  const backfillQueue = Object.fromEntries(
+    STATIC_BACKFILL_KINDS.map((kind) => [kind, { pending: 0, processing: 0, failed: 0, lastError: null as string | null }]),
+  ) as AdminStaticBuildsResponse["backfillQueue"];
+  for (const row of aggregates.results) {
+    if (row.kind === "count") {
+      const n = Number(row.n ?? 0);
+      if (row.a === "pending" || row.a === "processing" || row.a === "failed" || row.a === "dead_letter" || row.a === "done") {
+        counts[row.a] = n;
+      }
+    } else if (row.kind === "mode") {
+      operationMode = resolveOperationMode({ operation_mode: row.a });
+    } else if (row.kind === "bf_count") {
+      const kind = backfillKindFromReason(String(row.a ?? ""));
+      if (!kind) continue;
+      const count = Math.max(0, Number(row.n ?? 0));
+      if (row.b === "pending") backfillQueue[kind].pending += count;
+      if (row.b === "processing") backfillQueue[kind].processing += count;
+      if (row.b === "failed" || row.b === "dead_letter") backfillQueue[kind].failed += count;
+    }
+  }
+  for (const row of aggregates.results) {
+    if (row.kind !== "bf_fail") continue;
+    const kind = backfillKindFromReason(String(row.a ?? ""));
+    if (!kind || backfillQueue[kind].lastError || !row.b) continue;
+    backfillQueue[kind].lastError = row.b;
+  }
+
+  // ZERO_1102 S2: response <= 64 KiB (the queue rows carry error text).
+  const rows: AdminStaticBuildsResponse["rows"] = [];
+  let used = 0;
+  let truncated = false;
+  for (const row of queue.results) {
+    const size = JSON.stringify(row).length;
+    if (rows.length > 0 && used + size > MAX_OPS_LIST_BYTES) {
+      truncated = true;
+      break;
+    }
+    used += size;
+    rows.push(row);
+  }
+  const body: AdminStaticBuildsResponse = {
+    operationMode,
+    maxItemsPerRun: STATIC_REBUILD_ITEMS_PER_RUN,
+    counts,
+    backfillState,
+    backfillQueue,
+    sharedInputs,
+    truncated,
+    rows,
+  };
   return c.json(body);
 });
 

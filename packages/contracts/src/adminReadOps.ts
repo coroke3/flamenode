@@ -473,7 +473,68 @@ export const AdminWorkersResponseSchema = z.object({
   error: z.literal("query_failed").nullable(),
 });
 export type AdminWorkersResponse = z.infer<typeof AdminWorkersResponseSchema>;
-export type AdminSecurityResponse =z.infer<typeof AdminSecurityResponseSchema>;
+export type AdminSecurityResponse = z.infer<typeof AdminSecurityResponseSchema>;
+const BackfillRunSchema = z.object({
+  cursor: z.string().nullable(),
+  phase: z.enum(["shared_inputs", "items"]),
+  status: z.enum(["idle", "running", "completed", "failed"]),
+  total: z.number(),
+  scanned: z.number(),
+  enqueued: z.number(),
+  last_error: z.string().nullable(),
+  last_run_at: z.number().nullable(),
+});
+const BackfillQueueSchema = z.object({
+  pending: z.number(),
+  processing: z.number(),
+  failed: z.number(),
+  lastError: z.string().nullable(),
+});
+export const AdminStaticBuildsResponseSchema = z.object({
+  operationMode: z.string(),
+  maxItemsPerRun: z.number(),
+  counts: z.object({
+    pending: z.number(),
+    processing: z.number(),
+    failed: z.number(),
+    dead_letter: z.number(),
+    done: z.number(),
+  }),
+  backfillState: z.object({
+    schema_version: z.literal(1),
+    updated_at: z.number().nullable(),
+    runs: z.object({ video_v2: BackfillRunSchema, user_profile: BackfillRunSchema, event_crew: BackfillRunSchema }),
+  }),
+  backfillQueue: z.object({
+    video_v2: BackfillQueueSchema,
+    user_profile: BackfillQueueSchema,
+    event_crew: BackfillQueueSchema,
+  }),
+  // Object presence only (R2 head). loadStatus / generatedAt / itemCount of CURRENT's diagnostics need the artifact
+  // bodies (R2 get + big JSON.parse) and wait for MIG-0627 (build-time snapshots).
+  sharedInputs: z.array(
+    z.object({
+      kind: z.enum(["youtube_related_blocklist", "random_video_pool", "pickup_creators", "top_slot_stats"]),
+      objectKey: z.string(),
+      objectState: z.enum(["present", "missing", "unavailable"]),
+    }),
+  ),
+  truncated: z.boolean(),
+  rows: z.array(
+    z.object({
+      id: z.string(),
+      status: z.string(),
+      target_type: z.string(),
+      target_id: z.string(),
+      reason: z.string().nullable(),
+      priority: z.string().nullable(),
+      attempt_count: z.number().nullable(),
+      updated_at: z.number(),
+      error: z.string().nullable(),
+    }),
+  ),
+});
+export type AdminStaticBuildsResponse = z.infer<typeof AdminStaticBuildsResponseSchema>;
 export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;

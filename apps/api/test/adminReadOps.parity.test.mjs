@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/permissions/simulator?event_id=ev1&x_user_id=sx",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/ops/static-builds", "/permissions/simulator?event_id=ev1&x_user_id=sx",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -1031,6 +1031,88 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(failed.status, 200);
     assert.deepEqual(failed.body, { snapshot: null, error: "query_failed" });
     assert.doesNotMatch(failed.text, /secret-internal/);
+  });
+
+  test("T02 static builds equals CURRENT page loader (rows, counts, backfill summary, KV state, R2 head); diagnostics body reads are not made", async () => {
+    const core = await import("../../../src/lib/staticRebuild/backfillStateCore.ts");
+    const { like } = await import("drizzle-orm");
+    const q = (id, status, o = {}) => ins("static_rebuild_queue", { id, target_type: o.type ?? "video", target_id: o.target ?? id, status, reason: o.reason ?? null, priority: o.priority ?? "normal", attempt_count: o.attempts ?? 0, created_at: T0, updated_at: o.at, error: o.error ?? null });
+    q("sb1", "pending", { reason: "backfill_video_v2", at: T0 + 10 });
+    q("sb2", "failed", { reason: "backfill_video_v2_x", at: T0 + 20, error: "e-video" });
+    q("sb3", "dead_letter", { reason: "backfill_event_crew", at: T0 + 30, error: "e-crew" });
+    q("sb4", "processing", { reason: "backfill_user_profile_1", at: T0 + 40 });
+    q("sb5", "done", { reason: "manual", at: T0 + 50 });
+    q("sb6", "failed", { reason: "backfill_unknown", at: T0 + 60, error: "ignored" });
+    q("sb7", "pending", { at: T0 + 70 });
+    for (let i = 0; i < 90; i += 1) q(`sbx${i}`, "done", { at: T0 + 100 + i, reason: "bulk" });
+    sqlite.exec("UPDATE system_settings SET operation_mode = 'economy'");
+
+    const stateJson = JSON.stringify({ schema_version: 1, updated_at: 5, runs: { video_v2: { cursor: "c1", phase: "items", status: "running", total: 9, scanned: 3, enqueued: 2, last_error: "bad", last_run_at: 7 } } });
+    const kvFor = (value) => ({ async get(key) { assert.equal(key, core.STATIC_BACKFILL_KV_KEY); if (value instanceof Error) throw value; return value; } });
+    const buckets = {
+      mixed: { async head(key) { if (key === "videos/random-pool.v1.json") return { size: 1 }; if (key === "top/slot-stats.v1.json") throw new Error("r2 down"); return null; } },
+    };
+
+    const refPage = async (kvValue) => {
+      const rows = await refDb.select().from(S.staticRebuildQueue).orderBy(desc(S.staticRebuildQueue.updated_at)).limit(80);
+      const backfillCountRows = await refDb.select({ reason: S.staticRebuildQueue.reason, status: S.staticRebuildQueue.status, c: sql`COUNT(*)` }).from(S.staticRebuildQueue).where(like(S.staticRebuildQueue.reason, "backfill_%")).groupBy(S.staticRebuildQueue.reason, S.staticRebuildQueue.status);
+      const backfillFailureRows = await refDb.select({ reason: S.staticRebuildQueue.reason, error: S.staticRebuildQueue.error }).from(S.staticRebuildQueue).where(and(like(S.staticRebuildQueue.reason, "backfill_%"), inArray(S.staticRebuildQueue.status, ["failed", "dead_letter"]))).orderBy(desc(S.staticRebuildQueue.updated_at)).limit(20);
+      const countRows = await refDb.select({ status: S.staticRebuildQueue.status, c: sql`COUNT(*)` }).from(S.staticRebuildQueue).groupBy(S.staticRebuildQueue.status);
+      const counts = { pending: 0, processing: 0, failed: 0, dead_letter: 0, done: 0 };
+      for (const r of countRows) if (r.status in counts) counts[r.status] = Number(r.c ?? 0);
+      const settings = (await refDb.select({ operation_mode: S.systemSettings.operation_mode }).from(S.systemSettings).limit(1))[0];
+      const operationMode = resolveOperationMode(settings ?? null);
+      const kindOf = (reason) => core.STATIC_BACKFILL_KINDS.find((kind) => reason === `backfill_${kind}` || reason.startsWith(`backfill_${kind}_`)) ?? null;
+      const summary = Object.fromEntries(core.STATIC_BACKFILL_KINDS.map((kind) => [kind, { pending: 0, processing: 0, failed: 0, lastError: null }]));
+      for (const row of backfillCountRows) {
+        const kind = kindOf(String(row.reason ?? ""));
+        if (!kind) continue;
+        const count = Math.max(0, Number(row.c ?? 0));
+        if (row.status === "pending") summary[kind].pending += count;
+        if (row.status === "processing") summary[kind].processing += count;
+        if (row.status === "failed" || row.status === "dead_letter") summary[kind].failed += count;
+      }
+      for (const row of backfillFailureRows) {
+        const kind = kindOf(String(row.reason ?? ""));
+        if (!kind || summary[kind].lastError || !row.error) continue;
+        summary[kind].lastError = row.error;
+      }
+      let backfillState;
+      try {
+        backfillState = kvValue instanceof Error ? core.createEmptyStaticBackfillState() : kvValue ? core.parseStaticBackfillState(JSON.parse(kvValue)) : core.createEmptyStaticBackfillState();
+      } catch {
+        backfillState = core.createEmptyStaticBackfillState();
+      }
+      return canon({
+        operationMode, maxItemsPerRun: 1, counts, backfillState, backfillQueue: summary, truncated: false,
+        rows: rows.map((r) => pick(r, ["id", "status", "target_type", "target_id", "reason", "priority", "attempt_count", "updated_at", "error"])),
+      });
+    };
+    const fetchPage = async (kvValue, bucket) => {
+      const r = await call("/api/admin-read/ops/static-builds", ADMIN, { env: { KV: kvFor(kvValue), BUCKET: bucket } });
+      assert.equal(r.status, 200);
+      assert.equal(r.stats.statements, 3, "session + 2 (CURRENT 5)");
+      assert.equal(r.stats.writes, 0);
+      assert.ok(r.text.length <= 64 * 1024);
+      const { sharedInputs, ...rest } = r.body;
+      return { rest, sharedInputs };
+    };
+    for (const kvValue of [stateJson, null, "{not json", new Error("kv down")]) {
+      const { rest } = await fetchPage(kvValue, undefined);
+      assert.deepEqual(rest, await refPage(kvValue), String(kvValue));
+    }
+    const { rest, sharedInputs } = await fetchPage(stateJson, buckets.mixed);
+    assert.equal(rest.rows.length, 80);
+    assert.equal(rest.backfillQueue.video_v2.pending, 1);
+    assert.equal(rest.backfillQueue.video_v2.failed, 1);
+    assert.equal(rest.backfillQueue.video_v2.lastError, "e-video");
+    assert.equal(rest.backfillQueue.event_crew.lastError, "e-crew");
+    assert.equal(rest.operationMode, "economy");
+    assert.deepEqual(
+      Object.fromEntries(sharedInputs.map((s) => [s.kind, s.objectState])),
+      { youtube_related_blocklist: "missing", random_video_pool: "present", pickup_creators: "missing", top_slot_stats: "unavailable" },
+    );
+    assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
