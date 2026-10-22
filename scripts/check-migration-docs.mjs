@@ -887,7 +887,7 @@ if (errors.length === 0) {
   }
 
   // MIG-0009 Queue / Cron / background jobs baseline.
-  const wakeBudgetSource = read("src/lib/queues/wakeBudget.ts");
+  const wakeBudgetSource = read("packages/server-core/src/queues/wakeBudget.ts");
   const wakeKindBlock =
     wakeBudgetSource.match(/QUEUE_WAKE_KINDS\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1] ?? "";
   const wakeKinds = [...wakeKindBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);

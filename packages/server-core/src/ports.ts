@@ -49,3 +49,24 @@ export type RethrowFrameworkControl = (error: unknown) => void;
 export type Clock = {
   nowMs(): number;
 };
+
+/**
+ * What the Queue wake chain needs from its host. Each reader returns null (or throws, which the
+ * core treats as null) when the host has no binding context; wake is best-effort and never
+ * fails the committed mutation. Next supplies these from getCloudflareContext in nextPorts.ts,
+ * Hono from `c.env` and `c.executionCtx`.
+ */
+export type QueueWakeHost = {
+  /** Resolved env: feature flags (QUEUE_DISPATCH_ENABLED ...) and queue bindings by binding name. */
+  readEnv(): EnvValues | null;
+  /** `ctx.waitUntil` of the current request. */
+  readWaitUntil(): WaitUntilPort | null;
+  /** KV used to record the last wake failure. */
+  readKv(): Pick<KvPort, "put"> | null;
+};
+
+/**
+ * Resolves the host after the D1 batch has committed. Next loads nextPorts.ts lazily, so code
+ * that never wakes a Queue (and tests that do not mock server-only) never evaluates it.
+ */
+export type QueueWakeHostLoader = () => Promise<QueueWakeHost>;
