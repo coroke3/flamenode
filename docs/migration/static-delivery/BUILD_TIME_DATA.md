@@ -30,9 +30,9 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
 | Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
-| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | **Build (MIG-0509) until an Island loader exists**; the Queue only deletes unpublished pages (upper-bound `renderToString` 25–49 ms; the approved Island-shell fallback has no client loader, so it would be an empty body) | MIG-0411 / MIG-0509 |
+| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | Queue → R2 HTML, **server-rendered like the build's static page** (MIG-0403 mapping, empty lists; warm max ≈ 1.2 ms local Node wall). **Re-measure when MIG-0502 / MIG-0507 add lists** (upper-bound with lists: 25–49 ms) | MIG-0411 |
 | User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
-| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | **Build (MIG-0509) until an Island loader exists**; the Queue only deletes unpublished pages (max 5.4–8.7 ms, 5 of 6 runs ≥ 8 ms; Island-shell fallback has no loader) | MIG-0411 / MIG-0509 |
+| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | Queue → R2 HTML, **server-rendered like the build's static page** (empty lists; warm max ≈ 0.5 ms). Upper-bound with lists 5.4–8.7 ms is borderline: re-measure when lists are added | MIG-0411 |
 | Slot vacancy (`/event/[id]/slots`) | 30 s (`slots/page.tsx:32`) | reservation / release | **API (S2) from an Island** | MIG-06xx (slots) |
 | Like count, viewer overlay | per request | like, session | API (S2) from an Island | MIG-06xx |
 
@@ -158,18 +158,26 @@ max of 300 warm renders, 6 runs (`project-files/migration-review/pr326-u05a-rend
 
 | Kind | p50 | p95 | max | HTML | Format chosen |
 | --- | --- | --- | --- | --- | --- |
-| Video | 1.7–2.8 ms | 5.4–6.8 ms | 25.3–48.8 ms | 591 KB | excluded (Island-shell fallback approved, no loader yet) |
+| Video | 1.7–2.8 ms | 5.4–6.8 ms | 25.3–48.8 ms | 591 KB | upper bound only; server-rendered with the build's empty lists (see update below) |
 | User | 0.3–0.6 ms | 0.9–1.9 ms | 4.4–5.8 ms | 166 KB | server-rendered |
-| Event | 0.5–0.8 ms | 1.0–1.5 ms | 5.4–8.7 ms | 157 KB | excluded (borderline; Island-shell fallback approved, no loader yet) |
+| Event | 0.5–0.8 ms | 1.0–1.5 ms | 5.4–8.7 ms | 157 KB | upper bound only (borderline); server-rendered with the build's empty lists |
 
 The first render in a fresh isolate also evaluates React and the UI (8.7–12.0 ms for the
-wrangler-like bundle), which alone exceeds 8 ms; whether that counts against the consumer's CPU
-is part of the U07 / workerd check. Behaviour difference (approved): no-JS readers and crawlers
-see no body text on video / event pages rendered by the Queue until the Island reads it.
-That Island needs a client loader (a built script plus the page data) that does not exist yet
-(R-PAGE pages, MIG-0403), so the Queue does not write video / event pages at all (2026-10-19,
-PR #326 review): they stay with the build (MIG-0509) and the Queue only deletes them on
-unpublish. The fallback is enabled together with its loader.
+wrangler-like bundle; 114 ms wall on a Windows Node with unbundled modules), which alone exceeds
+8 ms; whether that counts against the consumer's CPU is part of the U07 / workerd check.
+
+Update (2026-10-23, takeover of PR #326): the Queue renders the same document as the build.
+MIG-0403's pages are static (no Island, no JavaScript; lists and totals are not in the snapshot
+yet), so the earlier Island-shell fallback is not needed. The consumer maps the D1 row to the
+snapshot shape, uses `publicPages.ts` (head + screen props), `StaticScreen` and the
+`PublicPage.astro` shell, and `pageRenderQueue.test.mjs` compares the result with the Astro
+`dist` HTML byte for byte (user, video incl. the YouTube-ID alias, event). With the build's
+empty lists the render is small (`renderPublicPage.measure.mjs --snapshot`, 3 runs of 300 warm
+renders, local Node on Windows, wall ms, max-size text: video max 0.8–1.2, user 0.7–0.8, event
+0.4–0.5; `process.cpuUsage()` ticks at about 15.6 ms there and is not usable per render). The
+upper-bound table above applies when the snapshot gains lists (members, chapters, related, works,
+staff, slots): re-measure then, and set the kind back to `excluded` in `PAGE_BODY_FORMAT` if it
+reaches 8 ms. Not measured in workerd (ZERO_1102 §5).
 
 ### U06 list / search shards
 
