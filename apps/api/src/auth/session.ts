@@ -74,24 +74,48 @@ function isCookieSpace(code: number): boolean {
   return code === 0x20 || code === 0x09;
 }
 
+// The same space and tab trimming as native regex scans, for the session cookie:
+// a crafted 128 KB run of spaces then costs no JS loop per char, even on a cold
+// isolate (ZERO_1102.md S4). Both scans are linear: LAST_NON_COOKIE_SPACE only
+// gets past its first char at a non-space, so each run of spaces is read once.
+const COOKIE_SPACES = /[ \t]*/y;
+const LAST_NON_COOKIE_SPACE = /[^ \t][ \t]*$/;
+
+// The index of the first char at or after `index` that is not a space or tab.
+function skipCookieSpaces(header: string, index: number): number {
+  COOKIE_SPACES.lastIndex = index;
+  COOKIE_SPACES.test(header);
+  return COOKIE_SPACES.lastIndex;
+}
+
+function trimCookieSpacesEnd(text: string): string {
+  if (!isCookieSpace(text.charCodeAt(text.length - 1))) return text;
+  const last = LAST_NON_COOKIE_SPACE.exec(text);
+  return last ? text.slice(0, last.index + 1) : "";
+}
+
+// The value between `=` and the segment end, trimmed, and URI-decoded only when it
+// contains `%` and decodes cleanly. Quotes are kept, as in Auth.js parse.
+function readCookieValue(header: string, eqIdx: number, endIdx: number): string {
+  const val = trimCookieSpacesEnd(header.slice(skipCookieSpaces(header, eqIdx + 1), endIdx));
+  if (!val.includes("%")) return val;
+  try {
+    return decodeURIComponent(val);
+  } catch {
+    return val;
+  }
+}
+
 /**
- * Walks a Cookie header with the same rules as the cookie parser Auth.js uses
- * (@auth/core lib/vendored/cookie.js parse): first occurrence wins, quotes are
- * kept, values are URI-decoded only when they contain `%` and decode cleanly.
- * Only names starting with `prefix` are sliced and decoded, so the cost for
- * other cookies is a few indexOf calls. `onNew` sees each first occurrence and
- * stops the walk by returning false. The walk also stops, returning false, at
- * the (maxMatches + 1)th name with the prefix, counting empty and repeated ones.
+ * Parses raw Cookie header string into key-value map, with the same walk as the
+ * cookie parser Auth.js uses (@auth/core lib/vendored/cookie.js parse): first
+ * occurrence wins, and a segment without `=` is skipped by jumping to the
+ * segment that holds the next `=`. No request path uses it: it is the full-walk
+ * reference the tests compare readPrefixedCookies against.
  */
-function readCookies(
-  header: string,
-  prefix: string,
-  into: Record<string, string>,
-  onNew?: (key: string, value: string) => boolean,
-  maxMatches = Infinity,
-): boolean {
-  if (header.length < 2) return true;
-  let matches = 0;
+export function parseCookieHeader(header?: string | null): Record<string, string> {
+  const result: Record<string, string> = Object.create(null);
+  if (!header || typeof header !== "string" || header.length < 2) return result;
 
   const len = header.length;
   let index = 0;
@@ -107,41 +131,68 @@ function readCookies(
 
     let keyStart = index;
     while (keyStart < eqIdx && isCookieSpace(header.charCodeAt(keyStart))) keyStart++;
-    // The prefix has no `=`, space or tab, so a match lies wholly inside the trimmed name.
-    if (header.startsWith(prefix, keyStart)) {
-      if (++matches > maxMatches) return false;
-      let keyEnd = eqIdx;
-      while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
-      const key = header.slice(keyStart, keyEnd);
-
-      if (into[key] === undefined) {
-        let valStart = eqIdx + 1;
-        while (valStart < endIdx && isCookieSpace(header.charCodeAt(valStart))) valStart++;
-        let valEnd = endIdx;
-        while (valEnd > valStart && isCookieSpace(header.charCodeAt(valEnd - 1))) valEnd--;
-        const val = header.slice(valStart, valEnd);
-        let decoded = val;
-        if (val.includes("%")) {
-          try {
-            decoded = decodeURIComponent(val);
-          } catch {
-            decoded = val;
-          }
-        }
-        into[key] = decoded;
-        if (onNew && !onNew(key, decoded)) return false;
-      }
-    }
+    let keyEnd = eqIdx;
+    while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
+    const key = header.slice(keyStart, keyEnd);
+    if (result[key] === undefined) result[key] = readCookieValue(header, eqIdx, endIdx);
     index = endIdx + 1;
   } while (index < len);
-  return true;
+  return result;
 }
 
-/** Parses raw Cookie header string into key-value map, like Auth.js parse (see readCookies). */
-export function parseCookieHeader(header?: string | null): Record<string, string> {
-  const result: Record<string, string> = Object.create(null);
-  if (header && typeof header === "string") readCookies(header, "", result);
-  return result;
+/**
+ * Reads the cookies whose name starts with `prefix`, giving the same pairs as
+ * parseCookieHeader. Rather than walking every `;` segment, it jumps between
+ * `indexOf(prefix)` matches, so other cookies cost only native scans, even on a
+ * cold isolate (ZERO_1102.md S4). Each scan starts at or after the segment the
+ * previous one ended in, so the cost stays linear in the header length, also
+ * for runs of prefixed segments without `=`. `onNew` sees each first occurrence
+ * and stops the read by returning false. The read also stops, returning false,
+ * at the (maxMatches + 1)th name with the prefix, counting empty and repeated ones.
+ */
+function readPrefixedCookies(
+  header: string,
+  prefix: string,
+  onNew: (key: string, value: string) => boolean,
+  maxMatches: number,
+): boolean {
+  if (header.length < 2) return true;
+  const seen: Record<string, true> = Object.create(null);
+  let matches = 0;
+
+  const len = header.length;
+  let from = 0;
+  while (from < len) {
+    const m = header.indexOf(prefix, from);
+    if (m === -1) return true;
+    const semiIdx = header.indexOf(";", m);
+    const endIdx = semiIdx === -1 ? len : semiIdx;
+    // Segments start after a `;`, so the match is a name only when nothing but
+    // space or tab precedes it in its segment.
+    const prev = m === 0 ? 0x3b : header.charCodeAt(m - 1);
+    const isName =
+      prev === 0x3b ||
+      (isCookieSpace(prev) && skipCookieSpaces(header, header.lastIndexOf(";", m - 1) + 1) === m);
+    if (isName) {
+      // The prefix has no `=`, so the segment's first `=` is at or after the match.
+      const eqIdx = header.indexOf("=", m);
+      if (eqIdx === -1) return true;
+      if (eqIdx > endIdx) {
+        // No `=` in this segment: resume at the segment holding that `=`, as Auth.js does.
+        from = header.lastIndexOf(";", eqIdx - 1) + 1;
+        continue;
+      }
+
+      if (++matches > maxMatches) return false;
+      const key = trimCookieSpacesEnd(header.slice(m, eqIdx));
+      if (seen[key] === undefined) {
+        seen[key] = true;
+        if (!onNew(key, readCookieValue(header, eqIdx, endIdx))) return false;
+      }
+    }
+    from = endIdx + 1;
+  }
+  return true;
 }
 
 /**
@@ -149,8 +200,8 @@ export function parseCookieHeader(header?: string | null): Record<string, string
  * like @auth/core SessionStore, joins every non-empty cookie whose name starts
  * with the session cookie name, ordered by the numeric suffix after the last `.`.
  * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH, or
- * above MAX_SESSION_COOKIE_NAMES names with the prefix. The caps stop the header
- * walk, so a 128 KB header costs one pass of indexOf.
+ * above MAX_SESSION_COOKIE_NAMES names with the prefix. The caps stop the read
+ * early, and other cookies cost only indexOf scans (see readPrefixedCookies).
  */
 export function extractSessionToken(
   cookieHeader: string | null | undefined,
@@ -160,10 +211,9 @@ export function extractSessionToken(
   const base = sessionCookieName(options.secure);
   const chunks: { index: number; value: string }[] = [];
   let length = 0;
-  const complete = readCookies(
+  const complete = readPrefixedCookies(
     cookieHeader,
     base,
-    Object.create(null),
     (name, value) => {
       if (!value) return true;
       length += value.length;
