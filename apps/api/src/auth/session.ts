@@ -58,6 +58,12 @@ export const INSECURE_SESSION_COOKIE_NAME = "authjs.session-token";
  */
 export const MAX_SESSION_COOKIE_CHUNKS = 64;
 export const MAX_SESSION_TOKEN_LENGTH = 4096;
+/**
+ * Names with the session prefix, counting empty and repeated ones, which Auth.js
+ * skips but which still cost a slice each. Browsers keep about 180 cookies per
+ * site and Auth.js clears unused chunks, so a real request carries a handful.
+ */
+export const MAX_SESSION_COOKIE_NAMES = 2 * MAX_SESSION_COOKIE_CHUNKS;
 
 export function sessionCookieName(secure: boolean): string {
   return secure ? SECURE_SESSION_COOKIE_NAME : INSECURE_SESSION_COOKIE_NAME;
@@ -74,15 +80,18 @@ function isCookieSpace(code: number): boolean {
  * kept, values are URI-decoded only when they contain `%` and decode cleanly.
  * Only names starting with `prefix` are sliced and decoded, so the cost for
  * other cookies is a few indexOf calls. `onNew` sees each first occurrence and
- * stops the walk by returning false.
+ * stops the walk by returning false. The walk also stops, returning false, at
+ * the (maxMatches + 1)th name with the prefix, counting empty and repeated ones.
  */
 function readCookies(
   header: string,
   prefix: string,
   into: Record<string, string>,
   onNew?: (key: string, value: string) => boolean,
-): void {
-  if (header.length < 2) return;
+  maxMatches = Infinity,
+): boolean {
+  if (header.length < 2) return true;
+  let matches = 0;
 
   const len = header.length;
   let index = 0;
@@ -100,6 +109,7 @@ function readCookies(
     while (keyStart < eqIdx && isCookieSpace(header.charCodeAt(keyStart))) keyStart++;
     // The prefix has no `=`, space or tab, so a match lies wholly inside the trimmed name.
     if (header.startsWith(prefix, keyStart)) {
+      if (++matches > maxMatches) return false;
       let keyEnd = eqIdx;
       while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
       const key = header.slice(keyStart, keyEnd);
@@ -119,11 +129,12 @@ function readCookies(
           }
         }
         into[key] = decoded;
-        if (onNew && !onNew(key, decoded)) return;
+        if (onNew && !onNew(key, decoded)) return false;
       }
     }
     index = endIdx + 1;
   } while (index < len);
+  return true;
 }
 
 /** Parses raw Cookie header string into key-value map, like Auth.js parse (see readCookies). */
@@ -137,8 +148,9 @@ export function parseCookieHeader(header?: string | null): Record<string, string
  * Extracts the sessionToken Auth.js would read for a request of this scheme:
  * like @auth/core SessionStore, joins every non-empty cookie whose name starts
  * with the session cookie name, ordered by the numeric suffix after the last `.`.
- * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH; the
- * caps stop the header walk, so a 128 KB header costs one pass of indexOf.
+ * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH, or
+ * above MAX_SESSION_COOKIE_NAMES names with the prefix. The caps stop the header
+ * walk, so a 128 KB header costs one pass of indexOf.
  */
 export function extractSessionToken(
   cookieHeader: string | null | undefined,
@@ -148,19 +160,21 @@ export function extractSessionToken(
   const base = sessionCookieName(options.secure);
   const chunks: { index: number; value: string }[] = [];
   let length = 0;
-  let overCap = false;
-  readCookies(cookieHeader, base, Object.create(null), (name, value) => {
-    if (!value) return true;
-    length += value.length;
-    if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) {
-      overCap = true;
-      return false;
-    }
-    // Same index as the SessionStore comparator, computed once per chunk.
-    chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
-    return true;
-  });
-  if (overCap || chunks.length === 0) return null;
+  const complete = readCookies(
+    cookieHeader,
+    base,
+    Object.create(null),
+    (name, value) => {
+      if (!value) return true;
+      length += value.length;
+      if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) return false;
+      // Same index as the SessionStore comparator, computed once per chunk.
+      chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
+      return true;
+    },
+    MAX_SESSION_COOKIE_NAMES,
+  );
+  if (!complete || chunks.length === 0) return null;
   if (chunks.length === 1) return chunks[0].value;
   // NaN differences compare as equal, as in SessionStore; the sort is stable.
   return chunks

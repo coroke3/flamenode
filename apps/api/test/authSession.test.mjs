@@ -9,6 +9,7 @@ import {
   requireAuth,
   MAX_SESSION_COOKIE_CHUNKS,
   MAX_SESSION_TOKEN_LENGTH,
+  MAX_SESSION_COOKIE_NAMES,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -183,6 +184,16 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(header, { secure: true }), null);
   });
 
+  await t.test("session-prefixed name cap counts empty and repeated names, and fails closed above it", () => {
+    const name = "__Secure-authjs.session-token";
+    const empties = (count) => Array.from({ length: count }, (_, i) => `${name}.${i + 1}=`).join("; ");
+    const atCap = `${empties(MAX_SESSION_COOKIE_NAMES - 1)}; ${name}=abc`;
+    assert.equal(extractSessionToken(atCap, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${empties(MAX_SESSION_COOKIE_NAMES)}; ${name}=abc`, { secure: true }), null);
+    const repeated = Array.from({ length: MAX_SESSION_COOKIE_NAMES + 1 }, () => `${name}=abc`).join("; ");
+    assert.equal(extractSessionToken(repeated, { secure: true }), null);
+  });
+
   await t.test("a 128KB header (Cloudflare's request header limit) stays within the S4 2ms budget", () => {
     const name = "__Secure-authjs.session-token";
     const token = "t".repeat(36);
@@ -192,13 +203,17 @@ test("Cookie extraction and parsing", async (t) => {
       [`${junk(11000)}; ${name}=${token}`, token],
       [`${name}=${"a".repeat(MAX_SESSION_TOKEN_LENGTH)}; ${junk(11000)}`, "a".repeat(MAX_SESSION_TOKEN_LENGTH)],
       [Array.from({ length: 3400 }, (_, i) => `${name}.${(i * 7919) % 3400}=xx`).join("; "), null],
+      // Empty and repeated chunks are skipped by Auth.js but still matched by name.
+      [Array.from({ length: 3500 }, (_, i) => `${name}.${i}=`).join("; "), null],
+      [Array.from({ length: 3500 }, () => `${name}=${token}`).join("; "), null],
     ];
     for (const [header, expected] of cases) {
       assert.ok(header.length >= 64 * 1024, String(header.length));
       assert.equal(extractSessionToken(header, { secure: true }), expected);
-      // Best of 10 (as in scripts/migration-gateway.test.mjs) to keep runner noise out.
+      // Best of 20, as in scripts/migration-gateway.test.mjs: the max of a wall clock is GC and
+      // parallel-runner noise here. This pins the per-header cost (the full parse cost 4-6ms).
       let best = Infinity;
-      for (let r = 0; r < 10; r++) {
+      for (let r = 0; r < 20; r++) {
         const start = performance.now();
         extractSessionToken(header, { secure: true });
         best = Math.min(best, performance.now() - start);
