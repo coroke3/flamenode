@@ -2,7 +2,7 @@
  * FlameNode Phase 6: Hono read-only session resolution (MIG-0608).
  *
  * Implements read-only session resolution from Auth.js database session cookies
- * (__Secure-authjs.session-token and authjs.session-token).
+ * (__Secure-authjs.session-token and authjs.session-token, including chunks).
  *
  * INVARIANTS:
  * - Read-only: never issues, renews, or deletes cookies (managed by Next until Phase 8).
@@ -37,10 +37,10 @@ export interface D1DatabaseLike {
 }
 
 /**
- * Auth.js reads exactly one session cookie name, chosen by `useSecureCookies`
- * (`url.protocol === "https:"`, @auth/core lib/init.js). Accepting any other
- * name would let Hono resolve a user that Next does not (e.g. a tossed
- * non-`__Secure-` cookie on https), so the same rule applies here.
+ * Auth.js picks the session cookie name by `useSecureCookies`
+ * (`url.protocol === "https:"`, @auth/core lib/init.js), then reads every
+ * cookie whose name starts with it (SessionStore chunks). A non-`__Secure-`
+ * cookie on https is never read, so the same rule applies here.
  */
 export const SECURE_SESSION_COOKIE_NAME = "__Secure-authjs.session-token";
 export const INSECURE_SESSION_COOKIE_NAME = "authjs.session-token";
@@ -49,54 +49,84 @@ export function sessionCookieName(secure: boolean): string {
   return secure ? SECURE_SESSION_COOKIE_NAME : INSECURE_SESSION_COOKIE_NAME;
 }
 
+// Space and tab only, like @auth/core lib/vendored/cookie.js startIndex/endIndex.
+function isCookieSpace(code: number): boolean {
+  return code === 0x20 || code === 0x09;
+}
+
 /**
- * Parses raw Cookie header string into key-value map.
- * Safely decodes URI components while handling malformed values gracefully.
+ * Parses raw Cookie header string into key-value map, with the same rules as
+ * the cookie parser Auth.js uses (@auth/core lib/vendored/cookie.js parse):
+ * first occurrence wins, quotes are kept, values are URI-decoded only when
+ * they contain `%` and decode cleanly.
  */
 export function parseCookieHeader(header?: string | null): Record<string, string> {
   const result: Record<string, string> = Object.create(null);
-  if (!header || typeof header !== "string") {
+  if (!header || typeof header !== "string" || header.length < 2) {
     return result;
   }
 
-  const pairs = header.split(";");
-  for (const rawPair of pairs) {
-    const pair = rawPair.trim();
-    if (!pair) continue;
-    const eqIdx = pair.indexOf("=");
-    if (eqIdx === -1) continue;
-
-    const key = pair.slice(0, eqIdx).trim();
-    let val = pair.slice(eqIdx + 1).trim();
-    if (!key) continue;
-
-    // Strip wrapping quotes if present
-    if (val.startsWith('"') && val.endsWith('"') && val.length >= 2) {
-      val = val.slice(1, -1);
+  const len = header.length;
+  let index = 0;
+  do {
+    const eqIdx = header.indexOf("=", index);
+    if (eqIdx === -1) break;
+    const semiIdx = header.indexOf(";", index);
+    const endIdx = semiIdx === -1 ? len : semiIdx;
+    if (eqIdx > endIdx) {
+      index = header.lastIndexOf(";", eqIdx - 1) + 1;
+      continue;
     }
 
-    // First occurrence wins, like the cookie parser Auth.js uses
-    // (@auth/core lib/vendored/cookie.js), so both read the same token.
-    if (Object.hasOwn(result, key)) continue;
-    try {
-      result[key] = decodeURIComponent(val);
-    } catch {
-      result[key] = val;
+    let keyStart = index;
+    while (keyStart < eqIdx && isCookieSpace(header.charCodeAt(keyStart))) keyStart++;
+    let keyEnd = eqIdx;
+    while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
+    const key = header.slice(keyStart, keyEnd);
+
+    if (result[key] === undefined) {
+      let valStart = eqIdx + 1;
+      while (valStart < endIdx && isCookieSpace(header.charCodeAt(valStart))) valStart++;
+      let valEnd = endIdx;
+      while (valEnd > valStart && isCookieSpace(header.charCodeAt(valEnd - 1))) valEnd--;
+      const val = header.slice(valStart, valEnd);
+      let decoded = val;
+      if (val.includes("%")) {
+        try {
+          decoded = decodeURIComponent(val);
+        } catch {
+          decoded = val;
+        }
+      }
+      result[key] = decoded;
     }
-  }
+    index = endIdx + 1;
+  } while (index < len);
 
   return result;
 }
 
 /**
- * Extracts the sessionToken Auth.js would read for a request of this scheme.
+ * Extracts the sessionToken Auth.js would read for a request of this scheme:
+ * like @auth/core SessionStore, joins every non-empty cookie whose name starts
+ * with the session cookie name, ordered by the numeric suffix after the last `.`.
  */
 export function extractSessionToken(
   cookieHeader: string | null | undefined,
   options: { secure: boolean },
 ): string | null {
   if (!cookieHeader) return null;
-  const token = parseCookieHeader(cookieHeader)[sessionCookieName(options.secure)];
+  const base = sessionCookieName(options.secure);
+  const cookies = parseCookieHeader(cookieHeader);
+  const chunks: Record<string, string> = Object.create(null);
+  for (const name of Object.keys(cookies)) {
+    if (name.startsWith(base) && cookies[name]) chunks[name] = cookies[name];
+  }
+  // Same comparator as SessionStore (NaN suffixes compare as equal).
+  const token = Object.keys(chunks)
+    .sort((a, b) => parseInt(a.split(".").pop() || "0") - parseInt(b.split(".").pop() || "0"))
+    .map((name) => chunks[name])
+    .join("");
   return token ? token : null;
 }
 

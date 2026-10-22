@@ -99,11 +99,11 @@ function createTestD1() {
 }
 
 test("Cookie extraction and parsing", async (t) => {
-  await t.test("parses cookies with various formats, whitespace, and quotes", () => {
+  await t.test("parses cookies with various formats and whitespace, keeping quotes like Auth.js", () => {
     const parsed = parseCookieHeader(
       '__Secure-authjs.session-token="token-with-quotes"; theme=dark; authjs.session-token=dev-token',
     );
-    assert.equal(parsed["__Secure-authjs.session-token"], "token-with-quotes");
+    assert.equal(parsed["__Secure-authjs.session-token"], '"token-with-quotes"');
     assert.equal(parsed["theme"], "dark");
     assert.equal(parsed["authjs.session-token"], "dev-token");
   });
@@ -128,6 +128,15 @@ test("Cookie extraction and parsing", async (t) => {
     const header = "__Secure-authjs.session-token=FIRST; __Secure-authjs.session-token=SECOND";
     assert.equal(parseCookieHeader(header)["__Secure-authjs.session-token"], "FIRST");
     assert.equal(extractSessionToken(header, { secure: true }), "FIRST");
+  });
+
+  await t.test("joins every cookie starting with the session name, by chunk index (Auth.js SessionStore)", () => {
+    const name = "__Secure-authjs.session-token";
+    assert.equal(extractSessionToken(`${name}=abc; ${name}.1=def`, { secure: true }), "abcdef");
+    assert.equal(extractSessionToken(`${name}.1=def; ${name}.0=abc`, { secure: true }), "abcdef");
+    assert.equal(extractSessionToken(`${name}.0=abc`, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${name}=abc; ${name}x=zzz`, { secure: true }), "abczzz");
+    assert.equal(extractSessionToken(`${name}=; theme=dark`, { secure: true }), null);
   });
 
   await t.test("prototype keys are ordinary cookie names", () => {

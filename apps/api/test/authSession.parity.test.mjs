@@ -50,6 +50,26 @@ if (runTestWithTsx(import.meta.url)) {
       `${SECURE}=${SESSIONS.deletedToken}; ${SECURE}=${SESSIONS.valid.sessionToken}`,
       null,
     ],
+    // Auth.js keeps quotes and joins every cookie whose name starts with the
+    // session cookie name (SessionStore chunks), so these differ from a plain lookup.
+    ["quoted value is not unquoted", `${SECURE}="${SESSIONS.valid.sessionToken}"`, null],
+    [
+      "extra .1 chunk is appended",
+      `${SECURE}=${SESSIONS.valid.sessionToken}; ${SECURE}.1=zzz`,
+      null,
+    ],
+    [
+      "prefixed cookie name is appended",
+      `${SECURE}=${SESSIONS.valid.sessionToken}; ${SECURE}x=zzz`,
+      null,
+    ],
+    ["only a .0 chunk", `${SECURE}.0=${SESSIONS.valid.sessionToken}`, USERS.valid.id],
+    [
+      "chunks are joined by index, not header order",
+      `${SECURE}.1=${SESSIONS.valid.sessionToken.slice(8)}; ${SECURE}.0=${SESSIONS.valid.sessionToken.slice(0, 8)}`,
+      USERS.valid.id,
+    ],
+    ["empty session cookie", `${SECURE}=; ${SECURE}.1=${SESSIONS.valid.sessionToken}`, USERS.valid.id],
   ];
 
   for (const [name, cookieHeader, expectedId] of cases) {
@@ -60,6 +80,46 @@ if (runTestWithTsx(import.meta.url)) {
       const next = await nextUserId(cookieHeader);
       assert.deepEqual(hono, next);
       assert.equal(hono.id, expectedId);
+    });
+  }
+
+  // Token-level parity with the parser and SessionStore Auth.js actually uses
+  // (not exported by @auth/core, so loaded from its file next to the entry point).
+  const authCore = import.meta.resolve("@auth/core");
+  const { parse } = await import(new URL("./lib/vendored/cookie.js", authCore).href);
+  const { SessionStore } = await import(new URL("./lib/utils/cookie.js", authCore).href);
+  const INSECURE = "authjs.session-token";
+  const headers = [
+    "",
+    "theme=dark",
+    `${SECURE}=abc`,
+    `${INSECURE}=abc`,
+    `${SECURE}="abc"`,
+    `${SECURE}="abc`,
+    `${SECURE}=a%20b%2`,
+    `${SECURE}=a%62c`,
+    `${SECURE}=abc; ${SECURE}.1=def`,
+    `${SECURE}.1=def; ${SECURE}.0=abc`,
+    `${SECURE}.2=c; ${SECURE}.10=d; ${SECURE}.1=b; ${SECURE}.0=a`,
+    `${SECURE}.x=b; ${SECURE}=a; ${SECURE}.1=c`,
+    `${SECURE}=abc; ${SECURE}x=zzz`,
+    `${SECURE}=first; ${SECURE}=second`,
+    `${SECURE}=; ${SECURE}.0=abc`,
+    `${SECURE}=abc; ${INSECURE}=def`,
+    `${INSECURE}=abc; ${INSECURE}.1=def; ${SECURE}=ghi`,
+    `  ${SECURE} \t=\t abc \t; theme=dark`,
+    `${SECURE}=\u00a0abc\u00a0`,
+    `junk; ${SECURE}=abc`,
+    `${SECURE}=a=b; =x; __proto__=y`,
+    `${SECURE}.0=a;${SECURE}.1=b;${SECURE}.1=ignored`,
+  ];
+  for (const secure of [true, false]) {
+    test(`token parity with Auth.js SessionStore (secure=${secure})`, () => {
+      const name = secure ? SECURE : INSECURE;
+      for (const header of headers) {
+        const expected = new SessionStore({ name }, parse(header), console).value || null;
+        assert.equal(extractSessionToken(header, { secure }), expected, header);
+      }
     });
   }
 
