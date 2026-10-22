@@ -681,6 +681,67 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await call("/api/manage/events/evStage5/videos/vstage5", "tok-admin")).status, 503, "more than 4 stage questions fails like CURRENT");
   });
 
+  // app/(manage)/manage/events/[id]/edit/page.tsx
+  const { loadStagePermissionFormSettingsJson } = await import("../../../src/lib/video/stagePermissionQuestions.ts");
+  const { loadGeneralCustomQuestionsForEvent } = await import("../../../src/lib/video/customQuestionAnswers.ts");
+  async function refEdit(name, eventId) {
+    const snapshot = await refSnapshot(name);
+    const event = (await refDb.select().from(S.events).where(eq(S.events.id, eventId)).limit(1))[0];
+    if (!event) return 404;
+    const videoFormSettingsJson = await loadStagePermissionFormSettingsJson(refDb, eventId);
+    const customQuestions = await loadGeneralCustomQuestionsForEvent(refDb, eventId);
+    const sections = {
+      basic: MA.canEditEventFromSnapshot(snapshot, eventId, "event.basic"),
+      publish: MA.canEditEventFromSnapshot(snapshot, eventId, "event.publish"),
+      questions: MA.canEditEventFromSnapshot(snapshot, eventId, "event.questions"),
+      slots: MA.canEditEventFromSnapshot(snapshot, eventId, "event.slots"),
+    };
+    if (!sections.basic && !sections.publish && !sections.questions && !sections.slots) return 404;
+    const nav = await refNavigation(name);
+    const user = (await refDb.select().from(S.users).where(eq(S.users.id, `u_${name}`)))[0];
+    const linked = await getHeaderLinkedXUsersForAuthUser(refDb, user.id);
+    return {
+      isAdmin: snapshot.isAdmin,
+      pendingCount: nav.pendingByEvent.get(eventId) ?? 0,
+      activeXUserId: await resolveActiveXUserId(refDb, user.id, normalizeXId(user.active_x_user_id) || null, linked),
+      manageStaffXUserIds: [...MA.getManageStaffXUserIdsFromSnapshot(snapshot)],
+      editableSections: sections,
+      initial: {
+        id: event.id, updated_at: event.updated_at, title: event.title, event_type: event.event_type ?? "event", explanation: event.explanation,
+        youtube_description_template: event.youtube_description_template, required_video_fields_json: event.required_video_fields_json, icon_url: event.icon_url,
+        img_url: event.img_url, accent_color: event.accent_color, start_time: event.start_time, end_time: event.end_time, entry_start_time: event.entry_start_time,
+        entry_end_time: event.entry_end_time, visibility_status: event.visibility_status, allow_user_video_event_links: event.allow_user_video_event_links,
+        allow_unslotted_posts: event.allow_unslotted_posts, allow_user_video_edits: event.allow_user_video_edits,
+        user_video_edit_permission_keys_json: event.user_video_edit_permission_keys_json, video_form_settings_json: videoFormSettingsJson, custom_questions: customQuestions,
+        max_slots_per_video: event.max_slots_per_video, max_slot_reservation_groups_per_xid: event.max_slot_reservation_groups_per_xid,
+        slot_interval_minutes: event.slot_interval_minutes, slot_part_gap_minutes: event.slot_part_gap_minutes, slot_type: event.slot_type ?? "time",
+        slot_visibility_mode: event.slot_visibility_mode ?? "public_name", parts_json: event.parts_json, editable_fields: event.editable_fields, review_settings: event.review_settings,
+      },
+    };
+  }
+
+  test("T-edit: event edit form data (event row, stage settings, general questions, sections) equals CURRENT; IDOR", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "evPoint", "nope"]) {
+        const r = await call(`/api/manage/events/${eventId}/edit`, `tok-${name}`);
+        const ref = await refEdit(name, eventId);
+        if (ref === 404) {
+          assert.equal(r.status, 404, `${name} ${eventId}`);
+          continue;
+        }
+        assert.equal(r.status, 200, `${name} ${eventId}`);
+        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+        record("edit", r);
+      }
+    }
+    const a = (await call("/api/manage/events/evA/edit", "tok-owner")).body;
+    assert.deepEqual(a.editableSections, { basic: true, publish: true, questions: true, slots: true });
+    assert.equal((await call("/api/manage/events/evA/edit", "tok-rev")).status, 404, "reviewer has no edit permission");
+    assert.deepEqual((await call("/api/manage/events/evB/edit", "tok-slot")).body.editableSections, { basic: false, publish: false, questions: false, slots: true });
+    assert.equal((await call("/api/manage/events/evC/edit", "tok-owner")).status, 404);
+    assert.equal((await call("/api/manage/events/evGen19/edit", "tok-admin")).status, 503, "19 general questions fail like CURRENT");
+  });
+
   // app/(manage)/manage/events/[id]/youtube-playlist/page.tsx
   const { derivePlaylistSyncHealth } = await import("../../../src/lib/youtube/playlistSyncHealth.ts");
   async function refPlaylist(name, eventId) {

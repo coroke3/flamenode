@@ -7,3 +7,4 @@ export * from "./audience.ts";
 export * from "./playlist.ts";
 export * from "./videos.ts";
 export * from "./videoDetail.ts";
+export * from "./eventEdit.ts";

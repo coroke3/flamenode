@@ -200,6 +200,7 @@ export function seed(sqlite) {
   question("cq4", "evA", "free_text", { required: 1, sort: 3 });
   question("cq5", "evB", "stage_permission", { sort: 0 });
   question("cq6", "evA", "other_required", { required: 1, sort: 4 });
+  question("cq7", "evB", "inactive_one", { sort: 1, active: 0 });
   answer("v1", "evA", "cq1", "This answer is clearly longer than twenty four characters");
   answer("v1", "evA", "cq2", " short ");
   answer("v1", "evA", "cq4", "ok");
@@ -219,6 +220,12 @@ export function seed(sqlite) {
   ins("video_softwares", { video_id: "v1", software_id: "sw2", raw_label: "Aseprite" });
   sqlite.prepare("UPDATE videos SET music = 'BGM', credit = 'Credit', intro_comment = 'Hi', highlights = 'H', production_story = 'S', creator_x_user_id = NULL, creator_display_name = 'Creator One' WHERE id = 'v1'").run();
   sqlite.prepare("UPDATE videos SET youtube_video_id = ' yt-v3 ' WHERE id = 'v3'").run();
+  event("evGen19", { start_time: NOW + 70 * DAY, end_time: NOW + 71 * DAY });
+  for (let i = 0; i < 19; i += 1) question(`cg${String(i).padStart(2, "0")}`, "evGen19", `gq_${i}`, { sort: i });
+  sqlite.prepare("UPDATE event_custom_questions SET type = 'checkbox', options_json = ?, placeholder = 'ph', description = 'd' WHERE id = 'cq4'").run(JSON.stringify([" a ", "a", "b", 3, "", "c".repeat(300)]));
+  sqlite.prepare("UPDATE event_custom_questions SET type = 'select', options_json = '{bad' WHERE id = 'cq6'").run();
+  sqlite.prepare("UPDATE event_custom_questions SET description = 'stage desc', placeholder = 'stage ph' WHERE id = 'cq2'").run();
+  sqlite.prepare("UPDATE events SET explanation = 'long text', event_type = 'collabo', slot_type = 'count', slot_visibility_mode = 'anonymous', editable_fields = 'x', review_settings = 'y', required_video_fields_json = '[]' WHERE id = 'evA'").run();
   event("evStage5", { start_time: NOW + 50 * DAY, end_time: NOW + 51 * DAY });
   for (let i = 0; i < 5; i += 1) question(`cs${i}`, "evStage5", i === 0 ? "stage_permission" : `stage_permission_${i + 1}`, { sort: i });
   ins("videos", { id: "vstage5", title: "stage5", submitted_by_user_id: "u_plain", creator_display_name: "c", visibility_status: "pending", created_at: NOW });
