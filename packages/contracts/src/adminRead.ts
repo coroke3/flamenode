@@ -202,3 +202,46 @@ export interface AdminModerationResponse {
   now: number;
   cases: AdminModerationRow[];
 }
+
+// ---- /x-link-requests ---------------------------------------------------------------------------------------
+
+export interface AdminXLinkRequestRow {
+  id: string;
+  requested_x_id: string;
+  requested_by_auth_user_id: string;
+  discord_name: string | null;
+  discord_image: string | null;
+  requested_at: number;
+  request_type: string;
+  target_x_user_id: string | null;
+  requested_x_name: string | null;
+  /** CURRENT resolveManageXIconUrl: external https as is, approved internal icons signed (5 min), else null */
+  requested_icon_url: string | null;
+  requested_approval_status: string | null;
+  target_icon_url: string | null;
+  target_approval_status: string | null;
+}
+
+export interface AdminXLinkRejectedRow {
+  id: string;
+  requested_x_id: string | null;
+  requested_by_auth_user_id: string;
+  request_type: string;
+  requested_at: number;
+}
+
+export interface AdminXLinkAuditRow {
+  id: string;
+  table_name: string;
+  operation: string;
+  target_id: string | null;
+  created_at: number;
+  /** CURRENT parseAuditDiff(before, after).changedKeys.slice(0, 6) */
+  changedKeys: string[];
+}
+
+export interface AdminXLinkRequestsResponse {
+  pending: AdminXLinkRequestRow[];
+  recentRejected: AdminXLinkRejectedRow[];
+  recentAudit: AdminXLinkAuditRow[];
+}

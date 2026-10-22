@@ -91,4 +91,29 @@ export function seed(sqlite) {
   ins("video_interactions", { x_user_id: "alice_x", video_id: "va2", interaction_type: "like", created_at: T0 });
   ins("video_interactions", { x_user_id: "alice_x", video_id: "va3", interaction_type: "bookmark", created_at: T0 });
   sqlite.exec(`UPDATE videos SET submitted_by_user_id = 'u_alice' WHERE id IN (SELECT id FROM videos WHERE creator_x_user_id = 'alice_x' LIMIT 25)`);
+
+  // x-link-requests: pending of each type, '@'/case/space variants, legacy-cased x_users id, internal/external icons.
+  ins("x_users", { id: "ic_int", x_name: "Internal icon", icon_url: "/api/media/xicons/ic_int.png", approval_status: "approved" });
+  ins("x_users", { id: "ic_pend", x_name: "Pending icon", icon_url: "/api/media/xicons/ic_pend.png", approval_status: "pending" });
+  ins("x_users", { id: "ic_ext", x_name: "External icon", icon_url: "https://pbs.example.test/ic_ext.png", approval_status: "approved" });
+  ins("x_users", { id: "ic_bad", x_name: "Bad ns", icon_url: "/api/media/video-icons/x.png", approval_status: "approved" });
+  ins("x_users", { id: " Legacy_X ", x_name: "Legacy cased", icon_url: null, approval_status: "approved" });
+  const xr = (id, o) =>
+    ins("x_identity_requests", { id, request_type: o.type ?? "new_link", requested_by_auth_user_id: o.by ?? "u_alice", requested_x_id: o.x ?? null, source_x_user_id: o.source ?? null, target_x_user_id: o.target ?? null, status: o.status ?? "pending", requested_at: o.at, updated_at: o.at });
+  xr("xl1", { x: "@IC_INT ", at: T0 + 90000 });
+  xr("xl2", { x: "ic_pend", type: "existing_link", target: "ic_ext", at: T0 + 90001 });
+  xr("xl3", { x: "legacy_x", type: "alias", target: "ic_bad", at: T0 + 90002, by: "u_ghost2" });
+  xr("xl4", { x: "nobody", at: T0 + 90003 });
+  xr("xl5", { x: "   ", at: T0 + 90004 });
+  xr("xl-merge", { type: "merge", source: "ic_ext", target: "ic_int", at: T0 + 90005 });
+  for (let i = 0; i < 105; i += 1) xr(`xlb${i}`, { x: `bulk_x${String(i % 60).padStart(2, "0")}`, at: T0 + 6000 + i });
+  for (let i = 0; i < 12; i += 1) xr(`xrej${i}`, { x: `rej${i}`, status: "rejected", ...(i % 4 === 3 ? { type: "merge", source: "ic_ext", target: "ic_int" } : {}), at: T0 + 7000 + i });
+  const al = (id, table, o) => ins("audit_logs", { id, table_name: table, target_id: o.target ?? "t", operation: o.op ?? "UPDATE", actor_user_id: "u_root", created_at: o.at, before_json: o.before ?? null, after_json: o.after ?? null });
+  al("al1", "x_users", { at: T0 + 8000, before: '{"approval_status":"pending","x_name":"a"}', after: '{"approval_status":"approved","x_name":"a"}' });
+  al("al2", "x_identity_requests", { at: T0 + 8001, op: "CREATE", after: '{"id":"z","status":"pending"}' });
+  al("al3", "x_user_account_links", { at: T0 + 8002, op: "DELETE", before: "not json", after: null });
+  al("al4", "x_users", { at: T0 + 8003, op: "RESTORE", before: "{}", after: '{"a":1}' });
+  al("al5", "events", { at: T0 + 8004, before: "{}", after: '{"a":1}' });
+  al("al6", "x_users", { at: T0 + 8005, before: '{"k1":1,"k2":2,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"k0":0}', after: '{"k1":2,"k2":3,"k3":4,"k4":5,"k5":6,"k6":7,"k7":8,"k0":1}' });
+  for (let i = 0; i < 32; i += 1) al(`alb${i}`, "x_users", { at: T0 + 8100 + i, before: `{"n":${i}}`, after: `{"n":${i + 1}}` });
 }

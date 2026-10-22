@@ -352,8 +352,9 @@ New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route 
 | `GET /api/admin-read/videos?q&status&event&page` | `app/(admin)/admin/videos/page.tsx` | `apps/api/src/routes/adminRead/videos.ts` | 3 | 50/page; event options LIMIT 100 (CURRENT 200); `reviewSummaries: "deferred"`; D1 failure -> 200 `degraded` | unmeasured | BRIDGED |
 | `GET /api/admin-read/events?sort&filter&q` | `app/(admin)/admin/events/page.tsx` | `apps/api/src/routes/adminRead/events.ts` | 2 | LIMIT 60; rendered columns only; returns server `now` for the badges | unmeasured | BRIDGED |
 | `GET /api/admin-read/moderation?type&status&overdue` | `app/(admin)/admin/moderation/page.tsx` | `apps/api/src/routes/adminRead/moderation.ts` | 2 | LIMIT 100; D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/x-link-requests` | `app/(admin)/admin/x-link-requests/page.tsx` | `apps/api/src/routes/adminRead/xLinkRequests.ts` | 3 | pending 100 / rejected 10 / audit 30 (only `changedKeys` returned); icons signed with `env.AUTH_SECRET` (signer copied verbatim from PR #345 `routes/manage/icon.ts`), no secret -> internal icons null; D1 failure -> 503 | unmeasured | BRIDGED |
 
-Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new, events/templates, event-groups/*, users/[id]/edit, x-link-requests, x-id-merges, review summaries, xid icon projection.
+Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new, events/templates, event-groups/*, users/[id]/edit, x-id-merges, review summaries, xid icon projection.
 
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 

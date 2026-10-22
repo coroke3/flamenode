@@ -5,6 +5,7 @@ import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import { adminEventsRoutes } from "./events.ts";
 import { adminModerationRoutes } from "./moderation.ts";
 import { adminUsersRoutes } from "./users.ts";
+import { adminXLinkRequestsRoutes } from "./xLinkRequests.ts";
 import { adminVideosRoutes } from "./videos.ts";
 
 // MIG-0625: read-only Admin screens API (users / videos / events / moderation). GET only; nothing here writes.
@@ -34,6 +35,7 @@ adminReadRoutes.route("/users", adminUsersRoutes);
 adminReadRoutes.route("/videos", adminVideosRoutes);
 adminReadRoutes.route("/events", adminEventsRoutes);
 adminReadRoutes.route("/moderation", adminModerationRoutes);
+adminReadRoutes.route("/x-link-requests", adminXLinkRequestsRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); CURRENT pages without a try/catch show the error page.
 adminReadRoutes.onError((_error, c) => {

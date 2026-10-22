@@ -23,6 +23,9 @@ if (runUnderRootTsx(import.meta.url)) {
   const { loadAdminXUserEnrichment } = await import("../../../src/lib/admin/adminXUserEnrichment.ts");
   const { getLatestPublishedMajorTerms, termsReacceptRequiredValue } = await import("../../../src/lib/terms/reaccept.ts");
   const { getLinkedXUsersForAuthUser } = await import("../../../src/lib/auth/xIdentity.ts");
+  const { enrichXLinkPendingRows } = await import("../../../src/lib/admin/enrichXLinkPendingRows.ts");
+  const { resolveManageXIconUrl } = await import("../../../src/lib/media/manageXIcon.ts");
+  const { parseAuditDiff } = await import("../../../src/lib/audit/diff.ts");
   const { acceptingEntriesWhere } = await import("../../../src/lib/utils/eventStatus.ts");
   const { videoReviewQueueOrder } = await import("../../../src/lib/admin/videoReviewQueueOrder.ts");
   const { normalizeVideoVisibilityFilter, videoVisibilityStatusesForFilter } = await import(
@@ -41,6 +44,7 @@ if (runUnderRootTsx(import.meta.url)) {
     return { rows: method === "get" ? rows[0] : rows };
   });
 
+  const SECRET = "test-secret-mig-0625";
   const canon = (value) => JSON.parse(JSON.stringify(value ?? null));
 
   const parseBody = (text) => {
@@ -53,7 +57,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   async function call(path, token, options = {}) {
     const d1 = options.d1 ?? createD1(sqlite);
-    const response = await app.request(path, { method: options.method ?? "GET", headers: token ? cookie(token) : {} }, { DB: d1 });
+    const response = await app.request(path, { method: options.method ?? "GET", headers: token ? cookie(token) : {} }, { DB: d1, AUTH_SECRET: options.secret === undefined ? SECRET : options.secret });
     const text = await response.text();
     return { status: response.status, headers: response.headers, body: text ? parseBody(text) : null, stats: d1.stats };
   }
@@ -268,10 +272,38 @@ if (runUnderRootTsx(import.meta.url)) {
     };
   }
 
+  async function refXLink(secret) {
+    const LINK_TYPES = ["new_link", "existing_link", "alias"];
+    const pendingBase = await refDb
+      .select({ id: S.xIdentityRequests.id, requested_x_id: S.xIdentityRequests.requested_x_id, requested_by_auth_user_id: S.xIdentityRequests.requested_by_auth_user_id, discord_name: S.users.name, discord_image: S.users.image, requested_at: S.xIdentityRequests.requested_at, request_type: S.xIdentityRequests.request_type, target_x_user_id: S.xIdentityRequests.target_x_user_id })
+      .from(S.xIdentityRequests).leftJoin(S.users, eq(S.users.id, S.xIdentityRequests.requested_by_auth_user_id))
+      .where(and(eq(S.xIdentityRequests.status, "pending"), inArray(S.xIdentityRequests.request_type, LINK_TYPES)))
+      .orderBy(desc(S.xIdentityRequests.requested_at)).limit(100);
+    const recentRejected = await refDb
+      .select({ id: S.xIdentityRequests.id, requested_x_id: S.xIdentityRequests.requested_x_id, requested_by_auth_user_id: S.xIdentityRequests.requested_by_auth_user_id, request_type: S.xIdentityRequests.request_type, requested_at: S.xIdentityRequests.requested_at })
+      .from(S.xIdentityRequests).where(and(eq(S.xIdentityRequests.status, "rejected"), inArray(S.xIdentityRequests.request_type, LINK_TYPES)))
+      .orderBy(desc(S.xIdentityRequests.requested_at)).limit(10);
+    const logs = await refDb
+      .select({ id: S.auditLogs.id, table_name: S.auditLogs.table_name, operation: S.auditLogs.operation, target_id: S.auditLogs.target_id, before_json: S.auditLogs.before_json, after_json: S.auditLogs.after_json, created_at: S.auditLogs.created_at })
+      .from(S.auditLogs).where(and(inArray(S.auditLogs.table_name, ["x_identity_requests", "x_user_account_links", "x_users"]), inArray(S.auditLogs.operation, ["UPDATE", "CREATE", "DELETE"])))
+      .orderBy(desc(S.auditLogs.created_at)).limit(30);
+    const enriched = await enrichXLinkPendingRows(refDb, pendingBase);
+    const pending = await Promise.all(enriched.map(async (row) => ({
+      ...row,
+      requested_icon_url: await resolveManageXIconUrl({ iconUrl: row.requested_icon_url, approvalStatus: row.requested_approval_status, authSecret: secret }),
+      target_icon_url: await resolveManageXIconUrl({ iconUrl: row.target_icon_url, approvalStatus: row.target_approval_status, authSecret: secret }),
+    })));
+    return {
+      pending,
+      recentRejected,
+      recentAudit: logs.map((l) => ({ id: l.id, table_name: l.table_name, operation: l.operation, target_id: l.target_id, created_at: l.created_at, changedKeys: parseAuditDiff(l.before_json, l.after_json).changedKeys.slice(0, 6) })),
+    };
+  }
+
   const bySort = (rows, key) => [...rows].sort((a, b) => String(a[key]).localeCompare(String(b[key])));
 
   // ---------------- T02: authz ----------------
-  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation"];
+  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation", "/x-link-requests"];
 
   test("T02 guest / expired / unknown token -> 401, no-store, one D1 statement at most", async () => {
     for (const path of ENDPOINTS) {
@@ -448,8 +480,35 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(missing.headers.get("cache-control"), "private, no-store");
   });
 
+  test("T01 x-link-requests: pending (enriched, signed icons), rejected and audit equal CURRENT incl. legacy ids and bad namespaces", async () => {
+    const realNow = Date.now;
+    const fixedNow = Math.floor(realNow() / 60_000) * 60_000 + 1000;
+    Date.now = () => fixedNow;
+    try {
+      const r = await get("/api/admin-read/x-link-requests");
+      assert.deepEqual(r.body, canon(await refXLink(SECRET)));
+      assert.equal(r.body.pending.length, 100);
+      assert.equal(r.body.recentRejected.length, 10);
+      assert.equal(r.body.recentAudit.length, 30);
+      const byId = Object.fromEntries(r.body.pending.map((p) => [p.id, p]));
+      assert.match(byId.xl1.requested_icon_url, /^\/api\/media\/manage-x-icon\/xicons\/ic_int\.png\?v=1&exp=\d+&sig=[A-Za-z0-9_-]+$/);
+      assert.equal(byId.xl2.requested_icon_url, null, "pending X is not signed");
+      assert.equal(byId.xl2.target_icon_url, "https://pbs.example.test/ic_ext.png");
+      assert.equal(byId.xl3.target_icon_url, null, "video-icons namespace is not allowed");
+      assert.equal(byId.xl3.requested_x_name, "Legacy cased", "legacy cased id resolved via lower(trim(id))");
+      // absent secret: internal icons fail closed (null), never unsigned internal URLs
+      const noSecret = await call("/api/admin-read/x-link-requests", "tok-root", { secret: "" });
+      assert.equal(noSecret.status, 200);
+      assert.deepEqual(noSecret.body, canon(await refXLink("")));
+      assert.equal(noSecret.body.pending.find((p) => p.id === "xl1").requested_icon_url, null);
+      assert.doesNotMatch(JSON.stringify(r.body), /test-secret-mig-0625|before_json|after_json/);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test("T04 responses never carry secrets (tokens, audit before/after payloads, session data)", async () => {
-    for (const path of ["/users/u_alice", "/users", "/videos", "/events", "/moderation", "/users?view=xid"]) {
+    for (const path of ["/users/u_alice", "/users", "/videos", "/events", "/moderation", "/users?view=xid", "/x-link-requests"]) {
       const text = JSON.stringify((await get(`/api/admin-read${path}`)).body);
       assert.doesNotMatch(text, /sessionToken|tok-|"secret"|before_json|after_json|inverse_patch|actor_snapshot/, path);
     }

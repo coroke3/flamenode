@@ -6,6 +6,7 @@ export type Bindings = {
   KV?: KVNamespace;
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
+  AUTH_SECRET?: string;
   PUBLIC_VISIBILITY_GUARD_MODE?: string;
 };
 
