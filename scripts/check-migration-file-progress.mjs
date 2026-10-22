@@ -90,12 +90,17 @@ const listChangedFromBase=base=>{
  const raw=execFileSync("git",["diff","--name-only",base+"...HEAD"],{cwd:ROOT,encoding:"utf8"});
  return raw.trim().split(/\r?\n/).filter(Boolean);
 };
-// PR diff inputs: changed paths, the ledger at base, and a local commit lookup for SHA= evidence.
+const isAncestor=(root,a,b)=>{
+ try{execFileSync("git",["merge-base","--is-ancestor",a,b],{cwd:root,stdio:"ignore"});return true;}catch{return false;}
+};
+export const prCommitCheck=(root,base)=>sha=>gitCommitExists(root,sha)&&isAncestor(root,sha,"HEAD")&&!isAncestor(root,sha,base);
+// PR diff inputs: changed paths, the ledger at base, and a check that a SHA= is one of this PR's own
+// commits (reachable from HEAD, not from base). Holds on the GitHub PR merge ref.
 export function changedFileInputs(base){
  return {
   changedPaths:listChangedFromBase(base),
   baseMatrix:execFileSync("git",["show",base+":docs/migration/FILE_MIGRATION_MATRIX.md"],{cwd:ROOT,encoding:"utf8"}),
-  commitExists:sha=>gitCommitExists(ROOT,sha),
+  isPrCommit:prCommitCheck(ROOT,base),
  };
 }
 export function collectFiles(root=ROOT){
@@ -115,7 +120,7 @@ export function collectFiles(root=ROOT){
  }
  return files;
 }
-export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[],baseMatrix="",commitExists=null,taskCardsText=""}){
+export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[],baseMatrix="",isPrCommit=null,taskCardsText=""}){
  const errors=[];
  const {rows,errors:parseErrors}=parseFileRows(matrix);errors.push(...parseErrors);
  const pages=parsePageLedger(currentRoutes), RH=parseRouteHandlerLedger(routeHandlers),SA=parseActionLedger(serverActions),migs=parseMigs(status);
@@ -167,15 +172,17 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  for(const [f] of RH)if(!rows.has(f))errors.push(f+" RH method source not tracked");
  for(const [f] of SA)if(!rows.has(f))errors.push(f+" SA source not tracked");
  const baseRows=baseMatrix?parseFileRows(baseMatrix).rows:new Map();
- const shaOf=row=>row?.evidence.match(/SHA=([0-9a-f]{40})\b/)?.[1];
+ const shasOf=row=>[...(row?.evidence||"").matchAll(/SHA=([0-9a-f]{40})\b/g)].map(m=>m[1]);
  for(const file of changedPaths.filter(trackedChangeCandidate)){
   const row=rows.get(file);
   if(!row){errors.push("changed migration source missing file progress row: "+file);continue;}
   if(row.state==="NOT_STARTED")continue;
-  // A changed started file must cite new evidence: a SHA that differs from base and exists in git.
-  const sha=shaOf(row);
-  if(sha&&sha===shaOf(baseRows.get(file)))errors.push(file+" changed in this PR but its evidence still cites base SHA="+sha+"; update state/evidence");
-  if(sha&&commitExists&&!commitExists(sha))errors.push(file+" evidence SHA="+sha+" is not a commit in this repository");
+  // A changed started file must cite, anywhere in its row, a SHA= that is new versus base
+  // and is a commit from this PR's own history.
+  const baseShas=new Set(shasOf(baseRows.get(file)));
+  const fresh=shasOf(row).filter(sha=>!baseShas.has(sha));
+  if(!fresh.length)errors.push(file+" changed in this PR but its evidence cites no SHA= newer than base; update state/evidence");
+  else if(isPrCommit&&!fresh.some(isPrCommit))errors.push(file+" evidence SHA="+fresh.join(",")+" is not a commit from this PR's history");
  }
  if(rows.size<mandatory.size)errors.push("file progress rows fewer than required current sources");
  return errors;
@@ -190,7 +197,10 @@ if(invoked){
   if(process.env.CI){console.error("[migration-file] MIGRATION_FILE_BASE_SHA is required in CI");process.exit(1);}
   console.log("[migration-file] NOTE: changed-file validation skipped (no MIGRATION_FILE_BASE_SHA)");
  }
- try{if(baseSha)diffInputs=changedFileInputs(baseSha);}
+ try{
+  if(baseSha)diffInputs=changedFileInputs(baseSha);
+  if(baseSha&&!diffInputs.changedPaths.length)console.log("[migration-file] NOTE: no changed files versus base "+baseSha+" (e.g. workflow_dispatch on main)");
+ }
  catch(e){console.error("[migration-file] git changed-file validation unavailable: "+e.message);process.exit(1);}
  const input={
   matrix:read("docs/migration/FILE_MIGRATION_MATRIX.md"),

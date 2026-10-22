@@ -39,6 +39,8 @@
 
 **Evidence syntax:** Every state other than NOT_STARTED must have PR#123 and SHA=<40 hex>. BRIDGED/PARITY_VERIFIED and later also require TEST=<exact command> and CI=https://... or LOG=<real log reference>. For BRIDGED or later the file checker also verifies that every named target file path actually exists in this git tree. CUTOVER/RETIRED require APPROVAL=<reference>. These strings represent actual run identifiers; never fabricate them. DONE is a MIG state, never a file state.
 
+**Changed files cite this PR's own commit:** when a PR changes a file whose row is not NOT_STARTED, that row must contain, anywhere in its evidence, a `SHA=` that is not in the base row and is a commit from this PR's own history (reachable from the PR HEAD, not from the base). Earlier evidence may stay in the row after it. `scripts/check-migration-file-progress.mjs` enforces this against `MIGRATION_FILE_BASE_SHA` and fails in CI when no base is given.
+
 ## File mapping is a wiring contract
 
 For every changed file document: current exact file#export or URL/method → actual target file#export → every importer, API consumer or browser route. Show how package exports resolve under Node/Next/Astro/Vite/Workers. TypeScript path aliases do not establish runtime resolution. For DB work specify D1 binding, SQL transaction/audit/Queue; for public routes specify static HTML visibility fence, R2/caching and SEO; for private routes specify server-side auth and cross-SPA navigation.
