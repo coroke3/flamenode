@@ -552,6 +552,10 @@ export const AdminHealthResponseSchema = z.object({
   error: z.literal("query_failed").nullable(),
 });
 export type AdminHealthResponse = z.infer<typeof AdminHealthResponseSchema>;
+
+// Integrity page: only the pre-run state is served (ran false, no results); run=1 is 501 (see ops.ts).
+export const AdminIntegrityResponseSchema = z.object({ ran: z.literal(false), results: z.array(z.never()) });
+export type AdminIntegrityResponse = z.infer<typeof AdminIntegrityResponseSchema>;
 export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;

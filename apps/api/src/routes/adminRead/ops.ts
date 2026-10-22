@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type {
   AdminCostGuardResponse,
   AdminHealthResponse,
+  AdminIntegrityResponse,
   AdminNotificationsResponse,
   AdminSecurityResponse,
   AdminStaticBuildsResponse,
@@ -308,6 +309,20 @@ adminOpsRoutes.get("/health", async (c) => {
     results = [];
   }
   const body: AdminHealthResponse = { status, results, error };
+  return c.json(body);
+});
+
+// ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----
+// CURRENT renders only the "run" prompt without ?run=1 (no query), and with ?run=1 runs 28 table-scanning checks
+// (runIntegrityChecks, ~910 lines of check definitions) in one page load.
+//
+// STOP (recorded, not implemented): 28 scans cannot fit one S2 request (<= 3 D1 statements). The run=1 view is answered
+// 501. Follow-up design (not built here): GET /ops/integrity/:checkId, one window-count statement per check
+// (session + 1, LIMIT 10 sample), called one by one by the SPA; this needs the 28 makeCheck definitions ported from
+// drizzle sql`` fragments to plain SQL with a per-check parity test.
+adminOpsRoutes.get("/integrity", (c) => {
+  if (c.req.query("run") === "1") return c.json({ error: "integrity_run_unsupported" }, 501);
+  const body: AdminIntegrityResponse = { ran: false, results: [] };
   return c.json(body);
 });
 

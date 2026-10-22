@@ -1149,6 +1149,17 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
+  test("T02 integrity: idle state like CURRENT (no query); run=1 is the recorded STOP (501)", async () => {
+    const idle = await get("/ops/integrity");
+    assert.deepEqual(idle.body, { ran: false, results: [] });
+    assert.equal(idle.stats.statements, 1, "no page query without run=1");
+    const run = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
+    assert.equal(run.status, 501);
+    assert.equal(run.headers.get("cache-control"), "private, no-store");
+    assert.equal(run.stats.statements, 1);
+    assert.equal((await call("/api/admin-read/ops/integrity", "tok-alice")).status, 403);
+  });
+
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
     sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
     assert.deepEqual((await get("/ops/cost-guard")).body, await refCostGuard());
