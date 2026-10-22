@@ -135,15 +135,24 @@ test("failed / active の target は sweep から除外する", async () => {
   f.track("video", "okv", "videos/okv.json", OLD);
   f.uploaded.set("rules/current.json", OLD);
   f.uploaded.set("top.json", OLD);
-  f.sqlite
-    .prepare("INSERT INTO static_rebuild_queue VALUES ('q1','video','failedv','x','normal','failed',3,1,1)")
-    .run();
-  f.sqlite
-    .prepare("INSERT INTO static_rebuild_queue VALUES ('q2','rules','global','x','normal','failed',3,1,1)")
-    .run();
-  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 2);
+  f.track("video", "oldfailv", "videos/oldfailv.json", OLD);
+  f.uploaded.set("list/recent.json", OLD);
+  const recent = NOW - 3600;
+  const longAgo = NOW - 30 * 24 * 3600;
+  for (const [id, type, target, updatedAt] of [
+    ["q1", "video", "failedv", recent],
+    ["q2", "rules", "global", recent],
+    // 7日より古い failed は除外しない
+    ["q3", "video", "oldfailv", longAgo],
+    ["q4", "list_recent", "global", longAgo],
+  ]) {
+    f.sqlite
+      .prepare("INSERT INTO static_rebuild_queue VALUES (?, ?, ?, 'x', 'normal', 'failed', 3, ?, ?)")
+      .run(id, type, target, updatedAt, updatedAt);
+  }
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 4);
   assert.deepEqual(
     f.queue().filter((row) => row.reason === STALE_ARTIFACT_REFRESH_REASON).map((row) => `${row.target_type}:${row.target_id}`),
-    ["top:global", "video:okv"],
+    ["list_recent:global", "top:global", "video:okv", "video:oldfailv"],
   );
 });

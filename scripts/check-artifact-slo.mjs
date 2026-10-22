@@ -72,6 +72,13 @@ for (const probe of ARTIFACT_SLO_PROBES) {
     `${probe.key}: needs a rebuild target in STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS`,
   );
 }
+const rebuildSource = readFileSync(path.join(root, "workers/json-generator/rebuild.ts"), "utf8");
+for (const target of Object.values(STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS)) {
+  assert.ok(
+    rebuildSource.includes(`case "${target}":`),
+    `${target}: sweep target must be handled by rebuildTarget`,
+  );
+}
 assert.equal(
   Object.keys(STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS).length,
   ARTIFACT_SLO_PROBES.length - 1,

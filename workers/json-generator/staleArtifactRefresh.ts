@@ -19,6 +19,8 @@ export const STALE_ARTIFACT_REFRESH_MAX_TARGETS = 100;
 export const STALE_ARTIFACT_REFRESH_INTERVAL_SEC = 6 * 3600;
 export const STALE_ARTIFACT_REFRESH_LEASE_SEC = 5 * 60;
 export const STALE_ARTIFACT_REFRESH_LEASE_JOB = "content-jobs:artifact-refresh";
+/** 直近この期間に failed になった target は再 enqueue しない（古い failed で永久除外しない）。 */
+export const STALE_ARTIFACT_REFRESH_FAILED_COOLDOWN_SEC = 7 * 24 * 3600;
 export const STALE_ARTIFACT_REFRESH_REASON = "artifact_slo_refresh";
 /** lease 取得(1) + detail SELECT(1) + global blocked SELECT(1) + enqueue(1) + lease 成功/解放(2)。 */
 export const STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS = 6;
@@ -53,6 +55,7 @@ type RefreshEnv = { DB: D1Database; R2: Pick<R2Bucket, "head"> };
 async function listStaleDetailTargets(
   env: RefreshEnv,
   cutoff: number,
+  failedSince: number,
 ): Promise<StaticRebuildEnqueueTarget[]> {
   const placeholders = DETAIL_TARGET_TYPES.map(() => "?").join(", ");
   const result = await env.DB.prepare(
@@ -66,12 +69,20 @@ async function listStaleDetailTargets(
           SELECT 1 FROM static_rebuild_queue AS q
            WHERE q.target_type = a.target_type
              AND q.target_id = a.target_id
-             AND q.status IN ('pending', 'processing', 'failed')
+             AND (
+               q.status IN ('pending', 'processing')
+               OR (q.status = 'failed' AND q.updated_at > ?)
+             )
         )
       ORDER BY MIN(a.generated_at) ASC
       LIMIT ?`,
   )
-    .bind(...DETAIL_TARGET_TYPES, cutoff, STALE_ARTIFACT_REFRESH_MAX_TARGETS)
+    .bind(
+      ...DETAIL_TARGET_TYPES,
+      cutoff,
+      failedSince,
+      STALE_ARTIFACT_REFRESH_MAX_TARGETS,
+    )
     .all<{ target_type: string; target_id: string }>();
   return (result.results ?? []).map((row) => ({
     targetType: String(row.target_type),
@@ -82,6 +93,7 @@ async function listStaleDetailTargets(
 async function listStaleGlobalTargets(
   env: RefreshEnv,
   cutoffMs: number,
+  failedSince: number,
   signal?: AbortSignal,
 ): Promise<StaticRebuildEnqueueTarget[]> {
   const entries = Object.entries(STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS);
@@ -92,9 +104,12 @@ async function listStaleGlobalTargets(
        FROM static_rebuild_queue
       WHERE target_id = 'global'
         AND target_type IN (${targetTypes.map(() => "?").join(", ")})
-        AND status IN ('pending', 'processing', 'failed')`,
+        AND (
+          status IN ('pending', 'processing')
+          OR (status = 'failed' AND updated_at > ?)
+        )`,
   )
-    .bind(...targetTypes)
+    .bind(...targetTypes, failedSince)
     .all<{ target_type: string }>();
   const skip = new Set(
     (blocked.results ?? []).map((row) => String(row.target_type)),
@@ -125,11 +140,13 @@ export async function ensureStaleArtifactRefresh(
   options.signal?.throwIfAborted();
   const now = options.now ?? Math.floor(Date.now() / 1000);
   const cutoff = now - STATIC_ARTIFACT_REFRESH_AFTER_SEC;
-  const detail = await listStaleDetailTargets(env, cutoff);
+  const failedSince = now - STALE_ARTIFACT_REFRESH_FAILED_COOLDOWN_SEC;
+  const detail = await listStaleDetailTargets(env, cutoff, failedSince);
   options.signal?.throwIfAborted();
   const globals = await listStaleGlobalTargets(
     env,
     cutoff * 1000,
+    failedSince,
     options.signal,
   );
   return enqueueStaticRebuildTargets(
