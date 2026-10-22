@@ -156,7 +156,7 @@ export async function loadVideoPagesForBuild(
   }
   // MIG-0404 route map: reserved roots, assets, duplicates and traversal are build errors.
   buildRouteMap(
-    pages.filter((p) => p.slug === p.canonicalSlug).map((p) => ({ kind: "video" as const, id: p.slug, aliases: p.slug !== p.videoId ? [p.videoId] : [] })),
+    pages.filter((p) => p.slug === p.canonicalSlug).map((p) => ({ kind: "video" as const, id: p.videoId, slug: p.slug, aliases: p.slug !== p.videoId ? [p.videoId] : [] })),
     access.options.generation,
   );
   return pages;

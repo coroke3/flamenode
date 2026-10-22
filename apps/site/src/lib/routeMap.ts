@@ -9,7 +9,10 @@ export type RedirectStatus = 301 | 302 | 307 | 308;
 
 export type EntityRouteEntry = Readonly<{
   kind: RouteEntityKind;
+  /** Entity id: `resolution.id`, and the revocation fence id (`deny:<kind>:<id>`). */
   id: string;
+  /** URL segment when it differs from `id` (video: YouTube id canonical, internal id as the id). Defaults to `id`. */
+  slug?: string;
   aliases?: readonly string[];
 }>;
 
@@ -214,7 +217,7 @@ export function buildRouteMap(
     }
 
     const id = validateRouteId(entry.id);
-    const key = entityKey(entry.kind, id);
+    const key = entityKey(entry.kind, entry.slug === undefined ? id : validateRouteId(entry.slug));
     const canonicalPath = `/${key}`;
     add(key, { type: "canonical", kind: entry.kind, id, canonicalPath });
 
