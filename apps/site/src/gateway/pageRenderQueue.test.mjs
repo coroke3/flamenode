@@ -60,6 +60,8 @@ function seed(sqlite) {
   video.run("vid-public", "Alpha", "Public \"clip\" <script>", "Intro", "public");
   video.run("vid-private", "Alpha", "Private clip", null, "private");
   video.run("vid-pending", "Alpha", "Pending clip", null, "pending");
+  video.run("vid-yt", "Alpha", "YouTube clip", "Intro", "public");
+  sqlite.exec("UPDATE videos SET youtube_video_id = 'ytSlug00001' WHERE id = 'vid-yt'");
   const event = sqlite.prepare("INSERT INTO events (id, title, explanation, visibility_status) VALUES (?, ?, ?, ?)");
   event.run("ev-public", "Spring Fest", "Desc", "public");
   event.run("ev-private", "Hidden Fest", null, "private");
@@ -72,6 +74,8 @@ function manifest() {
       { kind: "video", id: "vid-private" },
       { kind: "video", id: "vid-pending" },
       { kind: "video", id: "vid-missing-row" },
+      // id = videos.id, slug = YouTube id (the CURRENT canonical URL), internal-id URL = alias.
+      { kind: "video", id: "vid-yt", slug: "ytSlug00001", aliases: ["vid-yt"] },
       { kind: "user", id: "creator-alpha" },
       { kind: "user", id: "pending-user" },
       { kind: "user", id: "rejected-user" },
@@ -242,8 +246,9 @@ test("excluded kinds (a kind switched to PAGE_BODY_FORMAT 'excluded'): never wri
 async function excludedKindsScenario() {
   const h = harness();
   // HTML the build (MIG-0509) put in R2 for the current generation.
-  const build = { body: "<!DOCTYPE html><p>build</p>", httpMetadata: { contentType: "text/html" }, customMetadata: { generation: GENERATION } };
-  h.r2.set(r2HtmlKey("vid-public"), { ...build });
+  const buildMeta = (kind, id, key) => ({ kind, id, key, generation: GENERATION });
+  const build = { body: "<!DOCTYPE html><p>build</p>", httpMetadata: { contentType: "text/html" }, customMetadata: buildMeta("event", "ev-public", "event/ev-public") };
+  h.r2.set(r2HtmlKey("vid-public"), { ...build, customMetadata: buildMeta("video", "vid-public", "vid-public") });
   h.r2.set(r2HtmlKey("event/ev-public"), { ...build });
   for (const [kind, id] of [["video", "vid-public"], ["event", "ev-public"]]) {
     h.request(kind, id, 1000);
@@ -313,12 +318,94 @@ test("T04: the same doorbell twice: the second does nothing; a gateway request s
   const { outcomes } = await h.consume(doorbell("user", "creator-alpha"));
   assert.equal(outcomes[0].action, "skipped_up_to_date");
   assert.equal(h.ops.length, opsAfterFirst);
-  // After a new build the gateway reports the HTML stale although the version is current.
-  h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata.generation = "older-build";
-  assert.equal((await h.get("/user/creator-alpha")).status, 503);
+  // After a new build the HTML is from an older generation although the version is current:
+  // the gateway still serves it (F-02) and asks for one rebuild.
+  const stored = h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata;
+  assert.deepEqual(Object.keys(stored).sort(), ["generation", "id", "key", "kind"]);
+  stored.generation = "older-build";
+  const sentBefore = h.sent.length;
+  assert.equal((await h.get("/user/creator-alpha")).status, 200);
+  assert.equal(h.sent.length, sentBefore + 1);
+  assert.equal(h.sent.at(-1).reason, "stale_generation");
   const again = await h.consume(h.sent.at(-1));
   assert.equal(again.outcomes[0].action, "rendered");
+  assert.equal(h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata.generation, GENERATION);
+  const fresh = h.sent.length;
   assert.equal((await h.get("/user/creator-alpha")).status, 200);
+  assert.equal(h.sent.length, fresh, "current generation asks for nothing");
+});
+
+test("F-02: R2 HTML written for another kind, id or key is never served (503, rebuild requested)", async () => {
+  const h = harness();
+  await h.consume(doorbell("user", "creator-alpha"));
+  const meta = h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata;
+  for (const wrong of [{ kind: "event" }, { id: "pending-user" }, { key: "user/pending-user" }]) {
+    h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata = { ...meta, ...wrong };
+    const before = h.sent.length;
+    assert.equal((await h.get("/user/creator-alpha")).status, 503, JSON.stringify(wrong));
+    assert.equal(h.sent.length, before + 1);
+    assert.equal(h.sent.at(-1).reason, "corrupt_data");
+  }
+});
+
+test("F-07: a video whose URL slug is its YouTube id: id = videos.id, key = slug, canonical from the row", async () => {
+  const h = harness();
+  const slugKey = "ytSlug00001";
+  // Gateway miss: the message carries the slug key and the INTERNAL id.
+  assert.equal((await h.get(`/${slugKey}`)).status, 503);
+  assert.deepEqual(h.sent.at(-1), { type: "rebuild-page", key: slugKey, kind: "video", id: "vid-yt", generation: GENERATION, reason: "html_missing" });
+  const viaGateway = await h.consume(h.sent.at(-1));
+  assert.equal(viaGateway.outcomes[0].action, "rendered");
+  assert.deepEqual(viaGateway.outcomes[0], { action: "rendered", kind: "video", id: "vid-yt", key: slugKey, generation: GENERATION });
+  assert.deepEqual([...h.r2.keys()], [`${slugKey}/index.html`]);
+  assert.deepEqual(
+    { ...h.r2.get(r2HtmlKey(slugKey)).customMetadata },
+    { kind: "video", id: "vid-yt", key: slugKey, generation: GENERATION },
+  );
+  const served = await h.get(`/${slugKey}`);
+  assert.equal(served.status, 200);
+  const html = await served.text();
+  assert.match(html, /<link rel="canonical" href="https:\/\/flamenode\.net\/ytSlug00001">/, "canonical is the YouTube-id URL, as CURRENT");
+  // The internal-id URL is the route alias (308 to the slug), not a page of its own.
+  const alias = await h.get("/vid-yt");
+  assert.equal(alias.status, 308);
+  assert.equal(alias.headers.get("Location"), `/${slugKey}`);
+
+  // Doorbell (producer / recovery) carries only videos.id: the consumer follows the alias to the slug key.
+  h.r2.clear();
+  h.request("video", "vid-yt", 1000);
+  const viaDoorbell = await h.consume(doorbell("video", "vid-yt"));
+  assert.equal(viaDoorbell.outcomes[0].action, "rendered");
+  assert.equal(viaDoorbell.outcomes[0].key, slugKey);
+  assert.deepEqual([...h.r2.keys()], [`${slugKey}/index.html`], "never written under the internal id");
+  const t = h.tracker("video", "vid-yt");
+  assert.equal(t.rendered_version, t.request_version, "tracked by the internal id");
+
+  // The revocation fence and the delete use the internal id, as CURRENT's fences do.
+  h.kv.set(revocationKey("video", "vid-yt"), "1");
+  assert.equal((await h.get(`/${slugKey}`)).status, 404);
+  h.request("video", "vid-yt", 2000);
+  const revoked = await h.consume(doorbell("video", "vid-yt"));
+  assert.equal(revoked.outcomes[0].action, "deleted");
+  assert.equal(revoked.outcomes[0].reason, "revoked");
+  assert.equal(h.r2.size, 0);
+  // A fence on the YouTube id is not the video's fence.
+  h.kv.clear();
+  h.kv.set(revocationKey("video", slugKey), "1");
+  h.request("video", "vid-yt", 3000);
+  assert.equal((await h.consume(doorbell("video", "vid-yt"))).outcomes[0].action, "rendered");
+});
+
+test("F-07: a gateway message with the YouTube id as the entity id is not_routed (the id is videos.id)", async () => {
+  const h = harness();
+  const { outcomes } = await h.consume({ type: "rebuild-page", key: "ytSlug00001", kind: "video", id: "ytSlug00001", generation: "g", reason: "html_missing" });
+  assert.equal(outcomes[0].action, "deleted");
+  assert.equal(outcomes[0].reason, "not_routed");
+  assert.equal(h.r2.size, 0);
+  // Slug key / id pairing is checked against the route shard, not trusted from the message.
+  const wrongPair = await h.consume({ type: "rebuild-page", key: "ytSlug00001", kind: "video", id: "vid-public", generation: "g", reason: "html_missing" });
+  assert.equal(wrongPair.outcomes[0].reason, "not_routed");
+  assert.equal(h.r2.size, 0);
 });
 
 test("T05: R2 PUT failure retries the message and leaves the request for recovery", async () => {

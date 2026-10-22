@@ -2,7 +2,7 @@
  * Cloudflare visibility gateway entrypoint (MIG-0405 / Recipe R-GATEWAY / Runtime S1).
  * Thin Worker in front of Static Assets / prebuilt R2 HTML. Per request it reads at most
  * one route shard (Static Assets), one KV revocation entry and one R2 object (ZERO_1102.md S1).
- * A missing, stale or unreadable R2 page answers 503 and asks for a rebuild (MIG-0406 U02).
+ * A missing or unreadable R2 page answers 503 (an older-generation page is served and rebuilt) and asks for a rebuild (MIG-0406 U02).
  * Non-production PoC: no wrangler.toml, Route or Custom Domain uses it yet.
  */
 import type { RouteResolution } from "../lib/routeMap.ts";
@@ -156,11 +156,11 @@ async function servePage(
   // The route data says the page is public; without its HTML the answer is 503, not 404.
   if (!env.R2_STORAGE) return unavailable();
   const result = await loadR2PrebuiltHtml(env.R2_STORAGE, decision, request.method, env.REBUILD_QUEUE);
-  if (result.action === "serve") return result.response;
   if (result.rebuild) {
     if (ctx) ctx.waitUntil(result.rebuild);
     else await result.rebuild;
   }
+  if (result.action === "serve") return result.response;
   return unavailable();
 }
 

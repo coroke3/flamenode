@@ -101,8 +101,11 @@ Current gateway behaviour (MIG-0405/0406, `apps/site/src/gateway/index.ts`, `r2H
 
 - A path not in the route shards answers **404** (the route manifest is produced by the build,
   so a work created after the last build is unknown to the gateway until the next build).
-- A path in the shards whose R2 HTML is missing / from another generation / unreadable answers
-  **503** and sends one `rebuild-page` message (once per key per isolate per minute).
+- A path in the shards whose R2 HTML is missing, unreadable, or whose `customMetadata`
+  `{ kind, id, key }` does not equal the shard resolution answers **503** and sends one
+  `rebuild-page` message (once per key per isolate per minute). An object of an older
+  `generation` (same kind/id/key) is **served (200)** and one rebuild is requested (F-02);
+  build-written HTML (MIG-0509) must carry the same `{ kind, id, key, generation }` metadata.
 
 The Work Order default ("serve a static shell and let the Island read the API") is **not
 implemented**. The 2026-10-18 approval did not cover it, so the current 404/503 behaviour stays;
@@ -306,14 +309,15 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | --- | --- | --- | --- |
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
-| Gateway `rebuild-page` after a build that changes the route generation (each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
+| Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
 
 With realistic update rates (far below one update per entity per day) the first two rows stay
-well inside 50 %. The third row is the risk: R2 HTML is accepted only when its generation equals
-the route shard generation (`r2Html.ts`), so if every data build (≤ 24/day) produced a new
-generation, every visited detail page would answer 503 and be re-rendered after each build —
-up to 1,460 × 24 ≈ 35,000 messages/day, 10× the free tier. MIG-0509 must therefore keep the
-route generation unchanged across data-only builds (e.g. derive it from the route manifest
-content), or the gateway contract must change; that is a design decision for the lead and the
-owner, recorded in MIG-0411.
+well inside 50 %. The third row used to be the risk: a generation mismatch answered 503. Decided
+2026-10-23 (F-02): the gateway accepts R2 HTML on identity (`kind`/`id`/`key`); generation is
+diagnostic, so a stale page is served and one deduplicated rebuild is requested. Visitors no
+longer see 503 after each build. The rebuild requests themselves can still reach
+1,460 × builds/day (≈ 35,000 messages/day) if every build changes the generation and every
+visited page asks once; keeping the route generation across data-only builds (MIG-0509) remains
+the way to bring that down. Unpublish and slug changes stay fenced by KV `deny:`, the consumer's
+R2 delete, and the route key.
 

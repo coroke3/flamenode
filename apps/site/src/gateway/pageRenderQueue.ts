@@ -3,7 +3,8 @@
  * R-JOB / Runtime B). Runs in the gateway Worker, so it reads the same route shards
  * (Static Assets) and writes exactly what `r2Html.ts` serves:
  *   key  = r2HtmlKey(<route key>)            e.g. `abc/index.html`, `user/x/index.html`
- *   meta = { generation: <route shard generation> }
+ *   meta = { kind, id, key, generation }   id = internal row id (videos.id), key = route key
+ *          (video: the YouTube id slug); the gateway serves on kind/id/key, generation is diagnostic
  *
  * Accepted messages (anything else is acked as invalid):
  *   - RebuildRequest from r2Html.ts (gateway, HTML missing / stale / unreadable)
@@ -113,11 +114,18 @@ export function parsePageRenderMessage(body: unknown): PageRenderMessage | null 
   const key = canonicalRouteKey(kind, b.id);
   if (!key) return null;
   if (b.type === "rebuild-page") {
-    // The gateway sends its decision key; it must be this entity's canonical key.
+    // The gateway sends its decision key. It is this entity's canonical key, except a video
+    // whose URL slug is its YouTube id (id = videos.id, key = slug): processPageRender then
+    // checks the key against the route shard (kind and id must match).
     const request = b as Partial<RebuildRequest>;
-    if (request.key !== key) return null;
-    return { source: "gateway", kind, id: b.id, key };
+    const sentKey = request.key;
+    const valid = kind === "video"
+      ? typeof sentKey === "string" && !sentKey.includes("/") && canonicalRouteKey("video", sentKey) === sentKey
+      : sentKey === key;
+    if (!valid || typeof sentKey !== "string") return null;
+    return { source: "gateway", kind, id: b.id, key: sentKey };
   }
+  // A video doorbell carries only videos.id; processPageRender follows the route alias to the slug key.
   if (b.type === "render-page") return { source: "doorbell", kind, id: b.id, key };
   return null;
 }
@@ -193,7 +201,8 @@ export async function processPageRender(
   const kv = env.VISIBILITY_KV;
   if (!db || !r2 || !kv) throw new Error("page render: DB, R2_STORAGE and VISIBILITY_KV are required");
 
-  const { kind, key } = message;
+  const { kind } = message;
+  let key = message.key;
   const entityId = canonicalEntityId(kind, message.id);
 
   const tracker = await db
@@ -226,8 +235,17 @@ export async function processPageRender(
     return finish({ action: "deleted", kind, id: entityId, key, reason });
   };
 
-  const route = await lookup(key);
+  let route = await lookup(key);
   if (!route) throw new Error("page render: route data unavailable");
+  // Doorbell for a video whose slug is its YouTube id: the internal id is an alias of that key.
+  if (message.source === "doorbell" && kind === "video" && route.resolution?.type === "redirect" && route.resolution.reason === "alias") {
+    const slugKey = routeKeyFromPath(route.resolution.targetPath.split(/[?#]/, 1)[0]);
+    if (slugKey) {
+      key = slugKey;
+      route = await lookup(key);
+      if (!route) throw new Error("page render: route data unavailable");
+    }
+  }
   const resolution = route.resolution;
   if (
     !resolution ||
@@ -252,7 +270,8 @@ export async function processPageRender(
   });
   await r2.put(r2HtmlKey(key), html, {
     httpMetadata: { contentType: "text/html; charset=utf-8" },
-    customMetadata: { generation: route.generation },
+    // Identity for the gateway (r2Html.ts); generation is diagnostic there.
+    customMetadata: { kind, id: entityId, key, generation: route.generation },
   });
   return finish({ action: "rendered", kind, id: entityId, key, generation: route.generation });
 }
