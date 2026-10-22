@@ -32,18 +32,51 @@ export function BannedNotice(): React.ReactElement {
   );
 }
 
-/** UX-AUTH-005: a failed session read must not look like logout or a role change. */
-export function AuthUnavailable(): React.ReactElement {
+/** Same text/markup/actions as CURRENT app/(auth)/error.tsx. */
+export function AuthErrorView({
+  error,
+  reset,
+}: {
+  error?: (Error & { digest?: string }) | null;
+  reset: () => void;
+}): React.ReactElement {
+  const shortTrace = (error?.digest ?? "unknown").slice(0, 12);
   return (
-    <div className="fn-public-container fn-page fn-guard-shell">
-      <div className="fn-empty fn-guard-card" role="status">
-        <h1 className="fn-guard-title">認証状態を確認できません</h1>
-        <p className="fn-empty-message">
-          一時的に認証状態を確認できません。時間をおいて再読み込みしてください。
-        </p>
-      </div>
+    <div className="fn-public-container fn-page">
+      <header className="fn-page-head">
+        <span className="fn-eyebrow">error</span>
+        <h1 className="fn-display fn-page-title">画面の表示中に問題が発生しました</h1>
+      </header>
+      <section className="fn-entry-status fn-entry-status--warn" role="alert">
+        <div>
+          <p className="fn-jp fn-entry-status-lead">
+            表示前の取得に失敗したか、保存後の画面描画で失敗した可能性があります。
+            再送しても安全な操作もあります。まず再読み込みしてください。
+          </p>
+          <p className="fn-mono fn-text-muted-sm">trace: {shortTrace}</p>
+          <div className="fn-panel-actions" style={{ marginTop: 12 }}>
+            <button type="button" className="fn-btn fn-btn-primary" onClick={reset}>
+              再読み込み
+            </button>
+            <a href="/entry" className="fn-btn">
+              ログイン画面
+            </a>
+            <a href="/onboarding" className="fn-btn">
+              オンボーディング
+            </a>
+          </div>
+        </div>
+      </section>
     </div>
   );
+}
+
+/**
+ * UX-AUTH-005: a failed session read must not look like logout or a role change.
+ * CURRENT surfaces auth failures through the same (auth)/error.tsx screen.
+ */
+export function AuthUnavailable(): React.ReactElement {
+  return <AuthErrorView reset={() => window.location.reload()} />;
 }
 
 export function SessionLoading(): React.ReactElement {

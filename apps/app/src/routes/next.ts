@@ -33,6 +33,13 @@ export function entryLoginHref(next?: string): string {
   return `/entry?next=${encodeURIComponent(sanitizeNextPath(next, "/dashboard"))}`;
 }
 
+/** CURRENT settings/page.tsx:72-79: guard next = sanitized ?next unless it is settings itself. */
+export function settingsGateNext(rawNextParam: string | null | undefined): string {
+  const rawNext = rawNextParam?.trim();
+  const next = rawNext && rawNext !== "/dashboard/settings" ? sanitizeNextPath(rawNext, "/dashboard") : null;
+  return next ?? "/dashboard/settings";
+}
+
 /** CURRENT dashboard/youtube-playlists/page.tsx: admin -> admin SPA, everyone else -> /dashboard. */
 export function youtubePlaylistsTarget(role: "user" | "admin" | "moderator"): string {
   return role === "admin" ? "/admin/youtube-sync/playlists" : "/dashboard";

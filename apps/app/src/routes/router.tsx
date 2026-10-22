@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Route, Routes } from "react-router-dom";
 import type { PersonalApi } from "../api/session.js";
+import { AuthErrorView } from "./guard.js";
 import { Dashboard } from "./dashboard/Dashboard.js";
 import { Library } from "./dashboard/Library.js";
 import { Settings } from "./dashboard/Settings.js";
@@ -16,21 +17,16 @@ export const PERSONAL_READ_PATHS = [
   "/onboarding",
 ] as const;
 
-export class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError(): { failed: boolean } {
-    return { failed: true };
+/** CURRENT app/(auth)/error.tsx equivalent: `reset` clears the failure and re-renders. */
+export class RouteErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error };
   }
   render(): React.ReactNode {
-    if (!this.state.failed) return this.props.children;
-    return (
-      <div className="fn-public-container fn-page fn-guard-shell">
-        <div className="fn-empty fn-guard-card" role="alert">
-          <h1 className="fn-guard-title">表示中にエラーが発生しました</h1>
-          <p className="fn-empty-message">ページを再読み込みしてください。</p>
-        </div>
-      </div>
-    );
+    const { error } = this.state;
+    if (!error) return this.props.children;
+    return <AuthErrorView error={error} reset={() => this.setState({ error: null })} />;
   }
 }
 

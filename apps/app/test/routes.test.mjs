@@ -31,7 +31,7 @@ test("route table covers the 5 MIG-0701 paths", () => {
 test("gate: loading / unavailable / anonymous / banned / ok (CURRENT texts)", () => {
   assert.match(html({ status: "loading" }), /読み込み中/);
   assert.doesNotMatch(html({ status: "loading" }), /PAGE/);
-  assert.match(html({ status: "unavailable" }), /認証状態を確認できません/);
+  assert.match(html({ status: "unavailable" }), /画面の表示中に問題が発生しました/);
   assert.doesNotMatch(html({ status: "unavailable" }), /ログインが必要です/);
   const anon = html({ status: "anonymous" }, "/dashboard/library");
   assert.match(anon, /ログインが必要です/);
@@ -101,7 +101,7 @@ test("direct deep links render the guard per session (reload = fresh mount)", as
 test("session read failure shows unavailable, never logout (unwired default included)", async () => {
   for (const api of [unwiredPersonalApi, { getSession: async () => { throw new Error("boom"); } }]) {
     const m = await mount("/dashboard", api);
-    assert.match(m.container.textContent, /認証状態を確認できません/);
+    assert.match(m.container.textContent, /画面の表示中に問題が発生しました/);
     assert.doesNotMatch(m.container.textContent, /ログインが必要です/);
     await act(async () => m.root.unmount());
   }
@@ -112,6 +112,42 @@ test("youtube-playlists redirects a non-admin to /dashboard inside the SPA", asy
   await act(async () => { await Promise.resolve(); });
   assert.match(m.container.textContent, /ダッシュボード/);
   await act(async () => m.root.unmount());
+});
+
+test("settings guard next mirrors CURRENT (?next sanitize, self-reference ignored)", async () => {
+  const cases = [
+    ["/dashboard/settings", "/dashboard/settings"],
+    ["/dashboard/settings?next=%2F%2Fevil", "/dashboard"],
+    ["/dashboard/settings?next=https%3A%2F%2Fevil.com", "/dashboard"],
+    ["/dashboard/settings?next=%2Fdashboard%2Fsettings", "/dashboard/settings"],
+    ["/dashboard/settings?next=%2Fentry%2Fslotted%3Fslot%3Dabc", "/entry/slotted?slot=abc"],
+    ["/dashboard/settings?next=%20%20", "/dashboard/settings"],
+  ];
+  for (const [url, gateNext] of cases) {
+    const m = await mount(url, apiOf({ status: "anonymous" }));
+    assert.ok(m.container.innerHTML.includes(next.entryLoginHref(gateNext)), url);
+    await act(async () => m.root.unmount());
+  }
+});
+
+test("error boundary matches CURRENT (auth)/error.tsx and reset re-renders", async () => {
+  const { RouteErrorBoundary } = await import("../.test-dist/routes/router.js");
+  let fail = true;
+  const Boom = () => { if (fail) throw Object.assign(new Error("x"), { digest: "abcdef0123456789" }); return "OK"; };
+  const origError = console.error;
+  console.error = () => {};
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => root.render(React.createElement(RouteErrorBoundary, null, React.createElement(Boom))));
+  console.error = origError;
+  const text = container.textContent;
+  for (const s of ["画面の表示中に問題が発生しました", "再送しても安全な操作もあります。まず再読み込みしてください。", "trace: abcdef012345", "再読み込み", "ログイン画面", "オンボーディング"]) {
+    assert.ok(text.includes(s), s);
+  }
+  fail = false;
+  await act(async () => container.querySelector("button").click());
+  assert.equal(container.textContent, "OK");
+  await act(async () => root.unmount());
 });
 
 test("onboarding guard next is the sanitized self href", async () => {
