@@ -206,6 +206,13 @@ test("Cookie extraction and parsing", async (t) => {
       // Empty and repeated chunks are skipped by Auth.js but still matched by name.
       [Array.from({ length: 3500 }, (_, i) => `${name}.${i}=`).join("; "), null],
       [Array.from({ length: 3500 }, () => `${name}=${token}`).join("; "), null],
+      // Prefixed segments without `=` are skipped in one jump, not rescanned per match.
+      [`${Array.from({ length: 4500 }, () => name).join("; ")}; a=b`, null],
+      // The prefix inside values, and after another name, is not a session cookie name.
+      [Array.from({ length: 4500 }, (_, i) => `c${i}=${name}`).join("; "), null],
+      [Array.from({ length: 4500 }, () => `x${name}=${token}`).join("; "), null],
+      // Long space and tab runs around the name and value are trimmed like Auth.js.
+      [`${" \t".repeat(32 * 1024)}${name}${" ".repeat(16 * 1024)}=${" ".repeat(16 * 1024)}${token}\t`, token],
     ];
     for (const [header, expected] of cases) {
       assert.ok(header.length >= 64 * 1024, String(header.length));
