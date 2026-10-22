@@ -1,0 +1,21 @@
+---
+/**
+ * `/rules` (MIG-0501 / Recipe R-PAGE / Runtime S0). The terms are read once at build time; a source
+ * failure fails the build. The consent form (SA-075) and the `?error=` notice are not emitted: they need
+ * the MIG-0605 API, so `/rules` must not be cut over before that (Work Order STOP).
+ */
+import { RulesView } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { buildPageHead } from "../lib/pageHead.ts";
+import { loadRulesForBuild, rulesSourceFromEnv } from "../lib/rulesLoader.ts";
+
+const head = buildPageHead({
+  path: "/rules",
+  title: "利用規約",
+  description: "FlameNodeの投稿・閲覧・イベント参加に関する利用規約です。",
+});
+const rules = await loadRulesForBuild(rulesSourceFromEnv());
+---
+<PublicLayout head={head} currentPath="/rules">
+  <RulesView versionLabel={rules.versionLabel} updatedLabel={rules.updatedLabel} blocks={rules.blocks} />
+</PublicLayout>
