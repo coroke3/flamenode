@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
+  STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS,
   STALE_ARTIFACT_REFRESH_MAX_TARGETS,
   STALE_ARTIFACT_REFRESH_REASON,
   ensureStaleArtifactRefresh,
@@ -103,14 +104,46 @@ test("1 runのdetail enqueueは MAX_TARGETS 件までで、古い順", async () 
 
 test("global artifactは tracking 行が新しくてもR2最終PUTが古ければenqueueする", async () => {
   const f = createFixture();
-  f.track("rules", "global", "rules/current.json", FRESH);
   f.uploaded.set("rules/current.json", OLD);
-  f.track("list_recent", "global", "list/recent.json", FRESH);
   f.uploaded.set("list/recent.json", FRESH);
-  f.track("top", "global", "top.json", FRESH);
-  // R2 object 欠落は enqueue せず（別の欠落修復経路の責務）
+  f.uploaded.set("recommend.json", OLD);
+  // top.json は R2 object 欠落 → enqueue せず（別の欠落修復経路の責務）
   const enqueued = await ensureStaleArtifactRefresh(f.env, { now: NOW });
-  assert.equal(enqueued, 1);
-  assert.deepEqual(f.queue().map((row) => `${row.target_type}:${row.target_id}:${row.priority}`), ["rules:global:low"]);
-  assert.ok(f.heads.length <= 32);
+  assert.equal(enqueued, 2);
+  assert.deepEqual(
+    f.queue().map((row) => `${row.target_type}:${row.target_id}:${row.priority}`),
+    ["recommend:global:low", "rules:global:low"],
+  );
+  assert.equal(f.heads.length, Object.keys(STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS).length);
+});
+
+test("rules は 32 件を超える古い search_index 行があっても enqueue される", async () => {
+  const f = createFixture();
+  for (let i = 0; i < 40; i += 1) {
+    f.track("search_index", "global", `search/postings/${i}.json`, OLD - 1000 - i);
+  }
+  f.track("rules", "global", "rules/current.json", FRESH);
+  f.uploaded.set("rules/current.json", NOW - 91 * 24 * 3600);
+  f.uploaded.set("search-index-lite.json", FRESH);
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 1);
+  assert.deepEqual(f.queue().map((row) => row.target_type), ["rules"]);
+});
+
+test("failed / active の target は sweep から除外する", async () => {
+  const f = createFixture();
+  f.track("video", "failedv", "videos/failedv.json", OLD);
+  f.track("video", "okv", "videos/okv.json", OLD);
+  f.uploaded.set("rules/current.json", OLD);
+  f.uploaded.set("top.json", OLD);
+  f.sqlite
+    .prepare("INSERT INTO static_rebuild_queue VALUES ('q1','video','failedv','x','normal','failed',3,1,1)")
+    .run();
+  f.sqlite
+    .prepare("INSERT INTO static_rebuild_queue VALUES ('q2','rules','global','x','normal','failed',3,1,1)")
+    .run();
+  assert.equal(await ensureStaleArtifactRefresh(f.env, { now: NOW }), 2);
+  assert.deepEqual(
+    f.queue().filter((row) => row.reason === STALE_ARTIFACT_REFRESH_REASON).map((row) => `${row.target_type}:${row.target_id}`),
+    ["top:global", "video:okv"],
+  );
 });

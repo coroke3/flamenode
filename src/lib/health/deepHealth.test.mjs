@@ -661,3 +661,8 @@ test("classifyArtifactSloError maps tracked detail and missing artifacts; unknow
     console.error = originalError;
   }
 });
+
+test("classifyArtifactSloError は未知のkeyを返さない", () => {
+  const unknown = classifyArtifactSloError(new Error("secret-token-xyz: generated_at is stale"));
+  assert.deepEqual([unknown.reason, unknown.key], ["artifact_stale", "unknown"]);
+});

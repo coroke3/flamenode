@@ -7,6 +7,7 @@ import process from "node:process";
 import {
   STATIC_ARTIFACT_REFRESH_AFTER_SEC,
 } from "../workers/json-generator/r2Dedup.ts";
+import { STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS } from "../workers/json-generator/staleArtifactRefresh.ts";
 import {
   ARTIFACT_SLO_MAX_AGE_SEC,
   ARTIFACT_SLO_PROBES,
@@ -62,6 +63,20 @@ for (const [name, maxAge] of Object.entries(ARTIFACT_SLO_MAX_AGE_SEC)) {
     `${name}: SLO max age must leave >= 14 days after STATIC_ARTIFACT_REFRESH_AFTER_SEC`,
   );
 }
+
+// sweep が HEAD する global key は SLO probe と一致させる（visibility manifest だけ除外）。
+for (const probe of ARTIFACT_SLO_PROBES) {
+  if (probe.key === "visibility/blocked-entities.v1.json") continue;
+  assert.ok(
+    STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS[probe.key],
+    `${probe.key}: needs a rebuild target in STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS`,
+  );
+}
+assert.equal(
+  Object.keys(STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS).length,
+  ARTIFACT_SLO_PROBES.length - 1,
+  "STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS must not contain keys outside the SLO probes",
+);
 
 console.log(
   `[check-artifact-slo] OK (${ARTIFACT_SLO_PROBES.length} global artifact probes)`,

@@ -49,6 +49,12 @@ export class DeepHealthCheckError extends Error {
   }
 }
 
+const DEEP_HEALTH_REASON_KEYS: ReadonlySet<string> = new Set([
+  ...ARTIFACT_SLO_PROBES.map((probe) => probe.key),
+  "static_artifacts:video",
+  "static_artifacts:event",
+]);
+
 /**
  * artifactSlo.ts の assertion message から固定コードと key だけを取り出す。
  * 注意: message は定数 key（または "<video|event> detail"）で始まること。可変値（本文・例外詳細）を
@@ -60,9 +66,11 @@ export function classifyArtifactSloError(error: unknown): DeepHealthCheckError {
   const missing = /^static artifact (?:missing|too large|malformed): (.+)$/.exec(
     message,
   );
-  const key = detail
+  const rawKey = detail
     ? `static_artifacts:${detail[1]}`
-    : (missing?.[1] ?? /^([^:\s]+):/.exec(message)?.[1] ?? "unknown");
+    : (missing?.[1] ?? /^([^:\s]+):/.exec(message)?.[1] ?? "");
+  // 既知の probe key と tracked 詳細 key だけを返し、それ以外は "unknown"（漏洩防止）。
+  const key = DEEP_HEALTH_REASON_KEYS.has(rawKey) ? rawKey : "unknown";
   const reason: DeepHealthFailureReason =
     /^static artifact missing:/.test(message)
       ? "artifact_missing"
