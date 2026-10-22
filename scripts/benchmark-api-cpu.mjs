@@ -464,6 +464,12 @@ export default {
       for (let i = 0; i < n; i += 1) await env.DB.prepare("SELECT 1 AS x").first();
       return new Response("ok");
     }
+    if (url.pathname === "/__bench/cache-delete") {
+      // Calibration only: n sequential Cache API deletes (what SA-007/008 do 8 times after commit).
+      const n = Number(url.searchParams.get("n") ?? 0);
+      for (let i = 0; i < n; i += 1) await caches.default.delete(new Request(url.origin + "/__bench/k" + i));
+      return new Response("ok");
+    }
     if (url.pathname === "/__bench/cache-clear") {
       // about-stats caches under a fixed key; clear it so every sample takes the R2-miss path.
       await caches.default.delete(new Request(url.origin + "/api/public/about-stats"));
@@ -554,7 +560,11 @@ async function createWranglerTarget(plan, opts) {
   let log = "";
   child.stdout.on("data", (d) => { log += d; });
   child.stderr.on("data", (d) => { log += d; });
-  const cleanup = () => { killTree(child); fs.rmSync(workDir, { recursive: true, force: true }); };
+  const cleanup = async () => {
+    killTree(child);
+    await sleep(1500); // let workerd release its file handles (Windows EPERM otherwise)
+    try { fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 300 }); } catch (e) { console.error(`warning: could not remove ${workDir}: ${e.code}`); }
+  };
 
   const ping = async () => {
     try { const r = await fetch(`${base}/__bench/ping`); return r.ok ? r.headers.get("x-bench-build") : null; } catch { return null; }
@@ -564,7 +574,7 @@ async function createWranglerTarget(plan, opts) {
     while (Date.now() - t0 < ms) { if ((await ping()) === want) return; await sleep(150); }
     throw new Error(`wrangler dev did not serve build ${want} within ${ms}ms. Log tail:\n${log.slice(-1500)}`);
   };
-  try { await waitBuild("b0"); } catch (e) { cleanup(); throw e; }
+  try { await waitBuild("b0"); } catch (e) { await cleanup(); throw e; }
 
   const post = (p, body, method = "POST") => fetch(`${base}${p}`, { method, body });
   const exec = async (list) => {
@@ -663,6 +673,11 @@ async function createWranglerTarget(plan, opts) {
     calibration.push({ route: "burn", iters, clientWallMs: Math.round(performance.now() - t0), profilerBusyMs: Number(r.cpuMs.toFixed(2)) });
   }
   // Local D1 simulator cost per trivial read (production D1 is a remote call: its wait is not CPU).
+  for (const n of [1, 8]) {
+    const runs = [];
+    for (let k = 0; k < 5; k += 1) runs.push((await run({ method: "GET", path: `/__bench/cache-delete?n=${n}` })).cpuMs);
+    calibration.push({ route: "cache-api-deletes", n, profilerBusyMsMax: Number(Math.max(...runs).toFixed(2)), profilerBusyMsMin: Number(Math.min(...runs).toFixed(2)) });
+  }
   for (const n of [1, 17]) {
     const runs = [];
     for (let k = 0; k < 5; k += 1) runs.push((await run({ method: "GET", path: `/__bench/d1?n=${n}` })).cpuMs);
@@ -691,7 +706,7 @@ async function createWranglerTarget(plan, opts) {
       await connect();
     },
     toolVersions: () => spawnSync(process.execPath, [wranglerBin, "--version"], { encoding: "utf8" }).stdout.trim(),
-    close: async () => { try { ws?.terminate(); } catch { /* ignore */ } cleanup(); },
+    close: async () => { try { ws?.terminate(); } catch { /* ignore */ } await cleanup(); },
   };
 }
 
@@ -804,7 +819,7 @@ export async function main(argv) {
       if (r.id === "BASELINE") r.agg.verdict = "NOISE_FLOOR";
     }
   } finally {
-    await target.close();
+    try { await target.close(); } catch (e) { console.error(`warning: target close failed: ${e.message}`); }
   }
 
   const meta = {
