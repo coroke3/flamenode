@@ -38,7 +38,7 @@ const schema = fs.readFileSync(
 assert.match(schema, /publicVisibilityFences/);
 
 const manifestCore = fs.readFileSync(
-  path.join(root, "src/lib/publicData/publicVisibilityManifestCore.ts"),
+  path.join(root, "packages/server-core/src/visibility/manifestCore.ts"),
   "utf8",
 );
 assert.match(manifestCore, /visibility\/blocked-entities\.v1\.json/);
@@ -51,7 +51,7 @@ const manifest = fs.readFileSync(
 assert.match(manifest, /resolvePublicVisibilityGuardModeFromEnv/);
 
 const manifestR2 = fs.readFileSync(
-  path.join(root, "src/lib/publicData/publicVisibilityManifestR2.ts"),
+  path.join(root, "packages/server-core/src/visibility/manifestR2.ts"),
   "utf8",
 );
 assert.match(manifestR2, /MANIFEST_PUT_MAX_RETRIES = 3/);
