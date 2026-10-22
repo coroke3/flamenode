@@ -4,11 +4,13 @@ import type {
   AdminNotificationsResponse,
   AdminSecurityResponse,
   AdminTopResponse,
+  AdminWorkersResponse,
   AdminYoutubePlaylistsResponse,
   AdminYoutubeQuotaResponse,
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
+import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import { resolveOperationMode } from "@flamenode/domain/admin";
 import type { AppEnv } from "../../env.ts";
 
@@ -205,6 +207,22 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/workers (workers/page.tsx; src/lib/admin/workerMonitoring.ts loadWorkerMonitoring) ----
+// D1: session + 2 statements (CURRENT 7); KV: 4 gets of the last queue-wake failure (null on any KV failure, as CURRENT).
+// No Cloudflare / external API is called: the page reads only internal D1 records.
+adminOpsRoutes.get("/workers", async (c) => {
+  let snapshot: AdminWorkersResponse["snapshot"] = null;
+  let error: AdminWorkersResponse["error"] = null;
+  try {
+    snapshot = (await loadWorkerMonitoring(c.env.DB, { kv: c.env.KV })) as AdminWorkersResponse["snapshot"];
+  } catch {
+    console.error("[adminRead] worker monitoring failed");
+    error = "query_failed";
+  }
+  const body: AdminWorkersResponse = { snapshot, error };
   return c.json(body);
 });
 

@@ -409,7 +409,71 @@ export const AdminSecurityResponseSchema = z.object({
   ),
   error: z.literal("query_failed").nullable(),
 });
-export type AdminSecurityResponse = z.infer<typeof AdminSecurityResponseSchema>;
+const MonitorLevelSchema = z.enum(["ok", "warn", "critical", "unknown", "running"]);
+const QueueSnapshotSchema = z.object({
+  pending: z.number(),
+  processing: z.number(),
+  failed: z.number(),
+  deadLetter: z.number(),
+  stuck: z.number(),
+  oldestPendingAt: z.number().nullable(),
+});
+export const AdminWorkersResponseSchema = z.object({
+  snapshot: z
+    .object({
+      generatedAt: z.number(),
+      operationMode: z.string(),
+      overallLevel: z.enum(["ok", "warn", "critical", "unknown"]),
+      overallMessage: z.string(),
+      jobs: z.array(
+        z.object({
+          jobName: z.string(),
+          label: z.string(),
+          cadenceSeconds: z.number(),
+          detailHref: z.string(),
+          level: MonitorLevelSchema,
+          message: z.string(),
+          leaseExpiresAt: z.number().nullable(),
+          lastStartedAt: z.number().nullable(),
+          lastSucceededAt: z.number().nullable(),
+          lastFailedAt: z.number().nullable(),
+          lastErrorCode: z.string().nullable(),
+          nextExpectedAt: z.number().nullable(),
+        }),
+      ),
+      notifications: QueueSnapshotSchema,
+      staticRebuilds: QueueSnapshotSchema,
+      youtube: z.object({
+        eligible: z.number(),
+        pending: z.number(),
+        stale: z.number(),
+        failed: z.number(),
+        oldestPendingAt: z.number().nullable(),
+      }),
+      scores: z.object({ eligible: z.number(), stale: z.number(), oldestUpdatedAt: z.number().nullable() }),
+      artifacts: z.array(z.object({ targetType: z.string(), generatedAt: z.number().nullable() })),
+      pipelines: z.array(
+        z.object({
+          id: z.enum(["notifications", "static", "youtube", "scores"]),
+          label: z.string(),
+          level: MonitorLevelSchema,
+          backlog: z.number(),
+          capacityPerDay: z.number(),
+          estimatedDrainMinutes: z.number(),
+          note: z.string(),
+          detailHref: z.string(),
+        }),
+      ),
+      // null when KV is unbound or a read failed
+      queueWakeFailures: z
+        .record(z.object({ at: z.number(), reason: z.string() }).nullable())
+        .nullable(),
+    })
+    .nullable(),
+  error: z.literal("query_failed").nullable(),
+});
+export type AdminWorkersResponse = z.infer<typeof AdminWorkersResponseSchema>;
+export type AdminSecurityResponse =z.infer<typeof AdminSecurityResponseSchema>;
 export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;

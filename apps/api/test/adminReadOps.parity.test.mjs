@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/permissions/simulator?event_id=ev1&x_user_id=sx",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/permissions/simulator?event_id=ev1&x_user_id=sx",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -978,6 +978,58 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(byId.banned_user_videos.count, 1);
     assert.match(byId.banned_user_videos.note, /検査自体の実行に失敗/);
     assert.equal(byId.access_token_not_null.count, 1);
+    assert.doesNotMatch(failed.text, /secret-internal/);
+  });
+
+  test("T02 workers monitoring equals CURRENT loadWorkerMonitoring (7 D1 statements -> 2, KV failures)", async () => {
+    const { loadWorkerMonitoring } = await import("../../../src/lib/admin/workerMonitoring.ts");
+    const lease = (job, o) => ins("worker_leases", { job_name: job, lease_token: o.token ?? "", lease_expires_at: o.expires ?? 0, last_started_at: o.started ?? null, last_succeeded_at: o.ok ?? null, last_failed_at: o.failed ?? null, last_error_code: o.code ?? null });
+    lease("fast-jobs", { ok: nowS - 100, started: nowS - 110 });
+    lease("content-jobs", { ok: nowS - 20000 });
+    lease("sync-jobs", { ok: nowS - 8000, failed: nowS - 50, code: "quota" });
+    lease("fast-jobs:slot-deadline-reminders", { token: "tok", expires: nowS + 600, started: nowS - 5 });
+    ins("static_rebuild_queue", { id: "q1", target_type: "top", target_id: "global", status: "pending", created_at: nowS - 400 });
+    ins("static_rebuild_queue", { id: "q2", target_type: "top", target_id: "x", status: "processing", lease_expires_at: nowS - 10, created_at: nowS - 300 });
+    ins("static_rebuild_queue", { id: "q3", target_type: "top", target_id: "y", status: "dead_letter", created_at: nowS - 200 });
+    ins("static_rebuild_queue", { id: "q4", target_type: "top", target_id: "z", status: "done", created_at: nowS - 200 });
+    for (const [i, type] of ["top", "list_recent", "search_index"].entries()) {
+      ins("static_artifacts", { id: `art${i}`, target_type: type, target_id: "global", object_key: `k${i}`, content_hash: "h", schema_version: 1, generated_at: T0 + i });
+    }
+    ins("static_artifacts", { id: "art-old", target_type: "top", target_id: "global", object_key: "k-old", content_hash: "h", schema_version: 1, generated_at: T0 - 5 });
+    ins("static_artifacts", { id: "art-del", target_type: "events_index", target_id: "global", object_key: "k-del", content_hash: "h", schema_version: 1, generated_at: T0, deleted_at: T0 });
+    sqlite.exec("UPDATE videos SET score_updated_at = " + nowS + " WHERE id IN ('va1','va2')");
+
+    const kvStore = { "queue_wake:last_failure:notification_available": { at: nowS - 5, reason: "  queue down " }, "queue_wake:last_failure:youtube_sync_pending": { at: "bad", reason: "x" } };
+    const fakeKv = { async get(key) { return kvStore[key] ?? null; } };
+    const run = async (kv) => {
+      const d1 = createD1(sqlite);
+      const response = await app.request("/api/admin-read/ops/workers", { headers: cookie(ADMIN) }, { DB: d1, KV: kv });
+      return { body: await response.json(), stats: d1.stats, status: response.status };
+    };
+    for (const kv of [fakeKv, undefined, { async get() { throw new Error("kv down"); } }]) {
+      const r = await run(kv);
+      assert.equal(r.status, 200);
+      assert.equal(r.stats.statements, 3, "session + 2 statements");
+      assert.equal(r.stats.writes, 0);
+      assert.equal(r.body.error, null);
+      const ref = await loadWorkerMonitoring(createD1(sqlite), { now: r.body.snapshot.generatedAt, kv });
+      assert.deepEqual(r.body.snapshot, canon(ref));
+    }
+    const snap = (await run(fakeKv)).body.snapshot;
+    assert.equal(snap.queueWakeFailures.notification_available.reason, "queue down");
+    assert.equal(snap.queueWakeFailures.youtube_sync_pending, null);
+    assert.equal(snap.overallLevel, "critical");
+    assert.deepEqual(snap.artifacts.map((a) => a.targetType), ["list_recent", "search_index", "top"]);
+
+    const d1 = createD1(sqlite);
+    const prepare = d1.prepare;
+    d1.prepare = (text) => {
+      if (/FROM worker_leases/.test(text)) throw new Error("secret-internal");
+      return prepare(text);
+    };
+    const failed = await call("/api/admin-read/ops/workers", ADMIN, { d1 });
+    assert.equal(failed.status, 200);
+    assert.deepEqual(failed.body, { snapshot: null, error: "query_failed" });
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
