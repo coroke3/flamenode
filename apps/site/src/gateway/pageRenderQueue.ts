@@ -35,10 +35,11 @@ import {
   isPublicVideoDirect,
   normalizePublicEventVisibility,
 } from "../../../../src/lib/publicData/visibility.ts";
-import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
+import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN, PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
 import { r2HtmlKey, type RebuildRequest } from "./r2Html.ts";
 import {
   PAGE_BODY_FORMAT,
+  parseStylesheets,
   renderPublicPage,
   type PageRenderEntityKind,
   type PublicPageRow,
@@ -75,8 +76,8 @@ export interface PageRenderEnv {
   DB?: D1DatabaseLike;
   R2_STORAGE?: PageRenderR2Bucket;
   VISIBILITY_KV?: { get: (key: string) => Promise<string | null> };
-  /** Site origin for canonical / og:url, e.g. https://example.org. Required. */
-  PUBLIC_SITE_URL?: string;
+  /** Comma-separated /_astro/*.css paths of the build (renderPublicPage.ts parseStylesheets). Required to render. */
+  PUBLIC_PAGE_STYLESHEETS?: string;
 }
 
 export type PageRenderDoorbell = Readonly<{ type: "render-page"; kind: PageRenderEntityKind; id: string }>;
@@ -143,12 +144,15 @@ export function requestPageRenderStatement(
 }
 
 const ENTITY_SQL: Record<PageRenderEntityKind, string> = {
+  // Only what the build's page reads (publicPages.ts videoScreenData / videoMetadata).
+  // creator_has_public_profile: CURRENT's link condition, a primary-key lookup in the same statement.
   video: `SELECT id, title, creator_display_name, creator_x_user_id, creator_icon_url, creator_youtube_channel_url,
-                 youtube_video_id, music, credit, music_reference_url, intro_comment, highlights,
-                 production_story, closing_comment, visibility_status
+                 youtube_video_id, scheduled_time, music, credit, intro_comment, highlights, visibility_status,
+                 EXISTS (SELECT 1 FROM x_users u WHERE lower(u.id) = lower(videos.creator_x_user_id)
+                           AND u.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})) AS creator_has_public_profile
           FROM videos WHERE id = ? LIMIT 1`,
   // x_users ids are compared lower-cased, as CURRENT fences and routes do (x_users_lower_id_idx).
-  user: `SELECT id, x_name, icon_url, profile_text, portfolio_contact, youtube_channel_url, approval_status
+  user: `SELECT id, x_name, icon_url, profile_text, youtube_channel_url, approval_status
          FROM x_users WHERE lower(id) = ? LIMIT 1`,
   event: `SELECT id, title, explanation, icon_url, img_url, visibility_status,
                  start_time, end_time, entry_start_time, entry_end_time
@@ -187,8 +191,7 @@ export async function processPageRender(
   const db = env.DB;
   const r2 = env.R2_STORAGE;
   const kv = env.VISIBILITY_KV;
-  const origin = env.PUBLIC_SITE_URL?.trim();
-  if (!db || !r2 || !kv || !origin) throw new Error("page render: DB, R2_STORAGE, VISIBILITY_KV and PUBLIC_SITE_URL are required");
+  if (!db || !r2 || !kv) throw new Error("page render: DB, R2_STORAGE and VISIBILITY_KV are required");
 
   const { kind, key } = message;
   const entityId = canonicalEntityId(kind, message.id);
@@ -239,12 +242,12 @@ export async function processPageRender(
 
   const row = await db.prepare(ENTITY_SQL[kind]).bind(entityId).first<Record<string, unknown>>();
   if (!isPublicRow(kind, row)) return remove("not_public");
-  // No page body for this kind (no Island loader yet): never publish an empty shell.
+  // A kind whose render does not fit the budget is left to the build (PAGE_BODY_FORMAT).
   if (PAGE_BODY_FORMAT[kind] === "excluded") return finish({ action: "excluded_kind", kind, id: entityId });
 
+  // Throws (retry) while the build's stylesheet is not configured: an unstyled page is never written.
   const html = await renderPublicPage(kind, row as PublicPageRow, {
-    origin,
-    canonicalPath: resolution.canonicalPath,
+    stylesheets: parseStylesheets(env.PUBLIC_PAGE_STYLESHEETS),
     nowSeconds: Math.floor(now / 1000),
   });
   await r2.put(r2HtmlKey(key), html, {

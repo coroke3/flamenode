@@ -8,9 +8,14 @@
  *     apps/site/src/gateway/renderPublicPage.measure.mjs [--runs 300] [--cold]
  *
  * --cold measures only the first render in a fresh process (React + UI module load included).
- * CPU = process.cpuUsage() around one renderPublicPageHtml call (user + system).
+ * --snapshot measures the consumer path (D1 row of max-size text, renderPublicPage): the build-equal render
+ * with empty lists. Without it: the upper-bound screen props of MIG-0409 U05 (a).
+ * CPU = process.cpuUsage() around one render call (user + system).
  */
-import { renderPublicPageHtml } from "./renderPublicPage.ts";
+import { pathToFileURL } from "node:url";
+import { performance } from "node:perf_hooks";
+import { renderPublicPage, renderPublicPageHtml } from "./renderPublicPage.ts";
+import { buildPageMetadata } from "../lib/pageMetadata.ts";
 
 // Upper bounds (CURRENT): video members MAX_VIDEO_MEMBERS = 100 (src/lib/video/atomicLimits.ts),
 // chapters 128 (MAX_LEGACY_VIDEO_CHAPTERS_PER_VIDEO), related RELATED_MAX_LIMIT = 30;
@@ -68,37 +73,60 @@ export function maxInputs() {
   };
 }
 
+const STYLESHEETS = ["/_astro/_id_.measure.css"];
 const PATHS = { video: "/vid-max", user: "/user/creator-max", event: "/event/ev-max" };
 const cpuMs = (start) => { const u = process.cpuUsage(start); return (u.user + u.system) / 1000; };
 
-export async function measure({ runs = 300, cold = false } = {}) {
+// --snapshot: what the consumer renders today, a D1 row of max-size text through
+// renderPublicPage (the build's snapshot fields; lists are empty in the build too).
+function maxRows() {
+  const title = long("長", 1000);
+  const body = long("説", 10_000);
+  return {
+    video: { id: "vid-max", title, youtube_video_id: "yt-max", creator_display_name: long("名", 200), creator_x_user_id: "creator_x", creator_icon_url: img(0), creator_has_public_profile: 1, scheduled_time: 1792238400, music: title, credit: title, intro_comment: body, highlights: body },
+    user: { id: "creator-max", x_name: long("名", 200), icon_url: img(0), profile_text: body, youtube_channel_url: "https://www.youtube.com/@c" },
+    event: { id: "ev-max", title, explanation: body, icon_url: img(1), img_url: img(0), visibility_status: "public", start_time: 1_800_000_100, end_time: 1_800_000_200 },
+  };
+}
+
+export async function measure({ runs = 300, cold = false, snapshot = false } = {}) {
   const inputs = maxInputs();
+  const rows = maxRows();
+  const render = (kind) => snapshot
+    ? renderPublicPage(kind, rows[kind], { stylesheets: STYLESHEETS, nowSeconds: 1_800_000_000 })
+    : renderPublicPageHtml({ input: inputs[kind], meta: buildPageMetadata({ title: "t", description: "d", path: PATHS[kind] }) }, STYLESHEETS);
   const out = {};
   for (const kind of cold ? ["video"] : ["video", "user", "event"]) {
-    const opts = { origin: "https://site.example", canonicalPath: PATHS[kind] };
     if (cold) {
       const start = process.cpuUsage();
-      const html = await renderPublicPageHtml(inputs[kind], opts);
-      out.cold = { kind, cpuMs: cpuMs(start), bytes: Buffer.byteLength(html) };
+      const wall = performance.now();
+      const html = await render(kind);
+      out.cold = { kind, cpuMs: cpuMs(start), wallMs: performance.now() - wall, bytes: Buffer.byteLength(html) };
       continue;
     }
-    const html = await renderPublicPageHtml(inputs[kind], opts); // warm (module load excluded)
+    const html = await render(kind); // warm (module load excluded)
     const samples = [];
+    let cpuTotal = 0;
     for (let i = 0; i < runs; i++) {
       const start = process.cpuUsage();
-      await renderPublicPageHtml(inputs[kind], opts);
-      samples.push(cpuMs(start));
+      const wall = performance.now();
+      await render(kind);
+      samples.push(performance.now() - wall);
+      cpuTotal += cpuMs(start);
     }
     samples.sort((a, b) => a - b);
     const q = (p) => samples[Math.min(samples.length - 1, Math.floor(p * samples.length))];
-    out[kind] = { runs, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: samples.at(-1), bytes: Buffer.byteLength(html) };
+    // Wall ms of a (synchronous) render: process.cpuUsage() ticks at ~15.6 ms on Windows, so its
+    // per-run values are 0 / 16 / 31; only its total over all runs is comparable.
+    out[kind] = { runs, unit: "wall ms", cpuUsageMsTotal: cpuTotal, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: samples.at(-1), bytes: Buffer.byteLength(html) };
   }
   return out;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const arg = (name) => process.argv.includes(name);
   const runsAt = process.argv.indexOf("--runs");
-  const result = await measure({ runs: runsAt > 0 ? Number(process.argv[runsAt + 1]) : 300, cold: arg("--cold") });
-  console.log(JSON.stringify({ node: process.version, env: process.env.NODE_ENV ?? "development", ...result }, null, 2));
+  const result = await measure({ runs: runsAt > 0 ? Number(process.argv[runsAt + 1]) : 300, cold: arg("--cold"), snapshot: arg("--snapshot") });
+  console.log(JSON.stringify({ node: process.version, env: process.env.NODE_ENV ?? "development", mode: arg("--snapshot") ? "snapshot" : "upper-bound-screen-props", ...result }, null, 2));
 }
+

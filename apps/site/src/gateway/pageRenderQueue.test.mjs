@@ -15,15 +15,17 @@ import {
   recoverPendingPageRenders,
   requestPageRenderStatement,
 } from "./pageRenderQueue.ts";
-import { PAGE_BODY_FORMAT, renderPublicPage, renderPublicPageHtml, screenDataFromRow } from "./renderPublicPage.ts";
+import { PAGE_BODY_FORMAT, renderPublicPage, renderPublicPageHtml } from "./renderPublicPage.ts";
 import { maxInputs } from "./renderPublicPage.measure.mjs";
 import gateway, { resetGatewayCaches } from "./index.ts";
 import { r2HtmlKey, resetRebuildMemory } from "./r2Html.ts";
 import { buildRouteMap } from "../lib/routeMap.ts";
+import { buildPageMetadata } from "../lib/pageMetadata.ts";
 import { buildRouteShards, revocationKey } from "./routeShards.ts";
 
 const GENERATION = "gen-mig-0411-test";
-const ORIGIN = "https://site.example";
+const ORIGIN = "https://site.example"; // request URL host only: page URLs are the build's (pageMetadata.ts)
+const STYLESHEET = "/_astro/_id_.test0001.css";
 const MIGRATIONS = fileURLToPath(new URL("../../../../migrations/", import.meta.url));
 
 function realSchema() {
@@ -114,7 +116,7 @@ function harness({ kv = new Map(), env: extra = {} } = {}) {
     },
     REBUILD_QUEUE: { send: async (m) => { sent.push(m); } },
     DB: d1(sqlite),
-    PUBLIC_SITE_URL: ORIGIN,
+    PUBLIC_PAGE_STYLESHEETS: STYLESHEET,
     ...extra,
   };
   // The producer statement (S3 contract). The mock D1 writes synchronously when run() is called.
@@ -159,10 +161,11 @@ test("contract: a missing page -> gateway rebuild-page message -> consumer -> ga
   const served = await h.get("/user/creator-alpha");
   assert.equal(served.status, 200);
   const html = await served.text();
-  assert.match(html, /<link rel="canonical" href="https:\/\/site\.example\/user\/creator-alpha"\/>/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/flamenode\.net\/user\/creator-alpha">/, "canonical is the build's (pageMetadata.ts)");
+  assert.ok(html.includes('<link rel="stylesheet" href="' + STYLESHEET + '">'), "styled: stylesheet link from configuration");
   assert.match(html, /Alpha &lt;b&gt;/, "body text is in the HTML and escaped");
   assert.ok(!html.includes("<b>"), "row text is escaped");
-  assert.ok(!html.includes("flamenode.net"));
+  assert.ok(!html.includes("<script"), "same as the build: no JavaScript");
 });
 
 test("T01: a doorbell for an updated public page rebuilds only that page and records the version", async () => {
@@ -225,7 +228,18 @@ test("users: CURRENT listable approval statuses and case-insensitive ids", async
   assert.equal((await h.get("/user/Mixed_Case")).status, 200);
 });
 
-test("excluded kinds (video / event, no Island loader): never written, build HTML untouched, request done; unpublish still deletes", async () => {
+test("excluded kinds (a kind switched to PAGE_BODY_FORMAT 'excluded'): never written, build HTML untouched, request done; unpublish still deletes", async () => {
+  const saved = { ...PAGE_BODY_FORMAT };
+  PAGE_BODY_FORMAT.video = "excluded";
+  PAGE_BODY_FORMAT.event = "excluded";
+  try {
+    await excludedKindsScenario();
+  } finally {
+    Object.assign(PAGE_BODY_FORMAT, saved);
+  }
+});
+
+async function excludedKindsScenario() {
   const h = harness();
   // HTML the build (MIG-0509) put in R2 for the current generation.
   const build = { body: "<!DOCTYPE html><p>build</p>", httpMetadata: { contentType: "text/html" }, customMetadata: { generation: GENERATION } };
@@ -251,7 +265,7 @@ test("excluded kinds (video / event, no Island loader): never written, build HTM
   assert.equal(outcomes[0].action, "deleted");
   assert.equal(outcomes[0].reason, "not_public");
   assert.equal(h.r2.size, 0);
-});
+}
 
 test("T03: an update during the render is rebuilt by the next message, also within the same millisecond", async () => {
   // Same requested_at for both edits: a CAS on the timestamp would succeed and lose the
@@ -322,7 +336,7 @@ test("T05: R2 PUT failure retries the message and leaves the request for recover
 });
 
 test("bindings / configuration missing, route data or KV unavailable: retry, nothing written", async () => {
-  for (const extra of [{ PUBLIC_SITE_URL: undefined }, { DB: undefined }, { VISIBILITY_KV: undefined }, { ASSETS: undefined }]) {
+  for (const extra of [{ PUBLIC_PAGE_STYLESHEETS: undefined }, { PUBLIC_PAGE_STYLESHEETS: "https://evil.example/x.css" }, { PUBLIC_PAGE_STYLESHEETS: "/_astro/a.css,/other.css" }, { DB: undefined }, { VISIBILITY_KV: undefined }, { ASSETS: undefined }]) {
     const h = harness({ env: extra });
     const { outcomes, acks } = await h.consume(doorbell("video", "vid-public"));
     assert.equal(outcomes[0].action, "retry", JSON.stringify(Object.keys(extra)));
@@ -392,14 +406,6 @@ test("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
   assert.equal(h.ops.length, 1);
 });
 
-test("render: canonical comes from configuration + route canonicalPath, never a built-in domain", async () => {
-  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: "", canonicalPath: "/x" }));
-  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: "javascript:alert(1)", canonicalPath: "/x" }));
-  await assert.rejects(renderPublicPage("video", { id: "x", title: "t" }, { origin: ORIGIN, canonicalPath: "//evil.example/x" }));
-  const html = await renderPublicPage("user", { id: "u", x_name: "\"><img src=x onerror=1>" }, { origin: ORIGIN, canonicalPath: "/user/u" });
-  assert.ok(!/<img src=x/.test(html));
-  assert.match(html, /href="https:\/\/site\.example\/user\/u"/);
-});
 
 test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue budget (local Node)", async () => {
   // Same method as scripts/migration-gateway.test.mjs: mocks resolve in a microtask,
@@ -431,7 +437,7 @@ test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue
       DB: db,
       R2_STORAGE: { put: async () => {}, delete: async () => {} },
       VISIBILITY_KV: { get: async () => null },
-      PUBLIC_SITE_URL: ORIGIN,
+      PUBLIC_PAGE_STYLESHEETS: STYLESHEET,
     };
     const parsedShards = new Map();
     const lookup = async (key) => {
@@ -462,29 +468,100 @@ test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue
     .map(([k, v]) => `${k} p50=${v.p50.toFixed(3)} p99=${v.p99.toFixed(3)} max=${v.max.toFixed(3)}ms`).join("; ")}`);
 });
 
-test("U02 format: user pages are server-rendered (text in the HTML without JS); video / event excluded until an Island loader exists", async () => {
-  assert.deepEqual(PAGE_BODY_FORMAT, { video: "excluded", user: "server-rendered", event: "excluded" });
-  const user = await renderPublicPage("user", { id: "creator-alpha", x_name: "<b>Alpha</b>", profile_text: "プロフィール本文 & <script>x</script>", portfolio_contact: "DM" }, { origin: ORIGIN, canonicalPath: "/user/creator-alpha" });
-  assert.match(user, /<div id="page-root" data-entity="user">/);
-  assert.match(user, /プロフィール本文 &amp; &lt;script&gt;x&lt;\/script&gt;/);
-  assert.match(user, /&lt;b&gt;Alpha&lt;\/b&gt;/);
-  assert.ok(!/<script>x/.test(user) && !/<b>Alpha/.test(user));
-  // No page this consumer writes has a body that needs JS to appear.
-  assert.ok(!user.includes("island-root"));
+// --- Characterization: the regenerated HTML is the build's HTML (MIG-0403 SSG output) ---
+// Needs the Astro build: `npm run build --workspace=@flamenode/site` (CI runs it before this file).
+
+const DIST = fileURLToPath(new URL("../../dist/", import.meta.url));
+const readDist = (route) => {
+  const file = path.join(DIST, route, "index.html");
+  assert.ok(fs.existsSync(file), "missing " + file + ": run npm run build --workspace=@flamenode/site first");
+  return fs.readFileSync(file, "utf8");
+};
+const distStylesheets = (html) => [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
+
+const { loadRepresentativeEvents, loadRepresentativeUsers, loadRepresentativeVideos } = await import("../lib/representativeFixtures.ts");
+const { contentFromSnapshot, snapshotFromRow, parseStylesheets } = await import("./renderPublicPage.ts");
+
+/** D1 rows holding exactly what the representative snapshots hold (same input as the SSG). */
+const REP_ROWS = {
+  video: {
+    id: "repvideo01", title: "代表作品: 合同作品のサンプル", youtube_video_id: "repYTid0001",
+    creator_display_name: "代表クリエイター", creator_x_user_id: "rep_creator", creator_icon_url: "/brand/flamenode-icon-192.png",
+    creator_has_public_profile: 1, scheduled_time: 1792238400, music: "代表楽曲", credit: "代表アーティスト",
+    intro_comment: "MIG-0403 の代表 fixture です。公開作品の静的 HTML を確認します。", visibility_status: "public",
+  },
+  user: {
+    id: "rep_creator", x_name: "代表クリエイター", icon_url: "/brand/flamenode-icon-512.png",
+    profile_text: "MIG-0403 の代表クリエイター fixture です。", approval_status: "approved",
+  },
+};
+
+test("characterization: user row -> regenerated HTML is byte-identical to the SSG page (layout, stylesheet, body)", async () => {
+  const ssg = readDist("user/rep_creator");
+  const stylesheets = distStylesheets(ssg);
+  assert.equal(stylesheets.length, 1, "the build links one shared stylesheet");
+  assert.doesNotMatch(ssg, /<script/, "the SSG page ships no JavaScript, so neither does the regenerated one");
+  assert.equal(await renderPublicPage("user", REP_ROWS.user, { stylesheets }), ssg);
+});
+
+test("characterization: video row -> identical to both SSG pages (internal id and YouTube alias)", async () => {
+  const ssg = readDist("repvideo01");
+  const stylesheets = distStylesheets(ssg);
+  const html = await renderPublicPage("video", REP_ROWS.video, { stylesheets });
+  assert.equal(html, ssg);
+  assert.equal(html, readDist("repYTid0001"), "alias URL: same document, canonical on the YouTube ID");
+});
+
+test("characterization: event snapshot -> identical to the SSG page; row -> same snapshot fields", async () => {
+  const ssg = readDist("event/rep-event-2026");
+  const stylesheets = distStylesheets(ssg);
+  const [snapshot] = await loadRepresentativeEvents();
+  assert.equal(await renderPublicPageHtml(contentFromSnapshot(snapshot), stylesheets), ssg);
+  // Row -> snapshot: the stored fields are equal; status / entry come from CURRENT at render time
+  // and the period label has no CURRENT source yet (MIG-0502).
+  const row = { id: snapshot.id, title: snapshot.title, explanation: snapshot.explanation, icon_url: snapshot.iconUrl, img_url: snapshot.imageUrl ?? null, visibility_status: "public" };
+  const fromRow = snapshotFromRow("event", row, 1_800_000_000);
+  for (const field of ["kind", "id", "title", "explanation", "iconUrl", "imageUrl"]) assert.equal(fromRow[field], snapshot[field], field);
+});
+
+test("characterization: the row projection equals the loaded snapshot field for field (video, user)", async () => {
+  const [video] = await loadRepresentativeVideos();
+  const [user] = await loadRepresentativeUsers();
+  const clean = (value) => JSON.parse(JSON.stringify(value));
+  assert.deepEqual(clean(snapshotFromRow("video", REP_ROWS.video)), clean({ ...video }));
+  assert.deepEqual(clean(snapshotFromRow("user", REP_ROWS.user)), clean({ ...user }));
+});
+
+test("regenerated pages: row text is escaped, stylesheet must be a build asset, event label is the render-time status", async () => {
+  const html = await renderPublicPage("user", { id: "u", x_name: '"><img src=x onerror=1>' }, { stylesheets: [STYLESHEET] });
+  assert.ok(!html.includes("<img src=x"));
+  assert.ok(html.includes("&quot;&gt;&lt;img src=x"));
+  assert.deepEqual(parseStylesheets("/_astro/a.css, /_astro/b.1.css"), ["/_astro/a.css", "/_astro/b.1.css"]);
+  for (const bad of [undefined, "", "https://evil.example/a.css", "/_astro/../x.css", '/_astro/a.css"><script>', "/other/a.css"]) {
+    assert.throws(() => parseStylesheets(bad), /PUBLIC_PAGE_STYLESHEETS/, String(bad));
+  }
+  const now = 1_800_000_000;
+  const open = snapshotFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now + 10, end_time: now + 20, entry_start_time: now - 10, entry_end_time: now + 5 }, now);
+  assert.equal(open.statusLabel, "募集期間中");
+  assert.equal(open.entryAction, "reserve");
+  const ended = snapshotFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now - 20, end_time: now - 10 }, now);
+  assert.equal(ended.statusLabel, "終了済");
+  assert.equal(ended.entryAction, undefined);
+});
+
+test("U02 format: every kind is server-rendered like the build (text in the HTML without JS, no empty shell)", async () => {
+  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "server-rendered", event: "server-rendered" });
+  for (const [kind, row] of [["video", REP_ROWS.video], ["user", REP_ROWS.user], ["event", { id: "e", title: "イベント名", explanation: "説明文", visibility_status: "public" }]]) {
+    const html = await renderPublicPage(kind, row, { stylesheets: [STYLESHEET] });
+    assert.ok(!html.includes("island-root") && !html.includes("<script"), kind);
+    assert.match(html, /<h1[^>]*>[^<]+<\/h1>/, kind + ": the screen heading is in the HTML");
+  }
 });
 
 test("U02 server-rendered body: every kind renders its screen at the upper-bound input (MIG-0409 U05 (a) harness)", async () => {
   const inputs = maxInputs();
   for (const kind of ["video", "user", "event"]) {
-    const html = await renderPublicPageHtml(inputs[kind], { origin: ORIGIN, canonicalPath: kind === "video" ? "/vid-max" : `/${kind}/x` });
-    assert.match(html, /<div id="page-root"/);
-    assert.ok(html.length > 50_000, `${kind} ${html.length}`);
+    const html = await renderPublicPageHtml({ input: inputs[kind], meta: buildPageMetadata({ title: "t", path: "/" + kind }) }, [STYLESHEET]);
+    assert.ok(html.length > 40_000, kind + " " + html.length);
   }
-  // Event status comes from CURRENT eventStatusCore at render time.
-  const now = 1_800_000_000;
-  const accepting = screenDataFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now + 10, end_time: now + 20, entry_start_time: now - 10, entry_end_time: now + 5 }, { canonicalPath: "/event/e", nowSeconds: now });
-  assert.equal(accepting.event.statusLabel, "募集期間中");
-  assert.equal(accepting.event.entryAction, "reserve");
-  const ended = screenDataFromRow("event", { id: "e", title: "E", visibility_status: "public", start_time: now - 20, end_time: now - 10 }, { canonicalPath: "/event/e", nowSeconds: now });
-  assert.equal(ended.event.statusLabel, "終了済");
 });

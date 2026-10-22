@@ -47,8 +47,8 @@ export interface GatewayEnv {
   };
   /** MIG-0411 consumer only: public_page_renders and the entity rows. Never read by fetch(). */
   DB?: D1DatabaseLike;
-  /** MIG-0411 consumer only: site origin for canonical / og:url. */
-  PUBLIC_SITE_URL?: string;
+  /** MIG-0411 consumer only: comma-separated /_astro/*.css paths of the build (page stylesheet link). */
+  PUBLIC_PAGE_STYLESHEETS?: string;
 }
 
 const NO_STORE = "no-store, private";
@@ -234,7 +234,7 @@ export default {
       : async () => undefined;
     return handlePageRenderQueue(
       batch,
-      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV, PUBLIC_SITE_URL: env.PUBLIC_SITE_URL },
+      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV, PUBLIC_PAGE_STYLESHEETS: env.PUBLIC_PAGE_STYLESHEETS },
       lookup,
     );
   },
