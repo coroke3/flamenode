@@ -75,6 +75,16 @@ test("video: Islands are slots; the static render has no no-op buttons and no Yo
   assert.equal(withIslands.querySelector(".vd-chapters"), null, "chapters slot replaces the static list");
 });
 
+test("video: primary event without a status label shows no status badge, never the Badge default DRAFT", () => {
+  for (const statusLabel of ["", undefined]) {
+    const video = videoFixture();
+    video.primaryEvent = { ...video.primaryEvent, statusLabel, statusTone: undefined, accepting: false };
+    const doc = render(VideoDetailView, { video });
+    assert.equal(doc.querySelector(".vd-event .fn-status"), null);
+    assert.doesNotMatch(doc.body.textContent, /DRAFT/);
+  }
+});
+
 test("video: no YouTube shows CURRENT fallback; related unavailable / empty / limit", () => {
   const video = { ...videoFixture(), hasYoutube: false, relatedUnavailable: true };
   const doc = render(VideoDetailView, { video });

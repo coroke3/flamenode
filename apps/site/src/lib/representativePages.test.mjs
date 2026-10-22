@@ -221,22 +221,20 @@ test("video author block follows CURRENT: JST date, public-profile link only whe
 });
 
 test("event status badge follows CURRENT app/(public)/event/[id]/page.tsx:234-236, never the Badge default DRAFT", async () => {
-  const { eventStatusLabel } = await import("../../../../src/lib/utils/eventStatusCore.ts");
   const { eventScreenData } = await import("./publicPages.ts");
   const { EventDetailView } = await import("@flamenode/ui");
   const React = (await import("react")).default;
   const { renderToStaticMarkup } = await import("react-dom/server");
-  const badge = (snapshot) => {
-    const html = renderToStaticMarkup(React.createElement(EventDetailView, { event: eventScreenData(snapshot) }));
-    const m = /<span class="fn-status fn-status--(\w+)" data-status="\w+"><span>([^<]*)<\/span><\/span>/.exec(html);
-    assert.doesNotMatch(html, /DRAFT/);
-    return m && { tone: m[1], label: m[2] };
-  };
+  const render = (snapshot) => renderToStaticMarkup(React.createElement(EventDetailView, { event: eventScreenData(snapshot) }));
   // Snapshot label as written by the build; the CURRENT pill has one accent style for every status.
-  assert.deepEqual(badge(event), { tone: "public", label: "開始前" });
-  // No label in the snapshot: only public events are published, so CURRENT computeEventStatus gives `published`.
+  const html = render(event);
+  assert.doesNotMatch(html, /DRAFT/);
+  assert.match(html, /<span class="fn-status fn-status--public" data-status="public"><span>開始前<\/span><\/span>/);
+  // No label in the snapshot: no dates to tell open / ended, so no pill rather than a guess or DRAFT.
   for (const statusLabel of [undefined, ""]) {
-    assert.deepEqual(badge({ kind: "event", id: "e1", title: "T", statusLabel }), { tone: "public", label: eventStatusLabel("published") });
+    const bare = render({ kind: "event", id: "e1", title: "T", statusLabel });
+    assert.doesNotMatch(bare, /DRAFT/);
+    assert.doesNotMatch(bare, /class="fn-status\b/);
   }
   assert.match(read(`event/${event.id}`), /<span class="fn-status fn-status--public" data-status="public"><span>開始前<\/span><\/span>/);
 });

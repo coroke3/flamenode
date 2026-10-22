@@ -91,9 +91,9 @@ export function eventScreenData(event: EventPublicSnapshot): EventDetailData {
     imageUrl: event.imageUrl ?? event.iconUrl ?? null,
     iconUrl: event.iconUrl ?? null,
     explanation: event.explanation ?? null,
-    // CURRENT `app/(public)/event/[id]/page.tsx:234-236` always shows a status pill. Only public
-    // events reach a snapshot, so a missing label is CURRENT `eventStatusLabel("published")`.
-    statusLabel: event.statusLabel || "公開",
+    // Build-time CURRENT label (`app/(public)/event/[id]/page.tsx:234-236`). Without one the view
+    // shows no pill: the snapshot has no dates to tell open / ended, and never the Badge DRAFT default.
+    statusLabel: event.statusLabel ?? "",
     // The CURRENT pill has one accent style for every status (never the muted draft tone).
     statusTone: "public",
     periodLabel: event.periodLabel ?? null,
