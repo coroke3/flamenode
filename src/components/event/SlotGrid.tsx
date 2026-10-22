@@ -113,6 +113,30 @@ type ActionMenuState = {
 
 const SLOT_PREVIEW_EVENT = "flamenode:slot-preview";
 const LEGACY_SLOT_DISPLAY_NAME_KEY = "fn:lastSlotDisplayName";
+const COMMUNICATION_ERROR_MESSAGE =
+  "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
+
+function isNextRedirectError(error: unknown): boolean {
+  return (
+    error != null &&
+    typeof error === "object" &&
+    "digest" in error &&
+    String((error as { digest?: unknown }).digest).startsWith("NEXT_REDIRECT")
+  );
+}
+
+async function runSlotAction<T>(
+  action: () => Promise<T>,
+  onCommunicationError: () => void,
+): Promise<T | null> {
+  try {
+    return await action();
+  } catch (error) {
+    if (isNextRedirectError(error)) throw error;
+    onCommunicationError();
+    return null;
+  }
+}
 
 function slotDisplayNameStorageKey(viewerXId: string | null): string {
   const normalized = normalizeXId(viewerXId ?? "");
@@ -447,7 +471,11 @@ export function SlotGrid({
       }
     }
     startTransition(async () => {
-      const result = await reserveSlot(fd);
+      const result = await runSlotAction(() => reserveSlot(fd), () => {
+        setError(COMMUNICATION_ERROR_MESSAGE);
+        router.refresh();
+      });
+      if (!result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の確保に失敗しました。");
@@ -480,7 +508,11 @@ export function SlotGrid({
     const fd = new FormData();
     fd.set("slot_id", slotId);
     startTransition(async () => {
-      const result = await releaseOwnSlot(fd);
+      const result = await runSlotAction(() => releaseOwnSlot(fd), () => {
+        setError(COMMUNICATION_ERROR_MESSAGE);
+        router.refresh();
+      });
+      if (!result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の解放に失敗しました。");
@@ -507,7 +539,11 @@ export function SlotGrid({
     fd.set("direction", direction);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
     startTransition(async () => {
-      const result = await extendOwnSlotGroup(fd);
+      const result = await runSlotAction(() => extendOwnSlotGroup(fd), () => {
+        setError(COMMUNICATION_ERROR_MESSAGE);
+        router.refresh();
+      });
+      if (!result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の拡張に失敗しました。");
@@ -539,7 +575,11 @@ export function SlotGrid({
     fd.set("display_name", displayName);
     if (operatorOverrideRequired) fd.set("operator_override", "1");
     startTransition(async () => {
-      const result = await mergeOwnSlotGroups(fd);
+      const result = await runSlotAction(() => mergeOwnSlotGroups(fd), () => {
+        setError(COMMUNICATION_ERROR_MESSAGE);
+        router.refresh();
+      });
+      if (!result) return;
       if (!result.ok) {
         if (redirectForGuardReason(result.reason)) return;
         setError(result.message ?? "枠の結合に失敗しました。");
