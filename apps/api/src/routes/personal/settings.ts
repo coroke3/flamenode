@@ -1,23 +1,12 @@
 import { Hono } from "hono";
 import type { SettingsResponse, SettingsXId, XIdentityRequestRow } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
-import {
-  buildPersonalUser,
-  termsStatement,
-  type TermsRow,
-} from "./context.ts";
-import {
-  buildChannelCandidates,
-  buildIconCandidates,
-  channelCandidatesStatements,
-  iconCandidatesStatements,
-} from "./candidates.ts";
-import { MAX_LINKED_X_USERS } from "./sql.ts";
+import { loadPersonalContext, parseJsonColumn, type LinkedXRow } from "./context.ts";
+import { buildChannelCandidates, buildIconCandidates, candidatesStatement } from "./candidates.ts";
 
 // CURRENT: app/(auth)/dashboard/settings/page.tsx.
-// D1: 1 batch (terms + linked X profile rows + 50 request history), then 1 batch of 4 candidate
-// statements only when the X tab is shown (CURRENT loads candidates for the shown panel only).
-export const MAX_REQUEST_HISTORY = 50;
+// D1 (S2, <= 3 statements incl. the session lookup): context = 1 statement (terms + linked X profile rows + 50 request
+// history as JSON columns), then 1 candidates statement only when the X tab is shown (as CURRENT).
 
 type UtilityTabId = "discord" | "link" | "history";
 
@@ -45,7 +34,7 @@ export function sortXIds(xIds: readonly SettingsXId[], activeXUserId: string | n
   });
 }
 
-interface SettingsLinkedRow {
+interface SettingsLinkedRow extends LinkedXRow {
   x_user_id: string;
   x_name: string;
   icon_url: string | null;
@@ -56,25 +45,6 @@ interface SettingsLinkedRow {
   approval_status: string | null;
   created_at: number;
   request_requested_at: number | null;
-}
-
-/** CURRENT getLinkedXUsersForAuthUser (profile columns + the creating request's requested_at). */
-function settingsLinkedStatement(db: D1Database, userId: string): D1PreparedStatement {
-  return db
-    .prepare(
-      `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
-         x_users.youtube_channel_url AS youtube_channel_url, x_users.profile_text AS profile_text,
-         x_users.portfolio_contact AS portfolio_contact, x_users.other_social_links AS other_social_links,
-         x_users.approval_status AS approval_status,
-         x_user_account_links.created_at AS created_at,
-         x_identity_requests.requested_at AS request_requested_at
-       FROM x_user_account_links
-       INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
-       LEFT JOIN x_identity_requests ON x_identity_requests.id = x_user_account_links.created_by_request_id
-       WHERE x_user_account_links.auth_user_id = ?
-       LIMIT ?`,
-    )
-    .bind(userId, MAX_LINKED_X_USERS);
 }
 
 export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
@@ -88,25 +58,13 @@ export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const utilityTab = legacyTab ? null : parseUtilityTab(rawTab);
   const requestedX = c.req.query("x")?.trim() || null;
 
-  const [termsResult, linkedResult, historyResult] = await db.batch([
-    termsStatement(db, sessionUser.id),
-    settingsLinkedStatement(db, sessionUser.id),
-    db
-      .prepare(
-        `SELECT id, request_type, requested_x_id, source_x_user_id, target_x_user_id, parent_request_id,
-           revert_deadline_at, status, requested_at, updated_at
-         FROM x_identity_requests
-         WHERE requested_by_auth_user_id = ?
-         ORDER BY requested_at DESC, id DESC
-         LIMIT ?`,
-      )
-      .bind(sessionUser.id, MAX_REQUEST_HISTORY),
-  ]);
-  const terms = (termsResult?.results as TermsRow[] | undefined)?.[0];
-  if (!terms) return c.json({ error: "Unauthorized" }, 401);
-  const linked = (linkedResult?.results ?? []) as unknown as SettingsLinkedRow[];
-  const requestHistory = (historyResult?.results ?? []) as unknown as XIdentityRequestRow[];
-  const user = buildPersonalUser(sessionUser, terms, linked);
+  const ctx = await loadPersonalContext<SettingsLinkedRow>(db, sessionUser, {
+    profileColumns: true,
+    requestHistory: true,
+  });
+  if (!ctx) return c.json({ error: "Unauthorized" }, 401);
+  const { user, linkedRows: linked } = ctx;
+  const requestHistory = ctx.history as XIdentityRequestRow[];
 
   const xIds: SettingsXId[] = linked.map((x) => ({
     id: x.x_user_id,
@@ -149,17 +107,21 @@ export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
   let iconCandidates: string[] = [];
   let channelCandidates: string[] = [];
   if (xTabSelected && activeXPanel) {
-    const [iconX, iconVideos, channelX, channelVideos] = await db.batch([
-      ...iconCandidatesStatements(db, activeXPanel.id),
-      ...channelCandidatesStatements(db, activeXPanel.id),
-    ]);
+    const row = await candidatesStatement(db, activeXPanel.id).first<{
+      icon_x: string | null;
+      icon_videos: string | null;
+      channel_x: string | null;
+      channel_videos: string | null;
+    }>();
     iconCandidates = buildIconCandidates(
-      (iconX?.results as Array<{ icon_url: string | null }> | undefined)?.[0],
-      (iconVideos?.results ?? []) as Array<{ icon_url: string | null }>,
+      { icon_url: row?.icon_x ?? null },
+      parseJsonColumn<Array<string | null>>(row?.icon_videos, []).map((icon_url) => ({ icon_url })),
     );
     channelCandidates = buildChannelCandidates(
-      (channelX?.results as Array<{ youtube_channel_url: string | null }> | undefined)?.[0],
-      (channelVideos?.results ?? []) as Array<{ youtube_channel_url: string | null }>,
+      { youtube_channel_url: row?.channel_x ?? null },
+      parseJsonColumn<Array<string | null>>(row?.channel_videos, []).map((youtube_channel_url) => ({
+        youtube_channel_url,
+      })),
     );
   }
 

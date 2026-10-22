@@ -46,16 +46,49 @@ async function readRulesObject(bucket: R2Bucket | undefined): Promise<unknown | 
   }
 }
 
+/** CURRENT publicVisibilityManifestCore.ts */
+export const VISIBILITY_MANIFEST_KEY = "visibility/blocked-entities.v1.json";
+export const VISIBILITY_MANIFEST_MAX_BYTES = 1024 * 1024;
+
+/**
+ * CURRENT loadPublicJson resolvePublicVisibilityGuard for the "rules" target: the "rules" target maps to no
+ * fenced entity, so only the enforce-mode fail-closed rule applies: without a committed, size-bounded
+ * visibility manifest in R2 nothing is served (rules = null -> the client shows the built-in default terms).
+ * The manifest body is not parsed here (S2 JSON bound); a malformed manifest is a known gap.
+ */
+async function visibilityGuardAllows(env: AppEnv["Bindings"]): Promise<boolean> {
+  if (env.PUBLIC_VISIBILITY_GUARD_MODE !== "enforce") return true;
+  try {
+    const head = await env.BUCKET?.head(VISIBILITY_MANIFEST_KEY);
+    return Boolean(
+      head?.etag?.trim() && Number.isFinite(head.size) && head.size >= 0 && head.size <= VISIBILITY_MANIFEST_MAX_BYTES,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Only published terms are ever returned: the R2 artifact is generated from published terms and the
+ * D1 fallback filters status = 'published' (CURRENT fetchDegradedRulesPayload). Cache API use and the
+ * miss-time rebuild enqueue of CURRENT are intentionally skipped (GET must not write): known gap.
+ */
 async function loadRules(env: AppEnv["Bindings"]): Promise<OnboardingRules | null> {
+  if (!(await visibilityGuardAllows(env))) return null;
   const fromR2 = await readRulesObject(env.BUCKET);
   if (fromR2 !== undefined && fromR2 !== null) return normalizeRules(fromR2);
-  const row = await env.DB.prepare(
-    `SELECT version_label, body_markdown FROM terms_versions
-     WHERE status = 'published'
-     ORDER BY published_at DESC, updated_at DESC
-     LIMIT 1`,
-  ).first<{ version_label: string; body_markdown: string }>();
-  return row ? normalizeRules(row) : null;
+  try {
+    const row = await env.DB.prepare(
+      `SELECT version_label, body_markdown FROM terms_versions
+       WHERE status = 'published'
+       ORDER BY published_at DESC, updated_at DESC
+       LIMIT 1`,
+    ).first<{ version_label: string; body_markdown: string }>();
+    return row ? normalizeRules(row) : null;
+  } catch {
+    // CURRENT's loader does not throw to the page on a degraded-read failure; the page falls back to default terms.
+    return null;
+  }
 }
 
 export const personalOnboardingRoutes = new Hono<AppEnv>().get("/", async (c) => {

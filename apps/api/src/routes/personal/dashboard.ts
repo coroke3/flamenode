@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import type { DashboardResponse } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
-import { approvedXIdsOf, computeOnboardingState, loadPersonalContext } from "./context.ts";
+import { approvedXIdsOf, computeOnboardingState, loadPersonalContext, parseJsonColumn } from "./context.ts";
 import {
   approvedXIdsWhere,
+  CARD_COLUMNS,
+  CHAPTER_COLUMNS,
+  jsonList,
+  jsonRow,
   collabVideosStatement,
   DASHBOARD_COLLAB_DISPLAY,
   EXCLUDE_PVSF_SUMMARY_VIDEOS_SQL,
@@ -17,9 +21,10 @@ import {
 } from "./sql.ts";
 
 // CURRENT: app/(auth)/dashboard/page.tsx.
-// D1: 1 batch for the context (terms + linked X + pending request), then at most 1 batch of 6 bounded
-// statements (own videos / collab / chapters / active slot / stats / event count). No N+1.
+// D1 (S2, <= 3 statements incl. the session lookup): context = 1 statement (terms + linked X + pending request),
+// then ONE statement whose columns are bounded JSON subqueries (own videos / collab / chapters / active slot / stats).
 export const DASHBOARD_PREVIEW_LIMIT = 8;
+const SLOT_COLUMNS = ["id", "status", "start_time", "slot_label", "video_id", "event_id", "event_title", "event_accent_color"] as const;
 
 interface SlotRow {
   id: string;
@@ -94,33 +99,52 @@ export const personalDashboardRoutes = new Hono<AppEnv>().get("/", async (c) => 
   });
   const approvedXIds = approvedXIdsOf(linkedRows);
 
+  // One statement: every section is a bounded JSON subquery. CURRENT wraps these reads in a try/catch
+  // that logs and renders the empty sections, so a failure here returns the same empty data (200).
   const limit = DASHBOARD_PREVIEW_LIMIT + 1;
-  const fragments: Record<string, SqlFragment> = {
-    slot: activeSlotStatement(user.id, user.active_x_user_id),
+  const parts: Record<string, SqlFragment | null> = {
+    mine:
+      approvedXIds.length > 0 && onboarding.activeApprovedXId
+        ? jsonList(myVideosStatement(onboarding.activeApprovedXId, limit, 0), CARD_COLUMNS)
+        : null,
+    collab:
+      approvedXIds.length > 0
+        ? jsonList(collabVideosStatement(approvedXIds, DASHBOARD_COLLAB_DISPLAY, limit, 0), CARD_COLUMNS)
+        : null,
+    chapters:
+      approvedXIds.length > 0 ? jsonList(myChaptersStatement(approvedXIds, limit, 0), CHAPTER_COLUMNS) : null,
+    slot: jsonRow(activeSlotStatement(user.id, user.active_x_user_id), SLOT_COLUMNS),
+    agg: null,
+    events: null,
   };
   if (approvedXIds.length > 0) {
-    if (onboarding.activeApprovedXId) {
-      fragments.mine = myVideosStatement(onboarding.activeApprovedXId, limit, 0);
-    }
-    fragments.collab = collabVideosStatement(approvedXIds, DASHBOARD_COLLAB_DISPLAY, limit, 0);
-    fragments.chapters = myChaptersStatement(approvedXIds, limit, 0);
     const [agg, events] = statsStatements(approvedXIds);
-    fragments.agg = agg;
-    fragments.events = events;
+    parts.agg = jsonRow(agg, ["likes", "views", "c"]);
+    parts.events = { sql: `(SELECT q.event_count FROM (${events.sql}) q)`, params: events.params };
   }
 
-  const keys = Object.keys(fragments);
-  const results = await db.batch(
-    keys.map((key) => db.prepare(fragments[key]!.sql).bind(...fragments[key]!.params)),
-  );
-  const rows = (key: string): unknown[] => results[keys.indexOf(key)]?.results ?? [];
+  let sections: Record<string, unknown> = {};
+  try {
+    const keys = Object.keys(parts);
+    const row = await db
+      .prepare(`SELECT ${keys.map((key) => `${parts[key]?.sql ?? "NULL"} AS ${key}`).join(", ")}`)
+      .bind(...keys.flatMap((key) => parts[key]?.params ?? []))
+      .first<Record<string, unknown>>();
+    sections = row ?? {};
+    for (const key of ["mine", "collab", "chapters", "slot", "agg"]) {
+      sections[key] = parseJsonColumn<unknown>(sections[key], null);
+    }
+  } catch {
+    console.error("[personal] DASHBOARD_SECTIONS_FAILED");
+    sections = {};
+  }
 
-  const mineRows = rows("mine") as VideoCardRow[];
-  const collabRows = rows("collab") as VideoCardRow[];
-  const chapterRows = rows("chapters") as ChapterRow[];
-  const slot = (rows("slot") as SlotRow[])[0];
-  const agg = (rows("agg") as Array<{ likes?: unknown; views?: unknown; c?: unknown }>)[0];
-  const eventCount = (rows("events") as Array<{ event_count?: unknown }>)[0];
+  const mineRows = (sections.mine ?? []) as VideoCardRow[];
+  const collabRows = (sections.collab ?? []) as VideoCardRow[];
+  const chapterRows = (sections.chapters ?? []) as ChapterRow[];
+  const slot = (sections.slot ?? undefined) as SlotRow | undefined;
+  const agg = (sections.agg ?? undefined) as { likes?: unknown; views?: unknown; c?: unknown } | undefined;
+  const eventCount = { event_count: sections.events };
 
   const body: DashboardResponse = {
     user,

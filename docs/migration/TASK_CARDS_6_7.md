@@ -29,6 +29,13 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 旧Next発行cookieで同一利用者、期限切れ/削除済み/改ざん/BAN、sessionTokenがログに出ないこと、request単位の解決（module global無し）。
 - DONE: MIG-0602以降の認証付きHono APIが旧Nextのsessionを読める証跡と独立レビュー。独自token/署名を作っていない。
 
+### MIG-0611 — Personal read APIs
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0611 Work Order、`app/(auth)/{dashboard,dashboard/library,dashboard/settings,onboarding}/page.tsx`, `src/lib/auth/{currentUser,onboarding,resolveActiveXId}.ts`。
+- 変更: `+apps/api/src/routes/personal/*` に `/api/personal/{session,dashboard,library,settings,onboarding}` の GET を追加。全応答 `Cache-Control: private, no-store`、GET 中の書き込みなし。DTO は `+packages/contracts/src/personal/*`。
+- 試験: CURRENT の loader と同じ seed（node:sqlite + 全 migration）で行・順序・件数が一致、401/403/no-store、paging、D1 statement 数。
+- DONE: 5 endpoint の parity テストと独立レビュー。`maybeMarkOnboardingComplete` は MIG-0702 の POST へ引き継ぎ。
+
 ### MIG-0602 — low-risk write commands
 
 - 読む: SA-004..011（announcements / API endpoints / audit settings。SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。

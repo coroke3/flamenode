@@ -41,7 +41,7 @@
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608（session 読み取り）の merge 後
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0102, MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0102, MIG-0601, MIG-0608, MIG-0611 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/dashboard/page.tsx`, `app/(auth)/dashboard/library/page.tsx`, `app/(auth)/dashboard/settings/page.tsx`, `app/(auth)/dashboard/youtube-playlists/page.tsx`（COMPAT_REDIRECT）, `app/(auth)/onboarding/page.tsx`（`FILE_MIGRATION_MATRIX.md` で MIG-0701 所有）。

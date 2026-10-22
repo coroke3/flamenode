@@ -83,6 +83,12 @@ export function createD1(sqlite) {
 
 export function fakeBucket(objects) {
   return {
+    async head(key) {
+      const value = objects[key];
+      if (value === undefined) return null;
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      return { size: Buffer.byteLength(text), etag: `etag-${key}` };
+    },
     async get(key) {
       const value = objects[key];
       if (value === undefined) return null;

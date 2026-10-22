@@ -45,19 +45,30 @@ export function normalizeYoutubeChannelInput(raw: string | null | undefined): st
   return normalizeYoutubeChannelUrl(trimmed) ?? normalizeHttpUrl(trimmed, 500);
 }
 
-/** x_users.icon_url first, then public video snapshots (newest first), de-duplicated, capped. */
-export function iconCandidatesStatements(db: D1Database, xId: string): D1PreparedStatement[] {
-  return [
-    db.prepare("SELECT icon_url FROM x_users WHERE id = ? LIMIT 1").bind(xId),
-    db
-      .prepare(
-        `SELECT creator_icon_url AS icon_url FROM videos
-         WHERE creator_x_user_id = ? AND creator_icon_url IS NOT NULL AND visibility_status = 'public'
-         ORDER BY created_at DESC
-         LIMIT ?`,
-      )
-      .bind(xId, MAX_ICON_CANDIDATES * 2),
-  ];
+/**
+ * ONE statement for both candidate lists (CURRENT getXIconCandidates + getYoutubeChannelCandidates):
+ * x_users profile value first, then video snapshots newest first (icons: public videos only;
+ * channels: case-insensitive creator match). Lists are bounded JSON columns.
+ */
+export function candidatesStatement(db: D1Database, xId: string): D1PreparedStatement {
+  const lower = xId.trim().toLowerCase();
+  return db
+    .prepare(
+      `SELECT
+         (SELECT icon_url FROM x_users WHERE id = ? LIMIT 1) AS icon_x,
+         (SELECT json_group_array(q.icon_url) FROM (
+            SELECT creator_icon_url AS icon_url FROM videos
+            WHERE creator_x_user_id = ? AND creator_icon_url IS NOT NULL AND visibility_status = 'public'
+            ORDER BY created_at DESC
+            LIMIT ?) q) AS icon_videos,
+         (SELECT youtube_channel_url FROM x_users WHERE lower(id) = ? LIMIT 1) AS channel_x,
+         (SELECT json_group_array(q.youtube_channel_url) FROM (
+            SELECT creator_youtube_channel_url AS youtube_channel_url FROM videos
+            WHERE lower(creator_x_user_id) = ? AND creator_youtube_channel_url IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT ?) q) AS channel_videos`,
+    )
+    .bind(xId, xId, MAX_ICON_CANDIDATES * 2, lower, lower, MAX_CHANNEL_CANDIDATES * 2);
 }
 
 export function buildIconCandidates(
@@ -81,21 +92,6 @@ export function buildIconCandidates(
   return out;
 }
 
-/** x_users.youtube_channel_url first, then video snapshots (case-insensitive creator match, newest first). */
-export function channelCandidatesStatements(db: D1Database, xId: string): D1PreparedStatement[] {
-  const lower = xId.trim().toLowerCase();
-  return [
-    db.prepare("SELECT youtube_channel_url FROM x_users WHERE lower(id) = ? LIMIT 1").bind(lower),
-    db
-      .prepare(
-        `SELECT creator_youtube_channel_url AS youtube_channel_url FROM videos
-         WHERE lower(creator_x_user_id) = ? AND creator_youtube_channel_url IS NOT NULL
-         ORDER BY created_at DESC
-         LIMIT ?`,
-      )
-      .bind(lower, MAX_CHANNEL_CANDIDATES * 2),
-  ];
-}
 
 export function buildChannelCandidates(
   xRow: { youtube_channel_url: string | null } | undefined,

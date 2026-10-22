@@ -23,75 +23,6 @@ export interface TermsRow {
   terms_reaccept_required: number | null;
 }
 
-/**
- * is_tos_accepted / accepted_terms_version_id plus terms_reaccept_required derived from the latest published
- * major terms version (CURRENT getLatestPublishedMajorTerms + termsReacceptRequiredCondition, as one statement).
- */
-export function termsStatement(db: D1Database, userId: string): D1PreparedStatement {
-  return db
-    .prepare(
-      `WITH required_major AS (
-         SELECT id, published_at FROM terms_versions
-         WHERE severity = 'major' AND published_at IS NOT NULL
-         ORDER BY published_at DESC, updated_at DESC
-         LIMIT 1
-       )
-       SELECT u.is_tos_accepted AS is_tos_accepted,
-         u.accepted_terms_version_id AS accepted_terms_version_id,
-         CASE WHEN EXISTS (SELECT 1 FROM required_major WHERE published_at <> 0)
-           AND u.is_tos_accepted = 1
-           AND NOT (
-             EXISTS (
-               SELECT 1 FROM terms_versions accepted_terms
-               WHERE accepted_terms.id = u.accepted_terms_version_id
-                 AND accepted_terms.published_at IS NOT NULL
-                 AND (accepted_terms.id = (SELECT id FROM required_major)
-                   OR accepted_terms.published_at > (SELECT published_at FROM required_major))
-             )
-             OR EXISTS (
-               SELECT 1 FROM user_tos_consents consent
-               INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
-               WHERE consent.user_id = u.id
-                 AND consent_terms.published_at IS NOT NULL
-                 AND (consent_terms.id = (SELECT id FROM required_major)
-                   OR consent_terms.published_at > (SELECT published_at FROM required_major))
-             )
-           )
-         THEN 1 ELSE 0 END AS terms_reaccept_required
-       FROM "user" u WHERE u.id = ? LIMIT 1`,
-    )
-    .bind(userId);
-}
-
-/** CURRENT getHeaderLinkedXUsersForAuthUser (approval_status is not filtered). */
-export function linkedXStatement(db: D1Database, userId: string): D1PreparedStatement {
-  return db
-    .prepare(
-      `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
-         x_users.approval_status AS approval_status
-       FROM x_user_account_links
-       INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
-       WHERE x_user_account_links.auth_user_id = ?
-       LIMIT ?`,
-    )
-    .bind(userId, MAX_LINKED_X_USERS);
-}
-
-/** CURRENT pendingSlotReservationXRequestWhere + getOnboardingState's `limit(1)`. */
-export function pendingRequestStatement(db: D1Database, userId: string): D1PreparedStatement {
-  const types = SLOT_RESERVATION_X_REQUEST_TYPES;
-  return db
-    .prepare(
-      `SELECT id, requested_x_id FROM x_identity_requests
-       WHERE requested_by_auth_user_id = ? AND status = 'pending'
-         AND request_type IN (${types.map(() => "?").join(", ")})
-         AND requested_x_id IS NOT NULL
-       ORDER BY requested_at DESC, id DESC
-       LIMIT 1`,
-    )
-    .bind(userId, ...types);
-}
-
 /** CURRENT resolveActiveXUserId with the linked rows supplied (no extra query). */
 export function resolveActiveXUserId(
   currentActiveXUserId: string | null,
@@ -187,28 +118,191 @@ export function approvedXIdsOf(
   );
 }
 
-export interface PersonalContext {
+/** ZERO_1102 S2: every JSON.parse input is <= 64 KiB. */
+export const MAX_JSON_COLUMN_BYTES = 64 * 1024;
+export const MAX_REQUEST_HISTORY = 50;
+
+/** Parses a json_group_array / json_object column produced by D1; throws (-> 503) when it exceeds the bound. */
+export function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  if (typeof value !== "string" || value.length > MAX_JSON_COLUMN_BYTES) {
+    throw new Error("json_column_invalid");
+  }
+  return JSON.parse(value) as T;
+}
+
+/** CURRENT getHeaderLinkedXUsersForAuthUser (approval_status is not filtered). Used by the library tabs. */
+export function linkedXStatement(db: D1Database, userId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
+         x_users.approval_status AS approval_status
+       FROM x_user_account_links
+       INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
+       WHERE x_user_account_links.auth_user_id = ?
+       LIMIT ?`,
+    )
+    .bind(userId, MAX_LINKED_X_USERS);
+}
+
+export interface ContextOptions {
+  /** latest pending slot-reservation X request (CURRENT pendingSlotReservationXRequestWhere + limit 1) */
+  pendingRequest?: boolean;
+  /** settings: profile columns + the creating request's requested_at (CURRENT getLinkedXUsersForAuthUser) */
+  profileColumns?: boolean;
+  /** settings: own request history, newest first, MAX_REQUEST_HISTORY rows */
+  requestHistory?: boolean;
+}
+
+const HEADER_LINKED_COLUMNS = ["x_user_id", "x_name", "icon_url", "approval_status"] as const;
+const PROFILE_LINKED_COLUMNS = [
+  ...HEADER_LINKED_COLUMNS,
+  "youtube_channel_url",
+  "profile_text",
+  "portfolio_contact",
+  "other_social_links",
+  "created_at",
+  "request_requested_at",
+] as const;
+const HISTORY_COLUMNS = [
+  "id",
+  "request_type",
+  "requested_x_id",
+  "source_x_user_id",
+  "target_x_user_id",
+  "parent_request_id",
+  "revert_deadline_at",
+  "status",
+  "requested_at",
+  "updated_at",
+] as const;
+
+const jsonObject = (columns: readonly string[]) => columns.map((c) => `'${c}', q.${c}`).join(", ");
+
+/**
+ * ONE statement for everything the Personal pages read about the user besides the session row:
+ * terms columns (terms_reaccept_required derived from the latest published major version, CURRENT
+ * getLatestPublishedMajorTerms + termsReacceptRequiredCondition), linked X rows, and optionally the
+ * pending request / request history, each as a bounded JSON column.
+ */
+export function contextStatement(
+  db: D1Database,
+  userId: string,
+  options: ContextOptions,
+): D1PreparedStatement {
+  const params: unknown[] = [];
+  const profile = options.profileColumns === true;
+  const linkedColumns = profile ? PROFILE_LINKED_COLUMNS : HEADER_LINKED_COLUMNS;
+  const linkedInner = profile
+    ? `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
+           x_users.approval_status AS approval_status, x_users.youtube_channel_url AS youtube_channel_url,
+           x_users.profile_text AS profile_text, x_users.portfolio_contact AS portfolio_contact,
+           x_users.other_social_links AS other_social_links, x_user_account_links.created_at AS created_at,
+           x_identity_requests.requested_at AS request_requested_at
+         FROM x_user_account_links
+         INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
+         LEFT JOIN x_identity_requests ON x_identity_requests.id = x_user_account_links.created_by_request_id
+         WHERE x_user_account_links.auth_user_id = ?
+         LIMIT ?`
+    : `SELECT x_users.id AS x_user_id, x_users.x_name AS x_name, x_users.icon_url AS icon_url,
+           x_users.approval_status AS approval_status
+         FROM x_user_account_links
+         INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
+         WHERE x_user_account_links.auth_user_id = ?
+         LIMIT ?`;
+  params.push(userId, MAX_LINKED_X_USERS);
+  const linked = `(SELECT json_group_array(json_object(${jsonObject(linkedColumns)})) FROM (${linkedInner}) q)`;
+
+  let pending = "NULL";
+  if (options.pendingRequest) {
+    const types = SLOT_RESERVATION_X_REQUEST_TYPES;
+    pending = `(SELECT json_object('id', q.id, 'requested_x_id', q.requested_x_id) FROM (
+        SELECT id, requested_x_id FROM x_identity_requests
+        WHERE requested_by_auth_user_id = ? AND status = 'pending'
+          AND request_type IN (${types.map(() => "?").join(", ")})
+          AND requested_x_id IS NOT NULL
+        ORDER BY requested_at DESC, id DESC
+        LIMIT 1) q)`;
+    params.push(userId, ...types);
+  }
+
+  let history = "NULL";
+  if (options.requestHistory) {
+    history = `(SELECT json_group_array(json_object(${jsonObject(HISTORY_COLUMNS)})) FROM (
+        SELECT id, request_type, requested_x_id, source_x_user_id, target_x_user_id, parent_request_id,
+          revert_deadline_at, status, requested_at, updated_at
+        FROM x_identity_requests
+        WHERE requested_by_auth_user_id = ?
+        ORDER BY requested_at DESC, id DESC
+        LIMIT ?) q)`;
+    params.push(userId, MAX_REQUEST_HISTORY);
+  }
+  params.push(userId);
+
+  return db
+    .prepare(
+      `WITH required_major AS (
+         SELECT id, published_at FROM terms_versions
+         WHERE severity = 'major' AND published_at IS NOT NULL
+         ORDER BY published_at DESC, updated_at DESC
+         LIMIT 1
+       )
+       SELECT u.is_tos_accepted AS is_tos_accepted,
+         u.accepted_terms_version_id AS accepted_terms_version_id,
+         CASE WHEN EXISTS (SELECT 1 FROM required_major WHERE published_at <> 0)
+           AND u.is_tos_accepted = 1
+           AND NOT (
+             EXISTS (
+               SELECT 1 FROM terms_versions accepted_terms
+               WHERE accepted_terms.id = u.accepted_terms_version_id
+                 AND accepted_terms.published_at IS NOT NULL
+                 AND (accepted_terms.id = (SELECT id FROM required_major)
+                   OR accepted_terms.published_at > (SELECT published_at FROM required_major))
+             )
+             OR EXISTS (
+               SELECT 1 FROM user_tos_consents consent
+               INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
+               WHERE consent.user_id = u.id
+                 AND consent_terms.published_at IS NOT NULL
+                 AND (consent_terms.id = (SELECT id FROM required_major)
+                   OR consent_terms.published_at > (SELECT published_at FROM required_major))
+             )
+           )
+         THEN 1 ELSE 0 END AS terms_reaccept_required,
+         ${linked} AS linked,
+         ${pending} AS pending,
+         ${history} AS history
+       FROM "user" u WHERE u.id = ? LIMIT 1`,
+    )
+    .bind(...params);
+}
+
+export interface PersonalContext<L extends LinkedXRow = LinkedXRow> {
   user: PersonalUser;
-  linkedRows: LinkedXRow[];
+  linkedRows: L[];
   pendingRequest: { id: string; requested_x_id: string | null } | null;
+  history: unknown[];
 }
 
 /**
- * Loads terms + linked X (+ optionally the latest pending request) in one D1 batch and builds the user.
+ * One D1 statement (see contextStatement) -> user + linked X (+ pending request / history).
  * Returns null when the user row vanished after the session was resolved (CURRENT treats it as logged out).
  */
-export async function loadPersonalContext(
+export async function loadPersonalContext<L extends LinkedXRow = LinkedXRow>(
   db: D1Database,
   sessionUser: SessionUser,
-  options: { pendingRequest: boolean },
-): Promise<PersonalContext | null> {
-  const statements = [termsStatement(db, sessionUser.id), linkedXStatement(db, sessionUser.id)];
-  if (options.pendingRequest) statements.push(pendingRequestStatement(db, sessionUser.id));
-  const [termsResult, linkedResult, pendingResult] = await db.batch(statements);
-  const terms = (termsResult?.results as TermsRow[] | undefined)?.[0];
-  if (!terms) return null;
-  const linkedRows = (linkedResult?.results ?? []) as unknown as LinkedXRow[];
-  const pendingRequest =
-    (pendingResult?.results as Array<{ id: string; requested_x_id: string | null }> | undefined)?.[0] ?? null;
-  return { user: buildPersonalUser(sessionUser, terms, linkedRows), linkedRows, pendingRequest };
+  options: ContextOptions,
+): Promise<PersonalContext<L> | null> {
+  const row = await contextStatement(db, sessionUser.id, options).first<
+    TermsRow & { linked: string | null; pending: string | null; history: string | null }
+  >();
+  if (!row) return null;
+  const linkedRows = parseJsonColumn<L[]>(row.linked, []);
+  return {
+    user: buildPersonalUser(sessionUser, row, linkedRows),
+    linkedRows,
+    pendingRequest: parseJsonColumn<{ id: string; requested_x_id: string | null } | null>(row.pending, null),
+    history: parseJsonColumn<unknown[]>(row.history, []),
+  };
 }
+

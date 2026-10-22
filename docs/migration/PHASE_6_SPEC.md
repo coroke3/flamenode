@@ -465,8 +465,8 @@ npm run typecheck
 PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cron が拾う。
 
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
-- **Model:** lead-refined / small impl（認証付き参照 API。権限は MIG-0608 の `sessionMiddleware` + `requireAuth` だけを使う。Cloudflare 実操作なし）
-- **Readiness:** READY_FOR_SMALL_MODEL — 依存は DONE。ただし「RSC 内の副作用」を持つ onboarding の扱いは下記 STOP に従う
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。独立レビューと人間のmerge待ち。認証付き参照 API のため lead が所有する
 - **Recipe:** R-API
 - **Runtime:** S2
 - **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-02 DECIDED, D-07 DECIDED
@@ -493,7 +493,7 @@ PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cr
 - **U02 dashboard**: `GET /api/personal/dashboard`。
 - **U03 library**: `GET /api/personal/library?tab=&page=`。
 - **U04 settings**: `GET /api/personal/settings?tab=&x=&onboarding=`。
-- **U05 onboarding**: `GET /api/personal/onboarding`。`maybeMarkOnboardingComplete`（GET 中の UPDATE）は再現しない（STOP 参照）。
+- **U05 onboarding**: `GET /api/personal/onboarding`。`maybeMarkOnboardingComplete`（GET 中の UPDATE）は再現せず MIG-0702 の POST へ引き継ぐ（lead 決定 2026-10-23）。
 - **U06 tests**: `node:sqlite` に `migrations/*.sql` 全部を適用し、CURRENT の drizzle クエリ（page.tsx の写し）と同じ seed で行・順序・件数が一致することを確認。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -521,13 +521,13 @@ npm run check:public-api-leaks
 #### DONE checklist
 - [ ] 5 endpoint が同じ seed で CURRENT と同じ行・順序・件数を返す（private / deleted / banned / visibility の条件が同じ）
 - [ ] 全 endpoint が `requireAuth` 配下で、全応答が `Cache-Control: private, no-store`
-- [ ] 全クエリが `LIMIT` 付きで N+1 が無い。statement 数と D1 往復数を work item に記録している
+- [ ] 全クエリが `LIMIT` 付きで N+1 が無い。各 endpoint の D1 statement が session 照合を含め 3 以内（テストで assert）
 - [ ] D1 の bind が 100 以下（承認済み X が多い場合も）
 - [ ] 本番 Route・Remote D1・secret を変更していない
 - [ ] 独立レビュー（他agentまたは人間）の APPROVE
 #### STOP
 - `GET` の中で書き込みが必要になったら止める。`maybeMarkOnboardingComplete`（`onboarding_completed_at` の条件付き UPDATE）は認可に使われない補助マーカーなので、この task では再現せず、MIG-0702 で `POST` として扱う（lead 決定待ち）。
-- 規約本文の公開データ層（可視性 guard・Cache API・miss 時の rebuild enqueue）は再現しない。R2 の 1 object 読み取りと D1 の公開中規約の fallback だけ。差が必要になったら止める。
+- 規約本文: 可視性 guard（enforce 時は manifest が無ければ fail closed）は再現する。Cache API と miss 時の rebuild enqueue は GET が書かないため再現しない（既知の差）。未公開の規約は返さない。
 - `session.ts` / `writeOrigin.ts` の変更が必要に見えたら止める（PR #331）。
 - 公開してよいか判断が要る列（email 等）を DTO に足したくなったら止める。
 #### Rollback

@@ -47,6 +47,50 @@ export const EXCLUDE_PVSF_SUMMARY_VIDEOS_SQL = `COALESCE(videos.primary_event_id
         AND pvsf_summary_video_events.event_id = '${PVSF_SUMMARY_EVENT_ID}'
     )`;
 
+export const CARD_COLUMNS = [
+  "id",
+  "title",
+  "youtube_video_id",
+  "display_name",
+  "icon_url",
+  "creator_x_user_id",
+  "primary_event_id",
+  "scheduled_time",
+  "status",
+] as const;
+
+export const CHAPTER_COLUMNS = [
+  "id",
+  "video_id",
+  "youtube_video_id",
+  "video_title",
+  "chapter_time",
+  "chapter_label",
+  "visibility",
+  "created_at",
+] as const;
+
+const jsonColumns = (columns: readonly string[]) => columns.map((c) => `'${c}', q.${c}`).join(", ");
+
+/**
+ * Wraps a bounded, ordered list query as ONE scalar JSON array column (D1 statement consolidation,
+ * ZERO_1102 S2). Row order is the inner ORDER BY; the inner query keeps its own LIMIT.
+ */
+export function jsonList(fragment: SqlFragment, columns: readonly string[]): SqlFragment {
+  return {
+    sql: `(SELECT json_group_array(json_object(${jsonColumns(columns)})) FROM (${fragment.sql}) q)`,
+    params: fragment.params,
+  };
+}
+
+/** Wraps a single-row query as one scalar JSON object column (NULL when there is no row). */
+export function jsonRow(fragment: SqlFragment, columns: readonly string[]): SqlFragment {
+  return {
+    sql: `(SELECT json_object(${jsonColumns(columns)}) FROM (${fragment.sql}) q)`,
+    params: fragment.params,
+  };
+}
+
 export interface VideoCardRow {
   id: string;
   title: string;

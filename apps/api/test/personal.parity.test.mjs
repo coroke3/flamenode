@@ -396,6 +396,7 @@ if (runUnderRootTsx(import.meta.url)) {
     stats[endpoint].push(result.stats);
     assert.equal(result.stats.writes, 0, `${endpoint}: GET must not write`);
     assert.ok(result.stats.maxBinds <= 100, `${endpoint}: ${result.stats.maxBinds} binds`);
+    assert.ok(result.stats.statements <= 3, `${endpoint}: ${result.stats.statements} D1 statements (ZERO_1102 S2 allows 3 incl. the session lookup)`);
   };
 
   // ---------------- T01 / T02 / T03 ----------------
@@ -430,18 +431,55 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("T03 D1 failure -> 503 {error:unavailable}, no-store, no internals", async () => {
+    // CURRENT: a failing user/linked-X read throws to the error page -> 503 (settings, library lists, onboarding, session).
+    const failing = (match) => {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      d1.prepare = (sql) => {
+        if (match.test(sql)) throw new Error("secret-internal tok-alice");
+        return prepare(sql);
+      };
+      return d1;
+    };
+    for (const [path, match] of [
+      ["/api/personal/session", /required_major/],
+      ["/api/personal/settings", /required_major/],
+      ["/api/personal/onboarding", /required_major/],
+      ["/api/personal/dashboard", /required_major/],
+      ["/api/personal/library?tab=like", /video_interactions_auth/],
+    ]) {
+      const response = await app.request(path, { headers: cookie("tok-alice") }, { DB: failing(match) });
+      const text = await response.text();
+      assert.equal(response.status, 503, path);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.deepEqual(JSON.parse(text), { error: "unavailable" });
+      assert.doesNotMatch(text, /secret-internal|tok-alice/);
+    }
+  });
+
+  test("T03 dashboard sections failing -> same empty sections as CURRENT's swallowed try/catch (200)", async () => {
     const d1 = createD1(sqlite);
-    const original = d1.batch;
-    d1.batch = async () => {
-      throw new Error("secret-internal tok-alice");
+    const prepare = d1.prepare;
+    d1.prepare = (sql) => {
+      if (/AS mine/.test(sql) || /AS slot/.test(sql)) throw new Error("boom");
+      return prepare(sql);
     };
     const response = await app.request("/api/personal/dashboard", { headers: cookie("tok-alice") }, { DB: d1 });
-    const text = await response.text();
-    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
-    assert.deepEqual(JSON.parse(text), { error: "unavailable" });
-    assert.doesNotMatch(text, /secret-internal|tok-alice/);
-    d1.batch = original;
+    assert.deepEqual(
+      { v: body.myVideos, c: body.collabVideos, h: body.myChapters, s: body.activeSlot, st: body.stats },
+      {
+        v: { items: [], hasMore: false },
+        c: { items: [], hasMore: false },
+        h: { items: [], hasMore: false },
+        s: null,
+        st: { likes: 0, views: 0, video_count: 0, event_count: 0 },
+      },
+    );
+    assert.equal(body.linkedXUsers.length, 5, "account/linked X still come from the context read");
+    assert.equal(body.onboarding.canPost, true);
   });
 
   test("other methods are not routed", async () => {
@@ -473,9 +511,9 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(!("email" in flags.alice) && !("discord_id" in flags.alice));
   });
 
-  test("T04 session: 1 session lookup + 1 batch of 2 statements", async () => {
+  test("S2 budget: session = session lookup + 1 context statement", async () => {
     const r = await call("/api/personal/session", "tok-alice");
-    assert.deepEqual({ statements: r.stats.statements, batches: r.stats.batches }, { statements: 3, batches: 1 });
+    assert.deepEqual({ statements: r.stats.statements, batches: r.stats.batches }, { statements: 2, batches: 0 });
   });
 
   // ---------------- T04/T05 dashboard ----------------
@@ -515,9 +553,9 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(r.stats.maxBinds <= 100);
   });
 
-  test("S2 budget: dashboard = 1 session lookup + 2 batches (3 + 6 statements), bounded", async () => {
+  test("S2 budget: dashboard = session lookup + context + 1 JSON-sections statement (3, no batch)", async () => {
     const r = await call("/api/personal/dashboard", "tok-alice");
-    assert.deepEqual({ statements: r.stats.statements, batches: r.stats.batches }, { statements: 10, batches: 2 });
+    assert.deepEqual({ statements: r.stats.statements, batches: r.stats.batches }, { statements: 3, batches: 0 });
   });
 
   // ---------------- T04/T06 library ----------------
@@ -592,11 +630,11 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(!JSON.stringify(body).includes("restore_snapshot_json"));
   });
 
-  test("S2 budget: settings = session + 1 batch of 3 (+ 1 batch of 4 for the shown X panel)", async () => {
+  test("S2 budget: settings = session + context (+ 1 candidates statement for the shown X panel)", async () => {
     const withPanel = await call("/api/personal/settings", "tok-alice");
-    assert.deepEqual({ statements: withPanel.stats.statements, batches: withPanel.stats.batches }, { statements: 8, batches: 2 });
+    assert.deepEqual({ statements: withPanel.stats.statements, batches: withPanel.stats.batches }, { statements: 3, batches: 0 });
     const noPanel = await call("/api/personal/settings?tab=link", "tok-alice");
-    assert.deepEqual({ statements: noPanel.stats.statements, batches: noPanel.stats.batches }, { statements: 4, batches: 1 });
+    assert.deepEqual({ statements: noPanel.stats.statements, batches: noPanel.stats.batches }, { statements: 2, batches: 0 });
   });
 
   // ---------------- onboarding ----------------
@@ -617,7 +655,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const viaR2 = await call("/api/personal/onboarding", "tok-carol", { bucket: fakeBucket({ "rules/current.json": good }) });
     assert.deepEqual(viaR2.body, await refOnboarding("carol", good));
     assert.deepEqual(viaR2.body.rules, { versionLabel: "r2-label", bodyMarkdown: "# from r2" });
-    assert.equal(viaR2.stats.statements, 4, "no D1 rules read when R2 has the object");
+    assert.equal(viaR2.stats.statements, 2, "no D1 rules read when R2 has the object");
 
     const invalid = { version_label: "  ", body_markdown: "x" };
     const viaInvalid = await call("/api/personal/onboarding", "tok-carol", { bucket: fakeBucket({ "rules/current.json": invalid }) });
@@ -630,6 +668,26 @@ if (runUnderRootTsx(import.meta.url)) {
 
     const noBucket = await call("/api/personal/onboarding", "tok-carol");
     assert.equal(noBucket.body.rules.versionLabel, "v2");
+  });
+
+  test("T08 onboarding: visibility guard mirrors CURRENT (enforce needs a committed manifest; unpublished terms never served)", async () => {
+    const run = (mode, objects) => {
+      const d1 = createD1(sqlite);
+      return app
+        .request("/api/personal/onboarding", { headers: cookie("tok-carol") }, { DB: d1, BUCKET: fakeBucket(objects), PUBLIC_VISIBILITY_GUARD_MODE: mode })
+        .then((r) => r.json());
+    };
+    const rules = { version_label: "r2-label", body_markdown: "# from r2" };
+    assert.equal((await run("enforce", { "rules/current.json": rules })).rules, null, "no manifest -> fail closed");
+    assert.equal((await run("enforce", { "rules/current.json": rules, "visibility/blocked-entities.v1.json": {} })).rules.versionLabel, "r2-label");
+    assert.equal((await run("observe", { "rules/current.json": rules })).rules.versionLabel, "r2-label");
+    assert.equal((await run("off", {})).rules.versionLabel, "v2", "D1 fallback only returns published terms");
+    sqlite.exec("UPDATE terms_versions SET status = 'draft' WHERE id = 'T2'");
+    try {
+      assert.equal((await run("off", {})).rules, null, "unpublished terms are never served");
+    } finally {
+      sqlite.exec("UPDATE terms_versions SET status = 'published' WHERE id = 'T2'");
+    }
   });
 
   test("read-only: nothing wrote to D1 and no endpoint set a cookie", async () => {
