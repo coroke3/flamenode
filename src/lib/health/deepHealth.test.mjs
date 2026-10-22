@@ -4,6 +4,9 @@ import { getTableName, isTable } from "drizzle-orm";
 import * as dbSchema from "../db/schema.ts";
 import {
   authorizeDeepHealth,
+  buildDeepHealthFailureResponse,
+  classifyArtifactSloError,
+  DeepHealthCheckError,
   runDeepHealthChecks,
 } from "./deepHealth.ts";
 import {
@@ -596,4 +599,65 @@ test("detail artifact SLO rejects incomplete and stale tracked inventories", () 
       ),
     /video detail artifact is stale/,
   );
+});
+
+test("deep health failure carries a fixed reason code and artifact key", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const rules = ARTIFACT_SLO_PROBES.find((probe) => probe.key === "rules/current.json");
+  const baseBucket = createBucket(now);
+  const env = createBaseEnv(now, {
+    BUCKET: {
+      head: baseBucket.head,
+      get: async (key) =>
+        key === rules.key
+          ? { text: async () => JSON.stringify(artifactPayload(key, now - 91 * 24 * 3600)) }
+          : baseBucket.get(key),
+    },
+  });
+  const error = await runDeepHealthChecks(env).then(
+    () => null,
+    (caught) => caught,
+  );
+  assert.ok(error instanceof DeepHealthCheckError);
+  assert.equal(error.reason, "artifact_stale");
+  assert.equal(error.key, "rules/current.json");
+
+  const logged = [];
+  const originalError = console.error;
+  console.error = (line) => logged.push(line);
+  let response;
+  try {
+    response = buildDeepHealthFailureResponse(error);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    service: "flamenode-web",
+    reason: "artifact_stale",
+    key: "rules/current.json",
+  });
+  assert.deepEqual(JSON.parse(logged[0]), {
+    service: "deep-health",
+    code: "deep_health_failed",
+    reason: "artifact_stale",
+    key: "rules/current.json",
+  });
+});
+
+test("classifyArtifactSloError maps tracked detail and missing artifacts; unknown errors stay reasonless", async () => {
+  const detail = classifyArtifactSloError(new Error("video detail artifact is stale"));
+  assert.deepEqual([detail.reason, detail.key], ["artifact_stale", "static_artifacts:video"]);
+  const missing = classifyArtifactSloError(new Error("static artifact missing: top.json"));
+  assert.deepEqual([missing.reason, missing.key], ["artifact_missing", "top.json"]);
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    const response = buildDeepHealthFailureResponse(new Error("secret detail"));
+    assert.deepEqual(await response.json(), { ok: false, service: "flamenode-web" });
+  } finally {
+    console.error = originalError;
+  }
 });

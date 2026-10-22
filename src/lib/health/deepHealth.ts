@@ -29,6 +29,68 @@ export const PUBLIC_VISIBILITY_STUCK_FENCE_GRACE_SECONDS = 5 * 60;
 /** Keep the health JSON1 join bounded even if an invalid manifest grows large. */
 export const PUBLIC_VISIBILITY_STUCK_FENCE_MAX_CANDIDATES = 200;
 
+export type DeepHealthFailureReason =
+  | "artifact_stale"
+  | "artifact_missing"
+  | "artifact_invalid";
+
+/** 認可済み呼び出し元にだけ返す、secret を含まない失敗理由（固定コード + artifact key）。 */
+export class DeepHealthCheckError extends Error {
+  readonly reason: DeepHealthFailureReason;
+  readonly key: string;
+
+  constructor(reason: DeepHealthFailureReason, key: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : `deep health failed: ${reason}`, {
+      cause,
+    });
+    this.name = "DeepHealthCheckError";
+    this.reason = reason;
+    this.key = key;
+  }
+}
+
+/** artifactSlo.ts の assertion message から固定コードと key だけを取り出す。 */
+export function classifyArtifactSloError(error: unknown): DeepHealthCheckError {
+  const message = error instanceof Error ? error.message : "";
+  const detail = /^(video|event) detail /.exec(message);
+  const missing = /^static artifact (?:missing|too large|malformed): (.+)$/.exec(
+    message,
+  );
+  const key = detail
+    ? `static_artifacts:${detail[1]}`
+    : (missing?.[1] ?? /^([^:\s]+):/.exec(message)?.[1] ?? "unknown");
+  const reason: DeepHealthFailureReason =
+    /^static artifact missing:/.test(message)
+      ? "artifact_missing"
+      : /(stale|in the future)/.test(message)
+        ? "artifact_stale"
+        : "artifact_invalid";
+  return new DeepHealthCheckError(reason, key, error);
+}
+
+/**
+ * 認可後の失敗応答。DeepHealthCheckError のときだけ固定 reason と artifact key を返し、
+ * 構造化ログ（固定 code + reason + key）を残す。secret・本文・例外メッセージは含めない。
+ */
+export function buildDeepHealthFailureResponse(error: unknown): Response {
+  const known = error instanceof DeepHealthCheckError ? error : null;
+  console.error(
+    JSON.stringify({
+      service: "deep-health",
+      code: "deep_health_failed",
+      ...(known ? { reason: known.reason, key: known.key } : {}),
+    }),
+  );
+  return Response.json(
+    {
+      ok: false,
+      service: "flamenode-web",
+      ...(known ? { reason: known.reason, key: known.key } : {}),
+    },
+    { status: 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 type DeepHealthCheckStatus = "ok" | "degraded";
 
 type DeepHealthR2Object = {
@@ -332,8 +394,12 @@ export async function runDeepHealthChecks(
   const artifactSloProbes = ARTIFACT_SLO_PROBES.filter(
     (probe) => probe.key !== PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY,
   );
-  assertTrackedDetailArtifactSloFresh(schema, nowSec);
-  await assertArtifactSloFresh(env.BUCKET, nowSec, artifactSloProbes);
+  try {
+    assertTrackedDetailArtifactSloFresh(schema, nowSec);
+    await assertArtifactSloFresh(env.BUCKET, nowSec, artifactSloProbes);
+  } catch (error) {
+    throw classifyArtifactSloError(error);
+  }
   const visibilityHealth = await checkPublicVisibilityManifestHealth(
     env.DB,
     env.BUCKET,

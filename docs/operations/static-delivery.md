@@ -376,6 +376,15 @@ enqueue できない場合に「一時的に表示できません」を表示し
 
 postings-v1 の候補走査では検索語を trim/lower した値と空の creator-name map を再利用し、候補ごとの正規化・Map生成を避ける。部分一致の対象列と検索結果は変えない。
 
+### Artifact SLO の鮮度維持（dedup refresh と sweep）
+
+Artifact SLO（`src/lib/health/artifactSlo.ts`）は本文 `generated_at`／`static_artifacts.generated_at` の経過を 90 日で判定する。内容不変の artifact は R2 dedup が PUT を省くため、そのままでは `generated_at` が進まず deep health が 503 になる。
+
+- Dedup refresh: `workers/json-generator/r2Dedup.ts` は同一 content hash でも R2 `uploaded` が `STATIC_ARTIFACT_REFRESH_AFTER_SEC`（60 日）より古ければ書き直す。`scripts/check-artifact-slo.mjs` が SLO との差 14 日以上を検査する。
+- 定期 sweep: `content-jobs` の既存 hourly Recovery（新 cron なし）が `content-jobs:artifact-refresh` lease（最小間隔 6 時間）で `ensureStaleArtifactRefresh` を実行する。video/event は `static_artifacts` の最古 `generated_at` が 60 日超の target を古い順に最大 100 件、global artifact は R2 HEAD（最大 32 回）で 60 日超のものを `reason=artifact_slo_refresh`・`priority=low` で enqueue する。active な queue 行がある target は除く。
+- 上限と無料枠: 1 日 4 run × 100 = 最大 400 detail target + global 約 19 target。D1 は run あたり最大 6 statement（lease 3 + SELECT 2 + enqueue 1）、非実行 hour は lease 取得 1 statement。Queue は既存の `static_rebuild_available` wake を共用し、追加 message は最大でも 1 run あたり 1（日 4 ops 前後）。`npm run estimate:queue-budget` の予約枠内。
+- 診断: `/api/health/deep` は失敗時、認可済み呼び出し元にだけ `{"ok":false,"service":"flamenode-web","reason":"artifact_stale|artifact_missing|artifact_invalid","key":"<artifact key>"}` を返し、同じ code を `console.error` に構造化出力する。`scripts/smoke-cloudflare.mjs` はこれを表示する。
+
 ## スコア再計算とランキング再生成
 
 Video global projections share the internal materialized source at

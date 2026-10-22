@@ -5,6 +5,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import {
+  STATIC_ARTIFACT_REFRESH_AFTER_SEC,
+} from "../workers/json-generator/r2Dedup.ts";
+import {
+  ARTIFACT_SLO_MAX_AGE_SEC,
   ARTIFACT_SLO_PROBES,
   listArtifactSloKeys,
 } from "../src/lib/health/artifactSlo.ts";
@@ -47,6 +51,15 @@ for (const probe of ARTIFACT_SLO_PROBES) {
     staticDeliveryDoc,
     new RegExp(probe.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
     `${probe.key} must be documented in docs/operations/static-delivery.md`,
+  );
+}
+
+// dedup は内容不変の artifact を再PUTしないため、REFRESH_AFTER を SLO の最大経過より
+// 十分短く保たないと generated_at が SLO を割る（deep health 503）。
+for (const [name, maxAge] of Object.entries(ARTIFACT_SLO_MAX_AGE_SEC)) {
+  assert.ok(
+    STATIC_ARTIFACT_REFRESH_AFTER_SEC + 14 * 24 * 3600 <= maxAge,
+    `${name}: SLO max age must leave >= 14 days after STATIC_ARTIFACT_REFRESH_AFTER_SEC`,
   );
 }
 
