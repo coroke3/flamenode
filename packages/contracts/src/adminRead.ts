@@ -322,6 +322,49 @@ export interface AdminEventNewResponse extends AdminEventTemplatesResponse {
   formInitial: "deferred";
 }
 
+// ---- /event-groups ------------------------------------------------------------------------------------------
+
+export interface AdminEventGroupRow {
+  id: string;
+  name: string;
+  slug: string;
+  group_type: string;
+  visibility_status: string;
+  sort_order: number | null;
+  event_count: number;
+}
+
+export interface AdminEventGroupsResponse {
+  visibility: string;
+  type: string;
+  groups: AdminEventGroupRow[];
+}
+
+export interface AdminEventGroupMember {
+  event_id: string;
+  title: string;
+  start_time: number | null;
+}
+
+export interface AdminEventGroupDetailResponse {
+  group: {
+    id: string;
+    name: string;
+    slug: string;
+    description: string | null;
+    group_type: string;
+    icon_url: string | null;
+    accent_color: string | null;
+    visibility_status: string;
+    sort_order: number | null;
+    updated_at: number;
+  };
+  members: AdminEventGroupMember[];
+  /** CURRENT queryEventGroupEventOptions(query "", cursor null): first page of events not in the group */
+  eventOptions: { id: string; title: string; start_time: number | null }[];
+  nextCursor: string | null;
+}
+
 export interface AdminXIdMergesResponse {
   view: "requests" | "reverts";
   selectedImpactId: string;

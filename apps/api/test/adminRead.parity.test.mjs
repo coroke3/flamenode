@@ -303,7 +303,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const bySort = (rows, key) => [...rows].sort((a, b) => String(a[key]).localeCompare(String(b[key])));
 
   // ---------------- T02: authz ----------------
-  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation", "/x-link-requests", "/x-id-merges", "/events/templates", "/events/new"];
+  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation", "/x-link-requests", "/x-id-merges", "/events/templates", "/events/new", "/event-groups"];
 
   test("T02 guest / expired / unknown token -> 401, no-store, one D1 statement at most", async () => {
     for (const path of ENDPOINTS) {
@@ -591,6 +591,35 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       sqlite.exec(`UPDATE system_settings SET operation_mode = 'normal', disabled_features_json = NULL, cost_guard_exception_until = NULL, cost_guard_exception_features_json = NULL WHERE id = 'default'`);
     }
+  });
+
+  test("T01 event groups: list filters/counts and edit detail (members, first option page) equal CURRENT", async () => {
+    const { queryEventGroupEventOptions } = await import("../../../src/lib/admin/eventGroupEventOptions.ts");
+    for (const query of ["", "?visibility=public", "?visibility=private", "?visibility=archived", "?type=series", "?type=other&visibility=archived", "?type=bogus", "?type=toString", "?visibility=zzz"]) {
+      const sp = Object.fromEntries(new URLSearchParams(query));
+      const visibilityFilter = ["public", "private", "archived"].includes(sp.visibility) ? sp.visibility : "any";
+      const typeFilter = sp.type && sp.type in { series: 1, genre: 1, related: 1, collection: 1, other: 1 } ? sp.type : "any";
+      const conds = [visibilityFilter !== "any" ? eq(S.eventGroups.visibility_status, visibilityFilter) : undefined, typeFilter !== "any" ? eq(S.eventGroups.group_type, typeFilter) : undefined].filter((x) => x !== undefined);
+      const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
+      const rows = await refDb
+        .select({ id: S.eventGroups.id, name: S.eventGroups.name, slug: S.eventGroups.slug, group_type: S.eventGroups.group_type, visibility_status: S.eventGroups.visibility_status, sort_order: S.eventGroups.sort_order, event_count: sql`count(${S.eventGroupEvents.event_id})`.as("event_count") })
+        .from(S.eventGroups).leftJoin(S.eventGroupEvents, eq(S.eventGroupEvents.event_group_id, S.eventGroups.id)).where(where).groupBy(S.eventGroups.id)
+        .orderBy(asc(S.eventGroups.sort_order), asc(S.eventGroups.name)).limit(100);
+      const r = await get(`/api/admin-read/event-groups${query}`);
+      assert.deepEqual(r.body.groups, canon(rows.map((x) => ({ ...x, event_count: Number(x.event_count) }))), query);
+    }
+    for (const id of ["eg1", "eg2", "eg3", "eg-empty"]) {
+      const g = (await refDb.select().from(S.eventGroups).where(eq(S.eventGroups.id, id)).limit(1))[0];
+      const members = await refDb.select({ event_id: S.eventGroupEvents.event_id, title: S.events.title, start_time: S.events.start_time }).from(S.eventGroupEvents).innerJoin(S.events, eq(S.events.id, S.eventGroupEvents.event_id)).where(eq(S.eventGroupEvents.event_group_id, id)).orderBy(desc(S.events.start_time), asc(S.events.id));
+      const options = await queryEventGroupEventOptions(refDb, { groupId: id, query: "", cursor: null });
+      const r = await get(`/api/admin-read/event-groups/${id}`);
+      assert.deepEqual(r.body.group, canon({ id: g.id, name: g.name, slug: g.slug, description: g.description, group_type: g.group_type, icon_url: g.icon_url, accent_color: g.accent_color, visibility_status: g.visibility_status, sort_order: g.sort_order, updated_at: g.updated_at }), id);
+      assert.deepEqual(r.body.members, canon(members), id);
+      assert.deepEqual(r.body.eventOptions, canon(options.options), id);
+      assert.equal(r.body.nextCursor, options.nextCursor, id);
+      assert.equal(r.stats.statements, 3);
+    }
+    assert.equal((await call("/api/admin-read/event-groups/nope", "tok-root")).status, 404);
   });
 
   test("T04 responses never carry secrets (tokens, audit before/after payloads, session data)", async () => {

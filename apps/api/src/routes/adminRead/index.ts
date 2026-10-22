@@ -3,6 +3,7 @@ import type { AdminReadError } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import { adminEventNewRoutes, adminEventTemplatesRoutes } from "./eventTemplates.ts";
+import { adminEventGroupsRoutes } from "./eventGroups.ts";
 import { adminEventsRoutes } from "./events.ts";
 import { adminModerationRoutes } from "./moderation.ts";
 import { adminUsersRoutes } from "./users.ts";
@@ -35,6 +36,7 @@ adminReadRoutes.use("*", async (c, next) => {
 
 adminReadRoutes.route("/users", adminUsersRoutes);
 adminReadRoutes.route("/videos", adminVideosRoutes);
+adminReadRoutes.route("/event-groups", adminEventGroupsRoutes);
 adminReadRoutes.route("/events/templates", adminEventTemplatesRoutes);
 adminReadRoutes.route("/events/new", adminEventNewRoutes);
 adminReadRoutes.route("/events", adminEventsRoutes);

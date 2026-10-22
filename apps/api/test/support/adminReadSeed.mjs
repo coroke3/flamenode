@@ -92,6 +92,15 @@ export function seed(sqlite) {
   ins("video_interactions", { x_user_id: "alice_x", video_id: "va3", interaction_type: "bookmark", created_at: T0 });
   sqlite.exec(`UPDATE videos SET submitted_by_user_id = 'u_alice' WHERE id IN (SELECT id FROM videos WHERE creator_x_user_id = 'alice_x' LIMIT 25)`);
 
+  // event groups
+  const eg = (id, o) => ins("event_groups", { id, name: o.name, slug: id, group_type: o.type ?? "series", visibility_status: o.vis ?? "public", sort_order: o.sort ?? 0, description: o.desc ?? null, updated_at: T0 + 40000 });
+  eg("eg1", { name: "Alpha", sort: 1 });
+  eg("eg2", { name: "Beta", sort: 1, type: "genre", vis: "private" });
+  eg("eg3", { name: "Gamma", sort: 0, type: "other", vis: "archived", desc: "d" });
+  eg("eg-empty", { name: "Empty", sort: 5 });
+  for (const [ev, i] of [["ev1", 0], ["ev2", 1], ["a-open", 2], ["a-ended", 3]]) ins("event_group_events", { event_group_id: "eg1", event_id: ev });
+  ins("event_group_events", { event_group_id: "eg2", event_id: "ev1" });
+
   // event templates (admin templates + new-event pages).
   for (let i = 0; i < 4; i += 1) {
     ins("event_templates", { id: `tpl${i}`, name: `Template ${i}`, description: i % 2 ? null : `desc ${i}`, source_event_id: i === 0 ? "ev1" : null, settings_json: `{"event_type":"event","n":${i}}`, created_by_user_id: "u_root", updated_at: T0 + 30000 + i });
