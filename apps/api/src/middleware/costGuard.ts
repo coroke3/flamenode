@@ -85,6 +85,11 @@ export async function evaluateCostGuard(
  */
 export function costGuardMiddleware(feature: WriteFeatureKey) {
   return async (c: Context, next: Next): Promise<Response | void> => {
+    // writeGuardMiddleware({ activeX }) already evaluated CostGuard itself.
+    if (c.get("costGuardEvaluated") === true) {
+      await next();
+      return;
+    }
     const db = (c.env as { DB?: D1Database }).DB;
     // writeGuardMiddleware already returned 503 db_unavailable without a DB.
     const result = db
@@ -94,10 +99,6 @@ export function costGuardMiddleware(feature: WriteFeatureKey) {
       return writeGuardDenyResponse(c, result.denied, 503);
     }
     if (result.auditSettings) c.set("auditSettings", result.auditSettings);
-    // Active X denial decided by writeGuardMiddleware, applied here so the
-    // order stays identity -> CostGuard -> active X (CURRENT writeGuard.ts).
-    const activeXDeny = c.get("activeXDeny");
-    if (activeXDeny) return writeGuardDenyResponse(c, activeXDeny, 403);
     await next();
   };
 }

@@ -188,7 +188,8 @@ test("write-only checks skip GET/HEAD: a future admin read mounted under /api/ad
 
 // ---------------- generalized guard: requiredRole / activeX ----------------
 
-function guardApp({ user, requiredRole, activeX, settings = "normal", seed }) {
+function guardApp({ user, requiredRole, activeX: activeXOptions, settings = "normal", seed, mountCostGuard = true }) {
+  const activeX = activeXOptions ? { feature: "manage_event_update", ...activeXOptions } : undefined;
   const d1 = createAdminD1();
   seedBase(d1.sqlite, { settings });
   d1.sqlite.exec("UPDATE \"user\" SET id = 'u-1', role = '" + user.role + "', active_x_user_id = " + (user.active_x_user_id ? "'" + user.active_x_user_id + "'" : "NULL"));
@@ -202,7 +203,7 @@ function guardApp({ user, requiredRole, activeX, settings = "normal", seed }) {
     await next();
   });
   hono.use("*", writeGuardMiddleware(options));
-  hono.use("*", costGuardMiddleware("manage_event_update"));
+  if (mountCostGuard) hono.use("*", costGuardMiddleware("manage_event_update"));
   hono.post("/w", (c) => c.json({ ok: true, activeX: c.get("activeX") ?? null }));
   const post = () => hono.request("/w", { method: "POST", headers: { Origin: SITE } }, { DB: d1.db });
   return { ...d1, post };
@@ -278,6 +279,131 @@ test("activeX check runs AFTER CostGuard (CURRENT order) and adds no D1 read", a
   const withX = guardApp({ user: U("admin", "x1"), activeX: { requireApprovedActiveXId: true }, seed: (s) => s.exec("INSERT INTO x_users (id, approval_status) VALUES ('x1', 'approved'); INSERT INTO x_user_account_links VALUES ('u-1', 'x1')") });
   await withX.post();
   assert.equal(withX.stats.reads, plain.stats.reads);
+});
+
+test("fail closed: activeX route WITHOUT costGuardMiddleware still denies (and still checks CostGuard first)", async () => {
+  const noX = guardApp({ user: U("admin"), activeX: { requireActiveXId: true }, mountCostGuard: false });
+  const r1 = await noX.post();
+  assert.equal(r1.status, 403);
+  assert.equal((await r1.json()).reason, "active_x_required");
+  const maint = guardApp({ user: U("admin"), activeX: { requireActiveXId: true }, settings: "maintenance", mountCostGuard: false });
+  const r2 = await maint.post();
+  assert.equal(r2.status, 503);
+  assert.equal((await r2.json()).reason, "maintenance_mode");
+  const ok = guardApp({ user: U("admin", "x1"), activeX: { requireApprovedActiveXId: true }, mountCostGuard: false, seed: (s) => s.exec("INSERT INTO x_users (id, approval_status) VALUES ('x1', 'approved'); INSERT INTO x_user_account_links VALUES ('u-1', 'x1')") });
+  assert.equal((await ok.post()).status, 200);
+  // activeX without a feature (misconfiguration) fails closed
+  const d1 = createAdminD1();
+  seedBase(d1.sqlite);
+  const hono = new Hono();
+  const options = { loadSiteUrl: () => SITE, allowLocalPreview: () => false, activeX: { requireActiveXId: true } };
+  hono.use("*", async (c, next) => { c.set("user", { ...U("admin"), id: "admin-1" }); c.set("sessionState", "user"); await next(); });
+  hono.use("*", writeGuardMiddleware(options));
+  hono.post("/w", (c) => c.json({ ok: true }));
+  const res = await hono.request("/w", { method: "POST", headers: { Origin: SITE } }, { DB: d1.db });
+  assert.equal(res.status, 503);
+});
+
+test("approved X IDs are bounded (LIMIT 100) and oversized JSON fails closed", async () => {
+  const many = guardApp({
+    user: U("admin", "x0"),
+    activeX: { requireApprovedActiveXId: true },
+    seed: (s) => {
+      for (let i = 0; i < 150; i++) {
+        s.exec(`INSERT INTO x_users (id, approval_status) VALUES ('x${i}', 'approved'); INSERT INTO x_user_account_links VALUES ('u-1', 'x${i}')`);
+      }
+    },
+  });
+  const res = await many.post();
+  assert.equal(res.status, 200);
+  assert.ok((await res.json()).activeX.approvedXIds.length <= 100);
+  // byte cap before JSON.parse: a lying/huge column value -> 503
+  const huge = { prepare: () => ({ bind: () => ({ first: async () => ({ is_tos_accepted: 1, terms_reaccept_required: 0, discord_id: null, discord_name: null, active_x_user_id: "x1", user_image: null, x_name: null, x_icon_url: null, x_approval_status: "approved", approved_x_ids_json: JSON.stringify(["a".repeat(9000)]) }) }) }) };
+  const hono = new Hono();
+  const options = { loadSiteUrl: () => SITE, allowLocalPreview: () => false, activeX: { feature: "manage_event_update", requireApprovedActiveXId: true } };
+  hono.use("*", async (c, next) => { c.set("user", { ...U("admin"), id: "u-1" }); c.set("sessionState", "user"); await next(); });
+  hono.use("*", writeGuardMiddleware(options));
+  hono.post("/w", (c) => c.json({ ok: true }));
+  const r = await hono.request("/w", { method: "POST", headers: { Origin: SITE } }, { DB: huge });
+  assert.equal(r.status, 503);
+  assert.equal((await r.json()).reason, "db_unavailable");
+});
+
+// ---------------- default read guard for safe methods ----------------
+
+function readApp({ user, sessionState = "user" }) {
+  const d1 = createAdminD1();
+  seedBase(d1.sqlite);
+  const admin = createAdminRoutes({ session: async (c, next) => { c.set("user", user); c.set("sessionState", sessionState); await next(); } });
+  admin.get("/ping", (c) => c.json({ pong: true }));
+  const hono = new Hono();
+  hono.route("/api/admin", admin);
+  const get = (method = "GET") => hono.request("/api/admin/ping", { method }, { DB: d1.db, NEXT_PUBLIC_SITE_URL: SITE });
+  return { ...d1, get };
+}
+
+test("default read guard: GET denied unless authenticated admin (CURRENT requireRouteUser reasons), private no-store", async () => {
+  const cases = [
+    [{ user: null }, 401, "unauthorized"],
+    [{ user: null, sessionState: "unavailable" }, 503, "database_unavailable"],
+    [{ user: { ...ADMIN, is_banned: 1 } }, 403, "account_disabled"],
+    [{ user: { ...ADMIN, role: "moderator" } }, 403, "forbidden"],
+    [{ user: { ...ADMIN, role: "user" } }, 403, "forbidden"],
+  ];
+  for (const [input, status, error] of cases) {
+    const app = readApp(input);
+    const res = await app.get();
+    assert.equal(res.status, status, error);
+    assert.deepEqual(await res.json(), { error });
+    assert.equal(res.headers.get("cache-control"), "private, no-store");
+    assert.equal(app.stats.reads, 0);
+  }
+  const ok = readApp({ user: ADMIN });
+  assert.equal((await ok.get()).status, 200);
+  assert.equal((await ok.get("HEAD")).status, 200);
+  assert.equal(ok.stats.reads, 0);
+});
+
+// ---------------- preload vs self-read audit rows ----------------
+
+test("audit rows are identical whether settings/actor are preloaded by guards or self-read", async () => {
+  const { mutateWithAudit } = await import("../src/audit/mutateWithAudit.ts");
+  const originalNow = Date.now;
+  const originalUuid = globalThis.crypto.randomUUID;
+  const run = async (preloadedFrom) => {
+    let n = 0;
+    Date.now = () => 1_800_000_000_000;
+    globalThis.crypto.randomUUID = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+    const d1 = createAdminD1();
+    seedBase(d1.sqlite);
+    d1.sqlite.exec("UPDATE system_settings SET audit_normal_retention_days = 45, audit_max_payload_bytes = 90000");
+    d1.sqlite.exec("INSERT INTO x_users (id, x_name, icon_url, approval_status) VALUES ('x1', 'XN', 'https://i/x.png', 'approved'); UPDATE \"user\" SET active_x_user_id = 'x1', image = 'https://i/u.png'");
+    const audits = [{ table_name: "announcements", target_id: "a1", operation: "CREATE", before: null, after: { id: "a1", t: "日本語" }, actor_user_id: "admin-1", retention_class: "normal" }];
+    const statement = { sql: "INSERT INTO announcements (id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", params: ["a1", "t", "b", 1, 1] };
+    let preloaded;
+    if (preloadedFrom === "guards") {
+      const { evaluateCostGuardWithSettings } = await import("../src/middleware/costGuard.ts");
+      const cost = await evaluateCostGuardWithSettings(d1.db, "admin_announcement_broadcast");
+      const user = d1.sqlite.prepare("SELECT u.discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM \"user\" u LEFT JOIN x_users x ON x.id = u.active_x_user_id WHERE u.id = 'admin-1'").get();
+      const { actorSnapshotJsonFromRow } = await import("../src/audit/mutateWithAudit.ts");
+      preloaded = { settings: cost.auditSettings, actorSnapshotJsonById: { "admin-1": actorSnapshotJsonFromRow(user) } };
+    }
+    const before = d1.stats.reads;
+    await mutateWithAudit(d1.db, { mutationStatements: [statement], expectedMutationChanges: [1], audits, preloaded });
+    return { rows: d1.sqlite.prepare("SELECT * FROM audit_logs").all(), reads: d1.stats.reads - before };
+  };
+  try {
+    const self = await run("self");
+    const guards = await run("guards");
+    assert.equal(self.reads, 2);
+    assert.equal(guards.reads, 0);
+    assert.equal(self.rows.length, 1);
+    assert.equal(JSON.stringify(guards.rows), JSON.stringify(self.rows));
+    assert.equal(self.rows[0].expires_at - self.rows[0].created_at, 45 * 86400);
+  } finally {
+    Date.now = originalNow;
+    globalThis.crypto.randomUUID = originalUuid;
+  }
 });
 
 test("identity denies win over active X denies (banned before active_x_required)", async () => {

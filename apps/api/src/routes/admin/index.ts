@@ -17,6 +17,7 @@ import {
   originGuardMiddleware,
   writeGuardMiddleware,
 } from "../../middleware/writeOrigin.ts";
+import { adminReadGuardMiddleware, onlyReads } from "../../middleware/adminReadGuard.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
 
@@ -40,6 +41,8 @@ export function createAdminRoutes(
   // 3. origin (repeated, pure) -> auth -> identity
   admin.use("*", onlyMutating((c, next) => writeGuardMiddleware(originOptions(c))(c, next)));
   // 4. CostGuard is mounted per feature inside each route module.
+  // Safe reads (GET/HEAD) are denied by default unless an authenticated admin.
+  admin.use("*", onlyReads(adminReadGuardMiddleware()));
   admin.route("/announcements", announcementRoutes);
   admin.route("/api-endpoints", apiEndpointRoutes);
   return admin;

@@ -25,6 +25,7 @@
 import {
   evaluateActiveXWriteAccess,
   evaluateWriteIdentity,
+  type WriteFeatureKey,
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
 import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
@@ -33,6 +34,7 @@ import {
   MAX_SINGLE_ROW_LIMIT,
   type ActorSnapshotRow,
 } from "../audit/mutateWithAudit.ts";
+import { evaluateCostGuardWithSettings } from "./costGuard.ts";
 
 export type WriteGuardDenyReason =
   | "origin_verification_unavailable"
@@ -95,6 +97,11 @@ export function writeGuardDenyBody(reason: string): string {
 }
 
 export type WriteRequiredRole = "admin" | null;
+
+/** Bounds for the approved linked X ID list folded into the user read. */
+export const MAX_APPROVED_X_IDS = 100;
+/** X IDs are <= 15 chars; 100 quoted ids + separators fit well under this. */
+export const MAX_APPROVED_X_IDS_JSON_BYTES = 8192;
 
 /** CURRENT WriteGuardOptions.requireActiveXId / requireApprovedActiveXId. */
 export type WriteActiveXOptions = {
@@ -227,11 +234,13 @@ async function loadTosState(
          x."approval_status" AS x_approval_status${
            activeX?.requireApprovedActiveXId
              ? `,
-         (SELECT json_group_array(DISTINCT l."x_user_id")
-            FROM "x_user_account_links" l
-            INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
-           WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
-         ) AS approved_x_ids_json`
+         (SELECT json_group_array(approved."x_user_id") FROM (
+            SELECT DISTINCT l."x_user_id" AS x_user_id
+              FROM "x_user_account_links" l
+              INNER JOIN "x_users" ax ON ax."id" = l."x_user_id"
+             WHERE l."auth_user_id" = u."id" AND ax."approval_status" = 'approved'
+             LIMIT ${MAX_APPROVED_X_IDS}
+         ) approved) AS approved_x_ids_json`
              : ""
          }`;
   const row = await db
@@ -306,6 +315,11 @@ async function loadTosState(
   if (!row) return null;
   let approvedXIds: string[] = [];
   if (row.approved_x_ids_json) {
+    // Fail closed (caller maps a throw to 503 db_unavailable) before parsing
+    // anything larger than the bounded list can be.
+    if (row.approved_x_ids_json.length > MAX_APPROVED_X_IDS_JSON_BYTES) {
+      throw new Error("approved_x_ids_too_large");
+    }
     const parsed: unknown = JSON.parse(row.approved_x_ids_json);
     approvedXIds = Array.isArray(parsed)
       ? parsed.filter((v): v is string => typeof v === "string")
@@ -394,11 +408,12 @@ export type WriteGuardMiddlewareOptions = {
   /** Default "admin" (CURRENT requireAdminWrite). null = any authenticated user. */
   requiredRole?: WriteRequiredRole;
   /**
-   * CURRENT requireActiveXId / requireApprovedActiveXId. The decision is made
-   * from the same user read (no extra D1 query) but applied by the CostGuard
-   * middleware after its own check, as CURRENT does.
+   * CURRENT requireActiveXId / requireApprovedActiveXId. Decided from the same
+   * user read (no extra D1 query). Requires the CostGuard `feature`: the guard
+   * evaluates CostGuard then active X itself (CURRENT order), so the check
+   * cannot be skipped by forgetting costGuardMiddleware.
    */
-  activeX?: WriteActiveXOptions;
+  activeX?: WriteActiveXOptions & { feature: WriteFeatureKey };
 };
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -488,10 +503,25 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
     if (!outcome.ok) {
       return writeGuardDenyResponse(c, outcome.reason, outcome.status);
     }
-    // Deferred to costGuardMiddleware (CURRENT order: identity -> CostGuard -> active X).
+    // Active X (fail closed, independent of whether costGuardMiddleware is
+    // mounted): CURRENT order identity -> CostGuard -> active X is evaluated
+    // here, so an activeX route can never skip the check.
     const activeXState = activeXRow as ActiveXRow | null;
-    if (options.activeX && activeXState) {
-      c.set("activeXDeny", evaluateActiveXAccess(options.activeX, activeXState));
+    if (options.activeX) {
+      const feature = options.activeX.feature;
+      if (!feature || !activeXState || !db) {
+        return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
+      }
+      const cost = await evaluateCostGuardWithSettings(
+        db as unknown as D1Database,
+        feature,
+      );
+      if (cost.denied) return writeGuardDenyResponse(c, cost.denied, 503);
+      if (cost.auditSettings) c.set("auditSettings", cost.auditSettings);
+      // costGuardMiddleware on the same route skips its (second) read.
+      c.set("costGuardEvaluated", true);
+      const activeXDeny = evaluateActiveXAccess(options.activeX, activeXState);
+      if (activeXDeny) return writeGuardDenyResponse(c, activeXDeny, 403);
       c.set("activeX", {
         activeXId: activeXState.activeXId,
         approvedXIds: activeXState.approvedXIds,
