@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type {
   AdminAuditDetailResponse,
   AdminAuditListResponse,
+  AdminAuditPayloadChunkResponse,
   AdminAuditRestoreResponse,
 } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
@@ -157,10 +158,24 @@ adminAuditRoutes.get("/restore", async (c) => {
 adminAuditRoutes.get("/:id", async (c) => {
   const auditId = c.req.param("id");
   if (!auditId) return c.json(NOT_FOUND, 404);
-  const row = await c.env.DB.prepare("SELECT * FROM audit_logs WHERE id = ? LIMIT 1")
+  // Payload columns stay in D1 (only their lengths are read); see AdminAuditDetailRowSchema.
+  const found = await c.env.DB.prepare(
+    `SELECT id, table_name, target_id, operation, changed_keys_json, actor_user_id, actor_x_user_id,
+       actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status,
+       restore_unavailable_reason_code, restore_unavailable_message, payload_size_bytes, expires_at, created_at,
+       length(before_json) AS before_len, length(after_json) AS after_len, length(inverse_patch_json) AS inverse_len
+     FROM audit_logs WHERE id = ? LIMIT 1`,
+  )
     .bind(auditId)
-    .first<AdminAuditDetailResponse["row"]>();
-  if (!row) return c.json(NOT_FOUND, 404);
+    .first<
+      AdminAuditDetailResponse["row"] & {
+        before_len: number | null;
+        after_len: number | null;
+        inverse_len: number | null;
+      }
+    >();
+  if (!found) return c.json(NOT_FOUND, 404);
+  const { before_len, after_len, inverse_len, ...row } = found;
 
   // prev/next audit row for the same target_id (CURRENT runs these as two statements; one UNION ALL here).
   const { results } = await c.env.DB.prepare(
@@ -176,6 +191,41 @@ adminAuditRoutes.get("/:id", async (c) => {
     const found = results.find((entry) => entry.kind === kind);
     return found ? { id: found.id, created_at: found.created_at } : null;
   };
-  const body: AdminAuditDetailResponse = { row, prev: neighbor("prev"), next: neighbor("next") };
+  const body: AdminAuditDetailResponse = {
+    row,
+    payload: { before: before_len, after: after_len, inverse: inverse_len },
+    prev: neighbor("prev"),
+    next: neighbor("next"),
+  };
+  return c.json(body);
+});
+
+// ---- GET /audit/:id/payload/:field?offset=N (before_json / after_json / inverse_patch_json in bounded chunks) ----
+// D1: session + 1 statement. substr/length count characters, so a chunk is at most 12,000 characters
+// (<= 48 KB even at 4 bytes/char) and the response stays under 64 KiB with its envelope.
+const PAYLOAD_COLUMNS = { before: "before_json", after: "after_json", inverse: "inverse_patch_json" } as const;
+const PAYLOAD_CHUNK_CHARS = 12_000;
+
+adminAuditRoutes.get("/:id/payload/:field", async (c) => {
+  const field = c.req.param("field") as keyof typeof PAYLOAD_COLUMNS;
+  if (!Object.hasOwn(PAYLOAD_COLUMNS, field)) return c.json(NOT_FOUND, 404);
+  const offsetRaw = Number(c.req.query("offset") ?? "0");
+  const offset = Number.isSafeInteger(offsetRaw) && offsetRaw > 0 ? offsetRaw : 0;
+  const column = PAYLOAD_COLUMNS[field];
+  const row = await c.env.DB.prepare(
+    "SELECT length(" + column + ") AS total, substr(" + column + ", ?, ?) AS chunk FROM audit_logs WHERE id = ? LIMIT 1",
+  )
+    .bind(offset + 1, PAYLOAD_CHUNK_CHARS, c.req.param("id"))
+    .first<{ total: number | null; chunk: string | null }>();
+  // Unknown id and SQL NULL payload both mean "nothing to show" (CURRENT renders "(null)").
+  if (!row || row.total == null) return c.json(NOT_FOUND, 404);
+  const end = offset + PAYLOAD_CHUNK_CHARS;
+  const body: AdminAuditPayloadChunkResponse = {
+    field,
+    total: row.total,
+    offset,
+    chunk: row.chunk ?? "",
+    nextOffset: end < row.total ? end : null,
+  };
   return c.json(body);
 });

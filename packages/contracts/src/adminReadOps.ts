@@ -153,10 +153,31 @@ export const AdminAuditListResponseSchema = z.object({
   operators: z.array(AdminAuditOperatorSchema),
 });
 export const AdminAuditNeighborSchema = z.object({ id: z.string(), created_at: z.number() });
+export const AdminAuditPayloadFieldSchema = z.enum(["before", "after", "inverse"]);
+// The detail page shows before_json / after_json / inverse_patch_json whole; they can be up to the audit payload
+// cap (default 120 KB), so they are NOT in the detail response. payload.<field> is the character length (null = SQL NULL);
+// the SPA reads the text through the chunk endpoint (<= 64 KiB per response) and concatenates the chunks.
+export const AdminAuditDetailRowSchema = AdminAuditRowSchema.omit({
+  before_json: true,
+  after_json: true,
+  inverse_patch_json: true,
+});
 export const AdminAuditDetailResponseSchema = z.object({
-  row: AdminAuditRowSchema,
+  row: AdminAuditDetailRowSchema,
+  payload: z.object({
+    before: z.number().nullable(),
+    after: z.number().nullable(),
+    inverse: z.number().nullable(),
+  }),
   prev: AdminAuditNeighborSchema.nullable(),
   next: AdminAuditNeighborSchema.nullable(),
+});
+export const AdminAuditPayloadChunkResponseSchema = z.object({
+  field: AdminAuditPayloadFieldSchema,
+  total: z.number(),
+  offset: z.number(),
+  chunk: z.string(),
+  nextOffset: z.number().nullable(),
 });
 export const AdminAuditRestoreResponseSchema = z.object({
   runs: z.array(
@@ -184,6 +205,7 @@ export type AdminEventTemplatesResponse = z.infer<typeof AdminEventTemplatesResp
 export type AdminAuditSettingsResponse = z.infer<typeof AdminAuditSettingsResponseSchema>;
 export type AdminAuditListResponse = z.infer<typeof AdminAuditListResponseSchema>;
 export type AdminAuditDetailResponse = z.infer<typeof AdminAuditDetailResponseSchema>;
+export type AdminAuditPayloadChunkResponse = z.infer<typeof AdminAuditPayloadChunkResponseSchema>;
 export type AdminAuditRestoreResponse = z.infer<typeof AdminAuditRestoreResponseSchema>;
 
 // ---- ops: notifications / YouTube sync ----

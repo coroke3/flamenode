@@ -23,7 +23,8 @@ adminReadRoutes.use("*", requireAuth());
 // both mean "not allowed" and are expressed here as a single 403.
 adminReadRoutes.use("*", async (c, next) => {
   const user = c.get("user");
-  if (!user || user.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+  // Same body as the part-A router (PR #349) so both mounts of one shared router agree.
+  if (!user || user.role !== "admin") return c.json({ error: "Forbidden", redirect: "/dashboard" }, 403);
   await next();
 });
 

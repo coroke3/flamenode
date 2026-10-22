@@ -449,6 +449,23 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
+  // Concatenates /audit/:id/payload/:field chunks; null when the column is SQL NULL (404).
+  async function readPayload(id, field) {
+    let offset = 0;
+    let text = "";
+    for (;;) {
+      const r = await call(`/api/admin-read/audit/${id}/payload/${field}?offset=${offset}`, ADMIN);
+      if (r.status === 404) return null;
+      assert.equal(r.status, 200);
+      assert.ok(r.text.length <= 64 * 1024, "chunk response <= 64 KiB");
+      assert.equal(r.stats.statements, 2);
+      assert.equal(r.stats.writes, 0);
+      text += r.body.chunk;
+      if (r.body.nextOffset == null) return text;
+      offset = r.body.nextOffset;
+    }
+  }
+
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
@@ -661,12 +678,35 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("T02 audit detail equals CURRENT (prev/next on the same target); missing -> 404", async () => {
     for (const id of ["a1", "a2", "a5", "a3", "a7"]) {
-      assert.deepEqual((await get(`/audit/${id}`)).body, await refAuditDetail(id), id);
+      const r = (await get(`/audit/${id}`)).body;
+      const ref = await refAuditDetail(id);
+      const { before_json, after_json, inverse_patch_json, ...refRow } = ref.row;
+      assert.deepEqual({ row: r.row, prev: r.prev, next: r.next }, { row: refRow, prev: ref.prev, next: ref.next }, id);
+      // payloads come back through the chunk endpoint and reassemble to CURRENT's stored text
+      for (const [field, expected] of [["before", before_json], ["after", after_json], ["inverse", inverse_patch_json]]) {
+        assert.equal(r.payload[field], expected == null ? null : expected.length, `${id} ${field} length`);
+        assert.equal(await readPayload(id, field), expected, `${id} ${field}`);
+      }
     }
     const a2 = (await get("/audit/a2")).body;
     assert.equal(a2.prev.id, "a1");
     assert.equal(a2.next.id, "a5");
     assert.equal((await call("/api/admin-read/audit/nope", ADMIN)).status, 404);
+  });
+
+  test("S2 budget: a 120 KB / non-ASCII payload never 503s or exceeds 64 KiB; chunks reassemble exactly", async () => {
+    const big = JSON.stringify({ text: "あ𠮷x".repeat(40_000) });
+    ins("audit_logs", { id: "a-huge", table_name: "huge", target_id: "h1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 9000, before_json: big, after_json: big + "z", inverse_patch_json: "{}" });
+    const detail = await get("/audit/a-huge");
+    assert.equal(detail.body.payload.before, [...big].length, "length() counts characters");
+    assert.equal(await readPayload("a-huge", "before"), big);
+    assert.equal(await readPayload("a-huge", "after"), big + "z");
+    assert.equal(await readPayload("a-huge", "inverse"), "{}");
+    const row = (await refAuditDetail("a-huge")).row;
+    assert.equal(row.before_json, big);
+    assert.equal((await call("/api/admin-read/audit/a-huge/payload/bogus", ADMIN)).status, 404);
+    assert.equal((await call("/api/admin-read/audit/nope/payload/before", ADMIN)).status, 404);
+    assert.equal((await call("/api/admin-read/audit/a-huge/payload/before", "tok-alice")).status, 403);
   });
 
   test("T02 audit restore history equals CURRENT (newest first, join to audit target, missing log -> null)", async () => {
