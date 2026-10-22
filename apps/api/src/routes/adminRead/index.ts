@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import type { AdminReadError } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
+import { adminEventNewRoutes, adminEventTemplatesRoutes } from "./eventTemplates.ts";
 import { adminEventsRoutes } from "./events.ts";
 import { adminModerationRoutes } from "./moderation.ts";
 import { adminUsersRoutes } from "./users.ts";
+import { adminXIdMergesRoutes } from "./xIdMerges.ts";
 import { adminXLinkRequestsRoutes } from "./xLinkRequests.ts";
 import { adminVideosRoutes } from "./videos.ts";
 
@@ -33,9 +35,12 @@ adminReadRoutes.use("*", async (c, next) => {
 
 adminReadRoutes.route("/users", adminUsersRoutes);
 adminReadRoutes.route("/videos", adminVideosRoutes);
+adminReadRoutes.route("/events/templates", adminEventTemplatesRoutes);
+adminReadRoutes.route("/events/new", adminEventNewRoutes);
 adminReadRoutes.route("/events", adminEventsRoutes);
 adminReadRoutes.route("/moderation", adminModerationRoutes);
 adminReadRoutes.route("/x-link-requests", adminXLinkRequestsRoutes);
+adminReadRoutes.route("/x-id-merges", adminXIdMergesRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); CURRENT pages without a try/catch show the error page.
 adminReadRoutes.onError((_error, c) => {

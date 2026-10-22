@@ -353,8 +353,11 @@ New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route 
 | `GET /api/admin-read/events?sort&filter&q` | `app/(admin)/admin/events/page.tsx` | `apps/api/src/routes/adminRead/events.ts` | 2 | LIMIT 60; rendered columns only; returns server `now` for the badges | unmeasured | BRIDGED |
 | `GET /api/admin-read/moderation?type&status&overdue` | `app/(admin)/admin/moderation/page.tsx` | `apps/api/src/routes/adminRead/moderation.ts` | 2 | LIMIT 100; D1 failure -> 503 | unmeasured | BRIDGED |
 | `GET /api/admin-read/x-link-requests` | `app/(admin)/admin/x-link-requests/page.tsx` | `apps/api/src/routes/adminRead/xLinkRequests.ts` | 3 | pending 100 / rejected 10 / audit 30 (only `changedKeys` returned); icons signed with `env.AUTH_SECRET` (signer copied verbatim from PR #345 `routes/manage/icon.ts`), no secret -> internal icons null; D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/x-id-merges?view&impact` | `app/(admin)/admin/x-id-merges/page.tsx` | `apps/api/src/routes/adminRead/xIdMerges.ts` | 2 (3 with `impact`) | merge requests 50, reverts 100; impact counts + preview (51) of the selected pending/approved request in ONE union statement; restore JSON never returned (`has_restore_snapshot`); D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/events/templates` | `app/(admin)/admin/events/templates/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | CURRENT lists behind requireAdminWrite("admin_event_templates"): TOS / re-accept / CostGuard denial -> empty list (`guardOk:false`); list capped at 100 (CURRENT unbounded) | unmeasured | BRIDGED |
+| `GET /api/admin-read/events/new?template` | `app/(admin)/admin/events/new/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | same guard/list; selected template returned as name + raw `settings_json` (<= 64 KiB); `snapshotToFormInitial` not ported (`formInitial:"deferred"`) | unmeasured | PARTIAL |
 
-Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new, events/templates, event-groups/*, users/[id]/edit, x-id-merges, review summaries, xid icon projection.
+Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, event-groups/*, events/new form initial, users/[id]/edit, review summaries, xid icon projection.
 
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 

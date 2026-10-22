@@ -92,6 +92,30 @@ export function seed(sqlite) {
   ins("video_interactions", { x_user_id: "alice_x", video_id: "va3", interaction_type: "bookmark", created_at: T0 });
   sqlite.exec(`UPDATE videos SET submitted_by_user_id = 'u_alice' WHERE id IN (SELECT id FROM videos WHERE creator_x_user_id = 'alice_x' LIMIT 25)`);
 
+  // event templates (admin templates + new-event pages).
+  for (let i = 0; i < 4; i += 1) {
+    ins("event_templates", { id: `tpl${i}`, name: `Template ${i}`, description: i % 2 ? null : `desc ${i}`, source_event_id: i === 0 ? "ev1" : null, settings_json: `{"event_type":"event","n":${i}}`, created_by_user_id: "u_root", updated_at: T0 + 30000 + i });
+  }
+  ins("event_templates", { id: "tpl-big", name: "Big", description: null, source_event_id: null, settings_json: JSON.stringify({ pad: "x".repeat(70_000) }), created_by_user_id: "u_root", updated_at: T0 + 30010 });
+
+  // x-id-merges: merge requests in every state (snapshot / no snapshot), reverts, and rows the impact counts touch.
+  const mg = (id, o) =>
+    ins("x_identity_requests", { id, request_type: "merge", requested_by_auth_user_id: "u_root", source_x_user_id: o.source, target_x_user_id: o.target, status: o.status ?? "pending", requested_at: o.at, updated_at: o.at, restore_snapshot_json: o.snap ?? null, revert_deadline_at: o.deadline ?? null, parent_request_id: o.parent ?? null });
+  mg("mg1", { source: "alice_x", target: "alice_y", at: T0 + 20000, snap: '{"a":1}', deadline: T0 + 99 });
+  mg("mg2", { source: "orph_x", target: "ghost_target", status: "approved", at: T0 + 20001 });
+  mg("mg3", { source: "alice_y", target: "alice_x", status: "done", at: T0 + 20002, snap: '{"b":2}', deadline: Math.floor(Date.now() / 1000) + 3600 });
+  mg("mg4", { source: "ic_ext", target: "ic_int", status: "rejected", at: T0 + 20003 });
+  for (let i = 0; i < 55; i += 1) mg(`mgb${i}`, { source: "bulk_x00", target: "bulk_x01", at: T0 + 10000 + i });
+  const rv = (id, o) =>
+    ins("x_identity_requests", { id, request_type: "revert_merge", requested_by_auth_user_id: "u_root", parent_request_id: o.parent, status: o.status ?? "pending", requested_at: o.at, updated_at: o.at, restore_snapshot_json: o.snap ?? null, revert_deadline_at: o.deadline ?? null });
+  rv("rv1", { parent: "mg3", at: T0 + 21000, snap: '{"c":3}', deadline: Math.floor(Date.now() / 1000) + 3600 });
+  rv("rv2", { parent: "mg3", at: T0 + 21001, status: "done" });
+  rv("rv3", { parent: "mg1", at: T0 + 21002, snap: '{"d":4}', deadline: T0 });
+  for (let i = 0; i < 102; i += 1) rv(`rvb${i}`, { parent: "mg1", at: T0 + 22000 + i });
+  ins("slots", { id: "s-merge-snap", event_id: "ev1", status: "reserved", sort_order: 0, video_id: "va4", reserved_x_id_snapshot: " @Alice_X " });
+  ins("slots", { id: "s-merge-x", event_id: "ev1", status: "reserved", sort_order: 0, video_id: "va5", x_user_id: "alice_x" });
+  ins("video_moderation_cases", { id: "mc-merge", video_id: "va6", case_type: "duplicate", status: "open", created_at: T0, related_x_user_id: "alice_x" });
+
   // x-link-requests: pending of each type, '@'/case/space variants, legacy-cased x_users id, internal/external icons.
   ins("x_users", { id: "ic_int", x_name: "Internal icon", icon_url: "/api/media/xicons/ic_int.png", approval_status: "approved" });
   ins("x_users", { id: "ic_pend", x_name: "Pending icon", icon_url: "/api/media/xicons/ic_pend.png", approval_status: "pending" });

@@ -303,7 +303,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const bySort = (rows, key) => [...rows].sort((a, b) => String(a[key]).localeCompare(String(b[key])));
 
   // ---------------- T02: authz ----------------
-  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation", "/x-link-requests"];
+  const ENDPOINTS = ["/users", "/users/u_alice", "/videos", "/events", "/moderation", "/x-link-requests", "/x-id-merges", "/events/templates", "/events/new"];
 
   test("T02 guest / expired / unknown token -> 401, no-store, one D1 statement at most", async () => {
     for (const path of ENDPOINTS) {
@@ -504,6 +504,92 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.doesNotMatch(JSON.stringify(r.body), /test-secret-mig-0625|before_json|after_json/);
     } finally {
       Date.now = realNow;
+    }
+  });
+
+  test("T01 x-id-merges: requests (50), reverts (100), impact + preview of the selected request equal CURRENT", async () => {
+    const { fetchXIdMergeImpact, fetchXIdMergePreview } = await import("../../../src/lib/admin/xIdMergeImpact.ts");
+    const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+    const dialect = new SQLiteSyncDialect();
+    const mergeBase = (r) => ({ id: r.id, request_type: r.request_type, status: r.status, source_x_user_id: r.source_x_user_id, target_x_user_id: r.target_x_user_id, parent_request_id: r.parent_request_id, revert_deadline_at: r.revert_deadline_at, updated_at: r.updated_at, source_name: r.source_name, has_restore_snapshot: Boolean(r.restore_snapshot_json) });
+    for (const impact of ["", "mg1", "mg2", "mg3", "mg4", "nope", "mgb1", "  mg1  "]) {
+      const query = impact ? `?impact=${encodeURIComponent(impact)}` : "";
+      const r = await get(`/api/admin-read/x-id-merges${query}`);
+      const rows = await refDb
+        .select({ id: S.xIdentityRequests.id, request_type: S.xIdentityRequests.request_type, status: S.xIdentityRequests.status, source_x_user_id: S.xIdentityRequests.source_x_user_id, target_x_user_id: S.xIdentityRequests.target_x_user_id, parent_request_id: S.xIdentityRequests.parent_request_id, restore_snapshot_json: S.xIdentityRequests.restore_snapshot_json, revert_deadline_at: S.xIdentityRequests.revert_deadline_at, updated_at: S.xIdentityRequests.updated_at, source_name: S.xUsers.x_name })
+        .from(S.xIdentityRequests).leftJoin(S.xUsers, eq(S.xUsers.id, S.xIdentityRequests.source_x_user_id))
+        .where(eq(S.xIdentityRequests.request_type, "merge")).orderBy(desc(S.xIdentityRequests.updated_at)).limit(50);
+      const targetIds = Array.from(new Set(rows.map((x) => x.target_x_user_id).filter(Boolean)));
+      const targetNames = new Map((await refDb.select({ id: S.xUsers.id, name: S.xUsers.x_name }).from(S.xUsers).where(inArray(S.xUsers.id, targetIds))).map((x) => [x.id, x.name]));
+      const selectedId = impact.trim().slice(0, 128);
+      const selected = rows.find((x) => x.id === selectedId && Boolean(x.source_x_user_id) && (x.status === "pending" || x.status === "approved"));
+      const selImpact = selected?.source_x_user_id ? await fetchXIdMergeImpact(refDb, selected.source_x_user_id) : [];
+      const objectDb = { all: async (query) => { const built = dialect.sqlToQuery(query); return sqlite.prepare(built.sql).all(...built.params).map((row) => ({ ...row })); } };
+      const selPreview = selected?.source_x_user_id ? await fetchXIdMergePreview(objectDb, selected.source_x_user_id) : [];
+      const expected = rows.map((x) => ({ ...mergeBase(x), target_name: x.target_x_user_id ? targetNames.get(x.target_x_user_id) ?? null : null, impact: x.id === selectedId ? selImpact : [], preview: x.id === selectedId ? selPreview : [] }));
+      assert.deepEqual(r.body.requests, canon(expected), query);
+      assert.equal(r.body.requests.length, 50);
+      if (impact === "mg1") assert.ok(r.body.requests.find((x) => x.id === "mg1").impact.some((i) => i.count > 0), "impact counts non-empty");
+      if (impact === "mg1") assert.equal(r.stats.statements, 3);
+      if (!impact) assert.equal(r.stats.statements, 2);
+    }
+    const rev = await get("/api/admin-read/x-id-merges?view=reverts");
+    const refRevs = await refDb.select().from(S.xIdentityRequests).where(eq(S.xIdentityRequests.request_type, "revert_merge")).orderBy(desc(S.xIdentityRequests.updated_at)).limit(100);
+    assert.deepEqual(rev.body.reverts, canon(refRevs.map((x) => ({ id: x.id, status: x.status, parent_request_id: x.parent_request_id, revert_deadline_at: x.revert_deadline_at, has_restore_snapshot: Boolean(x.restore_snapshot_json) }))));
+    assert.equal(rev.body.reverts.length, 100);
+    assert.doesNotMatch(JSON.stringify(rev.body) + JSON.stringify((await get("/api/admin-read/x-id-merges?impact=mg1")).body), /restore_snapshot_json|"a":1/);
+  });
+
+  test("T01 event templates / new event: guard (TOS, re-accept, CostGuard) decides an empty list exactly like requireAdminWrite", async () => {
+    const { evaluateWriteIdentity } = await import("../../../src/lib/auth/writeGuardCore.ts");
+    const { evaluateCostGuardCore } = await import("../../../src/lib/auth/writeGuardCore.ts");
+    async function refGuardList(userId) {
+      const requiredMajor = await getLatestPublishedMajorTerms(refDb);
+      const u = (await refDb.select({ role: S.users.role, is_banned: S.users.is_banned, is_tos_accepted: S.users.is_tos_accepted, terms_reaccept_required: termsReacceptRequiredValue(requiredMajor) }).from(S.users).where(eq(S.users.id, userId)).limit(1))[0];
+      const deny = evaluateWriteIdentity({ role: u.role, is_banned: u.is_banned ?? 0, is_tos_accepted: u.is_tos_accepted ?? 0, terms_reaccept_required: u.terms_reaccept_required === 1 ? 1 : 0 }, "admin");
+      if (deny) return { guardOk: false, templates: [] };
+      const row = (await refDb.select({ operation_mode: S.systemSettings.operation_mode, disabled_features_json: S.systemSettings.disabled_features_json, cost_guard_exception_until: S.systemSettings.cost_guard_exception_until, cost_guard_exception_features_json: S.systemSettings.cost_guard_exception_features_json }).from(S.systemSettings).where(eq(S.systemSettings.id, "default")).limit(1))[0];
+      if (!row) return { guardOk: false, templates: [] };
+      const cg = evaluateCostGuardCore({ feature: "admin_event_templates", operationMode: row.operation_mode, disabledFeaturesJson: row.disabled_features_json, exceptionUntil: row.cost_guard_exception_until, exceptionFeaturesJson: row.cost_guard_exception_features_json, now: Math.floor(Date.now() / 1000) });
+      if (cg.blocked) return { guardOk: false, templates: [] };
+      const templates = await refDb.select({ id: S.eventTemplates.id, name: S.eventTemplates.name, description: S.eventTemplates.description, source_event_id: S.eventTemplates.source_event_id, updated_at: S.eventTemplates.updated_at }).from(S.eventTemplates).orderBy(desc(S.eventTemplates.updated_at));
+      return { guardOk: true, templates };
+    }
+    const run = async (token, userId) => {
+      const t = await get("/api/admin-read/events/templates", token);
+      assert.deepEqual(t.body, canon(await refGuardList(userId)), `${token} templates`);
+      assert.ok(t.stats.statements <= 3);
+      const n = await get("/api/admin-read/events/new?template=tpl2", token);
+      const ref = await refGuardList(userId);
+      assert.equal(n.body.guardOk, ref.guardOk);
+      assert.deepEqual(n.body.templates, canon(ref.templates));
+      assert.equal(n.body.userId, userId);
+      assert.equal(n.body.templateName, "Template 2");
+      assert.equal(n.body.templateSettingsJson, '{"event_type":"event","n":2}');
+      return t.body;
+    };
+    assert.equal((await run("root", "u_root")).templates.length, 5);
+    assert.equal((await run("carol", "u_carol")).guardOk, false, "admin without TOS acceptance -> empty list");
+    const unknown = await get("/api/admin-read/events/new?template=nope", "root");
+    assert.equal(unknown.body.templateName, null);
+    assert.equal(unknown.body.templateSettingsJson, null);
+    assert.equal((await get("/api/admin-read/events/new?template=tpl-big", "root")).body.templateSettingsJson, null, "> 64 KiB not returned");
+    assert.equal((await get("/api/admin-read/events/new", "root")).body.templateId, "");
+    try {
+      for (const [sets, expected] of [
+        ["operation_mode = 'read_only'", false],
+        ["operation_mode = 'economy'", true],
+        ["disabled_features_json = '[\"admin_event_templates\"]'", false],
+        ["disabled_features_json = 'garbage'", false],
+        [`operation_mode = 'maintenance', cost_guard_exception_until = ${Math.floor(Date.now() / 1000) + 600}, cost_guard_exception_features_json = '["admin_event_templates"]'`, true],
+      ]) {
+        sqlite.exec(`UPDATE system_settings SET ${sets} WHERE id = 'default'`);
+        const body = await run("root", "u_root");
+        assert.equal(body.guardOk, expected, sets);
+        sqlite.exec(`UPDATE system_settings SET operation_mode = 'normal', disabled_features_json = NULL, cost_guard_exception_until = NULL, cost_guard_exception_features_json = NULL WHERE id = 'default'`);
+      }
+    } finally {
+      sqlite.exec(`UPDATE system_settings SET operation_mode = 'normal', disabled_features_json = NULL, cost_guard_exception_until = NULL, cost_guard_exception_features_json = NULL WHERE id = 'default'`);
     }
   });
 

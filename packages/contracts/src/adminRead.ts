@@ -245,3 +245,88 @@ export interface AdminXLinkRequestsResponse {
   recentRejected: AdminXLinkRejectedRow[];
   recentAudit: AdminXLinkAuditRow[];
 }
+
+// ---- /x-id-merges -------------------------------------------------------------------------------------------
+
+export interface AdminXMergeImpactItem {
+  key: string;
+  label: string;
+  count: number;
+}
+
+export interface AdminXMergePreviewRow {
+  id: string;
+  title: string;
+  visibility_status: string;
+  primary_event_id: string | null;
+  creator_change: number;
+  member_rows: number;
+  chapter_rows: number;
+  slot_rows: number;
+  interaction_rows: number;
+  moderation_rows: number;
+}
+
+export interface AdminXMergeRequestRow {
+  id: string;
+  request_type: string;
+  status: string;
+  source_x_user_id: string | null;
+  target_x_user_id: string | null;
+  parent_request_id: string | null;
+  revert_deadline_at: number | null;
+  updated_at: number;
+  source_name: string | null;
+  target_name: string | null;
+  /** CURRENT never renders the restore JSON, only whether it exists */
+  has_restore_snapshot: boolean;
+  /** only for the request selected with ?impact= (pending/approved), else [] */
+  impact: AdminXMergeImpactItem[];
+  preview: AdminXMergePreviewRow[];
+}
+
+export interface AdminXMergeRevertRow {
+  id: string;
+  status: string;
+  parent_request_id: string | null;
+  revert_deadline_at: number | null;
+  has_restore_snapshot: boolean;
+}
+
+// ---- /events/templates and /events/new ----------------------------------------------------------------------
+
+export interface AdminEventTemplateRow {
+  id: string;
+  name: string;
+  description: string | null;
+  source_event_id: string | null;
+  updated_at: number;
+}
+
+/**
+ * CURRENT listEventTemplatesForAdmin runs behind requireAdminWrite("admin_event_templates"): a denied guard
+ * (TOS not accepted / re-accept required / cost guard) renders the page with an EMPTY list. `guardOk` is false then.
+ */
+export interface AdminEventTemplatesResponse {
+  guardOk: boolean;
+  templates: AdminEventTemplateRow[];
+}
+
+export interface AdminEventNewResponse extends AdminEventTemplatesResponse {
+  /** the signed-in admin (EventForm draftAuthUserId) */
+  userId: string;
+  templateId: string;
+  templateName: string | null;
+  /** raw event_templates.settings_json (<= 64 KiB, else null); CURRENT's snapshotToFormInitial is not ported yet */
+  templateSettingsJson: string | null;
+  formInitial: "deferred";
+}
+
+export interface AdminXIdMergesResponse {
+  view: "requests" | "reverts";
+  selectedImpactId: string;
+  requests: AdminXMergeRequestRow[];
+  reverts: AdminXMergeRevertRow[];
+  /** server unix seconds, for the "expired" badges */
+  now: number;
+}
