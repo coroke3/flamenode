@@ -333,11 +333,11 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 
 | Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| `GET /api/personal/session` | `src/lib/auth/guard.tsx` requireSession / `currentUser.ts` | `apps/api/src/routes/personal/session.ts` | 2 | user DTO incl. `is_tos_accepted`, `accepted_terms_version_id`, derived `terms_reaccept_required`, resolved `active_x_user_id`; no email | unmeasured | IN_PROGRESS |
-| `GET /api/personal/dashboard` | `app/(auth)/dashboard/page.tsx` | `apps/api/src/routes/personal/dashboard.ts` | 3 | sections are bounded JSON subqueries; section failure -> same empty data (200) as CURRENT's try/catch; stats aggregate has no LIMIT (1 row, as CURRENT) | unmeasured | IN_PROGRESS |
-| `GET /api/personal/library?tab&page` | `app/(auth)/dashboard/library/page.tsx` | `apps/api/src/routes/personal/library.ts` | 3 | 24/page, page 1..500, LIMIT 25 OFFSET | unmeasured | IN_PROGRESS |
-| `GET /api/personal/settings?tab&x&onboarding` | `app/(auth)/dashboard/settings/page.tsx` | `apps/api/src/routes/personal/settings.ts` | 3 | profile text read as rows; request history 50; candidates for the shown panel only; response can exceed 64 KiB with long profiles (CURRENT parity) | unmeasured | IN_PROGRESS |
-| `GET /api/personal/onboarding` | `app/(auth)/onboarding/page.tsx` | `apps/api/src/routes/personal/onboarding.ts` | 2 (+1 rules fallback) | no write: `maybeMarkOnboardingComplete` moves to MIG-0702 POST; rules via R2 `rules/current.json` (<= 64 KiB) then D1 published terms (<= 64 KiB), enforce-mode visibility guard | unmeasured | IN_PROGRESS |
+| `GET /api/personal/session` | `src/lib/auth/guard.tsx` requireSession / `currentUser.ts` | `apps/api/src/routes/personal/session.ts` | 2 | user DTO incl. `is_tos_accepted`, `accepted_terms_version_id`, derived `terms_reaccept_required`, resolved `active_x_user_id`; no email | unmeasured | BRIDGED |
+| `GET /api/personal/dashboard` | `app/(auth)/dashboard/page.tsx` | `apps/api/src/routes/personal/dashboard.ts` | 3 | sections are bounded JSON subqueries; section failure -> same empty data (200) as CURRENT's try/catch; stats aggregate has no LIMIT (1 row, as CURRENT) | unmeasured | BRIDGED |
+| `GET /api/personal/library?tab&page` | `app/(auth)/dashboard/library/page.tsx` | `apps/api/src/routes/personal/library.ts` | 3 | 24/page, page 1..500, LIMIT 25 OFFSET | unmeasured | BRIDGED |
+| `GET /api/personal/settings?tab&x&onboarding` | `app/(auth)/dashboard/settings/page.tsx` | `apps/api/src/routes/personal/settings.ts` | 3 | profile text read as rows; request history 50; candidates for the shown panel only; response can exceed 64 KiB with long profiles (CURRENT parity) | unmeasured | BRIDGED |
+| `GET /api/personal/onboarding` | `app/(auth)/onboarding/page.tsx` | `apps/api/src/routes/personal/onboarding.ts` | 2 (+1 rules fallback) | no write: `maybeMarkOnboardingComplete` moves to MIG-0702 POST; rules via R2 `rules/current.json` (<= 64 KiB) then D1 published terms (<= 64 KiB), enforce-mode visibility guard | unmeasured | BRIDGED |
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
 
