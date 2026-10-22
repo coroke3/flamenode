@@ -42,7 +42,7 @@ jobs:
         # (pull_request.base.sha is not refreshed on synchronize). workflow_dispatch
         # compares against origin/main. Anything else leaves the base empty and fails closed.
         run: |
-          if git rev-parse -q --verify HEAD^2 >/dev/null; then
+          if [ "${{ github.event_name }}" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
             export MIGRATION_FILE_BASE_SHA="$(git rev-parse HEAD^1)"
           elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
             export MIGRATION_FILE_BASE_SHA="$(git merge-base origin/main HEAD)"
