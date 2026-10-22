@@ -131,6 +131,10 @@ test("T03: an error inside one Island shows the error callout; static HTML and t
     assert.match(alert.textContent, new RegExp(ISLAND_ERROR_MESSAGE));
     assert.ok(alert.classList.contains("fn-island-error"));
     assert.equal(alert.getAttribute("style"), null, "fallback has no inline colours");
+    // ...so its colours must come from the shared CSS that PublicPage.astro loads.
+    const css = fs.readFileSync(path.join(siteRoot, "../../packages/ui/src/styles/components.css"), "utf8");
+    for (const name of alert.classList) assert.match(css, new RegExp(`\\.${name}(?![\\w-])`), `no rule for .${name}`);
+    assert.match(css, /\.fn-error-callout--danger\{[^}]*var\(--danger\)/, "danger tone uses the --danger token");
     assert.ok(document.body.contains(staticText), "static HTML stays");
     assert.equal(healthy.querySelector("button").textContent, "ok", "the other Island still renders");
     await act(async () => {
