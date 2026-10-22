@@ -33,7 +33,10 @@
     "./queues/wakeNotificationQueueAfterCommit": "./src/queues/wakeNotificationQueueAfterCommit.ts",
     "./queues/wakeStaticRebuildQueueAfterCommit": "./src/queues/wakeStaticRebuildQueueAfterCommit.ts",
     "./queues/youtubePlaylistSyncWake": "./src/queues/youtubePlaylistSyncWake.ts",
-    "./queues/youtubeSyncWake": "./src/queues/youtubeSyncWake.ts"
+    "./queues/youtubeSyncWake": "./src/queues/youtubeSyncWake.ts",
+    "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
+    "./xid/mergeCore": "./src/xid/mergeCore.ts",
+    "./xid/mergeSafety": "./src/xid/mergeSafety.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
