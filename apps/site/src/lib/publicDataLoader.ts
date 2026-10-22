@@ -100,7 +100,12 @@ type SnapshotEnvelope = {
 };
 
 const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+// CURRENT ids may start with `_` or `-`: X handles `[a-z0-9_]{1,20}`, event ids
+// `[A-Za-z0-9_-]{1,64}` (src/lib/event/eventForm.ts) and `v_<uuid>` video ids. Same leading set as
+// routeMap.ts SAFE_ID_PATTERN; `.`, `/` and backslash stay rejected so ids are never path segments.
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+// packages/domain/src/xid/format.ts X_HANDLE_RE, case-insensitive like CURRENT `/user/${creator_x_user_id}`.
+const X_USER_ID_PATTERN = /^[A-Za-z0-9_]{1,20}$/;
 const HEX_256 = /^[a-f0-9]{64}$/;
 const decode = new TextDecoder("utf-8", { fatal: true });
 
@@ -171,7 +176,7 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
       kind: "video", id, title,
       youtubeVideoId,
       creatorName: text(value.creatorName, 100),
-      creatorXUserId: typeof value.creatorXUserId === "string" && ID_PATTERN.test(value.creatorXUserId) ? value.creatorXUserId : undefined,
+      creatorXUserId: typeof value.creatorXUserId === "string" && X_USER_ID_PATTERN.test(value.creatorXUserId) ? value.creatorXUserId : undefined,
       creatorIconUrl: publicUrl(value.creatorIconUrl),
       creatorHasPublicProfile: value.creatorHasPublicProfile === true ? true : undefined,
       creatorYoutubeChannelUrl: publicUrl(value.creatorYoutubeChannelUrl),
