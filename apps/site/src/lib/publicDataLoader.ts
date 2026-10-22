@@ -7,7 +7,67 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 export type SnapshotKind = "video" | "user" | "event";
-export type PublicSnapshot = Readonly<{ kind: SnapshotKind; id: string; title: string }>;
+
+/**
+ * Public DTOs (MIG-0403). Field names follow the CURRENT columns the three
+ * public pages read (`app/(public)/[id]`, `event/[id]`, `user/[id]`), so the
+ * snapshot generator can project them 1:1. Only public-page fields; values
+ * that change faster than a build (likes, slot counts, viewer state) are
+ * Island/API data (D-09) and never part of the snapshot.
+ */
+export interface BasePublicSnapshot {
+  readonly kind: SnapshotKind;
+  readonly id: string;
+  readonly title: string;
+}
+
+export interface VideoPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "video";
+  /** `youtube_video_id`; also the alias URL `/{youtubeVideoId}` and the canonical path. */
+  readonly youtubeVideoId?: string;
+  /** `creator_display_name`. */
+  readonly creatorName?: string;
+  /** `creator_x_user_id`. */
+  readonly creatorXUserId?: string;
+  /** `creator_icon_url` (already the public projected icon). */
+  readonly creatorIconUrl?: string;
+  /** CURRENT `creatorHref` condition: the creator has a public profile. */
+  readonly creatorHasPublicProfile?: boolean;
+  readonly creatorYoutubeChannelUrl?: string;
+  /** `scheduled_time`, unix seconds. */
+  readonly scheduledTime?: number;
+  readonly music?: string;
+  readonly credit?: string;
+  readonly introComment?: string;
+  readonly highlights?: string;
+}
+
+export interface UserPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "user";
+  /** `x_name`. */
+  readonly name?: string;
+  /** `icon_url` (already the public projected icon). */
+  readonly iconUrl?: string;
+  readonly profileText?: string;
+  readonly youtubeChannelUrl?: string;
+}
+
+export interface EventPublicSnapshot extends BasePublicSnapshot {
+  readonly kind: "event";
+  readonly explanation?: string;
+  /** `img_url`. */
+  readonly imageUrl?: string;
+  /** `icon_url`. */
+  readonly iconUrl?: string;
+  /** Build-time `eventStatusLabel(computeEventStatus(event))` (live status is MIG-0502). */
+  readonly statusLabel?: string;
+  readonly periodLabel?: string;
+  /** CURRENT entry action at build time: reserve / submit / none. */
+  readonly entryAction?: "reserve" | "submit";
+}
+
+export type PublicSnapshot = VideoPublicSnapshot | UserPublicSnapshot | EventPublicSnapshot;
+
 export type SnapshotSource = Readonly<{
   read(key: string): Promise<Uint8Array | null>;
 }>;
@@ -66,6 +126,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+/** Clamp text; anything that is not a non-empty string is dropped. */
+function text(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.trim() ? value.slice(0, max) : undefined;
+}
+
+/** http(s) URL or same-site path only; `javascript:`, `data:`, `//host` and `/\\host` are dropped. */
+function publicUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const url = value.trim();
+  if (!url || url.length > 2048) return undefined;
+  if (url.startsWith("/")) return url.startsWith("//") || url.startsWith("/\\") ? undefined : url;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withDefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
 function validatedPublicDto(value: unknown): PublicSnapshot | null {
   if (!isRecord(value)) return null;
   const { kind, id, title } = value;
@@ -75,7 +160,46 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
     typeof title !== "string" || title.length === 0 || title.length > 300
   ) return null;
   // Strict projection. Never forward unknown metadata or private attributes.
-  return { kind: kind as SnapshotKind, id, title };
+  if (kind === "video") {
+    const youtubeVideoId = typeof value.youtubeVideoId === "string" && YOUTUBE_ID_PATTERN.test(value.youtubeVideoId)
+      ? value.youtubeVideoId
+      : undefined;
+    const scheduledTime = Number.isSafeInteger(value.scheduledTime) && (value.scheduledTime as number) > 0
+      ? value.scheduledTime as number
+      : undefined;
+    return withDefined<VideoPublicSnapshot>({
+      kind: "video", id, title,
+      youtubeVideoId,
+      creatorName: text(value.creatorName, 100),
+      creatorXUserId: typeof value.creatorXUserId === "string" && ID_PATTERN.test(value.creatorXUserId) ? value.creatorXUserId : undefined,
+      creatorIconUrl: publicUrl(value.creatorIconUrl),
+      creatorHasPublicProfile: value.creatorHasPublicProfile === true ? true : undefined,
+      creatorYoutubeChannelUrl: publicUrl(value.creatorYoutubeChannelUrl),
+      scheduledTime,
+      music: text(value.music, 500),
+      credit: text(value.credit, 500),
+      introComment: text(value.introComment, 5000),
+      highlights: text(value.highlights, 5000),
+    });
+  }
+  if (kind === "user") {
+    return withDefined<UserPublicSnapshot>({
+      kind: "user", id, title,
+      name: text(value.name, 100),
+      iconUrl: publicUrl(value.iconUrl),
+      profileText: text(value.profileText, 5000),
+      youtubeChannelUrl: publicUrl(value.youtubeChannelUrl),
+    });
+  }
+  return withDefined<EventPublicSnapshot>({
+    kind: "event", id, title,
+    explanation: text(value.explanation, 5000),
+    imageUrl: publicUrl(value.imageUrl),
+    iconUrl: publicUrl(value.iconUrl),
+    statusLabel: text(value.statusLabel, 50),
+    periodLabel: text(value.periodLabel, 200),
+    entryAction: value.entryAction === "reserve" || value.entryAction === "submit" ? value.entryAction : undefined,
+  });
 }
 
 function checkedManifest(manifest: SnapshotManifest | null, generation: string, metrics: SnapshotBuildMetrics): SnapshotManifest {

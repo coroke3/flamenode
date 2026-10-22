@@ -1,0 +1,27 @@
+---
+/**
+ * Representative creator page `/user/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
+ * Built from the representative snapshots only; the full set is MIG-0504 / MIG-0411.
+ * Non-public snapshots are rejected by the loader.
+ */
+import { CreatorView } from "@flamenode/ui";
+import PublicPage from "../../../layouts/PublicPage.astro";
+import { StaticScreen } from "../../../components/StaticScreen.ts";
+import { loadRepresentativeUsers } from "../../../lib/representativeFixtures.ts";
+import { creatorMetadata, creatorScreenData } from "../../../lib/publicPages.ts";
+import type { UserPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+
+export async function getStaticPaths() {
+  const users = await loadRepresentativeUsers();
+  return users.map((user) => ({ params: { id: user.id }, props: { user } }));
+}
+
+interface Props {
+  user: UserPublicSnapshot;
+}
+
+const { user } = Astro.props;
+---
+<PublicPage meta={creatorMetadata(user)}>
+  <StaticScreen screen={CreatorView} props={{ creator: creatorScreenData(user) }} />
+</PublicPage>

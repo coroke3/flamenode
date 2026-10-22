@@ -28,20 +28,20 @@ None of #318 / #319 / #320 had an independent review: Claude implemented and int
 | DONE-2 | MIG-0308 DONE | MET | STATUS.md, #315 |
 | Depends on | MIG-0304, MIG-0305, MIG-0306 DONE | MET | STATUS.md on main c996c1c |
 | T02 | `test:unit` / `test:integration` ≥ Phase 3 start, 0 tests deleted | MET | Phase 3 start `fe211b2`: unit 2514/0, integration 55/55. main c996c1c + this PR: unit 2575/0 (1 skipped), integration 55/55. The moved-code source-text tests read the new domain files with the same assertions (listed in each PR). |
-| T03 | Tier 2 not left BLOCKED/SKIPPED | MET (owner decision 2026-10-18) | The decision logic of every named Tier 2 file now lives in `packages/domain`: video fence `planVideoVisibilityFence`, event fence `planEventVisibilityFence`, edit-section policy `resolveAllowedVideoEditSections`, X merge state planner `xid/mergeState.ts`. The DB, `server-only` and `next/navigation` parts of those files stay in `src` as adapters until the Hono API tasks (MIG-0603..0605), which is what PHASE_3_SPEC §Tier 2 (no `packages/*` → `src/*`) requires. Whether this counts as "Tier 2 done" is the owner's call. |
+| T03 | Tier 2 not left BLOCKED/SKIPPED | MET (owner decision 2026-10-18) | The decision logic of every named Tier 2 file now lives in `packages/domain`: video fence `planVideoVisibilityFence`, event fence `planEventVisibilityFence`, edit-section policy `resolveAllowedVideoEditSections`, X merge state planner `xid/mergeState.ts`. The DB, `server-only` and `next/navigation` parts of those files stay in `src` as adapters until the Hono API tasks (MIG-0603..0605), which is what PHASE_3_SPEC §Tier 2 (no `packages/*` → `src/*`) requires. The owner accepted this as T03 met on 2026-10-18T16:38:49Z. |
 | §3 source | `permissions.ts` placeholder neutralised | MET (owner confirmed 2026-10-18) | Deleted in #320 (caller=0). The RETIRED row cites `APPROVAL=user-approved-2026-10-18`, written by the Antigravity agent; Claude could not find that approval and asks the owner to confirm it. |
 | DONE-3 | Independent review APPROVE + human Phase Gate approval | Gate approved by the owner; **no independent review** | The owner approved the Gate on 2026-10-18 without an independent review of the final head. |
 
 ### Not met / open (explicit list)
 
-1. DONE-3: an independent review of the final head of this PR, and the owner's Phase Gate approval.
-2. T03: the owner decides whether domain-side Tier 2 decision logic with DB adapters retained in `src` satisfies T03.
-3. `permissions.ts` retirement: the owner confirms `APPROVAL=user-approved-2026-10-18`.
+1. DONE-3: no independent review of the final head; the owner approved the Gate without one (2026-10-18T16:38:49Z).
+2. T03: decided — the owner accepted it as met (2026-10-18T16:38:49Z).
+3. `permissions.ts` retirement: approved by the owner (2026-10-18T16:38:49Z).
 4. SA-009/010 (`src/lib/actions/audit-admin.ts`) are in no Phase 3 micro-unit; re-owned to MIG-0605 at #320 integration, so they get no Phase 3 domain extraction.
 5. `npm run check:video-interactions-auth` fails on main (a `voided` assertion about the dashboard library page) and is not run by CI. It predates this phase's domain PRs (it fails on c47b962).
 
-## 3. Decisions for the human owner
+## 3. Decisions for the human owner (all decided 2026-10-18T16:38:49Z)
 
-1. Approve or reject the Phase 3 Gate.
-2. T03 judgment (above).
-3. Confirm or revert the `permissions.ts` retirement approval.
+1. Phase 3 Gate: approved.
+2. T03: accepted as met.
+3. `permissions.ts` retirement: approved.

@@ -1,9 +1,4 @@
-import { Hono } from "hono";
+import { app } from "./app.ts";
 
-const app = new Hono();
-
-app.get("/health", (c) => {
-  return c.json({ status: "ok", timestamp: Date.now() });
-});
-
+export { app };
 export default app;
