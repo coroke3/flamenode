@@ -55,11 +55,15 @@ jobs:
       - name: 実装カードchecker回帰テスト
         run: node --test scripts/check-migration-task-cards.test.mjs
       - name: ファイル別依存・Route/RH/SA登録とPR差分を照合
-        env:
-          MIGRATION_FILE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # workflow_dispatch has no PR base; compare against origin/main instead of skipping.
+        # On the PR merge ref, HEAD^1 is the current base tip and HEAD^2 the PR head
+        # (pull_request.base.sha is not refreshed on synchronize). workflow_dispatch
+        # compares against origin/main. Anything else leaves the base empty and fails closed.
         run: |
-          export MIGRATION_FILE_BASE_SHA="${MIGRATION_FILE_BASE_SHA:-$(git merge-base origin/main HEAD)}"
+          if git rev-parse -q --verify HEAD^2 >/dev/null; then
+            export MIGRATION_FILE_BASE_SHA="$(git rev-parse HEAD^1)"
+          elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            export MIGRATION_FILE_BASE_SHA="$(git merge-base origin/main HEAD)"
+          fi
           node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs

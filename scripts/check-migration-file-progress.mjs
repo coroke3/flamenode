@@ -95,7 +95,8 @@ const isAncestor=(root,a,b)=>{
 };
 export const prCommitCheck=(root,base)=>sha=>gitCommitExists(root,sha)&&isAncestor(root,sha,"HEAD")&&!isAncestor(root,sha,base);
 // PR diff inputs: changed paths, the ledger at base, and a check that a SHA= is one of this PR's own
-// commits (reachable from HEAD, not from base). Holds on the GitHub PR merge ref.
+// commits (reachable from HEAD, not from base). In PR CI base is HEAD^1 of the merge ref, so this
+// means reachable from HEAD^2 (the PR head) and not from HEAD^1.
 export function changedFileInputs(base){
  return {
   changedPaths:listChangedFromBase(base),
