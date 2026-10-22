@@ -53,7 +53,7 @@ export type VideoVisibilityTransitionHost = VisibilityFenceHost & {
   invalidateEventExportCaches(eventIds: readonly string[]): Promise<void>;
   deletePublicJsonCaches(r2Keys: readonly string[]): Promise<void>;
   /** Loaded lazily by the host so tests and callers that never wake do not evaluate the queue chain. */
-  wakeNotificationQueue(source: QueueWakeSource): Promise<unknown>;
+  wakeNotificationQueueAfterCommit(source: QueueWakeSource): Promise<unknown>;
 };
 
 export type VideoVisibilityTransitionContext =
@@ -592,7 +592,7 @@ export async function enqueueVideoVisibilityNotificationsPostCommit(
   _db: ServerCoreDb,
   notificationBatch: VideoStatusNotificationBatch,
   context: { flow: string; traceId: string; wakeSource: QueueWakeSource },
-  host: Pick<VideoVisibilityTransitionHost, "wakeNotificationQueue">,
+  host: Pick<VideoVisibilityTransitionHost, "wakeNotificationQueueAfterCommit">,
 ): Promise<void> {
   if (notificationBatch.statements.length === 0) return;
 
@@ -612,7 +612,7 @@ export async function enqueueVideoVisibilityNotificationsPostCommit(
       {
         name: "notification_queue_wake",
         run: async () => {
-          await host.wakeNotificationQueue(context.wakeSource);
+          await host.wakeNotificationQueueAfterCommit(context.wakeSource);
         },
       },
     ]);

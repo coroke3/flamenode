@@ -64,7 +64,7 @@ const videoVisibilityTransitionHost: VideoVisibilityTransitionHost = {
   buildNotificationBatch: buildVideoStatusChangeNotificationBatch,
   invalidateEventExportCaches,
   deletePublicJsonCaches,
-  wakeNotificationQueue: async (source) => {
+  wakeNotificationQueueAfterCommit: async (source) => {
     const { wakeNotificationQueueAfterCommit } = await import(
       "@/lib/queues/wakeNotificationQueueAfterCommit"
     );
