@@ -25,7 +25,8 @@ export async function deletePublicJsonCache(
   try {
     await host.readEdgeCache().delete(publicJsonCacheUrl(r2Key));
   } catch {
-    // Cache API failure must not take down the mutation path.
+    // Cache API failure must not take down the mutation path. Key は出さない。
+    console.warn("[public-cache] cache_api_delete_failed");
   }
 }
 
