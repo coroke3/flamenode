@@ -69,16 +69,20 @@ function isCookieSpace(code: number): boolean {
 }
 
 /**
- * Parses raw Cookie header string into key-value map, with the same rules as
- * the cookie parser Auth.js uses (@auth/core lib/vendored/cookie.js parse):
- * first occurrence wins, quotes are kept, values are URI-decoded only when
- * they contain `%` and decode cleanly.
+ * Walks a Cookie header with the same rules as the cookie parser Auth.js uses
+ * (@auth/core lib/vendored/cookie.js parse): first occurrence wins, quotes are
+ * kept, values are URI-decoded only when they contain `%` and decode cleanly.
+ * Only names starting with `prefix` are sliced and decoded, so the cost for
+ * other cookies is a few indexOf calls. `onNew` sees each first occurrence and
+ * stops the walk by returning false.
  */
-export function parseCookieHeader(header?: string | null): Record<string, string> {
-  const result: Record<string, string> = Object.create(null);
-  if (!header || typeof header !== "string" || header.length < 2) {
-    return result;
-  }
+function readCookies(
+  header: string,
+  prefix: string,
+  into: Record<string, string>,
+  onNew?: (key: string, value: string) => boolean,
+): void {
+  if (header.length < 2) return;
 
   const len = header.length;
   let index = 0;
@@ -94,29 +98,38 @@ export function parseCookieHeader(header?: string | null): Record<string, string
 
     let keyStart = index;
     while (keyStart < eqIdx && isCookieSpace(header.charCodeAt(keyStart))) keyStart++;
-    let keyEnd = eqIdx;
-    while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
-    const key = header.slice(keyStart, keyEnd);
+    // The prefix has no `=`, space or tab, so a match lies wholly inside the trimmed name.
+    if (header.startsWith(prefix, keyStart)) {
+      let keyEnd = eqIdx;
+      while (keyEnd > keyStart && isCookieSpace(header.charCodeAt(keyEnd - 1))) keyEnd--;
+      const key = header.slice(keyStart, keyEnd);
 
-    if (result[key] === undefined) {
-      let valStart = eqIdx + 1;
-      while (valStart < endIdx && isCookieSpace(header.charCodeAt(valStart))) valStart++;
-      let valEnd = endIdx;
-      while (valEnd > valStart && isCookieSpace(header.charCodeAt(valEnd - 1))) valEnd--;
-      const val = header.slice(valStart, valEnd);
-      let decoded = val;
-      if (val.includes("%")) {
-        try {
-          decoded = decodeURIComponent(val);
-        } catch {
-          decoded = val;
+      if (into[key] === undefined) {
+        let valStart = eqIdx + 1;
+        while (valStart < endIdx && isCookieSpace(header.charCodeAt(valStart))) valStart++;
+        let valEnd = endIdx;
+        while (valEnd > valStart && isCookieSpace(header.charCodeAt(valEnd - 1))) valEnd--;
+        const val = header.slice(valStart, valEnd);
+        let decoded = val;
+        if (val.includes("%")) {
+          try {
+            decoded = decodeURIComponent(val);
+          } catch {
+            decoded = val;
+          }
         }
+        into[key] = decoded;
+        if (onNew && !onNew(key, decoded)) return;
       }
-      result[key] = decoded;
     }
     index = endIdx + 1;
   } while (index < len);
+}
 
+/** Parses raw Cookie header string into key-value map, like Auth.js parse (see readCookies). */
+export function parseCookieHeader(header?: string | null): Record<string, string> {
+  const result: Record<string, string> = Object.create(null);
+  if (header && typeof header === "string") readCookies(header, "", result);
   return result;
 }
 
@@ -124,7 +137,8 @@ export function parseCookieHeader(header?: string | null): Record<string, string
  * Extracts the sessionToken Auth.js would read for a request of this scheme:
  * like @auth/core SessionStore, joins every non-empty cookie whose name starts
  * with the session cookie name, ordered by the numeric suffix after the last `.`.
- * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH.
+ * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH; the
+ * caps stop the header walk, so a 128 KB header costs one pass of indexOf.
  */
 export function extractSessionToken(
   cookieHeader: string | null | undefined,
@@ -132,20 +146,21 @@ export function extractSessionToken(
 ): string | null {
   if (!cookieHeader) return null;
   const base = sessionCookieName(options.secure);
-  const cookies = parseCookieHeader(cookieHeader);
   const chunks: { index: number; value: string }[] = [];
   let length = 0;
-  for (const name of Object.keys(cookies)) {
-    const value = cookies[name];
-    if (!name.startsWith(base) || !value) continue;
+  let overCap = false;
+  readCookies(cookieHeader, base, Object.create(null), (name, value) => {
+    if (!value) return true;
     length += value.length;
     if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) {
-      return null;
+      overCap = true;
+      return false;
     }
     // Same index as the SessionStore comparator, computed once per chunk.
     chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
-  }
-  if (chunks.length === 0) return null;
+    return true;
+  });
+  if (overCap || chunks.length === 0) return null;
   if (chunks.length === 1) return chunks[0].value;
   // NaN differences compare as equal, as in SessionStore; the sort is stable.
   return chunks

@@ -183,6 +183,30 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(header, { secure: true }), null);
   });
 
+  await t.test("a 128KB header (Cloudflare's request header limit) stays within the S4 2ms budget", () => {
+    const name = "__Secure-authjs.session-token";
+    const token = "t".repeat(36);
+    const junk = (count) => Array.from({ length: count }, (_, i) => `c${i}=v`).join("; ");
+    const cases = [
+      [junk(12000), null],
+      [`${junk(11000)}; ${name}=${token}`, token],
+      [`${name}=${"a".repeat(MAX_SESSION_TOKEN_LENGTH)}; ${junk(11000)}`, "a".repeat(MAX_SESSION_TOKEN_LENGTH)],
+      [Array.from({ length: 3400 }, (_, i) => `${name}.${(i * 7919) % 3400}=xx`).join("; "), null],
+    ];
+    for (const [header, expected] of cases) {
+      assert.ok(header.length >= 64 * 1024, String(header.length));
+      assert.equal(extractSessionToken(header, { secure: true }), expected);
+      // Best of 10 (as in scripts/migration-gateway.test.mjs) to keep runner noise out.
+      let best = Infinity;
+      for (let r = 0; r < 10; r++) {
+        const start = performance.now();
+        extractSessionToken(header, { secure: true });
+        best = Math.min(best, performance.now() - start);
+      }
+      assert.ok(best < 2, `${header.length} bytes took ${best.toFixed(3)}ms`);
+    }
+  });
+
   await t.test("prototype keys are ordinary cookie names", () => {
     const parsed = parseCookieHeader("__proto__=x; constructor=y");
     assert.equal(parsed["__proto__"], "x");
