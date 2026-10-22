@@ -1,4 +1,7 @@
-// Moderation case input normalization (moved unchanged from src/lib/admin/moderationCaseInput.ts).
+// Moderation case input normalization (moved from src/lib/admin/moderationCaseInput.ts;
+// parseModerationDueAt now uses the strict JST datetime-local parser).
+import { parseJstDatetimeLocalStrict } from "../datetime.ts";
+
 export const MODERATION_CASE_TYPES = [
   "x_reapply",
   "void",
@@ -56,30 +59,14 @@ export function normalizeModerationVideoStatus(
     : null;
 }
 
+// The only producer is the admin form's <input type="datetime-local">, so
+// reuse the strict JST parser: overflow dates (2026-02-30) and other formats
+// (no Date.parse fallback) map to null, the same result as malformed input.
 export function parseModerationDueAt(
   value: string | null | undefined,
 ): number | null {
-  if (!value) return null;
-  const s = value.trim();
-  if (!s) return null;
-  const m = s.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
-  );
-  if (!m) {
-    const t = Date.parse(s);
-    return Number.isNaN(t) ? null : Math.floor(t / 1000);
-  }
-  const [, y, mo, d, h, mi, sec = "0"] = m;
-  return Math.floor(
-    Date.UTC(
-      Number(y),
-      Number(mo) - 1,
-      Number(d),
-      Number(h) - 9,
-      Number(mi),
-      Number(sec),
-    ) / 1000,
-  );
+  const parsed = parseJstDatetimeLocalStrict(value);
+  return parsed.ok ? parsed.value : null;
 }
 
 export function normalizeModerationText(
