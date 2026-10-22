@@ -1,0 +1,4 @@
+# MIG-0620: Personal SPA (Vite assetsDir=_personal_assets) の hash 付き bundle。
+# index.html など HTML には rule を置かない。
+/_personal_assets/*
+  Cache-Control: public, max-age=31536000, immutable
