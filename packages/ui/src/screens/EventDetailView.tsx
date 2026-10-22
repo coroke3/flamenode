@@ -18,7 +18,8 @@ export type EventEntryAction = "reserve" | "submit" | null;
 
 export interface EventSlotPart {
   label: string;
-  filled: number;
+  /** null until the live slot status (RH-020) is loaded: the static HTML carries no slot state. */
+  filled: number | null;
   total: number;
 }
 
@@ -53,7 +54,8 @@ export interface EventDetailData {
   playlistUrl?: string | null;
   videoTotal: number;
   creatorTotal: number;
-  slotFilled: number;
+  /** null until the live slot status is loaded (shown as `–`). */
+  slotFilled: number | null;
   slotTotal: number;
   /** CURRENT `getDayMetric`: label (e.g. `募集締切まで`) and days. */
   dayMetric?: { label: string; days: number } | null;
@@ -78,8 +80,8 @@ export function eventVideoHref(eventId: string, video: Pick<EventDetailVideo, "i
   return `/${encodeURIComponent(target)}?playlist=${encodeURIComponent(eventId)}`;
 }
 
-function percent(filled: number, total: number): number {
-  return total > 0 ? Math.round((filled / total) * 100) : 0;
+function percent(filled: number | null, total: number): number {
+  return filled != null && total > 0 ? Math.round((filled / total) * 100) : 0;
 }
 
 export function EventDetailView({ event, className }: EventDetailViewProps): React.ReactElement {
@@ -142,7 +144,7 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
         <div className="metrics ed-metrics" role="group" aria-label="イベント概要">
           <Metric value={event.videoTotal.toLocaleString("ja-JP")} label="作品" />
           <Metric value={event.creatorTotal.toLocaleString("ja-JP")} label="クリエイター" />
-          <Metric value={`${event.slotFilled} / ${event.slotTotal}`} label="埋まり枠" />
+          <Metric value={`${event.slotFilled ?? "–"} / ${event.slotTotal}`} label="埋まり枠" />
           {event.dayMetric ? <Metric value={`${event.dayMetric.days}日`} label={event.dayMetric.label} /> : null}
         </div>
 
@@ -177,16 +179,14 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
                         <div className="row t-sm ed-slot-row">
                           <span>{part.label}</span>
                           <span className="muted t-num">
-                            {part.filled} / {part.total}
+                            {part.filled ?? "–"} / {part.total}
                           </span>
                         </div>
                         <div
                           className="bar"
-                          role="meter"
-                          aria-label={`${part.label} の埋まり`}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-valuenow={pct}
+                          {...(part.filled != null
+                            ? { role: "meter", "aria-label": `${part.label} の埋まり`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct }
+                            : { "aria-hidden": true })}
                         >
                           <i style={{ width: `${pct}%` }} />
                         </div>

@@ -15,7 +15,8 @@
     "./styles/layout.css": "./src/styles/layout.css",
     "./styles/tokens.css": "./src/styles/tokens.css",
     "./styles/components.css": "./src/styles/components.css",
-    "./styles/screens.css": "./src/styles/screens.css"
+    "./styles/screens.css": "./src/styles/screens.css",
+    "./styles/events.css": "./src/styles/events.css"
   },
   "scripts": {
     "build": "tsc",
