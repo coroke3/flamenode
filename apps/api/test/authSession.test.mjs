@@ -148,6 +148,14 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(`${name}=; ${name}.x=abc`, { secure: true }), "abc");
   });
 
+  await t.test("the session name inside another cookie's value is not a cookie", () => {
+    const name = "__Secure-authjs.session-token";
+    for (const header of [`a= ${name}=abc`, `a=x ${name}=abc`, `a=\t${name}=abc`, `a=${name}=abc`]) {
+      assert.equal(extractSessionToken(header, { secure: true }), null, header);
+    }
+    assert.equal(extractSessionToken(`a=1; \t ${name}=abc`, { secure: true }), "abc");
+  });
+
   await t.test("chunk count cap: cap-1 and cap chunks join, cap+1 fails closed", () => {
     const name = "__Secure-authjs.session-token";
     // Header lists chunks in reverse index order; chunk k carries the digit k % 10.
@@ -206,6 +214,13 @@ test("Cookie extraction and parsing", async (t) => {
       // Empty and repeated chunks are skipped by Auth.js but still matched by name.
       [Array.from({ length: 3500 }, (_, i) => `${name}.${i}=`).join("; "), null],
       [Array.from({ length: 3500 }, () => `${name}=${token}`).join("; "), null],
+      // Prefixed segments without `=` are skipped in one jump, not rescanned per match.
+      [`${Array.from({ length: 4500 }, () => name).join("; ")}; a=b`, null],
+      // The prefix inside values, and after another name, is not a session cookie name.
+      [Array.from({ length: 4500 }, (_, i) => `c${i}=${name}`).join("; "), null],
+      [Array.from({ length: 4500 }, () => `x${name}=${token}`).join("; "), null],
+      // Long space and tab runs around the name and value are trimmed like Auth.js.
+      [`${" \t".repeat(32 * 1024)}${name}${" ".repeat(16 * 1024)}=${" ".repeat(16 * 1024)}${token}\t`, token],
     ];
     for (const [header, expected] of cases) {
       assert.ok(header.length >= 64 * 1024, String(header.length));
