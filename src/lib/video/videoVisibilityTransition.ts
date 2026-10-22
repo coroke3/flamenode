@@ -17,6 +17,7 @@ import {
   createTraceId,
   logFlowTrace,
 } from "@/lib/observability/flowTrace";
+import { invalidateEventExportCaches } from "@/lib/api/eventExportCache";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 import {
   eventBaseObjectKey,
@@ -78,6 +79,7 @@ export type VideoVisibilityTransitionPlan = {
   fenceToken: string | null;
   depublicizedFromPublic: boolean;
   publicCacheKeys: string[];
+  exportEventIds: string[];
   /** Validation failure is returned as data so every caller can surface it. */
   validationError?: string;
 };
@@ -230,6 +232,7 @@ export async function planVideoVisibilityTransition(
       fenceToken: null,
       depublicizedFromPublic: false,
       publicCacheKeys: [],
+      exportEventIds: [],
       validationError: publicEligibility.message,
     };
   }
@@ -353,6 +356,10 @@ export async function planVideoVisibilityTransition(
       ]
     : [];
 
+  const exportEventIds = visibilityChanged
+    ? [...new Set(input.eventIds)].filter(Boolean)
+    : [];
+
   return {
     mutationStatements,
     expectedMutationChanges,
@@ -363,6 +370,7 @@ export async function planVideoVisibilityTransition(
     fenceToken,
     depublicizedFromPublic,
     publicCacheKeys,
+    exportEventIds,
   };
 }
 
@@ -425,12 +433,30 @@ export async function preCommitVideoVisibilityDepublicization(input: {
 
 export async function runVideoVisibilityTransitionPostCommit(input: {
   publicCacheKeys: readonly string[];
+  exportEventIds: readonly string[];
   revalidate: () => void;
 }): Promise<void> {
+  let publicCacheError: unknown;
   if (input.publicCacheKeys.length > 0) {
-    await deletePublicJsonCaches(input.publicCacheKeys);
+    try {
+      await deletePublicJsonCaches(input.publicCacheKeys);
+    } catch (error) {
+      publicCacheError = error;
+    }
+  }
+  const exportEventIds = [...new Set(input.exportEventIds)].filter(Boolean);
+  if (exportEventIds.length > 0) {
+    try {
+      await invalidateEventExportCaches(exportEventIds);
+    } catch (error) {
+      console.warn("[video-visibility] event export cache invalidation failed", {
+        eventIds: exportEventIds,
+        error,
+      });
+    }
   }
   input.revalidate();
+  if (publicCacheError) throw publicCacheError;
 }
 
 const DEPUBLICIZATION_COMPENSATION_MAX_RETRIES = 3;

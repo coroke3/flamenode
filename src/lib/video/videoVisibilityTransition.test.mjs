@@ -20,6 +20,15 @@ test("video visibility transition uses full fan-out helpers", () => {
   assert.match(source, /users\/\$\{xUserId\}\/collabs\/\$\{page\}\.json/);
 });
 
+test("visibility transition invalidates scheduled event export cache", () => {
+  assert.match(source, /exportEventIds/);
+  assert.match(source, /invalidateEventExportCaches/);
+  assert.match(
+    source,
+    /runVideoVisibilityTransitionPostCommit[\s\S]*?invalidateEventExportCaches/,
+  );
+});
+
 test("depublicization keeps R2 block before D1 and compensates only when safe", () => {
   assert.match(source, /preCommitVideoVisibilityDepublicization/);
   assert.match(source, /writePublicVisibilityBlockedEntitiesManifest/);
