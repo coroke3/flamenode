@@ -29,6 +29,17 @@ test("visibility transition invalidates scheduled event export cache", () => {
   );
 });
 
+test("export cache invalidation runs before public key deletes and stays best-effort", () => {
+  const body = source.slice(
+    source.indexOf("export async function runVideoVisibilityTransitionPostCommit"),
+  );
+  assert.ok(
+    body.indexOf("invalidateEventExportCaches(") <
+      body.indexOf("deletePublicJsonCaches("),
+  );
+  assert.match(body, /event_export_cache_invalidation_failed/);
+});
+
 test("depublicization keeps R2 block before D1 and compensates only when safe", () => {
   assert.match(source, /preCommitVideoVisibilityDepublicization/);
   assert.match(source, /writePublicVisibilityBlockedEntitiesManifest/);

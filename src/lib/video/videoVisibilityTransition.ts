@@ -436,23 +436,22 @@ export async function runVideoVisibilityTransitionPostCommit(input: {
   exportEventIds: readonly string[];
   revalidate: () => void;
 }): Promise<void> {
+  // export payload cache は公開 JSON key より影響が小さいので先に消す
+  // （subrequest 上限で途中打切りになっても、重要な公開 key の削除を優先して残す）。
+  const exportEventIds = [...new Set(input.exportEventIds)].filter(Boolean);
+  if (exportEventIds.length > 0) {
+    try {
+      await invalidateEventExportCaches(exportEventIds);
+    } catch {
+      console.warn("[video-visibility] event_export_cache_invalidation_failed");
+    }
+  }
   let publicCacheError: unknown;
   if (input.publicCacheKeys.length > 0) {
     try {
       await deletePublicJsonCaches(input.publicCacheKeys);
     } catch (error) {
       publicCacheError = error;
-    }
-  }
-  const exportEventIds = [...new Set(input.exportEventIds)].filter(Boolean);
-  if (exportEventIds.length > 0) {
-    try {
-      await invalidateEventExportCaches(exportEventIds);
-    } catch (error) {
-      console.warn("[video-visibility] event export cache invalidation failed", {
-        eventIds: exportEventIds,
-        error,
-      });
     }
   }
   input.revalidate();
