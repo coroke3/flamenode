@@ -6,8 +6,9 @@
  * The player, like/save, chapter and comment controls are Islands; until their APIs exist the page shows the
  * static display of the view (the MIG-0403 fixture version lives under /migration-fixture-poc/video/).
  */
-import { VideoDetailView } from "@flamenode/ui";
 import PublicLayout from "../layouts/PublicLayout.astro";
+import { VideoPageIsland } from "../components/VideoPageIsland.ts";
+import { gaMeasurementId } from "../lib/pageHead.ts";
 import { loadVideoPagesForBuild, type VideoPage } from "../lib/videoPage.ts";
 
 export async function getStaticPaths() {
@@ -20,7 +21,8 @@ interface Props {
 }
 
 const { page } = Astro.props;
+const gaEnabled = gaMeasurementId() !== null;
 ---
 <PublicLayout head={page.head} currentPath={`/${page.slug}`} jsonLd={page.jsonLd}>
-  <VideoDetailView video={page.data} />
+  <VideoPageIsland client:load video={page.data} youtubeId={page.youtubeId} primaryEventId={page.data.primaryEvent?.id ?? null} gaEnabled={gaEnabled} />
 </PublicLayout>
