@@ -1,11 +1,12 @@
 import React from "react";
-import { Button } from "@flamenode/ui";
+import { BrowserRouter } from "react-router-dom";
+import { unwiredPersonalApi, type PersonalApi } from "./api/session.js";
+import { PersonalRoutes } from "./routes/router.js";
 
-export function App() {
+export function App({ api = unwiredPersonalApi }: { api?: PersonalApi }) {
   return (
-    <div>
-      <h1>FlameNode App Dashboard</h1>
-      <Button variant="primary">管理画面ボタン</Button>
-    </div>
+    <BrowserRouter>
+      <PersonalRoutes api={api} />
+    </BrowserRouter>
   );
 }
