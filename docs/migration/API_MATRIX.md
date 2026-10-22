@@ -327,6 +327,20 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
 
+## MIG-0611 Hono Personal read APIs (Phase 6)
+
+New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT pages are Server Components reading D1). No Worker Route / traffic change. Parity: `apps/api/test/personal.parity.test.mjs` runs the Hono routes and the real CURRENT loaders on the same seed. All responses `Cache-Control: private, no-store`; `sessionMiddleware` + `requireAuth` (401 anonymous, 403 banned); 503 `{error:"unavailable"}` where CURRENT throws to the error page. CPU: not measured (MIG-0606).
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/personal/session` | `src/lib/auth/guard.tsx` requireSession / `currentUser.ts` | `apps/api/src/routes/personal/session.ts` | 2 | user DTO incl. `is_tos_accepted`, `accepted_terms_version_id`, derived `terms_reaccept_required`, resolved `active_x_user_id`; no email | unmeasured | BRIDGED |
+| `GET /api/personal/dashboard` | `app/(auth)/dashboard/page.tsx` | `apps/api/src/routes/personal/dashboard.ts` | 3 | sections are bounded JSON subqueries; section failure -> same empty data (200) as CURRENT's try/catch; stats aggregate has no LIMIT (1 row, as CURRENT) | unmeasured | BRIDGED |
+| `GET /api/personal/library?tab&page` | `app/(auth)/dashboard/library/page.tsx` | `apps/api/src/routes/personal/library.ts` | 3 | 24/page, page 1..500, LIMIT 25 OFFSET | unmeasured | BRIDGED |
+| `GET /api/personal/settings?tab&x&onboarding` | `app/(auth)/dashboard/settings/page.tsx` | `apps/api/src/routes/personal/settings.ts` | 3 | profile text read as rows; request history 50; candidates for the shown panel only; response can exceed 64 KiB with long profiles (CURRENT parity) | unmeasured | BRIDGED |
+| `GET /api/personal/onboarding` | `app/(auth)/onboarding/page.tsx` | `apps/api/src/routes/personal/onboarding.ts` | 2 (+1 rules fallback) | no write: `maybeMarkOnboardingComplete` moves to MIG-0702 POST; rules via R2 `rules/current.json` (<= 64 KiB) then D1 published terms (<= 64 KiB), enforce-mode visibility guard | unmeasured | BRIDGED |
+
+Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
+
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 
 Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.

@@ -29,6 +29,13 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 旧Next発行cookieで同一利用者、期限切れ/削除済み/改ざん/BAN、sessionTokenがログに出ないこと、request単位の解決（module global無し）。
 - DONE: MIG-0602以降の認証付きHono APIが旧Nextのsessionを読める証跡と独立レビュー。独自token/署名を作っていない。
 
+### MIG-0611 — Personal read APIs
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0611 Work Order、`app/(auth)/{dashboard,dashboard/library,dashboard/settings,onboarding}/page.tsx`, `src/lib/auth/{currentUser,onboarding,resolveActiveXId}.ts`。
+- 変更: `+apps/api/src/routes/personal/*` に `/api/personal/{session,dashboard,library,settings,onboarding}` の GET を追加。全応答 `Cache-Control: private, no-store`、GET 中の書き込みなし。DTO は `+packages/contracts/src/personal/*`。
+- 試験: CURRENT の loader と同じ seed（node:sqlite + 全 migration）で行・順序・件数が一致、401/403/no-store、paging、D1 statement 数。
+- DONE: 5 endpoint の parity テストと独立レビュー。`maybeMarkOnboardingComplete` は MIG-0702 の POST へ引き継ぎ。
+
 ### MIG-0602 — low-risk write commands
 
 - 読む: SA-004..011（announcements / API endpoints / audit settings。SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
@@ -101,6 +108,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 読む: SA-098..105, active-X link modal flow, `ACTIVE_X_MIGRATION_PLAN.md`, mutation status/error semantics。
 - 変更: profile settings, selected Active X, account link, like/bookmark command等をHono APIと接続。未連携の場合はモーダルで登録/承認の導線を提供、元のAuth User履歴は保持。
 - 試験: duplicate submit, approval pending, revoked link, manager-only, 0X, multiX, D-03の履歴fan-out結果、D-04の一斉cutover/負荷/ロールバック。通知の`既読化`はCURRENTで未実装のため勝手に新規追加しない（参照契約の状態を調べる）。
+- 引き継ぎ（MIG-0611）: `/onboarding` 到達時の `maybeMarkOnboardingComplete`（`onboarding_completed_at` の条件付き UPDATE）は GET API が書かないため、明示的な POST として実装する。
 - DONE: 既存のprofile/edit/like/notification UXを消さずに旧/新状態を再現。D-04本番切替自体は別承認。
 
 ### MIG-0703 — submission / edit / entry routes

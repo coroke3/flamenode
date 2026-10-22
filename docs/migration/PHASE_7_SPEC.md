@@ -41,7 +41,7 @@
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608（session 読み取り）の merge 後
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0102, MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0102, MIG-0601, MIG-0608, MIG-0611 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/dashboard/page.tsx`, `app/(auth)/dashboard/library/page.tsx`, `app/(auth)/dashboard/settings/page.tsx`, `app/(auth)/dashboard/youtube-playlists/page.tsx`（COMPAT_REDIRECT）, `app/(auth)/onboarding/page.tsx`（`FILE_MIGRATION_MATRIX.md` で MIG-0701 所有）。
@@ -88,6 +88,7 @@ Phase 7 共通契約のとおり。
 #### Source snapshot
 - SA-098〜105（`src/lib/actions/xid.ts`: `setActiveXId`, `requestXIdLink`, `cancelXIdLinkRequest`, `requestXIdMergeRevert`, `updateXIdProfile`, `deleteLinkedXId`, `setXIdIcon`, `uploadXIdIcon`）、SA-076 `acceptOnboardingTerms`（`src/lib/actions/terms.ts`）。
 - 通知の「既読化」は CURRENT に無い。追加しない。
+- 引き継ぎ（MIG-0611, lead 決定 2026-10-23）: CURRENT の `/onboarding` 表示は `maybeMarkOnboardingComplete`（`user.onboarding_completed_at` の条件付き UPDATE。X 申請済み/承認済みのときだけ。認可には使わない補助マーカー）を GET 中に実行する。`GET /api/personal/onboarding` は書かないので、この更新は MIG-0702 で明示的な `POST` として実装し、SPA が `/onboarding` 到達時に呼ぶ。
 #### Owned paths
 - 新規: `+apps/app/src/routes/dashboard/settings/*.tsx`（更新フォーム）, `+apps/app/src/components/ActiveXLinkModal.tsx`
 - 触らない: `src/lib/actions/**`
