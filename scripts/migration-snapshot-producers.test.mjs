@@ -1,0 +1,213 @@
+// MIG-0509 pre-work: snapshot producers. A seeded, fully migrated SQLite database -> CURRENT's R2 generators ->
+// verified snapshot envelopes -> the Astro loaders and view models, compared with the CURRENT generator output
+// for the same seed (the objects CURRENT's pages read), plus the visibility, tamper and budget properties.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
+import { produceSnapshots, writeSnapshotDir, wrapSnapshot, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import {
+  loadAboutStatsSnapshot,
+  loadListingPayload,
+  loadUserProfileSnapshot,
+  userProfileSnapshotKey,
+  SnapshotBuildError,
+  TOP_KEY,
+  LIST_FIRST_PAGE_KEY,
+  RECOMMEND_KEY,
+  TRENDING_KEY,
+  ABOUT_STATS_KEY,
+  USERS_INDEX_KEY,
+} from "../apps/site/src/lib/publicDataLoader.ts";
+import { loadAboutStatsForBuild } from "../apps/site/src/lib/aboutStats.ts";
+import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
+import { loadTopForBuild } from "../apps/site/src/lib/topData.ts";
+import { loadUserBuildDataFrom, userPayloadSourceFromEnv } from "../apps/site/src/lib/userData.ts";
+import { loadRulesForBuild, rulesSourceFromEnv } from "../apps/site/src/lib/rulesLoader.ts";
+import { computeUsersIndexView, buildSectionPages } from "../apps/site/src/lib/userViews.ts";
+import { normalizeStaticUserProfile } from "../src/lib/publicData/staticUserProfileCore.ts";
+
+const NOW = 1_760_000_000;
+const migrationsDir = path.resolve("migrations");
+
+function migrated() {
+  const sqlite = new DatabaseSync(":memory:");
+  for (const name of fs.readdirSync(migrationsDir).filter((n) => n.endsWith(".sql")).sort((a, b) => a.localeCompare(b))) {
+    const sql = fs.readFileSync(path.join(migrationsDir, name), "utf8");
+    if (name !== "0043_db_canonical_migration.sql") sqlite.exec(sql);
+    else { sqlite.exec("BEGIN IMMEDIATE"); sqlite.exec(sql); sqlite.exec("COMMIT"); }
+  }
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  return sqlite;
+}
+
+function d1(sqlite, log) {
+  return {
+    prepare(sql) {
+      log?.push(sql);
+      let params = [];
+      const st = {
+        bind(...v) { params = v; return st; },
+        async first() { return sqlite.prepare(sql).get(...params) ?? null; },
+        async all() { return { results: sqlite.prepare(sql).all(...params) }; },
+        async run() { const r = sqlite.prepare(sql).run(...params); return { meta: { changes: Number(r.changes) } }; },
+      };
+      return st;
+    },
+  };
+}
+
+function seed(sqlite) {
+  sqlite.prepare(`INSERT INTO "user" (id) VALUES (?)`).run("auth-user");
+  const xu = sqlite.prepare(`INSERT INTO x_users (id, x_name, approval_status, profile_text, icon_url, portfolio_contact) VALUES (?, ?, ?, ?, ?, ?)`);
+  xu.run("creator_a", "Creator A", "approved", "A のプロフィール", "https://example.com/a.png", "DM ください");
+  xu.run("creator_b", "Creator B", "pending", null, null, null);
+  xu.run("banned_c", "Banned C", "rejected", "非公開にすべきプロフィール", null, null);
+  const ev = sqlite.prepare(`INSERT INTO events (id, title, visibility_status, start_time, end_time) VALUES (?, ?, ?, ?, ?)`);
+  ev.run("public-event", "Public Event", "public", NOW - 86400, NOW + 86400 * 5);
+  ev.run("private-event", "Private Event", "private", NOW - 86400, NOW + 86400 * 5);
+  const vid = sqlite.prepare(
+    `INSERT INTO videos (id, title, youtube_video_id, creator_display_name, creator_x_user_id, submitted_by_user_id, visibility_status, scheduled_time, primary_event_id, score, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (let i = 0; i < 30; i += 1) {
+    vid.run(`a-${i}`, `作品 A${i}`, `yta${String(i).padStart(8, "0")}`, "Creator A", "creator_a", "auth-user", "public", NOW - 1000 * i, i === 0 ? "private-event" : "public-event", 30 - i, NOW);
+  }
+  vid.run("a-private", "非公開の作品 A", "ytprivate001", "Creator A", "creator_a", "auth-user", "private", NOW, null, 99, NOW);
+  vid.run("b-1", "作品 B1", "ytb000000001", "Creator B", "creator_b", "auth-user", "public", NOW - 50, null, 5, NOW);
+  vid.run("c-1", "作品 C1", "ytc000000001", "Banned C", "banned_c", "auth-user", "public", NOW - 60, null, 5, NOW);
+  sqlite.prepare(`INSERT INTO video_events (video_id, event_id) VALUES (?, ?)`).run("a-1", "public-event");
+  sqlite.prepare(`INSERT INTO video_members (id, video_id, x_user_id, name, is_public_member) VALUES (?, ?, ?, ?, ?)`).run("m1", "b-1", "creator_a", "Creator A", 1);
+}
+
+const TRENDING = {
+  schema_version: 1,
+  generated_at: NOW - 60,
+  items: [{ id: "a-1", title: "作品 A1", youtube_video_id: "yta00000001", display_name: "Creator A", icon_url: null, primary_event_id: null, primary_event_title: null, scheduled_time: NOW - 1000, status: "public", views_2d: 9, views_5d: 20, views_7d: 30, views_30d: 100, rank: 1, video_id: "a-1" }],
+};
+
+async function produce(extra = {}) {
+  const sqlite = migrated();
+  seed(sqlite);
+  const log = [];
+  const result = await produceSnapshots({ db: d1(sqlite, log), generation: "gen-1", nowSec: NOW, trending: TRENDING, ...extra });
+  return { sqlite, result, log };
+}
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-"));
+const produced = await produce();
+const env = writeSnapshotDir(dir, produced.result);
+const byKey = new Map(produced.result.snapshots.map((s) => [s.key, JSON.parse(s.json)]));
+
+test("every snapshot kind the pages read is produced as a verifiable envelope", () => {
+  for (const key of [ABOUT_STATS_KEY, TOP_KEY, RECOMMEND_KEY, LIST_FIRST_PAGE_KEY, TRENDING_KEY, USERS_INDEX_KEY, userProfileSnapshotKey("creator_a"), userProfileSnapshotKey("creator_b")]) {
+    assert.ok(byKey.has(key), `missing ${key}`);
+    const e = byKey.get(key);
+    assert.equal(e.schemaVersion, 1);
+    assert.equal(e.generation, "gen-1");
+    assert.equal(e.key, key);
+    assert.equal(e.visibility, "public");
+    assert.match(e.sha256, /^[a-f0-9]{64}$/);
+  }
+  assert.deepEqual(produced.result.manifest.allowedKeys, [...new Set(produced.result.snapshots.map((s) => s.key))].sort());
+  assert.ok(fs.existsSync(path.join(dir, "snapshot/top/current.json")));
+  assert.equal(produced.result.report.trending, "produced");
+});
+
+test("loaders accept the output: about-stats equals CURRENT RH-026 counts, listing and top build from it", async () => {
+  const stats = await loadAboutStatsForBuild(env);
+  // CURRENT counts only publicly listable creators (banned_c is not one) but every public video.
+  assert.deepEqual(stats, { publicVideos: 32, creators: 2, events: 1 });
+  const listing = await loadListingForBuild(env, NOW);
+  assert.equal(listing.list.videos.length, LIST_FIRST_PAGE_SIZE);
+  assert.equal(listing.list.total, 32);
+  assert.ok(listing.trending.items.length === 1);
+  assert.ok(listing.recommend);
+  const top = await loadTopForBuild(env, NOW, () => 0.5);
+  assert.equal(top.stats.publicVideos, 32);
+});
+
+test("user pages: loader output equals the object CURRENT's /user pages read for the same seed", async () => {
+  // The CURRENT generator output for the same seed, produced independently of the snapshot wrapper.
+  const sqlite = migrated();
+  seed(sqlite);
+  const objects = new Map();
+  const cur = { DB: d1(sqlite), R2: { async get(k) { const v = objects.get(k); return v === undefined ? null : { async json() { return structuredClone(v); } }; }, async head() { return null; }, async put(k, b) { objects.set(k, JSON.parse(String(b))); }, async delete(k) { objects.delete(k); } }, KV: { async get() { return null; }, async put() {} } };
+  await rebuildTarget(cur, "user", "creator_a");
+  const want = normalizeStaticUserProfile(objects.get("users/creator_a.json"));
+  const source = userPayloadSourceFromEnv(env);
+  const data = await loadUserBuildDataFrom(source);
+  const got = data.users.get("creator_a");
+  assert.deepEqual(got.profile.user, want.user);
+  assert.deepEqual(got.profile.works.items, want.works.items);
+  assert.equal(got.profile.works.total, 30);
+  assert.equal(got.profile.works.items.length, 24);
+  assert.ok(got.worksPages.has(2), "artifact page 2 (works 25..30) is produced");
+  const pages = buildSectionPages(got.profile.works, got.worksPages, 8, 24);
+  assert.equal(pages.pages.length, 4);
+  assert.equal(pages.pages.every((p) => p !== null), true);
+  // The collab shows on creator_a; creator_b has a page (pending is listable).
+  assert.equal(got.profile.collabs.total, 1);
+  assert.ok(data.users.has("creator_b"));
+  // /user index equals the CURRENT index view.
+  const view = computeUsersIndexView(data.index, "", "score", 1);
+  assert.equal(view.total, data.users.size);
+});
+
+test("visibility: private works, the private event id and non-listable creators never appear in any snapshot", async () => {
+  const all = produced.result.snapshots.map((s) => s.json).join("\n");
+  for (const secret of ["非公開の作品 A", "a-private", "ytprivate001", "private-event", "Private Event", "非公開にすべきプロフィール"]) {
+    assert.equal(all.includes(secret), false, `leaked ${secret}`);
+  }
+  assert.ok(produced.result.manifest.blockedKeys.includes(userProfileSnapshotKey("banned_c")), "the banned creator is fenced in blockedKeys");
+  assert.equal(produced.result.manifest.allowedKeys.includes(userProfileSnapshotKey("banned_c")), false);
+  const data = await loadUserBuildDataFrom(userPayloadSourceFromEnv(env));
+  assert.equal(data.users.has("banned_c"), false);
+});
+
+test("tampering is rejected by the loaders (digest, generation, blocked key)", async () => {
+  const bad = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-bad-"));
+  const badEnv = writeSnapshotDir(bad, produced.result);
+  const file = path.join(bad, "snapshot/user-profile/creator_a.json");
+  const e = JSON.parse(fs.readFileSync(file, "utf-8"));
+  e.payload.user.x_name = "Evil";
+  fs.writeFileSync(file, JSON.stringify(e));
+  await assert.rejects(loadUserBuildDataFrom(userPayloadSourceFromEnv(badEnv)), (err) => err instanceof SnapshotBuildError && err.code === "HASH_MISMATCH");
+  await assert.rejects(loadUserBuildDataFrom(userPayloadSourceFromEnv({ ...env, FLAMENODE_SNAPSHOT_GENERATION: "other" })), (err) => err instanceof SnapshotBuildError);
+});
+
+test("budget: bounded D1 statements, small objects, deterministic output for the same seed and clock", async () => {
+  assert.ok(produced.result.report.d1Statements < 120, `statements: ${produced.result.report.d1Statements}`);
+  for (const s of produced.result.snapshots) assert.ok(Buffer.byteLength(s.json) < MAX_SNAPSHOT_BYTES);
+  const again = await produce();
+  const strip = (r) => r.result.snapshots.map((s) => `${s.key}:${s.sha256}`).join("|");
+  assert.equal(strip(again), strip(produced));
+  assert.throws(() => wrapSnapshot("snapshot/x/y.json", "g", { big: "x".repeat(MAX_SNAPSHOT_BYTES) }), /over the/);
+});
+
+test("trending is not derivable from D1: absent input is reported, never invented; rules come from CURRENT's generator", async () => {
+  const none = await produce({ trending: undefined });
+  assert.equal(none.result.report.trending, "missing");
+  assert.equal(none.result.snapshots.some((s) => s.key === TRENDING_KEY), false);
+  const rules = await loadRulesForBuild(rulesSourceFromEnv(env));
+  assert.ok(rules.blocks.length > 0, "no rules row in the seed = CURRENT built-in terms");
+});
+
+// Opt-in (about 15 s): a real Astro build against the produced directory. MIG0509_E2E=1
+test("e2e: astro build reads the produced snapshots and emits the user, list, top and about pages", { skip: process.env.MIG0509_E2E ? false : "set MIG0509_E2E=1" }, async () => {
+  const { spawnSync } = await import("node:child_process");
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-dist-"));
+  const run = spawnSync("npx", ["astro", "build", "--outDir", out], { cwd: path.resolve("apps/site"), env: { ...process.env, ...env }, shell: true, encoding: "utf-8" });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const html = (f) => fs.readFileSync(path.join(out, f), "utf-8");
+  assert.ok(html("user/creator_a/index.html").includes("Creator A"));
+  assert.ok(html("user/creator_a/portfolio/index.html").includes("A のプロフィール"));
+  assert.equal(fs.existsSync(path.join(out, "user/banned_c/index.html")), false);
+  assert.equal(html("user/creator_a/index.html").includes("非公開の作品 A"), false);
+  assert.ok(html("user/index.html").includes("Creator B"));
+  assert.ok(html("index.html").includes("作品 A"));
+  assert.ok(html("about/index.html").includes("32"));
+});
