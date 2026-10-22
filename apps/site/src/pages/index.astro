@@ -1,7 +1,7 @@
 ---
 /**
  * `/` (MIG-0506 / Recipe R-PAGE / Runtime S0): the whole top page as static HTML from the `top` and `trending`
- * build snapshots. The loop/auto-scroll behaviour of the shelves is the MIG-0507 Island; native horizontal scroll
+ * build snapshots. The loop/auto-scroll behaviour of the shelves is the MIG-0507 U09 Island (script below); native horizontal scroll
  * works without it. The page title is the bare site name (CURRENT `title.absolute`).
  */
 import { TopView } from "@flamenode/ui";
@@ -29,3 +29,7 @@ const websiteJsonLd = {
 <PublicLayout head={head} currentPath="/" jsonLd={[websiteJsonLd]}>
   <TopView {...view} />
 </PublicLayout>
+<script>
+  import { mountTopShelves } from "../components/mountTopShelves.ts";
+  mountTopShelves();
+</script>

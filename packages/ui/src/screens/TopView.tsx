@@ -207,7 +207,7 @@ export function TopView({ stats, primary, recruits, moreRecruitCount, announceme
             {shelf.items.length === 0 ? (
               <div className="wrap"><p className="muted tp-empty">{shelf.emptyMessage}</p></div>
             ) : (
-              <div className="shelf" role="region" aria-label={shelf.title} tabIndex={0}>
+              <div className="shelf" data-shelf={shelf.id} role="region" aria-label={shelf.title} tabIndex={0}>
                 <ol className="shelf-track">
                   {shelf.items.map((item, index) => (
                     <li key={`${item.id}-${index}`} className="shelf-i">
