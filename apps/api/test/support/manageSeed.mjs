@@ -186,6 +186,7 @@ export function seed(sqlite) {
   xr("xr4", "existing_link", "legacyd", "req_p", "pending", NOW + 4);
   xr("xr5", "new_link", "reqlegacyv", "nobody", "pending", NOW + 5);
   xr("xr7", "new_link", "req_a", null, "approved", NOW + 7);
+  xr("xr9", "new_link", "　@@Req_A ﻿", " req_c\u000b", "pending", NOW + 9);
   for (let i = 0; i < 105; i += 1) xr(`xrbulk${i}`, "new_link", `bulk${i}`, null, "pending", NOW - 1000 + i);
 
   // youtube playlist sync: evA synced (one public video with a playlist item), evC failed, evB has no config row

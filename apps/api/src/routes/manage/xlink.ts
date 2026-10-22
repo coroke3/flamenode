@@ -11,12 +11,15 @@ import { resolveManageXIconUrl } from "./icon.ts";
 // D1 (S2, 3 statements incl. the session lookup): staff snapshot (admins skip it), then ONE statement that does what
 // CURRENT does in 3 + 2 chunked queries: pending rows (100), X user lookup (primary key first, then the legacy
 // lower(trim(id)) match only when the key misses) and the creator-icon fallback from past videos.
-// Known gap: the SQL id normalisation trims ASCII whitespace and leading "@" and lowercases (CURRENT normalizeXId also
-// trims Unicode whitespace); the returned ids are normalised in JS exactly like CURRENT.
+// Id normalisation in SQL equals JS String.trim (the full ECMAScript WhiteSpace and LineTerminator set, bound as the
+// trim character list), then leading "@" removed, then lower() (ASCII-only in SQLite; X ids are ASCII).
 const PENDING_LIMIT = 100;
 
-const norm = (column: string): string =>
-  `lower(ltrim(trim(${column}, ' ' || char(9) || char(10) || char(13)), '@'))`;
+// JS String.prototype.trim character set (escapes, not literal characters).
+const JS_WHITESPACE =
+  "\t\n\v\f\r                  　﻿";
+
+const norm = (column: string): string => `lower(ltrim(trim(${column}, ?), '@'))`;
 
 const xUserLookup = (n: string): string =>
   `COALESCE(
@@ -74,7 +77,7 @@ export const manageXLinkRequestRoutes = new Hono<AppEnv>().get("/", async (c) =>
            LIMIT ?) p
        ) o`,
     )
-    .bind(PENDING_LIMIT)
+    .bind(JS_WHITESPACE, JS_WHITESPACE, PENDING_LIMIT)
     .first<{ rows: string | null }>();
 
   const raw = parseJsonColumn<RawRow[]>(row?.rows, []);
