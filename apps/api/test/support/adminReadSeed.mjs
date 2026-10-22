@@ -69,6 +69,20 @@ export function seed(sqlite) {
   ins("video_events", { video_id: "av-private", event_id: "a-open" });
   ins("video_events", { video_id: "av-pending-2", event_id: "a-ended" });
 
+  // review summaries: stage-permission questions (active/inactive, >24 chars answer) and required questions
+  const q = (id, event, key, o = {}) => ins("event_custom_questions", { id, event_id: event, question_key: key, label: o.label ?? `Label ${key}`, required: o.required ?? 0, sort_order: o.sort ?? 0, is_active: o.active ?? 1 });
+  q("q1", "a-open", "stage_permission", { required: 1, sort: 0, label: "Stage use" });
+  q("q2", "a-open", "stage_permission_2", { sort: 1 });
+  q("q3", "a-open", "req_q", { required: 1, sort: 2 });
+  q("q4", "a-ended", "stage_permission", { active: 0 });
+  q("q5", "a-ended", "req_q2", { required: 1 });
+  const ans = (video, event, question, o) => ins("video_custom_answers", { video_id: video, event_id: event, question_id: question, answer_text: o.text ?? null, answer_json: o.json ?? null });
+  ans("av-pending-1", "a-open", "q1", { text: "OK to use everything on stage, including long text over twenty-four characters" });
+  ans("av-pending-1", "a-open", "q3", { json: "[]" });
+  ans("av-private", "a-open", "q1", { text: "short ok" });
+  ans("av-private", "a-open", "q3", { text: "yes" });
+  ans("av-pending-2", "a-ended", "q4", { text: "ignored (inactive)" });
+
   // Moderation cases.
   const now = Math.floor(Date.now() / 1000);
   const mc = (id, o) =>

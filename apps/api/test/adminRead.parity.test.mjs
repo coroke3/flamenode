@@ -26,6 +26,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { enrichXLinkPendingRows } = await import("../../../src/lib/admin/enrichXLinkPendingRows.ts");
   const { resolveManageXIconUrl } = await import("../../../src/lib/media/manageXIcon.ts");
   const { parseAuditDiff } = await import("../../../src/lib/audit/diff.ts");
+  const { fetchVideoReviewSummaries } = await import("../../../src/lib/admin/videoReviewMeta.ts");
   const { acceptingEntriesWhere } = await import("../../../src/lib/utils/eventStatus.ts");
   const { videoReviewQueueOrder } = await import("../../../src/lib/admin/videoReviewQueueOrder.ts");
   const { normalizeVideoVisibilityFilter, videoVisibilityStatusesForFilter } = await import(
@@ -411,14 +412,34 @@ if (runUnderRootTsx(import.meta.url)) {
       const params = Object.fromEntries(new URLSearchParams(query));
       const r = await get(`/api/admin-read/videos${query}`);
       const ref = await refVideos(params);
-      assert.deepEqual(r.body.videos, canon(ref.rows), query);
+      let expectedRows = canon(ref.rows);
+      if (ref.status === "review" || ref.status === "pending") {
+        const summaries = await fetchVideoReviewSummaries(refDb, ref.rows.map((row) => row.id), params.event || undefined);
+        expectedRows = expectedRows.map((row) => ({ ...row, review: canon(summaries.get(row.id)) }));
+        assert.equal(r.body.reviewSummaries, "included");
+      } else {
+        assert.equal(r.body.reviewSummaries, "not_requested");
+      }
+      assert.deepEqual(r.body.videos, expectedRows, query);
       assert.deepEqual(r.body.paging, { page: ref.page, pageSize: 50, total: ref.total }, query);
       assert.equal(r.body.status, ref.status);
       assert.deepEqual(r.body.events, canon(ref.events), query);
       assert.equal(r.body.degraded, false);
-      assert.equal(r.body.reviewSummaries, "deferred");
     }
     assert.equal((await get("/api/admin-read/videos?status=review&event=a-open")).body.paging.total, 1);
+    const first = (await get("/api/admin-read/videos?status=review")).body.videos.find((v) => v.id === "av-pending-1");
+    assert.equal(first.review.stage_permission_summary.endsWith("…"), true, "long stage permission is truncated to 23 chars + ellipsis");
+    assert.equal(first.review.required_unanswered_count, 1, "answer_json [] counts as unanswered");
+    assert.equal((await get("/api/admin-read/videos?status=review")).stats.statements, 3, "summaries add no D1 statement");
+    // > 4 stage questions on one video: CURRENT throws outside its try/catch -> error page (503)
+    for (let i = 0; i < 5; i += 1) sqlite.prepare("INSERT INTO event_custom_questions (id, event_id, question_key, label, sort_order) VALUES (?, 'a-open', ?, 'x', ?)").run(`qx${i}`, `stage_permission_x${i}`, 10 + i);
+    try {
+      const over = await call("/api/admin-read/videos?status=review", "tok-root");
+      assert.equal(over.status, 503);
+      assert.deepEqual(over.body, { error: "unavailable" });
+    } finally {
+      sqlite.exec("DELETE FROM event_custom_questions WHERE id LIKE 'qx%'");
+    }
   });
 
   // ---------------- users ----------------

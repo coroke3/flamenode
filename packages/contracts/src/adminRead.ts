@@ -131,6 +131,8 @@ export interface AdminVideoRow {
   display_name: string | null;
   status: string;
   created_at: number;
+  /** review group only (status review|pending): CURRENT fetchVideoReviewSummaries */
+  review?: { stage_permission_summary: string; required_unanswered_count: number };
 }
 
 export interface AdminVideosResponse {
@@ -145,7 +147,7 @@ export interface AdminVideosResponse {
    * The review group's per-row stage-permission / unanswered counts (CURRENT fetchVideoReviewSummaries) are not
    * reproduced yet; the SPA shows "-" / 0 until the follow-up lands (MIG-0625 handoff).
    */
-  reviewSummaries: "deferred";
+  reviewSummaries: "included" | "not_requested";
   degraded: boolean;
 }
 
