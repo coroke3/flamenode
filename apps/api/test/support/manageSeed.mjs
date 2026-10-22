@@ -207,6 +207,18 @@ export function seed(sqlite) {
   answer("v2", "evA", "cq4", null, "[]");
   answer("v3", "evA", "cq6", null, '{"a":1}');
   answer("v4", "evB", "cq5", "b-answer");
+  ins("video_members", { id: "m1", video_id: "v1", x_user_id: "owner_x", name: "Member One", role: "Director", order_index: 1, is_public_member: 1 });
+  ins("video_members", { id: "m2", video_id: "v1", x_user_id: null, name: "Member Two", role: null, order_index: 0, is_public_member: 0 });
+  ins("video_members", { id: "m3", video_id: "v1", x_user_id: "mgr_x", name: "Member Three", role: "Edit", order_index: 1, is_public_member: 1 });
+  for (const [id, t, label, x] of [["c1", 75.4, "Intro", "owner_x"], ["c2", 5, "Start", "owner_x"], ["c3", 61, "Mid", "mgr_x"], ["c4", 12, "Anon", null]]) {
+    ins("video_chapters", { id, video_id: "v1", x_user_id: x, chapter_time: t, chapter_label: label, visibility: "public", created_at: NOW, updated_at: NOW });
+  }
+  ins("software_catalog", { id: "sw1", name: "Blender", normalized_name: "blender", created_at: NOW, updated_at: NOW });
+  ins("software_catalog", { id: "sw2", name: "Aseprite", normalized_name: "aseprite", created_at: NOW, updated_at: NOW });
+  ins("video_softwares", { video_id: "v1", software_id: "sw1", raw_label: "Blender 4" });
+  ins("video_softwares", { video_id: "v1", software_id: "sw2", raw_label: "Aseprite" });
+  sqlite.prepare("UPDATE videos SET music = 'BGM', credit = 'Credit', intro_comment = 'Hi', highlights = 'H', production_story = 'S', creator_x_user_id = NULL, creator_display_name = 'Creator One' WHERE id = 'v1'").run();
+  sqlite.prepare("UPDATE videos SET youtube_video_id = ' yt-v3 ' WHERE id = 'v3'").run();
   event("evStage5", { start_time: NOW + 50 * DAY, end_time: NOW + 51 * DAY });
   for (let i = 0; i < 5; i += 1) question(`cs${i}`, "evStage5", i === 0 ? "stage_permission" : `stage_permission_${i + 1}`, { sort: i });
   ins("videos", { id: "vstage5", title: "stage5", submitted_by_user_id: "u_plain", creator_display_name: "c", visibility_status: "pending", created_at: NOW });

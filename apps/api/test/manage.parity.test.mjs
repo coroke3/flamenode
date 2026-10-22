@@ -638,6 +638,49 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(stage5.status, 503, "more than 4 stage questions -> video_stage_answer_read_limit_exceeded (CURRENT throws)");
   });
 
+  // app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx
+  const { fetchEventVideoReviewDetail } = await import("../../../src/lib/admin/videoReviewDetail.ts");
+  async function refVideoDetail(name, eventId, videoId) {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    if (!MA.canAccessManageEventFromSnapshot(snapshot, eventId)) return 404;
+    const ev = nav.events.find((e) => e.id === eventId);
+    if (!ev) return 404;
+    const video = await fetchEventVideoReviewDetail(refDb, eventId, videoId);
+    if (!video) return 404;
+    return {
+      isAdmin: snapshot.isAdmin,
+      event: { id: ev.id, title: ev.title, accent_color: ev.accent_color },
+      pendingCount: nav.pendingByEvent.get(eventId) ?? 0,
+      canReview: MA.canEditEventFromSnapshot(snapshot, eventId, "video.status"),
+      video,
+      truncated: false,
+    };
+  }
+
+  test("T-video-detail: review detail (answers, members + chapters, software, stage permission) equals CURRENT; IDOR", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const [eventId, videoId] of [["evA", "v1"], ["evA", "v2"], ["evA", "v3"], ["evA", "v4"], ["evB", "v4"], ["evB", "v1"], ["evC", "v1"], ["evA", "nope"], ["evA", "vi4"]]) {
+        const r = await call(`/api/manage/events/${eventId}/videos/${videoId}`, `tok-${name}`);
+        const ref = await refVideoDetail(name, eventId, videoId);
+        if (ref === 404) {
+          assert.equal(r.status, 404, `${name} ${eventId} ${videoId}`);
+          continue;
+        }
+        assert.equal(r.status, 200, `${name} ${eventId} ${videoId}`);
+        assert.deepEqual(r.body, canon(ref), `${name} ${eventId} ${videoId}`);
+        record("videoDetail", r);
+      }
+    }
+    const v1 = (await call("/api/manage/events/evA/videos/v1", "tok-owner")).body;
+    assert.equal(v1.video.members.find((m) => m.name === "Member One").chapters, "0:05 Start, 1:15 Intro");
+    assert.equal(v1.video.software_label, "Aseprite, Blender 4");
+    assert.ok(v1.video.customAnswers.some((a) => a.answer === "（未回答）"));
+    assert.equal((await call("/api/manage/events/evA/videos/v1", "tok-rev")).body.canReview, true);
+    assert.equal((await call("/api/manage/events/evA/videos/v1", "tok-slot")).status, 404);
+    assert.equal((await call("/api/manage/events/evStage5/videos/vstage5", "tok-admin")).status, 503, "more than 4 stage questions fails like CURRENT");
+  });
+
   // app/(manage)/manage/events/[id]/youtube-playlist/page.tsx
   const { derivePlaylistSyncHealth } = await import("../../../src/lib/youtube/playlistSyncHealth.ts");
   async function refPlaylist(name, eventId) {
