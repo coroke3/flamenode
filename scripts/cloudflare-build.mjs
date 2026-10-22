@@ -95,7 +95,9 @@ export function runCloudflareBuild({
 
   const result = run({
     executable: process.execPath,
-    args: [cli, "build"],
+    // OpenNext refuses Next.js releases past the Next.js support window (date-based).
+    // The Next app is retired by the migration (Phase 9); keep deploying the pinned version.
+    args: [cli, "build", "--dangerouslyUseUnsupportedNextVersion"],
     cwd: repoRoot,
     env: {
       ...env,
