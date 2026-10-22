@@ -48,6 +48,42 @@ export type AuditInput = {
   retention_class?: RetentionClass;
 };
 
+/** Single-row point reads (ZERO_1102 section 4: bounded reads). */
+export const MAX_SINGLE_ROW_LIMIT = 1;
+
+/** Columns of system_settings that hold audit settings (shared with CostGuard's single read). */
+export type AuditSettingsRow = {
+  audit_normal_retention_days: number;
+  audit_restorable_retention_days: number;
+  audit_long_retention_days: number;
+  audit_max_payload_bytes: number;
+  audit_compact_after_days: number;
+};
+
+/** src/lib/audit/settings.ts mapAuditSettings. */
+export function mapAuditSettings(
+  row: AuditSettingsRow | null | undefined,
+): AuditLogSettings {
+  if (!row) return { ...DEFAULT_AUDIT_LOG_SETTINGS };
+  return {
+    normal_retention_days: row.audit_normal_retention_days,
+    restorable_retention_days: row.audit_restorable_retention_days,
+    long_audit_retention_days: row.audit_long_retention_days,
+    max_payload_bytes: row.audit_max_payload_bytes,
+    compact_after_days: row.audit_compact_after_days,
+  };
+}
+
+/**
+ * Values already read by the request's guards (ZERO_1102 S3: at most 3 D1
+ * pre-reads). When present, prepareAuditEntries skips the corresponding read.
+ * actorSnapshotJsonById holds the exact JSON buildActorSnapshotJson would build.
+ */
+export type PreloadedAuditContext = {
+  settings?: AuditLogSettings;
+  actorSnapshotJsonById?: Readonly<Record<string, string>>;
+};
+
 export type AuditLogSettings = {
   normal_retention_days: number;
   restorable_retention_days: number;
@@ -179,7 +215,7 @@ async function loadAuditSettings(db: D1Database): Promise<AuditLogSettings> {
     .prepare(
       `SELECT audit_normal_retention_days, audit_restorable_retention_days,
               audit_long_retention_days, audit_max_payload_bytes, audit_compact_after_days
-       FROM system_settings WHERE id = ? LIMIT 1`,
+       FROM system_settings WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind("default")
     .first<{
@@ -189,14 +225,30 @@ async function loadAuditSettings(db: D1Database): Promise<AuditLogSettings> {
       audit_max_payload_bytes: number;
       audit_compact_after_days: number;
     }>();
-  if (!row) return { ...DEFAULT_AUDIT_LOG_SETTINGS };
-  return {
-    normal_retention_days: row.audit_normal_retention_days,
-    restorable_retention_days: row.audit_restorable_retention_days,
-    long_audit_retention_days: row.audit_long_retention_days,
-    max_payload_bytes: row.audit_max_payload_bytes,
-    compact_after_days: row.audit_compact_after_days,
-  };
+  return mapAuditSettings(row);
+}
+
+export type ActorSnapshotRow = {
+  discord_id: string | null;
+  discord_name: string | null;
+  active_x_user_id: string | null;
+  user_image: string | null;
+  x_name: string | null;
+  x_icon_url: string | null;
+};
+
+/** src/lib/audit/logger.ts buildActorSnapshot (row -> JSON string). */
+export function actorSnapshotJsonFromRow(
+  row: ActorSnapshotRow | null | undefined,
+): string {
+  if (!row) return EMPTY_ACTOR_JSON;
+  return JSON.stringify({
+    discord_id: row.discord_id ?? null,
+    discord_name: row.discord_name ?? null,
+    x_user_id: row.active_x_user_id ?? null,
+    x_name: row.x_name ?? null,
+    icon_url: row.x_icon_url || row.user_image || null,
+  });
 }
 
 async function buildActorSnapshotJson(
@@ -209,25 +261,11 @@ async function buildActorSnapshotJson(
               u."active_x_user_id" AS active_x_user_id, u."image" AS user_image,
               x."x_name" AS x_name, x."icon_url" AS x_icon_url
        FROM "user" u LEFT JOIN "x_users" x ON x."id" = u."active_x_user_id"
-       WHERE u."id" = ? LIMIT 1`,
+       WHERE u."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
     .bind(userId)
-    .first<{
-      discord_id: string | null;
-      discord_name: string | null;
-      active_x_user_id: string | null;
-      user_image: string | null;
-      x_name: string | null;
-      x_icon_url: string | null;
-    }>();
-  if (!row) return EMPTY_ACTOR_JSON;
-  return JSON.stringify({
-    discord_id: row.discord_id ?? null,
-    discord_name: row.discord_name ?? null,
-    x_user_id: row.active_x_user_id ?? null,
-    x_name: row.x_name ?? null,
-    icon_url: row.x_icon_url || row.user_image || null,
-  });
+    .first<ActorSnapshotRow>();
+  return actorSnapshotJsonFromRow(row);
 }
 
 /**
@@ -303,16 +341,22 @@ export function buildPreparedAuditEntry(
 export async function prepareAuditEntries(
   db: D1Database,
   inputs: readonly AuditInput[],
+  preloaded: PreloadedAuditContext = {},
 ): Promise<(PreparedAuditEntry | null)[]> {
   const active = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (active.length === 0) return inputs.map(() => null);
 
-  const settings = await loadAuditSettings(db);
+  const settings = preloaded.settings ?? (await loadAuditSettings(db));
   const actorJsonById = new Map<string, string>();
   const actorIds = [...new Set(active.map((input) => input.actor_user_id))];
   for (let offset = 0; offset < actorIds.length; offset += 4) {
     await Promise.all(
       actorIds.slice(offset, offset + 4).map(async (actorId) => {
+        const known = preloaded.actorSnapshotJsonById?.[actorId];
+        if (known !== undefined) {
+          actorJsonById.set(actorId, known);
+          return;
+        }
         actorJsonById.set(actorId, await buildActorSnapshotJson(db, actorId));
       }),
     );
@@ -370,6 +414,8 @@ export type AtomicAuditMutationInput = {
   expectedMutationChanges: readonly (number | null)[];
   audits: readonly AuditInput[];
   callerQueryCount?: number;
+  /** Values the request guards already read (skips those D1 reads). */
+  preloaded?: PreloadedAuditContext;
 };
 
 /**
@@ -415,7 +461,7 @@ export async function mutateWithAudit(
     }
   }
 
-  const prepared = await prepareAuditEntries(db, input.audits);
+  const prepared = await prepareAuditEntries(db, input.audits, input.preloaded);
   const entries = prepared.map((entry, index) => {
     if (!entry) {
       throw new AuditMutationError(

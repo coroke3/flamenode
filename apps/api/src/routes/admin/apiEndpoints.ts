@@ -13,8 +13,14 @@ import {
 } from "@flamenode/domain/apiEndpoints";
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { mutateWithAudit } from "../../audit/mutateWithAudit.ts";
+import { MAX_SINGLE_ROW_LIMIT, mutateWithAudit } from "../../audit/mutateWithAudit.ts";
+import {
+  ApiEndpointCreateBodySchema,
+  ApiEndpointSetActiveBodySchema,
+} from "@flamenode/contracts";
+import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { onlyMutating } from "../../middleware/writeOrigin.ts";
 
 export const API_ENDPOINT_FAILURE_MESSAGE =
   "更新が競合したか監査記録に失敗しました。";
@@ -76,6 +82,11 @@ const EVENT_EXPORT_CACHE_VERSION = 9;
 const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
 const PUBLIC_JSON_CACHE_ORIGIN = "https://flamenode.internal/public-json/";
 
+/** src/lib/publicData/publicCache.ts publicJsonCacheKey(r2Key).url */
+export function publicJsonCacheRequestUrl(r2Key: string): string {
+  return `${PUBLIC_JSON_CACHE_ORIGIN}${encodeURIComponent(r2Key)}`;
+}
+
 export function eventExportCacheKeys(eventId: string): string[] {
   return (["v5", "legacy"] as const).flatMap((format) =>
     EVENT_EXPORT_REFRESH_MINUTES.map((minutes) =>
@@ -96,7 +107,7 @@ async function invalidateEventExportCache(eventId: string): Promise<void> {
   for (const key of eventExportCacheKeys(eventId)) {
     try {
       await store?.delete(
-        new Request(`${PUBLIC_JSON_CACHE_ORIGIN}${encodeURIComponent(key)}`),
+        new Request(publicJsonCacheRequestUrl(key)),
       );
     } catch {
       // Cache API failure must not take down the mutation path.
@@ -105,8 +116,8 @@ async function invalidateEventExportCache(eventId: string): Promise<void> {
 }
 
 function failure(
-  c: { json: (b: unknown, s: 400 | 404 | 500) => Response },
-  status: 400 | 404 | 500,
+  c: { json: (b: unknown, s: 400 | 404 | 413 | 500) => Response },
+  status: 400 | 404 | 413 | 500,
   message: string,
 ) {
   const body: ApiEndpointResult = { ok: false, message };
@@ -124,13 +135,19 @@ async function setPublicApi(
   if (!validated.ok) return failure(c, 400, validated.message);
   const eventId = validated.eventId;
 
-  const before = await db
-    .prepare(
-      `SELECT ${EVENT_COLUMNS.map((col) => `"${col}"`).join(", ")}
-       FROM events WHERE id = ? LIMIT 1`,
-    )
-    .bind(eventId)
-    .first<EventRow>();
+  let before: EventRow | null;
+  try {
+    before = await db
+      .prepare(
+        `SELECT ${EVENT_COLUMNS.map((col) => `"${col}"`).join(", ")}
+         FROM events WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
+      )
+      .bind(eventId)
+      .first<EventRow>();
+  } catch (error) {
+    console.error("[api-endpoints] preflight read failed", error);
+    return failure(c, 500, API_ENDPOINT_FAILURE_MESSAGE);
+  }
   const activationCheck = validateEventForApiActivation(before, enabled);
   if (!activationCheck.ok) {
     return failure(c, before ? 400 : 404, activationCheck.message);
@@ -150,6 +167,7 @@ async function setPublicApi(
         },
       ],
       expectedMutationChanges: [1],
+      preloaded: auditPreloaded(c),
       audits: [
         {
           table_name: "events",
@@ -180,31 +198,31 @@ async function setPublicApi(
   return c.json(body, 200);
 }
 
-async function readJsonObject(
-  request: Request,
-): Promise<Record<string, unknown>> {
-  try {
-    const body = await request.json();
-    return body && typeof body === "object" && !Array.isArray(body)
-      ? (body as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
 export const apiEndpointRoutes = new Hono<AppEnv>();
-apiEndpointRoutes.use("*", costGuardMiddleware("admin_api_endpoints"));
+apiEndpointRoutes.use("*", onlyMutating(costGuardMiddleware("admin_api_endpoints")));
 
 // SA-007 createApiEndpoint
 apiEndpointRoutes.post("/", async (c) => {
-  const body = await readJsonObject(c.req.raw);
-  return setPublicApi(c, String(body.event_id ?? "").trim(), 1);
+  const read = await readAdminJsonBody(c.req.raw);
+  if (read.kind === "too_large") return failure(c, 413, BODY_TOO_LARGE_MESSAGE);
+  const shape =
+    read.kind === "ok" ? ApiEndpointCreateBodySchema.safeParse(read.value) : null;
+  // CURRENT: String(formData.get("event_id") ?? "").trim(); a missing body
+  // reaches validateApiEndpointEventId as "" -> "event_idが不正です。".
+  const eventId = shape?.success ? String(shape.data.event_id ?? "").trim() : "";
+  return setPublicApi(c, eventId, 1);
 });
 
 // SA-008 setApiEndpointActive
 apiEndpointRoutes.patch("/:id", async (c) => {
-  const body = await readJsonObject(c.req.raw);
-  const enabled = String(body.public_api_enabled ?? "0") === "1" ? 1 : 0;
-  return setPublicApi(c, c.req.param("id").trim(), enabled);
+  const read = await readAdminJsonBody(c.req.raw);
+  if (read.kind === "too_large") return failure(c, 413, BODY_TOO_LARGE_MESSAGE);
+  const shape =
+    read.kind === "ok"
+      ? ApiEndpointSetActiveBodySchema.safeParse(read.value)
+      : null;
+  if (!shape || !shape.success) {
+    return failure(c, 400, "public_api_enabledが不正です。");
+  }
+  return setPublicApi(c, c.req.param("id").trim(), shape.data.public_api_enabled);
 });

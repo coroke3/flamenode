@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0601
+Current Task: MIG-0602
 Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0601
-Last Task PR: #329
-Merged READY: MIG-0409, MIG-0602, MIG-0701
+Last Completed Task: MIG-0602
+Last Task PR: #331
+Merged READY: MIG-0409, MIG-0603, MIG-0604, MIG-0605, MIG-0701
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -301,13 +301,14 @@ Validation:
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | DONE | MIG-0307, MIG-0107 |
 | MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
-| MIG-0602 | low-risk mutations | READY | MIG-0601, MIG-0608 |
-| MIG-0603 | video APIs | BLOCKED | MIG-0602 |
-| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
-| MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602 |
+| MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
+| MIG-0603 | video APIs | READY | MIG-0602 |
+| MIG-0604 | event/slot APIs | READY | MIG-0602 |
+| MIG-0605 | user/X/admin APIs | READY | MIG-0602 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
+| MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。

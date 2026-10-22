@@ -219,3 +219,22 @@ test("video author block follows CURRENT: JST date, public-profile link only whe
   assert.equal(videoScreenData({ ...video, creatorHasPublicProfile: undefined }).creator.profileHref, null);
   assert.equal(videoScreenData({ ...video, creatorName: "  " }).creator.name, "作者未設定");
 });
+
+test("event status badge follows CURRENT app/(public)/event/[id]/page.tsx:234-236, never the Badge default DRAFT", async () => {
+  const { eventScreenData } = await import("./publicPages.ts");
+  const { EventDetailView } = await import("@flamenode/ui");
+  const React = (await import("react")).default;
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const render = (snapshot) => renderToStaticMarkup(React.createElement(EventDetailView, { event: eventScreenData(snapshot) }));
+  // Snapshot label as written by the build; the CURRENT pill has one accent style for every status.
+  const html = render(event);
+  assert.doesNotMatch(html, /DRAFT/);
+  assert.match(html, /<span class="fn-status fn-status--public" data-status="public"><span>開始前<\/span><\/span>/);
+  // No label in the snapshot: no dates to tell open / ended, so no pill rather than a guess or DRAFT.
+  for (const statusLabel of [undefined, ""]) {
+    const bare = render({ kind: "event", id: "e1", title: "T", statusLabel });
+    assert.doesNotMatch(bare, /DRAFT/);
+    assert.doesNotMatch(bare, /class="fn-status\b/);
+  }
+  assert.match(read(`event/${event.id}`), /<span class="fn-status fn-status--public" data-status="public"><span>開始前<\/span><\/span>/);
+});
