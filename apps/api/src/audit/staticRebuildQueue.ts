@@ -10,7 +10,7 @@ import { generateId, type SqlStatement } from "./mutateWithAudit.ts";
 
 export function buildAnnouncementChangeQueueStatement(opts: {
   reason: string;
-  requestedByUserId: string;
+  requestedByUserId?: string;
 }): { statement: SqlStatement; expectedChanges: 1 } {
   const now = Math.floor(Date.now() / 1000);
   const payload = JSON.stringify([
@@ -20,7 +20,8 @@ export function buildAnnouncementChangeQueueStatement(opts: {
       target_id: "global",
       reason: opts.reason,
       priority: "normal",
-      requested_by_user_id: opts.requestedByUserId,
+      // CURRENT buildAnnouncementChangeQueueBatch drops requestedByUserId (null).
+      requested_by_user_id: null,
     },
   ]);
   return {
