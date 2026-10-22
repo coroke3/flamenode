@@ -157,7 +157,7 @@ src/lib/serverCore/nextPorts.ts                ← Next 側の ports 供給（ge
 
 - D1 は `DrizzleD1Database` を引数で受け取る。module の中で binding・env・request context を取得しない。`getDb` / `getEnv` / `getCloudflareContext` / `process.env` / `server-only` を書かない。
 - 外部の資源（Queue、KV、R2、cache、`waitUntil`、`unstable_rethrow`）は `ports.ts` の型の引数で受ける。Next の bridge が既存の関数と同じ signature で ports を埋めるので、呼び出し側（81 箇所の `mutateWithAudit` など）は変えない。
-- 順序・strict / CAS の意味・SQL 文と bind の並びを変えない。移動前に golden test（batch の SQL 文字列 + params と `audit_logs` の行。`id` / `created_at` を除く）を commit し、移動後に byte 単位で一致させる。
+- 順序・strict / CAS の意味・SQL 文と bind の並びを変えない。移動前に golden test（batch の SQL 文字列 + params と `audit_logs` の行。時刻と乱数 id を固定して `id` / `created_at` も比較する）を commit し、移動後に byte 単位で一致させる。
 - `revalidatePath` / `revalidateTag` は core に入れない（Next の Server Action に残す）。`src/lib/publicData/loader.ts` は移さない。
 - test は `node --test --experimental-strip-types` か、CURRENT の test と同じ起動方法（tsx）。移した test の件数が移動前と同じであること。
 

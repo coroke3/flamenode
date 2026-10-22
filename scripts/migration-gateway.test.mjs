@@ -124,6 +124,30 @@ test("R-GATEWAY 3: legacy path answers 307", async () => {
   assert.equal(res.headers.get("Location"), "/video-public-1");
 });
 
+test("legacy redirect Location merges the request query into the target's, the target winning a shared key", async () => {
+  const { env } = createEnv({
+    manifest: buildRouteMap(
+      [
+        { kind: "redirect", fromPath: "/legacy/plain", toPath: "/about", status: 301 },
+        { kind: "redirect", fromPath: "/legacy/query", toPath: "/about?x=1", status: 301 },
+        { kind: "redirect", fromPath: "/legacy/hash", toPath: "/event#event-group-g", status: 307 },
+      ],
+      GENERATION,
+    ),
+  });
+  const location = async (path) => (await get(path, env)).headers.get("Location");
+  // No target query: the request query is appended as is.
+  assert.equal(await location("/legacy/plain"), "/about");
+  assert.equal(await location("/legacy/plain?t=2&t=3"), "/about?t=2&t=3");
+  // Target query + request query: one query string, never `?x=1?t=2`.
+  assert.equal(await location("/legacy/query"), "/about?x=1");
+  assert.equal(await location("/legacy/query?t=2"), "/about?x=1&t=2");
+  // Shared key: the target's value wins and the request's values for it are dropped (Next prepare-destination).
+  assert.equal(await location("/legacy/query?x=9&t=2&x=8"), "/about?x=1&t=2");
+  // A target fragment stays last.
+  assert.equal(await location("/legacy/hash?t=2"), "/event?t=2#event-group-g");
+});
+
 test("R-GATEWAY 4 / T04: unknown and prototype-named routes are 404 with noindex and no-store", async () => {
   const { env } = createEnv();
   for (const path of ["/unknown-random-slug", "/constructor", "/user/toString", "/hasOwnProperty"]) {
