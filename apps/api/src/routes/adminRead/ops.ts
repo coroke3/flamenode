@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type {
   AdminCostGuardResponse,
   AdminNotificationsResponse,
+  AdminSecurityResponse,
   AdminTopResponse,
   AdminYoutubePlaylistsResponse,
   AdminYoutubeQuotaResponse,
@@ -204,6 +205,167 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/security?run=1 (security/page.tsx; src/lib/admin/securityChecks.ts) ----
+// CURRENT runs 7 count/sample queries in parallel and only when ?run=1. Here: two UNION ALL statements (3 + 4 checks)
+// so the request stays at session + 2. A statement failure marks ITS checks as CURRENT's per-check failure result
+// (warn, count 1, fixed note); CURRENT isolates every check on its own. The accounts.access_token check only COUNTs.
+const SECURITY_LABELS = {
+  access_token_not_null: "accounts.access_token が null でない行",
+  rejected_xid_active: "rejected X ID が active_x_user_id に設定されている",
+  unapproved_creator_videos: "未承認 X ID の creator_x_user_id を持つ作品",
+  banned_user_videos: "BANされた投稿者が登録した作品",
+  tos_not_accepted_user_videos: "TOS未同意の投稿者が登録した作品",
+  custom_page_dangerous_html: "custom_pages/custom_themes disabled",
+  banned_user_chapters: "BANユーザーにも紐づくX IDのチャプターコメント",
+  orphan_approved_xid: "approved な X ID で認証ユーザー紐付けがない",
+} as const;
+type SecurityCheckId = keyof typeof SECURITY_LABELS;
+type SecurityResult = AdminSecurityResponse["results"][number];
+
+const SECURITY_CHECK_FAILED_NOTE =
+  "検査自体の実行に失敗しました。DB接続、schema適用状況、サーバーログを確認してください。";
+
+// SELECT check_id, total_count, a, b; one subquery per check, each LIMIT 10 like CURRENT (samples use the first 5).
+const SECURITY_SELECTS: Record<Exclude<SecurityCheckId, "custom_page_dangerous_html">, string> = {
+  access_token_not_null:
+    "SELECT 'access_token_not_null' AS check_id, COUNT(*) AS total_count, NULL AS a, NULL AS b FROM account WHERE access_token IS NOT NULL",
+  rejected_xid_active:
+    "SELECT 'rejected_xid_active' AS check_id, total_count, id AS a, active_x_user_id AS b FROM (" +
+    'SELECT "user".id AS id, "user".active_x_user_id AS active_x_user_id, COUNT(*) OVER() AS total_count FROM "user" ' +
+    'INNER JOIN x_users ON x_users.id = "user".active_x_user_id ' +
+    "WHERE \"user\".active_x_user_id IS NOT NULL AND x_users.approval_status = 'rejected' LIMIT 10)",
+  unapproved_creator_videos:
+    "SELECT 'unapproved_creator_videos' AS check_id, total_count, id AS a, creator_x_user_id AS b FROM (" +
+    "SELECT videos.id AS id, videos.creator_x_user_id AS creator_x_user_id, COUNT(*) OVER() AS total_count FROM videos " +
+    "INNER JOIN x_users ON x_users.id = videos.creator_x_user_id " +
+    "WHERE videos.creator_x_user_id IS NOT NULL AND x_users.approval_status <> 'approved' LIMIT 10)",
+  banned_user_videos:
+    "SELECT 'banned_user_videos' AS check_id, total_count, id AS a, submitted_by_user_id AS b FROM (" +
+    "SELECT videos.id AS id, videos.submitted_by_user_id AS submitted_by_user_id, COUNT(*) OVER() AS total_count FROM videos " +
+    'INNER JOIN "user" ON "user".id = videos.submitted_by_user_id WHERE "user".is_banned = 1 LIMIT 10)',
+  tos_not_accepted_user_videos:
+    "SELECT 'tos_not_accepted_user_videos' AS check_id, total_count, id AS a, submitted_by_user_id AS b FROM (" +
+    "SELECT videos.id AS id, videos.submitted_by_user_id AS submitted_by_user_id, COUNT(*) OVER() AS total_count FROM videos " +
+    'INNER JOIN "user" ON "user".id = videos.submitted_by_user_id WHERE "user".is_tos_accepted <> 1 LIMIT 10)',
+  banned_user_chapters:
+    "SELECT 'banned_user_chapters' AS check_id, total_count, id AS a, x_user_id AS b FROM (" +
+    "SELECT video_chapters.id AS id, video_chapters.x_user_id AS x_user_id, COUNT(*) OVER() AS total_count FROM video_chapters " +
+    'WHERE EXISTS (SELECT 1 FROM x_user_account_links link INNER JOIN "user" auth_user ON auth_user.id = link.auth_user_id ' +
+    "WHERE link.x_user_id = video_chapters.x_user_id AND auth_user.is_banned = 1) LIMIT 10)",
+  orphan_approved_xid:
+    "SELECT 'orphan_approved_xid' AS check_id, total_count, id AS a, NULL AS b FROM (" +
+    "SELECT x_users.id AS id, COUNT(*) OVER() AS total_count FROM x_users WHERE x_users.approval_status = 'approved' " +
+    "AND NOT EXISTS (SELECT 1 FROM x_user_account_links link WHERE link.x_user_id = x_users.id) LIMIT 10)",
+};
+
+function securityResult(id: SecurityCheckId, rows: Array<{ total_count: number | null; a: string | null; b: string | null }>): SecurityResult {
+  const count = Number(rows[0]?.total_count ?? 0);
+  const label = SECURITY_LABELS[id];
+  const sample = (fn: (r: { a: string | null; b: string | null }) => string) => rows.slice(0, 5).map(fn);
+  switch (id) {
+    case "access_token_not_null":
+      return {
+        id: "access_token_not_null",
+        label,
+        status: count === 0 ? "ok" : "warn",
+        count,
+        samples: [],
+        note: "OAuth トークンが残存しています。DBに平文トークンが保存されていないか確認してください。",
+      };
+    case "rejected_xid_active":
+      return { id: "rejected_xid_active", label, status: count === 0 ? "ok" : "warn", count, samples: sample((r) => "user:" + r.a + " x:" + (r.b ?? "")) };
+    case "unapproved_creator_videos":
+      return { id: "unapproved_creator_videos", label, status: count === 0 ? "ok" : "warn", count, samples: sample((r) => "video:" + r.a + " creator:" + (r.b ?? "")) };
+    case "banned_user_videos":
+      return { id: "banned_user_videos", label, status: count === 0 ? "ok" : "warn", count, samples: sample((r) => "video:" + r.a + " submitter:" + r.b) };
+    case "tos_not_accepted_user_videos":
+      return { id: "tos_not_accepted_user_videos", label, status: count === 0 ? "ok" : "warn", count, samples: sample((r) => "video:" + r.a + " submitter:" + r.b) };
+    case "banned_user_chapters":
+      return {
+        id: "banned_user_chapters",
+        label,
+        status: count === 0 ? "ok" : "warn",
+        count,
+        samples: sample((r) => "chapter:" + r.a + " x:" + r.b),
+        ...(count > 0 ? { note: "紐づくX IDにBANユーザーが存在します。実際の投稿者を特定できる列はありません。" } : {}),
+      };
+    case "orphan_approved_xid":
+      return {
+        id: "orphan_approved_xid",
+        label,
+        status: count === 0 ? "ok" : "info",
+        count,
+        samples: sample((r) => "x:" + r.a),
+        ...(count > 0 ? { note: "認証ユーザー紐付けがない approved X ID。公開名義として意図されたものか確認してください。" } : {}),
+      };
+    default:
+      throw new Error("unreachable");
+  }
+}
+
+adminOpsRoutes.get("/security", async (c) => {
+  const statusQ = c.req.query("status");
+  const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
+  const shouldRun = c.req.query("run") === "1";
+  if (!shouldRun) {
+    const idle: AdminSecurityResponse = { status, ran: false, results: [], error: null };
+    return c.json(idle);
+  }
+
+  const groups: Array<Array<Exclude<SecurityCheckId, "custom_page_dangerous_html">>> = [
+    ["access_token_not_null", "rejected_xid_active", "unapproved_creator_videos"],
+    ["banned_user_videos", "tos_not_accepted_user_videos", "banned_user_chapters", "orphan_approved_xid"],
+  ];
+  const byId = new Map<string, SecurityResult>();
+  for (const group of groups) {
+    try {
+      const { results } = await c.env.DB.prepare(group.map((id) => SECURITY_SELECTS[id]).join(" UNION ALL "))
+        .all<{ check_id: string; total_count: number | null; a: string | null; b: string | null }>();
+      for (const id of group) {
+        byId.set(id, securityResult(id, results.filter((row) => row.check_id === id)));
+      }
+    } catch {
+      console.error("[adminRead] security check group failed");
+      for (const id of group) {
+        byId.set(id, { id, label: SECURITY_LABELS[id], status: "warn", count: 1, samples: [], note: SECURITY_CHECK_FAILED_NOTE });
+      }
+    }
+  }
+  const staticOk: SecurityResult = {
+    id: "custom_page_dangerous_html",
+    label: SECURITY_LABELS.custom_page_dangerous_html,
+    status: "ok",
+    count: 0,
+    samples: [],
+    note: "初期本番では custom_pages/custom_themes は無効化されています。",
+  };
+  // CURRENT order: definitions order, then the two static info results.
+  const order: SecurityCheckId[] = [
+    "access_token_not_null",
+    "rejected_xid_active",
+    "unapproved_creator_videos",
+    "banned_user_videos",
+    "tos_not_accepted_user_videos",
+    "custom_page_dangerous_html",
+    "banned_user_chapters",
+    "orphan_approved_xid",
+  ];
+  const results: SecurityResult[] = [
+    ...order.map((id) => (id === "custom_page_dangerous_html" ? staticOk : (byId.get(id) as SecurityResult))),
+    { id: "public_api_leak", label: "公開 API 内部情報漏洩", status: "info", count: 0, samples: [], note: "OK (whitelist enforced)" },
+    {
+      id: "notification_table_mismatch",
+      label: "通知テーブル名の整合性 (Worker / ORM schema)",
+      status: "info",
+      count: 0,
+      samples: [],
+      note: "Cloudflare Workers / OpenNext runtime ではソースファイルを参照できないため、CI の静的検査で確認します。",
+    },
+  ];
+  const body: AdminSecurityResponse = { status, ran: true, results, error: null };
   return c.json(body);
 });
 

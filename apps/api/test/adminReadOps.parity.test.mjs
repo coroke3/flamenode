@@ -940,6 +940,47 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await get("/permissions/simulator")).stats.statements, 1);
   });
 
+  test("T02 security checks equal CURRENT runSecurityChecks (only with run=1; 7 queries -> 2 statements)", async () => {
+    const { runSecurityChecks } = await import("../../../src/lib/admin/securityChecks.ts");
+    ins("account", { userId: "u_alice", type: "oauth", provider: "twitter", providerAccountId: "p1", access_token: "super-secret-token-value" });
+    ins("account", { userId: "u_bob", type: "oauth", provider: "twitter", providerAccountId: "p2" });
+    ins("videos", { id: "v-ban", title: "B", submitted_by_user_id: "u_banned", creator_display_name: "n", creator_x_user_id: "dave_r", youtube_video_id: "ytban", visibility_status: "public", created_at: T0 });
+    ins("videos", { id: "v-tos", title: "T", submitted_by_user_id: "u_carol", creator_display_name: "n", creator_x_user_id: "alice_x", youtube_video_id: "yttos", visibility_status: "public", created_at: T0 });
+    ins("video_chapters", { id: "ch-ban", video_id: "v-ban", x_user_id: "banned_x", chapter_time: 1, chapter_label: "c", visibility: "public", created_at: T0, updated_at: T0 });
+    ins("x_users", { id: "banned_x", x_name: "bx", approval_status: "approved" });
+    ins("x_users", { id: "orphan_x", x_name: "ox", approval_status: "approved" });
+    ins("x_user_account_links", { x_user_id: "banned_x", auth_user_id: "u_banned", created_at: T0 });
+
+    const strip = (list) => list.map(({ note, ...r }) => ({ ...r, ...(note ? { note } : {}) }));
+    const ref = canon(strip(await runSecurityChecks(refDb)));
+    const r = await get("/ops/security?run=1");
+    assert.deepEqual(r.body, { status: "all", ran: true, results: ref, error: null });
+    assert.equal(r.stats.statements, 3, "session + 2 statements instead of 7 queries");
+    assert.doesNotMatch(r.text, /super-secret-token-value/, "tokens are counted, never returned");
+    assert.ok(ref.find((x) => x.id === "access_token_not_null").count === 1);
+    assert.ok(ref.find((x) => x.id === "banned_user_chapters").count === 1);
+
+    const idle = await get("/ops/security?status=warn");
+    assert.deepEqual(idle.body, { status: "warn", ran: false, results: [], error: null });
+    assert.equal(idle.stats.statements, 1, "no run -> no query");
+
+    // a failing group degrades to CURRENT's per-check failure result (warn, count 1) for its checks only
+    const d1 = createD1(sqlite);
+    const prepare = d1.prepare;
+    d1.prepare = (text) => {
+      if (/banned_user_videos/.test(text)) throw new Error("secret-internal");
+      return prepare(text);
+    };
+    const failed = await call("/api/admin-read/ops/security?run=1", ADMIN, { d1 });
+    assert.equal(failed.status, 200);
+    const byId = Object.fromEntries(failed.body.results.map((x) => [x.id, x]));
+    assert.equal(byId.banned_user_videos.status, "warn");
+    assert.equal(byId.banned_user_videos.count, 1);
+    assert.match(byId.banned_user_videos.note, /検査自体の実行に失敗/);
+    assert.equal(byId.access_token_not_null.count, 1);
+    assert.doesNotMatch(failed.text, /secret-internal/);
+  });
+
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
     sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
     assert.deepEqual((await get("/ops/cost-guard")).body, await refCostGuard());

@@ -393,7 +393,24 @@ export const AdminPermissionSimulatorResponseSchema = z.object({
     })
     .nullable(),
 });
-export type AdminPermissionSimulatorResponse = z.infer<typeof AdminPermissionSimulatorResponseSchema>;
+export const AdminSecurityResponseSchema = z.object({
+  status: z.enum(["all", "warn", "info", "ok"]),
+  // false = no ?run=1: CURRENT renders only the "run" prompt and queries nothing.
+  ran: z.boolean(),
+  results: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      status: z.enum(["ok", "warn", "info"]),
+      count: z.number(),
+      samples: z.array(z.string()),
+      note: z.string().optional(),
+    }),
+  ),
+  error: z.literal("query_failed").nullable(),
+});
+export type AdminSecurityResponse = z.infer<typeof AdminSecurityResponseSchema>;
+export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
 export type AdminNotificationsResponse =z.infer<typeof AdminNotificationsResponseSchema>;
