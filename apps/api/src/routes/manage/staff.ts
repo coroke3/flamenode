@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { ManageStaffMember, ManageStaffResponse } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { parseJsonColumn } from "../personal/context.ts";
+import { resolveManageXIconUrl } from "./icon.ts";
 import { loadManageSnapshot, manageGate, resolveStaffPermissionKeys } from "./access.ts";
 
 // CURRENT: app/(manage)/manage/events/[id]/staff/page.tsx.
@@ -34,22 +35,6 @@ interface MemberRow {
   x_name: string | null;
   icon_url: string | null;
   approval_status: string | null;
-}
-
-/**
- * CURRENT resolveManageXIconUrl without the signing branch: external https URLs are returned unchanged,
- * everything else is null. Internal icons of approved X accounts are signed with AUTH_SECRET in CURRENT;
- * the API has no signing key yet (handoff in MIG-0624).
- */
-function resolveExternalIconUrl(iconUrl: string | null | undefined): string | null {
-  const value = iconUrl?.trim() ?? "";
-  if (!value) return null;
-  if (/[\x00-\x1F\x7F]/.test(value)) return null;
-  try {
-    return new URL(value).protocol === "https:" ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 export const manageStaffRoutes = new Hono<AppEnv>().get("/", async (c) => {
@@ -91,17 +76,23 @@ export const manageStaffRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const all = parseJsonColumn<MemberRow[]>(row.members, []);
   const membersTruncated = all.length > MAX_STAFF_MEMBERS;
   const rows = membersTruncated ? all.slice(0, MAX_STAFF_MEMBERS) : all;
-  const members: ManageStaffMember[] = rows.map((member) => ({
-    id: member.id,
-    x_user_id: member.x_user_id,
-    display_name: member.display_name,
-    permission_preset: member.permission_preset,
-    is_public: member.is_public,
-    public_role_label: member.public_role_label,
-    permission_keys: Array.from(resolveStaffPermissionKeys(member)),
-    x_name: member.x_name,
-    icon_url: resolveExternalIconUrl(member.icon_url),
-  }));
+  const members: ManageStaffMember[] = await Promise.all(
+    rows.map(async (member) => ({
+      id: member.id,
+      x_user_id: member.x_user_id,
+      display_name: member.display_name,
+      permission_preset: member.permission_preset,
+      is_public: member.is_public,
+      public_role_label: member.public_role_label,
+      permission_keys: Array.from(resolveStaffPermissionKeys(member)),
+      x_name: member.x_name,
+      icon_url: await resolveManageXIconUrl({
+        iconUrl: member.icon_url,
+        approvalStatus: member.approval_status,
+        authSecret: c.env.AUTH_SECRET,
+      }),
+    })),
+  );
   const body: ManageStaffResponse = {
     event: { id: row.id, title: row.title, accent_color: row.accent_color },
     isAdmin: snapshot.isAdmin,

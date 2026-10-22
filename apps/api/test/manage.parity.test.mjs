@@ -26,7 +26,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { resolveActiveXUserId } = await import("../../../src/lib/auth/resolveActiveXId.ts");
   const { getHeaderLinkedXUsersForAuthUser } = await import("../../../src/lib/auth/headerLinkedXUsers.ts");
   const { normalizeXId } = await import("../../../src/lib/utils/xid.ts");
-  const { resolveManageXIconUrl } = await import("../../../src/lib/media/manageXIcon.ts");
+  const { resolveManageXIconUrl, verifyManageXIconSignatureInput } = await import("../../../src/lib/media/manageXIcon.ts");
   const { parseEventPartsJson } = await import("../../../src/lib/video/parseEventIds.ts");
   const { PRESET_PERMISSIONS, resolveStaffPermissionKeys } = await import("../src/routes/manage/access.ts");
   const order = await import("../src/routes/manage/eventOrder.ts");
@@ -51,7 +51,8 @@ if (runUnderRootTsx(import.meta.url)) {
 
   async function call(path, token, options = {}) {
     const d1 = options.d1 ?? createD1(options.sqlite ?? sqlite);
-    const response = await app.request(path, { method: "GET", headers: token ? cookie(token) : {} }, { DB: d1 });
+    const env = { DB: d1, AUTH_SECRET: "secret" in options ? options.secret : "test-secret" };
+    const response = await app.request(path, { method: "GET", headers: token ? cookie(token) : {} }, env);
     const text = await response.text();
     return { status: response.status, headers: response.headers, body: text ? JSON.parse(text) : null, stats: d1.stats, bytes: Buffer.byteLength(text) };
   }
@@ -178,7 +179,7 @@ if (runUnderRootTsx(import.meta.url)) {
         is_public: row.is_public, public_role_label: row.public_role_label,
         permission_keys: Array.from(PR.resolveStaffPermissionKeys(row)),
         x_name: row.x_name,
-        icon_url: await resolveManageXIconUrl({ iconUrl: row.icon_url, approvalStatus: row.approval_status, authSecret: undefined }),
+        icon_url: await resolveManageXIconUrl({ iconUrl: row.icon_url, approvalStatus: row.approval_status, authSecret: "test-secret" }),
       })),
     );
     return {
@@ -366,7 +367,16 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(owner.canManageMembers, true);
     const icons = Object.fromEntries(owner.members.map((m) => [m.x_user_id, m.icon_url]));
     assert.equal(icons.owner_x, "https://x.test/o.png", "external https icons are unchanged");
-    assert.equal(icons.mgr_x, null, "internal icons need the signing secret (handoff)");
+    assert.match(icons.mgr_x, /^\/api\/media\/manage-x-icon\/xicons\/mgr\.png\?v=1&exp=\d+&sig=[\w-]+$/, "internal icons are signed");
+    const url = new URL(icons.mgr_x, "https://x.test");
+    assert.equal(
+      await verifyManageXIconSignatureInput({ key: "xicons/mgr.png", expiresAt: Number(url.searchParams.get("exp")), signature: url.searchParams.get("sig"), secret: "test-secret" }),
+      true,
+      "CURRENT verifies the API signature",
+    );
+    const noSecret = (await call("/api/manage/events/evA/staff", "tok-owner", { secret: undefined })).body;
+    assert.equal(noSecret.members.find((m) => m.x_user_id === "mgr_x").icon_url, null, "no AUTH_SECRET -> no unsigned internal URL (CURRENT)");
+    assert.equal(noSecret.members.find((m) => m.x_user_id === "owner_x").icon_url, "https://x.test/o.png");
   });
 
   // ---------------- slots ----------------

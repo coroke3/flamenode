@@ -57,7 +57,7 @@ export function seed(sqlite) {
   ins("session", { sessionToken: "tok-expired", userId: "u_owner", expires: Date.now() - 1000 });
   for (const [name, list] of Object.entries(xLinks)) {
     for (const [xId, status] of list) {
-      ins("x_users", { id: xId, x_name: `X ${xId}`, icon_url: xId === "owner_x" ? "https://x.test/o.png" : xId === "mgr_x" ? "xicons/mgr.png" : null, approval_status: status });
+      ins("x_users", { id: xId, x_name: `X ${xId}`, icon_url: xId === "owner_x" ? "https://x.test/o.png" : xId === "mgr_x" ? "/api/media/xicons/mgr.png" : null, approval_status: status });
       ins("x_user_account_links", { x_user_id: xId, auth_user_id: `u_${name}`, link_role: "owner", created_at: NOW, updated_at: NOW });
     }
   }
