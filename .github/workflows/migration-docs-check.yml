@@ -18,6 +18,18 @@ on:
       - "apps/**"
       - "packages/**"
       - "src/lib/**"
+      - "src/components/**"
+      - "src/styles/**"
+      - "public/**"
+      - "cloudflare/**"
+      - "middleware.ts"
+      - "next.config.mjs"
+      - "open-next.config.ts"
+      - "instrumentation.ts"
+      - "tsconfig.json"
+      - "wrangler.toml"
+      - "drizzle.config.ts"
+      - "tsconfig.base.json"
       - "app/**"
       - "workers/**"
       - "package.json"
@@ -61,6 +73,10 @@ jobs:
         run: node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
+      - name: ledger網羅検査（行の無いtracked source fileを落とす, MIG-0622）
+        run: |
+          node scripts/check-migration-ledger-completeness.mjs
+          node --test scripts/check-migration-ledger-completeness.test.mjs
       - name: Work-item進捗構造と所有重複の回帰テスト
         run: |
           node scripts/check-migration-work-items.mjs

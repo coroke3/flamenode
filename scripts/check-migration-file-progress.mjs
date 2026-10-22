@@ -100,8 +100,8 @@ export function collectFiles(root=ROOT){
    else if(item.isFile())files.push(path.relative(root,child).replaceAll(path.sep,"/"));
   }
  }
- for(const sub of ["app","src/lib","src/components","workers","apps","packages"])visit(path.join(root,sub));
- for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"]){
+ for(const sub of ["app","src/lib","src/components","src/styles","public","cloudflare","workers","apps","packages"])visit(path.join(root,sub));
+ for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json","middleware.ts","next.config.mjs","open-next.config.ts","instrumentation.ts","next-env.d.ts","tsconfig.json"]){
   if(fs.existsSync(path.join(root,base)))files.push(base);
  }
  return files;

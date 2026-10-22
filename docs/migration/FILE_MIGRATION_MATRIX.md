@@ -460,6 +460,37 @@
 | `apps/site/src/components/StaticScreen.ts` | HELPER | server-only render of a shared screen inside SiteAdapterProvider (no client directive, no JS) | MIG-0403 | SAME (new file) | RETAINED | PR#327 SHA=5b2bbfd04b88bd8f91c14a7223e2905ccf31d472 TEST=npm run test --workspace=@flamenode/site (apps/site/src/lib/representativePages.test.mjs) LOG=project-files/migration-review/pr327-site-test.log LOG=project-files/migration-review/pr327-browser.log |
 | `apps/site/src/layouts/PublicPage.astro` | TARGET_SKELETON | public document shell: CURRENT head tags + shared UI CSS (tokens/layout/components/screens) once; header/footer/fonts/icons are MIG-0501 | MIG-0403 | SAME (new file) | RETAINED | PR#327 SHA=5b2bbfd04b88bd8f91c14a7223e2905ccf31d472 TEST=npm run test --workspace=@flamenode/site (apps/site/src/lib/representativePages.test.mjs) LOG=project-files/migration-review/pr327-site-test.log LOG=project-files/migration-review/pr327-browser.log |
 | `apps/site/src/lib/representativePages.test.mjs` | TEST | MIG-0403 T01-T04 on built pages, head equality with CURRENT src/lib/seo.ts, CSS/no-JS, alt, hrefs | MIG-0403 | SAME (new file) | RETAINED | PR#327 SHA=5b2bbfd04b88bd8f91c14a7223e2905ccf31d472 TEST=npm run test --workspace=@flamenode/site (apps/site/src/lib/representativePages.test.mjs) LOG=project-files/migration-review/pr327-site-test.log |
+| `middleware.ts` | CONFIG | canonical host 308 + maintenance redirect (G01/G02); edge policy only, no page content | MIG-0619 | +apps/site/src/gateway/edgePolicy.ts (gateway/personal/ops/api) | NOT_STARTED | — |
+| `next.config.mjs` | CONFIG | rewrites to query twin routes (G03: MIG-0502/0504/0505), serverActions bodySizeLimit 8mb (G21: MIG-0605/0603), OpenNext build config | MIG-0904 | removed with OpenNext; behaviors re-homed by the linked MIGs first | NOT_STARTED | — |
+| `open-next.config.ts` | CONFIG | OpenNext adapter config (incremental cache R2, G24) | MIG-0904 | removed with OpenNext deploy path | NOT_STARTED | — |
+| `instrumentation.ts` | CONFIG | Next instrumentation hook | MIG-0904 | removed with OpenNext (observability re-homed by MIG-0606) | NOT_STARTED | — |
+| `next-env.d.ts` | CONFIG | Next generated type reference | MIG-0904 | removed with OpenNext | NOT_STARTED | — |
+| `tsconfig.json` | CONFIG | root Next tsconfig (paths, jsx) | MIG-0904 | removed with OpenNext; apps/* tsconfig extend tsconfig.base.json | NOT_STARTED | — |
+| `workers/tsconfig.json` | CONFIG | CURRENT Workers tsconfig | MIG-0901 | residual inventory; removed with the last CURRENT Worker | NOT_STARTED | — |
+| `cloudflare/ids.example.json` | CONFIG | example resource ids (D1/KV/R2) | MIG-0628 | +per-Worker binding injection for new Workers | NOT_STARTED | — |
+| `app/layout.tsx` | HELPER | root layout: metadata, manifest/icons, theme bootstrap, JSON-LD WebSite (G05/G06/G08) | MIG-0501 | +apps/site/src/layouts/PublicPage.astro (extend) | NOT_STARTED | — |
+| `app/(public)/layout.tsx` | HELPER | public layout: GoogleAnalytics tag, header/footer, PublicMetricsShell/PublicDegradedBanner (G07/G08) | MIG-0501 | +apps/site/src/layouts/PublicPage.astro (extend) | NOT_STARTED | — |
+| `app/(auth)/layout.tsx` | HELPER | auth route-group layout guard: redirects, noindex, CostGuardBanner (G12) | MIG-0703 | +apps/app route guard | NOT_STARTED | — |
+| `app/(auth-complete)/layout.tsx` | HELPER | /auth/complete layout (FN-AUTH-007 canonical host) | MIG-0802 | Auth.js integration (Phase 8) | NOT_STARTED | — |
+| `app/(manage)/layout.tsx` | HELPER | manage route-group layout guard: redirects, noindex, CostGuardBanner (G12) | MIG-0704 | +apps/ops route guard | NOT_STARTED | — |
+| `app/(admin)/layout.tsx` | HELPER | admin route-group layout guard: role redirect, noindex (G12) | MIG-0705 | +apps/ops route guard | NOT_STARTED | — |
+| `app/error.tsx` | HELPER | route error boundary (UX-GLOBAL-023) | MIG-0501 | static 503 page (G10) | NOT_STARTED | — |
+| `app/global-error.tsx` | HELPER | global error boundary (UX-GLOBAL-024) | MIG-0501 | static 503 page (G10) | NOT_STARTED | — |
+| `app/not-found.tsx` | HELPER | 404 surface (UX-GLOBAL-025) | MIG-0501 | static 404 page (G10) | NOT_STARTED | — |
+| `app/(auth)/error.tsx` | HELPER | auth-group error boundary (G10) | MIG-0701 | SPA error boundary | NOT_STARTED | — |
+| `app/(public)/rules/error.tsx` | HELPER | rules page error boundary (G10) | MIG-0501 | static error page | NOT_STARTED | — |
+| `app/fonts/FlameNodeSans.otf` | HELPER | self-hosted UI font (G08) | MIG-0501 | +apps/site/public fonts | NOT_STARTED | — |
+| `app/(public)/page.module.css` | HELPER | top page CSS module | MIG-0506 | +apps/site top page styles | NOT_STARTED | — |
+| `src/lib/seo.ts` | HELPER | buildPageMetadata (G05); ported to apps/site/src/lib/pageMetadata.ts in MIG-0403, CURRENT file stays | MIG-0501 | SAME (apps/site/src/lib/pageMetadata.ts is the port) | NOT_STARTED | — |
+| `src/lib/cloudflare.ts` | HELPER | Cloudflare context accessor (D1/KV/R2 bindings) for Next | MIG-0904 | removed with OpenNext; ports in packages/server-core (MIG-0612) | NOT_STARTED | — |
+| `src/lib/eventGroupRoutes.ts` | HELPER | event group route helpers | MIG-0503 | group routes (closest owner) | NOT_STARTED | — |
+| `src/lib/profileContact.ts` | HELPER | profile contact helper | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
+| `src/lib/r2Body.ts` | HELPER | R2 body reader for artifact consumers | MIG-0627 | R2 artifact consumers to build-time snapshots (closest owner) | NOT_STARTED | — |
+| `src/lib/socialLinks.ts` | HELPER | social link normalization | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
+| `public/_headers` | CONFIG | Cache-Control rules for static assets (G04) | MIG-0620 | +apps/site _headers | NOT_STARTED | — |
+| `public/favicon.ico` | HELPER | favicon (G05) | MIG-0501 | +apps/site/public/favicon.ico | NOT_STARTED | — |
+| `public/logo.png` | HELPER | logo image | MIG-0501 | +apps/site/public/logo.png | NOT_STARTED | — |
+| `public/manifest.webmanifest` | HELPER | web app manifest linked from root layout (G05) | MIG-0501 | +apps/site/public/manifest.webmanifest | NOT_STARTED | — |
 
 ## Future files requiring source/target registration
 
@@ -469,6 +500,86 @@
 | `apps/site/src/lib/publicDataLoader.ts` | MIG-0401 | IN_PROGRESS | static projection R2 public snapshot, privacy fence |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
+
+## Source families (MIG-0622 completeness)
+
+`scripts/check-migration-ledger-completeness.mjs` fails when a tracked non-test file under `app/`, `src/lib/`, `src/components/`, `src/styles/`, `public/`, `workers/`, `cloudflare/` or a listed root config has neither an exact ledger row above nor a family row here. A family row names a directory (`dir/**`) and its **first owner MIG** (the task that decides the disposition, not necessarily the one that extracts it). Exact rows win. When an owner MIG touches a file in a family it adds an exact row in the same PR (the file-progress checker already requires that for changed files). Owners marked `closest` were not decided by a Work Order; the MIG-0901 residual inventory may reassign them.
+
+Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fixtures (`*.fixture.*`), generated or vendored output (`node_modules`, `dist`, `.next`, `.wrangler`, `.astro`, `coverage`). `apps/**` and `packages/**` are owned by `check-migration-file-progress.mjs`; `migrations/**` is owned by the DB task line (MIG-0308); `scripts/**`, `docs/**` and CI files are tooling, not CURRENT product source.
+
+| Family | Kind | First owner MIG | Disposition (closest owner unless stated) | State |
+| --- | --- | --- | --- | --- |
+| `public/brand/**` | HELPER | MIG-0501 | brand images referenced by root layout/manifest (G05); copied to apps/site public | NOT_STARTED |
+| `src/styles/**` | HELPER | MIG-0201 | global CSS replaced by @flamenode/ui tokens/layout CSS | NOT_STARTED |
+| `app/(public)/[id]/**` | HELPER | MIG-0507 | video page CSS module (page.tsx has its own row) | NOT_STARTED |
+| `app/(public)/about/**` | HELPER | MIG-0501 | about page view and CSS | NOT_STARTED |
+| `app/(public)/event/**` | HELPER | MIG-0502 | event pages views/CSS (EventIndexView, ReleaseView, EventSlotsViewerPanel) | NOT_STARTED |
+| `app/(public)/list/**` | HELPER | MIG-0505 | list page view/CSS | NOT_STARTED |
+| `app/(public)/recommend/**` | HELPER | MIG-0505 | recommend page CSS | NOT_STARTED |
+| `app/(public)/rules/**` | HELPER | MIG-0501 | rules page assets | NOT_STARTED |
+| `app/(public)/trending/**` | HELPER | MIG-0505 | trending page CSS | NOT_STARTED |
+| `app/(public)/user/**` | HELPER | MIG-0504 | user pages views/CSS (UserIndexView, UserProfilePage) | NOT_STARTED |
+| `app/(auth)/dashboard/**` | HELPER | MIG-0701 | dashboard CSS | NOT_STARTED |
+| `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
+| `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
+| `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
+| `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
+| `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
+| `src/components/forms/**` | HELPER | MIG-0702 | form components to @flamenode/ui + apps/app | NOT_STARTED |
+| `src/components/layout/**` | HELPER | MIG-0203 | navigation/layout (shared UI; existing exact rows win) | NOT_STARTED |
+| `src/components/manage/**` | HELPER | MIG-0704 | manage components to apps/ops | NOT_STARTED |
+| `src/components/media/**` | HELPER | MIG-0603 | media components (video APIs) | NOT_STARTED |
+| `src/components/notifications/**` | HELPER | MIG-0701 | notification summary UI | NOT_STARTED |
+| `src/components/seo/**` | HELPER | MIG-0501 | JsonLd (G06) | NOT_STARTED |
+| `src/components/settings/**` | HELPER | MIG-0701 | settings screens | NOT_STARTED |
+| `src/components/terms/**` | HELPER | MIG-0703 | terms accept button | NOT_STARTED |
+| `src/components/ui/**` | HELPER | MIG-0202 | primitives in @flamenode/ui | NOT_STARTED |
+| `src/components/user/**` | HELPER | MIG-0504 | user components | NOT_STARTED |
+| `src/components/video/**` | HELPER | MIG-0507 | video components | NOT_STARTED |
+| `src/lib/account/**` | HELPER | MIG-0701 | account menu/summary (dashboard) | NOT_STARTED |
+| `src/lib/admin/**` | HELPER | MIG-0705 | admin loaders/helpers | NOT_STARTED |
+| `src/lib/analytics/**` | HELPER | MIG-0507 | videoViewTrackerCore, island (G07) | NOT_STARTED |
+| `src/lib/api/**` | HELPER | MIG-0601 | CURRENT API route helpers | NOT_STARTED |
+| `src/lib/audit/**` | HELPER | MIG-0613 | audit mutation core | NOT_STARTED |
+| `src/lib/auth/**` | HELPER | MIG-0802 | Auth.js integration (existing exact rows win) | NOT_STARTED |
+| `src/lib/client/**` | HELPER | MIG-0701 | browser-side helpers for SPA | NOT_STARTED |
+| `src/lib/constants/**` | HELPER | MIG-0306 | domain constants | NOT_STARTED |
+| `src/lib/db/**` | HELPER | MIG-0308 | db access helpers (existing exact rows win) | NOT_STARTED |
+| `src/lib/entry/**` | HELPER | MIG-0703 | entry step states | NOT_STARTED |
+| `src/lib/event/**` | HELPER | MIG-0305 | event domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/forms/**` | HELPER | MIG-0702 | form helpers | NOT_STARTED |
+| `src/lib/health/**` | HELPER | MIG-0601 | health checks (RH-017/018 done; deep health follow-up) | NOT_STARTED |
+| `src/lib/import/**` | HELPER | MIG-0705 | import tools (admin) | NOT_STARTED |
+| `src/lib/interactions/**` | HELPER | MIG-0602 | video interactions mutations | NOT_STARTED |
+| `src/lib/manage/**` | HELPER | MIG-0704 | manage loaders | NOT_STARTED |
+| `src/lib/media/**` | HELPER | MIG-0603 | media helpers | NOT_STARTED |
+| `src/lib/moderation/**` | HELPER | MIG-0605 | moderation cases | NOT_STARTED |
+| `src/lib/notifications/**` | HELPER | MIG-0614 | notification batch core (existing exact rows win) | NOT_STARTED |
+| `src/lib/observability/**` | HELPER | MIG-0501 | publicRequestMetrics/flowTrace (G08) | NOT_STARTED |
+| `src/lib/operationMode/**` | HELPER | MIG-0619 | maintenance mode (existing exact rows win) | NOT_STARTED |
+| `src/lib/publicData/**` | HELPER | MIG-0509 | public data loaders become build-time snapshots (existing exact rows win) | NOT_STARTED |
+| `src/lib/queues/**` | HELPER | MIG-0614 | static rebuild enqueue core | NOT_STARTED |
+| `src/lib/slots/**` | HELPER | MIG-0305 | slot domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/staticRebuild/**` | HELPER | MIG-0907 | removed with the static rebuild queue | NOT_STARTED |
+| `src/lib/terms/**` | HELPER | MIG-0306 | terms domain | NOT_STARTED |
+| `src/lib/testing/**` | HELPER | MIG-0901 | test runner helper (residual inventory) | NOT_STARTED |
+| `src/lib/theme/**` | HELPER | MIG-0501 | theme bootstrap (G08) | NOT_STARTED |
+| `src/lib/ui/**` | HELPER | MIG-0202 | floating menu helper to @flamenode/ui | NOT_STARTED |
+| `src/lib/utils/**` | HELPER | MIG-0901 | shared utils (residual inventory; existing exact rows win) | NOT_STARTED |
+| `src/lib/video/**` | HELPER | MIG-0304 | video domain (existing exact rows win) | NOT_STARTED |
+| `src/lib/xid/**` | HELPER | MIG-0618 | xid merge core (existing exact rows win) | NOT_STARTED |
+| `src/lib/youtube/**` | HELPER | MIG-0610 | youtube sync helpers (background jobs split) | NOT_STARTED |
+| `workers/cleanup/**` | WORKER_ENTRY | MIG-0901 | retention/incremental cache (G24: MIG-0904 removes the cache) | NOT_STARTED |
+| `workers/content-jobs/**` | WORKER_ENTRY | MIG-0901 | cron + /rebuild (G17/G18: MIG-0609/0610/0907) | NOT_STARTED |
+| `workers/fast-jobs/**` | WORKER_ENTRY | MIG-0901 | notification queue consumer | NOT_STARTED |
+| `workers/ga-analytics/**` | WORKER_ENTRY | MIG-0627 | GA4 sync and ranking; R2 recent.json consumers (G14) | NOT_STARTED |
+| `workers/json-generator/**` | WORKER_ENTRY | MIG-0907 | removed after build-time snapshots (MIG-0627 first) | NOT_STARTED |
+| `workers/notification-dispatcher/**` | WORKER_ENTRY | MIG-0610 | dispatch and reminders split under 8ms | NOT_STARTED |
+| `workers/score-recalc/**` | WORKER_ENTRY | MIG-0901 | score recalculation worker | NOT_STARTED |
+| `workers/shared/**` | WORKER_ENTRY | MIG-0610 | shared worker runtime (lease, queue, d1 budget) | NOT_STARTED |
+| `workers/sync-jobs/**` | WORKER_ENTRY | MIG-0901 | sync jobs | NOT_STARTED |
+| `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
+| `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 

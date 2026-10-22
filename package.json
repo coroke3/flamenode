@@ -64,6 +64,7 @@
     "check:db-history": "node scripts/check-db-change-history.mjs",
     "check:project-docs": "node scripts/check-project-docs.mjs",
     "check:migration-work-items": "node scripts/check-migration-work-items.mjs",
+    "check:migration-ledger": "node scripts/check-migration-ledger-completeness.mjs",
     "migration:status": "node scripts/check-migration-work-items.mjs --status",
     "migration:next": "node scripts/print-migration-task-context.mjs --next",
     "check:ui-acceptance": "node scripts/check-ui-acceptance.mjs",
