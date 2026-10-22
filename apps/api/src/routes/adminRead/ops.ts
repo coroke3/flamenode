@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type {
   AdminCostGuardResponse,
   AdminNotificationsResponse,
+  AdminTopResponse,
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { resolveOperationMode } from "@flamenode/domain/admin";
@@ -200,6 +201,82 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/top (admin/page.tsx; fetchAdminTopSnapshot in src/lib/admin/adminPendingCounts.ts) ----
+// CURRENT runs 7 reads; here ONE statement of scalar subqueries (session + 1). A failure is swallowed like
+// CURRENT's try/catch: empty counts, mode normal (200).
+const EMPTY_TOP_COUNTS: AdminTopResponse["counts"] = {
+  pendingVideos: 0,
+  reservedOpenSlots: 0,
+  xLinkRequests: 0,
+  xMergeRequests: 0,
+  xMergeReverts: 0,
+  notificationFailed: 0,
+  notificationStuck: 0,
+  youtubeFailed: 0,
+  moderationOpen: 0,
+  moderationOverdue: 0,
+};
+
+adminOpsRoutes.get("/top", async (c) => {
+  const now = Math.floor(Date.now() / 1000);
+  const processingCutoff = now - 15 * 60;
+  let body: AdminTopResponse = { counts: { ...EMPTY_TOP_COUNTS }, mode: "normal", isMaintenance: 0 };
+  try {
+    const row = await c.env.DB.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM videos WHERE visibility_status = 'pending') AS pending_videos,
+         (SELECT COUNT(*) FROM slots INNER JOIN events ON events.id = slots.event_id
+           WHERE slots.status = 'reserved' AND events.visibility_status = 'public'
+             AND (events.entry_start_time IS NOT NULL OR events.entry_end_time IS NOT NULL)
+             AND (events.entry_start_time IS NULL OR events.entry_start_time <= ?1)
+             AND (events.entry_end_time IS NULL OR events.entry_end_time > ?1)
+             AND (events.start_time IS NULL OR events.end_time IS NULL OR events.end_time > ?1)) AS reserved_open_slots,
+         (SELECT SUM(CASE WHEN request_type IN ('new_link','existing_link','alias') THEN 1 ELSE 0 END)
+           FROM x_identity_requests WHERE status = 'pending'
+             AND request_type IN ('new_link','existing_link','alias','merge','revert_merge')) AS x_link_requests,
+         (SELECT SUM(CASE WHEN request_type = 'merge' THEN 1 ELSE 0 END)
+           FROM x_identity_requests WHERE status = 'pending'
+             AND request_type IN ('new_link','existing_link','alias','merge','revert_merge')) AS x_merge_requests,
+         (SELECT SUM(CASE WHEN request_type = 'revert_merge' THEN 1 ELSE 0 END)
+           FROM x_identity_requests WHERE status = 'pending'
+             AND request_type IN ('new_link','existing_link','alias','merge','revert_merge')) AS x_merge_reverts,
+         (SELECT SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)
+           FROM notification_outbox WHERE status IN ('failed','processing')) AS notification_failed,
+         (SELECT SUM(CASE WHEN status = 'processing' AND processing_started_at < ?2 THEN 1 ELSE 0 END)
+           FROM notification_outbox WHERE status IN ('failed','processing')) AS notification_stuck,
+         (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS youtube_failed,
+         (SELECT SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)
+           FROM video_moderation_cases WHERE status = 'open') AS moderation_open,
+         (SELECT SUM(CASE WHEN status = 'open' AND due_at < ?1 THEN 1 ELSE 0 END)
+           FROM video_moderation_cases WHERE status = 'open') AS moderation_overdue,
+         (SELECT operation_mode FROM system_settings WHERE id = 'default' LIMIT 1) AS operation_mode`,
+    )
+      .bind(now, processingCutoff)
+      .first<Record<string, number | string | null>>();
+    const n = (key: string) => Number(row?.[key] ?? 0);
+    const mode = resolveOperationMode({ operation_mode: (row?.operation_mode as string | null) ?? null });
+    body = {
+      counts: {
+        pendingVideos: n("pending_videos"),
+        reservedOpenSlots: n("reserved_open_slots"),
+        xLinkRequests: n("x_link_requests"),
+        xMergeRequests: n("x_merge_requests"),
+        xMergeReverts: n("x_merge_reverts"),
+        notificationFailed: n("notification_failed"),
+        notificationStuck: n("notification_stuck"),
+        youtubeFailed: n("youtube_failed"),
+        moderationOpen: n("moderation_open"),
+        moderationOverdue: n("moderation_overdue"),
+      },
+      mode,
+      isMaintenance: mode === "maintenance" ? 1 : 0,
+    };
+  } catch {
+    console.error("[adminRead] top snapshot failed");
+  }
   return c.json(body);
 });
 

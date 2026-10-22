@@ -449,6 +449,8 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
+  const { fetchAdminTopSnapshot } = await import("../../../src/lib/admin/adminPendingCounts.ts");
+
   // Concatenates /audit/:id/payload/:field chunks; null when the column is SQL NULL (404).
   async function readPayload(id, field) {
     let offset = 0;
@@ -469,7 +471,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -745,6 +747,39 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.body.error, "query_failed");
     assert.deepEqual(r.body.rows, []);
     assert.doesNotMatch(r.text, /secret-internal/);
+  });
+
+  test("T02 admin top counts equal CURRENT fetchAdminTopSnapshot (one statement); failure -> empty counts (200)", async () => {
+    ins("events", { id: "ev-open", title: "Open", visibility_status: "public", entry_start_time: nowS - 100, entry_end_time: nowS + 1000 });
+    ins("events", { id: "ev-closed", title: "Closed", visibility_status: "public", entry_start_time: nowS - 100, entry_end_time: nowS - 10 });
+    ins("slots", { id: "so1", event_id: "ev-open", status: "reserved", sort_order: 0 });
+    ins("slots", { id: "so2", event_id: "ev-open", status: "reserved", sort_order: 1 });
+    ins("slots", { id: "so3", event_id: "ev-closed", status: "reserved", sort_order: 0 });
+    ins("video_moderation_cases", { id: "mc1", video_id: "va1", case_type: "void", status: "open", due_at: nowS - 5, created_at: T0 });
+    ins("video_moderation_cases", { id: "mc2", video_id: "va2", case_type: "void", status: "open", due_at: nowS + 500, created_at: T0 });
+    ins("video_moderation_cases", { id: "mc3", video_id: "va3", case_type: "void", status: "open", due_at: null, created_at: T0 });
+    sqlite.exec("UPDATE notification_outbox SET processing_started_at = " + (nowS - 3600) + " WHERE id = 'n2'");
+    sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
+    ins("system_settings", { id: "default", operation_mode: "maintenance" });
+    const r = await get("/ops/top");
+    const ref = await fetchAdminTopSnapshot(refDb);
+    assert.deepEqual(r.body, canon(ref));
+    assert.equal(r.stats.statements, 2);
+    assert.ok(r.body.counts.reservedOpenSlots === 2 && r.body.counts.moderationOpen === 3 && r.body.counts.moderationOverdue === 1);
+    assert.ok(r.body.counts.notificationStuck >= 1 && r.body.counts.xLinkRequests >= 1);
+    assert.equal(r.body.isMaintenance, 1);
+    const d1 = createD1(sqlite);
+    const prepare = d1.prepare;
+    d1.prepare = (text) => {
+      if (/pending_videos/.test(text)) throw new Error("secret-internal");
+      return prepare(text);
+    };
+    const failed = await call("/api/admin-read/ops/top", ADMIN, { d1 });
+    assert.equal(failed.status, 200);
+    assert.equal(failed.body.counts.pendingVideos, 0);
+    assert.equal(failed.body.mode, "normal");
+    sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
+    ins("system_settings", { id: "default" });
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

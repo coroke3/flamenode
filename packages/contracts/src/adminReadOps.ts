@@ -302,6 +302,23 @@ export const AdminCostGuardResponseSchema = z.object({
   ),
 });
 
-export type AdminCostGuardResponse = z.infer<typeof AdminCostGuardResponseSchema>;
+export const AdminTopResponseSchema = z.object({
+  counts: z.object({
+    pendingVideos: z.number(),
+    reservedOpenSlots: z.number(),
+    xLinkRequests: z.number(),
+    xMergeRequests: z.number(),
+    xMergeReverts: z.number(),
+    notificationFailed: z.number(),
+    notificationStuck: z.number(),
+    youtubeFailed: z.number(),
+    moderationOpen: z.number(),
+    moderationOverdue: z.number(),
+  }),
+  mode: z.string(),
+  isMaintenance: z.number(),
+});
+export type AdminTopResponse = z.infer<typeof AdminTopResponseSchema>;
+export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
 export type AdminNotificationsResponse =z.infer<typeof AdminNotificationsResponseSchema>;
 export type AdminYoutubeSyncResponse = z.infer<typeof AdminYoutubeSyncResponseSchema>;
