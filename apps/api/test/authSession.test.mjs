@@ -7,6 +7,8 @@ import {
   resolveSessionUser,
   sessionMiddleware,
   requireAuth,
+  MAX_SESSION_COOKIE_CHUNKS,
+  MAX_SESSION_TOKEN_LENGTH,
 } from "../src/auth/session.ts";
 import {
   USERS,
@@ -137,6 +139,48 @@ test("Cookie extraction and parsing", async (t) => {
     assert.equal(extractSessionToken(`${name}.0=abc`, { secure: true }), "abc");
     assert.equal(extractSessionToken(`${name}=abc; ${name}x=zzz`, { secure: true }), "abczzz");
     assert.equal(extractSessionToken(`${name}=; theme=dark`, { secure: true }), null);
+  });
+
+  await t.test("a single matching cookie is returned as is, whatever its suffix", () => {
+    const name = "__Secure-authjs.session-token";
+    assert.equal(extractSessionToken(`theme=dark; ${name}.7=abc; visitor=anon`, { secure: true }), "abc");
+    assert.equal(extractSessionToken(`${name}=; ${name}.x=abc`, { secure: true }), "abc");
+  });
+
+  await t.test("chunk count cap: cap-1 and cap chunks join, cap+1 fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    // Header lists chunks in reverse index order; chunk k carries the digit k % 10.
+    const header = (count) =>
+      Array.from({ length: count }, (_, i) => count - 1 - i)
+        .map((k) => `${name}.${k}=${k % 10}`)
+        .join("; ");
+    const joined = (count) => Array.from({ length: count }, (_, k) => k % 10).join("");
+    for (const count of [MAX_SESSION_COOKIE_CHUNKS - 1, MAX_SESSION_COOKIE_CHUNKS]) {
+      assert.equal(extractSessionToken(header(count), { secure: true }), joined(count), String(count));
+    }
+    assert.equal(extractSessionToken(header(MAX_SESSION_COOKIE_CHUNKS + 1), { secure: true }), null);
+    // Empty chunks are not read by Auth.js and do not count.
+    const withEmpty = `${header(MAX_SESSION_COOKIE_CHUNKS)}; ${name}.999=`;
+    assert.equal(extractSessionToken(withEmpty, { secure: true }), joined(MAX_SESSION_COOKIE_CHUNKS));
+  });
+
+  await t.test("joined token length cap: cap chars are read, cap+1 fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    const atCap = "a".repeat(MAX_SESSION_TOKEN_LENGTH);
+    assert.equal(extractSessionToken(`${name}=${atCap}`, { secure: true }), atCap);
+    assert.equal(extractSessionToken(`${name}=${atCap}b`, { secure: true }), null);
+    const half = "a".repeat(MAX_SESSION_TOKEN_LENGTH / 2);
+    assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}`, { secure: true }), half + half);
+    assert.equal(extractSessionToken(`${name}.0=${half}; ${name}.1=${half}b`, { secure: true }), null);
+  });
+
+  await t.test("a 32KB header of ~900 shuffled chunks fails closed", () => {
+    const name = "__Secure-authjs.session-token";
+    const count = 900;
+    // 7919 is coprime with 900, so this visits every index once, out of order.
+    const header = Array.from({ length: count }, (_, i) => `${name}.${(i * 7919) % count}=xx`).join("; ");
+    assert.ok(header.length >= 32 * 1024, String(header.length));
+    assert.equal(extractSessionToken(header, { secure: true }), null);
   });
 
   await t.test("prototype keys are ordinary cookie names", () => {

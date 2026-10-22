@@ -45,6 +45,20 @@ export interface D1DatabaseLike {
 export const SECURE_SESSION_COOKIE_NAME = "__Secure-authjs.session-token";
 export const INSECURE_SESSION_COOKIE_NAME = "authjs.session-token";
 
+/**
+ * Fail-closed bounds on the attacker-controlled session cookie chunks, so the
+ * chunk sort only ever sees bounded input (ZERO_1102.md §4 rule 8).
+ *
+ * They cannot change which user resolves: Auth.js database sessions store
+ * `crypto.randomUUID()` (36 chars; @auth/core lib/init.js generateSessionToken,
+ * not overridden in CURRENT src/lib/auth) as session.sessionToken, and a value
+ * that short is never chunked. Every counted chunk is non-empty, so more than
+ * 64 chunks, or more than 4096 joined chars (one browser cookie's size limit),
+ * is far longer than any stored token and matches no row in Auth.js either.
+ */
+export const MAX_SESSION_COOKIE_CHUNKS = 64;
+export const MAX_SESSION_TOKEN_LENGTH = 4096;
+
 export function sessionCookieName(secure: boolean): string {
   return secure ? SECURE_SESSION_COOKIE_NAME : INSECURE_SESSION_COOKIE_NAME;
 }
@@ -110,6 +124,7 @@ export function parseCookieHeader(header?: string | null): Record<string, string
  * Extracts the sessionToken Auth.js would read for a request of this scheme:
  * like @auth/core SessionStore, joins every non-empty cookie whose name starts
  * with the session cookie name, ordered by the numeric suffix after the last `.`.
+ * Returns null above MAX_SESSION_COOKIE_CHUNKS / MAX_SESSION_TOKEN_LENGTH.
  */
 export function extractSessionToken(
   cookieHeader: string | null | undefined,
@@ -118,16 +133,25 @@ export function extractSessionToken(
   if (!cookieHeader) return null;
   const base = sessionCookieName(options.secure);
   const cookies = parseCookieHeader(cookieHeader);
-  const chunks: Record<string, string> = Object.create(null);
+  const chunks: { index: number; value: string }[] = [];
+  let length = 0;
   for (const name of Object.keys(cookies)) {
-    if (name.startsWith(base) && cookies[name]) chunks[name] = cookies[name];
+    const value = cookies[name];
+    if (!name.startsWith(base) || !value) continue;
+    length += value.length;
+    if (chunks.length === MAX_SESSION_COOKIE_CHUNKS || length > MAX_SESSION_TOKEN_LENGTH) {
+      return null;
+    }
+    // Same index as the SessionStore comparator, computed once per chunk.
+    chunks.push({ index: parseInt(name.split(".").pop() || "0"), value });
   }
-  // Same comparator as SessionStore (NaN suffixes compare as equal).
-  const token = Object.keys(chunks)
-    .sort((a, b) => parseInt(a.split(".").pop() || "0") - parseInt(b.split(".").pop() || "0"))
-    .map((name) => chunks[name])
+  if (chunks.length === 0) return null;
+  if (chunks.length === 1) return chunks[0].value;
+  // NaN differences compare as equal, as in SessionStore; the sort is stable.
+  return chunks
+    .sort((a, b) => a.index - b.index)
+    .map((chunk) => chunk.value)
     .join("");
-  return token ? token : null;
 }
 
 export interface ResolveSessionOptions {
