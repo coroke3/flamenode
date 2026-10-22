@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "./env.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { adminReadRoutes } from "./routes/adminRead/index.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
 import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
@@ -13,3 +14,6 @@ app.route("/api/public/about-stats", publicAboutStatsRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 // MIG-0611: authenticated read-only Personal screens API (no CURRENT /api/* equivalent).
 app.route("/api/personal", personalRoutes);
+// MIG-0626: authenticated admin-only read-only Admin screens API (no CURRENT /api/* equivalent).
+// Separate from the /api/admin mutation router (MIG-0602): that one has no default read guard.
+app.route("/api/admin-read", adminReadRoutes);
