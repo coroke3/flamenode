@@ -57,6 +57,21 @@ function textResponse(status: number, body: string, extra: Record<string, string
 const unavailable = () => textResponse(503, "Service Unavailable");
 const notFound = () => textResponse(404, "Not Found");
 
+/**
+ * Redirect Location: the target plus the incoming query. A target that has its own query
+ * or fragment is merged as CURRENT Next merges redirect queries (prepare-destination.js:
+ * `{ ...incoming, ...destination }`), so a key the target sets wins over the request's.
+ */
+function redirectLocation(targetPath: string, search: string): string {
+  if (!search || !/[?#]/.test(targetPath)) return targetPath + search;
+  const target = new URL(targetPath, "https://gateway.invalid");
+  const own = new Set(target.searchParams.keys());
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (!own.has(key)) target.searchParams.append(key, value);
+  }
+  return target.pathname + target.search + target.hash;
+}
+
 // Parsed shards are small (~20 KB at 52k routes); keep a bounded number per isolate.
 // A shard belongs to one Static Assets version, so it cannot go stale within an isolate.
 const SHARD_CACHE_LIMIT = 64;
@@ -199,7 +214,7 @@ export default {
           status: decision.status,
           headers: {
             // Keep the query, as CURRENT Next redirects do (e.g. `?tab=works`).
-            Location: decision.targetPath + url.search,
+            Location: redirectLocation(decision.targetPath, url.search),
             // The target may be unpublished at any time; never let a cache keep it.
             "Cache-Control": NO_STORE,
           },
