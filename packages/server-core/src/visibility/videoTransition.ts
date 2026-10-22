@@ -15,7 +15,7 @@ import type { QueueWakeSource } from "../queues/wakeBudget.ts";
 import type { StaticRebuildQueueBatch } from "../staticRebuild/enqueue.ts";
 import { buildAfterVideoStatusChangeQueueBatch } from "../staticRebuild/hooks.ts";
 import { getPublicVisibilityFence } from "./fenceStore.ts";
-import type { VisibilityManifestHost } from "./manifestHost.ts";
+import type { VisibilityFenceHost } from "./manifestHost.ts";
 import {
   isEntityBlockedInManifest,
   releaseBlockedEntityInManifest,
@@ -42,8 +42,7 @@ export type VideoPublicCacheKeyHost = {
 };
 
 /** Everything the video transition needs from src. A function takes the part it uses. */
-export type VideoVisibilityTransitionHost = {
-  manifest: VisibilityManifestHost;
+export type VideoVisibilityTransitionHost = VisibilityFenceHost & {
   rethrowFrameworkControl: RethrowFrameworkControl;
   publicCacheKeys: VideoPublicCacheKeyHost;
   /** Payload builders read NEXT_PUBLIC_SITE_URL, so the host binds them. */

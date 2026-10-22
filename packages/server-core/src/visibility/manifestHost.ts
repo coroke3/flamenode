@@ -20,3 +20,8 @@ export type VisibilityManifestHost = {
     },
   ): Promise<void>;
 };
+
+/** What the fence lifecycle needs from its host: the manifest only. */
+export type VisibilityFenceHost = {
+  manifest: VisibilityManifestHost;
+};

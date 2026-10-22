@@ -50,6 +50,9 @@
     "./visibility/countablePublicVideoSql": "./src/visibility/countablePublicVideoSql.ts",
     "./visibility/manifestHost": "./src/visibility/manifestHost.ts",
     "./visibility/videoTransition": "./src/visibility/videoTransition.ts",
+    "./visibility/compensationLog": "./src/visibility/compensationLog.ts",
+    "./visibility/fenceTransition": "./src/visibility/fenceTransition.ts",
+    "./visibility/eventTransition": "./src/visibility/eventTransition.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts"
   },
   "scripts": {

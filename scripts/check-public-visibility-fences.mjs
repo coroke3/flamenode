@@ -58,7 +58,7 @@ assert.match(manifestR2, /MANIFEST_PUT_MAX_RETRIES = 3/);
 assert.match(manifestR2, /cacheControl: "no-store"/);
 
 const transition = fs.readFileSync(
-  path.join(root, "src/lib/video/videoVisibilityTransition.ts"),
+  path.join(root, "packages/server-core/src/visibility/videoTransition.ts"),
   "utf8",
 );
 assert.match(transition, /preCommitVideoVisibilityDepublicization/);
