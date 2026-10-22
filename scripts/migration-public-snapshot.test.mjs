@@ -102,3 +102,23 @@ test("MIG-0403 U01: long text is clamped and an oversized title is rejected",asy
  assert.equal(snapshot.introComment.length,5000);assert.equal(snapshot.creatorName.length,100);
  await assert.rejects(()=>loadAs({kind:"user",id:"over_user",title:"A".repeat(301)}),e=>e instanceof SnapshotBuildError&&e.code==="INVALID_PAYLOAD");
 });
+test("F-06: CURRENT ids starting with `_` or `-` are accepted and creatorXUserId is kept",async()=>{
+ assert.deepEqual(await loadAs({kind:"user",id:"_foo",title:"Foo"}),{kind:"user",id:"_foo",title:"Foo"});
+ assert.deepEqual(await loadAs({kind:"user",id:"-foo",title:"Foo"}),{kind:"user",id:"-foo",title:"Foo"});
+ assert.deepEqual(await loadAs({kind:"event",id:"-ev_01",title:"Ev"}),{kind:"event",id:"-ev_01",title:"Ev"});
+ assert.deepEqual(await loadAs({kind:"video",id:"_v1",title:"V",creatorXUserId:"_foo",creatorHasPublicProfile:true}),
+  {kind:"video",id:"_v1",title:"V",creatorXUserId:"_foo",creatorHasPublicProfile:true});
+ assert.equal((await loadAs({kind:"video",id:"v1",title:"V",creatorXUserId:"Foo_Bar"})).creatorXUserId,"Foo_Bar");
+});
+test("F-06: unsafe or non-CURRENT ids are still rejected",async()=>{
+ for(const id of ["","../private","a/b","a\\b","a.b",".","-".repeat(129),"a b"]){
+  await assert.rejects(()=>loadPublicBuildSnapshot(source(pack({...data,id})),key,options()),
+   e=>e instanceof SnapshotBuildError&&e.code==="INVALID_PAYLOAD",id);
+ }
+ for(const creatorXUserId of ["-foo","a".repeat(64)]){
+  assert.equal((await loadAs({kind:"video",id:"v1",title:"V",creatorXUserId})).creatorXUserId,creatorXUserId,creatorXUserId);
+ }
+ for(const creatorXUserId of ["a".repeat(129),"../admin","a/b","a.b",""]){
+  assert.equal((await loadAs({kind:"video",id:"v1",title:"V",creatorXUserId})).creatorXUserId,undefined,creatorXUserId);
+ }
+});
