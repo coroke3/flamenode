@@ -40,6 +40,33 @@ export type WriteGuardOutcome =
   | { ok: true; user: SessionUser }
   | { ok: false; status: 401 | 403 | 503; reason: WriteGuardDenyReason };
 
+/**
+ * Same Japanese messages as CURRENT src/lib/auth/writeGuard.ts MESSAGES (deny()).
+ * Origin reasons have no CURRENT message (Next enforces origin for Server
+ * Actions; requireSameOriginWrite returns only an error code), so they carry none.
+ */
+export const WRITE_GUARD_MESSAGES: Readonly<Record<string, string>> = {
+  unauthenticated: "ログインが必要です。",
+  db_unavailable: "DB に接続できません。",
+  banned: "現在、このアカウントは利用停止中です。",
+  tos_required: "利用規約への同意が必要です。",
+  tos_reaccept_required: "利用規約の最新版に再同意してください。",
+  maintenance_mode:
+    "現在、書き込みを一時停止しています (コストガード)。しばらく時間をおいてからお試しください。",
+  cost_guard_blocked: "現在、この機能の書き込みは一時的に無効化されています。",
+  forbidden: "この操作を実行する権限がありません。",
+};
+
+/** JSON deny body: {ok:false, reason, message?} (message as CURRENT deny()). */
+export function writeGuardDenyBody(reason: string): string {
+  const message = WRITE_GUARD_MESSAGES[reason];
+  return JSON.stringify(
+    message === undefined
+      ? { ok: false, reason }
+      : { ok: false, reason, message },
+  );
+}
+
 export type OriginChecker = (originHeader: string | null) => boolean;
 
 /**
@@ -73,7 +100,8 @@ export async function evaluateAdminWriteGuard(options: {
     return { ok: false, status: 503, reason: "db_unavailable" };
   }
   if (!tos) {
-    return { ok: false, status: 503, reason: "db_unavailable" };
+    // CURRENT getCurrentUser: a session whose user row is gone is unauthenticated.
+    return { ok: false, status: 401, reason: "unauthenticated" };
   }
   const identityDeny = evaluateWriteIdentity(
     {
@@ -230,7 +258,11 @@ export type WriteGuardMiddlewareOptions = {
    * (CURRENT: 503 origin_verification_unavailable).
    */
   loadSiteUrl: () => string | null;
-  /** CURRENT: process.env.NODE_ENV !== "production" || env.FLAMENODE_LOCAL_PREVIEW === "1" */
+  /**
+   * Hono boundary: true only when env.FLAMENODE_LOCAL_PREVIEW === "1".
+   * Never derived from NODE_ENV (CURRENT also allows NODE_ENV !== "production";
+   * the Hono boundary is intentionally stricter).
+   */
   allowLocalPreview: () => boolean;
 };
 
@@ -271,10 +303,7 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
     });
     if (!outcome.ok) {
       c.header("Content-Type", "application/json");
-      return c.body(
-        JSON.stringify({ ok: false, reason: outcome.reason }),
-        outcome.status,
-      );
+      return c.body(writeGuardDenyBody(outcome.reason), outcome.status);
     }
     await next();
   };

@@ -71,9 +71,9 @@ test("guard: TOS read error -> 503 db_unavailable (fail-closed)", async () => {
   assert.deepEqual(outcome, { ok: false, status: 503, reason: "db_unavailable" });
 });
 
-test("guard: missing user row -> 503 db_unavailable (fail-closed)", async () => {
+test("guard: missing user row -> 401 unauthenticated (CURRENT getCurrentUser null)", async () => {
   const outcome = await guard({ loadTosStateReturnsNull: true });
-  assert.deepEqual(outcome, { ok: false, status: 503, reason: "db_unavailable" });
+  assert.deepEqual(outcome, { ok: false, status: 401, reason: "unauthenticated" });
 });
 
 // --- identity: same cases as src/lib/auth/writeGuardCore.test.mjs ---
@@ -178,7 +178,7 @@ test("middleware: unauthenticated -> 401 (T02-auth)", async () => {
     headers: { Origin: SITE_URL },
   }, env);
   assert.equal(res.status, 401);
-  assert.deepEqual(await res.json(), { ok: false, reason: "unauthenticated" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "unauthenticated", message: "ログインが必要です。" });
 });
 
 test("middleware: no D1 binding -> 503 db_unavailable", async () => {
@@ -188,7 +188,7 @@ test("middleware: no D1 binding -> 503 db_unavailable", async () => {
     headers: { Origin: SITE_URL },
   }, {});
   assert.equal(res.status, 503);
-  assert.deepEqual(await res.json(), { ok: false, reason: "db_unavailable" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "db_unavailable", message: "DB に接続できません。" });
 });
 
 test("middleware: non-admin -> 403 forbidden (T02)", async () => {
@@ -198,7 +198,7 @@ test("middleware: non-admin -> 403 forbidden (T02)", async () => {
     headers: { Origin: SITE_URL },
   }, env);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "forbidden" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "forbidden", message: "この操作を実行する権限がありません。" });
 });
 
 test("middleware: banned -> 403 banned (T02)", async () => {
@@ -208,7 +208,7 @@ test("middleware: banned -> 403 banned (T02)", async () => {
     headers: { Origin: SITE_URL },
   }, env);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "banned" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "banned", message: "現在、このアカウントは利用停止中です。" });
 });
 
 test("middleware: tos not accepted -> 403 tos_required", async () => {
@@ -218,7 +218,7 @@ test("middleware: tos not accepted -> 403 tos_required", async () => {
     headers: { Origin: SITE_URL },
   }, env);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "tos_required" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_required", message: "利用規約への同意が必要です。" });
 });
 
 test("middleware: reaccept required -> 403 tos_reaccept_required", async () => {
@@ -228,17 +228,17 @@ test("middleware: reaccept required -> 403 tos_reaccept_required", async () => {
     headers: { Origin: SITE_URL },
   }, env);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "tos_reaccept_required" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_reaccept_required", message: "利用規約の最新版に再同意してください。" });
 });
 
-test("middleware: user row missing (deleted) -> 503 db_unavailable", async () => {
+test("middleware: user row missing (deleted) -> 401 unauthenticated", async () => {
   const { app, env } = makeApp({ user: user(), db: makeDb(null) });
   const res = await app.request("/api/admin/me", {
     method: "POST",
     headers: { Origin: SITE_URL },
   }, env);
-  assert.equal(res.status, 503);
-  assert.deepEqual(await res.json(), { ok: false, reason: "db_unavailable" });
+  assert.equal(res.status, 401);
+  assert.deepEqual(await res.json(), { ok: false, reason: "unauthenticated", message: "ログインが必要です。" });
 });
 
 test("middleware: admin + same origin + clean state -> passes (T03 guard part)", async () => {
@@ -346,7 +346,7 @@ test("loadTosState: accepted an old major, no consent -> 403 tos_reaccept_requir
   });
   const res = await postGuard(db);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "tos_reaccept_required" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_reaccept_required", message: "利用規約の最新版に再同意してください。" });
 });
 
 test("loadTosState: accepted the latest major -> passes", async () => {
@@ -387,5 +387,5 @@ test("loadTosState: is_tos_accepted = 0 -> 403 tos_required", async () => {
   });
   const res = await postGuard(db);
   assert.equal(res.status, 403);
-  assert.deepEqual(await res.json(), { ok: false, reason: "tos_required" });
+  assert.deepEqual(await res.json(), { ok: false, reason: "tos_required", message: "利用規約への同意が必要です。" });
 });
