@@ -95,9 +95,12 @@ export type PageHead = Readonly<{
   canonical: string;
   ogTitle: string;
   ogImage: string;
-  ogImageWidth: number;
-  ogImageHeight: number;
+  /** Brand card only: dimensions and type are known (CURRENT adds them only for the default image). */
+  ogImageWidth?: number;
+  ogImageHeight?: number;
+  ogImageType?: string;
   ogImageAlt: string;
+  ogType: "website" | "video.other" | "profile";
 }>;
 
 export function buildPageHead(input: {
@@ -105,17 +108,21 @@ export function buildPageHead(input: {
   title: string;
   description?: string | null;
   noIndex?: boolean;
+  /** Absolute or site-relative image; omitted = the brand social card. */
+  image?: string | null;
+  ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
+  const custom = input.image ? new URL(input.image, origin).toString() : null;
   return {
     noindex: input.noIndex === true,
     title: `${input.title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
     ogTitle: input.title,
-    ogImage: `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
-    ogImageWidth: 1200,
-    ogImageHeight: 630,
-    ogImageAlt: `${SITE_NAME} ロゴ`,
+    ogImage: custom ?? `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
+    ...(custom ? {} : { ogImageWidth: 1200, ogImageHeight: 630, ogImageType: "image/png" }),
+    ogImageAlt: custom ? input.title : `${SITE_NAME} ロゴ`,
+    ogType: input.ogType ?? "website",
   };
 }
