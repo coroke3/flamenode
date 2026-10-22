@@ -9,9 +9,9 @@ export type RedirectStatus = 301 | 302 | 307 | 308;
 
 export type EntityRouteEntry = Readonly<{
   kind: RouteEntityKind;
-  /** Entity id: `resolution.id`, and the revocation fence id (`deny:<kind>:<id>`). */
+  /** Entity id: the internal row id (`videos.id`, `x_users.id`, `events.id`). Fences and R2 metadata use it. */
   id: string;
-  /** URL segment when it differs from `id` (video: YouTube id canonical, internal id as the id). Defaults to `id`. */
+  /** URL slug when it differs from `id` (video: the YouTube id, as CURRENT's canonical URL). Defaults to `id`. */
   slug?: string;
   aliases?: readonly string[];
 }>;
