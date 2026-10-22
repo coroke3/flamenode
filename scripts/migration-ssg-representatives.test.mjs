@@ -68,7 +68,8 @@ test("MIG-0403 T03: OGP metadata, title, and site_name follow CURRENT production
     const eventHtmlPath = path.join(DIST_DIR, "event/autumn-collab-2026/index.html");
     assert.ok(fs.existsSync(eventHtmlPath), "event/autumn-collab-2026/index.html must exist");
     const eventHtml = fs.readFileSync(eventHtmlPath, "utf-8");
-    assert.ok(eventHtml.includes("<title>FlameNode Autumn Festival 2026 - FlameNode</title>"));
+    // MIG-0502: the event page now follows CURRENT buildPageMetadata (`<title> | FlameNode`).
+    assert.ok(eventHtml.includes("<title>FlameNode Autumn Festival 2026 | FlameNode</title>"));
     assert.ok(eventHtml.includes('<link rel="canonical" href="https://flamenode.net/event/autumn-collab-2026">'));
     assert.ok(eventHtml.includes('<meta property="og:type" content="website">'));
     assert.ok(eventHtml.includes('<meta property="og:image" content="https://flamenode.net/brand/banner.png">'));
