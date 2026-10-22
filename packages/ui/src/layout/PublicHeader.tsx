@@ -38,6 +38,27 @@ function cx(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(" ");
 }
 
+// CURRENT `src/components/layout/useDismissablePanel.ts` FOCUSABLE.
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/**
+ * CURRENT useDismissablePanel outside press (UX-GLOBAL-015): a pointerdown anywhere but inside
+ * one of `getInside()` closes. The toggle button is listed as inside, so its own click toggles.
+ */
+function closeOnOutsidePointerDown(
+  getInside: () => readonly (Element | null)[],
+  close: () => void,
+): () => void {
+  const onPointerDown = (event: PointerEvent) => {
+    const target = event.target as Node | null;
+    if (getInside().some((element) => element?.contains(target))) return;
+    close();
+  };
+  window.addEventListener("pointerdown", onPointerDown);
+  return () => window.removeEventListener("pointerdown", onPointerDown);
+}
+
 export function PublicHeader({
   currentPath,
   className,
@@ -50,6 +71,7 @@ export function PublicHeader({
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const searchButtonRef = React.useRef<HTMLButtonElement>(null);
   // Unique per header, so two headers on one page never share ids.
   const baseId = React.useId();
   const menuId = `${baseId}-menu`;
@@ -58,6 +80,44 @@ export function PublicHeader({
   React.useEffect(() => {
     if (!menuOpen) return;
     return openDialogBehavior(menuRef.current, menuButtonRef.current, () => () => setMenuOpen(false));
+  }, [menuOpen]);
+
+  // The menu is aria-modal, so Tab stays inside it and a press outside closes it
+  // (CURRENT useDismissablePanel, UX-GLOBAL-015/016). Esc is handled by openDialogBehavior.
+  React.useEffect(() => {
+    const panel = menuRef.current;
+    if (!menuOpen || !panel) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (element) => !element.hasAttribute("disabled") && element.offsetParent !== null,
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const active = document.activeElement;
+      // The menu itself has focus right after opening; Shift+Tab from there goes to the last item.
+      if (event.shiftKey && (active === first || active === panel)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    const stopOutsideClose = closeOnOutsidePointerDown(
+      () => [panel, menuButtonRef.current],
+      () => setMenuOpen(false),
+    );
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      stopOutsideClose();
+    };
   }, [menuOpen]);
 
   // The menu exists only below 641px (styles/layout.css). Widening the viewport hides it with CSS,
@@ -79,6 +139,28 @@ export function PublicHeader({
   React.useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus();
   }, [searchOpen]);
+
+  // CURRENT useDismissablePanel for the search panel: Esc anywhere closes it and returns focus to
+  // the button (the field becomes display:none), and a press outside the form and the button closes it.
+  React.useEffect(() => {
+    if (!searchOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return; // IME conversion uses Esc
+      event.preventDefault();
+      setSearchOpen(false);
+      searchButtonRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    // ImeSafeGetForm takes no ref, so the form is found by its id.
+    const stopOutsideClose = closeOnOutsidePointerDown(
+      () => [document.getElementById(searchId), searchButtonRef.current],
+      () => setSearchOpen(false),
+    );
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      stopOutsideClose();
+    };
+  }, [searchOpen, searchId]);
 
   return (
     <header className={cx("hd2", searchOpen && "open-search", className)} lang="ja">
@@ -118,12 +200,10 @@ export function PublicHeader({
               placeholder="作品を検索"
               autoComplete="off"
               enterKeyHint="search"
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && !e.nativeEvent.isComposing) setSearchOpen(false);
-              }}
             />
           </ImeSafeGetForm>
           <button
+            ref={searchButtonRef}
             type="button"
             className="ib hd-search-ic"
             aria-label={searchOpen ? "検索を閉じる" : "作品を検索"}

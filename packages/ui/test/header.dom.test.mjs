@@ -1,10 +1,16 @@
 // PublicHeader in a real DOM (jsdom) rendered by react-dom/client (MIG-0203 T04).
+// Element checks use assert.ok(a === b): a failing assert.equal on jsdom nodes stalls the test reporter.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test/list", pretendToBeVisual: true });
 dom.window.scrollTo = () => {}; // jsdom does not implement scrolling
+// jsdom has no layout, so offsetParent is always null; treat everything outside [hidden] as rendered.
+Object.defineProperty(dom.window.HTMLElement.prototype, "offsetParent", {
+  configurable: true,
+  get() { return this.closest("[hidden]") ? null : this.parentElement; },
+});
 // jsdom has no matchMedia; this stub lets a test cross the 641px menu breakpoint.
 const wideQuery = { matches: false, listeners: new Set() };
 dom.window.matchMedia = () => ({
@@ -38,6 +44,13 @@ async function mount(props = {}) {
 const click = (el) => act(() => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 const key = (k, init = {}) =>
   act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...init })));
+// Tab from the focused element; returns whether the header took over the move (defaultPrevented).
+async function tab(init = {}) {
+  const event = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true, ...init });
+  await act(() => (document.activeElement ?? document.body).dispatchEvent(event));
+  return event.defaultPrevented;
+}
+const pointerDown = (el) => act(() => el.dispatchEvent(new Event("pointerdown", { bubbles: true })));
 
 test("T04: the mobile menu opens as a dialog, Esc closes it and focus returns to the menu button", async () => {
   const { root, burger, menu } = await mount();
@@ -71,7 +84,7 @@ test("the scrim and a menu link close the menu and release the scroll lock", asy
   await act(() => root.unmount());
 });
 
-test("the search button opens the search field and focuses it; Esc in the field closes it", async () => {
+test("the search button opens the search field and focuses it; Esc in the field closes it and focus returns to the button (CURRENT)", async () => {
   const { root } = await mount();
   const button = document.querySelector(".hd-search-ic");
   await click(button);
@@ -79,8 +92,59 @@ test("the search button opens the search field and focuses it; Esc in the field 
   assert.match(header.className, /open-search/);
   const input = document.querySelector('input[name="q"]');
   assert.equal(document.activeElement, input);
+  await act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, isComposing: true })));
+  assert.match(header.className, /open-search/, "Esc during IME composition keeps the search open");
   await act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   assert.doesNotMatch(header.className, /open-search/);
+  // The field is display:none once closed, so focus must not stay on (or drop from) it.
+  assert.ok(document.activeElement === button, "focus returns to the search button");
+  await act(() => root.unmount());
+});
+
+test("UX-GLOBAL-015: a pointerdown outside the search field and its button closes the search (CURRENT)", async () => {
+  const { root } = await mount();
+  const button = document.querySelector(".hd-search-ic");
+  const header = document.querySelector("header");
+  await click(button);
+  await pointerDown(document.querySelector('input[name="q"]'));
+  assert.match(header.className, /open-search/, "inside the field keeps it open");
+  await pointerDown(button);
+  assert.match(header.className, /open-search/, "the button handles its own toggle");
+  await pointerDown(document.body);
+  assert.doesNotMatch(header.className, /open-search/);
+  await act(() => root.unmount());
+});
+
+test("UX-GLOBAL-016: Tab and Shift+Tab cycle inside the aria-modal mobile menu (CURRENT)", async () => {
+  const mobileAccount = React.createElement("button", { type: "button", className: "acc" }, "ログイン");
+  const { root, burger, menu } = await mount({ mobileAccount });
+  await click(burger());
+  assert.ok(document.activeElement === menu(), "the menu has focus");
+  const links = [...menu().querySelectorAll("a")];
+  const last = menu().querySelector("button.acc");
+
+  assert.equal(await tab({ shiftKey: true }), true, "Shift+Tab from the menu itself stays inside");
+  assert.ok(document.activeElement === last, "focus moved to the last item");
+  assert.equal(await tab(), true, "Tab from the last item wraps");
+  assert.ok(document.activeElement === links[0], "focus moved to the first item");
+  assert.equal(await tab({ shiftKey: true }), true, "Shift+Tab from the first item wraps");
+  assert.ok(document.activeElement === last, "focus wrapped to the last item");
+  links[1].focus();
+  assert.equal(await tab(), false, "Tab between items is the browser's own move");
+  assert.ok(menu(), "Tab never closes the menu");
+  await act(() => root.unmount());
+});
+
+test("UX-GLOBAL-015: a pointerdown outside the mobile menu and its button closes it (CURRENT)", async () => {
+  const { root, burger, menu } = await mount();
+  await click(burger());
+  await pointerDown(menu().querySelector("a"));
+  assert.ok(menu(), "inside the menu keeps it open");
+  await pointerDown(burger());
+  assert.ok(menu(), "the menu button handles its own toggle");
+  await pointerDown(document.querySelector(".hd-logo"));
+  assert.ok(menu() === null, "outside closes the menu");
+  assert.equal(getBodyScrollLockCountForTest(), 0);
   await act(() => root.unmount());
 });
 
