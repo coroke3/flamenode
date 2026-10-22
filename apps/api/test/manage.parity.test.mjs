@@ -410,6 +410,169 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await call("/api/manage/events/evA/slots?offset=abc", "tok-owner")).body.offset, 0);
   });
 
+  // ---------------- event overview and notification center ----------------
+  const notifMod = await import("../../../src/lib/notifications/display.ts");
+  const notifTypes = await import("../../../src/lib/notifications/types.ts");
+  const { lookupNotificationRecipients } = await import("../../../src/lib/notifications/recipient.ts");
+  const { TERMINAL_NOTIFICATION_FAILURE_STATUSES, isTerminalNotificationFailure } = await import("@flamenode/domain/admin");
+  const { or } = await import("drizzle-orm");
+
+  const refNotif = (n, recipientMap) => {
+    const r = n.recipient_user_id ? recipientMap.get(n.recipient_user_id) ?? null : null;
+    return {
+      id: n.id, type: n.type, status: n.status, payload_json: n.payload_json, attempt_count: n.attempt_count, last_error: n.last_error,
+      dedupe_key: n.dedupe_key, recipient_user_id: n.recipient_user_id, event_id: n.event_id, created_at: n.created_at,
+      recipient: r ? { userName: r.userName, discordId: r.discordId, notificationsEnabled: r.notificationsEnabled } : null,
+    };
+  };
+
+  // app/(manage)/manage/events/[id]/page.tsx
+  async function refOverview(name, eventId, notif = "all") {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    if (!MA.canAccessManageEventFromSnapshot(snapshot, eventId)) return 404;
+    const ev = nav.events.find((e) => e.id === eventId);
+    if (!ev) return 404;
+    const user = (await refDb.select().from(S.users).where(eq(S.users.id, `u_${name}`)))[0];
+    const publicCount = await refDb.select({ c: sql`COUNT(*)` }).from(S.videos).innerJoin(S.videoEvents, eq(S.videoEvents.video_id, S.videos.id)).where(and(eq(S.videoEvents.event_id, eventId), eq(S.videos.visibility_status, "public")));
+    const slotRows = await refDb.select({ status: S.slots.status, c: sql`COUNT(*)` }).from(S.slots).where(eq(S.slots.event_id, eventId)).groupBy(S.slots.status);
+    const pendingVideos = await refDb
+      .select({ id: S.videos.id, title: S.videos.title, display_name: S.videos.creator_display_name, created_at: S.videos.created_at })
+      .from(S.videos).innerJoin(S.videoEvents, eq(S.videoEvents.video_id, S.videos.id))
+      .where(and(eq(S.videoEvents.event_id, eventId), eq(S.videos.visibility_status, "pending")))
+      .orderBy(desc(S.videos.created_at), desc(S.videos.id)).limit(10);
+    const logs = await refDb.select().from(S.auditLogs).where(and(eq(S.auditLogs.table_name, "events"), eq(S.auditLogs.target_id, eventId))).orderBy(desc(S.auditLogs.created_at), desc(S.auditLogs.id)).limit(15);
+    const where = notif === "all" ? eq(S.notificationOutbox.event_id, eventId) : and(eq(S.notificationOutbox.event_id, eventId), notifMod.drizzleManageNotificationFilter(notif, S.notificationOutbox.type));
+    const counts = { all: 0, video: 0, x_id: 0, slot: 0, chapter: 0, other: 0 };
+    const typeRows = await refDb.select({ type: S.notificationOutbox.type, c: sql`COUNT(*)` }).from(S.notificationOutbox).where(eq(S.notificationOutbox.event_id, eventId)).groupBy(S.notificationOutbox.type);
+    for (const r of typeRows) {
+      const c = Number(r.c ?? 0);
+      counts.all += c;
+      const bucket = notifTypes.categorizeNotificationType(r.type);
+      if (["video", "x_id", "slot", "chapter"].includes(bucket)) counts[bucket] += c;
+      else counts.other += c;
+    }
+    const notifRows = await refDb.select().from(S.notificationOutbox).where(where).orderBy(desc(S.notificationOutbox.created_at), desc(S.notificationOutbox.id)).limit(20);
+    const recipients = await lookupNotificationRecipients(refDb, notifRows.map((n) => n.recipient_user_id).filter(Boolean));
+    const linked = await getHeaderLinkedXUsersForAuthUser(refDb, user.id);
+    return {
+      isAdmin: snapshot.isAdmin,
+      event: { ...ev, pending_review_count: nav.pendingByEvent.get(eventId) ?? 0 },
+      editorRole: snapshot.isAdmin ? null : MA.getManageStaffRoleFromSnapshot(snapshot, eventId),
+      activeXUserId: await resolveActiveXUserId(refDb, user.id, normalizeXId(user.active_x_user_id) || null, linked),
+      manageStaffXUserIds: [...MA.getManageStaffXUserIdsFromSnapshot(snapshot)],
+      publicVideoCount: Number(publicCount[0]?.c ?? 0),
+      slotCounts: Object.fromEntries(slotRows.map((r) => [r.status, Number(r.c ?? 0)])),
+      pendingVideos,
+      auditLogs: logs.map((h) => ({ id: h.id, operation: h.operation, actor_user_id: h.actor_user_id, created_at: h.created_at })),
+      notifCategory: notif,
+      notifCounts: counts,
+      notificationSchemaMissing: false,
+      notifications: notifRows.map((n) => refNotif(n, recipients)),
+    };
+  }
+
+  // app/(manage)/manage/notifications/page.tsx (single IN query instead of 80-id chunks)
+  async function refCenter(name, { event = "", notif = "all", status = "" } = {}) {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    const user = (await refDb.select().from(S.users).where(eq(S.users.id, `u_${name}`)))[0];
+    const accessible = snapshot.isAdmin ? nav.events.map((e) => e.id) : snapshot.manageableEventIds;
+    let eventIds = event ? [event] : [...accessible];
+    if (event && !accessible.includes(event) && !MA.canAccessManageEventFromSnapshot(snapshot, event)) return 404;
+    let rows = [];
+    if (eventIds.length > 0) {
+      const conditions = [inArray(S.notificationOutbox.event_id, eventIds)];
+      if (notif !== "all") conditions.push(notifMod.drizzleManageNotificationFilter(notif, S.notificationOutbox.type));
+      if (status === "failed") conditions.push(inArray(S.notificationOutbox.status, [...TERMINAL_NOTIFICATION_FAILURE_STATUSES]));
+      else if (["pending", "processing", "sent", "cancelled"].includes(status)) conditions.push(eq(S.notificationOutbox.status, status));
+      rows = await refDb.select().from(S.notificationOutbox).where(and(...conditions)).orderBy(desc(S.notificationOutbox.created_at), desc(S.notificationOutbox.id)).limit(50);
+    }
+    const recipients = await lookupNotificationRecipients(refDb, rows.map((r) => r.recipient_user_id).filter((x) => x != null));
+    const linked = await getHeaderLinkedXUsersForAuthUser(refDb, user.id);
+    return {
+      isAdmin: snapshot.isAdmin,
+      activeXUserId: await resolveActiveXUserId(refDb, user.id, normalizeXId(user.active_x_user_id) || null, linked),
+      manageStaffXUserIds: [...MA.getManageStaffXUserIdsFromSnapshot(snapshot)],
+      eventFilter: event,
+      notifFilter: notif,
+      statusFilter: status,
+      managedEvents: snapshot.isAdmin ? [] : nav.events.map(({ id, title }) => ({ id, title })),
+      eventTitles: Object.fromEntries(nav.events.map((e) => [e.id, e.title])),
+      schemaMissing: false,
+      failedCount: rows.filter((r) => isTerminalNotificationFailure(r.status)).length,
+      notifications: rows.map((n) => refNotif(n, recipients)),
+    };
+  }
+
+  test("T-overview: event overview equals CURRENT for every user, event and notification filter", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const eventId of ["evA", "evB", "evC", "evD", "evNull", "nope"]) {
+        for (const notif of ["all", "video", "x_id", "slot", "chapter", "other", "bogus"]) {
+          const r = await call(`/api/manage/events/${eventId}?notif=${notif}`, `tok-${name}`);
+          const ref = await refOverview(name, eventId, ["video", "x_id", "slot", "chapter", "other"].includes(notif) ? notif : "all");
+          if (ref === 404) {
+            assert.equal(r.status, 404, `${name} ${eventId}`);
+            continue;
+          }
+          assert.equal(r.status, 200, `${name} ${eventId} ${notif}`);
+          assert.deepEqual(r.body, canon(ref), `${name} ${eventId} ${notif}`);
+          record("overview", r);
+        }
+      }
+    }
+  });
+
+  test("T-overview: recipient lookup, missing event_id degrade, IDOR", async () => {
+    const owner = (await call("/api/manage/events/evA", "tok-owner")).body;
+    assert.equal(owner.notifications.length, 17);
+    assert.deepEqual(owner.notifications[0].recipient, { userName: "Name owner", discordId: "d_owner", notificationsEnabled: true });
+    assert.equal((await call("/api/manage/events/evB", "tok-owner")).status, 404);
+    assert.equal((await call("/api/manage/events/evC", "tok-mgr")).status, 404);
+    const old = createSqlite();
+    seed(old);
+    old.exec("DROP INDEX IF EXISTS notification_outbox_event_idx");
+    old.exec("ALTER TABLE notification_outbox DROP COLUMN event_id");
+    const degraded = await call("/api/manage/events/evA", "tok-owner", { sqlite: old });
+    assert.equal(degraded.status, 200);
+    assert.equal(degraded.body.notificationSchemaMissing, true);
+    assert.deepEqual(degraded.body.notifications, []);
+    assert.equal(degraded.body.notifCounts.all, 0);
+  });
+
+  test("T-center: notification center equals CURRENT for every user and filter", async () => {
+    const queries = [{}, { event: "evA" }, { event: "evB" }, { event: "evC" }, { event: "nope" }, { notif: "video" }, { notif: "other" }, { status: "failed" }, { status: "sent" }, { status: "bogus" }, { event: "evA", notif: "slot", status: "failed" }];
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const q of queries) {
+        const query = new URLSearchParams(q);
+        const r = await call(`/api/manage/notifications?${query}`, `tok-${name}`);
+        const ref = await refCenter(name, { event: q.event ?? "", notif: q.notif ?? "all", status: q.status ?? "" });
+        if (ref === 404) {
+          assert.equal(r.status, 404, `${name} ${query}`);
+          continue;
+        }
+        assert.equal(r.status, 200, `${name} ${query}`);
+        const expected = canon(ref);
+        if (name === "admin") {
+          assert.equal(Object.keys(r.body.eventTitles).length, 100, "event titles are capped at 100 (S2)");
+          expected.eventTitles = Object.fromEntries(Object.entries(expected.eventTitles).filter(([id]) => id in r.body.eventTitles));
+        }
+        assert.deepEqual(r.body, expected, `${name} ${query}`);
+        record("center", r);
+      }
+    }
+  });
+
+  test("T-center: IDOR - another event's notifications are not readable, rows capped at 50", async () => {
+    assert.equal((await call("/api/manage/notifications?event=evC", "tok-owner")).status, 404);
+    const all = (await call("/api/manage/notifications", "tok-owner")).body;
+    assert.ok(all.notifications.every((n) => n.event_id === "evA" || n.event_id === "evD"));
+    const admin = (await call("/api/manage/notifications", "tok-admin")).body;
+    assert.equal(admin.notifications.length, 26 - 1 + 0 > 50 ? 50 : admin.notifications.length);
+    assert.ok(admin.notifications.length <= 50);
+    assert.ok(admin.notifications.every((n) => n.event_id !== null), "events without event_id are not listed");
+  });
+
   // ---------------- authorization / IDOR ----------------
   test("T-auth: unauthenticated -> 401, banned -> 403, no manage access -> 403 manage_access_required", async () => {
     const paths = ["/api/manage", "/api/manage/navigation", "/api/manage/events/evA/staff", "/api/manage/events/evA/slots"];

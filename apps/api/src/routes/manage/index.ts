@@ -3,6 +3,8 @@ import type { AppEnv } from "../../env.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import { manageDashboardRoutes } from "./dashboard.ts";
 import { manageNavigationRoutes } from "./navigation.ts";
+import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
+import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
 import { manageStaffRoutes } from "./staff.ts";
 
@@ -25,6 +27,8 @@ manageRoutes.use("*", requireAuth());
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
+manageRoutes.route("/events/:id", manageOverviewRoutes);
+manageRoutes.route("/notifications", manageNotificationCenterRoutes);
 manageRoutes.route("/", manageDashboardRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.

@@ -38,15 +38,19 @@ export interface ManageData {
   inbox: ManageInboxRow[];
   notifications: ManageNotificationRow[];
   linked: ManageLinkedX[];
+  /** Parsed JSON columns of caller-supplied pieces (see ManageDataParts.extra). */
+  extra: Record<string, unknown>;
 }
 
 export interface ManageDataParts {
   inbox?: boolean;
   notifications?: boolean;
   linked?: boolean;
+  /** Extra bounded JSON-column pieces appended to the same statement (aliases must be plain identifiers). */
+  extra?: Record<string, Piece>;
 }
 
-interface Piece {
+export interface Piece {
   sql: string;
   params: unknown[];
 }
@@ -77,7 +81,7 @@ const NOTIFICATION_COLUMNS = [
 ] as const;
 const INBOX_COLUMNS = ["id", "target_id", "operation", "actor_user_id", "created_at"] as const;
 
-const jsonObject = (columns: readonly string[]): string => columns.map((c) => `'${c}', q.${c}`).join(", ");
+export const jsonObject = (columns: readonly string[]): string => columns.map((c) => `'${c}', q.${c}`).join(", ");
 
 /** Which events the caller may see: admin = every event, staff = the snapshot's manageable ids (one json_each bind). */
 function scope(snapshot: ManageSnapshot, column: string): Piece {
@@ -152,7 +156,8 @@ function manageDataStatement(
     ["events", eventsPiece(snapshot)],
     ["inbox", parts.inbox ? inboxPiece(snapshot) : null],
     ["notifications", parts.notifications ? notificationsPiece(snapshot) : null],
-    ["linked", parts.linked && !snapshot.isAdmin ? linkedPiece(user.id) : null],
+    ["linked", parts.linked ? linkedPiece(user.id) : null],
+    ...Object.entries(parts.extra ?? {}).map(([name, piece]): [string, Piece] => [name, piece]),
   ];
   const select = pieces.map(([name, piece]) => `${piece?.sql ?? "NULL"} AS ${name}`).join(", ");
   return db.prepare(`SELECT ${select}`).bind(...pieces.flatMap(([, piece]) => piece?.params ?? []));
@@ -174,5 +179,6 @@ export async function loadManageData(
     inbox: parseJsonColumn<ManageInboxRow[]>(row?.inbox, []),
     notifications: parseJsonColumn<ManageNotificationRow[]>(row?.notifications, []),
     linked: parseJsonColumn<ManageLinkedX[]>(row?.linked, []),
+    extra: Object.fromEntries(Object.keys(parts.extra ?? {}).map((name) => [name, parseJsonColumn<unknown>(row?.[name], null)])),
   };
 }
