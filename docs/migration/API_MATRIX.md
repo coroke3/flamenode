@@ -341,6 +341,20 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
 
+## MIG-0625 Hono Admin read APIs A (Phase 6)
+
+New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route / traffic change. GET only, mounted at `/api/admin-read` (never shares a prefix with the mutating `/api/admin` write guard). Guard: `sessionMiddleware` + `requireAuth` (401 anonymous, 403 banned) + `role === "admin"` (403 `{error:"Forbidden",redirect:"/dashboard"}`, CURRENT `(admin)/layout.tsx`; moderators rejected). All responses `Cache-Control: private, no-store`. Parity: `apps/api/test/adminRead.parity.test.mjs` (queries copied from the page loaders + the real lib functions, node:sqlite with all migrations). CPU: not measured (MIG-0606).
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/admin-read/users?view&q&status&page` | `app/(admin)/admin/users/page.tsx` | `apps/api/src/routes/adminRead/users.ts` | 2 | 50/page; discord, xid, permissions views; `view=links` -> `{redirect}`; D1 failure -> 200 `degraded`; xid `icon_url` null (R2 icon map not reproduced) | unmeasured | BRIDGED |
+| `GET /api/admin-read/users/:id` | `app/(admin)/admin/users/[id]/page.tsx` | `apps/api/src/routes/adminRead/users.ts` | 3 | lists capped (X 100, videos 20, audit 15+15, requests 10); audit before/after payloads not returned; unknown id 404 | unmeasured | BRIDGED |
+| `GET /api/admin-read/videos?q&status&event&page` | `app/(admin)/admin/videos/page.tsx` | `apps/api/src/routes/adminRead/videos.ts` | 3 | 50/page; event options LIMIT 100 (CURRENT 200); `reviewSummaries: "deferred"`; D1 failure -> 200 `degraded` | unmeasured | BRIDGED |
+| `GET /api/admin-read/events?sort&filter&q` | `app/(admin)/admin/events/page.tsx` | `apps/api/src/routes/adminRead/events.ts` | 2 | LIMIT 60; rendered columns only; returns server `now` for the badges | unmeasured | BRIDGED |
+| `GET /api/admin-read/moderation?type&status&overdue` | `app/(admin)/admin/moderation/page.tsx` | `apps/api/src/routes/adminRead/moderation.ts` | 2 | LIMIT 100; D1 failure -> 503 | unmeasured | BRIDGED |
+
+Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new, events/templates, event-groups/*, users/[id]/edit, x-link-requests, x-id-merges, review summaries, xid icon projection.
+
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 
 Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.

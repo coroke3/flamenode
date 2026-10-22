@@ -302,6 +302,7 @@ Validation:
 | MIG-0601 | low-risk reads | DONE | MIG-0307, MIG-0107 |
 | MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
 | MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
+| MIG-0625 | Admin read APIs A (users/videos/events/moderation) | READY | MIG-0601, MIG-0608 |
 | MIG-0602 | low-risk mutations | READY | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | BLOCKED | MIG-0602 |
 | MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
