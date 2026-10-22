@@ -114,6 +114,16 @@ test("event: entry action follows CURRENT (reserve / submit / none), guideline a
   assert.ok(!hrefs(none).some((h) => h?.startsWith("https://www.youtube.com/playlist")));
 });
 
+test("event: no status label renders no badge, never the Badge default DRAFT (CURRENT always shows a status, never DRAFT)", () => {
+  for (const statusLabel of ["", undefined]) {
+    const doc = render(EventDetailView, { event: { ...eventFixture(), statusLabel, statusTone: undefined } });
+    assert.equal(doc.querySelector(".ed-status .fn-status"), null);
+    assert.doesNotMatch(doc.body.textContent, /DRAFT/);
+  }
+  const labelled = render(EventDetailView, { event: { ...eventFixture(), statusLabel: "開始前", statusTone: undefined } });
+  assert.equal(labelled.querySelector(".ed-status .fn-status").textContent, "開始前");
+});
+
 test("event: metrics, slot parts, staff, videos and CURRENT hrefs", () => {
   const doc = render(EventDetailView, { event: eventFixture() });
   assert.deepEqual([...doc.querySelectorAll(".metric span")].map((s) => s.textContent), ["作品", "クリエイター", "埋まり枠", "募集締切まで"]);

@@ -91,7 +91,11 @@ export function eventScreenData(event: EventPublicSnapshot): EventDetailData {
     imageUrl: event.imageUrl ?? event.iconUrl ?? null,
     iconUrl: event.iconUrl ?? null,
     explanation: event.explanation ?? null,
-    statusLabel: event.statusLabel ?? "",
+    // CURRENT `app/(public)/event/[id]/page.tsx:234-236` always shows a status pill. Only public
+    // events reach a snapshot, so a missing label is CURRENT `eventStatusLabel("published")`.
+    statusLabel: event.statusLabel || "公開",
+    // The CURRENT pill has one accent style for every status (never the muted draft tone).
+    statusTone: "public",
     periodLabel: event.periodLabel ?? null,
     entryAction: event.entryAction ?? null,
     // Totals and slot counts come from lists / the live slots API (MIG-0502).
