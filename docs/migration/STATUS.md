@@ -308,6 +308,13 @@ Validation:
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
+| MIG-0612 | shared server core scaffold, ports, boundary check (D-10) | READY | — |
+| MIG-0613 | audit mutation core + queue wake via ports (D-10) | BLOCKED | MIG-0612 |
+| MIG-0614 | static rebuild enqueue / notifications batch / visibility fence / public cache core (D-10) | BLOCKED | MIG-0613 |
+| MIG-0615 | video/event/xUser visibility transition planners (D-10) | BLOCKED | MIG-0614 |
+| MIG-0616 | audit restore core (D-10) | BLOCKED | MIG-0615 |
+| MIG-0617 | replace apps/api Option A copy with core (D-10) | BLOCKED | MIG-0613, MIG-0614, MIG-0602 |
+| MIG-0618 | xid merge core (D-10) | BLOCKED | MIG-0613 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
