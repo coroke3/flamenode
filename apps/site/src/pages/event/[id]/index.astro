@@ -1,0 +1,27 @@
+---
+/**
+ * Representative event detail page `/event/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
+ * Built from the representative snapshots only; the full set is MIG-0502 / MIG-0411.
+ * Non-public snapshots are rejected by the loader.
+ */
+import { EventDetailView } from "@flamenode/ui";
+import PublicPage from "../../../layouts/PublicPage.astro";
+import { StaticScreen } from "../../../components/StaticScreen.ts";
+import { loadRepresentativeEvents } from "../../../lib/representativeFixtures.ts";
+import { eventMetadata, eventScreenData } from "../../../lib/publicPages.ts";
+import type { EventPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+
+export async function getStaticPaths() {
+  const events = await loadRepresentativeEvents();
+  return events.map((event) => ({ params: { id: event.id }, props: { event } }));
+}
+
+interface Props {
+  event: EventPublicSnapshot;
+}
+
+const { event } = Astro.props;
+---
+<PublicPage meta={eventMetadata(event)}>
+  <StaticScreen screen={EventDetailView} props={{ event: eventScreenData(event) }} />
+</PublicPage>

@@ -78,6 +78,7 @@ npm run test:unit
 #### DONE checklist
 - [ ] 4メソッドで status/body/header が CURRENT と一致
 - [ ] 本番 Route を変更していない
+- 例外（owner 決定 2026-10-19T11:07:37Z、PR #329）: 認証済み `GET /api/health/deep` は CURRENT の検査本体（`src/lib/health/deepHealth.ts` と依存）を移さず、常に `503 {ok:false, service}` を返す fail-closed の仮実装で DONE とした。拒否（T02）は CURRENT と一致。**`/api/health/deep` を Hono へ route する前に検査本体を package へ移して CURRENT と一致させる**（MIG-0607 の DONE checklist で確認）。
 #### STOP
 - 認証が必要になったら止める（MIG-0608 の後）。
 - 本番 Route の変更が必要に見えたら止める。
@@ -494,6 +495,7 @@ npm run check:project-docs
 承認後に `STATUS.md` の MIG-0607 を DONE、MIG-0802 の依存を反映。
 #### DONE checklist
 - [ ] 33メソッドの disposition が揃っている
+- [ ] RH-017 認証済み `/api/health/deep` が CURRENT の検査本体と一致している（MIG-0601 の fail-closed 仮実装が残っていない）
 - [ ] 独立レビューの APPROVE と人間の Phase Gate 承認
 #### STOP
 - 人間の承認なしに STATUS を DONE にしない。
