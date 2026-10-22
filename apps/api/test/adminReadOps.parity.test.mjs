@@ -40,7 +40,8 @@ if (runUnderRootTsx(import.meta.url)) {
       statement.run(...params);
       return { rows: [] };
     }
-    const rows = statement.all(...params).map((row) => Object.values(row));
+    statement.setReturnArrays(true); // duplicate column names (id, id) must not collapse
+    const rows = statement.all(...params).map((row) => [...row]);
     return { rows: method === "get" ? rows[0] : rows };
   });
   const canon = (value) => JSON.parse(JSON.stringify(value ?? null));
@@ -471,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -780,6 +781,21 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(failed.body.mode, "normal");
     sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
     ins("system_settings", { id: "default" });
+  });
+
+  test("T02 api-endpoints equals CURRENT page queries (enabled events, public events, limit 100)", async () => {
+    for (let i = 0; i < 3; i += 1) {
+      ins("events", { id: `api-${i}`, title: `Api ${i}`, visibility_status: i === 2 ? "private" : "public", public_api_enabled: i === 0 ? 0 : 1, created_at: T0 + 7000 + i, updated_at: T0 + 8000 + i });
+    }
+    const enabledRows = await refDb
+      .select({ id: S.events.id, event_id: S.events.id, public_api_enabled: S.events.public_api_enabled, updated_at: S.events.updated_at, created_at: S.events.created_at, event_title: S.events.title, event_visibility_status: S.events.visibility_status })
+      .from(S.events).where(eq(S.events.public_api_enabled, 1)).orderBy(desc(S.events.updated_at), desc(S.events.created_at)).limit(100);
+    const publicEvents = await refDb
+      .select({ id: S.events.id, title: S.events.title, enabled: S.events.public_api_enabled })
+      .from(S.events).where(eq(S.events.visibility_status, "public")).orderBy(desc(S.events.created_at)).limit(100);
+    const r = await get("/api-endpoints");
+    assert.deepEqual(r.body, canon({ rows: enabledRows, eventOptions: publicEvents }));
+    assert.deepEqual(r.body.rows.map((x) => x.id), ["api-2", "api-1"]);
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

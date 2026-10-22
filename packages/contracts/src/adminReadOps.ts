@@ -318,7 +318,24 @@ export const AdminTopResponseSchema = z.object({
   mode: z.string(),
   isMaintenance: z.number(),
 });
-export type AdminTopResponse = z.infer<typeof AdminTopResponseSchema>;
+export const AdminApiEndpointsResponseSchema = z.object({
+  rows: z.array(
+    z.object({
+      id: z.string(),
+      event_id: z.string(),
+      public_api_enabled: z.number().nullable(),
+      updated_at: z.number(),
+      created_at: z.number(),
+      event_title: z.string(),
+      event_visibility_status: z.string().nullable(),
+    }),
+  ),
+  eventOptions: z.array(
+    z.object({ id: z.string(), title: z.string(), enabled: z.number().nullable() }),
+  ),
+});
+export type AdminApiEndpointsResponse = z.infer<typeof AdminApiEndpointsResponseSchema>;
+export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
 export type AdminNotificationsResponse =z.infer<typeof AdminNotificationsResponseSchema>;
 export type AdminYoutubeSyncResponse = z.infer<typeof AdminYoutubeSyncResponseSchema>;

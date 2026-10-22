@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type {
+  AdminApiEndpointsResponse,
   AdminAnnouncementDetailResponse,
   AdminAnnouncementListResponse,
   AdminAuditSettingsResponse,
@@ -331,6 +332,29 @@ adminSettingsRoutes.get("/event-templates", async (c) => {
       .first<NonNullable<AdminEventTemplatesResponse["selected"]>>();
   }
   const body: AdminEventTemplatesResponse = { items: results, selected };
+  return c.json(body);
+});
+
+// ---- /api-endpoints (api-endpoints/page.tsx): events with the public export API on + public events to enable ----
+const MAX_API_ENDPOINT_ROWS = 100;
+
+adminSettingsRoutes.get("/api-endpoints", async (c) => {
+  const [enabled, options] = await Promise.all([
+    c.env.DB.prepare(
+      "SELECT id, id AS event_id, public_api_enabled, updated_at, created_at, title AS event_title, " +
+        "visibility_status AS event_visibility_status FROM events WHERE public_api_enabled = 1 " +
+        "ORDER BY updated_at DESC, created_at DESC LIMIT ?",
+    )
+      .bind(MAX_API_ENDPOINT_ROWS)
+      .all<AdminApiEndpointsResponse["rows"][number]>(),
+    c.env.DB.prepare(
+      "SELECT id, title, public_api_enabled AS enabled FROM events WHERE visibility_status = 'public' " +
+        "ORDER BY created_at DESC LIMIT ?",
+    )
+      .bind(MAX_API_ENDPOINT_ROWS)
+      .all<AdminApiEndpointsResponse["eventOptions"][number]>(),
+  ]);
+  const body: AdminApiEndpointsResponse = { rows: enabled.results, eventOptions: options.results };
   return c.json(body);
 });
 
