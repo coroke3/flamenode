@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type {
   AdminCostGuardResponse,
+  AdminHealthResponse,
   AdminNotificationsResponse,
   AdminSecurityResponse,
   AdminStaticBuildsResponse,
@@ -215,6 +216,98 @@ adminOpsRoutes.get("/notifications", async (c) => {
   }
 
   const body: AdminNotificationsResponse = { status, category, truncated, error, counts, rows };
+  return c.json(body);
+});
+
+// ---- /ops/health (health/page.tsx; src/lib/admin/healthChecks.ts runOperationalHealthChecks) ----
+// Default view = the 5 operational checks, as ONE UNION ALL statement (session + 1; CURRENT 9 queries). A failure
+// is CURRENT's page error (Promise.all rejects): error "query_failed", no results.
+//
+// STOP (recorded, not implemented): ?deep=1 / ?run=1 runs the 22-check runHealthChecks(), which scans whole tables
+// (like_count drift loads every video with stored likes into JS, orphan joins, slot pairs). That cannot meet S2
+// (<= 3 statements, bounded LIMIT, 7 ms) and is a background-job (B) / build-time report, not an API read.
+// The API answers 501 for deep runs; the SPA must not link to it until that job exists.
+adminOpsRoutes.get("/health", async (c) => {
+  const statusQ = c.req.query("status");
+  const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
+  if (c.req.query("deep") === "1" || c.req.query("run") === "1") {
+    return c.json({ error: "deep_unsupported" }, 501);
+  }
+  const now = Math.floor(Date.now() / 1000);
+  let results: AdminHealthResponse["results"] = [];
+  let error: AdminHealthResponse["error"] = null;
+  try {
+    const { results: rows } = await c.env.DB.prepare(
+      `SELECT 'system_settings_single_row' AS check_id, COUNT(*) AS total_count, NULL AS a, NULL AS b, NULL AS c FROM system_settings
+       UNION ALL
+       SELECT 'notification_processing_stuck', total_count, id, processing_started_at, NULL FROM (
+         SELECT id, processing_started_at, COUNT(*) OVER() AS total_count FROM notification_outbox
+          WHERE status = 'processing' AND processing_started_at IS NOT NULL AND processing_started_at < ?1
+          ORDER BY processing_started_at LIMIT 10)
+       UNION ALL
+       SELECT 'notification_failed_volume', total_count, id, type, NULL FROM (
+         SELECT id, type, COUNT(*) OVER() AS total_count FROM notification_outbox
+          WHERE status = 'failed' ORDER BY created_at DESC LIMIT 10)
+       UNION ALL
+       SELECT 'open_moderation_cases_overdue', total_count, id, video_id, NULL FROM (
+         SELECT id, video_id, COUNT(*) OVER() AS total_count FROM video_moderation_cases
+          WHERE status = 'open' AND due_at IS NOT NULL AND due_at < ?2 ORDER BY due_at LIMIT 10)
+       UNION ALL
+       SELECT 'x_id_merge_pending_stale', total_count, id, source_x_user_id, target_x_user_id FROM (
+         SELECT id, source_x_user_id, target_x_user_id, COUNT(*) OVER() AS total_count FROM x_identity_requests
+          WHERE request_type = 'merge' AND status = 'pending' AND requested_at < ?3 ORDER BY requested_at LIMIT 10)`,
+    )
+      .bind(now - 15 * 60, now, now - 7 * 86400)
+      .all<{ check_id: string; total_count: number | null; a: string | null; b: string | number | null; c: string | null }>();
+    const of = (id: string) => rows.filter((row) => row.check_id === id);
+    const count = (id: string) => Number(of(id)[0]?.total_count ?? 0);
+    const samples = (id: string, fn: (r: (typeof rows)[number]) => string) => of(id).slice(0, 5).map(fn);
+    const stuck = count("notification_processing_stuck");
+    const failed = count("notification_failed_volume");
+    const overdue = count("open_moderation_cases_overdue");
+    const stale = count("x_id_merge_pending_stale");
+    const single = count("system_settings_single_row");
+    results = [
+      { id: "system_settings_single_row", label: "system_settings グローバル 1 行性", status: single === 1 ? "ok" : "warn", count: single, samples: [] },
+      {
+        id: "notification_processing_stuck",
+        label: "notification_outbox processing 固着",
+        status: stuck === 0 ? "ok" : "warn",
+        count: stuck,
+        samples: samples("notification_processing_stuck", (r) => r.a + " (" + (r.b ?? "?") + ")"),
+        ...(stuck > 0 ? { note: "Worker が処理中のまま戻せていない通知です。再送制御または手動キャンセルを確認してください。" } : {}),
+      },
+      {
+        id: "notification_failed_volume",
+        label: "notification_outbox failed 件数",
+        status: failed >= 20 ? "warn" : failed > 0 ? "info" : "ok",
+        count: failed,
+        samples: samples("notification_failed_volume", (r) => r.a + " (" + r.b + ")"),
+        ...(failed > 0 ? { note: "失敗通知は手動再送またはキャンセルし、古い failed は cleanup の TTL で削除します。" } : {}),
+      },
+      {
+        id: "open_moderation_cases_overdue",
+        label: "未解決モデレーション期限切れ",
+        status: overdue === 0 ? "ok" : "warn",
+        count: overdue,
+        samples: samples("open_moderation_cases_overdue", (r) => r.a + " video:" + r.b),
+        ...(overdue > 0 ? { note: "期限切れの open case です。/admin/moderation で解決・却下・キャンセルしてください。" } : {}),
+      },
+      {
+        id: "x_id_merge_pending_stale",
+        label: "X ID 統合申請 pending 放置",
+        status: stale === 0 ? "ok" : "warn",
+        count: stale,
+        samples: samples("x_id_merge_pending_stale", (r) => r.a + " @" + r.b + " -> @" + r.c),
+        ...(stale > 0 ? { note: "危険操作のため自動実行せず、影響範囲を確認して承認・却下してください。" } : {}),
+      },
+    ];
+  } catch {
+    console.error("[adminRead] health checks failed");
+    error = "query_failed";
+    results = [];
+  }
+  const body: AdminHealthResponse = { status, results, error };
   return c.json(body);
 });
 

@@ -472,7 +472,7 @@ if (runUnderRootTsx(import.meta.url)) {
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
     "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
-    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/ops/static-builds", "/permissions/simulator?event_id=ev1&x_user_id=sx",
+    "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/ops/static-builds", "/ops/health", "/permissions/simulator?event_id=ev1&x_user_id=sx",
   ];
 
   test("T03 guest (no cookie, expired, unknown token) -> 401, no-store, one D1 statement at most", async () => {
@@ -1113,6 +1113,40 @@ if (runUnderRootTsx(import.meta.url)) {
       { youtube_related_blocklist: "missing", random_video_pool: "present", pickup_creators: "missing", top_slot_stats: "unavailable" },
     );
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
+  });
+
+  test("T02 health (operational view) equals CURRENT runOperationalHealthChecks; deep run is 501", async () => {
+    const { runOperationalHealthChecks } = await import("../../../src/lib/admin/healthChecks.ts");
+    ins("x_identity_requests", { id: "xs1", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "alice_x", target_x_user_id: "alice_y", requested_at: nowS - 9 * 86400, updated_at: nowS });
+    ins("x_identity_requests", { id: "xs2", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "frank_x", target_x_user_id: "frank_y", requested_at: nowS - 8 * 86400, updated_at: nowS });
+    ins("x_identity_requests", { id: "xs3", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "a", target_x_user_id: "b", requested_at: nowS - 100, updated_at: nowS });
+    ins("video_moderation_cases", { id: "mc-late", video_id: "va4", case_type: "void", status: "open", due_at: nowS - 50, created_at: T0 });
+    for (let i = 0; i < 22; i += 1) notif(`nf${i}`, "video_bulk", "failed", { at: T0 + 500 + i });
+    const strip = (list) => list.map(({ note, ...rest }) => ({ ...rest, ...(note ? { note } : {}) }));
+    const r = await get("/ops/health");
+    assert.deepEqual(r.body, { status: "all", results: canon(strip(await runOperationalHealthChecks(refDb))), error: null });
+    assert.equal(r.stats.statements, 2, "session + 1 (CURRENT 9 queries)");
+    const byId = Object.fromEntries(r.body.results.map((x) => [x.id, x]));
+    assert.equal(byId.notification_failed_volume.status, "warn");
+    assert.ok(byId.x_id_merge_pending_stale.count >= 2 && byId.open_moderation_cases_overdue.count >= 1);
+    assert.equal((await get("/ops/health?status=info")).body.status, "info");
+
+    const deep = await call("/api/admin-read/ops/health?deep=1", ADMIN);
+    assert.equal(deep.status, 501);
+    assert.equal(deep.headers.get("cache-control"), "private, no-store");
+    assert.equal(deep.stats.statements, 1, "no health query for a deep run");
+    assert.equal((await call("/api/admin-read/ops/health?run=1", ADMIN)).status, 501);
+
+    const d1 = createD1(sqlite);
+    const prepare = d1.prepare;
+    d1.prepare = (text) => {
+      if (/notification_failed_volume/.test(text)) throw new Error("secret-internal");
+      return prepare(text);
+    };
+    const failed = await call("/api/admin-read/ops/health", ADMIN, { d1 });
+    assert.equal(failed.status, 200);
+    assert.deepEqual(failed.body, { status: "all", results: [], error: "query_failed" });
+    assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

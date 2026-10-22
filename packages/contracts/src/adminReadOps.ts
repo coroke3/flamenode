@@ -535,6 +535,23 @@ export const AdminStaticBuildsResponseSchema = z.object({
   ),
 });
 export type AdminStaticBuildsResponse = z.infer<typeof AdminStaticBuildsResponseSchema>;
+
+// Same result row as the security checks (CURRENT HealthCheckResult / SecurityCheckResult).
+export const AdminDiagnosticResultSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  status: z.enum(["ok", "warn", "info"]),
+  count: z.number(),
+  samples: z.array(z.string()),
+  note: z.string().optional(),
+});
+// Operational (default) health view only; the deep view is answered 501 by the API (see ops.ts).
+export const AdminHealthResponseSchema = z.object({
+  status: z.enum(["all", "warn", "info", "ok"]),
+  results: z.array(AdminDiagnosticResultSchema),
+  error: z.literal("query_failed").nullable(),
+});
+export type AdminHealthResponse = z.infer<typeof AdminHealthResponseSchema>;
 export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
 export type AdminCostGuardResponse =z.infer<typeof AdminCostGuardResponseSchema>;
