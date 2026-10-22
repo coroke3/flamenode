@@ -275,3 +275,29 @@ export async function loadAboutStatsSnapshot(
   metrics.accepted += 1;
   return stats;
 }
+
+/**
+ * Public event object keys (MIG-0502). The payloads are CURRENT's `events/index.json`,
+ * `events/{id}.json` and `events/{id}/release.v1.json` as they are; the normalizers stay CURRENT's
+ * (`staticEvents*Core`, imported by `eventData.ts`) so the visibility fences cannot drift.
+ */
+export const EVENT_INDEX_KEY = "snapshot/event-index/current.json";
+export const EVENT_DETAIL_KEY_PATTERN = /^snapshot\/event-detail\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const EVENT_RELEASE_KEY_PATTERN = /^snapshot\/event-release\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const eventDetailKey = (id: string): string => `snapshot/event-detail/${id}.json`;
+export const eventReleaseKey = (id: string): string => `snapshot/event-release/${id}.json`;
+
+/** Verified raw payload of one event object (manifest, generation, visibility, hash). Throws SnapshotBuildError. */
+export async function loadEventPayloadSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const pattern = key === EVENT_INDEX_KEY
+    ? /^snapshot\/event-index\/current\.json$/
+    : key.startsWith("snapshot/event-release/") ? EVENT_RELEASE_KEY_PATTERN : EVENT_DETAIL_KEY_PATTERN;
+  const payload = await readVerifiedPayload(source, key, options, metrics, pattern);
+  metrics.accepted += 1;
+  return payload;
+}

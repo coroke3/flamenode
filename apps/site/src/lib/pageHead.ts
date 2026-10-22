@@ -67,6 +67,15 @@ export function buildSiteJsonLd(origin: string = siteOrigin()): Record<string, u
   };
 }
 
+/** CURRENT `absoluteUrl`: absolute URLs pass through, paths resolve against the site origin. */
+export function absoluteUrl(pathOrUrl = "/", origin: string = siteOrigin()): string {
+  try {
+    return new URL(pathOrUrl).toString();
+  } catch {
+    return new URL(pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`, origin).toString();
+  }
+}
+
 export function serializeJsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
@@ -95,9 +104,11 @@ export type PageHead = Readonly<{
   canonical: string;
   ogTitle: string;
   ogImage: string;
-  ogImageWidth: number;
-  ogImageHeight: number;
+  ogImageWidth: number | null;
+  ogImageHeight: number | null;
   ogImageAlt: string;
+  /** `image/png` for the brand card only (CURRENT emits width/height/type just for it). */
+  ogImageType: string | null;
 }>;
 
 export function buildPageHead(input: {
@@ -105,17 +116,22 @@ export function buildPageHead(input: {
   title: string;
   description?: string | null;
   noIndex?: boolean;
+  /** CURRENT `buildPageMetadata({ image })`: absolute or site-relative; omitted = the brand social card. */
+  image?: string | null;
 }): PageHead {
   const origin = siteOrigin();
+  const image = input.image?.trim() || null;
+  const imageUrl = image ? absoluteUrl(image, origin) : `${origin}${BRAND_SOCIAL_IMAGE_PATH}`;
   return {
     noindex: input.noIndex === true,
     title: `${input.title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
     ogTitle: input.title,
-    ogImage: `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
-    ogImageWidth: 1200,
-    ogImageHeight: 630,
-    ogImageAlt: `${SITE_NAME} ロゴ`,
+    ogImage: imageUrl,
+    ogImageWidth: image ? null : 1200,
+    ogImageHeight: image ? null : 630,
+    ogImageAlt: image ? input.title : `${SITE_NAME} ロゴ`,
+    ogImageType: image ? null : "image/png",
   };
 }
