@@ -401,10 +401,10 @@ if (runUnderRootTsx(import.meta.url)) {
   test("T-slots: page size 100, offset clamp 0..400, rows beyond the first page are reachable", async () => {
     const first = (await call("/api/manage/events/evA/slots", "tok-owner")).body;
     assert.equal(first.slots.length, 100);
-    assert.equal(first.total, 130);
+    assert.equal(first.total, 133);
     const second = (await call("/api/manage/events/evA/slots?offset=100", "tok-owner")).body;
-    assert.equal(second.slots.length, 30);
-    assert.equal(new Set([...first.slots, ...second.slots].map((s) => s.id)).size, 130);
+    assert.equal(second.slots.length, 33);
+    assert.equal(new Set([...first.slots, ...second.slots].map((s) => s.id)).size, 133);
     assert.equal((await call("/api/manage/events/evA/slots?offset=99999", "tok-owner")).body.offset, 400);
     assert.equal((await call("/api/manage/events/evA/slots?offset=-5", "tok-owner")).body.offset, 0);
     assert.equal((await call("/api/manage/events/evA/slots?offset=abc", "tok-owner")).body.offset, 0);
@@ -504,6 +504,70 @@ if (runUnderRootTsx(import.meta.url)) {
       notifications: rows.map((n) => refNotif(n, recipients)),
     };
   }
+
+  // app/(manage)/manage/events/[id]/audience/page.tsx
+  const { isNotNull, or: orOp } = await import("drizzle-orm");
+  async function refAudience(name, eventId) {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    const ev = nav.events.find((e) => e.id === eventId);
+    if (!ev) return 404;
+    const permissions = snapshot.isAdmin ? new Set() : MA.getEventPermissionsFromSnapshot(snapshot, eventId);
+    if (!snapshot.isAdmin && permissions.size === 0) return 404;
+    const slotAudienceXId = sql`COALESCE(${S.slots.reserved_x_id_snapshot}, ${S.slots.x_user_id})`;
+    const slotXIds = await refDb
+      .select({
+        x_user_id: slotAudienceXId, x_name: S.xUsers.x_name, icon_url: S.xUsers.icon_url, approval_status: S.xUsers.approval_status,
+        slot_count: sql`COUNT(*)`, submitted_count: sql`SUM(CASE WHEN ${S.slots.status} = 'submitted' THEN 1 ELSE 0 END)`,
+      })
+      .from(S.slots).leftJoin(S.xUsers, eq(S.xUsers.id, slotAudienceXId))
+      .where(and(eq(S.slots.event_id, eventId), orOp(isNotNull(S.slots.x_user_id), isNotNull(S.slots.reserved_x_id_snapshot)), sql`TRIM(COALESCE(${S.slots.reserved_x_id_snapshot}, ${S.slots.x_user_id}, '')) != ''`))
+      .groupBy(slotAudienceXId).orderBy(asc(slotAudienceXId));
+    const submitters = await refDb
+      .select({ x_user_id: S.videos.creator_x_user_id, x_name: S.xUsers.x_name, icon_url: S.xUsers.icon_url, approval_status: S.xUsers.approval_status, video_count: sql`COUNT(*)` })
+      .from(S.videos).innerJoin(S.videoEvents, eq(S.videoEvents.video_id, S.videos.id)).leftJoin(S.xUsers, eq(S.xUsers.id, S.videos.creator_x_user_id))
+      .where(and(eq(S.videoEvents.event_id, eventId), isNotNull(S.videos.creator_x_user_id)))
+      .groupBy(S.videos.creator_x_user_id).orderBy(asc(S.videos.creator_x_user_id));
+    const audienceMap = new Map();
+    for (const s of slotXIds) {
+      if (!s.x_user_id) continue;
+      audienceMap.set(s.x_user_id, { x_user_id: s.x_user_id, x_name: s.x_name, icon_url: s.icon_url, approval_status: s.approval_status, slot_count: Number(s.slot_count ?? 0), submitted_count: Number(s.submitted_count ?? 0), video_count: 0 });
+    }
+    for (const v of submitters) {
+      if (!v.x_user_id) continue;
+      const existing = audienceMap.get(v.x_user_id);
+      if (existing) {
+        existing.video_count = Number(v.video_count ?? 0);
+        if (!existing.x_name && v.x_name) existing.x_name = v.x_name;
+        if (!existing.icon_url && v.icon_url) existing.icon_url = v.icon_url;
+        if (!existing.approval_status && v.approval_status) existing.approval_status = v.approval_status;
+      } else {
+        audienceMap.set(v.x_user_id, { x_user_id: v.x_user_id, x_name: v.x_name, icon_url: v.icon_url, approval_status: v.approval_status, slot_count: 0, submitted_count: 0, video_count: Number(v.video_count ?? 0) });
+      }
+    }
+    const sorted = Array.from(audienceMap.values()).sort((a, b) => b.submitted_count - a.submitted_count || b.video_count - a.video_count || b.slot_count - a.slot_count);
+    const audience = await Promise.all(sorted.map(async (row) => ({ ...row, icon_url: await resolveManageXIconUrl({ iconUrl: row.icon_url, approvalStatus: row.approval_status, authSecret: "test-secret" }) })));
+    return { isAdmin: snapshot.isAdmin, event: { id: ev.id, title: ev.title, accent_color: ev.accent_color }, pendingCount: nav.pendingByEvent.get(eventId) ?? 0, audience, truncated: false };
+  }
+
+  test("T-audience: audience preview equals CURRENT for every user and event; IDOR", async () => {
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const eventId of ["evA", "evB", "evC", "evD", "nope"]) {
+        const r = await call(`/api/manage/events/${eventId}/audience`, `tok-${name}`);
+        const ref = await refAudience(name, eventId);
+        if (ref === 404) {
+          assert.equal(r.status, 404, `${name} ${eventId}`);
+          continue;
+        }
+        assert.equal(r.status, 200, `${name} ${eventId}`);
+        assert.deepEqual(r.body, canon(ref), `${name} ${eventId}`);
+        record("audience", r);
+      }
+    }
+    const a = (await call("/api/manage/events/evA/audience", "tok-owner")).body;
+    assert.ok(a.audience.some((row) => row.x_user_id === "req_b" && row.video_count === 3));
+    assert.ok(!a.audience.some((row) => row.x_user_id.trim() === ""), "blank snapshots are skipped");
+  });
 
   // app/(manage)/manage/x-link-requests/page.tsx
   const { enrichXLinkPendingRows } = await import("../../../src/lib/admin/enrichXLinkPendingRows.ts");

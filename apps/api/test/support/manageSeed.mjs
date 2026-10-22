@@ -207,6 +207,11 @@ export function seed(sqlite) {
       version: 1 + (i % 4),
     });
   }
+  ins("slots", { id: "sAsnap1", event_id: "evA", status: "submitted", start_time: NOW, sort_order: 0, x_user_id: "owner_x", reserved_x_id_snapshot: "req_a", updated_at: NOW });
+  ins("slots", { id: "sAsnap2", event_id: "evA", status: "reserved", start_time: NOW, sort_order: 0, reserved_x_id_snapshot: "ghost_snapshot", updated_at: NOW });
+  ins("slots", { id: "sAblank", event_id: "evA", status: "reserved", start_time: NOW, sort_order: 0, reserved_x_id_snapshot: "  ", updated_at: NOW });
+  for (const id of ["vi1", "vi2", "vi3"]) ins("video_events", { video_id: id, event_id: "evA" });
+  ins("video_events", { video_id: "vi4", event_id: "evA" });
   for (let i = 0; i < 4; i += 1) ins("slots", { id: `sB${i}`, event_id: "evB", status: "reserved", start_time: NOW + i, sort_order: 0, reserved_by_user_id: "u_removed", updated_at: NOW });
   ins("slots", { id: "sC0", event_id: "evC", status: "available", start_time: NOW, sort_order: 0, updated_at: NOW });
 }
