@@ -75,6 +75,16 @@ test("video: Islands are slots; the static render has no no-op buttons and no Yo
   assert.equal(withIslands.querySelector(".vd-chapters"), null, "chapters slot replaces the static list");
 });
 
+test("video: primary event without a status label shows no status badge, never the Badge default DRAFT", () => {
+  for (const statusLabel of ["", undefined]) {
+    const video = videoFixture();
+    video.primaryEvent = { ...video.primaryEvent, statusLabel, statusTone: undefined, accepting: false };
+    const doc = render(VideoDetailView, { video });
+    assert.equal(doc.querySelector(".vd-event .fn-status"), null);
+    assert.doesNotMatch(doc.body.textContent, /DRAFT/);
+  }
+});
+
 test("video: no YouTube shows CURRENT fallback; related unavailable / empty / limit", () => {
   const video = { ...videoFixture(), hasYoutube: false, relatedUnavailable: true };
   const doc = render(VideoDetailView, { video });
@@ -112,6 +122,16 @@ test("event: entry action follows CURRENT (reserve / submit / none), guideline a
   const none = render(EventDetailView, { event: { ...eventFixture(), entryAction: null, playlistUrl: null } });
   assert.equal(none.querySelector(".ed-head .fn-btn--primary"), null);
   assert.ok(!hrefs(none).some((h) => h?.startsWith("https://www.youtube.com/playlist")));
+});
+
+test("event: no status label renders no badge, never the Badge default DRAFT (CURRENT always shows a status, never DRAFT)", () => {
+  for (const statusLabel of ["", undefined]) {
+    const doc = render(EventDetailView, { event: { ...eventFixture(), statusLabel, statusTone: undefined } });
+    assert.equal(doc.querySelector(".ed-status .fn-status"), null);
+    assert.doesNotMatch(doc.body.textContent, /DRAFT/);
+  }
+  const labelled = render(EventDetailView, { event: { ...eventFixture(), statusLabel: "開始前", statusTone: undefined } });
+  assert.equal(labelled.querySelector(".ed-status .fn-status").textContent, "開始前");
 });
 
 test("event: metrics, slot parts, staff, videos and CURRENT hrefs", () => {

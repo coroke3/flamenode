@@ -874,7 +874,7 @@ test("Cloudflare build invokes OpenNext build exactly once and checks the result
       },
     });
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].args, [fakeCli, "build"]);
+    assert.deepEqual(calls[0].args, [fakeCli, "build", "--dangerouslyUseUnsupportedNextVersion"]);
     assert.equal(checked, true);
   }));
 
