@@ -104,12 +104,12 @@ export type PageHead = Readonly<{
   canonical: string;
   ogTitle: string;
   ogImage: string;
-  /** null for a page-specific image: CURRENT emits no size or type for it. */
-  ogImageWidth: number | null;
-  ogImageHeight: number | null;
-  ogImageType: string | null;
+  /** Brand card only: dimensions and type are known (CURRENT adds them only for the default image). */
+  ogImageWidth?: number;
+  ogImageHeight?: number;
+  ogImageType?: string;
   ogImageAlt: string;
-  ogType: "website" | "profile";
+  ogType: "website" | "video.other" | "profile";
 }>;
 
 /** CURRENT `absoluteUrl`: absolute URLs stay, paths go under the site origin. */
@@ -126,35 +126,21 @@ export function buildPageHead(input: {
   title: string;
   description?: string | null;
   noIndex?: boolean;
-  /** Page-specific Open Graph image (CURRENT `buildPageMetadata({ image })`); default is the brand card. */
+  /** Absolute or site-relative image; omitted = the brand social card. */
   image?: string | null;
-  ogType?: "website" | "profile";
+  ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
-  const base = {
+  const custom = input.image ? new URL(input.image, origin).toString() : null;
+  return {
     noindex: input.noIndex === true,
     title: `${input.title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
     ogTitle: input.title,
+    ogImage: custom ?? `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
+    ...(custom ? {} : { ogImageWidth: 1200, ogImageHeight: 630, ogImageType: "image/png" }),
+    ogImageAlt: custom ? input.title : `${SITE_NAME} ロゴ`,
     ogType: input.ogType ?? "website",
-  } as const;
-  if (input.image) {
-    return {
-      ...base,
-      ogImage: absoluteUrl(input.image, origin),
-      ogImageWidth: null,
-      ogImageHeight: null,
-      ogImageType: null,
-      ogImageAlt: input.title,
-    };
-  }
-  return {
-    ...base,
-    ogImage: `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
-    ogImageWidth: 1200,
-    ogImageHeight: 630,
-    ogImageType: "image/png",
-    ogImageAlt: `${SITE_NAME} ロゴ`,
   };
 }

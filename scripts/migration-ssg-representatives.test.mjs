@@ -43,7 +43,7 @@ test("MIG-0403 T02: alias fixture has canonical pointing to canonical primary UR
   assert.equal(aliasVideo.aliasOf, "sample-video-1");
 
   if (fs.existsSync(DIST_DIR)) {
-    const aliasHtmlPath = path.join(DIST_DIR, "sample-video-alias/index.html");
+    const aliasHtmlPath = path.join(DIST_DIR, "migration-fixture-poc/video/sample-video-alias/index.html");
     if (fs.existsSync(aliasHtmlPath)) {
       const html = fs.readFileSync(aliasHtmlPath, "utf-8");
       assert.ok(html.includes('<link rel="canonical" href="https://flamenode.net/sample-video-1">'));
@@ -54,8 +54,8 @@ test("MIG-0403 T02: alias fixture has canonical pointing to canonical primary UR
 test("MIG-0403 T03: OGP metadata, title, and site_name follow CURRENT production rules", () => {
   if (fs.existsSync(DIST_DIR)) {
     // 1. Video Detail HTML verification
-    const videoHtmlPath = path.join(DIST_DIR, "sample-video-1/index.html");
-    assert.ok(fs.existsSync(videoHtmlPath), "sample-video-1/index.html must exist");
+    const videoHtmlPath = path.join(DIST_DIR, "migration-fixture-poc/video/sample-video-1/index.html");
+    assert.ok(fs.existsSync(videoHtmlPath), "migration-fixture-poc/video/sample-video-1/index.html must exist");
     const videoHtml = fs.readFileSync(videoHtmlPath, "utf-8");
     assert.ok(videoHtml.includes("<title>代表動画: FlameNodeローンチ記念フェス - FlameNode</title>"));
     assert.ok(videoHtml.includes('<link rel="canonical" href="https://flamenode.net/sample-video-1">'));

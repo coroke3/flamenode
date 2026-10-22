@@ -256,6 +256,9 @@ a.il::before,button.il::before{content:"";position:absolute;inset:-6px 0}
 
 /* video detail */
 .vd-player{background:var(--black);aspect-ratio:16/9;display:grid;place-items:center}
+.vd-player .vd-iframe{width:100%;height:100%;border:0;display:block}
+.vd-player:has(.vd-iframe){position:relative}
+.vd-player .vd-iframe{position:absolute;inset:0}
 .vd-player-empty{margin:0;padding:24px;text-align:center;color:var(--ink-muted);font-size:14px;line-height:20px}
 .vd-creator-row{gap:12px 16px}
 .vd-creator{gap:12px;min-width:0}

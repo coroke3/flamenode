@@ -286,6 +286,25 @@ export async function loadListingPayload(
   return payload;
 }
 
+/** CURRENT `videos/{id}.json` artifact, one snapshot per public video (MIG-0507). */
+const VIDEO_DETAIL_KEY = /^snapshot\/video-detail\/[A-Za-z0-9_-]{1,64}\.json$/;
+
+/** Allowed, not blocked, well-formed video detail keys of a manifest. */
+export function videoDetailKeys(manifest: SnapshotManifest): string[] {
+  return manifest.allowedKeys.filter((key) => VIDEO_DETAIL_KEY.test(key) && !manifest.blockedKeys.includes(key));
+}
+
+export async function loadVideoDetailPayload(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, VIDEO_DETAIL_KEY);
+  metrics.accepted += 1;
+  return payload;
+}
+
 /** Same fail-closed checks as entities; the payload is the three RH-026 counts (MIG-0501). */
 export async function loadAboutStatsSnapshot(
   source: SnapshotSource,
