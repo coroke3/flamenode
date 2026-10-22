@@ -91,9 +91,9 @@ export function AboutView({ stats, logoSrc = "/brand/flamenode-mark.svg", classN
           <div className="ab-points">
             {stats ? (
               <div className="metrics" role="group" aria-label="FlameNode の現在">
-                <div className="metric"><b>{count(stats.publicVideos)}</b><span>公開作品</span></div>
-                <div className="metric"><b>{count(stats.creators)}</b><span>クリエイター名義</span></div>
-                <div className="metric"><b>{count(stats.events)}</b><span>イベント</span></div>
+                <div className="metric"><b>{count(stats.publicVideos)}件</b><span>公開作品</span><span className="ab-note">動画ページ・作品棚・イベントから閲覧できます。</span></div>
+                <div className="metric"><b>{count(stats.creators)}件</b><span>クリエイター名義</span><span className="ab-note">X ID を公開名義として作品と紐づけます。</span></div>
+                <div className="metric"><b>{count(stats.events)}件</b><span>イベント</span><span className="ab-note">募集・公開・アーカイブの記録を扱います。</span></div>
               </div>
             ) : (
               <ul className="wrap-row t-sm muted ab-chips" aria-label="FlameNode がつなぐ情報">

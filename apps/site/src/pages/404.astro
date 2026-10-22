@@ -1,0 +1,23 @@
+---
+/**
+ * Static 404 body (MIG-0501 / G10). CURRENT `app/not-found.tsx` text, noindex like Next's not-found.
+ * Emitted as `404.html`; the gateway / Static Assets `404-page` handling answers with status 404.
+ */
+import { EmptyState } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { buildPageHead } from "../lib/pageHead.ts";
+
+const head = buildPageHead({ path: "/404", title: "ページが見つかりません", noIndex: true });
+---
+<PublicLayout head={head} currentPath="/404">
+  <div class="p-root fn-screen">
+    <main class="wrap scr-empty">
+      <EmptyState
+        title="ページが見つかりません"
+        description="URL を確認するか、トップページから再度お探しください。"
+        tone="neutral"
+        action={{ href: "/", label: "トップへ戻る", variant: "primary" }}
+      />
+    </main>
+  </div>
+</PublicLayout>

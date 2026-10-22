@@ -8,7 +8,18 @@ import "@flamenode/ui/styles/layout.css";
 import "@flamenode/ui/styles/screens.css";
 import { PublicFooter } from "@flamenode/ui";
 import { SiteHeader } from "../components/SiteHeader.ts";
-import type { PageHead } from "../lib/pageHead.ts";
+import {
+  BRAND_ICON_PATH,
+  SITE_NAME,
+  THEME_BOOTSTRAP_CODE,
+  buildSiteJsonLd,
+  gaInitScript,
+  gaLoaderSrc,
+  gaMeasurementId,
+  serializeJsonLd,
+  siteOrigin,
+  type PageHead,
+} from "../lib/pageHead.ts";
 
 interface Props {
   head: PageHead;
@@ -16,13 +27,46 @@ interface Props {
 }
 
 const { head, currentPath } = Astro.props;
+const origin = siteOrigin();
+const gaId = gaMeasurementId();
+const robots = head.noindex
+  ? "noindex, nofollow"
+  : "index, follow";
+const googlebot = head.noindex
+  ? "noindex, nofollow"
+  : "index, follow, max-video-preview:-1, max-image-preview:large, max-snippet:-1";
 ---
 <!doctype html>
 <html lang="ja" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <script is:inline set:html={THEME_BOOTSTRAP_CODE}></script>
+    <script is:inline id="flamenode-site-structured-data" type="application/ld+json" set:html={serializeJsonLd(buildSiteJsonLd(origin))}></script>
     <title>{head.title}</title>
+    <meta name="application-name" content={SITE_NAME} />
+    <meta name="author" content={SITE_NAME} />
+    <link rel="author" href={`${origin}/`} />
+    <meta name="creator" content={SITE_NAME} />
+    <meta name="publisher" content={SITE_NAME} />
+    <meta name="category" content="entertainment" />
+    <meta name="robots" content={robots} />
+    <meta name="googlebot" content={googlebot} />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#fbfaf5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content={SITE_NAME} />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="msapplication-TileColor" content="#c8f21f" />
+    <link rel="icon" href="/brand/flamenode-favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="icon" href="/brand/flamenode-icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="icon" href={BRAND_ICON_PATH} sizes="512x512" type="image/png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/brand/flamenode-apple-touch-icon.png" sizes="180x180" type="image/png" />
+    <link rel="preload" href="/fonts/FlameNodeSans.otf" as="font" type="font/otf" crossorigin />
+    <meta property="og:locale" content="ja_JP" />
     <meta name="description" content={head.description} />
     <link rel="canonical" href={head.canonical} />
     <meta property="og:site_name" content="FlameNode" />
@@ -39,6 +83,9 @@ const { head, currentPath } = Astro.props;
     <meta name="twitter:description" content={head.description} />
     <meta name="twitter:image" content={head.ogImage} />
     <meta name="twitter:image:alt" content={head.ogImageAlt} />
+    <meta property="og:image:type" content="image/png" />
+    {gaId && <script is:inline id="_next-ga-init" set:html={gaInitScript(gaId)}></script>}
+    {gaId && <script is:inline id="_next-ga" src={gaLoaderSrc(gaId)}></script>}
   </head>
   <body>
     <SiteHeader client:load currentPath={currentPath} />
@@ -47,6 +94,8 @@ const { head, currentPath } = Astro.props;
   </body>
 </html>
 <style is:global>
-  html { color-scheme: dark; }
+  @font-face { font-family: "FlameNode Sans"; src: url("/fonts/FlameNodeSans.otf") format("opentype"); font-weight: 400; font-display: swap; }
+  html { --font-flamenode: "FlameNode Sans"; color-scheme: dark; }
+  html[data-theme="light"] { color-scheme: light; }
   body { margin: 0; background: var(--bg); color: var(--ink); }
 </style>

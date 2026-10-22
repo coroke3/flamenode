@@ -362,7 +362,7 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .ab-lead{margin:0;font-size:18px;line-height:30px;max-width:640px}
 .ab-points{flex:1 1 360px}
 .ab-chips{gap:8px 24px}
-.ab-head{margin-bottom:32px}
+.metric .ab-note{max-width:20em;letter-spacing:0}.ab-head{margin-bottom:32px}
 .ab-sublead{margin:-16px 0 32px}
 .ab-kv{grid-template-columns:200px minmax(0,720px);gap:32px 48px}
 .ab-kv dt{font-size:15px;color:var(--ink)}
@@ -376,6 +376,7 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .ab-entry{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:32px 48px}
 .ab-entry a{display:flex;flex-direction:column;gap:4px}
 .ab-entry .t-h3{display:inline-flex;align-items:center;gap:8px}
+.mt-wrap{gap:24px;padding-top:96px;padding-bottom:96px}
 .rl-wrap{padding-top:56px}
 .rl-main{max-width:760px}
 .rl-ver{margin:12px 0 0}

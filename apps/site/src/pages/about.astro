@@ -1,11 +1,12 @@
 ---
 /**
  * `/about` (MIG-0501 / Recipe R-PAGE / Runtime S0). Static HTML, no request-time data.
- * Stats: the Phase 4 snapshot loader has no stats object, so none are passed and the block stays
- * hidden, the same as CURRENT when its client fetch fails (see the MIG-0501 work item).
+ * Stats come from the `about-stats` build snapshot; they are hidden when none is available,
+ * the same as CURRENT when its client fetch fails (see the MIG-0501 work item).
  */
 import { AboutView } from "@flamenode/ui";
 import PublicLayout from "../layouts/PublicLayout.astro";
+import { loadAboutStatsForBuild } from "../lib/aboutStats.ts";
 import { buildPageHead } from "../lib/pageHead.ts";
 
 const head = buildPageHead({
@@ -14,7 +15,8 @@ const head = buildPageHead({
   description:
     "FlameNode は、個人制作映像のアーカイブとイベント参加・投稿・運営の記録をつなぐサイトです。",
 });
+const stats = await loadAboutStatsForBuild();
 ---
 <PublicLayout head={head} currentPath="/about">
-  <AboutView />
+  <AboutView stats={stats} />
 </PublicLayout>
