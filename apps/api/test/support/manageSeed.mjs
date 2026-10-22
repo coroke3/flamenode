@@ -189,6 +189,34 @@ export function seed(sqlite) {
   xr("xr9", "new_link", "　@@Req_A ﻿", " req_c\u000b", "pending", NOW + 9);
   for (let i = 0; i < 105; i += 1) xr(`xrbulk${i}`, "new_link", `bulk${i}`, null, "pending", NOW - 1000 + i);
 
+  // custom questions / answers (review summaries): stage permission keys, an inactive one, a required free-text question
+  const question = (id, eventId, key, o = {}) =>
+    ins("event_custom_questions", { id, event_id: eventId, question_key: key, label: o.label ?? `Label ${key}`, type: "text", required: o.required ?? 0, sort_order: o.sort ?? 0, is_active: o.active ?? 1 });
+  const answer = (videoId, eventId, questionId, text, json = null) =>
+    ins("video_custom_answers", { video_id: videoId, event_id: eventId, question_id: questionId, answer_text: text, answer_json: json, created_at: NOW, updated_at: NOW });
+  question("cq1", "evA", "stage_permission", { required: 1, sort: 0 });
+  question("cq2", "evA", "stage_permission_2", { sort: 1 });
+  question("cq3", "evA", "stage_permission_3", { sort: 2, active: 0 });
+  question("cq4", "evA", "free_text", { required: 1, sort: 3 });
+  question("cq5", "evB", "stage_permission", { sort: 0 });
+  question("cq6", "evA", "other_required", { required: 1, sort: 4 });
+  answer("v1", "evA", "cq1", "This answer is clearly longer than twenty four characters");
+  answer("v1", "evA", "cq2", " short ");
+  answer("v1", "evA", "cq4", "ok");
+  answer("v2", "evA", "cq1", "   ");
+  answer("v2", "evA", "cq4", null, "[]");
+  answer("v3", "evA", "cq6", null, '{"a":1}');
+  answer("v4", "evB", "cq5", "b-answer");
+  event("evStage5", { start_time: NOW + 50 * DAY, end_time: NOW + 51 * DAY });
+  for (let i = 0; i < 5; i += 1) question(`cs${i}`, "evStage5", i === 0 ? "stage_permission" : `stage_permission_${i + 1}`, { sort: i });
+  ins("videos", { id: "vstage5", title: "stage5", submitted_by_user_id: "u_plain", creator_display_name: "c", visibility_status: "pending", created_at: NOW });
+  ins("video_events", { video_id: "vstage5", event_id: "evStage5" });
+  event("evQueue", { start_time: NOW + 60 * DAY, end_time: NOW + 61 * DAY });
+  for (let i = 0; i < 120; i += 1) {
+    ins("videos", { id: `vq${String(i).padStart(3, "0")}`, title: `Q ${i}`, submitted_by_user_id: "u_plain", creator_display_name: `C ${i}`, visibility_status: i % 4 === 0 ? "public" : "pending", created_at: NOW - i, source_type: "youtube" });
+    ins("video_events", { video_id: `vq${String(i).padStart(3, "0")}`, event_id: "evQueue" });
+  }
+
   // youtube playlist sync: evA synced (one public video with a playlist item), evC failed, evB has no config row
   ins("event_youtube_playlist_sync", { event_id: "evA", playlist_id: "PL1", enabled: 1, sync_mode: "all", sync_interval_minutes: 60, sync_status: "synced", next_sync_at: NOW + 1000, last_synced_at: NOW - 10, last_full_scan_at: NOW - 20 });
   ins("event_youtube_playlist_sync", { event_id: "evC", playlist_id: "PL2", enabled: 1, sync_mode: "all", sync_status: "failed", last_error: "boom" });

@@ -569,6 +569,75 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(!a.audience.some((row) => row.x_user_id.trim() === ""), "blank snapshots are skipped");
   });
 
+  // app/(manage)/manage/events/[id]/videos/page.tsx
+  const { fetchVideoReviewSummaries } = await import("../../../src/lib/admin/videoReviewMeta.ts");
+  const labels = await import("../../../src/lib/admin/videoVisibilityLabels.ts");
+  const { videoReviewQueueOrder } = await import("../../../src/lib/admin/videoReviewQueueOrder.ts");
+  async function refVideos(name, eventId, statusRaw = "review", offset = 0) {
+    const nav = await refNavigation(name);
+    const { snapshot } = nav;
+    if (!MA.canAccessManageEventFromSnapshot(snapshot, eventId)) return 404;
+    const ev = nav.events.find((e) => e.id === eventId);
+    if (!ev) return 404;
+    const statusFilter = labels.normalizeVideoVisibilityFilter(statusRaw, "review");
+    const statusValues = labels.videoVisibilityStatusesForFilter(statusFilter);
+    const statusCond = statusValues && statusValues.length > 1 ? inArray(S.videos.visibility_status, statusValues) : statusValues?.[0] ? eq(S.videos.visibility_status, statusValues[0]) : undefined;
+    const eventCond = eq(S.videoEvents.event_id, eventId);
+    const baseRows = await refDb
+      .select({ id: S.videos.id, title: S.videos.title, source_type: S.videos.source_type, youtube_video_id: S.videos.youtube_video_id, display_name: S.videos.creator_display_name, visibility_status: S.videos.visibility_status, created_at: S.videos.created_at })
+      .from(S.videos).innerJoin(S.videoEvents, eq(S.videoEvents.video_id, S.videos.id))
+      .where(statusCond ? and(eventCond, statusCond) : eventCond)
+      .orderBy(...videoReviewQueueOrder).limit(200);
+    const summaries = baseRows.length > 0 ? await fetchVideoReviewSummaries(refDb, baseRows.map((r) => r.id), eventId) : new Map();
+    const rows = baseRows.map((row) => {
+      const summary = summaries.get(row.id);
+      return { ...row, stage_permission_summary: summary?.stage_permission_summary ?? "—", required_unanswered_count: summary?.required_unanswered_count ?? 0 };
+    });
+    return {
+      isAdmin: snapshot.isAdmin,
+      event: { id: ev.id, title: ev.title, accent_color: ev.accent_color },
+      pendingCount: nav.pendingByEvent.get(eventId) ?? 0,
+      canApproveVideoStatus: MA.canEditEventFromSnapshot(snapshot, eventId, "video.status"),
+      statusFilter,
+      filterLabel: statusFilter ? labels.videoVisibilityFilterLabel(statusFilter) : "すべて",
+      isReviewFilter: (statusFilter ? labels.videoVisibilityGroupForFilter(statusFilter) : null) === "review",
+      offset,
+      pageSize: 100,
+      rows: rows.slice(offset, offset + 100),
+    };
+  }
+
+  test("T-videos: review queue (filters, review summaries, paging) equals CURRENT; IDOR; >4 stage questions fails like CURRENT", async () => {
+    const statuses = [undefined, "", "all", "review", "public", "private", "closed", "pending", "voided", "bogus"];
+    for (const name of WITH_ACCESS.filter((n) => n !== "many")) {
+      for (const eventId of ["evA", "evB", "evC", "evQueue", "nope"]) {
+        for (const status of statuses) {
+          if (eventId === "evQueue" && name !== "admin" && status !== undefined) continue;
+          const qs = status === undefined ? "" : `?status=${status}`;
+          const r = await call(`/api/manage/events/${eventId}/videos${qs}`, `tok-${name}`);
+          const ref = await refVideos(name, eventId, status);
+          if (ref === 404) {
+            assert.equal(r.status, 404, `${name} ${eventId} ${status}`);
+            continue;
+          }
+          assert.equal(r.status, 200, `${name} ${eventId} ${status}`);
+          assert.deepEqual(r.body, canon(ref), `${name} ${eventId} ${status}`);
+          record("videos", r);
+        }
+      }
+    }
+    for (const offset of [100, 150, -3]) {
+      const r = await call(`/api/manage/events/evQueue/videos?status=all&offset=${offset}`, "tok-admin");
+      assert.deepEqual(r.body, canon(await refVideos("admin", "evQueue", "all", Math.max(0, Math.min(offset, 100)))));
+    }
+    const a = (await call("/api/manage/events/evA/videos?status=all", "tok-owner")).body;
+    assert.ok(a.rows.some((row) => row.stage_permission_summary.endsWith("…")), "long summaries are cut at 23 chars");
+    assert.ok(a.rows.some((row) => row.required_unanswered_count > 0));
+    assert.equal((await call("/api/manage/events/evB/videos", "tok-owner")).status, 404);
+    const stage5 = await call("/api/manage/events/evStage5/videos?status=all", "tok-admin");
+    assert.equal(stage5.status, 503, "more than 4 stage questions -> video_stage_answer_read_limit_exceeded (CURRENT throws)");
+  });
+
   // app/(manage)/manage/events/[id]/youtube-playlist/page.tsx
   const { derivePlaylistSyncHealth } = await import("../../../src/lib/youtube/playlistSyncHealth.ts");
   async function refPlaylist(name, eventId) {
