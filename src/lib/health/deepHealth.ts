@@ -49,7 +49,11 @@ export class DeepHealthCheckError extends Error {
   }
 }
 
-/** artifactSlo.ts の assertion message から固定コードと key だけを取り出す。 */
+/**
+ * artifactSlo.ts の assertion message から固定コードと key だけを取り出す。
+ * 注意: message は定数 key（または "<video|event> detail"）で始まること。可変値（本文・例外詳細）を
+ * 先頭に置くと key としてログ・応答へ漏れる。
+ */
 export function classifyArtifactSloError(error: unknown): DeepHealthCheckError {
   const message = error instanceof Error ? error.message : "";
   const detail = /^(video|event) detail /.exec(message);
