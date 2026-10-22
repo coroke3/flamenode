@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { SettingsResponse, SettingsXId, XIdentityRequestRow } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
-import { loadPersonalContext, parseJsonColumn, type LinkedXRow } from "./context.ts";
-import { buildChannelCandidates, buildIconCandidates, candidatesStatement } from "./candidates.ts";
+import { loadPersonalContext, parseJsonColumn } from "./context.ts";
+import { buildChannelCandidates, buildIconCandidates, settingsRowsStatement } from "./candidates.ts";
 
 // CURRENT: app/(auth)/dashboard/settings/page.tsx.
 // D1 (S2, <= 3 statements incl. the session lookup): context = 1 statement (terms + linked X profile rows + 50 request
@@ -34,17 +34,15 @@ export function sortXIds(xIds: readonly SettingsXId[], activeXUserId: string | n
   });
 }
 
-interface SettingsLinkedRow extends LinkedXRow {
-  x_user_id: string;
-  x_name: string;
-  icon_url: string | null;
-  youtube_channel_url: string | null;
-  profile_text: string | null;
-  portfolio_contact: string | null;
-  other_social_links: string | null;
-  approval_status: string | null;
-  created_at: number;
-  request_requested_at: number | null;
+interface SettingsRow {
+  kind: "x" | "cand";
+  c1: unknown;
+  c2: unknown;
+  c3: unknown;
+  c4: unknown;
+  c5: unknown;
+  c6: unknown;
+  c7: unknown;
 }
 
 export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
@@ -58,10 +56,8 @@ export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const utilityTab = legacyTab ? null : parseUtilityTab(rawTab);
   const requestedX = c.req.query("x")?.trim() || null;
 
-  const ctx = await loadPersonalContext<SettingsLinkedRow>(db, sessionUser, {
-    profileColumns: true,
-    requestHistory: true,
-  });
+  // Statement 2: terms + header linked X (JSON, short columns) + request history (<= 50 small rows).
+  const ctx = await loadPersonalContext(db, sessionUser, { requestHistory: true });
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
   const { user, linkedRows: linked } = ctx;
   const requestHistory = ctx.history as XIdentityRequestRow[];
@@ -77,11 +73,11 @@ export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
       x.approval_status === "imported"
         ? x.approval_status
         : "pending",
-    requested_at: x.request_requested_at ?? x.created_at,
-    profile_text: x.profile_text ?? null,
-    portfolio_contact: normalizePortfolioContact(x.portfolio_contact),
-    youtube_channel_url: x.youtube_channel_url ?? null,
-    other_social_links: x.other_social_links ?? null,
+    requested_at: null,
+    profile_text: null,
+    portfolio_contact: null,
+    youtube_channel_url: null,
+    other_social_links: null,
   }));
 
   const sortedXIds = sortXIds(xIds, user.active_x_user_id);
@@ -104,26 +100,43 @@ export const personalSettingsRoutes = new Hono<AppEnv>().get("/", async (c) => {
           : null);
   const xTabSelected = showUtilityTab == null && activeXPanel != null;
 
+  // Statement 3: profile text as ROWS (never packed into a JSON column) + the panel's candidate lists.
+  const { results: rows } = await settingsRowsStatement(
+    db,
+    sessionUser.id,
+    xTabSelected && activeXPanel ? activeXPanel.id : null,
+  ).all<SettingsRow>();
+  const byId = new Map(xIds.map((x) => [x.id, x]));
+  let candidateRow: SettingsRow | undefined;
+  for (const row of rows) {
+    if (row.kind === "cand") {
+      candidateRow = row;
+      continue;
+    }
+    const x = byId.get(String(row.c1));
+    if (!x) continue;
+    x.requested_at = (row.c7 as number | null) ?? (row.c6 as number | null);
+    x.profile_text = (row.c2 as string | null) ?? null;
+    x.portfolio_contact = normalizePortfolioContact(row.c3 as string | null);
+    x.other_social_links = (row.c4 as string | null) ?? null;
+    x.youtube_channel_url = (row.c5 as string | null) ?? null;
+  }
+
   let iconCandidates: string[] = [];
   let channelCandidates: string[] = [];
-  if (xTabSelected && activeXPanel) {
-    const row = await candidatesStatement(db, activeXPanel.id).first<{
-      icon_x: string | null;
-      icon_videos: string | null;
-      channel_x: string | null;
-      channel_videos: string | null;
-    }>();
+  if (candidateRow) {
     iconCandidates = buildIconCandidates(
-      { icon_url: row?.icon_x ?? null },
-      parseJsonColumn<Array<string | null>>(row?.icon_videos, []).map((icon_url) => ({ icon_url })),
+      { icon_url: (candidateRow.c1 as string | null) ?? null },
+      parseJsonColumn<Array<string | null>>(candidateRow.c2, []).map((icon_url) => ({ icon_url })),
     );
     channelCandidates = buildChannelCandidates(
-      { youtube_channel_url: row?.channel_x ?? null },
-      parseJsonColumn<Array<string | null>>(row?.channel_videos, []).map((youtube_channel_url) => ({
+      { youtube_channel_url: (candidateRow.c3 as string | null) ?? null },
+      parseJsonColumn<Array<string | null>>(candidateRow.c4, []).map((youtube_channel_url) => ({
         youtube_channel_url,
       })),
     );
   }
+
 
   const body: SettingsResponse = {
     user,

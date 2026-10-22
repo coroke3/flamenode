@@ -1,8 +1,11 @@
 // MIG-0611: raw SQL building blocks shared by the Personal read routes.
 // Every query that uses these is bounded by a named LIMIT in its caller.
 
-/** Max linked X IDs read per user (a user links a handful; this is only a safety cap, CURRENT is unbounded). */
-export const MAX_LINKED_X_USERS = 200;
+/**
+ * Max linked X IDs read per user (ZERO_1102 S2: named LIMIT <= 100), ordered by x_users.id so the kept rows are
+ * deterministic. DIVERGENCE: CURRENT reads all linked rows (unbounded); links beyond 100 are not returned here.
+ */
+export const MAX_LINKED_X_USERS = 100;
 
 export const PVSF_SUMMARY_EVENT_ID = "PVSFSummary";
 
