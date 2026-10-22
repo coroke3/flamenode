@@ -120,3 +120,15 @@ test("parseFileRows and validateFileProgress handle CRLF newlines", () => {
   assert.equal(parseFileRows(crlfMatrix).rows.size, 3);
   assert.deepEqual(validateFileProgress({ ...base, matrix: crlfMatrix }), []);
 });
+
+test("changed started file must cite a new, existing SHA",()=>{
+ const sha=n=>String(n).repeat(40);
+ const row=s=>replace("| \x60app/api/health/route.ts\x60 | ROUTE_HANDLER | RH-018:GET | MIG-0601 | +apps/api/src/routes/health.ts | NOT_STARTED | — |",
+  "| \x60app/api/health/route.ts\x60 | ROUTE_HANDLER | RH-018:GET | MIG-0601 | +apps/api/src/routes/health.ts | IN_PROGRESS | PR#1 SHA="+s+" |");
+ const input={...base,changedPaths:["app/api/health/route.ts"],baseMatrix:row(sha(1)),commitExists:s=>s===sha(1)||s===sha(2)};
+ assert.match(validateFileProgress({...input,matrix:row(sha(1))}).join("\n"),/still cites base SHA/);
+ assert.match(validateFileProgress({...input,matrix:row(sha(3))}).join("\n"),/is not a commit in this repository/);
+ assert.deepEqual(validateFileProgress({...input,matrix:row(sha(2))}),[]);
+ // NOT_STARTED rows keep the existence-only check.
+ assert.deepEqual(validateFileProgress({...base,changedPaths:["app/api/health/route.ts"],baseMatrix:matrix,commitExists:()=>false}),[]);
+});

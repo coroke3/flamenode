@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { validateMigrationExecution, CHECKPOINT_POLICY_FILES } from "./check-migration-execution.mjs";
 import { validateTaskCards, validateWorkOrders, validatePlanCompleteness, readSpecs, TASK_CARD_FILES } from "./check-migration-task-cards.mjs";
-import { validateFileProgress, collectFiles as collectMigrationFiles } from "./check-migration-file-progress.mjs";
+import { validateFileProgress, collectFiles as collectMigrationFiles, changedFileInputs } from "./check-migration-file-progress.mjs";
 import { validateLinks, listMarkdownFiles } from "./check-migration-links.mjs";
 import { validateWorkItems, readWorkItems, gitCommitExists } from "./check-migration-work-items.mjs";
 import { validateUiReference, readUiReferenceInputs } from "./check-migration-ui-reference.mjs";
@@ -1204,6 +1204,7 @@ if (errors.length === 0) {
     serverActions: read("docs/migration/server-actions/README.md"),
     status,
     filePaths: collectMigrationFiles(),
+    ...(process.env.MIGRATION_FILE_BASE_SHA ? changedFileInputs(process.env.MIGRATION_FILE_BASE_SHA) : {}),
     taskCardsText: TASK_CARD_FILES.map(p=>read(p)).join("\n"),
   }));
 

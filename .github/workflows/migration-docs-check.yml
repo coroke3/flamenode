@@ -57,7 +57,10 @@ jobs:
       - name: ファイル別依存・Route/RH/SA登録とPR差分を照合
         env:
           MIGRATION_FILE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node scripts/check-migration-file-progress.mjs
+        # workflow_dispatch has no PR base; compare against origin/main instead of skipping.
+        run: |
+          export MIGRATION_FILE_BASE_SHA="${MIGRATION_FILE_BASE_SHA:-$(git merge-base origin/main HEAD)}"
+          node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
       - name: Work-item進捗構造と所有重複の回帰テスト
