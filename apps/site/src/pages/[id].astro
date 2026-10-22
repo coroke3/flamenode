@@ -1,0 +1,28 @@
+---
+/**
+ * Representative video detail page `/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
+ * Built from the representative snapshots only; the full set is MIG-0507 / MIG-0411.
+ * The internal ID and the YouTube ID alias both get a page with the same canonical,
+ * as CURRENT serves both URLs. Non-public snapshots are rejected by the loader.
+ */
+import { VideoDetailView } from "@flamenode/ui";
+import PublicPage from "../layouts/PublicPage.astro";
+import { StaticScreen } from "../components/StaticScreen.ts";
+import { loadRepresentativeVideos } from "../lib/representativeFixtures.ts";
+import { videoMetadata, videoPaths, videoScreenData } from "../lib/publicPages.ts";
+import type { VideoPublicSnapshot } from "../lib/publicDataLoader.ts";
+
+export async function getStaticPaths() {
+  const videos = await loadRepresentativeVideos();
+  return videos.flatMap((video) => videoPaths(video).map((id) => ({ params: { id }, props: { video } })));
+}
+
+interface Props {
+  video: VideoPublicSnapshot;
+}
+
+const { video } = Astro.props;
+---
+<PublicPage meta={videoMetadata(video)}>
+  <StaticScreen screen={VideoDetailView} props={{ video: videoScreenData(video) }} />
+</PublicPage>

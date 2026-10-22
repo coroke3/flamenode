@@ -189,19 +189,36 @@ the clock during execution); locally that is 23.3 / 104.4 / 994.5 ms CPU for 20 
 ```bash
 npx wrangler login
 npx wrangler queues create flamenode-u07-queue-cpu-probe
+# This first deploy is fail-closed (503) until the secret is set.
 npx wrangler deploy --config apps/site/scripts/queue-cpu-probe/wrangler.jsonc
+# Use a fresh unpredictable 32-byte token. Do not commit or print it.
+export PROBE_TRIGGER_TOKEN="$(openssl rand -hex 32)"
+printf '%s' "$PROBE_TRIGGER_TOKEN" | npx wrangler secret put PROBE_TRIGGER_TOKEN --config apps/site/scripts/queue-cpu-probe/wrangler.jsonc
+# Workers.dev /send now requires Authorization; missing/invalid token returns 401.
 npx wrangler tail flamenode-u07-queue-cpu-probe --format json > u07-tail.jsonl   # leave running
 for ms in 20 100 1000; do
-  curl -X POST "https://flamenode-u07-queue-cpu-probe.<subdomain>.workers.dev/send?ms=$ms&count=50"
+  curl --fail-with-body -X POST -H "Authorization: Bearer $PROBE_TRIGGER_TOKEN" "https://flamenode-u07-queue-cpu-probe.<subdomain>.workers.dev/send?ms=$ms&count=50"
   sleep 120
 done
 # count per condition: outcome == "exceededCpu" vs "ok", and cpuTime, from u07-tail.jsonl
 npx wrangler delete --config apps/site/scripts/queue-cpu-probe/wrangler.jsonc
 npx wrangler queues delete flamenode-u07-queue-cpu-probe
+unset PROBE_TRIGGER_TOKEN
 ```
 
 Results (3 × `exceededCpu` counts) go to `ZERO_1102.md` §1. A local run cannot answer it:
 workerd does not enforce or report the production CPU limit.
+
+**U07 security and failure gate (2026-10-21):** The temporary workers.dev endpoint must
+never accept unauthenticated POSTs. The Worker requires a 32+ character
+`PROBE_TRIGGER_TOKEN` secret and exact `Authorization: Bearer` match; missing/weak
+secret returns 503 and invalid/missing token returns 401 before any Queue request.
+It enqueues at most 50 messages per authorized POST and returns 503 if the Queue
+binding is missing or `sendBatch` fails. Only the owner uses the secret for the
+three authorized runs; delete Worker and Queue immediately after measurement.
+The auth/missing-Queue/invalid-count regression test is run by the migration CI
+(`apps/site/scripts/queue-cpu-probe/worker.test.mjs`). This fixes the previously
+public CPU amplification endpoint; it does **not** prove any workerd CPU limit.
 
 ## 5. How the build reads D1
 

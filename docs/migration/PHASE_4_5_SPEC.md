@@ -343,11 +343,11 @@ npm run check:project-docs
 #### DONE checklist
 - [ ] 1 family の出力が CURRENT と一致する test が PASS
 - [ ] 全項目に「build / API」の分類があり、API の項目は担当の MIG-06xx が書いてある
-- [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある
+- [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある（Workers Builds の再測定は MIG-0509 へ先送り。Fable 決定 2026-10-23）
 - [ ] 新規作品と非公開化の扱いが表にある
-- [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある
-- [ ] 一覧・検索の shard 1つの作り直しの CPU（max）と、各 family を「API / Queue 1件 / Queue 分割 / build」のどれにしたかが PR にある
-- [ ] U07 の Queue consumer の 3条件それぞれの `exceededCpu` 件数が `ZERO_1102.md` §1 にある
+- [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある（MIG-0411 へ先送り。公式の方法: 非本番 Worker + tail cpuTime）
+- [ ] 一覧・検索の shard 1つの作り直しの CPU（max）と、各 family を「API / Queue 1件 / Queue 分割 / build」のどれにしたかが PR にある（MIG-0509 へ先送り。公式の方法: 非本番 Worker + tail cpuTime）
+- [x] U07 の Queue consumer の 3条件それぞれの `exceededCpu` 件数が `ZERO_1102.md` §1 にある（2026-10-23、Fable 決定）
 #### STOP
 - 最短間隔が CURRENT の鮮度（30〜300秒）より大きく延びるので、計算した「公開までの最大の遅れ」を PR とスレッドでユーザーに示し、承認を得るまで MIG-0410 の定数を決めない。
 - 非公開化に 60秒を超える遅れが出る設計になったら止める。

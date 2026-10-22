@@ -7,7 +7,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "astro build && node --test --experimental-strip-types src/components/*.test.mjs"
+    "test": "astro build && node --test --experimental-strip-types src/components/*.test.mjs src/lib/*.test.mjs"
   },
   "dependencies": {
     "@flamenode/contracts": "*",
