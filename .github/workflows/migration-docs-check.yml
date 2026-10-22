@@ -1,27 +1,10 @@
 name: Migration contract and workspace verification
 
 on:
+  # No paths filter: root tsc (**/*.ts), test:unit (src/scripts/app), test:workers,
+  # D1 migration tests (migrations/) and check:cloudflare-template (wrangler.toml)
+  # read most of the repository, so a filter would leave such PRs with no CI.
   pull_request:
-    paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "docs/AI_CONTEXT.md"
-      - "docs/migration/**"
-      - "scripts/check-migration*.mjs"
-      - "scripts/print-migration-task-context*.mjs"
-      - "scripts/check-project-docs.mjs"
-      - "scripts/check-domain-imports*.mjs"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "apps/**"
-      - "packages/**"
-      - "src/lib/**"
-      - "app/**"
-      - "workers/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/migration-docs-check.yml"
   workflow_dispatch:
 
 concurrency:
@@ -55,9 +38,16 @@ jobs:
       - name: 実装カードchecker回帰テスト
         run: node --test scripts/check-migration-task-cards.test.mjs
       - name: ファイル別依存・Route/RH/SA登録とPR差分を照合
-        env:
-          MIGRATION_FILE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node scripts/check-migration-file-progress.mjs
+        # On the PR merge ref, HEAD^1 is the current base tip and HEAD^2 the PR head
+        # (pull_request.base.sha is not refreshed on synchronize). workflow_dispatch
+        # compares against origin/main. Anything else leaves the base empty and fails closed.
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            export MIGRATION_FILE_BASE_SHA="$(git rev-parse HEAD^1)"
+          elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            export MIGRATION_FILE_BASE_SHA="$(git merge-base origin/main HEAD)"
+          fi
+          node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
       - name: Work-item進捗構造と所有重複の回帰テスト
