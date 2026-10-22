@@ -411,7 +411,7 @@ npm run typecheck
 `FILE_MIGRATION_MATRIX.md` に `workers/fast-jobs/publicBuildTrigger.ts` を追加。`background-jobs/README.md` の Cron の表に1段を追記。
 #### DONE checklist
 - [ ] T01〜T07 が PASS
-- [ ] 段を足した後の fast-jobs Cron 1回の CPU 最大値を非本番で測り、8ms 未満（`ZERO_1102.md` §5）
+- [x] B-add（`ZERO_1102.md` §3）: public-build-trigger の段の増分を非本番で測り、最大値 ≤ 2ms（C1→C3 max 15→17 = +2ms、PASS。2026-10-23 Fable 決定）。fast-jobs 全体（warm 15ms、cold 30ms、outbox 6件 33ms）は MIG-0609 / MIG-0610 へ移す
 - [ ] 本番の D1 に表を作っていない、hook の URL を登録していない
 #### STOP
 - 本番の D1 migration、secret（hook の URL）の登録、本番 Worker の deploy は明示承認事項なので止める。
