@@ -21,7 +21,7 @@ test("仕様01/02のD1 baselineはowner subjectとleaseのcanonical契約を持�
 });
 
 test("監査復元の競合検出とowner最後の一人保護は同じD1 mutationへ伝播する", () => {
-  const restore = read("src/lib/audit/restore.ts");
+  const restore = read("packages/server-core/src/audit/restore.ts");
   const adapters = read("packages/server-core/src/audit/adapters.ts");
   const expectedCondition = read("packages/server-core/src/audit/expectedRowCondition.ts");
   assert.match(restore, /computeChangedKeys\(after, current\)/);
