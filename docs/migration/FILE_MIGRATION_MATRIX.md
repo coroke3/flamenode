@@ -643,7 +643,6 @@
 | `apps/site/src/gateway/edgePolicy.test.mjs` | TEST | MIG-0619 T01-T06 characterization against CURRENT canonical host and middleware tables | MIG-0619 | SAME | IN_PROGRESS | PR#347 SHA=5d86eb194fc978c4097cd6b71a450387ba7af441 TEST=node --test --experimental-strip-types apps/site/src/gateway/edgePolicy.test.mjs |
 | `apps/site/src/pages/maintenance.astro` | TARGET_SKELETON | static /maintenance (noindex) served by the gateway before the maintenance redirect | MIG-0619 | SAME | IN_PROGRESS | PR#347 SHA=5d86eb194fc978c4097cd6b71a450387ba7af441 MIG-0619 built to dist/maintenance/index.html, no script |
 | `packages/ui/src/screens/MaintenanceView.tsx` | HELPER | mock Maintenance layout with CURRENT texts and top link | MIG-0619 | SAME | IN_PROGRESS | PR#347 SHA=5d86eb194fc978c4097cd6b71a450387ba7af441 MIG-0619 |
-| `public/_headers` | CONFIG | Cache-Control: /_next/static immutable 1y, /favicon.ico 1d, png/webp/svg 1d + SWR 7d (CURRENT stays until MIG-0904) | MIG-0620 | +apps/site/public/_headers (/_astro immutable, favicon, png/webp/svg) and +apps/app/public/_headers (/_personal_assets immutable) | IN_PROGRESS | PR#351 SHA=c668c5ec14893f3a499a11063e7e86dda658c24a MIG-0620 values pinned by assetHeaders.test.mjs; /_ops_assets rule waits for the Ops SPA app |
 | `apps/site/public/_headers` | CONFIG | Astro static asset Cache-Control: /_astro immutable, favicon, png/webp/svg | MIG-0620 | SAME | IN_PROGRESS | PR#351 SHA=c668c5ec14893f3a499a11063e7e86dda658c24a MIG-0620 values pinned by assetHeaders.test.mjs |
 | `apps/app/public/_headers` | CONFIG | Personal SPA static asset Cache-Control: /_personal_assets immutable | MIG-0620 | SAME | IN_PROGRESS | PR#351 SHA=c668c5ec14893f3a499a11063e7e86dda658c24a MIG-0620 values pinned by assetHeaders.test.mjs |
 | `apps/site/src/gateway/assetHeaders.test.mjs` | TEST | MIG-0620 T01-T03 resolves CURRENT and new _headers with Static Assets semantics plus build output check | MIG-0620 | SAME | IN_PROGRESS | PR#351 SHA=c668c5ec14893f3a499a11063e7e86dda658c24a TEST=node --test --experimental-strip-types apps/site/src/gateway/assetHeaders.test.mjs |
@@ -817,7 +816,6 @@
 | `src/lib/eventGroupRoutes.ts` | HELPER | event group route helpers | MIG-0503 | group routes (closest owner) | NOT_STARTED | — |
 | `src/lib/profileContact.ts` | HELPER | profile contact helper | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
 | `src/lib/socialLinks.ts` | HELPER | social link normalization | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
-| `public/_headers` | CONFIG | Cache-Control rules for static assets (G04) | MIG-0620 | +apps/site _headers | NOT_STARTED | — |
 | `public/favicon.ico` | HELPER | favicon (G05) | MIG-0501 | +apps/site/public/favicon.ico | NOT_STARTED | — |
 | `public/logo.png` | HELPER | logo image | MIG-0501 | +apps/site/public/logo.png | NOT_STARTED | — |
 | `public/manifest.webmanifest` | HELPER | web app manifest linked from root layout (G05) | MIG-0501 | +apps/site/public/manifest.webmanifest | NOT_STARTED | — |
