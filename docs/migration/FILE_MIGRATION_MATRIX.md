@@ -787,7 +787,6 @@
 | `src/lib/cloudflare.ts` | HELPER | Cloudflare context accessor (D1/KV/R2 bindings) for Next | MIG-0904 | removed with OpenNext; ports in packages/server-core (MIG-0612) | NOT_STARTED | — |
 | `src/lib/eventGroupRoutes.ts` | HELPER | event group route helpers | MIG-0503 | group routes (closest owner) | NOT_STARTED | — |
 | `src/lib/profileContact.ts` | HELPER | profile contact helper | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
-| `src/lib/r2Body.ts` | HELPER | R2 body reader for artifact consumers | MIG-0627 | R2 artifact consumers to build-time snapshots (closest owner) | NOT_STARTED | — |
 | `src/lib/socialLinks.ts` | HELPER | social link normalization | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
 | `public/_headers` | CONFIG | Cache-Control rules for static assets (G04) | MIG-0620 | +apps/site _headers | NOT_STARTED | — |
 | `public/favicon.ico` | HELPER | favicon (G05) | MIG-0501 | +apps/site/public/favicon.ico | NOT_STARTED | — |
