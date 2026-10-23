@@ -88,6 +88,8 @@ Next wake (one file/micro-unit): ...
 ~~~bash
 node scripts/check-migration-file-progress.mjs
 node --test scripts/check-migration-file-progress.test.mjs
+node scripts/check-migration-ledger-completeness.mjs
+node --test scripts/check-migration-ledger-completeness.test.mjs
 node scripts/check-migration-docs.mjs
 node scripts/check-migration-task-cards.mjs
 npm run check:project-docs
