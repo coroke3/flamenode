@@ -343,11 +343,11 @@ npm run check:project-docs
 #### DONE checklist
 - [ ] 1 family の出力が CURRENT と一致する test が PASS
 - [ ] 全項目に「build / API」の分類があり、API の項目は担当の MIG-06xx が書いてある
-- [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある
+- [ ] build 時間の実測5回と、1日の上限・最短間隔の計算が PR にある（Workers Builds の再測定は MIG-0509 へ先送り。Fable 決定 2026-10-23）
 - [ ] 新規作品と非公開化の扱いが表にある
-- [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある
-- [ ] 一覧・検索の shard 1つの作り直しの CPU（max）と、各 family を「API / Queue 1件 / Queue 分割 / build」のどれにしたかが PR にある
-- [ ] U07 の Queue consumer の 3条件それぞれの `exceededCpu` 件数が `ZERO_1102.md` §1 にある
+- [ ] 個別ページの種類ごとの1件生成の CPU（max）が PR にある（MIG-0411 へ先送り。公式の方法: 非本番 Worker + tail cpuTime）
+- [ ] 一覧・検索の shard 1つの作り直しの CPU（max）と、各 family を「API / Queue 1件 / Queue 分割 / build」のどれにしたかが PR にある（MIG-0509 へ先送り。公式の方法: 非本番 Worker + tail cpuTime）
+- [x] U07 の Queue consumer の 3条件それぞれの `exceededCpu` 件数が `ZERO_1102.md` §1 にある（2026-10-23、Fable 決定）
 #### STOP
 - 最短間隔が CURRENT の鮮度（30〜300秒）より大きく延びるので、計算した「公開までの最大の遅れ」を PR とスレッドでユーザーに示し、承認を得るまで MIG-0410 の定数を決めない。
 - 非公開化に 60秒を超える遅れが出る設計になったら止める。
@@ -411,7 +411,7 @@ npm run typecheck
 `FILE_MIGRATION_MATRIX.md` に `workers/fast-jobs/publicBuildTrigger.ts` を追加。`background-jobs/README.md` の Cron の表に1段を追記。
 #### DONE checklist
 - [ ] T01〜T07 が PASS
-- [ ] 段を足した後の fast-jobs Cron 1回の CPU 最大値を非本番で測り、8ms 未満（`ZERO_1102.md` §5）
+- [x] B-add（`ZERO_1102.md` §3）: public-build-trigger の段の増分を非本番で測り、最大値 ≤ 2ms（C1→C3 max 15→17 = +2ms、PASS。2026-10-23 Fable 決定）。fast-jobs 全体（warm 15ms、cold 30ms、outbox 6件 33ms）は MIG-0609 / MIG-0610 へ移す
 - [ ] 本番の D1 に表を作っていない、hook の URL を登録していない
 #### STOP
 - 本番の D1 migration、secret（hook の URL）の登録、本番 Worker の deploy は明示承認事項なので止める。
@@ -449,7 +449,7 @@ PRをrevert。表は未使用のまま残っても害はない（本番に作る
   ```
   更新 API（S3）は同じ `batch` で `INSERT ... ON CONFLICT DO UPDATE SET requested_at = excluded.requested_at` を1つ足し、doorbell を1つ enqueue する。
 - **U02 render**: `renderPublicPage(entity, row)` は、R-PAGE のページ component を `renderToString` で HTML にする純粋な関数にする。入力の行は `LIMIT` 付きの query（`MAX_` 定数）で読む。
-- **U03 consumer**: 1 message で1ページだけ処理する（`max_batch_size = 1`）。手順: `requested_at > rendered_at` の行を1つ読む → 公開なら HTML を作り R2 の `pages/<entity>/<id>.html` に PUT、非公開・削除済みなら R2 から消す → 条件付き UPDATE（`WHERE requested_at = ?`）で `rendered_at` を進める。処理の途中で新しい更新が来た行は、条件が外れて次の message で作り直される。
+- **U03 consumer**: 1 message で1ページだけ処理する（`max_batch_size = 1`）。手順: `request_version > rendered_version` の行を1つ読む → 公開なら HTML を作り R2 の `r2HtmlKey(<route key>)`（`<route key>/index.html`。gateway が読む key。user は `user/<id>/index.html`、event は `event/<id>/index.html`、作品は URL slug＝YouTube id があればそれ、なければ `videos.id`）に、`customMetadata = { kind, id, key, generation }`（`id` は内部 id＝`videos.id`、`generation` は診断用）付きで PUT、非公開・削除済みなら R2 から消す → 条件付き UPDATE（`WHERE request_version = ?`）で `rendered_version` を進める。gateway は `kind/id/key` が route shard と一致する HTML だけを配信し、`generation` が古いだけなら配信して再生成を1回要求する（503 は html_missing / corrupt_data / r2_read_failed のみ）。処理の途中で新しい更新が来た行は、条件が外れて次の message で作り直される。
 - **U04 recovery**: 既存の Cron（新しい cron 式は足さない。R-JOB）に、未処理の行があれば doorbell を1つ enqueue する段を足す。D1 は1 statement。
 - **U05 measure**: 作品・ユーザー・イベントのそれぞれで、上限ちょうどの入力（関連作品・枠の数が最大のページ）の CPU を `ZERO_1102.md` §5 の方法で測る。max ≥ 8ms の種類は対象から外し、MIG-0509 の build に回す（PR に記録）。
 #### Test cases
@@ -487,7 +487,7 @@ PRをrevert。個別ページは build 時の HTML（MIG-0509）に戻る。
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0403, MIG-0406, MIG-0410, MIG-0411 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
+- **Depends on:** MIG-0403, MIG-0406（2026-10-23 owner 判断で MIG-0410 / MIG-0411 を依存から外した。D-09 系の本番手順は PHASE_4_GATE.md §5 の承認時持ち越し） / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - MIG-0401〜0406 の merge 済みPRと各PRの測定値・比較証跡。
@@ -579,11 +579,16 @@ Gate 文書のPRをrevert。
 - mock: `docs/migration/mock/site/About.html`、規約は `pages.json` の `Rules /rules`。
 - `app/robots.ts`, `app/sitemap.ts`（`src/lib/publicData/sitemapSources` を使う）。
 #### Owned paths
-- 新規: `+apps/site/src/pages/about.astro`, `+apps/site/src/pages/rules.astro`
+- 新規: `+apps/site/src/pages/about.astro`, `+apps/site/src/pages/rules.astro`, `+apps/site/src/pages/404.astro`, `+apps/site/src/pages/503.astro`
+- 変更（coverage gap U03〜U06）: `apps/site/src/layouts/PublicPage.astro`、`apps/site/src/lib/representativePages.test.mjs`
 - 触らない: `app/(public)/about/**`, `app/(public)/rules/**`（本番切替まで現行のまま）, `app/robots.ts`, `app/sitemap.ts`（Phase 9 まで）
 #### Micro-units
 - **U01 /about**: mock に合わせて実装。統計は U00 の決定に従う。検証: build 出力の `<head>`（title/description/canonical/OGP）を CURRENT と比較。
 - **U02 /rules**: 規約の現行版を build 時に取り込み、版番号と施行日を CURRENT と同じに表示。検証: 同上。
+- **U03 head 要素（coverage gap G05）**: `apps/site/src/layouts/PublicPage.astro:27-52` は theme-color・canonical・og:*・twitter:* だけを出す。`app/layout.tsx:41-126` の metadata（manifest link、icons（svg / ico / png / apple-touch）、appleWebApp、`msapplication-TileColor`、`og:locale=ja_JP`、authors / creator / category、googleBot の max-image-preview / snippet / video）と `public/manifest.webmanifest` を揃える。検証: `apps/site/src/lib/representativePages.test.mjs` を拡張し、`/`, `/about`, `/[id]`, `/event/[id]`, `/user/[id]`, `/list` の正規化した `<head>` を Next と Astro で比較。
+- **U04 公開 shell（G08）**: header / footer / fonts（`FlameNodeSans.otf`）/ icons に加え、theme bootstrap script（`app/layout.tsx` の `themeBootstrapCode`、key `fn-theme`。初回描画前に `data-theme` を決め、`PublicPage.astro` の `data-theme=dark` 固定による FOUC を無くす）、`PublicDegradedBanner`（劣化 flag で表示）、`PublicMetricsShell`（`runWithPublicRequestMetrics` 相当の計測の扱いを決めて記録）。`CostGuardBanner` は MIG-0701 / 0704 の担当。
+- **U05 構造化データと GA4 tag（G06, G07）**: WebSite の JSON-LD（`app/layout.tsx:126-139`）。GA4 tag は `app/(public)/layout.tsx:8-22` の `GoogleAnalytics`（`NEXT_PUBLIC_GA_MEASUREMENT_ID`）を、Astro の build 時 env（`PUBLIC_` 接頭辞）で同じ ID を読む形にする。tag は `workers/ga-analytics` の人気順の入力を作るため、欠落すると `/trending` が空になる。view 計測の island は MIG-0507。
+- **U06 404 / 503 page（G10）**: `app/not-found.tsx`, `app/error.tsx`, `app/global-error.tsx`, `app/rules/error.tsx` 相当の静的 page を用意し、非公開 id は 404 + noindex、利用不能は 503 + `Retry-After`（gateway 側の応答と一致）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -591,6 +596,12 @@ Gate 文書のPRをrevert。
 | T02 | 規約の取得に失敗した build | build が失敗する（空の規約ページを出さない） |
 | T03 | スマホ幅のナビ | MIG-0203 の header で開閉できる |
 | T04 | canonical/OGP | CURRENT と一致 |
+| T05 | head の正規化 diff（G05） | 6 ルートで Next と Astro が一致 |
+| T06 | JSON-LD（G06） | `application/ld+json` を抽出して `serializeJsonLd` の escape 後に deep-equal |
+| T07 | GA4（G07） | 環境値がある build の HTML に gtag loader が含まれ、無い build には含まれない |
+| T08 | theme bootstrap（G08） | 保存値 `fn-theme=light` または system 設定で、初回描画前に `data-theme` が決まる |
+| T09 | 劣化 flag（G08） | `PublicDegradedBanner` 相当が表示される |
+| T10 | 非公開 id・利用不能（G10） | 404 の body と noindex が CURRENT と同じ。503 は `Retry-After` 付き |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/site
@@ -624,6 +635,9 @@ Phase 5 共通契約のとおり。
 - 触らない: `app/(public)/event/**`, `app/api/live/**`（API は Phase 6）
 #### Micro-units
 - U01〜U04 は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0502 のとおり。枠の数・overlay は Island で既存 API を読む（静的HTMLに焼かない）。
+- **U05 query key（coverage gap G03）**: `next.config.mjs:35-60` の rewrite は query 付きの `/event` を `~query` へ送る。`/event` の key は `q`, `status`, `sort`。空値は既定の view。未知の key の扱いも CURRENT と同じにし、Island の key 表を PR に書く。
+- **U06 slots 0 件の redirect（G19）**: `app/(public)/event/[id]/slots/page.tsx:181` は `slotsForUi.length === 0` のとき `/event/{id}` へ redirect する（Next の `redirect()` 既定の 307）。SSG では build 時の redirect か gateway rule で同じ status と Location を返す。
+- **U07 JSON-LD（G06）**: Event の JSON-LD（`event/[id]/page.tsx:204`）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -632,6 +646,9 @@ Phase 5 共通契約のとおり。
 | T03 | 非公開イベント | HTML を生成しない |
 | T04 | `/event?…` の filter・再読込・戻る | CURRENT と同じ結果 |
 | T05 | live API の失敗 | 静的本文は残り、劣化表示 |
+| T06 | `/event?q=…&status=…&sort=…`（key ごとに 値あり・空値・未知） | 結果集合が Next と同じ（G03） |
+| T07 | 枠 0 件の event の `/event/{id}/slots`、枠ありの event | 0 件は CURRENT と同じ status と Location、枠ありは 200（G19） |
+| T08 | Event の JSON-LD | Next と Astro から抽出して deep-equal（G06） |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/site
@@ -705,6 +722,8 @@ Phase 5 共通契約のとおり。
 - 触らない: `app/(public)/user/**`
 #### Micro-units
 - U01〜U03 は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0504 のとおり。`~query` と `paged` は同名ページを作らず、論理URLの query/ページ送り parity で代替する。
+- **U04 query key（coverage gap G03）**: `next.config.mjs:35-60` の rewrite の key は、`/user` が `q`, `sort`, `page`、`/user/:id` が `worksPage`, `collabPage`。空値は既定の view。key 表と、SSG + Island での扱いを PR に書く。
+- **U05 JSON-LD（G06）**: Person の JSON-LD（`user/[id]/UserProfilePage.tsx:379`）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -712,6 +731,8 @@ Phase 5 共通契約のとおり。
 | T02 | 非公開作品を持つユーザー | 非公開作品が HTML に含まれない |
 | T03 | 旧 X ID | 新IDへ redirect |
 | T04 | プロフィールの OGP | CURRENT と一致 |
+| T05 | `/user?q=…&sort=…&page=…`、`/user/:id?worksPage=…&collabPage=…`（key ごとに 値あり・空値・未知） | 結果集合が Next と同じ（G03） |
+| T06 | Person の JSON-LD | Next と Astro から抽出して deep-equal（G06） |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/site
@@ -748,6 +769,7 @@ Phase 5 共通契約のとおり。
 - **U01 /list**: 最初の表示は静的、検索・filter・並び替えは Island。URL の query 形式は CURRENT と同じ。
 - **U02 /recommend, /trending**: build snapshot のランキングで静的生成。
 - **U03 deep link**: `/list?…` の再読込・戻る・共有URLが CURRENT と同じ結果になることを確認。
+- **U04 query key（coverage gap G03）**: `next.config.mjs:35-60` の rewrite で `/list` の key は `q`, `sort`, `page`, `event`, `view`。空値は既定の view。`event` と `view` を SSG + Island でどう扱うかを key 表にして PR に書く。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -755,6 +777,7 @@ Phase 5 共通契約のとおり。
 | T02 | 結果0件 | empty 表示 |
 | T03 | サムネイルの取得失敗 | 代替表示 |
 | T04 | Island の API 失敗 | 静的な最初の表示は残る |
+| T05 | `/list` の全 key（`q`, `sort`, `page`, `event`, `view`）の 値あり・空値・未知 | 結果集合が Next と同じ（G03） |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/site
@@ -829,6 +852,8 @@ Phase 5 共通契約のとおり。
 - 触らない: `app/(public)/[id]/**`, `app/api/videos/**`, Cloudflare の Route 設定
 #### Micro-units
 - U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0507 のとおり。root slug の解決は MIG-0404 の route map を使い、固定ルートと asset path の後に適用する。
+- **U05 JSON-LD（coverage gap G06）**: VideoObject と Person の JSON-LD（`app/(public)/[id]/page.tsx:246-265`）。
+- **U06 view tracker（G07）**: `VideoViewTracker.tsx` の `sendGAEvent` を island にする。`VIEW_THRESHOLD_SECONDS` に達したら1回、6時間の localStorage cooldown（`videoViewTrackerCore.test.mjs` の挙動）。GA4 tag 自体は MIG-0501 U05。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -837,6 +862,8 @@ Phase 5 共通契約のとおり。
 | T03 | Active X 0件・複数のユーザーがいいね | CURRENT と同じ 403/202/モーダル誘導 |
 | T04 | YouTube の埋め込み失敗 | CURRENT と同じ劣化表示 |
 | T05 | OGP・共有サムネイル | CURRENT と一致 |
+| T06 | VideoObject / Person の JSON-LD | Next と Astro から抽出して deep-equal（G06） |
+| T07 | view tracker | 閾値秒で1回だけ発火、6時間の cooldown 内は発火しない（G07） |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/site
@@ -909,7 +936,7 @@ PRをrevert。CURRENT の json-generator は動いたままなので、公開ペ
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0507, MIG-0509, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
+- **Depends on:** MIG-0507, MIG-0509, MIG-0621, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `CURRENT_ROUTES.md` の Public 16 ルート（VISUAL_SCREEN 13 + COMPAT_REDIRECT 3）と `ROUTE_MATRIX.md`。

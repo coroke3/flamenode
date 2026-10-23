@@ -3,10 +3,16 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const source = readFileSync(
-  fileURLToPath(new URL("./restore.ts", import.meta.url)),
+// The core builds the key sets from the host; the object key constants are bound in the video bridge.
+const core = readFileSync(
+  fileURLToPath(new URL("../../../packages/server-core/src/audit/restore.ts", import.meta.url)),
   "utf8",
 );
+const keyHost = readFileSync(
+  fileURLToPath(new URL("../video/videoVisibilityTransition.ts", import.meta.url)),
+  "utf8",
+);
+const source = `${core}\n${keyHost}`;
 
 test("audit video restore invalidates the same global projections as visibility actions", () => {
   assert.match(source, /RANDOM_VIDEO_POOL_OBJECT_KEY/);
@@ -34,5 +40,6 @@ test("audit video restore invalidates both primary event and all user profile pa
 test("audit event restore invalidates global event projections", () => {
   assert.match(source, /events\/index\.json/);
   assert.match(source, /top\/sections\/events\.v1\.json/);
-  assert.match(source, /eventComposedObjectKey\(log\.target_id\)/);
+  assert.match(core, /publicCacheKeys\.eventObjectKeys\(log\.target_id\)/);
+  assert.match(keyHost, /eventComposedObjectKey\(eventId\)/);
 });

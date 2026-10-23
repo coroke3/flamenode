@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [staff, notifications, mutationResult] = await Promise.all([
+const [staff, notifications, mutationResult, notificationPolicy] = await Promise.all([
   readFile(new URL("./event-staff-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("./notification-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("./mutationResult.ts", import.meta.url), "utf8"),
+  // MIG-0306 U03: the cancel decision moved to the domain package.
+  readFile(new URL("../../../packages/domain/src/admin/notificationOutbox.ts", import.meta.url), "utf8"),
 ]);
 
 test("event-staff-admin uses post-commit revalidate and unstable_rethrow", () => {
@@ -21,7 +23,8 @@ test("event-staff-admin uses post-commit revalidate and unstable_rethrow", () =>
 test("notification-admin uses post-commit revalidate and unstable_rethrow", () => {
   assert.match(notifications, /runPostCommitBestEffort/);
   assert.match(notifications, /unstable_rethrow\(error\)/);
-  assert.match(notifications, /既に\$\{row\.status\}です/);
+  assert.match(notifications, /decideNotificationCancel\(row\.status\)/);
+  assert.match(notificationPolicy, /既に\$\{status\}です/);
 });
 
 test("MutationResult shared type is available for gradual adoption", () => {

@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 
-const transition = fs.readFileSync(
-  new URL("./xUserVisibilityTransition.ts", import.meta.url),
-  "utf8",
-);
+// MIG-0615: the planner lives in packages/server-core; the bridge keeps the listable statuses.
+const transition = [
+  "../../../packages/server-core/src/visibility/xUserTransition.ts",
+  "./xUserVisibilityTransition.ts",
+]
+  .map((path) => fs.readFileSync(new URL(path, import.meta.url), "utf8"))
+  .join("\n");
 const merge = fs.readFileSync(
-  new URL("./merge.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
 const rebuild = fs.readFileSync(
