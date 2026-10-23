@@ -643,6 +643,76 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await call("/api/admin-read/event-groups/nope", "tok-root")).status, 404);
   });
 
+  test("contracts: every endpoint response parses with its zod schema (and a malformed body does not)", async () => {
+    const C = await import("@flamenode/contracts");
+    const cases = [
+      ["/users", C.AdminUsersResponseSchema],
+      ["/users?view=xid", C.AdminUsersResponseSchema],
+      ["/users?view=permissions", C.AdminUsersResponseSchema],
+      ["/users?view=links", C.AdminUsersRedirectResponseSchema],
+      ["/users/u_alice", C.AdminUserDetailResponseSchema],
+      ["/videos", C.AdminVideosResponseSchema],
+      ["/videos?status=review", C.AdminVideosResponseSchema],
+      ["/events", C.AdminEventsResponseSchema],
+      ["/moderation", C.AdminModerationResponseSchema],
+      ["/x-link-requests", C.AdminXLinkRequestsResponseSchema],
+      ["/x-id-merges", C.AdminXIdMergesResponseSchema],
+      ["/x-id-merges?view=reverts", C.AdminXIdMergesResponseSchema],
+      ["/x-id-merges?impact=mg1", C.AdminXIdMergesResponseSchema],
+      ["/events/templates", C.AdminEventTemplatesResponseSchema],
+      ["/events/new?template=tpl2", C.AdminEventNewResponseSchema],
+      ["/event-groups", C.AdminEventGroupsResponseSchema],
+      ["/event-groups/eg1", C.AdminEventGroupDetailResponseSchema],
+    ];
+    for (const [path, schema] of cases) {
+      const r = await get(`/api/admin-read${path}`);
+      const parsed = schema.safeParse(r.body);
+      assert.ok(parsed.success, `${path}: ${parsed.success ? "" : JSON.stringify(parsed.error.issues.slice(0, 3))}`);
+    }
+    assert.equal(C.AdminUsersResponseSchema.safeParse({ view: "discord" }).success, false);
+    const denied = await call("/api/admin-read/users", "tok-alice");
+    assert.ok(C.AdminReadErrorSchema.safeParse(denied.body).success);
+  });
+
+  test("guard parity with middleware/adminReadGuard.ts: same status for 503 / 401 / banned 403 / non-admin 403 / admin", async () => {
+    // The inline guard (sessionMiddleware + requireAuth + role check) is kept on purpose: the SPA reads the
+    // { error: "Forbidden", redirect: "/dashboard" } hint (CURRENT (admin)/layout.tsx redirect) and the capitalised
+    // codes, which adminReadGuardMiddleware (lowercase codes, no redirect) does not produce. Statuses must match.
+    const { Hono } = await import("hono");
+    const { adminReadGuardMiddleware } = await import("../src/middleware/adminReadGuard.ts");
+    const shared = new Hono();
+    shared.use("*", async (c, next) => {
+      const mode = c.req.header("x-mode");
+      if (mode === "unavailable") c.set("sessionState", "unavailable");
+      else if (mode) c.set("user", { id: "u", role: mode === "user" ? "user" : "admin", is_banned: mode === "banned" ? 1 : 0 });
+      else c.set("user", null);
+      await next();
+    });
+    shared.use("*", adminReadGuardMiddleware());
+    shared.get("/", (c) => c.json({ ok: true }));
+    const reference = async (mode) => (await shared.request("/", { headers: mode ? { "x-mode": mode } : {} })).status;
+    const failSessionLookup = createD1(sqlite);
+    const prepare = failSessionLookup.prepare;
+    failSessionLookup.prepare = (text) => {
+      if (/session/i.test(text)) throw new Error("db down");
+      return prepare(text);
+    };
+    const actual = {
+      unavailable: (await call("/api/admin-read/users", "tok-root", { d1: failSessionLookup })).status,
+      anonymous: (await call("/api/admin-read/users", null)).status,
+      banned: (await call("/api/admin-read/users", "tok-badmin")).status,
+      user: (await call("/api/admin-read/users", "tok-alice")).status,
+      moderator: (await call("/api/admin-read/users", "tok-bob")).status,
+      admin: (await call("/api/admin-read/users", "tok-root")).status,
+    };
+    assert.deepEqual(actual, { unavailable: 503, anonymous: 401, banned: 403, user: 403, moderator: 403, admin: 200 });
+    assert.equal(await reference("unavailable"), actual.unavailable);
+    assert.equal(await reference(null), actual.anonymous);
+    assert.equal(await reference("banned"), actual.banned);
+    assert.equal(await reference("user"), actual.user);
+    assert.equal(await reference("admin"), actual.admin);
+  });
+
   test("T04 responses never carry secrets (tokens, audit before/after payloads, session data)", async () => {
     for (const path of ["/users/u_alice", "/users", "/videos", "/events", "/moderation", "/users?view=xid", "/x-link-requests"]) {
       const text = JSON.stringify((await get(`/api/admin-read${path}`)).body);
