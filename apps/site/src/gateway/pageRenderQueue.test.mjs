@@ -147,7 +147,22 @@ function harness({ kv = new Map(), env: extra = {} } = {}) {
 
 const doorbell = (kind, id) => ({ type: "render-page", kind, id });
 
-test("contract: a missing page -> gateway rebuild-page message -> consumer -> gateway serves it", async () => {
+// Queue mechanics need a kind the consumer writes. In production every Island page kind is excluded after
+// Phase 5, so these run on the pre-Phase-5 table and restore the production table
+// (node:test runs the top-level tests of a file sequentially).
+const PRODUCTION_FORMAT = Object.freeze({ ...PAGE_BODY_FORMAT });
+const MECHANICS_FORMAT = { video: "server-rendered", user: "server-rendered", event: "server-rendered" };
+const mechanics = (name, fn) =>
+  test(name, async (t) => {
+    Object.assign(PAGE_BODY_FORMAT, MECHANICS_FORMAT);
+    try {
+      await fn(t);
+    } finally {
+      Object.assign(PAGE_BODY_FORMAT, PRODUCTION_FORMAT);
+    }
+  });
+
+mechanics("contract: a missing page -> gateway rebuild-page message -> consumer -> gateway serves it", async () => {
   const h = harness();
   const first = await h.get("/user/creator-alpha");
   assert.equal(first.status, 503, "public route without HTML is a build gap");
@@ -172,7 +187,7 @@ test("contract: a missing page -> gateway rebuild-page message -> consumer -> ga
   assert.ok(!html.includes("<script"), "same as the build: no JavaScript");
 });
 
-test("T01: a doorbell for an updated public page rebuilds only that page and records the version", async () => {
+mechanics("T01: a doorbell for an updated public page rebuilds only that page and records the version", async () => {
   const h = harness();
   h.request("user", "creator-alpha", 5000);
   const { outcomes } = await h.consume(doorbell("user", "creator-alpha"));
@@ -183,7 +198,7 @@ test("T01: a doorbell for an updated public page rebuilds only that page and rec
   assert.ok(t.rendered_at > 0);
 });
 
-test("T02: unpublish -> R2 HTML deleted and the gateway answers 404 at once (deny entry)", async () => {
+mechanics("T02: unpublish -> R2 HTML deleted and the gateway answers 404 at once (deny entry)", async () => {
   const h = harness();
   await h.consume(doorbell("user", "creator-alpha"));
   assert.equal((await h.get("/user/creator-alpha")).status, 200);
@@ -222,7 +237,7 @@ test("fail-closed visibility: never writes a page that is not public by CURRENT'
   assert.equal(h.r2.size, 0);
 });
 
-test("users: CURRENT listable approval statuses and case-insensitive ids", async () => {
+mechanics("users: CURRENT listable approval statuses and case-insensitive ids", async () => {
   const h = harness();
   for (const body of [doorbell("user", "pending-user"), doorbell("user", "Mixed_Case")]) {
     const { outcomes } = await h.consume(body);
@@ -270,9 +285,25 @@ async function excludedKindsScenario() {
   assert.equal(outcomes[0].action, "deleted");
   assert.equal(outcomes[0].reason, "not_public");
   assert.equal(h.r2.size, 0);
+
+  // /user/[id] (client:load Island page since MIG-0504) is excluded in production: same contract.
+  assert.equal(PAGE_BODY_FORMAT.user, "excluded");
+  h.ops.length = 0;
+  const userBuild = { ...build, customMetadata: buildMeta("user", "creator-alpha", "user/creator-alpha") };
+  h.r2.set(r2HtmlKey("user/creator-alpha"), userBuild);
+  h.request("user", "creator-alpha", 3000);
+  assert.equal((await h.consume(doorbell("user", "creator-alpha"))).outcomes[0].action, "excluded_kind");
+  assert.deepEqual(h.ops, [], "no PUT or DELETE for a public user page");
+  assert.equal(h.r2.get(r2HtmlKey("user/creator-alpha")).body, build.body);
+  h.sqlite.exec("UPDATE x_users SET approval_status = 'rejected' WHERE id = 'creator-alpha'");
+  h.request("user", "creator-alpha", 4000);
+  const revoked = (await h.consume(doorbell("user", "creator-alpha"))).outcomes[0];
+  assert.equal(revoked.action, "deleted");
+  assert.equal(revoked.reason, "not_public");
+  assert.equal(h.r2.size, 0);
 }
 
-test("T03: an update during the render is rebuilt by the next message, also within the same millisecond", async () => {
+mechanics("T03: an update during the render is rebuilt by the next message, also within the same millisecond", async () => {
   // Same requested_at for both edits: a CAS on the timestamp would succeed and lose the
   // second edit; the version CAS does not.
   for (const secondAt of [2000, 1000]) {
@@ -296,7 +327,7 @@ test("T03: an update during the render is rebuilt by the next message, also with
   }
 });
 
-test("producer: each request adds 1 to the version (same millisecond, clock behind), ids stored canonical", async () => {
+mechanics("producer: each request adds 1 to the version (same millisecond, clock behind), ids stored canonical", async () => {
   const h = harness();
   await h.request("user", "Mixed_Case", 5000);
   await h.request("user", "MIXED_case", 5000);
@@ -310,7 +341,7 @@ test("producer: each request adds 1 to the version (same millisecond, clock behi
   assert.equal((await h.consume(doorbell("user", "Mixed_Case"))).outcomes[0].action, "rendered");
 });
 
-test("T04: the same doorbell twice: the second does nothing; a gateway request still rebuilds", async () => {
+mechanics("T04: the same doorbell twice: the second does nothing; a gateway request still rebuilds", async () => {
   const h = harness();
   h.request("user", "creator-alpha", 1000);
   await h.consume(doorbell("user", "creator-alpha"));
@@ -335,7 +366,7 @@ test("T04: the same doorbell twice: the second does nothing; a gateway request s
   assert.equal(h.sent.length, fresh, "current generation asks for nothing");
 });
 
-test("F-02: R2 HTML written for another kind, id or key is never served (503, rebuild requested)", async () => {
+mechanics("F-02: R2 HTML written for another kind, id or key is never served (503, rebuild requested)", async () => {
   const h = harness();
   await h.consume(doorbell("user", "creator-alpha"));
   const meta = h.r2.get(r2HtmlKey("user/creator-alpha")).customMetadata;
@@ -348,7 +379,7 @@ test("F-02: R2 HTML written for another kind, id or key is never served (503, re
   }
 });
 
-test("F-07: a video whose URL slug is its YouTube id: id = videos.id, key = slug, canonical from the row", async () => {
+mechanics("F-07: a video whose URL slug is its YouTube id: id = videos.id, key = slug, canonical from the row", async () => {
   const h = harness();
   const slugKey = "ytSlug00001";
   // Gateway miss: the message carries the slug key and the INTERNAL id.
@@ -408,7 +439,7 @@ test("F-07: a gateway message with the YouTube id as the entity id is not_routed
   assert.equal(h.r2.size, 0);
 });
 
-test("T05: R2 PUT failure retries the message and leaves the request for recovery", async () => {
+mechanics("T05: R2 PUT failure retries the message and leaves the request for recovery", async () => {
   const h = harness();
   h.request("user", "creator-alpha", 1000);
   h.env.R2_STORAGE.put = async () => { throw new Error("r2 down"); };
@@ -422,7 +453,7 @@ test("T05: R2 PUT failure retries the message and leaves the request for recover
   assert.ok(parsePageRenderMessage(sent[0]), "recovery doorbells are accepted by the consumer");
 });
 
-test("bindings / configuration missing, route data or KV unavailable: retry, nothing written", async () => {
+mechanics("bindings / configuration missing, route data or KV unavailable: retry, nothing written", async () => {
   for (const extra of [{ PUBLIC_PAGE_STYLESHEETS: undefined }, { PUBLIC_PAGE_STYLESHEETS: "https://evil.example/x.css" }, { PUBLIC_PAGE_STYLESHEETS: "/_astro/a.css,/other.css" }, { DB: undefined }, { VISIBILITY_KV: undefined }, { ASSETS: undefined }]) {
     const h = harness({ env: extra });
     const { outcomes, acks } = await h.consume(doorbell("video", "vid-public"));
@@ -478,7 +509,7 @@ test("U04 recovery: bounded LIMIT, served by the partial pending index", async (
   assert.match(plan, /public_page_renders_pending_idx/);
 });
 
-test("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
+mechanics("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
   const h = harness();
   h.request("user", "creator-alpha", 1000);
   const log = [];
@@ -494,7 +525,7 @@ test("statement budget per message: ≤ 3 D1, 1 KV, 1 R2 write", async () => {
 });
 
 
-test("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue budget (local Node)", async () => {
+mechanics("T06: one message end to end (all I/O mocked) stays far below the 8ms Queue budget (local Node)", async () => {
   // Same method as scripts/migration-gateway.test.mjs: mocks resolve in a microtask,
   // fastest of 5 repeats per sample; local wall time, not workerd CPU. Max-size row:
   // 1,000-char title / name, 10,000-char intro / profile.
@@ -583,14 +614,6 @@ const REP_ROWS = {
   },
 };
 
-test("characterization: user row -> regenerated HTML is byte-identical to the SSG page (layout, stylesheet, body)", async () => {
-  const ssg = readDist("user/rep_creator");
-  const stylesheets = distStylesheets(ssg);
-  assert.equal(stylesheets.length, 1, "the build links one shared stylesheet");
-  assert.doesNotMatch(ssg, /<script/, "the SSG page ships no JavaScript, so neither does the regenerated one");
-  assert.equal(await renderPublicPage("user", REP_ROWS.user, { stylesheets }), ssg);
-});
-
 test("characterization: video row -> identical to both SSG pages (internal id and YouTube alias)", async () => {
   const ssg = readDist("repvideo01");
   const stylesheets = distStylesheets(ssg);
@@ -636,9 +659,10 @@ test("regenerated pages: row text is escaped, stylesheet must be a build asset, 
   assert.equal(ended.entryAction, undefined);
 });
 
-test("U02 format: every kind is server-rendered like the build (text in the HTML without JS, no empty shell)", async () => {
-  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "server-rendered", event: "server-rendered" });
-  for (const [kind, row] of [["video", REP_ROWS.video], ["user", REP_ROWS.user], ["event", { id: "e", title: "イベント名", explanation: "説明文", visibility_status: "public" }]]) {
+test("U02 format: production table (Island pages excluded; guards a leaked mechanics override or a hidden production flip); remaining server-rendered kinds ship no JS", async () => {
+  assert.deepEqual(PAGE_BODY_FORMAT, PRODUCTION_FORMAT);
+  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "excluded", event: "server-rendered" });
+  for (const [kind, row] of [["video", REP_ROWS.video], ["event", { id: "e", title: "イベント名", explanation: "説明文", visibility_status: "public" }]]) {
     const html = await renderPublicPage(kind, row, { stylesheets: [STYLESHEET] });
     assert.ok(!html.includes("island-root") && !html.includes("<script"), kind);
     assert.match(html, /<h1[^>]*>[^<]+<\/h1>/, kind + ": the screen heading is in the HTML");

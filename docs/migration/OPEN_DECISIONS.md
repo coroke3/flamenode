@@ -25,6 +25,7 @@
 | D-08 | **A: HTMLモックを先に確定してからUIを移行** | DECIDED | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | デザインモック受領・登録完了（docs/migration/mock/、UI_REFERENCE.md）。Phase 2抽出アンロック。 |
 | D-09 | **A: 一覧・検索などの公開データは build 時に作り、更新は deploy hook で build を起こす。作品・ユーザー・イベントの個別ページは ISR 相当（更新されたページだけを Queue で R2 HTML に作り直す、2026-10-16 改訂）。残る背景処理は 1回 8ms 未満に分ける** | DECIDED | MIG-0409, MIG-0410, MIG-0411, MIG-0509, MIG-0609, MIG-0610, MIG-0907。`ZERO_1102.md` G2 | build 時の D1 読み取り用 token と deploy hook URL（どちらも secret）の作成、本番の Cron / Queue 変更は作業直前の明示承認 |
 | D-10 | **共有 server core `@flamenode/server-core`（drizzle handle 注入、framework 非依存）を作り、Next（bridge 経由）と Hono の両方が使う** | DECIDED | MIG-0612〜0618。MIG-0603〜0605 の未着手 unit | source code の移動だけ。Remote D1 / deploy / Route / secret は対象外 |
+| D-11 | **Island ページの queue 再生成の parity（Astro serializer port / AstroContainer 同梱 / build cadence 受容）** | PROVISIONAL | MIG-0411 follow-up, MIG-0502/0504/0507 | lead の決定。production queue は未配線のため現時点の影響なし |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -198,3 +199,9 @@ owner Yugo の standing instruction「検討事項は推奨で進めて」に基
 決定の経緯: owner Yugo の standing instruction「検討事項は推奨で進めて」（推奨案と Fable の判断で決める）に基づく。lead の決定を Opus (high) と Fable が #338 でレビューして APPROVE した。
 
 承認境界: source code の移動だけ。Remote D1、production deploy、Route、secret は対象外。D-10 は DB package の D-01 を変えない（schema は `@flamenode/db` のまま）。
+
+## D-11 — Island ページの queue 再生成（PROVISIONAL、未決）
+
+Island page queue parity: Phase 5 makes user/event/video kinds `excluded` in renderPublicPage, so per-page freshness reverts to the build cycle until parity is restored. 選択肢: (1) Astro serializer を port する、(2) `experimental_AstroContainer` を consumer Worker に同梱する（bundle 577 KiB、8 ms budget）、(3) kind ごとに build cadence を受け入れる。
+
+production queue は未配線のため、現時点の影響はない。`/user/[id]`（MIG-0504）が最初に `excluded` になった（event は MIG-0502、video は MIG-0507 で続く）。それまでの consumer の production 上の役割は、非公開化時の R2 HTML 削除と tracker close のみ。gateway miss は build（MIG-0509）が HTML を出すまで 503 のまま。lead が、parity を回復するか renderer を削除して injectable にするかを決める。
