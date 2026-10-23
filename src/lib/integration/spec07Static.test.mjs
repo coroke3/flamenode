@@ -58,9 +58,9 @@ test("X ID profile updates use canonical columns without runtime schema fallback
 });
 
 test("audit restore source contains payload, stale-snapshot, and atomic failure guards", () => {
-  const capability = fs.readFileSync(path.join(root, "src/lib/audit/capability.ts"), "utf8");
+  const capability = fs.readFileSync(path.join(root, "packages/server-core/src/audit/capability.ts"), "utf8");
   const restore = fs.readFileSync(path.join(root, "src/lib/audit/restore.ts"), "utf8");
-  const mutate = fs.readFileSync(path.join(root, "src/lib/audit/mutate.ts"), "utf8");
+  const mutate = fs.readFileSync(path.join(root, "packages/server-core/src/audit/mutate.ts"), "utf8");
   assert.match(capability, /payloadExceeded/);
   assert.match(capability, /snapshotRedacted/);
   assert.match(restore, /computeChangedKeys\(after, current\)/);

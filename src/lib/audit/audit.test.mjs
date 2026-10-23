@@ -25,7 +25,7 @@ import {
 
 test("audit mutation は D1 batch と変更件数 assertion を同一取引で使う", async () => {
   const mutateSource = await readFile(
-    fileURLToPath(new URL("./mutate.ts", import.meta.url)),
+    fileURLToPath(new URL("../../../packages/server-core/src/audit/mutate.ts", import.meta.url)),
     "utf8",
   );
 
