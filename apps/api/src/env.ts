@@ -6,6 +6,7 @@ export type Bindings = {
   KV?: KVNamespace;
   BUILD_COMMIT_SHA?: string;
   WORKER_ADMIN_TOKEN?: string;
+  /** Manage icon signing (MIG-0624); the binding is an owner-approved step tracked in MIG-0628. */
   AUTH_SECRET?: string;
   PUBLIC_VISIBILITY_GUARD_MODE?: string;
   /** Configured application origin for write origin verification. */

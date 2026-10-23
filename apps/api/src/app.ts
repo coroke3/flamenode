@@ -3,6 +3,7 @@ import type { AppEnv } from "./env.ts";
 import { adminReadRoutes } from "./routes/adminRead/index.ts";
 import { healthRoutes } from "./routes/health.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
+import { manageRoutes } from "./routes/manage/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
 import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 import { createAdminRoutes } from "./routes/admin/index.ts";
@@ -22,6 +23,7 @@ app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 app.route("/api/personal", personalRoutes);
 // MIG-0625: authenticated, admin-only, read-only Admin screens API (users / videos / events / moderation).
 app.route("/api/admin-read", adminReadRoutes);
+app.route("/api/manage", manageRoutes);
 app.route("/api/admin", createAdminRoutes());
 // Must stay after createAdminRoutes(): reuses its session + writeGuard middleware.
 app.route("/api/admin", adminEventRoutes);
