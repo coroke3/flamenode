@@ -3,10 +3,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const source = readFileSync(
-  fileURLToPath(new URL("./videoVisibilityTransition.ts", import.meta.url)),
-  "utf8",
-);
+// MIG-0615: the planner lives in packages/server-core; the bridge keeps the key constants and the manifest host binds the R2 read/write.
+const source = [
+  "../../../packages/server-core/src/visibility/videoTransition.ts",
+  "./videoVisibilityTransition.ts",
+  "../publicData/visibilityManifestHost.ts",
+]
+  .map((path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8"))
+  .join("\n");
 
 test("video visibility transition uses full fan-out helpers", () => {
   assert.match(source, /buildAfterVideoStatusChangeQueueBatch/);
@@ -18,6 +22,26 @@ test("video visibility transition uses full fan-out helpers", () => {
   assert.match(source, /STATIC_USER_MAX_PAGES/);
   assert.match(source, /users\/\$\{xUserId\}\/works\/\$\{page\}\.json/);
   assert.match(source, /users\/\$\{xUserId\}\/collabs\/\$\{page\}\.json/);
+});
+
+test("visibility transition invalidates scheduled event export cache", () => {
+  assert.match(source, /exportEventIds/);
+  assert.match(source, /invalidateEventExportCaches/);
+  assert.match(
+    source,
+    /runVideoVisibilityTransitionPostCommit[\s\S]*?invalidateEventExportCaches/,
+  );
+});
+
+test("export cache invalidation runs before public key deletes and stays best-effort", () => {
+  const body = source.slice(
+    source.indexOf("export async function runVideoVisibilityTransitionPostCommit"),
+  );
+  assert.ok(
+    body.indexOf("invalidateEventExportCaches(") <
+      body.indexOf("deletePublicJsonCaches("),
+  );
+  assert.match(body, /event_export_cache_invalidation_failed/);
 });
 
 test("depublicization keeps R2 block before D1 and compensates only when safe", () => {

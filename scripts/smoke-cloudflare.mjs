@@ -211,6 +211,24 @@ function assertWeakTopPublicShell(html, label) {
   }
 }
 
+const HEALTH_REASON_PATTERN = /^[a-z0-9_]{1,64}$/;
+const HEALTH_KEY_PATTERN = /^[A-Za-z0-9_./:-]{1,160}$/;
+
+/** deep health の 503 body にある固定 reason/key（secret 無し）をエラーへ付けて出す。 */
+async function throwWithHealthReason(response, label) {
+  let detail = "";
+  try {
+    const body = await response.clone().json();
+    if (typeof body?.reason === "string" && HEALTH_REASON_PATTERN.test(body.reason)) {
+      detail = ` reason=${body.reason}`;
+      if (typeof body.key === "string" && HEALTH_KEY_PATTERN.test(body.key)) {
+        detail += ` key=${body.key}`;
+      }
+    }
+  } catch {}
+  if (detail) throw new Error(`${label}: unexpected status ${response.status}.${detail}`);
+}
+
 async function requestJsonUntilValid(
   fetchImpl,
   url,
@@ -233,6 +251,7 @@ async function requestJsonUntilValid(
         label,
         { attempts: 1, timeoutMs, retryDelayMs: 0 },
       );
+      if (response.status !== 200) await throwWithHealthReason(response, label);
       assertStatus(response, [200], label);
       const body = await parseJson(response, label);
       validate(body);

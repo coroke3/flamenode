@@ -16,7 +16,7 @@ const OPS_PER_RETRY = 2;
 const MAX_BUSY_DAY_OPERATIONS = 7_000;
 
 const enqueueSource = fs.readFileSync(
-  new URL("../src/lib/staticRebuild/enqueue.ts", import.meta.url),
+  new URL("../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url),
   "utf8",
 );
 const MAX_MUTATION_TARGETS = Number(

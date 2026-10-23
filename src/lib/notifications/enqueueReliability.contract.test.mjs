@@ -18,7 +18,8 @@ const [
   readFile(new URL("../actions/manage-video.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/rules.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/slot.ts", import.meta.url), "utf8"),
-  readFile(new URL("../video/videoVisibilityTransition.ts", import.meta.url), "utf8"),
+  // MIG-0615: the planner lives in packages/server-core.
+  readFile(new URL("../../../packages/server-core/src/visibility/videoTransition.ts", import.meta.url), "utf8"),
   readFile(new URL("./enqueue.ts", import.meta.url), "utf8"),
 ]);
 

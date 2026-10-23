@@ -175,6 +175,7 @@ As phases progress, use these boundaries:
 - `apps/api`: Hono HTTP boundary
 - `packages/ui`: reusable React UI without Next/Astro/Hono/data bindings
 - `packages/domain`: business logic without framework imports
+- `packages/server-core`: adapter-layer shared core used by both Next (via `src/lib/**` re-export bridges) and Hono. D1 is reached only through an injected drizzle handle; transactions, audit and enqueue are allowed. It must not import `next/*`, `react`, `hono`, `server-only`, `@/`, `src/`, `process.env` or `getCloudflareContext`; env, KV, Queue and `waitUntil` arrive through the `src/ports.ts` types (D-10, `scripts/check-server-core-boundaries.mjs`)
 - `packages/contracts`: shared Zod/API contracts
 - `packages/public-data`: public projection contracts/loaders
 - `workers/*`: background/queue/scheduled jobs

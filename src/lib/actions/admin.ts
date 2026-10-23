@@ -46,6 +46,7 @@ async function revalidateVideoStatusPathsBestEffort(
   videoId: string,
   youtubeVideoId: string | null,
   publicCacheKeys: readonly string[],
+  exportEventIds: readonly string[],
 ): Promise<void> {
   await runPostCommitBestEffort(
     { flow: "admin_video_status", traceId: createTraceId() },
@@ -55,6 +56,7 @@ async function revalidateVideoStatusPathsBestEffort(
         run: async () => {
           await runVideoVisibilityTransitionPostCommit({
             publicCacheKeys,
+            exportEventIds,
             revalidate: () => {
               revalidateVideoStatusPaths(videoId, youtubeVideoId);
             },
@@ -198,6 +200,7 @@ export async function setVideoStatus(formData: FormData): Promise<AdminActionRes
       videoId,
       before.youtube_video_id,
       transition.publicCacheKeys,
+      transition.exportEventIds,
     );
 
     return attachApproveAndNextHref(db, result, {
