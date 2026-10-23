@@ -20,7 +20,7 @@ const { createRoot } = await import("react-dom/client");
 const { renderToString } = await import("react-dom/server");
 const { act } = React;
 const h = React.createElement;
-const { loadUserBuildDataFrom, fixturePayloadSource, snapshotPayloadSource } = await import("../apps/site/src/lib/userData.ts");
+const { loadUserBuildDataFrom, fixturePayloadSource, snapshotPayloadSource, userPayloadSourceFromEnv } = await import("../apps/site/src/lib/userData.ts");
 const views = await import("../apps/site/src/lib/userViews.ts");
 const { buildPageHead, compactText } = await import("../apps/site/src/lib/pageHead.ts");
 // test:unit runs before the ui build, so the Islands (which import @flamenode/ui) load only when packages/ui/dist exists;
@@ -402,4 +402,16 @@ test("head builder: page image replaces the brand card without size/type; noinde
   const brand = buildPageHead({ path: "/about", title: "T" });
   assert.equal(brand.ogImageWidth, 1200);
   assert.equal(brand.ogImageType, "image/png");
+});
+
+test("snapshot env: all unset means fixtures, a partly set configuration fails the build (never silently falls back to fixtures)", () => {
+  assert.equal(userPayloadSourceFromEnv({}), null);
+  assert.equal(userPayloadSourceFromEnv({ FLAMENODE_SNAPSHOT_DIR: " ", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "", FLAMENODE_SNAPSHOT_GENERATION: undefined }), null);
+  const full = { FLAMENODE_SNAPSHOT_DIR: "/x", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "/x/manifest.json", FLAMENODE_SNAPSHOT_GENERATION: "g1" };
+  for (const missing of Object.keys(full)) {
+    const partial = { ...full, [missing]: undefined };
+    assert.throws(() => userPayloadSourceFromEnv(partial), /Snapshot env incomplete/, `${missing} missing`);
+  }
+  // A complete configuration with an unreadable manifest throws too.
+  assert.throws(() => userPayloadSourceFromEnv(full));
 });
