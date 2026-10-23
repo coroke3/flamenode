@@ -19,7 +19,7 @@
 コード上は、次の条件が揃えば再生リスト同期を実行できます。
 
 - `flamenode-sync-jobs` が現行commitでデプロイ済み
-- Cronが `7 * * * *` / `52 * * * *`
+- Cronが `7,52 * * * *`（毎時7分・52分）
 - `DB` / `KV` / `YOUTUBE_SYNC_WAKE_QUEUE` / `STATIC_REBUILD_WAKE_QUEUE` bindingが存在
 - `event_youtube_playlist_sync` / `event_youtube_playlist_items` / `external_api_quota_usage` がRemote D1に存在
 - `YOUTUBE_API_KEY` / `YOUTUBE_OAUTH_CLIENT_ID` / `YOUTUBE_OAUTH_CLIENT_SECRET` / `YOUTUBE_OAUTH_REFRESH_TOKEN` のsecret名が登録済み

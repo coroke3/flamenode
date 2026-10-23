@@ -3,9 +3,11 @@
  * Shell for fixed public pages (MIG-0501): head metadata, shared CSS, header Island, static footer.
  */
 import "@flamenode/ui/styles/tokens.css";
-import "@flamenode/ui/styles/components.css";
 import "@flamenode/ui/styles/layout.css";
+import "@flamenode/ui/styles/components.css";
 import "@flamenode/ui/styles/screens.css";
+import "@flamenode/ui/styles/events.css";
+import "../styles/base.css";
 import { PublicFooter } from "@flamenode/ui";
 import { SiteHeader } from "../components/SiteHeader.ts";
 import {
@@ -76,17 +78,18 @@ const googlebot = head.noindex
     <meta property="og:title" content={head.ogTitle} />
     <meta property="og:description" content={head.description} />
     <meta property="og:url" content={head.canonical} />
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={head.ogType} />
     <meta property="og:image" content={head.ogImage} />
-    <meta property="og:image:width" content={String(head.ogImageWidth)} />
-    <meta property="og:image:height" content={String(head.ogImageHeight)} />
+    {head.ogImageWidth !== null && <meta property="og:image:width" content={String(head.ogImageWidth)} />}
+    {head.ogImageHeight !== null && <meta property="og:image:height" content={String(head.ogImageHeight)} />}
     <meta property="og:image:alt" content={head.ogImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={head.ogTitle} />
     <meta name="twitter:description" content={head.description} />
     <meta name="twitter:image" content={head.ogImage} />
     <meta name="twitter:image:alt" content={head.ogImageAlt} />
-    <meta property="og:image:type" content="image/png" />
+    {head.ogImageType !== null && <meta property="og:image:type" content={head.ogImageType} />}
+    <slot name="head" />
     {gaId && <script is:inline id="_next-ga-init" set:html={gaInitScript(gaId)}></script>}
     {gaId && <script is:inline id="_next-ga" src={gaLoaderSrc(gaId)}></script>}
   </head>
@@ -100,5 +103,5 @@ const googlebot = head.noindex
   @font-face { font-family: "FlameNode Sans"; src: url("/fonts/FlameNodeSans.otf") format("opentype"); font-weight: 400; font-display: swap; }
   html { --font-flamenode: "FlameNode Sans"; color-scheme: dark; }
   html[data-theme="light"] { color-scheme: light; }
-  body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { color: var(--ink); }
 </style>

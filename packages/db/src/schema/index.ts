@@ -14,6 +14,8 @@ export {
   eventGroups,
   eventTemplates,
   notificationOutbox,
+  publicBuildState,
+  publicPageRenders,
   publicVisibilityFences,
   schemaVersion,
   sessions,

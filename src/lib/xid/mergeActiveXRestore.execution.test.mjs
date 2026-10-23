@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-const mergeSource = readFileSync(new URL("./merge.ts", import.meta.url), "utf8");
+const mergeSource = readFileSync(new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url), "utf8");
 
 function compileActiveXRestoreSql() {
   const templates = [...mergeSource.matchAll(/db\.run\(sql`([\s\S]*?)`\)/g)].map(

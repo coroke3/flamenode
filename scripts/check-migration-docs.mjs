@@ -778,7 +778,7 @@ if (errors.length === 0) {
   }
 
   // MIG-0007 static artifact / visibility baseline.
-  const staticRebuildTypesSource = read("src/lib/staticRebuild/types.ts");
+  const staticRebuildTypesSource = read("packages/server-core/src/staticRebuild/types.ts");
   const staticRebuildTypeBlock =
     staticRebuildTypesSource.match(/STATIC_REBUILD_TARGET_TYPES\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1] ?? "";
   const configuredStaticTargets = [...staticRebuildTypeBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
@@ -887,7 +887,7 @@ if (errors.length === 0) {
   }
 
   // MIG-0009 Queue / Cron / background jobs baseline.
-  const wakeBudgetSource = read("src/lib/queues/wakeBudget.ts");
+  const wakeBudgetSource = read("packages/server-core/src/queues/wakeBudget.ts");
   const wakeKindBlock =
     wakeBudgetSource.match(/QUEUE_WAKE_KINDS\s*=\s*\[([\s\S]*?)\]\s*as const/)?.[1] ?? "";
   const wakeKinds = [...wakeKindBlock.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
@@ -922,8 +922,7 @@ if (errors.length === 0) {
     "`QUEUE_WAKE_MESSAGE_VERSION = 1`",
     "`0 * * * *`",
     "`15 * * * *`",
-    "`7 * * * *`",
-    "`52 * * * *`",
+    "`7,52 * * * *`",
     "Application retry budget: **4 attempts**",
     "`delivery_succeeded_awaiting_sent_mark`",
     "`rebuild_succeeded_awaiting_done_mark`",

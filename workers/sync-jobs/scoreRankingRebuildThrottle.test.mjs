@@ -302,7 +302,7 @@ test("deduped enqueue does not update KV marker", async () => {
 test("user-driven static rebuild paths do not import score throttle", async () => {
   const syncJobsSource = await readFile(new URL("./index.ts", import.meta.url), "utf8");
   const hooksSource = await readFile(
-    new URL("../../src/lib/staticRebuild/hooks.ts", import.meta.url),
+    new URL("../../packages/server-core/src/staticRebuild/hooks.ts", import.meta.url),
     "utf8",
   );
   const videoSavePlanSource = await readFile(

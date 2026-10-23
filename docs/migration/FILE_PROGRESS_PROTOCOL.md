@@ -24,7 +24,7 @@
 
 ## File-state machine and evidence
 
-**SHA循環回避:** ファイル台帳に記録する`SHA=`は、実装・テストした**直前のsource commit SHA**。進捗行を更新するcommit自身の未来SHAを記入することは不可能。最終PR HEAD/CI runをGitHubで別途確認し、レビュー担当者が紐付ける。偽の未来SHAや仮のCI URLを入力しない。
+**SHA循環回避:** ファイル台帳に記録する`SHA=`は、**このPR自身の履歴にあるcommit**（PR headから到達でき、baseからは到達できないcommit）。進捗行を更新するcommit自身の未来SHAは書けないので、2段階で進める: (1) source とtestを変更するcode commitを作る、(2) そのcode commitのSHAを`SHA=`に引用して台帳行を更新するledger commitを作る。最終PR HEAD/CI runをGitHubで別途確認し、レビュー担当者が紐付ける。偽の未来SHAや仮のCI URLを入力しない。rebaseすると引用済みSHAはPRの履歴から到達できなくなるため、rebase後は新しいcode commitのSHAを引用し直す。rebaseより`git merge origin/main`を優先する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)のmerge手順）。stacked PRのparent merge後のrebase/retarget（[GIT_WORKFLOW.md](GIT_WORKFLOW.md) §11 Stacked PRs）でも同様に引用し直す。
 
 | State | Required meaning | Required evidence |
 | --- | --- | --- |
@@ -38,6 +38,8 @@
 | BLOCKED | safe continuation impossible | PR and SHA, exact blocker, responsible owner and resume condition |
 
 **Evidence syntax:** Every state other than NOT_STARTED must have PR#123 and SHA=<40 hex>. BRIDGED/PARITY_VERIFIED and later also require TEST=<exact command> and CI=https://... or LOG=<real log reference>. For BRIDGED or later the file checker also verifies that every named target file path actually exists in this git tree. CUTOVER/RETIRED require APPROVAL=<reference>. These strings represent actual run identifiers; never fabricate them. DONE is a MIG state, never a file state.
+
+**Changed files cite this PR's own commit:** when a PR changes a file whose row is not NOT_STARTED, that row must contain, anywhere in its evidence, a `SHA=` that is not in the base row and is a commit from this PR's own history (reachable from the PR HEAD, not from the base). Earlier evidence may stay in the row after it. `scripts/check-migration-file-progress.mjs` enforces this against `MIGRATION_FILE_BASE_SHA` (in PR CI, `HEAD^1` of the merge ref) and fails in CI when no base is given. NOT_STARTED rows are intentionally exempt, so a CURRENT hotfix to a file whose migration has not started only needs the row to exist.
 
 ## File mapping is a wiring contract
 
@@ -86,6 +88,8 @@ Next wake (one file/micro-unit): ...
 ~~~bash
 node scripts/check-migration-file-progress.mjs
 node --test scripts/check-migration-file-progress.test.mjs
+node scripts/check-migration-ledger-completeness.mjs
+node --test scripts/check-migration-ledger-completeness.test.mjs
 node scripts/check-migration-docs.mjs
 node scripts/check-migration-task-cards.mjs
 npm run check:project-docs

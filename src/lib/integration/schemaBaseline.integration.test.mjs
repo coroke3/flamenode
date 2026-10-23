@@ -41,9 +41,11 @@ test("active migrations apply cleanly and match schema.ts manifests", () => {
     "0062_static_artifact_cleanup_index.sql",
     "0063_event_staff_account_lookup_index.sql",
     "0064_x_users_lower_id_index.sql",
+    "0065_public_build_state.sql",
+    "0066_public_page_renders.sql",
   ]);
-  assert.equal(result.tableCount, 46);
-  assert.equal(result.columnCount, 474);
+  assert.equal(result.tableCount, 48);
+  assert.equal(result.columnCount, 485);
   assert.ok(result.indexCount > 78);
   assert.ok(result.foreignKeyCount > 20);
   assert.ok(result.checkCount > 20);

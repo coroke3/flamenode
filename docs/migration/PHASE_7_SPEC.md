@@ -41,7 +41,7 @@
 - **Readiness:** NEEDS_REFINEMENT — MIG-0601 と MIG-0608（session 読み取り）の merge 後
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0102, MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0102, MIG-0601, MIG-0608, MIG-0611 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/dashboard/page.tsx`, `app/(auth)/dashboard/library/page.tsx`, `app/(auth)/dashboard/settings/page.tsx`, `app/(auth)/dashboard/youtube-playlists/page.tsx`（COMPAT_REDIRECT）, `app/(auth)/onboarding/page.tsx`（`FILE_MIGRATION_MATRIX.md` で MIG-0701 所有）。
@@ -55,6 +55,7 @@
 - **U01 router shell**: React Router と error boundary、未ログイン時の挙動（CURRENT と同じ遷移先）。
 - **U02 dashboard / library**: Active X 単位の表示。`no-store`。
 - **U03 settings / onboarding / youtube-playlists redirect**: 表示のみ（更新は MIG-0702）。
+- **U01 追加（coverage gap G10, G12）**: error boundary は `app/error.tsx` / `global-error.tsx` / `(auth)/error.tsx` の表示を写す。route guard は `(auth)` layout の redirect 先（query を含む）を CURRENT と同じにし、SPA の HTML（`apps/app/index.html`）に `meta robots noindex`（または `X-Robots-Tag`）を付ける。`CostGuardBanner` を auth layout 相当に置く。SPA の shell は SSR の `force-dynamic` の代わりに `no-store` で配る。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -62,6 +63,8 @@
 | T02 | 未ログインで直接URL | CURRENT と同じ遷移 |
 | T03 | 再読込・戻る・進む | 状態が壊れない |
 | T04 | BAN された利用者 | CURRENT と同じ表示 |
+| T05 | 子 component が throw（G10） | error boundary の UI が出る |
+| T06 | route × role の guard（G12） | redirect 先と query が CURRENT の layout と同じ。SPA の HTML に noindex がある |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -88,6 +91,7 @@ Phase 7 共通契約のとおり。
 #### Source snapshot
 - SA-098〜105（`src/lib/actions/xid.ts`: `setActiveXId`, `requestXIdLink`, `cancelXIdLinkRequest`, `requestXIdMergeRevert`, `updateXIdProfile`, `deleteLinkedXId`, `setXIdIcon`, `uploadXIdIcon`）、SA-076 `acceptOnboardingTerms`（`src/lib/actions/terms.ts`）。
 - 通知の「既読化」は CURRENT に無い。追加しない。
+- 引き継ぎ（MIG-0611, lead 決定 2026-10-23）: CURRENT の `/onboarding` 表示は `maybeMarkOnboardingComplete`（`user.onboarding_completed_at` の条件付き UPDATE。X 申請済み/承認済みのときだけ。認可には使わない補助マーカー）を GET 中に実行する。`GET /api/personal/onboarding` は書かないので、この更新は MIG-0702 で明示的な `POST` として実装し、SPA が `/onboarding` 到達時に呼ぶ。
 #### Owned paths
 - 新規: `+apps/app/src/routes/dashboard/settings/*.tsx`（更新フォーム）, `+apps/app/src/components/ActiveXLinkModal.tsx`
 - 触らない: `src/lib/actions/**`
@@ -123,7 +127,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿は MIG-0603、枠は MIG-0604 の API を使う
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0603, MIG-0604, MIG-0702 / **Decisions:** none
+- **Depends on:** MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/entry/page.tsx`, `app/(auth)/entry/slotted/page.tsx`, `app/(auth)/entry/unslotted/page.tsx`, `app/(auth)/dashboard/edit/[id]/page.tsx`, `app/(auth)/dashboard/edit/[id]/permissions/page.tsx`。
@@ -134,7 +138,8 @@ Phase 7 共通契約のとおり。
 - 触らない: `src/components/forms/**`（移植元。Phase 9 まで残す）
 #### Micro-units
 - **U01 entry**: `/entry` と slotted / unslotted。
-- **U02 edit**: `/dashboard/edit/:id` と permissions。
+- **U02 edit**: `/dashboard/edit/:id` と permissions（読み取り API は MIG-0630）。
+- **SA-107 の扱い（coverage gap G22）**: entry の `discordSignInInline` と return-to の sanitize は MIG-0802 の認証と合わせて対応する。それまでは CURRENT の Server Action を呼ぶ。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -142,6 +147,8 @@ Phase 7 共通契約のとおり。
 | T02 | 不正な YouTube URL・重複 | CURRENT と同じエラー |
 | T03 | collaborator が権限ページ | CURRENT と同じ可否 |
 | T04 | 編集中の再読込 | CURRENT と同じ |
+| T05 | 読み取りは MIG-0623 の API を使う（G13） | 画面が直接 D1 / auth / publicData を import しない |
+| T06 | SA-107 の return-to に危険な URL（G22） | 同じ移動先に sanitize される |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -162,7 +169,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0604 と MIG-0703 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0604, MIG-0703 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0604, MIG-0703, MIG-0624 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT（12ファイル）: `app/(manage)/manage/page.tsx`, `app/(manage)/manage/events/[id]/{page,edit/page,audience/page,slots/page,staff/page,videos/page,videos/[videoId]/page,youtube-playlist/page,review/page}.tsx`, `app/(manage)/manage/notifications/page.tsx`, `app/(manage)/manage/x-link-requests/page.tsx`。
@@ -174,6 +181,7 @@ Phase 7 共通契約のとおり。
 - 触らない: `app/(manage)/**`, `apps/app/**`
 #### Micro-units
 - U01〜U05 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704 のとおり。
+- **U01 追加（coverage gap G10, G12）**: `(manage)/layout.tsx` の guard を写す。user 無しは `/entry`、enrichmentFailed は `/entry?error=auth_temporarily_unavailable`、manage / admin 権限無しは `/dashboard`。error boundary と `CostGuardBanner` を置く。`apps/ops/index.html` に noindex。読み取りは MIG-0624 の API を使う。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -181,6 +189,8 @@ Phase 7 共通契約のとおり。
 | T02 | 担当外イベントの URL | 拒否 |
 | T03 | 最後の owner の解任 | 拒否 |
 | T04 | `/manage/events/[id]/review` | `videos?status=pending` へ互換 redirect |
+| T05 | route × role（guest, user, staff, owner, admin）（G12） | Location（`error` query を含む）が CURRENT の layout と同じ |
+| T06 | Ops の HTML（G12） | `meta robots noindex` または `X-Robots-Tag` がある |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -203,7 +213,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0605, MIG-0704 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626 / **Decisions:** D-05 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(admin)/**/page.tsx` 45件（`CURRENT_ROUTES.md` Admin 45）。部品は `src/components/admin/**`。
@@ -213,6 +223,7 @@ Phase 7 共通契約のとおり。
 - 触らない: `app/(admin)/**`, `apps/app/**`
 #### Micro-units
 - U01〜U08 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705 のとおり。
+- **U01 追加（coverage gap G10, G12）**: `(admin)/layout.tsx` の guard（manage と同じ redirect に加え、admin 以外は `/dashboard`）、error boundary、noindex、`CostGuardBanner`。読み取りは MIG-0625 / MIG-0626 の API を使う。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -220,6 +231,8 @@ Phase 7 共通契約のとおり。
 | T02 | spreadsheet の import 途中失敗 | 全件ロールバック |
 | T03 | 発行 token | ブラウザに渡らない |
 | T04 | Personal bundle | admin のコードが入っていない |
+| T05 | admin guard の Location（`error` query を含む）（G12） | CURRENT の layout と同じ |
+| T06 | Admin 45 の読み取り（G13） | MIG-0625 / MIG-0626 の endpoint を使い、直接 D1 を import しない |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/ops

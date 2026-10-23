@@ -8,47 +8,65 @@ import { performance } from "node:perf_hooks";
 
 export type SnapshotKind = "video" | "user" | "event";
 
+/**
+ * Public DTOs (MIG-0403). Field names follow the CURRENT columns the three
+ * public pages read (`app/(public)/[id]`, `event/[id]`, `user/[id]`), so the
+ * snapshot generator can project them 1:1. Only public-page fields; values
+ * that change faster than a build (likes, slot counts, viewer state) are
+ * Island/API data (D-09) and never part of the snapshot.
+ */
 export interface BasePublicSnapshot {
   readonly kind: SnapshotKind;
   readonly id: string;
   readonly title: string;
-  readonly description?: string;
-  readonly canonicalUrl?: string;
-  readonly ogImageUrl?: string;
-  readonly aliasOf?: string;
 }
 
 export interface VideoPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "video";
-  readonly creatorName?: string;
-  readonly creatorHandle?: string;
-  readonly creatorAvatarUrl?: string;
-  readonly thumbnailUrl?: string;
-  readonly publishedAt?: string;
+  /** `youtube_video_id`; also the alias URL `/{youtubeVideoId}` and the canonical path. */
   readonly youtubeVideoId?: string;
+  /** `creator_display_name`. */
+  readonly creatorName?: string;
+  /** `creator_x_user_id`. */
+  readonly creatorXUserId?: string;
+  /** `creator_icon_url` (already the public projected icon). */
+  readonly creatorIconUrl?: string;
+  /** CURRENT `creatorHref` condition: the creator has a public profile. */
+  readonly creatorHasPublicProfile?: boolean;
+  readonly creatorYoutubeChannelUrl?: string;
+  /** `scheduled_time`, unix seconds. */
+  readonly scheduledTime?: number;
+  readonly music?: string;
+  readonly credit?: string;
+  readonly introComment?: string;
+  readonly highlights?: string;
 }
 
 export interface UserPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "user";
+  /** `x_name`. */
   readonly name?: string;
-  readonly handle?: string;
-  readonly bio?: string;
-  readonly avatarUrl?: string;
+  /** `icon_url` (already the public projected icon). */
+  readonly iconUrl?: string;
+  readonly profileText?: string;
+  readonly youtubeChannelUrl?: string;
 }
 
 export interface EventPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "event";
-  readonly bannerUrl?: string;
+  readonly explanation?: string;
+  /** `img_url`. */
+  readonly imageUrl?: string;
+  /** `icon_url`. */
   readonly iconUrl?: string;
-  readonly status?: string;
-  readonly periodText?: string;
+  /** Build-time `eventStatusLabel(computeEventStatus(event))` (live status is MIG-0502). */
+  readonly statusLabel?: string;
+  readonly periodLabel?: string;
+  /** CURRENT entry action at build time: reserve / submit / none. */
+  readonly entryAction?: "reserve" | "submit";
 }
 
-export type PublicSnapshot =
-  | VideoPublicSnapshot
-  | UserPublicSnapshot
-  | EventPublicSnapshot
-  | BasePublicSnapshot;
+export type PublicSnapshot = VideoPublicSnapshot | UserPublicSnapshot | EventPublicSnapshot;
 
 export type SnapshotSource = Readonly<{
   read(key: string): Promise<Uint8Array | null>;
@@ -82,7 +100,10 @@ type SnapshotEnvelope = {
 };
 
 const MAX_OBJECT_BYTES = 2 * 1024 * 1024;
-const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
+// CURRENT ids may start with `_` or `-`: X handles `[a-z0-9_]{1,20}`, event ids
+// `[A-Za-z0-9_-]{1,64}` (src/lib/event/eventForm.ts) and `v_<uuid>` video ids. Same leading set as
+// routeMap.ts SAFE_ID_PATTERN; `.`, `/` and backslash stay rejected so ids are never path segments.
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const HEX_256 = /^[a-f0-9]{64}$/;
 const decode = new TextDecoder("utf-8", { fatal: true });
 
@@ -108,10 +129,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isSafeUrl(url: unknown): url is string {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  return /^https?:\/\/[^\s<>"']+$/i.test(trimmed) || (/^\/[^\/\s<>"']+/i.test(trimmed) && !trimmed.startsWith("//"));
+const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+/** Clamp text; anything that is not a non-empty string is dropped. */
+function text(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.trim() ? value.slice(0, max) : undefined;
+}
+
+/** http(s) URL or same-site path only; `javascript:`, `data:`, `//host` and `/\\host` are dropped. */
+function publicUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const url = value.trim();
+  if (!url || url.length > 2048) return undefined;
+  if (url.startsWith("/")) return url.startsWith("//") || url.startsWith("/\\") ? undefined : url;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withDefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 }
 
 function validatedPublicDto(value: unknown): PublicSnapshot | null {
@@ -122,41 +162,49 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
     typeof id !== "string" || !ID_PATTERN.test(id) ||
     typeof title !== "string" || title.length === 0 || title.length > 300
   ) return null;
-
-  const base: Record<string, unknown> = {
-    kind: kind as SnapshotKind,
-    id,
-    title,
-  };
-
-  if (typeof value.description === "string") base.description = value.description.slice(0, 5000);
-  if (isSafeUrl(value.canonicalUrl)) base.canonicalUrl = value.canonicalUrl.trim();
-  if (isSafeUrl(value.ogImageUrl)) base.ogImageUrl = value.ogImageUrl.trim();
-  if (typeof value.aliasOf === "string" && ID_PATTERN.test(value.aliasOf)) base.aliasOf = value.aliasOf;
-
-  if (kind === "video") {
-    if (typeof value.creatorName === "string") base.creatorName = value.creatorName.slice(0, 100);
-    if (typeof value.creatorHandle === "string") base.creatorHandle = value.creatorHandle.slice(0, 100);
-    if (isSafeUrl(value.creatorAvatarUrl)) base.creatorAvatarUrl = value.creatorAvatarUrl.trim();
-    if (isSafeUrl(value.thumbnailUrl)) base.thumbnailUrl = value.thumbnailUrl.trim();
-    if (typeof value.publishedAt === "string") base.publishedAt = value.publishedAt.slice(0, 50);
-    if (typeof value.youtubeVideoId === "string" && /^[a-zA-Z0-9_-]{6,15}$/.test(value.youtubeVideoId)) {
-      base.youtubeVideoId = value.youtubeVideoId;
-    }
-  } else if (kind === "user") {
-    if (typeof value.name === "string") base.name = value.name.slice(0, 100);
-    if (typeof value.handle === "string") base.handle = value.handle.slice(0, 100);
-    if (typeof value.bio === "string") base.bio = value.bio.slice(0, 2000);
-    if (isSafeUrl(value.avatarUrl)) base.avatarUrl = value.avatarUrl.trim();
-  } else if (kind === "event") {
-    if (isSafeUrl(value.bannerUrl)) base.bannerUrl = value.bannerUrl.trim();
-    if (isSafeUrl(value.iconUrl)) base.iconUrl = value.iconUrl.trim();
-    if (typeof value.status === "string") base.status = value.status.slice(0, 50);
-    if (typeof value.periodText === "string") base.periodText = value.periodText.slice(0, 200);
-  }
-
   // Strict projection. Never forward unknown metadata or private attributes.
-  return base as unknown as PublicSnapshot;
+  if (kind === "video") {
+    const youtubeVideoId = typeof value.youtubeVideoId === "string" && YOUTUBE_ID_PATTERN.test(value.youtubeVideoId)
+      ? value.youtubeVideoId
+      : undefined;
+    const scheduledTime = Number.isSafeInteger(value.scheduledTime) && (value.scheduledTime as number) > 0
+      ? value.scheduledTime as number
+      : undefined;
+    return withDefined<VideoPublicSnapshot>({
+      kind: "video", id, title,
+      youtubeVideoId,
+      creatorName: text(value.creatorName, 100),
+      // Same pattern as the user page id: CURRENT stores handles up to 64 chars (legacy/normalize.ts)
+      // and renders any stored value as `/user/${id}`, so a stricter X-handle check would drop creators.
+      creatorXUserId: typeof value.creatorXUserId === "string" && ID_PATTERN.test(value.creatorXUserId) ? value.creatorXUserId : undefined,
+      creatorIconUrl: publicUrl(value.creatorIconUrl),
+      creatorHasPublicProfile: value.creatorHasPublicProfile === true ? true : undefined,
+      creatorYoutubeChannelUrl: publicUrl(value.creatorYoutubeChannelUrl),
+      scheduledTime,
+      music: text(value.music, 500),
+      credit: text(value.credit, 500),
+      introComment: text(value.introComment, 5000),
+      highlights: text(value.highlights, 5000),
+    });
+  }
+  if (kind === "user") {
+    return withDefined<UserPublicSnapshot>({
+      kind: "user", id, title,
+      name: text(value.name, 100),
+      iconUrl: publicUrl(value.iconUrl),
+      profileText: text(value.profileText, 5000),
+      youtubeChannelUrl: publicUrl(value.youtubeChannelUrl),
+    });
+  }
+  return withDefined<EventPublicSnapshot>({
+    kind: "event", id, title,
+    explanation: text(value.explanation, 5000),
+    imageUrl: publicUrl(value.imageUrl),
+    iconUrl: publicUrl(value.iconUrl),
+    statusLabel: text(value.statusLabel, 50),
+    periodLabel: text(value.periodLabel, 200),
+    entryAction: value.entryAction === "reserve" || value.entryAction === "submit" ? value.entryAction : undefined,
+  });
 }
 
 function checkedManifest(manifest: SnapshotManifest | null, generation: string, metrics: SnapshotBuildMetrics): SnapshotManifest {
@@ -297,4 +345,76 @@ export async function loadAboutStatsSnapshot(
   if (!stats) return reject(metrics, "INVALID_PAYLOAD", "About stats payload invalid");
   metrics.accepted += 1;
   return stats;
+}
+
+/**
+ * Public event object keys (MIG-0502). The payloads are CURRENT's `events/index.json`,
+ * `events/{id}.json` and `events/{id}/release.v1.json` as they are; the normalizers stay CURRENT's
+ * (`staticEvents*Core`, imported by `eventData.ts`) so the visibility fences cannot drift.
+ */
+export const EVENT_INDEX_KEY = "snapshot/event-index/current.json";
+export const EVENT_DETAIL_KEY_PATTERN = /^snapshot\/event-detail\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const EVENT_RELEASE_KEY_PATTERN = /^snapshot\/event-release\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const eventDetailKey = (id: string): string => `snapshot/event-detail/${id}.json`;
+export const eventReleaseKey = (id: string): string => `snapshot/event-release/${id}.json`;
+
+/** Verified raw payload of one event object (manifest, generation, visibility, hash). Throws SnapshotBuildError. */
+export async function loadEventPayloadSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const pattern = key === EVENT_INDEX_KEY
+    ? /^snapshot\/event-index\/current\.json$/
+    : key.startsWith("snapshot/event-release/") ? EVENT_RELEASE_KEY_PATTERN : EVENT_DETAIL_KEY_PATTERN;
+  const payload = await readVerifiedPayload(source, key, options, metrics, pattern);
+  metrics.accepted += 1;
+  return payload;
+}
+/** CURRENT `users/index.json` (the R2 object `/user` reads) as one build-time object (MIG-0504). */
+export const USERS_INDEX_KEY = "snapshot/users-index/current.json";
+/**
+ * CURRENT `users/<id>.json` and its paged siblings (`users/<id>/works/<n>.json`, `collabs/<n>.json`) as
+ * build-time objects: `snapshot/user-profile/<x-id>[.works.<n>|.collabs.<n>].json` (n = 2..5).
+ */
+const USER_PROFILE_KEY_PATTERN = /^snapshot\/user-profile\/[a-z0-9_]{1,20}(\.(works|collabs)\.[2-9])?\.json$/;
+
+export function userProfileSnapshotKey(xId: string, section?: "works" | "collabs", page?: number): string {
+  return section && page
+    ? `snapshot/user-profile/${xId}.${section}.${page}.json`
+    : `snapshot/user-profile/${xId}.json`;
+}
+
+/**
+ * Same fail-closed envelope checks as entities; the payload is returned as the CURRENT R2 JSON object.
+ * The caller projects it with CURRENT `normalizeStaticUserProfile` / `normalizeStaticUsersIndex`, which
+ * forward only known fields and drop non-public videos.
+ */
+async function loadPublicRecord(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+  keyPattern: RegExp,
+): Promise<Record<string, unknown>> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, keyPattern);
+  if (!isRecord(payload)) return reject(metrics, "INVALID_PAYLOAD", "Snapshot payload is not an object");
+  metrics.accepted += 1;
+  return payload;
+}
+
+export function loadUserProfileSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, key, options, USER_PROFILE_KEY_PATTERN);
+}
+
+export function loadUsersIndexSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, USERS_INDEX_KEY, options, /^snapshot\/users-index\/current\.json$/);
 }

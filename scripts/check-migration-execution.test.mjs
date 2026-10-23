@@ -151,7 +151,7 @@ const performanceDagStatus = status
  + "| MIG-0409 | build-time data | BLOCKED | MIG-0404 |\n"
  + "| MIG-0410 | build scheduler | BLOCKED | MIG-0409 |\n"
  + "| MIG-0411 | page regeneration | BLOCKED | MIG-0405, MIG-0409 |\n"
- + "| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |\n";
+ + "| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |\n";
 test("1102 performance PoC can be READY while visual D-08 is BLOCKED", () => {
  const actual=performanceDagStatus.replace("| MIG-0406 | budget | BLOCKED | MIG-0405 |","| MIG-0406 | budget | BLOCKED | MIG-0405 |");
  assert.deepEqual(run({statusText:actual}),[]);
@@ -168,7 +168,7 @@ test("0401 cannot silently acquire the visual HTML dependency",()=>{
  const changed=performanceDagStatus.replace("| MIG-0401 | snapshot | READY | MIG-0105 |","| MIG-0401 | snapshot | BLOCKED | MIG-0206 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0401 performance\/visual DAG/);
 });
-test("Phase 4 Gate cannot drop the D-09 build scheduler",()=>{
- const changed=performanceDagStatus.replace("| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |","| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |");
+test("Phase 4 Gate depends on 0403 and 0406 only (owner decision 2026-10-23)",()=>{
+ const changed=performanceDagStatus.replace("| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |","| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0407 performance\/visual DAG/);
 });

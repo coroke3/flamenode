@@ -67,7 +67,7 @@ test("枠表示名はX ID単位で分離しlegacy値はX未設定時だけ読む
 });
 
 test("監査ログのactor X検証結果は入力単位で保持する", () => {
-  const source = read("./audit/logger.ts");
+  const source = read("../../packages/server-core/src/audit/logger.ts");
 
   assert.match(
     source,

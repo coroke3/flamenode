@@ -95,27 +95,57 @@ export type PageHead = Readonly<{
   canonical: string;
   ogTitle: string;
   ogImage: string;
-  ogImageWidth: number;
-  ogImageHeight: number;
+  /** null for a page-specific image: CURRENT emits no size or type for it. */
+  ogImageWidth: number | null;
+  ogImageHeight: number | null;
+  ogImageType: string | null;
   ogImageAlt: string;
+  ogType: "website" | "profile";
 }>;
+
+/** CURRENT `absoluteUrl`: absolute URLs stay, paths go under the site origin. */
+export function absoluteUrl(path: string, origin: string = siteOrigin()): string {
+  try {
+    return new URL(path).toString();
+  } catch {
+    return new URL(path.startsWith("/") ? path : `/${path}`, origin).toString();
+  }
+}
 
 export function buildPageHead(input: {
   path: string;
   title: string;
   description?: string | null;
   noIndex?: boolean;
+  /** Page-specific Open Graph image (CURRENT `buildPageMetadata({ image })`); default is the brand card. */
+  image?: string | null;
+  ogType?: "website" | "profile";
 }): PageHead {
   const origin = siteOrigin();
-  return {
+  const base = {
     noindex: input.noIndex === true,
     title: `${input.title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
     ogTitle: input.title,
+    ogType: input.ogType ?? "website",
+  } as const;
+  if (input.image) {
+    return {
+      ...base,
+      ogImage: absoluteUrl(input.image, origin),
+      ogImageWidth: null,
+      ogImageHeight: null,
+      ogImageType: null,
+      ogImageAlt: input.title,
+    };
+  }
+  return {
+    ...base,
     ogImage: `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
     ogImageWidth: 1200,
     ogImageHeight: 630,
+    ogImageType: "image/png",
     ogImageAlt: `${SITE_NAME} ロゴ`,
   };
 }

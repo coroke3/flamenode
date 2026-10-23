@@ -1,0 +1,27 @@
+---
+/**
+ * `/event/[id]/release` (MIG-0502 U04 / Recipe R-PAGE / Runtime S0). One page per public event release object
+ * in the build data; a missing, private or invalid object produces no page (CURRENT: 404).
+ */
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { EventReleaseIsland } from "../../../components/EventReleaseIsland.ts";
+import { getEventBuildData } from "../../../lib/eventData.ts";
+import { buildEventReleaseModel } from "../../../lib/eventRelease.ts";
+import { buildPageHead } from "../../../lib/pageHead.ts";
+
+export async function getStaticPaths() {
+  const { releases } = await getEventBuildData();
+  return [...releases.values()].map((release) => ({ params: { id: release.event.id }, props: { release } }));
+}
+
+const { release } = Astro.props;
+const head = buildPageHead({
+  path: `/event/${release.event.id}/release`,
+  title: `${release.event.title} | Release`,
+  description: "イベントの公開作品一覧",
+});
+const model = buildEventReleaseModel(release);
+---
+<PublicLayout head={head} currentPath="/event">
+  <EventReleaseIsland client:load model={model} />
+</PublicLayout>

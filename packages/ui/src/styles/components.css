@@ -76,3 +76,42 @@ a.fn-btn{text-decoration:none}
 .fn-empty-state-title{margin:0;font:700 24px/32px var(--font-display)}
 .fn-empty-state-description{margin:0;max-width:45em;color:var(--ink-muted)}
 .fn-empty-state-actions{display:flex;flex-wrap:wrap;gap:8px}
+
+/*
+ * Dialog: Modal rules copied from the mock components.css (z-index above the header,
+ * layout.css .hd2 20-31), plus max-height/scroll and a narrower padding on phones.
+ * ErrorCallout / StatusNotice / PartialFailureNotice have no mock rule. They follow the
+ * mock's flat note (fn.css .en-banner / .hd-acc-note: subtle surface, 3px inset tone bar)
+ * with CURRENT's tones: ErrorCallout danger/warning, PublicDegradedBanner warning,
+ * SaveSuccessNotice success, PartialFailureNotice fn-alert-warning.
+ */
+.fn-modal-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:var(--space-4);background:rgba(0,0,0,.6);z-index:1000}
+.fn-modal-backdrop--contained{position:absolute}
+.fn-modal{width:100%;max-width:520px;max-height:100%;overflow-y:auto;background:var(--surface-raised);color:var(--ink);box-shadow:var(--shadow-overlay);font-family:var(--font-sans);text-align:center}
+.fn-modal__content{padding:var(--space-12) var(--space-12) var(--space-8)}
+.fn-modal__icon{color:var(--ink-muted);margin-bottom:var(--space-4)}
+.fn-modal__icon .fn-icon{font-size:20px;width:auto}
+.fn-modal__title{font:700 24px/32px var(--font-display);margin:0 0 var(--space-4)}
+.fn-modal__body{font:400 15px/24px var(--font-sans);color:var(--ink-muted)}
+.fn-modal__actions{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.fn-modal__actions .fn-btn{width:100%;height:56px}
+.fn-modal__actions .fn-btn--secondary,.fn-modal__actions .fn-btn--danger{background:var(--surface-active)}
+@media (max-width:640px){.fn-modal__content{padding:var(--space-8) var(--space-6) var(--space-6)}}
+.fn-error-callout{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);padding:var(--space-3) var(--space-4);background:var(--surface-subtle);color:var(--ink);font:400 13px/20px var(--font-sans)}
+.fn-error-callout--danger{box-shadow:inset 3px 0 0 var(--danger)}
+.fn-error-callout--warning{box-shadow:inset 3px 0 0 var(--warning)}
+.fn-error-callout--danger .fn-error-message{color:var(--danger)}
+.fn-error-callout--warning .fn-error-message{color:var(--warning)}
+.fn-error-message{flex:1;min-width:0}
+.fn-error-retry{flex:none}
+.fn-island-error{margin:var(--space-3) 0}
+.fn-status-notice{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-2);padding:var(--space-2) var(--space-4);background:var(--surface-subtle);box-shadow:inset 3px 0 0 var(--ink-muted);color:var(--ink);font:400 13px/20px var(--font-sans)}
+.fn-status-notice--degraded{box-shadow:inset 3px 0 0 var(--warning)}
+.fn-status-notice--success{box-shadow:inset 3px 0 0 var(--success)}
+.fn-status-notice--info{box-shadow:inset 3px 0 0 var(--info)}
+.fn-status-notice--pending,.fn-status-notice--unavailable{color:var(--ink-muted)}
+.fn-status-title{font-weight:700}
+.fn-status-message{min-width:0}
+.fn-partial-failure{padding:var(--space-3) var(--space-4);background:var(--surface-subtle);box-shadow:inset 3px 0 0 var(--warning);color:var(--ink);font:400 13px/20px var(--font-sans)}
+.fn-partial-failure-title{margin:0}
+.fn-partial-failure ul{margin:var(--space-1) 0 0;padding-left:18px}

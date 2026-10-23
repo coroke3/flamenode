@@ -3,6 +3,12 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const action = await readFile(new URL("./cost-guard.ts", import.meta.url), "utf8");
+// MIG-0306 U03: input/confirm/allowlist rules live in the domain package; the
+// action must keep calling them.
+const policy = await readFile(
+  new URL("../../../packages/domain/src/admin/costGuardCommands.ts", import.meta.url),
+  "utf8",
+);
 const normalUi = await readFile(new URL("../../components/admin/CostGuardForm.tsx", import.meta.url), "utf8");
 const overrideUi = await readFile(new URL("../../components/admin/CostGuardOverrideForm.tsx", import.meta.url), "utf8");
 const contentJobs = await readFile(new URL("../../../workers/content-jobs/index.ts", import.meta.url), "utf8");
@@ -20,7 +26,7 @@ test("all manual CostGuard control writes use the dedicated control guard and at
   assert.doesNotMatch(action, /auditAction\(/);
   assert.doesNotMatch(action, /await db\.(?:insert|update|delete)/);
   assert.doesNotMatch(action, /setAutoCostGuard|setCostGuardAdvancedSettings/);
-  assert.match(action, /z\.enum\(\["normal", "economy", "read_only", "static_only"\]\)/);
+  assert.match(policy, /z\.enum\(\["normal", "economy", "read_only", "static_only"\]\)/);
   assert.match(action, /writeOperationModeKvMirror/);
   assert.match(action, /KV複製の更新に失敗/);
   assert.equal(
@@ -30,18 +36,29 @@ test("all manual CostGuard control writes use the dedicated control guard and at
   );
   assert.doesNotMatch(normalUi, /\["maintenance", "メンテナンス"\]/);
   assert.match(action, /context: "cost_guard_disabled_features"/);
-  assert.match(action, /WRITE_FEATURE_KEYS\.filter/);
+  assert.match(policy, /WRITE_FEATURE_KEYS\.filter/);
   assert.match(action, /expected_disabled_features_json/);
-  assert.match(action, /JSON\.parse\(expectedDisabledFeatures\)/);
-  assert.match(action, /設定が別の管理者によって変更されています/);
+  assert.match(policy, /JSON\.parse\(expectedDisabledFeatures\)/);
+  assert.match(policy, /設定が別の管理者によって変更されています/);
+  for (const name of [
+    "parseCostGuardModeInput",
+    "parseMaintenanceModeInput",
+    "resolveMaintenanceTargetMode",
+    "parseDisabledFeaturesInput",
+    "checkExpectedDisabledFeatures",
+  ]) {
+    assert.match(action, new RegExp(`${name}\\(`));
+  }
 });
 
 test("override is a separate, short, confirmed and allowlisted emergency operation", () => {
   assert.match(action, /requireCostGuardControlAdmin\(\)/);
-  assert.match(action, /OVERRIDE_DURATION_SEC = 15 \* 60/);
-  assert.match(action, /confirm !== "OVERRIDE"/);
-  assert.match(action, /confirm !== "CLEAR"/);
-  assert.match(action, /candidates\.every\(isWriteFeatureKey\)/);
+  assert.match(policy, /OVERRIDE_DURATION_SEC = 15 \* 60/);
+  assert.match(policy, /confirm !== "OVERRIDE"/);
+  assert.match(policy, /confirm !== "CLEAR"/);
+  assert.match(policy, /candidates\.every\(isWriteFeatureKey\)/);
+  assert.match(action, /parseCostGuardOverrideInput\(/);
+  assert.match(action, /parseClearCostGuardOverrideInput\(/);
   assert.match(action, /context: "cost_guard_override_enable"/);
   assert.match(action, /context: "cost_guard_override_clear"/);
   assert.doesNotMatch(normalUi, /exception_until|exception_features_json|一時例外/);

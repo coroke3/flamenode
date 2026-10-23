@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-17
+> Last updated: 2026-10-19
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0406
-Current Owner: unassigned
+Current Task: MIG-0407
+Current Owner: antigravity
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0406
-Last Task PR: #314
-Merged READY: MIG-0205, MIG-0304, MIG-0305, MIG-0306, MIG-0409
+Last Completed Task: MIG-0407
+Last Task PR: #328
+Merged READY: MIG-0501 (lead Work Order, NEEDS_REFINEMENT text allowed), MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -106,11 +106,11 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | --- | --- | --- | --- |
 | 0 | Baseline / Inventory | DONE | PASSED |
 | 1 | Repository boundaries | DONE | PASSED |
-| 2 | Design System / HTML mock integration (公開画面用) | IN_PROGRESS (MIG-0201, MIG-0202, MIG-0203, MIG-0204 DONE / MIG-0205 READY) | CLOSED |
-| 3 | Domain extraction | READY | CLOSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406 DONE / MIG-0409 READY) | CLOSED |
+| 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
+| 3 | Domain extraction | DONE | PASSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | PASSED (owner approval 2026-10-23, with deferrals) |
 | 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0608 READY) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -232,8 +232,8 @@ Validation:
 | MIG-0202 | primitives | DONE | MIG-0201 |
 | MIG-0203 | navigation/layout | DONE | MIG-0202 |
 | MIG-0204 | forms/feedback/data-display | DONE | MIG-0202 |
-| MIG-0205 | representative responsive screens + UX mapping | READY | MIG-0203, MIG-0204 |
-| MIG-0206 | Phase 2 Gate | BLOCKED | MIG-0205 |
+| MIG-0205 | representative responsive screens + UX mapping | DONE | MIG-0203, MIG-0204 |
+| MIG-0206 | Phase 2 Gate | DONE | MIG-0205 |
 
 ## Phase 3 — Domain extraction
 
@@ -242,13 +242,13 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0301 | extraction/DI pattern | DONE | MIG-0108 |
-| MIG-0302 | low-risk read domain | READY | MIG-0301 |
-| MIG-0308 | `packages/db` schema extraction (zero DDL) | BLOCKED | MIG-0302 |
-| MIG-0303 | low-risk mutation domain | BLOCKED | MIG-0308 |
-| MIG-0304 | video domain group | BLOCKED | MIG-0303 |
-| MIG-0305 | event/slot domain group | BLOCKED | MIG-0303 |
-| MIG-0306 | user/X/admin domain group | BLOCKED | MIG-0303 |
-| MIG-0307 | Phase 3 Gate | BLOCKED | MIG-0304..MIG-0306, MIG-0308 |
+| MIG-0302 | low-risk read domain | DONE | MIG-0301 |
+| MIG-0308 | `packages/db` schema extraction (zero DDL) | DONE | MIG-0302 |
+| MIG-0303 | low-risk mutation domain | DONE | MIG-0308 |
+| MIG-0304 | video domain group | DONE | MIG-0303 |
+| MIG-0305 | event/slot domain group | DONE | MIG-0303 |
+| MIG-0306 | user/X/admin domain group | DONE | MIG-0303 |
+| MIG-0307 | Phase 3 Gate | DONE | MIG-0304..MIG-0306, MIG-0308 |
 
 ## Phase 4 — Public PoC
 
@@ -265,15 +265,15 @@ Validation:
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
 | MIG-0401 | Astro build-input / fixture perf PoC (no UI mock) | DONE | MIG-0105 |
-| MIG-0402 | shared React UI in Astro | BLOCKED | MIG-0206, MIG-0401 |
-| MIG-0403 | representative video/user/event SSG | BLOCKED | MIG-0402, MIG-0404 |
+| MIG-0402 | shared React UI in Astro | DONE | MIG-0206, MIG-0401 |
+| MIG-0403 | representative video/user/event SSG | DONE | MIG-0402, MIG-0404 |
 | MIG-0404 | route-map generator (mock-independent) | DONE | MIG-0401 |
 | MIG-0405 | visibility gateway | DONE | MIG-0404 |
 | MIG-0406 | CPU/build benchmark | DONE | MIG-0405 |
-| MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | READY | MIG-0404 |
+| MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | BLOCKED | MIG-0404 |
 | MIG-0410 | deploy-hook build scheduler Cron (B, D-09) | BLOCKED | MIG-0409 |
 | MIG-0411 | per-page R2 HTML regeneration via Queue (ISR equivalent, D-09) | BLOCKED | MIG-0405, MIG-0409 |
-| MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |
+| MIG-0407 | Phase 4 Gate: performance + visual evidence | DONE | MIG-0403, MIG-0406 |
 
 ## Phase 5 — Public migration
 
@@ -281,7 +281,7 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0501 | fixed/static routes | BLOCKED | MIG-0407 |
+| MIG-0501 | fixed/static routes | READY | MIG-0407 |
 | MIG-0502 | event routes | BLOCKED | MIG-0501 |
 | MIG-0503 | group routes | BLOCKED | MIG-0501 |
 | MIG-0504 | user routes | BLOCKED | MIG-0501 |
@@ -289,7 +289,7 @@ Validation:
 | MIG-0506 | root/top | BLOCKED | MIG-0505 |
 | MIG-0507 | `/:id` video catch-all | BLOCKED | MIG-0502..MIG-0506 |
 | MIG-0509 | all public data generated at build time (D-09) | BLOCKED | MIG-0507 |
-| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0509, MIG-0607 |
+| MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0509, MIG-0621, MIG-0607 |
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
@@ -299,16 +299,38 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0601 | low-risk reads | BLOCKED | MIG-0307, MIG-0107 |
-| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | READY | MIG-0801, MIG-0107 |
-| MIG-0602 | low-risk mutations | BLOCKED | MIG-0601, MIG-0608 |
-| MIG-0603 | video APIs | BLOCKED | MIG-0602 |
-| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602 |
-| MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602 |
+| MIG-0601 | low-risk reads | DONE | MIG-0307, MIG-0107 |
+| MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
+| MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
+| MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
+| MIG-0603 | video APIs | READY | MIG-0602 |
+| MIG-0604 | event/slot APIs | READY | MIG-0602 |
+| MIG-0605 | user/X/admin APIs | READY | MIG-0602 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
+| MIG-0612 | shared server core scaffold, ports, boundary check (D-10) | DONE | — |
+| MIG-0613 | audit mutation core + queue wake via ports (D-10) | DONE | MIG-0612 |
+| MIG-0614 | static rebuild enqueue / notifications batch / visibility fence / public cache core (D-10) | DONE | MIG-0613 |
+| MIG-0615 | video/event/xUser visibility transition planners (D-10) | DONE | MIG-0614 |
+| MIG-0616 | audit restore core (D-10) | DONE | MIG-0615 |
+| MIG-0617 | replace apps/api Option A copy with core (D-10) | BLOCKED | MIG-0613, MIG-0614, MIG-0602 |
+| MIG-0618 | xid merge core (D-10) | DONE | MIG-0613 |
+| MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
+| MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | BLOCKED | MIG-0405 |
+| MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | BLOCKED | MIG-0509 |
+| MIG-0622 | ledger completeness checker (every tracked CURRENT file has a FILE_MIGRATION_MATRIX row) | DONE | — |
+| MIG-0623 | Entry page read APIs | DONE | MIG-0601, MIG-0608 |
+| MIG-0624 | Manage page read APIs | DONE | MIG-0601, MIG-0608 |
+| MIG-0625 | Admin read APIs part A (users/videos/events/moderation) | BLOCKED | MIG-0601, MIG-0608 |
+| MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | READY | MIG-0601, MIG-0608 |
+| MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509 |
+| MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | BLOCKED | MIG-0405, MIG-0606 |
+| MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602 |
+| MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | IN_PROGRESS | MIG-0623 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
+
+MIG-0617 と MIG-0629 は依存が DONE でも、Work Order の未決の lead 決定が残るため BLOCKED。Next: waiting for lead decisions L1-L3 (MIG-0617) / M1-M3 (MIG-0629), see PHASE_6_SPEC.md の各 Work Order。MIG-0630 は IN_PROGRESS（U01/U02a/U03/U04 を #382 で merge、U02b が次の unit）。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
@@ -319,11 +341,11 @@ MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を�
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601, MIG-0608 |
+| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
 | MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
-| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702 |
-| MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703 |
-| MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704 |
+| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 |
+| MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703, MIG-0624 |
+| MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704, MIG-0625, MIG-0626 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
 
 ## Phase 8 — Auth
@@ -336,7 +358,7 @@ MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を�
 | MIG-0802 | Web Standard/Auth integration PoC | BLOCKED | MIG-0801, MIG-0607 |
 | MIG-0803 | Discord/account-linking parity | BLOCKED | MIG-0802 |
 | MIG-0804 | CPU/security review | BLOCKED | MIG-0803 |
-| MIG-0805 | production cutover proposal | BLOCKED | MIG-0804 |
+| MIG-0805 | production cutover proposal | BLOCKED | MIG-0804, MIG-0628 |
 | MIG-0806 | Phase 8 Gate | BLOCKED | MIG-0805 |
 
 MIG-0805 requires explicit user approval before production action.
@@ -351,7 +373,7 @@ MIG-0805 requires explicit user approval before production action.
 | MIG-0902 | rollback observation window | BLOCKED | MIG-0901 |
 | MIG-0903 | remove legacy Server Actions/routes | BLOCKED | MIG-0902 |
 | MIG-0904 | remove OpenNext/Next deploy path | BLOCKED | MIG-0903 |
-| MIG-0907 | remove json-generator / static rebuild queue + G2 observation (D-09) | BLOCKED | MIG-0904, MIG-0610 |
+| MIG-0907 | remove json-generator / static rebuild queue + G2 observation (D-09) | BLOCKED | MIG-0904, MIG-0610, MIG-0627 |
 | MIG-0905 | final architecture/docs consolidation | BLOCKED | MIG-0907 |
 | MIG-0906 | Final Gate | BLOCKED | MIG-0905 |
 
