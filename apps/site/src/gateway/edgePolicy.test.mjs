@@ -6,6 +6,7 @@ import gateway, { resetGatewayCaches } from "./index.ts";
 import {
   OPERATION_MODE_KV_KEY,
   applyEdgePolicy,
+  isPolicyBypassPath,
   resetEdgePolicyCache,
   resolveCanonicalHostRedirect as ported,
 } from "./edgePolicy.ts";
@@ -243,4 +244,26 @@ test("Static Assets are fetched with redirect manual; /event/{id}/slots reaches 
     ["/about/", "manual"],
     ["/maintenance/", "manual"],
   ]);
+});
+
+test("CURRENT matcher exclusions (build assets, favicon) bypass policy: no redirect, no KV read", async () => {
+  const middleware = await readFile(new URL("../../../../middleware.ts", import.meta.url), "utf8");
+  assert.ok(middleware.includes('matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]'));
+  const bypass = ["/_astro/x.css", "/_astro/chunk.abc123.js", "/favicon.ico"];
+  for (const path of bypass) assert.equal(isPolicyBypassPath(path), true, path);
+  for (const path of ["/", "/maintenance", "/brand/a.png", "/logo.png", "/robots.txt", "/astro/x.css", "/x/favicon.ico"]) {
+    assert.equal(isPolicyBypassPath(path), false, path);
+  }
+  for (const path of bypass) {
+    resetEdgePolicyCache();
+    const store = kv(MIRROR_MAINTENANCE);
+    assert.equal(await applyEdgePolicy(req(path), { KV: store }), null, `maintenance ${path}`);
+    assert.equal(await applyEdgePolicy(req(path), { MAINTENANCE_MODE: "1" }), null, `env flag ${path}`);
+    assert.equal(store.calls.length, 0, `no KV read ${path}`);
+    const host = await applyEdgePolicy(req(path, {}, "https://www.flamenode.net"), { NEXT_PUBLIC_SITE_URL: ORIGIN });
+    assert.equal(host, null, `non-canonical host ${path}`);
+  }
+  // Non-excluded static files still follow the policy, as in CURRENT.
+  resetEdgePolicyCache();
+  assert.equal((await applyEdgePolicy(req("/logo.png"), { KV: kv(MIRROR_MAINTENANCE) }))?.status, 307);
 });
