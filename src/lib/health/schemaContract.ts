@@ -27,6 +27,7 @@ export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "flamenode_schema_meta",
   "notification_outbox",
   "ops_incident_state",
+  "public_build_state",
   "public_visibility_fences",
   "session",
   "slots",

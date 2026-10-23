@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-const FORBIDDEN_RULES = [
+export const FORBIDDEN_RULES = [
   {
     name: "next/*",
     test: (spec) => spec === "next" || spec.startsWith("next/"),
@@ -61,7 +61,7 @@ const FORBIDDEN_RULES = [
   },
 ];
 
-function collectSourceFiles(dir, result = []) {
+export function collectSourceFiles(dir, result = []) {
   if (!fs.existsSync(dir)) return result;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (["node_modules", ".next", ".git", "dist"].includes(entry.name)) continue;
@@ -75,7 +75,7 @@ function collectSourceFiles(dir, result = []) {
   return result;
 }
 
-function extractImportSpecifiers(content) {
+export function extractImportSpecifiers(content) {
   const { importedFiles } = ts.preProcessFile(content, true, true);
   return importedFiles.map((file) => ({
     specifier: file.fileName,
