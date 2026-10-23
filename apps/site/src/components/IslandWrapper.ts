@@ -42,7 +42,7 @@ export class IslandErrorBoundary extends React.Component<
   render(): React.ReactNode {
     if (!this.state.hasError) return this.props.children;
     if (this.props.fallback !== undefined) return this.props.fallback;
-    // Shared ErrorCallout (role=alert); colours come from the shared CSS tokens.
+    // Shared ErrorCallout (role=alert), styled by @flamenode/ui styles/components.css.
     return React.createElement(ErrorCallout, {
       message: ISLAND_ERROR_MESSAGE,
       className: "fn-island-error",

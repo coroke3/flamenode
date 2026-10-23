@@ -39,7 +39,7 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U01 ownership policy**: `src/lib/auth/ownershipCore.ts`, `videoEditSections.ts`, `generalEditPermissionsCore.ts` と tests。mode別allow/deny,dangerous keyでpolicy抽出/bridge。
 - **U02 video visibility**: `src/lib/actions/admin.ts`のSA-001..003、`src/lib/video/videoVisibilityTransition.ts`とevent roleのSA-040..042。publish→private即時フェンス、CAS+通知+静的Queue。
 - **U03 edit/member/chapter**: `computeEditSections.ts`, SA-012..015/082..085。chapter削除でもcomment保持、collab editor権限はCreatorOwnerだけ委譲。
-- **U04 submission/interactions**: SA-086..089 と fan-out移行の契約を分離。new interactionは選択Active Xのみ、old Auth history migrationは全approved owner X。再実行性/Queue。
+- **U04 submission/interactions**: SA-086..089 と fan-out移行の契約を分離。new interactionは選択Active Xのみ、old Auth history migrationは全approved owner X。再実行性/Queue。CURRENTの新規interactionはAuth User単位（`video_interactions_auth`）で、選択Active Xへの切替はD-04 cutover（MIG-0702）、fan-outはMIG-0605 U05。本unitは両者をdomainへ混ぜない。
 - **Final audit**: SA-001..003/012..015/040..042/082..089, affected UX/FNを漏れなく列挙。
 
 ## MIG-0305 — Event / Slot domain

@@ -1,20 +1,19 @@
 ---
 /**
- * Representative Event Detail SSG Page (MIG-0403 / Recipe R-PAGE / Runtime S0).
- * Pre-renders public event detail HTML with full OGP and Island hydration.
- * Private and deleted fixtures are strictly excluded at build time.
+ * Representative event detail page `/event/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
+ * Built from the representative snapshots only; the full set is MIG-0502 / MIG-0411.
+ * Non-public snapshots are rejected by the loader.
  */
-import { EventDetailView, type EventDetailData } from "@flamenode/ui";
-import { IslandWrapper } from "../../../components/IslandWrapper.ts";
-import { getPublicRepresentativeEvents } from "../../../lib/representativeFixtures.ts";
+import { EventDetailView } from "@flamenode/ui";
+import PublicPage from "../../../layouts/PublicPage.astro";
+import { StaticScreen } from "../../../components/StaticScreen.ts";
+import { loadRepresentativeEvents } from "../../../lib/representativeFixtures.ts";
+import { eventMetadata, eventScreenData } from "../../../lib/publicPages.ts";
 import type { EventPublicSnapshot } from "../../../lib/publicDataLoader.ts";
 
 export async function getStaticPaths() {
-  const events = getPublicRepresentativeEvents();
-  return events.map((event) => ({
-    params: { id: event.id },
-    props: { event },
-  }));
+  const events = await loadRepresentativeEvents();
+  return events.map((event) => ({ params: { id: event.id }, props: { event } }));
 }
 
 interface Props {
@@ -22,45 +21,7 @@ interface Props {
 }
 
 const { event } = Astro.props;
-const title = `${event.title} - FlameNode`;
-const canonicalUrl = event.canonicalUrl ?? `https://flamenode.net/event/${event.id}`;
-const ogImageUrl = event.ogImageUrl ?? event.bannerUrl ?? "https://flamenode.net/brand/ogp-default.png";
-const description = event.description ?? "";
-
-const eventData: EventDetailData = {
-  id: event.id,
-  title: event.title,
-  imageUrl: event.bannerUrl ?? null,
-  iconUrl: event.iconUrl ?? null,
-  explanation: event.description ?? null,
-  statusLabel: event.status === "upcoming" ? "募集期間中" : "開催中",
-  statusTone: "info",
-  periodLabel: event.periodText ?? null,
-  entryAction: "reserve",
-  videoTotal: 0,
-  creatorTotal: 0,
-  slotFilled: 0,
-  slotTotal: 0,
-};
 ---
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title}</title>
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={title} />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:site_name" content="FlameNode" />
-    {description && <meta name="description" content={description} />}
-    {description && <meta property="og:description" content={description} />}
-  </head>
-  <body>
-    <IslandWrapper client:load>
-      <EventDetailView event={eventData} />
-    </IslandWrapper>
-  </body>
-</html>
+<PublicPage meta={eventMetadata(event)}>
+  <StaticScreen screen={EventDetailView} props={{ event: eventScreenData(event) }} />
+</PublicPage>

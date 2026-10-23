@@ -29,9 +29,16 @@ test("Cache API read は isolate 解析キャッシュを先に見る", () => {
   assert.ok(isolateRead > fnStart && matchIndex > isolateRead);
 });
 
-test("Cache API delete は isolate エントリも落とす", () => {
-  const fnStart = source.indexOf("export async function deletePublicJsonCache");
-  const isolateDelete = source.indexOf("deletePublicJsonIsolateCache(r2Key)", fnStart);
-  const cacheDelete = source.indexOf(".default.delete(", fnStart);
-  assert.ok(isolateDelete > fnStart && cacheDelete > isolateDelete);
+test("Cache API delete は isolate エントリも落とす", async () => {
+  // MIG-0614: the delete order lives in packages/server-core; src hands over the isolate map and Cache API.
+  const core = await readFile(
+    new URL("../../../packages/server-core/src/publicCache/delete.ts", import.meta.url),
+    "utf8",
+  );
+  const fnStart = core.indexOf("export async function deletePublicJsonCache(");
+  const isolateDelete = core.indexOf("host.dropIsolateEntry(r2Key)", fnStart);
+  const cacheDelete = core.indexOf(".delete(publicJsonCacheUrl(r2Key))", fnStart);
+  assert.ok(fnStart >= 0 && isolateDelete > fnStart && cacheDelete > isolateDelete);
+  assert.match(source, /dropIsolateEntry: deletePublicJsonIsolateCache/);
+  assert.match(source, /readEdgeCache: \(\) => \(caches as unknown as \{ default: Cache \}\)\.default/);
 });

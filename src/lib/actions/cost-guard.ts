@@ -10,7 +10,6 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "@/lib/db/client";
 import { systemSettings } from "@/lib/db/schema";
@@ -18,10 +17,15 @@ import {
   requireCostGuardControlAdmin,
 } from "@/lib/auth/writeGuard";
 import {
-  isWriteFeatureKey,
-  WRITE_FEATURE_KEYS,
-  type WriteFeatureKey,
-} from "@/lib/auth/writeGuardCore";
+  OVERRIDE_DURATION_SEC,
+  checkExpectedDisabledFeatures,
+  parseClearCostGuardOverrideInput,
+  parseCostGuardModeInput,
+  parseCostGuardOverrideInput,
+  parseDisabledFeaturesInput,
+  parseMaintenanceModeInput,
+  resolveMaintenanceTargetMode,
+} from "@flamenode/domain/admin";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
@@ -32,13 +36,6 @@ import type { OperationMode } from "@/lib/operationMode/types";
 
 export interface CostGuardResult { ok: boolean; message?: string; warning?: string }
 
-const OVERRIDE_DURATION_SEC = 15 * 60;
-const MAX_OVERRIDE_FEATURES = 8;
-const MAX_DISABLED_FEATURES = 100;
-const modeSchema = z.object({
-  mode: z.enum(["normal", "economy", "read_only", "static_only"]),
-  reason: z.string().trim().min(1).max(500),
-});
 type SettingsRow = typeof systemSettings.$inferSelect;
 type SettingsPatch = Partial<typeof systemSettings.$inferInsert>;
 
@@ -124,9 +121,9 @@ async function mutateSettings(input: {
 export async function setCostGuardMode(formData: FormData): Promise<CostGuardResult> {
   const guard = await requireCostGuardControlAdmin();
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = modeSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  const { mode, reason } = parsed.data;
+  const parsed = parseCostGuardModeInput(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
+  const { mode, reason } = parsed;
   const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
@@ -140,15 +137,16 @@ export async function setCostGuardMode(formData: FormData): Promise<CostGuardRes
 export async function setMaintenanceMode(formData: FormData): Promise<CostGuardResult> {
   const guard = await requireCostGuardControlAdmin();
   if (!guard.ok) return { ok: false, message: guard.message };
-  const next = Number(formData.get("is_maintenance_mode") ?? 0);
-  const reason = String(formData.get("reason") ?? "").trim();
-  if (next !== 0 && next !== 1) return { ok: false, message: "値が不正です。" };
-  if (!reason || reason.length > 500) return { ok: false, message: "500文字以内の理由が必要です。" };
+  const parsed = parseMaintenanceModeInput({
+    isMaintenanceMode: formData.get("is_maintenance_mode"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.ok) return parsed;
+  const { reason } = parsed;
   const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
-  const currentMode = resolveOperationMode(before);
-  const nextMode: OperationMode = next === 1 ? "maintenance" : currentMode === "maintenance" ? "normal" : currentMode;
+  const nextMode: OperationMode = resolveMaintenanceTargetMode(resolveOperationMode(before), parsed.enable);
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({ db, before, actorUserId: guard.user.id, reason, context: "cost_guard_maintenance", patch: { operation_mode: nextMode, cost_guard_reason: reason, cost_guard_updated_by_user_id: guard.user.id, cost_guard_updated_at: now } });
   if (!result.ok) return result;
@@ -159,14 +157,13 @@ export async function setMaintenanceMode(formData: FormData): Promise<CostGuardR
 export async function setCostGuardOverride(formData: FormData): Promise<CostGuardResult> {
   const guard = await requireCostGuardControlAdmin();
   if (!guard.ok) return { ok: false, message: guard.message };
-  const reason = String(formData.get("reason") ?? "").trim();
-  const confirm = String(formData.get("confirm") ?? "").trim();
-  const candidates = formData.getAll("features").map(String);
-  if (!reason || reason.length > 500) return { ok: false, message: "500文字以内の理由が必要です。" };
-  if (confirm !== "OVERRIDE") return { ok: false, message: "確認文字列OVERRIDEが一致しません。" };
-  if (candidates.length === 0 || candidates.length > MAX_OVERRIDE_FEATURES || new Set(candidates).size !== candidates.length) return { ok: false, message: `対象機能は重複なしで1〜${MAX_OVERRIDE_FEATURES}件指定してください。` };
-  if (!candidates.every(isWriteFeatureKey)) return { ok: false, message: "未知の機能キーが含まれています。" };
-  const features = candidates as WriteFeatureKey[];
+  const parsed = parseCostGuardOverrideInput({
+    reason: formData.get("reason"),
+    confirm: formData.get("confirm"),
+    features: formData.getAll("features"),
+  });
+  if (!parsed.ok) return parsed;
+  const { reason, features } = parsed;
   const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };
@@ -187,43 +184,21 @@ export async function setCostGuardOverride(formData: FormData): Promise<CostGuar
 export async function setDisabledFeatures(formData: FormData): Promise<CostGuardResult> {
   const guard = await requireCostGuardControlAdmin();
   if (!guard.ok) return { ok: false, message: guard.message };
-  const reason = String(formData.get("reason") ?? "").trim();
-  const confirm = String(formData.get("confirm") ?? "").trim();
-  const candidates = formData.getAll("features").map((value) => String(value).trim());
-  if (!reason || reason.length > 500) {
-    return { ok: false, message: "reason は1〜500文字で指定してください。" };
-  }
-  if (confirm !== "APPLY") {
-    return { ok: false, message: "確認文字列 APPLY が一致しません。" };
-  }
-  if (candidates.length > MAX_DISABLED_FEATURES || new Set(candidates).size !== candidates.length) {
-    return { ok: false, message: "機能キーが重複しているか、件数上限を超えています。" };
-  }
-  if (!candidates.every(isWriteFeatureKey)) {
-    return { ok: false, message: "未許可の機能キーが含まれています。" };
-  }
-  const selected = new Set(candidates as WriteFeatureKey[]);
-  const features = WRITE_FEATURE_KEYS.filter((feature) => selected.has(feature));
+  const parsed = parseDisabledFeaturesInput({
+    reason: formData.get("reason"),
+    confirm: formData.get("confirm"),
+    features: formData.getAll("features"),
+  });
+  if (!parsed.ok) return parsed;
+  const { reason, features } = parsed;
   const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settings が見つかりません。" };
-  const expectedDisabledFeatures = formData.get("expected_disabled_features_json");
-  if (typeof expectedDisabledFeatures !== "string") {
-    return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
-  }
-  let expectedDisabledFeaturesValue: string | null;
-  try {
-    const decoded = JSON.parse(expectedDisabledFeatures) as unknown;
-    if (decoded !== null && typeof decoded !== "string") {
-      return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
-    }
-    expectedDisabledFeaturesValue = decoded;
-  } catch {
-    return { ok: false, message: "設定の取得時点を確認できません。ページを再読み込みしてください。" };
-  }
-  if (expectedDisabledFeaturesValue !== (before.disabled_features_json ?? null)) {
-    return { ok: false, message: "設定が別の管理者によって変更されています。ページを再読み込みしてください。" };
-  }
+  const expected = checkExpectedDisabledFeatures(
+    formData.get("expected_disabled_features_json"),
+    before.disabled_features_json ?? null,
+  );
+  if (!expected.ok) return expected;
   const now = Math.floor(Date.now() / 1000);
   const result = await mutateSettings({
     db,
@@ -257,10 +232,12 @@ export async function setDisabledFeatures(formData: FormData): Promise<CostGuard
 export async function clearCostGuardOverride(formData: FormData): Promise<CostGuardResult> {
   const guard = await requireCostGuardControlAdmin();
   if (!guard.ok) return { ok: false, message: guard.message };
-  const reason = String(formData.get("reason") ?? "").trim();
-  const confirm = String(formData.get("confirm") ?? "").trim();
-  if (!reason || reason.length > 500) return { ok: false, message: "500文字以内の解除理由が必要です。" };
-  if (confirm !== "CLEAR") return { ok: false, message: "確認文字列CLEARが一致しません。" };
+  const parsed = parseClearCostGuardOverrideInput({
+    reason: formData.get("reason"),
+    confirm: formData.get("confirm"),
+  });
+  if (!parsed.ok) return parsed;
+  const { reason } = parsed;
   const db = guard.db;
   const before = await loadSettings(db);
   if (!before) return { ok: false, message: "system_settingsが見つかりません。" };

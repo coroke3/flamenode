@@ -44,9 +44,11 @@ const reliabilityTargets = [
 ];
 
 test("./admin.ts uses post-commit revalidate and shared visibility failure helper", async () => {
-  const [adminSource, transitionSource] = await Promise.all([
+  // MIG-0615: the planner lives in packages/server-core and takes the Next rethrow as an injected port.
+  const [adminSource, transitionSource, nextPortsSource] = await Promise.all([
     read("./admin.ts"),
-    read("../video/videoVisibilityTransition.ts"),
+    read("../../../packages/server-core/src/visibility/videoTransition.ts"),
+    read("../serverCore/nextPorts.ts"),
   ]);
   assert.match(adminSource, /handleVideoVisibilityMutationFailure/);
   assert.match(
@@ -65,9 +67,10 @@ test("./admin.ts uses post-commit revalidate and shared visibility failure helpe
   );
   assert.match(
     transitionSource,
-    /export async function handleVideoVisibilityMutationFailure[\s\S]*unstable_rethrow\(error\)/,
+    /export async function handleVideoVisibilityMutationFailure[\s\S]*rethrowFrameworkControl\(error\)/,
     "videoVisibilityTransition must rethrow NEXT navigation errors",
   );
+  assert.match(nextPortsSource, /nextRethrowFrameworkControl[\s\S]*unstable_rethrow\(error\)/);
 });
 
 for (const target of reliabilityTargets) {

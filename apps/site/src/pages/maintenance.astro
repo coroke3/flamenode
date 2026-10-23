@@ -1,29 +1,21 @@
 ---
 /**
- * `/maintenance` (MIG-0501 / G23): CURRENT `app/(public)/maintenance/page.tsx` text, noindex,
- * laid out like the mock `static/Maintenance.html` (status label, display title, muted lead, one action).
- * The redirect into this page during maintenance (middleware) is an edge policy owned elsewhere (G02).
+ * `/maintenance` (MIG-0619, Recipe R-GATEWAY, Runtime S0): static page the gateway redirects to
+ * while operation_mode is maintenance. Texts are CURRENT `app/(public)/maintenance/page.tsx`;
+ * noindex as CURRENT (`buildPageMetadata({ noIndex: true })`). The gateway serves it before the
+ * maintenance check, so it never redirects to itself.
  */
-import PublicLayout from "../layouts/PublicLayout.astro";
-import { buildPageHead } from "../lib/pageHead.ts";
+import { MaintenanceView } from "@flamenode/ui";
+import PublicPage from "../layouts/PublicPage.astro";
+import { StaticScreen } from "../components/StaticScreen.ts";
+import { buildPageMetadata } from "../lib/pageMetadata.ts";
 
-const head = buildPageHead({ path: "/maintenance", title: "メンテナンス中", noIndex: true });
+const meta = {
+  ...buildPageMetadata({ path: "/maintenance", title: "メンテナンス中" }),
+  robots: "noindex, nofollow",
+  googlebot: "noindex, nofollow",
+};
 ---
-<PublicLayout head={head} currentPath="/maintenance">
-  <div class="p-root fn-screen">
-    <main class="wrap stack mt-wrap">
-      <h1 class="t-display">メンテナンス中</h1>
-      <p class="muted">
-        FlameNode は現在メンテナンスを実施しています。<br />
-        ご迷惑をおかけしますが、しばらくお待ちください。
-      </p>
-      <p class="muted t-sm">
-        Cloudflare コストガード機能により、書き込み操作が一時的に停止される場合があります。
-        閲覧のみは静的 JSON で継続提供します。
-      </p>
-      <div class="actions">
-        <a href="/" class="fn-btn fn-btn--primary">トップへ戻る</a>
-      </div>
-    </main>
-  </div>
-</PublicLayout>
+<PublicPage meta={meta}>
+  <StaticScreen screen={MaintenanceView} props={{}} />
+</PublicPage>
