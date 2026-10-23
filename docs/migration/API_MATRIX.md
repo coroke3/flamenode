@@ -355,6 +355,37 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
 
+## MIG-0626 Hono Admin read APIs B (Phase 6)
+
+New authenticated, **admin-only**, read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT pages are Server Components reading D1). Mounted at `/api/admin-read/*`, deliberately not under `/api/admin` (MIG-0602 mutation router: guards only non-GET/HEAD/OPTIONS, no default read guard). No Worker Route / traffic change. Parity: `apps/api/test/adminReadOps.parity.test.mjs` runs the Hono routes and the real CURRENT loaders on the same seed. All responses `Cache-Control: private, no-store`; `sessionMiddleware` + `requireAuth` + `role === "admin"` (401 anonymous, 403 banned / non-admin); 503 `{error:"unavailable"}` where CURRENT throws to the error page. CPU: not measured (MIG-0606). the Admin read APIs part A task (users/videos/events/moderation/reports/X-ID requests) mounts its routes in the same `adminReadRoutes` router.
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/admin-read/announcements?audience&status` | `app/(admin)/admin/announcements/page.tsx` | `apps/api/src/routes/adminRead/settings.ts` | 2 | LIMIT 50, newest created first, rendered columns only | unmeasured | BRIDGED |
+| `GET /api/admin-read/announcements/:id` | `announcements/[id]/edit/page.tsx` | `settings.ts` | 2 | 404 = CURRENT notFound() | unmeasured | BRIDGED |
+| `GET /api/admin-read/rules?status` | `rules/page.tsx` | `settings.ts` | 3 | 20 versions + current published in one UNION ALL; re-accept count (<= 31 rows) failure swallowed as CURRENT | unmeasured | BRIDGED |
+| `GET /api/admin-read/rules/:id` | `rules/[id]/edit/page.tsx` | `settings.ts` | 2 | body_markdown is a row column (no JSON packing) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit-settings` | `audit/settings/page.tsx` | `settings.ts` | 2 | defaults when no `default` row | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit?table&operation&actor&record&restore_status&limit&since&until` | `audit/page.tsx` | `apps/api/src/routes/adminRead/audit.ts` | 3 | explicit columns, payload lengths only (full text via the chunk endpoint); truncated to 48 KiB UTF-8 bytes incl. the first row (`truncated` flag) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit/:id` | `audit/[id]/page.tsx` | `audit.ts` | 3 | prev/next merged into one statement; one row can exceed 64 KiB (payload cap is the audit setting, default 120 KB) | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit/restore` | `audit/restore/page.tsx` | `audit.ts` | 2 | 50 runs joined to table_name / target_id only | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/notifications?status&type&event&q&cat` | `notifications/page.tsx` | `apps/api/src/routes/adminRead/ops.ts` | 3 | list (100, recipient joined) + counts incl. unhealthy leases; query failure -> 200 `error:"query_failed"`; 48 KiB truncation | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/cost-guard` | `cost-guard/page.tsx` | `ops.ts` | 3 | read failure -> defaults (200) as CURRENT | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/youtube-sync?...` | `youtube-sync/page.tsx` | `ops.ts` | 2 | 100 + hasMore | unmeasured | BRIDGED |
+| `GET /api/admin-read/audit/:id/payload/:field?offset` | `audit/[id]/page.tsx` (before/after/inverse text) | `audit.ts` | 2 | detail response omits the 3 payload columns (lengths only); chunks of 12,000 chars (<= 48 KB), `nextOffset` continuation | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/top` | `admin/page.tsx` (`fetchAdminTopSnapshot`) | `ops.ts` | 2 | 7 CURRENT reads -> one scalar-subquery statement; failure -> empty counts (200) | unmeasured | BRIDGED |
+| `GET /api/admin-read/api-endpoints` | `api-endpoints/page.tsx` | `settings.ts` | 3 | enabled events + public events, 100 each | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/youtube-quota` | `youtube-quota/page.tsx` | `ops.ts` | 2 | local usage counter only (no YouTube request); env `YOUTUBE_DAILY_QUOTA_LIMIT` | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/youtube-playlists?enabled&status` | `youtube-sync/playlists/page.tsx` | `ops.ts` + `playlistHealth.ts` | 3 | configs (101) + one json_each aggregate; health derived server-side (copy of `playlistSyncHealth.ts`, grid-tested) | unmeasured | BRIDGED |
+| `GET /api/admin-read/permissions/simulator?event_id&x_user_id` | `permissions/simulator/page.tsx` | `settings.ts` + `permissions.ts` | 2 | presets/resolver ported (parity: every preset, custom, alias) | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/security?run=1` | `security/page.tsx` | `ops.ts` | 3 | 7 queries -> 2 UNION ALL statements; group failure marks only its checks (CURRENT isolates per check); token column is COUNT only | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/workers` | `workers/page.tsx` | `ops.ts` + `workerMonitoring.ts` | 3 (+4 KV gets) | 7 D1 statements -> 2; pure functions copied; no Cloudflare API call | unmeasured | BRIDGED |
+| `GET /api/admin-read/ops/static-builds` | `static-builds/page.tsx` | `ops.ts` | 3 (+1 KV, 4 R2 head) | 5 D1 statements -> 2; shared-input body diagnostics (R2 get + big JSON.parse) NOT served: STOP, the R2-artifact-consumers task | unmeasured | BRIDGED (partial) |
+| `GET /api/admin-read/ops/health` | `health/page.tsx` | `ops.ts` | 2 | operational view only (9 queries -> 1); `deep=1`/`run=1` = 501 (22 whole-table scans: STOP) | unmeasured | BRIDGED (partial) |
+| `GET /api/admin-read/ops/integrity` | `health/integrity/page.tsx` | `ops.ts` | 1 | idle state only; `run=1` = 501 (28 table-scanning checks: STOP; per-check endpoint design in the work item) | unmeasured | BRIDGED (partial) |
+
+Divergences recorded: audit list / notifications / cost-guard history / youtube-sync / static-builds truncate to 48 KiB UTF-8 bytes (first row included) (`truncated` flag; CURRENT renders all rows); audit list rows carry payload lengths only (full text via the chunk endpoint); event groups / event templates are owned by MIG-0625 (PR #349), not this task; the layout's `loadManagementAccess` enrichment query is not run (an admin role needs no management lookup); notification query errors return a fixed code instead of `String(cause)`.
+
 ## MIG-0625 Hono Admin read APIs A (Phase 6)
 
 New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route / traffic change. GET only, mounted at `/api/admin-read` (never shares a prefix with the mutating `/api/admin` write guard). Guard: `sessionMiddleware` + `requireAuth` (401 anonymous, 403 banned) + `role === "admin"` (403 `{error:"Forbidden",redirect:"/dashboard"}`, CURRENT `(admin)/layout.tsx`; moderators rejected). All responses `Cache-Control: private, no-store`. Parity: `apps/api/test/adminRead.parity.test.mjs` (queries copied from the page loaders + the real lib functions, node:sqlite with all migrations). CPU: not measured (MIG-0606).

@@ -9,6 +9,7 @@ export type Bindings = {
   /** Manage icon signing (MIG-0624); the binding is an owner-approved step tracked in MIG-0628. */
   AUTH_SECRET?: string;
   PUBLIC_VISIBILITY_GUARD_MODE?: string;
+  YOUTUBE_DAILY_QUOTA_LIMIT?: string;
   /** Configured application origin for write origin verification. */
   NEXT_PUBLIC_SITE_URL?: string;
   /** "1" allows loopback origins (local preview only). */

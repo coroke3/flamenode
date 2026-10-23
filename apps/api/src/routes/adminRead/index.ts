@@ -5,6 +5,9 @@ import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import { adminEventNewRoutes, adminEventTemplatesRoutes } from "./eventTemplates.ts";
 import { adminEventGroupsRoutes } from "./eventGroups.ts";
 import { adminEventsRoutes } from "./events.ts";
+import { adminAuditRoutes } from "./audit.ts";
+import { adminOpsRoutes } from "./ops.ts";
+import { adminSettingsRoutes } from "./settings.ts";
 import { adminModerationRoutes } from "./moderation.ts";
 import { adminUsersRoutes } from "./users.ts";
 import { adminXIdMergesRoutes } from "./xIdMerges.ts";
@@ -43,6 +46,10 @@ adminReadRoutes.route("/events", adminEventsRoutes);
 adminReadRoutes.route("/moderation", adminModerationRoutes);
 adminReadRoutes.route("/x-link-requests", adminXLinkRequestsRoutes);
 adminReadRoutes.route("/x-id-merges", adminXIdMergesRoutes);
+// MIG-0626 (part B): settings / audit / ops.
+adminReadRoutes.route("/", adminSettingsRoutes);
+adminReadRoutes.route("/audit", adminAuditRoutes);
+adminReadRoutes.route("/ops", adminOpsRoutes);
 
 // D1 failures: fixed code only (errors may carry bound values); CURRENT pages without a try/catch show the error page.
 adminReadRoutes.onError((_error, c) => {
