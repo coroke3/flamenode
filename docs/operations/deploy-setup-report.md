@@ -193,7 +193,7 @@ Variables / Secrets の分離:
 
 ---
 
-## 5. Cron Trigger（Recovery 4式）
+## 5. Cron Trigger（Recovery 3式）
 
 確認箇所: 各 Worker の `workers/*/wrangler.toml` の `[triggers]`、および Cloudflare Dashboard の Cron 設定。通常運用は Queue 駆動を優先し、Cron は wake が届かなかった場合の安全網とする。
 
@@ -201,9 +201,9 @@ Variables / Secrets の分離:
 | --- | --- | --- |
 | `flamenode-fast-jobs` | `0 * * * *` | 通知・締切リマインダー（Recovery） |
 | `flamenode-content-jobs` | `15 * * * *` | 静的 JSON 再生成（Recovery） |
-| `flamenode-sync-jobs` | `7 * * * *`、`52 * * * *` | YouTube metadata / playlist 同期（Recovery） |
+| `flamenode-sync-jobs` | `7,52 * * * *`（毎時7分・52分） | YouTube metadata / playlist 同期（Recovery） |
 
-- [ ] 上記 4 式のみ存在（追加・変更なし）
+- [ ] 上記 3 式のみ存在（追加・変更なし）
 - [ ] Cron Worker へ Git 連携を付けていない
 - [ ] Dashboard の Cron 式が wrangler template と一致
 - [ ] Cloudflare アカウントの Cron Trigger 合計が上限 5 件以内（リポジトリ外の既存 Trigger は削除しない）
