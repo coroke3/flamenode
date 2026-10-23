@@ -344,3 +344,50 @@ export async function loadAboutStatsSnapshot(
   metrics.accepted += 1;
   return stats;
 }
+
+/** CURRENT `users/index.json` (the R2 object `/user` reads) as one build-time object (MIG-0504). */
+export const USERS_INDEX_KEY = "snapshot/users-index/current.json";
+/**
+ * CURRENT `users/<id>.json` and its paged siblings (`users/<id>/works/<n>.json`, `collabs/<n>.json`) as
+ * build-time objects: `snapshot/user-profile/<x-id>[.works.<n>|.collabs.<n>].json` (n = 2..5).
+ */
+const USER_PROFILE_KEY_PATTERN = /^snapshot\/user-profile\/[a-z0-9_]{1,20}(\.(works|collabs)\.[2-9])?\.json$/;
+
+export function userProfileSnapshotKey(xId: string, section?: "works" | "collabs", page?: number): string {
+  return section && page
+    ? `snapshot/user-profile/${xId}.${section}.${page}.json`
+    : `snapshot/user-profile/${xId}.json`;
+}
+
+/**
+ * Same fail-closed envelope checks as entities; the payload is returned as the CURRENT R2 JSON object.
+ * The caller projects it with CURRENT `normalizeStaticUserProfile` / `normalizeStaticUsersIndex`, which
+ * forward only known fields and drop non-public videos.
+ */
+async function loadPublicRecord(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+  keyPattern: RegExp,
+): Promise<Record<string, unknown>> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, keyPattern);
+  if (!isRecord(payload)) return reject(metrics, "INVALID_PAYLOAD", "Snapshot payload is not an object");
+  metrics.accepted += 1;
+  return payload;
+}
+
+export function loadUserProfileSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, key, options, USER_PROFILE_KEY_PATTERN);
+}
+
+export function loadUsersIndexSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, USERS_INDEX_KEY, options, /^snapshot\/users-index\/current\.json$/);
+}

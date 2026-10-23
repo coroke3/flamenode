@@ -8,3 +8,5 @@ export * from "./RecommendView.js";
 export * from "./TrendingView.js";
 export * from "./MaintenanceView.js";
 export type { ScreenVideoCard } from "./parts.js";
+export * from "./CreatorsView.js";
+export * from "./PortfolioView.js";

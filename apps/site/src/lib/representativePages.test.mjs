@@ -33,6 +33,10 @@ const [videos, events, users] = await Promise.all([loadRepresentativeVideos(), l
 const [video] = videos;
 const [event] = events;
 const [user] = users;
+// MIG-0504 builds /user/[id] from the user fixtures (PublicLayout + CreatorProfileIsland); rep_creator has no page.
+const { FIXTURE_USER_PROFILES } = await import("./userFixtures.ts");
+const profileUser = FIXTURE_USER_PROFILES.miku_producer.user;
+const PROFILE_ROUTE = "user/miku_producer";
 
 /** `<head>` as {title, canonical, tags: {"name|property": content}}. */
 function head(html) {
@@ -75,12 +79,11 @@ function currentHead(input) {
   return { title: `${md.title} | ${current.SITE_NAME}`, canonical: md.alternates.canonical, tags };
 }
 
-test("build output exists for the three representative pages", () => {
+test("build output exists for the representative video and event pages and the MIG-0504 creator page", () => {
   assert.ok(fs.existsSync(dist), "run astro build first");
   assert.deepEqual(videos.map((v) => v.id), ["repvideo01"]);
   assert.deepEqual(events.map((e) => e.id), ["rep-event-2026"]);
-  assert.deepEqual(users.map((u) => u.id), ["rep_creator"]);
-  for (const route of ["repvideo01", video.youtubeVideoId, "event/rep-event-2026", "user/rep_creator"]) {
+  for (const route of ["repvideo01", video.youtubeVideoId, "event/rep-event-2026", PROFILE_ROUTE]) {
     assert.ok(fs.existsSync(path.join(dist, route, "index.html")), route);
   }
 });
@@ -140,13 +143,27 @@ test("T03: event <head> equals CURRENT generateMetadata (app/(public)/event/[id]
 
 test("T03: creator <head> equals CURRENT generateMetadata (app/(public)/user/[id]/UserProfilePage.tsx:114-137)", () => {
   const expected = currentHead({
-    title: `${user.name} - クリエイター`,
-    description: user.profileText ?? `FlameNodeで公開されている${user.name}の作品。`,
-    path: `/user/${user.id}`,
-    image: user.iconUrl,
+    title: `${profileUser.x_name} - クリエイター`,
+    description: profileUser.profile_text ?? `FlameNodeで公開されている${profileUser.x_name}の作品。`,
+    path: `/user/${profileUser.id}`,
+    image: profileUser.icon_url,
     ogType: "profile",
   });
-  assert.deepEqual(head(read(`user/${user.id}`)), expected);
+  // The production page uses PublicLayout, whose <head> also carries the CURRENT root layout
+  // metadata (app/layout.tsx); the page-level fields must equal CURRENT generateMetadata exactly.
+  const actual = head(read(PROFILE_ROUTE));
+  assert.equal(actual.title, expected.title);
+  assert.equal(actual.canonical, expected.canonical);
+  for (const [key, value] of Object.entries(expected.tags)) assert.equal(actual.tags[key], value, key);
+  const rootLayoutTags = [
+    "application-name", "author", "creator", "publisher", "category", "mobile-web-app-capable",
+    "apple-mobile-web-app-title", "apple-mobile-web-app-status-bar-style", "msapplication-TileColor", "og:locale",
+  ];
+  assert.deepEqual(
+    Object.keys(actual.tags).filter((key) => !(key in expected.tags)).sort(),
+    [...rootLayoutTags].sort(),
+    "only the CURRENT root layout metadata is added on top of generateMetadata",
+  );
 });
 
 test("T03: site buildPageMetadata matches CURRENT for fallback, long, blank and absolute inputs", () => {
@@ -181,13 +198,20 @@ test("T04: video paths do not collide with fixed routes, reserved slugs or asset
   }
   // Fixed folders are served by their own route files, not by `[id].astro`.
   assert.match(read(`event/${event.id}`), /class="[^"]*\bed-/);
-  assert.match(read(`user/${user.id}`), /class="[^"]*\bpf-head\b/);
+  assert.match(read(PROFILE_ROUTE), /class="[^"]*\bpf-head\b/);
 });
 
-test("pages are static HTML with the shared CSS and no JavaScript", () => {
-  for (const route of [video.id, `event/${event.id}`, `user/${user.id}`]) {
+test("pages are static HTML with the shared CSS; only the creator page has JSON-LD and Astro island hydration scripts", () => {
+  for (const route of [video.id, `event/${event.id}`, PROFILE_ROUTE]) {
     const html = read(route);
-    assert.doesNotMatch(html, /<script\b|<astro-island\b/, `${route} ships no JS`);
+    if (route === PROFILE_ROUTE) {
+      const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
+      assert.ok(scripts.some((a) => /application\/ld\+json/.test(a)), "Person JSON-LD");
+      assert.ok(scripts.every((a) => /application\/ld\+json/.test(a) || /\bsrc="\/_astro\//.test(a) || /\btype="module"/.test(a) || a.trim() === ""), `only JSON-LD and island hydration: ${scripts.join(" | ")}`);
+      assert.match(html, /<astro-island\b/);
+    } else {
+      assert.doesNotMatch(html, /<script\b|<astro-island\b/, `${route} ships no JS`);
+    }
     const links = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
     assert.equal(links.length, 1, route);
     const css = fs.readFileSync(path.join(dist, links[0]), "utf8");
@@ -197,7 +221,7 @@ test("pages are static HTML with the shared CSS and no JavaScript", () => {
 });
 
 test("every image has an alt attribute (decorative avatars/posters use alt=\"\" as CURRENT UserAvatar/YoutubePlayer)", () => {
-  for (const route of [video.id, `event/${event.id}`, `user/${user.id}`]) {
+  for (const route of [video.id, `event/${event.id}`, PROFILE_ROUTE]) {
     for (const img of read(route).matchAll(/<img\b[^>]*>/g)) assert.match(img[0], /\balt="[^"]*"/, `${route}: ${img[0]}`);
   }
   assert.match(read(`event/${event.id}`), /<img[^>]*alt="代表イベント 2026 メインビジュアル"/);

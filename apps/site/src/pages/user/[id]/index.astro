@@ -1,27 +1,41 @@
 ---
 /**
- * Representative creator page `/user/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
- * Built from the representative snapshots only; the full set is MIG-0504 / MIG-0411.
- * Non-public snapshots are rejected by the loader.
+ * `/user/[id]` (MIG-0504 / Recipe R-PAGE / Runtime S0). One static page per creator that has a published,
+ * manifest-allowed profile snapshot; banned / merged / unapproved / private creators get no page (gateway 404).
+ * Page 1 of works and collabs is static HTML; `?worksPage=` / `?collabPage=` are applied by the Island.
  */
-import { CreatorView } from "@flamenode/ui";
-import PublicPage from "../../../layouts/PublicPage.astro";
-import { StaticScreen } from "../../../components/StaticScreen.ts";
-import { loadRepresentativeUsers } from "../../../lib/representativeFixtures.ts";
-import { creatorMetadata, creatorScreenData } from "../../../lib/publicPages.ts";
-import type { UserPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { CreatorProfileIsland } from "../../../components/CreatorProfileIsland.ts";
+import { serializeJsonLd } from "../../../lib/pageHead.ts";
+import { loadUserBuildData, type UserBuildEntry } from "../../../lib/userData.ts";
+import {
+  STATIC_USER_COLLABS_PAGE_SIZE,
+  STATIC_USER_WORKS_PAGE_SIZE,
+  USER_COLLAB_DISPLAY_PAGE_SIZE,
+  USER_WORKS_DISPLAY_PAGE_SIZE,
+  buildCreatorHeader,
+  buildPersonJsonLd,
+  buildProfileHead,
+  buildSectionPages,
+} from "../../../lib/userViews.ts";
 
 export async function getStaticPaths() {
-  const users = await loadRepresentativeUsers();
-  return users.map((user) => ({ params: { id: user.id }, props: { user } }));
+  const data = await loadUserBuildData();
+  return [...data.users].map(([id, entry]) => ({ params: { id }, props: { entry } }));
 }
 
 interface Props {
-  user: UserPublicSnapshot;
+  entry: UserBuildEntry;
 }
 
-const { user } = Astro.props;
+const { profile, worksPages, collabsPages } = Astro.props.entry;
+const head = buildProfileHead(profile);
+const header = buildCreatorHeader(profile);
+const works = buildSectionPages(profile.works, worksPages, USER_WORKS_DISPLAY_PAGE_SIZE, STATIC_USER_WORKS_PAGE_SIZE);
+const collabs = buildSectionPages(profile.collabs, collabsPages, USER_COLLAB_DISPLAY_PAGE_SIZE, STATIC_USER_COLLABS_PAGE_SIZE);
+const jsonLd = buildPersonJsonLd(profile);
 ---
-<PublicPage meta={creatorMetadata(user)}>
-  <StaticScreen screen={CreatorView} props={{ creator: creatorScreenData(user) }} />
-</PublicPage>
+<PublicLayout head={head} currentPath="/user">
+  <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(jsonLd)}></script>
+  <CreatorProfileIsland client:load header={header} works={works} collabs={collabs} />
+</PublicLayout>
