@@ -77,6 +77,7 @@ test("R2欠落修復は各実装が公開するworst-case予算をsoft limit前�
     "USERS_SHARED_REPAIR_MAX_D1_STATEMENTS",
     "TOP_SLOT_STATS_REPAIR_MAX_D1_STATEMENTS",
     "TOP_SECTIONS_REPAIR_MAX_D1_STATEMENTS",
+    "STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS",
   ]) {
     assert.match(source, new RegExp(`import[\\s\\S]*?${name}`));
     assert.match(
@@ -87,6 +88,19 @@ test("R2欠落修復は各実装が公開するworst-case予算をsoft limit前�
 
   assert.doesNotMatch(source, /DEPLOY_GLOBAL_REPAIR_MAX_D1_STATEMENTS\s*=/);
   assert.doesNotMatch(source, /YOUTUBE_SHARED_REPAIR_MAX_D1_STATEMENTS\s*=/);
+});
+
+test("artifact SLO refresh sweepはRecovery内で6時間lease・soft budget付きで実行される", async () => {
+  const sweep = await import("../json-generator/staleArtifactRefresh.ts");
+  assert.equal(sweep.STALE_ARTIFACT_REFRESH_LEASE_JOB, "content-jobs:artifact-refresh");
+  assert.equal(sweep.STALE_ARTIFACT_REFRESH_INTERVAL_SEC, 6 * 3600);
+  assert.equal(sweep.STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS, 6);
+  assert.match(
+    source,
+    /hasSoftD1Budget\([\s\S]*?STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS[\s\S]*?withCronLease\([\s\S]*?jobName: STALE_ARTIFACT_REFRESH_LEASE_JOB[\s\S]*?minimumIntervalSeconds: STALE_ARTIFACT_REFRESH_INTERVAL_SEC[\s\S]*?ensureStaleArtifactRefresh\(/,
+  );
+  // enqueue があれば既存のQueue wake判定に含める。
+  assert.match(source, /staleArtifactRefresh > 0 \|\|/);
 });
 
 test("stale queue reconcileは実行する3 UPDATE分をsoft limit前に予約する", () => {

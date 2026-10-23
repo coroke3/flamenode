@@ -114,7 +114,7 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   const members =
     read("./replaceVideoMembers.ts");
   const memberSet =
-    read("./memberSetSnapshot.ts");
+    read("../../../packages/server-core/src/video/memberSetSnapshot.ts");
 
   assert.match(
     limits,
@@ -135,7 +135,7 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
 });
 
 test("静的queueは100件単位のjson_each UPSERTへ集約する", () => {
-  const queue = read("../staticRebuild/enqueue.ts");
+  const queue = read("../../../packages/server-core/src/staticRebuild/enqueue.ts");
   assert.match(queue, /STATIC_REBUILD_BULK_UPSERT_ROWS = 100/);
   assert.match(queue, /FROM json_each\(\$\{payload\}\)/);
   assert.match(
