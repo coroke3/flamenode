@@ -7,6 +7,29 @@ export {
   buildXIdMergeBeforeState,
 } from "@flamenode/domain/xid";
 
+/**
+ * Every column name which the merge assertion may inline. D1 allows only 100
+ * bind parameters per statement, and binding each `$.column` JSON path pushed
+ * the AFTER-state assertion to 141. These are code constants, never input.
+ */
+const MERGE_STATE_COLUMNS: ReadonlySet<string> = new Set([
+  "id", "approval_status", "active_x_user_id", "x_user_id", "auth_user_id",
+  "link_role", "created_by_request_id", "created_at", "updated_at",
+  "creator_x_user_id", "reserved_x_id_snapshot", "version",
+  "related_x_user_id", "video_id", "interaction_type", "event_id",
+  "display_name", "permission_preset", "custom_permission_keys_json",
+  "is_public", "public_role_label", "approved_by_auth_user_id", "approved_at",
+  "alias_x_id",
+]);
+
+/** `'$.column'` as a SQL literal; throws unless the column is allowlisted. */
+function jsonColumnPathSql(column: string): SQL {
+  if (!MERGE_STATE_COLUMNS.has(column) || !/^[a-z_]+$/.test(column)) {
+    throw new Error(`xid merge state: 未許可の column です: ${column}`);
+  }
+  return sql.raw(`'$.${column}'`);
+}
+
 function rowsMatchJsonSql(input: {
   table: string;
   columns: readonly string[];
@@ -22,7 +45,7 @@ function rowsMatchJsonSql(input: {
   );
   const jsonColumns = sql.join(
     input.columns.map((column) =>
-      sql`json_extract(value, ${`$.${column}`})`,
+      sql`json_extract(value, ${jsonColumnPathSql(column)})`,
     ),
     sql`, `,
   );
@@ -57,7 +80,7 @@ function expectedRowsScope(
       // json_each itself exposes an `id` column. Always qualify the outer
       // relation so a state row keyed by `id` is compared to the table row,
       // not to JSON1's internal traversal ID.
-      sql`json_extract(value, ${`$.${column}`}) IS ${sql.raw(`${table}.${column}`)}`,
+      sql`json_extract(value, ${jsonColumnPathSql(column)}) IS ${sql.raw(`${table}.${column}`)}`,
     ),
     sql` AND `,
   );
