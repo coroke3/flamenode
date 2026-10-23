@@ -115,10 +115,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0616 — audit restore core (D-10)
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0616 Work Order、audit の restore.ts。
-- 変更: restore.ts を core へ、旧 file は bridge。
-- 試験: golden（strategy 別、CAS 競合、YouTube eligibility）。
-- DONE: golden の diff 0。
+- 読む: `PHASE_6_SPEC.md` の MIG-0616 Work Order（lead 決定 1〜4 と Core API）、`src/lib/audit/restore.ts`、harness の手本 `src/lib/serverCore/visibilityTransitionGolden.execution.test.mjs`。
+- 変更: restore.ts を `packages/server-core/src/audit/restore.ts` へ（`AuditRestoreHost` = manifest / `VideoPublicCacheKeyHost` / cache delete / export cache / wake loader）、旧 file は bridge。video bridge の key host を `nextVideoPublicCacheKeyHost` に切り出して共有。`nextPorts.ts` と呼び出し側は変えない。
+- 試験: 移動前に golden（入口の拒否、期限、capability、strategy 別、競合、events / videos の可視性、YouTube eligibility、CAS rollback と補償、後処理の失敗）。source を読む test 5 件は read 先だけを変える。
+- DONE: golden の diff 0、既存 test の件数同一、呼び出し側の diff 0。
 
 ### MIG-0617 — replace apps/api Option A copy (D-10)
 
@@ -126,6 +126,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。fake D1 に `.raw()`。
 - 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致。
 - DONE: 写しの呼び出しが 0。
+- 着手前: Work Order の lead 決定 L1〜L3（apps/api が core を読む方法、drizzle を Worker に入れるか、`preloaded`）が未決。決まるまで実装しない。
 
 ### MIG-0618 — xid merge core (D-10)
 
@@ -209,6 +210,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
 - 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
 - DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
+- 着手前: Work Order の lead 決定 M1〜M3（SA-010 を core restore で作るか、SA-010 の guard を CURRENT の `requireAdminWrite("admin_permissions")` に揃えるか、MIG-0617 との順序）が未決。決まるまで実装しない。
 
 ### MIG-0630 — Video edit page read APIs (/dashboard/edit/[id] + permissions)
 
