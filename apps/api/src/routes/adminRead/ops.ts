@@ -39,6 +39,11 @@ const MAX_YOUTUBE_SYNC_ROWS = 100;
 const YOUTUBE_SYNC_STALE_SECONDS = 14 * 24 * 60 * 60;
 /** ZERO_1102 S2: keep each list response under 64 KiB (payloads / errors are the large columns). */
 const MAX_OPS_LIST_BYTES = 48 * 1024;
+const utf8Encoder = new TextEncoder();
+/** Serialized size in UTF-8 bytes (not UTF-16 units). Lists apply it to every row, the first included. */
+function utf8Size(value: unknown): number {
+  return utf8Encoder.encode(JSON.stringify(value)).length;
+}
 
 const TERMINAL_FAILURE_STATUSES = ["failed", "dead_letter"];
 const NOTIFICATION_STATUSES = ["pending", "processing", "sent", "failed", "cancelled"];
@@ -201,8 +206,8 @@ adminOpsRoutes.get("/notifications", async (c) => {
               }
             : null,
       };
-      const size = JSON.stringify(entry).length;
-      if (rows.length > 0 && used + size > MAX_OPS_LIST_BYTES) {
+      const size = utf8Size(entry);
+      if (used + size > MAX_OPS_LIST_BYTES) {
         truncated = true;
         break;
       }
@@ -430,8 +435,8 @@ adminOpsRoutes.get("/static-builds", async (c) => {
   let used = 0;
   let truncated = false;
   for (const row of queue.results) {
-    const size = JSON.stringify(row).length;
-    if (rows.length > 0 && used + size > MAX_OPS_LIST_BYTES) {
+    const size = utf8Size(row);
+    if (used + size > MAX_OPS_LIST_BYTES) {
       truncated = true;
       break;
     }
@@ -922,8 +927,8 @@ adminOpsRoutes.get("/cost-guard", async (c) => {
     let used = 0;
     let truncated = false;
     for (const row of results) {
-      const size = JSON.stringify(row).length;
-      if (history.length > 0 && used + size > MAX_OPS_LIST_BYTES) {
+      const size = utf8Size(row);
+      if (used + size > MAX_OPS_LIST_BYTES) {
         truncated = true;
         break;
       }
@@ -1016,8 +1021,8 @@ adminOpsRoutes.get("/youtube-sync", async (c) => {
   let used = 0;
   let truncated = false;
   for (const row of all) {
-    const size = JSON.stringify(row).length;
-    if (rows.length > 0 && used + size > MAX_OPS_LIST_BYTES) {
+    const size = utf8Size(row);
+    if (used + size > MAX_OPS_LIST_BYTES) {
       truncated = true;
       break;
     }

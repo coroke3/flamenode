@@ -384,7 +384,7 @@ New authenticated, **admin-only**, read-only endpoints (no CURRENT `/api/*` equi
 | `GET /api/admin-read/ops/health` | `health/page.tsx` | `ops.ts` | 2 | operational view only (9 queries -> 1); `deep=1`/`run=1` = 501 (22 whole-table scans: STOP) | unmeasured | BRIDGED (partial) |
 | `GET /api/admin-read/ops/integrity` | `health/integrity/page.tsx` | `ops.ts` | 1 | idle state only; `run=1` = 501 (28 table-scanning checks: STOP; per-check endpoint design in the work item) | unmeasured | BRIDGED (partial) |
 
-Divergences recorded: audit list / notifications / cost-guard history truncate to 48 KiB UTF-8 bytes (`truncated` flag; CURRENT renders all rows); audit list rows carry payload lengths only (full text via the chunk endpoint); event groups / event templates are owned by MIG-0625 (PR #349), not this task; the layout's `loadManagementAccess` enrichment query is not run (an admin role needs no management lookup); notification query errors return a fixed code instead of `String(cause)`.
+Divergences recorded: audit list / notifications / cost-guard history / youtube-sync / static-builds truncate to 48 KiB UTF-8 bytes (first row included) (`truncated` flag; CURRENT renders all rows); audit list rows carry payload lengths only (full text via the chunk endpoint); event groups / event templates are owned by MIG-0625 (PR #349), not this task; the layout's `loadManagementAccess` enrichment query is not run (an admin role needs no management lookup); notification query errors return a fixed code instead of `String(cause)`.
 
 ## MIG-0625 Hono Admin read APIs A (Phase 6)
 

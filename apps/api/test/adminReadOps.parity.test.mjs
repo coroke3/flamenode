@@ -1138,4 +1138,56 @@ if (runUnderRootTsx(import.meta.url)) {
     }
     assert.equal((await get("/ops/youtube-sync?missing=1")).body.rows.length, 2);
   });
+
+  // ---------------- S2 byte budget for the ops lists (UTF-8 bytes, first row included) ----------------
+  const OPS_BYTE_CASES = [
+    {
+      name: "notifications", path: "/ops/notifications", rowsKey: "rows",
+      seed: (id, text, at) => notif(id, "video_bulk", "sent", { at, error: text }),
+      clean: () => sqlite.exec("DELETE FROM notification_outbox WHERE id LIKE 'bb-%'"),
+    },
+    {
+      name: "static-builds", path: "/ops/static-builds", rowsKey: "rows",
+      env: { KV: { async get() { return null; } }, BUCKET: { async head() { return null; } } },
+      seed: (id, text, at) => ins("static_rebuild_queue", { id, target_type: "video", target_id: id, status: "failed", priority: "normal", attempt_count: 1, created_at: at, updated_at: at, error: text }),
+      clean: () => sqlite.exec("DELETE FROM static_rebuild_queue WHERE id LIKE 'bb-%'"),
+    },
+    {
+      name: "cost-guard history", path: "/ops/cost-guard", rowsKey: "history",
+      seed: (id, text, at) => ins("audit_logs", { id, table_name: "system_settings", target_id: "default", operation: "UPDATE", actor_user_id: "u_carol", created_at: at, before_json: text, after_json: "{}" }),
+      clean: () => sqlite.exec("DELETE FROM audit_logs WHERE id LIKE 'bb-%'"),
+    },
+    {
+      name: "youtube-sync", path: "/ops/youtube-sync", rowsKey: "rows",
+      seed: (id, text, at) => {
+        ins("videos", { id, title: id, submitted_by_user_id: "u_zed_user", creator_display_name: "n", youtube_video_id: "yt-" + id, visibility_status: "public", created_at: at });
+        ytMeta(id, { status: "failed", error: text, synced: nowS, updated: at });
+      },
+      clean: () => { sqlite.exec("DELETE FROM video_youtube_metadata WHERE video_id LIKE 'bb-%'"); sqlite.exec("DELETE FROM videos WHERE id LIKE 'bb-%'"); },
+    },
+  ];
+  for (const c of OPS_BYTE_CASES) {
+    test(`S2 byte budget: ${c.name} counts UTF-8 bytes and bounds the first row too`, async () => {
+      const fetchList = async () => {
+        const r = await call(`/api/admin-read${c.path}`, ADMIN, c.env ? { env: c.env } : {});
+        assert.equal(r.status, 200, r.text.slice(0, 200));
+        assert.ok(new TextEncoder().encode(r.text).length < 64 * 1024, "response < 64 KiB bytes");
+        return r.body;
+      };
+      const FAR = 4_000_000_000;
+      // 20,000 chars = 60,000 UTF-8 bytes: an over-budget FIRST row is dropped, not returned.
+      c.seed("bb-wide", "あ".repeat(20_000), FAR);
+      const wide = await fetchList();
+      assert.equal(wide.truncated, true);
+      assert.deepEqual(wide[c.rowsKey].filter((r) => JSON.stringify(r).includes("bb-wide")), []);
+      assert.equal(wide[c.rowsKey].length, 0, "newest row over the budget -> nothing kept");
+      c.clean();
+      // 4,200 chars = 12,600 bytes (4,200 UTF-16 units): only 3 fit in 48 KiB; UTF-16 counting would keep ~11.
+      for (let i = 0; i < 6; i += 1) c.seed(`bb-mid${i}`, "あ".repeat(4_200), FAR + i);
+      const mid = await fetchList();
+      assert.equal(mid.truncated, true);
+      assert.equal(mid[c.rowsKey].length, 3);
+      c.clean();
+    });
+  }
 }
