@@ -5,9 +5,6 @@ import type {
   AdminAnnouncementDetailResponse,
   AdminAnnouncementListResponse,
   AdminAuditSettingsResponse,
-  AdminEventGroupDetailResponse,
-  AdminEventGroupsResponse,
-  AdminEventTemplatesResponse,
   AdminRuleDetailResponse,
   AdminRulesResponse,
 } from "@flamenode/contracts";
@@ -23,17 +20,6 @@ const MAX_ANNOUNCEMENTS = 50;
 const MAX_RULE_VERSIONS = 20;
 /** CURRENT rules page counts at most 30 users (reads 31 to know whether it is a lower bound). */
 const MAX_REACCEPT_COUNT = 30;
-/** CURRENT app/(admin)/admin/event-groups/page.tsx .limit(100). */
-const MAX_EVENT_GROUPS = 100;
-/**
- * DIVERGENCE: CURRENT reads every member event of a group; this keeps the first 100 (same order) so the
- * response and the statement stay bounded.
- */
-const MAX_EVENT_GROUP_MEMBERS = 100;
-/** CURRENT EVENT_GROUP_EVENT_PAGE_SIZE (src/lib/admin/eventGroupEventOptions.ts). */
-export const EVENT_GROUP_EVENT_PAGE_SIZE = 80;
-/** DIVERGENCE: CURRENT listEventTemplatesForAdmin() is unbounded; capped at 100 (newest first). */
-const MAX_EVENT_TEMPLATES = 100;
 
 // CURRENT src/lib/audit/retention.ts DEFAULT_AUDIT_LOG_SETTINGS (used when system_settings has no "default" row).
 const DEFAULT_AUDIT_LOG_SETTINGS = {
@@ -45,14 +31,6 @@ const DEFAULT_AUDIT_LOG_SETTINGS = {
 } as const;
 
 const NOT_FOUND = { error: "not_found" } as const;
-
-const GROUP_TYPES: Record<string, true> = {
-  series: true,
-  genre: true,
-  related: true,
-  collection: true,
-  other: true,
-};
 
 export const adminSettingsRoutes = new Hono<AppEnv>();
 
@@ -196,144 +174,6 @@ adminSettingsRoutes.get("/rules/:id", async (c) => {
     .first<AdminRuleDetailResponse["item"]>();
   if (!row) return c.json(NOT_FOUND, 404);
   const body: AdminRuleDetailResponse = { item: row };
-  return c.json(body);
-});
-
-// ---- /event-groups (event-groups/page.tsx) ----
-adminSettingsRoutes.get("/event-groups", async (c) => {
-  const visibilityQ = c.req.query("visibility");
-  const typeQ = c.req.query("type");
-  const visibility =
-    visibilityQ === "public" || visibilityQ === "private" || visibilityQ === "archived"
-      ? visibilityQ
-      : "any";
-  // CURRENT: sp.type && sp.type in GROUP_TYPE_LABELS
-  const typeFilter = typeQ && typeQ in GROUP_TYPES ? typeQ : "any";
-
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  if (visibility !== "any") {
-    conditions.push("g.visibility_status = ?");
-    params.push(visibility);
-  }
-  if (typeFilter !== "any") {
-    conditions.push("g.group_type = ?");
-    params.push(typeFilter);
-  }
-  const where = conditions.length > 0 ? " WHERE " + conditions.join(" AND ") : "";
-  const { results } = await c.env.DB.prepare(
-    "SELECT g.id AS id, g.name AS name, g.slug AS slug, g.group_type AS group_type, " +
-      "g.visibility_status AS visibility_status, g.sort_order AS sort_order, count(ege.event_id) AS event_count " +
-      "FROM event_groups g LEFT JOIN event_group_events ege ON ege.event_group_id = g.id" +
-      where +
-      " GROUP BY g.id ORDER BY g.sort_order ASC, g.name ASC LIMIT ?",
-  )
-    .bind(...params, MAX_EVENT_GROUPS)
-    .all<AdminEventGroupsResponse["items"][number]>();
-  const body: AdminEventGroupsResponse = {
-    visibility,
-    type: typeFilter,
-    items: results.map((row) => ({ ...row, event_count: Number(row.event_count) })),
-  };
-  return c.json(body);
-});
-
-// ---- /event-groups/:id (event-groups/[id]/edit/page.tsx; missing group -> notFound()) ----
-interface GroupMemberRow {
-  id: string;
-  updated_at: number;
-  name: string;
-  slug: string;
-  description: string | null;
-  group_type: string;
-  icon_url: string | null;
-  accent_color: string | null;
-  visibility_status: string;
-  sort_order: number | null;
-  member_event_id: string | null;
-  member_title: string | null;
-  member_start_time: number | null;
-}
-
-adminSettingsRoutes.get("/event-groups/:id", async (c) => {
-  const id = c.req.param("id");
-  // Statement 2: the group row joined with its member events (one row per member; one row with NULL member
-  // columns when the group is empty), ordered as CURRENT: events.start_time DESC, events.id ASC.
-  const { results } = await c.env.DB.prepare(
-    "SELECT g.id AS id, g.updated_at AS updated_at, g.name AS name, g.slug AS slug, g.description AS description, " +
-      "g.group_type AS group_type, g.icon_url AS icon_url, g.accent_color AS accent_color, " +
-      "g.visibility_status AS visibility_status, g.sort_order AS sort_order, " +
-      "m.event_id AS member_event_id, m.title AS member_title, m.start_time AS member_start_time " +
-      "FROM event_groups g LEFT JOIN (" +
-      "SELECT ege.event_group_id AS event_group_id, ege.event_id AS event_id, e.title AS title, e.start_time AS start_time " +
-      "FROM event_group_events ege INNER JOIN events e ON e.id = ege.event_id) m ON m.event_group_id = g.id " +
-      "WHERE g.id = ? ORDER BY m.start_time DESC, m.event_id ASC LIMIT ?",
-  )
-    .bind(id, MAX_EVENT_GROUP_MEMBERS)
-    .all<GroupMemberRow>();
-  const first = results[0];
-  if (!first) return c.json(NOT_FOUND, 404);
-
-  // Statement 3: events not yet in the group (CURRENT queryEventGroupEventOptions with query "" and no cursor).
-  const page = await c.env.DB.prepare(
-    "SELECT id, title, start_time, updated_at FROM events " +
-      "WHERE NOT EXISTS (SELECT event_id FROM event_group_events WHERE event_group_id = ? AND event_id = events.id) " +
-      "ORDER BY updated_at DESC, id ASC LIMIT ?",
-  )
-    .bind(id, EVENT_GROUP_EVENT_PAGE_SIZE + 1)
-    .all<{ id: string; title: string; start_time: number | null; updated_at: number }>();
-  const hasMore = page.results.length > EVENT_GROUP_EVENT_PAGE_SIZE;
-  const options = page.results.slice(0, EVENT_GROUP_EVENT_PAGE_SIZE);
-  const last = options.at(-1);
-
-  const body: AdminEventGroupDetailResponse = {
-    group: {
-      id: first.id,
-      updated_at: first.updated_at,
-      name: first.name,
-      slug: first.slug,
-      description: first.description,
-      group_type: first.group_type,
-      icon_url: first.icon_url,
-      accent_color: first.accent_color,
-      visibility_status: first.visibility_status,
-      sort_order: first.sort_order,
-    },
-    members: results
-      .filter((row) => row.member_event_id != null)
-      .map((row) => ({
-        event_id: row.member_event_id as string,
-        title: row.member_title as string,
-        start_time: row.member_start_time,
-      })),
-    eventOptions: {
-      options: options.map(({ id: eventId, title, start_time }) => ({ id: eventId, title, start_time })),
-      nextCursor:
-        hasMore && last ? JSON.stringify({ updatedAt: last.updated_at, id: last.id }) : null,
-    },
-  };
-  return c.json(body);
-});
-
-// ---- /event-templates (events/templates/page.tsx; events/new/page.tsx via ?template=) ----
-// NOT reproduced: listEventTemplatesForAdmin() runs requireAdminWrite("admin_event_templates") first and returns []
-// when that write guard (cost guard / identity) fails. This read endpoint does not run the write guard.
-adminSettingsRoutes.get("/event-templates", async (c) => {
-  const templateId = (c.req.query("template") ?? "").trim();
-  const { results } = await c.env.DB.prepare(
-    "SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC LIMIT ?",
-  )
-    .bind(MAX_EVENT_TEMPLATES)
-    .all<AdminEventTemplatesResponse["items"][number]>();
-  let selected: AdminEventTemplatesResponse["selected"] = null;
-  if (templateId) {
-    selected = await c.env.DB.prepare(
-      "SELECT id, name, settings_json FROM event_templates WHERE id = ? LIMIT 1",
-    )
-      .bind(templateId)
-      .first<NonNullable<AdminEventTemplatesResponse["selected"]>>();
-  }
-  const body: AdminEventTemplatesResponse = { items: results, selected };
   return c.json(body);
 });
 

@@ -146,6 +146,37 @@ export function linkedXStatement(db: D1Database, userId: string): D1PreparedStat
     .bind(userId, MAX_LINKED_X_USERS);
 }
 
+/**
+ * CURRENT getLatestPublishedMajorTerms + termsReacceptRequiredCondition as SQL, for a `"user" u` row.
+ * Shared with the MIG-0625 admin user detail (src/lib/terms/reaccept.ts termsReacceptRequiredValue).
+ */
+export const TERMS_REACCEPT_REQUIRED_CTE_SQL = `WITH required_major AS (
+         SELECT id, published_at FROM terms_versions
+         WHERE severity = 'major' AND published_at IS NOT NULL
+         ORDER BY published_at DESC, updated_at DESC
+         LIMIT 1
+       )`;
+export const TERMS_REACCEPT_REQUIRED_CASE_SQL = `CASE WHEN EXISTS (SELECT 1 FROM required_major WHERE published_at <> 0)
+           AND u.is_tos_accepted = 1
+           AND NOT (
+             EXISTS (
+               SELECT 1 FROM terms_versions accepted_terms
+               WHERE accepted_terms.id = u.accepted_terms_version_id
+                 AND accepted_terms.published_at IS NOT NULL
+                 AND (accepted_terms.id = (SELECT id FROM required_major)
+                   OR accepted_terms.published_at > (SELECT published_at FROM required_major))
+             )
+             OR EXISTS (
+               SELECT 1 FROM user_tos_consents consent
+               INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
+               WHERE consent.user_id = u.id
+                 AND consent_terms.published_at IS NOT NULL
+                 AND (consent_terms.id = (SELECT id FROM required_major)
+                   OR consent_terms.published_at > (SELECT published_at FROM required_major))
+             )
+           )
+         THEN 1 ELSE 0 END`;
+
 export interface ContextOptions {
   /** latest pending slot-reservation X request (CURRENT pendingSlotReservationXRequestWhere + limit 1) */
   pendingRequest?: boolean;
@@ -222,34 +253,10 @@ export function contextStatement(
 
   return db
     .prepare(
-      `WITH required_major AS (
-         SELECT id, published_at FROM terms_versions
-         WHERE severity = 'major' AND published_at IS NOT NULL
-         ORDER BY published_at DESC, updated_at DESC
-         LIMIT 1
-       )
+      `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
        SELECT u.is_tos_accepted AS is_tos_accepted,
          u.accepted_terms_version_id AS accepted_terms_version_id,
-         CASE WHEN EXISTS (SELECT 1 FROM required_major WHERE published_at <> 0)
-           AND u.is_tos_accepted = 1
-           AND NOT (
-             EXISTS (
-               SELECT 1 FROM terms_versions accepted_terms
-               WHERE accepted_terms.id = u.accepted_terms_version_id
-                 AND accepted_terms.published_at IS NOT NULL
-                 AND (accepted_terms.id = (SELECT id FROM required_major)
-                   OR accepted_terms.published_at > (SELECT published_at FROM required_major))
-             )
-             OR EXISTS (
-               SELECT 1 FROM user_tos_consents consent
-               INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
-               WHERE consent.user_id = u.id
-                 AND consent_terms.published_at IS NOT NULL
-                 AND (consent_terms.id = (SELECT id FROM required_major)
-                   OR consent_terms.published_at > (SELECT published_at FROM required_major))
-             )
-           )
-         THEN 1 ELSE 0 END AS terms_reaccept_required,
+         ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS terms_reaccept_required,
          ${linked} AS linked,
          ${pending} AS pending,
          ${history} AS history

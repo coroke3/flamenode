@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const source = await readFile(new URL("./merge.ts", import.meta.url), "utf8");
+// MIG-0618: the SQL fragments and request normalisation moved to packages/server-core; the contract spans both files.
+const source =
+  (await readFile(new URL("./merge.ts", import.meta.url), "utf8")) +
+  (await readFile(new URL("../../../packages/server-core/src/xid/mergeCore.ts", import.meta.url), "utf8"));
 
 test("X ID統合は予約主体の全表記と連続枠グループを統合先へ揃える", () => {
   assert.match(source, /slotReservationGroups/);

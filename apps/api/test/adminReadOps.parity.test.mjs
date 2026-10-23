@@ -20,7 +20,6 @@ if (runUnderRootTsx(import.meta.url)) {
   const S = await import("../../../src/lib/db/schema.ts");
   const { app } = await import("../src/app.ts");
   const { getLatestPublishedMajorTerms, termsReacceptRequiredCondition } = await import("../../../src/lib/terms/reaccept.ts");
-  const { queryEventGroupEventOptions } = await import("../../../src/lib/admin/eventGroupEventOptions.ts");
   const { getAuditLogSettings } = await import("../../../src/lib/audit/settings.ts");
   const { drizzleNotificationCategoryCondition } = await import("../../../src/lib/notifications/display.ts");
   const { lookupNotificationRecipients } = await import("../../../src/lib/notifications/recipient.ts");
@@ -202,62 +201,6 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
-  async function refEventGroups(sp) {
-    const GROUP_TYPE_LABELS = { series: 1, genre: 1, related: 1, collection: 1, other: 1 };
-    const visibilityFilter = sp.visibility === "public" || sp.visibility === "private" || sp.visibility === "archived" ? sp.visibility : "any";
-    const typeFilter = sp.type && sp.type in GROUP_TYPE_LABELS ? sp.type : "any";
-    const conds = [
-      visibilityFilter !== "any" ? eq(S.eventGroups.visibility_status, visibilityFilter) : undefined,
-      typeFilter !== "any" ? eq(S.eventGroups.group_type, typeFilter) : undefined,
-    ].filter((c) => c !== undefined);
-    const where = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
-    const rows = await refDb
-      .select({
-        id: S.eventGroups.id, name: S.eventGroups.name, slug: S.eventGroups.slug, group_type: S.eventGroups.group_type,
-        visibility_status: S.eventGroups.visibility_status, sort_order: S.eventGroups.sort_order,
-        event_count: sql`count(${S.eventGroupEvents.event_id})`.as("event_count"),
-      })
-      .from(S.eventGroups)
-      .leftJoin(S.eventGroupEvents, eq(S.eventGroupEvents.event_group_id, S.eventGroups.id))
-      .where(where)
-      .groupBy(S.eventGroups.id)
-      .orderBy(asc(S.eventGroups.sort_order), asc(S.eventGroups.name))
-      .limit(100);
-    return canon({ visibility: visibilityFilter, type: typeFilter, items: rows.map((r) => ({ ...r, event_count: Number(r.event_count) })) });
-  }
-
-  async function refEventGroup(id) {
-    const row = (await refDb.select().from(S.eventGroups).where(eq(S.eventGroups.id, id)).limit(1))[0];
-    if (!row) return null;
-    const [members, eventOptions] = await Promise.all([
-      refDb
-        .select({ event_id: S.eventGroupEvents.event_id, title: S.events.title, start_time: S.events.start_time })
-        .from(S.eventGroupEvents)
-        .innerJoin(S.events, eq(S.events.id, S.eventGroupEvents.event_id))
-        .where(eq(S.eventGroupEvents.event_group_id, id))
-        .orderBy(desc(S.events.start_time), asc(S.events.id)),
-      queryEventGroupEventOptions(refDb, { groupId: id, query: "", cursor: null }),
-    ]);
-    return canon({
-      group: pick(row, ["id", "updated_at", "name", "slug", "description", "group_type", "icon_url", "accent_color", "visibility_status", "sort_order"]),
-      members,
-      eventOptions,
-    });
-  }
-
-  async function refTemplates(templateId) {
-    const items = await refDb
-      .select({ id: S.eventTemplates.id, name: S.eventTemplates.name, description: S.eventTemplates.description, source_event_id: S.eventTemplates.source_event_id, updated_at: S.eventTemplates.updated_at })
-      .from(S.eventTemplates)
-      .orderBy(desc(S.eventTemplates.updated_at));
-    let selected = null;
-    if (templateId) {
-      const row = (await refDb.select().from(S.eventTemplates).where(eq(S.eventTemplates.id, templateId)).limit(1))[0];
-      if (row) selected = { id: row.id, name: row.name, settings_json: row.settings_json };
-    }
-    return canon({ items, selected });
-  }
-
   const AUDIT_OPERATIONS = ["CREATE", "UPDATE", "DELETE", "RESTORE", "STATUS_CHANGE", "MERGE", "SYSTEM"];
   const RESTORE_STATUSES = ["restorable", "restored", "expired", "not_restorable", "blocked", "failed"];
   async function refAudit(sp) {
@@ -293,7 +236,11 @@ if (runUnderRootTsx(import.meta.url)) {
         .leftJoin(S.xUsers, sql`lower(${S.xUsers.id}) = lower(${S.users.active_x_user_id})`)
         .where(inArray(S.users.id, actorIds));
     }
-    return canon({ limit, truncated: false, rows, operators });
+    const listRows = rows.map(({ before_json, after_json, inverse_patch_json, ...row }) => ({
+      ...row,
+      payload: { before: before_json == null ? null : [...before_json].length, after: after_json == null ? null : [...after_json].length, inverse: inverse_patch_json == null ? null : [...inverse_patch_json].length },
+    }));
+    return canon({ limit, truncated: false, rows: listRows, operators });
   }
 
   async function refAuditDetail(auditId) {
@@ -471,7 +418,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // ---------------- T03 authz ----------------
   const ENDPOINTS = [
-    "/announcements", "/announcements/ann-01", "/rules", "/rules/T2", "/event-groups", "/event-groups/g1", "/event-templates",
+    "/announcements", "/announcements/ann-01", "/rules", "/rules/T2",
     "/audit-settings", "/audit", "/audit/a1", "/audit/restore", "/ops/notifications", "/ops/youtube-sync", "/ops/cost-guard", "/ops/top", "/api-endpoints", "/ops/youtube-quota", "/ops/youtube-playlists", "/ops/workers", "/ops/static-builds", "/ops/health", "/permissions/simulator?event_id=ev1&x_user_id=sx",
   ];
 
@@ -510,10 +457,8 @@ if (runUnderRootTsx(import.meta.url)) {
     for (const [path, match] of [
       ["/announcements", /FROM announcements/],
       ["/rules", /terms_versions/],
-      ["/event-groups", /event_groups/],
       ["/audit", /FROM audit_logs/],
       ["/audit/restore", /audit_restore_runs/],
-      ["/event-templates", /event_templates/],
       ["/audit-settings", /system_settings/],
       ["/ops/youtube-sync", /video_youtube_metadata/],
     ]) {
@@ -594,43 +539,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal((await call("/api/admin-read/rules/nope", ADMIN)).status, 404);
   });
 
-  // ---------------- event groups ----------------
-  test("T02 event groups list equals CURRENT for every filter (member counts, order, limit)", async () => {
-    for (const sp of [{}, { visibility: "public" }, { type: "series" }, { visibility: "private", type: "genre" }, { type: "constructor" }, { type: "bogus" }]) {
-      const query = new URLSearchParams(sp).toString();
-      const r = await get(`/event-groups${query ? `?${query}` : ""}`);
-      assert.deepEqual(r.body, await refEventGroups(sp), JSON.stringify(sp));
-    }
-    const all = (await get("/event-groups")).body.items;
-    assert.deepEqual(all.map((g) => [g.id, g.event_count]), [["g2", 1], ["g3", 1], ["g1", 4], ["g4", 0]]);
-  });
-
-  test("T02 event group detail equals CURRENT (members by start_time desc / id, add-event options); empty group; missing -> 404", async () => {
-    for (const id of ["g1", "g2", "g4"]) {
-      assert.deepEqual((await get(`/event-groups/${id}`)).body, await refEventGroup(id), id);
-    }
-    const g1 = (await get("/event-groups/g1")).body;
-    assert.deepEqual(g1.members.map((m) => m.event_id), ["ev3", "ev4", "ev5", "ev2"], "NULL start_time last");
-    assert.equal((await get("/event-groups/g4")).body.members.length, 0);
-    assert.equal((await call("/api/admin-read/event-groups/nope", ADMIN)).status, 404);
-  });
-
-  test("T02 event group add-event options page at 80 with the CURRENT cursor", async () => {
-    for (let i = 0; i < 90; i += 1) ins("events", { id: `evx${String(i).padStart(2, "0")}`, title: `X ${i}`, start_time: i, updated_at: T0 + 1000 + i });
-    const r = await get("/event-groups/g4");
-    assert.deepEqual(r.body, await refEventGroup("g4"));
-    assert.equal(r.body.eventOptions.options.length, 80);
-    assert.ok(r.body.eventOptions.nextCursor);
-  });
-
-  // ---------------- event templates / audit settings ----------------
-  test("T02 event templates list (+ ?template= selection) equals CURRENT", async () => {
-    assert.deepEqual((await get("/event-templates")).body, await refTemplates(null));
-    assert.deepEqual((await get("/event-templates?template=tpl-1")).body, await refTemplates("tpl-1"));
-    assert.deepEqual((await get("/event-templates?template=nope")).body, await refTemplates("nope"));
-    assert.deepEqual((await get("/event-templates?template=%20tpl-2%20")).body, await refTemplates("tpl-2"));
-  });
-
+  // ---------------- audit settings ----------------
   test("T02 audit settings: defaults without a row, stored values with one (CURRENT getAuditLogSettings)", async () => {
     sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
     const noRow = (await get("/audit-settings")).body;
@@ -665,18 +574,44 @@ if (runUnderRootTsx(import.meta.url)) {
     const r = await get("/audit?record=u1");
     assert.deepEqual(r.body, await refAudit({ record: "u1" }));
     assert.deepEqual(Object.keys(r.body.rows[0]).sort(), Object.keys((await refAudit({ record: "u1" })).rows[0]).sort());
-    assert.match(r.body.rows[0].after_json, /REDACTED/);
+    assert.equal(r.body.rows[0].after_json, undefined, "list rows never carry payload bodies");
+    assert.equal(r.body.rows[0].payload.after, JSON.stringify({ email: "[REDACTED]" }).length);
+    assert.match(await readPayload("a-red", "after"), /REDACTED/, "redacted body stays reachable via the chunk endpoint");
   });
 
-  test("S2 budget: audit list truncates to the 64 KiB response budget instead of growing", async () => {
-    const big = "x".repeat(30_000);
-    for (let i = 0; i < 8; i += 1) {
-      ins("audit_logs", { id: `a-big${i}`, table_name: "big", target_id: "b1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 2000 + i, before_json: big, after_json: big });
+  test("S2 budget: oversized payload rows return lengths only (no bodies) and stay under 64 KiB", async () => {
+    const big = "あ".repeat(40_000);
+    for (let i = 0; i < 100; i += 1) {
+      ins("audit_logs", { id: `a-big${i}`, table_name: "big", target_id: "b1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 2000 + i, before_json: big, after_json: big, inverse_patch_json: big });
     }
-    const r = await get("/audit?table=big");
+    const r = await get("/audit?table=big&limit=100");
+    assert.equal(r.status, 200);
+    assert.ok(new TextEncoder().encode(r.text).length < 64 * 1024, "response < 64 KiB bytes");
+    assert.equal(r.body.rows[0].id, "a-big99", "newest first");
+    assert.equal(r.body.rows[0].payload.before, 40_000);
+    assert.doesNotMatch(r.text, /あ/, "no payload body in the list");
+    assert.doesNotMatch(r.text, /before_json|after_json|inverse_patch_json/);
+    assert.equal((await readPayload("a-big99", "before")).length, 40_000, "full payload via chunk endpoint");
+  });
+
+  test("S2 budget: byte bound is enforced (UTF-8) including the first row; truncated is reported", async () => {
+    const wide = "あ".repeat(20_000); // 60,000 UTF-8 bytes in 20,000 UTF-16 units
+    for (let i = 0; i < 3; i += 1) {
+      ins("audit_logs", { id: `a-wide${i}`, table_name: "wide", target_id: "w1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 3000 + i, reason: wide });
+    }
+    const first = await get("/audit?table=wide");
+    assert.equal(first.body.truncated, true);
+    assert.deepEqual(first.body.rows, [], "a first row over the byte budget is not returned either");
+    assert.ok(new TextEncoder().encode(first.text).length < 64 * 1024);
+    const mid = "あ".repeat(4_000); // 12,000 bytes per row
+    for (let i = 0; i < 6; i += 1) {
+      ins("audit_logs", { id: `a-mid${i}`, table_name: "mid", target_id: "m1", operation: "UPDATE", actor_user_id: "u_carol", created_at: T0 + 4000 + i, reason: mid });
+    }
+    const r = await get("/audit?table=mid");
     assert.equal(r.body.truncated, true);
-    assert.ok(r.body.rows.length >= 1 && r.body.rows.length < 8);
-    assert.equal(r.body.rows[0].id, "a-big7", "newest rows are kept");
+    assert.equal(r.body.rows.length, 3);
+    assert.equal(r.body.rows[0].id, "a-mid5");
+    assert.ok(new TextEncoder().encode(r.text).length < 64 * 1024);
   });
 
   test("T02 audit detail equals CURRENT (prev/next on the same target); missing -> 404", async () => {

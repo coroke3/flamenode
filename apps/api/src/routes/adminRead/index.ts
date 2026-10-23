@@ -1,14 +1,22 @@
 import { Hono } from "hono";
+import type { AdminReadError } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
+import { adminEventNewRoutes, adminEventTemplatesRoutes } from "./eventTemplates.ts";
+import { adminEventGroupsRoutes } from "./eventGroups.ts";
+import { adminEventsRoutes } from "./events.ts";
 import { adminAuditRoutes } from "./audit.ts";
 import { adminOpsRoutes } from "./ops.ts";
 import { adminSettingsRoutes } from "./settings.ts";
+import { adminModerationRoutes } from "./moderation.ts";
+import { adminUsersRoutes } from "./users.ts";
+import { adminXIdMergesRoutes } from "./xIdMerges.ts";
+import { adminXLinkRequestsRoutes } from "./xLinkRequests.ts";
+import { adminVideosRoutes } from "./videos.ts";
 
-// MIG-0626 (with MIG-0625): authenticated, admin-only, read-only Admin screens API.
-// Mounted at /api/admin-read, deliberately NOT under /api/admin: the MIG-0602 admin router only guards
-// non-GET/HEAD/OPTIONS requests and has no default read guard. Every response (success, 401, 403, 503) is
-// "Cache-Control: private, no-store"; nothing here writes to D1, R2, KV or cookies.
+// MIG-0625: read-only Admin screens API (users / videos / events / moderation). GET only; nothing here writes.
+// Mounted at /api/admin-read so it never shares a path prefix with the mutating /api/admin write guard.
+// Every response (success, 401, 403, 503) is `Cache-Control: private, no-store`.
 const NO_STORE = "private, no-store";
 
 export const adminReadRoutes = new Hono<AppEnv>();
@@ -18,22 +26,34 @@ adminReadRoutes.use("*", async (c, next) => {
   c.header("Cache-Control", NO_STORE);
 });
 adminReadRoutes.use("*", sessionMiddleware());
+// 401 (no/expired session -> SPA /entry) and 403 (banned), exactly like CURRENT getLayoutAuthSurface + banned handling.
 adminReadRoutes.use("*", requireAuth());
-// CURRENT app/(admin)/layout.tsx: role !== "admin" redirects away. Several pages also notFound() for non-admins;
-// both mean "not allowed" and are expressed here as a single 403.
+// CURRENT app/(admin)/layout.tsx: `headerUser.role !== "admin"` -> redirect("/dashboard"). Moderators are NOT admins here.
 adminReadRoutes.use("*", async (c, next) => {
-  const user = c.get("user");
-  // Same body as the part-A router (PR #349) so both mounts of one shared router agree.
-  if (!user || user.role !== "admin") return c.json({ error: "Forbidden", redirect: "/dashboard" }, 403);
+  if (c.get("user")?.role !== "admin") {
+    const body: AdminReadError = { error: "Forbidden", redirect: "/dashboard" };
+    return c.json(body, 403);
+  }
   await next();
 });
 
+adminReadRoutes.route("/users", adminUsersRoutes);
+adminReadRoutes.route("/videos", adminVideosRoutes);
+adminReadRoutes.route("/event-groups", adminEventGroupsRoutes);
+adminReadRoutes.route("/events/templates", adminEventTemplatesRoutes);
+adminReadRoutes.route("/events/new", adminEventNewRoutes);
+adminReadRoutes.route("/events", adminEventsRoutes);
+adminReadRoutes.route("/moderation", adminModerationRoutes);
+adminReadRoutes.route("/x-link-requests", adminXLinkRequestsRoutes);
+adminReadRoutes.route("/x-id-merges", adminXIdMergesRoutes);
+// MIG-0626 (part B): settings / audit / ops.
 adminReadRoutes.route("/", adminSettingsRoutes);
 adminReadRoutes.route("/audit", adminAuditRoutes);
 adminReadRoutes.route("/ops", adminOpsRoutes);
 
-// D1 failures: fixed code only (errors may carry bound values); the SPA shows its "unavailable" state.
+// D1 failures: fixed code only (errors may carry bound values); CURRENT pages without a try/catch show the error page.
 adminReadRoutes.onError((_error, c) => {
   console.error("[adminRead] READ_FAILED");
-  return c.json({ error: "unavailable" }, 503, { "Cache-Control": NO_STORE });
+  const body: AdminReadError = { error: "unavailable" };
+  return c.json(body, 503, { "Cache-Control": NO_STORE });
 });

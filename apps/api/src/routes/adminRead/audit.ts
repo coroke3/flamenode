@@ -31,6 +31,14 @@ function parseDateBoundary(value: string, end: boolean): number | null {
   return Number.isNaN(t) ? null : Math.floor(t / 1000);
 }
 
+const AUDIT_ROW_COLUMNS =
+  "id, table_name, target_id, operation, changed_keys_json, actor_user_id, actor_x_user_id, " +
+  "actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, " +
+  "restore_unavailable_reason_code, restore_unavailable_message, payload_size_bytes, expires_at, created_at, " +
+  "length(before_json) AS before_len, length(after_json) AS after_len, length(inverse_patch_json) AS inverse_len";
+
+type AuditLengthColumns = { before_len: number | null; after_len: number | null; inverse_len: number | null };
+
 export const adminAuditRoutes = new Hono<AppEnv>();
 
 // ---- GET /audit (audit/page.tsx) ----
@@ -82,25 +90,30 @@ adminAuditRoutes.get("/", async (c) => {
     params.push(untilUnix);
   }
   const where = conds.length > 0 ? " WHERE " + conds.join(" AND ") : "";
-  const { results: rows } = await c.env.DB.prepare(
-    "SELECT * FROM audit_logs" + where + " ORDER BY created_at DESC LIMIT ?",
+  // Payload bodies are never selected here (only their lengths); see AdminAuditListRowSchema.
+  const { results: dbRows } = await c.env.DB.prepare(
+    "SELECT " + AUDIT_ROW_COLUMNS + " FROM audit_logs" + where + " ORDER BY created_at DESC LIMIT ?",
   )
     .bind(...params, limit)
-    .all<AdminAuditListResponse["rows"][number]>();
+    .all<AdminAuditDetailResponse["row"] & AuditLengthColumns>();
+  const candidates: AdminAuditListResponse["rows"] = dbRows.map(({ before_len, after_len, inverse_len, ...row }) => ({
+    ...row,
+    payload: { before: before_len, after: after_len, inverse: inverse_len },
+  }));
 
-  // ZERO_1102 S2: response <= 64 KiB. Payload columns (before/after/inverse, up to audit max_payload_bytes each)
-  // can exceed that over 100 rows, so rows are kept (newest first) until the budget is used; at least one is kept.
+  // ZERO_1102 S2: response <= 64 KiB. Rows are kept (newest first) until the UTF-8 byte budget is used; the first row
+  // is held to the same bound (no unbounded first row). Row size is counted in bytes, not UTF-16 units.
   // DIVERGENCE: CURRENT renders all `limit` rows. The SPA re-queries with a narrower filter when truncated.
-  let kept = 0;
+  const encoder = new TextEncoder();
+  const rows: AdminAuditListResponse["rows"] = [];
   let used = 0;
-  for (const row of rows) {
-    const size = JSON.stringify(row).length;
-    if (kept > 0 && used + size > MAX_AUDIT_LIST_BYTES) break;
+  for (const row of candidates) {
+    const size = encoder.encode(JSON.stringify(row)).length;
+    if (used + size > MAX_AUDIT_LIST_BYTES) break;
     used += size;
-    kept += 1;
+    rows.push(row);
   }
-  const truncated = kept < rows.length;
-  rows.length = kept;
+  const truncated = rows.length < candidates.length;
 
   const actorIds = Array.from(new Set(rows.map((row) => row.actor_user_id).filter(Boolean)));
   let operators: AdminAuditListResponse["operators"] = [];
@@ -159,21 +172,9 @@ adminAuditRoutes.get("/:id", async (c) => {
   const auditId = c.req.param("id");
   if (!auditId) return c.json(NOT_FOUND, 404);
   // Payload columns stay in D1 (only their lengths are read); see AdminAuditDetailRowSchema.
-  const found = await c.env.DB.prepare(
-    `SELECT id, table_name, target_id, operation, changed_keys_json, actor_user_id, actor_x_user_id,
-       actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status,
-       restore_unavailable_reason_code, restore_unavailable_message, payload_size_bytes, expires_at, created_at,
-       length(before_json) AS before_len, length(after_json) AS after_len, length(inverse_patch_json) AS inverse_len
-     FROM audit_logs WHERE id = ? LIMIT 1`,
-  )
+  const found = await c.env.DB.prepare("SELECT " + AUDIT_ROW_COLUMNS + " FROM audit_logs WHERE id = ? LIMIT 1")
     .bind(auditId)
-    .first<
-      AdminAuditDetailResponse["row"] & {
-        before_len: number | null;
-        after_len: number | null;
-        inverse_len: number | null;
-      }
-    >();
+    .first<AdminAuditDetailResponse["row"] & AuditLengthColumns>();
   if (!found) return c.json(NOT_FOUND, 404);
   const { before_len, after_len, inverse_len, ...row } = found;
 

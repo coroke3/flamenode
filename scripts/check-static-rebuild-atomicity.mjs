@@ -49,7 +49,7 @@ for (const dir of actionRoots) {
 }
 
 const enqueueSource = readFileSync(
-  path.join(root, "src/lib/staticRebuild/enqueue.ts"),
+  path.join(root, "packages/server-core/src/staticRebuild/enqueue.ts"),
   "utf8",
 );
 const batchStart = enqueueSource.indexOf(

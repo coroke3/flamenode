@@ -184,11 +184,11 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 | `/admin/audit/restore` | MIG-0626 | `GET /api/admin-read/audit/restore` | DONE |
 | `/admin/audit/settings` | MIG-0626 | `GET /api/admin-read/audit-settings` | DONE |
 | `/admin/cost-guard` | MIG-0626 | `GET /api/admin-read/ops/cost-guard` | DONE |
-| `/admin/event-groups` | MIG-0626 | `GET /api/admin-read/event-groups` | DONE |
-| `/admin/event-groups/[id]/edit` | MIG-0626 | `GET /api/admin-read/event-groups/:id` | DONE |
+| `/admin/event-groups` | MIG-0625 (PR #349) | (owned by MIG-0625) | NOT MIG-0626 |
+| `/admin/event-groups/[id]/edit` | MIG-0625 (PR #349) | (owned by MIG-0625) | NOT MIG-0626 |
 | `/admin/event-groups/new` | MIG-0626 | — | NONE (static form) |
-| `/admin/events/new` | MIG-0626 | `GET /api/admin-read/event-templates?template=` | DONE (template list + selection; form initial built client-side) |
-| `/admin/events/templates` | MIG-0626 | `GET /api/admin-read/event-templates` | DONE |
+| `/admin/events/new` | MIG-0625 (PR #349) | (owned by MIG-0625) | NOT MIG-0626 |
+| `/admin/events/templates` | MIG-0625 (PR #349) | (owned by MIG-0625) | NOT MIG-0626 |
 | `/admin/events/[id]`, `/edit`, `/slots`, `/staff`, `/admin/history` | MIG-0626 | — | NONE (COMPAT_REDIRECT) |
 | `/admin/notifications` | MIG-0626 | `GET /api/admin-read/ops/notifications` | DONE |
 | `/admin/rules` | MIG-0626 | `GET /api/admin-read/rules` | DONE |

@@ -54,58 +54,6 @@ export const AdminRuleDetailSchema = z.object({
 });
 export const AdminRuleDetailResponseSchema = z.object({ item: AdminRuleDetailSchema });
 
-export const AdminEventGroupListRowSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  slug: z.string(),
-  group_type: z.string(),
-  visibility_status: z.string(),
-  sort_order: z.number().nullable(),
-  event_count: z.number(),
-});
-export const AdminEventGroupsResponseSchema = z.object({
-  visibility: z.enum(["any", "public", "private", "archived"]),
-  type: z.string(),
-  items: z.array(AdminEventGroupListRowSchema),
-});
-export const AdminEventGroupDetailResponseSchema = z.object({
-  group: z.object({
-    id: z.string(),
-    updated_at: z.number(),
-    name: z.string(),
-    slug: z.string(),
-    description: z.string().nullable(),
-    group_type: z.string(),
-    icon_url: z.string().nullable(),
-    accent_color: z.string().nullable(),
-    visibility_status: z.string(),
-    sort_order: z.number().nullable(),
-  }),
-  members: z.array(
-    z.object({ event_id: z.string(), title: z.string(), start_time: z.number().nullable() }),
-  ),
-  eventOptions: z.object({
-    options: z.array(
-      z.object({ id: z.string(), title: z.string(), start_time: z.number().nullable() }),
-    ),
-    nextCursor: z.string().nullable(),
-  }),
-});
-
-export const AdminEventTemplatesResponseSchema = z.object({
-  items: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      description: z.string().nullable(),
-      source_event_id: z.string().nullable(),
-      updated_at: z.number(),
-    }),
-  ),
-  // The template picked by ?template= on the new-event page: name + raw settings_json (the SPA builds the form initial).
-  selected: z.object({ id: z.string(), name: z.string(), settings_json: z.string() }).nullable(),
-});
-
 export const AdminAuditSettingsResponseSchema = z.object({
   settings: z.object({
     normal_retention_days: z.number(),
@@ -145,15 +93,6 @@ export const AdminAuditOperatorSchema = z.object({
   active_x_user_id: z.string().nullable(),
   x_name: z.string().nullable(),
 });
-export const AdminAuditListResponseSchema = z.object({
-  limit: z.number(),
-  // true when rows were dropped to keep the response under the 64 KiB API budget (CURRENT shows all rows).
-  truncated: z.boolean(),
-  rows: z.array(AdminAuditRowSchema),
-  operators: z.array(AdminAuditOperatorSchema),
-});
-export const AdminAuditNeighborSchema = z.object({ id: z.string(), created_at: z.number() });
-export const AdminAuditPayloadFieldSchema = z.enum(["before", "after", "inverse"]);
 // The detail page shows before_json / after_json / inverse_patch_json whole; they can be up to the audit payload
 // cap (default 120 KB), so they are NOT in the detail response. payload.<field> is the character length (null = SQL NULL);
 // the SPA reads the text through the chunk endpoint (<= 64 KiB per response) and concatenates the chunks.
@@ -162,13 +101,26 @@ export const AdminAuditDetailRowSchema = AdminAuditRowSchema.omit({
   after_json: true,
   inverse_patch_json: true,
 });
+export const AdminAuditPayloadLengthsSchema = z.object({
+  before: z.number().nullable(),
+  after: z.number().nullable(),
+  inverse: z.number().nullable(),
+});
+// List rows carry the payload character LENGTHS only (never the bodies, which can be up to the audit payload cap each);
+// the full text stays reachable through the chunk endpoint.
+export const AdminAuditListRowSchema = AdminAuditDetailRowSchema.extend({ payload: AdminAuditPayloadLengthsSchema });
+export const AdminAuditListResponseSchema = z.object({
+  limit: z.number(),
+  // true when rows were dropped to keep the response under the 64 KiB (UTF-8 bytes) API budget (CURRENT shows all rows).
+  truncated: z.boolean(),
+  rows: z.array(AdminAuditListRowSchema),
+  operators: z.array(AdminAuditOperatorSchema),
+});
+export const AdminAuditNeighborSchema = z.object({ id: z.string(), created_at: z.number() });
+export const AdminAuditPayloadFieldSchema = z.enum(["before", "after", "inverse"]);
 export const AdminAuditDetailResponseSchema = z.object({
   row: AdminAuditDetailRowSchema,
-  payload: z.object({
-    before: z.number().nullable(),
-    after: z.number().nullable(),
-    inverse: z.number().nullable(),
-  }),
+  payload: AdminAuditPayloadLengthsSchema,
   prev: AdminAuditNeighborSchema.nullable(),
   next: AdminAuditNeighborSchema.nullable(),
 });
@@ -199,9 +151,6 @@ export type AdminAnnouncementListResponse = z.infer<typeof AdminAnnouncementList
 export type AdminAnnouncementDetailResponse = z.infer<typeof AdminAnnouncementDetailResponseSchema>;
 export type AdminRulesResponse = z.infer<typeof AdminRulesResponseSchema>;
 export type AdminRuleDetailResponse = z.infer<typeof AdminRuleDetailResponseSchema>;
-export type AdminEventGroupsResponse = z.infer<typeof AdminEventGroupsResponseSchema>;
-export type AdminEventGroupDetailResponse = z.infer<typeof AdminEventGroupDetailResponseSchema>;
-export type AdminEventTemplatesResponse = z.infer<typeof AdminEventTemplatesResponseSchema>;
 export type AdminAuditSettingsResponse = z.infer<typeof AdminAuditSettingsResponseSchema>;
 export type AdminAuditListResponse = z.infer<typeof AdminAuditListResponseSchema>;
 export type AdminAuditDetailResponse = z.infer<typeof AdminAuditDetailResponseSchema>;
