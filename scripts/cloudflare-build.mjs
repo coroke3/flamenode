@@ -95,7 +95,8 @@ export function runCloudflareBuild({
 
   const result = run({
     executable: process.execPath,
-    args: [cli, "build"],
+    // Support window expired so the flag is required; Next 15.5 patches are tracked until Phase 9 retires the app.
+    args: [cli, "build", "--dangerouslyUseUnsupportedNextVersion"],
     cwd: repoRoot,
     env: {
       ...env,

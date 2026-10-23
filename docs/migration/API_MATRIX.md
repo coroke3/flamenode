@@ -85,6 +85,20 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
+### Hono endpoints (MIG-0602 U02, PR #331)
+
+Write guard order for every row: origin (pure) -> session -> origin/auth/identity (`writeGuardMiddleware`, admin) -> CostGuard (feature below). Body cap 64KB (413). Audit + `static_rebuild_queue` row are written in one D1 batch by `apps/api/src/audit/mutateWithAudit.ts` (D-0602-1 Option A). Contracts: `packages/contracts/src/admin/*`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Source |
+| --- | --- | --- | --- | --- |
+| SA-004 | `POST /api/admin/announcements` | `admin_announcement_broadcast` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/announcements.ts` |
+| SA-005 | `PUT /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 400 / 404 / 409 / 413 / 500 | same |
+| SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
+| SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
+| SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+
+SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
@@ -326,3 +340,14 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
+
+## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
+
+Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.
+
+| RH | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | CPU p50 / p95 (local Node) | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| RH-017 | `GET /api/health/deep` | `apps/api/src/routes/health.ts` | Bearer token (`WORKER_ADMIN_TOKEN`) | token gate identical to CURRENT (503 unset / 401 missing, malformed or wrong; constant-time compare; no-store). Authorized requests fail closed with CURRENT's failure response `503 {ok:false, service}` and read no binding, because the check body (`src/lib/health/deepHealth.ts`: schema version + tables, artifact SLO, queue config, visibility manifest/fence join) is not ported. Do not route `/api/health/deep` to Hono until it is | 0.050ms / 0.130ms | BRIDGED (gate only) |
+| RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | only a 40-hex `BUILD_COMMIT_SHA` (lower-cased); 503 without one; no other binding read; no-store | 0.055ms / 0.131ms | BRIDGED |
+| RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | 1 R2 GET `top/sections/stats.v1.json` (<= 64 KiB, body cancelled when oversized), `normalizeTopStatsSection` semantics, 3 public counters only, fixed Cache API key, 503 `{stats:null}` no-store on any failure; no D1 | 0.038ms / 0.095ms | BRIDGED |
+| RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | isolate rate limit 60/min (key cap 2048), `q` <= 64 chars, limit 1..50 (0 / non-numeric -> 20), D1 <= 2 bounded reads, active-only DTO allowlist, SHA-256 ETag / 304, 503 `database_unavailable` | 0.228ms / 0.615ms | BRIDGED |

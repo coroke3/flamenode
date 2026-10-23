@@ -7,6 +7,7 @@ const scripts = [
   "scripts/check-db-schema.mjs",
   "scripts/check-migration-docs.mjs",
   "scripts/check-domain-imports.mjs",
+  "scripts/check-server-core-boundaries.mjs",
 ];
 for (const script of scripts) {
   const result = spawnSync(process.execPath, [script], {
