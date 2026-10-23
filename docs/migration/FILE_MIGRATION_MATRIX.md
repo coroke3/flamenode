@@ -318,6 +318,7 @@
 | `workers/fast-jobs/publicBuildTrigger.test.mjs` | TEST | MIG-0410 T01-T07 + failure/retry, Cron wiring, local CPU | MIG-0410 | SAME | IN_PROGRESS | PR#325 SHA=b8e0d477f8e0330d54d571fb88d84e84dcf50928 TEST=node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs (14/14) LOG=project-files/migration-review/pr325-approved-constants-check.log |
 | `workers/score-recalc/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/sync-jobs/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
+| `workers/sync-jobs/wrangler.toml` | CONFIG | Current sync recovery Cron schedule; shared Free-tier quota | MIG-0901 | SAME (existing production Worker) | NOT_STARTED | — |
 | `workers/youtube-playlist-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `workers/youtube-sync/index.ts` | WORKER_ENTRY | Queue/Cron + production bindings | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
 | `wrangler.toml` | CONFIG | shared config; change requires cross-task compatibility review | MIG-0901 | SAME (review owner and package graph) | NOT_STARTED | — |
