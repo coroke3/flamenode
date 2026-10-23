@@ -85,6 +85,20 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
+### Hono endpoints (MIG-0602 U02, PR #331)
+
+Write guard order for every row: origin (pure) -> session -> origin/auth/identity (`writeGuardMiddleware`, admin) -> CostGuard (feature below). Body cap 64KB (413). Audit + `static_rebuild_queue` row are written in one D1 batch by `apps/api/src/audit/mutateWithAudit.ts` (D-0602-1 Option A). Contracts: `packages/contracts/src/admin/*`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Source |
+| --- | --- | --- | --- | --- |
+| SA-004 | `POST /api/admin/announcements` | `admin_announcement_broadcast` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/announcements.ts` |
+| SA-005 | `PUT /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 400 / 404 / 409 / 413 / 500 | same |
+| SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
+| SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
+| SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+
+SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
@@ -341,6 +355,26 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
 
+## MIG-0625 Hono Admin read APIs A (Phase 6)
+
+New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route / traffic change. GET only, mounted at `/api/admin-read` (never shares a prefix with the mutating `/api/admin` write guard). Guard: `sessionMiddleware` + `requireAuth` (401 anonymous, 403 banned) + `role === "admin"` (403 `{error:"Forbidden",redirect:"/dashboard"}`, CURRENT `(admin)/layout.tsx`; moderators rejected). All responses `Cache-Control: private, no-store`. Parity: `apps/api/test/adminRead.parity.test.mjs` (queries copied from the page loaders + the real lib functions, node:sqlite with all migrations). CPU: not measured (MIG-0606).
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `GET /api/admin-read/users?view&q&status&page` | `app/(admin)/admin/users/page.tsx` | `apps/api/src/routes/adminRead/users.ts` | 2 | 50/page; discord, xid, permissions views; `view=links` -> `{redirect}`; D1 failure -> 200 `degraded`; xid `icon_url` null (R2 icon map not reproduced) | unmeasured | BRIDGED |
+| `GET /api/admin-read/users/:id` | `app/(admin)/admin/users/[id]/page.tsx` | `apps/api/src/routes/adminRead/users.ts` | 3 | lists capped (X 100, videos 20, audit 15+15, requests 10); audit before/after payloads not returned; unknown id 404 | unmeasured | BRIDGED |
+| `GET /api/admin-read/videos?q&status&event&page` | `app/(admin)/admin/videos/page.tsx` | `apps/api/src/routes/adminRead/videos.ts` | 3 | 50/page; event options LIMIT 100 (CURRENT 200); review group (status review|pending) rows carry `review` from `apps/api/src/lib/videoReviewSummaries.ts` (reused from PR #345, no extra D1 statement; >4 stage questions -> 503 like CURRENT); D1 failure -> 200 `degraded` | unmeasured | BRIDGED |
+| `GET /api/admin-read/events?sort&filter&q` | `app/(admin)/admin/events/page.tsx` | `apps/api/src/routes/adminRead/events.ts` | 2 | LIMIT 60; rendered columns only; returns server `now` for the badges | unmeasured | BRIDGED |
+| `GET /api/admin-read/moderation?type&status&overdue` | `app/(admin)/admin/moderation/page.tsx` | `apps/api/src/routes/adminRead/moderation.ts` | 2 | LIMIT 100; D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/x-link-requests` | `app/(admin)/admin/x-link-requests/page.tsx` | `apps/api/src/routes/adminRead/xLinkRequests.ts` | 3 | pending 100 / rejected 10 / audit 30 (only `changedKeys` returned); icons signed with `env.AUTH_SECRET` (signer copied verbatim from PR #345 `routes/manage/icon.ts`), no secret -> internal icons null; D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/event-groups?visibility&type` | `app/(admin)/admin/event-groups/page.tsx` | `apps/api/src/routes/adminRead/eventGroups.ts` | 2 | LIMIT 100; `type in labels` quirk kept; `event-groups/new` is a static form (no read) | unmeasured | BRIDGED |
+| `GET /api/admin-read/event-groups/:id` | `app/(admin)/admin/event-groups/[id]/edit/page.tsx` | `apps/api/src/routes/adminRead/eventGroups.ts` | 3 | members capped at 100 (CURRENT unbounded); first 80 option events + cursor; unknown id 404 | unmeasured | BRIDGED |
+| `GET /api/admin-read/x-id-merges?view&impact` | `app/(admin)/admin/x-id-merges/page.tsx` | `apps/api/src/routes/adminRead/xIdMerges.ts` | 2 (3 with `impact`) | merge requests 50, reverts 100; impact counts + preview (51) of the selected pending/approved request in ONE union statement; restore JSON never returned (`has_restore_snapshot`); D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/events/templates` | `app/(admin)/admin/events/templates/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | CURRENT lists behind requireAdminWrite("admin_event_templates"): TOS / re-accept / CostGuard denial -> empty list (`guardOk:false`); list capped at 100 (CURRENT unbounded) | unmeasured | BRIDGED |
+| `GET /api/admin-read/events/new?template` | `app/(admin)/admin/events/new/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | same guard/list; selected template returned as name + raw `settings_json` (<= 64 KiB); `snapshotToFormInitial` not ported (`formInitial:"deferred"`) | unmeasured | PARTIAL |
+
+Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new form initial, users/[id]/edit, xid icon projection.
+
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 
 Code landing only: no Worker Route / traffic change; the CURRENT Next handlers stay. Parity: `apps/api/test/mig0601.parity.test.mjs` runs the Hono route and the CURRENT implementation on the same input. CPU is local Node `process.cpuUsage` per `app.request()` with D1/R2 doubles (remote I/O excluded), warm, n=1000 (`project-files/migration-review/pr329-cpu-local.log`); Workers p95 and 1102 stay with MIG-0606.
@@ -351,3 +385,13 @@ Code landing only: no Worker Route / traffic change; the CURRENT Next handlers s
 | RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | only a 40-hex `BUILD_COMMIT_SHA` (lower-cased); 503 without one; no other binding read; no-store | 0.055ms / 0.131ms | BRIDGED |
 | RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | 1 R2 GET `top/sections/stats.v1.json` (<= 64 KiB, body cancelled when oversized), `normalizeTopStatsSection` semantics, 3 public counters only, fixed Cache API key, 503 `{stats:null}` no-store on any failure; no D1 | 0.038ms / 0.095ms | BRIDGED |
 | RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | isolate rate limit 60/min (key cap 2048), `q` <= 64 chars, limit 1..50 (0 / non-numeric -> 20), D1 <= 2 bounded reads, active-only DTO allowlist, SHA-256 ETag / 304, 503 `database_unavailable` | 0.228ms / 0.615ms | BRIDGED |
+
+## MIG-0604 Hono event/slot APIs (Phase 6, stacked on MIG-0602 / PR#334)
+
+Code landing only; the CURRENT Next handlers/actions stay. CPU not measured (MIG-0606 harness absent).
+
+| ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-020..022 | `GET /api/live/events/[id]/{slots,submissions,summary}` | `apps/api/src/routes/live/events.ts` | public | id 1..128 else 400; DB missing 503; `live_api_enabled` per request (FORCE_STATIC_ONLY > isolate 30s > KV mirror > D1 > normal); 15s isolate micro-cache after the gate, success only; success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`, errors JSON `no-store`; public events only; non `public_name` hides video_id/display_name; slots limit 6000, submissions 50; D1 <= 2 reads | IN_PROGRESS |
+| SA-036 | `deleteEventTemplate` | `DELETE /api/admin/event-templates/:id` (`apps/api/src/routes/events/templates.ts`) | admin (session -> writeGuard -> CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` validation; single D1 batch: CAS DELETE on every preflight scalar column + changes() assertion + strict audit (context `admin_event_templates`, reason as CURRENT, restore none); 400 / 404 / 409 / 500; `private, no-store` | IN_PROGRESS |
+| RH-012..015, RH-014 overlay, SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on public-data loader / current-user + ownership port / role-parameterised write guard / audit restore strategies | BLOCKED |

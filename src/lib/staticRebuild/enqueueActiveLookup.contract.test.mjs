@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const enqueue = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
+const enqueue = await readFile(new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url), "utf8");
 const columns = await readFile(
-  new URL("./activeLookupColumns.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/staticRebuild/activeLookupColumns.ts", import.meta.url),
   "utf8",
 );
 

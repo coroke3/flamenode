@@ -1,0 +1,14 @@
+// MIG-0409 U07 — NON-PRODUCTION probe. Deploy only after `wrangler login` on the owner's
+// machine; delete with the steps in BUILD_TIME_DATA.md §4 U07. No Route, no custom domain,
+// no FlameNode bindings. workers.dev is used only for the one POST that enqueues messages.
+{
+  "name": "flamenode-u07-queue-cpu-probe",
+  "main": "worker.ts",
+  "compatibility_date": "2026-07-21",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "queues": {
+    "producers": [{ "binding": "PROBE_QUEUE", "queue": "flamenode-u07-queue-cpu-probe" }],
+    "consumers": [{ "queue": "flamenode-u07-queue-cpu-probe", "max_batch_size": 1, "max_retries": 0 }]
+  }
+}

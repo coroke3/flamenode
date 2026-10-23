@@ -132,7 +132,7 @@ test("完全no-opの参加者保存はvideos.updated_at・score dirty・static r
 });
 
 test("member-set CASのID順はlocaleCompareに依存しない", async () => {
-  const snapshot = await read("src/lib/video/memberSetSnapshot.ts");
+  const snapshot = await read("packages/server-core/src/video/memberSetSnapshot.ts");
   const replace = await read("src/lib/video/replaceVideoMembers.ts");
   assert.match(snapshot, /compareSqliteBinaryText/);
   assert.doesNotMatch(snapshot, /id\.localeCompare/);
