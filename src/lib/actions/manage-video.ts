@@ -198,6 +198,7 @@ export async function setManageVideoStatus(
         run: async () => {
           await runVideoVisibilityTransitionPostCommit({
             publicCacheKeys: transition!.publicCacheKeys,
+            exportEventIds: transition!.exportEventIds,
             revalidate: () => {
               revalidateManageVideoPaths(eventId, videoId, target.youtube_video_id);
             },

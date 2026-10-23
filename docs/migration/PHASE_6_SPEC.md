@@ -142,7 +142,7 @@ PRをrevert。旧 Next の認証は変わらない。
 | --- | --- | --- |
 | announcement lifecycle | SA-004..006 | `src/lib/actions/announcement.ts` |
 | API endpoint config | SA-007..008 | `src/lib/actions/api-endpoints.ts` |
-| audit settings / restore | SA-009..011 | `src/lib/actions/audit-admin.ts` |
+| audit settings / restore | SA-009..011（MIG-0629 / MIG-0616 へ移動） | `src/lib/actions/audit-admin.ts` |
 - Server Action の CSRF は Next が origin で守っている。Hono 側は `src/lib/auth/writeOriginGuard.ts` と同じ origin 検査を middleware で行う。
 #### Owned paths
 - 新規: `+apps/api/src/routes/admin/*.ts`, `+apps/api/src/middleware/writeOrigin.ts`, `+packages/contracts/src/admin/*.ts`
@@ -150,7 +150,7 @@ PRをrevert。旧 Next の認証は変わらない。
 #### Micro-units
 - **U01 write guard**: origin 検査と admin 権限の middleware。検証: `writeGuardCore.test.mjs` と同じケース。
 - **U02 announcements / api-endpoints**: SA-004〜008 のエンドポイント。MIG-0303 の domain を呼ぶ。
-- **U03 audit**: SA-009〜011。SA-011（audit restore）は個別実装のまま。cost guard（SA-016〜020）は MIG-0605 U06 の所有。
+- **U03（MIG-0629 へ移動）**: SA-009〜010（audit settings / restore dry-run）。SA-011（audit restore）は MIG-0616 で個別実装。本 task の範囲は U01+U02（2026-10-23 分割決定、work-items/MIG-0602.md Decision）。cost guard（SA-016〜020）は MIG-0605 U06 の所有。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -167,7 +167,7 @@ npm run test:unit
 npm run test:integration
 ```
 #### Ledger updates
-`API_MATRIX.md` の SA-004〜011 に Hono エンドポイント。`FILE_MIGRATION_MATRIX.md` の action 行の target に Hono の場所。
+`API_MATRIX.md` の SA-004〜008 に Hono エンドポイント（SA-009〜011 は MIG-0629 / MIG-0616）。`FILE_MIGRATION_MATRIX.md` の action 行の target に Hono の場所。
 #### DONE checklist
 - [ ] 対象SAすべてで成功・拒否・競合と監査・Queue が CURRENT と一致
 - [ ] 本番 Route を変更していない
@@ -463,6 +463,50 @@ npm run typecheck
 - 外部 API の呼び出し回数が CURRENT より増える分割になったら止める（YouTube の quota）。
 #### Rollback
 PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cron が拾う。
+
+### MIG-0629: admin audit settings + restore dry-run APIs（監査設定・dry-run API）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 の merge 後（MIG-0613 は台帳未登録。登録され次第 Depends に追加）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602 / **Decisions:** D-01 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+| CURRENT | ID | file |
+| --- | --- | --- |
+| audit settings update | SA-009 | `src/lib/actions/audit-admin.ts#updateAuditLogSettingsAction` |
+| audit dry run | SA-010 | `src/lib/actions/audit-admin.ts#getAuditLogDryRun` |
+- MIG-0602 の分割で移動（2026-10-23）。SA-011（audit restore）は MIG-0616 で個別実装。ガードは MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` を再利用する。
+#### Owned paths
+- 新規: `+apps/api/src/routes/admin/audit*.ts`、`+packages/contracts/src/admin/audit*.ts`
+- 触らない: `src/lib/actions/**`
+#### Micro-units
+- **U01 audit settings**: SA-009。`updateAuditLogSettings` と同じ strict 監査（`system_settings` 更新 + 監査 1 件を 1 batch）。
+- **U02 dry run**: SA-010。読み取りのみ（既定の admin read guard を使う）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 別 origin からの POST | 拒否 |
+| T02 | 非admin | CURRENT と同じ拒否、監査0 |
+| T03 | 設定更新の成功 | 監査1件が CURRENT と byte 一致 |
+| T04 | dry run | 書き込み0、CURRENT と同じ件数 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+npm run test:critical
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-009〜010 に Hono エンドポイント。
+#### DONE checklist
+- [ ] SA-009 / SA-010 で成功・拒否・競合と監査が CURRENT と一致
+- [ ] 本番 Route を変更していない
+#### STOP
+- 監査の意味を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
 
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
