@@ -50,6 +50,10 @@ jobs:
           node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
+      - name: ファイル台帳の網羅性(追跡ソースが台帳行または家族行でカバーされる)
+        run: |
+          node scripts/check-migration-ledger-completeness.mjs
+          node --test scripts/check-migration-ledger-completeness.test.mjs
       - name: Work-item進捗構造と所有重複の回帰テスト
         run: |
           node scripts/check-migration-work-items.mjs
