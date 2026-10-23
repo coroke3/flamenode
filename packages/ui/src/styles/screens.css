@@ -401,10 +401,10 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .tp-sec{margin-top:80px}
 .tp-sec .sec-head .stack{gap:4px}
 .tp-empty{margin:0}
-.shelf{margin-inline:calc(50% - 50vw);padding-inline:calc(50vw - 50%);overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-padding-inline:calc(50vw - 50%);outline-offset:-2px}
-.shelf-track{display:flex;gap:24px;width:max-content;padding:0 0 8px}
-.shelf-i{position:relative;flex:none;width:clamp(220px,22vw,300px);scroll-snap-align:start}
-.shelf-rank{position:absolute;top:8px;left:8px;z-index:1;min-width:28px;padding:2px 8px;background:var(--bg);color:var(--ink);font-size:14px;line-height:20px;text-align:center}
+.tp-shelf{margin-inline:calc(50% - 50vw);padding-inline:calc(50vw - 50%);overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-padding-inline:calc(50vw - 50%);outline-offset:-2px}
+.tp-shelf-track{display:flex;gap:24px;width:max-content;padding:0 0 8px}
+.tp-shelf-i{position:relative;flex:none;width:clamp(220px,22vw,300px);scroll-snap-align:start}
+.tp-shelf-rank{position:absolute;top:8px;left:8px;z-index:1;min-width:28px;padding:2px 8px;background:var(--bg);color:var(--ink);font-size:14px;line-height:20px;text-align:center}
 .tp-evcard{display:flex;flex-direction:column;gap:8px}
 .tp-evposter{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--surface-raised)}
 .tp-evtop{justify-content:space-between;gap:8px}
@@ -414,7 +414,7 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
   .tp-intro{padding-top:32px}
   .tp-rec-primary .tp-rec-status{font-size:24px;line-height:32px}
   .tp-sec{margin-top:40px}
-  .shelf-i{width:62vw}
+  .tp-shelf-i{width:62vw}
 }
 
 /* list / recommend / trending (MIG-0505): mock Videos.html, Recommend.html, Trending.html */
