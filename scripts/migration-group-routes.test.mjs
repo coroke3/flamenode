@@ -69,7 +69,7 @@ test("T03 /groups/a%20b: same URL as CURRENT after parsing (CURRENT puts the dec
 
 test("T04 query: documented divergence (assets keep it, CURRENT drops it); nothing else in the rules reads it", () => {
   // `_redirects` has no way to drop a request query string: see the smoke (assets: /groups?x=1 -> /event?x=1;
-  // gateway PoC: /groups answered 200). The rules therefore never carry a query in their destination.
+  // gateway since MIG-0619 answers 307 without the query). The rules therefore never carry a query in their destination.
   assert.ok(rules.every((r) => !r.destination.includes("?")));
   assert.match(read("docs/migration/work-items/MIG-0503.md"), /\/groups\?x=1/);
 });
@@ -101,7 +101,10 @@ test("MIG-0502 integration keeps hand-written rules: merged `_redirects` still h
   assert.equal(parseRules(merged).length, 5);
 });
 
-test("built dist/_redirects (when built) has the groups rules before the generated event block", { skip: fs.existsSync("apps/site/dist/_redirects") ? false : "apps/site/dist missing: build @flamenode/site first" }, () => {
+// test:unit runs before the site build, so the dist check skips there; the CI REQUIRE_BUILT step fails instead of skipping.
+const skipDist = fs.existsSync("apps/site/dist/_redirects") ? false : "apps/site/dist missing: build @flamenode/site first";
+if (process.env.REQUIRE_BUILT && skipDist) throw new Error("REQUIRE_BUILT is set but " + skipDist);
+test("built dist/_redirects (when built) has the groups rules before the generated event block", { skip: skipDist }, () => {
   const built = read(path.join("apps/site/dist", "_redirects"));
   assert.deepEqual(parseRules(built).slice(0, 4), rules);
   assert.ok(!fs.existsSync("apps/site/dist/groups"), "no groups HTML");
