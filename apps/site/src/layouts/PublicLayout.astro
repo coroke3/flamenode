@@ -26,9 +26,11 @@ import {
 interface Props {
   head: PageHead;
   currentPath: string;
+  /** Page-level JSON-LD (CURRENT `JsonLd`), emitted after the site-wide graph. */
+  jsonLd?: readonly unknown[];
 }
 
-const { head, currentPath } = Astro.props;
+const { head, currentPath, jsonLd = [] } = Astro.props;
 const origin = siteOrigin();
 const gaId = gaMeasurementId();
 const robots = head.noindex
@@ -45,6 +47,7 @@ const googlebot = head.noindex
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <script is:inline set:html={THEME_BOOTSTRAP_CODE}></script>
     <script is:inline id="flamenode-site-structured-data" type="application/ld+json" set:html={serializeJsonLd(buildSiteJsonLd(origin))}></script>
+    {jsonLd.map((data) => <script is:inline type="application/ld+json" set:html={serializeJsonLd(data)}></script>)}
     <title>{head.title}</title>
     <meta name="application-name" content={SITE_NAME} />
     <meta name="author" content={SITE_NAME} />
