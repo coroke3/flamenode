@@ -204,4 +204,4 @@ owner Yugo の standing instruction「検討事項は推奨で進めて」に基
 
 Island page queue parity: Phase 5 makes user/event/video kinds `excluded` in renderPublicPage, so per-page freshness reverts to the build cycle until parity is restored. 選択肢: (1) Astro serializer を port する、(2) `experimental_AstroContainer` を consumer Worker に同梱する（bundle 577 KiB、8 ms budget）、(3) kind ごとに build cadence を受け入れる。
 
-production queue は未配線のため、現時点の影響はない。`/user/[id]`（MIG-0504）が最初に `excluded` になった（event は MIG-0502、video は MIG-0507 で続く）。それまでの consumer の production 上の役割は、非公開化時の R2 HTML 削除と tracker close のみ。gateway miss は build（MIG-0509）が HTML を出すまで 503 のまま。lead が、parity を回復するか renderer を削除して injectable にするかを決める。
+production queue は未配線のため、現時点の影響はない。`/user/[id]`（MIG-0504）と `/event/[id]`（MIG-0502）が `excluded` になった（video は MIG-0507 で続く）。それまでの consumer の production 上の役割は、非公開化時の R2 HTML 削除と tracker close のみ。gateway miss は build（MIG-0509）が HTML を出すまで 503 のまま。lead が、parity を回復するか renderer を削除して injectable にするかを決める。

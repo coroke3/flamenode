@@ -1,27 +1,37 @@
 ---
 /**
- * Representative event detail page `/event/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
- * Built from the representative snapshots only; the full set is MIG-0502 / MIG-0411.
- * Non-public snapshots are rejected by the loader.
+ * `/event/[id]` (MIG-0403 representative -> MIG-0502 U02 / Recipe R-PAGE / Runtime S0).
+ * One page per public event in the build data; private, deleted or unreadable events produce no file.
+ * The page body, head and Event JSON-LD come from the build; clock-dependent labels and slot counts are
+ * refreshed by the Island (live slot state is never in the static HTML).
  */
-import { EventDetailView } from "@flamenode/ui";
-import PublicPage from "../../../layouts/PublicPage.astro";
-import { StaticScreen } from "../../../components/StaticScreen.ts";
-import { loadRepresentativeEvents } from "../../../lib/representativeFixtures.ts";
-import { eventMetadata, eventScreenData } from "../../../lib/publicPages.ts";
-import type { EventPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { EventDetailIsland } from "../../../components/EventDetailIsland.ts";
+import { getEventBuildData } from "../../../lib/eventData.ts";
+import { buildEventJsonLd } from "../../../lib/eventDetail.ts";
+import { buildPageHead, serializeJsonLd } from "../../../lib/pageHead.ts";
+import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
 
 export async function getStaticPaths() {
-  const events = await loadRepresentativeEvents();
-  return events.map((event) => ({ params: { id: event.id }, props: { event } }));
+  const { details } = await getEventBuildData();
+  return [...details.values()].map((detail) => ({ params: { id: detail.event.id }, props: { detail } }));
 }
 
 interface Props {
-  event: EventPublicSnapshot;
+  detail: StaticEventDetail;
 }
 
-const { event } = Astro.props;
+const { detail } = Astro.props;
+const { event } = detail;
+const head = buildPageHead({
+  path: `/event/${event.id}`,
+  title: event.title,
+  description: event.explanation,
+  image: event.img_url ?? event.icon_url,
+});
+const builtAt = Math.floor(Date.now() / 1000);
 ---
-<PublicPage meta={eventMetadata(event)}>
-  <StaticScreen screen={EventDetailView} props={{ event: eventScreenData(event) }} />
-</PublicPage>
+<PublicLayout head={head} currentPath="/event">
+  <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(buildEventJsonLd(event))}></script>
+  <EventDetailIsland client:load detail={detail} builtAt={builtAt} />
+</PublicLayout>

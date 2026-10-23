@@ -47,16 +47,15 @@ export type PageRenderEntityKind = "video" | "user" | "event";
  * "server-rendered": the consumer writes the page. "excluded": it writes nothing and the
  * build keeps serving the kind (Work Order U05, max >= 8 ms).
  *
- * user is excluded: /user/[id] is an Island page (MIG-0504) that this renderer cannot reproduce
- * byte-for-byte. video and event stay server-rendered until MIG-0507 / MIG-0502 make them Island pages
- * too. Earlier measurement (renderPublicPage.measure.mjs `--snapshot`, local Node, not workerd; upper-bound
+ * user and event are excluded: /user/[id] (MIG-0504) and /event/[id] (MIG-0502) are Island pages that this
+ * renderer cannot reproduce byte-for-byte. video stays server-rendered until MIG-0507 makes it an Island page too. Earlier measurement (renderPublicPage.measure.mjs `--snapshot`, local Node, not workerd; upper-bound
  * inputs video 25-49 ms, event 5-9 ms, user 4-6 ms, project-files/migration-review/pr326-u05a-render-to-string.log)
  * is the budget evidence if a kind is restored.
  */
 export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "excluded">> = {
   video: "server-rendered",
   user: "excluded",
-  event: "server-rendered",
+  event: "excluded",
 };
 
 /** Columns read by pageRenderQueue.ts (real D1 names, see packages/db/src/schema/base.ts). */
