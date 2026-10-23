@@ -250,6 +250,9 @@ Phase 6 共通契約のとおり。
 - 触らない: `src/lib/actions/**`, `app/api/events/**`, `app/api/live/**`
 #### Micro-units
 - U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604 のとおり。
+#### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
+- live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2（LIMIT は名前付き定数 100 以下 / 応答 64KB 以下）を超える。CURRENT（`liveApi.ts`）が同じ 6000 件上限・`truncated` を持つため、挙動を保つ目的で変えない。6000 枠の実測応答は約 890 KiB（`public_name`、UUID 形式 id・表示名付き）/ 約 615 KiB（匿名）。5 秒 cache と 15 秒 isolate micro-cache は CURRENT と同じ。ページング化（応答契約の変更）は owner 判断として保留し、MIG-0604 では行わない。
+
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
