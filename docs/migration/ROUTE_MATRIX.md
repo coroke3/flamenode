@@ -96,7 +96,7 @@ Evidence: `next.config.mjs` の `QUERY_RENDERED_PUBLIC_PAGES` と各shared view 
 | `/list*` | Next/OpenNext | Astro/site | SSG shell + Island | public R2/API | public DTO | BASELINED | MIG-0505 |
 | `/recommend*` | Next/OpenNext | Astro/site | SSG shell + Island | public R2/API | public DTO | BASELINED | MIG-0505 |
 | `/trending*` | Next/OpenNext | Astro/site | SSG shell + Island | public R2/API | public DTO | BASELINED | MIG-0505 |
-| `/maintenance` | Next/OpenNext | site/system | static/system state | operation mode | public/admin exception | BASELINED | MIG-0501 or system cutover task |
+| `/maintenance` | Next/OpenNext | site/system | static/system state | operation mode | public/admin exception | BASELINED | MIG-0619 (gateway serves static page + redirect, non-production; evidence `apps/site/src/gateway/edgePolicy.test.mjs`) then system cutover task |
 | `/` | Next/OpenNext | Astro/site | SSG + Islands | public R2 | public DTO | BASELINED | MIG-0506 |
 | `/:id` | Next/OpenNext | Astro/site | SSG + Islands | public R2 + overlay API | visibility fence + alias map | BASELINED | MIG-0507 |
 | `/dashboard/*` | Next/OpenNext | React/Vite app | SPA | Hono→D1 | auth + permission | BASELINED | MIG-0701/0702 |
