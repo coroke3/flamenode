@@ -672,46 +672,119 @@ PR を revert。
 
 ### MIG-0616: audit restore（core）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0615 の merge 後に精緻化
+- **Readiness:** NEEDS_REFINEMENT — 精緻化済み（2026-10-23、MIG-0615 の merge 後に lead が確定）。STATUS は READY で、下の Work Order のとおり実装してよい。Model が lead なので checker 上の値は NEEDS_REFINEMENT のまま（MIG-0612 と同じ扱い）
 - **Recipe:** R-CORE
 - **Runtime:** S3
 - **Depends on:** MIG-0615 / **Decisions:** D-10 DECIDED
-- **Verified against:** `c5a62b4d` (2026-10-23)
+- **Verified against:** `e8ac0020` (2026-10-23)
 #### Source snapshot
-- `src/lib/audit/restore.ts`（744 行）と `restore*.test.mjs`。SA-011（audit restore）。
+- `src/lib/audit/restore.ts`（744 行、最終変更 `c55f9a71`）。export は `restoreAuditLog` だけ（`find-unused-exports`: non-test 1。呼び出しは `src/lib/actions/audit-admin.ts` の SA-010 dry run と SA-011 restore）。
+- restore.ts の import 先は、下の 4 つを除いて MIG-0613〜0615 で core に移っている（`./capability` `./mutate` `./registry` `./snapshot` `./types`、`@/lib/utils/id`、`@/lib/staticRebuild/hooks`、`@/lib/event/eventVisibilityTransition`、`@/lib/video/videoVisibilityTransition`、`@/lib/publicData/publicCache` は bridge で、中身は `packages/server-core/src/**`）。
+- source の text を読む test（read 先だけを変える）: `src/lib/audit/{restore.batch.contract,restore.youtubeEligibility.contract,restoreVisibilityCache.contract}.test.mjs`、`src/lib/integration/{spec07Static,spec010207Contracts}.test.mjs`（`src/lib/audit/restore.ts` を読む行）。`src/lib/audit/eventStaffRestore.execution.test.mjs` は adapters だけを使うので触らない。
+- 到達しない分岐（golden では扱わず、そのまま移す）: capability の reasonCode は全て `PERMANENT_RESTORE_REASONS` に入るので、capability 失敗時の `persistFailedRestoreRun` 側。`evaluateRestoreCapability` が registry を先に確かめるので、`!registration` の分岐。
+#### 残る src 依存の扱い（lead 決定 2026-10-23）
+golden を byte 一致に保ち、呼び出し側を変えず、host の面を最小にする形を選ぶ。
+1. **`@/lib/db/schema` の table と `DB` 型** → core は `@flamenode/db/schema` の `auditLogs` / `auditRestoreRuns` / `users` / `videoEvents` と `ServerCoreDb`（`../db.ts`）を直接使う。理由: `src/lib/db/schema.ts` はこれらを `@flamenode/db/schema` から re-export するだけで、同じ object なので SQL は変わらない。`DB` は `ServerCoreDb` に代入できる（MIG-0613 で確認済み）。
+2. **object key 定数**（`staticEventDetailCore` / `randomVideoPoolCore` / `staticTopSectionsCore` / `staticYoutubeRelatedBlocklistCore` / `staticUserProfileCore` の `STATIC_USER_MAX_PAGES`）→ host で渡す。MIG-0615 の `VideoPublicCacheKeyHost`（`packages/server-core/src/visibility/videoTransition.ts`）をそのまま使い、新しい型を作らない。理由: 複製すると生成側（src）と drift する。移すと UI / Next 型を引く生成コードごと core に入る（MIG-0615 で不採用）。restore の key の並びは `VideoPublicCacheKeyHost` の定義と一致する（`staticObjectKeys` は `"search-index-lite.json"` の後・`"top.json"` の前の 6 key で同じ順。`eventObjectKeys(id)` は `[composed, base, slots, release]`）。値は video bridge の host が既に持つので、`src/lib/video/videoVisibilityTransition.ts` の inline literal を `export const nextVideoPublicCacheKeyHost: VideoPublicCacheKeyHost` に切り出す（値と順は変えない）。video の host と restore の bridge の両方がこれを使い、restore と visibility action が同じ key 集合を消すこと（`restoreVisibilityCache.contract` の意図）が 1 か所で保たれる。
+3. **`invalidateEventExportCache`**（`src/lib/api/eventExportCache.ts`）→ host の関数 `invalidateEventExportCache(eventId)` で渡す。理由: このファイルは `server-only` と `publicCache`（Cache API）を読み、route 用の export も持つので移さない。複数形の `invalidateEventExportCaches([id])` で代用すると `filter(Boolean)` と空配列の skip が入って挙動が 1 点変わり得るので、単数形をそのまま渡す。
+4. **`validateVideoPublicEligibility`**（`src/lib/video/videoPublicEligibility.ts`）→ port も move も不要。このファイルは既に `@flamenode/domain/video` の re-export なので、core は `@flamenode/domain/video` から import する（`visibility/videoTransition.ts` と同じ）。
+
+Queue wake: core の restore は core の `mutateWithAudit(db, input, loadWakeHost)` を呼び、loader は host から受ける（MIG-0613 の `QueueWakeHostLoader`）。`nextPorts.ts` に足す port は無い。
+#### Core API（U02 で作る形）
+```ts
+// packages/server-core/src/audit/restore.ts
+export type AuditRestoreHost = VisibilityFenceHost & {          // manifest: event / video の fence precommit と補償
+  publicCacheKeys: VideoPublicCacheKeyHost;                     // 決定 2
+  deletePublicJsonCaches(r2Keys: readonly string[]): Promise<void>;
+  invalidateEventExportCache(eventId: string): Promise<void>;   // 決定 3
+  loadQueueWakeHost: QueueWakeHostLoader;                       // mutateWithAudit の第 3 引数
+};
+export async function restoreAuditLog(db: ServerCoreDb, options: RestoreOptions, host: AuditRestoreHost): Promise<RestoreResult>;
+```
+- 本体は CURRENT の文の並び・文言・`console.warn` / `console.error` の引数を変えずに写す。置き換えるのは import 先と次の箇所だけ: video の固定 key は `"list/recent.json", "list/popular.json", "search-index-lite.json", ...host.publicCacheKeys.staticObjectKeys, "top.json", "users/index.json", ...` の順、event の key は `...host.publicCacheKeys.eventObjectKeys(id)`。`STATIC_USER_MAX_PAGES` は `host.publicCacheKeys.userMaxPages`（`userPublicCacheKeys(xUserId, userMaxPages)` は restore 内の private 関数のまま残す）。`deletePublicJsonCaches` / `invalidateEventExportCache` は `host.*`。`preCommit*` / `compensate*` は最後の引数に `host`。`mutateWithAudit(db, {...}, host.loadQueueWakeHost)`。
+- `parseSnapshot` / `sanitizeRestoreError` / `persist*` / `PERMANENT_RESTORE_REASONS` は export しない（今も private）。
+- `packages/server-core/package.json` の exports に `"./audit/restore": "./src/audit/restore.ts"` を足す。barrel（`src/index.ts`）には足さない。
+#### Bridge（U03）
+- `src/lib/audit/restore.ts` は `restoreAuditLog(db: DB, options: RestoreOptions): Promise<RestoreResult>` の signature を保つ wrapper だけにする。host は module 定数で、次を渡す:
+  - `manifest: nextVisibilityManifestHost`（`@/lib/publicData/visibilityManifestHost`。event / video の bridge と同じ値）
+  - `publicCacheKeys: nextVideoPublicCacheKeyHost`（`@/lib/video/videoVisibilityTransition`）
+  - `deletePublicJsonCaches`（`@/lib/publicData/publicCache`）、`invalidateEventExportCache`（`@/lib/api/eventExportCache`）
+  - `loadQueueWakeHost: async () => (await import("@/lib/serverCore/nextPorts")).nextQueueWakeHost`（`src/lib/audit/mutate.ts` の loader と同じ形・同じ遅延。commit 後まで nextPorts を評価しない順序を保つ）
+- 先頭に `// Compatibility bridge (MIG-0616, D-10): ...` の 1 行（MIG-0613〜0615 と同じ）。
+- 呼び出し側（`src/lib/actions/audit-admin.ts`）の diff は 0。
 #### Owned paths
-- 新規: `+packages/server-core/src/audit/restore.ts`。変更: `src/lib/audit/restore.ts` を bridge 化。
+- 新規: `+packages/server-core/src/audit/restore.ts`, `+src/lib/serverCore/auditRestoreGolden.execution.test.mjs`, `+src/lib/serverCore/auditRestoreGolden.snapshot.json`
+- 変更: `src/lib/audit/restore.ts`（bridge 化）、`src/lib/video/videoVisibilityTransition.ts`（key host を named export に切り出すだけ）、`packages/server-core/package.json`（exports 1 行）、source を読む test 5 件（上記）、`docs/migration/FILE_MIGRATION_MATRIX.md`（該当行）、`docs/migration/work-items/MIG-0616.md`
+- 触らない: `src/lib/actions/**`、`src/lib/serverCore/nextPorts.ts`、既存 core（`visibility/**`、`staticRebuild/**`、`publicCache/**`、`audit/mutate.ts`）の signature、`apps/api/**`
 #### Micro-units
-- **U01 golden**（restore の batch SQL + params、`audit_restore_runs`、`audit_logs`）→ **U02 move**。
+- **U01 golden（移動前の tree で commit）**: `src/lib/serverCore/auditRestoreGolden.execution.test.mjs` と snapshot。harness は `src/lib/serverCore/visibilityTransitionGolden.execution.test.mjs` を写す（migrations を流した `node:sqlite` と記録する fake D1、`getCloudflareContext` を stub して BUCKET / KV / Queue / `waitUntil` を渡す、etag CAS 付きの fake R2、Cache API の delete recorder、`console.*` の記録）。固定値: `Date.now = () => 1_760_000_000_000`（`now` = 1760000000）、`crypto.randomUUID` は `00000000-0000-4000-8000-<連番 12 桁>`、`PUBLIC_VISIBILITY_GUARD_MODE` は未設定、`QUEUE_DISPATCH_ENABLED: "1"`。入口は bridge の `../audit/restore.ts` の `restoreAuditLog`（移動後も同じ path を呼ぶ）。fake D1 に注入を 2 つ足す: `beforeBatch(sqlite)`（最初の `batch` の直前に 1 回だけ実行。並行更新の再現）と `failRun: RegExp`（batch 外の `run` で SQL が一致したら throw）。scenario ごとに記録するもの: 戻り値、`log`（D1 の SQL + params、batch の SQL + params と commit / rollback、`r2.get` / `r2.put`、`cache.delete`、`queue.send`、`kv.put`、`waitUntil`、`console.*` を呼ばれた順）、実行後の `audit_logs`（全列。`id` / `created_at` を含む）、`audit_restore_runs`、対象 table の行、`public_visibility_fences`、`static_rebuild_queue`、manifest。最低限の scenario（名前を snapshot の key にする）:
+  - 入口の拒否: `confirm_text_mismatch`、`reason_blank`、`non_admin_user`、`audit_log_missing`、`already_restored`（success の run が既にある）
+  - 期限: `expired_dry_run`（書き込み 0）、`expired_persists_permanent_failure`（`audit_logs` 更新と run 挿入の 1 batch、status `expired`）
+  - capability: `payload_exceeded_permanent`、`snapshot_redacted_permanent`、`strategy_none_dry_run`、`strategy_unsupported_permanent`（videos の `recreate_deleted`）
+  - snapshot: `target_id_mismatch`（書き込み 0）
+  - 競合: `dry_run_no_conflict`、`dry_run_with_conflicts`（message の key の並び）、`conflict_without_force_records_failed_run`（batch 外の run 1 件、`restore_status` は元のまま）、`recreate_target_already_exists`
+  - strategy 別の成功（visibility 無し、cache delete 無し、wake 無し）: `announcements_update_before`、`announcements_recreate_deleted`、`event_staff_delete_created`、`video_members_set_custom_adapter`、`conflict_with_force_overwrite`
+  - mutation 作成の失敗: `build_mutation_throws`（`video_members_set` の before の `rows` が parse できない → adapter が `video_members_set_snapshot_invalid` を throw）→ `mutation_failed` の run（batch 外）
+  - owner 保護: `event_staff_sole_owner_rolls_back`（唯一の owner を非 owner の snapshot に戻す → owner 件数条件で 0 changes → rollback → `mutation_failed` の run）
+  - events: `event_public_to_private`（期待する順: fence precommit の `r2.put` → batch（restore 文 + transition 文 + static rebuild queue、priority `high`）→ commit → Queue wake（source `admin`）→ public cache 9 key の delete → export cache 8 key の delete。wake が `waitUntil` 経由ならその記録位置も golden が固定する）、`event_private_to_public`、`event_title_only`（fence 無し・priority 無し。cache / export の delete と wake は行う）
+  - videos: `video_public_to_private`（`video_events` 由来の event と current / target の primary event、current / target の creator の user page 全 page、`videos/<id>` と current / target の `youtube_video_id`）、`video_private_to_public`、`video_snapshot_without_source_keys_uses_current`、`video_youtube_ineligible`（snapshot が `youtube_video_id: null` を明示 → throw → precommit 無し・補償無し、`mutation_failed` の run）、`video_event_limit_exceeded`（`video_events` 9 行）
+  - CAS / rollback: `event_cas_conflict_rolls_back_and_compensates`（`beforeBatch` で対象行を更新 → `assertChanges` で rollback → event の fence 補償 → failed run）、`video_cas_conflict_rolls_back_and_compensates`、`compensation_failure_is_warned`（補償中の `r2.get` が throw → `[audit-restore] visibility compensation failed` の warn → failed run は記録）、`failed_run_record_failure_is_logged`（`failRun` で `audit_restore_runs` の insert を落とす → `restore_failure_record_failed` の `console.error`、`restore_run_id` 無し）
+  - 後処理の失敗: `cache_delete_failure_is_swallowed`（Cache API の delete が throw しても `ok: true`）、`wake_dispatch_disabled`（`QUEUE_DISPATCH_ENABLED` 無し。KV 記録と戻り値を固定）
+  - 公開 API（`restoreAuditLog`）から入力を作れない scenario は省き、理由を work item に書く（例: capability を通る malformed snapshot が作れない場合）。scenario を足すのはよい。
+  - 移動前の test 件数を記録する: `node --test --experimental-strip-types src/lib/audit/*.test.mjs src/lib/integration/spec07Static.test.mjs src/lib/integration/spec010207Contracts.test.mjs` の pass 数。
+- **U02 move**: `packages/server-core/src/audit/restore.ts` を作り（上の Core API）、`package.json` の exports を足す。core に `@/`・`src/`・`server-only`・`next/*`・`process.env`・`getCloudflareContext` が無いこと（境界検査）。
+- **U03 bridge**: `src/lib/audit/restore.ts` を wrapper にし、`src/lib/video/videoVisibilityTransition.ts` の key host を `nextVideoPublicCacheKeyHost` に切り出す。golden を再実行して snapshot の diff 0（`FLAMENODE_UPDATE_GOLDEN` は使わない）。
+- **U04 source を読む test**: read 先を変える。`restore.batch.contract` / `restore.youtubeEligibility.contract` / `spec07Static` / `spec010207Contracts` は core の file を読む（assertion は同じ）。`restoreVisibilityCache.contract` は core と `src/lib/video/videoVisibilityTransition.ts`（key 定数を束ねる場所）を連結して読む。assertion のうち `eventComposedObjectKey\(log\.target_id\)` だけを、core の `publicCacheKeys\.eventObjectKeys\(log\.target_id\)` と bridge の `eventComposedObjectKey\(eventId\)` の 2 つに置き換える（意図は同じで場所が変わる。MIG-0615 の rethrow と同じ扱い）。test の件数は変えない。
+- **U05 ledger**: 下の Ledger updates と work item。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | golden: restore の各 strategy、CAS 競合、YouTube eligibility | 一致 |
-| T02 | 既存の `restore*.test.mjs` | 同じ件数 PASS |
+| T01 | U01 の golden 全 scenario | 移動前後で snapshot が byte 一致（SQL・params・`audit_logs` の `id` / `created_at`・`audit_restore_runs`・R2 / Cache / Queue / console の順） |
+| T02 | `src/lib/audit/*.test.mjs` と `spec07Static` / `spec010207Contracts` | 移動前と同じ件数 PASS |
+| T03 | `check-server-core-boundaries` | OK（core に src / Next / ambient env の参照が無い） |
+| T04 | `rg -n "@/lib/audit/restore" src app` | `audit-admin.ts` の 1 件のまま（呼び出し側の diff 0） |
 #### Commands
 ```bash
+node --import tsx --test src/lib/serverCore/auditRestoreGolden.execution.test.mjs
+node --test --experimental-strip-types src/lib/audit/*.test.mjs src/lib/integration/spec07Static.test.mjs src/lib/integration/spec010207Contracts.test.mjs
+node scripts/find-unused-exports.mjs packages/server-core/src/audit/restore.ts
+npm run typecheck --workspace=@flamenode/server-core
 npm run test --workspace=@flamenode/server-core
 node scripts/check-server-core-boundaries.mjs
-npm run typecheck && npm run test:critical && npm run test:unit && npm run test:integration && npm run check:project-docs
+npm run typecheck && npm run test:critical && npm run test:unit && npm run test:integration && npm run test:static-rebuild
+npm run check:project-docs
+MIGRATION_FILE_BASE_SHA=$(git merge-base origin/main HEAD) node scripts/check-migration-file-progress.mjs
 ```
 #### Ledger updates
-STATUS は merge 直前の統合でだけ更新する。移した file は `FILE_MIGRATION_MATRIX.md` の行の target を bridge と core の場所に更新する。
+STATUS は merge 直前の統合でだけ更新する。`FILE_MIGRATION_MATRIX.md`: 新規行 `packages/server-core/src/audit/restore.ts`（HELPER, RETAINED。host `AuditRestoreHost` を記す）、`src/lib/serverCore/auditRestoreGolden.execution.test.mjs` と `.snapshot.json`（TEST, RETAINED）、既存行 `src/lib/audit/restore.ts`（Work Order 精緻化の PR で NOT_STARTED・owner MIG-0616 として追加済み）を BRIDGED に、`src/lib/audit/{restore.batch.contract,restore.youtubeEligibility.contract,restoreVisibilityCache.contract}.test.mjs`（TEST, RETAINED）。既存行 `src/lib/video/videoVisibilityTransition.ts` の target に「key host を `nextVideoPublicCacheKeyHost` として audit restore と共有」を足す。`spec07Static` / `spec010207Contracts` の行は evidence を本 PR に更新する。evidence は `PR#<n> SHA=<40 hex> TEST=...`（MIG-0615 と同じ形）。
 #### DONE checklist
-- [ ] golden の diff が 0。既存 test の件数が同じ。呼び出し側の diff が 0
+- [ ] U01 の golden を移動前の commit に入れ、移動後に snapshot の diff が 0（`id` / `created_at` を含む）
+- [ ] 既存 test の件数が移動前と同じ。呼び出し側（`audit-admin.ts`）の diff が 0
+- [ ] `nextPorts.ts` と既存 core の signature に変更が無い
+- [ ] source を読む test は新しい場所を読み、assertion の変更は U04 の 1 件だけ
 #### STOP
-- restore の意味（strict / CAS / 順序）を変える必要が出たら止める。
+- golden に 1 byte でも差が出たら止める（`FLAMENODE_UPDATE_GOLDEN=1` で上書きしない）。
+- 実行順（入口の検査 → 読み取り → precommit → 1 batch → 補償 / failed run → cache delete → export cache）や strict / CAS / `PERMANENT_RESTORE_REASONS` の意味を変える必要が出たら止める。
+- core が `@/`・`src/`・`next/*`・`server-only`・`process.env` を必要としたら止める。`VideoPublicCacheKeyHost` や `mutateWithAudit` など既存 core の signature を変えたくなったら止める。`nextPorts.ts` に port を足したくなったら止める。
+- 呼び出し側（`src/lib/actions/**`）を変えたくなったら止める。
 #### Rollback
-PR を revert。
+PR を revert（bridge が元の実装に戻る。DB・Queue・Route・secret の変更は無い）。
 
 ### MIG-0617: `apps/api` の Option A を core に置き換える
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0613、MIG-0614、MIG-0602 の merge 後に精緻化
+- **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0613 / 0614 / 0602）は merge 済みで STATUS は READY だが、下の「実装前に要る lead 決定」L1〜L3 が決まるまで着手しない（2026-10-23 調査）
 - **Recipe:** R-CORE, R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0613, MIG-0614, MIG-0602 / **Decisions:** D-10 DECIDED
-- **Verified against:** `c5a62b4d` (2026-10-23)
+- **Verified against:** `e8ac0020` (2026-10-23)
 #### Source snapshot
 - MIG-0602 が `apps/api` に作った監査・wake の写し（Option A）。core と二重になっている部分を消す。テストの fake D1 は `.raw()` を持つ形に揃える。
+- Option A の本体: `apps/api/src/audit/{mutateWithAudit,snapshot,staticRebuildQueue}.ts`（計 731 行）。利用先: `apps/api/src/{env.ts,middleware/costGuard.ts,middleware/writeOrigin.ts,routes/admin/{announcements,apiEndpoints,body}.ts,routes/events/templates.ts}`、test `apps/api/test/{adminGuards,auditParity}.test.mjs`。
+#### 実装前に要る lead 決定（2026-10-23 調査）
+- **L1 apps/api が core をどう読むか**: `apps/api` は `tsc` で `rootDir: ./src` に emit し、`paths` は `@flamenode/domain` の dist だけを向く。server-core は emit しない（MIG-0613: TS6059）。今の設定では `@flamenode/server-core/*` を import できない。案: (a) apps/api の build を typecheck のみにして Worker の bundle（wrangler / esbuild）に任せる、(b) server-core に emit 用の tsconfig を足して dist を `paths` で向ける、(c) apps/api の `rootDir` を外す。test（`node --experimental-strip-types`）からの解決も同時に決める。
+- **L2 drizzle を apps/api の Worker に入れるか**: core は `ServerCoreDb`（drizzle）を受け、Option A は raw D1（`c.env.DB.prepare`）。`@flamenode/api` の依存に `drizzle-orm` / `@flamenode/db` / `@flamenode/server-core` が無い。入れると bundle と request ごとの CPU（ZERO_1102 §3）が増え、測る手段（MIG-0606）はまだ無い。
+- **L3 `preloaded` の扱い**: Option A の `mutateWithAudit` は `preloaded`（system settings と actor snapshot の pre-read を writeGuard / CostGuard の読み取りに畳み込む。MIG-0602 B2 の pre-read 3 回以内）を持つが、core には無い。core に足す（core API の追加、Next 側は不変）か、read 回数の増加を受け入れるかを決める。
+- L1〜L3 が決まれば、U01 の棚卸し表（写しと core の SQL + params の差）から先は MIG-0616 と同じ書き方で精緻化できる。
 #### Owned paths
 - 変更: `apps/api/src/**` の監査・wake 部分、`apps/api/test/**`。削除: Option A の写し。
 #### Micro-units
@@ -1228,7 +1301,7 @@ npm run check:project-docs
 PRをrevert。
 ### MIG-0629: admin audit settings + restore dry-run APIs（監査設定・dry-run API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602 の merge 後（MIG-0613 は台帳未登録。登録され次第 Depends に追加）
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 は merge 済みで STATUS は READY だが、下の「実装前に要る lead 決定」M1〜M3 が決まるまで着手しない（2026-10-23 調査）
 - **Recipe:** R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0602 / **Decisions:** D-01 DECIDED
@@ -1239,6 +1312,10 @@ PRをrevert。
 | audit settings update | SA-009 | `src/lib/actions/audit-admin.ts#updateAuditLogSettingsAction` |
 | audit dry run | SA-010 | `src/lib/actions/audit-admin.ts#getAuditLogDryRun` |
 - MIG-0602 の分割で移動（2026-10-23）。SA-011（audit restore）は MIG-0616 で個別実装。ガードは MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` を再利用する。
+#### 実装前に要る lead 決定（2026-10-23 調査）
+- **M1 SA-010 の実装の置き場**: CURRENT の `getAuditLogDryRun` は `restoreAuditLog(db, { dry_run: true })` を呼ぶ（`user` / `audit_logs` / `audit_restore_runs` の読み取り、capability、registry の 8 table の adapter `fetchCurrent`、`computeChangedKeys`）。Hono で byte 一致させる筋は MIG-0616 の core `restoreAuditLog` を呼ぶことだが、apps/api はまだ core を読めない（MIG-0617 の L1 / L2）。Option A で写すと 8 adapter と capability の複製になり D-10 に反する。Depends に MIG-0616 と MIG-0617 を足すか、写しを許すかを決める。
+- **M2 SA-010 の guard**: CURRENT の SA-010 は `requireAdminWrite("admin_permissions")`（writeGuard と CostGuard の `admin_permissions`）を通る。下の U02 の「既定の admin read guard」ではこの CostGuard の拒否が無くなる。POST + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")` に揃えるかを決める（SA-009 も同じ feature）。
+- **M3 SA-009 の順序**: SA-009（`updateAuditLogSettings`: `system_settings` を drizzle の列順で before / after、`AuditOperation.SYSTEM`、reason `監査ログ設定を更新`、context `audit_settings_update`、`long_audit`、strict、zod の範囲は action と同じ）は今の Option A でも実装できる。MIG-0617 で Option A を消すなら、その後に置くか先に作るかを決める。
 #### Owned paths
 - 新規: `+apps/api/src/routes/admin/audit*.ts`、`+packages/contracts/src/admin/audit*.ts`
 - 触らない: `src/lib/actions/**`
@@ -1272,7 +1349,7 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0630: Video edit 画面の読み取り API（/dashboard/edit/[id] + permissions）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0623（PR #343）の merge 後にその R-API の形（paging / byte 上限）を確定してから
+- **Readiness:** NEEDS_REFINEMENT — 実装中（PR #382）。U01 / U02a / U03 / U04 実装済み（`work-items/MIG-0630.md`）。U02b（form-options: 受付イベント・質問・回答・候補）は次の単位で、それまで MIG-0630 / MIG-0703 は完了しない
 - **Recipe:** R-API
 - **Runtime:** S2
 - **Depends on:** MIG-0601, MIG-0608, MIG-0623 / **Decisions:** D-05 DECIDED
