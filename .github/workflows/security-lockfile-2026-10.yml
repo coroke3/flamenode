@@ -36,4 +36,6 @@ jobs:
       - name: Critical tests
         run: npm run test:critical
       - name: Cloudflare OpenNext build
+        env:
+          WORKERS_CI_COMMIT_SHA: ${{ github.sha }}
         run: npm run cf:build
