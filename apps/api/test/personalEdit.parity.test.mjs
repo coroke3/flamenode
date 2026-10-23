@@ -688,6 +688,9 @@ if (runUnderRootTsx(import.meta.url)) {
       const clamped = await call(formUrl("ed-own1", undefined, 99999), "tok-alice");
       assert.equal(clamped.status, 200);
       assert.equal(clamped.body.eventOptions.length, 0);
+      const edge = await call(formUrl("ed-own1", undefined, 900), "tok-alice");
+      assert.equal(edge.status, 200);
+      assert.deepEqual([edge.body.eventOptions.length, edge.body.truncated, edge.body.nextOffset], [0, false, null]);
       for (const r of [first, second]) EditFormOptionsResponseSchema.parse(r.body);
     } finally {
       sqlite.exec("DELETE FROM events WHERE id LIKE 'ez%'");
@@ -716,6 +719,20 @@ if (runUnderRootTsx(import.meta.url)) {
       sqlite.exec("DELETE FROM events WHERE id LIKE 'zb%'");
       sqlite.exec("UPDATE events SET parts_json = NULL WHERE id = 'ee1'");
     }
+  });
+
+  test("U02b no-progress cut: attached-only events that alone fill the budget are 503, never nextOffset == offset", async () => {
+    sqlite.prepare("UPDATE events SET parts_json = ? WHERE id IN ('ee5', 'ee6')").run("p".repeat(40_000));
+    try {
+      const r = await call(formUrl("ed-own-ee5"), "tok-alice");
+      assert.equal(r.status, 503);
+      assert.deepEqual(r.body, { error: "unavailable" });
+    } finally {
+      sqlite.exec("UPDATE events SET parts_json = NULL WHERE id IN ('ee5', 'ee6')");
+    }
+    const ok = await call(formUrl("ed-own-ee5"), "tok-alice");
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.kind, "ready");
   });
 
   test("read-only: no D1 write and no cookie on any edit endpoint; response summary (informational)", () => {

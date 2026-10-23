@@ -254,6 +254,9 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
   );
   const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
   const keptAccepting = Math.max(0, fit.items.length - prepended.length);
+  // Fail closed when a cut makes no progress (the attached-only events alone fill the budget): nextOffset would equal
+  // offset and the SPA would refetch the same page forever.
+  if (fit.cut && keptAccepting === 0) throw new Error("form_options_no_progress");
   const body: EditFormOptionsResponse = {
     ...rest,
     eventOptions: fit.items,

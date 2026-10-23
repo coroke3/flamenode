@@ -212,6 +212,10 @@ export const EditPermissionsResponseSchema = z.discriminatedUnion("kind", [
  * is derived by the UI from the id (`/event/<id>`). `customAnswers` is CURRENT initialCustomAnswers (`<event_id>:<question_key>`),
  * `stagePermissionAnswers` is CURRENT stagePermissionInitial (custom_question_answers_json). When `customAnswersTruncated` the
  * answers are incomplete and the SPA must not save them.
+ * Paging contract: `customAnswers`, `customAnswersTruncated`, `stagePermissionAnswers`, `softwareSuggestions`, `iconCandidates` and
+ * `channelCandidates` are authoritative on the FIRST page (offset 0) only. Later pages are read for `eventOptions` / `truncated` /
+ * `nextOffset` only; their other fields are repeated (answers cover that page's events, `customAnswersTruncated` is per page) and must be
+ * ignored by the SPA. A cut that cannot make progress (attached events alone exceed 64 KiB) is 503, never an endless `nextOffset`.
  */
 export const EditFormOptionsResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("no_access") }),
