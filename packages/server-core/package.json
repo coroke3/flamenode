@@ -20,6 +20,7 @@
     "./audit/mutateBudget": "./src/audit/mutateBudget.ts",
     "./audit/postCommit": "./src/audit/postCommit.ts",
     "./audit/registry": "./src/audit/registry.ts",
+    "./audit/restore": "./src/audit/restore.ts",
     "./audit/retention": "./src/audit/retention.ts",
     "./audit/settings": "./src/audit/settings.ts",
     "./audit/snapshot": "./src/audit/snapshot.ts",
