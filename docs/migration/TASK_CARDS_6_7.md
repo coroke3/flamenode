@@ -165,9 +165,9 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 ### MIG-0623 — Entry page read APIs
 
 - 読む: `PHASE_6_SPEC.md` の MIG-0623 Work Order、`app/(auth)/entry/**`、`app/(manage)/dashboard/edit/[id]/**`、MIG-0611 の実装。
-- 変更: 5ルートの読み取り endpoint と DTO。
-- 試験: 実 loader と Hono の parity（`node:sqlite`）、失敗時の同一性、D1 3文以下、private no-store。
-- DONE: 5ルートすべてで parity PASS。
+- 変更: `/entry` `/entry/slotted` `/entry/unslotted` の 3 ルートの読み取り endpoint と DTO（`/dashboard/edit/[id]` と `/permissions` は MIG-0630）。
+- 試験: 実 loader と Hono の parity（`node:sqlite`）、失敗時の同一性、D1 3文以下、private no-store、LIMIT <= 100 / response <= 64 KiB（paging と byte 上限）。
+- DONE: 3ルートで parity PASS。edit 2 ルートは MIG-0630 で DONE にする。
 
 ### MIG-0624 — Manage page read APIs
 
@@ -209,6 +209,13 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
 - 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
 - DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
+
+### MIG-0630 — Video edit page read APIs (/dashboard/edit/[id] + permissions)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0630 Work Order、`app/(auth)/dashboard/edit/[id]/**`、MIG-0623 の paging / byte 上限の形。
+- 変更: edit 2 ルートの読み取り endpoint と DTO、API 側の所有者 / 共同編集者の権限確認。
+- 試験: 実 loader と Hono の parity、他人の作品・存在しない id、D1 3文以下、LIMIT <= 100 / response <= 64 KiB。
+- DONE: 2ルートの parity と権限が PASS。
 
 ### MIG-0607 — Phase 6 API Gate
 
