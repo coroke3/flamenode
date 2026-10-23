@@ -10,10 +10,8 @@
  * Observed with wrangler 4 / workerd (2026-10-23) and asserted here so a change is noticed:
  *   - 307 with `Location: /event` and `/event#event-group-{slug}` (fragment kept, `:slug` substituted)
  *   - assets alone: a request query string is appended (`/groups?x=1` -> `/event?x=1`); CURRENT drops it
- *   - behind the current gateway PoC (MIG-0405, `run_worker_first`) the redirects are NOT reproduced: `/groups` is
- *     answered 200 with the /event page (the gateway calls `ASSETS.fetch` with the default `redirect: "follow"`),
- *     and `/groups/{slug}` is not on the fixed-page allowlist and answers 503. The gateway section below prints
- *     MISMATCH lines for these (informational, exit 0); the fix belongs to the gateway owners (MIG-0404/0405/0406).
+ *   - behind the gateway (`run_worker_first`) the gateway answers the group redirects itself (MIG-0619 edge policy:
+ *     307, query dropped as CURRENT), so the gateway section is asserted too.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -62,10 +60,8 @@ async function run(label, withGateway, expectations) {
     for (const [path, status, location] of expectations) {
       const r = await fetch(base + path, { redirect: "manual" });
       await r.arrayBuffer();
-      if (r.status !== status && label === "assets") assert.fail(`${label} ${path}: status ${r.status}, want ${status}`);
-      if (r.status !== status) { console.log(`MISMATCH ${label} ${path}: status ${r.status} location ${r.headers.get("location")} (want ${status})`); continue; }
-      if (label === "assets") assert.equal(r.headers.get("location"), location, `${label} ${path}: location ${r.headers.get("location")}`);
-      else if (r.headers.get("location") !== location) { console.log(`MISMATCH ${label} ${path}: location ${r.headers.get("location")} (want ${location})`); continue; }
+      assert.equal(r.status, status, `${label} ${path}: status ${r.status}, want ${status}`);
+      assert.equal(r.headers.get("location"), location, `${label} ${path}: location ${r.headers.get("location")}`);
       console.log(`ok ${label} ${status} ${path} -> ${location}`);
     }
   } finally {
