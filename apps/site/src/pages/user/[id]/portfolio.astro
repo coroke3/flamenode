@@ -1,0 +1,45 @@
+---
+/**
+ * `/user/[id]/portfolio` (MIG-0504 / Recipe R-PAGE / Runtime S0). Fully static, noindex like CURRENT.
+ * Shows the first 36 works of the profile snapshot (CURRENT `WORK_LIMIT`); non-public works are already
+ * dropped by the CURRENT normalizer. Same emission rule as `/user/[id]`: no profile snapshot, no page.
+ */
+import { PortfolioView, type PortfolioData } from "@flamenode/ui";
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { loadUserBuildData, type UserBuildEntry } from "../../../lib/userData.ts";
+import {
+  PORTFOLIO_WORK_LIMIT,
+  buildCreatorHeader,
+  buildPortfolioHead,
+  toScreenVideoCard,
+} from "../../../lib/userViews.ts";
+
+export async function getStaticPaths() {
+  const data = await loadUserBuildData();
+  return [...data.users].map(([id, entry]) => ({ params: { id }, props: { entry } }));
+}
+
+interface Props {
+  entry: UserBuildEntry;
+}
+
+const { profile } = Astro.props.entry;
+const head = buildPortfolioHead(profile);
+const header = buildCreatorHeader(profile);
+const works = profile.works.items.slice(0, PORTFOLIO_WORK_LIMIT).map(toScreenVideoCard);
+const portfolio: PortfolioData = {
+  id: header.id,
+  name: header.name,
+  iconUrl: header.iconUrl,
+  youtubeChannelUrl: header.youtubeChannelUrl,
+  socialLinks: header.socialLinks,
+  profileText: header.profileText,
+  contact: header.contact,
+  works,
+  totalWorks: profile.works.total,
+  workLimit: PORTFOLIO_WORK_LIMIT,
+};
+---
+<PublicLayout head={head} currentPath="/user">
+  <PortfolioView portfolio={portfolio} />
+</PublicLayout>

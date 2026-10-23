@@ -1,0 +1,18 @@
+---
+/**
+ * `/user` (MIG-0504 / Recipe R-PAGE / Runtime S0). Static HTML of CURRENT's default view (page 1,
+ * おすすめ順). `?q=&sort=&page=` are applied by the Island from `/user/index.json` (see UsersIndexIsland).
+ */
+import PublicLayout from "../../layouts/PublicLayout.astro";
+import { UsersIndexIsland } from "../../components/UsersIndexIsland.ts";
+import { loadUserBuildData } from "../../lib/userData.ts";
+import { buildUsersIndexHead, computeUsersIndexView } from "../../lib/userViews.ts";
+
+const data = await loadUserBuildData();
+const head = buildUsersIndexHead();
+const initial = computeUsersIndexView(data.index ?? [], "", "score", 1);
+const unavailable = data.index === null;
+---
+<PublicLayout head={head} currentPath="/user">
+  <UsersIndexIsland client:load initial={initial} unavailable={unavailable} indexUrl="/user/index.json" />
+</PublicLayout>

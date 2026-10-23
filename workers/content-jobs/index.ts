@@ -29,6 +29,13 @@ import {
 } from "../json-generator/deployGlobalRebuildEnqueue.ts";
 import { ensureDailyTopNostalgicShuffle } from "../json-generator/rebuild.ts";
 import {
+  ensureStaleArtifactRefresh,
+  STALE_ARTIFACT_REFRESH_INTERVAL_SEC,
+  STALE_ARTIFACT_REFRESH_LEASE_JOB,
+  STALE_ARTIFACT_REFRESH_LEASE_SEC,
+  STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS,
+} from "../json-generator/staleArtifactRefresh.ts";
+import {
   ensureEventPlaylistBackfill,
   EVENT_PLAYLIST_BACKFILL_MAX_STATEMENTS,
 } from "../json-generator/eventPlaylistBackfill.ts";
@@ -327,8 +334,42 @@ export async function runContentJobsRecovery(
             }
           }
 
+          // Artifact SLO(90日)前に、内容不変で dedup され続けた artifact を低優先度で再生成する。
+          // 6時間に1回・上限付き。失敗しても他の repair を止めない。
+          let staleArtifactRefresh = 0;
+          if (
+            hasSoftD1Budget(
+              rebuildEnv.d1Budget,
+              STALE_ARTIFACT_REFRESH_MAX_D1_STATEMENTS,
+            )
+          ) {
+            try {
+              const refreshLease = await withCronLease(
+                rebuildEnv,
+                {
+                  jobName: STALE_ARTIFACT_REFRESH_LEASE_JOB,
+                  leaseSeconds: STALE_ARTIFACT_REFRESH_LEASE_SEC,
+                  minimumIntervalSeconds: STALE_ARTIFACT_REFRESH_INTERVAL_SEC,
+                  heartbeatSeconds: 0,
+                  signal,
+                },
+                (refreshSignal) =>
+                  ensureStaleArtifactRefresh(rebuildEnv, {
+                    signal: refreshSignal,
+                  }),
+              );
+              staleArtifactRefresh = refreshLease.value ?? 0;
+            } catch (error) {
+              signal.throwIfAborted();
+              console.error("[content-jobs] stale artifact refresh enqueue failed", {
+                error: safeErrorSummary(error),
+              });
+            }
+          }
+
           signal.throwIfAborted();
           if (
+            staleArtifactRefresh > 0 ||
             deployGlobalRebuilds > 0 ||
             missingYoutubeSharedInputs > 0 ||
             missingUsersSharedInputs > 0 ||

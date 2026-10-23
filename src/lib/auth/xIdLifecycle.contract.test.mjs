@@ -105,7 +105,7 @@ test("本人X IDプロフィール・アイコン更新はmutation成功後に�
 test("管理X ID lifecycleは通知を含むatomic batch、merge状態はCAS付き監査を使う", () => {
   const admin = read("../actions/xid-admin.ts");
   const merge = read("../actions/xid-merge-admin.ts");
-  const mergeCore = read("../xid/merge.ts");
+  const mergeCore = read("../../../packages/server-core/src/xid/merge.ts");
   assert.doesNotMatch(admin, /auditAction\(|enqueueNotification\(/);
   assert.match(admin, /canManageXIdLinkRequests/);
   assert.match(admin, /buildNotificationOutboxStatement/);

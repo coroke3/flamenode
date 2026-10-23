@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { gitCommitExists } from "./check-migration-work-items.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ALLOWED_KINDS = new Set(["PAGE","ROUTE_HANDLER","SERVER_ACTION","ACTION_HELPER","DB_SCHEMA","WORKER_ENTRY","TARGET_SKELETON","CONFIG","HELPER","TEST"]);
@@ -89,6 +90,20 @@ const listChangedFromBase=base=>{
  const raw=execFileSync("git",["diff","--name-only",base+"...HEAD"],{cwd:ROOT,encoding:"utf8"});
  return raw.trim().split(/\r?\n/).filter(Boolean);
 };
+const isAncestor=(root,a,b)=>{
+ try{execFileSync("git",["merge-base","--is-ancestor",a,b],{cwd:root,stdio:"ignore"});return true;}catch{return false;}
+};
+export const prCommitCheck=(root,base)=>sha=>gitCommitExists(root,sha)&&isAncestor(root,sha,"HEAD")&&!isAncestor(root,sha,base);
+// PR diff inputs: changed paths, the ledger at base, and a check that a SHA= is one of this PR's own
+// commits (reachable from HEAD, not from base). In PR CI base is HEAD^1 of the merge ref, so this
+// means reachable from HEAD^2 (the PR head) and not from HEAD^1.
+export function changedFileInputs(base){
+ return {
+  changedPaths:listChangedFromBase(base),
+  baseMatrix:execFileSync("git",["show",base+":docs/migration/FILE_MIGRATION_MATRIX.md"],{cwd:ROOT,encoding:"utf8"}),
+  isPrCommit:prCommitCheck(ROOT,base),
+ };
+}
 export function collectFiles(root=ROOT){
  const files=[];
  function visit(dir){
@@ -100,13 +115,13 @@ export function collectFiles(root=ROOT){
    else if(item.isFile())files.push(path.relative(root,child).replaceAll(path.sep,"/"));
   }
  }
- for(const sub of ["app","src/lib","src/components","workers","apps","packages"])visit(path.join(root,sub));
- for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"]){
+ for(const sub of ["app","src/lib","src/components","src/styles","public","cloudflare","workers","apps","packages"])visit(path.join(root,sub));
+ for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json","middleware.ts","next.config.mjs","open-next.config.ts","instrumentation.ts","next-env.d.ts","tsconfig.json"]){
   if(fs.existsSync(path.join(root,base)))files.push(base);
  }
  return files;
 }
-export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[],taskCardsText=""}){
+export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverActions,status,filePaths,changedPaths=[],baseMatrix="",isPrCommit=null,taskCardsText=""}){
  const errors=[];
  const {rows,errors:parseErrors}=parseFileRows(matrix);errors.push(...parseErrors);
  const pages=parsePageLedger(currentRoutes), RH=parseRouteHandlerLedger(routeHandlers),SA=parseActionLedger(serverActions),migs=parseMigs(status);
@@ -157,8 +172,18 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  for(const [f] of pages)if(!rows.has(f))errors.push(f+" CURRENT_ROUTES row not tracked");
  for(const [f] of RH)if(!rows.has(f))errors.push(f+" RH method source not tracked");
  for(const [f] of SA)if(!rows.has(f))errors.push(f+" SA source not tracked");
+ const baseRows=baseMatrix?parseFileRows(baseMatrix).rows:new Map();
+ const shasOf=row=>[...(row?.evidence||"").matchAll(/SHA=([0-9a-f]{40})\b/g)].map(m=>m[1]);
  for(const file of changedPaths.filter(trackedChangeCandidate)){
-  if(!rows.has(file))errors.push("changed migration source missing file progress row: "+file);
+  const row=rows.get(file);
+  if(!row){errors.push("changed migration source missing file progress row: "+file);continue;}
+  if(row.state==="NOT_STARTED")continue;
+  // A changed started file must cite, anywhere in its row, a SHA= that is new versus base
+  // and is a commit from this PR's own history.
+  const baseShas=new Set(shasOf(baseRows.get(file)));
+  const fresh=shasOf(row).filter(sha=>!baseShas.has(sha));
+  if(!fresh.length)errors.push(file+" changed in this PR but its evidence cites no SHA= newer than base; update state/evidence");
+  else if(isPrCommit&&!fresh.some(isPrCommit))errors.push(file+" evidence SHA="+fresh.join(",")+" is not a commit from this PR's history");
  }
  if(rows.size<mandatory.size)errors.push("file progress rows fewer than required current sources");
  return errors;
@@ -166,8 +191,17 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(invoked){
  const read=p=>fs.readFileSync(path.join(ROOT,p),"utf8");
- let changedPaths=[];
- try{if(process.env.MIGRATION_FILE_BASE_SHA)changedPaths=listChangedFromBase(process.env.MIGRATION_FILE_BASE_SHA);}
+ let diffInputs={changedPaths:[]};
+ const baseSha=process.env.MIGRATION_FILE_BASE_SHA;
+ if(!baseSha){
+  // CI must always compare against a base; a silent skip would pass untouched ledgers.
+  if(process.env.CI){console.error("[migration-file] MIGRATION_FILE_BASE_SHA is required in CI");process.exit(1);}
+  console.log("[migration-file] NOTE: changed-file validation skipped (no MIGRATION_FILE_BASE_SHA)");
+ }
+ try{
+  if(baseSha)diffInputs=changedFileInputs(baseSha);
+  if(baseSha&&!diffInputs.changedPaths.length)console.log("[migration-file] NOTE: no changed files versus base "+baseSha+" (e.g. workflow_dispatch on main)");
+ }
  catch(e){console.error("[migration-file] git changed-file validation unavailable: "+e.message);process.exit(1);}
  const input={
   matrix:read("docs/migration/FILE_MIGRATION_MATRIX.md"),
@@ -176,11 +210,11 @@ if(invoked){
   serverActions:read("docs/migration/server-actions/README.md"),
   status:read("docs/migration/STATUS.md"),
   filePaths:collectFiles(),
-  changedPaths,
+  ...diffInputs,
   taskCardsText: ["TASK_CARDS_2_3.md","TASK_CARDS_4_5.md","TASK_CARDS_6_7.md","TASK_CARDS_8_9.md"].map(p=>read("docs/migration/"+p)).join("\n"),
  };
  const errors=validateFileProgress(input);
  for(const e of errors)console.error("[migration-file] "+e);
  if(errors.length)process.exitCode=1;
- else console.log("[migration-file] PASS: "+parseFileRows(input.matrix).rows.size+" source files connected; "+parsePageLedger(input.currentRoutes).size+" pages, "+[...parseRouteHandlerLedger(input.routeHandlers).values()].reduce((n,a)=>n+a.length,0)+" RH methods, "+[...parseActionLedger(input.serverActions).values()].reduce((n,a)=>n+a.length,0)+" SA IDs; changed files="+changedPaths.length);
+ else console.log("[migration-file] PASS: "+parseFileRows(input.matrix).rows.size+" source files connected; "+parsePageLedger(input.currentRoutes).size+" pages, "+[...parseRouteHandlerLedger(input.routeHandlers).values()].reduce((n,a)=>n+a.length,0)+" RH methods, "+[...parseActionLedger(input.serverActions).values()].reduce((n,a)=>n+a.length,0)+" SA IDs; changed files="+diffInputs.changedPaths.length);
 }

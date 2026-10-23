@@ -6,6 +6,11 @@ const rules = await readFile(new URL("../actions/rules.ts", import.meta.url), "u
 const accept = await readFile(new URL("../actions/terms.ts", import.meta.url), "utf8");
 const currentUser = await readFile(new URL("../auth/currentUser.ts", import.meta.url), "utf8");
 const adminPage = await readFile(new URL("../../../app/(admin)/admin/rules/page.tsx", import.meta.url), "utf8");
+// MIG-0306 U03: terms lifecycle rules (monotonic published_at) live in the domain package.
+const termsLifecycle = await readFile(
+  new URL("../../../packages/domain/src/admin/termsLifecycle.ts", import.meta.url),
+  "utf8",
+);
 
 test("major publish never counts or updates every user", () => {
   const publish = rules.slice(
@@ -15,7 +20,8 @@ test("major publish never counts or updates every user", () => {
   assert.doesNotMatch(publish, /count\(/i);
   assert.doesNotMatch(publish, /update\(users\)/);
   assert.doesNotMatch(publish, /terms_reaccept_required/);
-  assert.match(publish, /\(current\?\.published_at \?\? 0\) \+ 1/);
+  assert.match(publish, /nextTermsPublishedAt\(Math\.floor\(Date\.now\(\) \/ 1000\), current\?\.published_at\)/);
+  assert.match(termsLifecycle, /\(currentPublishedAt \?\? 0\) \+ 1/);
   assert.doesNotMatch(adminPage, /COUNT\(\*\)/i);
   assert.match(adminPage, /\.limit\(31\)/);
 });

@@ -81,7 +81,7 @@ Detailed job semantics, idempotency, recovery side effects and user-visible asyn
 | `flamenode-web` | none |
 | `flamenode-fast-jobs` | `0 * * * *` |
 | `flamenode-content-jobs` | `15 * * * *` |
-| `flamenode-sync-jobs` | `7 * * * *`, `52 * * * *` |
+| `flamenode-sync-jobs` | `7,52 * * * *` |
 
 The deployed schedules match the tracked Worker configs. Semantic ownership of each scheduled job is deferred to MIG-0009.
 
@@ -138,7 +138,7 @@ The latest inspected Workers Build succeeded from the MIG-0004 main commit, and 
 | Queue feature flags | tracked templates default `0` | production bindings are `1` | expected Workers Builds variable override |
 | GA4 sync flag | tracked sync template defaults `0` | production is `1` | expected Workers Builds variable override |
 | web origin variables in Build metadata | bootstrap `workers.dev` values may remain stored in Build variables | deployed `AUTH_URL` / site URL are `https://flamenode.net` | expected deploy-time rewrite |
-| Cron schedules | 1 fast + 1 content + 2 sync | exact match | aligned |
+| Cron schedules | 1 fast + 1 content + 1 sync | exact match | aligned |
 | build ownership | deploy scripts define four ordered targets | only web has Git build trigger; job Workers have none | aligned |
 
 These expected transformations must stay explicit. Future migration code should not treat them as accidental configuration drift.

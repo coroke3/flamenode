@@ -36,6 +36,15 @@ legacy Next services ────┘
 - `packages/db` must not import `src/`, `app/`, `workers/`, `next`, `hono`, `react`, or `packages/domain`.
 - `packages/domain` may import `@flamenode/db` for schema/types but must not import legacy `src/**`. Avoid domain→Hono/Next dependencies.
 - Only adapters use Cloudflare D1 bindings, request context, transactions, authorization session, audits, enqueue, and adapter-specific retry.
+- **D-10（2026-10-23）:** adapter 層の共有 core として `packages/server-core`（`@flamenode/server-core`）を置く。Next（`src/lib/**` の re-export bridge）と Hono（`apps/api`）の両方が使い、D1 は drizzle handle を引数で受け取り（`drizzle-orm/d1`、schema は `@flamenode/db`）、transaction・監査・enqueue を持てる。`next/*`, `react`, `hono`, `server-only`, `@/`, `src/`, `process.env`, `getCloudflareContext` は import / 参照しない（`scripts/check-server-core-boundaries.mjs`）。env・KV・Queue・`waitUntil` は ports の型で注入する。`packages/domain` と `packages/db` は `@flamenode/server-core` を import しない。
+
+```text
+packages/db ◄── packages/domain          （純粋ロジック。DB 実行なし）
+     ▲                ▲
+     └─── packages/server-core ───────── （D1 handle 注入・transaction・監査・enqueue。ports で env を受ける）
+              ▲                ▲
+   src/lib/** (bridge)     apps/api (Hono)
+```
 - Prefer `packages/db/src/schema/index.ts` as canonical public export, with `@flamenode/db/schema` export and package main. No wildcard exports exposing internal fragment modules.
 
 ## 3. Implementation (separate MIG task/PR before Tier 2 extraction)

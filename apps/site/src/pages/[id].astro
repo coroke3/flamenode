@@ -1,20 +1,20 @@
 ---
 /**
- * Representative Video Detail SSG Page (MIG-0403 / Recipe R-PAGE / Runtime S0).
- * Pre-renders public video detail HTML with full OGP and Island hydration.
- * Private and deleted fixtures are strictly excluded at build time.
+ * Representative video detail page `/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
+ * Built from the representative snapshots only; the full set is MIG-0507 / MIG-0411.
+ * The internal ID and the YouTube ID alias both get a page with the same canonical,
+ * as CURRENT serves both URLs. Non-public snapshots are rejected by the loader.
  */
-import { VideoDetailView, type VideoDetailData } from "@flamenode/ui";
-import { IslandWrapper } from "../components/IslandWrapper.ts";
-import { getPublicRepresentativeVideos } from "../lib/representativeFixtures.ts";
+import { VideoDetailView } from "@flamenode/ui";
+import PublicPage from "../layouts/PublicPage.astro";
+import { StaticScreen } from "../components/StaticScreen.ts";
+import { loadRepresentativeVideos } from "../lib/representativeFixtures.ts";
+import { videoMetadata, videoPaths, videoScreenData } from "../lib/publicPages.ts";
 import type { VideoPublicSnapshot } from "../lib/publicDataLoader.ts";
 
 export async function getStaticPaths() {
-  const videos = getPublicRepresentativeVideos();
-  return videos.map((video) => ({
-    params: { id: video.id },
-    props: { video },
-  }));
+  const videos = await loadRepresentativeVideos();
+  return videos.flatMap((video) => videoPaths(video).map((id) => ({ params: { id }, props: { video } })));
 }
 
 interface Props {
@@ -22,44 +22,7 @@ interface Props {
 }
 
 const { video } = Astro.props;
-const title = `${video.title} - FlameNode`;
-const canonicalUrl = video.canonicalUrl ?? `https://flamenode.net/${video.id}`;
-const ogImageUrl = video.ogImageUrl ?? video.thumbnailUrl ?? "https://flamenode.net/brand/ogp-default.png";
-const description = video.description ?? "";
-
-const videoData: VideoDetailData = {
-  id: video.id,
-  title: video.title,
-  creator: {
-    name: video.creatorName ?? "FlameNode Creator",
-    xUserId: video.creatorHandle ? video.creatorHandle.replace(/^@/, "") : null,
-    iconUrl: video.creatorAvatarUrl ?? null,
-    profileHref: video.creatorHandle ? `/user/${video.creatorHandle.replace(/^@/, "")}` : null,
-  },
-  publishedLabel: video.publishedAt ? new Date(video.publishedAt).toLocaleDateString("ja-JP") : null,
-  thumbnailUrl: video.thumbnailUrl ?? null,
-  hasYoutube: Boolean(video.youtubeVideoId),
-  introComment: video.description ?? null,
-};
 ---
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title}</title>
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={title} />
-    <meta property="og:type" content="video.other" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:site_name" content="FlameNode" />
-    {description && <meta name="description" content={description} />}
-    {description && <meta property="og:description" content={description} />}
-  </head>
-  <body>
-    <IslandWrapper client:load>
-      <VideoDetailView video={videoData} />
-    </IslandWrapper>
-  </body>
-</html>
+<PublicPage meta={videoMetadata(video)}>
+  <StaticScreen screen={VideoDetailView} props={{ video: videoScreenData(video) }} />
+</PublicPage>

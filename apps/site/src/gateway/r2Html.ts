@@ -4,6 +4,7 @@
  * already checked (visibility.ts). Here: one R2 GET, and a rebuild request when the
  * HTML is missing, stale or unreadable. Nothing is rendered during the request.
  */
+import { canonicalEntityId } from "./routeShards.ts";
 import type { GatewayDecision } from "./visibility.ts";
 
 export type ServeDecision = Extract<GatewayDecision, { action: "serve" }>;
@@ -12,7 +13,7 @@ export type R2HtmlBucket = {
   get: (key: string) => Promise<{
     body: ReadableStream;
     httpMetadata?: { contentType?: string };
-    customMetadata?: { generation?: string };
+    customMetadata?: { kind?: string; id?: string; key?: string; generation?: string };
     size?: number;
   } | null>;
 };
@@ -31,8 +32,9 @@ export type RebuildQueue = { send: (message: RebuildRequest) => Promise<unknown>
 
 export type R2HtmlFailure = "html_missing" | "stale_generation" | "corrupt_data" | "r2_read_failed";
 
+// `stale_generation` is a rebuild reason only: such a page is served, never a 503.
 export type R2HtmlResult =
-  | Readonly<{ action: "serve"; response: Response }>
+  | Readonly<{ action: "serve"; response: Response; rebuild?: Promise<void> }>
   | Readonly<{ action: "unavailable"; reason: R2HtmlFailure; rebuild?: Promise<void> }>;
 
 export function r2HtmlKey(key: string): string {
@@ -98,17 +100,33 @@ export async function loadR2PrebuiltHtml(
   }
   // The route data says the page is public, so a missing page is a build gap, not a 404.
   if (!object) return fail("html_missing");
-  // HTML from another build may predate an unpublish or a slug change.
-  if (object.customMetadata?.generation !== decision.generation) return fail("stale_generation");
+  // Identity, not generation: the object must be this entity's page at this route key.
+  // Unpublish and slug changes are fenced earlier (KV deny:, consumer delete, another route key),
+  // and the route generation moves with almost every data build, so it is diagnostic only.
+  const meta = object.customMetadata;
+  if (
+    !meta ||
+    meta.kind !== decision.kind ||
+    meta.key !== decision.key ||
+    typeof meta.id !== "string" ||
+    meta.id !== canonicalEntityId(decision.kind, decision.id)
+  ) {
+    return fail("corrupt_data");
+  }
   const contentType = object.httpMetadata?.contentType ?? "";
   if (!object.body || !Number.isFinite(object.size) || (object.size ?? 0) <= 0 ||
       !/^text\/html(?:\s*;|$)/i.test(contentType)) {
     return fail("corrupt_data");
   }
+  // An older generation is still this page: serve it and ask for one (deduplicated) rebuild.
+  const rebuild = meta.generation !== decision.generation
+    ? requestRebuild(queue, decision, "stale_generation", now)
+    : undefined;
   // HEAD sends no body; release the R2 stream instead of leaving it open.
   if (method === "HEAD") await Promise.resolve(object.body.cancel?.()).catch(() => undefined);
   return {
     action: "serve",
+    rebuild,
     response: new Response(method === "HEAD" ? null : object.body, {
       status: 200,
       headers: {

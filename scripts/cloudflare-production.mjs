@@ -776,7 +776,7 @@ function validateProductionConfig(content, target, env, commit, relativePath, st
         "sync-jobs must produce to flamenode-notification-wake for operational notifications",
       );
     }
-    validateCronSchedule(content, errors, ["7 * * * *", "52 * * * *"]);
+    validateCronSchedule(content, errors, ["7,52 * * * *"]);
   }
   if (target.key === "web") {
     validateQueueFeatureFlags(content, errors, env);
