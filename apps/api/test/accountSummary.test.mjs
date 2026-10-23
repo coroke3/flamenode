@@ -184,7 +184,7 @@ test("X rows query failure -> 503 unavailable", async () => {
 });
 
 test("PRESETS_WITH_PERMISSIONS matches CURRENT presets.ts", async () => {
-  const src = readFileSync(new URL("../../../src/lib/auth/permissions/presets.ts", import.meta.url), "utf8");
+  const src = readFileSync(new URL("../../../packages/domain/src/auth/permissions/presets.ts", import.meta.url), "utf8");
   const current = [...src.matchAll(/^  (\w+): \{\n(?:.*\n)*?    permissions: (\[[^\]]*\]),?$/gm)]
     .filter((m) => m[2].replace(/\s/g, "") !== "[]")
     .map((m) => m[1]);
