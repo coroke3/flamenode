@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0616
-Current Owner: claude
+Current Task: MIG-0407
+Current Owner: antigravity
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0616
-Last Task PR: #383
-Merged READY: MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
+Last Completed Task: MIG-0407
+Last Task PR: #328
+Merged READY: MIG-0501 (lead Work Order, NEEDS_REFINEMENT text allowed), MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -108,7 +108,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | PASSED (owner approval 2026-10-23, with deferrals) |
 | 5 | Public migration | BLOCKED | CLOSED |
 | 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
@@ -273,7 +273,7 @@ Validation:
 | MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | BLOCKED | MIG-0404 |
 | MIG-0410 | deploy-hook build scheduler Cron (B, D-09) | BLOCKED | MIG-0409 |
 | MIG-0411 | per-page R2 HTML regeneration via Queue (ISR equivalent, D-09) | BLOCKED | MIG-0405, MIG-0409 |
-| MIG-0407 | Phase 4 Gate: performance + visual evidence | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |
+| MIG-0407 | Phase 4 Gate: performance + visual evidence | DONE | MIG-0403, MIG-0406 |
 
 ## Phase 5 — Public migration
 
@@ -281,7 +281,7 @@ Validation:
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0501 | fixed/static routes | BLOCKED | MIG-0407 |
+| MIG-0501 | fixed/static routes | READY | MIG-0407 |
 | MIG-0502 | event routes | BLOCKED | MIG-0501 |
 | MIG-0503 | group routes | BLOCKED | MIG-0501 |
 | MIG-0504 | user routes | BLOCKED | MIG-0501 |
