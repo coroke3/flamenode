@@ -1,0 +1,27 @@
+---
+/**
+ * `/list` (MIG-0505 / Recipe R-PAGE / Runtime S0): the default view (page 1, newest first, tiles) as static HTML.
+ * Query-bearing URLs (`?q`, `sort`, `page`, `event`, `view`) are served by the same file and need the
+ * ListFilterIsland of MIG-0507; the key table is in `lib/listQuery.ts`. No request-time data.
+ */
+import { ListView } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { loadListingForBuild } from "../lib/listingData.ts";
+import { normalizeListQuery } from "../lib/listQuery.ts";
+import { buildPageHead } from "../lib/pageHead.ts";
+import { toListVideo } from "../lib/videoCards.ts";
+
+const head = buildPageHead({
+  path: "/list",
+  title: "作品一覧",
+  description: "FlameNodeに投稿された公開作品を、新着順やスコア順で探せます。",
+});
+const { list } = await loadListingForBuild();
+const query = normalizeListQuery({});
+const videos = (list?.videos ?? []).map(toListVideo);
+// CURRENT `listEmptyMessage`: a missing artifact is "reflecting", never "no results".
+const emptyMessage = "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
+---
+<PublicLayout head={head} currentPath="/list">
+  <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} />
+</PublicLayout>

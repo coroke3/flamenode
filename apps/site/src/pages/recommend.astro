@@ -1,0 +1,31 @@
+---
+/**
+ * `/recommend` (MIG-0505 / R-PAGE / S0): rails built at build time with CURRENT `buildRecommendViewModel`.
+ */
+import { RecommendView, type RecommendRail } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { loadListingForBuild } from "../lib/listingData.ts";
+import { buildPageHead } from "../lib/pageHead.ts";
+import { toListVideo } from "../lib/videoCards.ts";
+
+const RAIL_DISPLAY_LIMIT = 8;
+
+const head = buildPageHead({
+  path: "/recommend",
+  title: "おすすめ作品",
+  description: "FlameNodeの注目作品、新着作品、見つけてほしい映像をまとめて紹介します。",
+});
+const { recommend } = await loadListingForBuild();
+const cards = (rows: Parameters<typeof toListVideo>[0][] | undefined) => (rows ?? []).slice(0, RAIL_DISPLAY_LIMIT).map(toListVideo);
+// CURRENT order: hot, underrated, events, more, fresh.
+const rails: RecommendRail[] = [
+  { id: "rail-hot", title: "人気作品", ariaLabel: "人気作品", items: cards(recommend?.hot) },
+  { id: "rail-underrated", title: "見落としがち", ariaLabel: "見落としがちな作品", items: cards(recommend?.underrated) },
+  { id: "rail-events", title: "イベントから見る", ariaLabel: "イベントごとの作品", items: cards(recommend?.eventsRail), moreHref: "/event" },
+  { id: "rail-more", title: "まとめて見る", ariaLabel: "さらに探す作品", items: cards(recommend?.more), moreHref: "/list" },
+  { id: "rail-fresh", title: "新着だけど良さそう", ariaLabel: "新着作品", items: cards(recommend?.fresh), moreHref: "/list?sort=new" },
+];
+---
+<PublicLayout head={head} currentPath="/recommend">
+  <RecommendView hero={recommend?.hero ? toListVideo(recommend.hero) : null} rails={rails} />
+</PublicLayout>
