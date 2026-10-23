@@ -38,7 +38,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0602 — low-risk write commands
 
-- 読む: SA-004..011（announcements / API endpoints / audit settings。SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
+- 読む: SA-004..008（announcements / API endpoints。SA-009..010 は MIG-0629、SA-011 は MIG-0616、SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
 - 変更: Hono Zod input検証、session userのpolicy判定、D1 write transaction + audit outboxを同一業務サービスへ委譲。新APIだけのvalidationを作って旧Nextと意味を分けない。
 - 試験: unauthorized/forbidden/banned、invalid body、CAS lost update、audit write failure→rollback、post-commit queue exactly-once-ish/idempotent retry、same-origin check。
 - DONE: SA unitごとに同一requestで旧/新statusとDB副作用・監査・Queue結果が一致。
@@ -84,6 +84,131 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: Cron を doorbell の enqueue だけにする、`max_batch_size`、予算を超えた job の `MAX_` 定数と続きの enqueue。
 - 試験: 上限ちょうど / 上限 + 1 / 2回目の doorbell / 外部 API の失敗 / Queue の1日の message 数。
 - DONE: 全 job の非本番 max < 8ms。遅れが延びる場合はユーザーの承認がある。
+
+### MIG-0612 — shared server core scaffold (D-10)
+
+- 読む: `OPEN_DECISIONS.md` D-10、`IMPLEMENTATION_RECIPES.md` R-CORE、`scripts/check-domain-imports.mjs`。
+- 変更: `+packages/server-core`（足場と `src/ports.ts`）、`+scripts/check-server-core-boundaries.mjs`、docs。実装コードは動かさない。
+- 試験: fixture の禁止 import / `process.env` / `getCloudflareContext` を検出、domain→server-core の逆依存を検出。
+- DONE: 境界検査が CI で動く。`src/lib/**` の diff が 0。
+
+### MIG-0613 — audit mutation core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0613 Work Order、`src/lib/audit/**`、`src/lib/queues/**`。
+- 変更: 先に golden test、次に `packages/server-core/src/{audit,queues}/**` へ移動し `src/lib/**` は bridge。`nextPorts.ts` が env / KV / Queue / `waitUntil` を供給。
+- 試験: golden（SQL + params + `audit_logs`）の一致、既存 test の件数同一、wake の失敗系。
+- DONE: golden の diff 0、呼び出し側の diff 0。
+
+### MIG-0614 — static rebuild / notifications / visibility fence / public cache core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0614 Work Order。
+- 変更: `packages/server-core/src/{staticRebuild,notifications,visibility,publicCache}/**`、`src/lib/**` は bridge。`loader.ts` は移さない。
+- 試験: golden、R2 / cache の失敗系。
+- DONE: golden の diff 0、既存 test の件数同一。
+
+### MIG-0615 — visibility transition planners (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0615 Work Order。
+- 変更: video / event / xUser の可視性遷移を core へ。`unstable_rethrow` は `RethrowFrameworkControl` で注入。
+- 試験: golden（公開↔非公開、補償、post commit）、framework 例外の再 throw。
+- DONE: golden の diff 0。
+
+### MIG-0616 — audit restore core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0616 Work Order、audit の restore.ts。
+- 変更: restore.ts を core へ、旧 file は bridge。
+- 試験: golden（strategy 別、CAS 競合、YouTube eligibility）。
+- DONE: golden の diff 0。
+
+### MIG-0617 — replace apps/api Option A copy (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order、MIG-0602 の `apps/api` 実装。
+- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。fake D1 に `.raw()`。
+- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致。
+- DONE: 写しの呼び出しが 0。
+
+### MIG-0618 — xid merge core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0618 Work Order。
+- 変更: X ID merge を core へ。
+- 試験: golden（merge の SQL + params、監査行、owner 保護）。
+- DONE: golden の diff 0。
+
+### MIG-0619 — edge policy parity in the public gateway
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0619 Work Order、`middleware.ts`、`src/lib/auth/canonicalHostRedirect.ts`、`src/lib/operationMode/middlewareMaintenance.ts`。
+- 変更: gateway に canonical host 308 と maintenance redirect（同じ allowlist）、`/maintenance` の静的 page。
+- 試験: host × path × query の表、mode × path の表、health 除外、workers.dev 設定、既存 contract test の再利用。
+- DONE: 全表が CURRENT middleware と一致し、本番 Route を変更していない。
+
+### MIG-0620 — static asset Cache-Control parity
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0620 Work Order、`public/_headers`、`apps/site/src/gateway/routeShards.ts`。
+- 変更: 新 Worker の `_headers`（`/_astro` `/_personal_assets` `/_ops_assets` `/brand`）。
+- 試験: prefix ごとの Cache-Control、HTML が immutable にならないこと。
+- DONE: 全 prefix が表と一致。
+
+### MIG-0621 — robots.txt and sitemap.xml
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0621 Work Order、`app/robots.ts`、`app/sitemap.ts`。
+- 変更: Astro endpoint で robots.txt（byte 一致）と sitemap.xml（公開可視性 manifest から）。
+- 試験: robots の byte 比較、sitemap の URL 集合と manifest の一致、静的 entry。
+- DONE: 最初の公開 cutover の前に PASS。
+
+### MIG-0622 — ledger completeness checker
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0622 Work Order、`FILE_MIGRATION_MATRIX.md`、`scripts/check-migration-file-progress.mjs`。
+- 変更: 行が無い tracked file で CI を落とす検査と、不足行の追加。
+- 試験: 行無し file で失敗、除外一覧で成功、現在の main で PASS。
+- DONE: G11 の file すべてに行があり、CI に組み込まれている。
+
+### MIG-0623 — Entry page read APIs
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0623 Work Order、`app/(auth)/entry/**`、`app/(manage)/dashboard/edit/[id]/**`、MIG-0611 の実装。
+- 変更: 5ルートの読み取り endpoint と DTO。
+- 試験: 実 loader と Hono の parity（`node:sqlite`）、失敗時の同一性、D1 3文以下、private no-store。
+- DONE: 5ルートすべてで parity PASS。
+
+### MIG-0624 — Manage page read APIs
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0624 Work Order、`app/(manage)/manage/**`、MIG-0611 の実装。
+- 変更: Manage 12ルートの読み取り endpoint と DTO、API 側の権限確認。
+- 試験: 実 loader と Hono の parity、route × role、D1 3文以下。
+- DONE: 12ルートの parity と権限が PASS。
+
+### MIG-0625 — Admin read APIs part A
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0625 Work Order、`app/(admin)/admin/**`（users / videos / events / moderation）、MIG-0611 の実装。
+- 変更: 対象 page の読み取り endpoint と DTO、admin 権限。
+- 試験: 実 loader と Hono の parity、admin 以外の拒否、D1 3文以下。
+- DONE: 担当範囲の parity PASS、MIG-0626 との分担に漏れが無い。
+
+### MIG-0626 — Admin read APIs part B
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0626 Work Order、MIG-0625 の分担表、`app/(admin)/admin/**` の残り。
+- 変更: settings / audit / ops / 残りの読み取り endpoint と DTO。
+- 試験: Admin 45 の網羅、parity、admin 以外の拒否、外部診断失敗の劣化。
+- DONE: Admin 45 の全 page に read endpoint がある。
+
+### MIG-0627 — R2 artifact consumers to build-time snapshots
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0627 Work Order、`workers/json-generator/**`、`src/lib/publicData/sitemapSources`。
+- 変更: R2 artifact の読み手を build 時 snapshot へ、`R2_ARTIFACT_CONSUMERS.md`。
+- 試験: `rg` で R2 get key の読み手と producer 一覧の突き合わせ、置き換え後の DTO の同一性。
+- DONE: 全 artifact に置き換え先があり、MIG-0907 が参照できる。
+
+### MIG-0628 — new Worker deploy + smoke chain
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0628 Work Order、`wrangler.toml`、`scripts/cloudflare-production.mjs`、`scripts/smoke-cloudflare.mjs`。
+- 変更: 新 Worker の `wrangler.toml`、CI の dry-run、smoke list、手順書。
+- 試験: Worker ごとの `wrangler deploy --dry-run`、env key の和集合、smoke list の網羅。
+- DONE: dry-run が CI で PASS、実 deploy・Route・secret は未実行（明示承認まで停止）。
+### MIG-0629 — admin audit settings + restore dry-run APIs
+
+- 読む: SA-009..010（`src/lib/actions/audit-admin.ts`）, `mutate.ts`, `API_MATRIX.md`, `work-items/MIG-0602.md` Decision（MIG-0602 の分割）。
+- 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
+- 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
+- DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
 
 ### MIG-0607 — Phase 6 API Gate
 

@@ -16,6 +16,8 @@
       "@flamenode/db/*": ["./packages/db/src/*"],
       "@flamenode/domain": ["./packages/domain/src/index.ts"],
       "@flamenode/domain/*": ["./packages/domain/src/*"],
+      "@flamenode/server-core": ["./packages/server-core/src/index.ts"],
+      "@flamenode/server-core/*": ["./packages/server-core/src/*"],
       "@flamenode/ui": ["./packages/ui/src/index.ts"]
     }
   }
