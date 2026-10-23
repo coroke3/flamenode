@@ -8,18 +8,18 @@ import { fileURLToPath } from "node:url";
 const root = process.cwd();
 const REQUIRED_PATTERNS = [
   {
-    file: "src/lib/audit/types.ts",
+    file: "packages/server-core/src/audit/types.ts",
     pattern: /actor_x_user_id\?: string \| null;/,
     message: "WriteAuditLogInput must expose actor_x_user_id",
   },
   {
-    file: "src/lib/audit/logger.ts",
+    file: "packages/server-core/src/audit/logger.ts",
     pattern:
       /loadApprovedActorXPairs\(db, activeInputs\)[\s\S]*?if \(!linked && input\.strict\) \{[\s\S]*?throw new Error\("actor_x_user_id is not linked to actor_user_id"\)/,
     message: "audit logger must validate actor_x_user_id for strict audits",
   },
   {
-    file: "src/lib/audit/mutate.ts",
+    file: "packages/server-core/src/audit/mutate.ts",
     pattern: /actor_x_user_id/,
     message: "mutateWithAudit must persist actor_x_user_id",
   },

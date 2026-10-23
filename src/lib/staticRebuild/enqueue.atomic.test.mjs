@@ -39,7 +39,7 @@ test("video visibility fence reason is never hidden by queue metadata merging", 
 });
 
 test("atomic builder は latest done skip を持たない", async () => {
-  const source = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url), "utf8");
   const batchStart = source.indexOf(
     "export async function buildStaticRebuildQueueBatch",
   );
@@ -62,7 +62,7 @@ test("atomic builder は latest done skip を持たない", async () => {
 
 test("direct enqueue は public_miss / periodic / manual_repair のみ", async () => {
   const source = await readFile(
-    new URL("./directEnqueue.ts", import.meta.url),
+    new URL("../../../packages/server-core/src/staticRebuild/directEnqueue.ts", import.meta.url),
     "utf8",
   );
   assert.match(source, /DirectEnqueueResult/);

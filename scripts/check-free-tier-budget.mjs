@@ -101,7 +101,7 @@ assert.ok(D1_QUERY_SOFT_LIMIT < D1_QUERY_HARD_LIMIT);
 assert.ok(D1_QUERY_HARD_LIMIT <= OFFICIAL_FREE_LIMITS.d1StatementsPerInvocation);
 
 const staticRebuildSource = fs.readFileSync(
-  path.join(REPO_ROOT, "src/lib/staticRebuild/enqueue.ts"),
+  path.join(REPO_ROOT, "packages/server-core/src/staticRebuild/enqueue.ts"),
   "utf8",
 );
 const maxMutationTargets = Number(

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const registrySource = await readFile(new URL("./registry.ts", import.meta.url), "utf8");
-const adaptersSource = await readFile(new URL("./adapters.ts", import.meta.url), "utf8");
+const registrySource = await readFile(new URL("../../../packages/server-core/src/audit/registry.ts", import.meta.url), "utf8");
+const adaptersSource = await readFile(new URL("../../../packages/server-core/src/audit/adapters.ts", import.meta.url), "utf8");
 
 test("restore registry は主要テーブルを登録する", () => {
   assert.match(adaptersSource, /export const RESTORE_ADAPTERS/);

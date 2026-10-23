@@ -13,7 +13,7 @@ const moderationAdminSource = readFileSync(
   "utf8",
 );
 const openCasesSource = readFileSync(
-  fileURLToPath(new URL("./openCases.ts", import.meta.url)),
+  fileURLToPath(new URL("../../../packages/server-core/src/moderation/openCases.ts", import.meta.url)),
   "utf8",
 );
 
