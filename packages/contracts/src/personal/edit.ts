@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { SlottedEventOptionSchema } from "./entry.ts";
 import { PersonalUserSchema } from "./shared.ts";
 
 // MIG-0630: DTOs for the authenticated video-edit read APIs (/api/personal/edit/:id and /:id/permissions).
 // CURRENT sources: app/(auth)/dashboard/edit/[id]/page.tsx and permissions/page.tsx (loader part only). Unit U02a
-// returns the access decision and the form's own values; event options / custom questions / answers / suggestions are
-// a later unit. The Japanese messages, the permission view model and the mode-switch links stay in the UI (the
+// returns the access decision and the form's own values; event options / custom questions / answers / suggestions are unit U02b
+// (EditFormOptionsResponseSchema below). The Japanese messages, the permission view model and the mode-switch links stay in the UI (the
 // inputs for them are returned here).
 
 export const EditPrivilegeModeSchema = z.enum(["normal", "admin", "event"]);
@@ -201,6 +202,34 @@ export const EditPermissionsResponseSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+/**
+ * GET /api/personal/edit/:id/form-options?privileged=&offset=N (MIG-0630 U02b): what the CURRENT edit page loads for VideoForm
+ * besides the video's own values (those are in GET /api/personal/edit/:id). `no_access` = the page would not render the form
+ * (no capability, or only a privilege switch); nothing else is returned. 404 `{error:"not_found"}` for an unknown video.
+ * `eventOptions` is paged like the Entry forms: `truncated` = more accepting events may follow, `nextOffset` = the `?offset=`
+ * that continues (null when complete or beyond the 900 clamp). The events the video is attached to are listed first on the
+ * first page (offset 0); a later page may repeat one of them at its natural place (merge by id). `youtube_description_event_url`
+ * is derived by the UI from the id (`/event/<id>`). `customAnswers` is CURRENT initialCustomAnswers (`<event_id>:<question_key>`),
+ * `stagePermissionAnswers` is CURRENT stagePermissionInitial (custom_question_answers_json). When `customAnswersTruncated` the
+ * answers are incomplete and the SPA must not save them.
+ */
+export const EditFormOptionsResponseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("no_access") }),
+  z.object({
+    kind: z.literal("ready"),
+    eventOptions: z.array(SlottedEventOptionSchema),
+    truncated: z.boolean(),
+    nextOffset: z.number().nullable(),
+    customAnswers: z.record(z.union([z.string(), z.array(z.string())])),
+    customAnswersTruncated: z.boolean(),
+    stagePermissionAnswers: z.string().nullable(),
+    softwareSuggestions: z.array(z.string()),
+    iconCandidates: z.array(z.string()),
+    channelCandidates: z.array(z.string()),
+  }),
+]);
+
+export type EditFormOptionsResponse = z.infer<typeof EditFormOptionsResponseSchema>;
 export type EditAccess = z.infer<typeof EditAccessSchema>;
 export type EditSections = z.infer<typeof EditSectionsSchema>;
 export type EditNotice = z.infer<typeof EditNoticeSchema>;

@@ -20,7 +20,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { and, eq, inArray } = await import("drizzle-orm");
   const S = await import("../../../src/lib/db/schema.ts");
   const { app } = await import("../src/app.ts");
-  const { EditPageResponseSchema, EditPermissionsResponseSchema } = await import("@flamenode/contracts");
+  const { EditFormOptionsResponseSchema, EditPageResponseSchema, EditPermissionsResponseSchema } = await import("@flamenode/contracts");
   const { getHeaderLinkedXUsersForAuthUser } = await import("../../../src/lib/auth/headerLinkedXUsers.ts");
   const { resolveActiveXUserId } = await import("../../../src/lib/auth/resolveActiveXId.ts");
   const { getLinkedXUsersForAuthUser } = await import("../../../src/lib/auth/xIdentity.ts");
@@ -34,6 +34,13 @@ if (runUnderRootTsx(import.meta.url)) {
   const { hasAnyEditableVideoFormSection } = await import("../../../src/lib/video/permissionUnlockHint.ts");
   const { canAttachInitialYoutubeToSlottedVideo } = await import("../../../src/lib/video/youtubeAttachEligibility.ts");
   const { getVideoSoftwareLabel } = await import("../../../src/lib/db/software.ts");
+  const { acceptingEntriesWhere } = await import("../../../src/lib/utils/eventStatus.ts");
+  const { getUsedSoftwareSuggestions } = await import("../../../src/lib/db/videoFormSuggestions.ts");
+  const { getXIconCandidates } = await import("../../../src/lib/db/xIconResolution.ts");
+  const { getYoutubeChannelCandidates } = await import("../../../src/lib/db/youtubeChannelCandidates.ts");
+  const { fetchActiveCustomQuestionsForEvents } = await import("../../../src/lib/video/customQuestionAnswers.ts");
+  const { loadStagePermissionFormSettingsJsonByEvents } = await import("../../../src/lib/video/stagePermissionQuestions.ts");
+  const { readStagePermissionCustomAnswers } = await import("../../../src/lib/video/stagePermissionAnswers.ts");
 
   const sqlite = createSqlite();
   seed(sqlite);
@@ -65,7 +72,7 @@ if (runUnderRootTsx(import.meta.url)) {
       body = null;
     }
     const result = { status: response.status, headers: response.headers, text, body, stats: d1.stats };
-    (stats[path.split("?")[0].replace(/\/[^/]+(\/permissions)?$/, "/:id$1")] ??= []).push(d1.stats);
+    (stats[path.split("?")[0].replace(/\/[^/]+(\/(permissions|form-options))?$/, "/:id$1")] ??= []).push(d1.stats);
     return result;
   }
   const url = (id, suffix, mode) => `/api/personal/edit/${encodeURIComponent(id)}${suffix}${mode === undefined ? "" : `?privileged=${mode}`}`;
@@ -280,6 +287,73 @@ if (runUnderRootTsx(import.meta.url)) {
     };
   }
 
+  // app/(auth)/dashboard/edit/[id]/page.tsx (the part that feeds VideoForm: event options, questions, answers, suggestions, candidates).
+  // The form is rendered only when the page is kind "edit" (refEdit); the order of eventOptions differs by design
+  // (attached-only events first, then the accepting events, each by id; CURRENT: accepting in storage order, then attached-only).
+  async function refFormOptions(name, id, rawMode) {
+    const edit = await refEdit(name, id, rawMode);
+    if (edit.status === 404) return { status: 404 };
+    if (edit.body.kind !== "edit") return { status: 200, body: { kind: "no_access" } };
+    const db = refDb;
+    const video = (await db.select().from(S.videos).where(eq(S.videos.id, id)).limit(1))[0];
+    const currentEventIds = (await db.select({ event_id: S.videoEvents.event_id }).from(S.videoEvents).where(eq(S.videoEvents.video_id, video.id))).map((r) => r.event_id);
+    if (video.primary_event_id && !currentEventIds.includes(video.primary_event_id)) currentEventIds.push(video.primary_event_id);
+    const creatorX = video.creator_x_user_id;
+    const softwareSuggestions = await getUsedSoftwareSuggestions(db);
+    const iconCandidates = creatorX ? await getXIconCandidates(db, creatorX) : [];
+    const channelCandidates = creatorX ? await getYoutubeChannelCandidates(db, creatorX) : [];
+    const now = Math.floor(Date.now() / 1000);
+    const optionColumns = { id: S.events.id, title: S.events.title, parts_json: S.events.parts_json, youtube_description_template: S.events.youtube_description_template, required_video_fields_json: S.events.required_video_fields_json };
+    const acceptingEventRows = await db.select(optionColumns).from(S.events).where(and(acceptingEntriesWhere(now), eq(S.events.allow_user_video_event_links, 1)));
+    const attachedEventRows = currentEventIds.length > 0 ? await db.select(optionColumns).from(S.events).where(inArray(S.events.id, currentEventIds)) : [];
+    const acceptingEventMap = new Map();
+    for (const ev of acceptingEventRows) acceptingEventMap.set(ev.id, { ...ev });
+    for (const ev of attachedEventRows) acceptingEventMap.set(ev.id, { ...ev });
+    const formSettingsByEvent = await loadStagePermissionFormSettingsJsonByEvents(db, Array.from(acceptingEventMap.keys()));
+    const customQuestionsByEvent = await fetchActiveCustomQuestionsForEvents(db, Array.from(acceptingEventMap.keys()));
+    const options = Array.from(acceptingEventMap.values()).map((event) => ({ ...event, video_form_settings_json: formSettingsByEvent.get(event.id) ?? null, custom_questions: customQuestionsByEvent.get(event.id) ?? [] }));
+    const customQuestionById = new Map(Array.from(customQuestionsByEvent.values()).flat().map((question) => [question.id, question]));
+    const customQuestionIds = Array.from(customQuestionById.keys());
+    const customAnswerRows = [];
+    for (let index = 0; index < customQuestionIds.length; index += 80) {
+      const chunk = customQuestionIds.slice(index, index + 80);
+      const rows = await db
+        .select({ event_id: S.videoCustomAnswers.event_id, question_id: S.videoCustomAnswers.question_id, answer_text: S.videoCustomAnswers.answer_text, answer_json: S.videoCustomAnswers.answer_json })
+        .from(S.videoCustomAnswers)
+        .where(and(eq(S.videoCustomAnswers.video_id, video.id), inArray(S.videoCustomAnswers.question_id, chunk)))
+        .limit(chunk.length);
+      customAnswerRows.push(...rows);
+    }
+    const initialCustomAnswers = {};
+    for (const row of customAnswerRows) {
+      const question = customQuestionById.get(row.question_id);
+      if (!question) continue;
+      if (row.answer_json?.trim()) {
+        try {
+          const parsed = JSON.parse(row.answer_json);
+          if (Array.isArray(parsed)) {
+            initialCustomAnswers[`${row.event_id}:${question.question_key}`] = parsed.filter((value) => typeof value === "string").map((value) => value.trim()).filter(Boolean);
+            continue;
+          }
+        } catch {
+          // invalid JSON: use the text
+        }
+      }
+      if (row.answer_text?.trim()) initialCustomAnswers[`${row.event_id}:${question.question_key}`] = row.answer_text.trim();
+    }
+    const stagePermissionInitial = await readStagePermissionCustomAnswers(db, { videoId: video.id, eventIds: currentEventIds });
+    const acceptingIds = new Set(acceptingEventRows.map((r) => r.id));
+    const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const eventOptions = [...options.filter((o) => !acceptingIds.has(o.id)).sort(byId), ...options.filter((o) => acceptingIds.has(o.id)).sort(byId)];
+    return {
+      status: 200,
+      body: canon({
+        kind: "ready", eventOptions, truncated: false, nextOffset: null, customAnswers: initialCustomAnswers, customAnswersTruncated: false,
+        stagePermissionAnswers: stagePermissionInitial ?? null, softwareSuggestions, iconCandidates, channelCandidates,
+      }),
+    };
+  }
+
   // ---------------- access control ----------------
   test("auth: 401 without a session / expired, 403 banned, private,no-store; only the session lookup runs; GET only", async () => {
     for (const path of ["/api/personal/edit/ed-own1", "/api/personal/edit/ed-own1/permissions"]) {
@@ -467,6 +541,181 @@ if (runUnderRootTsx(import.meta.url)) {
     const expected = await refEdit("frank", "ed-multi", "event");
     assert.deepEqual(canon(r.body), canon(expected.body));
     assert.equal(r.body.access.eventId !== null || r.body.kind !== "edit", true);
+  });
+
+  // ---------------- U02b: GET /api/personal/edit/:id/form-options ----------------
+  const formUrl = (id, mode, offset) => {
+    const query = [mode === undefined ? null : `privileged=${mode}`, offset === undefined ? null : `offset=${offset}`].filter(Boolean).join("&");
+    return `/api/personal/edit/${encodeURIComponent(id)}/form-options${query ? `?${query}` : ""}`;
+  };
+
+  test("U02b auth: 401 without a session / expired, 403 banned (no data statement), private,no-store; GET only", async () => {
+    for (const token of [undefined, "tok-expired", "tok-nope"]) {
+      const r = await call(formUrl("ed-own1"), token);
+      assert.equal(r.status, 401, String(token));
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.ok(r.stats.statements <= 1);
+    }
+    const banned = await call(formUrl("ed-own1"), "tok-banned");
+    assert.equal(banned.status, 403);
+    assert.ok(banned.stats.statements <= 1, "a banned user never reaches the data statement");
+    for (const method of ["POST", "PUT", "DELETE"]) assert.equal((await call(formUrl("ed-own1"), "tok-alice", { method })).status, 404, method);
+  });
+
+  test("U02b: every user x video x privileged mode equals CURRENT (gate, options, questions, answers, stage answers, suggestions, candidates)", async () => {
+    const kinds = {};
+    for (const name of USERS) {
+      for (const id of MATRIX_VIDEOS) {
+        for (const mode of [undefined, "admin", "event"]) {
+          const expected = await refFormOptions(name, id, mode);
+          const r = await call(formUrl(id, mode), `tok-${name}`);
+          assert.equal(r.status, expected.status, `${name} ${id} ${mode}`);
+          if (expected.status === 404) {
+            assert.deepEqual(r.body, { error: "not_found" });
+            continue;
+          }
+          assert.deepEqual(canon(r.body), expected.body, `${name} ${id} ${mode}`);
+          EditFormOptionsResponseSchema.parse(r.body);
+          assert.equal(r.headers.get("cache-control"), "private, no-store");
+          kinds[expected.body.kind] = (kinds[expected.body.kind] ?? 0) + 1;
+        }
+      }
+    }
+    assert.ok(kinds.ready > 30 && kinds.no_access > 100, JSON.stringify(kinds));
+  });
+
+  test("U02b content: ed-own1 / alice (attached events first, accepting events by id, answers, stage answers, candidates)", async () => {
+    const r = await call(formUrl("ed-own1"), "tok-alice");
+    assert.equal(r.body.kind, "ready");
+    assert.deepEqual(
+      r.body.eventOptions.map((o) => o.id),
+      ["ee1", "ee-open", "ee-open2", "ee-point"],
+      "ee1 is attached only; closed / ended / future / nolink / private / noentry events are not options",
+    );
+    assert.deepEqual(r.body.eventOptions[0].custom_questions.map((q) => q.question_key), ["fq_multi", "fq_text", "fq_bad"], "active general questions in (sort_order, id) order, stage questions excluded");
+    assert.ok(r.body.eventOptions[0].video_form_settings_json?.includes("Stage perm"));
+    assert.deepEqual(r.body.customAnswers, {
+      "ee1:fq_text": "hello",
+      "ee1:fq_multi": ["a", "b", "c"],
+      "ee1:fq_bad": "fallback",
+      "ee-open:open_q": "stray answer on an accepting event",
+    });
+    assert.deepEqual(JSON.parse(r.body.stagePermissionAnswers), {
+      version: 1,
+      answers: [
+        { id: "stage_permission", label: "Stage perm", value: "ok" },
+        { id: "stage_permission_x_y_", label: "ステージ・素材・権利まわりの使用許可", value: "second" },
+      ],
+    });
+    assert.ok(r.body.iconCandidates.length >= 3 && !r.body.iconCandidates.includes("https://i.test/hidden.png"), "only public videos feed the icon candidates");
+    assert.ok(r.body.channelCandidates.length >= 3);
+    assert.ok(r.body.softwareSuggestions.includes("Blender") && r.body.softwareSuggestions.includes("AfterEffects"));
+    const noCreator = await call(formUrl("ed-null-creator"), "tok-carol", { });
+    assert.deepEqual((await refFormOptions("carol", "ed-null-creator", undefined)).body.kind, noCreator.body.kind);
+    if (noCreator.body.kind === "ready") assert.deepEqual([noCreator.body.iconCandidates, noCreator.body.channelCandidates], [[], []]);
+  });
+
+  test("U02b IDOR: a stranger gets nothing but {kind:no_access}; unknown id is 404 for everyone", async () => {
+    const r = await call(formUrl("ed-none"), "tok-bob");
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, { kind: "no_access" });
+    assert.doesNotMatch(r.text, /Form |Edit title|Creator|zed|stage|Label/i);
+    for (const name of USERS) assert.equal((await call(formUrl("nope"), `tok-${name}`)).status, 404);
+  });
+
+  test("U02b S2 budget: session lookup + context + 1 data statement (3, no batch, no write, <= 4 binds)", async () => {
+    for (const [id, token, mode] of [["ed-own1", "tok-alice"], ["ed-own2", "tok-alice"], ["ed-collab", "tok-frank"], ["ed-multi", "tok-frank", "event"], ["ed-none", "tok-carol", "admin"], ["no-such-video", "tok-alice"], ["ed-own1", "tok-many"], ["ed-ans-many", "tok-alice"]]) {
+      const r = await call(formUrl(id, mode), token);
+      assert.deepEqual({ statements: r.stats.statements, batches: r.stats.batches, writes: r.stats.writes }, { statements: 3, batches: 0, writes: 0 }, `${id} ${mode}`);
+      assert.ok(r.stats.maxBinds <= 4, `binds ${r.stats.maxBinds}`);
+      assert.equal(r.headers.get("set-cookie"), null);
+      assert.ok(Buffer.byteLength(r.text) <= 64 * 1024);
+    }
+  });
+
+  test("U02b D1 failure -> 503 with a fixed body; nothing leaks", async () => {
+    for (const match of [/required_major/, /WITH v AS/]) {
+      const d1 = createD1(sqlite);
+      const prepare = d1.prepare;
+      d1.prepare = (text) => {
+        if (match.test(text)) throw new Error("secret-internal tok-alice");
+        return prepare(text);
+      };
+      const r = await call(formUrl("ed-own1"), "tok-alice", { d1 });
+      assert.equal(r.status, 503, String(match));
+      assert.deepEqual(r.body, { error: "unavailable" });
+      assert.equal(r.headers.get("cache-control"), "private, no-store");
+      assert.doesNotMatch(r.text, /secret-internal|tok-alice/);
+    }
+  });
+
+  test("U02b limits CURRENT enforces by throwing (5 stage questions, 19 general questions) are 503, never a partial body", async () => {
+    await assert.rejects(readStagePermissionCustomAnswers(refDb, { videoId: "ed-stage-many", eventIds: ["est5"] }), /video_stage_answer_read_limit_exceeded/);
+    await assert.rejects(fetchActiveCustomQuestionsForEvents(refDb, ["eq19"]), /video_custom_question_read_limit_exceeded/);
+    for (const id of ["ed-stage-many", "ed-q-many"]) {
+      const r = await call(formUrl(id), "tok-alice");
+      assert.equal(r.status, 503, id);
+      assert.deepEqual(r.body, { error: "unavailable" });
+    }
+  });
+
+  test("U02b answers bound: 108 answers -> first 100 kept (all correct), customAnswersTruncated", async () => {
+    const r = await call(formUrl("ed-ans-many"), "tok-alice");
+    assert.equal(r.status, 200);
+    assert.equal(r.body.kind, "ready");
+    assert.equal(r.body.customAnswersTruncated, true);
+    const entries = Object.entries(r.body.customAnswers);
+    assert.equal(entries.length, 100);
+    for (const [key, value] of entries) assert.equal(value, key.replace(/^(ea\d):a(\d+)$/, "$1/$2"), key);
+  });
+
+  test("U02b paging: 130 more accepting events -> pages of 100 by id, attached-only first on page 0, nothing lost or duplicated", async () => {
+    for (let i = 0; i < 130; i += 1) sqlite.prepare("INSERT INTO events (id, title, visibility_status, allow_user_video_event_links, entry_start_time) VALUES (?, ?, 'public', 1, 1)").run(`ez${String(i).padStart(3, "0")}`, `Page ${i}`);
+    try {
+      const first = await call(formUrl("ed-own1", undefined, 0), "tok-alice");
+      assert.equal(first.body.truncated, true);
+      assert.equal(first.body.nextOffset, 100);
+      assert.equal(first.body.eventOptions[0].id, "ee1");
+      assert.equal(first.body.eventOptions.length, 101);
+      const second = await call(formUrl("ed-own1", undefined, 100), "tok-alice");
+      assert.equal(second.body.truncated, false);
+      assert.equal(second.body.nextOffset, null);
+      assert.equal(second.body.eventOptions.length, 33);
+      assert.ok(!second.body.eventOptions.some((o) => o.id === "ee1"), "attached-only events are listed on the first page only");
+      const seen = [...first.body.eventOptions, ...second.body.eventOptions].map((o) => o.id);
+      assert.equal(new Set(seen).size, seen.length);
+      assert.equal(seen.length, 134);
+      const clamped = await call(formUrl("ed-own1", undefined, 99999), "tok-alice");
+      assert.equal(clamped.status, 200);
+      assert.equal(clamped.body.eventOptions.length, 0);
+      for (const r of [first, second]) EditFormOptionsResponseSchema.parse(r.body);
+    } finally {
+      sqlite.exec("DELETE FROM events WHERE id LIKE 'ez%'");
+    }
+  });
+
+  test("U02b bytes: options are cut so the response stays <= 64 KiB (nextOffset continues); an attached event that cannot fit fails closed (503)", async () => {
+    for (let i = 0; i < 6; i += 1) sqlite.prepare("INSERT INTO events (id, title, visibility_status, allow_user_video_event_links, entry_start_time, parts_json) VALUES (?, ?, 'public', 1, 1, ?)").run(`zb${i}`, `Big ${i}`, "x".repeat(20_000));
+    try {
+      const first = await call(formUrl("ed-own1"), "tok-alice");
+      assert.equal(first.status, 200);
+      assert.ok(Buffer.byteLength(first.text) <= 64 * 1024, `${Buffer.byteLength(first.text)} bytes`);
+      assert.equal(first.body.truncated, true);
+      const kept = first.body.eventOptions.filter((o) => o.id.startsWith("zb")).length;
+      assert.ok(kept > 0 && kept < 6);
+      assert.equal(first.body.nextOffset, first.body.eventOptions.length - 1, "ee1 (attached only) is not counted");
+      const rest = await call(formUrl("ed-own1", undefined, first.body.nextOffset), "tok-alice");
+      assert.equal(rest.status, 200);
+      const all = [...first.body.eventOptions, ...rest.body.eventOptions].filter((o) => o.id.startsWith("zb")).map((o) => o.id);
+      assert.deepEqual([...new Set(all)], ["zb0", "zb1", "zb2", "zb3", "zb4", "zb5"]);
+      sqlite.prepare("UPDATE events SET parts_json = ? WHERE id = 'ee1'").run("y".repeat(63_000));
+      const failClosed = await call(formUrl("ed-own1"), "tok-alice");
+      assert.equal(failClosed.status, 503);
+      assert.deepEqual(failClosed.body, { error: "unavailable" });
+    } finally {
+      sqlite.exec("DELETE FROM events WHERE id LIKE 'zb%'");
+      sqlite.exec("UPDATE events SET parts_json = NULL WHERE id = 'ee1'");
+    }
   });
 
   test("read-only: no D1 write and no cookie on any edit endpoint; response summary (informational)", () => {
