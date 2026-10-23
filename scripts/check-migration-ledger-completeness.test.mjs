@@ -53,3 +53,10 @@ test("family pattern must be dir/**, duplicates and missing section fail", () =>
 test("required scope matches Work Order categories", () => {
   for (const f of ["middleware.ts", "next.config.mjs", "app/layout.tsx", "app/(admin)/layout.tsx", "app/robots.ts", "app/not-found.tsx", "public/_headers", "src/lib/seo.ts", "src/lib/health/x.ts", "workers/json-generator/queue.ts", "workers/shared/runJob.ts", "src/components/ui/Button.tsx", "wrangler.toml"]) assert.equal(isRequiredSource(f), true, f);
 });
+
+test("top-level directory family would pass vacuously and is rejected", () => {
+  for (const p of ["app/**", "src/lib/**", "workers/**"]) {
+    assert.match(parseFamilyRows(matrix([], [p])).errors.join(" "), /would cover everything/);
+  }
+  assert.match(run([], ["app/**"], ["app/layout.tsx"]).join(" "), /would cover everything/);
+});

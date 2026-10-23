@@ -5,42 +5,6 @@ on:
   # D1 migration tests (migrations/) and check:cloudflare-template (wrangler.toml)
   # read most of the repository, so a filter would leave such PRs with no CI.
   pull_request:
-<<<<<<< HEAD
-    paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "docs/AI_CONTEXT.md"
-      - "docs/migration/**"
-      - "scripts/check-migration*.mjs"
-      - "scripts/print-migration-task-context*.mjs"
-      - "scripts/check-project-docs.mjs"
-      - "scripts/check-domain-imports*.mjs"
-      - "scripts/check-server-core-boundaries*.mjs"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "apps/**"
-      - "packages/**"
-      - "src/lib/**"
-      - "src/components/**"
-      - "src/styles/**"
-      - "public/**"
-      - "cloudflare/**"
-      - "middleware.ts"
-      - "next.config.mjs"
-      - "open-next.config.ts"
-      - "instrumentation.ts"
-      - "tsconfig.json"
-      - "wrangler.toml"
-      - "drizzle.config.ts"
-      - "tsconfig.base.json"
-      - "app/**"
-      - "workers/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/migration-docs-check.yml"
-=======
->>>>>>> origin/docs/migration-coverage-gap-tasks
   workflow_dispatch:
 
 concurrency:
@@ -86,7 +50,7 @@ jobs:
           node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
-      - name: ledger網羅検査（行の無いtracked source fileを落とす, MIG-0622）
+      - name: ファイル台帳の網羅性(追跡ソースが台帳行または家族行でカバーされる)
         run: |
           node scripts/check-migration-ledger-completeness.mjs
           node --test scripts/check-migration-ledger-completeness.test.mjs

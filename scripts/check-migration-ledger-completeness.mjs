@@ -14,6 +14,8 @@ const B = "\x60";
 
 // Directories whose tracked files are all required (unless excluded below).
 export const REQUIRED_DIRS = ["app/", "src/lib/", "src/components/", "src/styles/", "public/", "workers/", "cloudflare/"];
+// Small flat directory with one owner: a whole-directory family row is a genuine mapping, not a vacuous cover-all.
+const SINGLE_OWNER_DIRS = ["src/styles/"];
 // Repository-root files that are required.
 export const REQUIRED_ROOT_FILES = [
   "middleware.ts", "next.config.mjs", "open-next.config.ts", "instrumentation.ts", "next-env.d.ts",
@@ -49,7 +51,9 @@ export function parseFamilyRows(markdown) {
     if (cells.length !== 5) { errors.push("family row has " + cells.length + " columns, expected 5: " + line.slice(0, 90)); continue; }
     const pattern = cells[0].replaceAll(B, "");
     if (!pattern.endsWith("/**") || pattern.slice(0, -3).includes("*")) { errors.push("family pattern must be 'dir/**': " + pattern); continue; }
-    rows.push({ prefix: pattern.slice(0, -2), pattern, kind: cells[1], owner: cells[2], target: cells[3], state: cells[4] });
+    const prefix = pattern.slice(0, -2);
+    if (REQUIRED_DIRS.includes(prefix) && !SINGLE_OWNER_DIRS.includes(prefix)) { errors.push("family pattern must be below a top-level required directory (would cover everything): " + pattern); continue; }
+    rows.push({ prefix, pattern, kind: cells[1], owner: cells[2], target: cells[3], state: cells[4] });
   }
   return { rows, errors };
 }
