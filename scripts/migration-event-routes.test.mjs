@@ -42,14 +42,19 @@ const { buildEventReleaseModel, formatDateKey, formatTime } = await import("../a
 const { parseLiveSlots, fetchLiveSlots } = await import("../apps/site/src/lib/liveSlots.ts");
 const { eventSlotsRedirectLines, mergeEventRedirects } = await import("../apps/site/src/integrations/eventRedirects.ts");
 const { buildPageHead } = await import("../apps/site/src/lib/pageHead.ts");
-const { EventsIndexIsland } = await import("../apps/site/src/components/EventsIndexIsland.ts");
-const { EventDetailIsland } = await import("../apps/site/src/components/EventDetailIsland.ts");
-const { EventSlotsIsland } = await import("../apps/site/src/components/EventSlotsIsland.ts");
-const { EventReleaseIsland, modeFromHash } = await import("../apps/site/src/components/EventReleaseIsland.ts");
+// test:unit runs before the ui build, so the Islands (which import @flamenode/ui) load only when packages/ui/dist exists;
+// the CI REQUIRE_BUILT step fails instead of skipping.
+const uiBuilt = fs.existsSync(path.resolve("packages/ui/dist/index.js"));
+const skipUi = uiBuilt ? false : "packages/ui/dist missing: build @flamenode/ui first";
+const { EventsIndexIsland } = uiBuilt ? await import("../apps/site/src/components/EventsIndexIsland.ts") : {};
+const { EventDetailIsland } = uiBuilt ? await import("../apps/site/src/components/EventDetailIsland.ts") : {};
+const { EventSlotsIsland } = uiBuilt ? await import("../apps/site/src/components/EventSlotsIsland.ts") : {};
+const { EventReleaseIsland, modeFromHash } = uiBuilt ? await import("../apps/site/src/components/EventReleaseIsland.ts") : {};
 
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "event/index.html")) && fs.existsSync(path.join(DIST, "event/autumn-collab-2026/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+if (process.env.REQUIRE_BUILT && (skip || skipUi)) throw new Error("REQUIRE_BUILT is set but " + (skip || skipUi));
 const load = (rel) => new JSDOM(fs.readFileSync(path.join(DIST, rel), "utf-8")).window.document;
 const meta = (doc, sel) => doc.querySelector(sel)?.getAttribute("content");
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
@@ -395,14 +400,27 @@ test("U04 release model: CURRENT ordering and date key", () => {
   assert.equal(model.videos[1].collab, true);
   assert.equal(model.videos[0].detailHref, "/dKw1xV41f8s");
   assert.equal(buildEventReleaseModel(data.releases.get("past-event-2020")).videos.length, 0);
-  assert.equal(modeFromHash("#GRID"), "grid");
-  assert.equal(modeFromHash("#creator"), "creator");
-  assert.equal(modeFromHash("#nope"), "list");
-  assert.equal(modeFromHash(""), "list");
+  if (uiBuilt) {
+    assert.equal(modeFromHash("#GRID"), "grid");
+    assert.equal(modeFromHash("#creator"), "creator");
+    assert.equal(modeFromHash("#nope"), "list");
+    assert.equal(modeFromHash(""), "list");
+  }
+});
+
+test("snapshot env: all unset means fixtures, a partly set configuration fails the build (never silently falls back to fixtures)", async () => {
+  assert.equal((await loadEventBuildData({})).source, "fixture");
+  assert.equal((await loadEventBuildData({ FLAMENODE_SNAPSHOT_DIR: " ", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "", FLAMENODE_SNAPSHOT_GENERATION: undefined })).source, "fixture");
+  const full = { FLAMENODE_SNAPSHOT_DIR: "/x", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "/x/manifest.json", FLAMENODE_SNAPSHOT_GENERATION: "g1" };
+  for (const missing of Object.keys(full)) {
+    await assert.rejects(loadEventBuildData({ ...full, [missing]: undefined }), /Snapshot env incomplete/, `${missing} missing`);
+  }
+  // A complete configuration with an unreadable manifest throws too.
+  await assert.rejects(loadEventBuildData(full));
 });
 
 // ---------- Islands (jsdom) ----------
-test("Island /event: server HTML hydrates; query keys filter after mount (G03 reload/back)", async () => {
+test("Island /event: server HTML hydrates; query keys filter after mount (G03 reload/back)", { skip: skipUi }, async () => {
   dom.reconfigure({ url: "https://flamenode.net/event" });
   document.body.innerHTML = "";
   const props = { index: data.index, builtAt: NOW };
@@ -441,7 +459,7 @@ test("Island /event: server HTML hydrates; query keys filter after mount (G03 re
   dom.reconfigure({ url: "https://flamenode.net/event" });
 });
 
-test("Island /event/[id]: live slots fill the counts; a failed read keeps the static body (T05)", async () => {
+test("Island /event/[id]: live slots fill the counts; a failed read keeps the static body (T05)", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
   const run = async (fetchImpl) => {
@@ -482,7 +500,7 @@ test("Island /event/[id]: live slots fill the counts; a failed read keeps the st
   await act(async () => r.unmount());
 });
 
-test("Island /event/[id]/slots: pending -> live names; failure notice; never a button", async () => {
+test("Island /event/[id]/slots: pending -> live names; failure notice; never a button", { skip: skipUi }, async () => {
   const detail = detailOf("autumn-collab-2026");
   const props = { detail, builtAt: NOW };
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ slots: [{ id: "s1", status: "reserved", display_name: "おたこ" }, { id: "s2", status: "available" }, { id: "s3", status: "available" }, { id: "s4", status: "available" }] }) });
@@ -517,7 +535,7 @@ test("Island /event/[id]/slots: pending -> live names; failure notice; never a b
   await act(async () => r.unmount());
 });
 
-test("Island /event/[id]/release: list on the server, mode follows the URL hash like CURRENT", async () => {
+test("Island /event/[id]/release: list on the server, mode follows the URL hash like CURRENT", { skip: skipUi }, async () => {
   const model = buildEventReleaseModel(data.releases.get("autumn-collab-2026"));
   dom.reconfigure({ url: "https://flamenode.net/event/autumn-collab-2026/release" });
   document.body.innerHTML = "";

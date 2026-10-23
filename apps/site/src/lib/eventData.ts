@@ -9,8 +9,6 @@
  * (private, unknown schema) produces no page; the id is logged. An unreadable index renders CURRENT's
  * "一時的に表示できません" state instead of an empty list.
  */
-import fs from "node:fs";
-import path from "node:path";
 import { normalizeStaticEventsIndex, type StaticEventsIndex } from "../../../../src/lib/publicData/staticEventsIndexCore.ts";
 import { normalizeStaticEventDetail, type StaticEventDetail } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
 import { normalizeStaticEventRelease, type StaticEventRelease } from "../../../../src/lib/publicData/staticEventReleaseCore.ts";
@@ -26,6 +24,7 @@ import {
   type SnapshotManifest,
   type SnapshotSource,
 } from "./publicDataLoader.ts";
+import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import {
   FIXTURE_EVENTS_INDEX_PAYLOAD,
   FIXTURE_EVENT_DETAIL_PAYLOADS,
@@ -87,10 +86,9 @@ export async function loadEventBuildData(
   env: Record<string, string | undefined> = process.env,
   injected?: { source: SnapshotSource; manifest: SnapshotManifest; generation: string },
 ): Promise<EventBuildData> {
-  const dir = env.FLAMENODE_SNAPSHOT_DIR?.trim();
-  const manifestFile = env.FLAMENODE_SNAPSHOT_MANIFEST_FILE?.trim();
-  const generation = env.FLAMENODE_SNAPSHOT_GENERATION?.trim();
-  if (!injected && (!dir || !manifestFile || !generation)) {
+  // Fixtures stand in only when NO snapshot variable is set; a partly configured snapshot throws (same as users/listings).
+  const access = injected ? null : snapshotAccessFromEnv(env);
+  if (!injected && !access) {
     return buildEventDataFromPayloads({
       source: "fixture",
       index: FIXTURE_EVENTS_INDEX_PAYLOAD,
@@ -98,15 +96,11 @@ export async function loadEventBuildData(
       releases: FIXTURE_EVENT_RELEASE_PAYLOADS,
     });
   }
-  const manifest = injected?.manifest ?? (JSON.parse(fs.readFileSync(manifestFile!, "utf-8")) as SnapshotManifest);
-  const gen = injected?.generation ?? generation!;
-  const source: SnapshotSource = injected?.source ?? {
-    async read(key) {
-      const file = path.join(dir!, key);
-      return fs.existsSync(file) ? new Uint8Array(fs.readFileSync(file)) : null;
-    },
-  };
-  const options: SnapshotLoadOptions = { manifest, generation: gen };
+  const source: SnapshotSource = injected?.source ?? access!.source;
+  const options: SnapshotLoadOptions = injected
+    ? { manifest: injected.manifest, generation: injected.generation }
+    : access!.options;
+  const manifest = options.manifest;
 
   let indexPayload: unknown | null = null;
   try {

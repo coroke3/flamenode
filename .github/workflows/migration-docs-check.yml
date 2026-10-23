@@ -106,7 +106,7 @@ jobs:
       - name: MIG-0401 synthetic public-only HTML verification
         run: node scripts/check-migration-public-poc-build.mjs
       - name: MIG-0501 fixed-route parity (requires the ui and site builds above; missing build fails; serial because tests run astro build in apps/site)
-        run: REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-fixed-routes.test.mjs scripts/migration-public-shell.test.mjs scripts/migration-list-discover.test.mjs scripts/migration-user-routes.test.mjs
+        run: REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-fixed-routes.test.mjs scripts/migration-public-shell.test.mjs scripts/migration-list-discover.test.mjs scripts/migration-user-routes.test.mjs scripts/migration-event-routes.test.mjs
       - name: MIG-0404 route-map generator verification
         run: node --test --experimental-strip-types scripts/migration-route-map.test.mjs
       - name: MIG-0405 visibility gateway verification

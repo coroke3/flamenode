@@ -250,7 +250,6 @@ mechanics("users: CURRENT listable approval statuses and case-insensitive ids", 
 test("excluded kinds (a kind switched to PAGE_BODY_FORMAT 'excluded'): never written, build HTML untouched, request done; unpublish still deletes", async () => {
   const saved = { ...PAGE_BODY_FORMAT };
   PAGE_BODY_FORMAT.video = "excluded";
-  PAGE_BODY_FORMAT.event = "excluded";
   try {
     await excludedKindsScenario();
   } finally {
@@ -622,11 +621,8 @@ test("characterization: video row -> identical to both SSG pages (internal id an
   assert.equal(html, readDist("repYTid0001"), "alias URL: same document, canonical on the YouTube ID");
 });
 
-test("characterization: event snapshot -> identical to the SSG page; row -> same snapshot fields", async () => {
-  const ssg = readDist("event/rep-event-2026");
-  const stylesheets = distStylesheets(ssg);
+test("characterization: event row -> same snapshot fields (the byte-identical SSG check is replaced by the excluded scenario: /event/[id] is an Island page)", async () => {
   const [snapshot] = await loadRepresentativeEvents();
-  assert.equal(await renderPublicPageHtml(contentFromSnapshot(snapshot), stylesheets), ssg);
   // Row -> snapshot: the stored fields are equal; status / entry come from CURRENT at render time
   // and the period label has no CURRENT source yet (MIG-0502).
   const row = { id: snapshot.id, title: snapshot.title, explanation: snapshot.explanation, icon_url: snapshot.iconUrl, img_url: snapshot.imageUrl ?? null, visibility_status: "public" };
@@ -661,8 +657,8 @@ test("regenerated pages: row text is escaped, stylesheet must be a build asset, 
 
 test("U02 format: production table (Island pages excluded; guards a leaked mechanics override or a hidden production flip); remaining server-rendered kinds ship no JS", async () => {
   assert.deepEqual(PAGE_BODY_FORMAT, PRODUCTION_FORMAT);
-  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "excluded", event: "server-rendered" });
-  for (const [kind, row] of [["video", REP_ROWS.video], ["event", { id: "e", title: "イベント名", explanation: "説明文", visibility_status: "public" }]]) {
+  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "excluded", event: "excluded" });
+  for (const [kind, row] of [["video", REP_ROWS.video]]) {
     const html = await renderPublicPage(kind, row, { stylesheets: [STYLESHEET] });
     assert.ok(!html.includes("island-root") && !html.includes("<script"), kind);
     assert.match(html, /<h1[^>]*>[^<]+<\/h1>/, kind + ": the screen heading is in the HTML");

@@ -67,15 +67,6 @@ export function buildSiteJsonLd(origin: string = siteOrigin()): Record<string, u
   };
 }
 
-/** CURRENT `absoluteUrl`: absolute URLs pass through, paths resolve against the site origin. */
-export function absoluteUrl(pathOrUrl = "/", origin: string = siteOrigin()): string {
-  try {
-    return new URL(pathOrUrl).toString();
-  } catch {
-    return new URL(pathOrUrl.startsWith("/") ? pathOrUrl : `/${pathOrUrl}`, origin).toString();
-  }
-}
-
 export function serializeJsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
