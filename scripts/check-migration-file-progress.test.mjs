@@ -142,7 +142,7 @@ test("changed started file must cite a SHA= newer than base that is a PR commit"
 
 test("PR commit check: old main commit and base fail, branch commit passes",()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"file-progress-git-"));
- const git=(...a)=>execFileSync("git",["-c","user.name=t","-c","user.email=t@t",...a],{cwd:dir,encoding:"utf8"}).trim();
+ const git=(...a)=>execFileSync("git",["-c","user.name=t","-c","user.email=t@t","-c","commit.gpgsign=false",...a],{cwd:dir,encoding:"utf8"}).trim();
  git("init","-q");
  const commit=m=>{git("commit","-q","--allow-empty","-m",m);return git("rev-parse","HEAD");};
  const old=commit("old main"), baseSha=commit("base"), branch=commit("branch");

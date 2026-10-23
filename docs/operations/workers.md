@@ -25,7 +25,7 @@ health probe (`/api/health` とその配下) は既存仕様どおり canonical 
 | Worker | Recovery Cron | Queue | 上限 |
 | --- | --- | --- | --- |
 | `fast-jobs` | 毎時0分 | `flamenode-notification-wake`（consumer/producer） | 通知最大6件、Discord外部request最大12件、DM cache KV書込最大2件。締切リマインダーはleaseで1時間間隔 |
-| `content-jobs` | 毎時15分 | `flamenode-static-rebuild-wake` | Queue Consumer + Recovery。静的queue 1 target。cleanupはleaseで日次 |
+| `content-jobs` | 毎時15分 | `flamenode-static-rebuild-wake` | Queue Consumer + Recovery。静的queue 1 target。cleanupはleaseで日次。artifact SLO refresh sweepはleaseで6時間間隔（detail最大100 + global最大11 target をlow enqueue、D1最大6 statement） |
 | `sync-jobs` | 毎時7分・52分 | `flamenode-youtube-sync-wake` | metadata外部API最大8件、playlist専用実行最大12件（同一invocationでは両方を実行しない）、score最大150件 |
 
 - 認証・関連動画の可変X ID集合は、80件以下だけを通常の`IN`へ展開し、それを超える場合はJSON1の1 bindへ切り替える。承認済みリンクが多い利用者や合作メンバー100人でもD1の100 bind上限を超えず、認可結果と関連動画の並びは維持する。

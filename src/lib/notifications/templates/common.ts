@@ -4,16 +4,18 @@ import {
   type NotificationUrlEnv,
 } from "../format";
 import type { OpsWebhookTarget } from "../forum";
+import type { DiscordBlock } from "@flamenode/server-core/notifications/discordText";
+
+// MIG-0614: moved to packages/server-core so the actor/notification core can use it without src imports.
+export {
+  escapeDiscordMention,
+  type DiscordBlock,
+} from "@flamenode/server-core/notifications/discordText";
 
 export type DiscordAllowedMentions = {
   parse?: Array<"roles" | "users" | "everyone">;
   users?: string[];
   roles?: string[];
-};
-
-export type DiscordBlock = {
-  heading?: string;
-  lines: Array<string | null | undefined | false>;
 };
 
 export type DiscordNotificationBody = DiscordNotificationPayload & {
@@ -38,14 +40,6 @@ export function formatJstDateTime(unixSec: number): string {
 /** 現在時刻を日本時間で返す（通知文面の「送信時刻」用）。 */
 export function formatJstNow(unixSec = Math.floor(Date.now() / 1000)): string {
   return formatJstDateTime(unixSec);
-}
-
-/** Discordメンション誤爆を防ぐためのエスケープ。 */
-export function escapeDiscordMention(text: string): string {
-  return text
-    .replace(/@/g, "@\u200b")
-    .replace(/</g, "\\<")
-    .replace(/>/g, "\\>");
 }
 
 /** 空行・空文字を除去する。 */

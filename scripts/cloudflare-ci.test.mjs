@@ -1388,3 +1388,26 @@ test("smoke waits for stale health and cached top HTML until deployment converge
     }),
   );
 });
+
+test("smoke surfaces the deep health 503 reason code and artifact key", async () => {
+  const base = smokeFetch(COMMIT);
+  const fetchImpl = async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.pathname === "/api/health/deep" && init.headers?.Authorization) {
+      return jsonResponse(
+        { ok: false, service: "flamenode-web", reason: "artifact_stale", key: "rules/current.json" },
+        503,
+      );
+    }
+    return base(input, init);
+  };
+  await assert.rejects(
+    () => runSmoke({
+      env: productionEnv(),
+      expectedCommit: COMMIT,
+      fetchImpl,
+      requestOptions: { attempts: 1, retryDelayMs: 0 },
+    }),
+    /deep health: unexpected status 503\. reason=artifact_stale key=rules\/current\.json/,
+  );
+});
