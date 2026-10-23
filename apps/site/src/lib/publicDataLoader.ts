@@ -218,19 +218,37 @@ function checkedManifest(manifest: SnapshotManifest | null, generation: string, 
   return manifest;
 }
 
+const ENTITY_KEY_PATTERN = /^snapshot\/(video|user|event)\/[a-zA-Z0-9_-]+\.json$/;
+/** CURRENT `GET /api/public/about-stats` (RH-026) as one build-time object. */
+export const ABOUT_STATS_KEY = "snapshot/about-stats/current.json";
+
+export type AboutStatsSnapshot = Readonly<{ publicVideos: number; creators: number; events: number }>;
+
+/** CURRENT `AboutStats.normalizeStats`: three safe non-negative integers or nothing. */
+function validatedAboutStats(value: unknown): AboutStatsSnapshot | null {
+  if (!isRecord(value)) return null;
+  const publicVideos = Number(value.publicVideos);
+  const creators = Number(value.creators);
+  const events = Number(value.events);
+  for (const n of [publicVideos, creators, events]) {
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+  }
+  return { publicVideos, creators, events };
+}
+
 /**
- * Strictly read a versioned, SHA-verified public-only projection.
- * Fail closed on private, stale, invalid, missing or oversized inputs.
- * Does not call D1, Queue, HTTP or production Workers.
+ * Verified envelope payload: manifest, key, size, JSON, generation, visibility and digest checks.
+ * Shared by every snapshot kind; the caller projects the payload strictly.
  */
-export async function loadPublicBuildSnapshot(
+async function readVerifiedPayload(
   source: SnapshotSource,
   key: string,
   options: SnapshotLoadOptions,
-): Promise<PublicSnapshot> {
-  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  metrics: SnapshotBuildMetrics,
+  keyPattern: RegExp,
+): Promise<unknown> {
   const manifest = checkedManifest(options.manifest, options.generation, metrics);
-  if (typeof key !== "string" || !/^snapshot\/(video|user|event)\/[a-zA-Z0-9_-]+\.json$/.test(key)) {
+  if (typeof key !== "string" || !keyPattern.test(key)) {
     return reject(metrics, "INVALID_KEY", "Invalid snapshot key");
   }
   if (manifest.blockedKeys.includes(key) || !manifest.allowedKeys.includes(key)) {
@@ -270,10 +288,38 @@ export async function loadPublicBuildSnapshot(
   if (!HEX_256.test(envelope.sha256)) return reject(metrics, "INVALID_HASH", "Snapshot digest missing");
   const actualHash = createHash("sha256").update(JSON.stringify(envelope.payload)).digest("hex");
   if (actualHash !== envelope.sha256) return reject(metrics, "HASH_MISMATCH", "Snapshot digest mismatch");
-  const dto = validatedPublicDto(envelope.payload);
+  return envelope.payload;
+}
+
+/**
+ * Strictly read a versioned, SHA-verified public-only projection.
+ * Fail closed on private, stale, invalid, missing or oversized inputs.
+ * Does not call D1, Queue, HTTP or production Workers.
+ */
+export async function loadPublicBuildSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<PublicSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, ENTITY_KEY_PATTERN);
+  const dto = validatedPublicDto(payload);
   if (!dto) return reject(metrics, "INVALID_PAYLOAD", "Snapshot public DTO invalid");
   const expectedKey = `snapshot/${dto.kind}/${dto.id}.json`;
   if (expectedKey !== key) return reject(metrics, "ENTITY_MISMATCH", "Snapshot entity ID does not match key");
   metrics.accepted += 1;
   return dto;
+}
+
+/** Same fail-closed checks as entities; the payload is the three RH-026 counts (MIG-0501). */
+export async function loadAboutStatsSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<AboutStatsSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, ABOUT_STATS_KEY, options, metrics, /^snapshot\/about-stats\/current\.json$/);
+  const stats = validatedAboutStats(payload);
+  if (!stats) return reject(metrics, "INVALID_PAYLOAD", "About stats payload invalid");
+  metrics.accepted += 1;
+  return stats;
 }
