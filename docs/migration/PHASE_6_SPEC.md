@@ -772,7 +772,7 @@ PR を revert（bridge が元の実装に戻る。DB・Queue・Route・secret �
 
 ### MIG-0617: `apps/api` の Option A を core に置き換える
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0613 / 0614 / 0602）は merge 済みで STATUS は READY だが、下の「実装前に要る lead 決定」L1〜L3 が決まるまで着手しない（2026-10-23 調査）
+- **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0613 / 0614 / 0602）は merge 済みで STATUS は BLOCKED (lead decisions pending) で、下の「実装前に要る lead 決定」L1〜L3 が決まるまで着手しない（2026-10-23 調査）
 - **Recipe:** R-CORE, R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0613, MIG-0614, MIG-0602 / **Decisions:** D-10 DECIDED
@@ -1301,7 +1301,7 @@ npm run check:project-docs
 PRをrevert。
 ### MIG-0629: admin audit settings + restore dry-run APIs（監査設定・dry-run API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602 は merge 済みで STATUS は READY だが、下の「実装前に要る lead 決定」M1〜M3 が決まるまで着手しない（2026-10-23 調査）
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 は merge 済みで STATUS は BLOCKED (lead decisions pending) で、下の「実装前に要る lead 決定」M1〜M3 が決まるまで着手しない（2026-10-23 調査）
 - **Recipe:** R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0602 / **Decisions:** D-01 DECIDED

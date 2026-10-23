@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0622
+Current Task: MIG-0616
 Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0622
-Last Task PR: #348
-Merged READY: MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0616, MIG-0617, MIG-0618 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0630
+Last Completed Task: MIG-0616
+Last Task PR: #383
+Merged READY: MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -108,9 +108,9 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps) | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0619 / 0622 / 0623 / 0624 DONE) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -313,9 +313,9 @@ Validation:
 | MIG-0613 | audit mutation core + queue wake via ports (D-10) | DONE | MIG-0612 |
 | MIG-0614 | static rebuild enqueue / notifications batch / visibility fence / public cache core (D-10) | DONE | MIG-0613 |
 | MIG-0615 | video/event/xUser visibility transition planners (D-10) | DONE | MIG-0614 |
-| MIG-0616 | audit restore core (D-10) | READY | MIG-0615 |
-| MIG-0617 | replace apps/api Option A copy with core (D-10) | READY | MIG-0613, MIG-0614, MIG-0602 |
-| MIG-0618 | xid merge core (D-10) | READY | MIG-0613 |
+| MIG-0616 | audit restore core (D-10) | DONE | MIG-0615 |
+| MIG-0617 | replace apps/api Option A copy with core (D-10) | BLOCKED | MIG-0613, MIG-0614, MIG-0602 |
+| MIG-0618 | xid merge core (D-10) | DONE | MIG-0613 |
 | MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
 | MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | BLOCKED | MIG-0405 |
 | MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | BLOCKED | MIG-0509 |
@@ -326,9 +326,11 @@ Validation:
 | MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | READY | MIG-0601, MIG-0608 |
 | MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509 |
 | MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | BLOCKED | MIG-0405, MIG-0606 |
-| MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | READY | MIG-0602 |
-| MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | READY | MIG-0623 |
+| MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602 |
+| MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | IN_PROGRESS | MIG-0623 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
+
+MIG-0617 と MIG-0629 は依存が DONE でも、Work Order の未決の lead 決定が残るため BLOCKED。Next: waiting for lead decisions L1-L3 (MIG-0617) / M1-M3 (MIG-0629), see PHASE_6_SPEC.md の各 Work Order。MIG-0630 は IN_PROGRESS（U01/U02a/U03/U04 を #382 で merge、U02b が次の unit）。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
