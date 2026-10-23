@@ -262,12 +262,15 @@ test("an Assets redirect or error is not forwarded as public content", async () 
   }
 });
 
-test("MIG-0406 T02/T03: R2 HTML is served only for the same generation, typed and non-empty; otherwise 503", async () => {
+// What the MIG-0411 consumer writes (pageRenderQueue.ts): identity plus the route generation.
+const EVENT_META = { kind: "event", id: "spring-fest-2026", key: "event/spring-fest-2026", generation: GENERATION };
+
+test("MIG-0406 T02/T03: R2 HTML is served for the same kind/id/key, typed and non-empty; otherwise 503", async () => {
   const html = (overrides = {}) => async () => ({
     body: new Response("<html>r2</html>").body,
     size: 15,
     httpMetadata: { contentType: "text/html; charset=utf-8" },
-    customMetadata: { generation: GENERATION },
+    customMetadata: EVENT_META,
     ...overrides,
   });
   const ok = createEnv({ r2: html() });
@@ -277,7 +280,11 @@ test("MIG-0406 T02/T03: R2 HTML is served only for the same generation, typed an
   assert.deepEqual(ok.calls.r2, ["event/spring-fest-2026/index.html"]);
 
   const cases = {
-    stale: html({ customMetadata: { generation: "gen-old" } }),
+    wrongKind: html({ customMetadata: { ...EVENT_META, kind: "user" } }),
+    wrongId: html({ customMetadata: { ...EVENT_META, id: "other-event" } }),
+    wrongKey: html({ customMetadata: { ...EVENT_META, key: "event/other" } }),
+    noIdentity: html({ customMetadata: { generation: GENERATION } }),
+    noMetadata: html({ customMetadata: undefined }),
     untyped: html({ httpMetadata: {} }),
     notHtml: html({ httpMetadata: { contentType: "application/json" } }),
     empty: html({ size: 0 }),
@@ -287,19 +294,45 @@ test("MIG-0406 T02/T03: R2 HTML is served only for the same generation, typed an
   for (const [name, r2] of Object.entries(cases)) {
     assert.equal((await get("/event/spring-fest-2026", createEnv({ r2 }).env)).status, 503, name);
   }
+  // An older generation is the same page: served (200), not a 503; generation is diagnostic.
+  const old = createEnv({ r2: html({ customMetadata: { ...EVENT_META, generation: "gen-old" } }) });
+  assert.equal((await get("/event/spring-fest-2026", old.env)).status, 200, "stale generation is served");
   // The route data says the page is public, so a missing page is a build gap (503), not a 404.
   assert.equal((await get("/event/spring-fest-2026", createEnv({ r2: async () => null }).env)).status, 503);
   assert.equal((await get("/event/spring-fest-2026", createEnv().env)).status, 503, "no R2 binding");
 });
 
-test("MIG-0406 U02: missing, stale or unreadable R2 HTML asks for one rebuild per key, and the answer stays 503", async () => {
-  const stale = async () => ({
+test("MIG-0406 U02 / F-02: stale generation is served and asks for one rebuild; missing, corrupt or unreadable R2 HTML asks for one and answers 503", async () => {
+  const page = (customMetadata) => async () => ({
     body: new Response("<html>old</html>").body,
     size: 16,
     httpMetadata: { contentType: "text/html" },
-    customMetadata: { generation: "gen-old" },
+    customMetadata,
   });
-  for (const [reason, r2] of [["html_missing", async () => null], ["stale_generation", stale], ["r2_read_failed", async () => { throw new Error("down"); }]]) {
+  // Stale generation: 200 from the old object, one deduplicated rebuild request.
+  const stale = createEnv({ r2: page({ ...EVENT_META, generation: "gen-old" }), queue: true });
+  const staleRes = await get("/event/spring-fest-2026", stale.env);
+  assert.equal(staleRes.status, 200);
+  assert.equal(await staleRes.text(), "<html>old</html>");
+  assert.deepEqual(stale.calls.rebuild.map((m) => m.reason), ["stale_generation"]);
+  // Same generation: served, nothing requested.
+  const fresh = createEnv({ r2: page(EVENT_META), queue: true });
+  assert.equal((await get("/event/spring-fest-2026", fresh.env)).status, 200);
+  assert.deepEqual(fresh.calls.rebuild, []);
+  // Stale page with a failing queue still answers 200.
+  const failing503 = createEnv({ r2: page({ ...EVENT_META, generation: "gen-old" }), queue: "throws" });
+  assert.equal((await get("/event/spring-fest-2026", failing503.env)).status, 200);
+  // Deduplicated per key per isolate.
+  const dedup = createEnv({ r2: page({ ...EVENT_META, generation: "gen-old" }), queue: true });
+  resetRebuildMemory();
+  for (let i = 0; i < 3; i++) {
+    resetGatewayCaches();
+    await gateway.fetch(new Request("https://flamenode.net/event/spring-fest-2026"), dedup.env);
+  }
+  assert.equal(dedup.calls.rebuild.length, 1);
+
+  const mismatch = page({ ...EVENT_META, id: "other-event" });
+  for (const [reason, r2] of [["html_missing", async () => null], ["corrupt_data", mismatch], ["r2_read_failed", async () => { throw new Error("down"); }]]) {
     const { env, calls } = createEnv({ r2, queue: true });
     const res = await get("/event/spring-fest-2026", env);
     assert.equal(res.status, 503, reason);
@@ -342,7 +375,7 @@ test("MIG-0406 U02: missing, stale or unreadable R2 HTML asks for one rebuild pe
 
 test("HEAD is answered like GET without a body from R2", async () => {
   const { env } = createEnv({
-    r2: async () => ({ body: new Response("<html>r2</html>").body, size: 15, httpMetadata: { contentType: "text/html" }, customMetadata: { generation: GENERATION } }),
+    r2: async () => ({ body: new Response("<html>r2</html>").body, size: 15, httpMetadata: { contentType: "text/html" }, customMetadata: EVENT_META }),
   });
   const res = await get("/event/spring-fest-2026", env, { method: "HEAD" });
   assert.equal(res.status, 200);
@@ -615,9 +648,12 @@ test("MIG-0406 U03: per-family time and reads with 52k routes, cold and warm sha
     },
     VISIBILITY_KV: { get: async () => { counts.kv += 1; return null; } },
     R2_STORAGE: {
-      get: async () => {
+      get: async (r2Key) => {
         counts.r2 += 1;
-        return { body: new Response("<html>r2</html>").body, size: 15, httpMetadata: { contentType: "text/html" }, customMetadata: { generation: "gen-cpu-large" } };
+        const key = r2Key.slice(0, -"/index.html".length);
+        const kind = key.startsWith("user/") ? "user" : key.startsWith("event/") ? "event" : "video";
+        const id = kind === "video" ? key : key.slice(kind.length + 1);
+        return { body: new Response("<html>r2</html>").body, size: 15, httpMetadata: { contentType: "text/html" }, customMetadata: { kind, id, key, generation: "gen-cpu-large" } };
       },
     },
   };

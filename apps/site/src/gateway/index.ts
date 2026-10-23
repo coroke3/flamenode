@@ -2,7 +2,7 @@
  * Cloudflare visibility gateway entrypoint (MIG-0405 / Recipe R-GATEWAY / Runtime S1).
  * Thin Worker in front of Static Assets / prebuilt R2 HTML. Per request it reads at most
  * one route shard (Static Assets), one KV revocation entry and one R2 object (ZERO_1102.md S1).
- * A missing, stale or unreadable R2 page answers 503 and asks for a rebuild (MIG-0406 U02).
+ * A missing or unreadable R2 page answers 503 (an older-generation page is served and rebuilt) and asks for a rebuild (MIG-0406 U02).
  * Non-production PoC: no wrangler.toml, Route or Custom Domain uses it yet.
  */
 import type { RouteResolution } from "../lib/routeMap.ts";
@@ -24,13 +24,21 @@ import {
   type RouteLookup,
 } from "./visibility.ts";
 
+import {
+  handlePageRenderQueue,
+  type D1DatabaseLike,
+  type PageRenderOutcome,
+  type PageRenderR2Bucket,
+  type QueueBatch,
+} from "./pageRenderQueue.ts";
+
 type Fetcher = { fetch: (request: Request) => Promise<Response> };
 
 export interface GatewayEnv extends EdgePolicyEnv {
   /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
   ASSETS?: Fetcher;
-  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06). */
-  R2_STORAGE?: R2HtmlBucket;
+  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06); the MIG-0411 consumer writes it. */
+  R2_STORAGE?: R2HtmlBucket & Partial<PageRenderR2Bucket>;
   /** Non-production only: rebuild requests for the MIG-0411 consumer. */
   REBUILD_QUEUE?: RebuildQueue;
   // Explicit service binding to the existing Auth.js origin; never return a fake auth 404.
@@ -38,6 +46,10 @@ export interface GatewayEnv extends EdgePolicyEnv {
   VISIBILITY_KV?: {
     get: (key: string) => Promise<string | null>;
   };
+  /** MIG-0411 consumer only: public_page_renders and the entity rows. Never read by fetch(). */
+  DB?: D1DatabaseLike;
+  /** MIG-0411 consumer only: comma-separated /_astro/*.css paths of the build (page stylesheet link). */
+  PUBLIC_PAGE_STYLESHEETS?: string;
 }
 
 const NO_STORE = "no-store, private";
@@ -170,11 +182,11 @@ async function servePage(
   // The route data says the page is public; without its HTML the answer is 503, not 404.
   if (!env.R2_STORAGE) return unavailable();
   const result = await loadR2PrebuiltHtml(env.R2_STORAGE, decision, request.method, env.REBUILD_QUEUE);
-  if (result.action === "serve") return result.response;
   if (result.rebuild) {
     if (ctx) ctx.waitUntil(result.rebuild);
     else await result.rebuild;
   }
+  if (result.action === "serve") return result.response;
   return unavailable();
 }
 
@@ -268,5 +280,19 @@ export default {
       case "serve":
         return servePage(decision, request, env, ctx);
     }
+  },
+  /** MIG-0411: the REBUILD_QUEUE consumer (max_batch_size = 1, max_concurrency = 1). Non-production. */
+  async queue(batch: QueueBatch, env: GatewayEnv): Promise<PageRenderOutcome[]> {
+    const r2 = env.R2_STORAGE;
+    const writable = r2?.put && r2.delete ? (r2 as PageRenderR2Bucket) : undefined;
+    // Same shard lookup as fetch(): the Assets binding ignores the origin.
+    const lookup: RouteLookup = env.ASSETS
+      ? createShardLookup(env.ASSETS, "https://gateway.invalid")
+      : async () => undefined;
+    return handlePageRenderQueue(
+      batch,
+      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV, PUBLIC_PAGE_STYLESHEETS: env.PUBLIC_PAGE_STYLESHEETS },
+      lookup,
+    );
   },
 };

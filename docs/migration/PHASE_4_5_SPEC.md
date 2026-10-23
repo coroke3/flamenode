@@ -449,7 +449,7 @@ PRをrevert。表は未使用のまま残っても害はない（本番に作る
   ```
   更新 API（S3）は同じ `batch` で `INSERT ... ON CONFLICT DO UPDATE SET requested_at = excluded.requested_at` を1つ足し、doorbell を1つ enqueue する。
 - **U02 render**: `renderPublicPage(entity, row)` は、R-PAGE のページ component を `renderToString` で HTML にする純粋な関数にする。入力の行は `LIMIT` 付きの query（`MAX_` 定数）で読む。
-- **U03 consumer**: 1 message で1ページだけ処理する（`max_batch_size = 1`）。手順: `requested_at > rendered_at` の行を1つ読む → 公開なら HTML を作り R2 の `pages/<entity>/<id>.html` に PUT、非公開・削除済みなら R2 から消す → 条件付き UPDATE（`WHERE requested_at = ?`）で `rendered_at` を進める。処理の途中で新しい更新が来た行は、条件が外れて次の message で作り直される。
+- **U03 consumer**: 1 message で1ページだけ処理する（`max_batch_size = 1`）。手順: `request_version > rendered_version` の行を1つ読む → 公開なら HTML を作り R2 の `r2HtmlKey(<route key>)`（`<route key>/index.html`。gateway が読む key。user は `user/<id>/index.html`、event は `event/<id>/index.html`、作品は URL slug＝YouTube id があればそれ、なければ `videos.id`）に、`customMetadata = { kind, id, key, generation }`（`id` は内部 id＝`videos.id`、`generation` は診断用）付きで PUT、非公開・削除済みなら R2 から消す → 条件付き UPDATE（`WHERE request_version = ?`）で `rendered_version` を進める。gateway は `kind/id/key` が route shard と一致する HTML だけを配信し、`generation` が古いだけなら配信して再生成を1回要求する（503 は html_missing / corrupt_data / r2_read_failed のみ）。処理の途中で新しい更新が来た行は、条件が外れて次の message で作り直される。
 - **U04 recovery**: 既存の Cron（新しい cron 式は足さない。R-JOB）に、未処理の行があれば doorbell を1つ enqueue する段を足す。D1 は1 statement。
 - **U05 measure**: 作品・ユーザー・イベントのそれぞれで、上限ちょうどの入力（関連作品・枠の数が最大のページ）の CPU を `ZERO_1102.md` §5 の方法で測る。max ≥ 8ms の種類は対象から外し、MIG-0509 の build に回す（PR に記録）。
 #### Test cases

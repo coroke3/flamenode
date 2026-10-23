@@ -30,9 +30,9 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
 | Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
-| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | **Queue, one page per message → R2 HTML** | MIG-0411 |
-| User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML | MIG-0411 |
-| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | Queue → R2 HTML | MIG-0411 |
+| Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | Queue → R2 HTML, **server-rendered like the build's static page** (MIG-0403 mapping, empty lists; warm max ≈ 1.2 ms local Node wall). **Re-measure when MIG-0502 / MIG-0507 add lists** (upper-bound with lists: 25–49 ms) | MIG-0411 |
+| User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
+| Event `/event/[id]` | 60 s (`app/(public)/event/[id]/page.tsx:61`) | event / staff edit | Queue → R2 HTML, **server-rendered like the build's static page** (empty lists; warm max ≈ 0.5 ms). Upper-bound with lists 5.4–8.7 ms is borderline: re-measure when lists are added | MIG-0411 |
 | Slot vacancy (`/event/[id]/slots`) | 30 s (`slots/page.tsx:32`) | reservation / release | **API (S2) from an Island** | MIG-06xx (slots) |
 | Like count, viewer overlay | per request | like, session | API (S2) from an Island | MIG-06xx |
 
@@ -101,8 +101,11 @@ Current gateway behaviour (MIG-0405/0406, `apps/site/src/gateway/index.ts`, `r2H
 
 - A path not in the route shards answers **404** (the route manifest is produced by the build,
   so a work created after the last build is unknown to the gateway until the next build).
-- A path in the shards whose R2 HTML is missing / from another generation / unreadable answers
-  **503** and sends one `rebuild-page` message (once per key per isolate per minute).
+- A path in the shards whose R2 HTML is missing, unreadable, or whose `customMetadata`
+  `{ kind, id, key }` does not equal the shard resolution answers **503** and sends one
+  `rebuild-page` message (once per key per isolate per minute). An object of an older
+  `generation` (same kind/id/key) is **served (200)** and one rebuild is requested (F-02);
+  build-written HTML (MIG-0509) must carry the same `{ kind, id, key, generation }` metadata.
 
 The Work Order default ("serve a static shell and let the Island read the API") is **not
 implemented**. The 2026-10-18 approval did not cover it, so the current 404/503 behaviour stays;
@@ -148,9 +151,36 @@ video and the event release section exceed it even without D1 time; user and eve
 below it; event base and the composer are borderline. Not a final classification: ZERO_1102 §5
 requires a workerd profile.
 
-U05 (a) full `experimental_AstroContainer.renderToString` per kind: **NOT MEASURED** — no Astro
-page components for video / user / event exist yet (Phase 5). Restart: when R-PAGE components
-land, render the same inputs with this harness.
+U05 (a) server-rendered page per kind — **measured in MIG-0411 (PR #326)**: React `renderToString`
+of the shared `@flamenode/ui` screens (MIG-0205) inside the site adapters (MIG-0402), which is
+what Astro itself calls for React components; `experimental_AstroContainer` was not used because
+no `.astro` R-PAGE page exists yet (MIG-0403) and the gateway Worker bundles no Astro runtime.
+Upper-bound inputs (video 100 members / 128 chapters / 30 related; event 8 works / 20 staff /
+20 slot parts; user 8 + 8 works; 1,000-char titles, 10,000-char bodies), NODE_ENV=production,
+max of 300 warm renders, 6 runs (`project-files/migration-review/pr326-u05a-render-to-string.log`):
+
+| Kind | p50 | p95 | max | HTML | Format chosen |
+| --- | --- | --- | --- | --- | --- |
+| Video | 1.7–2.8 ms | 5.4–6.8 ms | 25.3–48.8 ms | 591 KB | upper bound only; server-rendered with the build's empty lists (see update below) |
+| User | 0.3–0.6 ms | 0.9–1.9 ms | 4.4–5.8 ms | 166 KB | server-rendered |
+| Event | 0.5–0.8 ms | 1.0–1.5 ms | 5.4–8.7 ms | 157 KB | upper bound only (borderline); server-rendered with the build's empty lists |
+
+The first render in a fresh isolate also evaluates React and the UI (8.7–12.0 ms for the
+wrangler-like bundle; 114 ms wall on a Windows Node with unbundled modules), which alone exceeds
+8 ms; whether that counts against the consumer's CPU is part of the U07 / workerd check.
+
+Update (2026-10-23, takeover of PR #326): the Queue renders the same document as the build.
+MIG-0403's pages are static (no Island, no JavaScript; lists and totals are not in the snapshot
+yet), so the earlier Island-shell fallback is not needed. The consumer maps the D1 row to the
+snapshot shape, uses `publicPages.ts` (head + screen props), `StaticScreen` and the
+`PublicPage.astro` shell, and `pageRenderQueue.test.mjs` compares the result with the Astro
+`dist` HTML byte for byte (user, video incl. the YouTube-ID alias, event). With the build's
+empty lists the render is small (`renderPublicPage.measure.mjs --snapshot`, 3 runs of 300 warm
+renders, local Node on Windows, wall ms, max-size text: video max 0.8–1.2, user 0.7–0.8, event
+0.4–0.5; `process.cpuUsage()` ticks at about 15.6 ms there and is not usable per render). The
+upper-bound table above applies when the snapshot gains lists (members, chapters, related, works,
+staff, slots): re-measure then, and set the kind back to `excluded` in `PAGE_BODY_FORMAT` if it
+reaches 8 ms. Not measured in workerd (ZERO_1102 §5).
 
 ### U06 list / search shards
 
@@ -296,14 +326,15 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | --- | --- | --- | --- |
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
-| Gateway `rebuild-page` after a build that changes the route generation (each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
+| Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
 
 With realistic update rates (far below one update per entity per day) the first two rows stay
-well inside 50 %. The third row is the risk: R2 HTML is accepted only when its generation equals
-the route shard generation (`r2Html.ts`), so if every data build (≤ 24/day) produced a new
-generation, every visited detail page would answer 503 and be re-rendered after each build —
-up to 1,460 × 24 ≈ 35,000 messages/day, 10× the free tier. MIG-0509 must therefore keep the
-route generation unchanged across data-only builds (e.g. derive it from the route manifest
-content), or the gateway contract must change; that is a design decision for the lead and the
-owner, recorded in MIG-0411.
+well inside 50 %. The third row used to be the risk: a generation mismatch answered 503. Decided
+2026-10-23 (F-02): the gateway accepts R2 HTML on identity (`kind`/`id`/`key`); generation is
+diagnostic, so a stale page is served and one deduplicated rebuild is requested. Visitors no
+longer see 503 after each build. The rebuild requests themselves can still reach
+1,460 × builds/day (≈ 35,000 messages/day) if every build changes the generation and every
+visited page asks once; keeping the route generation across data-only builds (MIG-0509) remains
+the way to bring that down. Unpublish and slug changes stay fenced by KV `deny:`, the consumer's
+R2 delete, and the route key.
 

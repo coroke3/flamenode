@@ -28,6 +28,7 @@ export const RUNTIME_CRITICAL_TABLES = Object.freeze([
   "notification_outbox",
   "ops_incident_state",
   "public_build_state",
+  "public_page_renders",
   "public_visibility_fences",
   "session",
   "slots",

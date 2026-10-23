@@ -1427,3 +1427,21 @@ export const publicBuildState = sqliteTable(
     hooks_today: integer("hooks_today").notNull().default(0),
   },
 );
+
+export const publicPageRenders = sqliteTable(
+  "public_page_renders",
+  {
+    entity: text("entity", { enum: ["video", "user", "event"] }).notNull(),
+    entity_id: text("entity_id").notNull(),
+    requested_at: integer("requested_at").notNull(),
+    rendered_at: integer("rendered_at").notNull().default(0),
+    request_version: integer("request_version").notNull().default(1),
+    rendered_version: integer("rendered_version").notNull().default(0),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.entity, t.entity_id] }),
+    pendingIdx: index("public_page_renders_pending_idx")
+      .on(t.requested_at)
+      .where(sql`request_version > rendered_version`),
+  }),
+);
