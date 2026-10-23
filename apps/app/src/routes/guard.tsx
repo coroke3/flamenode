@@ -1,5 +1,6 @@
 import * as React from "react";
-import type { PersonalApi, PersonalSessionUser, SessionState } from "../api/session.js";
+import type { PersonalUser } from "@flamenode/contracts";
+import type { ApiResult, PersonalApi, SessionState } from "../api/personal.js";
 import { entryLoginHref } from "./next.js";
 
 /** Same markup/text as CURRENT RequireAuthRedirect (src/lib/auth/guard.tsx). */
@@ -95,13 +96,64 @@ export function GateView({
 }: {
   state: SessionState;
   next: string;
-  children: (user: PersonalSessionUser) => React.ReactNode;
+  children: (user: PersonalUser) => React.ReactNode;
 }): React.ReactElement {
   if (state.status === "loading") return <SessionLoading />;
   if (state.status === "unavailable") return <AuthUnavailable />;
   if (state.status === "anonymous") return <LoginRequired next={next} />;
-  if (state.user.is_banned === 1) return <BannedNotice />;
+  if (state.status === "banned" || state.user.is_banned === 1) return <BannedNotice />;
   return <>{children(state.user)}</>;
+}
+
+export type DataState<T> = { status: "loading" } | ApiResult<T>;
+const LOADING = { status: "loading" } as const;
+
+/**
+ * Loads one Personal read endpoint. `key` identifies the request (path + query); a new key aborts the
+ * previous request and goes back to "loading". The session is not read separately: every
+ * /api/personal/* endpoint answers 401/403 itself (one request per screen, not two).
+ */
+export function useApiResult<T>(
+  api: PersonalApi,
+  key: string,
+  load: (api: PersonalApi, signal: AbortSignal) => Promise<ApiResult<T>>,
+): DataState<T> {
+  const [state, setState] = React.useState<DataState<T>>(LOADING);
+  const loadRef = React.useRef(load);
+  loadRef.current = load;
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    setState(LOADING);
+    loadRef.current(api, ctrl.signal).then(
+      (r) => {
+        if (!ctrl.signal.aborted) setState(r);
+      },
+      () => {
+        if (!ctrl.signal.aborted) setState({ status: "unavailable" });
+      },
+    );
+    return () => ctrl.abort();
+  }, [api, key]);
+  return state;
+}
+
+/** Same gate order as GateView, for a data endpoint. `unavailable` lets a screen keep CURRENT's own degraded view. */
+export function ResultView<T>({
+  state,
+  next,
+  unavailable,
+  children,
+}: {
+  state: DataState<T>;
+  next: string;
+  unavailable?: React.ReactNode;
+  children: (data: T) => React.ReactNode;
+}): React.ReactElement {
+  if (state.status === "loading") return <SessionLoading />;
+  if (state.status === "unavailable") return <>{unavailable ?? <AuthUnavailable />}</>;
+  if (state.status === "anonymous") return <LoginRequired next={next} />;
+  if (state.status === "banned") return <BannedNotice />;
+  return <>{children(state.data)}</>;
 }
 
 export function useSession(api: PersonalApi): SessionState {
@@ -128,7 +180,7 @@ export function SessionGate({
 }: {
   api: PersonalApi;
   next: string;
-  children: (user: PersonalSessionUser) => React.ReactNode;
+  children: (user: PersonalUser) => React.ReactNode;
 }): React.ReactElement {
   return <GateView state={useSession(api)} next={next} children={children} />;
 }
