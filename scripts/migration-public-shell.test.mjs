@@ -23,6 +23,7 @@ const built = fs.existsSync(path.join(DIST, "about/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
 const uiBuilt = fs.existsSync(path.resolve("packages/ui/dist/index.js"));
 const skipUi = uiBuilt ? false : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && (skip || skipUi)) throw new Error("REQUIRE_BUILT is set but " + (skip || skipUi));
 const html = (file) => fs.readFileSync(path.join(DIST, file), "utf-8");
 const dom = (file) => new JSDOM(html(file)).window.document;
 const rootLayout = fs.readFileSync("app/layout.tsx", "utf-8");
