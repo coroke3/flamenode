@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-const mergeSource = readFileSync(new URL("./merge.ts", import.meta.url), "utf8");
+// MIG-0618: the flow and the revert-window constant live in packages/server-core; the contract spans both files.
+const mergeSource =
+  readFileSync(new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url), "utf8") +
+  readFileSync(new URL("../../../packages/server-core/src/xid/mergeCore.ts", import.meta.url), "utf8");
 
 function normalizedEquals(column) {
   return `lower(trim(ltrim(trim(${column}), '@'))) = lower(?)`;

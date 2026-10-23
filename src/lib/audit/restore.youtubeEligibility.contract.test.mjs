@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const source = readFileSync(
-  fileURLToPath(new URL("./restore.ts", import.meta.url)),
+  fileURLToPath(new URL("../../../packages/server-core/src/audit/restore.ts", import.meta.url)),
   "utf8",
 );
 

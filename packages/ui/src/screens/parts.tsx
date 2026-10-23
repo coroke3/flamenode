@@ -27,6 +27,7 @@ const ICON_PATHS = {
   search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm9 3-4.5-4.5",
   sort: "M4 6h13M4 12h9M4 18h5M19 5v14m0 0-3-3m3 3 3-3",
   heart: "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z",
+  warning: "M12 4l9 16H3zM12 10v4m0 3h.01",
 } as const;
 
 export type ScreenIconName = keyof typeof ICON_PATHS;

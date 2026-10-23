@@ -176,8 +176,9 @@ export function validateMigrationExecution({
       "MIG-0409": ["MIG-0404"],
       "MIG-0410": ["MIG-0409"],
       "MIG-0411": ["MIG-0405", "MIG-0409"],
-      // D-09: the Phase 4 Gate also needs the build-time data path, its build scheduler and per-page regeneration.
-      "MIG-0407": ["MIG-0403", "MIG-0406", "MIG-0410", "MIG-0411"],
+      // Owner decision 2026-10-23 (Yugo, ref cmsg_01AJzh3ov5j8ZhPEfvz4FDRV6E3GxpZmzc8G1U8Q4StkYS): the Gate depends on 0403 + 0406 only.
+      // The D-09 tasks (0409/0410/0411) are tracked by their own work items; their production steps are accepted deferrals in PHASE_4_GATE.md section 5.
+      "MIG-0407": ["MIG-0403", "MIG-0406"],
     };
     for (const [id, deps] of Object.entries(expected)) {
       const actual = dependencyGraph.get(id) ?? [];

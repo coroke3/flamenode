@@ -55,16 +55,19 @@ const moderationAdmin = readFileSync(
 assert.match(moderationAdmin, /planVideoVisibilityTransition/);
 assert.match(moderationAdmin, /buildAfterVideoStatusChangeQueueBatch|planVideoVisibilityTransition/);
 
-const transition = readFileSync(
-  path.join(root, "src/lib/video/videoVisibilityTransition.ts"),
-  "utf8",
-);
+// MIG-0615: the planner lives in packages/server-core; the bridge wires the notification builder.
+const transition = [
+  "packages/server-core/src/visibility/videoTransition.ts",
+  "src/lib/video/videoVisibilityTransition.ts",
+]
+  .map((file) => readFileSync(path.join(root, file), "utf8"))
+  .join("\n");
 assert.match(transition, /buildAfterVideoStatusChangeQueueBatch/);
 assert.match(transition, /buildVideoStatusChangeNotificationBatch/);
 assert.match(transition, /preCommitVideoVisibilityDepublicization/);
 
 const openCases = readFileSync(
-  path.join(root, "src/lib/moderation/openCases.ts"),
+  path.join(root, "packages/server-core/src/moderation/openCases.ts"),
   "utf8",
 );
 assert.match(openCases, /planVoidModerationCaseOpen/);
