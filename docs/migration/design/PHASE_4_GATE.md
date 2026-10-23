@@ -15,8 +15,8 @@
 
 | Task | 対象 / スコープ | 所有パス | 実装状況 | main 統合状態 |
 | :--- | :--- | :--- | :--- | :--- |
-| **MIG-0401** | Public snapshot loader & fixture PoC | `apps/site/src/lib/publicDataLoader.ts`, `apps/site/src/pages/migration-fixture-poc` | 実装完了 | **merge 済み**（`36bf4c67`, PR #283） |
-| **MIG-0404** | Build-time route-map generator | `apps/site/src/lib/routeMap.ts` | 実装完了 | **merge 済み**（`c3203081`, PR #305） |
+| **MIG-0401** | Public snapshot loader & fixture PoC | `apps/site/src/lib/publicDataLoader.ts`, `apps/site/src/pages/migration-fixture-poc` | 実装完了 | **merge 済み**（`03972deb`, PR #283） |
+| **MIG-0404** | Build-time route-map generator | `apps/site/src/lib/routeMap.ts` | 実装完了 | **merge 済み**（`62b8dad7`, PR #305） |
 | **MIG-0405** | Thin visibility gateway Worker | `apps/site/src/gateway/**` | 実装完了 | **merge 済み**（`b8817d6e`, PR #313） |
 | **MIG-0406** | CPU benchmark & capacity verification | `PERF_HOTPATH_MATRIX.md`, `scripts/check-public-site-build-budget.*` | 実装完了 | **merge 済み**（`1e435c4d`, PR #314） |
 | **MIG-0409** | Build-time public data from D1 (D-09) | `apps/site/scripts/readPublicData.ts`, `apps/site/src/lib/BUILD_TIME_DATA.md` | U01/02/04 完了、U03/U07 は owner の Cloudflare 操作待ち（work-item 参照） | **merge 済み**（`4f90bc9d`, PR #323） |
