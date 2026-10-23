@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0622
 Last Task PR: #348
-Merged READY: MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0616, MIG-0617, MIG-0618 (remainder), MIG-0629, MIG-0630
+Merged READY: MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0616, MIG-0617, MIG-0618 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0630
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -317,13 +317,13 @@ Validation:
 | MIG-0617 | replace apps/api Option A copy with core (D-10) | READY | MIG-0613, MIG-0614, MIG-0602 |
 | MIG-0618 | xid merge core (D-10) | READY | MIG-0613 |
 | MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
-| MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | IN_PROGRESS | MIG-0405 |
+| MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | BLOCKED | MIG-0405 |
 | MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | BLOCKED | MIG-0509 |
 | MIG-0622 | ledger completeness checker (every tracked CURRENT file has a FILE_MIGRATION_MATRIX row) | DONE | — |
 | MIG-0623 | Entry page read APIs | DONE | MIG-0601, MIG-0608 |
 | MIG-0624 | Manage page read APIs | DONE | MIG-0601, MIG-0608 |
-| MIG-0625 | Admin read APIs part A (users/videos/events/moderation) | IN_PROGRESS | MIG-0601, MIG-0608 |
-| MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | IN_PROGRESS | MIG-0601, MIG-0608 |
+| MIG-0625 | Admin read APIs part A (users/videos/events/moderation) | BLOCKED | MIG-0601, MIG-0608 |
+| MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | READY | MIG-0601, MIG-0608 |
 | MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509 |
 | MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | BLOCKED | MIG-0405, MIG-0606 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | READY | MIG-0602 |
@@ -339,7 +339,7 @@ MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を�
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | IN_PROGRESS | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
+| MIG-0701 | dashboard read-only | BLOCKED | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
 | MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
 | MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703, MIG-0624 |
