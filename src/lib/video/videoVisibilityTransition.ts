@@ -29,6 +29,7 @@ import {
   planVideoVisibilityTransition as planVideoVisibilityTransitionCore,
   preCommitVideoVisibilityDepublicization as preCommitVideoVisibilityDepublicizationCore,
   runVideoVisibilityTransitionPostCommit as runVideoVisibilityTransitionPostCommitCore,
+  type VideoPublicCacheKeyHost,
   type VideoVisibilityTransitionHost,
 } from "@flamenode/server-core/visibility/videoTransition";
 
@@ -40,27 +41,32 @@ export {
   type VideoVisibilityTransitionPlan,
 } from "@flamenode/server-core/visibility/videoTransition";
 
-/** Key constants stay beside their generators in src/lib/publicData; the core receives them here. */
+/**
+ * Key constants stay beside their generators in src/lib/publicData; the core receives them here.
+ * Shared with the audit restore bridge so both clear the same object key set.
+ */
+export const nextVideoPublicCacheKeyHost: VideoPublicCacheKeyHost = {
+  staticObjectKeys: [
+    RANDOM_VIDEO_POOL_OBJECT_KEY,
+    YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
+    TOP_RECOMMENDED_OBJECT_KEY,
+    TOP_LATEST_OBJECT_KEY,
+    TOP_NOSTALGIC_OBJECT_KEY,
+    TOP_STATS_OBJECT_KEY,
+  ],
+  userMaxPages: STATIC_USER_MAX_PAGES,
+  eventObjectKeys: (eventId) => [
+    eventComposedObjectKey(eventId),
+    eventBaseObjectKey(eventId),
+    eventSlotsObjectKey(eventId),
+    eventReleaseObjectKey(eventId),
+  ],
+};
+
 const videoVisibilityTransitionHost: VideoVisibilityTransitionHost = {
   manifest: nextVisibilityManifestHost,
   rethrowFrameworkControl: nextRethrowFrameworkControl,
-  publicCacheKeys: {
-    staticObjectKeys: [
-      RANDOM_VIDEO_POOL_OBJECT_KEY,
-      YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY,
-      TOP_RECOMMENDED_OBJECT_KEY,
-      TOP_LATEST_OBJECT_KEY,
-      TOP_NOSTALGIC_OBJECT_KEY,
-      TOP_STATS_OBJECT_KEY,
-    ],
-    userMaxPages: STATIC_USER_MAX_PAGES,
-    eventObjectKeys: (eventId) => [
-      eventComposedObjectKey(eventId),
-      eventBaseObjectKey(eventId),
-      eventSlotsObjectKey(eventId),
-      eventReleaseObjectKey(eventId),
-    ],
-  },
+  publicCacheKeys: nextVideoPublicCacheKeyHost,
   buildNotificationBatch: buildVideoStatusChangeNotificationBatch,
   invalidateEventExportCaches,
   deletePublicJsonCaches,
