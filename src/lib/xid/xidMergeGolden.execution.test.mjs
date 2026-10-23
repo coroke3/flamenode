@@ -212,31 +212,10 @@ if (runTestWithTsx(import.meta.url)) {
     "audit_logs",
   ];
 
-  /**
-   * CURRENT behaviour finding: the merge AFTER-state assertion compiles to 141 bound parameters
-   * (97 for the before-state), above D1's limit of 100, whatever the data. So the shipped
-   * executeApprovedXIdMergeRequest throws in assertAtomicAuditMutationBindLimits before it ever
-   * writes. The scenario `merge_as_shipped_exceeds_d1_bind_limit` pins that. Every other
-   * scenario relaxes ONLY the pre-flight bind count (the in-memory SQLite has no such limit), by
-   * hiding the extra params from the caller named getStatementBindCount, so the batch SQL, params,
-   * audits, queue rows and ordering are still pinned. Execution itself is untouched.
-   */
-  function relaxBindPreflight(db) {
-    const dialect = db.dialect;
-    const original = dialect.sqlToQuery.bind(dialect);
-    dialect.sqlToQuery = (query) => {
-      const compiled = original(query);
-      if (new Error().stack.includes("getStatementBindCount")) {
-        return { ...compiled, params: compiled.params.slice(0, 1) };
-      }
-      return compiled;
-    };
-  }
-
   async function runScenario(
     name,
     body,
-    { seedRelations = true, extraSeed = "", relaxBindCheck = true } = {},
+    { seedRelations = true, extraSeed = "" } = {},
   ) {
     const sqlite = new DatabaseSync(":memory:");
     for (const migration of migrations) sqlite.exec(migration);
@@ -248,7 +227,6 @@ if (runTestWithTsx(import.meta.url)) {
     const log = [];
     const d1 = createD1(sqlite, log);
     const db = drizzle(d1, { schema });
-    if (relaxBindCheck) relaxBindPreflight(db);
     const bucket = createBucket(log);
     const pendingWaitUntil = [];
     const queue = (binding) => ({
@@ -330,10 +308,9 @@ if (runTestWithTsx(import.meta.url)) {
         ),
     ],
     [
-      "merge_as_shipped_exceeds_d1_bind_limit",
+      "merge_as_shipped_within_d1_bind_limit",
       ({ db, readRequest }) =>
         merge.executeApprovedXIdMergeRequest(db, mergeInput(readRequest("req-merge"))),
-      { relaxBindCheck: false },
     ],
     [
       "merge_then_revert",

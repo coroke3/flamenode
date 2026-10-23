@@ -255,4 +255,39 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(evaluate(db, condition).ok, false);
     db.close();
   });
+
+  test("merge state assertions stay under the D1 bind limit in both phases and still detect concurrent change", () => {
+    const input = snapshot();
+    const before = buildXIdMergeBeforeState(input);
+    const after = buildXIdMergeAfterState(input, {
+      sourceXUserId: source,
+      targetXUserId: target,
+      now,
+    });
+    for (const [state, phase] of [[before, "before"], [after, "after"]]) {
+      const query = dialect.sqlToQuery(sql`SELECT ${xIdMergeStateMatchesSql(state, {
+        sourceXUserId: source,
+        targetXUserId: target,
+        phase,
+      })} AS ok`);
+      assert.ok(
+        query.params.length <= 100,
+        `${phase} bind count ${query.params.length} exceeds D1 limit 100`,
+      );
+      // JSON paths are inlined literals, never binds.
+      assert.ok(!query.params.some((value) => typeof value === "string" && value.startsWith("$.")));
+    }
+
+    const db = makeDatabase();
+    insertState(db, after);
+    const condition = xIdMergeStateMatchesSql(after, {
+      sourceXUserId: source,
+      targetXUserId: target,
+      phase: "after",
+    });
+    assert.equal(evaluate(db, condition).ok, true);
+    db.prepare("UPDATE videos SET updated_at = updated_at + 1 WHERE id = 'video-1'").run();
+    assert.equal(evaluate(db, condition).ok, false, "concurrent change must fail the CAS");
+    db.close();
+  });
 }
