@@ -1,0 +1,50 @@
+{
+  "name": "@flamenode/server-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./ports": "./src/ports.ts",
+    "./db": "./src/db.ts",
+    "./id": "./src/id.ts",
+    "./observability/flowTrace": "./src/observability/flowTrace.ts",
+    "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
+    "./audit/adapters": "./src/audit/adapters.ts",
+    "./audit/capability": "./src/audit/capability.ts",
+    "./audit/diff": "./src/audit/diff.ts",
+    "./audit/expectedRowCondition": "./src/audit/expectedRowCondition.ts",
+    "./audit/helpers": "./src/audit/helpers.ts",
+    "./audit/logger": "./src/audit/logger.ts",
+    "./audit/mutate": "./src/audit/mutate.ts",
+    "./audit/mutateBudget": "./src/audit/mutateBudget.ts",
+    "./audit/postCommit": "./src/audit/postCommit.ts",
+    "./audit/registry": "./src/audit/registry.ts",
+    "./audit/retention": "./src/audit/retention.ts",
+    "./audit/settings": "./src/audit/settings.ts",
+    "./audit/snapshot": "./src/audit/snapshot.ts",
+    "./audit/types": "./src/audit/types.ts",
+    "./queues/featureFlags": "./src/queues/featureFlags.ts",
+    "./queues/sendQueueWakeBestEffort": "./src/queues/sendQueueWakeBestEffort.ts",
+    "./queues/wakeBudget": "./src/queues/wakeBudget.ts",
+    "./queues/wakeFailureRecord": "./src/queues/wakeFailureRecord.ts",
+    "./queues/wakeFailureRecordCore": "./src/queues/wakeFailureRecordCore.ts",
+    "./queues/wakeMessage": "./src/queues/wakeMessage.ts",
+    "./queues/wakeNotificationQueueAfterCommit": "./src/queues/wakeNotificationQueueAfterCommit.ts",
+    "./queues/wakeStaticRebuildQueueAfterCommit": "./src/queues/wakeStaticRebuildQueueAfterCommit.ts",
+    "./queues/youtubePlaylistSyncWake": "./src/queues/youtubePlaylistSyncWake.ts",
+    "./queues/youtubeSyncWake": "./src/queues/youtubeSyncWake.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@flamenode/db": "*",
+    "@flamenode/domain": "*",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

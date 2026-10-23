@@ -1,0 +1,2055 @@
+{
+  "announcement_update_with_static_rebuild_and_notification_wake": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE announcements SET title = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+            "params": [
+              "Hello v2",
+              2000,
+              "ann-1",
+              1000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "INSERT INTO static_rebuild_queue (id, target_type, target_id, reason, status, priority, attempt_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "params": [
+              "srq-1",
+              "announcements",
+              "all",
+              "announcement_update",
+              "pending",
+              "normal",
+              0,
+              1000,
+              1000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      },
+      {
+        "op": "waitUntil"
+      },
+      {
+        "op": "queue.send",
+        "binding": "NOTIFICATION_WAKE_QUEUE",
+        "message": {
+          "version": 1,
+          "kind": "notification_available",
+          "source": "web",
+          "requested_at": 1760000000,
+          "trace_id": "00000000-0000-4000-8000-000000000002"
+        }
+      },
+      {
+        "op": "waitUntil"
+      },
+      {
+        "op": "queue.send",
+        "binding": "STATIC_REBUILD_WAKE_QUEUE",
+        "message": {
+          "version": 1,
+          "kind": "static_rebuild_available",
+          "source": "admin",
+          "requested_at": 1760000000,
+          "trace_id": "00000000-0000-4000-8000-000000000003"
+        }
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 1000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello v2",
+        "is_published": 1,
+        "updated_at": 2000
+      }
+    ]
+  },
+  "events_cas_update_succeeds_with_builder": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "update \"events\" set \"title\" = ?, \"updated_at\" = ? where \"events\".\"id\" = ? AND \"id\" = ? AND \"title\" = ? AND \"visibility_status\" = ? AND \"updated_at\" = ?",
+            "params": [
+              "Event Renamed",
+              2000,
+              "evt-1",
+              "evt-1",
+              "Event One",
+              "private",
+              1000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "events",
+              "evt-1",
+              "UPDATE",
+              "{\"id\":\"evt-1\",\"title\":\"Event One\",\"visibility_status\":\"private\",\"updated_at\":1000}",
+              "{\"id\":\"evt-1\",\"title\":\"Event Renamed\",\"visibility_status\":\"private\",\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Event One\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              "event_rename",
+              "restorable",
+              "update_before",
+              "restorable",
+              168,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "events",
+        "target_id": "evt-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"evt-1\",\"title\":\"Event One\",\"visibility_status\":\"private\",\"updated_at\":1000}",
+        "after_json": "{\"id\":\"evt-1\",\"title\":\"Event Renamed\",\"visibility_status\":\"private\",\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Event One\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": "event_rename",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 168,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event Renamed",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "events_cas_conflict_rolls_back_without_audit_or_wake": {
+    "outcome": {
+      "threw": "malformed JSON"
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "update \"events\" set \"title\" = ?, \"updated_at\" = ? where \"events\".\"id\" = ? AND \"id\" = ? AND \"title\" = ? AND \"visibility_status\" = ? AND \"updated_at\" = ?",
+            "params": [
+              "Event Renamed",
+              2000,
+              "evt-1",
+              "evt-1",
+              "Stale Title",
+              "private",
+              999
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "events",
+              "evt-1",
+              "UPDATE",
+              "{\"id\":\"evt-1\",\"title\":\"Stale Title\",\"visibility_status\":\"private\",\"updated_at\":999}",
+              "{\"id\":\"evt-1\",\"title\":\"Event Renamed\",\"visibility_status\":\"private\",\"updated_at\":999}",
+              "[\"title\"]",
+              "{\"title\":\"Stale Title\"}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "normal",
+              "update_before",
+              "restorable",
+              168,
+              1767776000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.rollback",
+        "error": "malformed JSON"
+      }
+    ],
+    "audit_logs": [],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 1000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "payload_exceeded_drops_snapshots_and_marks_not_restorable": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "events",
+              "evt-1",
+              "UPDATE",
+              null,
+              null,
+              null,
+              null,
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "restorable",
+              "update_before",
+              "not_restorable",
+              648,
+              1775552000,
+              1760000000,
+              "payload_exceeded",
+              "監査ペイロードが上限を超えたため復元できません。"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "events",
+        "target_id": "evt-1",
+        "operation": "UPDATE",
+        "before_json": null,
+        "after_json": null,
+        "changed_keys_json": null,
+        "inverse_patch_json": null,
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "not_restorable",
+        "restore_unavailable_reason_code": "payload_exceeded",
+        "restore_unavailable_message": "監査ペイロードが上限を超えたため復元できません。",
+        "payload_size_bytes": 648,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "redaction_masks_secrets_and_keeps_changed_keys": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "api_endpoints",
+              "api-1",
+              "UPDATE",
+              "{\"id\":\"api-1\",\"name\":\"old\",\"api_key\":\"[REDACTED]\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":1},\"refresh_token\":\"[REDACTED]\"}",
+              "{\"id\":\"api-1\",\"name\":\"new\",\"api_key\":\"[REDACTED]\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":2},\"refresh_token\":\"[REDACTED]\"}",
+              "[\"name\",\"nested\"]",
+              "{\"name\":\"old\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":1}}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "redaction",
+              null,
+              "long_audit",
+              "none",
+              "not_restorable",
+              242,
+              1791536000,
+              1760000000,
+              "strategy_none",
+              "この監査操作には復元戦略がありません。"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "api_endpoints",
+        "target_id": "api-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"api-1\",\"name\":\"old\",\"api_key\":\"[REDACTED]\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":1},\"refresh_token\":\"[REDACTED]\"}",
+        "after_json": "{\"id\":\"api-1\",\"name\":\"new\",\"api_key\":\"[REDACTED]\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":2},\"refresh_token\":\"[REDACTED]\"}",
+        "changed_keys_json": "[\"name\",\"nested\"]",
+        "inverse_patch_json": "{\"name\":\"old\",\"nested\":{\"password\":\"[REDACTED]\",\"ok\":1}}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "redaction",
+        "context": null,
+        "retention_class": "long_audit",
+        "restore_strategy": "none",
+        "restore_status": "not_restorable",
+        "restore_unavailable_reason_code": "strategy_none",
+        "restore_unavailable_message": "この監査操作には復元戦略がありません。",
+        "payload_size_bytes": 242,
+        "expires_at": 1791536000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "restore_strategy_variants_in_one_batch_chunk_boundary": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001",
+        "audit_00000000-0000-4000-8000-000000000002",
+        "audit_00000000-0000-4000-8000-000000000003",
+        "audit_00000000-0000-4000-8000-000000000004",
+        "audit_00000000-0000-4000-8000-000000000005"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "event_staff",
+              "staff-1",
+              "CREATE",
+              null,
+              "{\"id\":\"staff-1\",\"event_id\":\"evt-1\",\"permission_preset\":\"manager\"}",
+              "[\"id\",\"event_id\",\"permission_preset\"]",
+              null,
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "restorable",
+              "delete_created",
+              "not_restorable",
+              65,
+              1775552000,
+              1760000000,
+              "event_staff_subject_missing",
+              "イベントスタッフの復元スナップショットに主体 ID がありません。",
+              "audit_00000000-0000-4000-8000-000000000002",
+              "announcements",
+              "ann-9",
+              "DELETE",
+              "{\"id\":\"ann-9\",\"title\":\"Gone\"}",
+              null,
+              "[\"id\",\"title\"]",
+              null,
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "restorable",
+              "recreate_deleted",
+              "restorable",
+              29,
+              1775552000,
+              1760000000,
+              null,
+              null,
+              "audit_00000000-0000-4000-8000-000000000003",
+              "video_members_set",
+              "vid-1",
+              "UPDATE",
+              "{\"id\":\"vid-1\",\"rows\":[]}",
+              "{\"id\":\"vid-1\",\"rows\":[]}",
+              null,
+              null,
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "restorable",
+              "custom_adapter",
+              "restorable",
+              48,
+              1775552000,
+              1760000000,
+              null,
+              null,
+              "audit_00000000-0000-4000-8000-000000000004",
+              "slots",
+              "slot-1",
+              "UPDATE",
+              "{\"id\":\"slot-1\",\"event_id\":\"evt-1\"}",
+              "{\"id\":\"slot-1\",\"event_id\":\"evt-1\",\"version\":2}",
+              "[\"version\"]",
+              "{\"version\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "restorable",
+              "update_before",
+              "not_restorable",
+              80,
+              1775552000,
+              1760000000,
+              "required_field_missing",
+              "復元スナップショットに必須項目「version」がありません。"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?, ?, ?, ?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "audit_00000000-0000-4000-8000-000000000002",
+              "audit_00000000-0000-4000-8000-000000000003",
+              "audit_00000000-0000-4000-8000-000000000004",
+              4
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000005",
+              "unregistered_table",
+              "u-1",
+              "UPDATE",
+              "{\"id\":\"u-1\"}",
+              "{\"id\":\"u-1\",\"v\":2}",
+              "[\"v\"]",
+              "{\"v\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              null,
+              null,
+              "normal",
+              "update_before",
+              "not_restorable",
+              30,
+              1767776000,
+              1760000000,
+              "adapter_missing",
+              "テーブル「unregistered_table」の復元アダプターがありません。"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000005",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "event_staff",
+        "target_id": "staff-1",
+        "operation": "CREATE",
+        "before_json": null,
+        "after_json": "{\"id\":\"staff-1\",\"event_id\":\"evt-1\",\"permission_preset\":\"manager\"}",
+        "changed_keys_json": "[\"id\",\"event_id\",\"permission_preset\"]",
+        "inverse_patch_json": null,
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "restorable",
+        "restore_strategy": "delete_created",
+        "restore_status": "not_restorable",
+        "restore_unavailable_reason_code": "event_staff_subject_missing",
+        "restore_unavailable_message": "イベントスタッフの復元スナップショットに主体 ID がありません。",
+        "payload_size_bytes": 65,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000002",
+        "table_name": "announcements",
+        "target_id": "ann-9",
+        "operation": "DELETE",
+        "before_json": "{\"id\":\"ann-9\",\"title\":\"Gone\"}",
+        "after_json": null,
+        "changed_keys_json": "[\"id\",\"title\"]",
+        "inverse_patch_json": null,
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "restorable",
+        "restore_strategy": "recreate_deleted",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 29,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000003",
+        "table_name": "video_members_set",
+        "target_id": "vid-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"vid-1\",\"rows\":[]}",
+        "after_json": "{\"id\":\"vid-1\",\"rows\":[]}",
+        "changed_keys_json": null,
+        "inverse_patch_json": null,
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "restorable",
+        "restore_strategy": "custom_adapter",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 48,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000004",
+        "table_name": "slots",
+        "target_id": "slot-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"slot-1\",\"event_id\":\"evt-1\"}",
+        "after_json": "{\"id\":\"slot-1\",\"event_id\":\"evt-1\",\"version\":2}",
+        "changed_keys_json": "[\"version\"]",
+        "inverse_patch_json": "{\"version\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "not_restorable",
+        "restore_unavailable_reason_code": "required_field_missing",
+        "restore_unavailable_message": "復元スナップショットに必須項目「version」がありません。",
+        "payload_size_bytes": 80,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000005",
+        "table_name": "unregistered_table",
+        "target_id": "u-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"u-1\"}",
+        "after_json": "{\"id\":\"u-1\",\"v\":2}",
+        "changed_keys_json": "[\"v\"]",
+        "inverse_patch_json": "{\"v\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": null,
+        "context": null,
+        "retention_class": "normal",
+        "restore_strategy": "update_before",
+        "restore_status": "not_restorable",
+        "restore_unavailable_reason_code": "adapter_missing",
+        "restore_unavailable_message": "テーブル「unregistered_table」の復元アダプターがありません。",
+        "payload_size_bytes": 30,
+        "expires_at": 1767776000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "actor_x_linked_is_normalised_and_unlinked_strict_is_rejected": {
+    "outcome": {
+      "returned": {
+        "linked": [
+          "audit_00000000-0000-4000-8000-000000000001"
+        ],
+        "unlinkedStrict": "actor_x_user_id is not linked to actor_user_id"
+      }
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"x_user_account_links\".\"auth_user_id\", \"x_user_account_links\".\"x_user_id\" from \"x_user_account_links\" inner join \"x_users\" on \"x_users\".\"id\" = \"x_user_account_links\".\"x_user_id\" where \n      \"x_users\".\"approval_status\" = 'approved'\n      AND EXISTS (\n        SELECT 1\n        FROM json_each(?) AS requested_pairs\n        WHERE CAST(json_extract(requested_pairs.value, '$.actor_user_id') AS TEXT)\n                = \"x_user_account_links\".\"auth_user_id\"\n          AND lower(CAST(json_extract(requested_pairs.value, '$.x_user_id') AS TEXT))\n                = lower(\"x_user_account_links\".\"x_user_id\")\n      )\n    ",
+        "params": [
+          "[{\"actor_user_id\":\"actor-1\",\"x_user_id\":\"x_actor\"}]"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              "x_actor",
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      },
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"x_user_account_links\".\"auth_user_id\", \"x_user_account_links\".\"x_user_id\" from \"x_user_account_links\" inner join \"x_users\" on \"x_users\".\"id\" = \"x_user_account_links\".\"x_user_id\" where \n      \"x_users\".\"approval_status\" = 'approved'\n      AND EXISTS (\n        SELECT 1\n        FROM json_each(?) AS requested_pairs\n        WHERE CAST(json_extract(requested_pairs.value, '$.actor_user_id') AS TEXT)\n                = \"x_user_account_links\".\"auth_user_id\"\n          AND lower(CAST(json_extract(requested_pairs.value, '$.x_user_id') AS TEXT))\n                = lower(\"x_user_account_links\".\"x_user_id\")\n      )\n    ",
+        "params": [
+          "[{\"actor_user_id\":\"actor-1\",\"x_user_id\":\"x_pending\"}]"
+        ]
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": "x_actor"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "prepare_and_write_audit_log_without_batch": {
+    "outcome": {
+      "returned": {
+        "prepared": [
+          {
+            "id": "audit_00000000-0000-4000-8000-000000000001",
+            "table_name": "announcements",
+            "target_id": "ann-1",
+            "operation": "UPDATE",
+            "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+            "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+            "changed_keys_json": "[\"title\",\"updated_at\"]",
+            "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+            "actor_user_id": "actor-1",
+            "actor_x_user_id": null,
+            "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+            "reason": "announcement_update",
+            "context": "announcement_update",
+            "retention_class": "restorable",
+            "restore_strategy": "update_before",
+            "restore_status": "restorable",
+            "restore_unavailable_reason_code": null,
+            "restore_unavailable_message": null,
+            "payload_size_bytes": 133,
+            "expires_at": 1775552000,
+            "created_at": 1760000000
+          },
+          null
+        ],
+        "written": "audit_00000000-0000-4000-8000-000000000002"
+      }
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"x_user_account_links\".\"auth_user_id\", \"x_user_account_links\".\"x_user_id\" from \"x_user_account_links\" inner join \"x_users\" on \"x_users\".\"id\" = \"x_user_account_links\".\"x_user_id\" where \n      \"x_users\".\"approval_status\" = 'approved'\n      AND EXISTS (\n        SELECT 1\n        FROM json_each(?) AS requested_pairs\n        WHERE CAST(json_extract(requested_pairs.value, '$.actor_user_id') AS TEXT)\n                = \"x_user_account_links\".\"auth_user_id\"\n          AND lower(CAST(json_extract(requested_pairs.value, '$.x_user_id') AS TEXT))\n                = lower(\"x_user_account_links\".\"x_user_id\")\n      )\n    ",
+        "params": [
+          "[{\"actor_user_id\":\"actor-1\",\"x_user_id\":\"x_pending\"}]"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-2"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"x_user_account_links\".\"auth_user_id\", \"x_user_account_links\".\"x_user_id\" from \"x_user_account_links\" inner join \"x_users\" on \"x_users\".\"id\" = \"x_user_account_links\".\"x_user_id\" where \n      \"x_users\".\"approval_status\" = 'approved'\n      AND EXISTS (\n        SELECT 1\n        FROM json_each(?) AS requested_pairs\n        WHERE CAST(json_extract(requested_pairs.value, '$.actor_user_id') AS TEXT)\n                = \"x_user_account_links\".\"auth_user_id\"\n          AND lower(CAST(json_extract(requested_pairs.value, '$.x_user_id') AS TEXT))\n                = lower(\"x_user_account_links\".\"x_user_id\")\n      )\n    ",
+        "params": [
+          "[{\"actor_user_id\":\"actor-2\",\"x_user_id\":\"x_actor\"}]"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "insert into \"audit_logs\" (\"id\", \"table_name\", \"target_id\", \"operation\", \"before_json\", \"after_json\", \"changed_keys_json\", \"inverse_patch_json\", \"actor_user_id\", \"actor_x_user_id\", \"actor_snapshot_json\", \"reason\", \"context\", \"retention_class\", \"restore_strategy\", \"restore_status\", \"restore_unavailable_reason_code\", \"restore_unavailable_message\", \"payload_size_bytes\", \"expires_at\", \"created_at\") values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "params": [
+          "audit_00000000-0000-4000-8000-000000000002",
+          "announcements",
+          "ann-1",
+          "UPDATE",
+          "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+          "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+          "[\"title\",\"updated_at\"]",
+          "{\"title\":\"Hello\",\"updated_at\":1000}",
+          "actor-2",
+          null,
+          "{\"discord_id\":null,\"discord_name\":\"Actor Two\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+          "announcement_update",
+          "announcement_update",
+          "restorable",
+          "update_before",
+          "restorable",
+          null,
+          null,
+          133,
+          1775552000,
+          1760000000
+        ]
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000002",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-2",
+        "actor_snapshot_json": "{\"discord_id\":null,\"discord_name\":\"Actor Two\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 1000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "wake_send_failure_records_last_failure_in_kv": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      },
+      {
+        "op": "waitUntil"
+      },
+      {
+        "op": "kv.put",
+        "key": "queue_wake:last_failure:static_rebuild_available",
+        "value": "{\"at\":1760000000,\"reason\":\"send_failed\"}",
+        "options": {
+          "expirationTtl": 604800
+        }
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "wake_binding_missing_and_dispatch_disabled": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      },
+      {
+        "op": "kv.put",
+        "key": "queue_wake:last_failure:static_rebuild_available",
+        "value": "{\"at\":1760000000,\"reason\":\"binding_missing\"}",
+        "options": {
+          "expirationTtl": 604800
+        }
+      },
+      {
+        "op": "waitUntil"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "wake_dispatch_disabled_sends_nothing": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "five_audits_split_into_two_insert_chunks": {
+    "outcome": {
+      "returned": [
+        "audit_00000000-0000-4000-8000-000000000001",
+        "audit_00000000-0000-4000-8000-000000000002",
+        "audit_00000000-0000-4000-8000-000000000003",
+        "audit_00000000-0000-4000-8000-000000000004",
+        "audit_00000000-0000-4000-8000-000000000005"
+      ]
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n   UNION ALL \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-0",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-0\",\"n\":0}",
+              "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              85,
+              1775552000,
+              1760000000,
+              null,
+              null,
+              "audit_00000000-0000-4000-8000-000000000002",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"n\":1}",
+              "[\"title\",\"is_published\",\"updated_at\",\"n\"]",
+              "{\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              85,
+              1775552000,
+              1760000000,
+              null,
+              null,
+              "audit_00000000-0000-4000-8000-000000000003",
+              "announcements",
+              "ann-2",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-2\",\"n\":2}",
+              "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              85,
+              1775552000,
+              1760000000,
+              null,
+              null,
+              "audit_00000000-0000-4000-8000-000000000004",
+              "announcements",
+              "ann-3",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-3\",\"n\":3}",
+              "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              85,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?, ?, ?, ?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "audit_00000000-0000-4000-8000-000000000002",
+              "audit_00000000-0000-4000-8000-000000000003",
+              "audit_00000000-0000-4000-8000-000000000004",
+              4
+            ]
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000005",
+              "announcements",
+              "ann-4",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-4\",\"n\":4}",
+              "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              85,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000005",
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-0",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-0\",\"n\":0}",
+        "changed_keys_json": "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+        "inverse_patch_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 85,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000002",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"n\":1}",
+        "changed_keys_json": "[\"title\",\"is_published\",\"updated_at\",\"n\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 85,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000003",
+        "table_name": "announcements",
+        "target_id": "ann-2",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-2\",\"n\":2}",
+        "changed_keys_json": "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+        "inverse_patch_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 85,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000004",
+        "table_name": "announcements",
+        "target_id": "ann-3",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-3\",\"n\":3}",
+        "changed_keys_json": "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+        "inverse_patch_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 85,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      },
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000005",
+        "table_name": "announcements",
+        "target_id": "ann-4",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-4\",\"n\":4}",
+        "changed_keys_json": "[\"id\",\"title\",\"is_published\",\"updated_at\",\"n\"]",
+        "inverse_patch_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000,\"n\":null}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 85,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Event One",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  },
+  "guards_reject_empty_audits_wrong_counts_and_post_audit_statements": {
+    "outcome": {
+      "returned": {
+        "no_audits": "threw: 重要 mutation には監査ログが必要です。",
+        "no_statements": "threw: 原子的監査 mutation に本体 SQL がありません。",
+        "count_mismatch": "threw: 原子的監査 mutation の件数検査と本体 SQL の数が一致しません。",
+        "post_audit_and_assertions": [
+          "audit_00000000-0000-4000-8000-000000000001"
+        ]
+      }
+    },
+    "log": [
+      {
+        "op": "read",
+        "sql": "select \"id\", \"default_editable_fields\", \"upcoming_editable_fields\", \"operation_mode\", \"disabled_features_json\", \"cost_guard_reason\", \"cost_guard_updated_by_user_id\", \"cost_guard_updated_at\", \"cost_guard_exception_until\", \"cost_guard_exception_features_json\", \"audit_normal_retention_days\", \"audit_restorable_retention_days\", \"audit_long_retention_days\", \"audit_max_payload_bytes\", \"audit_compact_after_days\", \"audit_updated_by_auth_user_id\", \"audit_updated_at\" from \"system_settings\" where \"system_settings\".\"id\" = ?",
+        "params": [
+          "default"
+        ]
+      },
+      {
+        "op": "read",
+        "sql": "select \"user\".\"discord_id\", \"user\".\"name\", \"user\".\"active_x_user_id\", \"user\".\"image\", \"x_users\".\"x_name\", \"x_users\".\"icon_url\" from \"user\" left join \"x_users\" on \"x_users\".\"id\" = \"user\".\"active_x_user_id\" where \"user\".\"id\" = ?",
+        "params": [
+          "actor-1"
+        ]
+      },
+      {
+        "op": "batch",
+        "statements": [
+          {
+            "sql": "SELECT 1",
+            "params": []
+          },
+          {
+            "sql": "UPDATE events SET updated_at = ? WHERE id = ?",
+            "params": [
+              2000,
+              "evt-1"
+            ]
+          },
+          {
+            "sql": "SELECT 1",
+            "params": []
+          },
+          {
+            "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              "announcements",
+              "ann-1",
+              "UPDATE",
+              "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+              "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+              "[\"title\",\"updated_at\"]",
+              "{\"title\":\"Hello\",\"updated_at\":1000}",
+              "actor-1",
+              null,
+              "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+              "announcement_update",
+              "announcement_update",
+              "restorable",
+              "update_before",
+              "restorable",
+              133,
+              1775552000,
+              1760000000,
+              null,
+              null
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ?\n      THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              "audit_00000000-0000-4000-8000-000000000001",
+              1
+            ]
+          },
+          {
+            "sql": "UPDATE events SET title = ? WHERE id = ?",
+            "params": [
+              "Post Audit",
+              "evt-1"
+            ]
+          }
+        ]
+      },
+      {
+        "op": "batch.commit"
+      }
+    ],
+    "audit_logs": [
+      {
+        "id": "audit_00000000-0000-4000-8000-000000000001",
+        "table_name": "announcements",
+        "target_id": "ann-1",
+        "operation": "UPDATE",
+        "before_json": "{\"id\":\"ann-1\",\"title\":\"Hello\",\"is_published\":1,\"updated_at\":1000}",
+        "after_json": "{\"id\":\"ann-1\",\"title\":\"Hello v2\",\"is_published\":1,\"updated_at\":2000}",
+        "changed_keys_json": "[\"title\",\"updated_at\"]",
+        "inverse_patch_json": "{\"title\":\"Hello\",\"updated_at\":1000}",
+        "actor_user_id": "actor-1",
+        "actor_snapshot_json": "{\"discord_id\":\"discord-1\",\"discord_name\":\"Actor One\",\"x_user_id\":\"x_actor\",\"x_name\":\"Actor X\",\"icon_url\":\"https://img.example.test/x.png\"}",
+        "reason": "announcement_update",
+        "context": "announcement_update",
+        "retention_class": "restorable",
+        "restore_strategy": "update_before",
+        "restore_status": "restorable",
+        "restore_unavailable_reason_code": null,
+        "restore_unavailable_message": null,
+        "payload_size_bytes": 133,
+        "expires_at": 1775552000,
+        "created_at": 1760000000,
+        "actor_x_user_id": null
+      }
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "title": "Post Audit",
+        "visibility_status": "private",
+        "updated_at": 2000
+      }
+    ],
+    "announcements": [
+      {
+        "id": "ann-1",
+        "title": "Hello",
+        "is_published": 1,
+        "updated_at": 1000
+      }
+    ]
+  }
+}

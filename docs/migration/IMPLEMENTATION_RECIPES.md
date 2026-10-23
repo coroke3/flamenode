@@ -130,11 +130,42 @@ test("GET /api/events caps the page size", async () => {
 
 test に必ず入れるもの: 未ログイン / 権限なし / 他人の resource / 上限ちょうど / 上限超え / 不正入力 / CURRENT と同じ成功結果。
 
+注: 上の `c.env.DB.prepare(...)` は最小の例で、raw D1 を必須にするものではない。監査・transaction・wake を伴う更新は、`packages/server-core`（R-CORE、D-10）の関数に drizzle handle（`drizzle(c.env.DB, { schema })`）と ports を渡して呼んでよい。その場合も handler の順番、`LIMIT`、`c.env` 以外から binding を読まない規則は同じ。
+
 禁止: handler の中で HTML を作る、`LIMIT` の無い query、上限の無い `JSON.parse`、request 中の再生成・通知送信、`c.env` 以外から binding を読む。
 
 DONE に足す項目: [`ZERO_1102.md`](ZERO_1102.md) §5 の計測（MIG-0606 の harness ができる前は「未計測」と書く）/ CURRENT の Server Action と同じ入力で同じ結果になる test。
 
 Runtime: 参照 `S2`、更新 `S3`、session `S4`。
+
+## R-CORE: CURRENT の server 処理を `packages/server-core` へ移す
+
+使う task: MIG-0612〜0618。決定は [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) D-10。R-DOMAIN の server 版で、D1 を引数の drizzle handle として受け取り、transaction・監査・enqueue を含められる点だけが違う。
+
+配置:
+
+```text
+packages/server-core/src/<area>/<name>.ts      ← 実装（CURRENT から意味を変えずに移す）
+packages/server-core/src/ports.ts              ← 注入する型（env の値、Queue、KV、waitUntil、R2、edge cache、Clock、rethrow）
+packages/server-core/package.json              ← exports に移した module を1行ずつ足す（R-DOMAIN と同じ）
+packages/server-core/test/<name>.test.mjs      ← package 名で import する test
+src/lib/<CURRENT path>.ts                      ← bridge（re-export だけ。呼び出し側は変えない）
+src/lib/serverCore/nextPorts.ts                ← Next 側の ports 供給（getEnv / getCloudflareContext を読んでよい唯一の場所）
+```
+
+規則:
+
+- D1 は `DrizzleD1Database` を引数で受け取る。module の中で binding・env・request context を取得しない。`getDb` / `getEnv` / `getCloudflareContext` / `process.env` / `server-only` を書かない。
+- 外部の資源（Queue、KV、R2、cache、`waitUntil`、`unstable_rethrow`）は `ports.ts` の型の引数で受ける。Next の bridge が既存の関数と同じ signature で ports を埋めるので、呼び出し側（81 箇所の `mutateWithAudit` など）は変えない。
+- 順序・strict / CAS の意味・SQL 文と bind の並びを変えない。移動前に golden test（batch の SQL 文字列 + params と `audit_logs` の行。時刻と乱数 id を固定して `id` / `created_at` も比較する）を commit し、移動後に byte 単位で一致させる。
+- `revalidatePath` / `revalidateTag` は core に入れない（Next の Server Action に残す）。`src/lib/publicData/loader.ts` は移さない。
+- test は `node --test --experimental-strip-types` か、CURRENT の test と同じ起動方法（tsx）。移した test の件数が移動前と同じであること。
+
+検査: `node scripts/check-server-core-boundaries.mjs`（禁止 import と `process.env` / `getCloudflareContext` の参照）。`node scripts/find-unused-exports.mjs <file>` で `UNUSED` / `TEST_ONLY` を移さない。
+
+禁止: ports を介さない ambient な env 参照、`packages/domain` / `packages/db` から `@flamenode/server-core` への import、call site の変更を伴う signature の変更、挙動を変える改善（PR に proposal として書く）。
+
+Runtime: 呼び出す側の予算に入る（`S3` の更新では「D1 は事前読み3つまで + `batch` 1回」を core が守る）。
 
 ## R-PAGE: 公開ページを Astro の静的ページにする
 

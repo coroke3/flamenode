@@ -7,7 +7,7 @@ const actionSource = await readFile(
   "utf8",
 );
 const budgetSource = await readFile(
-  new URL("../audit/mutateBudget.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url),
   "utf8",
 );
 const notificationSource = await readFile(

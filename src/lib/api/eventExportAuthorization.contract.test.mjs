@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const [route, eventAction, cache, eventExportData] = await Promise.all([
+const [route, eventAction, cache, eventExportData, videoVisibilityTransition] =
+  await Promise.all([
   readFile(
     new URL("../../../app/api/event-endpoints/[id]/route.ts", import.meta.url),
     "utf8",
@@ -10,6 +11,10 @@ const [route, eventAction, cache, eventExportData] = await Promise.all([
   readFile(new URL("../actions/event-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventExportCache.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventExportData.ts", import.meta.url), "utf8"),
+  readFile(
+    new URL("../video/videoVisibilityTransition.ts", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を検査する", () => {
@@ -35,6 +40,25 @@ test("イベントprivate化後は全payload cacheを無効化する", () => {
   assert.match(eventAction, /await invalidateEventExportCache\(eventId\)/);
   assert.doesNotMatch(cache, /eventExportAccessCacheKey/);
   assert.match(cache, /EVENT_EXPORT_REFRESH_MINUTES\.map/);
+});
+
+test("作品visibility変更後もpayload cacheを無効化する", async () => {
+  const [adminAction, manageAction, moderationAction] = await Promise.all([
+    readFile(new URL("../actions/admin.ts", import.meta.url), "utf8"),
+    readFile(new URL("../actions/manage-video.ts", import.meta.url), "utf8"),
+    readFile(new URL("../actions/moderation-admin.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(videoVisibilityTransition, /exportEventIds/);
+  assert.match(videoVisibilityTransition, /invalidateEventExportCaches/);
+  assert.match(
+    videoVisibilityTransition,
+    /runVideoVisibilityTransitionPostCommit[\s\S]*?invalidateEventExportCaches/,
+  );
+  assert.match(adminAction, /transition\.exportEventIds/);
+  assert.match(manageAction, /exportEventIds:\s*transition!\.exportEventIds/);
+  assert.match(moderationAction, /loadVideoRebuildEventIds/);
+  assert.match(moderationAction, /transition\?\.exportEventIds/);
+  assert.doesNotMatch(moderationAction, /async function loadVideoEventIds/);
 });
 
 test("イベント出力の関連行取得は小規模IN・大規模JSON1 1-bindでD1 query数を固定する", () => {
