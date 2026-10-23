@@ -970,13 +970,14 @@ PRをrevert。
 - **Verified against:** `c5a62b4d` (2026-10-23)
 #### Source snapshot
 - G13 CURRENT の `app/(auth)/entry/**` と `app/(manage)/dashboard/edit/[id]/**` の `page.tsx` は RSC loader（`src/lib/db`, `src/lib/auth`, `src/lib/publicData`）を直接 import する。Phase 6 の API 一覧（RH-001〜033, SA-001〜110）に対応する読み取り endpoint が無い。MIG-0703 の STOP 規則「API が無ければ lead に戻す」に当たる。
-- 対象: `/entry`, `/entry/slotted`, `/entry/unslotted`, `/dashboard/edit/[id]`, `/dashboard/edit/[id]/permissions`。
+- 対象（本 task）: `/entry`, `/entry/slotted`, `/entry/unslotted` の 3 ルート。`/dashboard/edit/[id]`（813 行の loader）と `/dashboard/edit/[id]/permissions` は規模が大きいため **MIG-0630** へ分割（2026-10-23、Opus レビュー指摘）。本 task の DONE に含めない。
 - パターン: MIG-0611（dashboard / library / settings / onboarding）と同じ。
+- S2 上限（ZERO_1102）: 全 LIMIT は名前付き定数 <= 100、response は <= 64 KiB。CURRENT が 100 件超を 1 画面で表示する event 一覧（index の受付中 event、unslotted / slotted の event 選択肢）は `?offset=` で分割し、`truncated` + `nextOffset` を返す。1 page は 100 行、さらに response が 64 KiB を超える前に byte で切る（manage の `truncated` / `offset` と同形）。
 #### Owned paths
-- 新規: `+apps/api/src/routes/entry.ts`, `+apps/api/src/routes/edit.ts`, `+packages/contracts/src/entry.ts`, `+apps/api/test/entry.parity.test.mjs`
+- 新規: `+apps/api/src/routes/personal/entry/**`, `+packages/contracts/src/personal/entry.ts`, `+apps/api/test/personalEntry.parity.test.mjs`, `+apps/api/test/support/personalEntrySeed.mjs`（`edit.ts` は MIG-0630）
 - 触らない: `app/**`（本番切替まで）, `src/lib/actions/**`
 #### Micro-units
-- **U01 inventory**: 5ルートの loader が読む query と戻り値を表にする。
+- **U01 inventory**: 3ルートの loader が読む query と戻り値を表にする。
 - **U02 contract**: DTO を `packages/contracts` に置く。D1 の column を漏らさない。
 - **U03 routes**: MIG-0608 の session を使う。`Cache-Control: private, no-store`。
 - **U04 parity**: 実 CURRENT loader と Hono を `node:sqlite` に全 migration を当てた DB で比べる（`personal.parity` と同じ形）。
@@ -988,18 +989,22 @@ PRをrevert。
 | T03 | D1 失敗 | CURRENT と同じ劣化 |
 | T04 | D1 statement 数 | 1 endpoint あたり3件以下（S2） |
 | T05 | response header | private, no-store |
+| T06 | 100 件超の event（unslotted / index / slotted） | 1 page 100 行以下、`?offset=` を辿ると全件、順序は CURRENT と一致 |
+| T07 | 大きい event option（template 9KB × 30） | response <= 64 KiB、`nextOffset` で続きを取得 |
+| T08 | 101 slot 超の event の part | SQL の part index が CURRENT の `buildSlotParts` と一致 |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/api
-node --test apps/api/test/entry.parity.test.mjs
+node --test apps/api/test/personalEntry.parity.test.mjs
 npm run check:public-api-leaks
 npm run typecheck
 npm run test:unit
 ```
 #### Ledger updates
-`API_MATRIX.md` に読み取り endpoint の行。`FILE_MIGRATION_MATRIX.md` の entry / edit の page 行の target。
+`API_MATRIX.md` に読み取り endpoint の行。`FILE_MIGRATION_MATRIX.md` の entry の page 行の target（edit の page 行は MIG-0630）。
 #### DONE checklist
-- [ ] 5ルートすべてに endpoint があり parity が PASS
+- [ ] `/entry` `/entry/slotted` `/entry/unslotted` の 3 ルートに endpoint があり parity が PASS（`/dashboard/edit/[id]` と `/permissions` は MIG-0630 で、本 task の DONE から除外）
+- [ ] 全 LIMIT <= 100 の名前付き定数、response <= 64 KiB（byte 上限をテスト）
 - [ ] 本番 Route を変更していない
 #### STOP
 - 認証の cookie の発行・更新が必要になったら止める（Phase 8）。
@@ -1264,6 +1269,51 @@ npm run test:unit
 - 監査の意味を変える必要が出たら止める。
 #### Rollback
 Phase 6 共通契約のとおり。
+
+### MIG-0630: Video edit 画面の読み取り API（/dashboard/edit/[id] + permissions）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0623（PR #343）の merge 後にその R-API の形（paging / byte 上限）を確定してから
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0601, MIG-0608, MIG-0623 / **Decisions:** D-05 DECIDED
+- **Verified against:** `84fbd458` (2026-10-23)
+#### Source snapshot
+- MIG-0623 の分割で移動（2026-10-23、Opus レビュー指摘）。`app/(auth)/dashboard/edit/[id]/page.tsx`（813 行）と `permissions/page.tsx` は RSC loader で D1 / auth を直接読み、対応する Hono 読み取り endpoint が無い。MIG-0703（Entry SPA）の slotted 完了後の遷移先、および MIG-0701/0702 の edit 導線が使う。
+- 対象: `/dashboard/edit/[id]`, `/dashboard/edit/[id]/permissions`。
+#### Owned paths
+- 新規: `+apps/api/src/routes/personal/edit/**`, `+packages/contracts/src/personal/edit.ts`, `+apps/api/test/personalEdit.parity.test.mjs`
+- 触らない: `app/**`（本番切替まで）, `src/lib/actions/**`, `apps/api/src/routes/personal/entry/**`（MIG-0623 の所有）
+#### Micro-units
+- **U01 inventory**: 2ルートの loader が読む query と戻り値（作品本体・共同編集者・chapter・event link・質問回答・権限）を表にし、100 行 / 64 KiB を超える面を特定する。
+- **U02 contract + route**: DTO と `GET /api/personal/edit/:id`（所有者 / 共同編集者の権限確認を API 側でも行う）。
+- **U03 permissions**: `GET /api/personal/edit/:id/permissions`。
+- **U04 parity**: 実 CURRENT loader と Hono を `node:sqlite` で比べる。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 所有者・共同編集者の正常系 | CURRENT loader と DTO が一致 |
+| T02 | 他人の作品・存在しない id・未ログイン | CURRENT と同じ status / redirect 相当 |
+| T03 | D1 失敗 | CURRENT と同じ劣化 |
+| T04 | D1 statement 数 | 3 件以下（S2） |
+| T05 | 100 行超・64 KiB 超 | LIMIT <= 100、`truncated` / offset、response <= 64 KiB |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/personalEdit.parity.test.mjs
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` に読み取り endpoint の行。`FILE_MIGRATION_MATRIX.md` の edit page 行の target。
+#### DONE checklist
+- [ ] 2ルートに endpoint があり parity が PASS
+- [ ] 全 LIMIT <= 100、response <= 64 KiB
+- [ ] 本番 Route を変更していない
+#### STOP
+- 認証の cookie の発行・更新が必要になったら止める（Phase 8）。
+- D1 statement が 3 件を超えるなら、分割か projection を lead に確認する。
+#### Rollback
+PRをrevert。
 
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
