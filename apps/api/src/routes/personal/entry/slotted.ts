@@ -12,15 +12,23 @@ import {
   softwareSuggestionsOf,
   type ActiveXRow,
 } from "./formData.ts";
-import { armOf, armOne, loadArmRows } from "./rows.ts";
-import { resolvePartFromSlotRows, type PartSlot } from "./slotPart.ts";
+import {
+  armOf,
+  armOne,
+  assertResponseBytes,
+  ENTRY_PAGE_ROWS,
+  jsonBytes,
+  loadArmRows,
+  MAX_RESPONSE_BYTES,
+  nestedRows,
+  parseOffset,
+  takeWithinBytes,
+} from "./rows.ts";
+import { partNameAt, SLOT_PART_CTES } from "./slotPart.ts";
 import {
   activeXArm,
   candidateArms,
   customQuestionArm,
-  MAX_PART_SLOTS,
-  MAX_SLOTTED_EVENT_OPTIONS,
-  MAX_STAGE_QUESTION_ROWS,
   softwareArms,
   stageQuestionArm,
 } from "./sql.ts";
@@ -28,7 +36,8 @@ import {
 // CURRENT: app/(auth)/entry/slotted/page.tsx. GET only. CURRENT's redirect() calls are returned as
 // `{ kind: "redirect", to }` (200) and notFound() as 404 `{ error: "not_found" }`.
 // D1 (S2, 3 statements incl. the session lookup): context = 1, then ONE data statement (slot + event + group span +
-// active X + software + candidates + accepting event options + their questions + the event's slots for the part).
+// active X + software + candidates + accepting event options (ENTRY_PAGE_ROWS per `?offset=` page, cut earlier to keep
+// the response <= 64 KiB; `truncated` + `nextOffset`) + their questions + the part index of the slot computed in SQL).
 
 interface SlotRow {
   id: string;
@@ -62,6 +71,7 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
   if (!sessionUser) return c.json({ error: "Unauthorized" }, 401);
   const db = c.env.DB;
   const slotId = c.req.query("slot") ?? "";
+  const offset = parseOffset(c.req.query("offset"));
   const ctx = await loadPersonalContext(db, sessionUser, {});
   if (!ctx) return c.json({ error: "Unauthorized" }, 401);
   const user = ctx.user;
@@ -80,7 +90,7 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     : { sql: "slots.reserved_by_user_id = ?", params: [user.id] };
 
   const stage = stageQuestionArm("opt_ids");
-  const questions = customQuestionArm("opt_ids", MAX_SLOTTED_EVENT_OPTIONS + 1);
+  const questions = customQuestionArm("opt_ids");
   const arms = await loadArmRows(
     db
       .prepare(
@@ -112,9 +122,10 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
              AND (events.start_time IS NULL OR events.end_time IS NULL OR events.end_time > ?)
              AND events.allow_user_video_event_links = 1
            ORDER BY events.id
-           LIMIT ${MAX_SLOTTED_EVENT_OPTIONS + 1}
+           LIMIT ${ENTRY_PAGE_ROWS} OFFSET ?
          ),
-         opt_ids AS (SELECT id FROM acc UNION SELECT id FROM ev)
+         opt_ids AS (SELECT id FROM acc UNION SELECT id FROM ev),
+         ${SLOT_PART_CTES}
          SELECT 'slot' AS k, json_object('id', slot.id, 'event_id', slot.event_id, 'status', slot.status,
              'video_id', slot.video_id, 'x_user_id', slot.x_user_id, 'start_time', slot.start_time,
              'slot_label', slot.slot_label, 'display_name', slot.display_name,
@@ -139,17 +150,13 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
          UNION ALL
          ${questions.sql}
          UNION ALL
-         SELECT 'pslot' AS k, json_object('id', q.id, 'start_time', q.start_time, 'sort_order', q.sort_order) AS j FROM (
-           SELECT slots.id AS id, slots.start_time AS start_time, slots.sort_order AS sort_order FROM slots
-           WHERE EXISTS (SELECT 1 FROM go) AND slots.event_id = (SELECT event_id FROM slot)
-             AND (SELECT COALESCE(trim(parts_json), '') FROM ev) <> ''
-           LIMIT ${MAX_PART_SLOTS + 1}) q
+         SELECT 'pidx' AS k, json_object('idx', pn.idx) AS j FROM pn WHERE pn.id = (SELECT id FROM slot)
          UNION ALL
          ${softwareArms("EXISTS (SELECT 1 FROM go)")}
          UNION ALL
          ${candidateArms()}`,
       )
-      .bind(slotId, ...owner.params, activeXId, now, now, now),
+      .bind(slotId, ...owner.params, activeXId, now, now, now, offset),
   );
 
   const slot = armOne<SlotRow>(arms, "slot");
@@ -185,7 +192,6 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
   const xIdOptions = approvedXRows(ctx.linkedRows).sort((a, b) => a.x_name.localeCompare(b.x_name, "ja"));
 
   const accepting = armOf<EventOptionRow>(arms, "acc");
-  if (accepting.length > MAX_SLOTTED_EVENT_OPTIONS) throw new Error("entry_event_options_exceeded");
   const slotEventOption: EventOptionRow = {
     id: ev.id,
     title: ev.title,
@@ -193,15 +199,16 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     youtube_description_template: ev.youtube_description_template,
     required_video_fields_json: ev.required_video_fields_json,
   };
-  const rawEventOptions = accepting.some((option) => option.id === ev.id) ? accepting : [slotEventOption, ...accepting];
-  const stageRows = armOf<StageQuestionRow>(arms, "stage");
-  if (stageRows.length > MAX_STAGE_QUESTION_ROWS) throw new Error("entry_stage_rows_exceeded");
+  // The event of the slot is always listed (first page only; later pages continue the accepting list).
+  const prependSlotEvent = offset === 0 && !accepting.some((option) => option.id === ev.id);
+  const rawEventOptions = prependSlotEvent ? [slotEventOption, ...accepting] : accepting;
+  const stageRows = nestedRows<StageQuestionRow>(arms, "stage");
   const stageSettings = stageSettingsJsonByEvent(stageRows);
   const questionsByEvent = groupCustomQuestions(
-    armOf<CustomQuestionRow>(arms, "cq"),
+    nestedRows<CustomQuestionRow>(arms, "cq"),
     rawEventOptions.map((option) => option.id),
   );
-  const eventOptions: SlottedEventOption[] = rawEventOptions.map((option) => ({
+  const allOptions: SlottedEventOption[] = rawEventOptions.map((option) => ({
     id: option.id,
     title: option.title,
     parts_json: option.parts_json ?? null,
@@ -211,17 +218,10 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     custom_questions: questionsByEvent.get(option.id) ?? [],
   }));
 
-  const partSlots = armOf<PartSlot>(arms, "pslot");
-  if (partSlots.length > MAX_PART_SLOTS) throw new Error("entry_part_slots_exceeded");
-  const slotPart = resolvePartFromSlotRows({
-    slotId: slot.id,
-    partsJson: ev.parts_json ?? null,
-    slotPartGapMinutes: ev.slot_part_gap_minutes ?? null,
-    eventSlots: partSlots,
-  });
+  const slotPart = partNameAt(ev.parts_json ?? null, armOne<{ idx: number }>(arms, "pidx")?.idx ?? null);
 
-  const body: SlottedEntryResponse = {
-    kind: "ready",
+  const rest = {
+    kind: "ready" as const,
     user,
     activeXId: activeX ?? null,
     submitBlock: slottedSubmitBlock(activeXId, xRow),
@@ -243,7 +243,20 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     event: { id: ev.id, title: ev.title },
     activeXName: xRow?.x_name ?? null,
     slotPart,
-    eventOptions,
   };
+  // Options are cut by bytes (after the row page) so the whole response stays <= 64 KiB; nextOffset continues from the cut
+  // (counted in accepting rows: the prepended slot event is not one).
+  const fit = takeWithinBytes(
+    allOptions,
+    MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
+  );
+  const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
+  const body: SlottedEntryResponse = {
+    ...rest,
+    eventOptions: fit.items,
+    truncated,
+    nextOffset: truncated ? offset + fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0) : null,
+  };
+  assertResponseBytes(body);
   return c.json(body);
 });

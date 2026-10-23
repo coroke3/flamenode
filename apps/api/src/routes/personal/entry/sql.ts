@@ -9,18 +9,10 @@ export const MAX_SOFTWARE_SUGGESTIONS = 80;
 /** CURRENT getXIconCandidates / getYoutubeChannelCandidates default limit (entry pages pass none). */
 export const MAX_ENTRY_ICON_CANDIDATES = 24;
 export const MAX_ENTRY_CHANNEL_CANDIDATES = 24;
-/** CURRENT unslotted page MAX_UNSLOTTED_EVENT_OPTIONS. */
-export const MAX_UNSLOTTED_EVENT_OPTIONS = 120;
-/** CURRENT slotted page lists every accepting event; this is a fail-closed cap (exceeded -> 503), not truncation. */
-export const MAX_SLOTTED_EVENT_OPTIONS = 120;
-/** Index page: accepting events; same fail-closed cap. */
-export const MAX_ENTRY_EVENTS = 200;
-/** Index page reserved slots (CURRENT .limit(24)). */
+/** Index reserved slots (CURRENT .limit(24)). */
 export const MAX_RESERVED_SLOTS = 24;
-/** Stage-permission question rows read for the listed events (fail-closed cap). */
-export const MAX_STAGE_QUESTION_ROWS = 1000;
-/** Slots of the slot's event read for the part computation (fail-closed cap, keeps rows small). */
-export const MAX_PART_SLOTS = 600;
+/** Stage-permission question rows read per event (fail-closed: reaching it throws, like the per-event question limit). */
+export const MAX_STAGE_QUESTIONS_PER_EVENT = 100;
 
 const obj = (columns: readonly string[], alias = "q") => columns.map((c) => `'${c}', ${alias}.${c}`).join(", ");
 
@@ -69,29 +61,34 @@ export function activeXArm(): string {
 
 /**
  * Active custom questions (non stage-permission) of the events in the CTE named `eventsCte` (column `id`), in CURRENT's
- * order (event_id, sort_order, id), capped at 18 rows per event for at most `maxEvents` events (+1 to detect overflow).
+ * order (sort_order, id) per event. ONE row per event: `{event_id, rows:[...]}`, each bounded by a named LIMIT
+ * (MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1 so a larger event is detected and fails like CURRENT).
  */
-export function customQuestionArm(eventsCte: string, maxEvents: number): SqlFragment {
+export function customQuestionArm(eventsCte: string): SqlFragment {
   return {
-    sql: `SELECT 'cq' AS k, json_object(${obj(CUSTOM_QUESTION_COLUMNS)}) AS j FROM (
-      SELECT ${CUSTOM_QUESTION_COLUMNS.join(", ")} FROM event_custom_questions
-      WHERE event_id IN (SELECT id FROM ${eventsCte}) AND is_active = 1 AND NOT ${STAGE_PERMISSION_KEY_SQL}
-      ORDER BY event_id, sort_order, id
-      LIMIT ${maxEvents * MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1}) q`,
+    sql: `SELECT 'cq' AS k, json_object('event_id', e.id, 'rows', json((
+      SELECT json_group_array(json_object(${obj(CUSTOM_QUESTION_COLUMNS)})) FROM (
+        SELECT ${CUSTOM_QUESTION_COLUMNS.join(", ")} FROM event_custom_questions
+        WHERE event_id = e.id AND is_active = 1 AND NOT ${STAGE_PERMISSION_KEY_SQL}
+        ORDER BY sort_order, id
+        LIMIT ${MAX_VIDEO_CUSTOM_QUESTIONS_READ + 1}) q))) AS j
+      FROM ${eventsCte} e`,
     params: [],
   };
 }
 
 const STAGE_COLUMNS = ["event_id", "question_key", "label", "description", "placeholder", "required", "is_active"] as const;
 
-/** Stage-permission question rows of the events in `eventsCte`, ordered like CURRENT (event_id, sort_order). */
+/** Stage-permission question rows per event of `eventsCte` (one row per event, `{event_id, rows}`), ordered like CURRENT. */
 export function stageQuestionArm(eventsCte: string): SqlFragment {
   return {
-    sql: `SELECT 'stage' AS k, json_object(${obj(STAGE_COLUMNS)}) AS j FROM (
-      SELECT ${STAGE_COLUMNS.join(", ")} FROM event_custom_questions
-      WHERE event_id IN (SELECT id FROM ${eventsCte}) AND ${STAGE_PERMISSION_KEY_SQL}
-      ORDER BY event_id, sort_order
-      LIMIT ${MAX_STAGE_QUESTION_ROWS + 1}) q`,
+    sql: `SELECT 'stage' AS k, json_object('event_id', e.id, 'rows', json((
+      SELECT json_group_array(json_object(${obj(STAGE_COLUMNS)})) FROM (
+        SELECT ${STAGE_COLUMNS.join(", ")} FROM event_custom_questions
+        WHERE event_id = e.id AND ${STAGE_PERMISSION_KEY_SQL}
+        ORDER BY sort_order
+        LIMIT ${MAX_STAGE_QUESTIONS_PER_EVENT}) q))) AS j
+      FROM ${eventsCte} e`,
     params: [],
   };
 }

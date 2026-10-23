@@ -38,7 +38,6 @@ if (runUnderRootTsx(import.meta.url)) {
   const { buildSlotParts } = await import("../../../src/lib/utils/slotGroupingCore.ts");
   const { computeEventStatus: apiComputeStatus, isAcceptingEntries: apiAccepting, compareEventsByUpcomingPriority: apiCompare } =
     await import("../src/routes/personal/entry/eventStatus.ts");
-  const { resolvePartFromSlotRows } = await import("../src/routes/personal/entry/slotPart.ts");
 
   const sqlite = createSqlite();
   seed(sqlite);
@@ -159,6 +158,8 @@ if (runUnderRootTsx(import.meta.url)) {
         id: s.id, event_id: s.event_id, video_id: s.video_id ?? null, slot_label: s.slot_label ?? null, start_time: s.start_time ?? null,
         status: s.status, event_title: s.event_title ?? null, event_entry_end_time: s.event_entry_end_time ?? null,
       })),
+      truncated: false,
+      nextOffset: null,
     });
   }
 
@@ -265,6 +266,8 @@ if (runUnderRootTsx(import.meta.url)) {
       activeXName: xRow?.x_name ?? null,
       slotPart,
       eventOptions,
+      truncated: false,
+      nextOffset: null,
     });
   }
 
@@ -327,6 +330,8 @@ if (runUnderRootTsx(import.meta.url)) {
         custom_questions: questionsByEvent.get(event.id) ?? [],
         status_label: event.end_time != null && event.end_time <= now ? "終了済" : "開催前・開催中の個別許可",
       })),
+      truncated: false,
+      nextOffset: null,
     });
   }
 
@@ -542,7 +547,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   // ---------------- pure functions copied from CURRENT ----------------
-  test("event status / ordering / part helpers equal the real CURRENT modules over a matrix", async () => {
+  test("event status / ordering helpers equal the real CURRENT modules over a matrix", async () => {
     const times = [null, NOW - 5000, NOW - 10, NOW + 10, NOW + 5000];
     const events = [];
     for (const visibility_status of ["public", "private", "draft", null]) {
@@ -563,22 +568,130 @@ if (runUnderRootTsx(import.meta.url)) {
     for (let i = 0; i < events.length - 1; i += 37) {
       assert.equal(Math.sign(apiCompare(events[i], events[i + 1], NOW)), Math.sign(compareEventsByUpcomingPriority(events[i], events[i + 1], NOW)));
     }
-    const slots = [
-      { id: "a", start_time: 1_700_000_000, sort_order: 0 }, { id: "b", start_time: 1_700_000_900, sort_order: 1 },
-      { id: "c", start_time: 1_700_003_000, sort_order: 2 }, { id: "d", start_time: null, sort_order: 4 },
-      { id: "e", start_time: null, sort_order: 5 }, { id: "f", start_time: null, sort_order: 9 },
-      { id: "g", start_time: 1_700_000_000 + 86_400, sort_order: 3 },
-    ];
-    for (const gap of [0, 15, 30, 60, -5, null]) {
-      const parts = buildSlotParts(slots, (gap ?? 15) * 60);
-      for (const s of slots) {
-        const expected = parts.findIndex((p) => p.rows.some((r) => r.id === s.id));
-        const got = resolvePartFromSlotRows({ slotId: s.id, partsJson: '["P1","P2","P3","P4","P5"]', slotPartGapMinutes: gap, eventSlots: slots });
-        assert.equal(got, ['P1', 'P2', 'P3', 'P4', 'P5'][expected] ?? null, `gap ${gap} slot ${s.id}`);
+  });
+
+  // ---------------- MIG-0623 S2 bounds: paging, byte cut, SQL part index ----------------
+  const insertEvent = (id, cols) => {
+    const row = { id, title: cols.title ?? id, visibility_status: "public", ...cols };
+    const keys = Object.keys(row);
+    sqlite.prepare(`INSERT INTO events (${keys.join(",")}) VALUES (${keys.map(() => "?").join(",")})`).run(...keys.map((k) => row[k]));
+  };
+  const dropEvents = (prefix) => {
+    sqlite.prepare("DELETE FROM slots WHERE event_id LIKE ?").run(`${prefix}%`);
+    sqlite.prepare("DELETE FROM events WHERE id LIKE ?").run(`${prefix}%`);
+  };
+  async function allPages(path, token, listKey) {
+    const ids = [];
+    const pages = [];
+    let offset = 0;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const r = await call(`${path}${path.includes("?") ? "&" : "?"}offset=${offset}`, token);
+      assert.equal(r.status, 200);
+      assert.ok(r.text.length <= 64 * 1024, `response over 64 KiB: ${r.text.length}`);
+      pages.push(r.body);
+      ids.push(...r.body[listKey].map((o) => o.id));
+      if (!r.body.truncated) {
+        assert.equal(r.body.nextOffset, null);
+        return { ids, pages };
       }
+      assert.ok(r.body.nextOffset > offset, "nextOffset must advance");
+      offset = r.body.nextOffset;
     }
-    assert.equal(resolvePartFromSlotRows({ slotId: "a", partsJson: "[]", slotPartGapMinutes: 15, eventSlots: slots }), null);
-    assert.equal(resolvePartFromSlotRows({ slotId: "a", partsJson: "not json", slotPartGapMinutes: 15, eventSlots: slots }), null);
+    throw new Error("paging did not finish");
+  }
+
+  test("S2 bounds: unslotted lists > 100 events by ?offset= (100 rows per page), in CURRENT order", async () => {
+    try {
+      for (let i = 0; i < 130; i += 1) insertEvent(`pg_${String(i).padStart(3, "0")}`, { title: `Zpg ${i}`, allow_unslotted_posts: 1, start_time: NOW + 700_000 + i, end_time: NOW + 800_000 + i });
+      const first = (await call("/api/personal/entry/unslotted?event_q=Zpg", "tok-alice")).body;
+      assert.equal(first.eventOptions.length, 100);
+      assert.equal(first.truncated, true);
+      assert.equal(first.nextOffset, 100);
+      const { ids } = await allPages("/api/personal/entry/unslotted?event_q=Zpg", "tok-alice", "eventOptions");
+      const expected = (await refUnslotted("alice", "Zpg")).eventOptions.map((o) => o.id); // CURRENT reads up to 120 here
+      assert.equal(ids.length, 130);
+      assert.deepEqual(ids.slice(0, expected.length), expected);
+      assert.deepEqual(ids.slice(0, 3), ["pg_129", "pg_128", "pg_127"]);
+      // anything but a positive integer is page 0; a huge offset is clamped and simply returns the empty tail
+      assert.equal((await call("/api/personal/entry/unslotted?event_q=Zpg&offset=abc", "tok-alice")).body.eventOptions.length, 100);
+      const far = await call("/api/personal/entry/unslotted?event_q=Zpg&offset=99999", "tok-alice");
+      assert.equal(far.status, 200);
+      assert.deepEqual([far.body.eventOptions.length, far.body.truncated, far.body.nextOffset], [0, false, null]);
+    } finally {
+      dropEvents("pg_");
+    }
+  });
+
+  test("S2 bounds: a page is cut by bytes so the whole response stays <= 64 KiB; the pages concatenate to everything", async () => {
+    try {
+      for (let i = 0; i < 30; i += 1) {
+        insertEvent(`big_${String(i).padStart(2, "0")}`, { title: `Zbig ${i}`, allow_unslotted_posts: 1, start_time: NOW + 700_000 + i, end_time: NOW + 800_000 + i, youtube_description_template: "x".repeat(9000) });
+      }
+      const { ids, pages } = await allPages("/api/personal/entry/unslotted?event_q=Zbig", "tok-alice", "eventOptions");
+      assert.equal(ids.length, 30);
+      assert.equal(new Set(ids).size, 30);
+      assert.ok(pages.length > 1 && pages[0].truncated && pages[0].eventOptions.length < 30);
+      assert.equal(pages[0].nextOffset, pages[0].eventOptions.length);
+    } finally {
+      dropEvents("big_");
+    }
+  });
+
+  test("S2 bounds: index events and slotted event options are paged past 100 accepting events", async () => {
+    try {
+      for (let i = 0; i < 130; i += 1) insertEvent(`ix_${String(i).padStart(3, "0")}`, { title: `Ix ${i}`, entry_start_time: NOW - 1000, entry_end_time: NOW + 6000, allow_user_video_event_links: 1 });
+      const index = await allPages("/api/personal/entry", "tok-alice", "events");
+      assert.ok(index.pages[0].events.length <= 100 && index.pages[0].truncated);
+      assert.equal(index.ids.filter((id) => id.startsWith("ix_")).length, 130);
+      assert.equal(new Set(index.ids).size, index.ids.length);
+      assert.equal(index.ids.length, (await refIndex("alice")).events.length); // CURRENT lists every accepting event
+      const slotted = await allPages("/api/personal/entry/slotted?slot=sl-g1", "tok-alice", "eventOptions");
+      assert.ok(slotted.pages[0].eventOptions.length <= 101 && slotted.pages[0].truncated);
+      assert.equal(slotted.ids.filter((id) => id.startsWith("ix_")).length, 130);
+      assert.equal(new Set(slotted.ids).size, slotted.ids.length);
+    } finally {
+      dropEvents("ix_");
+    }
+  });
+
+  test("slot part index computed in SQL equals CURRENT buildSlotParts (gap matrix and an event with > 100 slots)", async () => {
+    const PARTS = Array.from({ length: 300 }, (_, i) => `P${i + 1}`);
+    const base = 1_700_000_000;
+    const small = [
+      { id: "a", start_time: base, sort_order: 0 }, { id: "b", start_time: base + 900, sort_order: 1 },
+      { id: "c", start_time: base + 3000, sort_order: 2 }, { id: "d", start_time: null, sort_order: 4 },
+      { id: "e", start_time: null, sort_order: 5 }, { id: "f", start_time: null, sort_order: 9 },
+      { id: "g", start_time: base + 86_400, sort_order: 3 },
+    ];
+    const big = [];
+    let at = base;
+    for (let i = 0; i < 250; i += 1) {
+      at += i % 7 === 0 ? 3600 : i % 11 === 0 ? 86_400 : 600;
+      big.push({ id: `s${String(i).padStart(3, "0")}`, start_time: at, sort_order: i });
+    }
+    const cases = [
+      ...[0, 15, 30, 60, -5, null].map((gap, i) => ({ eventId: `pm_${i}`, gap, slots: small, pick: small.map((x) => x.id) })),
+      { eventId: "pm_big", gap: 15, slots: big, pick: big.filter((_, i) => i % 9 === 0).map((x) => x.id) },
+    ];
+    try {
+      for (const { eventId, gap, slots } of cases) {
+        insertEvent(eventId, { visibility_status: "private", parts_json: JSON.stringify(PARTS), slot_part_gap_minutes: gap });
+        for (const x of slots) {
+          sqlite.prepare("INSERT INTO slots (id,event_id,status,reserved_by_user_id,start_time,sort_order) VALUES (?,?,?,?,?,?)").run(`${eventId}-${x.id}`, eventId, "reserved", "u_alice", x.start_time, x.sort_order);
+        }
+      }
+      for (const { eventId, gap, slots, pick } of cases) {
+        const parts = buildSlotParts(slots, (gap ?? 15) * 60);
+        for (const id of pick) {
+          const expected = PARTS[parts.findIndex((part) => part.rows.some((r) => r.id === id))] ?? null;
+          const r = await call(`/api/personal/entry/slotted?slot=${eventId}-${id}`, "tok-alice");
+          assert.equal(r.body.slotPart, expected, `${eventId} gap ${gap} slot ${id}`);
+          assert.equal(r.stats.statements, 3);
+        }
+      }
+    } finally {
+      dropEvents("pm_");
+    }
   });
 
   test("read-only: no D1 write and no cookie on any entry endpoint", async () => {

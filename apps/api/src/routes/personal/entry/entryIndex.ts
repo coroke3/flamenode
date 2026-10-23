@@ -3,10 +3,11 @@ import type { EntryIndexResponse, EntryReservedSlot } from "@flamenode/contracts
 import type { AppEnv } from "../../../env.ts";
 import { computeOnboardingState, loadPersonalContext } from "../context.ts";
 import { compareEventsByUpcomingPriority, isAcceptingEntries, type EventStatusInput } from "./eventStatus.ts";
-import { armOf, loadArmRows } from "./rows.ts";
-import { MAX_ENTRY_EVENTS, MAX_RESERVED_SLOTS } from "./sql.ts";
+import { armOf, assertResponseBytes, ENTRY_PAGE_ROWS, loadArmRows, parseOffset } from "./rows.ts";
+import { MAX_RESERVED_SLOTS } from "./sql.ts";
 
 // CURRENT: app/(auth)/entry/page.tsx (logged-in branch). GET only: nothing is written.
+// Events are paged (ENTRY_PAGE_ROWS per request, `?offset=`, `truncated` + `nextOffset`); the response is checked against 64 KiB.
 // D1 (S2, 3 statements incl. the session lookup): context (terms + linked X + pending request) = 1,
 // then ONE data statement: accepting events with their available-slot count + the user's reserved slots.
 // Logged-out visitors get 401 (the SPA shows its login CTA); the public event list for them is a handoff.
@@ -38,6 +39,7 @@ export const personalEntryIndexRoutes = new Hono<AppEnv>().get("/", async (c) =>
   const state = computeOnboardingState({ user: ctx.user, linkedRows: ctx.linkedRows, pendingRequest: ctx.pendingRequest });
 
   const now = Math.floor(Date.now() / 1000);
+  const offset = parseOffset(c.req.query("offset"));
   const activeX = ctx.user.active_x_user_id;
   const owner = activeX
     ? { sql: "slots.reserved_by_user_id = ? AND (slots.x_user_id = ? OR slots.x_user_id IS NULL)", params: [ctx.user.id, activeX] }
@@ -65,7 +67,7 @@ export const personalEntryIndexRoutes = new Hono<AppEnv>().get("/", async (c) =>
              AND (events.entry_start_time IS NULL OR events.entry_start_time <= ?)
              AND (events.entry_end_time IS NULL OR events.entry_end_time > ?)
            ORDER BY events.start_time DESC, events.id ASC
-           LIMIT ${MAX_ENTRY_EVENTS + 1}) q
+           LIMIT ${ENTRY_PAGE_ROWS} OFFSET ?) q
          UNION ALL
          SELECT 'slot' AS k, json_object('id', q.id, 'event_id', q.event_id, 'video_id', q.video_id,
             'slot_label', q.slot_label, 'start_time', q.start_time, 'sort_order', q.sort_order, 'status', q.status,
@@ -80,11 +82,12 @@ export const personalEntryIndexRoutes = new Hono<AppEnv>().get("/", async (c) =>
            ORDER BY slots.start_time, slots.sort_order, slots.id
            LIMIT ${MAX_RESERVED_SLOTS}) q`,
       )
-      .bind(now, now, now, ...owner.params),
+      .bind(now, now, now, offset, ...owner.params),
   );
 
   const eventRows = armOf<EventRow>(arms, "event");
-  if (eventRows.length > MAX_ENTRY_EVENTS) throw new Error("entry_events_exceeded");
+  // A full page may have more rows behind it (a page of exactly ENTRY_PAGE_ROWS reports truncated; the next page can be empty).
+  const pageFull = eventRows.length >= ENTRY_PAGE_ROWS;
   const events = eventRows
     .sort((a, b) => compareEventsByUpcomingPriority(a, b, now))
     .filter((event) => isAcceptingEntries(event, now))
@@ -120,6 +123,15 @@ export const personalEntryIndexRoutes = new Hono<AppEnv>().get("/", async (c) =>
     event_entry_end_time: slot.event_entry_end_time ?? null,
   }));
 
-  const body: EntryIndexResponse = { user: ctx.user, state, events, reservedSlots };
+  // pageFull: this page was cut by the row bound; the next page starts after the rows READ (the JS filter only narrows).
+  const body: EntryIndexResponse = {
+    user: ctx.user,
+    state,
+    events,
+    reservedSlots,
+    truncated: pageFull,
+    nextOffset: pageFull ? offset + eventRows.length : null,
+  };
+  assertResponseBytes(body);
   return c.json(body);
 });

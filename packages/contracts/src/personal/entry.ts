@@ -5,6 +5,13 @@ import { OnboardingStateSchema, PersonalUserSchema } from "./shared.ts";
 // CURRENT sources: app/(auth)/entry/{page,slotted/page,unslotted/page}.tsx. Only the data those pages render or
 // pass to the post forms is returned (no reserved_by_user_id, no email, no other users' slots).
 
+/**
+ * Paging of the event lists (ZERO_1102 S2: at most 100 rows and 64 KiB per response). `truncated` = more rows may follow;
+ * `nextOffset` = the `?offset=` that continues the list (null when complete). A full page of exactly 100 rows reports
+ * truncated and its continuation can be empty.
+ */
+const pagingShape = { truncated: z.boolean(), nextOffset: z.number().nullable() };
+
 export const EntryEventSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -24,12 +31,13 @@ export const EntryReservedSlotSchema = z.object({
   event_entry_end_time: z.number().nullable(),
 });
 
-/** GET /api/personal/entry. `reservedSlots` is already in CURRENT's display order. */
+/** GET /api/personal/entry?offset=N (pages `events`). `reservedSlots` is already in CURRENT's display order. */
 export const EntryIndexResponseSchema = z.object({
   user: PersonalUserSchema,
   state: OnboardingStateSchema,
   events: z.array(EntryEventSchema),
   reservedSlots: z.array(EntryReservedSlotSchema),
+  ...pagingShape,
 });
 
 export const EntryCustomQuestionSchema = z.object({
@@ -97,7 +105,7 @@ const formCommonShape = {
   channelCandidates: z.array(z.string()),
 };
 
-/** GET /api/personal/entry/slotted?slot=ID. CURRENT redirects are returned as `redirect`; not-found is HTTP 404. */
+/** GET /api/personal/entry/slotted?slot=ID&offset=N (pages `eventOptions`). CURRENT redirects are returned as `redirect`; not-found is HTTP 404. */
 export const SlottedEntryResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("redirect"), to: z.string() }),
   z.object({
@@ -119,14 +127,16 @@ export const SlottedEntryResponseSchema = z.discriminatedUnion("kind", [
     activeXName: z.string().nullable(),
     slotPart: z.string().nullable(),
     eventOptions: z.array(SlottedEventOptionSchema),
+    ...pagingShape,
   }),
 ]);
 
-/** GET /api/personal/entry/unslotted?event_q=TEXT. */
+/** GET /api/personal/entry/unslotted?event_q=TEXT&offset=N (pages `eventOptions`). */
 export const UnslottedEntryResponseSchema = z.object({
   ...formCommonShape,
   eventQuery: z.string(),
   eventOptions: z.array(UnslottedEventOptionSchema),
+  ...pagingShape,
 });
 
 export type EntryEvent = z.infer<typeof EntryEventSchema>;

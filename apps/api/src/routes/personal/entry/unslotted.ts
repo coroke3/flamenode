@@ -12,12 +12,24 @@ import {
   unslottedSubmitBlock,
   type ActiveXRow,
 } from "./formData.ts";
-import { armOf, armOne, loadArmRows } from "./rows.ts";
-import { activeXArm, candidateArms, customQuestionArm, MAX_UNSLOTTED_EVENT_OPTIONS, softwareArms } from "./sql.ts";
+import {
+  armOf,
+  armOne,
+  assertResponseBytes,
+  ENTRY_PAGE_ROWS,
+  jsonBytes,
+  loadArmRows,
+  MAX_RESPONSE_BYTES,
+  nestedRows,
+  parseOffset,
+  takeWithinBytes,
+} from "./rows.ts";
+import { activeXArm, candidateArms, customQuestionArm, softwareArms } from "./sql.ts";
 
 // CURRENT: app/(auth)/entry/unslotted/page.tsx. GET only.
 // D1 (S2, 3 statements incl. the session lookup): context = 1, then ONE data statement (active X + software +
-// candidates + eligible event options (<= 120) + their questions).
+// candidates + eligible event options (<= ENTRY_PAGE_ROWS per `?offset=` page, cut earlier to keep the response <= 64 KiB;
+// `truncated` + `nextOffset`) + their questions).
 export const MAX_EVENT_QUERY_LENGTH = 100;
 
 interface UnslottedEventRow {
@@ -39,8 +51,9 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
   const activeX = user.active_x_user_id;
   const eventQuery = (c.req.query("event_q") ?? "").trim().slice(0, MAX_EVENT_QUERY_LENGTH);
   const now = Math.floor(Date.now() / 1000);
+  const offset = parseOffset(c.req.query("offset"));
 
-  const questions = customQuestionArm("ev", MAX_UNSLOTTED_EVENT_OPTIONS);
+  const questions = customQuestionArm("ev");
   // unslottedEventEligibilityWhere(now) + the optional title/id LIKE filter (CURRENT does not escape % and _).
   const arms = await loadArmRows(
     db
@@ -55,7 +68,7 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
              AND (events.allow_unslotted_posts = 1 OR (events.end_time IS NOT NULL AND events.end_time <= ?))
              AND (? = '' OR events.title LIKE ? OR events.id LIKE ?)
            ORDER BY events.end_time DESC, events.start_time DESC, events.id ASC
-           LIMIT ${MAX_UNSLOTTED_EVENT_OPTIONS}
+           LIMIT ${ENTRY_PAGE_ROWS} OFFSET ?
          )
          ${activeXArm()}
          UNION ALL
@@ -71,7 +84,7 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
          UNION ALL
          ${candidateArms()}`,
       )
-      .bind(activeX, now, eventQuery, `%${eventQuery}%`, `%${eventQuery}%`),
+      .bind(activeX, now, eventQuery, `%${eventQuery}%`, `%${eventQuery}%`, offset),
   );
 
   const xRow = armOne<ActiveXRow>(arms, "x");
@@ -80,10 +93,10 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
   );
   const events = armOf<UnslottedEventRow>(arms, "ev");
   const questionsByEvent = groupCustomQuestions(
-    armOf<CustomQuestionRow>(arms, "cq"),
+    nestedRows<CustomQuestionRow>(arms, "cq"),
     events.map((event) => event.id),
   );
-  const eventOptions: UnslottedEventOption[] = events.map((event) => ({
+  const allOptions: UnslottedEventOption[] = events.map((event) => ({
     id: event.id,
     title: event.title,
     parts_json: event.parts_json ?? null,
@@ -93,7 +106,7 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
     status_label: event.end_time != null && event.end_time <= now ? "終了済" : "開催前・開催中の個別許可",
   }));
 
-  const body: UnslottedEntryResponse = {
+  const rest = {
     user,
     activeXId: activeX ?? null,
     submitBlock: unslottedSubmitBlock(activeX, xIdOptions, xRow),
@@ -103,7 +116,19 @@ export const personalEntryUnslottedRoutes = new Hono<AppEnv>().get("/", async (c
     iconCandidates: activeX ? iconCandidatesOf(arms) : [],
     channelCandidates: activeX ? channelCandidatesOf(arms) : [],
     eventQuery,
-    eventOptions,
   };
+  // Options are cut by bytes (after the row page) so the whole response stays <= 64 KiB; nextOffset continues from the cut.
+  const fit = takeWithinBytes(
+    allOptions,
+    MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
+  );
+  const truncated = events.length >= ENTRY_PAGE_ROWS || fit.cut;
+  const body: UnslottedEntryResponse = {
+    ...rest,
+    eventOptions: fit.items,
+    truncated,
+    nextOffset: truncated ? offset + fit.items.length : null,
+  };
+  assertResponseBytes(body);
   return c.json(body);
 });
