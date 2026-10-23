@@ -3,10 +3,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const source = readFileSync(
-  fileURLToPath(new URL("./videoVisibilityTransition.ts", import.meta.url)),
-  "utf8",
-);
+// MIG-0615: the planner lives in packages/server-core; the bridge keeps the key constants and the manifest host binds the R2 read/write.
+const source = [
+  "../../../packages/server-core/src/visibility/videoTransition.ts",
+  "./videoVisibilityTransition.ts",
+  "../publicData/visibilityManifestHost.ts",
+]
+  .map((path) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8"))
+  .join("\n");
 
 test("video visibility transition uses full fan-out helpers", () => {
   assert.match(source, /buildAfterVideoStatusChangeQueueBatch/);

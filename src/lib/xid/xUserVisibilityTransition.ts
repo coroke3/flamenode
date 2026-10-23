@@ -1,65 +1,36 @@
+// Compatibility bridge (MIG-0615, D-10): implementation lives in packages/server-core; remove when callers import it directly.
 import "server-only";
 
 import type { DB } from "@/lib/db/client";
-import type { xUsers } from "@/lib/db/schema";
-import {
-  compensatePublicVisibilityFenceOnD1Failure,
-  planPublicVisibilityFenceTransition,
-  preCommitPublicVisibilityFence,
-  type PublicVisibilityFencePlan,
-} from "@/lib/publicData/publicVisibilityFenceTransition";
+import { nextVisibilityManifestHost } from "@/lib/publicData/visibilityManifestHost";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "@/lib/utils/publicXUser";
+import {
+  compensateXUserVisibilityOnD1Failure as compensateXUserVisibilityOnD1FailureCore,
+  planXUserVisibilityFenceTransition as planXUserVisibilityFenceTransitionCore,
+  preCommitXUserVisibilityTransition as preCommitXUserVisibilityTransitionCore,
+} from "@flamenode/server-core/visibility/xUserTransition";
 
-type XUserApprovalStatus = typeof xUsers.$inferSelect["approval_status"];
+export type { XUserVisibilityFencePlan } from "@flamenode/server-core/visibility/xUserTransition";
 
-export type XUserVisibilityFencePlan = PublicVisibilityFencePlan<XUserApprovalStatus>;
+const xUserVisibilityHost = {
+  manifest: nextVisibilityManifestHost,
+  listableApprovalStatuses: PUBLIC_LISTABLE_X_APPROVAL_STATUSES,
+};
 
-function isListable(status: XUserApprovalStatus): boolean {
-  return PUBLIC_LISTABLE_X_APPROVAL_STATUSES.some((value) => value === status);
+export function planXUserVisibilityFenceTransition(
+  input: Parameters<typeof planXUserVisibilityFenceTransitionCore>[0] & { db: DB },
+) {
+  return planXUserVisibilityFenceTransitionCore(input, xUserVisibilityHost);
 }
 
-/** X ユーザーの一覧掲載可否が変わるときの fence planner（entity_type: "x_user"）。 */
-export function planXUserVisibilityFenceTransition(input: {
-  db: DB;
-  xUserId: string;
-  previousStatus: XUserApprovalStatus;
-  nextStatus: XUserApprovalStatus;
-  actorUserId: string;
-  reason?: string | null;
-  now: number;
-}): Promise<XUserVisibilityFencePlan> {
-  const { xUserId, ...rest } = input;
-  return planPublicVisibilityFenceTransition({
-    ...rest,
-    entityType: "x_user",
-    entityId: xUserId,
-    isPublic: isListable,
-  });
+export function preCommitXUserVisibilityTransition(
+  input: Parameters<typeof preCommitXUserVisibilityTransitionCore>[0],
+) {
+  return preCommitXUserVisibilityTransitionCore(input, xUserVisibilityHost);
 }
 
-export function preCommitXUserVisibilityTransition(input: {
-  xUserId: string;
-  fenceToken: string;
-  reason?: string | null;
-}): Promise<void> {
-  return preCommitPublicVisibilityFence({
-    entityType: "x_user",
-    entityId: input.xUserId,
-    fenceToken: input.fenceToken,
-    reason: input.reason,
-  });
-}
-
-export function compensateXUserVisibilityOnD1Failure(input: {
-  db: DB;
-  xUserId: string;
-  fenceToken: string;
-}): Promise<void> {
-  return compensatePublicVisibilityFenceOnD1Failure({
-    db: input.db,
-    entityType: "x_user",
-    entityId: input.xUserId,
-    fenceToken: input.fenceToken,
-    flow: "x_user_visibility",
-  });
+export function compensateXUserVisibilityOnD1Failure(
+  input: Parameters<typeof compensateXUserVisibilityOnD1FailureCore>[0] & { db: DB },
+) {
+  return compensateXUserVisibilityOnD1FailureCore(input, xUserVisibilityHost);
 }

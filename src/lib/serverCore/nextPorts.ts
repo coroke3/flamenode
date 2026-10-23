@@ -2,7 +2,12 @@ import "server-only";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { getEnv } from "@/lib/cloudflare";
-import type { EnvValues, QueueWakeHost } from "@flamenode/server-core/ports";
+import { unstable_rethrow } from "next/navigation";
+import type {
+  EnvValues,
+  QueueWakeHost,
+  RethrowFrameworkControl,
+} from "@flamenode/server-core/ports";
 
 /**
  * Next / OpenNext side of the server-core ports (D-10). This is the only place that turns
@@ -18,4 +23,12 @@ export const nextQueueWakeHost: QueueWakeHost = {
     return typeof waitUntil === "function" ? waitUntil.bind(ctx.ctx) : null;
   },
   readKv: () => getEnv().KV ?? null,
+};
+
+/**
+ * Next control-flow errors (redirect / notFound / dynamic-usage bailouts) must survive best-effort
+ * catch blocks. Hono supplies a no-op instead.
+ */
+export const nextRethrowFrameworkControl: RethrowFrameworkControl = (error) => {
+  unstable_rethrow(error);
 };
