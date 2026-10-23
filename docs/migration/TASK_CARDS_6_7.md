@@ -36,13 +36,6 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: CURRENT の loader と同じ seed（node:sqlite + 全 migration）で行・順序・件数が一致、401/403/no-store、paging、D1 statement 数。
 - DONE: 5 endpoint の parity テストと独立レビュー。`maybeMarkOnboardingComplete` は MIG-0702 の POST へ引き継ぎ。
 
-### MIG-0625 — Admin read APIs part A
-
-- 読む: `PHASE_6_SPEC.md` の MIG-0625 Work Order、`app/(admin)/admin/**`（users / videos / events / moderation）、MIG-0611 の実装。
-- 変更: 対象 page の読み取り endpoint と DTO、admin 権限。
-- 試験: 実 loader と Hono の parity、admin 以外の拒否、D1 3文以下。
-- DONE: 担当範囲の parity PASS、MIG-0626 との分担に漏れが無い。
-
 ### MIG-0602 — low-risk write commands
 
 - 読む: SA-004..008（announcements / API endpoints。SA-009..010 は MIG-0629、SA-011 は MIG-0616、SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
