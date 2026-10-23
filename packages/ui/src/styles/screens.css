@@ -377,6 +377,46 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .ab-entry a{display:flex;flex-direction:column;gap:4px}
 .ab-entry .t-h3{display:inline-flex;align-items:center;gap:8px}
 .mt-wrap{gap:24px;padding-top:96px;padding-bottom:96px}
+
+/* list / recommend / trending (MIG-0505): mock Videos.html, Recommend.html, Trending.html */
+.lv-wrap,.rc-wrap,.tr-wrap{padding-top:56px;padding-bottom:96px}
+.lv-head{justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.lv-titles,.rc-head,.tr-head{gap:8px}
+.lv-grid{margin-top:40px}
+.lv-compact{grid-template-columns:repeat(auto-fill,minmax(min(100%,160px),1fr))}
+.lv-empty{margin-top:40px}
+.lv-tbl-wrap{margin-top:40px}
+.lv-tbl{width:100%;border-collapse:collapse;font-size:14px;line-height:22px}
+.lv-tbl th{padding:0 12px 10px 0;text-align:left;font-weight:400;color:var(--ink-muted);font-size:13px}
+.lv-tbl td{padding:10px 12px 10px 0;vertical-align:middle}
+.lv-thumb{width:96px}
+.lv-thumb img,.lv-thumb-empty{display:block;width:96px;aspect-ratio:16/9;object-fit:cover;background:var(--surface-raised)}
+.lv-thumb-empty{display:grid;place-items:center;color:var(--ink-muted)}
+.seg{display:flex;flex-wrap:wrap;gap:0}
+.seg>a,.seg>button{padding:8px 14px;font-size:14px;color:var(--ink-muted);background:transparent;border:0}
+.seg>a:hover{color:var(--ink);background:var(--surface-subtle)}
+.rc-tabs{margin-top:24px}
+.rc-hero{margin-top:48px}
+.rc-hero-card{max-width:520px;margin-top:12px}
+.rc-empty{margin-top:48px}
+.rc-cta{margin-top:64px}
+.tr-wrap{max-width:1120px}
+.tr-note{margin:16px 0 0}
+.tr-list{margin-top:40px}
+.tr-row{display:grid;grid-template-columns:48px 160px minmax(0,1fr) auto;gap:16px;align-items:center;padding:12px 0}
+.tr-rank{font-size:18px;line-height:24px;color:var(--ink)}
+.tr-thumb{display:block;width:160px;aspect-ratio:16/9;object-fit:cover;background:var(--surface-raised)}
+.tr-thumb-empty{display:grid;place-items:center;color:var(--ink-muted)}
+.tr-body{gap:6px;min-width:0}
+.tr-title{font-size:16px;line-height:24px;overflow-wrap:anywhere}
+.tr-empty{margin-top:40px}
+@media (max-width:640px){
+  .lv-wrap,.rc-wrap,.tr-wrap{padding-top:32px}
+  .tr-row{grid-template-columns:32px 96px minmax(0,1fr);gap:12px}
+  .tr-thumb{width:96px}
+  .tr-views{grid-column:3}
+  .tr-title{font-size:14px;line-height:20px}
+}
 .rl-wrap{padding-top:56px}
 .rl-main{max-width:760px}
 .rl-ver{margin:12px 0 0}
