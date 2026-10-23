@@ -1272,7 +1272,7 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0630: Video edit 画面の読み取り API（/dashboard/edit/[id] + permissions）
 - **Model:** lead
-- **Readiness:** IN_PROGRESS（PR #382）— U01 / U02a / U03 / U04 実装済み（`work-items/MIG-0630.md`）。U02b（form-options: 受付イベント・質問・回答・候補）は次の単位で、それまで MIG-0630 / MIG-0703 は完了しない
+- **Readiness:** NEEDS_REFINEMENT — 実装中（PR #382）。U01 / U02a / U03 / U04 実装済み（`work-items/MIG-0630.md`）。U02b（form-options: 受付イベント・質問・回答・候補）は次の単位で、それまで MIG-0630 / MIG-0703 は完了しない
 - **Recipe:** R-API
 - **Runtime:** S2
 - **Depends on:** MIG-0601, MIG-0608, MIG-0623 / **Decisions:** D-05 DECIDED
