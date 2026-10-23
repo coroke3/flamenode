@@ -28,7 +28,7 @@ test("mergeVideoRebuildEventIds deduplicates primary and linked events", () => {
 
 test("same-status message is shared across admin and manage", async () => {
   const core = await readFile(
-    new URL("./videoVisibilityStatusCore.ts", import.meta.url),
+    new URL("../../../packages/domain/src/video/visibility.ts", import.meta.url),
     "utf8",
   );
   assert.match(core, /すでに同じ状態へ更新されています。/);

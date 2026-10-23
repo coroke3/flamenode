@@ -8,7 +8,11 @@ import {
 
 const [source, coreSource] = await Promise.all([
   readFile(new URL("./reservationIdentity.ts", import.meta.url), "utf8"),
-  readFile(new URL("./reservationIdentityCore.ts", import.meta.url), "utf8"),
+  // MIG-0305 U03: the core moved to @flamenode/domain/slots/reservationIdentity.
+  readFile(
+    new URL("../../../packages/domain/src/slots/reservationIdentity.ts", import.meta.url),
+    "utf8",
+  ),
 ]);
 
 test("SLOT_RESERVATION_X_REQUEST_TYPES は枠確保対象申請だけを含む", () => {

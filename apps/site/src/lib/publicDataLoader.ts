@@ -8,47 +8,65 @@ import { performance } from "node:perf_hooks";
 
 export type SnapshotKind = "video" | "user" | "event";
 
+/**
+ * Public DTOs (MIG-0403). Field names follow the CURRENT columns the three
+ * public pages read (`app/(public)/[id]`, `event/[id]`, `user/[id]`), so the
+ * snapshot generator can project them 1:1. Only public-page fields; values
+ * that change faster than a build (likes, slot counts, viewer state) are
+ * Island/API data (D-09) and never part of the snapshot.
+ */
 export interface BasePublicSnapshot {
   readonly kind: SnapshotKind;
   readonly id: string;
   readonly title: string;
-  readonly description?: string;
-  readonly canonicalUrl?: string;
-  readonly ogImageUrl?: string;
-  readonly aliasOf?: string;
 }
 
 export interface VideoPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "video";
-  readonly creatorName?: string;
-  readonly creatorHandle?: string;
-  readonly creatorAvatarUrl?: string;
-  readonly thumbnailUrl?: string;
-  readonly publishedAt?: string;
+  /** `youtube_video_id`; also the alias URL `/{youtubeVideoId}` and the canonical path. */
   readonly youtubeVideoId?: string;
+  /** `creator_display_name`. */
+  readonly creatorName?: string;
+  /** `creator_x_user_id`. */
+  readonly creatorXUserId?: string;
+  /** `creator_icon_url` (already the public projected icon). */
+  readonly creatorIconUrl?: string;
+  /** CURRENT `creatorHref` condition: the creator has a public profile. */
+  readonly creatorHasPublicProfile?: boolean;
+  readonly creatorYoutubeChannelUrl?: string;
+  /** `scheduled_time`, unix seconds. */
+  readonly scheduledTime?: number;
+  readonly music?: string;
+  readonly credit?: string;
+  readonly introComment?: string;
+  readonly highlights?: string;
 }
 
 export interface UserPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "user";
+  /** `x_name`. */
   readonly name?: string;
-  readonly handle?: string;
-  readonly bio?: string;
-  readonly avatarUrl?: string;
+  /** `icon_url` (already the public projected icon). */
+  readonly iconUrl?: string;
+  readonly profileText?: string;
+  readonly youtubeChannelUrl?: string;
 }
 
 export interface EventPublicSnapshot extends BasePublicSnapshot {
   readonly kind: "event";
-  readonly bannerUrl?: string;
+  readonly explanation?: string;
+  /** `img_url`. */
+  readonly imageUrl?: string;
+  /** `icon_url`. */
   readonly iconUrl?: string;
-  readonly status?: string;
-  readonly periodText?: string;
+  /** Build-time `eventStatusLabel(computeEventStatus(event))` (live status is MIG-0502). */
+  readonly statusLabel?: string;
+  readonly periodLabel?: string;
+  /** CURRENT entry action at build time: reserve / submit / none. */
+  readonly entryAction?: "reserve" | "submit";
 }
 
-export type PublicSnapshot =
-  | VideoPublicSnapshot
-  | UserPublicSnapshot
-  | EventPublicSnapshot
-  | BasePublicSnapshot;
+export type PublicSnapshot = VideoPublicSnapshot | UserPublicSnapshot | EventPublicSnapshot;
 
 export type SnapshotSource = Readonly<{
   read(key: string): Promise<Uint8Array | null>;
@@ -108,10 +126,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isSafeUrl(url: unknown): url is string {
-  if (typeof url !== "string") return false;
-  const trimmed = url.trim();
-  return /^https?:\/\/[^\s<>"']+$/i.test(trimmed) || (/^\/[^\/\s<>"']+/i.test(trimmed) && !trimmed.startsWith("//"));
+const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+/** Clamp text; anything that is not a non-empty string is dropped. */
+function text(value: unknown, max: number): string | undefined {
+  return typeof value === "string" && value.trim() ? value.slice(0, max) : undefined;
+}
+
+/** http(s) URL or same-site path only; `javascript:`, `data:`, `//host` and `/\\host` are dropped. */
+function publicUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const url = value.trim();
+  if (!url || url.length > 2048) return undefined;
+  if (url.startsWith("/")) return url.startsWith("//") || url.startsWith("/\\") ? undefined : url;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withDefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 }
 
 function validatedPublicDto(value: unknown): PublicSnapshot | null {
@@ -122,41 +159,47 @@ function validatedPublicDto(value: unknown): PublicSnapshot | null {
     typeof id !== "string" || !ID_PATTERN.test(id) ||
     typeof title !== "string" || title.length === 0 || title.length > 300
   ) return null;
-
-  const base: Record<string, unknown> = {
-    kind: kind as SnapshotKind,
-    id,
-    title,
-  };
-
-  if (typeof value.description === "string") base.description = value.description.slice(0, 5000);
-  if (isSafeUrl(value.canonicalUrl)) base.canonicalUrl = value.canonicalUrl.trim();
-  if (isSafeUrl(value.ogImageUrl)) base.ogImageUrl = value.ogImageUrl.trim();
-  if (typeof value.aliasOf === "string" && ID_PATTERN.test(value.aliasOf)) base.aliasOf = value.aliasOf;
-
-  if (kind === "video") {
-    if (typeof value.creatorName === "string") base.creatorName = value.creatorName.slice(0, 100);
-    if (typeof value.creatorHandle === "string") base.creatorHandle = value.creatorHandle.slice(0, 100);
-    if (isSafeUrl(value.creatorAvatarUrl)) base.creatorAvatarUrl = value.creatorAvatarUrl.trim();
-    if (isSafeUrl(value.thumbnailUrl)) base.thumbnailUrl = value.thumbnailUrl.trim();
-    if (typeof value.publishedAt === "string") base.publishedAt = value.publishedAt.slice(0, 50);
-    if (typeof value.youtubeVideoId === "string" && /^[a-zA-Z0-9_-]{6,15}$/.test(value.youtubeVideoId)) {
-      base.youtubeVideoId = value.youtubeVideoId;
-    }
-  } else if (kind === "user") {
-    if (typeof value.name === "string") base.name = value.name.slice(0, 100);
-    if (typeof value.handle === "string") base.handle = value.handle.slice(0, 100);
-    if (typeof value.bio === "string") base.bio = value.bio.slice(0, 2000);
-    if (isSafeUrl(value.avatarUrl)) base.avatarUrl = value.avatarUrl.trim();
-  } else if (kind === "event") {
-    if (isSafeUrl(value.bannerUrl)) base.bannerUrl = value.bannerUrl.trim();
-    if (isSafeUrl(value.iconUrl)) base.iconUrl = value.iconUrl.trim();
-    if (typeof value.status === "string") base.status = value.status.slice(0, 50);
-    if (typeof value.periodText === "string") base.periodText = value.periodText.slice(0, 200);
-  }
-
   // Strict projection. Never forward unknown metadata or private attributes.
-  return base as unknown as PublicSnapshot;
+  if (kind === "video") {
+    const youtubeVideoId = typeof value.youtubeVideoId === "string" && YOUTUBE_ID_PATTERN.test(value.youtubeVideoId)
+      ? value.youtubeVideoId
+      : undefined;
+    const scheduledTime = Number.isSafeInteger(value.scheduledTime) && (value.scheduledTime as number) > 0
+      ? value.scheduledTime as number
+      : undefined;
+    return withDefined<VideoPublicSnapshot>({
+      kind: "video", id, title,
+      youtubeVideoId,
+      creatorName: text(value.creatorName, 100),
+      creatorXUserId: typeof value.creatorXUserId === "string" && ID_PATTERN.test(value.creatorXUserId) ? value.creatorXUserId : undefined,
+      creatorIconUrl: publicUrl(value.creatorIconUrl),
+      creatorHasPublicProfile: value.creatorHasPublicProfile === true ? true : undefined,
+      creatorYoutubeChannelUrl: publicUrl(value.creatorYoutubeChannelUrl),
+      scheduledTime,
+      music: text(value.music, 500),
+      credit: text(value.credit, 500),
+      introComment: text(value.introComment, 5000),
+      highlights: text(value.highlights, 5000),
+    });
+  }
+  if (kind === "user") {
+    return withDefined<UserPublicSnapshot>({
+      kind: "user", id, title,
+      name: text(value.name, 100),
+      iconUrl: publicUrl(value.iconUrl),
+      profileText: text(value.profileText, 5000),
+      youtubeChannelUrl: publicUrl(value.youtubeChannelUrl),
+    });
+  }
+  return withDefined<EventPublicSnapshot>({
+    kind: "event", id, title,
+    explanation: text(value.explanation, 5000),
+    imageUrl: publicUrl(value.imageUrl),
+    iconUrl: publicUrl(value.iconUrl),
+    statusLabel: text(value.statusLabel, 50),
+    periodLabel: text(value.periodLabel, 200),
+    entryAction: value.entryAction === "reserve" || value.entryAction === "submit" ? value.entryAction : undefined,
+  });
 }
 
 function checkedManifest(manifest: SnapshotManifest | null, generation: string, metrics: SnapshotBuildMetrics): SnapshotManifest {
