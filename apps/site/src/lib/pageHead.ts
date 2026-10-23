@@ -95,34 +95,57 @@ export type PageHead = Readonly<{
   canonical: string;
   ogTitle: string;
   ogImage: string;
-  /** Brand card only: dimensions and type are known (CURRENT adds them only for the default image). */
-  ogImageWidth?: number;
-  ogImageHeight?: number;
-  ogImageType?: string;
+  /** null for a page-specific image: CURRENT emits no size or type for it. */
+  ogImageWidth: number | null;
+  ogImageHeight: number | null;
+  ogImageType: string | null;
   ogImageAlt: string;
   ogType: "website" | "video.other" | "profile";
 }>;
+
+/** CURRENT `absoluteUrl`: absolute URLs stay, paths go under the site origin. */
+export function absoluteUrl(path: string, origin: string = siteOrigin()): string {
+  try {
+    return new URL(path).toString();
+  } catch {
+    return new URL(path.startsWith("/") ? path : `/${path}`, origin).toString();
+  }
+}
 
 export function buildPageHead(input: {
   path: string;
   title: string;
   description?: string | null;
   noIndex?: boolean;
-  /** Absolute or site-relative image; omitted = the brand social card. */
+  /** Page-specific Open Graph image (CURRENT `buildPageMetadata({ image })`); default is the brand card. */
   image?: string | null;
   ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
-  const custom = input.image ? new URL(input.image, origin).toString() : null;
-  return {
+  const base = {
     noindex: input.noIndex === true,
     title: `${input.title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
     ogTitle: input.title,
-    ogImage: custom ?? `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
-    ...(custom ? {} : { ogImageWidth: 1200, ogImageHeight: 630, ogImageType: "image/png" }),
-    ogImageAlt: custom ? input.title : `${SITE_NAME} ロゴ`,
     ogType: input.ogType ?? "website",
+  } as const;
+  if (input.image) {
+    return {
+      ...base,
+      ogImage: absoluteUrl(input.image, origin),
+      ogImageWidth: null,
+      ogImageHeight: null,
+      ogImageType: null,
+      ogImageAlt: input.title,
+    };
+  }
+  return {
+    ...base,
+    ogImage: `${origin}${BRAND_SOCIAL_IMAGE_PATH}`,
+    ogImageWidth: 1200,
+    ogImageHeight: 630,
+    ogImageType: "image/png",
+    ogImageAlt: `${SITE_NAME} ロゴ`,
   };
 }

@@ -14,7 +14,7 @@ const sharedSource = await readFile(
   "utf8",
 );
 const wakeBudgetSource = await readFile(
-  new URL("../../src/lib/queues/wakeBudget.ts", import.meta.url),
+  new URL("../../packages/server-core/src/queues/wakeBudget.ts", import.meta.url),
   "utf8",
 );
 const playlistActionSource = await readFile(

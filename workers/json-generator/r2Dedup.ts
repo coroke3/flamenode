@@ -13,6 +13,25 @@ export type JsonArtifactPutResolution = {
 
 const MAX_PRELOAD_ARTIFACT_HASHES = 100;
 
+/**
+ * Artifact SLO (src/lib/health/artifactSlo.ts) は本文 generated_at の経過日数を 90 日で
+ * 判定する。内容不変の artifact は dedup で PUT されず generated_at が進まないため、
+ * 最終 PUT（R2 `uploaded`）がこの秒数より古ければ内容が同一でも書き直す。
+ * SLO(90日)より十分手前にして、定期 sweep が追いつく猶予（約30日）を残す。
+ */
+export const STATIC_ARTIFACT_REFRESH_AFTER_SEC = 60 * 24 * 3600;
+
+function isRefreshDue(object: R2Object, nowMs: number): boolean {
+  const uploaded = object.uploaded;
+  const uploadedMs =
+    uploaded instanceof Date ? uploaded.getTime() : Number.NaN;
+  // uploaded が取れない場合は従来どおり dedup する（テスト double など）。
+  return (
+    Number.isFinite(uploadedMs) &&
+    nowMs - uploadedMs > STATIC_ARTIFACT_REFRESH_AFTER_SEC * 1000
+  );
+}
+
 export class ArtifactHashCache {
   private readonly hashes = new Map<string, string | null>();
   private readonly loadedTargets = new Set<string>();
@@ -306,7 +325,11 @@ export async function resolveIdenticalJsonArtifactPut(
   const metadataHash = object.customMetadata?.content_hash;
   if (metadataHash) {
     return metadataHash === nextHash
-      ? { object, contentHash: nextHash, skipPut: true }
+      ? {
+          object,
+          contentHash: nextHash,
+          skipPut: !isRefreshDue(object, Date.now()),
+        }
       : null;
   }
 

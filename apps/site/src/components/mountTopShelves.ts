@@ -4,7 +4,7 @@ import { IslandErrorBoundary } from "./IslandWrapper.ts";
 import { TopShelfIsland, type TopShelfCard } from "./TopShelfIsland.ts";
 
 /**
- * Takes over the static shelves of the top page (`.shelf[data-shelf]`, rendered by `TopView`) when script runs.
+ * Takes over the static shelves of the top page (`.tp-shelf[data-shelf]`, rendered by `TopView`) when script runs.
  * The static `ol > li` stays as the fallback and is removed only after the Island has rendered; if the Island
  * throws, the error boundary renders nothing and the native horizontal scroll stays. Each shelf is mounted
  * when it comes near the viewport, so a shelf below the fold costs nothing until it is scrolled to.
@@ -49,7 +49,7 @@ export function mountTopShelf(shelf: HTMLElement): void {
 }
 
 export function mountTopShelves(scope: ParentNode = document): void {
-  const shelves = Array.from(scope.querySelectorAll<HTMLElement>(".shelf[data-shelf]"));
+  const shelves = Array.from(scope.querySelectorAll<HTMLElement>(".tp-shelf[data-shelf]"));
   if (typeof IntersectionObserver === "undefined") {
     shelves.forEach(mountTopShelf);
     return;

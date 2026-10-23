@@ -34,8 +34,9 @@ const chapterSource = await readFile(
   new URL("../actions/chapter.ts", import.meta.url),
   "utf8",
 );
+// The section table moved to the domain (MIG-0304 U03); computeEditSections.ts is its DB adapter.
 const computeEditSectionsSource = await readFile(
-  new URL("./computeEditSections.ts", import.meta.url),
+  new URL("../../../packages/domain/src/video/editSectionAccess.ts", import.meta.url),
   "utf8",
 );
 

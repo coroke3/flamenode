@@ -16,7 +16,7 @@ const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_SHELF_MAX_WIDTH_PX}px)`;
 
 export interface TopShelfCard {
   key: string;
-  /** Inner HTML of the static `li.shelf-i` (rank badge + card link), produced by the build. */
+  /** Inner HTML of the static `li.tp-shelf-i` (rank badge + card link), produced by the build. */
   html: string;
 }
 

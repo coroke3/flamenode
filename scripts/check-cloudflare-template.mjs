@@ -69,7 +69,7 @@ const expectedWorkers = new Map([
       d1: true,
       r2: true,
       kv: true,
-      crons: ["7 * * * *", "52 * * * *"],
+      crons: ["7,52 * * * *"],
       queueProducers: [
         { queue: "flamenode-youtube-sync-wake", binding: "YOUTUBE_SYNC_WAKE_QUEUE" },
         { queue: "flamenode-static-rebuild-wake", binding: "STATIC_REBUILD_WAKE_QUEUE" },

@@ -1,66 +1,37 @@
 ---
 /**
- * Representative Event Detail SSG Page (MIG-0403 / Recipe R-PAGE / Runtime S0).
- * Pre-renders public event detail HTML with full OGP and Island hydration.
- * Private and deleted fixtures are strictly excluded at build time.
+ * `/event/[id]` (MIG-0403 representative -> MIG-0502 U02 / Recipe R-PAGE / Runtime S0).
+ * One page per public event in the build data; private, deleted or unreadable events produce no file.
+ * The page body, head and Event JSON-LD come from the build; clock-dependent labels and slot counts are
+ * refreshed by the Island (live slot state is never in the static HTML).
  */
-import { EventDetailView, type EventDetailData } from "@flamenode/ui";
-import { IslandWrapper } from "../../../components/IslandWrapper.ts";
-import { getPublicRepresentativeEvents } from "../../../lib/representativeFixtures.ts";
-import type { EventPublicSnapshot } from "../../../lib/publicDataLoader.ts";
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { EventDetailIsland } from "../../../components/EventDetailIsland.ts";
+import { getEventBuildData } from "../../../lib/eventData.ts";
+import { buildEventJsonLd } from "../../../lib/eventDetail.ts";
+import { buildPageHead, serializeJsonLd } from "../../../lib/pageHead.ts";
+import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
 
 export async function getStaticPaths() {
-  const events = getPublicRepresentativeEvents();
-  return events.map((event) => ({
-    params: { id: event.id },
-    props: { event },
-  }));
+  const { details } = await getEventBuildData();
+  return [...details.values()].map((detail) => ({ params: { id: detail.event.id }, props: { detail } }));
 }
 
 interface Props {
-  event: EventPublicSnapshot;
+  detail: StaticEventDetail;
 }
 
-const { event } = Astro.props;
-const title = `${event.title} - FlameNode`;
-const canonicalUrl = event.canonicalUrl ?? `https://flamenode.net/event/${event.id}`;
-const ogImageUrl = event.ogImageUrl ?? event.bannerUrl ?? "https://flamenode.net/brand/ogp-default.png";
-const description = event.description ?? "";
-
-const eventData: EventDetailData = {
-  id: event.id,
+const { detail } = Astro.props;
+const { event } = detail;
+const head = buildPageHead({
+  path: `/event/${event.id}`,
   title: event.title,
-  imageUrl: event.bannerUrl ?? null,
-  iconUrl: event.iconUrl ?? null,
-  explanation: event.description ?? null,
-  statusLabel: event.status === "upcoming" ? "募集期間中" : "開催中",
-  statusTone: "info",
-  periodLabel: event.periodText ?? null,
-  entryAction: "reserve",
-  videoTotal: 0,
-  creatorTotal: 0,
-  slotFilled: 0,
-  slotTotal: 0,
-};
+  description: event.explanation,
+  image: event.img_url ?? event.icon_url,
+});
+const builtAt = Math.floor(Date.now() / 1000);
 ---
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{title}</title>
-    <link rel="canonical" href={canonicalUrl} />
-    <meta property="og:title" content={title} />
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content={canonicalUrl} />
-    <meta property="og:image" content={ogImageUrl} />
-    <meta property="og:site_name" content="FlameNode" />
-    {description && <meta name="description" content={description} />}
-    {description && <meta property="og:description" content={description} />}
-  </head>
-  <body>
-    <IslandWrapper client:load>
-      <EventDetailView event={eventData} />
-    </IslandWrapper>
-  </body>
-</html>
+<PublicLayout head={head} currentPath="/event">
+  <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(buildEventJsonLd(event))}></script>
+  <EventDetailIsland client:load detail={detail} builtAt={builtAt} />
+</PublicLayout>

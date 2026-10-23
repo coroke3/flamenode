@@ -338,13 +338,13 @@ test("<=700px with two rows: an odd list is padded to a full column and arrows s
 test("static takeover: the native shelf is removed only after the Island rendered; empty shelves stay", async () => {
   reset();
   document.body.innerHTML = `<section>
-    <div class="shelf" data-shelf="latest" role="region" aria-label="新着" tabindex="0"><ol class="shelf-track">${Array.from({ length: 8 }, (_, i) => `<li class="shelf-i"><span class="shelf-rank">${i + 1}</span><a href="/v${i}">作品${i}</a></li>`).join("")}</ol></div>
-    <div class="shelf" data-shelf="recommend" role="region" aria-label="空"><ol class="shelf-track"></ol></div>
+    <div class="tp-shelf" data-shelf="latest" role="region" aria-label="新着" tabindex="0"><ol class="tp-shelf-track">${Array.from({ length: 8 }, (_, i) => `<li class="shelf-i"><span class="shelf-rank">${i + 1}</span><a href="/v${i}">作品${i}</a></li>`).join("")}</ol></div>
+    <div class="tp-shelf" data-shelf="recommend" role="region" aria-label="空"><ol class="tp-shelf-track"></ol></div>
   </section>`;
   const shelf = document.querySelector('[data-shelf="latest"]');
   const cardsRead = readShelfCards(shelf);
   assert.equal(cardsRead.length, 8);
-  assert.match(cardsRead[0].html, /shelf-rank.*作品0/);
+  assert.match(cardsRead[0].html, /tp-shelf-rank.*作品0/);
   state.observers.length = 0;
   mountTopShelves();
   assert.ok(document.querySelector('[data-shelf="latest"]'), "static shelf is kept until the shelf is near the viewport");
@@ -356,7 +356,7 @@ test("static takeover: the native shelf is removed only after the Island rendere
   assert.equal(tls.getAttribute("aria-label"), "新着");
   assert.equal(tls.getAttribute("data-auto-direction"), "left");
   assert.equal(tls.querySelectorAll('[data-loop-group="1"] .tls-i').length, 8);
-  assert.match(tls.querySelector('[data-loop-group="1"] .tls-i').innerHTML, /<span class="shelf-rank">1<\/span><a href="\/v0">作品0<\/a>/);
+  assert.match(tls.querySelector('[data-loop-group="1"] .tls-i').innerHTML, /<span class="tp-shelf-rank">1<\/span><a href="\/v0">作品0<\/a>/);
   assert.ok(document.querySelector('[data-shelf="recommend"]'), "a shelf without cards is left alone");
   document.body.innerHTML = "";
 });

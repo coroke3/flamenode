@@ -1,26 +1,10 @@
 name: Migration contract and workspace verification
 
 on:
+  # No paths filter: root tsc (**/*.ts), test:unit (src/scripts/app), test:workers,
+  # D1 migration tests (migrations/) and check:cloudflare-template (wrangler.toml)
+  # read most of the repository, so a filter would leave such PRs with no CI.
   pull_request:
-    paths:
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "docs/AI_CONTEXT.md"
-      - "docs/migration/**"
-      - "scripts/check-migration*.mjs"
-      - "scripts/print-migration-task-context*.mjs"
-      - "scripts/check-project-docs.mjs"
-      - ".claude/**"
-      - ".codex/**"
-      - ".agents/**"
-      - "apps/**"
-      - "packages/**"
-      - "src/lib/**"
-      - "app/**"
-      - "workers/**"
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/migration-docs-check.yml"
   workflow_dispatch:
 
 concurrency:
@@ -54,11 +38,22 @@ jobs:
       - name: 実装カードchecker回帰テスト
         run: node --test scripts/check-migration-task-cards.test.mjs
       - name: ファイル別依存・Route/RH/SA登録とPR差分を照合
-        env:
-          MIGRATION_FILE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node scripts/check-migration-file-progress.mjs
+        # On the PR merge ref, HEAD^1 is the current base tip and HEAD^2 the PR head
+        # (pull_request.base.sha is not refreshed on synchronize). workflow_dispatch
+        # compares against origin/main. Anything else leaves the base empty and fails closed.
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            export MIGRATION_FILE_BASE_SHA="$(git rev-parse HEAD^1)"
+          elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            export MIGRATION_FILE_BASE_SHA="$(git merge-base origin/main HEAD)"
+          fi
+          node scripts/check-migration-file-progress.mjs
       - name: ファイル進捗checkerの回帰テスト
         run: node --test scripts/check-migration-file-progress.test.mjs
+      - name: ファイル台帳の網羅性(追跡ソースが台帳行または家族行でカバーされる)
+        run: |
+          node scripts/check-migration-ledger-completeness.mjs
+          node --test scripts/check-migration-ledger-completeness.test.mjs
       - name: Work-item進捗構造と所有重複の回帰テスト
         run: |
           node scripts/check-migration-work-items.mjs
@@ -100,14 +95,18 @@ jobs:
           npm run build --workspace=@flamenode/contracts
           npm run build --workspace=@flamenode/domain
           npm run test --workspace=@flamenode/domain
+          npm run typecheck --workspace=@flamenode/server-core
+          npm run test --workspace=@flamenode/server-core
           npm run build --workspace=@flamenode/ui
           npm run test --workspace=@flamenode/ui
-          npm run build --workspace=@flamenode/site
+          npm run test --workspace=@flamenode/site  # astro build + Island tests (MIG-0402)
           npm run build --workspace=@flamenode/app
           npm run build --workspace=@flamenode/api
           npm run test --workspace=@flamenode/api
       - name: MIG-0401 synthetic public-only HTML verification
         run: node scripts/check-migration-public-poc-build.mjs
+      - name: MIG-0501 fixed-route parity (requires the ui and site builds above; missing build fails; serial because tests run astro build in apps/site)
+        run: REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-fixed-routes.test.mjs scripts/migration-public-shell.test.mjs scripts/migration-list-discover.test.mjs scripts/migration-user-routes.test.mjs scripts/migration-event-routes.test.mjs scripts/migration-group-routes.test.mjs scripts/migration-top-route.test.mjs
       - name: MIG-0404 route-map generator verification
         run: node --test --experimental-strip-types scripts/migration-route-map.test.mjs
       - name: MIG-0405 visibility gateway verification
@@ -116,4 +115,10 @@ jobs:
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
           node scripts/check-public-site-build-budget.mjs
+      - name: MIG-0409 build-time public data parity with CURRENT
+        run: node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
+      - name: MIG-0411 queue page renders on the real schema and gateway
+        run: node --test --experimental-strip-types apps/site/src/gateway/pageRenderQueue.test.mjs
+      - name: MIG-0409 U07 non-production CPU probe auth and error regression
+        run: node --test --experimental-strip-types apps/site/scripts/queue-cpu-probe/worker.test.mjs
 

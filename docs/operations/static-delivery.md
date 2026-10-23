@@ -376,6 +376,22 @@ enqueue できない場合に「一時的に表示できません」を表示し
 
 postings-v1 の候補走査では検索語を trim/lower した値と空の creator-name map を再利用し、候補ごとの正規化・Map生成を避ける。部分一致の対象列と検索結果は変えない。
 
+### Artifact SLO の鮮度維持（dedup refresh と sweep）
+
+Artifact SLO（`src/lib/health/artifactSlo.ts`）は本文 `generated_at`／`static_artifacts.generated_at` の経過を 90 日で判定する。内容不変の artifact は R2 dedup が PUT を省くため、そのままでは `generated_at` が進まず deep health が 503 になる。
+
+- Dedup refresh: `workers/json-generator/r2Dedup.ts` は同一 content hash でも R2 `uploaded` が `STATIC_ARTIFACT_REFRESH_AFTER_SEC`（60 日）より古ければ書き直す。`scripts/check-artifact-slo.mjs` が SLO との差 14 日以上を検査する。
+- 定期 sweep: `content-jobs` の既存 hourly Recovery（新 cron なし）が `content-jobs:artifact-refresh` lease（最小間隔 6 時間）で `ensureStaleArtifactRefresh` を実行する。
+  - video/event 詳細: `static_artifacts` の最古 `generated_at` が 60 日超の target を古い順に最大 100 件。
+  - global artifact: tracking 行ではなく、SLO probe の最大 11 key（visibility manifest を除く、`STALE_ARTIFACT_REFRESH_GLOBAL_TARGETS` で key → rebuild target を明示）を R2 HEAD し、`uploaded` が 60 日超のものを対象にする。`scripts/check-artifact-slo.mjs` が probe との対応漏れを検査する。
+  - 対象は `reason=artifact_slo_refresh`・`priority=low` で enqueue。pending/processing の queue 行がある target、および直近 7 日以内に failed になった target は除外する（failed の無限再試行を避ける。7 日より古い failed は除外しない）。
+  - `recommend.json` の本文 `generated_at` は core の値ではなく合成時刻（`rebuildRecommend` 実行時）にする。core が古いまま recommend だけ先に再生成されても、R2 `uploaded` と本文 `generated_at` が一致する。
+- 上限と無料枠: sweep は 1 日最大 4 run、detail 最大 100 target/run（400/日）+ global 最大 11 target/run。D1 は run あたり最大 6 statement（lease 3 + SELECT 2 + enqueue 1）、非実行 hour は lease 取得 1 statement。R2 HEAD は run あたり最大 11 回。**Queue は target ごとに消費する**: consumer は `MAX_QUEUE_ITEMS_PER_RUN=1` で 1 wake 1 target を処理し、残りがあれば continuation wake を 1 message 送る。したがって enqueue した target 1 件あたり約 1 message（write/read/delete で約 3 ops）かかり、run あたり最大約 100〜111 message（約 300 ops）、1 日最大約 1,200〜1,300 ops を消費しうる。通常運用では refresh 対象は 60 日に 1 回なので定常状態は 1 日あたり対象数/60 件程度（数十 ops）。初回の catch-up だけ上限に張り付く。`npm run estimate:queue-budget` の通常日モデル（6,100 ops / 無料枠 10,000）に catch-up 最大 約 1,300 を足しても枠内。
+- 本番 flag（2026-10-23 時点の最新 version `34d13d32`、read-only 確認）: `flamenode-content-jobs` は `QUEUE_DISPATCH_ENABLED="1"`、`QUEUE_CONTINUATION_ENABLED="1"`。continuation が有効なので、enqueue された target は hourly Recovery を待たず wake 連鎖で連続処理される（約 1 target/秒〜数秒）。detail の catch-up は run あたり 100 target が数分で消化され、6 時間間隔でも 2026-10-30 までに 24 run 前後 × 100 = 約 2,400 target を処理できる。最古行（2026-08-01）は最初の run で最優先に再生成される。
+- Post-deploy one-shot: 現在の deep health 503 を即時に解消するには、deploy 後に `/admin/static-builds` の手動 form で `rules` / `global` を登録する（他の期限超過 global は次の sweep が拾う）。
+- related 動画の random seed: 動画詳細 artifact の `related_random_seed` は `internalVideoId:randomPool.generationKey:blocklist.generatedAt` から作られる。refresh で `youtube/related-blocklist.v1.json` の `generated_at` が約 60 日ごとに変わるため、その時に各動画の関連動画の補完（random）順が入れ替わる。内容は変わらず、挙動として許容する。
+- 診断: `/api/health/deep` は失敗時、認可済み呼び出し元にだけ `{"ok":false,"service":"flamenode-web","reason":"artifact_stale|artifact_missing|artifact_invalid","key":"<artifact key>"}` を返し、同じ code を `console.error` に構造化出力する。`scripts/smoke-cloudflare.mjs` はこれを表示する。
+
 ## スコア再計算とランキング再生成
 
 Video global projections share the internal materialized source at

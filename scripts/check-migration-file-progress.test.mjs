@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {validateFileProgress,parseFileRows,parsePageLedger,parseRouteHandlerLedger,parseActionLedger,isTrackedSourceCandidate} from "./check-migration-file-progress.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {execFileSync,spawnSync} from "node:child_process";
+import {fileURLToPath} from "node:url";
+import {validateFileProgress,parseFileRows,parsePageLedger,parseRouteHandlerLedger,parseActionLedger,isTrackedSourceCandidate,prCommitCheck} from "./check-migration-file-progress.mjs";
 
 const currentRoutes="| Route | Current file | Class | Role |\n| --- | --- | --- | --- |\n| \x60/about\x60 | \x60app/(public)/about/page.tsx\x60 | VISUAL_SCREEN | public |";
 const routeHandlers="| ID | Method | Route | Purpose |\n| --- | --- | --- | --- |\n| RH-018 | GET | /api/health | ok |";
@@ -119,4 +124,40 @@ test("parseFileRows and validateFileProgress handle CRLF newlines", () => {
   const crlfMatrix = matrix.replace(/\n/g, "\r\n");
   assert.equal(parseFileRows(crlfMatrix).rows.size, 3);
   assert.deepEqual(validateFileProgress({ ...base, matrix: crlfMatrix }), []);
+});
+
+test("changed started file must cite a SHA= newer than base that is a PR commit",()=>{
+ const sha=n=>String(n).repeat(40);
+ const row=ev=>replace("| \x60app/api/health/route.ts\x60 | ROUTE_HANDLER | RH-018:GET | MIG-0601 | +apps/api/src/routes/health.ts | NOT_STARTED | — |",
+  "| \x60app/api/health/route.ts\x60 | ROUTE_HANDLER | RH-018:GET | MIG-0601 | +apps/api/src/routes/health.ts | IN_PROGRESS | "+ev+" |");
+ const input={...base,changedPaths:["app/api/health/route.ts"],baseMatrix:row("PR#1 SHA="+sha(1)),isPrCommit:s=>s===sha(2)};
+ assert.match(validateFileProgress({...input,matrix:row("PR#1 SHA="+sha(1))}).join("\n"),/cites no SHA= newer than base/);
+ assert.match(validateFileProgress({...input,matrix:row("PR#2 SHA="+sha(3))}).join("\n"),/is not a commit from this PR's history/);
+ assert.deepEqual(validateFileProgress({...input,matrix:row("PR#2 SHA="+sha(2))}),[]);
+ // The new SHA counts wherever it sits in the row, e.g. after kept prior evidence.
+ assert.deepEqual(validateFileProgress({...input,matrix:row("PR#1 SHA="+sha(1)+"; PR#2 SHA="+sha(2))}),[]);
+ // NOT_STARTED rows keep the existence-only check.
+ assert.deepEqual(validateFileProgress({...base,changedPaths:["app/api/health/route.ts"],baseMatrix:matrix,isPrCommit:()=>false}),[]);
+});
+
+test("PR commit check: old main commit and base fail, branch commit passes",()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"file-progress-git-"));
+ const git=(...a)=>execFileSync("git",["-c","user.name=t","-c","user.email=t@t","-c","commit.gpgsign=false",...a],{cwd:dir,encoding:"utf8"}).trim();
+ git("init","-q");
+ const commit=m=>{git("commit","-q","--allow-empty","-m",m);return git("rev-parse","HEAD");};
+ const old=commit("old main"), baseSha=commit("base"), branch=commit("branch");
+ const check=prCommitCheck(dir,baseSha);
+ assert.equal(check(old),false);
+ assert.equal(check(baseSha),false);
+ assert.equal(check(branch),true);
+ assert.equal(check("d".repeat(40)),false);
+ fs.rmSync(dir,{recursive:true,force:true});
+});
+
+test("CLI fails closed in CI without MIGRATION_FILE_BASE_SHA",()=>{
+ const script=fileURLToPath(new URL("./check-migration-file-progress.mjs",import.meta.url));
+ const env={...process.env,CI:"true"};delete env.MIGRATION_FILE_BASE_SHA;
+ const r=spawnSync(process.execPath,[script],{env,encoding:"utf8"});
+ assert.equal(r.status,1);
+ assert.match(r.stderr,/MIGRATION_FILE_BASE_SHA is required in CI/);
 });

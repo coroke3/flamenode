@@ -207,11 +207,11 @@ export function TopView({ stats, primary, recruits, moreRecruitCount, announceme
             {shelf.items.length === 0 ? (
               <div className="wrap"><p className="muted tp-empty">{shelf.emptyMessage}</p></div>
             ) : (
-              <div className="shelf" data-shelf={shelf.id} role="region" aria-label={shelf.title} tabIndex={0}>
-                <ol className="shelf-track">
+              <div className="tp-shelf" data-shelf={shelf.id} role="region" aria-label={shelf.title} tabIndex={0}>
+                <ol className="tp-shelf-track">
                   {shelf.items.map((item, index) => (
-                    <li key={`${item.id}-${index}`} className="shelf-i">
-                      {item.rank != null ? <span className="shelf-rank t-num" aria-hidden="true">{item.rank}</span> : null}
+                    <li key={`${item.id}-${index}`} className="tp-shelf-i">
+                      {item.rank != null ? <span className="tp-shelf-rank t-num" aria-hidden="true">{item.rank}</span> : null}
                       <VideoCardLink video={item} />
                     </li>
                   ))}

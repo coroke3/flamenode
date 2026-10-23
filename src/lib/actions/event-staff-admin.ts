@@ -34,6 +34,7 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { generateId } from "@/lib/utils/id";
 import { parseCanonicalXId } from "@/lib/utils/xid";
+import { parseEventStaffPermissionKeys } from "@flamenode/domain/event";
 import { planD1AuditMutationBudget } from "@/lib/audit/mutateBudget";
 import { enqueueStaticRebuildMany } from "@/lib/staticRebuild/enqueue";
 import {
@@ -162,16 +163,6 @@ async function revalidateEventStaffPathsBestEffort(args: {
       },
     ],
   );
-}
-
-function parsePermissionKeys(raw: string | null | undefined): string[] {
-  const keys = (raw ?? "")
-    .split(",")
-    .map((key) => key.trim())
-    .filter(Boolean);
-  const invalid = keys.find((key) => !canonicalizePermissionKey(key));
-  if (invalid) throw new Error(`不正な権限キーです: ${invalid}`);
-  return [...new Set(keys)];
 }
 
 function assignmentFromInput(
@@ -335,7 +326,7 @@ export async function upsertEventStaffMember(
   try {
     assignment = assignmentFromInput(
       data.permission_preset,
-      parsePermissionKeys(data.permission_keys),
+      parseEventStaffPermissionKeys(data.permission_keys),
       guard.role === "admin",
     );
   } catch (error) {

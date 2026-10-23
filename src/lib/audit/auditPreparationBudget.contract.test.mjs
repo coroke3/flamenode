@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const loggerSource = await readFile(new URL("./logger.ts", import.meta.url), "utf8");
-const mutateSource = await readFile(new URL("./mutate.ts", import.meta.url), "utf8");
-const budgetSource = await readFile(new URL("./mutateBudget.ts", import.meta.url), "utf8");
+const loggerSource = await readFile(new URL("../../../packages/server-core/src/audit/logger.ts", import.meta.url), "utf8");
+const mutateSource = await readFile(new URL("../../../packages/server-core/src/audit/mutate.ts", import.meta.url), "utf8");
+const budgetSource = await readFile(new URL("../../../packages/server-core/src/audit/mutateBudget.ts", import.meta.url), "utf8");
 const atomicSource = await readFile(
   new URL("../video/atomicWritePlan.ts", import.meta.url),
   "utf8",

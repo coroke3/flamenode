@@ -21,9 +21,9 @@ test("仕様01/02のD1 baselineはowner subjectとleaseのcanonical契約を持�
 });
 
 test("監査復元の競合検出とowner最後の一人保護は同じD1 mutationへ伝播する", () => {
-  const restore = read("src/lib/audit/restore.ts");
-  const adapters = read("src/lib/audit/adapters.ts");
-  const expectedCondition = read("src/lib/audit/expectedRowCondition.ts");
+  const restore = read("packages/server-core/src/audit/restore.ts");
+  const adapters = read("packages/server-core/src/audit/adapters.ts");
+  const expectedCondition = read("packages/server-core/src/audit/expectedRowCondition.ts");
   assert.match(restore, /computeChangedKeys\(after, current\)/);
   assert.match(restore, /conflicts\.length\s*>\s*0\s*&&\s*!forceOverwrite|conflicts\.length && !forceOverwrite/);
   assert.match(restore, /expectedCurrent: current/);
@@ -31,7 +31,7 @@ test("監査復元の競合検出とowner最後の一人保護は同じD1 mutati
   assert.match(expectedCondition, /Object\.entries\(expected\)/);
   assert.match(expectedCondition, /sql\.join\(predicates, sql` AND `\)/);
   assert.match(adapters, /COUNT\(\*\).*permission_preset = 'owner'/s);
-  assert.match(read("src/lib/audit/mutate.ts"), /changes\(\)/);
+  assert.match(read("packages/server-core/src/audit/mutate.ts"), /changes\(\)/);
   assert.match(restore, /getRestoreRegistration|persistFailedRestoreRun/);
 });
 
