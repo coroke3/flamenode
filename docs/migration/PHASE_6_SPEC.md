@@ -389,6 +389,7 @@ PRをrevert。
 
 - CURRENT の計測値（本番、Four-Worker 表）: sync の scheduled が max 83ms、fast の scheduled が max 25ms（`cloudflare/PERFORMANCE_BASELINE.md`）。
 - Queue consumer は `max_batch_size = 10`（`workers/*/wrangler.toml`）。batch 全体が1回の invocation。
+- **MIG-0410（#325）からの引き継ぎ（Fable 決定 2026-10-23。非本番 `cpuTime`、整数 ms）:** (a) fast-jobs の既存の段は warm 約10ms（C1 max 15ms）、(b) 通知 outbox 6件で 33ms（1件約4ms → `MAX_` を 1〜2 にする案を検討）、(c) cold 24〜30ms。MIG-0410 の段の増分は +2ms で B-add（`ZERO_1102.md` §3）を満たす。fast-jobs 全体を 8ms に収めるのはこの task（測定）と MIG-0610（分割）。
 #### Owned paths
 - 新規: `+docs/migration/cloudflare/BACKGROUND_CPU.md`
 - 変更: `scripts/benchmark-api-cpu.mjs`（Cron と Queue consumer を呼ぶ入口を足すだけ）
