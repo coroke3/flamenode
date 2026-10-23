@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0602
+Current Task: MIG-0612
 Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0602
-Last Task PR: #331
-Merged READY: MIG-0409, MIG-0603, MIG-0604, MIG-0605, MIG-0701
+Last Completed Task: MIG-0612
+Last Task PR: #338
+Merged READY: MIG-0409, MIG-0603, MIG-0604, MIG-0605, MIG-0613, MIG-0701
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -308,6 +308,13 @@ Validation:
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
+| MIG-0612 | shared server core scaffold, ports, boundary check (D-10) | DONE | — |
+| MIG-0613 | audit mutation core + queue wake via ports (D-10) | READY | MIG-0612 |
+| MIG-0614 | static rebuild enqueue / notifications batch / visibility fence / public cache core (D-10) | BLOCKED | MIG-0613 |
+| MIG-0615 | video/event/xUser visibility transition planners (D-10) | BLOCKED | MIG-0614 |
+| MIG-0616 | audit restore core (D-10) | BLOCKED | MIG-0615 |
+| MIG-0617 | replace apps/api Option A copy with core (D-10) | BLOCKED | MIG-0613, MIG-0614, MIG-0602 |
+| MIG-0618 | xid merge core (D-10) | BLOCKED | MIG-0613 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
 
