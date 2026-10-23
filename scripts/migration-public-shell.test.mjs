@@ -1,5 +1,5 @@
 // MIG-0501 coverage-gap units (G05 head extras, G06 WebSite JSON-LD, G07 GA4, G08 theme/fonts, G10 404/503,
-// G23 /maintenance, about-stats snapshot) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
+// G23 text row, about-stats snapshot; /maintenance is MIG-0619-owned (PublicPage, no JS) so G10/G23 text rows only cross-check it) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
 // not-found/error/maintenance pages and @next/third-parties.
 // Run `npm run build -w @flamenode/ui && npm run build -w @flamenode/site` first.
 import assert from "node:assert/strict";
@@ -30,7 +30,7 @@ const seo = fs.readFileSync("src/lib/seo.ts", "utf-8");
 test("G08: theme bootstrap is CURRENT's script verbatim and runs before the first stylesheet/body", { skip }, () => {
   const current = rootLayout.match(/const themeBootstrapCode = `([^`]*)`;/)[1];
   assert.equal(THEME_BOOTSTRAP_CODE, current);
-  for (const route of ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html"]) {
     const text = html(route);
     const at = text.indexOf(current);
     assert.ok(at > 0, `${route}: bootstrap inlined`);
@@ -72,7 +72,7 @@ test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is em
   }
   assert.ok(seo.includes('"映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。"'));
   assert.ok(rootLayout.includes('id="flamenode-site-structured-data"'));
-  for (const route of ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html", "503/index.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html", "503/index.html"]) {
     const script = dom(route).querySelector('script#flamenode-site-structured-data[type="application/ld+json"]');
     assert.deepEqual(JSON.parse(script.textContent), JSON.parse(serializeJsonLd(ld)));
   }
