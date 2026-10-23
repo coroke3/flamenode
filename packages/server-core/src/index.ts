@@ -4,6 +4,8 @@ export type {
   EdgeCachePort,
   EnvValues,
   KvPort,
+  QueueWakeHost,
+  QueueWakeHostLoader,
   QueueWakePort,
   RethrowFrameworkControl,
   WaitUntilPort,

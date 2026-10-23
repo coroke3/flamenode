@@ -1,16 +1,17 @@
+// Compatibility bridge (MIG-0613, D-10): implementation lives in packages/server-core; remove when callers import it directly.
 import "server-only";
 
-import { sendQueueWakeBestEffort, type QueueSendBinding } from "./sendQueueWakeBestEffort";
-import type { QueueFeatureFlagEnv } from "./featureFlags";
-import type { QueueWakeKind, QueueWakeSource } from "./wakeBudget";
-
-const STATIC_REBUILD_WAKE_KIND: QueueWakeKind = "static_rebuild_available";
+import { nextQueueWakeHost } from "@/lib/serverCore/nextPorts";
+import type { QueueFeatureFlagEnv } from "@flamenode/server-core/queues/featureFlags";
+import type { QueueSendBinding } from "@flamenode/server-core/queues/sendQueueWakeBestEffort";
+import { wakeStaticRebuildQueueAfterCommit as wakeStaticRebuildQueueAfterCommitCore } from "@flamenode/server-core/queues/wakeStaticRebuildQueueAfterCommit";
+import type { QueueWakeKind, QueueWakeSource } from "@flamenode/server-core/queues/wakeBudget";
 
 /**
  * static_rebuild_queue 保存の D1 batch / トランザクション成功後にだけ呼ぶ。
  * 同一 HTTP リクエスト内では sentKinds を共有して kind ごと最大1回にする。
  */
-export async function wakeStaticRebuildQueueAfterCommit(
+export function wakeStaticRebuildQueueAfterCommit(
   source: QueueWakeSource,
   options?: {
     sentKinds?: Set<QueueWakeKind>;
@@ -18,11 +19,5 @@ export async function wakeStaticRebuildQueueAfterCommit(
     envFlags?: QueueFeatureFlagEnv | null;
   },
 ): Promise<{ sent: boolean; reason?: string }> {
-  return sendQueueWakeBestEffort({
-    kind: STATIC_REBUILD_WAKE_KIND,
-    source,
-    sentKinds: options?.sentKinds,
-    queue: options?.queue,
-    envFlags: options?.envFlags,
-  });
+  return wakeStaticRebuildQueueAfterCommitCore(source, options, nextQueueWakeHost);
 }

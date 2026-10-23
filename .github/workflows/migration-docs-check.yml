@@ -131,7 +131,7 @@ jobs:
           npm run build --workspace=@flamenode/contracts
           npm run build --workspace=@flamenode/domain
           npm run test --workspace=@flamenode/domain
-          npm run build --workspace=@flamenode/server-core
+          npm run typecheck --workspace=@flamenode/server-core
           npm run test --workspace=@flamenode/server-core
           npm run build --workspace=@flamenode/ui
           npm run test --workspace=@flamenode/ui
@@ -149,4 +149,8 @@ jobs:
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
           node scripts/check-public-site-build-budget.mjs
+      - name: MIG-0409 build-time public data parity with CURRENT
+        run: node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
+      - name: MIG-0409 U07 non-production CPU probe auth and error regression
+        run: node --test --experimental-strip-types apps/site/scripts/queue-cpu-probe/worker.test.mjs
 

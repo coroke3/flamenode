@@ -24,7 +24,7 @@
 
 ## File-state machine and evidence
 
-**SHA循環回避:** ファイル台帳に記録する`SHA=`は、実装・テストした**直前のsource commit SHA**。進捗行を更新するcommit自身の未来SHAを記入することは不可能。最終PR HEAD/CI runをGitHubで別途確認し、レビュー担当者が紐付ける。偽の未来SHAや仮のCI URLを入力しない。
+**SHA循環回避:** ファイル台帳に記録する`SHA=`は、**このPR自身の履歴にあるcommit**（PR headから到達でき、baseからは到達できないcommit）。進捗行を更新するcommit自身の未来SHAは書けないので、2段階で進める: (1) source とtestを変更するcode commitを作る、(2) そのcode commitのSHAを`SHA=`に引用して台帳行を更新するledger commitを作る。最終PR HEAD/CI runをGitHubで別途確認し、レビュー担当者が紐付ける。偽の未来SHAや仮のCI URLを入力しない。rebaseすると引用済みSHAはPRの履歴から到達できなくなるため、rebase後は新しいcode commitのSHAを引用し直す。rebaseより`git merge origin/main`を優先する（[IMPLEMENTATION_RUNBOOK.md](IMPLEMENTATION_RUNBOOK.md)のmerge手順）。stacked PRのparent merge後のrebase/retarget（[GIT_WORKFLOW.md](GIT_WORKFLOW.md) §11 Stacked PRs）でも同様に引用し直す。
 
 | State | Required meaning | Required evidence |
 | --- | --- | --- |

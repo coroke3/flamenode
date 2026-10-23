@@ -8,15 +8,15 @@ import {
 
 test("producer helper: static rebuild wake を commit 後ヘルパへ集約する", async () => {
   const source = await readFile(
-    new URL("./wakeStaticRebuildQueueAfterCommit.ts", import.meta.url),
+    new URL("../../../packages/server-core/src/queues/wakeStaticRebuildQueueAfterCommit.ts", import.meta.url),
     "utf8",
   );
   const mutate = await readFile(
-    new URL("../audit/mutate.ts", import.meta.url),
+    new URL("../../../packages/server-core/src/audit/mutate.ts", import.meta.url),
     "utf8",
   );
   const enqueue = await readFile(
-    new URL("../staticRebuild/enqueue.ts", import.meta.url),
+    new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url),
     "utf8",
   );
   assert.match(source, /sendQueueWakeBestEffort/);

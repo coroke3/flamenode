@@ -142,7 +142,7 @@ PRをrevert。旧 Next の認証は変わらない。
 | --- | --- | --- |
 | announcement lifecycle | SA-004..006 | `src/lib/actions/announcement.ts` |
 | API endpoint config | SA-007..008 | `src/lib/actions/api-endpoints.ts` |
-| audit settings / restore | SA-009..011 | `src/lib/actions/audit-admin.ts` |
+| audit settings / restore | SA-009..011（MIG-0629 / MIG-0616 へ移動） | `src/lib/actions/audit-admin.ts` |
 - Server Action の CSRF は Next が origin で守っている。Hono 側は `src/lib/auth/writeOriginGuard.ts` と同じ origin 検査を middleware で行う。
 #### Owned paths
 - 新規: `+apps/api/src/routes/admin/*.ts`, `+apps/api/src/middleware/writeOrigin.ts`, `+packages/contracts/src/admin/*.ts`
@@ -150,7 +150,7 @@ PRをrevert。旧 Next の認証は変わらない。
 #### Micro-units
 - **U01 write guard**: origin 検査と admin 権限の middleware。検証: `writeGuardCore.test.mjs` と同じケース。
 - **U02 announcements / api-endpoints**: SA-004〜008 のエンドポイント。MIG-0303 の domain を呼ぶ。
-- **U03 audit**: SA-009〜011。SA-011（audit restore）は個別実装のまま。cost guard（SA-016〜020）は MIG-0605 U06 の所有。
+- **U03（MIG-0629 へ移動）**: SA-009〜010（audit settings / restore dry-run）。SA-011（audit restore）は MIG-0616 で個別実装。本 task の範囲は U01+U02（2026-10-23 分割決定、work-items/MIG-0602.md Decision）。cost guard（SA-016〜020）は MIG-0605 U06 の所有。
 - **U04 binding / vars 表（coverage gap G16）**: Hono Worker（`apps/api/src/env.ts`）が持つ binding と vars を表にする。CURRENT の `wrangler.toml`（flamenode-web）の `DB`, `KV`, `BUCKET`, `ASSETS`, `WORKER_SELF_REFERENCE`、queue producer 3、vars `PUBLIC_DEGRADED_D1_ENABLED`, `PUBLIC_VISIBILITY_GUARD_MODE`, queue flags、placement smart、`nodejs_compat`、`global_fetch_strictly_public` のうち、変更系 parity に必要なものを `env.ts` に反映する。Worker 側の定義と注入は MIG-0628。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -169,7 +169,7 @@ npm run test:unit
 npm run test:integration
 ```
 #### Ledger updates
-`API_MATRIX.md` の SA-004〜011 に Hono エンドポイント。`FILE_MIGRATION_MATRIX.md` の action 行の target に Hono の場所。
+`API_MATRIX.md` の SA-004〜008 に Hono エンドポイント（SA-009〜011 は MIG-0629 / MIG-0616）。`FILE_MIGRATION_MATRIX.md` の action 行の target に Hono の場所。
 #### DONE checklist
 - [ ] 対象SAすべてで成功・拒否・競合と監査・Queue が CURRENT と一致
 - [ ] 本番 Route を変更していない
@@ -250,6 +250,9 @@ Phase 6 共通契約のとおり。
 - 触らない: `src/lib/actions/**`, `app/api/events/**`, `app/api/live/**`
 #### Micro-units
 - U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604 のとおり。
+#### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
+- live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2（LIMIT は名前付き定数 100 以下 / 応答 64KB 以下）を超える。CURRENT（`liveApi.ts`）が同じ 6000 件上限・`truncated` を持つため、挙動を保つ目的で変えない。6000 枠の実測応答は約 890 KiB（`public_name`、UUID 形式 id・表示名付き）/ 約 615 KiB（匿名）。5 秒 cache と 15 秒 isolate micro-cache は CURRENT と同じ。ページング化（応答契約の変更）は owner 判断として保留し、MIG-0604 では行わない。
+
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -399,6 +402,7 @@ PRをrevert。
 
 - CURRENT の計測値（本番、Four-Worker 表）: sync の scheduled が max 83ms、fast の scheduled が max 25ms（`cloudflare/PERFORMANCE_BASELINE.md`）。
 - Queue consumer は `max_batch_size = 10`（`workers/*/wrangler.toml`）。batch 全体が1回の invocation。
+- **MIG-0410（#325）からの引き継ぎ（Fable 決定 2026-10-23。非本番 `cpuTime`、整数 ms）:** (a) fast-jobs の既存の段は warm 約10ms（C1 max 15ms）、(b) 通知 outbox 6件で 33ms（1件約4ms → `MAX_` を 1〜2 にする案を検討）、(c) cold 24〜30ms。MIG-0410 の段の増分は +2ms で B-add（`ZERO_1102.md` §3）を満たす。fast-jobs 全体を 8ms に収めるのはこの task（測定）と MIG-0610（分割）。
 #### Owned paths
 - 新規: `+docs/migration/cloudflare/BACKGROUND_CPU.md`
 - 変更: `scripts/benchmark-api-cpu.mjs`（Cron と Queue consumer を呼ぶ入口を足すだけ）
@@ -514,7 +518,7 @@ PRをrevert。D1 が正本なので、途中まで処理した仕事は次の Cr
 | T05 | コメント・文字列の中の `process.env` | 検出しない |
 #### Commands
 ```bash
-npm run build --workspace=@flamenode/server-core
+npm run typecheck --workspace=@flamenode/server-core
 npm run test --workspace=@flamenode/server-core
 node --test scripts/check-server-core-boundaries.test.mjs
 node scripts/check-server-core-boundaries.mjs
@@ -551,9 +555,17 @@ PR を revert。実装コードの変更が無いので他に戻すものは無�
 | Queue wake | `sendQueueWakeBestEffort`（env / KV / `waitUntil` を ambient に読む）、wake message、budget、failure record | `src/lib/queues/*.ts` |
 - import 連鎖は 32 file・約 4,000 行（`server-only` 5、`getCloudflareContext` 直接 3、`@/` 8、`process.env` 1）。
 #### Owned paths
-- 新規: `+packages/server-core/src/{audit,queues}/**`, `+packages/server-core/test/**`, `+src/lib/serverCore/nextPorts.ts`, `+src/lib/audit/auditGolden.execution.test.mjs`
+- 新規: `+packages/server-core/src/{audit,queues,observability,video}/**`, `+packages/server-core/src/{db,id}.ts`, `+packages/server-core/test/**`, `+src/lib/serverCore/nextPorts.ts`, `+src/lib/audit/auditGolden.execution.test.mjs`, `+src/lib/audit/auditGolden.snapshot.json`
 - 変更: `src/lib/audit/*.ts`, `src/lib/queues/*.ts`（re-export bridge 化。`restore.ts` と `*.test.mjs` は移さない）, `src/lib/utils/id.ts`, `src/lib/observability/flowTrace.ts`, `src/lib/video/memberSetSnapshot.ts`
-- 触らない: 呼び出し側（`src/lib/actions/**` など）
+- 移動（R-DOMAIN）: `src/lib/auth/permissions/presets.ts` → `packages/domain/src/auth/permissions/presets.ts`（`capability` が `isEventStaffPreset` を使うため。純粋で、`@flamenode/domain/auth/permissions/presets` の subpath export だけ足し、barrel には足さない。`EventStaffPreset` 型が `@flamenode/domain/event` と衝突するため）
+- test / script のうち、移動した source の text を読むもの（read するパスだけを新しい場所に変える。assertion と件数は同じ）: `src/lib/audit/{audit,auditPreparationBudget.contract,mutate.wake.contract,registry}.test.mjs`, `src/lib/queues/{sendQueueWakeLifetime.contract,wakeNotificationQueueAfterCommit,wakeStaticRebuildQueueAfterCommit,youtubeSyncWake}.test.mjs`, `src/lib/{integration/spec010207Contracts,integration/spec07Static,knownBugs20260821.contract,youtubePlaylistReadiness.contract,video/atomicWritePlan.contract,admin/optimization.contract,actions/videoCollabPermsBudget.contract}.test.mjs`, `src/components/forms/videoMembersReliability.contract.test.mjs`, `workers/sync-jobs/index.test.mjs`, `scripts/check-audit-actor-x.mjs`, `scripts/check-migration-docs.mjs`
+- 触らない: 呼び出し側（`src/lib/actions/**` など）、`workers/shared/**`（`src/lib/queues/*.ts` の bridge を経由して同じ module を読む）
+#### 設計の決定（実装時）
+- `mutateWithAudit(db, input, loadWakeHost?)`: core は第 3 引数に `QueueWakeHostLoader`（commit 後に host を解決する async 関数）を受ける。Next の bridge は `nextPorts.ts` を動的 import する loader を渡す（CURRENT が wake module を commit 後に動的 import していたのと同じ順序・遅延）。wake source を指定したのに loader が無い呼び出しは、batch の前に `AuditMutationError` にする（bridge では起きない）。
+- `QueueWakeHost { readEnv, readWaitUntil, readKv }`（`ports.ts`）が、CURRENT の `getEnv()` / `getCloudflareContext().ctx.waitUntil` / `getEnv().KV` の ambient な読み取りの置き換え。reader が throw または null のときは CURRENT と同じく「binding 無し」として扱う。
+- core の DB 型は `ServerCoreDb = DrizzleD1Database<typeof schema>`（`@flamenode/db/schema`）。Next の `DB` がそのまま代入できる。
+- core の build は emit しない（`typecheck` のみ）。`tsconfig.base.json` の paths が `@flamenode/db` を src へ向けるため、`rootDir` 付きの emit は TS6059 になる。`apps/api` が core を使う MIG-0617 で消費方法（paths を dist か src か）を決める。
+- core の module 内 state（`missingBindingWarned`, `recentFailureWrites`）は CURRENT と同じ module-scope の Set / Map。bridge は同じ core module を共有する。
 #### Micro-units
 - **U01 golden**: 移動前の commit で、代表入力の batch SQL + params と `audit_logs` 行を固定する test（時刻と乱数 id を固定するので `id` / `created_at` も比較する）。
 - **U02 move**: audit を `packages/server-core/src/audit/**` へ、queues を `src/queues/**` へ移し、ports を引数にする。
@@ -598,6 +610,7 @@ PR を revert（bridge が元の実装に戻る）。
 - **Verified against:** `c5a62b4d` (2026-10-23)
 #### Source snapshot
 - `src/lib/staticRebuild/**` の enqueue / hooks、`src/lib/notifications/**` の batch、visibility fence の store と manifest（R2 を `BucketPort` で受ける）、`publicCache` の削除（`EdgeCachePort`）。`src/lib/publicData/loader.ts` は移さない。
+- 実施した形（PR #360、`work-items/MIG-0614.md` が正本）: 通知 template と `format.ts` は `process.env` を既定引数に使うため core に入れず、core の batch builder に template builder を引数で渡す。R2 manifest は etag/CAS が要るので `BucketPort` ではなく module 内の `VisibilityManifestBucket` を維持。`publicVisibilityManifest.ts`（react cache + getEnv）は src に残す。MIG-0411 の producer 配線は U06 として後続（本 PR では配線しない）。
 #### Owned paths
 - 新規: `+packages/server-core/src/{staticRebuild,notifications,visibility,publicCache}/**`。変更: 該当する `src/lib/**` を bridge 化。
 #### Micro-units
@@ -734,7 +747,9 @@ PR を revert。
 #### Source snapshot
 - X ID の merge（`src/lib/auth/xId*`、`planXIdMergeEventStaffOwnerProtection`）。MIG-0605 の user/X API が使う。
 #### Owned paths
-- 新規: `+packages/server-core/src/xid/**`。変更: 該当する `src/lib/**` を bridge 化。
+- 新規: `+packages/server-core/src/xid/**`, `+packages/server-core/test/xidMergeCore.test.mjs`, `+src/lib/xid/xidMergeGolden.execution.test.mjs`, `+src/lib/xid/xidMergeGolden.snapshot.json`。変更: `src/lib/xid/{merge,mergeBudget,mergeSafety}.ts`（bridge 化 / core の import）。
+- 実装時の分け方（PR #373）: core は `src/` を import できないため、`merge.ts` の flow 関数（`captureXIdMergeRestoreSnapshot` / `executeApprovedXIdMergeRequest` / `restoreApprovedXIdMergeRevertRequest` / `buildMergeStaticRebuildTargets`）と `xUserVisibilityTransition.ts` は MIG-0614（`staticRebuild/enqueue`・`staticRebuild/types`）と MIG-0615（`publicVisibilityFenceTransition`）の後に移す。今回移したのは `mergeBudget.ts` / `mergeSafety.ts`（全体）と、`merge.ts` から切り出した `xid/mergeCore.ts`（定数・snapshot 型・`assertMergeRequest`・`parseSnapshot`・SQL fragment 2 つ）。`mergeAudits.ts` は export が TEST_ONLY のため移さない。`nextPorts` に足す port は無い。
+- source を text で読む test は読み先だけを変える（assertion と件数は同じ）: `src/lib/xid/{mergeReferences.contract,mergeLifecycle.execution}.test.mjs`。
 #### Micro-units
 - **U01 golden** → **U02 move**。
 #### Test cases
@@ -1206,6 +1221,124 @@ npm run check:project-docs
 - 本番 Worker・Route・Custom Domain・secret・Remote D1 の操作は明示承認が出るまで止める。
 #### Rollback
 PRをrevert。
+### MIG-0629: admin audit settings + restore dry-run APIs（監査設定・dry-run API）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 の merge 後（MIG-0613 は台帳未登録。登録され次第 Depends に追加）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602 / **Decisions:** D-01 DECIDED
+- **Verified against:** `aacf4fd` (2026-10-15)
+#### Source snapshot
+| CURRENT | ID | file |
+| --- | --- | --- |
+| audit settings update | SA-009 | `src/lib/actions/audit-admin.ts#updateAuditLogSettingsAction` |
+| audit dry run | SA-010 | `src/lib/actions/audit-admin.ts#getAuditLogDryRun` |
+- MIG-0602 の分割で移動（2026-10-23）。SA-011（audit restore）は MIG-0616 で個別実装。ガードは MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` を再利用する。
+#### Owned paths
+- 新規: `+apps/api/src/routes/admin/audit*.ts`、`+packages/contracts/src/admin/audit*.ts`
+- 触らない: `src/lib/actions/**`
+#### Micro-units
+- **U01 audit settings**: SA-009。`updateAuditLogSettings` と同じ strict 監査（`system_settings` 更新 + 監査 1 件を 1 batch）。
+- **U02 dry run**: SA-010。読み取りのみ（既定の admin read guard を使う）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 別 origin からの POST | 拒否 |
+| T02 | 非admin | CURRENT と同じ拒否、監査0 |
+| T03 | 設定更新の成功 | 監査1件が CURRENT と byte 一致 |
+| T04 | dry run | 書き込み0、CURRENT と同じ件数 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+npm run test:critical
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-009〜010 に Hono エンドポイント。
+#### DONE checklist
+- [ ] SA-009 / SA-010 で成功・拒否・競合と監査が CURRENT と一致
+- [ ] 本番 Route を変更していない
+#### STOP
+- 監査の意味を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-02 DECIDED, D-07 DECIDED
+- **Verified against:** `c5a62b4d` (2026-10-23)
+- **Why:** MIG-0701（`apps/app` Personal SPA）が参照できる Hono の読み取り API が無い（`work-items/MIG-0701.md` Blocker B1）。CURRENT の `app/(auth)/**` は Server Component が D1 を直接読み、`RH-xxx` にも MIG-0601〜0605 にも割り当てが無い。
+- **URL（新設。CURRENT に `/api/*` の対応物は無い）:** `GET /api/personal/session`, `/api/personal/dashboard`, `/api/personal/library`, `/api/personal/settings`, `/api/personal/onboarding`。`/api/v1` は作らない。`RH-xxx` と衝突しないよう `/api/personal/` に固定する。
+#### Source snapshot
+| CURRENT | 参照するもの | file |
+| --- | --- | --- |
+| 利用者解決（`AuthSessionUser`） | `getCurrentUserContext`: user 行 + `is_tos_accepted` / `accepted_terms_version_id` / `terms_reaccept_required`（最新 major 版からの導出）+ linked X + `resolveActiveXUserId` | `src/lib/auth/currentUser.ts`, `src/lib/auth/guard.tsx`, `src/lib/auth/resolveActiveXId.ts`, `src/lib/auth/headerLinkedXUsers.ts`, `src/lib/terms/reaccept.ts` |
+| onboarding 状態 | `getOnboardingState`（linked X + 最新 pending 申請） | `src/lib/auth/onboarding.ts`, `src/lib/slots/reservationIdentity.ts`, `packages/domain/src/slots/reservationIdentity.ts` |
+| dashboard | linked X、自分の作品 8+1、共同編集 8+1（DISTINCT）、チャプター 8+1、アクティブ枠 1 + event、統計 2 本（いいね・再生・件数 / event 件数 UNION） | `app/(auth)/dashboard/page.tsx` |
+| library | like / bookmark（public のみ）、mine、collab、chapters。24 件/page、最大 500 page、`LIMIT 25 OFFSET`、反対タブの有無 | `app/(auth)/dashboard/library/page.tsx`, `src/lib/db/displayExpr.ts` |
+| settings | linked X（profile / contact / youtube / other links / request 時刻）、申請履歴 50、Active X の icon 候補 12 / youtube channel 候補 24 | `app/(auth)/dashboard/settings/page.tsx`, `src/lib/auth/xIdentity.ts`, `src/lib/db/xIconResolution.ts`, `src/lib/db/youtubeChannelCandidates.ts`, `src/lib/profileContact.ts` |
+| onboarding | 状態 + 規約本文（`loadStaticRulesPage` → R2 `rules/current.json`、無ければ D1 の公開中の最新規約、無ければクライアント側の `DEFAULT_TERMS_*`） | `app/(auth)/onboarding/page.tsx`, `src/lib/publicData/staticRulesCore.ts`, `src/lib/publicData/degradedQueries.ts` |
+#### Owned paths
+- 新規: `+apps/api/src/routes/personal/{index,context,sql,candidates,session,dashboard,library,settings,onboarding}.ts`, `+apps/api/test/personal.parity.test.mjs`, `+apps/api/test/support/{personalHarness,personalSeed}.mjs`
+- 新規: `+packages/contracts/src/personal/{shared,dashboard,library,settings,onboarding,index}.ts`（DTO と Zod schema）
+- 変更: `apps/api/src/app.ts`（mount の追加だけ）, `packages/contracts/src/index.ts`
+- 触らない: `apps/api/src/auth/session.ts`, `apps/api/src/middleware/**`（PR #331 が所有）, `app/**`（本番切替まで旧実装を維持）, 書き込み（MIG-0702）
+#### Micro-units
+- **U00 docs**: 本 Work Order と `work-items/MIG-0611.md`（STATUS は更新しない）。
+- **U01 context + session**: `context.ts`（CURRENT `getCurrentUserContext` / `getOnboardingState` と同じ解決。1 statement）と `GET /api/personal/session`。
+- **U02 dashboard**: `GET /api/personal/dashboard`。
+- **U03 library**: `GET /api/personal/library?tab=&page=`。
+- **U04 settings**: `GET /api/personal/settings?tab=&x=&onboarding=`。
+- **U05 onboarding**: `GET /api/personal/onboarding`。`maybeMarkOnboardingComplete`（GET 中の UPDATE）は再現せず MIG-0702 の POST へ引き継ぐ（lead 決定 2026-10-23）。
+- **U06 tests**: `node:sqlite` に `migrations/*.sql` 全部を適用し、CURRENT の drizzle クエリ（page.tsx の写し）と同じ seed で行・順序・件数が一致することを確認。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | cookie なし / 期限切れ | 全 5 endpoint が 401 |
+| T02 | BAN 済み利用者 | 全 5 endpoint が 403 |
+| T03 | 全 5 endpoint の成功・401・403 | `Cache-Control: private, no-store` |
+| T04 | 同じ seed で CURRENT クエリと比較 | dashboard の 5 区画、library の 5 タブ、settings、onboarding 状態が一致 |
+| T05 | `voided` / 非公開 / 他人の行 / 承認前 X | CURRENT と同じく含めない |
+| T06 | library の page / 範囲外 page / 不正 tab | 24 件/page、`page` は 1..500 に丸め、不正 tab は `like` |
+| T07 | 承認済み X 81 件 | `json_each` 経路でも CURRENT の述語と同じ結果、bind 数 ≤ 100 |
+| T08 | terms 状態（未同意 / 最新 major 未同意 / 同意済み） | `needsTermsAcceptance` が CURRENT の導出と一致 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/contracts
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+npm run test:critical
+npm run test:unit
+npm run check:public-api-leaks
+```
+#### Ledger updates
+`API_MATRIX.md` に Personal read API の行（CURRENT の画面 → Hono の場所、CPU は未計測）。`FILE_MIGRATION_MATRIX.md` に新規 file の行。STATUS は merge 直前の統合でだけ更新する。
+#### DONE checklist
+- [ ] 5 endpoint が同じ seed で CURRENT と同じ行・順序・件数を返す（private / deleted / banned / visibility の条件が同じ）
+- [ ] 全 endpoint が `requireAuth` 配下で、全応答が `Cache-Control: private, no-store`
+- [ ] 全クエリが `LIMIT` 付きで N+1 が無い。各 endpoint の D1 statement が session 照合を含め 3 以内（テストで assert）
+- [ ] D1 の bind が 100 以下（承認済み X が多い場合も）
+- [ ] 本番 Route・Remote D1・secret を変更していない
+- [ ] 独立レビュー（他agentまたは人間）の APPROVE
+#### STOP
+- `GET` の中で書き込みが必要になったら止める。`maybeMarkOnboardingComplete`（`onboarding_completed_at` の条件付き UPDATE）は認可に使われない補助マーカーなので、この task では再現せず、MIG-0702 で `POST` として扱う（lead 決定 2026-10-23: MIG-0702 の Work Order に引き継ぎ済み）。
+- 規約本文: 可視性 guard（enforce 時は manifest が無ければ fail closed）は再現する。Cache API と miss 時の rebuild enqueue は GET が書かないため再現しない（既知の差）。未公開の規約は返さない。
+- `session.ts` / `middleware` の変更が必要に見えたら止める（PR #331 が所有）。
+- 公開してよいか判断が要る列（email 等）を DTO に足したくなったら止める。
+#### 記録した既知の差・例外（挙動を変える改善ではなく S2 制約によるもの）
+- 連携 X の読み取りは `MAX_LINKED_X_USERS = 100`（`ORDER BY x_users.id`）。CURRENT は無制限なので、101 件以上の連携は返さない（ZERO_1102 S2: LIMIT は名前付き定数 100 以下）。
+- dashboard の統計 aggregate クエリ（`SUM`/`COUNT`）は 1 行を返すため `LIMIT` を持たない（CURRENT と同じ。event 件数も 1 行）。
+- settings の応答は profile 文字列が長いと S2 の 64KB を超えうる（CURRENT が同じ内容を描画するため切り詰めない）。profile は JSON 列ではなく行として読む。
+- D1 の `json_group_array` は順序付き FROM サブクエリの行順で集約される挙動に依存する。parity テストが順序付きの全区画を CURRENT と比較する。
+- statement 数（session 照合を含む）: session 2 / dashboard 3 / library 3 / settings 3 / onboarding 2（規約の D1 fallback 時 3）。テストが 3 以内を assert する。
+#### Rollback
+PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・旧 Next は変わらない。
 
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
