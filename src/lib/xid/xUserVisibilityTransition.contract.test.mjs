@@ -10,7 +10,7 @@ const transition = [
   .map((path) => fs.readFileSync(new URL(path, import.meta.url), "utf8"))
   .join("\n");
 const merge = fs.readFileSync(
-  new URL("./merge.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url),
   "utf8",
 ).replace(/\r\n/g, "\n");
 const rebuild = fs.readFileSync(

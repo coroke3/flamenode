@@ -111,7 +111,7 @@ test("本人X IDプロフィール・アイコン更新成功時に静的再生�
 test("member_suggestions再生成フックは必須mutationへ接続されている", async () => {
   const [merge, adminMembers, videoSavePlan, createFreeVideo, submitSlotVideo, collabPerms] =
     await Promise.all([
-      readFile(new URL("../xid/merge.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/adminMembers.ts", import.meta.url), "utf8"),
       readFile(new URL("../video/videoSavePlan.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/createFreeVideo.ts", import.meta.url), "utf8"),

@@ -12,7 +12,7 @@ import {
 
 export type { XUserVisibilityFencePlan } from "@flamenode/server-core/visibility/xUserTransition";
 
-const xUserVisibilityHost = {
+export const xUserVisibilityHost = {
   manifest: nextVisibilityManifestHost,
   listableApprovalStatuses: PUBLIC_LISTABLE_X_APPROVAL_STATUSES,
 };
