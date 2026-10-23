@@ -127,7 +127,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿は MIG-0603、枠は MIG-0604 の API を使う
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0603, MIG-0604, MIG-0702, MIG-0623 / **Decisions:** none
+- **Depends on:** MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/entry/page.tsx`, `app/(auth)/entry/slotted/page.tsx`, `app/(auth)/entry/unslotted/page.tsx`, `app/(auth)/dashboard/edit/[id]/page.tsx`, `app/(auth)/dashboard/edit/[id]/permissions/page.tsx`。
@@ -138,7 +138,7 @@ Phase 7 共通契約のとおり。
 - 触らない: `src/components/forms/**`（移植元。Phase 9 まで残す）
 #### Micro-units
 - **U01 entry**: `/entry` と slotted / unslotted。
-- **U02 edit**: `/dashboard/edit/:id` と permissions。
+- **U02 edit**: `/dashboard/edit/:id` と permissions（読み取り API は MIG-0630）。
 - **SA-107 の扱い（coverage gap G22）**: entry の `discordSignInInline` と return-to の sanitize は MIG-0802 の認証と合わせて対応する。それまでは CURRENT の Server Action を呼ぶ。
 #### Test cases
 | ID | 入力/操作 | 期待 |
