@@ -289,7 +289,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // app/(auth)/dashboard/edit/[id]/page.tsx (the part that feeds VideoForm: event options, questions, answers, suggestions, candidates).
   // The form is rendered only when the page is kind "edit" (refEdit); the order of eventOptions differs by design
-  // (attached-only events first, then the accepting events, each by id; CURRENT: accepting in storage order, then attached-only).
+  // (ALL attached events first by id, then the other accepting events by id; CURRENT: accepting in storage order, then attached-only).
   async function refFormOptions(name, id, rawMode) {
     const edit = await refEdit(name, id, rawMode);
     if (edit.status === 404) return { status: 404 };
@@ -342,9 +342,9 @@ if (runUnderRootTsx(import.meta.url)) {
       if (row.answer_text?.trim()) initialCustomAnswers[`${row.event_id}:${question.question_key}`] = row.answer_text.trim();
     }
     const stagePermissionInitial = await readStagePermissionCustomAnswers(db, { videoId: video.id, eventIds: currentEventIds });
-    const acceptingIds = new Set(acceptingEventRows.map((r) => r.id));
+    const attachedIds = new Set(attachedEventRows.map((r) => r.id));
     const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-    const eventOptions = [...options.filter((o) => !acceptingIds.has(o.id)).sort(byId), ...options.filter((o) => acceptingIds.has(o.id)).sort(byId)];
+    const eventOptions = [...options.filter((o) => attachedIds.has(o.id)).sort(byId), ...options.filter((o) => !attachedIds.has(o.id)).sort(byId)];
     return {
       status: 200,
       body: canon({
@@ -718,6 +718,35 @@ if (runUnderRootTsx(import.meta.url)) {
     } finally {
       sqlite.exec("DELETE FROM events WHERE id LIKE 'zb%'");
       sqlite.exec("UPDATE events SET parts_json = NULL WHERE id = 'ee1'");
+    }
+  });
+
+  test("U02b overlap: large attached events that are also accepting stay first on page 0, exactly once, never repeated or lost on later pages", async () => {
+    for (const prefix of ["aa", "zb"]) {
+      for (let i = 0; i < 4; i += 1) sqlite.prepare("INSERT INTO events (id, title, visibility_status, allow_user_video_event_links, entry_start_time, parts_json) VALUES (?, ?, 'public', 1, 1, ?)").run(`${prefix}${i}`, `Big ${prefix}${i}`, "x".repeat(20_000));
+    }
+    sqlite.prepare("UPDATE events SET parts_json = ? WHERE id IN ('ee-open', 'ee2')").run("a".repeat(15_000));
+    try {
+      const pages = [];
+      let offset = 0;
+      for (let guard = 0; guard < 20; guard += 1) {
+        const r = await call(formUrl("ed-own2", undefined, offset), "tok-alice");
+        assert.equal(r.status, 200, `offset ${offset}`);
+        assert.ok(Buffer.byteLength(r.text) <= 64 * 1024);
+        pages.push(r.body);
+        if (!r.body.truncated) break;
+        assert.ok(r.body.nextOffset > offset, "every cut makes progress");
+        offset = r.body.nextOffset;
+      }
+      assert.ok(pages.length > 2 && !pages.at(-1).truncated);
+      assert.deepEqual(pages[0].eventOptions.slice(0, 2).map((o) => o.id), ["ee-open", "ee2"], "attached events first, by id");
+      const ids = pages.flatMap((p) => p.eventOptions.map((o) => o.id));
+      assert.equal(new Set(ids).size, ids.length, "no event is repeated on any page");
+      for (const prefix of ["aa", "zb"]) for (let i = 0; i < 4; i += 1) assert.ok(ids.includes(`${prefix}${i}`), `${prefix}${i} is not lost`);
+      for (const id of ["ee-open", "ee2", "ee-open2", "ee-point"]) assert.ok(ids.includes(id), id);
+    } finally {
+      sqlite.exec("DELETE FROM events WHERE id LIKE 'aa%' OR id LIKE 'zb%'");
+      sqlite.exec("UPDATE events SET parts_json = NULL WHERE id IN ('ee-open', 'ee2')");
     }
   });
 

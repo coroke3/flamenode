@@ -207,15 +207,15 @@ export const EditPermissionsResponseSchema = z.discriminatedUnion("kind", [
  * besides the video's own values (those are in GET /api/personal/edit/:id). `no_access` = the page would not render the form
  * (no capability, or only a privilege switch); nothing else is returned. 404 `{error:"not_found"}` for an unknown video.
  * `eventOptions` is paged like the Entry forms: `truncated` = more accepting events may follow, `nextOffset` = the `?offset=`
- * that continues (null when complete or beyond the 900 clamp). The events the video is attached to are listed first on the
- * first page (offset 0); a later page may repeat one of them at its natural place (merge by id). `youtube_description_event_url`
+ * that continues (null when complete or beyond the 900 clamp). ALL events the video is attached to are listed first on the
+ * first page (offset 0), each once; later pages never repeat them (accepting rows that are attached are skipped). `youtube_description_event_url`
  * is derived by the UI from the id (`/event/<id>`). `customAnswers` is CURRENT initialCustomAnswers (`<event_id>:<question_key>`),
  * `stagePermissionAnswers` is CURRENT stagePermissionInitial (custom_question_answers_json). When `customAnswersTruncated` the
  * answers are incomplete and the SPA must not save them.
- * Paging contract: `customAnswers`, `customAnswersTruncated`, `stagePermissionAnswers`, `softwareSuggestions`, `iconCandidates` and
- * `channelCandidates` are authoritative on the FIRST page (offset 0) only. Later pages are read for `eventOptions` / `truncated` /
- * `nextOffset` only; their other fields are repeated (answers cover that page's events, `customAnswersTruncated` is per page) and must be
- * ignored by the SPA. A cut that cannot make progress (attached events alone exceed 64 KiB) is 503, never an endless `nextOffset`.
+ * Paging contract: `stagePermissionAnswers`, `softwareSuggestions`, `iconCandidates` and `channelCandidates` are authoritative on the
+ * FIRST page (offset 0) only (later pages repeat them; ignore). `customAnswers` of a page covers that page's events (including stray
+ * answers on accepting events beyond the first 100), so the SPA merges `customAnswers` by key across ALL pages; `customAnswersTruncated`
+ * is per page. A cut that cannot make progress (attached events alone exceed 64 KiB) is 503, never an endless `nextOffset`.
  */
 export const EditFormOptionsResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("no_access") }),

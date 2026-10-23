@@ -47,6 +47,8 @@ const MAX_FORM_ROWS = 1200;
 
 interface OptionRow {
   id: string;
+  /** accepting rows only: 1 when the event is also attached to the video */
+  is_att?: number;
   title: string;
   parts_json: string | null;
   youtube_description_template: string | null;
@@ -84,7 +86,7 @@ function formExtra() {
   return {
     ctes: `ax AS (SELECT NULLIF(creator_x_user_id, '') AS id FROM v),
       acc AS (
-        SELECT ${OPTION_COLUMNS} FROM events
+        SELECT ${OPTION_COLUMNS}, events.id IN (SELECT event_id FROM ev) AS is_att FROM events
         WHERE EXISTS (SELECT 1 FROM v)
           AND events.visibility_status = 'public'
           AND (events.entry_start_time IS NOT NULL OR events.entry_end_time IS NOT NULL)
@@ -106,7 +108,7 @@ function formExtra() {
         ORDER BY event_id, sort_order, id
         LIMIT ${MAX_STAGE_ANSWER_ROWS + 1})`,
     arms: [
-      `SELECT 'acc' AS k, ${optionObject("acc")} AS j FROM acc`,
+      `SELECT 'acc' AS k, json_patch(${optionObject("acc")}, json_object('is_att', acc.is_att)) AS j FROM acc`,
       `SELECT 'att' AS k, ${optionObject("att")} AS j FROM att`,
       questions.sql,
       stage.sql,
@@ -217,14 +219,16 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
   }
 
   const accepting = armOf<OptionRow>(arms, "acc");
-  const acceptingIds = new Set(accepting.map((option) => option.id));
-  // Attached events come first on the first page (so a byte cut never drops them); a later page may repeat one at its natural place.
-  const prepended = armOf<OptionRow>(arms, "att").filter((option) => !acceptingIds.has(option.id));
-  const raw = [...prepended, ...accepting];
+  // ALL attached events come first on page 0 (so a byte cut never drops them), each exactly once. Accepting rows that are
+  // attached are skipped on every page (they are on page 0 already), so no page repeats them and offset accounting has no gaps.
+  const prepended = armOf<OptionRow>(arms, "att");
+  const section = accepting.filter((option) => option.is_att !== 1);
+  const raw = [...prepended, ...section];
+  const checkIds = new Set([...prepended, ...accepting].map((option) => option.id));
   const stageSettings = stageSettingsJsonByEvent(nestedRows<StageQuestionRow>(arms, "stage"));
   const questionsByEvent = groupCustomQuestions(
     nestedRows<CustomQuestionRow>(arms, "cq"),
-    raw.map((option) => option.id),
+    Array.from(checkIds),
   );
   const allOptions: SlottedEventOption[] = raw.map((option) => ({
     id: option.id,
@@ -253,10 +257,12 @@ export const personalEditFormOptionsRoutes = new Hono<AppEnv>().get("/:id/form-o
     MAX_RESPONSE_BYTES - jsonBytes({ ...rest, eventOptions: [], truncated: true, nextOffset: 1000 }),
   );
   const truncated = accepting.length >= ENTRY_PAGE_ROWS || fit.cut;
-  const keptAccepting = Math.max(0, fit.items.length - prepended.length);
-  // Fail closed when a cut makes no progress (the attached-only events alone fill the budget): nextOffset would equal
+  const keptSection = Math.max(0, fit.items.length - prepended.length);
+  // Fail closed when a cut makes no progress (the attached events alone fill the budget): nextOffset would equal
   // offset and the SPA would refetch the same page forever.
-  if (fit.cut && keptAccepting === 0) throw new Error("form_options_no_progress");
+  if (fit.cut && keptSection === 0) throw new Error("form_options_no_progress");
+  // Accepting rows consumed = rows up to the last shown one (skipped attached rows before it included); all of them when not cut.
+  const keptAccepting = fit.cut ? accepting.findIndex((option) => option.id === section[keptSection - 1]!.id) + 1 : accepting.length;
   const body: EditFormOptionsResponse = {
     ...rest,
     eventOptions: fit.items,
