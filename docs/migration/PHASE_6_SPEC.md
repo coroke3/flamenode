@@ -1349,7 +1349,7 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0630: Video edit 画面の読み取り API（/dashboard/edit/[id] + permissions）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 実装中（PR #382）。U01 / U02a / U03 / U04 実装済み（`work-items/MIG-0630.md`）。U02b（form-options: 受付イベント・質問・回答・候補）は次の単位で、それまで MIG-0630 / MIG-0703 は完了しない
+- **Readiness:** NEEDS_REFINEMENT — 実装中。U01 / U02a / U03 / U04 は PR #382 でマージ済み、U02b（form-options: 受付イベント・質問・回答・候補）は本 task の追加 PR で実装済み（`work-items/MIG-0630.md`）。U05（STATUS 統合）が残るため MIG-0630 / MIG-0703 はまだ完了しない
 - **Recipe:** R-API
 - **Runtime:** S2
 - **Depends on:** MIG-0601, MIG-0608, MIG-0623 / **Decisions:** D-05 DECIDED
@@ -1365,6 +1365,7 @@ Phase 6 共通契約のとおり。
 - **U02 contract + route**: DTO と `GET /api/personal/edit/:id`（所有者 / 共同編集者の権限確認を API 側でも行う）。
 - **U03 permissions**: `GET /api/personal/edit/:id/permissions`。
 - **U04 parity**: 実 CURRENT loader と Hono を `node:sqlite` で比べる。
+- **U02b form-options**: `GET /api/personal/edit/:id/form-options?privileged=&offset=`（受付イベント ∪ 所属イベント、質問、既存回答、ステージ許可回答、ソフト / アイコン / チャンネル候補。`GET /:id` と同じ権限 gate、3 statement / 4 bind、`truncated` / `nextOffset`、64 KiB）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
