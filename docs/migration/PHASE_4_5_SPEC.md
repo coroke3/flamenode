@@ -487,7 +487,7 @@ PRをrevert。個別ページは build 時の HTML（MIG-0509）に戻る。
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0403, MIG-0406, MIG-0410, MIG-0411 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
+- **Depends on:** MIG-0403, MIG-0406（2026-10-23 owner 判断で MIG-0410 / MIG-0411 を依存から外した。D-09 系の本番手順は PHASE_4_GATE.md §5 の承認時持ち越し） / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - MIG-0401〜0406 の merge 済みPRと各PRの測定値・比較証跡。
