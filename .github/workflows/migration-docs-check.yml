@@ -109,4 +109,8 @@ jobs:
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
           node scripts/check-public-site-build-budget.mjs
+      - name: MIG-0409 build-time public data parity with CURRENT
+        run: node --test --experimental-strip-types apps/site/scripts/readPublicData.test.mjs
+      - name: MIG-0409 U07 non-production CPU probe auth and error regression
+        run: node --test --experimental-strip-types apps/site/scripts/queue-cpu-probe/worker.test.mjs
 
