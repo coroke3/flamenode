@@ -1,6 +1,7 @@
 import { getEnv } from "@/lib/cloudflare";
 import {
   authorizeDeepHealth,
+  buildDeepHealthFailureResponse,
   runDeepHealthChecks,
 } from "@/lib/health/deepHealth";
 
@@ -26,10 +27,7 @@ export async function GET(request: Request): Promise<Response> {
       status: result.status === "degraded" ? 200 : result.ok ? 200 : 503,
       headers: { "Cache-Control": "no-store" },
     });
-  } catch {
-    return Response.json(
-      { ok: false, service: "flamenode-web" },
-      { status: 503, headers: { "Cache-Control": "no-store" } },
-    );
+  } catch (error) {
+    return buildDeepHealthFailureResponse(error);
   }
 }

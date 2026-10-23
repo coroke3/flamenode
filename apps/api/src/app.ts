@@ -4,6 +4,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
 import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
+import { createAdminRoutes } from "./routes/admin/index.ts";
 
 export const app = new Hono<AppEnv>();
 
@@ -13,3 +14,4 @@ app.route("/api/public/about-stats", publicAboutStatsRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 // MIG-0611: authenticated read-only Personal screens API (no CURRENT /api/* equivalent).
 app.route("/api/personal", personalRoutes);
+app.route("/api/admin", createAdminRoutes());
