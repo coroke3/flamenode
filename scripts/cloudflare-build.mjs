@@ -95,8 +95,7 @@ export function runCloudflareBuild({
 
   const result = run({
     executable: process.execPath,
-    // OpenNext refuses Next.js releases past the Next.js support window (date-based).
-    // The Next app is retired by the migration (Phase 9); keep deploying the pinned version.
+    // Support window expired so the flag is required; Next 15.5 patches are tracked until Phase 9 retires the app.
     args: [cli, "build", "--dangerouslyUseUnsupportedNextVersion"],
     cwd: repoRoot,
     env: {
