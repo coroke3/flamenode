@@ -126,8 +126,8 @@ Read-only Cloudflare schedules reverified 2026-10-07.
 | --- | --- | --- |
 | `flamenode-fast-jobs` | `0 * * * *` | notification lease recovery, slot deadline reminders, Queue wake/fallback drain, deploy hook build trigger check (MIG-0410; ≤ 2 D1 statements, no-op without `PUBLIC_BUILD_DEPLOY_HOOK_URL`, hourly ⇒ ≤ 24 hooks/day) |
 | `flamenode-content-jobs` | `15 * * * *` | static-rebuild recovery/repair, cleanup, shared artifact repair, recovery fanout |
-| `flamenode-sync-jobs` | `7 * * * *` | GA4 trending + scheduled YouTube metadata + score/ranking + daily related repair + pending recovery |
-| `flamenode-sync-jobs` | `52 * * * *` | event YouTube playlist sync recovery |
+| `flamenode-sync-jobs` | `7,52 * * * *` | :07 GA4 trending + YouTube metadata + score/ranking + daily repair + pending recovery; :52 playlist sync recovery |
+
 
 Queue paths do not use the outer Cron lease. Their D1 pending/due/lease state is sufficient to arbitrate work.
 
