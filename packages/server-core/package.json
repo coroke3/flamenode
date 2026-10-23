@@ -55,7 +55,10 @@
     "./visibility/eventTransition": "./src/visibility/eventTransition.ts",
     "./visibility/xUserTransition": "./src/visibility/xUserTransition.ts",
     "./moderation/openCases": "./src/moderation/openCases.ts",
-    "./publicCache/delete": "./src/publicCache/delete.ts"
+    "./publicCache/delete": "./src/publicCache/delete.ts",
+    "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
+    "./xid/mergeCore": "./src/xid/mergeCore.ts",
+    "./xid/mergeSafety": "./src/xid/mergeSafety.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
