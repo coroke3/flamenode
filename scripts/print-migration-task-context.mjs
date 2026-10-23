@@ -111,7 +111,7 @@ export function readOpenPrOwners(root=ROOT){
 }
 
 // Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
-export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0409","MIG-0410","MIG-0411","MIG-0406"];
+export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"]; // 0409/0410/0411 left the Gate dependencies by owner decision 2026-10-23
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
 export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
   const tasks=parseTaskRows(statusText);

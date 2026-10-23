@@ -113,7 +113,8 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
             {event.iconUrl ? <Image className="ev-icon ed-ic" src={event.iconUrl} alt="" width={112} height={112} /> : null}
             <div className="stack ed-titles">
               <span className="wrap-row t-sm ed-status">
-                <Badge status={event.statusTone ?? "draft"} label={event.statusLabel} />
+                {/* An empty label would fall back to Badge's DRAFT, which CURRENT never shows. */}
+                {event.statusLabel ? <Badge status={event.statusTone ?? "draft"} label={event.statusLabel} /> : null}
                 {event.periodLabel ? <span className="muted t-num">{event.periodLabel}</span> : null}
               </span>
               <h1 className="t-display">{event.title}</h1>

@@ -1173,7 +1173,7 @@ test("X ID統合は承認申請だけを入口にし、直接Actionを残さな�
   const root = path.resolve(import.meta.dirname, "../../../..");
   assert.equal(fs.existsSync(path.join(root, "src/lib/actions/merge-admin.ts")), false);
   assert.equal(fs.existsSync(path.join(root, "src/components/admin/MergeRequestButton.tsx")), false);
-  const mergeSource = fs.readFileSync(path.join(root, "src/lib/xid/merge.ts"), "utf8");
+  const mergeSource = fs.readFileSync(path.join(root, "packages/server-core/src/xid/merge.ts"), "utf8");
   assert.match(mergeSource, /executeApprovedXIdMergeRequest/);
   assert.match(mergeSource, /UPDATE x_identity_requests/);
   assert.match(mergeSource, /SET active_x_user_id = \$\{target\}/);

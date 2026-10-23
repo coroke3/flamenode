@@ -7,9 +7,9 @@ minify = true
 [observability]
 enabled = true
 
-# Recovery Cron: metadata/score at :07, playlist sync at :52.
+# Recovery Cron: one trigger covers metadata/score at :07 and playlist sync at :52.
 [triggers]
-crons = ["7 * * * *", "52 * * * *"]
+crons = ["7,52 * * * *"]
 
 [vars]
 # Google Cloud Consoleの1日quota。FlameNode全体で80%まで使用する。

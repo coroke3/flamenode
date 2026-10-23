@@ -1,0 +1,521 @@
+// MIG-0626: copy of src/lib/admin/workerMonitoring.ts (pure functions unchanged). Only the D1 reads differ: CURRENT's
+// 7 statements are 2 here (ZERO_1102 S2: session + 2). Remove with the CURRENT module at retirement.
+// CURRENT src/lib/queues/wakeBudget.ts QUEUE_WAKE_KINDS (copied; the API cannot import src/**).
+const QUEUE_WAKE_KINDS = [
+  "notification_available",
+  "static_rebuild_available",
+  "youtube_sync_pending",
+  "youtube_playlist_sync",
+] as const;
+type QueueWakeKind = (typeof QUEUE_WAKE_KINDS)[number];
+
+type MonitorLevel = "ok" | "warn" | "critical" | "unknown" | "running";
+
+type LeaseRow = {
+  job_name: string;
+  lease_token: string | null;
+  lease_expires_at: number | null;
+  last_started_at: number | null;
+  last_succeeded_at: number | null;
+  last_failed_at: number | null;
+  last_error_code: string | null;
+};
+
+type CountValue = number | string | null | undefined;
+
+type QueueRow = {
+  pending?: CountValue;
+  processing?: CountValue;
+  failed?: CountValue;
+  dead_letter?: CountValue;
+  stuck?: CountValue;
+  oldest_pending_at?: CountValue;
+};
+
+type SyncRow = {
+  eligible?: CountValue;
+  pending?: CountValue;
+  stale?: CountValue;
+  failed?: CountValue;
+  oldest_pending_at?: CountValue;
+};
+
+type ScoreRow = {
+  eligible?: CountValue;
+  stale?: CountValue;
+  oldest_updated_at?: CountValue;
+};
+
+type ArtifactRow = { target_type: string; generated_at: CountValue };
+
+type WorkerJobStatus = {
+  jobName: string;
+  label: string;
+  cadenceSeconds: number;
+  detailHref: string;
+  level: MonitorLevel;
+  message: string;
+  leaseExpiresAt: number | null;
+  lastStartedAt: number | null;
+  lastSucceededAt: number | null;
+  lastFailedAt: number | null;
+  lastErrorCode: string | null;
+  nextExpectedAt: number | null;
+};
+
+type PipelineSnapshot = {
+  id: "notifications" | "static" | "youtube" | "scores";
+  label: string;
+  level: MonitorLevel;
+  backlog: number;
+  capacityPerDay: number;
+  estimatedDrainMinutes: number;
+  note: string;
+  detailHref: string;
+};
+
+type QueueWakeFailureRecord = {
+  at: number;
+  reason: string;
+};
+
+type QueueWakeFailures = Record<QueueWakeKind, QueueWakeFailureRecord | null>;
+
+type QueueSnapshot = {
+  pending: number;
+  processing: number;
+  failed: number;
+  deadLetter: number;
+  stuck: number;
+  oldestPendingAt: number | null;
+};
+
+export type WorkerMonitoringSnapshot = {
+  generatedAt: number;
+  operationMode: string;
+  overallLevel: Exclude<MonitorLevel, "running">;
+  overallMessage: string;
+  jobs: WorkerJobStatus[];
+  notifications: QueueSnapshot;
+  staticRebuilds: QueueSnapshot;
+  youtube: {
+    eligible: number;
+    pending: number;
+    stale: number;
+    failed: number;
+    oldestPendingAt: number | null;
+  };
+  scores: { eligible: number; stale: number; oldestUpdatedAt: number | null };
+  artifacts: { targetType: string; generatedAt: number | null }[];
+  pipelines: PipelineSnapshot[];
+  /** KV 未接続・読取失敗時は null */
+  queueWakeFailures: QueueWakeFailures | null;
+};
+
+type JobDefinition = {
+  jobName: string;
+  label: string;
+  cadenceSeconds: number;
+  warnAfterSeconds: number;
+  criticalAfterSeconds: number;
+  detailHref: string;
+};
+
+const JOBS: readonly JobDefinition[] = [
+  // Recovery Cron は毎時。Queue 本線があるため warn/critical は緩める。
+  { jobName: "fast-jobs", label: "通知・リマインダー", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/notifications" },
+  { jobName: "content-jobs", label: "静的JSON・クリーンアップ", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/static-builds" },
+  { jobName: "sync-jobs", label: "YouTube同期・スコア更新", cadenceSeconds: 3600, warnAfterSeconds: 7800, criticalAfterSeconds: 14400, detailHref: "/admin/youtube-sync" },
+  { jobName: "fast-jobs:slot-deadline-reminders", label: "締切リマインダー生成", cadenceSeconds: 3600, warnAfterSeconds: 7200, criticalAfterSeconds: 10800, detailHref: "/admin/notifications" },
+  { jobName: "content-jobs:cleanup", label: "期限切れデータ整理", cadenceSeconds: 86400, warnAfterSeconds: 172800, criticalAfterSeconds: 259200, detailHref: "/admin/static-builds" },
+] as const;
+
+/** score-recalc の SCORE_FORCE_REFRESH_SEC（72h）と揃える。 */
+const SCORE_STALE_THRESHOLD_SEC = 72 * 60 * 60;
+
+const QUEUE_WAKE_LAST_FAILURE_KV_KEYS = Object.freeze(
+  Object.fromEntries(
+    QUEUE_WAKE_KINDS.map((kind) => [
+      kind,
+      `queue_wake:last_failure:${kind}`,
+    ]),
+  ) as Record<QueueWakeKind, string>,
+);
+
+const MONITOR_LEVEL_SORT_ORDER: Record<MonitorLevel, number> = {
+  critical: 0,
+  warn: 1,
+  running: 2,
+  unknown: 3,
+  ok: 4,
+};
+
+function compareMonitorLevel(
+  left: { level: MonitorLevel },
+  right: { level: MonitorLevel },
+): number {
+  return MONITOR_LEVEL_SORT_ORDER[left.level] - MONITOR_LEVEL_SORT_ORDER[right.level];
+}
+
+function numberValue(value: CountValue): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nullableNumber(value: CountValue): number | null {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function queueSnapshot(row: QueueRow | null): QueueSnapshot {
+  return {
+    pending: numberValue(row?.pending),
+    processing: numberValue(row?.processing),
+    failed: numberValue(row?.failed),
+    deadLetter: numberValue(row?.dead_letter),
+    stuck: numberValue(row?.stuck),
+    oldestPendingAt: nullableNumber(row?.oldest_pending_at),
+  };
+}
+
+function parseQueueWakeFailureRecord(value: unknown): QueueWakeFailureRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as { at?: unknown; reason?: unknown };
+  const at = Number(record.at);
+  if (!Number.isFinite(at) || at <= 0) return null;
+  const reason = typeof record.reason === "string" ? record.reason.trim() : "";
+  if (!reason) return null;
+  return { at: Math.floor(at), reason };
+}
+
+async function loadQueueWakeFailures(
+  kv: KVNamespace | null | undefined,
+): Promise<QueueWakeFailures | null> {
+  if (!kv) return null;
+  try {
+    const entries = await Promise.all(
+      QUEUE_WAKE_KINDS.map(async (kind) => {
+        const raw = await kv.get(QUEUE_WAKE_LAST_FAILURE_KV_KEYS[kind], "json");
+        return [kind, parseQueueWakeFailureRecord(raw)] as const;
+      }),
+    );
+    return Object.fromEntries(entries) as QueueWakeFailures;
+  } catch {
+    return null;
+  }
+}
+
+function drainMinutes(backlog: number, batch: number, cadence: number): number {
+  return backlog <= 0 ? 0 : Math.ceil(backlog / batch) * cadence;
+}
+
+function jobStatus(definition: JobDefinition, row: LeaseRow | undefined, now: number): WorkerJobStatus {
+  const success = nullableNumber(row?.last_succeeded_at);
+  const failure = nullableNumber(row?.last_failed_at);
+  const running = Boolean(row?.lease_token && numberValue(row.lease_expires_at) > now);
+  const latestFailed = failure != null && (success == null || failure > success);
+  let level: MonitorLevel = "ok";
+  let message = "想定間隔内に成功しています。";
+
+  if (running) {
+    level = "running";
+    message = "実行中です。";
+  } else if (latestFailed) {
+    level = "critical";
+    message = "直近の実行が失敗しています。";
+  } else if (success == null) {
+    level = "unknown";
+    message = "成功履歴がありません。初回Cronまたはデプロイ状態を確認してください。";
+  } else if (now - success > definition.criticalAfterSeconds) {
+    level = "critical";
+    message = "想定間隔を大きく超えて成功していません。";
+  } else if (now - success > definition.warnAfterSeconds) {
+    level = "warn";
+    message = "想定間隔を超えています。次回Cronを確認してください。";
+  }
+
+  return {
+    ...definition,
+    level,
+    message,
+    leaseExpiresAt: nullableNumber(row?.lease_expires_at),
+    lastStartedAt: nullableNumber(row?.last_started_at),
+    lastSucceededAt: success,
+    lastFailedAt: failure,
+    lastErrorCode: row?.last_error_code ?? null,
+    nextExpectedAt: success == null ? null : success + definition.cadenceSeconds,
+  };
+}
+
+function pipelineLevel(
+  backlog: number,
+  drain: number,
+  warn: number,
+  critical: number,
+  failed = 0,
+  stuck = 0,
+  deadLetter = 0,
+): MonitorLevel {
+  if (failed > 0 || stuck > 0 || deadLetter > 0 || drain > critical) return "critical";
+  if (backlog > 0 && drain > warn) return "warn";
+  return "ok";
+}
+
+export async function loadWorkerMonitoring(
+  db: D1Database,
+  options?: {
+    now?: number;
+    kv?: KVNamespace | null;
+  },
+): Promise<WorkerMonitoringSnapshot> {
+  const now = options?.now ?? Math.floor(Date.now() / 1000);
+  // Statement A: every scalar in one row (each aggregate subquery yields exactly one row, so the cross join is 1 row).
+  // CURRENT's ?1 placeholders are renumbered: ?1 now, ?2 now - 900 (notification stuck cutoff), ?3 score stale seconds.
+  const scalars = await db.prepare(
+    `SELECT
+       (SELECT operation_mode FROM system_settings WHERE id = 'default' LIMIT 1) AS operation_mode,
+       n.pending AS n_pending, n.processing AS n_processing, n.failed AS n_failed, n.dead_letter AS n_dead_letter,
+       n.stuck AS n_stuck, n.oldest_pending_at AS n_oldest_pending_at,
+       s.pending AS s_pending, s.processing AS s_processing, s.failed AS s_failed, s.dead_letter AS s_dead_letter,
+       s.stuck AS s_stuck, s.oldest_pending_at AS s_oldest_pending_at,
+       y.eligible AS y_eligible, y.pending AS y_pending, y.stale AS y_stale, y.failed AS y_failed,
+       y.oldest_pending_at AS y_oldest_pending_at,
+       c.eligible AS c_eligible, c.stale AS c_stale, c.oldest_updated_at AS c_oldest_updated_at
+     FROM (SELECT
+         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+         SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
+         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+         SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END) AS dead_letter,
+         SUM(CASE WHEN status = 'processing' AND (processing_started_at IS NULL OR processing_started_at <= ?2) THEN 1 ELSE 0 END) AS stuck,
+         MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
+       FROM notification_outbox
+       WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')) n,
+     (SELECT
+         SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+         SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) AS processing,
+         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+         SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END) AS dead_letter,
+         SUM(CASE WHEN status = 'processing' AND (lease_expires_at IS NULL OR lease_expires_at <= ?1) THEN 1 ELSE 0 END) AS stuck,
+         MIN(CASE WHEN status = 'pending' THEN created_at END) AS oldest_pending_at
+       FROM static_rebuild_queue
+       WHERE status IN ('pending', 'processing', 'failed', 'dead_letter')) s,
+     (SELECT
+       (SELECT COUNT(*) FROM videos v WHERE v.youtube_video_id IS NOT NULL AND v.youtube_video_id <> '' AND v.visibility_status <> 'voided') AS eligible,
+       (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'pending') AS pending,
+       (SELECT COUNT(*)
+          FROM video_youtube_metadata ym
+          INNER JOIN videos v ON v.id = ym.video_id
+         WHERE v.youtube_video_id IS NOT NULL
+           AND v.youtube_video_id <> ''
+           AND v.visibility_status <> 'voided'
+           AND (
+             ym.sync_status = 'pending'
+             OR (
+               ym.sync_status IN ('synced', 'failed')
+               AND ym.synced_at IS NOT NULL
+               AND (
+                 ym.synced_at <= ?1 - 86400
+                 OR (
+                   ym.synced_at > ?1 - 86400
+                   AND ym.synced_at <= ?1 - 3600
+                   AND (
+                     EXISTS (
+                       SELECT 1
+                         FROM events e
+                        WHERE e.id = v.primary_event_id
+                          AND e.visibility_status = 'public'
+                          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+                          AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
+                          AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
+                     )
+                     OR EXISTS (
+                       SELECT 1
+                         FROM video_events ve
+                         INNER JOIN events e ON e.id = ve.event_id
+                        WHERE ve.video_id = v.id
+                          AND e.visibility_status = 'public'
+                          AND (e.start_time IS NOT NULL OR e.end_time IS NOT NULL)
+                          AND (e.start_time IS NULL OR e.start_time <= ?1 + 86400)
+                          AND (e.end_time IS NULL OR e.end_time >= ?1 - 86400)
+                     )
+                   )
+                 )
+               )
+             )
+           )) AS stale,
+       (SELECT COUNT(*) FROM video_youtube_metadata WHERE sync_status = 'failed') AS failed,
+       (SELECT MIN(updated_at) FROM video_youtube_metadata WHERE sync_status = 'pending') AS oldest_pending_at) y,
+     (SELECT COUNT(*) AS eligible,
+         SUM(CASE WHEN v.score_updated_at IS NULL
+           OR v.score_updated_at < v.updated_at
+           OR v.score_updated_at < COALESCE(ym.updated_at, 0)
+           OR v.score_updated_at <= ?1 - ?3 THEN 1 ELSE 0 END) AS stale,
+         MIN(v.score_updated_at) AS oldest_updated_at
+       FROM videos v
+       LEFT JOIN video_youtube_metadata ym ON ym.video_id = v.id
+       WHERE v.visibility_status = 'public') c`,
+  ).bind(now, now - 900, SCORE_STALE_THRESHOLD_SEC).first<Record<string, CountValue | string>>();
+  const pick = (prefix: string, keys: string[]) =>
+    Object.fromEntries(keys.map((key) => [key, scalars?.[prefix + key]])) as Record<string, CountValue>;
+  const settings = { operation_mode: (scalars?.operation_mode as string | null | undefined) ?? undefined };
+  const queueKeys = ["pending", "processing", "failed", "dead_letter", "stuck", "oldest_pending_at"];
+  const notificationRow = pick("n_", queueKeys) as QueueRow;
+  const staticRow = pick("s_", queueKeys) as QueueRow;
+  const youtubeRow = pick("y_", ["eligible", "pending", "stale", "failed", "oldest_pending_at"]) as SyncRow;
+  const scoreRow = pick("c_", ["eligible", "stale", "oldest_updated_at"]) as ScoreRow;
+
+  // Statement B: the <= 5 worker lease rows and the <= 5 newest-artifact rows.
+  const listed = await db.prepare(
+    `SELECT 'lease' AS kind, job_name AS k, lease_token AS c1, lease_expires_at AS c2, last_started_at AS c3,
+            last_succeeded_at AS c4, last_failed_at AS c5, last_error_code AS c6
+       FROM worker_leases
+      WHERE job_name IN (${JOBS.map(() => "?").join(",")})
+     UNION ALL
+     SELECT 'artifact' AS kind, target_type AS k, generated_at AS c1, NULL AS c2, NULL AS c3, NULL AS c4, NULL AS c5, NULL AS c6
+       FROM (SELECT target_type, MAX(generated_at) AS generated_at
+               FROM static_artifacts
+              WHERE target_id = 'global' AND deleted_at IS NULL
+                AND target_type IN ('top', 'list_recent', 'list_popular', 'events_index', 'search_index')
+              GROUP BY target_type ORDER BY target_type)`,
+  ).bind(...JOBS.map((job) => job.jobName)).all<{
+    kind: "lease" | "artifact";
+    k: string;
+    c1: string | number | null;
+    c2: number | null;
+    c3: number | null;
+    c4: number | null;
+    c5: number | null;
+    c6: string | null;
+  }>();
+  const leaseRows = {
+    results: listed.results
+      .filter((row) => row.kind === "lease")
+      .map((row) => ({
+        job_name: row.k,
+        lease_token: row.c1 as string | null,
+        lease_expires_at: row.c2,
+        last_started_at: row.c3,
+        last_succeeded_at: row.c4,
+        last_failed_at: row.c5,
+        last_error_code: row.c6,
+      })) as LeaseRow[],
+  };
+  const artifactRows = {
+    results: listed.results
+      .filter((row) => row.kind === "artifact")
+      .map((row) => ({ target_type: row.k, generated_at: row.c1 as CountValue })) as ArtifactRow[],
+  };
+
+  const leases = new Map((leaseRows.results ?? []).map((row) => [row.job_name, row]));
+  const jobs = JOBS
+    .map((job) => jobStatus(job, leases.get(job.jobName), now))
+    .sort(compareMonitorLevel);
+  const notifications = queueSnapshot(notificationRow);
+  const staticRebuilds = queueSnapshot(staticRow);
+  const youtube = {
+    eligible: numberValue(youtubeRow?.eligible),
+    pending: numberValue(youtubeRow?.pending),
+    stale: numberValue(youtubeRow?.stale),
+    failed: numberValue(youtubeRow?.failed),
+    oldestPendingAt: nullableNumber(youtubeRow?.oldest_pending_at),
+  };
+  const scores = {
+    eligible: numberValue(scoreRow?.eligible),
+    stale: numberValue(scoreRow?.stale),
+    oldestUpdatedAt: nullableNumber(scoreRow?.oldest_updated_at),
+  };
+
+  // Queue wake 有効時は秒単位起動が本線。Recovery Cron は1時間なので下限の目安にも使う。
+  const notificationDrain = drainMinutes(notifications.pending, 6, 1);
+  const staticDrain = drainMinutes(staticRebuilds.pending, 1, 1);
+  const youtubeDrain = drainMinutes(youtube.stale, 50, 60);
+  const scoreDrain = drainMinutes(scores.stale, 150, 60);
+  const youtubeFailureCritical = Math.max(10, Math.ceil(youtube.eligible * 0.1));
+  const queueWakeFailures = await loadQueueWakeFailures(options?.kv);
+  const pipelines: PipelineSnapshot[] = [
+    {
+      id: "notifications",
+      label: "通知配信",
+      level: pipelineLevel(
+        notifications.pending,
+        notificationDrain,
+        30,
+        120,
+        notifications.failed,
+        notifications.stuck,
+        notifications.deadLetter,
+      ),
+      backlog: notifications.pending,
+      capacityPerDay: 8_000,
+      estimatedDrainMinutes: notificationDrain,
+      note: `処理中 ${notifications.processing}件 / 固着 ${notifications.stuck}件 / 失敗 ${notifications.failed}件 / 最終失敗 ${notifications.deadLetter}件（Queue wake + 毎時Recovery）`,
+      detailHref: "/admin/notifications",
+    },
+    {
+      id: "static",
+      label: "静的JSON再生成",
+      level: pipelineLevel(
+        staticRebuilds.pending,
+        staticDrain,
+        360,
+        1440,
+        staticRebuilds.failed,
+        staticRebuilds.stuck,
+        staticRebuilds.deadLetter,
+      ),
+      backlog: staticRebuilds.pending,
+      capacityPerDay: 1_500,
+      estimatedDrainMinutes: staticDrain,
+      note: `処理中 ${staticRebuilds.processing}件 / 固着 ${staticRebuilds.stuck}件 / 失敗 ${staticRebuilds.failed}件 / 最終失敗 ${staticRebuilds.deadLetter}件（1 target/wake + 毎時Recovery）`,
+      detailHref: "/admin/static-builds",
+    },
+    {
+      id: "youtube",
+      label: "YouTubeメタデータ同期",
+      level: youtube.failed >= youtubeFailureCritical
+        ? "critical"
+        : youtube.failed > 0 || youtube.pending > 0 || youtubeDrain > 720
+          ? "warn"
+          : "ok",
+      backlog: youtube.stale,
+      capacityPerDay: 2_400,
+      estimatedDrainMinutes: youtubeDrain,
+      note: `対象 ${youtube.eligible}件 / pending ${youtube.pending}件 / 同期失敗 ${youtube.failed}件（Queue wake + 毎時7分Recovery）`,
+      detailHref: "/admin/youtube-sync",
+    },
+    {
+      id: "scores",
+      label: "スコア差分更新",
+      level: pipelineLevel(scores.stale, scoreDrain, 360, 1440),
+      backlog: scores.stale,
+      capacityPerDay: 3_600,
+      estimatedDrainMinutes: scoreDrain,
+      note: `公開作品 ${scores.eligible}件。変更動画限定 + 毎時Cron dirty。72h 超過も stale 扱い。`,
+      detailHref: "/admin/static-builds",
+    },
+  ];
+  pipelines.sort(compareMonitorLevel);
+
+  const critical = jobs.some((job) => job.level === "critical") || pipelines.some((pipeline) => pipeline.level === "critical");
+  const warning = jobs.some((job) => job.level === "warn" || job.level === "unknown") || pipelines.some((pipeline) => pipeline.level === "warn");
+
+  return {
+    generatedAt: now,
+    operationMode: settings?.operation_mode ?? "normal",
+    overallLevel: critical ? "critical" : warning ? "warn" : "ok",
+    overallMessage: critical
+      ? "停止・失敗・処理能力超過の可能性があります。該当項目を確認してください。"
+      : warning
+        ? "即時停止ではありませんが、遅延または未確認の項目があります。"
+        : "内部記録上、バックグラウンド処理は想定範囲内です。",
+    jobs,
+    notifications,
+    staticRebuilds,
+    youtube,
+    scores,
+    artifacts: (artifactRows.results ?? []).map((row) => ({ targetType: row.target_type, generatedAt: nullableNumber(row.generated_at) })),
+    pipelines,
+    queueWakeFailures,
+  };
+}

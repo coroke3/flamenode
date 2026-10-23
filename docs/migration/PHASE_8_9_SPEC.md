@@ -77,6 +77,7 @@ PRをrevert（テスト追加のみ）。
 - **U01 adapter**: `@auth/core` を既存 D1 adapter・同じ cookie 名/属性で動かす。
 - **U02 cross-runtime**: 旧 Next 発行の cookie を Hono で、Hono 発行の cookie を旧 Next で読む。logout も両方向。
 - **U03 auth/complete**: `/auth/complete` の安全な遷移を Hono 側で再現。
+- **U04 SA-107（coverage gap G22）**: entry の `discordSignInInline` と return-to の sanitize を Hono / SPA 側で再現する（MIG-0703 と対）。危険な URL は CURRENT と同じ移動先になる。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -84,6 +85,7 @@ PRをrevert（テスト追加のみ）。
 | T02 | Hono の cookie → 旧 Next | 同じ利用者 |
 | T03 | logout を片方で実行 | 両方で未ログイン |
 | T04 | CSRF token 不一致 | 拒否 |
+| T05 | SA-107 の return-to に危険な URL（G22） | CURRENT と同じ移動先に sanitize される |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/api
@@ -182,7 +184,7 @@ PRをrevert。
 - **Readiness:** NEEDS_REFINEMENT — 手順書だけを作る task。本番の Route・Discord 設定の変更は別の明示承認
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0804 / **Decisions:** D-02 DECIDED, D-07 DECIDED
+- **Depends on:** MIG-0804, MIG-0628 / **Decisions:** D-02 DECIDED, D-07 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - 現在の本番 Worker: `wrangler.toml:1,3`（`name = "flamenode-web"`, `main = ".open-next/worker.js"`）。
@@ -272,6 +274,7 @@ Gate のPRをrevert。
 - 旧 Worker: `wrangler.toml:1,3`（`flamenode-web`, `.open-next/worker.js`）。他の Worker は `workers/content-jobs`, `workers/fast-jobs`, `workers/sync-jobs`（各 `wrangler.toml`）。
 - どの Phase も所有しない CURRENT ページ: `app/(public)/maintenance/page.tsx`（SYSTEM_SURFACE）, `app/(public)/dev/ui-surfaces/page.tsx`（DEV_ONLY）。`FILE_MIGRATION_MATRIX.md` で「RETAIN/REVIEW in MIG-0901」。
 - `app/robots.ts`, `app/sitemap.ts`（Next の metadata route。Astro 側の代替が必要）。
+- Next 15 upstream support ended 2026-10-21; 15.5.28 is the last backport so far; track vercel/next.js advisories until MIG-0904.
 #### Owned paths
 - 新規: `+docs/migration/RESIDUAL_INVENTORY.md`
 - 変更: `docs/migration/FILE_MIGRATION_MATRIX.md`（残存ファイルの disposition）
@@ -378,7 +381,7 @@ node scripts/check-migration-file-progress.mjs
 - **Depends on:** MIG-0903 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- `package.json`: `next` `15.5.22`, `next-auth` `5.0.0-beta.32`, `@opennextjs/cloudflare` `1.20.2`。scripts `build`, `dev`, `cf:build`, `cf:deploy-production` など。
+- `package.json`: `next` `15.5.28`, `next-auth` `5.0.0-beta.32`, `@opennextjs/cloudflare` `1.20.2`。scripts `build`, `dev`, `cf:build`, `cf:deploy-production` など。
 - `open-next.config.ts`, `wrangler.toml`（`flamenode-web`）, `scripts/cloudflare-build.mjs`, `scripts/cloudflare-deploy-production.mjs`, `scripts/check-open-next-output.mjs`。
 - `.github/workflows/pr186-consolidated-verify.yml` は `npm run cf:build` を実行する。
 #### Owned paths
@@ -389,11 +392,13 @@ node scripts/check-migration-file-progress.mjs
 - **U01 deps**: Next / OpenNext 依存と scripts を外し、`npm ci` で lock を更新。
 - **U02 CI**: workflow を新構成の build に置き換える。
 - **U03 worker**: `flamenode-web` の停止手順（実行は承認の下で）。
+- **U04 incremental cache bucket（coverage gap G24）**: OpenNext の incremental cache（`workers/cleanup/incrementalCache.ts`、`NEXT_INC_CACHE_R2_BUCKET`）の binding と bucket の prefix を、MIG-0609 / MIG-0610 の cleanup job とともに消す。bucket 自体の削除は承認後。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | 全 workspace の build | 成功 |
 | T02 | `workers/**` のテスト | 変化なし |
+| T03 | `NEXT_INC_CACHE_R2_BUCKET` と incremental cache の job（G24） | binding が `rg` で0件 |
 #### Commands
 ```bash
 npm ci
@@ -419,7 +424,7 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0904 の後。消す前の呼び出し元 0件を `rg` で示してから
 - **Recipe:** R-REMOVE
 - **Runtime:** N
-- **Depends on:** MIG-0904, MIG-0610 / **Decisions:** D-09 DECIDED
+- **Depends on:** MIG-0904, MIG-0610, MIG-0627 / **Decisions:** D-09 DECIDED
 - **Verified against:** `96f20dc` (2026-10-15)
 #### Source snapshot
 - 消す対象: `workers/json-generator/**`、static rebuild queue の consumer（`workers/content-jobs/staticRebuildWakeQueue.ts`）、生成を起こすだけの段（`workers/content-jobs/index.ts:201〜318`、`workers/sync-jobs/index.ts:205`）、`src/lib/staticRebuild/**` と `src/lib/queues/wakeStaticRebuildQueueAfterCommit.ts`（MIG-0903・0904 で残っていれば）。
@@ -432,6 +437,7 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 #### Micro-units
 - **U01 inventory**: 消す file の export ごとに `rg` で呼び出し元を数え、0件の結果を PR に貼る。
 - **U02 remove**: 1 PR で消すのは1系統（R-REMOVE）。順番は consumer → 生成を起こす段 → `workers/json-generator`。
+- **U04 content-jobs の手動 HTTP（coverage gap G17）**: `workers/content-jobs/index.ts:458-505` の `/rebuild`, `/process-queue`（`WORKER_ADMIN_TOKEN`、lease が取れないと 409 `job_already_running`）と `createCronWorker` の `/health` を明示的に退役する。`scripts/smoke-cloudflare.mjs:399` の smoke list も同時に更新（MIG-0628）。
 - **U03 observe**: 本番へ反映（承認後）してから7日間、背景処理の Worker ごと・日ごとの Exceeded CPU / Exceeded Memory を `BACKGROUND_OBSERVATION.md` に記録する（`ZERO_1102.md` の G2）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -439,6 +445,8 @@ PRをrevert。旧 Worker は停止前なら再 deploy で戻る。
 | T01 | 消す export の呼び出し元 | 0件 |
 | T02 | 公開データを変える更新 | build 要求だけが記録され、R2 artifact は書かれない |
 | T03 | 7日間の観測 | 背景処理の Worker で Exceeded CPU / Memory が 0件 |
+| T04 | content-jobs の手動 endpoint（G17） | 退役前は 他 path が 404、token 無しが 401、lease 保持中が 409。退役後は smoke list に残っていない |
+| T05 | R2 artifact の読み手（G14） | MIG-0627 の `R2_ARTIFACT_CONSUMERS.md` で全て置き換え済み |
 #### Commands
 ```bash
 npm run test:unit

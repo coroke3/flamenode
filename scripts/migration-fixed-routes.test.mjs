@@ -16,6 +16,8 @@ import { formatUnix } from "../src/lib/utils/format.ts";
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "about/index.html")) && fs.existsSync(path.join(DIST, "rules/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+// CI step after the ui/site builds sets REQUIRE_BUILT=1: a missing build must fail, not skip (test:unit runs before the build).
+if (process.env.REQUIRE_BUILT && skip) throw new Error("REQUIRE_BUILT is set but " + skip);
 const load = (route) => new JSDOM(fs.readFileSync(path.join(DIST, route, "index.html"), "utf-8")).window.document;
 const meta = (doc, sel) => doc.querySelector(sel)?.getAttribute("content");
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();

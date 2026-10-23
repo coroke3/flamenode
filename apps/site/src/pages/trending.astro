@@ -1,0 +1,29 @@
+---
+/**
+ * `/trending` (MIG-0505 / R-PAGE / S0): the top 30 of the build-time ranking snapshot.
+ * The stale notice is evaluated at build time; the hourly rebuild (MIG-0410/0411) keeps it current.
+ */
+import { TrendingView } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { loadListingForBuild } from "../lib/listingData.ts";
+import { buildPageHead } from "../lib/pageHead.ts";
+import { toTrendingRow } from "../lib/videoCards.ts";
+import { formatUnix } from "../../../../src/lib/utils/format.ts";
+
+const TRENDING_PAGE_LIMIT = 30;
+
+const head = buildPageHead({
+  path: "/trending",
+  title: "急上昇ランキング",
+  description: "FlameNode内で最近よく視聴されている作品のランキングです。",
+});
+const { trending } = await loadListingForBuild();
+const items = (trending?.items ?? []).slice(0, TRENDING_PAGE_LIMIT).map(toTrendingRow);
+---
+<PublicLayout head={head} currentPath="/trending">
+  <TrendingView
+    items={items}
+    updatedLabel={trending ? formatUnix(trending.generatedAt) : null}
+    stale={trending?.stale ?? false}
+  />
+</PublicLayout>

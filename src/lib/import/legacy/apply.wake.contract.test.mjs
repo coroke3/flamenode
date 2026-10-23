@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 const apply = await readFile(new URL("./apply.ts", import.meta.url), "utf8");
 const enqueue = await readFile(
-  new URL("../../staticRebuild/enqueue.ts", import.meta.url),
+  new URL("../../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url),
   "utf8",
 );
 

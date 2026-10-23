@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
-import { videoEvents, videoModerationCases, videos } from "@/lib/db/schema";
+import { videoModerationCases, videos } from "@/lib/db/schema";
 import { requireAdminWrite } from "@/lib/auth/writeGuard";
 import { expectedRowCondition } from "@/lib/audit/adapters";
 import { mutateWithAudit } from "@/lib/audit/mutate";
@@ -25,7 +25,6 @@ import { generateId } from "@/lib/utils/id";
 import { buildInsertOpenModerationCaseStatement } from "@/lib/moderation/openCases";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId, logFlowTrace } from "@/lib/observability/flowTrace";
-import { MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS } from "@/lib/staticRebuild/hooks";
 import {
   compensateDepublicizationFenceOnD1Failure,
   enqueueVideoVisibilityNotificationsPostCommit,
@@ -34,6 +33,7 @@ import {
   preCommitVideoVisibilityDepublicization,
   runVideoVisibilityTransitionPostCommit,
 } from "@/lib/video/videoVisibilityTransition";
+import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
 
 export interface ModerationAdminResult extends PendingPublicReflection {
@@ -87,6 +87,7 @@ async function runModerationPostCommit(
   video: typeof videos.$inferSelect,
   changed: boolean,
   publicCacheKeys: readonly string[],
+  exportEventIds: readonly string[],
 ): Promise<void> {
   await runPostCommitBestEffort(
     { flow: "moderation.admin", traceId: createTraceId() },
@@ -95,6 +96,7 @@ async function runModerationPostCommit(
       run: async () => {
         await runVideoVisibilityTransitionPostCommit({
           publicCacheKeys,
+          exportEventIds,
           revalidate: () => {
             revalidateModeration(video, changed);
           },
@@ -102,18 +104,6 @@ async function runModerationPostCommit(
       },
     }],
   );
-}
-
-async function loadVideoEventIds(db: Parameters<typeof planVideoVisibilityTransition>[0], videoId: string): Promise<string[]> {
-  const eventRows = await db
-    .select({ event_id: videoEvents.event_id })
-    .from(videoEvents)
-    .where(eq(videoEvents.video_id, videoId))
-    .limit(MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS + 1);
-  if (eventRows.length > MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS) {
-    throw new Error("video_status_rebuild_event_limit_exceeded");
-  }
-  return eventRows.map((row) => row.event_id);
 }
 
 export async function createModerationCase(formData: FormData): Promise<ModerationAdminResult> {
@@ -171,14 +161,21 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     }
   }
   if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
-    const eventIds = await loadVideoEventIds(db, videoId);
+    const rebuildEvents = await loadVideoRebuildEventIds(
+      db,
+      videoId,
+      video.primary_event_id,
+    );
+    if (!rebuildEvents.ok) {
+      return { ok: false, message: rebuildEvents.message };
+    }
     transition = await planVideoVisibilityTransition(db, {
       video,
       nextStatus: nextVideoStatus,
       actorUserId: guard.user.id,
       context: "admin_moderation_create",
       reason: publicReason || null,
-      eventIds,
+      eventIds: rebuildEvents.eventIds,
       now,
     });
     if (transition.validationError) {
@@ -252,6 +249,7 @@ export async function createModerationCase(formData: FormData): Promise<Moderati
     video,
     Boolean(transition?.visibilityChanged),
     transition?.publicCacheKeys ?? [],
+    transition?.exportEventIds ?? [],
   );
   return markPendingPublicReflection(
     { ok: true, message: "case を作成しました。" },
@@ -294,14 +292,21 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
     }
   }
   if (nextVideoStatus && nextVideoStatus !== video.visibility_status) {
-    const eventIds = await loadVideoEventIds(db, video.id);
+    const rebuildEvents = await loadVideoRebuildEventIds(
+      db,
+      video.id,
+      video.primary_event_id,
+    );
+    if (!rebuildEvents.ok) {
+      return { ok: false, message: rebuildEvents.message };
+    }
     transition = await planVideoVisibilityTransition(db, {
       video,
       nextStatus: nextVideoStatus,
       actorUserId: guard.user.id,
       context: "admin_moderation_update",
       reason: note || null,
-      eventIds,
+      eventIds: rebuildEvents.eventIds,
       now,
     });
     if (transition.validationError) {
@@ -375,6 +380,7 @@ export async function updateModerationCaseStatus(formData: FormData): Promise<Mo
     video,
     Boolean(transition?.visibilityChanged),
     transition?.publicCacheKeys ?? [],
+    transition?.exportEventIds ?? [],
   );
   return markPendingPublicReflection(
     { ok: true, message: "case を更新しました。" },

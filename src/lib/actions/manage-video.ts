@@ -26,12 +26,13 @@ import {
   SAME_VIDEO_STATUS_MESSAGE,
   type VideoStatusActionResult,
 } from "@/lib/video/videoVisibilityStatusAction";
-import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
+import {
+  validateManageVideoStatusInput,
+  validateVideoPublicEligibility,
+} from "@flamenode/domain/video";
 
 export type ManageVideoActionResult = VideoStatusActionResult;
 
-/** イベント運営者が通常操作で変更できる公開状態。内部状態は管理者側に集約する。 */
-const MANAGE_ALLOWED_STATUS = new Set(["pending", "public", "private"]);
 const MANAGE_VIDEO_STATUS_OWN_PREFETCH_QUERY_COUNT = 3;
 const MANAGE_VIDEO_STATUS_PERMISSION_QUERY_COUNT = 2;
 /** "use server" は async 以外を export できないため非公開。 */
@@ -82,12 +83,8 @@ export async function setManageVideoStatus(
   const reason = String(formData.get("reason") ?? "").trim();
   const andNext = formData.get("and_next") === "1";
 
-  if (!eventId || !videoId) {
-    return { ok: false, message: "event_id と video_id が必要です。" };
-  }
-  if (!MANAGE_ALLOWED_STATUS.has(status)) {
-    return { ok: false, message: "このステータスへは変更できません。" };
-  }
+  const input = validateManageVideoStatusInput({ eventId, videoId, status });
+  if (!input.ok) return { ok: false, message: input.message };
 
   const db = identity.db;
 
@@ -201,6 +198,7 @@ export async function setManageVideoStatus(
         run: async () => {
           await runVideoVisibilityTransitionPostCommit({
             publicCacheKeys: transition!.publicCacheKeys,
+            exportEventIds: transition!.exportEventIds,
             revalidate: () => {
               revalidateManageVideoPaths(eventId, videoId, target.youtube_video_id);
             },
