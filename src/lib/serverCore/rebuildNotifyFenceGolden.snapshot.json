@@ -5262,6 +5262,12 @@
         "key": "https://flamenode.internal/public-json/k%2F2.json"
       },
       {
+        "op": "console.warn",
+        "args": [
+          "[public-cache] cache_api_delete_failed"
+        ]
+      },
+      {
         "op": "cache.delete",
         "key": "https://flamenode.internal/public-json/k%2F3.json"
       }
