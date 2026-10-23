@@ -3,18 +3,18 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(
-  new URL("./sendQueueWakeBestEffort.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/queues/sendQueueWakeBestEffort.ts", import.meta.url),
   "utf8",
 );
 
 test("binding missing telemetryはwaitUntilまたはawaitへ必ず接続する", () => {
   assert.match(source, /async function persistFailureWithinWorkerLifetime/);
-  assert.match(source, /const waitUntil = resolveWaitUntil\(options\.waitUntil\)/);
+  assert.match(source, /const waitUntil = resolveWaitUntil\(options\.waitUntil, host\)/);
   assert.match(source, /waitUntil\(promise\)/);
   assert.match(source, /await promise/);
   assert.match(
     source,
-    /await persistFailureWithinWorkerLifetime\(options, "binding_missing"\)/,
+    /await persistFailureWithinWorkerLifetime\(options, "binding_missing", host\)/,
   );
 });
 

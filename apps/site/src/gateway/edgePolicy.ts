@@ -104,6 +104,21 @@ export function resolveCanonicalHostRedirect(input: {
   return target.toString();
 }
 
+/**
+ * Paths CURRENT's `middleware.ts` `config.matcher` never runs the middleware for
+ * (`/((?!_next/static|_next/image|favicon.ico).*)`, a plain prefix test). The gateway's build
+ * output is `/_astro/` instead of `/_next/static`, so it takes the same place; the maintenance
+ * page needs its external CSS, and canonical redirects must not touch build assets.
+ */
+export function isPolicyBypassPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/_astro/") ||
+    pathname.startsWith("/_next/static") ||
+    pathname.startsWith("/_next/image") ||
+    pathname.startsWith("/favicon.ico")
+  );
+}
+
 /** Paths CURRENT keeps reachable while maintenance is on (`middleware.ts:79-86`). */
 export function isMaintenanceExempt(pathname: string): boolean {
   return (
@@ -164,6 +179,7 @@ export async function applyEdgePolicy(
   now = Date.now(),
 ): Promise<Response | null> {
   const url = new URL(request.url);
+  if (isPolicyBypassPath(url.pathname)) return null;
   if (matchesPathSegmentPrefix(url.pathname, "/api/health")) return null;
 
   const canonical = resolveCanonicalHostRedirect({

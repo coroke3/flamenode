@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const wakeSource = await readFile(
-  new URL("./youtubeSyncWake.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/queues/youtubeSyncWake.ts", import.meta.url),
   "utf8",
 );
 const sendSource = await readFile(
-  new URL("./sendQueueWakeBestEffort.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/queues/sendQueueWakeBestEffort.ts", import.meta.url),
   "utf8",
 );
 

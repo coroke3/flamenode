@@ -13,6 +13,7 @@
     "./eventTemplates": "./src/eventTemplates/index.ts",
     "./datetime": "./src/datetime.ts",
     "./auth/permissions": "./src/auth/permissions/index.ts",
+    "./auth/permissions/presets": "./src/auth/permissions/presets.ts",
     "./video": "./src/video/index.ts",
     "./event": "./src/event/index.ts",
     "./xid": "./src/xid/index.ts",
