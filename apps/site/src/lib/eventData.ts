@@ -49,6 +49,9 @@ function idsFromManifest(manifest: SnapshotManifest, pattern: RegExp): string[] 
   return ids.sort();
 }
 
+/** Missing / non-public objects mean "no page"; any other failure (hash, generation, envelope, json, source) fails the build. */
+const SKIPPABLE = new Set(["NOT_PUBLIC", "SNAPSHOT_MISSING"]);
+
 function describe(error: unknown): string {
   return error instanceof SnapshotBuildError ? error.code : error instanceof Error ? error.message : "UNKNOWN";
 }
@@ -106,6 +109,7 @@ export async function loadEventBuildData(
   try {
     indexPayload = await loadEventPayloadSnapshot(source, EVENT_INDEX_KEY, options);
   } catch (error) {
+    if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
     console.warn(`[event] index unavailable: ${describe(error)}`);
   }
   const read = async (ids: string[], key: (id: string) => string): Promise<Record<string, unknown>> => {
@@ -114,6 +118,7 @@ export async function loadEventBuildData(
       try {
         out[id] = await loadEventPayloadSnapshot(source, key(id), options);
       } catch (error) {
+        if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
         console.warn(`[event] no page for ${id}: ${describe(error)}`);
       }
     }

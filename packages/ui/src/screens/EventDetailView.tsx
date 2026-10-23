@@ -107,7 +107,7 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
   return (
     <div className={cx("p-root fn-screen", className)}>
       {event.imageUrl ? <Image className="ed-visual" src={event.imageUrl} alt={`${event.title} メインビジュアル`} /> : null}
-      <main className={cx("wrap", !event.imageUrl && "ed-novisual")}>
+      <main className={cx("wrap", "ev-scope", !event.imageUrl && "ed-novisual")}>
         <header className="ed-head">
           <div className="row ed-id">
             {event.iconUrl ? <Image className="ev-icon ed-ic" src={event.iconUrl} alt="" width={112} height={112} /> : null}

@@ -419,6 +419,67 @@ test("snapshot env: all unset means fixtures, a partly set configuration fails t
   await assert.rejects(loadEventBuildData(full));
 });
 
+test("snapshot objects: NOT_PUBLIC / SNAPSHOT_MISSING skip the page; hash, generation, envelope, json and source failures fail the build", async () => {
+  const { createHash } = await import("node:crypto");
+  const { SnapshotBuildError, EVENT_INDEX_KEY, eventDetailKey, eventReleaseKey } = await import("../apps/site/src/lib/publicDataLoader.ts");
+  const { FIXTURE_EVENTS_INDEX_PAYLOAD, FIXTURE_EVENT_DETAIL_PAYLOADS, FIXTURE_EVENT_RELEASE_PAYLOADS } = await import("../apps/site/src/lib/eventFixtures.ts");
+  const ID = "autumn-collab-2026";
+  const envelope = (key, payload, over = {}) => JSON.stringify({ schemaVersion: 1, generation: "g1", key, visibility: "public", sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), payload, ...over });
+  const valid = () => ({
+    [EVENT_INDEX_KEY]: envelope(EVENT_INDEX_KEY, FIXTURE_EVENTS_INDEX_PAYLOAD),
+    [eventDetailKey(ID)]: envelope(eventDetailKey(ID), FIXTURE_EVENT_DETAIL_PAYLOADS[ID]),
+    [eventReleaseKey(ID)]: envelope(eventReleaseKey(ID), FIXTURE_EVENT_RELEASE_PAYLOADS[ID]),
+  });
+  const load = (objects, { allowed = Object.keys(valid()), read } = {}) => {
+    const files = new Map(Object.entries(objects).map(([k, v]) => [k, new TextEncoder().encode(v)]));
+    return loadEventBuildData({}, {
+      source: { read: read ?? (async (k) => files.get(k) ?? null) },
+      manifest: { schemaVersion: 1, generation: "g1", allowedKeys: allowed, blockedKeys: [] },
+      generation: "g1",
+    });
+  };
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const ok = await load(valid());
+    assert.equal(ok.source, "snapshot");
+    assert.ok(ok.index && ok.details.has(ID) && ok.releases.has(ID));
+
+    const keys = { index: EVENT_INDEX_KEY, detail: eventDetailKey(ID), release: eventReleaseKey(ID) };
+    for (const [what, key] of Object.entries(keys)) {
+      const payload = { index: FIXTURE_EVENTS_INDEX_PAYLOAD, detail: FIXTURE_EVENT_DETAIL_PAYLOADS[ID], release: FIXTURE_EVENT_RELEASE_PAYLOADS[ID] }[what];
+      const fails = {
+        HASH_MISMATCH: envelope(key, payload, { sha256: "0".repeat(64) }),
+        GENERATION_MISMATCH: envelope(key, payload, { generation: "g2" }),
+        INVALID_ENVELOPE: "[]",
+        INVALID_JSON: "{",
+      };
+      for (const [code, body] of Object.entries(fails)) {
+        await assert.rejects(load({ ...valid(), [key]: body }), (e) => e instanceof SnapshotBuildError && e.code === code, `${what} ${code}`);
+      }
+      const files = new Map(Object.entries(valid()).map(([k, v]) => [k, new TextEncoder().encode(v)]));
+      await assert.rejects(
+        load(valid(), { read: async (k) => { if (k === key) throw new Error("down"); return files.get(k) ?? null; } }),
+        (e) => e instanceof SnapshotBuildError && e.code === "SOURCE_UNAVAILABLE",
+        `${what} SOURCE_UNAVAILABLE`,
+      );
+    }
+
+    // Skippable: not allowed by the manifest (NOT_PUBLIC) or absent (SNAPSHOT_MISSING) = no page, the build goes on.
+    const noDetail = await load(valid(), { allowed: [EVENT_INDEX_KEY, eventReleaseKey(ID)] });
+    assert.ok(!noDetail.details.has(ID) && noDetail.releases.has(ID));
+    const { [eventDetailKey(ID)]: _d, [eventReleaseKey(ID)]: _r, ...onlyIndex } = valid();
+    const missing = await load(onlyIndex);
+    assert.equal(missing.details.size, 0);
+    assert.equal(missing.releases.size, 0);
+    const { [EVENT_INDEX_KEY]: _i, ...noIndexObjects } = valid();
+    assert.equal((await load(noIndexObjects)).index, null, "a missing index renders CURRENT's unavailable notice");
+    assert.equal((await load(valid(), { allowed: [eventDetailKey(ID), eventReleaseKey(ID)] })).index, null, "an index denied by the manifest is also unavailable");
+  } finally {
+    console.warn = warn;
+  }
+});
+
 // ---------- Islands (jsdom) ----------
 test("Island /event: server HTML hydrates; query keys filter after mount (G03 reload/back)", { skip: skipUi }, async () => {
   dom.reconfigure({ url: "https://flamenode.net/event" });

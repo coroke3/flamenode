@@ -113,7 +113,7 @@ export function EventsIndexView({ model, className }: EventsIndexViewProps): Rea
   const { query } = model;
   return (
     <div className={cx("p-root fn-screen", className)}>
-      <main className="wrap ev-index">
+      <main className="wrap ev-scope ev-index">
         <span className="t-sm muted">EVENTS</span>
         <h1 className="t-display">イベントを探す</h1>
         <p className="muted ev-lead">{model.total} events</p>
