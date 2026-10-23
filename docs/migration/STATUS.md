@@ -110,7 +110,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 READY) | CLOSED |
 | 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0608 DONE / MIG-0601 DONE) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0608 DONE / MIG-0601 DONE / MIG-0611 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -301,6 +301,7 @@ Validation:
 | --- | --- | --- | --- |
 | MIG-0601 | low-risk reads | DONE | MIG-0307, MIG-0107 |
 | MIG-0608 | Hono read-only session resolution (Auth.js DB session) | DONE | MIG-0801, MIG-0107 |
+| MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
 | MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | READY | MIG-0602 |
 | MIG-0604 | event/slot APIs | READY | MIG-0602 |
@@ -337,7 +338,7 @@ MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を�
 
 | ID | Task | State | Depends on |
 | --- | --- | --- | --- |
-| MIG-0701 | dashboard read-only | READY | MIG-0102, MIG-0601, MIG-0608 |
+| MIG-0701 | dashboard read-only | READY | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
 | MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
 | MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702, MIG-0623 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703, MIG-0624 |
