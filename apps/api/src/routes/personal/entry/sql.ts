@@ -11,7 +11,7 @@ export const MAX_ENTRY_ICON_CANDIDATES = 24;
 export const MAX_ENTRY_CHANNEL_CANDIDATES = 24;
 /** Index reserved slots (CURRENT .limit(24)). */
 export const MAX_RESERVED_SLOTS = 24;
-/** Stage-permission question rows read per event (fail-closed: reaching it throws, like the per-event question limit). */
+/** Stage-permission question rows read per event; rows beyond it are silently NOT read (no throw, no truncated flag): judged unreachable. */
 export const MAX_STAGE_QUESTIONS_PER_EVENT = 100;
 
 const obj = (columns: readonly string[], alias = "q") => columns.map((c) => `'${c}', ${alias}.${c}`).join(", ");
@@ -79,7 +79,7 @@ export function customQuestionArm(eventsCte: string): SqlFragment {
 
 const STAGE_COLUMNS = ["event_id", "question_key", "label", "description", "placeholder", "required", "is_active"] as const;
 
-/** Stage-permission question rows per event of `eventsCte` (one row per event, `{event_id, rows}`), ordered like CURRENT. */
+/** Stage-permission question rows per event of `eventsCte` (one row per event, `{event_id, rows}`), ordered like CURRENT; at most MAX_STAGE_QUESTIONS_PER_EVENT per event, the rest are silently dropped. */
 export function stageQuestionArm(eventsCte: string): SqlFragment {
   return {
     sql: `SELECT 'stage' AS k, json_object('event_id', e.id, 'rows', json((

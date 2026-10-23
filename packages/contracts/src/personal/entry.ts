@@ -7,7 +7,7 @@ import { OnboardingStateSchema, PersonalUserSchema } from "./shared.ts";
 
 /**
  * Paging of the event lists (ZERO_1102 S2: at most 100 rows and 64 KiB per response). `truncated` = more rows may follow;
- * `nextOffset` = the `?offset=` that continues the list (null when complete). A full page of exactly 100 rows reports
+ * `nextOffset` = the `?offset=` that continues the list (null when complete, or when the next offset is beyond the 900 clamp: truncated stays true). A full page of exactly 100 rows reports
  * truncated and its continuation can be empty.
  */
 const pagingShape = { truncated: z.boolean(), nextOffset: z.number().nullable() };

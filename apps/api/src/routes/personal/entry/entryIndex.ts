@@ -3,7 +3,7 @@ import type { EntryIndexResponse, EntryReservedSlot } from "@flamenode/contracts
 import type { AppEnv } from "../../../env.ts";
 import { computeOnboardingState, loadPersonalContext } from "../context.ts";
 import { compareEventsByUpcomingPriority, isAcceptingEntries, type EventStatusInput } from "./eventStatus.ts";
-import { armOf, assertResponseBytes, ENTRY_PAGE_ROWS, loadArmRows, parseOffset } from "./rows.ts";
+import { armOf, assertResponseBytes, ENTRY_PAGE_ROWS, loadArmRows, nextOffsetOf, parseOffset } from "./rows.ts";
 import { MAX_RESERVED_SLOTS } from "./sql.ts";
 
 // CURRENT: app/(auth)/entry/page.tsx (logged-in branch). GET only: nothing is written.
@@ -130,7 +130,7 @@ export const personalEntryIndexRoutes = new Hono<AppEnv>().get("/", async (c) =>
     events,
     reservedSlots,
     truncated: pageFull,
-    nextOffset: pageFull ? offset + eventRows.length : null,
+    nextOffset: pageFull ? nextOffsetOf(offset + eventRows.length) : null,
   };
   assertResponseBytes(body);
   return c.json(body);

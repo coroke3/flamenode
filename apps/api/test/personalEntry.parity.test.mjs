@@ -622,6 +622,25 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("S2 bounds: at the offset clamp (900) a full page reports truncated with nextOffset null and never repeats a page", async () => {
+    try {
+      sqlite.exec("BEGIN");
+      for (let i = 0; i < 1010; i += 1) insertEvent(`lm_${String(i).padStart(4, "0")}`, { title: `Zlm ${i}`, allow_unslotted_posts: 1, start_time: NOW + 700_000 + i, end_time: NOW + 800_000 + i });
+      sqlite.exec("COMMIT");
+      const at = async (offset) => (await call(`/api/personal/entry/unslotted?event_q=Zlm&offset=${offset}`, "tok-alice")).body;
+      const p800 = await at(800);
+      assert.deepEqual([p800.eventOptions.length, p800.truncated, p800.nextOffset], [100, true, 900]);
+      const p900 = await at(900);
+      assert.deepEqual([p900.eventOptions.length, p900.truncated, p900.nextOffset], [100, true, null]);
+      const seen = new Set(p800.eventOptions.map((o) => o.id));
+      assert.ok(p900.eventOptions.every((o) => !seen.has(o.id)), "offset 900 must not repeat the 800 page");
+      // a request beyond the clamp is the 900 page again, which is why nextOffset is null there instead of 1000
+      assert.deepEqual((await at(1000)).eventOptions.map((o) => o.id), p900.eventOptions.map((o) => o.id));
+    } finally {
+      dropEvents("lm_");
+    }
+  });
+
   test("S2 bounds: a page is cut by bytes so the whole response stays <= 64 KiB; the pages concatenate to everything", async () => {
     try {
       for (let i = 0; i < 30; i += 1) {

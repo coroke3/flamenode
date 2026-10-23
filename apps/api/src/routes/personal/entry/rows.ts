@@ -76,3 +76,11 @@ export function takeWithinBytes<T>(items: readonly T[], budgetBytes: number): { 
 export function assertResponseBytes(body: unknown): void {
   if (jsonBytes(body) > MAX_RESPONSE_BYTES) throw new Error("entry_response_too_large");
 }
+
+/**
+ * `nextOffset` to report: null once it is beyond what `parseOffset` can honour (a request for it would be clamped to
+ * MAX_ENTRY_OFFSET and return the same page again). The response then keeps `truncated: true` so the cut is visible.
+ */
+export function nextOffsetOf(next: number): number | null {
+  return next > MAX_ENTRY_OFFSET ? null : next;
+}

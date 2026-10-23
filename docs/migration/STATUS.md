@@ -341,7 +341,7 @@ MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を�
 | --- | --- | --- | --- |
 | MIG-0701 | dashboard read-only | READY | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
 | MIG-0702 | dashboard mutations | BLOCKED | MIG-0602, MIG-0605, MIG-0701 |
-| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702, MIG-0623 |
+| MIG-0703 | entry | BLOCKED | MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 |
 | MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703, MIG-0624 |
 | MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704, MIG-0625, MIG-0626 |
 | MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |

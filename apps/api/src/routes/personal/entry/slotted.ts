@@ -21,6 +21,7 @@ import {
   loadArmRows,
   MAX_RESPONSE_BYTES,
   nestedRows,
+  nextOffsetOf,
   parseOffset,
   takeWithinBytes,
 } from "./rows.ts";
@@ -255,7 +256,7 @@ export const personalEntrySlottedRoutes = new Hono<AppEnv>().get("/", async (c) 
     ...rest,
     eventOptions: fit.items,
     truncated,
-    nextOffset: truncated ? offset + fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0) : null,
+    nextOffset: truncated ? nextOffsetOf(offset + fit.items.length - (prependSlotEvent && fit.items.length > 0 ? 1 : 0)) : null,
   };
   assertResponseBytes(body);
   return c.json(body);
