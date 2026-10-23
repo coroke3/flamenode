@@ -15,6 +15,7 @@ import {
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { mutateWithAudit } from "../../audit/mutateWithAudit.ts";
+import { auditPreloaded } from "../admin/body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 
 export const EVENT_TEMPLATE_FAILURE_MESSAGE =
@@ -106,6 +107,7 @@ eventTemplateRoutes.delete("/:id", async (c) => {
         },
       ],
       expectedMutationChanges: [1],
+      preloaded: auditPreloaded(c),
       audits: [
         {
           table_name: "event_templates",

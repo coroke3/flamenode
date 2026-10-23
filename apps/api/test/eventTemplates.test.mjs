@@ -13,7 +13,7 @@ const ADMIN = { id: "admin-1", name: "Admin", email: null, image: null, role: "a
 const TPL = { id: "etmpl_1", name: "T", description: null, source_event_id: "ev-1", settings_json: "{\"a\":1}", created_by_user_id: "admin-1", created_at: 10, updated_at: 20 };
 
 function setup({ user = ADMIN, role = "admin", settings = "normal", seed = true, onFirst } = {}) {
-  const { db, sqlite } = createAdminD1({ onFirst });
+  const { db, sqlite, stats } = createAdminD1({ onFirst });
   sqlite.exec(`CREATE TABLE event_templates (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, source_event_id TEXT, settings_json TEXT NOT NULL, created_by_user_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`);
   seedBase(sqlite, { role, settings });
   if (seed) sqlite.prepare("INSERT INTO event_templates VALUES (?,?,?,?,?,?,?,?)").run(...Object.values(TPL));
@@ -30,7 +30,7 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", seed = true,
   hono.route("/api/admin", adminEventRoutes);
   const del = (id, headers = { Origin: SITE }) =>
     hono.request(`/api/admin/event-templates/${id}`, { method: "DELETE", headers }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
-  return { sqlite, del, calls, db };
+  return { sqlite, del, calls, db, stats };
 }
 const count = (sqlite, t) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
 
@@ -66,6 +66,14 @@ test("writeGuard runs once per request (no duplicate D1 TOS read from the second
   const s = setup({ onFirst: (sql) => { if (sql.includes("terms_versions")) tosReads.push(sql); } });
   assert.equal((await s.del("etmpl_1")).status, 200);
   assert.equal(tosReads.length, 1);
+});
+
+test("D1 statement budget (ZERO_1102 S3): audit context is preloaded, <=3 reads + 1 batch", async () => {
+  const s = setup();
+  assert.equal((await s.del("etmpl_1")).status, 200);
+  assert.ok(s.stats.reads <= 3, `reads ${s.stats.reads}`);
+  assert.equal(s.stats.reads, 3);
+  assert.equal(s.stats.batches, 1);
 });
 
 test("success: deletes row, writes one audit row (DELETE, context/reason as CURRENT), no-store", async () => {
