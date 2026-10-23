@@ -42,11 +42,29 @@ export function eventExportPayloadCacheKey(
 export async function invalidateEventExportCache(
   eventId: string,
 ): Promise<void> {
-  const keys = (["v5", "legacy"] as const).flatMap((format) =>
+  // deletePublicJsonCaches は Cache API 失敗を握りつぶす（mutation path を落とさない）。
+  await deletePublicJsonCaches(eventExportPayloadCacheKeys(eventId));
+}
+
+function eventExportPayloadCacheKeys(eventId: string): string[] {
+  return (["v5", "legacy"] as const).flatMap((format) =>
     EVENT_EXPORT_REFRESH_MINUTES.map((refreshMinutes) =>
       eventExportPayloadCacheKey(eventId, format, refreshMinutes),
     ),
   );
-  // deletePublicJsonCaches は Cache API 失敗を握りつぶす（mutation path を落とさない）。
-  await deletePublicJsonCaches(keys);
+}
+
+/**
+ * 作品公開状態の変更後に関連イベントの payload cache をまとめて無効化する。
+ * 上限: 呼び出し側の eventIds は MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS(8) 以下、
+ * 1 event あたり 2 format x 4 refresh = 8 key、よって Cache API delete は最大 64 回。
+ * KV / D1 / R2 は使わないため無料枠の課金対象操作は 0。
+ */
+export async function invalidateEventExportCaches(
+  eventIds: readonly string[],
+): Promise<void> {
+  const keys = [...new Set(eventIds)]
+    .filter(Boolean)
+    .flatMap(eventExportPayloadCacheKeys);
+  if (keys.length > 0) await deletePublicJsonCaches(keys);
 }

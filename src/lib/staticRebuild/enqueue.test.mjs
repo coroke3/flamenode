@@ -6,7 +6,7 @@ import {
 } from "./queueBatchCore.ts";
 import { D1_MAX_BIND_PARAMETERS } from "../audit/mutateBudget.ts";
 
-const source = await readFile(new URL("./enqueue.ts", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url), "utf8");
 
 test("通常 enqueue は active row のCASと同時insert競合を有限回だけ再試行する", () => {
   assert.match(source, /ENQUEUE_CONFLICT_RETRY_LIMIT = 3/);

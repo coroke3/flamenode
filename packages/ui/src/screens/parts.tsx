@@ -25,6 +25,7 @@ const ICON_PATHS = {
   group: "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 19a6 6 0 0 1 12 0M16 11a3 3 0 1 0 0-6M21 19a6 6 0 0 0-4-5.6",
   comment: "M4 5h16v11H9l-5 4z",
   heart: "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z",
+  warning: "M12 4l9 16H3zM12 10v4m0 3h.01",
 } as const;
 
 export type ScreenIconName = keyof typeof ICON_PATHS;

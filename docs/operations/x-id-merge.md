@@ -2,7 +2,7 @@
 
 > Status: Active
 > Last verified: 2026-10-01
-> Source of truth: `src/lib/actions/xid-merge-admin.ts`, `src/lib/xid/merge.ts`, `src/lib/xid/mergeSafety.ts`, `src/lib/actions/xidPendingInsert.ts`, `src/lib/auth/xIdentityRequestCore.ts`
+> Source of truth: `src/lib/actions/xid-merge-admin.ts`, `src/lib/xid/merge.ts`, `packages/server-core/src/xid/mergeCore.ts`, `packages/server-core/src/xid/mergeSafety.ts` (`src/lib/xid/mergeSafety.ts` is a bridge), `src/lib/actions/xidPendingInsert.ts`, `src/lib/auth/xIdentityRequestCore.ts`
 
 X ID統合は、`x_identity_requests.request_type = 'merge'` の申請を `/admin/x-id-merges` で承認し、管理者が確認文字列 `MERGE` を入力した場合だけ実行する。通常のX ID連携承認画面からは実行しない。
 

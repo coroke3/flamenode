@@ -10,7 +10,7 @@ async function source(path) {
 }
 
 test("X ID統合はevent_staffを原子的に統合・復元し監査へ件数を残す", async () => {
-  const text = await source("src/lib/xid/merge.ts");
+  const text = await source("packages/server-core/src/xid/merge.ts");
 
   assert.match(text, /UPDATE event_staff/);
   assert.match(text, /DELETE FROM event_staff/);

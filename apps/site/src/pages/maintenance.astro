@@ -1,0 +1,21 @@
+---
+/**
+ * `/maintenance` (MIG-0619, Recipe R-GATEWAY, Runtime S0): static page the gateway redirects to
+ * while operation_mode is maintenance. Texts are CURRENT `app/(public)/maintenance/page.tsx`;
+ * noindex as CURRENT (`buildPageMetadata({ noIndex: true })`). The gateway serves it before the
+ * maintenance check, so it never redirects to itself.
+ */
+import { MaintenanceView } from "@flamenode/ui";
+import PublicPage from "../layouts/PublicPage.astro";
+import { StaticScreen } from "../components/StaticScreen.ts";
+import { buildPageMetadata } from "../lib/pageMetadata.ts";
+
+const meta = {
+  ...buildPageMetadata({ path: "/maintenance", title: "メンテナンス中" }),
+  robots: "noindex, nofollow",
+  googlebot: "noindex, nofollow",
+};
+---
+<PublicPage meta={meta}>
+  <StaticScreen screen={MaintenanceView} props={{}} />
+</PublicPage>

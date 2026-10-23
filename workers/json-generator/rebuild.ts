@@ -3565,7 +3565,10 @@ async function rebuildRecommend(env: Env, signal?: RebuildSignal): Promise<void>
     env,
     "recommend.json",
     {
-      generated_at: core.generatedAt,
+      // 合成時刻。core の generated_at を写すと、core が古いまま recommend だけ先に
+      // 再生成された場合に R2 uploaded は新しいが本文 generated_at が古いままになり、
+      // Artifact SLO(本文基準) が refresh sweep(uploaded基準) に検知されず破れる。
+      generated_at: Math.floor(Date.now() / 1000),
       recommended: core.recommended,
       latest: core.latest,
       underrated: core.underrated,
