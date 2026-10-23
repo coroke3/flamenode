@@ -1,16 +1,17 @@
 # Phase 4 Acceptance Gate: Public SSG, Gateway & Free-Tier PoC Audit (MIG-0407)
 
-> Gate Status: **NOT MET / BLOCKED** — 判定前（Phase 4 未マージPR、ユーザー判断事項、人間の Phase Gate 承認が未達）  
+> Gate Status: **NOT MET / BLOCKED** — 判定前（MIG-0411 PR #326 が未マージ、ユーザー判断事項、人間の Phase Gate 承認が未達）  
 > Task: MIG-0407（Recipe R-EVIDENCE, Runtime N）  
 > Work Order: [`PHASE_4_5_SPEC.md`](../PHASE_4_5_SPEC.md) `### MIG-0407`  
 > Decisions: D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED  
-> Last verified: 2026-10-19（Head: `389e469b6574fb664b9f70b1665bbbb589e3f740`）
+> Last verified: 2026-10-23  
+> Verified against commit: `34730b822d8145b55d1956dd699b10436533a27a`（origin/main）
 
 エージェントは Gate を承認しない。この文書は判定材料の一覧であり、承認は PR #328 に人間（Yugo）が明示的に記録する。前提条件や証跡が未達の項目は「未達」とし、該当タスクの統合後に再評価する。
 
 ---
 
-## 1. 前提: Phase 4 タスクの統合状態（2026-10-19 時点）
+## 1. 前提: Phase 4 タスクの統合状態（2026-10-23 時点、main `34730b82`）
 
 | Task | 対象 / スコープ | 所有パス | 実装状況 | main 統合状態 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -18,13 +19,13 @@
 | **MIG-0404** | Build-time route-map generator | `apps/site/src/lib/routeMap.ts` | 実装完了 | **merge 済み**（`c3203081`, PR #305） |
 | **MIG-0405** | Thin visibility gateway Worker | `apps/site/src/gateway/**` | 実装完了 | **merge 済み**（`b8817d6e`, PR #313） |
 | **MIG-0406** | CPU benchmark & capacity verification | `PERF_HOTPATH_MATRIX.md`, `scripts/check-public-site-build-budget.*` | 実装完了 | **merge 済み**（`1e435c4d`, PR #314） |
-| **MIG-0409** | Build-time public data from D1 (D-09) | `apps/site/scripts/readPublicData.ts`, `apps/site/src/lib/BUILD_TIME_DATA.md` | U01/02/04 完了、U03/05/06/07 は判断待ち | **未 merge**（PR #323, Head `403ba308`, BLOCKED） |
-| **MIG-0410** | Deploy hook build scheduler Cron (D-09) | `workers/fast-jobs/publicBuildTrigger.ts`, `migrations/0065_*.sql` | 実装完了（13/13 PASS） | **未 merge**（PR #325, Head `2d64b8fe`, Stack on #323） |
-| **MIG-0411** | Queue ISR per-page regeneration (D-09) | `apps/site/src/gateway/pageRenderQueue.ts`, `migrations/0066_*.sql` | 実装完了（15/15 PASS） | **未 merge**（PR #326, Head `ae309ece`, Stack on #325） |
-| **MIG-0402** | Shared React UI in Astro via Islands | `apps/site/src/components/IslandWrapper.ts`, `SiteAdapterProvider.ts` | 実装完了（8/8 PASS） | **未 merge**（PR #324, Head `290fea0e`, Stack on #321） |
-| **MIG-0403** | Representative video/event/user SSG | `apps/site/src/pages/[id].astro`, `event/[id]`, `user/[id]` | 実装完了（4/4 PASS） | **未 merge**（PR #327, Head `06f7a563`, Stack on #324） |
+| **MIG-0409** | Build-time public data from D1 (D-09) | `apps/site/scripts/readPublicData.ts`, `apps/site/src/lib/BUILD_TIME_DATA.md` | U01/02/04 完了、U03/U07 は owner の Cloudflare 操作待ち（work-item 参照） | **merge 済み**（`4f90bc9d`, PR #323） |
+| **MIG-0410** | Deploy hook build scheduler Cron (D-09) | `workers/fast-jobs/publicBuildTrigger.ts`, `migrations/0065_*.sql` | 実装完了（13/13 PASS） | **merge 済み**（`64781657`, PR #325）。本番手順（0065 適用・Deploy Hook・secret・fast-jobs deploy）は別途 owner 承認待ち |
+| **MIG-0411** | Queue ISR per-page regeneration (D-09) | `apps/site/src/gateway/pageRenderQueue.ts`, `migrations/0066_*.sql` | 実装完了（15/15 PASS） | **未 merge**（PR #326 は OPEN、Head `0e77362f`、base は `migration/mig-0410-deploy-hook-build-scheduler`） |
+| **MIG-0402** | Shared React UI in Astro via Islands | `apps/site/src/components/IslandWrapper.ts`, `SiteAdapterProvider.ts` | 実装完了（8/8 PASS） | **merge 済み**（`7573ff67`, PR #324） |
+| **MIG-0403** | Representative video/event/user SSG | `apps/site/src/pages/[id].astro`, `event/[id]`, `user/[id]` | 実装完了（4/4 PASS） | **merge 済み**（`68424cbc`, PR #327） |
 
-→ **前提状態:** MIG-0401, 0404, 0405, 0406 の 4 件が `main` にマージ済み。MIG-0402, 0403, 0409, 0410, 0411 の 5 件は open PR の段階であり、`main` への統合は **未達**。
+→ **前提状態:** MIG-0401, 0402, 0403, 0404, 0405, 0406, 0409, 0410 の 8 件が `main` にマージ済み。MIG-0411（PR #326）のみ未マージで、`main` への統合は **未達**。なお STATUS.md の MIG-0409/0410/0411/0407 行は未更新（STATUS.md は merge 直前の統合でのみ更新する運用）。
 
 ---
 
@@ -42,9 +43,11 @@
 
 ### Track B: Performance & Cloudflare Free-Tier Budget（性能・容量・予算）
 
+> 注意: 以下の Gateway CPU 等の数値は**ローカル計測**（Node 22 + Assets/KV モック、`scripts/migration-gateway.test.mjs` T05。`wrangler dev` では workerd が request 単位の CPU を報告しない）であり、本番 Cloudflare での実測ではない。出典: [`PERF_HOTPATH_MATRIX.md`](../PERF_HOTPATH_MATRIX.md) の `/:id` 行（local p99 0.25–0.47ms）。「< 1.5ms」は目標予算（p50 < 1.5ms、`PERFORMANCE_IMPLEMENTATION_PLAN.md`）に対する上界。本番 1102=0 の確認は未実施で、Phase 5 以降の nonprod / shadow 計測で行う。
+
 | 項目 / 制約 | Free Tier 上限 | 測定値 / 設計値 | 状態 |
 | :--- | :--- | :--- | :--- |
-| **Worker CPU per Request** | 10ms (Hard max) | Gateway: **< 1.5ms**, Static Assets: **0ms**（直配信） | **達成** (< 15% 予算) |
+| **Worker CPU per Request** | 10ms (Hard max) | Gateway: **< 1.5ms**（ローカル計測）, Static Assets: **0ms**（直配信） | **達成** (< 15% 予算) |
 | **Static Asset Ingress** | N/A | `run_worker_first = false`（静的アセット直配信を維持） | **達成** |
 | **Cron Triggers** | 5 triggers / account | **4 / 5 使用中**（新規 Cron trigger 追加なし） | **達成** |
 | **Queue Operations / 日** | 10,000 ops / 日 | 6,000 通常 / 4,000 予備（MIG-0411 1 msg/invocation 境界） | **達成** |
@@ -58,8 +61,7 @@
 Phase 4 Gate を承認・通過するために、以下の判断とマージが必要です：
 
 1. **Phase 4 open PR のマージ**:
-   - PR #321（Phase 2 Gate）承認・マージ後、PR #324（MIG-0402）および PR #327（MIG-0403）をマージする。
-   - PR #323（MIG-0409）、PR #325（MIG-0410）、PR #326（MIG-0411）を順次マージする。
+   - PR #326（MIG-0411）をマージする（PR #323/#324/#325/#327 は main 統合済み）。
 2. **MIG-0409 D1 ビルドデータ取得方式の決定**:
    - Option A（読み取り専用 API トークン）vs Option B（`wrangler d1 export` スナップショット）。
    - 最大公開遅延とデバウンス定数の承認（`MIN_BUILD_INTERVAL_MS = 480_000`, `MAX_DATA_BUILDS_PER_DAY = 180`）。
@@ -75,7 +77,7 @@ Phase 4 Gate を承認・通過するために、以下の判断とマージが�
 
 ## 4. Gate チェックリスト
 
-- [ ] Phase 4 の全実装タスク（MIG-0401〜0406, 0409〜0411, 0402, 0403）が `main` に merge 済みであること
+- [ ] Phase 4 の全実装タスク（MIG-0401〜0406, 0409〜0411）が `main` に merge 済みであること（MIG-0411 / PR #326 のみ未達）
 - [ ] ユーザー判断事項（D1 取得方式、遅延定数、ISR 描画方式）が合意・反映されていること
 - [x] Fail-closed 公開可視性が検証済みであること（非公開データ漏洩 0 件）
 - [x] Free Tier 予算制約（CPU < 10ms、Cron ≤ 5、Queue ≤ 10,000）が検証済みであること
