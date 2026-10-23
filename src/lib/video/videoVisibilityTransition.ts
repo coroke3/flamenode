@@ -17,6 +17,7 @@ import {
   createTraceId,
   logFlowTrace,
 } from "@/lib/observability/flowTrace";
+import { invalidateEventExportCaches } from "@/lib/api/eventExportCache";
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
 import {
   eventBaseObjectKey,
@@ -78,6 +79,7 @@ export type VideoVisibilityTransitionPlan = {
   fenceToken: string | null;
   depublicizedFromPublic: boolean;
   publicCacheKeys: string[];
+  exportEventIds: string[];
   /** Validation failure is returned as data so every caller can surface it. */
   validationError?: string;
 };
@@ -230,6 +232,7 @@ export async function planVideoVisibilityTransition(
       fenceToken: null,
       depublicizedFromPublic: false,
       publicCacheKeys: [],
+      exportEventIds: [],
       validationError: publicEligibility.message,
     };
   }
@@ -353,6 +356,10 @@ export async function planVideoVisibilityTransition(
       ]
     : [];
 
+  const exportEventIds = visibilityChanged
+    ? [...new Set(input.eventIds)].filter(Boolean)
+    : [];
+
   return {
     mutationStatements,
     expectedMutationChanges,
@@ -363,6 +370,7 @@ export async function planVideoVisibilityTransition(
     fenceToken,
     depublicizedFromPublic,
     publicCacheKeys,
+    exportEventIds,
   };
 }
 
@@ -425,12 +433,29 @@ export async function preCommitVideoVisibilityDepublicization(input: {
 
 export async function runVideoVisibilityTransitionPostCommit(input: {
   publicCacheKeys: readonly string[];
+  exportEventIds: readonly string[];
   revalidate: () => void;
 }): Promise<void> {
+  // export payload cache は公開 JSON key より影響が小さいので先に消す
+  // （subrequest 上限で途中打切りになっても、重要な公開 key の削除を優先して残す）。
+  const exportEventIds = [...new Set(input.exportEventIds)].filter(Boolean);
+  if (exportEventIds.length > 0) {
+    try {
+      await invalidateEventExportCaches(exportEventIds);
+    } catch {
+      console.warn("[video-visibility] event_export_cache_invalidation_failed");
+    }
+  }
+  let publicCacheError: unknown;
   if (input.publicCacheKeys.length > 0) {
-    await deletePublicJsonCaches(input.publicCacheKeys);
+    try {
+      await deletePublicJsonCaches(input.publicCacheKeys);
+    } catch (error) {
+      publicCacheError = error;
+    }
   }
   input.revalidate();
+  if (publicCacheError) throw publicCacheError;
 }
 
 const DEPUBLICIZATION_COMPENSATION_MAX_RETRIES = 3;

@@ -114,7 +114,7 @@ test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
   const members =
     read("./replaceVideoMembers.ts");
   const memberSet =
-    read("./memberSetSnapshot.ts");
+    read("../../../packages/server-core/src/video/memberSetSnapshot.ts");
 
   assert.match(
     limits,

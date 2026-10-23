@@ -31,7 +31,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0602 — low-risk write commands
 
-- 読む: SA-004..011（announcements / API endpoints / audit settings。SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
+- 読む: SA-004..008（announcements / API endpoints。SA-009..010 は MIG-0629、SA-011 は MIG-0616、SA-035..037 は MIG-0604、SA-016..020 は MIG-0605 の所有）, CURRENT actions, `src/lib/audit/mutate.ts`, `API_MATRIX.md`。
 - 変更: Hono Zod input検証、session userのpolicy判定、D1 write transaction + audit outboxを同一業務サービスへ委譲。新APIだけのvalidationを作って旧Nextと意味を分けない。
 - 試験: unauthorized/forbidden/banned、invalid body、CAS lost update、audit write failure→rollback、post-commit queue exactly-once-ish/idempotent retry、same-origin check。
 - DONE: SA unitごとに同一requestで旧/新statusとDB副作用・監査・Queue結果が一致。
@@ -77,6 +77,62 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: Cron を doorbell の enqueue だけにする、`max_batch_size`、予算を超えた job の `MAX_` 定数と続きの enqueue。
 - 試験: 上限ちょうど / 上限 + 1 / 2回目の doorbell / 外部 API の失敗 / Queue の1日の message 数。
 - DONE: 全 job の非本番 max < 8ms。遅れが延びる場合はユーザーの承認がある。
+
+### MIG-0612 — shared server core scaffold (D-10)
+
+- 読む: `OPEN_DECISIONS.md` D-10、`IMPLEMENTATION_RECIPES.md` R-CORE、`scripts/check-domain-imports.mjs`。
+- 変更: `+packages/server-core`（足場と `src/ports.ts`）、`+scripts/check-server-core-boundaries.mjs`、docs。実装コードは動かさない。
+- 試験: fixture の禁止 import / `process.env` / `getCloudflareContext` を検出、domain→server-core の逆依存を検出。
+- DONE: 境界検査が CI で動く。`src/lib/**` の diff が 0。
+
+### MIG-0613 — audit mutation core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0613 Work Order、`src/lib/audit/**`、`src/lib/queues/**`。
+- 変更: 先に golden test、次に `packages/server-core/src/{audit,queues}/**` へ移動し `src/lib/**` は bridge。`nextPorts.ts` が env / KV / Queue / `waitUntil` を供給。
+- 試験: golden（SQL + params + `audit_logs`）の一致、既存 test の件数同一、wake の失敗系。
+- DONE: golden の diff 0、呼び出し側の diff 0。
+
+### MIG-0614 — static rebuild / notifications / visibility fence / public cache core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0614 Work Order。
+- 変更: `packages/server-core/src/{staticRebuild,notifications,visibility,publicCache}/**`、`src/lib/**` は bridge。`loader.ts` は移さない。
+- 試験: golden、R2 / cache の失敗系。
+- DONE: golden の diff 0、既存 test の件数同一。
+
+### MIG-0615 — visibility transition planners (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0615 Work Order。
+- 変更: video / event / xUser の可視性遷移を core へ。`unstable_rethrow` は `RethrowFrameworkControl` で注入。
+- 試験: golden（公開↔非公開、補償、post commit）、framework 例外の再 throw。
+- DONE: golden の diff 0。
+
+### MIG-0616 — audit restore core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0616 Work Order、audit の restore.ts。
+- 変更: restore.ts を core へ、旧 file は bridge。
+- 試験: golden（strategy 別、CAS 競合、YouTube eligibility）。
+- DONE: golden の diff 0。
+
+### MIG-0617 — replace apps/api Option A copy (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order、MIG-0602 の `apps/api` 実装。
+- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。fake D1 に `.raw()`。
+- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致。
+- DONE: 写しの呼び出しが 0。
+
+### MIG-0618 — xid merge core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0618 Work Order。
+- 変更: X ID merge を core へ。
+- 試験: golden（merge の SQL + params、監査行、owner 保護）。
+- DONE: golden の diff 0。
+
+### MIG-0629 — admin audit settings + restore dry-run APIs
+
+- 読む: SA-009..010（`src/lib/actions/audit-admin.ts`）, `mutate.ts`, `API_MATRIX.md`, `work-items/MIG-0602.md` Decision（MIG-0602 の分割）。
+- 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
+- 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
+- DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
 
 ### MIG-0607 — Phase 6 API Gate
 
