@@ -2,6 +2,12 @@ import "server-only";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
+  deletePublicJsonCache as deletePublicJsonCacheCore,
+  deletePublicJsonCaches as deletePublicJsonCachesCore,
+  publicJsonCacheUrl,
+  type PublicJsonCacheDeleteHost,
+} from "@flamenode/server-core/publicCache/delete";
+import {
   deletePublicJsonIsolateCache,
   PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
   PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
@@ -15,7 +21,6 @@ import {
 
 export { publicJsonCacheFreshness, publicJsonCacheRetentionTtl } from "./publicCachePolicy";
 
-const CACHE_ORIGIN = "https://flamenode.internal/public-json/";
 export const PUBLIC_JSON_CACHE_MAX_BYTES = 16 * 1024 * 1024;
 
 export type PublicJsonCacheEnvelope = {
@@ -61,7 +66,7 @@ export function coercePublicJsonCacheEnvelope(
 }
 
 export function publicJsonCacheKey(r2Key: string): Request {
-  return new Request(`${CACHE_ORIGIN}${encodeURIComponent(r2Key)}`);
+  return new Request(publicJsonCacheUrl(r2Key));
 }
 
 function resolveWaitUntil(): ((promise: Promise<unknown>) => void) | null {
@@ -260,20 +265,17 @@ export function writePublicJsonCacheBestEffort(
   }
 }
 
+// MIG-0614: the delete path lives in packages/server-core; the isolate map and the Cache API
+// stay here and are handed over as a host.
+const publicJsonCacheDeleteHost: PublicJsonCacheDeleteHost = {
+  dropIsolateEntry: deletePublicJsonIsolateCache,
+  readEdgeCache: () => (caches as unknown as { default: Cache }).default,
+};
+
 export async function deletePublicJsonCache(r2Key: string): Promise<void> {
-  deletePublicJsonIsolateCache(r2Key);
-  try {
-    await (caches as unknown as { default: Cache }).default.delete(
-      publicJsonCacheKey(r2Key),
-    );
-  } catch {
-    // Cache API failure must not take down the mutation path. Key は出さない。
-    console.warn("[public-cache] cache_api_delete_failed");
-  }
+  await deletePublicJsonCacheCore(r2Key, publicJsonCacheDeleteHost);
 }
 
 export async function deletePublicJsonCaches(r2Keys: readonly string[]): Promise<void> {
-  for (const key of r2Keys) {
-    await deletePublicJsonCache(key);
-  }
+  await deletePublicJsonCachesCore(r2Keys, publicJsonCacheDeleteHost);
 }
