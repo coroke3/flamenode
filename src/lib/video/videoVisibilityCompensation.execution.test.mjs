@@ -97,7 +97,8 @@ if (!runningWithTsx) {
     },
   });
 
-  mock.module("@/lib/publicData/publicVisibilityFenceStore", {
+  // MIG-0615: the compensation code lives in packages/server-core and imports the fence store there.
+  mock.module("@flamenode/server-core/visibility/fenceStore", {
     namedExports: {
       async getPublicVisibilityFence() {
         return state.fence;

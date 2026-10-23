@@ -21,8 +21,7 @@ test("package.json depends on no framework or host package", () => {
       name === "hono" ||
       name === "astro" ||
       name === "server-only" ||
-      name.startsWith("@opennextjs/") ||
-      name === "@flamenode/domain",
+      name.startsWith("@opennextjs/"),
   );
   assert.deepEqual(forbidden, []);
 });

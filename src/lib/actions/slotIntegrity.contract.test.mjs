@@ -48,7 +48,8 @@ test("setManageVideoStatus returns ok:false on D1 mutation failure", async () =>
 });
 
 test("visibility transition separates DM notifications from canonical mutation", async () => {
-  const source = await read("../video/videoVisibilityTransition.ts");
+  // MIG-0615: the planner lives in packages/server-core.
+  const source = await read("../../../packages/server-core/src/visibility/videoTransition.ts");
   assert.match(source, /enqueueVideoVisibilityNotificationsPostCommit/);
   assert.doesNotMatch(
     source,

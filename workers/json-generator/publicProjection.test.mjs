@@ -304,3 +304,23 @@ test("materialized source powers search/random without a videos table scan and k
     sqlite.close();
   }
 });
+
+test("recommend.json の generated_at は core が古くても合成時刻へ進む（SLO refresh）", async () => {
+  const { sqlite, objects, env } = fixture();
+  try {
+    await rebuildTarget(env, "recommend_core", "global");
+    const core = objects.get("recommend/core.v1.json");
+    assert.ok(core, "recommend core is required");
+    const stale = Math.floor(Date.now() / 1000) - 91 * 24 * 3600;
+    objects.set("recommend/core.v1.json", { ...core, generated_at: stale });
+    const before = Math.floor(Date.now() / 1000);
+    // users_index follow-up が core より先に recommend を処理する順序を再現。
+    await rebuildTarget(env, "recommend", "global");
+    const recommend = objects.get("recommend.json");
+    assert.ok(recommend);
+    assert.ok(recommend.generated_at >= before, "recommend.json generated_at must be the composition time");
+    assert.notEqual(recommend.generated_at, stale);
+  } finally {
+    sqlite.close();
+  }
+});

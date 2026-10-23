@@ -274,6 +274,7 @@ Gate のPRをrevert。
 - 旧 Worker: `wrangler.toml:1,3`（`flamenode-web`, `.open-next/worker.js`）。他の Worker は `workers/content-jobs`, `workers/fast-jobs`, `workers/sync-jobs`（各 `wrangler.toml`）。
 - どの Phase も所有しない CURRENT ページ: `app/(public)/maintenance/page.tsx`（SYSTEM_SURFACE）, `app/(public)/dev/ui-surfaces/page.tsx`（DEV_ONLY）。`FILE_MIGRATION_MATRIX.md` で「RETAIN/REVIEW in MIG-0901」。
 - `app/robots.ts`, `app/sitemap.ts`（Next の metadata route。Astro 側の代替が必要）。
+- Next 15 upstream support ended 2026-10-21; 15.5.28 is the last backport so far; track vercel/next.js advisories until MIG-0904.
 #### Owned paths
 - 新規: `+docs/migration/RESIDUAL_INVENTORY.md`
 - 変更: `docs/migration/FILE_MIGRATION_MATRIX.md`（残存ファイルの disposition）
@@ -380,7 +381,7 @@ node scripts/check-migration-file-progress.mjs
 - **Depends on:** MIG-0903 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
-- `package.json`: `next` `15.5.22`, `next-auth` `5.0.0-beta.32`, `@opennextjs/cloudflare` `1.20.2`。scripts `build`, `dev`, `cf:build`, `cf:deploy-production` など。
+- `package.json`: `next` `15.5.28`, `next-auth` `5.0.0-beta.32`, `@opennextjs/cloudflare` `1.20.2`。scripts `build`, `dev`, `cf:build`, `cf:deploy-production` など。
 - `open-next.config.ts`, `wrangler.toml`（`flamenode-web`）, `scripts/cloudflare-build.mjs`, `scripts/cloudflare-deploy-production.mjs`, `scripts/check-open-next-output.mjs`。
 - `.github/workflows/pr186-consolidated-verify.yml` は `npm run cf:build` を実行する。
 #### Owned paths
