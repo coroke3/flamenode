@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const transitionSource = await readFile(
-  new URL("./eventVisibilityTransition.ts", import.meta.url),
-  "utf8",
-);
+// MIG-0615: the planners live in packages/server-core; the bridge keeps the Next wiring.
+const transitionSource = (
+  await Promise.all(
+    [
+      "../../../packages/server-core/src/visibility/eventTransition.ts",
+      "./eventVisibilityTransition.ts",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
+  )
+).join("\n");
 // MIG-0305 U02: the fence-state decision lives in @flamenode/domain/event.
 const fenceDecisionSource = await readFile(
   new URL("../../../packages/domain/src/event/visibility.ts", import.meta.url),

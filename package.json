@@ -102,10 +102,10 @@
   },
   "dependencies": {
     "@auth/drizzle-adapter": "1.11.3",
-    "@next/third-parties": "15.5.22",
+    "@next/third-parties": "15.5.28",
     "@opennextjs/cloudflare": "1.20.2",
     "drizzle-orm": "^0.45.2",
-    "next": "15.5.22",
+    "next": "15.5.28",
     "next-auth": "5.0.0-beta.32",
     "react": "19.0.0",
     "react-dom": "19.0.0",
@@ -118,7 +118,7 @@
     "@types/react-dom": "^19.0.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
-    "eslint-config-next": "15.5.22",
+    "eslint-config-next": "15.5.28",
     "sharp": "0.35.3",
     "typescript": "^5.7.3",
     "wrangler": "4.118.0"

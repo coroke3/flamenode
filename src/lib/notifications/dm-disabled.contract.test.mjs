@@ -9,7 +9,7 @@ const files = {
   chapter: new URL("../actions/chapter.ts", import.meta.url),
   moderation: new URL("../actions/moderation-admin.ts", import.meta.url),
   rules: new URL("../actions/rules.ts", import.meta.url),
-  videoStatus: new URL("./videoStatusNotify.ts", import.meta.url),
+  videoStatus: new URL("../../../packages/server-core/src/notifications/videoStatusNotify.ts", import.meta.url),
 };
 
 test("chapter_comment_added は enqueue しない", async () => {
