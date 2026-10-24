@@ -203,6 +203,8 @@ Phase 6 共通契約のとおり。
 - **U01 reads**: RH-030/031/032。
 - **U02 chapters / visibility**: SA-012〜015, 001〜003, 040〜042。チャプター削除時のコメント論理保持。
 - **U03 collaborators / submit / interaction / update**: SA-082〜089。SA-087 は Active X 単位（`ACTIVE_X_MIGRATION_PLAN.md`）。
+#### Rules
+- Static rebuild enqueue in Hono writes (D-0603-1): write the `static_rebuild_queue` row(s) in the same D1 batch as the mutation, byte-identical to CURRENT `buildStaticRebuildQueueBatch` (target_type / target_id / reason / priority / requested_by_user_id, active-row UPSERT merge rule). Send no Queue wake, add no Queue binding, no `waitUntil` fetch, no direct drain, no deploy-hook call. Each slice must (1) list the targets and reasons it enqueues in its work item, (2) assert the queue row field-by-field against the real CURRENT action in a node:sqlite parity test, (3) record one `DOCUMENTED DIFFERENCE D-0603-1` test showing CURRENT wake count vs 0, (4) reference D-0603-1 in the route file comment. Fan-out that needs more than the S3 pre-read budget (e.g. SA-087 `list_popular` prefetch) is a separate blocker, not covered by D-0603-1.
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
