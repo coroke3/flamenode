@@ -52,10 +52,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0604 — event / slot APIs
 
-- 読む: RH-012..015, RH-020..022, SA-021..039, SA-056..068, `background-jobs/README.md`, `CURRENT_ROUTES.md`。
-- 変更: event list/live viewer/slotted mutations/playlist/owner commandsを型付きサービスへ移行。対象RH-012,013 external export契約・version/format/legacy/CORSも取りこぼさない。slot owner/CAS/予約人数制限はDB transactionで強制。
-- 試験: schedule full/empty/expired, double reservation, removing last operable owner forbidden, public/private event on live endpoint, export v5+legacy, replay/notify/outbox/error retry。
-- DONE: RH-012..015/020..022・対象SAの仕様/CPU/Queue/permission parity。高リスク操作は独立レビュー。
+- 読む: RH-014, RH-020..022, SA-021..039, SA-056..068, `background-jobs/README.md`, `CURRENT_ROUTES.md`。
+- 変更: live viewer/slotted mutations/playlist/owner commandsを型付きサービスへ移行。RH-012/015 は MIG-0631、RH-013（export契約・version/format/legacy/CORS）は MIG-0632 へ移管（2026-10-24）。slot owner/CAS/予約人数制限はDB transactionで強制。
+- 試験: schedule full/empty/expired, double reservation, removing last operable owner forbidden, public/private event on live endpoint, replay/notify/outbox/error retry。
+- DONE: RH-014/020..022・対象SAの仕様/CPU/Queue/permission parity。高リスク操作は独立レビュー。
 
 ### MIG-0605 — Auth User / Active X / Admin / remaining RH
 
@@ -229,7 +229,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 - 読む: `PHASE_6_SPEC.md` の MIG-0632 Work Order、`eventExportData` / `eventExportPayload` / `eventExportCache`。
 - 変更: RH-013 の Hono route（D1 読み + publicCache R2）。
-- 試験: CORS・format / v5・refresh minutes の parity、上限入力の max CPU。
+- 試験: CORS・format / v5 + legacy・refresh minutes の parity、上限入力の max CPU。
 - DONE: 応答が CURRENT と一致し、64KB 超を D-12 の記録した例外として残す。
 
 ### MIG-0633 — event ownership / permission resolver core (D-10)
@@ -241,7 +241,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0607 — Phase 6 API Gate
 
-- 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606のPR。
+- 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606・0631..0633のPR。
 - 変更: RH行ごとに担当Hono/旧Auth/legacy fallbackと契約実行ログを列挙。Auth.js RH-010/011の2メソッドはPhase8へ残す。その他31メソッドは移行先とtest evidenceが必要。
 - 試験: 旧Next→新HonoのE2E, same-origin auth, method OPTIONS, authn/authz, no1121/1102, DTO, cache/Queue/media/CSRF, CPU。
 - DONE: 独立reviewと人間Gate承認後のみPhase 7/8関係タスクを更新。未移行を0と偽らない。

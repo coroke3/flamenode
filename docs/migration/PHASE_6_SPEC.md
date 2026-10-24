@@ -230,7 +230,7 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後、U04 は MIG-0633（ownership core）の DONE 待ち。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
 - **Recipe:** R-API
 - **Runtime:** S2, S3
 - **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** none
