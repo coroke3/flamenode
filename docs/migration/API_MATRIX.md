@@ -99,6 +99,19 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 
 SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
 
+### Hono endpoints (MIG-0603 U02b, PR #393)
+
+New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, TOS, CostGuard `chapter_comment`, approved active X) = CURRENT `writeGuard({ requireApprovedActiveXId: true, feature: "chapter_comment" })`. Every response is `Cache-Control: private, no-store`; body cap 64KB (413). Audit + video `static_rebuild_queue` row are one D1 batch (`mutateWithAudit`, `preloaded: auditPreloaded(c)`). Permission: own chapter, or `video.chapter_admin` in admin/event mode (bulk always). Source: `apps/api/src/routes/videos/chapters.ts` (+ `chapterAccess.ts`, `chapterCsv.ts`), body/result DTO `packages/contracts/src/videoChapter.ts`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Queue reason |
+| --- | --- | --- | --- | --- |
+| SA-012 | `POST /api/videos/:videoId/chapters` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_create` |
+| SA-013 | `PUT /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 400 / 403 / 404 / 413 / 500 | `chapter_update` |
+| SA-014 | `DELETE /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 403 / 404 / 500 | `chapter_delete` |
+| SA-015 | `POST /api/videos/:videoId/chapters/bulk` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_bulk_create` |
+
+Known difference (DECIDED, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API sends 0 wakes by design. The `static_rebuild_queue` row is persisted in the same D1 batch, drained by the content-jobs Recovery Cron `15 * * * *` (worst case about 60 min, equal to the D-11 accepted delay). The Queue binding decision is made once with MIG-0614 U06.
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
@@ -429,4 +442,5 @@ Code landing only; the CURRENT Next handlers/actions stay. CPU not measured (MIG
 | RH-020..022 | `GET /api/live/events/[id]/{slots,submissions,summary}` | `apps/api/src/routes/live/events.ts` | public | id 1..128 else 400; DB missing 503; `live_api_enabled` per request (FORCE_STATIC_ONLY > isolate 30s > KV mirror > D1 > normal); 15s isolate micro-cache after the gate, success only; success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`, errors JSON `no-store`; public events only; non `public_name` hides video_id/display_name; slots limit 6000, submissions 50; D1 <= 2 reads | IN_PROGRESS |
 | SA-036 | `deleteEventTemplate` | `DELETE /api/admin/event-templates/:id` (`apps/api/src/routes/events/templates.ts`) | admin (session -> writeGuard -> CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` validation; single D1 batch: CAS DELETE on every preflight scalar column + changes() assertion + strict audit (context `admin_event_templates`, reason as CURRENT, restore none); 400 / 404 / 409 / 500; `private, no-store` | IN_PROGRESS |
 | RH-014 | `GET /api/events/[id]/slots/viewer-overlay` | `apps/api/src/routes/events/viewerOverlay.ts` (`GET /api/events/:id/slots/viewer-overlay`; DTO `packages/contracts/src/eventSlotViewerOverlay.ts`) | public route, per-viewer DTO (session optional; anonymous / unavailable-auth / banned get the CURRENT fixed shapes) | id trimmed and cut to 128 chars (blank 400); public events only (404 `event_not_found`); every response `private, no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0`, 503 adds `Retry-After: 3`; D1 = session + event/own-slots (1) + terms/linked X/pending requests (1), anonymous 1; own slots LIMIT 100 and JSON <= 64 KiB else fail-closed `authUnavailable` shape (S2 delta); `operatorOverrideAllowed` always false = CURRENT behaviour (event row has no `visibility_status`); parity vs the real CURRENT handler in `apps/api/test/events.viewerOverlay.parity.test.mjs` | IN_PROGRESS |
-| RH-012, RH-013, RH-015, SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on public-data loader (RH-012/013/015) / ownership port + role-parameterised write guard + audit restore strategies (SA) | BLOCKED |
+| RH-012, RH-015 | see MIG-0631 | none | - | moved to MIG-0631 (build-time snapshot reader); RH-013 moved to MIG-0632 (event export) | BLOCKED |
+| SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on MIG-0633 (ownership core), role-parameterised write guard (MIG-0604 U04a) and MIG-0617 (restore_strategy via core) | BLOCKED |

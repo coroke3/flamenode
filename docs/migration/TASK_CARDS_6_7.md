@@ -52,10 +52,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0604 — event / slot APIs
 
-- 読む: RH-012..015, RH-020..022, SA-021..039, SA-056..068, `background-jobs/README.md`, `CURRENT_ROUTES.md`。
-- 変更: event list/live viewer/slotted mutations/playlist/owner commandsを型付きサービスへ移行。対象RH-012,013 external export契約・version/format/legacy/CORSも取りこぼさない。slot owner/CAS/予約人数制限はDB transactionで強制。
-- 試験: schedule full/empty/expired, double reservation, removing last operable owner forbidden, public/private event on live endpoint, export v5+legacy, replay/notify/outbox/error retry。
-- DONE: RH-012..015/020..022・対象SAの仕様/CPU/Queue/permission parity。高リスク操作は独立レビュー。
+- 読む: RH-014, RH-020..022, SA-021..039, SA-056..068, `background-jobs/README.md`, `CURRENT_ROUTES.md`。
+- 変更: live viewer/slotted mutations/playlist/owner commandsを型付きサービスへ移行。RH-012/015 は MIG-0631、RH-013（export契約・version/format/legacy/CORS）は MIG-0632 へ移管（2026-10-24）。slot owner/CAS/予約人数制限はDB transactionで強制。
+- 試験: schedule full/empty/expired, double reservation, removing last operable owner forbidden, public/private event on live endpoint, replay/notify/outbox/error retry。
+- DONE: RH-014/020..022・対象SAの仕様/CPU/Queue/permission parity。高リスク操作は独立レビュー。
 
 ### MIG-0605 — Auth User / Active X / Admin / remaining RH
 
@@ -122,11 +122,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0617 — replace apps/api Option A copy (D-10)
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order、MIG-0602 の `apps/api` 実装。
-- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。fake D1 に `.raw()`。
-- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致。
-- DONE: 写しの呼び出しが 0。
-- 着手前: Work Order の lead 決定 L1〜L3（apps/api が core を読む方法、drizzle を Worker に入れるか、`preloaded`）が未決。決まるまで実装しない。
+- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order（lead 決定 L1〜L3、2026-10-24）、MIG-0602 の `apps/api` 実装。
+- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。`apps/api` は typecheck のみ（noEmit）、drizzle を middleware で 1 回作る、core の `mutateWithAudit` に optional `preloaded`。fake D1 に `.raw()`。
+- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致、`wrangler deploy --dry-run` の bundle size。
+- DONE: 写しの呼び出しが 0、`routes/**` から drizzle の直接 import が 0。
 
 ### MIG-0618 — xid merge core (D-10)
 
@@ -207,10 +206,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 ### MIG-0629 — admin audit settings + restore dry-run APIs
 
 - 読む: SA-009..010（`src/lib/actions/audit-admin.ts`）, `mutate.ts`, `API_MATRIX.md`, `work-items/MIG-0602.md` Decision（MIG-0602 の分割）。
-- 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
+- 変更: SA-009 を strict 監査 1 batch で、SA-010 を core の `restoreAuditLog(db, { dry_run: true })` で実装。両方 `POST` + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")`。
 - 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
 - DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
-- 着手前: Work Order の lead 決定 M1〜M3（SA-010 を core restore で作るか、SA-010 の guard を CURRENT の `requireAdminWrite("admin_permissions")` に揃えるか、MIG-0617 との順序）が未決。決まるまで実装しない。
+- 着手前: lead 決定 M1〜M3 は 2026-10-24 に決定済み。MIG-0617 が DONE になるまで着手しない。
 
 ### MIG-0630 — Video edit page read APIs (/dashboard/edit/[id] + permissions)
 
@@ -219,9 +218,30 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 実 loader と Hono の parity、他人の作品・存在しない id、D1 3文以下、LIMIT <= 100 / response <= 64 KiB。
 - DONE: 2ルートの parity と権限が PASS。
 
+### MIG-0631 — public event list / release from build-time snapshot (RH-015, RH-012)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0631 Work Order、`apps/site/scripts/readPublicData.ts`、`apps/api/src/routes/live/operationMode.ts`。
+- 変更: R2 の `events/index.json` / release を読む Hono route。D1 0 回。
+- 試験: `readPublicData.test.mjs` の fixture での parity、snapshot 欠損の 503、rate limit と cache header。
+- DONE: RH-015 / RH-012 が CURRENT と同じ応答。loader は移植しない。
+
+### MIG-0632 — event export API (RH-013)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0632 Work Order、`eventExportData` / `eventExportPayload` / `eventExportCache`。
+- 変更: RH-013 の Hono route（D1 読み + publicCache R2）。
+- 試験: CORS・format / v5 + legacy・refresh minutes の parity、上限入力の max CPU。
+- DONE: 応答が CURRENT と一致し、64KB 超を D-12 の記録した例外として残す。
+
+### MIG-0633 — event ownership / permission resolver core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0633 Work Order、`src/lib/auth/ownership.ts`、`src/lib/event/eventOwnership.ts`。
+- 変更: 純粋な resolver と owner 0 guard を server-core へ移し、Next は bridge。
+- 試験: 移動前の golden、最後の owner の解任が拒否される SQL guard。
+- DONE: golden の diff 0、既存 test の件数同一、呼び出し側の diff 0。
+
 ### MIG-0607 — Phase 6 API Gate
 
-- 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606のPR。
+- 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606・0631..0633のPR。
 - 変更: RH行ごとに担当Hono/旧Auth/legacy fallbackと契約実行ログを列挙。Auth.js RH-010/011の2メソッドはPhase8へ残す。その他31メソッドは移行先とtest evidenceが必要。
 - 試験: 旧Next→新HonoのE2E, same-origin auth, method OPTIONS, authn/authz, no1121/1102, DTO, cache/Queue/media/CSRF, CPU。
 - DONE: 独立reviewと人間Gate承認後のみPhase 7/8関係タスクを更新。未移行を0と偽らない。

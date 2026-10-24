@@ -14,6 +14,10 @@ export type Bindings = {
   NEXT_PUBLIC_SITE_URL?: string;
   /** "1" allows loopback origins (local preview only). */
   FLAMENODE_LOCAL_PREVIEW?: string;
+  /** MIG-0605 U02: "1" / "true" / "yes" enables the admin spreadsheet routes (CURRENT ADMIN_SPREADSHEET_ENABLED). */
+  ADMIN_SPREADSHEET_ENABLED?: string;
+  /** MIG-0605 U02: optional page size (clamped to the S2 row cap). */
+  ADMIN_SPREADSHEET_PAGE_SIZE?: string;
 };
 
 export type Variables = {
