@@ -2,10 +2,16 @@
 // source (3 copies, teleport thresholds, clone a11y, no hover pause, reduced motion ...). Part 2 runs the Island in
 // jsdom with fake layout (jsdom has none): loop seam, auto-scroll, pauses, arrows, 2-row padding, static takeover.
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
+// The Island imports @flamenode/ui (IslandWrapper), so the jsdom part needs the ui build. test:unit runs before it and
+// skips that part; the CI REQUIRE_BUILT step fails instead of skipping.
+const skipUi = existsSync(path.resolve("packages/ui/dist/index.js")) ? false : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && skipUi) throw new Error("REQUIRE_BUILT is set but " + skipUi);
 const island = await readFile(new URL("../apps/site/src/components/TopShelfIsland.ts", import.meta.url), "utf8");
 const mount = await readFile(new URL("../apps/site/src/components/mountTopShelves.ts", import.meta.url), "utf8");
 const screensCss = await readFile(new URL("../packages/ui/src/styles/screens.css", import.meta.url), "utf8");
@@ -122,8 +128,8 @@ Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, valu
 
 const React = (await import("react")).default;
 const { createRoot } = await import("react-dom/client");
-const { TopShelfIsland } = await import("../apps/site/src/components/TopShelfIsland.ts");
-const { mountTopShelves, readShelfCards } = await import("../apps/site/src/components/mountTopShelves.ts");
+const { TopShelfIsland } = skipUi ? {} : await import("../apps/site/src/components/TopShelfIsland.ts");
+const { mountTopShelves, readShelfCards } = skipUi ? {} : await import("../apps/site/src/components/mountTopShelves.ts");
 const { act } = React;
 const h = React.createElement;
 
@@ -145,7 +151,7 @@ async function mountIsland(props) {
 const groups = (c) => [...c.querySelectorAll(".tls-group")];
 const reset = () => { state.mobile = false; state.reduced = false; };
 
-test("short list fits: one group, no arrows, no clones, scroll stays at 0", async () => {
+test("short list fits: one group, no arrows, no clones, scroll stays at 0", { skip: skipUi }, async () => {
   reset();
   const v = await mountIsland({ items: cards(3) });
   assert.equal(groups(v.container).length, 1);
@@ -162,7 +168,7 @@ test("short list fits: one group, no arrows, no clones, scroll stays at 0", asyn
   await none.unmount();
 });
 
-test("overflowing list: three copies, centred start, clone a11y, arrows, onReady once", async () => {
+test("overflowing list: three copies, centred start, clone a11y, arrows, onReady once", { skip: skipUi }, async () => {
   reset();
   let ready = 0;
   const v = await mountIsland({ items: cards(8), onReady: () => ready++ });
@@ -184,7 +190,7 @@ test("overflowing list: three copies, centred start, clone a11y, arrows, onReady
   await v.unmount();
 });
 
-test("teleport: leaving the middle third jumps one cycle, in both directions", async () => {
+test("teleport: leaving the middle third jumps one cycle, in both directions", { skip: skipUi }, async () => {
   reset();
   const v = await mountIsland({ items: cards(8) });
   const cycle = 8 * CARD;
@@ -198,7 +204,7 @@ test("teleport: leaving the middle third jumps one cycle, in both directions", a
   await v.unmount();
 });
 
-test("auto-scroll: only while visible; left grows scrollLeft, right shrinks it; carries the fraction", async () => {
+test("auto-scroll: only while visible; left grows scrollLeft, right shrinks it; carries the fraction", { skip: skipUi }, async () => {
   reset();
   const left = await mountIsland({ items: cards(8), autoScrollDirection: "left" });
   await sleep(150);
@@ -226,7 +232,7 @@ test("auto-scroll: only while visible; left grows scrollLeft, right shrinks it; 
   await off.unmount();
 });
 
-test("auto-scroll stops for reduced motion and a hidden tab", async () => {
+test("auto-scroll stops for reduced motion and a hidden tab", { skip: skipUi }, async () => {
   reset();
   state.reduced = true;
   const a = await mountIsland({ items: cards(8) });
@@ -249,7 +255,7 @@ test("auto-scroll stops for reduced motion and a hidden tab", async () => {
   await b.unmount();
 });
 
-test("pauses: focus, pointer down; hover alone does not; wheel and keys pause for the configured time", async () => {
+test("pauses: focus, pointer down; hover alone does not; wheel and keys pause for the configured time", { skip: skipUi }, async () => {
   reset();
   const v = await mountIsland({ items: cards(8), pauseAfterInteractionMs: 300 });
   await v.visible(true);
@@ -291,7 +297,7 @@ test("pauses: focus, pointer down; hover alone does not; wheel and keys pause fo
   await noWheel.unmount();
 });
 
-test("arrows move 1.5 cards with the eased scroll, instantly for reduced motion, and pause auto-scroll", async () => {
+test("arrows move 1.5 cards with the eased scroll, instantly for reduced motion, and pause auto-scroll", { skip: skipUi }, async () => {
   reset();
   const v = await mountIsland({ items: cards(8), autoScrollSpeed: 0 });
   const [prev, next] = v.container.querySelectorAll(".tls-arrow");
@@ -313,7 +319,7 @@ test("arrows move 1.5 cards with the eased scroll, instantly for reduced motion,
   reset();
 });
 
-test("<=700px with two rows: an odd list is padded to a full column and arrows step one card", async () => {
+test("<=700px with two rows: an odd list is padded to a full column and arrows step one card", { skip: skipUi }, async () => {
   reset();
   state.mobile = true;
   const v = await mountIsland({ items: cards(9), autoScrollSpeed: 0 });
@@ -335,7 +341,7 @@ test("<=700px with two rows: an odd list is padded to a full column and arrows s
   await desktop.unmount();
 });
 
-test("static takeover: the native shelf is removed only after the Island rendered; empty shelves stay", async () => {
+test("static takeover: the native shelf is removed only after the Island rendered; empty shelves stay", { skip: skipUi }, async () => {
   reset();
   document.body.innerHTML = `<section>
     <div class="tp-shelf" data-shelf="latest" role="region" aria-label="新着" tabindex="0"><ol class="tp-shelf-track">${Array.from({ length: 8 }, (_, i) => `<li class="tp-shelf-i"><span class="tp-shelf-rank">${i + 1}</span><a href="/v${i}">作品${i}</a></li>`).join("")}</ol></div>
