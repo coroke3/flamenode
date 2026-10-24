@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0630
+Current Task: MIG-0617
 Current Owner: claude
-Task State: DONE
+Task State: REVIEW
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0630
 Last Task PR: #385
-Merged READY: MIG-0501 (remainder), MIG-0603 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
+Merged READY: MIG-0501 (remainder), MIG-0603 (remainder), MIG-0605 (remainder), MIG-0626 (remainder), MIG-0631 (U01/U02 now)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -317,7 +317,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0614 | static rebuild enqueue / notifications batch / visibility fence / public cache core (D-10) | DONE | MIG-0613 |
 | MIG-0615 | video/event/xUser visibility transition planners (D-10) | DONE | MIG-0614 |
 | MIG-0616 | audit restore core (D-10) | DONE | MIG-0615 |
-| MIG-0617 | replace apps/api Option A copy with core (D-10) | READY | MIG-0613, MIG-0614, MIG-0602 |
+| MIG-0617 | replace apps/api Option A copy with core (D-10); merged #395 (343b4a3b), DONE pending review evidence | REVIEW | MIG-0613, MIG-0614, MIG-0602 |
 | MIG-0618 | xid merge core (D-10) | DONE | MIG-0613 |
 | MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
 | MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | BLOCKED | MIG-0405 |
@@ -331,12 +331,12 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | BLOCKED | MIG-0405, MIG-0606 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602, MIG-0616, MIG-0617 |
 | MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | DONE | MIG-0623 |
-| MIG-0631 | public event list / release from build-time snapshot (RH-015, RH-012) | READY | MIG-0602, MIG-0614 |
+| MIG-0631 | public event list / release Hono route (RH-015: live mode = D1, static_only = R2 artifact; RH-012: D1 gate + R2 artifact). U03以降はMIG-0617 DONE後 | READY | MIG-0602, MIG-0614 |
 | MIG-0632 | event export API (RH-013) | BLOCKED | MIG-0614, MIG-0606 |
 | MIG-0633 | event ownership / permission resolver core (D-10) | BLOCKED | MIG-0613, MIG-0617 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632 |
 
-MIG-0617 の lead 決定 L1〜L3 と MIG-0629 の M1〜M3 は 2026-10-24 に決定済み（PHASE_6_SPEC.md の各 Work Order）。MIG-0617 は READY、MIG-0629 は MIG-0617 が DONE になるまで BLOCKED。MIG-0631（RH-015 / RH-012 の snapshot reader）、MIG-0632（RH-013）、MIG-0633（ownership core）は 2026-10-24 に MIG-0604 の残りから切り出して登録（MIG-0632 は MIG-0606 待ち、MIG-0633 は MIG-0617 待ち）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0630 は DONE（U01/U02a/U03/U04 = #382、U02b = #385、Opus APPROVE on 0ee6f156、DONE checklist 3 項目とも充足）。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため、MIG-0603 / 0604 / 0702 が未完の間は BLOCKED のまま。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
+MIG-0617 の lead 決定 L1〜L3 と MIG-0629 の M1〜M3 は 2026-10-24 に決定済み（PHASE_6_SPEC.md の各 Work Order）。MIG-0617 は PR #395 が squash merge 済み（merge commit `343b4a3b6a31b48b5bdad86461e80aaad6d70100`、最終Head `3b3cc0de39c343193776a55842e330f6f5a9fa0d`、CI run 40061654686 green、Opus APPROVE コメントあり）だが REVIEW のまま。DONE checklist の1項目（Option A の写しが無い、API の応答・監査・wake が置き換え前と一致）は golden byte 一致・`rg` 0件・auditParity で証跡上は満たす。一方、AGENT_PROTOCOL.md §Independent review evidence の形式（`Independent review: <agent>/<model> (<separate agent | fresh-context subagent of <builder model> | human>) | Head: <40hex> | Verdict:`）・builder との独立性が既存コメントで確認できず、L2 の `wrangler deploy --dry-run` 記録は esbuild 代替のため、DONE 化は保留。DONE になるまで MIG-0629 / MIG-0633 は BLOCKED。MIG-0631（RH-015 live = D1 / static_only = R2 artifact、RH-012 = D1 gate + R2 artifact）、MIG-0632（RH-013）、MIG-0633（ownership core）は 2026-10-24 に MIG-0604 の残りから切り出して登録（MIG-0632 は MIG-0606 待ち、MIG-0633 は MIG-0617 DONE 待ち）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0630 は DONE（U01/U02a/U03/U04 = #382、U02b = #385、Opus APPROVE on 0ee6f156、DONE checklist 3 項目とも充足）。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため、MIG-0603 / 0604 / 0702 が未完の間は BLOCKED のまま。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
