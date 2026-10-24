@@ -14,19 +14,18 @@ import {
   validateAnnouncementInput,
 } from "@flamenode/domain/announcements";
 import { AnnouncementWriteBodySchema } from "@flamenode/contracts";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { generateId } from "@flamenode/server-core/id";
+import { sql } from "@flamenode/server-core/sql";
+import { buildAnnouncementChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
-import {
-  generateId,
-  MAX_SINGLE_ROW_LIMIT,
-  mutateWithAudit,
-} from "../../audit/mutateWithAudit.ts";
+import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 import {
   auditPreloaded,
   BODY_TOO_LARGE_MESSAGE,
   readAdminJsonBody,
 } from "./body.ts";
-import { buildAnnouncementChangeQueueStatement } from "../../audit/staticRebuildQueue.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { onlyMutating } from "../../middleware/writeOrigin.ts";
 
@@ -99,7 +98,7 @@ announcementRoutes.use("*", onlyMutating(costGuardMiddleware("admin_announcement
 
 // SA-004 createAnnouncement
 announcementRoutes.post("/", async (c) => {
-  const db = c.env.DB;
+  const db = c.get("db");
   const userId = c.get("user")!.id;
   const body0 = await readAnnouncementBody(c.req.raw);
   if (!body0.ok) return failure(c, body0.status, body0.message);
@@ -110,27 +109,22 @@ announcementRoutes.post("/", async (c) => {
   const now = Math.floor(Date.now() / 1000);
 
   try {
-    const queue = buildAnnouncementChangeQueueStatement({
+    const queue = await buildAnnouncementChangeQueueBatch(db, {
       reason: "announcement_create",
       requestedByUserId: userId,
     });
     await mutateWithAudit(db, {
       mutationStatements: [
-        {
-          sql: `
+        db.run(sql`
           INSERT INTO announcements (
             id, title, body, severity, target_audience, is_published,
             publish_at, expire_at, created_by_user_id, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-          params: [
-            id, data.title, data.body, data.severity, data.target_audience,
-            data.is_published, dates.publishAt, dates.expireAt, userId, now, now,
-          ],
-        },
-        queue.statement,
+          ) VALUES (${id}, ${data.title}, ${data.body}, ${data.severity}, ${data.target_audience},
+            ${data.is_published}, ${dates.publishAt}, ${dates.expireAt}, ${userId}, ${now}, ${now})
+        `),
+        ...queue.statements,
       ],
-      expectedMutationChanges: [1, queue.expectedChanges],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
       preloaded: auditPreloaded(c),
       audits: [
         {
@@ -166,7 +160,7 @@ announcementRoutes.post("/", async (c) => {
 
 // SA-005 updateAnnouncement
 announcementRoutes.put("/:id", async (c) => {
-  const db = c.env.DB;
+  const db = c.get("db");
   const userId = c.get("user")!.id;
   const body0 = await readAnnouncementBody(c.req.raw);
   if (!body0.ok) return failure(c, body0.status, body0.message);
@@ -179,7 +173,7 @@ announcementRoutes.put("/:id", async (c) => {
 
   let existing: AnnouncementRow | null;
   try {
-    existing = await loadAnnouncement(db, id);
+    existing = await loadAnnouncement(c.env.DB, id);
   } catch (error) {
     console.error("[announcement] atomic mutation failed", error);
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
@@ -192,30 +186,23 @@ announcementRoutes.put("/:id", async (c) => {
   const now = Math.floor(Date.now() / 1000);
   const nextUpdatedAt = Math.max(now, existing.updated_at + 1);
   try {
-    const queue = buildAnnouncementChangeQueueStatement({
+    const queue = await buildAnnouncementChangeQueueBatch(db, {
       reason: "announcement_update",
       requestedByUserId: userId,
     });
     await mutateWithAudit(db, {
       mutationStatements: [
-        {
-          sql: `
+        db.run(sql`
           UPDATE announcements
-          SET title = ?, body = ?,
-              severity = ?, target_audience = ?,
-              is_published = ?, publish_at = ?,
-              expire_at = ?, updated_at = ?
-          WHERE id = ? AND updated_at = ?
-        `,
-          params: [
-            data.title, data.body, data.severity, data.target_audience,
-            data.is_published, dates.publishAt, dates.expireAt, nextUpdatedAt,
-            id, data.base_updated_at,
-          ],
-        },
-        queue.statement,
+          SET title = ${data.title}, body = ${data.body},
+              severity = ${data.severity}, target_audience = ${data.target_audience},
+              is_published = ${data.is_published}, publish_at = ${dates.publishAt},
+              expire_at = ${dates.expireAt}, updated_at = ${nextUpdatedAt}
+          WHERE id = ${id} AND updated_at = ${data.base_updated_at}
+        `),
+        ...queue.statements,
       ],
-      expectedMutationChanges: [1, queue.expectedChanges],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
       preloaded: auditPreloaded(c),
       audits: [
         {
@@ -249,36 +236,33 @@ announcementRoutes.put("/:id", async (c) => {
 
 // SA-006 deleteAnnouncement
 announcementRoutes.delete("/:id", async (c) => {
-  const db = c.env.DB;
+  const db = c.get("db");
   const userId = c.get("user")!.id;
   const id = c.req.param("id").trim();
   if (!id) return failure(c, 400, "お知らせIDが必要です。");
 
   let existing: AnnouncementRow | null;
   try {
-    existing = await loadAnnouncement(db, id);
+    existing = await loadAnnouncement(c.env.DB, id);
   } catch (error) {
     console.error("[announcement] atomic mutation failed", error);
     return failure(c, 500, ANNOUNCEMENT_FAILURE_MESSAGE);
   }
   if (!existing) return failure(c, 404, "対象のお知らせが見つかりません。");
   try {
-    const queue = buildAnnouncementChangeQueueStatement({
+    const queue = await buildAnnouncementChangeQueueBatch(db, {
       reason: "announcement_delete",
       requestedByUserId: userId,
     });
     await mutateWithAudit(db, {
       mutationStatements: [
-        {
-          sql: `
+        db.run(sql`
           DELETE FROM announcements
-          WHERE id = ? AND updated_at = ?
-        `,
-          params: [id, existing.updated_at],
-        },
-        queue.statement,
+          WHERE id = ${id} AND updated_at = ${existing.updated_at}
+        `),
+        ...queue.statements,
       ],
-      expectedMutationChanges: [1, queue.expectedChanges],
+      expectedMutationChanges: [1, ...queue.expectedChanges],
       preloaded: auditPreloaded(c),
       audits: [
         {

@@ -12,9 +12,11 @@ import {
   type EventTemplateActionResult,
   validateDeleteEventTemplateId,
 } from "@flamenode/domain/eventTemplates";
+import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { sql } from "@flamenode/server-core/sql";
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { mutateWithAudit } from "../../audit/mutateWithAudit.ts";
 import { auditPreloaded } from "../admin/body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 
@@ -35,34 +37,6 @@ export const EVENT_TEMPLATE_COLUMNS = [
 
 type TemplateRow = Record<(typeof EVENT_TEMPLATE_COLUMNS)[number], unknown>;
 
-/** CURRENT src/lib/audit/expectedRowCondition.ts for a plain scalar row. */
-export function expectedRowCondition(row: Record<string, unknown>): {
-  sql: string;
-  params: unknown[];
-} {
-  const predicates: string[] = [];
-  const params: unknown[] = [];
-  for (const [key, value] of Object.entries(row)) {
-    const column = `"${key.replaceAll('"', '""')}"`;
-    if (value === null) {
-      predicates.push(`${column} IS NULL`);
-    } else if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "bigint" ||
-      typeof value === "boolean"
-    ) {
-      predicates.push(`${column} = ?`);
-      params.push(value);
-    } else {
-      return { sql: "0 = 1", params: [] };
-    }
-  }
-  return predicates.length > 0
-    ? { sql: predicates.join(" AND "), params }
-    : { sql: "0 = 1", params: [] };
-}
-
 function result(
   c: { json: (b: unknown, s: 200 | 400 | 404 | 409 | 500) => Response },
   status: 200 | 400 | 404 | 409 | 500,
@@ -81,7 +55,7 @@ eventTemplateRoutes.use("*", costGuardMiddleware("admin_event_templates"));
 
 // SA-036 deleteEventTemplate
 eventTemplateRoutes.delete("/:id", async (c) => {
-  const db = c.env.DB;
+  const db = c.get("db");
   const userId = c.get("user")!.id;
   c.header("Cache-Control", "private, no-store");
   const validated = validateDeleteEventTemplateId(c.req.param("id"));
@@ -89,7 +63,7 @@ eventTemplateRoutes.delete("/:id", async (c) => {
   const templateId = validated.templateId;
 
   try {
-    const row = await db
+    const row = await c.env.DB
       .prepare(
         `SELECT ${EVENT_TEMPLATE_COLUMNS.map((k) => `"${k}"`).join(", ")}
          FROM event_templates WHERE id = ? LIMIT 1`,
@@ -98,13 +72,10 @@ eventTemplateRoutes.delete("/:id", async (c) => {
       .first<TemplateRow>();
     if (!row) return result(c, 404, { ok: false, message: "テンプレートが見つかりません。" });
 
-    const cas = expectedRowCondition({ ...row });
+    const cas = expectedRowCondition({ expectedCurrent: { ...row } });
     await mutateWithAudit(db, {
       mutationStatements: [
-        {
-          sql: `DELETE FROM event_templates WHERE id = ? AND (${cas.sql})`,
-          params: [templateId, ...cas.params],
-        },
+        db.run(sql`DELETE FROM event_templates WHERE id = ${templateId} AND (${cas})`),
       ],
       expectedMutationChanges: [1],
       preloaded: auditPreloaded(c),

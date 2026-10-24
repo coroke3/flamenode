@@ -29,11 +29,8 @@ import {
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
 import type { D1DatabaseLike, SessionUser } from "../auth/session.ts";
-import {
-  actorSnapshotJsonFromRow,
-  MAX_SINGLE_ROW_LIMIT,
-  type ActorSnapshotRow,
-} from "../audit/mutateWithAudit.ts";
+import { actorSnapshotFromRow, type ActorSnapshotRow } from "@flamenode/server-core/audit/logger";
+import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import { evaluateCostGuardWithSettings } from "./costGuard.ts";
 
 export type WriteGuardDenyReason =
@@ -337,7 +334,7 @@ async function loadTosState(
     terms_reaccept_required: row.terms_reaccept_required === 1 ? 1 : 0,
     // Same user row the audit actor snapshot needs: saves a second D1 read
     // (ZERO_1102 S3: at most 3 pre-reads).
-    actor_snapshot_json: actorSnapshotJsonFromRow(row),
+    actor_snapshot_json: JSON.stringify(actorSnapshotFromRow(row)),
   };
 }
 

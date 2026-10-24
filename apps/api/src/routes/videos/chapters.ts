@@ -25,16 +25,15 @@ import {
 } from "@flamenode/contracts";
 import { validateChapterTime } from "@flamenode/domain/video";
 import { validateActiveXSnapshot } from "@flamenode/domain/xid";
+import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { generateId } from "@flamenode/server-core/id";
+import { sql } from "@flamenode/server-core/sql";
+import { buildStaticRebuildQueueBatch } from "@flamenode/server-core/staticRebuild/enqueue";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import type { AppEnv } from "../../env.ts";
-import {
-  generateId,
-  MAX_SINGLE_ROW_LIMIT,
-  mutateWithAudit,
-  type SqlStatement,
-} from "../../audit/mutateWithAudit.ts";
-import { buildStaticRebuildQueueStatement } from "../../audit/staticRebuildQueue.ts";
-import { expectedRowCondition } from "../admin/apiEndpoints.ts";
+import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 import {
   accessFactsColumnsSql,
@@ -219,16 +218,12 @@ function snapshotDeny(c: ChapterContext, raw: Record<string, unknown>, activeXId
   return check.ok ? null : fail(c, 409, check.message);
 }
 
-function queueFor(videoId: string, reason: string, userId: string) {
-  return buildStaticRebuildQueueStatement({
-    targetType: "video",
-    targetId: videoId,
-    reason,
-    requestedByUserId: userId,
-  });
+/** One `video` static_rebuild_queue UPSERT, written in the same D1 batch as the chapter mutation. */
+function queueFor(db: ServerCoreDb, videoId: string, reason: string, userId: string) {
+  return buildStaticRebuildQueueBatch(db, [
+    { targetType: "video", targetId: videoId, reason, requestedByUserId: userId },
+  ]);
 }
-
-const placeholders = (count: number) => Array.from({ length: count }, () => "?").join(", ");
 
 // SA-012 createChapter: POST /api/videos/:videoId/chapters
 function createChapterHandler() {
@@ -246,11 +241,11 @@ function createChapterHandler() {
     }
     const data = parsed.data;
     const videoId = (c.req.param("videoId") ?? "").trim();
-    const db = c.env.DB;
+    const db = c.get("db");
 
     let video: VideoFacts | null;
     try {
-      video = await loadVideo(db, videoId, "[]");
+      video = await loadVideo(c.env.DB, videoId, "[]");
     } catch (error) {
       console.error("[chapter] video read failed", error);
       return fail(c, 500, CHAPTER_FAILURE_MESSAGE);
@@ -278,25 +273,20 @@ function createChapterHandler() {
       updated_at: now,
     };
     try {
-      const queue = queueFor(videoId, "chapter_create", user.id);
+      const queue = await queueFor(db, videoId, "chapter_create", user.id);
       await mutateWithAudit(db, {
         mutationStatements: [
-          {
-            sql: `
+          db.run(sql`
     INSERT INTO video_chapters (
       id, video_id, x_user_id, chapter_time, chapter_label, note,
       visibility, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `,
-            params: [
-              after.id, after.video_id, after.x_user_id, after.chapter_time,
-              after.chapter_label, after.note, after.visibility,
-              after.created_at, after.updated_at,
-            ],
-          },
-          queue.statement,
+    ) VALUES (${after.id}, ${after.video_id}, ${after.x_user_id}, ${after.chapter_time},
+      ${after.chapter_label}, ${after.note}, ${after.visibility},
+      ${after.created_at}, ${after.updated_at})
+  `),
+          ...queue.statements,
         ],
-        expectedMutationChanges: [1, queue.expectedChanges],
+        expectedMutationChanges: [1, ...queue.expectedChanges],
         preloaded: auditPreloaded(c),
         audits: [
           {
@@ -333,7 +323,7 @@ function updateChapterHandler() {
     }
     const data = parsed.data;
     const chapterId = (c.req.param("chapterId") ?? "").trim();
-    const db = c.env.DB;
+    const db = c.get("db");
 
     const loaded = await loadManaged(
       c,
@@ -359,21 +349,15 @@ function updateChapterHandler() {
       updated_at: now,
     };
     try {
-      const queue = queueFor(existing.video_id, "chapter_update", user.id);
-      const expected = expectedRowCondition({ ...existing });
+      const queue = await queueFor(db, existing.video_id, "chapter_update", user.id);
+      const expected = expectedRowCondition({ expectedCurrent: { ...existing } });
       await mutateWithAudit(db, {
         mutationStatements: [
-          {
-            sql: `UPDATE "video_chapters" SET "chapter_time" = ?, "chapter_label" = ?, "note" = ?,
-                  "visibility" = ?, "updated_at" = ? WHERE ${expected.sql}`,
-            params: [
-              after.chapter_time, after.chapter_label, after.note,
-              after.visibility, after.updated_at, ...expected.params,
-            ],
-          },
-          queue.statement,
+          db.run(sql`UPDATE "video_chapters" SET "chapter_time" = ${after.chapter_time}, "chapter_label" = ${after.chapter_label}, "note" = ${after.note},
+                  "visibility" = ${after.visibility}, "updated_at" = ${after.updated_at} WHERE ${expected}`),
+          ...queue.statements,
         ],
-        expectedMutationChanges: [1, queue.expectedChanges],
+        expectedMutationChanges: [1, ...queue.expectedChanges],
         preloaded: auditPreloaded(c),
         audits: [
           {
@@ -409,7 +393,7 @@ function deleteChapterHandler() {
     if (!activeX) return fail(c, 403, SELECT_ACTIVE_X_MESSAGE);
     const chapterId = (c.req.param("chapterId") ?? "").trim();
     if (!chapterId) return fail(c, 400, INVALID_INPUT_MESSAGE);
-    const db = c.env.DB;
+    const db = c.get("db");
 
     const loaded = await loadManaged(
       c,
@@ -425,14 +409,14 @@ function deleteChapterHandler() {
     if ("response" in loaded) return loaded.response;
     const existing = loaded.chapter;
     try {
-      const queue = queueFor(existing.video_id, "chapter_delete", user.id);
-      const expected = expectedRowCondition({ ...existing });
+      const queue = await queueFor(db, existing.video_id, "chapter_delete", user.id);
+      const expected = expectedRowCondition({ expectedCurrent: { ...existing } });
       await mutateWithAudit(db, {
         mutationStatements: [
-          { sql: `DELETE FROM "video_chapters" WHERE ${expected.sql}`, params: expected.params },
-          queue.statement,
+          db.run(sql`DELETE FROM "video_chapters" WHERE ${expected}`),
+          ...queue.statements,
         ],
-        expectedMutationChanges: [1, queue.expectedChanges],
+        expectedMutationChanges: [1, ...queue.expectedChanges],
         preloaded: auditPreloaded(c),
         audits: [
           {
@@ -485,11 +469,11 @@ function bulkChaptersHandler() {
       return bulkFail(400, parsed.error.issues[0]?.message ?? INVALID_INPUT_MESSAGE);
     }
     const videoId = (c.req.param("videoId") ?? "").trim();
-    const db = c.env.DB;
+    const db = c.get("db");
 
     let video: VideoFacts | null;
     try {
-      video = await loadVideo(db, videoId, approvedXIdsJson(user.role, c.get("activeX").approvedXIds));
+      video = await loadVideo(c.env.DB, videoId, approvedXIdsJson(user.role, c.get("activeX").approvedXIds));
       if (!video) return bulkFail(404, VIDEO_NOT_FOUND_MESSAGE);
       // Operator chapters: admin / event sources only, never the normal owner mode.
       if (!canAdministerChapters(user.role, c.get("activeX").approvedXIds, video)) {
@@ -566,22 +550,23 @@ function bulkChaptersHandler() {
     }
 
     try {
-      const queue = queueFor(videoId, "chapter_bulk_create", user.id);
-      const insert: SqlStatement = {
-        sql: `
+      const queue = await queueFor(db, videoId, "chapter_bulk_create", user.id);
+      const values = sql.join(
+        pendingRows.map(
+          (row) =>
+            sql`(${row.id}, ${videoId}, ${activeX}, ${row.chapter_time}, ${row.chapter_label}, ${row.note}, ${row.visibility}, ${now}, ${now})`,
+        ),
+        sql`, `,
+      );
+      const insert = db.run(sql`
         INSERT INTO video_chapters (
           id, video_id, x_user_id, chapter_time, chapter_label, note,
           visibility, created_at, updated_at
-        ) VALUES ${pendingRows.map(() => `(${placeholders(9)})`).join(", ")}
-      `,
-        params: pendingRows.flatMap((row) => [
-          row.id, videoId, activeX, row.chapter_time, row.chapter_label,
-          row.note, row.visibility, now, now,
-        ]),
-      };
+        ) VALUES ${values}
+      `);
       await mutateWithAudit(db, {
-        mutationStatements: [insert, queue.statement],
-        expectedMutationChanges: [inserted, queue.expectedChanges],
+        mutationStatements: [insert, ...queue.statements],
+        expectedMutationChanges: [inserted, ...queue.expectedChanges],
         preloaded: auditPreloaded(c),
         audits: pendingRows.map((row) => ({
           table_name: "video_chapters" as const,

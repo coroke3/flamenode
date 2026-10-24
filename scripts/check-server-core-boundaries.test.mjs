@@ -27,6 +27,7 @@ const check = (rootDir) =>
       path.join(rootDir, "packages", "domain", "src"),
       path.join(rootDir, "packages", "db", "src"),
     ],
+    apiRouteDirs: [path.join(rootDir, "apps", "api", "src", "routes")],
   });
 
 describe("check-server-core-boundaries", () => {
@@ -106,6 +107,34 @@ describe("check-server-core-boundaries", () => {
       },
       (rootDir) => {
         assert.deepEqual(check(rootDir).errors, []);
+      },
+    );
+  });
+
+  it("T06 detects drizzle-orm and @flamenode/db imports in apps/api routes, allows server-core and the middleware", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ok.ts": `export const ok = 1;`,
+        "apps/api/src/routes/bad.ts": [
+          `import { sql } from "drizzle-orm";`,
+          `import { drizzle } from "drizzle-orm/d1";`,
+          `import { auditLogs } from "@flamenode/db/schema";`,
+          `import { dbOk } from "@flamenode/dbx";`,
+        ].join("\n"),
+        "apps/api/src/routes/ok.ts": `import { sql } from "@flamenode/server-core/sql";\nexport const ok = sql;`,
+        "apps/api/src/middleware/db.ts": `import { drizzle } from "drizzle-orm/d1";\nexport const ok = drizzle;`,
+      },
+      (rootDir) => {
+        const result = check(rootDir);
+        assert.equal(result.ok, false);
+        assert.deepEqual(
+          result.errors.map((error) => `${error.file}:${error.specifier}`),
+          [
+            "apps/api/src/routes/bad.ts:drizzle-orm",
+            "apps/api/src/routes/bad.ts:drizzle-orm/d1",
+            "apps/api/src/routes/bad.ts:@flamenode/db/schema",
+          ],
+        );
       },
     );
   });

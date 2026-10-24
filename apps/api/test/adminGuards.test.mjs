@@ -3,6 +3,8 @@
 // (requiredRole / activeX) mounted as writeGuardMiddleware({ requiredRole, activeX }).
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as schema from "@flamenode/db/schema";
+import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import {
   ApiEndpointSetActiveBodySchema,
@@ -367,7 +369,9 @@ test("default read guard: GET denied unless authenticated admin (CURRENT require
 // ---------------- preload vs self-read audit rows ----------------
 
 test("audit rows are identical whether settings/actor are preloaded by guards or self-read", async () => {
-  const { mutateWithAudit } = await import("../src/audit/mutateWithAudit.ts");
+  const { mutateWithAudit } = await import("@flamenode/server-core/audit/mutate");
+  const { actorSnapshotFromRow } = await import("@flamenode/server-core/audit/logger");
+  const { sql } = await import("@flamenode/server-core/sql");
   const originalNow = Date.now;
   const originalUuid = globalThis.crypto.randomUUID;
   const run = async (preloadedFrom) => {
@@ -379,17 +383,17 @@ test("audit rows are identical whether settings/actor are preloaded by guards or
     d1.sqlite.exec("UPDATE system_settings SET audit_normal_retention_days = 45, audit_max_payload_bytes = 90000");
     d1.sqlite.exec("INSERT INTO x_users (id, x_name, icon_url, approval_status) VALUES ('x1', 'XN', 'https://i/x.png', 'approved'); UPDATE \"user\" SET active_x_user_id = 'x1', image = 'https://i/u.png'");
     const audits = [{ table_name: "announcements", target_id: "a1", operation: "CREATE", before: null, after: { id: "a1", t: "日本語" }, actor_user_id: "admin-1", retention_class: "normal" }];
-    const statement = { sql: "INSERT INTO announcements (id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", params: ["a1", "t", "b", 1, 1] };
+    const db = drizzle(d1.db, { schema });
+    const statement = db.run(sql`INSERT INTO announcements (id, title, body, created_at, updated_at) VALUES (${"a1"}, ${"t"}, ${"b"}, ${1}, ${1})`);
     let preloaded;
     if (preloadedFrom === "guards") {
       const { evaluateCostGuardWithSettings } = await import("../src/middleware/costGuard.ts");
       const cost = await evaluateCostGuardWithSettings(d1.db, "admin_announcement_broadcast");
       const user = d1.sqlite.prepare("SELECT u.discord_id, u.name AS discord_name, u.active_x_user_id, u.image AS user_image, x.x_name, x.icon_url AS x_icon_url FROM \"user\" u LEFT JOIN x_users x ON x.id = u.active_x_user_id WHERE u.id = 'admin-1'").get();
-      const { actorSnapshotJsonFromRow } = await import("../src/audit/mutateWithAudit.ts");
-      preloaded = { settings: cost.auditSettings, actorSnapshotJsonById: { "admin-1": actorSnapshotJsonFromRow(user) } };
+      preloaded = { settings: cost.auditSettings, actorSnapshotJsonById: { "admin-1": JSON.stringify(actorSnapshotFromRow(user)) } };
     }
     const before = d1.stats.reads;
-    await mutateWithAudit(d1.db, { mutationStatements: [statement], expectedMutationChanges: [1], audits, preloaded });
+    await mutateWithAudit(db, { mutationStatements: [statement], expectedMutationChanges: [1], audits, preloaded });
     return { rows: d1.sqlite.prepare("SELECT * FROM audit_logs").all(), reads: d1.stats.reads - before };
   };
   try {

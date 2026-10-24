@@ -40,7 +40,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import("../../../packages/server-core/src/queues/wakeBudget.ts");
   const { parseChapterBulkCsv } = await import("../src/routes/videos/chapterCsv.ts");
   const { CHAPTER_COLUMNS } = await import("../src/routes/videos/chapters.ts");
-  const queueMine = await import("../src/audit/staticRebuildQueue.ts");
+  const coreEnqueue = await import("@flamenode/server-core/staticRebuild/enqueue");
 
   const NOW_MS = 1_800_000_000_000;
   function freeze() {
@@ -301,18 +301,21 @@ if (runUnderRootTsx(import.meta.url)) {
       restore();
     }
     const restoreMine = freeze();
+    const capturedMine = [];
+    const dbMine = { run: (query) => (capturedMine.push(dialect.sqlToQuery(query.getSQL ? query.getSQL() : query)), { kind: "run" }) };
     let actual;
     try {
-      actual = queueMine.buildStaticRebuildQueueStatement({
-        targetType: "video", targetId: "v_pub", reason: "chapter_update", requestedByUserId: "u_owner",
-      });
+      // the same call chapters.ts makes (queueFor)
+      actual = await coreEnqueue.buildStaticRebuildQueueBatch(dbMine, [
+        { targetType: "video", targetId: "v_pub", reason: "chapter_update", requestedByUserId: "u_owner" },
+      ]);
     } finally {
       restoreMine();
     }
     const norm = (s) => s.replace(/\s+/g, " ").trim();
-    assert.equal(norm(actual.statement.sql), norm(captured[0].sql));
-    assert.deepEqual([...actual.statement.params], captured[0].params);
-    assert.equal(actual.expectedChanges, 1);
+    assert.equal(norm(capturedMine[0].sql), norm(captured[0].sql));
+    assert.deepEqual(capturedMine[0].params, captured[0].params);
+    assert.deepEqual(actual.expectedChanges, [1]);
   });
 
   test("parseChapterBulkCsv equals the real parser on fixtures and 3000 random inputs", () => {

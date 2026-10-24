@@ -1,14 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "rewriteRelativeImportExtensions": true,
-    "types": ["@cloudflare/workers-types"],
-    "paths": {
-      "@flamenode/domain": ["../../packages/domain/dist/index.d.ts"],
-      "@flamenode/domain/*": ["../../packages/domain/dist/*"]
-    }
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["@cloudflare/workers-types"]
   },
   "include": ["src/**/*"]
 }

@@ -25,7 +25,10 @@ export const SCHEMA = `
   CREATE TABLE system_settings (id TEXT PRIMARY KEY, operation_mode TEXT, disabled_features_json TEXT,
     cost_guard_exception_until INTEGER, cost_guard_exception_features_json TEXT,
     audit_normal_retention_days INTEGER, audit_restorable_retention_days INTEGER,
-    audit_long_retention_days INTEGER, audit_max_payload_bytes INTEGER, audit_compact_after_days INTEGER);
+    audit_long_retention_days INTEGER, audit_max_payload_bytes INTEGER, audit_compact_after_days INTEGER,
+    default_editable_fields TEXT, upcoming_editable_fields TEXT, cost_guard_reason TEXT,
+    cost_guard_updated_by_user_id TEXT, cost_guard_updated_at INTEGER,
+    audit_updated_by_auth_user_id TEXT, audit_updated_at INTEGER);
   CREATE TABLE audit_logs (id TEXT PRIMARY KEY, table_name TEXT, target_id TEXT, operation TEXT,
     before_json TEXT, after_json TEXT, changed_keys_json TEXT, inverse_patch_json TEXT,
     actor_user_id TEXT, actor_x_user_id TEXT, actor_snapshot_json TEXT, reason TEXT, context TEXT,
@@ -61,6 +64,17 @@ export function createAdminD1({ onFirst } = {}) {
       return { results: sqlite.prepare(sql).all(...params) };
     },
     run: async () => ({ results: sqlite.prepare(sql).all(...params) }),
+    // drizzle-orm/d1 reads (select().get()) go through raw(): column-ordered arrays.
+    raw: async () => {
+      stats.reads += 1;
+      const prepared = sqlite.prepare(sql);
+      prepared.setReturnArrays(true);
+      try {
+        return prepared.all(...params).map((row) => [...row]);
+      } finally {
+        prepared.setReturnArrays(false);
+      }
+    },
   });
   const db = {
     prepare: (sql) => {

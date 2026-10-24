@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "node --test --experimental-strip-types \"test/**/*.test.mjs\""
   },
   "dependencies": {
     "@flamenode/contracts": "*",
+    "@flamenode/db": "*",
     "@flamenode/domain": "*",
+    "@flamenode/server-core": "*",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.6.0"
   },
   "devDependencies": {
