@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-19
+> Last updated: 2026-10-24
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -18,14 +18,14 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0407
-Current Owner: antigravity
+Current Task: MIG-0630
+Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0407
-Last Task PR: #328
-Merged READY: MIG-0501 (lead Work Order, NEEDS_REFINEMENT text allowed), MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
+Last Completed Task: MIG-0630
+Last Task PR: #385
+Merged READY: MIG-0501 (remainder), MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -44,6 +44,7 @@ Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
+  - 2026-10-24 以降の PR は squash merge（lead 決定）。それ以前に merge commit で入った PR の履歴は書き換えない
 - `READY → IN_PROGRESS → REVIEW → DONE` または `BLOCKED`
 - 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch `work-items/MIG-XXXX.md`にowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
 - claim時にtask固有`work-items/MIG-XXXX.md`へOwner/branch/PR/affected UX/FNと対象ファイル/consumerを記録する。実装途中にSTATUSを変更しない
@@ -109,8 +110,8 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | BLOCKED | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 DONE) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (MIG-0501 READY remainder after #340; MIG-0502 #355 / MIG-0503 #357 / MIG-0504 #352 / MIG-0505 #344 / MIG-0506 #350 / MIG-0507 #356 / MIG-0509 pre-work #354 merged partial and BLOCKED; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 / 0630 DONE) | CLOSED |
 | 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -291,6 +292,8 @@ Validation:
 | MIG-0509 | all public data generated at build time (D-09) | BLOCKED | MIG-0507 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0509, MIG-0621, MIG-0607 |
 
+Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。MIG-0501 は未着手の残り（browser 確認、gateway 404/503 + Retry-After、/maintenance の header / theme 差、about-stats producer の配線確認、/rules 同意 form は MIG-0605 後）を READY（無 owner）にし、MIG-0502 / 0503 / 0504 / 0505 は MIG-0501 DONE、MIG-0506 は MIG-0505 DONE、MIG-0507 は MIG-0502..0506 DONE と lead 決定、MIG-0509 は MIG-0507 DONE を再開条件とする BLOCKED。MIG-0507 の like / chapter / 一覧 Island は MIG-0603 / 0605 の API 待ち。Island ページの queue 再生成は `excluded`（user / event / video）。D-11 の状態と決定は OPEN_DECISIONS.md の D-11 を参照（`work-items/MIG-0411.md`）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
+
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
 ## Phase 6 — Hono API
@@ -327,10 +330,10 @@ Validation:
 | MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509 |
 | MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | BLOCKED | MIG-0405, MIG-0606 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | BLOCKED | MIG-0602 |
-| MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | IN_PROGRESS | MIG-0623 |
+| MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | DONE | MIG-0623 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
 
-MIG-0617 と MIG-0629 は依存が DONE でも、Work Order の未決の lead 決定が残るため BLOCKED。Next: waiting for lead decisions L1-L3 (MIG-0617) / M1-M3 (MIG-0629), see PHASE_6_SPEC.md の各 Work Order。MIG-0630 は IN_PROGRESS（U01/U02a/U03/U04 を #382 で merge、U02b が次の unit）。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
+MIG-0617 と MIG-0629 は依存が DONE でも、Work Order の未決の lead 決定が残るため BLOCKED。Next: waiting for lead decisions L1-L3 (MIG-0617) / M1-M3 (MIG-0629), see PHASE_6_SPEC.md の各 Work Order。MIG-0630 は DONE（U01/U02a/U03/U04 = #382、U02b = #385、Opus APPROVE on 0ee6f156、DONE checklist 3 項目とも充足）。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため、MIG-0603 / 0604 / 0702 が未完の間は BLOCKED のまま。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 

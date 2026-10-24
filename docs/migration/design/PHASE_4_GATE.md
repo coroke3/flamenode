@@ -79,8 +79,9 @@ Phase 4 Gate を承認・通過するために、以下の判断とマージが�
 
 - [x] Phase 4 の全実装タスク（MIG-0401〜0406, 0409〜0411）が `main` に merge 済みであること（MIG-0411 / PR #326 は 2026-10-23 に merge。本番 Queue・binding・workerd CPU は別項目として未了）
 - [ ] ユーザー判断事項（D1 取得方式、遅延定数、ISR 描画方式）が合意・反映されていること
+  - 注記（チェック状態は Gate 承認記録のまま変更しない）: D1 取得方式と遅延定数は 2026-10-18 に Yugo が決定済み（`work-items/MIG-0409.md` の owner decisions applied、`work-items/MIG-0411.md` の Yugo decisions 項目1）。ISR 描画方式（Island ページの queue 再生成）は D-11 で扱い、§5 の Accepted deferrals に載せる。Queue 作成・binding・Cron 割り当て（項目2〜3）は未了。
 - [x] Fail-closed 公開可視性が検証済みであること（非公開データ漏洩 0 件）
-- [x] Free Tier 予算制約（CPU < 10ms、Cron ≤ 5、Queue ≤ 10,000）が検証済みであること
+- [x] Free Tier 予算制約（CPU < 10ms、Cron ≤ 5、Queue ≤ 10,000）が検証済みであること（ローカル計測・設計上限の範囲。workerd / 本番 CPU と Queue メッセージ量 F-02 は未検証で、§5 の Accepted deferrals）
 - [x] `apps/site` から Next.js への依存漏洩が 0 件であること
 - [ ] 代表3画面の目視レビューが完了し、人間（Yugo）が外観を承認していること（owner の承認文言は Gate 全体への承認で、目視確認を個別に指すものではない。approved by owner without separate visual-check record）
 - [x] **人間の Phase Gate 承認**: Yugo が 2026-10-23T09:47:32Z に承認（§5）
@@ -93,7 +94,7 @@ Phase 4 Gate を承認・通過するために、以下の判断とマージが�
 - 承認時点の証跡: Phase 4 の全実装タスクが main に merge 済み（MIG-0411 は PR #326 `45edac4f`）、本番 D1 に migration 0066 を適用済み、PR #328 merge 済み（dbaec7dd）。
 - **Accepted deferrals at approval**（承認はこれらの解消を意味しない。各 work item で追跡する）:
   - Gateway / Queue の本番配線（Queue `flamenode-page-renders` の作成、bindings、Deploy Hook、secrets）は owner の手順待ち。
-  - MIG-0409 の U03 / U07 は owner 手順待ち。CPU 計測はローカルのみ（workerd / 本番 1102=0 は未確認）。
+  - MIG-0409: U07 は DONE（2026-10-23 の非本番 probe、ZERO_1102 §1）、U03（Workers Builds 5 回の再計測）は DEFERRED で追跡先は MIG-0509（`work-items/MIG-0409.md` の micro-unit 表）。MIG-0409 自体は BLOCKED のまま。CPU 計測はローカルと非本番 probe のみ（workerd の page render / 本番 1102=0 は未確認）。
   - Queue メッセージ量 F-02（最悪ケース約 35,000 msgs/day）は未決。
   - `_ops_assets` prefix の扱い（MIG-0620）は未決。
   - migration 0066 は 2026-10-23 に本番へ適用済み（Time Travel bookmark `000040fb-00000000-0000510d-0fe59f1506fe91415c0e0c0f10c1f92d`）。

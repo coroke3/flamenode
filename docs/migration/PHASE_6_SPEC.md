@@ -1349,7 +1349,7 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0630: Video edit 画面の読み取り API（/dashboard/edit/[id] + permissions）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 実装中。U01 / U02a / U03 / U04 は PR #382 でマージ済み、U02b（form-options: 受付イベント・質問・回答・候補）は本 task の追加 PR で実装済み（`work-items/MIG-0630.md`）。U05（STATUS 統合）が残るため MIG-0630 / MIG-0703 はまだ完了しない
+- **Readiness:** NEEDS_REFINEMENT — 完了（DONE）。U01 / U02a / U03 / U04 は PR #382、U02b（form-options）は PR #385 でマージ済み、U05 は STATUS 統合（`work-items/MIG-0630.md`）。MIG-0703 は他の依存（MIG-0603 / 0604 / 0702）が DONE になるまで BLOCKED
 - **Recipe:** R-API
 - **Runtime:** S2
 - **Depends on:** MIG-0601, MIG-0608, MIG-0623 / **Decisions:** D-05 DECIDED
