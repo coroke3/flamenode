@@ -220,10 +220,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0631 — public event list / release from build-time snapshot (RH-015, RH-012)
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0631 Work Order、`apps/site/scripts/readPublicData.ts`、`apps/api/src/routes/live/operationMode.ts`。
-- 変更: R2 の `events/index.json` / release を読む Hono route。D1 0 回。
-- 試験: `readPublicData.test.mjs` の fixture での parity、snapshot 欠損の 503、rate limit と cache header。
-- DONE: RH-015 / RH-012 が CURRENT と同じ応答。loader は移植しない。
+- 読む: `PHASE_6_SPEC.md` の MIG-0631 Work Order（lead 決定 L1〜L6。Q1 / Q2 は Fable が 2026-10-24 に決定、Q3 は Yugo の明示承認事項）、`app/api/events/route.ts`、`app/api/event-endpoints/[id]/release/route.ts`、`apps/api/src/routes/live/operationMode.ts`。
+- 変更: U01 `eventStatusCore` を domain へ、U02 純粋部品 8 file を server-core へ（bridge）、U03 RH-015（live mode は D1 1 文、static_only は R2 artifact、MIG-0617 の後）、U04 RH-012（D1 gate 1 文 + R2 release）。GET は D1 / Queue に書かない。
+- 試験: CURRENT の本物の handler との parity（差し替えは `server-only`・`@/lib/cloudflare`・`nextPorts`・`@opennextjs/cloudflare` だけ）、guard mode × artifact 欠損の 503 / 404、rate limit と ETag、viewer-overlay の header が一覧に掛からないこと。
+- DONE: T01〜T16 PASS、記録した差（miss で queue 行なし、stale なし）を残す。loader は移植しない。
 
 ### MIG-0632 — event export API (RH-013)
 

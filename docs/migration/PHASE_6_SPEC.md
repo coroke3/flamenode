@@ -252,7 +252,7 @@ Phase 6 共通契約のとおり。
 - 触らない: `src/lib/actions/**`, `app/api/events/**`, `app/api/live/**`
 #### Micro-units
 - U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604 のとおり。
-- U01 残り RH-015 と U03 RH-012 は MIG-0631（build 時 snapshot 読み）へ、RH-013 は MIG-0632 へ、U04 の非 admin 権限・owner 0 guard は MIG-0633（ownership core）の後に MIG-0604 で実装。B5 は MIG-0617 で解消（Option A に restore_strategy は足さない）。
+- U01 残り RH-015 と U03 RH-012 は MIG-0631（live mode は D1、static_only と release は R2 artifact。L1〜L6）へ、RH-013 は MIG-0632 へ、U04 の非 admin 権限・owner 0 guard は MIG-0633（ownership core）の後に MIG-0604 で実装。B5 は MIG-0617 で解消（Option A に restore_strategy は足さない）。
 #### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
 - live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2（LIMIT は名前付き定数 100 以下 / 応答 64KB 以下）を超える。CURRENT（`liveApi.ts`）が同じ 6000 件上限・`truncated` を持つため、挙動を保つ目的で変えない。6000 枠の実測応答は約 890 KiB（`public_name`、UUID 形式 id・表示名付き）/ 約 615 KiB（匿名）。5 秒 cache と 15 秒 isolate micro-cache は CURRENT と同じ。ページング化（応答契約の変更）は owner 判断として保留し、MIG-0604 では行わない。owner-delegate 決定（D-12、2026-10-24）: 例外として承認。MIG-0606 の 6000 枠入力で warm max を測り、7ms 以上のときだけ後続 unit で additive paging を足す。
 - RH-014（viewer overlay）は本人の枠を LIMIT 100 / JSON 64 KiB で打ち切り、超過時は CURRENT の `authUnavailable` 形（`loggedIn: true`）で fail-closed にする。CURRENT は無制限。本人の枠の読み取り失敗は CURRENT では 200 の `authUnavailable` 形だが、event 行と同じ statement で読むため 503 になる。どちらも S2（statement 3 つ以内）のための差で、`work-items/MIG-0604.md` の Known differences に記録した。`operatorOverrideAllowed` が常に false なのは CURRENT の挙動（event 行を `visibility_status` 無しで select）の再現で、修正は挙動変更として別に扱う。own-slots 100 / 64 KiB の fail-closed、503 への差、ORDER BY の明示、pending 100 件は D-12 で承認（ページング不要）。
@@ -1230,19 +1230,24 @@ PRをrevert。
 #### Source snapshot
 - G14 R2 artifact の producer（`workers/json-generator`）と consumer: RH-019 member-suggestions artifact、RH-026 `top` / `sections` / `stats.v1`、RH-028 event-base、`sitemapSources` の index、`ga-analytics` の `list/recent.json`、MIG-0611 の `rules/current.json`。
 - MIG-0907 T02 は「R2 artifact は書かれない」とするが、生き残る Hono / worker の読み手が何に置き換わるかを書く task が無い（GA4 だけは `PHASE_4_5_SPEC.md` の MIG-0509 が扱う）。
+- MIG-0631 の Hono 読み手 2 件（2026-10-24、MIG-0631 Q2 で Fable が決定）: RH-015 static_only の `events/index.json`、RH-012 の `events/<id>/release.v1.json`。両者とも GET は D1 / Queue / `public_build_state` に書かない（MIG-0631 L3）。MIG-0907 の後、欠けた artifact を作り直すのは build だけ（`apps/site/scripts/produceSnapshots.ts` が build ごとに全 public event の release と events index を D1 から作り直す）。
+- `visibility/blocked-entities.v1.json` は残す側（producer は server-core `visibility/eventTransition.ts` などの S3 経路で、json-generator ではない）。
 #### Owned paths
 - 新規: `+docs/migration/R2_ARTIFACT_CONSUMERS.md`
-- 変更: 読み手の file（棚卸しで確定。1 PR は1系統）
+- 変更: 読み手の file（棚卸しで確定。1 PR は1系統）。build の artifact publish と完全性検査の file（U04 / U05 で確定）
 #### Micro-units
 - **U01 inventory**: R2 の get key を `rg` で全件列挙し、producer、読み手、置き換え先（build 時 snapshot）を表にする。
 - **U02 replace**: 読み手を1系統ずつ build 時 snapshot へ。DTO は変えない。
 - **U03 gate**: MIG-0907 の U01 が参照できる状態（読み手0件）を確認。
+- **U04 API artifact publish**: API が読む artifact（MIG-0631 の 2 種）を build が同じ key / schema で R2 へ差分 PUT する（変わった object だけ）。PUT 件数を build log に出し、`BUILD_TIME_DATA.md` §6 に月間 Class A の見積りを書く（無料枠の 80% 以下）。build が R2 に書くのは runtime の書き込みではないので、`ZERO_1102.md` §4.7「request 時に書かない」とも MIG-0907 T02 とも矛盾しない。
+- **U05 build 内の完全性検査**: snapshot の public event id と R2 の release key を照合する。欠けは最大 3 回再試行し、残れば build を失敗にする。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | `rg` で R2 get key | producer 一覧に無い読み手が0件 |
 | T02 | 置き換え後の各読み手 | 置き換え前と同じ DTO |
 | T03 | snapshot 欠落 | CURRENT と同じ劣化 |
+| T04 | 非本番で release の artifact key を削除 → RH-012 → build publish → RH-012 | 削除後は 503、publish 後は 200。PUT 件数 = 欠けた数 |
 #### Commands
 ```bash
 npm run test:unit
@@ -1250,12 +1255,13 @@ npm run typecheck
 npm run check:project-docs
 ```
 #### Ledger updates
-`R2_ARTIFACT_CONSUMERS.md` を新規作成し、MIG-0907 から link。
+`R2_ARTIFACT_CONSUMERS.md` を新規作成し、MIG-0907 から link。回復規則を 1 行入れる:「欠けた artifact の再生成は次の build だけ。公開 GET は D1 / Queue / `public_build_state` に書かない」。
 #### DONE checklist
 - [ ] 全 artifact に置き換え先がある
 - [ ] MIG-0907 が依存として参照できる
 #### STOP
 - 本番 R2 の書き込みや削除が必要になったら止める（明示承認事項）。
+- build 用の R2 write credential が要ると分かったら止める（secret。Yugo の承認事項）。
 - artifact の DTO を変える必要が出たら止める。
 #### Rollback
 PRをrevert。
@@ -1397,50 +1403,99 @@ npm run test:unit
 #### Rollback
 PRをrevert。
 
-### MIG-0631: 公開 event 一覧・release を build 時 snapshot から返す Hono route（RH-015, RH-012）
+### MIG-0631: 公開 event 一覧・release の Hono route（RH-015, RH-012。live mode は D1、static_only と release は CURRENT の R2 artifact）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（実装は Sonnet 可、Work Order の精緻化と review は Opus。2026-10-24 に MIG-0604 U01 の残りから切り出し）
-- **Recipe:** R-API
-- **Runtime:** S1
-- **Depends on:** MIG-0602, MIG-0614 / **Decisions:** D-09 DECIDED, D-10 DECIDED, D-12 DECIDED
-- **Verified against:** `2b4504c2` (2026-10-24)
+- **Readiness:** NEEDS_REFINEMENT — READY（lead 決定 L1〜L6 は 2026-10-24 に実コードで決定。実装は Sonnet、review は Opus。U01 / U02 は今すぐ着手できる。U03 以降は MIG-0617 の merge（`apps/api` が `@flamenode/server-core` を import できる状態。MIG-0617 L1/L2）の後）
+- **Recipe:** R-DOMAIN（U01）, R-CORE（U02）, R-API（U03〜U05）
+- **Runtime:** S2
+- **Depends on:** MIG-0602, MIG-0614 / **Decisions:** D-09 DECIDED, D-10 DECIDED, D-12 DECIDED（MIG-0631 の行は 2026-10-24 に L4 で訂正）
+- **Verified against:** `5d4e9800` (2026-10-24)
 #### Source snapshot
-- CURRENT の RH-015（公開 event 一覧）と RH-012（release）は約 2000 行の loader を持つ。D-10 は loader を server-core の対象外とし、`ZERO_1102.md` §4.7 は cache miss で重い処理へ fallback することを禁じる。よって loader は移植せず、build 時 snapshot（R2 の `events/index.json` / release）を読む薄い route にする（2026-10-24 の決定）。
-- `apps/site/scripts/readPublicData.ts`（MIG-0409 U01）が同 schema を build 時に作る。producer の切替（MIG-0509 / MIG-0627）は key と schema を変えないので、reader は独立に先行できる。
+- RH-015 `app/api/events/route.ts`: rate limit（`checkPublicApiRateLimit(req, "/api/events")`）→ `page`（既定 1、上限なし）/ `limit`（既定 60、上限 `MAX_PUBLIC_EVENT_LIMIT` = 60）→ `loadStaticEventsIndex()`（throw なら 503 `database_unavailable`）→ **`strategy === "static_json_only"` で index があるときだけ** R2 artifact を slice して `pickKeys(PUBLIC_EVENT_KEYS)` → static_only / maintenance で index が無ければ 503 `public_data_unavailable` → **それ以外（normal / economy / read_only = `static_json_with_live_overlay`）は毎回 D1** を読む（`WHERE visibility_status = 'public' ORDER BY start_time DESC, created_at DESC LIMIT ? OFFSET ?`。失敗は 503 `database_unavailable`）。normal では loader の結果は捨てられ、応答は D1 から作られる（「D1 fallback」ではなく主経路）。Cache-Control は両経路とも `public, max-age=60, s-maxage=120, stale-while-revalidate=300`、ETag / 304 あり（`publicJsonResponse`）。
+- RH-012 `app/api/event-endpoints/[id]/release/route.ts`: rate limit（`"/api/event-endpoints/:id/release"`）→ id を `decodeURIComponent` + trim し、1〜128 文字以外は 404 → **D1 1 文**（`id = ? AND visibility_status = 'public' AND public_api_enabled = 1 LIMIT 1`。binding 例外は 503 `runtime_bindings_unavailable`、null は `db_unavailable`、query 失敗は `database_unavailable`、行なしは 404）→ 全 mode で `loadStaticEventRelease(id)`（R2 `events/<id>/release.v1.json`）→ data なしは state により 404 / 503 `public_data_reflecting` / 503 `public_data_unavailable` → `event.id` 不一致は 503 `public_data_unavailable` → 200（`public, max-age=30, s-maxage=60, stale-while-revalidate=120`）。404 は `public, max-age=60`。
+- loader（`src/lib/publicData/loader.ts`）のうち両 route が実際に通る部分: `loadPublicJson`（L758）の maintenance 判定（`resolvePublicOperationMode({ allowD1: true })` だが db を渡さないので D1 は読まない）→ `resolvePublicVisibilityGuard`（L309。`PUBLIC_VISIBILITY_GUARD_MODE` が enforce のときだけ manifest を読み、読めない / ETag が無いと unavailable。`events_index` は fence entity なし、`event_release` は event として blocked 判定。observe は blocked をログに出すだけ）→ isolate micro-cache と Cache API（fresh は events index 180s / release 120s、stale はその 2 倍まで。events index の stale は enforce で manifest があるときだけ）→ R2 の bounded read（`PUBLIC_STATIC_JSON_MAX_OBJECT_BYTES` = 16 MiB。壊れた / 大きすぎる / 例外は miss）→ `filterPublicArtifactPayload` → events index は `items` が空なら miss → miss は `resolvePublicJsonMiss`（L486）で、D1 の operation mode、`probePublicStaticTarget`（events_index / event_release は D1 を読まず public）、`directEnqueueStaticRebuild`（server-core。active 行 SELECT + cooldown SELECT + INSERT の 3 文、競合時は最大 9 文。`public_miss` cooldown 300s、priority は static_only か event_release なら high）と Queue wake。`normalizeStaticEventsIndex` は point event を除き、`shouldUseStaticCollection` は static_only では空でも採用する。
+- CURRENT の R2 artifact は `workers/json-generator/rebuild.ts` が書く（`rebuildEventsIndex` L1167: `visibility_status = 'public'` かつ非 point、`ORDER BY start_time DESC LIMIT EVENTS_INDEX_MAX_ROWS`（200）、group sections 付き）。`apps/site/scripts/produceSnapshots.ts` も同じ `rebuildTarget` を in-memory bucket に対して実行して build 時 snapshot を作る（R2 へは上げない）。MIG-0509 / MIG-0627 で producer が替わっても key と schema は変えない前提（MIG-0627 STOP「DTO を変える必要が出たら止める」）。
+- 本番の guard mode は `observe`（`wrangler.toml` L51）。manifest は `visibility/blocked-entities.v1.json`（≤ 1 MiB。server-core `visibility/manifestR2.ts#readVisibilityManifestObject`）。event の非公開化は D1 更新の前に manifest へ block を書き（server-core `visibility/eventTransition.ts`）、再公開後の artifact 生成が終わるまで block を外さない。
+- `apps/api` の既存部品: `routes/live/operationMode.ts#resolvePublicOperationMode(env, { allowD1 })`（CURRENT と同じ優先順位）、`routes/publicAboutStats.ts`（R2 1 回の前例）、`routes/videos/detail.ts`（rate limit / ETag の写し。本 task では触らない）。`apps/api` は `@flamenode/server-core` にまだ依存していない（MIG-0617 L1/L2 で追加）。
+- `slotViewerOverlayRoutes`（MIG-0604 U01）は `/api/events` に mount され、`use("*")` で private header と session lookup を `/api/events/*` 全体に掛ける（`apps/api/src/routes/events/viewerOverlay.ts` L170 / L176、MIG-0604 work item の Notes）。
+#### lead 決定（2026-10-24、Opus lead。各決定に「採らない案」を併記）
+- **L1 置き場所**: 純粋な部品だけを共有 package へ移し、request の組み立ては `apps/api` に置く。U01 で `src/lib/utils/eventStatusCore.ts`（`isPointEvent` を含む。import なし）を `packages/domain/src/event/status.ts` へ（R-DOMAIN）。U02 で `src/lib/publicData/{normalize,visibility,staticEventsIndexCore,staticEventReleaseCore,publicArtifactVisibility}.ts`、`src/lib/utils/publicXUser.ts`、`src/lib/api/{publicDto,publicApi}.ts` を `packages/server-core/src/publicData/` へ（R-CORE。元の場所は re-export の bridge）。`staticEventDetailCore.ts` からは `EVENT_RELEASE_SCHEMA_VERSION` と `eventReleaseObjectKey` だけを core へ移し、detail core は core から import する。R2 read + guard + filter + normalize の組み立て（`publicSnapshot.ts`）は、呼び出し元が `apps/api` の 2 route だけなので `apps/api/src/routes/events/` に置く。根拠: D-10「境界のある純粋な `*Core.ts` だけを、各 API の task で必要になった時に抜き出す」。loader は D-10 で移さない。採らない案: (i) normalizer の写しを `apps/api` に置く（約 1,000 行の二重化。`publicAboutStats.ts` の写しは 1 関数だけ）、(ii) `apps/api` から root の `src/lib/**` を相対 import する（`apps/api` に前例が無く、`server-only` を含む木への依存方向を作る）、(iii) loader の port（D-10・`ZERO_1102.md` §4.7 に反する）、(iv) guard を server-core の新関数にする（Next は loader を使い続けるので呼び出し元が 1 つ）。
+- **L2 可視性 guard（privacy）**: CURRENT と同じ規則にする。`c.env.PUBLIC_VISIBILITY_GUARD_MODE` を server-core の `resolvePublicVisibilityGuardMode` で解決する。enforce は manifest を読み、読めない・ETag が無い・壊れている・大きすぎるときは 503 `public_data_unavailable`（fail-closed）。`event_release` の event が blocked なら 404。artifact は `filterPublicArtifactPayload(targetType, payload, enforce のときだけ context)` で行を落とす。observe は manifest を読んで blocked をログに出すだけ（CURRENT と同じ JSON 形）、off は読まない。ただし `events_index` は fence entity が無いので、observe では manifest を読まない（`loader.ts` L278-L279。release と挙動が違う）。RH-015 の live mode は D1 が正本なので guard を通さない（CURRENT も normal では loader の結果を捨てる）。非公開・未公開の event が出ない保証は CURRENT と同じ: live mode は D1 の `visibility_status = 'public'`、release は D1 の gate、static_only は artifact 生成時の public 条件 + 行の marker + enforce の manifest。採らない案: (i) Hono だけ常に enforce（本番の observe と挙動が分かれ、manifest の有無で一覧全体が 503 になり得る。強化はブラッシュアップ提案）、(ii) entity ごとの KV `deny:` 参照（一覧は最大 60 件で S1 の KV 1 回を超え、writer も未実装。D-11 のリスク）。
+- **L3 miss 時の再生成依頼**: Hono の GET は書かない（D1 write 0、Queue 0、`waitUntil` 0）。miss は CURRENT と同じ status で返す。code は RH-015 が CURRENT と同じ `public_data_unavailable`、RH-012 は enqueue しないので `public_data_reflecting` を返さず常に `public_data_unavailable`（記録した差）。根拠: CURRENT の miss 経路は `directEnqueueStaticRebuild` だけで 3 文（最大 9 文）+ operation mode の D1 1 文で、RH-012 の gate 1 文と合わせると S2 の 3 文を超える。匿名の公開 GET が D1 に書く経路を Hono に増やさない。`apps/api` に Queue binding を置かない D-0603-1 と同じ方針。対象の `static_rebuild_queue` / json-generator は MIG-0907 で消える。Hono route は MIG-0509 の producer 配線まで本番 Route に繋がないので、共存中の自己修復は CURRENT（Next）側の miss が続ける。採らない案: (i) server-core `directEnqueueStaticRebuild` を wake 0 で呼ぶ（S2 超過。MIG-0907 で無効になる行）、(ii) `public_build_state.requested_at` の条件付き UPDATE（1 文だが、匿名 traffic が Workers Builds の日次上限まで build を起こせる。Q2 で不採用）。
+- **L4 RH-015 の live mode（DECIDED、Fable（owner-delegate）2026-10-24。D-12 を訂正）**: normal / economy / read_only は CURRENT と同じ D1 の 1 文（`LIMIT` は `MAX_PUBLIC_EVENT_LIMIT` = 60）で返し、static_only だけ R2 artifact を読む。Hono は live mode で R2 を読まない（CURRENT が読んで捨てる R2 read と miss enqueue は応答に影響しない）。根拠: CURRENT の normal は「D1 fallback」ではなく毎回 D1 が主経路で、artifact に置き換えると point event が消える、200 件で打ち切られる、同じ `start_time` の並びが変わる（`created_at DESC` が無い）、反映が artifact の再生成待ちになる、空 index で 503 になる、という D-12 に書かれていない利用者から見える差が出る。D1 1 文・`LIMIT` 60 は S2（3 文、`LIMIT` ≤ 100）に収まり、`ZERO_1102.md` §4.7 の「miss で重い処理へ fallback」にも当たらない（miss ではなく主経路）。D-09「反映の速さの方針」の 1（Island が S2 で即時に読む）とも合う。`page` は CURRENT と同じく上限を付けない（大きい `OFFSET` の D1 走査は記録した既知のリスク。T17 で `rows_read` を記録）。`OPEN_DECISIONS.md` D-12 に DECIDED として記録済み。U03 は static_only / maintenance / live mode の 3 分岐を 1 unit で実装する。採らない案: D-12 原文どおり全 mode で artifact（上の差がすべて出る）。
+- **L5 Cache 層**: Hono は isolate micro-cache・Cache API・stale fallback を持たず、request ごとに R2 を読む。CURRENT の cache は fresh の間は同じ object を返すので応答の内容は変わらない。差は「R2 障害時に CURRENT は TTL の 2 倍までの stale を返せる（events index は enforce で manifest があるときだけ）が、Hono は 503」だけ（記録した差）。R2 Class B の無料枠は 10M/月で、R2 を読むのは static_only と release だけ。edge cache（`publicAboutStats.ts` の形）はブラッシュアップ提案。
+- **L6 parity harness の境界**: CURRENT の本物の route handler 2 つを root の tsx（`apps/api/test/support/personalHarness.mjs#runUnderRootTsx`）で動かす。`registerHooks` で差し替えるのは次の 4 つだけ: `server-only`（空）、`@/lib/cloudflare`（`getDatabase` は node:sqlite の drizzle `sqlite-proxy`、`getEnv` は `{ BUCKET, KV, ... }` の fake、`withDatabase*`、`CloudflareBindingsUnavailableError`）、`@/lib/serverCore/nextPorts`（`nextQueueWakeHost` は Queue 送信を数えるだけ、`nextRethrowFrameworkControl` は no-op。これで `next/navigation` を読ませない）、`@opennextjs/cloudflare`（`getCloudflareContext()` は同じ fake env と `waitUntil` の収集。`publicCache.ts` と `degradedCircuitBreaker.ts` が直接 import する）。loader、manifest guard、`publicArtifactVisibility`、normalizer、operation mode、`publicApi` / `publicDto`、server-core の `directEnqueueStaticRebuild`、drizzle は本物を使う（CURRENT の queue 行が sqlite に書かれるので、Hono の 0 行と比べられる）。R2 artifact は `workers/json-generator/rebuild.ts#rebuildTarget`（`events_index` / `event_release`）を同じ sqlite と in-memory bucket に対して実行して作る（`produceSnapshots.ts` と同じ使い方）。両者は同じ fake bucket（`get` が `size` / `etag` / `json()` / `text()` / `body.cancel` を持つ。既存の `fakeBucket` には `text()` と `etag` が無いので harness で足す）と同じ fake KV を読む。mode は CURRENT が `process.env.FORCE_STATIC_ONLY` / `process.env.PUBLIC_VISIBILITY_GUARD_MODE`、Hono が `c.env` の同名値。maintenance は両者とも KV key `operation_mode:mirror`。case ごとに `resetPublicJsonIsolateCacheForTests`、`resetPublicOperationModeCacheForTests`、`resetDegradedCircuitBookkeepingForTests`、`clearPublicApiRateLimitForTests` と Hono 側の reset を呼ぶ。`react` の `cache` は tsx 下で関数として読めることを 2026-10-24 に確認した（memo するかどうかは結果に影響しない）。
 #### Owned paths
-- 新規: `+apps/api/src/routes/events/publicList.ts`, `+apps/api/test/eventsPublicList.parity.test.mjs`
-- 変更: `apps/api/src/app.ts`（mount 1 行）
-- 触らない: `app/**`, `src/lib/**`
+- U01: `+packages/domain/src/event/status.ts`, `+packages/domain/test/eventStatus.test.mjs`、`packages/domain/package.json`（exports 1 行）、`src/lib/utils/eventStatusCore.ts`（bridge）
+- U02: `+packages/server-core/src/publicData/{normalize,visibility,eventsIndexCore,eventReleaseCore,artifactVisibility,publicXUser,publicDto,publicApi}.ts`, `+packages/server-core/test/publicData*.test.mjs`、`packages/server-core/package.json`（exports）。bridge: `src/lib/publicData/{normalize,visibility,staticEventsIndexCore,staticEventReleaseCore,publicArtifactVisibility}.ts`、`src/lib/utils/publicXUser.ts`、`src/lib/api/{publicDto,publicApi}.ts`。`src/lib/publicData/staticEventDetailCore.ts`（release の 2 定数を core から import）。source を text で読む test は読み先だけを変える。
+- U03〜U04: `+apps/api/src/routes/events/{publicList,publicRelease,publicSnapshot}.ts`, `+apps/api/test/eventsPublic.parity.test.mjs`, `+apps/api/test/support/publicEventsHarness.mjs`。変更: `apps/api/src/app.ts`（mount 2 行）、`apps/api/src/env.ts`（`FORCE_STATIC_ONLY?: string` の型 1 行）、`apps/api/src/routes/events/viewerOverlay.ts`（`use("*")` の 2 つを `use("/:id/slots/viewer-overlay", …)` に狭める。MIG-0604 work item の Notes のとおり。それ以外は触らない）
+- U05: `docs/migration/{API_MATRIX,FILE_MIGRATION_MATRIX}.md`、本節の「記録した差」
+- 触らない: `app/**`、`src/lib/publicData/loader.ts`、`workers/**`、`apps/api/src/routes/videos/**`、`STATUS.md`（merge 直前の統合だけ）
 #### Micro-units
-- **U01 inventory**: RH-015 / RH-012 の応答 field、`page` / `limit` の slice、`pickKeys(PUBLIC_EVENT_KEYS)`、rate limit、cache header を表にする。
-- **U02 route**: R2 1 read + manifest、D1 0 回。operation mode は `apps/api/src/routes/live/operationMode.ts` を再利用する。
-- **U03 parity**: `readPublicData.test.mjs` の fixture を流用して CURRENT の応答と比べる。
+- **U01 eventStatusCore → domain**（R-DOMAIN。Sonnet。機械的）: `node scripts/find-unused-exports.mjs src/lib/utils/eventStatusCore.ts` は 2026-10-24 に `UNUSED` / `TEST_ONLY` 0 件、`LOCAL_ONLY` 2 件（`getEffectiveEventEnd` / `getEffectiveEventStart`。同じ file の関数が使うので file ごと移す）。`apps/site` の相対 import は bridge で動くので変えない。
+- **U02 純粋部品 → server-core**（R-CORE。Sonnet。機械的）: L1 の 8 file を移し、元の場所を `export * from "@flamenode/server-core/publicData/<name>"` だけにする。`find-unused-exports` は 2026-10-24 に `normalize` / `visibility` / `staticEventsIndexCore` / `staticEventReleaseCore` / `publicArtifactVisibility` / `publicXUser` の全 export が `used`。`publicDto` / `publicApi` も移す前に実行し、`UNUSED` / `TEST_ONLY` は移さない。`publicArtifactVisibility` の `../staticRebuild/types` と manifest の型は core 内の相対 import にする。`eventsIndexCore` は `@flamenode/domain/event/status` から `isPointEvent` を読む。移動前後で `npm run test:unit` の件数と PASS が同じ。`node scripts/check-server-core-boundaries.mjs` が PASS。`publicApi` の module scope の rate limit Map は移動後も 1 つ（Next と Hono は別 Worker なので共有しない）。
+- **U03 RH-015 + harness**（R-API。Sonnet 実装、Opus review。MIG-0617 merge 後）: L6 の harness。`publicSnapshot.ts`（L2 の guard、`readBoundedR2Json(bucket, key, MAX_PUBLIC_SNAPSHOT_OBJECT_BYTES)`（= 16 MiB。CURRENT と同じ閾値）、filter、normalize、空の `items` は miss）。`publicList.ts` の順番: rate limit → `page` / `limit` → `resolvePublicOperationMode(c.env, { allowD1: false })` → maintenance は 503 `public_data_unavailable` → static_only は artifact → live mode は D1 1 文（L4）。viewerOverlay の path を狭める。
+- **U04 RH-012**（R-API。Sonnet 実装、Opus review）: `publicRelease.ts`（id の検証 → D1 gate 1 文 → maintenance → guard → R2 `eventReleaseObjectKey(id)` → filter → normalize → `event.id` の照合）。
+- **U05 台帳**: `API_MATRIX.md` の RH-012 / RH-015 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` の route 2 行の target を実 file に、U01 / U02 で移した file の target を bridge と core に。CPU は「未計測」（MIG-0606）。
+- 小型モデル: U01 / U02 は機械的だが、Work Order は task ごとに `Model` を 1 つしか持てず、U03 / U04 は privacy と parity の判断を含むので、本 Work Order は `Model: lead` のままにする。U01 / U02 を Haiku に渡すなら、別の MIG id の small Work Order として STATUS に登録する（lead の docs PR。未実施）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | snapshot あり、`page` / `limit` 指定 | CURRENT と同じ slice と field |
-| T02 | snapshot 欠損 | 503 `public_data_unavailable`（CURRENT の normal 時 D1 fallback の置換。記録した差。出典: ZERO_1102 §4.7、OPEN_DECISIONS D-12 の追加差分） |
-| T03 | 連続 request | rate limit と cache header が CURRENT と同じ |
-| T04 | D1 statement 数 | 0 |
+| T01 | RH-015 normal、`page` / `limit` の組（既定、`limit=61`→60、`limit=0`→60、`page=-1`→1、範囲外の page） | status・body の byte・Cache-Control・ETag が CURRENT と一致。Hono の D1 は 1 文、R2 は 0 回 |
+| T02 | 同じ request に `If-None-Match` | 304 と header が一致 |
+| T03 | 同じ IP から 61 回 | 61 回目が 429。`Retry-After` と `Cache-Control: no-store` が一致。endpoint ごとに別の key |
+| T04 | static_only、`rebuildTarget` で作った artifact | CURRENT と一致（point event なし）。Hono の D1 は 0 文 |
+| T05 | static_only、artifact なし / 壊れた JSON / 16 MiB 超 | 両者 503 `public_data_unavailable`。CURRENT は `static_rebuild_queue` に high の行 1 つ + wake 1、Hono は行 0・wake 0（`DOCUMENTED DIFFERENCE L3`） |
+| T06 | static_only、`items: []` | 両者 503 `public_data_unavailable` |
+| T07 | static_only × guard mode（enforce: manifest なし / ETag なし / event を block / group を block。observe: block あり。off） | 各組で CURRENT と一致（enforce は fail-closed で 503 か行を落とす。observe と off は落とさない。`events_index` は fence entity が無いので observe では manifest を読まない） |
+| T08 | KV `operation_mode:mirror` が maintenance | 両 route とも 503 `public_data_unavailable` |
+| T09 | normal で D1 が失敗 / `DB` なし | 503 `database_unavailable`（CURRENT と一致） |
+| T10 | RH-012 public + `public_api_enabled = 1` + artifact | 200。body の byte・Cache-Control・ETag が一致。Hono の D1 は 1 文 |
+| T11 | RH-012 private / `public_api_enabled = 0` / 存在しない id / 129 文字 / 不正な `%` | 404 `public, max-age=60` が一致 |
+| T12 | RH-012 artifact なし | CURRENT は 503 `public_data_reflecting`（行 1 + wake 1）、Hono は 503 `public_data_unavailable`（行 0・wake 0）。`DOCUMENTED DIFFERENCE L3` |
+| T13 | RH-012 artifact の `event.id` が別 | 両者 503 `public_data_unavailable` |
+| T14 | RH-012 × guard mode（enforce で event が block = 再公開中の fence / manifest なし、observe で block、off） | enforce は 404 / 503 で一致、observe と off は 200 で一致（release は event の fence があるので observe でも manifest を読んでログに出す。T07 の `events_index` と違う） |
+| T15 | RH-012 artifact に `visibility_status: "private"` の動画行 | 両者その行を落とし、`total` を合わせる |
+| T16 | `GET /api/events` の header と session | private header なし、session lookup 0 回。`events.viewerOverlay.parity.test.mjs` は変更前と同じ件数 PASS |
+| T17 | 上限ちょうどの入力（RH-015: 60 件 × 長い `explanation`、artifact 200 件 + group、1 MiB 近い manifest。RH-012: 500 動画 × 100 member） | 応答 byte と D1 文数を記録。64KB 超は D-12 の「記録した例外」。CPU は「未計測」（MIG-0606 で判定）。RH-015 live mode の大きい `page`（`OFFSET` が全 public event 数に近い）では D1 の `rows_read` も記録する |
 #### Commands
 ```bash
+# U01 / U02
+npm run test --workspace=@flamenode/domain
+npm run test --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run typecheck && npm run test:unit
+# U03 / U04
 npm run build --workspace=@flamenode/api
-node --test apps/api/test/eventsPublicList.parity.test.mjs
-npm run typecheck
-npm run test:unit
+node --test apps/api/test/eventsPublic.parity.test.mjs
+node --test apps/api/test/events.viewerOverlay.parity.test.mjs
+npm run typecheck && npm run test:unit && npm run check:project-docs
 ```
 #### Ledger updates
-`API_MATRIX.md` の RH-015 / RH-012 に Hono エンドポイント。
+`API_MATRIX.md` の RH-015 / RH-012 に Hono endpoint と「記録した差」への参照。`FILE_MIGRATION_MATRIX.md` は U05。STATUS は merge 直前の統合でだけ更新する。
+#### 記録した差（CURRENT との差。test 名に `DOCUMENTED DIFFERENCE` を付ける）
+- L3: miss で `static_rebuild_queue` の行と Queue wake を作らない。RH-012 は `public_data_reflecting` を返さない。
+- L5: R2 障害時に stale cache を返さず 503 にする。
+- RH-012: Hono には `DB` binding の例外が無いので `runtime_bindings_unavailable` は出ない（binding なしは `db_unavailable`）。
 #### DONE checklist
-- [ ] RH-015 / RH-012 が snapshot から CURRENT と同じ応答を返す
-- [ ] D1 を読まない
-- [ ] R2 欠損時の 503 を「記録した差」として PHASE_6_SPEC に残した
+- [ ] T01〜T16 が PASS
+- [ ] Hono の GET が D1 / Queue に書かない（T05 / T12）
+- [ ] U01 / U02 の移動で `test:unit` の件数と PASS が同じ、呼び出し側の diff が 0
+- [ ] T17 の応答 byte と D1 文数を記録し、CPU は「未計測」と書いた
 - [ ] 本番 Route を変更していない（MIG-0509 の producer 配線が DONE になるまで Worker Route に接続しない）
 #### STOP
-- loader の移植や `*Core.ts` の抜き出しが必要になったら止める。
-- 本番 Worker・Route・secret・Remote D1 の操作は明示承認が出るまで止める。
+- loader の移植、`apps/api` から `src/lib/**` の import、L1 にない file の移動が必要になったら止める。
+- GET で D1 / Queue / `waitUntil` に書く必要が出たら止める（L3、Q2）。
+- harness に L6 の 4 つ以外の差し替えが要る（例: `next/*` を読む module が chain に入る）と分かったら止める。
+- U02 で bridge だけでは済まず呼び出し側の変更が要る、または `UNUSED` / `TEST_ONLY` の export が出たら止める（移さない）。
+- MIG-0606 の上限入力で warm max が 7ms 以上なら止める（D-12。応答の additive paging か build 時の分割を lead が決める）。
+- 本番の R2（manifest の存在確認を含む）・Worker・Route・secret・Remote D1 の操作は、明示承認が出るまで止める。
+#### OPEN（Fable / Yugo）
+- **Q1（DECIDED 2026-10-24、Fable）**: L4 を採る。D-12 を訂正済み。
+- **Q2（DECIDED 2026-10-24、Fable）**: GET は書かない（L3 のまま）。MIG-0907 の後、欠けた artifact を作り直すのは build だけ。`produceSnapshots.ts` が build ごとに全 public event の release と events index を D1 から作り直すので、MIG-0627 で (a) API が読む artifact を同じ key / schema で R2 へ差分 PUT する系統、(b) build 内の完全性検査（snapshot の public event id と R2 の release key を照合し、欠けは最大 3 回再試行、残れば build を失敗にする）、(c) `R2_ARTIFACT_CONSUMERS.md` の回復規則、を足す。GET の miss での `public_build_state` UPDATE は採らない（匿名 traffic が Workers Builds の日次上限まで build を起こせる）。
+- **Q3（OPEN。Yugo の明示承認事項（remote R2 read）のまま。本番 Route の接続前）**: 本番 R2 の `visibility/blocked-entities.v1.json` の存在・ETag・size の確認（remote R2 の読み取りは明示承認事項）。observe のままなら L2 で 503 にはならないが、enforce へ切り替える前に要る。
 #### Rollback
-PRをrevert（Hono route を足すだけで、本番 Route・D1・secret の変更は無い）。
+PRをrevert（U01 / U02 は bridge なので revert で戻る。U03〜U05 は Hono route を足すだけで、本番 Route・D1・secret の変更は無い）。
 
 ### MIG-0632: event export API（RH-013）の Hono 化
 - **Model:** lead
