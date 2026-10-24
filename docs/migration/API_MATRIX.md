@@ -99,6 +99,19 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 
 SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
 
+### Hono endpoints (MIG-0603 U02b, PR #393)
+
+New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, TOS, CostGuard `chapter_comment`, approved active X) = CURRENT `writeGuard({ requireApprovedActiveXId: true, feature: "chapter_comment" })`. Every response is `Cache-Control: private, no-store`; body cap 64KB (413). Audit + video `static_rebuild_queue` row are one D1 batch (`mutateWithAudit`, `preloaded: auditPreloaded(c)`). Permission: own chapter, or `video.chapter_admin` in admin/event mode (bulk always). Source: `apps/api/src/routes/videos/chapters.ts` (+ `chapterAccess.ts`, `chapterCsv.ts`), body/result DTO `packages/contracts/src/videoChapter.ts`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Queue reason |
+| --- | --- | --- | --- | --- |
+| SA-012 | `POST /api/videos/:videoId/chapters` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_create` |
+| SA-013 | `PUT /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 400 / 403 / 404 / 413 / 500 | `chapter_update` |
+| SA-014 | `DELETE /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 403 / 404 / 500 | `chapter_delete` |
+| SA-015 | `POST /api/videos/:videoId/chapters/bulk` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_bulk_create` |
+
+Known difference (OPEN, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API has no Queue binding yet, so the durable queue row is written but no wake is sent.
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
