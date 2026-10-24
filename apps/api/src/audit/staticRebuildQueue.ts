@@ -1,5 +1,5 @@
 /**
- * MIG-0602 U02: static_rebuild_queue write for the top_announcements target.
+ * MIG-0602 U02 / MIG-0603 U02b: static_rebuild_queue write (one JSON1 UPSERT) for the top_announcements and video targets.
  * Mirrors CURRENT src/lib/staticRebuild/enqueue.ts buildStaticRebuildQueueBatch
  * (one JSON1 chunk, active-row UPSERT) as called by
  * buildAnnouncementChangeQueueBatch (priority "normal"). The row is written in
@@ -12,16 +12,34 @@ export function buildAnnouncementChangeQueueStatement(opts: {
   reason: string;
   requestedByUserId?: string;
 }): { statement: SqlStatement; expectedChanges: 1 } {
+  // CURRENT buildAnnouncementChangeQueueBatch drops requestedByUserId (null).
+  return buildStaticRebuildQueueStatement({
+    targetType: "top_announcements",
+    targetId: "global",
+    reason: opts.reason,
+    requestedByUserId: null,
+  });
+}
+
+/**
+ * MIG-0603: one target, priority "normal" (CURRENT default), same single JSON1
+ * UPSERT statement (3 binds) as buildStaticRebuildQueueBatch for one item.
+ */
+export function buildStaticRebuildQueueStatement(item: {
+  targetType: string;
+  targetId: string;
+  reason: string;
+  requestedByUserId: string | null;
+}): { statement: SqlStatement; expectedChanges: 1 } {
   const now = Math.floor(Date.now() / 1000);
   const payload = JSON.stringify([
     {
       id: generateId("srb"),
-      target_type: "top_announcements",
-      target_id: "global",
-      reason: opts.reason,
+      target_type: item.targetType,
+      target_id: item.targetId,
+      reason: item.reason,
       priority: "normal",
-      // CURRENT buildAnnouncementChangeQueueBatch drops requestedByUserId (null).
-      requested_by_user_id: null,
+      requested_by_user_id: item.requestedByUserId,
     },
   ]);
   return {
