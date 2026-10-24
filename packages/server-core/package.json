@@ -8,6 +8,7 @@
     "./ports": "./src/ports.ts",
     "./db": "./src/db.ts",
     "./id": "./src/id.ts",
+    "./sql": "./src/sql.ts",
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./audit/adapters": "./src/audit/adapters.ts",

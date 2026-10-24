@@ -8,6 +8,7 @@ import { wakeStaticRebuildQueueAfterCommit } from "../queues/wakeStaticRebuildQu
 import type { WriteAuditLogInput } from "./types.ts";
 import {
   prepareAuditLogEntries,
+  type PreloadedAuditContext,
   type PreparedAuditLogEntry,
 } from "./logger.ts";
 import {
@@ -70,6 +71,8 @@ export type AtomicAuditMutationInput = {
   callerQueryCount?: number;
   /** mutation ごとの完全 before/after snapshot。 */
   audits: readonly WriteAuditLogInput[];
+  /** 同じ request の guard が既に読んだ監査設定 / actor snapshot。省略時は従来どおり読む（MIG-0617 L3）。 */
+  preloaded?: PreloadedAuditContext;
   /**
    * 監査 INSERT が成功した後に同じ D1 batch で実行する statement。
    * restore_status と audit_restore_runs の更新のように、監査対象 mutation と
@@ -404,6 +407,7 @@ export async function mutateWithAudit(
   const preparedEntries = await prepareAuditLogEntries(
     db,
     input.audits.map((audit) => ({ ...audit, strict: true })),
+    input.preloaded,
   );
   const entries = preparedEntries.map((entry, index) => {
     if (!entry) {

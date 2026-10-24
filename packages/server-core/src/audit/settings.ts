@@ -8,8 +8,18 @@ import { AuditOperation } from "./types.ts";
 
 const SETTINGS_ID = "default";
 
-function mapAuditSettings(
-  row: typeof systemSettings.$inferSelect | null | undefined,
+/** The five `system_settings.audit_*` columns a guard can read together with its own columns. */
+export type AuditSettingsRow = Pick<
+  typeof systemSettings.$inferSelect,
+  | "audit_normal_retention_days"
+  | "audit_restorable_retention_days"
+  | "audit_long_retention_days"
+  | "audit_max_payload_bytes"
+  | "audit_compact_after_days"
+>;
+
+export function mapAuditSettings(
+  row: AuditSettingsRow | null | undefined,
 ): AuditLogSettings {
   if (!row) return { ...DEFAULT_AUDIT_LOG_SETTINGS };
   return {
