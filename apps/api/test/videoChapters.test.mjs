@@ -243,14 +243,23 @@ test("SA-013 update: audit before/after bytes, queue reason, response, budget", 
   assert.equal(d1.stats.batches, 1);
 });
 
-test("SA-013 update: staff path uses at most 3 pre-reads (chapter, video events, staff) + guard reads", async () => {
-  const { request, d1 } = setup({ as: "u_staff" });
-  const res = await request("PUT", "/api/videos/chapters/ch_owner", { chapter_time: "20", chapter_label: "Edited" });
+test("S3: event staff update / delete / bulk stay within 3 D1 reads including the guard", async () => {
+  const upd = setup({ as: "u_staff" });
+  const res = await upd.request("PUT", "/api/videos/chapters/ch_owner", { chapter_time: "20", chapter_label: "Edited" });
   assert.equal(res.status, 200);
-  // guard user + settings are 2 reads; the handler adds <= 3 pre-reads.
-  assert.equal(d1.stats.reads, 5);
-  assert.equal(d1.stats.batches, 1);
-  assert.ok(d1.stats.maxBinds <= 100);
+  // guard user + settings + 1 chapter/video read (events and staff rows are subqueries).
+  assert.equal(upd.d1.stats.reads, 3);
+  assert.equal(upd.d1.stats.batches, 1);
+  assert.ok(upd.d1.stats.maxBinds <= 100);
+  const del = setup({ as: "u_staff" });
+  assert.equal((await del.request("DELETE", "/api/videos/chapters/ch_owner")).status, 200);
+  assert.ok(del.d1.stats.reads <= 3, `delete reads ${del.d1.stats.reads}`);
+  const bulk = setup({ as: "u_staff" });
+  assert.equal((await bulk.request("POST", "/api/videos/v_pub/chapters/bulk", { csv: "5,A", ...SNAP("x_staff") })).status, 200);
+  assert.ok(bulk.d1.stats.reads <= 3, `bulk reads ${bulk.d1.stats.reads}`);
+  const denied = setup({ as: "u_other" });
+  assert.equal((await denied.request("PUT", "/api/videos/chapters/ch_owner", { chapter_time: "20", chapter_label: "E" })).status, 403);
+  assert.ok(denied.d1.stats.reads <= 3, `denied reads ${denied.d1.stats.reads}`);
 });
 
 test("SA-013 update: admin needs no permission read; unknown chapter 404; invalid time 400 / beyond duration", async () => {

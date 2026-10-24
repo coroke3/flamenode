@@ -11,8 +11,9 @@
  * stale active X snapshot 409 / body too large 413 / atomic mutation failure
  * (CAS miss included, CURRENT generic message) 500.
  *
- * D1 budget: guard user read (+ CostGuard settings, both reused by the audit)
- * + at most 3 pre-reads + 1 batch. The post-commit Queue wake of CURRENT
+ * D1 budget (ZERO_1102 S3, guard included): guard user read + CostGuard settings
+ * (both reused by the audit) + 1 chapter/video read (video_events ids and the
+ * approved X ids' event_staff rows ride along as subqueries) = 3 reads, then 1 batch. The post-commit Queue wake of CURRENT
  * (staticRebuildWakeSource "web") is not sent: see the work item, D-0603-1.
  */
 import {
@@ -35,7 +36,13 @@ import {
 import { buildStaticRebuildQueueStatement } from "../../audit/staticRebuildQueue.ts";
 import { expectedRowCondition } from "../admin/apiEndpoints.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
-import { canAdministerChapters } from "./chapterAccess.ts";
+import {
+  accessFactsColumnsSql,
+  approvedXIdsJson,
+  canAdministerChapters,
+  parseAccessFacts,
+  type AccessFacts,
+} from "./chapterAccess.ts";
 import { parseChapterBulkCsv } from "./chapterCsv.ts";
 
 const CHAPTER_FAILURE_MESSAGE =
@@ -63,6 +70,7 @@ type VideoFacts = {
   primary_event_id: string | null;
   visibility_status: string | null;
   durationSeconds: number | null;
+  access: AccessFacts;
 };
 
 type ChapterContext = Context<AppEnv>;
@@ -77,21 +85,28 @@ const durationOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 
 /** CURRENT loadVideoDurationSeconds is folded into the video read (one statement). */
-async function loadVideo(db: D1Database, videoId: string): Promise<VideoFacts | null> {
+async function loadVideo(
+  db: D1Database,
+  videoId: string,
+  approvedJson: string,
+): Promise<VideoFacts | null> {
   const row = await db
     .prepare(
       `SELECT v."id" AS id, v."primary_event_id" AS primary_event_id,
               v."visibility_status" AS visibility_status,
               (SELECT m."duration_seconds" FROM "video_youtube_metadata" m
-                WHERE m."video_id" = v."id" LIMIT ${MAX_SINGLE_ROW_LIMIT}) AS duration_seconds
+                WHERE m."video_id" = v."id" LIMIT ${MAX_SINGLE_ROW_LIMIT}) AS duration_seconds,
+              ${accessFactsColumnsSql('v."id"', 'v."primary_event_id"')}
          FROM "videos" v WHERE v."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
-    .bind(videoId)
+    .bind(approvedJson, videoId)
     .first<{
       id: string;
       primary_event_id: string | null;
       visibility_status: string | null;
       duration_seconds: unknown;
+      ve_json: unknown;
+      staff_json: unknown;
     }>();
   return row
     ? {
@@ -99,6 +114,7 @@ async function loadVideo(db: D1Database, videoId: string): Promise<VideoFacts | 
         primary_event_id: row.primary_event_id,
         visibility_status: row.visibility_status,
         durationSeconds: durationOrNull(row.duration_seconds),
+        access: parseAccessFacts(row.ve_json, row.staff_json),
       }
     : null;
 }
@@ -107,6 +123,7 @@ async function loadVideo(db: D1Database, videoId: string): Promise<VideoFacts | 
 async function loadChapter(
   db: D1Database,
   chapterId: string,
+  approvedJson: string,
 ): Promise<{ chapter: ChapterRow; video: VideoFacts | null } | null> {
   const row = await db
     .prepare(
@@ -114,11 +131,12 @@ async function loadChapter(
               v."id" AS v_id, v."primary_event_id" AS v_primary_event_id,
               v."visibility_status" AS v_visibility_status,
               (SELECT m."duration_seconds" FROM "video_youtube_metadata" m
-                WHERE m."video_id" = c."video_id" LIMIT ${MAX_SINGLE_ROW_LIMIT}) AS v_duration_seconds
+                WHERE m."video_id" = c."video_id" LIMIT ${MAX_SINGLE_ROW_LIMIT}) AS v_duration_seconds,
+              ${accessFactsColumnsSql('c."video_id"', 'v."primary_event_id"')}
          FROM "video_chapters" c LEFT JOIN "videos" v ON v."id" = c."video_id"
         WHERE c."id" = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
     )
-    .bind(chapterId)
+    .bind(approvedJson, chapterId)
     .first<Record<string, unknown>>();
   if (!row) return null;
   const chapter = {} as Record<string, unknown>;
@@ -132,21 +150,21 @@ async function loadChapter(
             primary_event_id: (row.v_primary_event_id as string | null) ?? null,
             visibility_status: (row.v_visibility_status as string | null) ?? null,
             durationSeconds: durationOrNull(row.v_duration_seconds),
+            access: parseAccessFacts(row.ve_json, row.staff_json),
           }
         : null,
   };
 }
 
 /** CURRENT canManageChapter: own chapter (active X) or video.chapter_admin in admin/event mode. */
-async function canManageChapter(
+function canManageChapter(
   c: ChapterContext,
   chapter: ChapterRow,
   video: VideoFacts,
   activeXId: string,
-): Promise<boolean> {
+): boolean {
   if (chapter.x_user_id === activeXId) return true;
   return canAdministerChapters(
-    c.env.DB,
     c.get("user")!.role,
     c.get("activeX").approvedXIds,
     video,
@@ -162,10 +180,11 @@ async function loadManaged(
   deniedMessage: string,
 ): Promise<{ chapter: ChapterRow; video: VideoFacts } | { response: Response }> {
   try {
-    const loaded = await loadChapter(c.env.DB, chapterId);
+    const approvedJson = approvedXIdsJson(c.get("user")!.role, c.get("activeX").approvedXIds);
+    const loaded = await loadChapter(c.env.DB, chapterId, approvedJson);
     if (!loaded) return { response: missing() };
     if (!loaded.video) return { response: fail(c, 404, VIDEO_NOT_FOUND_MESSAGE) };
-    if (!(await canManageChapter(c, loaded.chapter, loaded.video, activeXId))) {
+    if (!canManageChapter(c, loaded.chapter, loaded.video, activeXId)) {
       return { response: fail(c, 403, deniedMessage) };
     }
     return { chapter: loaded.chapter, video: loaded.video };
@@ -226,12 +245,12 @@ function createChapterHandler() {
       return fail(c, 400, parsed.error.issues[0]?.message ?? INVALID_INPUT_MESSAGE);
     }
     const data = parsed.data;
-    const videoId = c.req.param("videoId") ?? "";
+    const videoId = (c.req.param("videoId") ?? "").trim();
     const db = c.env.DB;
 
     let video: VideoFacts | null;
     try {
-      video = await loadVideo(db, videoId);
+      video = await loadVideo(db, videoId, "[]");
     } catch (error) {
       console.error("[chapter] video read failed", error);
       return fail(c, 500, CHAPTER_FAILURE_MESSAGE);
@@ -313,7 +332,7 @@ function updateChapterHandler() {
       return fail(c, 400, parsed.error.issues[0]?.message ?? INVALID_INPUT_MESSAGE);
     }
     const data = parsed.data;
-    const chapterId = c.req.param("chapterId") ?? "";
+    const chapterId = (c.req.param("chapterId") ?? "").trim();
     const db = c.env.DB;
 
     const loaded = await loadManaged(
@@ -465,15 +484,15 @@ function bulkChaptersHandler() {
     if (!parsed.success) {
       return bulkFail(400, parsed.error.issues[0]?.message ?? INVALID_INPUT_MESSAGE);
     }
-    const videoId = c.req.param("videoId") ?? "";
+    const videoId = (c.req.param("videoId") ?? "").trim();
     const db = c.env.DB;
 
     let video: VideoFacts | null;
     try {
-      video = await loadVideo(db, videoId);
+      video = await loadVideo(db, videoId, approvedXIdsJson(user.role, c.get("activeX").approvedXIds));
       if (!video) return bulkFail(404, VIDEO_NOT_FOUND_MESSAGE);
       // Operator chapters: admin / event sources only, never the normal owner mode.
-      if (!(await canAdministerChapters(db, user.role, c.get("activeX").approvedXIds, video))) {
+      if (!canAdministerChapters(user.role, c.get("activeX").approvedXIds, video)) {
         return bulkFail(403, "この動画のチャプター一括登録権限がありません。");
       }
     } catch (error) {

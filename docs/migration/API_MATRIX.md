@@ -110,7 +110,7 @@ New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> or
 | SA-014 | `DELETE /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 403 / 404 / 500 | `chapter_delete` |
 | SA-015 | `POST /api/videos/:videoId/chapters/bulk` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_bulk_create` |
 
-Known difference (OPEN, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API has no Queue binding yet, so the durable queue row is written but no wake is sent.
+Known difference (DECIDED, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API sends 0 wakes by design. The `static_rebuild_queue` row is persisted in the same D1 batch, drained by the content-jobs Recovery Cron `15 * * * *` (worst case about 60 min, equal to the D-11 accepted delay). The Queue binding decision is made once with MIG-0614 U06.
 
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
