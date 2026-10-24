@@ -319,7 +319,7 @@ MIG-0411 consumer.
 R2 reads: each detail page view is one R2 GET (Class B; free 10 M/month ≈ 333,000/day) after one
 KV read and one route shard read. No traffic figures were read, so the volume is stated as that
 break-even: the free tier holds up to ~333 k detail views/day. R2 writes (D-11): the Queue consumer renders nothing, so it makes 0 PUTs; detail HTML is
-PUT by the build (MIG-0509), at most 1,460 per build. Worst case, if all 24 builds/day PUT every page: 24 × 1,460 = 35,040/day ≈ 1.05 M/month against the free 1 M/month (Class A), i.e. not within the free tier at that extreme. The real count is bounded by the builds that have a request mark; MIG-0509 records the PUT count per build (follow-up C).
+PUT by the build (MIG-0509), at most 1,460 per build. Worst case, if all 24 builds/day PUT every page: 24 × 1,460 = 35,040/day ≈ 1.05 M/month against the free 1 M/month (Class A), i.e. not within the free tier at that extreme. A request mark does not make this safe by itself: with hourly edits, 24 builds/day is the normal case. Obligation for MIG-0509: use a differential PUT (only the pages that changed, for example whose content hash changed) or lower the build cadence, so that Class A stays within budget (at most 80 % = 800 k/month). A full-page PUT on every hourly build must not run until one of the two holds. MIG-0509 also records the PUT count per build (follow-up C).
 
 Queue messages (free 10,000 operations/day; one message ≈ 3 operations — write, read,
 delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources and estimate

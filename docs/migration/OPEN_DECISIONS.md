@@ -216,12 +216,12 @@ Option 4（hybrid）を採る。
 
 ### 根拠
 
-1. CPU 予算で失格（決定的）: `ZERO_1102.md` §3 の B-new は「非本番の実プラットフォームで warm の最大値 < 8ms」。Island ページは一覧を含む（user の works/collabs 最大 120 行、event の slots、video の related）。MIG-0411 U05 の上限値は video 25.3–48.8 ms、event 5.4–8.7 ms（5/6 で 8ms 以上）。推定を実測扱いしない規範どおり最大値で判定すると、一覧込みの描画は 8ms に収まらない。Option 1/2 とも同じ React 木を描くので超過は変わらない。
+1. CPU 予算で失格（決定的）: `ZERO_1102.md` §3 の B-new は「非本番の実プラットフォームで warm の最大値 < 8ms」。Island ページは一覧を含む（user の works/collabs 最大 120 行、event の slots、video の related）。MIG-0411 U05 の上限値は video 25.3–48.8 ms、event 5.4–8.7 ms（5/6 で 8ms 以上）。ただし user ページの実測 4.4–5.8 ms は一覧なしで、一覧込みは推定である。video と event の実測値も一覧なしで、一覧込みの値は推定である。推定を実測扱いしない規範どおり最大値で判定すると、一覧込みの描画は 8ms に収まらない見込みで、結論は変わらない。Option 1/2 とも同じ React 木を描くので超過は変わらない。
 2. byte parity は構造的に不可能: Astro の `<astro-island>` は build ごとに hash が変わる `component-url` / `renderer-url` と `_astro/*.css` を埋め込む（Worker が build manifest を持たなければ再現できない）。さらに `apps/site/src/pages/event/[id]/index.astro` は `builtAt = Math.floor(Date.now()/1000)` を props に埋める。Option 1 は「Astro の build 出力を Worker で模倣する第二の renderer」になり、MIG-0502/0504/0507 の Island が変わるたびに追従が要る（`CODE_QUALITY.md`「呼び出し元が1つの抽象」「移行で守る簡潔さ」に反する）。
 3. Option 2 の無料枠/コールド: gateway dry-run は既に 577 KiB / 107 KiB gzip。Container 同梱は Astro runtime + 全ページ component を足す。cold isolate は React+UI の評価だけで +8.7–12.0 ms、`experimental_` API に本番の整合性を預けることになる。
 4. Option 4 が regression を最小にする: privacy fence は gateway の KV deny（fail-closed）で build 周期と無関係。残る regression は「公開中ページの内容編集の遅延」のみ（CURRENT revalidate 30/60 s → 最大 ≈60 min + build）で、owner は 2026-10-18 に publish delay（60 min + build）を既に承認済み（`BUILD_TIME_DATA.md` §2 の MIG-0410 定数承認）。
 5. 無料枠（Workers Builds）: 3,000 min/月。local 1.418 min/build で 52 builds/日（Cron で 24/日に cap）。Phase 5 で 1,460 ページ + snapshot 生産（≈145 D1 statement）が入るので build は長くなる。4 min/build なら 24/日 × 30 = 2,880 min で 80% 予算（2,400）を超える。よって定数 52 / 1,661,539 ms の再導出（Workers Builds 実測）は D-11 の前提条件。MIG-0410 は request-mark がある時だけ hook を呼ぶので、実 build 数は「変更のあった時間帯の数」以下。
-6. Queue 無料枠が軽くなる: consumer が描画しないので R2 PUT は 0。doorbell（≤1,460/日）と recovery（≤120/日）は従来見積りのまま ≤ 47%。gateway `rebuild-page` は excluded kind では `excluded_kind` で即 finish されるため消費は 3 ops/件のままで、F-02 の「stale は配信」により 503 は増えない。
+6. Queue 無料枠が軽くなる: consumer が描画しないので consumer の R2 PUT は 0。ただし R2 Class A の書き込みは build 側へ移る。毎 build で全ページを再 PUT すると 24 builds × 1,460 = 35,040/日 ≈ 1.05M/月 ≈ Class A 無料枠 1M/月の 105% になるため、差分 PUT か build 頻度の制限が必要（下のリスクと `BUILD_TIME_DATA.md` §6）。doorbell（≤1,460/日）と recovery（≤120/日）は従来見積りのまま ≤ 47%。gateway `rebuild-page` は excluded kind では `excluded_kind` で即 finish されるため消費は 3 ops/件のままで、F-02 の「stale は配信」により 503 は増えない。
 
 ### リスク / 残余
 
@@ -229,6 +229,7 @@ Option 4（hybrid）を採る。
 - KV deny の writer が未実装: `revocationKey` の利用者は gateway/consumer のみ。S3 の非公開化 API が同一 request で `deny:` を書く実装（MIG-0615 visibility transition / MIG-0614 U06）が揃うまで「非公開化は即時」は成立しない。D-11 の適用条件。
 - producer 配線（MIG-0614 U06）未完: doorbell が無い間は consumer の DELETE も届かない（gateway miss 経路のみ）。U06 の予算判定は「S3 に D1 statement +1、Queue message +1」のみで変わらない。
 - event の時刻依存ラベル（entry 開始/終了・status）: Island が `builtAt` 起点で clock 再計算する設計（MIG-0502）なので build 周期の影響を受けない。release/slots の filled 数は `GET /api/live/...` で browser 取得。
+- R2 Class A の書き込み予算: R2 への書き込みは consumer から build に移る。毎時の build が全ページを PUT すると 24 builds × 1,460 = 35,040/日 ≈ 1.05M/月（無料枠 1M/月の約 105%）。MIG-0509 は差分 PUT（変更のあったページだけ）か build 頻度の制限で月 800k（80%）以下にする。どちらかが成立するまで、毎時 build で全ページを PUT する運用は開始しない。
 - Workers Builds の実測が未取得: 無料枠超過の判定は推定。実測前に hourly 以上の頻度へ上げない。
 
 ### 再検討条件（いずれかで D-11 を再開）
@@ -245,7 +246,7 @@ Option 4（hybrid）を採る。
 | --- | --- | --- | --- |
 | A | MIG-0411 follow-up: consumer から描画経路を削除（DELETE + tracker close のみ）。`renderPublicPage.ts` の server-rendered 分岐と React/UI dynamic import、`PUBLIC_PAGE_STYLESHEETS` 設定、`renderPublicPage.measure.mjs` を削除。`PAGE_BODY_FORMAT` は削除か `excluded` 固定。`pageRenderQueue.test` の byte-equal characterization を excluded/delete シナリオに置換。bundle size を再計測 | Sonnet 実装、Opus review | なし（D-11 docs PR 後） |
 | B | MIG-0410 follow-up: Workers Builds 実測と定数再導出（`BUILD_TIME_DATA.md` §2 手順 1–4）。非本番 build probe project（owner 承認要）、5 回計測、`MAX_DATA_BUILDS_PER_DAY` / `MIN_BUILD_INTERVAL_MS` 再導出 | owner 操作 + Sonnet 記録 | MIG-0509 の build command 配線 |
-| C | MIG-0509 U: build-written HTML の R2 PUT と route generation 維持。F-02 の metadata 契約、data-only build で generation を維持、PUT 件数の記録 | lead（Opus）精緻化 → Sonnet 実装 | MIG-0507 merge（済）、MIG-0509 producers（#354 済） |
+| C | MIG-0509 U: build-written HTML の R2 PUT と route generation 維持。F-02 の metadata 契約、data-only build で generation を維持、PUT 件数の記録。受け入れ条件: 月間 Class A の見積りが予算以下（差分 PUT か build 頻度の制限で達成。件数の記録だけでは不可） | lead（Opus）精緻化 → Sonnet 実装 | MIG-0507 merge（済）、MIG-0509 producers（#354 済） |
 | D | MIG-0614 U06: producer 配線（doorbell + `requestPageRenderStatement`）+ S3 で `deny:` を同 request で書く。golden の意図的更新、S3 予算（statement +1、message +1）、`revocationKey` 利用 | Sonnet 実装、Opus review | A、Queue binding の owner 承認、MIG-0615 |
 | E | （評価のみ）debounced event-driven build trigger の設計判断。consumer（または S3 の doorbell 到達時）が `decidePublicBuild` の CAS 行で Deploy Hook を直接呼び、公開/新規作成の反映を ≈ build 時間まで短縮する案。gateway Worker への `PUBLIC_BUILD_DEPLOY_HOOK_URL` secret（承認要）と Cron 併用時の二重 trigger 防止を評価 | Opus（調査、コード変更なし） | B の実測結果 |
 | F | MIG-0615/0502 確認: event 時刻依存ラベルと slots filled 数が build 周期に依存しないことの parity test 追記（既存設計の確認のみ） | Sonnet | なし |

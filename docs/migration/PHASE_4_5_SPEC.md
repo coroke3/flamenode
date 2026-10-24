@@ -906,7 +906,7 @@ Phase 5 共通契約のとおり。
 - **U01..Unn family**: MIG-0409 の表で「build」とした family ごとに1 unit。各 unit は U01 of MIG-0409 と同じ形（CURRENT の生成関数と同じ fixture で出力が一致する test）で作り、`publicDataLoader.ts` の読み先を切り替える。
 - **Unn+1 request mark**: 公開データを変える CURRENT の更新が、static rebuild の enqueue と同じ場所で `public_build_state.requested_at` も更新するようにする（新旧の両方が動く期間のため）。
 - **Unn+2 GA4**: GA4 の同期 job の入力を D1 の query に変える。出力（`analytics/trending.json`、最大 200件。`workers/ga-analytics/ranking.ts:29`）は変えない。
-- **U-build-html**（D-11）: build が公開の detail HTML（最大 1,460 件）を R2 へ PUT する。customMetadata は `{kind,id,key,generation}`（F-02 契約）。
+- **U-build-html**（D-11）: build が公開の detail HTML（最大 1,460 件）を R2 へ PUT する。customMetadata は `{kind,id,key,generation}`（F-02 契約）。PUT は差分のみ（内容 hash が変わったページ）にするか build 頻度を制限し、月間 R2 Class A を無料枠の 80%（800k）以下にする。毎時 build で全ページを PUT しない。
 - **U-route-generation**（D-11）: data-only build で route generation を維持する（`BUILD_TIME_DATA.md` §6 の 35,000 messages/日 を避ける）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
@@ -930,6 +930,7 @@ npm run test:unit
 - [ ] `apps/site` が R2 artifact を読まない
 - [ ] build 時間が MIG-0409 で承認した値の範囲内（5回の実測）
 - [ ] Workers Builds 5 回実測で 52 / 1,661,539 ms を再導出（D-11）
+- [ ] 月間 R2 Class A の見積りが予算（800k/月）以下。差分 PUT か build 頻度の制限で達成する（D-11。PUT 件数の記録だけでは不可）
 #### STOP
 - family の出力が CURRENT と一致しない理由が CURRENT の不具合に見えたら、直さずに PR の「ブラッシュアップ提案」に書く（`CODE_QUALITY.md`）。privacy に関わる場合は止めて報告する。
 - build 時間が承認した値を超えたら止める。
