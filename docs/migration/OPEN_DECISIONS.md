@@ -26,6 +26,7 @@
 | D-09 | **A: 一覧・検索などの公開データは build 時に作り、更新は deploy hook で build を起こす。作品・ユーザー・イベントの個別ページは ISR 相当（更新されたページだけを Queue で R2 HTML に作り直す、2026-10-16 改訂）。残る背景処理は 1回 8ms 未満に分ける** | DECIDED | MIG-0409, MIG-0410, MIG-0411, MIG-0509, MIG-0609, MIG-0610, MIG-0907。`ZERO_1102.md` G2 | build 時の D1 読み取り用 token と deploy hook URL（どちらも secret）の作成、本番の Cron / Queue 変更は作業直前の明示承認<br>注: 個別ページの ISR 相当は Island 化した Phase 5 以降は D-11 により build cadence へ。Queue は DELETE/tracker のみ |
 | D-10 | **共有 server core `@flamenode/server-core`（drizzle handle 注入、framework 非依存）を作り、Next（bridge 経由）と Hono の両方が使う** | DECIDED | MIG-0612〜0618。MIG-0603〜0605 の未着手 unit | source code の移動だけ。Remote D1 / deploy / Route / secret は対象外 |
 | D-11 | **Island ページの queue 再生成の parity: Option 4（hybrid）。内容編集は build cadence、非公開化は即時（KV `deny:` + consumer の R2 DELETE）、consumer は描画しない。Island serializer port / `experimental_AstroContainer` 同梱は却下（B-new 8ms 超過、build hash と `builtAt` で byte parity 不能）** | DECIDED | MIG-0411 follow-up, MIG-0502/0504/0507, MIG-0509, MIG-0614 U06, MIG-0615 | Workers Builds 実測で 52 / 1,661,539 ms を再導出（実測前に Cron 頻度を上げない）。S3 が同一 request で `deny:` を書く実装（MIG-0614 U06 / MIG-0615）が揃うまで「非公開化は即時」は成立しない |
+| D-12 | **Hono GET の S2 上限（LIMIT ≤ 100 / 応答 ≤ 64KB）と CURRENT 契約が衝突する read API は、CURRENT 契約を保ち「記録した例外」とする。viewer 固有の読みは named LIMIT で fail-closed（権限を増やさない形）、公開一覧の大応答は CURRENT 上限を維持して MIG-0606 の上限入力で max CPU を測り、7ms 超のときだけ additive paging を足す** | DECIDED | MIG-0604（live slots 6000、RH-014 own-slots 100 / 64KiB）、MIG-0611 の既存例外、以後の S2 task | MIG-0606 の実測（6000 枠入力、warm max）。推定値で判定しない。決定者: Fable（owner-delegate）2026-10-24、Yugo の standing instruction「検討事項は推奨で進めて」に基づく。Yugo には事後に伝える |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -244,9 +245,19 @@ Option 4（hybrid）を採る。
 
 | ID | 題名 | owner model | 依存 |
 | --- | --- | --- | --- |
-| A | MIG-0411 follow-up: consumer から描画経路を削除（DELETE + tracker close のみ）。`renderPublicPage.ts` の server-rendered 分岐と React/UI dynamic import、`PUBLIC_PAGE_STYLESHEETS` 設定、`renderPublicPage.measure.mjs` を削除。`PAGE_BODY_FORMAT` は削除か `excluded` 固定。`pageRenderQueue.test` の byte-equal characterization を excluded/delete シナリオに置換。bundle size を再計測 | Sonnet 実装、Opus review | なし（D-11 docs PR 後） |
+| A | **登録済み（2026-10-24）: MIG-0411 work item の unit として。新 MIG id は作らない。** MIG-0411 follow-up: consumer から描画経路を削除（DELETE + tracker close のみ）。`renderPublicPage.ts` の server-rendered 分岐と React/UI dynamic import、`PUBLIC_PAGE_STYLESHEETS` 設定、`renderPublicPage.measure.mjs` を削除。`PAGE_BODY_FORMAT` は削除か `excluded` 固定。`pageRenderQueue.test` の byte-equal characterization を excluded/delete シナリオに置換。bundle size を再計測 | Sonnet 実装、Opus review | なし（D-11 docs PR 後） |
 | B | MIG-0410 follow-up: Workers Builds 実測と定数再導出（`BUILD_TIME_DATA.md` §2 手順 1–4）。非本番 build probe project（owner 承認要）、5 回計測、`MAX_DATA_BUILDS_PER_DAY` / `MIN_BUILD_INTERVAL_MS` 再導出 | owner 操作 + Sonnet 記録 | MIG-0509 の build command 配線 |
 | C | MIG-0509 U: build-written HTML の R2 PUT と route generation 維持。F-02 の metadata 契約、data-only build で generation を維持、PUT 件数の記録。受け入れ条件: 月間 Class A の見積りが予算以下（差分 PUT か build 頻度の制限で達成。件数の記録だけでは不可） | lead（Opus）精緻化 → Sonnet 実装 | MIG-0507 merge（済）、MIG-0509 producers（#354 済） |
-| D | MIG-0614 U06: producer 配線（doorbell + `requestPageRenderStatement`）+ S3 で `deny:` を同 request で書く。golden の意図的更新、S3 予算（statement +1、message +1）、`revocationKey` 利用 | Sonnet 実装、Opus review | A、Queue binding の owner 承認、MIG-0615 |
+| D | **登録済み（2026-10-24）: MIG-0614 work item の unit U06 として。新 MIG id は作らない。** MIG-0614 U06: producer 配線（doorbell + `requestPageRenderStatement`）+ S3 で `deny:` を同 request で書く。golden の意図的更新、S3 予算（statement +1、message +1）、`revocationKey` 利用 | Sonnet 実装、Opus review | A、Queue binding の owner 承認、MIG-0615 |
 | E | （評価のみ）debounced event-driven build trigger の設計判断。consumer（または S3 の doorbell 到達時）が `decidePublicBuild` の CAS 行で Deploy Hook を直接呼び、公開/新規作成の反映を ≈ build 時間まで短縮する案。gateway Worker への `PUBLIC_BUILD_DEPLOY_HOOK_URL` secret（承認要）と Cron 併用時の二重 trigger 防止を評価 | Opus（調査、コード変更なし） | B の実測結果 |
 | F | MIG-0615/0502 確認: event 時刻依存ラベルと slots filled 数が build 周期に依存しないことの parity test 追記（既存設計の確認のみ） | Sonnet | なし |
+
+## D-12 — S2 上限と CURRENT 契約の衝突（DECIDED、2026-10-24）
+
+決定者: Fable（owner-delegate）2026-10-24、Yugo の standing instruction「検討事項は推奨で進めて」に基づく。Yugo には事後に伝える。merge / Phase Gate / 本番操作（Route・Remote D1・secret・deploy）はこの決定に含まない。
+
+- 公開一覧で CURRENT が大きな上限を持つもの（live slots `MAX_LIVE_SLOTS = 6000`、約 890 KiB）: CURRENT の上限・truncated・cache 契約を保ち、PHASE_6_SPEC の「記録した既知の差・例外」に残す。MIG-0606 が「上限ちょうど」入力（6000 枠・`public_name`）で warm max を 50 回以上測り、7ms 未満なら恒久例外、7ms 以上なら additive paging（optional `limit` ≤ 100 + `cursor`、無指定時は従来の応答）を担当 MIG の追加 unit で入れる。ページング化を先行して契約を変えることはしない。推定値で判定しない。
+- viewer 固有の読み（RH-014 own slots 100 件 / 64 KiB、pending 申請 100 件）: named LIMIT を超えたら権限を増やさない fail-closed（CURRENT の既存 `authUnavailable` 形）で返す。ページング化しない。
+- 追加差分（Fable 決定の範囲外の追加差分なので Yugo 事後報告対象）: MIG-0631 は CURRENT の normal 時 D1 fallback を廃止し、R2 snapshot 欠損時に 503 `public_data_unavailable` を返す（`ZERO_1102.md` §4.7）。
+- 読み取り失敗の status（200 固定形 → 503 + Retry-After）、暗黙の行順の明示（`ORDER BY`）は S2 のための差として承認。
+- CURRENT の不具合（`slotViewerOverlay.ts` の event select に `visibility_status` が無く `operatorOverrideAllowed` が常に false）は Hono でも bug-compatible のまま。修正は挙動変更なので FIX-0604-1（MIG-0633 の後、Next と Hono を同一 PR で）として扱う。

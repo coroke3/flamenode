@@ -230,18 +230,18 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後、U04 は MIG-0633（ownership core）の DONE 待ち。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
 - **Recipe:** R-API
 - **Runtime:** S2, S3
-- **Depends on:** MIG-0602, MIG-0305 / **Decisions:** none
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 | CURRENT | ID | file |
 | --- | --- | --- |
-| event list | RH-015 | `app/api/events/route.ts` |
+| event list | RH-015（MIG-0631 へ移管） | `app/api/events/route.ts` |
 | slot viewer overlay | RH-014 | `app/api/events/[id]/slots/viewer-overlay/route.ts` |
 | live slots / submissions / summary | RH-020..022 | `app/api/live/events/[id]/{slots,submissions,summary}/route.ts` |
-| event export | RH-012..013 | `app/api/event-endpoints/[id]/route.ts`, `app/api/event-endpoints/[id]/release/route.ts` |
+| event export | RH-012（MIG-0631 へ移管）, RH-013（MIG-0632 へ移管） | `app/api/event-endpoints/[id]/route.ts`, `app/api/event-endpoints/[id]/release/route.ts` |
 | event / staff / template / playlist | SA-021..039 | `src/lib/actions/event-*.ts`, `event-youtube-playlist.ts` |
 | slot | SA-056..068 | `src/lib/actions/slot*.ts` |
 - 公開画面の `src/components/event/SlotGrid.tsx:15` が `@/lib/actions/slot` を直接呼ぶ。Phase 5 の枠 Island はこの MIG の API を使う。
@@ -270,9 +270,9 @@ npm run test:unit
 npm run test:integration
 ```
 #### Ledger updates
-`API_MATRIX.md` の RH-012〜015, 020〜022 と SA-021〜039, 056〜068 に Hono エンドポイント。
+`API_MATRIX.md` の RH-014, 020〜022 と SA-021〜039, 056〜068 に Hono エンドポイント。RH-012 / RH-015 は MIG-0631、RH-013 は MIG-0632 の Ledger（2026-10-24 に移管。本 task の DONE 条件から除く）。
 #### DONE checklist
-- [ ] U01〜U04 と Final audit が DONE
+- [ ] U01（RH-014）、U02、U04 と Final audit が DONE。RH-012 / RH-015 は MIG-0631、RH-013 は MIG-0632 の DONE で満たす（二重所有を避けるため本 task の条件に含めない。B4 の ownership port は MIG-0633、B5 は MIG-0617 で解消）
 - [ ] owner 0 防止と予約の原子性がテストで実証されている
 #### STOP
 - 予約の transaction 境界を変える必要が出たら止める。
@@ -772,7 +772,7 @@ PR を revert（bridge が元の実装に戻る。DB・Queue・Route・secret �
 
 ### MIG-0617: `apps/api` の Option A を core に置き換える
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — 依存（MIG-0613 / 0614 / 0602）は merge 済みで STATUS は BLOCKED (lead decisions pending) で、下の「実装前に要る lead 決定」L1〜L3 が決まるまで着手しない（2026-10-23 調査）
+- **Readiness:** NEEDS_REFINEMENT — READY（lead 決定 L1〜L3 は 2026-10-24 に決定済み。依存 MIG-0613 / 0614 / 0602 は DONE。U01 の棚卸し表から着手）
 - **Recipe:** R-CORE, R-API
 - **Runtime:** S3
 - **Depends on:** MIG-0613, MIG-0614, MIG-0602 / **Decisions:** D-10 DECIDED
@@ -780,11 +780,11 @@ PR を revert（bridge が元の実装に戻る。DB・Queue・Route・secret �
 #### Source snapshot
 - MIG-0602 が `apps/api` に作った監査・wake の写し（Option A）。core と二重になっている部分を消す。テストの fake D1 は `.raw()` を持つ形に揃える。
 - Option A の本体: `apps/api/src/audit/{mutateWithAudit,snapshot,staticRebuildQueue}.ts`（計 731 行）。利用先: `apps/api/src/{env.ts,middleware/costGuard.ts,middleware/writeOrigin.ts,routes/admin/{announcements,apiEndpoints,body}.ts,routes/events/templates.ts}`、test `apps/api/test/{adminGuards,auditParity}.test.mjs`。
-#### 実装前に要る lead 決定（2026-10-23 調査）
-- **L1 apps/api が core をどう読むか**: `apps/api` は `tsc` で `rootDir: ./src` に emit し、`paths` は `@flamenode/domain` の dist だけを向く。server-core は emit しない（MIG-0613: TS6059）。今の設定では `@flamenode/server-core/*` を import できない。案: (a) apps/api の build を typecheck のみにして Worker の bundle（wrangler / esbuild）に任せる、(b) server-core に emit 用の tsconfig を足して dist を `paths` で向ける、(c) apps/api の `rootDir` を外す。test（`node --experimental-strip-types`）からの解決も同時に決める。
-- **L2 drizzle を apps/api の Worker に入れるか**: core は `ServerCoreDb`（drizzle）を受け、Option A は raw D1（`c.env.DB.prepare`）。`@flamenode/api` の依存に `drizzle-orm` / `@flamenode/db` / `@flamenode/server-core` が無い。入れると bundle と request ごとの CPU（ZERO_1102 §3）が増え、測る手段（MIG-0606）はまだ無い。
-- **L3 `preloaded` の扱い**: Option A の `mutateWithAudit` は `preloaded`（system settings と actor snapshot の pre-read を writeGuard / CostGuard の読み取りに畳み込む。MIG-0602 B2 の pre-read 3 回以内）を持つが、core には無い。core に足す（core API の追加、Next 側は不変）か、read 回数の増加を受け入れるかを決める。
-- L1〜L3 が決まれば、U01 の棚卸し表（写しと core の SQL + params の差）から先は MIG-0616 と同じ書き方で精緻化できる。
+#### lead 決定（2026-10-24、Fable（owner-delegate）2026-10-24、Yugo の standing instruction「検討事項は推奨で進めて」に基づく。Yugo には事後に伝える）
+- **L1 apps/api が core をどう読むか**: (a) を採る。`apps/api` は typecheck のみ（`tsconfig` を `noEmit`、`rootDir` / `outDir` を外し、`paths` を root と同じく `@flamenode/domain` / `@flamenode/db` / `@flamenode/server-core` の src へ向ける）。build script は `tsc --noEmit`。Worker の bundle は MIG-0628 の wrangler / esbuild に任せる。test は node の exports 解決（`src/*.ts`、strip-types）で変更不要。U01 で `apps/api/dist` の消費者が 0 件であることを `rg` で記録する。(b) は core 側の二重構成、(c) は TS6059 の再発になるため採らない。
+- **L2 drizzle を apps/api の Worker に入れるか**: 入れる。依存に `@flamenode/server-core`, `@flamenode/db`, `drizzle-orm` を追加し、request ごとに `drizzle(c.env.DB)` を middleware で 1 回作って `c.set("db")`。`apps/api/src/routes/**` から `drizzle-orm` / `@flamenode/db` を直接 import するのは禁止（server-core 経由のみ。`check-server-core-boundaries.mjs` に 1 規則追加）。PR に `wrangler deploy --dry-run` の bundle size を記録し、MIG-0606 で同一 route の before/after CPU を測る（増分 ≤ 2ms が目標、超えたら STOP）。bundle gzip と request CPU は未計測。
+- **L3 `preloaded` の扱い**: core の `mutateWithAudit` に optional `preloaded`（settings / `actorSnapshotJsonById`）を足す。省略時は現在の core と同じ読み取り。Next 側は渡さない（監査行の SQL + params が不変であることを T02 で確認）。Option A に `restore_strategy` を足すことはしない（Option A は本 task で削除する暫定）。
+- U01 の棚卸し表（写しと core の SQL + params の差）から先は MIG-0616 と同じ書き方で精緻化する。
 #### Owned paths
 - 変更: `apps/api/src/**` の監査・wake 部分、`apps/api/test/**`。削除: Option A の写し。
 #### Micro-units
@@ -1301,10 +1301,10 @@ npm run check:project-docs
 PRをrevert。
 ### MIG-0629: admin audit settings + restore dry-run APIs（監査設定・dry-run API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602 は merge 済みで STATUS は BLOCKED (lead decisions pending) で、下の「実装前に要る lead 決定」M1〜M3 が決まるまで着手しない（2026-10-23 調査）
+- **Readiness:** NEEDS_REFINEMENT — 決定 M1〜M3 は 2026-10-24 に済み。MIG-0616 は DONE。MIG-0617 が DONE になった後に READY（それまで着手しない）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-01 DECIDED
+- **Depends on:** MIG-0602, MIG-0616, MIG-0617 / **Decisions:** D-01 DECIDED, D-10 DECIDED
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 | CURRENT | ID | file |
@@ -1312,16 +1312,16 @@ PRをrevert。
 | audit settings update | SA-009 | `src/lib/actions/audit-admin.ts#updateAuditLogSettingsAction` |
 | audit dry run | SA-010 | `src/lib/actions/audit-admin.ts#getAuditLogDryRun` |
 - MIG-0602 の分割で移動（2026-10-23）。SA-011（audit restore）は MIG-0616 で個別実装。ガードは MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` を再利用する。
-#### 実装前に要る lead 決定（2026-10-23 調査）
-- **M1 SA-010 の実装の置き場**: CURRENT の `getAuditLogDryRun` は `restoreAuditLog(db, { dry_run: true })` を呼ぶ（`user` / `audit_logs` / `audit_restore_runs` の読み取り、capability、registry の 8 table の adapter `fetchCurrent`、`computeChangedKeys`）。Hono で byte 一致させる筋は MIG-0616 の core `restoreAuditLog` を呼ぶことだが、apps/api はまだ core を読めない（MIG-0617 の L1 / L2）。Option A で写すと 8 adapter と capability の複製になり D-10 に反する。Depends に MIG-0616 と MIG-0617 を足すか、写しを許すかを決める。
-- **M2 SA-010 の guard**: CURRENT の SA-010 は `requireAdminWrite("admin_permissions")`（writeGuard と CostGuard の `admin_permissions`）を通る。下の U02 の「既定の admin read guard」ではこの CostGuard の拒否が無くなる。POST + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")` に揃えるかを決める（SA-009 も同じ feature）。
-- **M3 SA-009 の順序**: SA-009（`updateAuditLogSettings`: `system_settings` を drizzle の列順で before / after、`AuditOperation.SYSTEM`、reason `監査ログ設定を更新`、context `audit_settings_update`、`long_audit`、strict、zod の範囲は action と同じ）は今の Option A でも実装できる。MIG-0617 で Option A を消すなら、その後に置くか先に作るかを決める。
+#### lead 決定（2026-10-24、Fable（owner-delegate）2026-10-24、Yugo の standing instruction「検討事項は推奨で進めて」に基づく。Yugo には事後に伝える）
+- **M1 SA-010 の実装の置き場**: Depends に MIG-0616 と MIG-0617 を追加する。SA-010 は core の `restoreAuditLog(db, { dry_run: true })` を呼ぶ。8 adapter と capability の写しは作らない（D-10）。
+- **M2 guard**: SA-009 / SA-010 とも `POST` + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")`。CURRENT は両方 `requireAdminWrite("admin_permissions")` で、read guard にすると CostGuard の拒否が消えて parity を失う。下の U02 の「既定の admin read guard」は撤回。
+- **M3 順序**: MIG-0617 の後に実装する。SA-009 を Option A で先に書かない（二度書きの回避）。
 #### Owned paths
 - 新規: `+apps/api/src/routes/admin/audit*.ts`、`+packages/contracts/src/admin/audit*.ts`
 - 触らない: `src/lib/actions/**`
 #### Micro-units
 - **U01 audit settings**: SA-009。`updateAuditLogSettings` と同じ strict 監査（`system_settings` 更新 + 監査 1 件を 1 batch）。
-- **U02 dry run**: SA-010。読み取りのみ（既定の admin read guard を使う）。
+- **U02 dry run**: SA-010。書き込み 0（core の `restoreAuditLog` を `dry_run: true` で呼ぶ）。guard は M2 のとおり `POST` + writeGuard + CostGuard `admin_permissions`。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -1392,6 +1392,137 @@ npm run test:unit
 - D1 statement が 3 件を超えるなら、分割か projection を lead に確認する。
 #### Rollback
 PRをrevert。
+
+### MIG-0631: 公開 event 一覧・release を build 時 snapshot から返す Hono route（RH-015, RH-012）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（実装は Sonnet 可、Work Order の精緻化と review は Opus。2026-10-24 に MIG-0604 U01 の残りから切り出し）
+- **Recipe:** R-API
+- **Runtime:** S1
+- **Depends on:** MIG-0602, MIG-0614 / **Decisions:** D-09 DECIDED, D-10 DECIDED, D-12 DECIDED
+- **Verified against:** `2b4504c2` (2026-10-24)
+#### Source snapshot
+- CURRENT の RH-015（公開 event 一覧）と RH-012（release）は約 2000 行の loader を持つ。D-10 は loader を server-core の対象外とし、`ZERO_1102.md` §4.7 は cache miss で重い処理へ fallback することを禁じる。よって loader は移植せず、build 時 snapshot（R2 の `events/index.json` / release）を読む薄い route にする（2026-10-24 の決定）。
+- `apps/site/scripts/readPublicData.ts`（MIG-0409 U01）が同 schema を build 時に作る。producer の切替（MIG-0509 / MIG-0627）は key と schema を変えないので、reader は独立に先行できる。
+#### Owned paths
+- 新規: `+apps/api/src/routes/events/publicList.ts`, `+apps/api/test/eventsPublicList.parity.test.mjs`
+- 変更: `apps/api/src/app.ts`（mount 1 行）
+- 触らない: `app/**`, `src/lib/**`
+#### Micro-units
+- **U01 inventory**: RH-015 / RH-012 の応答 field、`page` / `limit` の slice、`pickKeys(PUBLIC_EVENT_KEYS)`、rate limit、cache header を表にする。
+- **U02 route**: R2 1 read + manifest、D1 0 回。operation mode は `apps/api/src/routes/live/operationMode.ts` を再利用する。
+- **U03 parity**: `readPublicData.test.mjs` の fixture を流用して CURRENT の応答と比べる。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | snapshot あり、`page` / `limit` 指定 | CURRENT と同じ slice と field |
+| T02 | snapshot 欠損 | 503 `public_data_unavailable`（CURRENT の normal 時 D1 fallback の置換。記録した差。出典: ZERO_1102 §4.7、OPEN_DECISIONS D-12 の追加差分） |
+| T03 | 連続 request | rate limit と cache header が CURRENT と同じ |
+| T04 | D1 statement 数 | 0 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/eventsPublicList.parity.test.mjs
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の RH-015 / RH-012 に Hono エンドポイント。
+#### DONE checklist
+- [ ] RH-015 / RH-012 が snapshot から CURRENT と同じ応答を返す
+- [ ] D1 を読まない
+- [ ] R2 欠損時の 503 を「記録した差」として PHASE_6_SPEC に残した
+- [ ] 本番 Route を変更していない（MIG-0509 の producer 配線が DONE になるまで Worker Route に接続しない）
+#### STOP
+- loader の移植や `*Core.ts` の抜き出しが必要になったら止める。
+- 本番 Worker・Route・secret・Remote D1 の操作は明示承認が出るまで止める。
+#### Rollback
+PRをrevert（Hono route を足すだけで、本番 Route・D1・secret の変更は無い）。
+
+### MIG-0632: event export API（RH-013）の Hono 化
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0606 の harness と同時期。応答が 64KB を超える見込みのため D-12 の例外手続きで精緻化してから
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0614, MIG-0606 / **Decisions:** D-10 DECIDED, D-12 DECIDED
+- **Verified against:** `2b4504c2` (2026-10-24)
+#### Source snapshot
+- `eventExportData` / `eventExportPayload` / `eventExportCache`（約 1100 行）は D1 読み + publicCache R2 + isolate micro-cache。loader（RH-012 / RH-015）には依存しないので MIG-0631 とは独立。
+- CORS・format / v5・refresh minutes の契約を維持する。
+#### Owned paths
+- 新規: `+apps/api/src/routes/events/export.ts`, `+apps/api/test/eventExport.parity.test.mjs`
+- 触らない: `app/**`, `src/lib/**`
+#### Micro-units
+- **U01 inventory**: 応答 size、D1 statement 数、cache の層を表にする。64KB 超は D-12 の「記録した例外」型で扱う。
+- **U02 route**: D1 読み + publicCache R2。
+- **U03 parity**: CURRENT と Hono を比べる。MIG-0606 の上限入力で max CPU を測る。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 正常系 | CURRENT と応答が byte 一致 |
+| T02 | CORS / format / refresh minutes | CURRENT と同じ |
+| T03 | 上限入力 | warm max CPU を記録（7ms 未満か、超えたら additive paging を追加 unit にする） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/eventExport.parity.test.mjs
+npm run typecheck
+npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の RH-013 に Hono エンドポイント。
+#### DONE checklist
+- [ ] RH-013 の応答が CURRENT と一致
+- [ ] 64KB 超の扱いを「記録した例外」として残し、MIG-0606 で測った
+- [ ] 本番 Route を変更していない
+#### STOP
+- 応答契約を変える改善が必要になったら止める（D-12）。
+- 本番 Worker・Route・secret・Remote D1 の操作は明示承認が出るまで止める。
+#### Rollback
+PRをrevert（Hono route を足すだけで、本番 Route・D1・secret の変更は無い）。
+
+### MIG-0633: event ownership / permission resolver core（D-10 R-CORE）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0617 が DONE になった後に READY。Sonnet 不可（最後の owner を外せない不変条件を含むため lead）
+- **Recipe:** R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0613, MIG-0617 / **Decisions:** D-10 DECIDED
+- **Verified against:** `2b4504c2` (2026-10-24)
+#### Source snapshot
+- 対象: `src/lib/auth/ownership.ts` と permissions resolver、`src/lib/event/eventOwnership.ts`（`remainingOperableEventOwnerSql` の owner 0 guard）。
+- 境界のある純粋部分だけを `packages/server-core/src/event/ownership` に移し、Next 側は bridge の re-export にする（呼び出し側の変更 0）。
+- MIG-0604 U04（SA-023/024/031..034/038/039/056..068 の非 admin 権限と owner 0 guard）の前提。FIX-0604-1（lead 追跡の follow-up、MIG id ではない）の前提でもある。
+#### Owned paths
+- 新規: `+packages/server-core/src/event/ownership/**`
+- 変更: `src/lib/auth/ownership.ts`, `src/lib/event/eventOwnership.ts`（bridge 化）, `packages/server-core/package.json`（exports）
+- 触らない: `app/**`, `src/lib/actions/**`
+#### Micro-units
+- **U01 golden**: 移動前の tree で resolver と owner 0 guard の golden を書く。
+- **U02 move**: core へ移し、bridge の 1 行目に `// Compatibility bridge (MIG-0633, D-10): ...` を書く。
+- **U03 boundary**: `check-server-core-boundaries.mjs` を通す。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 最後の owner の解任 | SQL guard により拒否 |
+| T02 | 権限 resolver の各 role | golden と diff 0 |
+| T03 | 既存 test の件数 | 同一 |
+#### Commands
+```bash
+npm run typecheck
+npm run typecheck --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run test:critical
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に core の新規行。
+#### DONE checklist
+- [ ] golden の diff 0、既存 test の件数同一、呼び出し側の diff 0
+- [ ] 最後の owner の解任が core test で拒否される
+- [ ] FIX-0604-1 の前提として MIG-0604 の担当に伝えた
+#### STOP
+- owner 0 guard の SQL が 1 文字でも変わるなら止める。
+- DB / migration / 権限緩和は上位へ。
+#### Rollback
+PRをrevert（bridge が元の `src/lib` 実装に戻る。DB・Route・secret の変更は無い）。
 
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
@@ -1473,7 +1604,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606 / **Decisions:** none
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js、`app/api/auth/[...nextauth]/route.ts`）は Phase 8 まで旧 Next に残す。
