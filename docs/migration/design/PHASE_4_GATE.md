@@ -78,7 +78,8 @@ Phase 4 Gate を承認・通過するために、以下の判断とマージが�
 ## 4. Gate チェックリスト
 
 - [x] Phase 4 の全実装タスク（MIG-0401〜0406, 0409〜0411）が `main` に merge 済みであること（MIG-0411 / PR #326 は 2026-10-23 に merge。本番 Queue・binding・workerd CPU は別項目として未了）
-- [x] ユーザー判断事項（D1 取得方式、遅延定数、ISR 描画方式）が合意・反映されていること（2026-10-18 に Yugo が決定。`work-items/MIG-0409.md`（owner decisions applied）と `work-items/MIG-0411.md`「Yugo decisions」の項目1。Queue 作成・binding・Cron 割り当て（項目2〜3）は未了で、§5 の Accepted deferrals）
+- [ ] ユーザー判断事項（D1 取得方式、遅延定数、ISR 描画方式）が合意・反映されていること
+  - 注記（チェック状態は Gate 承認記録のまま変更しない）: D1 取得方式と遅延定数は 2026-10-18 に Yugo が決定済み（`work-items/MIG-0409.md` の owner decisions applied、`work-items/MIG-0411.md` の Yugo decisions 項目1）。ISR 描画方式（Island ページの queue 再生成）は D-11 で扱い、§5 の Accepted deferrals に載せる。Queue 作成・binding・Cron 割り当て（項目2〜3）は未了。
 - [x] Fail-closed 公開可視性が検証済みであること（非公開データ漏洩 0 件）
 - [x] Free Tier 予算制約（CPU < 10ms、Cron ≤ 5、Queue ≤ 10,000）が検証済みであること（ローカル計測・設計上限の範囲。workerd / 本番 CPU と Queue メッセージ量 F-02 は未検証で、§5 の Accepted deferrals）
 - [x] `apps/site` から Next.js への依存漏洩が 0 件であること

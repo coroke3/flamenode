@@ -44,6 +44,7 @@ Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 
 - 1 iteration = exactly 1 MIG task
 - 原則 1 task = 1 short-lived branch = 1 PR = 1 squash merge
+  - 2026-10-24 以降の PR は squash merge（lead 決定）。それ以前に merge commit で入った PR の履歴は書き換えない
 - `READY → IN_PROGRESS → REVIEW → DONE` または `BLOCKED`
 - 大型MIGは `TASK_MICRO_UNITS.md` に従い、同じDraft PRのbranch `work-items/MIG-XXXX.md`にowner/current unit/tests/next unitを残して `IN_PROGRESS`のまま次wakeへ継続可能。**チェックポイント無しの放置禁止**
 - claim時にtask固有`work-items/MIG-XXXX.md`へOwner/branch/PR/affected UX/FNと対象ファイル/consumerを記録する。実装途中にSTATUSを変更しない
@@ -291,7 +292,7 @@ Validation:
 | MIG-0509 | all public data generated at build time (D-09) | BLOCKED | MIG-0507 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0509, MIG-0621, MIG-0607 |
 
-Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。MIG-0501 は未着手の残り（browser 確認、gateway 404/503 + Retry-After、/maintenance の header / theme 差、about-stats producer の配線確認、/rules 同意 form は MIG-0605 後）を READY（無 owner）にし、MIG-0502 / 0503 / 0504 / 0505 は MIG-0501 DONE、MIG-0506 は MIG-0505 DONE、MIG-0507 は MIG-0502..0506 DONE と lead 決定、MIG-0509 は MIG-0507 DONE を再開条件とする BLOCKED。MIG-0507 の like / chapter / 一覧 Island は MIG-0603 / 0605 の API 待ち。D-11（Island ページの queue 再生成、user / event / video は `excluded`）は PROVISIONAL で owner 決定待ち（OPEN_DECISIONS.md D-11、`work-items/MIG-0411.md`）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
+Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。MIG-0501 は未着手の残り（browser 確認、gateway 404/503 + Retry-After、/maintenance の header / theme 差、about-stats producer の配線確認、/rules 同意 form は MIG-0605 後）を READY（無 owner）にし、MIG-0502 / 0503 / 0504 / 0505 は MIG-0501 DONE、MIG-0506 は MIG-0505 DONE、MIG-0507 は MIG-0502..0506 DONE と lead 決定、MIG-0509 は MIG-0507 DONE を再開条件とする BLOCKED。MIG-0507 の like / chapter / 一覧 Island は MIG-0603 / 0605 の API 待ち。Island ページの queue 再生成は `excluded`（user / event / video）。D-11 の状態と決定は OPEN_DECISIONS.md の D-11 を参照（`work-items/MIG-0411.md`）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
