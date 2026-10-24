@@ -11,6 +11,10 @@ import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
+// Each case runs a real `astro build`, which needs the @flamenode/ui build. test:unit runs before it, so the cases
+// skip there; the CI REQUIRE_BUILT step fails instead of skipping.
+const skipUi = fs.existsSync(path.resolve("packages/ui/dist/index.js")) ? false : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && skipUi) throw new Error("REQUIRE_BUILT is set but " + skipUi);
 const page = fs.readFileSync("app/(public)/[id]/page.tsx", "utf-8");
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
 const NOW = Math.floor(Date.now() / 1000);
@@ -80,7 +84,7 @@ function build(videos, over = {}) {
 const clean = (r) => { fs.rmSync(r.out, { recursive: true, force: true }); fs.rmSync(r.dir, { recursive: true, force: true }); };
 const dom = (r, file) => new JSDOM(fs.readFileSync(path.join(r.out, file), "utf-8")).window.document;
 
-test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body follow CURRENT", () => {
+test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body follow CURRENT", { skip: skipUi }, () => {
   // The other pages of the build need no snapshot unless the env is set; the video build alone must be accepted
   // by every page, so give the site's other readers an empty-by-design environment (about-stats is optional).
   const r = build([["vid1", payload()]]);
@@ -127,7 +131,7 @@ test("snapshot build: YouTube-id and internal-id pages, head, JSON-LD and body f
   }
 });
 
-test("T01: a video id equal to a fixed route or asset path fails the build (route-map collision)", () => {
+test("T01: a video id equal to a fixed route or asset path fails the build (route-map collision)", { skip: skipUi }, () => {
   const colliding = payload({ video: { id: "about", youtube_video_id: null } });
   const r = build([["about", colliding]]);
   try {
@@ -138,7 +142,7 @@ test("T01: a video id equal to a fixed route or asset path fails the build (rout
   }
 });
 
-test("T02: non-public, tampered or blocked snapshots fail the build instead of publishing", () => {
+test("T02: non-public, tampered or blocked snapshots fail the build instead of publishing", { skip: skipUi }, () => {
   for (const [name, videos, over] of [
     ["private video", [["vid1", payload({ video: { visibility_status: "private" } })]], {}],
     ["hash mismatch", [["vid1", payload(), { sha256: "a".repeat(64) }]], {}],
@@ -156,5 +160,26 @@ test("T02: non-public, tampered or blocked snapshots fail the build instead of p
     } finally {
       clean(r);
     }
+  }
+});
+
+test("snapshot env: a partly set env fails the build instead of falling back to the fixture videos", { skip: skipUi }, () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-env-"));
+  const full = { FLAMENODE_SNAPSHOT_DIR: os.tmpdir(), FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(os.tmpdir(), "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
+  try {
+    for (const missing of Object.keys(full)) {
+      const env = { ...process.env, ...full };
+      delete env[missing];
+      let error = null;
+      try {
+        execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], { cwd: path.resolve("apps/site"), env, stdio: "pipe" });
+      } catch (e) {
+        error = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+      }
+      assert.notEqual(error, null, `${missing} missing: the build must fail`);
+      assert.match(error, /Snapshot env incomplete/, `${missing} missing`);
+    }
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
   }
 });

@@ -3,7 +3,8 @@
  * (CURRENT `videos/{id}.json` artifact) is projected with CURRENT's pure code: `normalizeStaticVideoDetail`,
  * `buildPublicVideoViewModelFromStatic`, `computeEventStatus`, `compactText` rules and the page's JSON-LD.
  * Root slugs are checked with the MIG-0404 route map, so a video id can never shadow a fixed route or asset.
- * No snapshot configured = no video pages. A configured but broken one fails the build.
+ * No snapshot configured = the fixture videos (videoFixtures.ts), like events and users. A partly configured env
+ * or a configured but broken snapshot (including a non-public or missing object the manifest allows) fails the build.
  */
 import type { VideoDetailData } from "@flamenode/ui";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
@@ -17,6 +18,7 @@ import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
 import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
+import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "./videoFixtures.ts";
 
 export class VideoPageBuildError extends Error {
   readonly code = "VIDEO_DETAIL_INVALID";
@@ -149,15 +151,18 @@ export async function loadVideoPagesForBuild(
   now: number = Math.floor(Date.now() / 1000),
 ): Promise<VideoPage[]> {
   const access = snapshotAccessFromEnv(env);
-  if (!access) return [];
   const pages: VideoPage[] = [];
-  for (const key of videoDetailKeys(access.options.manifest!)) {
-    pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now));
+  if (!access) {
+    for (const [id, p] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) pages.push(...buildVideoPages(p, `fixture:${id}`, now));
+  } else {
+    for (const key of videoDetailKeys(access.options.manifest!)) {
+      pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now));
+    }
   }
   // MIG-0404 route map: reserved roots, assets, duplicates and traversal are build errors.
   buildRouteMap(
     pages.filter((p) => p.slug === p.canonicalSlug).map((p) => ({ kind: "video" as const, id: p.videoId, slug: p.slug, aliases: p.slug !== p.videoId ? [p.videoId] : [] })),
-    access.options.generation,
+    access?.options.generation ?? "fixture",
   );
   return pages;
 }
