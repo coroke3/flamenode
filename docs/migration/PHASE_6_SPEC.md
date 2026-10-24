@@ -252,8 +252,10 @@ Phase 6 共通契約のとおり。
 - 触らない: `src/lib/actions/**`, `app/api/events/**`, `app/api/live/**`
 #### Micro-units
 - U01〜U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604 のとおり。
+- U01 残り RH-015 と U03 RH-012 は MIG-0631（build 時 snapshot 読み）へ、RH-013 は MIG-0632 へ、U04 の非 admin 権限・owner 0 guard は MIG-0633（ownership core）の後に MIG-0604 で実装。B5 は MIG-0617 で解消（Option A に restore_strategy は足さない）。
 #### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
-- live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2（LIMIT は名前付き定数 100 以下 / 応答 64KB 以下）を超える。CURRENT（`liveApi.ts`）が同じ 6000 件上限・`truncated` を持つため、挙動を保つ目的で変えない。6000 枠の実測応答は約 890 KiB（`public_name`、UUID 形式 id・表示名付き）/ 約 615 KiB（匿名）。5 秒 cache と 15 秒 isolate micro-cache は CURRENT と同じ。ページング化（応答契約の変更）は owner 判断として保留し、MIG-0604 では行わない。
+- live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2（LIMIT は名前付き定数 100 以下 / 応答 64KB 以下）を超える。CURRENT（`liveApi.ts`）が同じ 6000 件上限・`truncated` を持つため、挙動を保つ目的で変えない。6000 枠の実測応答は約 890 KiB（`public_name`、UUID 形式 id・表示名付き）/ 約 615 KiB（匿名）。5 秒 cache と 15 秒 isolate micro-cache は CURRENT と同じ。ページング化（応答契約の変更）は owner 判断として保留し、MIG-0604 では行わない。owner-delegate 決定（D-12、2026-10-24）: 例外として承認。MIG-0606 の 6000 枠入力で warm max を測り、7ms 以上のときだけ後続 unit で additive paging を足す。
+- RH-014（viewer overlay）は本人の枠を LIMIT 100 / JSON 64 KiB で打ち切り、超過時は CURRENT の `authUnavailable` 形（`loggedIn: true`）で fail-closed にする。CURRENT は無制限。本人の枠の読み取り失敗は CURRENT では 200 の `authUnavailable` 形だが、event 行と同じ statement で読むため 503 になる。どちらも S2（statement 3 つ以内）のための差で、`work-items/MIG-0604.md` の Known differences に記録した。`operatorOverrideAllowed` が常に false なのは CURRENT の挙動（event 行を `visibility_status` 無しで select）の再現で、修正は挙動変更として別に扱う。own-slots 100 / 64 KiB の fail-closed、503 への差、ORDER BY の明示、pending 100 件は D-12 で承認（ページング不要）。
 
 #### Test cases
 | ID | 入力/操作 | 期待 |
