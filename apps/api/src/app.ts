@@ -13,6 +13,8 @@ import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
 
+import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
+
 export const app = new Hono<AppEnv>();
 
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
@@ -24,6 +26,8 @@ app.route("/api/personal", personalRoutes);
 // MIG-0625: authenticated, admin-only, read-only Admin screens API (users / videos / events / moderation).
 app.route("/api/admin-read", adminReadRoutes);
 app.route("/api/manage", manageRoutes);
+// MIG-0605 U02 (RH-003/007/009 reads): BEFORE createAdminRoutes() so the disabled flag answers before any session read.
+app.route("/api/admin/spreadsheet", createSpreadsheetReadRoutes());
 app.route("/api/admin", createAdminRoutes());
 // Must stay after createAdminRoutes(): reuses its session + writeGuard middleware.
 app.route("/api/admin", adminEventRoutes);
