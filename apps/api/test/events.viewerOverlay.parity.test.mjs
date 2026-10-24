@@ -337,7 +337,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(stats.length > 0);
     for (const s of stats) {
       assert.ok(s.statements <= 3, `statements ${s.statements}`);
-      assert.ok(s.maxBinds <= 100, `binds ${s.maxBinds}`);
+      assert.ok(s.maxBinds <= 8, `binds ${s.maxBinds}`);
       assert.ok(s.bytes <= 64 * 1024, `bytes ${s.bytes}`);
       assert.equal(s.writes, 0);
     }
