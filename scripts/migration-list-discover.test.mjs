@@ -11,7 +11,6 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
-import { ListView } from "@flamenode/ui";
 import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } from "../apps/site/src/lib/listQuery.ts";
 import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
 import { LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, TOP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
@@ -20,6 +19,11 @@ import { formatUnix } from "../src/lib/utils/format.ts";
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "list/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+// test:unit runs before the ui build, so ListView is imported only when packages/ui/dist exists (CI REQUIRE_BUILT step fails instead of skipping).
+const uiBuilt = fs.existsSync(path.resolve("packages/ui/dist/index.js"));
+const skipUi = uiBuilt ? false : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && (skip || skipUi)) throw new Error("REQUIRE_BUILT is set but " + (skip || skipUi));
+const { ListView } = uiBuilt ? await import("@flamenode/ui") : {};
 const dom = (root, file) => new JSDOM(fs.readFileSync(path.join(root, file), "utf-8")).window.document;
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
 const listSrc = fs.readFileSync("app/(public)/list/ListIndexView.tsx", "utf-8");
@@ -172,7 +176,7 @@ test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and pu
     assert.match(text(rows[0]), /01.*作品50.*作者50.*第一回.*1週間 12,345回視聴/);
     assert.match(text(rows[1]), /02.*作品51.*1週間 7回視聴/);
     assert.equal(rows[0].querySelector("a").getAttribute("href"), "/AAAAAAAAA50");
-    assert.match(text(tr.querySelector('[role="status"]')), new RegExp(`最終更新（JST）: ${formatUnix(1790000000).replace(/[/]/g, "\\/")}`));
+    assert.match(text(tr.querySelector('main [role="status"]')), new RegExp(`最終更新（JST）: ${formatUnix(1790000000).replace(/[/]/g, "\\/")}`));
     assert.match(text(tr.querySelector("main")), /ランキングデータが古い可能性があります/, "stale at build time, as CURRENT evaluates at request time");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -199,7 +203,7 @@ test("fail closed: a configured but broken snapshot fails the build instead of p
   }
 });
 
-test("ListView display modes (Island will reuse): compact grid and CURRENT index table columns", () => {
+test("ListView display modes (Island will reuse): compact grid and CURRENT index table columns", { skip: skipUi }, () => {
   const videos = [
     { id: "a", href: "/AAAAAAAAA01", title: "作品A", thumbnailUrl: "/t.jpg", creatorName: "作者A", eventId: "ev 1", eventTitle: "第一回", dateLabel: "2026/10/01" },
     { id: "b", href: "/b", title: "作品B", thumbnailUrl: null, creatorName: "作者B", eventId: null, dateLabel: "-" },

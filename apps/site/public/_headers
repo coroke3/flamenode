@@ -1,0 +1,22 @@
+# MIG-0620: CURRENT public/_headers の値を新 Worker (Astro 静的出力) へ移す。
+# 同じ URL に複数 rule が一致すると Cache-Control は結合されるため、
+# 一般 rule を先に置き、hash 付き prefix は `! Cache-Control` で打ち消してから設定する。
+# HTML (/, /about, /<id> など) には rule を置かない (immutable にしない)。
+
+/favicon.ico
+  Cache-Control: public, max-age=86400
+
+# CURRENT と同じ。/brand/* と /fonts/* の png / webp / svg もここに入る。
+/*.png
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.webp
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+/*.svg
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
+
+# Astro の build 出力は内容 hash 付き。
+/_astro/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable

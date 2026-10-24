@@ -1,5 +1,5 @@
 // MIG-0501 coverage-gap units (G05 head extras, G06 WebSite JSON-LD, G07 GA4, G08 theme/fonts, G10 404/503,
-// G23 /maintenance, about-stats snapshot) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
+// G23 text row, about-stats snapshot; /maintenance is MIG-0619-owned (PublicPage, no JS) so G10/G23 text rows only cross-check it) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
 // not-found/error/maintenance pages and @next/third-parties.
 // Run `npm run build -w @flamenode/ui && npm run build -w @flamenode/site` first.
 import assert from "node:assert/strict";
@@ -12,7 +12,6 @@ import test from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
-import { AboutView } from "@flamenode/ui";
 import {
   THEME_BOOTSTRAP_CODE, buildSiteJsonLd, serializeJsonLd, gaMeasurementId, gaInitScript, gaLoaderSrc, buildPageHead,
 } from "../apps/site/src/lib/pageHead.ts";
@@ -22,6 +21,9 @@ import { loadAboutStatsForBuild } from "../apps/site/src/lib/aboutStats.ts";
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "about/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+const uiBuilt = fs.existsSync(path.resolve("packages/ui/dist/index.js"));
+const skipUi = uiBuilt ? false : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && (skip || skipUi)) throw new Error("REQUIRE_BUILT is set but " + (skip || skipUi));
 const html = (file) => fs.readFileSync(path.join(DIST, file), "utf-8");
 const dom = (file) => new JSDOM(html(file)).window.document;
 const rootLayout = fs.readFileSync("app/layout.tsx", "utf-8");
@@ -30,7 +32,7 @@ const seo = fs.readFileSync("src/lib/seo.ts", "utf-8");
 test("G08: theme bootstrap is CURRENT's script verbatim and runs before the first stylesheet/body", { skip }, () => {
   const current = rootLayout.match(/const themeBootstrapCode = `([^`]*)`;/)[1];
   assert.equal(THEME_BOOTSTRAP_CODE, current);
-  for (const route of ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html"]) {
     const text = html(route);
     const at = text.indexOf(current);
     assert.ok(at > 0, `${route}: bootstrap inlined`);
@@ -72,7 +74,7 @@ test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is em
   }
   assert.ok(seo.includes('"映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。"'));
   assert.ok(rootLayout.includes('id="flamenode-site-structured-data"'));
-  for (const route of ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html", "503/index.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html", "503/index.html"]) {
     const script = dom(route).querySelector('script#flamenode-site-structured-data[type="application/ld+json"]');
     assert.deepEqual(JSON.parse(script.textContent), JSON.parse(serializeJsonLd(ld)));
   }
@@ -103,7 +105,7 @@ test("G05: root-layout head extras (manifest, icons, apple, robots, locale, them
   assert.equal(buildPageHead({ path: "/x", title: "t", noIndex: true }).noindex, true);
 });
 
-test("G07: GA4 tag is absent without the env and identical to @next/third-parties when set", { skip }, () => {
+test("G07: GA4 tag is absent without the env and identical to @next/third-parties when set", { skip: skip || skipUi }, () => {
   for (const route of ["about/index.html", "rules/index.html"]) assert.equal(html(route).includes("googletagmanager"), false);
   assert.equal(gaMeasurementId({}), null);
   assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: " G-ABC123 " }), "G-ABC123");
@@ -188,7 +190,8 @@ test("about stats at build: shown from a verified snapshot, hidden (not failed) 
   }
 });
 
-test("about stats render: CURRENT numbers, ja-JP grouping, unit 件, labels and notes; nothing without stats", () => {
+test("about stats render: CURRENT numbers, ja-JP grouping, unit 件, labels and notes; nothing without stats", { skip: skipUi }, async () => {
+  const { AboutView } = await import("@flamenode/ui");
   const doc = (props) => new JSDOM(renderToStaticMarkup(React.createElement(AboutView, props))).window.document;
   const shown = doc({ stats: { publicVideos: 3240, creators: 812, events: 46 } });
   const items = [...shown.querySelectorAll(".metric")].map((m) => [m.querySelector("b").textContent, m.querySelectorAll("span")[0].textContent, m.querySelectorAll("span")[1].textContent]);

@@ -279,7 +279,7 @@ const MODES: readonly { mode: ReleaseMode; label: string; icon: "list" | "image"
 export function EventReleaseView({ model, mode, onModeChange, className }: EventReleaseViewProps): React.ReactElement {
   return (
     <div className={cx("p-root fn-screen", className)}>
-      <main className="wrap ev-release">
+      <main className="wrap ev-scope ev-release">
         <Link href={`/event/${encodeURIComponent(model.eventId)}`} className="il t-sm muted">
           <ScreenIcon name="arrowLeft" />
           {model.eventTitle}

@@ -57,7 +57,7 @@ Static Assetsは`run_worker_first = false`とし、静的ファイルを通常�
 13. D1 bindingは全4 Workerで既存の論理名へ一致させる。
 14. R2 bindingはWebとcontent-jobsで既存の論理名へ一致させる。
 15. KV bindingは全4 Workerで既存の論理名へ一致させる。
-16. Cron Triggerはfast、content、syncのRecovery Cron 4式だけにする（アカウント合計がCloudflare上限5件以内であることを確認する。リポジトリ外の既存Triggerは削除しない）。
+16. Cron Triggerはfast、content、syncのRecovery Cron 3式だけにする（アカウント合計がCloudflare上限5件以内であることを確認する。リポジトリ外の既存Triggerは削除しない）。
 17. Queue 6本（wake 3 + DLQ 3）を作成し、producer/consumer bindingをwrangler群どおり接続する。
 18. Queue feature flagは全Workerでデフォルト`"0"`とし、段階的に有効化する。
 19. 旧Pages Git Integrationを停止し、新しいBuildと二重起動させない。
@@ -191,9 +191,9 @@ deploy preflightはremoteに登録されたsecretの**名前だけ**を検査し
 | --- | --- |
 | `flamenode-fast-jobs` | `0 * * * *` |
 | `flamenode-content-jobs` | `15 * * * *` |
-| `flamenode-sync-jobs` | `7 * * * *`、`52 * * * *` |
+| `flamenode-sync-jobs` | `7,52 * * * *`（毎時7分・52分） |
 
-Cron WorkerへGit連携を追加せず、上記4式以外のTriggerを増やしません。CloudflareアカウントのCron Trigger合計が上限5件以内であることをDashboardで確認します（リポジトリ外の既存Triggerは削除しません）。
+Cron WorkerへGit連携を追加せず、上記3式以外のTriggerを増やしません。CloudflareアカウントのCron Trigger合計が上限5件以内であることをDashboardで確認します（リポジトリ外の既存Triggerは削除しません）。
 
 ## 5. 初回resource / Worker準備
 

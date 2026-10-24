@@ -7,8 +7,7 @@
  * no published, manifest-allowed profile object (banned, merged, unapproved, private) gets no page, so the
  * gateway answers 404. With no snapshot configured the fixtures stand in so the build stays testable.
  */
-import fs from "node:fs";
-import path from "node:path";
+import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import {
   SnapshotBuildError,
   loadUserProfileSnapshot,
@@ -103,20 +102,11 @@ export function snapshotPayloadSource(
   };
 }
 
-/** Env-configured snapshot directory, or null (fixtures). A configured but unreadable manifest throws. */
+/** Env-configured snapshot, or null (fixtures: only when NO snapshot variable is set). A partly configured or unreadable snapshot throws. */
 export function userPayloadSourceFromEnv(env: Record<string, string | undefined> = process.env): UserPayloadSource | null {
-  const dir = env.FLAMENODE_SNAPSHOT_DIR?.trim();
-  const manifestFile = env.FLAMENODE_SNAPSHOT_MANIFEST_FILE?.trim();
-  const generation = env.FLAMENODE_SNAPSHOT_GENERATION?.trim();
-  if (!dir || !manifestFile || !generation) return null;
-  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf-8")) as SnapshotManifest;
-  const fileSource: SnapshotSource = {
-    async read(key) {
-      const file = path.join(dir, key);
-      return fs.existsSync(file) ? new Uint8Array(fs.readFileSync(file)) : null;
-    },
-  };
-  return snapshotPayloadSource(fileSource, manifest, generation);
+  const access = snapshotAccessFromEnv(env);
+  if (!access) return null;
+  return snapshotPayloadSource(access.source, access.options.manifest, access.options.generation);
 }
 
 async function loadPages(

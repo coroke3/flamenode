@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { getDatabase } from "@/lib/cloudflare";
@@ -18,6 +17,13 @@ import {
 } from "@/lib/staticRebuild/publicReflectionNotice";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { normalizeXId } from "@/lib/utils/xid";
+import {
+  parseSetUserBannedInput,
+  parseSetUserCanCreateEventsInput,
+  parseSetUserNotificationsInput,
+  parseSetUserRoleInput,
+  userNotificationsAuditReason,
+} from "@flamenode/domain/user";
 
 export interface UserAdminResult extends PendingPublicReflection {
   ok: boolean;
@@ -163,22 +169,12 @@ async function getTargetUser(
   return (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0] ?? null;
 }
 
-const roleSchema = z.object({
-  user_id: z.string().trim().min(1),
-  role: z.enum(["user", "moderator", "admin"]),
-});
-
 export async function setUserRole(formData: FormData): Promise<UserAdminResult> {
   const guard = await requireAdminWrite("admin_user_role");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = roleSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
-  const { user_id, role } = parsed.data;
-  if (user_id === guard.user.id && role !== "admin") {
-    return { ok: false, message: "自分自身の管理者権限は解除できません。" };
-  }
+  const parsed = parseSetUserRoleInput(Object.fromEntries(formData), guard.user.id);
+  if (!parsed.ok) return parsed;
+  const { user_id, role } = parsed;
   const { db } = guard;
   const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
@@ -196,26 +192,12 @@ export async function setUserRole(formData: FormData): Promise<UserAdminResult> 
   return result;
 }
 
-const banSchema = z.object({
-  user_id: z.string().trim().min(1),
-  is_banned: z.coerce.number().int().min(0).max(1),
-  reason: z.string().trim().max(500).optional().nullable(),
-});
-
 export async function setUserBanned(formData: FormData): Promise<UserAdminResult> {
   const guard = await requireAdminWrite("admin_user_ban");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = banSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
-  const { user_id, is_banned, reason } = parsed.data;
-  if (user_id === guard.user.id && is_banned === 1) {
-    return { ok: false, message: "自分自身をBANにはできません。" };
-  }
-  if (is_banned === 1 && !reason) {
-    return { ok: false, message: "BANには理由が必要です。" };
-  }
+  const parsed = parseSetUserBannedInput(Object.fromEntries(formData), guard.user.id);
+  if (!parsed.ok) return parsed;
+  const { user_id, is_banned, auditReason } = parsed;
   const { db } = guard;
   const target = await getTargetUser(db, user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
@@ -226,7 +208,7 @@ export async function setUserBanned(formData: FormData): Promise<UserAdminResult
     patch: { is_banned },
     retentionClass: "long_audit",
     context: "admin_user_ban",
-    reason: reason || (is_banned === 0 ? "BAN解除" : null),
+    reason: auditReason,
   });
   if (result.ok) {
     await revalidateUserDetailPathsBestEffort(user_id);
@@ -234,26 +216,19 @@ export async function setUserBanned(formData: FormData): Promise<UserAdminResult
   return result;
 }
 
-const notifSchema = z.object({
-  user_id: z.string().trim().min(1),
-  is_notification_enabled: z.coerce.number().int().min(0).max(1),
-});
-
 export async function setUserNotifications(
   formData: FormData,
 ): Promise<UserAdminResult> {
   const guard = await requireAdminWrite("admin_user_notifications");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = notifSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
+  const parsed = parseSetUserNotificationsInput(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
 
   const { db } = guard;
-  const target = await getTargetUser(db, parsed.data.user_id);
+  const target = await getTargetUser(db, parsed.user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
 
-  const disabling = parsed.data.is_notification_enabled === 0;
+  const disabling = parsed.is_notification_enabled === 0;
   const now = Math.floor(Date.now() / 1000);
   const pendingCount = disabling
     ? Number(
@@ -294,49 +269,40 @@ export async function setUserNotifications(
     db,
     actorUserId: guard.user.id,
     target,
-    patch: { is_notification_enabled: parsed.data.is_notification_enabled },
+    patch: { is_notification_enabled: parsed.is_notification_enabled },
     retentionClass: "normal",
     context: "admin_user_notifications",
-    reason: disabling
-      ? `通知をOFFにし、未送信のpending通知${pendingCount}件をキャンセル`
-      : "通知をONに変更",
+    reason: userNotificationsAuditReason(disabling, pendingCount),
     extraStatements: pendingCancellation ? [pendingCancellation] : [],
     extraExpectedChanges: pendingCancellation ? [pendingCount] : [],
   });
 
   if (result.ok) {
-    await revalidateUserNotificationPathsBestEffort(parsed.data.user_id);
+    await revalidateUserNotificationPathsBestEffort(parsed.user_id);
   }
   return result;
 }
-
-const eventCreateSchema = z.object({
-  user_id: z.string().trim().min(1),
-  can_create_events: z.coerce.number().int().min(0).max(1),
-});
 
 export async function setUserCanCreateEvents(
   formData: FormData,
 ): Promise<UserAdminResult> {
   const guard = await requireAdminWrite("admin_user_event_create");
   if (!guard.ok) return { ok: false, message: guard.message };
-  const parsed = eventCreateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { ok: false, message: parsed.error.issues[0]?.message ?? "入力エラー" };
-  }
+  const parsed = parseSetUserCanCreateEventsInput(Object.fromEntries(formData));
+  if (!parsed.ok) return parsed;
   const { db } = guard;
-  const target = await getTargetUser(db, parsed.data.user_id);
+  const target = await getTargetUser(db, parsed.user_id);
   if (!target) return { ok: false, message: "対象ユーザーが見つかりません。" };
   const result = await updateUserAtomic({
     db,
     actorUserId: guard.user.id,
     target,
-    patch: { can_create_events: parsed.data.can_create_events },
+    patch: { can_create_events: parsed.can_create_events },
     retentionClass: "long_audit",
     context: "admin_user_event_create",
   });
   if (result.ok) {
-    await revalidateUserEventCreatePathsBestEffort(parsed.data.user_id);
+    await revalidateUserEventCreatePathsBestEffort(parsed.user_id);
   }
   return result;
 }

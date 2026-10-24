@@ -107,13 +107,14 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
   return (
     <div className={cx("p-root fn-screen", className)}>
       {event.imageUrl ? <Image className="ed-visual" src={event.imageUrl} alt={`${event.title} メインビジュアル`} /> : null}
-      <main className={cx("wrap", !event.imageUrl && "ed-novisual")}>
+      <main className={cx("wrap", "ev-scope", !event.imageUrl && "ed-novisual")}>
         <header className="ed-head">
           <div className="row ed-id">
             {event.iconUrl ? <Image className="ev-icon ed-ic" src={event.iconUrl} alt="" width={112} height={112} /> : null}
             <div className="stack ed-titles">
               <span className="wrap-row t-sm ed-status">
-                <Badge status={event.statusTone ?? "draft"} label={event.statusLabel} />
+                {/* An empty label would fall back to Badge's DRAFT, which CURRENT never shows. */}
+                {event.statusLabel ? <Badge status={event.statusTone ?? "draft"} label={event.statusLabel} /> : null}
                 {event.periodLabel ? <span className="muted t-num">{event.periodLabel}</span> : null}
               </span>
               <h1 className="t-display">{event.title}</h1>

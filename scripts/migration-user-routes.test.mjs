@@ -20,11 +20,15 @@ const { createRoot } = await import("react-dom/client");
 const { renderToString } = await import("react-dom/server");
 const { act } = React;
 const h = React.createElement;
-const { loadUserBuildDataFrom, fixturePayloadSource, snapshotPayloadSource } = await import("../apps/site/src/lib/userData.ts");
+const { loadUserBuildDataFrom, fixturePayloadSource, snapshotPayloadSource, userPayloadSourceFromEnv } = await import("../apps/site/src/lib/userData.ts");
 const views = await import("../apps/site/src/lib/userViews.ts");
 const { buildPageHead, compactText } = await import("../apps/site/src/lib/pageHead.ts");
-const { CreatorProfileIsland } = await import("../apps/site/src/components/CreatorProfileIsland.ts");
-const { UsersIndexIsland } = await import("../apps/site/src/components/UsersIndexIsland.ts");
+// test:unit runs before the ui build, so the Islands (which import @flamenode/ui) load only when packages/ui/dist exists;
+// the CI REQUIRE_BUILT step fails instead of skipping.
+const uiBuilt = fs.existsSync(path.resolve("packages/ui/dist/index.js"));
+const skipUi = uiBuilt ? false : "packages/ui/dist missing: build @flamenode/ui first";
+const { CreatorProfileIsland } = uiBuilt ? await import("../apps/site/src/components/CreatorProfileIsland.ts") : {};
+const { UsersIndexIsland } = uiBuilt ? await import("../apps/site/src/components/UsersIndexIsland.ts") : {};
 const { SnapshotBuildError } = await import("../apps/site/src/lib/publicDataLoader.ts");
 const { parseSocialLinks } = await import("../src/lib/socialLinks.ts");
 const { clampPaging, totalPagesFor } = await import("../src/lib/utils/sql.ts");
@@ -34,6 +38,7 @@ const { FIXTURE_USER_PROFILES, FIXTURE_USERS_INDEX } = await import("../apps/sit
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "user/index.html")) && fs.existsSync(path.join(DIST, "user/miku_producer/index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+if (process.env.REQUIRE_BUILT && (skip || skipUi)) throw new Error("REQUIRE_BUILT is set but " + (skip || skipUi));
 const loadHtml = (file) => new JSDOM(fs.readFileSync(path.join(DIST, file), "utf-8")).window.document;
 const meta = (doc, sel) => doc.querySelector(sel)?.getAttribute("content");
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
@@ -278,7 +283,7 @@ async function profileProps(id) {
   };
 }
 
-test("T05 profile Island: ?worksPage=3 shows display page 3; unknown/empty values stay on page 1; a 404 page shows a notice", async () => {
+test("T05 profile Island: ?worksPage=3 shows display page 3; unknown/empty values stay on page 1; a 404 page shows a notice", { skip: skipUi }, async () => {
   const props = await profileProps("long_list");
   const titles = (c) => [...c.querySelectorAll(".fn-vc__title")].map((n) => n.textContent);
   let m = await mountIsland(`${DOM_URL}`, h(CreatorProfileIsland, props));
@@ -305,7 +310,7 @@ test("T05 profile Island: ?worksPage=3 shows display page 3; unknown/empty value
   await act(async () => m.root.unmount());
 });
 
-test("T05 index Island: ?q= ?sort= ?page= are applied from /user/index.json like CURRENT; a failed fetch shows the unavailable notice", async () => {
+test("T05 index Island: ?q= ?sort= ?page= are applied from /user/index.json like CURRENT; a failed fetch shows the unavailable notice", { skip: skipUi }, async () => {
   const data = await loadUserBuildDataFrom(fixturePayloadSource());
   const initial = views.computeUsersIndexView(data.index, "", "score", 1);
   const original = globalThis.fetch;
@@ -397,4 +402,16 @@ test("head builder: page image replaces the brand card without size/type; noinde
   const brand = buildPageHead({ path: "/about", title: "T" });
   assert.equal(brand.ogImageWidth, 1200);
   assert.equal(brand.ogImageType, "image/png");
+});
+
+test("snapshot env: all unset means fixtures, a partly set configuration fails the build (never silently falls back to fixtures)", () => {
+  assert.equal(userPayloadSourceFromEnv({}), null);
+  assert.equal(userPayloadSourceFromEnv({ FLAMENODE_SNAPSHOT_DIR: " ", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "", FLAMENODE_SNAPSHOT_GENERATION: undefined }), null);
+  const full = { FLAMENODE_SNAPSHOT_DIR: "/x", FLAMENODE_SNAPSHOT_MANIFEST_FILE: "/x/manifest.json", FLAMENODE_SNAPSHOT_GENERATION: "g1" };
+  for (const missing of Object.keys(full)) {
+    const partial = { ...full, [missing]: undefined };
+    assert.throws(() => userPayloadSourceFromEnv(partial), /Snapshot env incomplete/, `${missing} missing`);
+  }
+  // A complete configuration with an unreadable manifest throws too.
+  assert.throws(() => userPayloadSourceFromEnv(full));
 });

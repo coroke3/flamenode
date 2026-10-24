@@ -15,6 +15,8 @@ import { buildTopView, loadTopForBuild, recruitState, recruitCountdown, toEventC
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "index.html"));
 const skip = built ? false : "apps/site/dist missing: build @flamenode/site first";
+// test:unit runs before the site build; the CI REQUIRE_BUILT step fails instead of skipping.
+if (process.env.REQUIRE_BUILT && skip) throw new Error("REQUIRE_BUILT is set but " + skip);
 const dom = (root, file = "index.html") => new JSDOM(fs.readFileSync(path.join(root, file), "utf-8")).window.document;
 const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
 const page = fs.readFileSync("app/(public)/page.tsx", "utf-8");
@@ -139,18 +141,18 @@ test("snapshot build: intro, news, recruit cards, shelves, events and CTA follow
 
     const ids = [...main.querySelectorAll("section[aria-labelledby]")].map((s) => s.getAttribute("aria-labelledby"));
     assert.deepEqual(ids, ["sec-trending", "sec-recommend", "sec-latest", "sec-nostalgic", "sec-events"], "CURRENT order");
-    for (const shelf of main.querySelectorAll(".shelf")) {
+    for (const shelf of main.querySelectorAll(".tp-shelf")) {
       assert.equal(shelf.getAttribute("tabindex"), "0", "keyboard-scrollable region");
-      assert.ok(shelf.querySelectorAll(".shelf-i").length <= 8);
+      assert.ok(shelf.querySelectorAll(".tp-shelf-i").length <= 8);
       assert.equal(shelf.getAttribute("role"), "region");
     }
     const trending = main.querySelector("#sec-trending").closest("section");
-    assert.deepEqual([...trending.querySelectorAll(".shelf-rank")].map(text), ["1", "2", "3", "4", "5", "6", "7", "8"]);
+    assert.deepEqual([...trending.querySelectorAll(".tp-shelf-rank")].map(text), ["1", "2", "3", "4", "5", "6", "7", "8"]);
     assert.equal(trending.querySelector(".sec-head a").getAttribute("href"), "/trending");
     const links = Object.fromEntries([...main.querySelectorAll("section.tp-sec")].map((s) => [s.querySelector("h2").id, s.querySelector(".sec-head a")?.getAttribute("href")]));
     assert.deepEqual(links, { "sec-trending": "/trending", "sec-recommend": "/recommend", "sec-latest": "/list", "sec-nostalgic": "/list?sort=old", "sec-events": "/event" });
     assert.equal(text(main.querySelector("#sec-nostalgic ~ *, #sec-nostalgic").closest("section").querySelector(".sec-head a")), "過去の作品を見る →".replace(" →", ""));
-    const pickHrefs = [...main.querySelector("#sec-recommend").closest("section").querySelectorAll(".shelf-i a")].map((a) => a.getAttribute("href"));
+    const pickHrefs = [...main.querySelector("#sec-recommend").closest("section").querySelectorAll(".tp-shelf-i a")].map((a) => a.getAttribute("href"));
     assert.equal(pickHrefs.length, 8);
     assert.ok(pickHrefs.every((h) => /^\/AAAAAAAAA\d\d$/.test(h)) && !pickHrefs.includes("/AAAAAAAAA99"));
     assert.equal(main.querySelectorAll("#sec-events ~ .grid-v a, section[aria-labelledby=sec-events] .grid-v a").length, 4, "CURRENT keeps 4 latest events");
@@ -167,6 +169,11 @@ test("trending joins the top page only while fresh (CURRENT tooOldForHome); brok
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-top-bad-"));
   try {
     assert.equal((await loadTopForBuild({}, nowSec)).shelves[0].id, "recommend");
+    // a partly set snapshot env never silently falls back to the empty page
+    const full = writeSnapshot(dir);
+    for (const missing of Object.keys(full)) {
+      await assert.rejects(loadTopForBuild({ ...full, [missing]: undefined }, nowSec), /Snapshot env incomplete/, `${missing} missing`);
+    }
     const fresh = await loadTopForBuild(writeSnapshot(dir), nowSec);
     assert.equal(fresh.shelves[0].id, "trending");
     const old = await loadTopForBuild(writeSnapshot(dir, { trending: trendingPayload(nowSec - 25 * 3600) }), nowSec);

@@ -9,8 +9,6 @@
  * (private, unknown schema) produces no page; the id is logged. An unreadable index renders CURRENT's
  * "一時的に表示できません" state instead of an empty list.
  */
-import fs from "node:fs";
-import path from "node:path";
 import { normalizeStaticEventsIndex, type StaticEventsIndex } from "../../../../src/lib/publicData/staticEventsIndexCore.ts";
 import { normalizeStaticEventDetail, type StaticEventDetail } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
 import { normalizeStaticEventRelease, type StaticEventRelease } from "../../../../src/lib/publicData/staticEventReleaseCore.ts";
@@ -26,6 +24,7 @@ import {
   type SnapshotManifest,
   type SnapshotSource,
 } from "./publicDataLoader.ts";
+import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import {
   FIXTURE_EVENTS_INDEX_PAYLOAD,
   FIXTURE_EVENT_DETAIL_PAYLOADS,
@@ -49,6 +48,9 @@ function idsFromManifest(manifest: SnapshotManifest, pattern: RegExp): string[] 
   }
   return ids.sort();
 }
+
+/** Missing / non-public objects mean "no page"; any other failure (hash, generation, envelope, json, source) fails the build. */
+const SKIPPABLE = new Set(["NOT_PUBLIC", "SNAPSHOT_MISSING"]);
 
 function describe(error: unknown): string {
   return error instanceof SnapshotBuildError ? error.code : error instanceof Error ? error.message : "UNKNOWN";
@@ -87,10 +89,9 @@ export async function loadEventBuildData(
   env: Record<string, string | undefined> = process.env,
   injected?: { source: SnapshotSource; manifest: SnapshotManifest; generation: string },
 ): Promise<EventBuildData> {
-  const dir = env.FLAMENODE_SNAPSHOT_DIR?.trim();
-  const manifestFile = env.FLAMENODE_SNAPSHOT_MANIFEST_FILE?.trim();
-  const generation = env.FLAMENODE_SNAPSHOT_GENERATION?.trim();
-  if (!injected && (!dir || !manifestFile || !generation)) {
+  // Fixtures stand in only when NO snapshot variable is set; a partly configured snapshot throws (same as users/listings).
+  const access = injected ? null : snapshotAccessFromEnv(env);
+  if (!injected && !access) {
     return buildEventDataFromPayloads({
       source: "fixture",
       index: FIXTURE_EVENTS_INDEX_PAYLOAD,
@@ -98,20 +99,17 @@ export async function loadEventBuildData(
       releases: FIXTURE_EVENT_RELEASE_PAYLOADS,
     });
   }
-  const manifest = injected?.manifest ?? (JSON.parse(fs.readFileSync(manifestFile!, "utf-8")) as SnapshotManifest);
-  const gen = injected?.generation ?? generation!;
-  const source: SnapshotSource = injected?.source ?? {
-    async read(key) {
-      const file = path.join(dir!, key);
-      return fs.existsSync(file) ? new Uint8Array(fs.readFileSync(file)) : null;
-    },
-  };
-  const options: SnapshotLoadOptions = { manifest, generation: gen };
+  const source: SnapshotSource = injected?.source ?? access!.source;
+  const options: SnapshotLoadOptions = injected
+    ? { manifest: injected.manifest, generation: injected.generation }
+    : access!.options;
+  const manifest = options.manifest;
 
   let indexPayload: unknown | null = null;
   try {
     indexPayload = await loadEventPayloadSnapshot(source, EVENT_INDEX_KEY, options);
   } catch (error) {
+    if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
     console.warn(`[event] index unavailable: ${describe(error)}`);
   }
   const read = async (ids: string[], key: (id: string) => string): Promise<Record<string, unknown>> => {
@@ -120,6 +118,7 @@ export async function loadEventBuildData(
       try {
         out[id] = await loadEventPayloadSnapshot(source, key(id), options);
       } catch (error) {
+        if (!(error instanceof SnapshotBuildError && SKIPPABLE.has(error.code))) throw error;
         console.warn(`[event] no page for ${id}: ${describe(error)}`);
       }
     }

@@ -1,7 +1,7 @@
 # FlameNode Migration Decisions — adopted options & remaining evidence
 
 > Status: Active / 仕様上の採用方針と実行ゲートの正本
-> Last updated: 2026-10-15
+> Last updated: 2026-10-23
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
@@ -24,6 +24,8 @@
 | D-07 | **A: Workers環境でもAuth.js/@auth/coreを継続利用** | DECIDED | MIG-0802..0806 | cookie/session/CSRF/OAuth非本番互換PoC |
 | D-08 | **A: HTMLモックを先に確定してからUIを移行** | DECIDED | MIG-0200..0206 / MIG-0402,0403 / Phase5 visual | デザインモック受領・登録完了（docs/migration/mock/、UI_REFERENCE.md）。Phase 2抽出アンロック。 |
 | D-09 | **A: 一覧・検索などの公開データは build 時に作り、更新は deploy hook で build を起こす。作品・ユーザー・イベントの個別ページは ISR 相当（更新されたページだけを Queue で R2 HTML に作り直す、2026-10-16 改訂）。残る背景処理は 1回 8ms 未満に分ける** | DECIDED | MIG-0409, MIG-0410, MIG-0411, MIG-0509, MIG-0609, MIG-0610, MIG-0907。`ZERO_1102.md` G2 | build 時の D1 読み取り用 token と deploy hook URL（どちらも secret）の作成、本番の Cron / Queue 変更は作業直前の明示承認 |
+| D-10 | **共有 server core `@flamenode/server-core`（drizzle handle 注入、framework 非依存）を作り、Next（bridge 経由）と Hono の両方が使う** | DECIDED | MIG-0612〜0618。MIG-0603〜0605 の未着手 unit | source code の移動だけ。Remote D1 / deploy / Route / secret は対象外 |
+| D-11 | **Island ページの queue 再生成の parity（Astro serializer port / AstroContainer 同梱 / build cadence 受容）** | PROVISIONAL | MIG-0411 follow-up, MIG-0502/0504/0507 | lead の決定。production queue は未配線のため現時点の影響なし |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -163,3 +165,43 @@ Hono/Workersで`@auth/core`と既存D1 adapter, `user/account/session`, cookie�
 | MIG-0609 | 残る背景処理（状態を更新する job）の CPU を非本番で測る |
 | MIG-0610 | 予算を超えた job を、1回 8ms 未満になるよう分割する |
 | MIG-0907 | 本番切替と観測の後、`workers/json-generator` と static rebuild queue を消す |
+
+## D-10 — Next と Hono が共有する server core（`packages/server-core`、2026-10-23 決定）
+
+owner Yugo の standing instruction「検討事項は推奨で進めて」に基づき、lead が決定した。
+
+背景: 監査付き mutation（`mutateWithAudit`）の呼び出しは 81 箇所・34 file、`mutate` + `logger` の import 連鎖は 32 file・約 4,000 行で、`server-only` 5・`getCloudflareContext` 直接 3・`@/` alias 8・`process.env` 1 を含む。MIG-0602 は Hono 側に監査の写し（Option A copy）を作って暫定的に動かしているが、写しを増やすと CURRENT との乖離が起きる（MIG-0603〜0605 は同じ監査・wake を再利用する）。`packages/domain` は DB を持たない純粋ロジックで、`apps/api` は HTTP の薄い層なので、どちらにも置けない。
+
+決定: framework 非依存の server core `@flamenode/server-core`（`packages/server-core`）を作り、Next（`src/lib/**` の re-export bridge 経由、呼び出し側の変更 0）と `apps/api`（Hono）の両方が使う。
+
+| 項目 | 内容 |
+| --- | --- |
+| DB | `drizzle-orm/d1` の drizzle handle を引数で受け取る。schema は `@flamenode/db`。relational API（`db.query.*`）は使わない |
+| 許可 | transaction（D1 `batch`）、監査 INSERT、Queue wake の enqueue |
+| 禁止 | `next/*`, `react`, `hono`, `astro`, `server-only`, `@/`, `src/`, `app/`, `process.env`, `getCloudflareContext`, `@opennextjs/cloudflare`（`scripts/check-server-core-boundaries.mjs` が検査） |
+| 環境の注入 | env の値・KV・Queue・`waitUntil`・R2・edge cache・`unstable_rethrow` 相当は `src/ports.ts` の型で関数引数として渡す。Next 側の供給元は `src/lib/serverCore/nextPorts.ts`（MIG-0613） |
+| 移さないもの | `src/lib/publicData/loader.ts`（[`ZERO_1102.md`](ZERO_1102.md) §4.1 / §4.7 と D-09 に反する）。境界のある純粋な `*Core.ts` だけを、各 API の task で必要になった時に抜き出す |
+| 残すもの | `revalidatePath` / `revalidateTag` は Next の Server Action に残す（Hono は呼ばない） |
+| 暫定 | MIG-0602 の `apps/api` の写し（Option A）は MIG-0617 で core に置き換えて削除する |
+
+適用 task: MIG-0612〜0618（[`PHASE_6_SPEC.md`](PHASE_6_SPEC.md)）。MIG-0603 / 0604 / 0605 の未着手の unit は MIG-0613 / 0615 の後に core を使う。
+
+| task | 内容 |
+| --- | --- |
+| MIG-0612 | D-10、package の足場、ports の型、境界検査、R-CORE レシピ |
+| MIG-0613 | 監査 mutation core（`src/lib/audit/**` と `src/lib/queues/**` の wake） |
+| MIG-0614 | static rebuild の enqueue、通知 batch、visibility fence store、public cache の削除 |
+| MIG-0615 | video / event / xUser の可視性遷移 planner |
+| MIG-0616 | audit restore |
+| MIG-0617 | `apps/api` の Option A を core に置き換える |
+| MIG-0618 | xid merge core |
+
+決定の経緯: owner Yugo の standing instruction「検討事項は推奨で進めて」（推奨案と Fable の判断で決める）に基づく。lead の決定を Opus (high) と Fable が #338 でレビューして APPROVE した。
+
+承認境界: source code の移動だけ。Remote D1、production deploy、Route、secret は対象外。D-10 は DB package の D-01 を変えない（schema は `@flamenode/db` のまま）。
+
+## D-11 — Island ページの queue 再生成（PROVISIONAL、未決）
+
+Island page queue parity: Phase 5 makes user/event/video kinds `excluded` in renderPublicPage, so per-page freshness reverts to the build cycle until parity is restored. 選択肢: (1) Astro serializer を port する、(2) `experimental_AstroContainer` を consumer Worker に同梱する（bundle 577 KiB、8 ms budget）、(3) kind ごとに build cadence を受け入れる。
+
+production queue は未配線のため、現時点の影響はない。`/user/[id]`（MIG-0504）、`/event/[id]`（MIG-0502）、`/[id]`（MIG-0507）の全 kind が `excluded` になった（build 出力がこれらの HTML の唯一の生成元）。それまでの consumer の production 上の役割は、非公開化時の R2 HTML 削除と tracker close のみ。gateway miss は build（MIG-0509）が HTML を出すまで 503 のまま。lead が、parity を回復するか renderer を削除して injectable にするかを決める。

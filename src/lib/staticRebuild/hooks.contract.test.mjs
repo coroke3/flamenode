@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 const [hooks, xid, enqueue] = await Promise.all([
-  readFile(new URL("./hooks.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/staticRebuild/hooks.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/xid.ts", import.meta.url), "utf8"),
-  readFile(new URL("./enqueue.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/staticRebuild/enqueue.ts", import.meta.url), "utf8"),
 ]);
 
 const MAX_STATIC_REBUILD_BATCH_TARGETS = Number(
@@ -111,7 +111,7 @@ test("本人X IDプロフィール・アイコン更新成功時に静的再生�
 test("member_suggestions再生成フックは必須mutationへ接続されている", async () => {
   const [merge, adminMembers, videoSavePlan, createFreeVideo, submitSlotVideo, collabPerms] =
     await Promise.all([
-      readFile(new URL("../xid/merge.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../../packages/server-core/src/xid/merge.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/adminMembers.ts", import.meta.url), "utf8"),
       readFile(new URL("../video/videoSavePlan.ts", import.meta.url), "utf8"),
       readFile(new URL("../actions/video/createFreeVideo.ts", import.meta.url), "utf8"),

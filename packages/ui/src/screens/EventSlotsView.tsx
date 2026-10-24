@@ -75,7 +75,7 @@ export function EventSlotsView({ model, className }: EventSlotsViewProps): React
   const { stats } = model;
   return (
     <div className={cx("p-root fn-screen", className)}>
-      <main className="wrap ev-slots">
+      <main className="wrap ev-scope ev-slots">
         <Link href={`/event/${model.eventId}`} className="il t-sm muted">
           <ScreenIcon name="arrowLeft" />
           イベント詳細へ
