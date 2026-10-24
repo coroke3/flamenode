@@ -432,6 +432,7 @@ PRをrevert。表は未使用のまま残っても害はない（本番に作る
 - 1ページの生成: `experimental_AstroContainer.renderToString`（`node_modules/astro/dist/container/index.d.ts:150`、`:227`、astro 5.18.2）。
 - Next の ISR 再生成は 16〜71ms だった（`docs/operations/workers.md:12`）。Queue consumer も 10ms の上限として扱う（`ZERO_1102.md` §1）。
 - 仕事の正本は D1、Queue は doorbell（`background-jobs/README.md`）。Queue の無料枠は1日 10,000 operations（`OPEN_DECISIONS.md` D-09 節）。
+- D-11 DECIDED（2026-10-24）: Island kind（user / event / video）は excluded で、consumer に描画経路を持たせない。consumer の本番の役割は DELETE + tracker close。描画経路の削除は follow-up（`OPEN_DECISIONS.md` D-11 の A）。
 #### Owned paths
 - 新規: `+apps/site/src/gateway/renderPublicPage.ts`, `+apps/site/src/gateway/pageRenderQueue.ts`, `+apps/site/src/gateway/pageRenderQueue.test.mjs`, `+drizzle/<次の番号>_public_page_renders.sql`
 - 変更: `apps/site/src/gateway/index.ts`（`queue` handler を足す）、schema の file（MIG-0410 と同じ規則で置き場所を選ぶ）
@@ -474,6 +475,7 @@ npm run typecheck
 - [ ] 種類ごとの max CPU と、対象から外した種類が PR にある
 - [ ] 1日の message 数の見積もりが Queue の無料枠の 50% 以下
 - [ ] 本番の D1・Queue・R2 に触れていない
+- [ ] D-11: Island kind は excluded、描画経路なし（DELETE + tracker close のみ）
 #### STOP
 - 1ページの生成が 8ms を切らない種類しか無い場合は止めて、計測値をユーザーに示す。
 - MIG-0409 U05 の (a) が 8ms を超え (b) だけが収まる種類は、本文を JS で描くことになり、JS なしの閲覧と検索エンジンが読む本文が CURRENT と変わる（挙動の変更）。実装前に計測値と影響をユーザーに示し、承認を得る。JSON は gateway を通して返し（拒否 entry の確認のため）、R2 の公開 bucket から直接配らない。
@@ -886,7 +888,7 @@ Phase 5 共通契約のとおり。
 
 ### MIG-0509: 全公開データの生成を build 時へ移す（D-09）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0501〜0507 の merge 後。MIG-0409 の分類表で「build」とした family を1つずつ micro-unit に分けてから。「Queue」とした個別ページは MIG-0411 の仕組みで作り、この task では build に入れない
+- **Readiness:** NEEDS_REFINEMENT — MIG-0501〜0507 の merge 後。MIG-0409 の分類表で「build」とした family を1つずつ micro-unit に分けてから。D-11（2026-10-24）により Island kind（user / event / video）の個別ページは build に入れる（Queue の consumer は描画せず DELETE / tracker のみ）
 - **Recipe:** R-BUILD
 - **Runtime:** N
 - **Depends on:** MIG-0507 / **Decisions:** D-06 DECIDED, D-09 DECIDED
@@ -904,6 +906,8 @@ Phase 5 共通契約のとおり。
 - **U01..Unn family**: MIG-0409 の表で「build」とした family ごとに1 unit。各 unit は U01 of MIG-0409 と同じ形（CURRENT の生成関数と同じ fixture で出力が一致する test）で作り、`publicDataLoader.ts` の読み先を切り替える。
 - **Unn+1 request mark**: 公開データを変える CURRENT の更新が、static rebuild の enqueue と同じ場所で `public_build_state.requested_at` も更新するようにする（新旧の両方が動く期間のため）。
 - **Unn+2 GA4**: GA4 の同期 job の入力を D1 の query に変える。出力（`analytics/trending.json`、最大 200件。`workers/ga-analytics/ranking.ts:29`）は変えない。
+- **U-build-html**（D-11）: build が公開の detail HTML（最大 1,460 件）を R2 へ PUT する。customMetadata は `{kind,id,key,generation}`（F-02 契約）。
+- **U-route-generation**（D-11）: data-only build で route generation を維持する（`BUILD_TIME_DATA.md` §6 の 35,000 messages/日 を避ける）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -925,6 +929,7 @@ npm run test:unit
 - [ ] 「build」に分類した全 family の一致 test が PASS
 - [ ] `apps/site` が R2 artifact を読まない
 - [ ] build 時間が MIG-0409 で承認した値の範囲内（5回の実測）
+- [ ] Workers Builds 5 回実測で 52 / 1,661,539 ms を再導出（D-11）
 #### STOP
 - family の出力が CURRENT と一致しない理由が CURRENT の不具合に見えたら、直さずに PR の「ブラッシュアップ提案」に書く（`CODE_QUALITY.md`）。privacy に関わる場合は止めて報告する。
 - build 時間が承認した値を超えたら止める。
