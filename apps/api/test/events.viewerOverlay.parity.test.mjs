@@ -341,6 +341,10 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.ok(s.bytes <= 64 * 1024, `bytes ${s.bytes}`);
       assert.equal(s.writes, 0);
     }
+    console.log(
+      `[viewer-overlay budget] requests=${stats.length} maxStatements=${Math.max(...stats.map((s) => s.statements))} ` +
+        `maxBinds=${Math.max(...stats.map((s) => s.maxBinds))} maxBytes=${Math.max(...stats.map((s) => s.bytes))}`,
+    );
     const signedIn = await hono("ov-pub", "alice");
     assert.equal(signedIn.stats.statements, 3);
     assert.equal(signedIn.stats.batches, 0);
