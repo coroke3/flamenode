@@ -261,6 +261,15 @@ test("event and video kinds: produced, accepted by the MIG-0502 / MIG-0507 loade
   assert.equal(video.video.id, "a-1");
   assert.equal(JSON.stringify(video).includes("private-event"), false, "the private event id is not in a public video artifact");
   assert.equal(videoDetailKeys(produced.result.manifest).includes("snapshot/video-detail/a-private.json"), false);
+  // Producer contract (MIG-0507): ONE video-detail key per video, named by the internal id. CURRENT also writes
+  // videos/{youtubeId}.json; producing both would build the same page twice and trip the route-map duplicate fence.
+  const videoKeys = [...keys].filter((k) => k.startsWith("snapshot/video-detail/")).sort();
+  assert.ok(videoKeys.includes("snapshot/video-detail/a-1.json") && videoKeys.includes("snapshot/video-detail/b-1.json"));
+  for (const key of videoKeys) {
+    const id = key.slice("snapshot/video-detail/".length, -".json".length);
+    const envelope = JSON.parse(fs.readFileSync(path.join(dir, key), "utf-8"));
+    assert.equal(envelope.payload.video.id, id, `${key} is keyed by the video's internal id`);
+  }
 });
 
 test("mirror covers every table the event and video generators read (tracking tables excepted)", async () => {
@@ -307,8 +316,11 @@ test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per cre
   await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
 });
 
-// Opt-in (about 15 s): a real Astro build against the produced directory. MIG0509_E2E=1
-test("e2e: astro build reads the produced snapshots and emits the user, list, top and about pages", { skip: process.env.MIG0509_E2E ? false : "set MIG0509_E2E=1" }, async () => {
+// A real Astro build against the produced directory. It needs the @flamenode/ui build, so test:unit (which runs
+// before it) skips it unless MIG0509_E2E=1; the CI REQUIRE_BUILT step runs it and fails instead of skipping.
+const skipE2e = fs.existsSync(path.resolve("packages/ui/dist/index.js")) ? (process.env.MIG0509_E2E || process.env.REQUIRE_BUILT ? false : "set MIG0509_E2E=1") : "packages/ui/dist missing: build @flamenode/ui first";
+if (process.env.REQUIRE_BUILT && skipE2e) throw new Error("REQUIRE_BUILT is set but " + skipE2e);
+test("e2e: astro build reads the produced snapshots and emits the user, list, top and about pages", { skip: skipE2e }, async () => {
   const { spawnSync } = await import("node:child_process");
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-dist-"));
   const run = spawnSync("npx", ["astro", "build", "--outDir", out], { cwd: path.resolve("apps/site"), env: { ...process.env, ...env }, shell: true, encoding: "utf-8" });
