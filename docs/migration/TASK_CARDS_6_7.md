@@ -122,11 +122,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0617 — replace apps/api Option A copy (D-10)
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order、MIG-0602 の `apps/api` 実装。
-- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。fake D1 に `.raw()`。
-- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致。
-- DONE: 写しの呼び出しが 0。
-- 着手前: Work Order の lead 決定 L1〜L3（apps/api が core を読む方法、drizzle を Worker に入れるか、`preloaded`）が未決。決まるまで実装しない。
+- 読む: `PHASE_6_SPEC.md` の MIG-0617 Work Order（lead 決定 L1〜L3、2026-10-24）、MIG-0602 の `apps/api` 実装。
+- 変更: 監査・wake の写しを core の呼び出しに置き換えて削除。`apps/api` は typecheck のみ（noEmit）、drizzle を middleware で 1 回作る、core の `mutateWithAudit` に optional `preloaded`。fake D1 に `.raw()`。
+- 試験: MIG-0602 の既存 test、写しと core の SQL + params の一致、`wrangler deploy --dry-run` の bundle size。
+- DONE: 写しの呼び出しが 0、`routes/**` から drizzle の直接 import が 0。
 
 ### MIG-0618 — xid merge core (D-10)
 
@@ -207,10 +206,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 ### MIG-0629 — admin audit settings + restore dry-run APIs
 
 - 読む: SA-009..010（`src/lib/actions/audit-admin.ts`）, `mutate.ts`, `API_MATRIX.md`, `work-items/MIG-0602.md` Decision（MIG-0602 の分割）。
-- 変更: MIG-0602 の `writeGuardMiddleware` + `costGuardMiddleware` と raw-D1 `mutateWithAudit` を再利用し、SA-009 を strict 監査 1 batch で、SA-010 を既定の admin read guard 下の読み取りで実装。
+- 変更: SA-009 を strict 監査 1 batch で、SA-010 を core の `restoreAuditLog(db, { dry_run: true })` で実装。両方 `POST` + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")`。
 - 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
 - DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
-- 着手前: Work Order の lead 決定 M1〜M3（SA-010 を core restore で作るか、SA-010 の guard を CURRENT の `requireAdminWrite("admin_permissions")` に揃えるか、MIG-0617 との順序）が未決。決まるまで実装しない。
+- 着手前: lead 決定 M1〜M3 は 2026-10-24 に決定済み。MIG-0617 が DONE になるまで着手しない。
 
 ### MIG-0630 — Video edit page read APIs (/dashboard/edit/[id] + permissions)
 
@@ -218,6 +217,27 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: edit 2 ルートの読み取り endpoint と DTO、API 側の所有者 / 共同編集者の権限確認。
 - 試験: 実 loader と Hono の parity、他人の作品・存在しない id、D1 3文以下、LIMIT <= 100 / response <= 64 KiB。
 - DONE: 2ルートの parity と権限が PASS。
+
+### MIG-0631 — public event list / release from build-time snapshot (RH-015, RH-012)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0631 Work Order、`apps/site/scripts/readPublicData.ts`、`apps/api/src/routes/live/operationMode.ts`。
+- 変更: R2 の `events/index.json` / release を読む Hono route。D1 0 回。
+- 試験: `readPublicData.test.mjs` の fixture での parity、snapshot 欠損の 503、rate limit と cache header。
+- DONE: RH-015 / RH-012 が CURRENT と同じ応答。loader は移植しない。
+
+### MIG-0632 — event export API (RH-013)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0632 Work Order、`eventExportData` / `eventExportPayload` / `eventExportCache`。
+- 変更: RH-013 の Hono route（D1 読み + publicCache R2）。
+- 試験: CORS・format / v5・refresh minutes の parity、上限入力の max CPU。
+- DONE: 応答が CURRENT と一致し、64KB 超を D-12 の記録した例外として残す。
+
+### MIG-0633 — event ownership / permission resolver core (D-10)
+
+- 読む: `PHASE_6_SPEC.md` の MIG-0633 Work Order、`src/lib/auth/ownership.ts`、`src/lib/event/eventOwnership.ts`。
+- 変更: 純粋な resolver と owner 0 guard を server-core へ移し、Next は bridge。
+- 試験: 移動前の golden、最後の owner の解任が拒否される SQL guard。
+- DONE: golden の diff 0、既存 test の件数同一、呼び出し側の diff 0。
 
 ### MIG-0607 — Phase 6 API Gate
 
