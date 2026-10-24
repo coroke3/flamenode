@@ -259,5 +259,6 @@ Option 4（hybrid）を採る。
 - 公開一覧で CURRENT が大きな上限を持つもの（live slots `MAX_LIVE_SLOTS = 6000`、約 890 KiB）: CURRENT の上限・truncated・cache 契約を保ち、PHASE_6_SPEC の「記録した既知の差・例外」に残す。MIG-0606 が「上限ちょうど」入力（6000 枠・`public_name`）で warm max を 50 回以上測り、7ms 未満なら恒久例外、7ms 以上なら additive paging（optional `limit` ≤ 100 + `cursor`、無指定時は従来の応答）を担当 MIG の追加 unit で入れる。ページング化を先行して契約を変えることはしない。推定値で判定しない。
 - viewer 固有の読み（RH-014 own slots 100 件 / 64 KiB、pending 申請 100 件）: named LIMIT を超えたら権限を増やさない fail-closed（CURRENT の既存 `authUnavailable` 形）で返す。ページング化しない。
 - 追加差分（Fable 決定の範囲外の追加差分なので Yugo 事後報告対象）: MIG-0631 は CURRENT の normal 時 D1 fallback を廃止し、R2 snapshot 欠損時に 503 `public_data_unavailable` を返す（`ZERO_1102.md` §4.7）。
+  - 修正案（PROPOSED、未決定、2026-10-24 MIG-0631 lead）: CURRENT の RH-015 は normal / economy / read_only で毎回 D1 を読む（fallback ではなく主経路。static_only だけ R2 artifact）。廃止すると point event が消える・200 件で打ち切られる・同時刻の並びが変わる・反映が遅れる・空 index で 503、の差が出る。D1 1 文・`LIMIT` 60 は S2 に収まるので、live mode は CURRENT と同じ D1、static_only だけ artifact とする案（`PHASE_6_SPEC.md` MIG-0631 L4、OPEN Q1）。Fable の確認まで MIG-0631 は live mode の分岐を実装しない。
 - 読み取り失敗の status（200 固定形 → 503 + Retry-After）、暗黙の行順の明示（`ORDER BY`）は S2 のための差として承認。
 - CURRENT の不具合（`slotViewerOverlay.ts` の event select に `visibility_status` が無く `operatorOverrideAllowed` が常に false）は Hono でも bug-compatible のまま。修正は挙動変更なので FIX-0604-1（MIG-0633 の後、Next と Hono を同一 PR で）として扱う。
