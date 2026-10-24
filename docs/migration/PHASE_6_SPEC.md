@@ -233,15 +233,15 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0602 と MIG-0305 の merge 後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
 - **Recipe:** R-API
 - **Runtime:** S2, S3
-- **Depends on:** MIG-0602, MIG-0305 / **Decisions:** none
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 | CURRENT | ID | file |
 | --- | --- | --- |
-| event list | RH-015 | `app/api/events/route.ts` |
+| event list | RH-015（MIG-0631 へ移管） | `app/api/events/route.ts` |
 | slot viewer overlay | RH-014 | `app/api/events/[id]/slots/viewer-overlay/route.ts` |
 | live slots / submissions / summary | RH-020..022 | `app/api/live/events/[id]/{slots,submissions,summary}/route.ts` |
-| event export | RH-012..013 | `app/api/event-endpoints/[id]/route.ts`, `app/api/event-endpoints/[id]/release/route.ts` |
+| event export | RH-012（MIG-0631 へ移管）, RH-013（MIG-0632 へ移管） | `app/api/event-endpoints/[id]/route.ts`, `app/api/event-endpoints/[id]/release/route.ts` |
 | event / staff / template / playlist | SA-021..039 | `src/lib/actions/event-*.ts`, `event-youtube-playlist.ts` |
 | slot | SA-056..068 | `src/lib/actions/slot*.ts` |
 - 公開画面の `src/components/event/SlotGrid.tsx:15` が `@/lib/actions/slot` を直接呼ぶ。Phase 5 の枠 Island はこの MIG の API を使う。
@@ -270,9 +270,9 @@ npm run test:unit
 npm run test:integration
 ```
 #### Ledger updates
-`API_MATRIX.md` の RH-012〜015, 020〜022 と SA-021〜039, 056〜068 に Hono エンドポイント。
+`API_MATRIX.md` の RH-014, 020〜022 と SA-021〜039, 056〜068 に Hono エンドポイント。RH-012 / RH-015 は MIG-0631、RH-013 は MIG-0632 の Ledger（2026-10-24 に移管。本 task の DONE 条件から除く）。
 #### DONE checklist
-- [ ] U01〜U04 と Final audit が DONE
+- [ ] U01（RH-014）、U02、U04 と Final audit が DONE。RH-012 / RH-015 は MIG-0631、RH-013 は MIG-0632 の DONE で満たす（二重所有を避けるため本 task の条件に含めない。B4 の ownership port は MIG-0633、B5 は MIG-0617 で解消）
 - [ ] owner 0 防止と予約の原子性がテストで実証されている
 #### STOP
 - 予約の transaction 境界を変える必要が出たら止める。
@@ -1415,7 +1415,7 @@ PRをrevert。
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | snapshot あり、`page` / `limit` 指定 | CURRENT と同じ slice と field |
-| T02 | snapshot 欠損 | 503 `public_data_unavailable`（CURRENT の normal 時 D1 fallback の置換。記録した差） |
+| T02 | snapshot 欠損 | 503 `public_data_unavailable`（CURRENT の normal 時 D1 fallback の置換。記録した差。出典: ZERO_1102 §4.7、OPEN_DECISIONS D-12 の追加差分） |
 | T03 | 連続 request | rate limit と cache header が CURRENT と同じ |
 | T04 | D1 statement 数 | 0 |
 #### Commands
@@ -1522,7 +1522,7 @@ npm run test:critical
 - owner 0 guard の SQL が 1 文字でも変わるなら止める。
 - DB / migration / 権限緩和は上位へ。
 #### Rollback
-PRをrevert（Hono route を足すだけで、本番 Route・D1・secret の変更は無い）。
+PRをrevert（bridge が元の `src/lib` 実装に戻る。DB・Route・secret の変更は無い）。
 
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
@@ -1604,7 +1604,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606 / **Decisions:** none
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632 / **Decisions:** none
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js、`app/api/auth/[...nextauth]/route.ts`）は Phase 8 まで旧 Next に残す。

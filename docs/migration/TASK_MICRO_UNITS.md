@@ -81,9 +81,9 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 
 ## MIG-0604 — Event/slot APIs
 
-- **U01**: RH-015 and RH-014; viewer overlay split, public/private guards。
+- **U01**: RH-014; viewer overlay split, public/private guards。RH-015 moved to MIG-0631 (2026-10-24)。
 - **U02**: RH-020..022 live/event slot status; 5s isolate cache/SWR and errors。
-- **U03**: RH-012..013 public export and legacy format/v5; authorization + limits + CORS。
+- **U03**: moved out (2026-10-24): RH-012 to MIG-0631, RH-013 (export, legacy format/v5, CORS) to MIG-0632。
 - **U04**: SA-021..039 and SA-056..068 mutation equivalence; owner0 guard, reservation, Playlist + postcommit。
 - **Final audit**: no remaining event/slot methods without contract/test evidence.
 

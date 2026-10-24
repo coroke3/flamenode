@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0630
 Last Task PR: #385
-Merged READY: MIG-0501 (remainder), MIG-0603 (remainder), MIG-0604 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
+Merged READY: MIG-0501 (remainder), MIG-0603 (remainder), MIG-0605 (remainder), MIG-0626 (remainder)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -307,7 +307,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
 | MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | READY | MIG-0602 |
-| MIG-0604 | event/slot APIs | READY | MIG-0602 |
+| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602, MIG-0633 |
 | MIG-0605 | user/X/admin APIs | READY | MIG-0602 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
@@ -334,7 +334,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0631 | public event list / release from build-time snapshot (RH-015, RH-012) | READY | MIG-0602, MIG-0614 |
 | MIG-0632 | event export API (RH-013) | BLOCKED | MIG-0614, MIG-0606 |
 | MIG-0633 | event ownership / permission resolver core (D-10) | BLOCKED | MIG-0613, MIG-0617 |
-| MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606 |
+| MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632 |
 
 MIG-0617 の lead 決定 L1〜L3 と MIG-0629 の M1〜M3 は 2026-10-24 に決定済み（PHASE_6_SPEC.md の各 Work Order）。MIG-0617 は READY、MIG-0629 は MIG-0617 が DONE になるまで BLOCKED。MIG-0631（RH-015 / RH-012 の snapshot reader）、MIG-0632（RH-013）、MIG-0633（ownership core）は 2026-10-24 に MIG-0604 の残りから切り出して登録（MIG-0632 は MIG-0606 待ち、MIG-0633 は MIG-0617 待ち）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0630 は DONE（U01/U02a/U03/U04 = #382、U02b = #385、Opus APPROVE on 0ee6f156、DONE checklist 3 項目とも充足）。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため、MIG-0603 / 0604 / 0702 が未完の間は BLOCKED のまま。MIG-0411 は #326 を merge 済みで本番 migration 0066 を 2026-10-23 に適用済み（Queue 作成・gateway binding・workerd CPU・producer 配線が未了のため BLOCKED のまま。詳細は work item）。
 
