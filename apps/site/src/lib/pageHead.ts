@@ -100,7 +100,7 @@ export type PageHead = Readonly<{
   ogImageHeight: number | null;
   ogImageType: string | null;
   ogImageAlt: string;
-  ogType: "website" | "profile";
+  ogType: "website" | "video.other" | "profile";
 }>;
 
 /** CURRENT `absoluteUrl`: absolute URLs stay, paths go under the site origin. */
@@ -119,7 +119,7 @@ export function buildPageHead(input: {
   noIndex?: boolean;
   /** Page-specific Open Graph image (CURRENT `buildPageMetadata({ image })`); default is the brand card. */
   image?: string | null;
-  ogType?: "website" | "profile";
+  ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
   const base = {

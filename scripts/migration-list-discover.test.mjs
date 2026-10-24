@@ -176,7 +176,7 @@ test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and pu
     assert.match(text(rows[0]), /01.*作品50.*作者50.*第一回.*1週間 12,345回視聴/);
     assert.match(text(rows[1]), /02.*作品51.*1週間 7回視聴/);
     assert.equal(rows[0].querySelector("a").getAttribute("href"), "/AAAAAAAAA50");
-    assert.match(text(tr.querySelector('[role="status"]')), new RegExp(`最終更新（JST）: ${formatUnix(1790000000).replace(/[/]/g, "\\/")}`));
+    assert.match(text(tr.querySelector('main [role="status"]')), new RegExp(`最終更新（JST）: ${formatUnix(1790000000).replace(/[/]/g, "\\/")}`));
     assert.match(text(tr.querySelector("main")), /ランキングデータが古い可能性があります/, "stale at build time, as CURRENT evaluates at request time");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

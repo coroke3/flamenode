@@ -248,13 +248,8 @@ mechanics("users: CURRENT listable approval statuses and case-insensitive ids", 
 });
 
 test("excluded kinds (a kind switched to PAGE_BODY_FORMAT 'excluded'): never written, build HTML untouched, request done; unpublish still deletes", async () => {
-  const saved = { ...PAGE_BODY_FORMAT };
-  PAGE_BODY_FORMAT.video = "excluded";
-  try {
-    await excludedKindsScenario();
-  } finally {
-    Object.assign(PAGE_BODY_FORMAT, saved);
-  }
+  assert.deepEqual(PAGE_BODY_FORMAT, PRODUCTION_FORMAT, "production table, no override");
+  await excludedKindsScenario();
 });
 
 async function excludedKindsScenario() {
@@ -585,19 +580,10 @@ mechanics("T06: one message end to end (all I/O mocked) stays far below the 8ms 
     .map(([k, v]) => `${k} p50=${v.p50.toFixed(3)} p99=${v.p99.toFixed(3)} max=${v.max.toFixed(3)}ms`).join("; ")}`);
 });
 
-// --- Characterization: the regenerated HTML is the build's HTML (MIG-0403 SSG output) ---
-// Needs the Astro build: `npm run build --workspace=@flamenode/site` (CI runs it before this file).
-
-const DIST = fileURLToPath(new URL("../../dist/", import.meta.url));
-const readDist = (route) => {
-  const file = path.join(DIST, route, "index.html");
-  assert.ok(fs.existsSync(file), "missing " + file + ": run npm run build --workspace=@flamenode/site first");
-  return fs.readFileSync(file, "utf8");
-};
-const distStylesheets = (html) => [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
+// --- Row -> snapshot projections (the byte-identical SSG checks are replaced by the excluded scenario: every kind is an Island page) ---
 
 const { loadRepresentativeEvents, loadRepresentativeUsers, loadRepresentativeVideos } = await import("../lib/representativeFixtures.ts");
-const { contentFromSnapshot, snapshotFromRow, parseStylesheets } = await import("./renderPublicPage.ts");
+const { snapshotFromRow, parseStylesheets } = await import("./renderPublicPage.ts");
 
 /** D1 rows holding exactly what the representative snapshots hold (same input as the SSG). */
 const REP_ROWS = {
@@ -612,14 +598,6 @@ const REP_ROWS = {
     profile_text: "MIG-0403 の代表クリエイター fixture です。", approval_status: "approved",
   },
 };
-
-test("characterization: video row -> identical to both SSG pages (internal id and YouTube alias)", async () => {
-  const ssg = readDist("repvideo01");
-  const stylesheets = distStylesheets(ssg);
-  const html = await renderPublicPage("video", REP_ROWS.video, { stylesheets });
-  assert.equal(html, ssg);
-  assert.equal(html, readDist("repYTid0001"), "alias URL: same document, canonical on the YouTube ID");
-});
 
 test("characterization: event row -> same snapshot fields (the byte-identical SSG check is replaced by the excluded scenario: /event/[id] is an Island page)", async () => {
   const [snapshot] = await loadRepresentativeEvents();
@@ -655,14 +633,9 @@ test("regenerated pages: row text is escaped, stylesheet must be a build asset, 
   assert.equal(ended.entryAction, undefined);
 });
 
-test("U02 format: production table (Island pages excluded; guards a leaked mechanics override or a hidden production flip); remaining server-rendered kinds ship no JS", async () => {
+test("U02 format: production table (every Island page kind is excluded; guards a leaked mechanics override or a hidden production flip)", () => {
   assert.deepEqual(PAGE_BODY_FORMAT, PRODUCTION_FORMAT);
-  assert.deepEqual(PAGE_BODY_FORMAT, { video: "server-rendered", user: "excluded", event: "excluded" });
-  for (const [kind, row] of [["video", REP_ROWS.video]]) {
-    const html = await renderPublicPage(kind, row, { stylesheets: [STYLESHEET] });
-    assert.ok(!html.includes("island-root") && !html.includes("<script"), kind);
-    assert.match(html, /<h1[^>]*>[^<]+<\/h1>/, kind + ": the screen heading is in the HTML");
-  }
+  assert.deepEqual(PAGE_BODY_FORMAT, { video: "excluded", user: "excluded", event: "excluded" });
 });
 
 test("U02 server-rendered body: every kind renders its screen at the upper-bound input (MIG-0409 U05 (a) harness)", async () => {
