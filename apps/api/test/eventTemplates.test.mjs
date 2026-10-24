@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { adminEventRoutes } from "../src/routes/events/index.ts";
-import { expectedRowCondition } from "../src/routes/events/templates.ts";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { expectedRowCondition as coreExpectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
@@ -135,7 +136,12 @@ test("audit failure rolls the delete back (500, generic message)", async () => {
 });
 
 test("expectedRowCondition mirrors CURRENT (null -> IS NULL, scalar -> =, non-scalar -> 0 = 1)", () => {
-  assert.deepEqual(expectedRowCondition({ a: null, b: "x", c: 1 }), { sql: "\"a\" IS NULL AND \"b\" = ? AND \"c\" = ?", params: ["x", 1] });
-  assert.deepEqual(expectedRowCondition({ a: {} }), { sql: "0 = 1", params: [] });
-  assert.deepEqual(expectedRowCondition({}), { sql: "0 = 1", params: [] });
+  const dialect = new SQLiteSyncDialect();
+  const compiled = (row) => {
+    const query = dialect.sqlToQuery(coreExpectedRowCondition({ expectedCurrent: row }));
+    return { sql: query.sql, params: query.params };
+  };
+  assert.deepEqual(compiled({ a: null, b: "x", c: 1 }), { sql: "\"a\" IS NULL AND \"b\" = ? AND \"c\" = ?", params: ["x", 1] });
+  assert.deepEqual(compiled({ a: {} }), { sql: "0 = 1", params: [] });
+  assert.deepEqual(compiled({}), { sql: "0 = 1", params: [] });
 });

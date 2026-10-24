@@ -13,12 +13,9 @@ import {
   type WriteFeatureKey,
 } from "@flamenode/domain/admin";
 import type { Context, Next } from "hono";
-import {
-  mapAuditSettings,
-  MAX_SINGLE_ROW_LIMIT,
-  type AuditLogSettings,
-  type AuditSettingsRow,
-} from "../audit/mutateWithAudit.ts";
+import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
+import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
+import { MAX_SINGLE_ROW_LIMIT } from "../lib/limits.ts";
 import { writeGuardDenyResponse } from "./writeOrigin.ts";
 
 type CostGuardRow = AuditSettingsRow & {

@@ -1,4 +1,4 @@
-import type { PreloadedAuditContext } from "../../audit/mutateWithAudit.ts";
+import type { PreloadedAuditContext } from "@flamenode/server-core/audit/logger";
 
 /**
  * ZERO_1102 section 4-3: request JSON is parsed only up to 64KB. The limit is

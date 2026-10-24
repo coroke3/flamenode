@@ -1,0 +1,1073 @@
+{
+  "SA-004 create announcement": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "id": "a-new"
+    },
+    "reads": 2,
+    "batches": [
+      [
+        {
+          "sql": "INSERT INTO announcements ( id, title, body, severity, target_audience, is_published, publish_at, expire_at, created_by_user_id, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "params": [
+            "a-new",
+            "T",
+            "B",
+            "info",
+            "all",
+            1,
+            null,
+            null,
+            "admin-1",
+            1800000000,
+            1800000000
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"top_announcements\",\"target_id\":\"global\",\"reason\":\"announcement_create\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "announcements",
+            "a-new",
+            "CREATE",
+            null,
+            "{\"id\":\"a-new\",\"title\":\"T\",\"body\":\"B\",\"severity\":\"info\",\"target_audience\":\"all\",\"is_published\":1,\"publish_at\":null,\"expire_at\":null,\"created_by_user_id\":\"admin-1\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"title\",\"body\",\"severity\",\"target_audience\",\"is_published\",\"publish_at\",\"expire_at\",\"created_by_user_id\",\"created_at\",\"updated_at\"]",
+            null,
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            210,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-005 update announcement": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "id": "a1"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "UPDATE announcements SET title = ?, body = ?, severity = ?, target_audience = ?, is_published = ?, publish_at = ?, expire_at = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "New",
+            "B",
+            "info",
+            "all",
+            1,
+            null,
+            null,
+            1800000000,
+            "a1",
+            100
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"top_announcements\",\"target_id\":\"global\",\"reason\":\"announcement_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "announcements",
+            "a1",
+            "UPDATE",
+            "{\"id\":\"a1\",\"title\":\"Old\",\"body\":\"Body\",\"severity\":\"info\",\"is_published\":0,\"publish_at\":null,\"expire_at\":null,\"target_audience\":\"all\",\"created_by_user_id\":\"x\",\"created_at\":50,\"updated_at\":100}",
+            "{\"id\":\"a1\",\"title\":\"New\",\"body\":\"B\",\"severity\":\"info\",\"is_published\":1,\"publish_at\":null,\"expire_at\":null,\"target_audience\":\"all\",\"created_by_user_id\":\"x\",\"created_at\":50,\"updated_at\":1800000000}",
+            "[\"title\",\"body\",\"is_published\",\"updated_at\"]",
+            "{\"title\":\"Old\",\"body\":\"Body\",\"is_published\":0,\"updated_at\":100}",
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            386,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-005 update announcement, race after preflight": {
+    "status": 500,
+    "body": {
+      "ok": false,
+      "message": "保存に失敗しました。再読み込みして、もう一度お試しください。"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "UPDATE announcements SET title = ?, body = ?, severity = ?, target_audience = ?, is_published = ?, publish_at = ?, expire_at = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+          "params": [
+            "Lost",
+            "B",
+            "info",
+            "all",
+            1,
+            null,
+            null,
+            1800000000,
+            "a1",
+            100
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"top_announcements\",\"target_id\":\"global\",\"reason\":\"announcement_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "announcements",
+            "a1",
+            "UPDATE",
+            "{\"id\":\"a1\",\"title\":\"Old\",\"body\":\"Body\",\"severity\":\"info\",\"is_published\":0,\"publish_at\":null,\"expire_at\":null,\"target_audience\":\"all\",\"created_by_user_id\":\"x\",\"created_at\":50,\"updated_at\":100}",
+            "{\"id\":\"a1\",\"title\":\"Lost\",\"body\":\"B\",\"severity\":\"info\",\"is_published\":1,\"publish_at\":null,\"expire_at\":null,\"target_audience\":\"all\",\"created_by_user_id\":\"x\",\"created_at\":50,\"updated_at\":1800000000}",
+            "[\"title\",\"body\",\"is_published\",\"updated_at\"]",
+            "{\"title\":\"Old\",\"body\":\"Body\",\"is_published\":0,\"updated_at\":100}",
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            387,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 0
+  },
+  "SA-006 delete announcement": {
+    "status": 200,
+    "body": {
+      "ok": true
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "DELETE FROM announcements WHERE id = ? AND updated_at = ?",
+          "params": [
+            "a1",
+            100
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"top_announcements\",\"target_id\":\"global\",\"reason\":\"announcement_delete\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "announcements",
+            "a1",
+            "DELETE",
+            "{\"id\":\"a1\",\"title\":\"Old\",\"body\":\"Body\",\"severity\":\"info\",\"is_published\":0,\"publish_at\":null,\"expire_at\":null,\"target_audience\":\"all\",\"created_by_user_id\":\"x\",\"created_at\":50,\"updated_at\":100}",
+            null,
+            "[\"id\",\"title\",\"body\",\"severity\",\"is_published\",\"publish_at\",\"expire_at\",\"target_audience\",\"created_by_user_id\",\"created_at\",\"updated_at\"]",
+            null,
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            191,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-007 enable public API": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "id": "ev-1",
+      "message": "公開APIリンクを発行しました。"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "UPDATE events SET public_api_enabled = ?, updated_at = ? WHERE id = ? AND \"id\" = ? AND \"title\" = ? AND \"event_type\" = ? AND \"explanation\" IS NULL AND \"youtube_description_template\" IS NULL AND \"required_video_fields_json\" IS NULL AND \"icon_url\" IS NULL AND \"img_url\" IS NULL AND \"accent_color\" IS NULL AND \"visibility_status\" = ? AND \"allow_user_video_event_links\" = ? AND \"allow_unslotted_posts\" = ? AND \"allow_user_video_edits\" = ? AND \"user_video_edit_permission_keys_json\" IS NULL AND \"slot_type\" = ? AND \"slot_visibility_mode\" = ? AND \"start_time\" = ? AND \"end_time\" = ? AND \"entry_start_time\" IS NULL AND \"entry_end_time\" IS NULL AND \"created_at\" = ? AND \"updated_at\" = ? AND \"max_slots_per_video\" = ? AND \"max_slot_reservation_groups_per_xid\" IS NULL AND \"slot_interval_minutes\" = ? AND \"review_settings\" IS NULL AND \"editable_fields\" IS NULL AND \"repeat_rules\" IS NULL AND \"slot_part_gap_minutes\" = ? AND \"parts_json\" IS NULL AND \"public_api_enabled\" = ?",
+          "params": [
+            1,
+            1800000000,
+            "ev-1",
+            "ev-1",
+            "Event",
+            "event",
+            "public",
+            0,
+            0,
+            0,
+            "time",
+            "public_name",
+            1000,
+            2000,
+            10,
+            20,
+            1,
+            30,
+            15,
+            0
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            "events",
+            "ev-1",
+            "UPDATE",
+            "{\"id\":\"ev-1\",\"title\":\"Event\",\"event_type\":\"event\",\"explanation\":null,\"youtube_description_template\":null,\"required_video_fields_json\":null,\"icon_url\":null,\"img_url\":null,\"accent_color\":null,\"visibility_status\":\"public\",\"allow_user_video_event_links\":0,\"allow_unslotted_posts\":0,\"allow_user_video_edits\":0,\"user_video_edit_permission_keys_json\":null,\"slot_type\":\"time\",\"slot_visibility_mode\":\"public_name\",\"start_time\":1000,\"end_time\":2000,\"entry_start_time\":null,\"entry_end_time\":null,\"created_at\":10,\"updated_at\":20,\"max_slots_per_video\":1,\"max_slot_reservation_groups_per_xid\":null,\"slot_interval_minutes\":30,\"review_settings\":null,\"editable_fields\":null,\"repeat_rules\":null,\"slot_part_gap_minutes\":15,\"parts_json\":null,\"public_api_enabled\":0}",
+            "{\"id\":\"ev-1\",\"title\":\"Event\",\"event_type\":\"event\",\"explanation\":null,\"youtube_description_template\":null,\"required_video_fields_json\":null,\"icon_url\":null,\"img_url\":null,\"accent_color\":null,\"visibility_status\":\"public\",\"allow_user_video_event_links\":0,\"allow_unslotted_posts\":0,\"allow_user_video_edits\":0,\"user_video_edit_permission_keys_json\":null,\"slot_type\":\"time\",\"slot_visibility_mode\":\"public_name\",\"start_time\":1000,\"end_time\":2000,\"entry_start_time\":null,\"entry_end_time\":null,\"created_at\":10,\"updated_at\":1800000000,\"max_slots_per_video\":1,\"max_slot_reservation_groups_per_xid\":null,\"slot_interval_minutes\":30,\"review_settings\":null,\"editable_fields\":null,\"repeat_rules\":null,\"slot_part_gap_minutes\":15,\"parts_json\":null,\"public_api_enabled\":1}",
+            "[\"updated_at\",\"public_api_enabled\"]",
+            "{\"updated_at\":20,\"public_api_enabled\":0}",
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            "公開APIリンクを発行",
+            "admin_api_endpoints",
+            "long_audit",
+            "none",
+            "not_restorable",
+            1498,
+            1831536000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-008 disable public API": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "id": "ev-1",
+      "message": "公開APIを無効化しました。"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "UPDATE events SET public_api_enabled = ?, updated_at = ? WHERE id = ? AND \"id\" = ? AND \"title\" = ? AND \"event_type\" = ? AND \"explanation\" IS NULL AND \"youtube_description_template\" IS NULL AND \"required_video_fields_json\" IS NULL AND \"icon_url\" IS NULL AND \"img_url\" IS NULL AND \"accent_color\" IS NULL AND \"visibility_status\" = ? AND \"allow_user_video_event_links\" = ? AND \"allow_unslotted_posts\" = ? AND \"allow_user_video_edits\" = ? AND \"user_video_edit_permission_keys_json\" IS NULL AND \"slot_type\" = ? AND \"slot_visibility_mode\" = ? AND \"start_time\" = ? AND \"end_time\" = ? AND \"entry_start_time\" IS NULL AND \"entry_end_time\" IS NULL AND \"created_at\" = ? AND \"updated_at\" = ? AND \"max_slots_per_video\" = ? AND \"max_slot_reservation_groups_per_xid\" IS NULL AND \"slot_interval_minutes\" = ? AND \"review_settings\" IS NULL AND \"editable_fields\" IS NULL AND \"repeat_rules\" IS NULL AND \"slot_part_gap_minutes\" = ? AND \"parts_json\" IS NULL AND \"public_api_enabled\" = ?",
+          "params": [
+            0,
+            1800000000,
+            "ev-1",
+            "ev-1",
+            "Event",
+            "event",
+            "archived",
+            0,
+            0,
+            0,
+            "time",
+            "public_name",
+            1000,
+            2000,
+            10,
+            20,
+            1,
+            30,
+            15,
+            1
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            "events",
+            "ev-1",
+            "UPDATE",
+            "{\"id\":\"ev-1\",\"title\":\"Event\",\"event_type\":\"event\",\"explanation\":null,\"youtube_description_template\":null,\"required_video_fields_json\":null,\"icon_url\":null,\"img_url\":null,\"accent_color\":null,\"visibility_status\":\"archived\",\"allow_user_video_event_links\":0,\"allow_unslotted_posts\":0,\"allow_user_video_edits\":0,\"user_video_edit_permission_keys_json\":null,\"slot_type\":\"time\",\"slot_visibility_mode\":\"public_name\",\"start_time\":1000,\"end_time\":2000,\"entry_start_time\":null,\"entry_end_time\":null,\"created_at\":10,\"updated_at\":20,\"max_slots_per_video\":1,\"max_slot_reservation_groups_per_xid\":null,\"slot_interval_minutes\":30,\"review_settings\":null,\"editable_fields\":null,\"repeat_rules\":null,\"slot_part_gap_minutes\":15,\"parts_json\":null,\"public_api_enabled\":1}",
+            "{\"id\":\"ev-1\",\"title\":\"Event\",\"event_type\":\"event\",\"explanation\":null,\"youtube_description_template\":null,\"required_video_fields_json\":null,\"icon_url\":null,\"img_url\":null,\"accent_color\":null,\"visibility_status\":\"archived\",\"allow_user_video_event_links\":0,\"allow_unslotted_posts\":0,\"allow_user_video_edits\":0,\"user_video_edit_permission_keys_json\":null,\"slot_type\":\"time\",\"slot_visibility_mode\":\"public_name\",\"start_time\":1000,\"end_time\":2000,\"entry_start_time\":null,\"entry_end_time\":null,\"created_at\":10,\"updated_at\":1800000000,\"max_slots_per_video\":1,\"max_slot_reservation_groups_per_xid\":null,\"slot_interval_minutes\":30,\"review_settings\":null,\"editable_fields\":null,\"repeat_rules\":null,\"slot_part_gap_minutes\":15,\"parts_json\":null,\"public_api_enabled\":0}",
+            "[\"updated_at\",\"public_api_enabled\"]",
+            "{\"updated_at\":20,\"public_api_enabled\":1}",
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            "公開APIを無効化",
+            "admin_api_endpoints",
+            "long_audit",
+            "none",
+            "not_restorable",
+            1502,
+            1831536000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-036 delete event template": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "message": "テンプレートを削除しました。"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "DELETE FROM event_templates WHERE id = ? AND (\"id\" = ? AND \"name\" = ? AND \"description\" IS NULL AND \"source_event_id\" = ? AND \"settings_json\" = ? AND \"created_by_user_id\" = ? AND \"created_at\" = ? AND \"updated_at\" = ?)",
+          "params": [
+            "etmpl_1",
+            "etmpl_1",
+            "T",
+            "ev-1",
+            "{\"a\":1}",
+            "admin-1",
+            10,
+            20
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            "event_templates",
+            "etmpl_1",
+            "DELETE",
+            "{\"id\":\"etmpl_1\",\"name\":\"T\",\"description\":null,\"source_event_id\":\"ev-1\",\"settings_json\":\"{\\\"a\\\":1}\",\"created_by_user_id\":\"admin-1\",\"created_at\":10,\"updated_at\":20}",
+            null,
+            "[\"id\",\"name\",\"description\",\"source_event_id\",\"settings_json\",\"created_by_user_id\",\"created_at\",\"updated_at\"]",
+            null,
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            "イベントテンプレートを削除",
+            "admin_event_templates",
+            "normal",
+            "none",
+            "not_restorable",
+            162,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-036 delete event template, CAS conflict": {
+    "status": 409,
+    "body": {
+      "ok": false,
+      "message": "処理に失敗しました。再読み込みして、もう一度お試しください。"
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "DELETE FROM event_templates WHERE id = ? AND (\"id\" = ? AND \"name\" = ? AND \"description\" IS NULL AND \"source_event_id\" = ? AND \"settings_json\" = ? AND \"created_by_user_id\" = ? AND \"created_at\" = ? AND \"updated_at\" = ?)",
+          "params": [
+            "etmpl_1",
+            "etmpl_1",
+            "T",
+            "ev-1",
+            "{\"a\":1}",
+            "admin-1",
+            10,
+            20
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            "event_templates",
+            "etmpl_1",
+            "DELETE",
+            "{\"id\":\"etmpl_1\",\"name\":\"T\",\"description\":null,\"source_event_id\":\"ev-1\",\"settings_json\":\"{\\\"a\\\":1}\",\"created_by_user_id\":\"admin-1\",\"created_at\":10,\"updated_at\":20}",
+            null,
+            "[\"id\",\"name\",\"description\",\"source_event_id\",\"settings_json\",\"created_by_user_id\",\"created_at\",\"updated_at\"]",
+            null,
+            "admin-1",
+            null,
+            "{\"discord_id\":\"d-1\",\"discord_name\":\"Admin\",\"x_user_id\":null,\"x_name\":null,\"icon_url\":null}",
+            "イベントテンプレートを削除",
+            "admin_event_templates",
+            "normal",
+            "none",
+            "not_restorable",
+            162,
+            1802592000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000001",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 0
+  },
+  "SA-012 create chapter": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "chapterId": "ch_00000000-0000-4000-8000-000000000001",
+      "pendingPublicReflection": true
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "INSERT INTO video_chapters ( id, video_id, x_user_id, chapter_time, chapter_label, note, visibility, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "params": [
+            "ch_00000000-0000-4000-8000-000000000001",
+            "v_pub",
+            "x_owner",
+            90,
+            "Intro",
+            "hello",
+            "public",
+            1800000000,
+            1800000000
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000002\",\"target_type\":\"video\",\"target_id\":\"v_pub\",\"reason\":\"chapter_create\",\"priority\":\"normal\",\"requested_by_user_id\":\"u_owner\"}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000003",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000001",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000001\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_owner\",\"chapter_time\":90,\"chapter_label\":\"Intro\",\"note\":\"hello\",\"visibility\":\"public\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_owner",
+            null,
+            "{\"discord_id\":\"d_u_owner\",\"discord_name\":\"u_owner\",\"x_user_id\":\"x_owner\",\"x_name\":\"name_x_owner\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            216,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000003",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-013 update chapter": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "chapterId": "ch_owner",
+      "message": "チャプターを更新しました。",
+      "pendingPublicReflection": true
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "UPDATE \"video_chapters\" SET \"chapter_time\" = ?, \"chapter_label\" = ?, \"note\" = ?, \"visibility\" = ?, \"updated_at\" = ? WHERE \"id\" = ? AND \"video_id\" = ? AND \"x_user_id\" = ? AND \"chapter_time\" = ? AND \"chapter_label\" = ? AND \"note\" = ? AND \"visibility\" = ? AND \"created_at\" = ? AND \"updated_at\" = ?",
+          "params": [
+            90,
+            "Changed",
+            "hello",
+            "public",
+            1800000000,
+            "ch_owner",
+            "v_pub",
+            "x_owner",
+            10,
+            "L ch_owner",
+            "N ch_owner",
+            "public",
+            100,
+            100
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"video\",\"target_id\":\"v_pub\",\"reason\":\"chapter_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u_owner\"}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "video_chapters",
+            "ch_owner",
+            "UPDATE",
+            "{\"id\":\"ch_owner\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_owner\",\"chapter_time\":10,\"chapter_label\":\"L ch_owner\",\"note\":\"N ch_owner\",\"visibility\":\"public\",\"created_at\":100,\"updated_at\":100}",
+            "{\"id\":\"ch_owner\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_owner\",\"chapter_time\":90,\"chapter_label\":\"Changed\",\"note\":\"hello\",\"visibility\":\"public\",\"created_at\":100,\"updated_at\":1800000000}",
+            "[\"chapter_time\",\"chapter_label\",\"note\",\"updated_at\"]",
+            "{\"chapter_time\":10,\"chapter_label\":\"L ch_owner\",\"note\":\"N ch_owner\",\"updated_at\":100}",
+            "u_owner",
+            null,
+            "{\"discord_id\":\"d_u_owner\",\"discord_name\":\"u_owner\",\"x_user_id\":\"x_owner\",\"x_name\":\"name_x_owner\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            361,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-014 delete chapter": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "chapterId": "ch_owner",
+      "message": "チャプターを削除しました。",
+      "pendingPublicReflection": true
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "DELETE FROM \"video_chapters\" WHERE \"id\" = ? AND \"video_id\" = ? AND \"x_user_id\" = ? AND \"chapter_time\" = ? AND \"chapter_label\" = ? AND \"note\" = ? AND \"visibility\" = ? AND \"created_at\" = ? AND \"updated_at\" = ?",
+          "params": [
+            "ch_owner",
+            "v_pub",
+            "x_owner",
+            10,
+            "L ch_owner",
+            "N ch_owner",
+            "public",
+            100,
+            100
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"video\",\"target_id\":\"v_pub\",\"reason\":\"chapter_delete\",\"priority\":\"normal\",\"requested_by_user_id\":\"u_owner\"}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            "video_chapters",
+            "ch_owner",
+            "DELETE",
+            "{\"id\":\"ch_owner\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_owner\",\"chapter_time\":10,\"chapter_label\":\"L ch_owner\",\"note\":\"N ch_owner\",\"visibility\":\"public\",\"created_at\":100,\"updated_at\":100}",
+            null,
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_owner",
+            null,
+            "{\"discord_id\":\"d_u_owner\",\"discord_name\":\"u_owner\",\"x_user_id\":\"x_owner\",\"x_name\":\"name_x_owner\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            181,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000002",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 1
+  },
+  "SA-015 bulk chapters (5 audit rows, 2 audit chunks)": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "message": "5 件追加 / 0 件スキップ",
+      "inserted": 5,
+      "skipped": 0,
+      "errors": [],
+      "pendingPublicReflection": true
+    },
+    "reads": 3,
+    "batches": [
+      [
+        {
+          "sql": "INSERT INTO video_chapters ( id, video_id, x_user_id, chapter_time, chapter_label, note, visibility, created_at, updated_at ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "params": [
+            "ch_00000000-0000-4000-8000-000000000001",
+            "v_pub",
+            "x_admin",
+            10,
+            "A",
+            "first",
+            "public",
+            1800000000,
+            1800000000,
+            "ch_00000000-0000-4000-8000-000000000002",
+            "v_pub",
+            "x_admin",
+            60,
+            "B",
+            null,
+            "private",
+            1800000000,
+            1800000000,
+            "ch_00000000-0000-4000-8000-000000000003",
+            "v_pub",
+            "x_admin",
+            120,
+            "C",
+            "third",
+            "public",
+            1800000000,
+            1800000000,
+            "ch_00000000-0000-4000-8000-000000000004",
+            "v_pub",
+            "x_admin",
+            180,
+            "D",
+            null,
+            "public",
+            1800000000,
+            1800000000,
+            "ch_00000000-0000-4000-8000-000000000005",
+            "v_pub",
+            "x_admin",
+            240,
+            "E",
+            "five",
+            "private",
+            1800000000,
+            1800000000
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            5
+          ]
+        },
+        {
+          "sql": "INSERT INTO static_rebuild_queue ( id, target_type, target_id, reason, priority, status, attempt_count, requested_by_user_id, created_at, updated_at ) SELECT json_extract(incoming.value, '$.id'), json_extract(incoming.value, '$.target_type'), json_extract(incoming.value, '$.target_id'), json_extract(incoming.value, '$.reason'), json_extract(incoming.value, '$.priority'), 'pending', 0, json_extract(incoming.value, '$.requested_by_user_id'), ?, ? FROM json_each(?) AS incoming WHERE 1 = 1 ON CONFLICT(target_type, target_id) WHERE status IN ('pending', 'processing') DO UPDATE SET reason = CASE WHEN excluded.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN excluded.reason WHEN static_rebuild_queue.reason IN ('video_visibility_update', 'event_id_rename_old_cleanup') THEN static_rebuild_queue.reason WHEN (CASE excluded.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) >= (CASE static_rebuild_queue.priority WHEN 'high' THEN 3 WHEN 'normal' THEN 2 ELSE 1 END) THEN excluded.reason ELSE static_rebuild_queue.reason END, priority = CASE WHEN static_rebuild_queue.priority = 'high' OR excluded.priority = 'high' THEN 'high' WHEN static_rebuild_queue.priority = 'normal' OR excluded.priority = 'normal' THEN 'normal' ELSE 'low' END, requested_by_user_id = COALESCE( excluded.requested_by_user_id, static_rebuild_queue.requested_by_user_id ), updated_at = MAX(static_rebuild_queue.updated_at + 1, excluded.updated_at)",
+          "params": [
+            1800000000,
+            1800000000,
+            "[{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"video\",\"target_id\":\"v_pub\",\"reason\":\"chapter_bulk_create\",\"priority\":\"normal\",\"requested_by_user_id\":\"u_admin\"}]"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            1
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1) UNION ALL SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1) UNION ALL SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1) UNION ALL SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000007",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000001",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000001\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_admin\",\"chapter_time\":10,\"chapter_label\":\"A\",\"note\":\"first\",\"visibility\":\"public\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_admin",
+            null,
+            "{\"discord_id\":\"d_u_admin\",\"discord_name\":\"u_admin\",\"x_user_id\":\"x_admin\",\"x_name\":\"name_x_admin\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            212,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。",
+            "audit_00000000-0000-4000-8000-000000000008",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000002",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000002\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_admin\",\"chapter_time\":60,\"chapter_label\":\"B\",\"note\":null,\"visibility\":\"private\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_admin",
+            null,
+            "{\"discord_id\":\"d_u_admin\",\"discord_name\":\"u_admin\",\"x_user_id\":\"x_admin\",\"x_name\":\"name_x_admin\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            210,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。",
+            "audit_00000000-0000-4000-8000-000000000009",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000003",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000003\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_admin\",\"chapter_time\":120,\"chapter_label\":\"C\",\"note\":\"third\",\"visibility\":\"public\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_admin",
+            null,
+            "{\"discord_id\":\"d_u_admin\",\"discord_name\":\"u_admin\",\"x_user_id\":\"x_admin\",\"x_name\":\"name_x_admin\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            213,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。",
+            "audit_00000000-0000-4000-8000-000000000010",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000004",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000004\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_admin\",\"chapter_time\":180,\"chapter_label\":\"D\",\"note\":null,\"visibility\":\"public\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_admin",
+            null,
+            "{\"discord_id\":\"d_u_admin\",\"discord_name\":\"u_admin\",\"x_user_id\":\"x_admin\",\"x_name\":\"name_x_admin\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            210,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?, ?, ?, ?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000007",
+            "audit_00000000-0000-4000-8000-000000000008",
+            "audit_00000000-0000-4000-8000-000000000009",
+            "audit_00000000-0000-4000-8000-000000000010",
+            4
+          ]
+        },
+        {
+          "sql": "INSERT INTO audit_logs ( id, table_name, target_id, operation, before_json, after_json, changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json, reason, context, retention_class, restore_strategy, restore_status, payload_size_bytes, expires_at, created_at, restore_unavailable_reason_code, restore_unavailable_message ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (1 = 1)",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000011",
+            "video_chapters",
+            "ch_00000000-0000-4000-8000-000000000005",
+            "CREATE",
+            null,
+            "{\"id\":\"ch_00000000-0000-4000-8000-000000000005\",\"video_id\":\"v_pub\",\"x_user_id\":\"x_admin\",\"chapter_time\":240,\"chapter_label\":\"E\",\"note\":\"five\",\"visibility\":\"private\",\"created_at\":1800000000,\"updated_at\":1800000000}",
+            "[\"id\",\"video_id\",\"x_user_id\",\"chapter_time\",\"chapter_label\",\"note\",\"visibility\",\"created_at\",\"updated_at\"]",
+            null,
+            "u_admin",
+            null,
+            "{\"discord_id\":\"d_u_admin\",\"discord_name\":\"u_admin\",\"x_user_id\":\"x_admin\",\"x_name\":\"name_x_admin\",\"icon_url\":null}",
+            null,
+            null,
+            "normal",
+            "none",
+            "not_restorable",
+            213,
+            1807776000,
+            1800000000,
+            "strategy_none",
+            "この監査操作には復元戦略がありません。"
+          ]
+        },
+        {
+          "sql": "SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs WHERE id IN (?)) = ? THEN 1 ELSE json_extract('not-valid-json', '$') END",
+          "params": [
+            "audit_00000000-0000-4000-8000-000000000011",
+            1
+          ]
+        }
+      ]
+    ],
+    "audit_logs": 5
+  }
+}

@@ -1,3 +1,5 @@
+import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { SessionUser, AuthSession } from "./auth/session.ts";
 
 export type Bindings = {
@@ -29,7 +31,9 @@ export type Variables = {
   /** Active X and approved X IDs read in the same user query. */
   activeX: { activeXId: string | null; approvedXIds: string[] };
   /** Set by costGuardMiddleware from its single system_settings read. */
-  auditSettings: import("./audit/mutateWithAudit.ts").AuditLogSettings;
+  auditSettings: AuditLogSettings;
+  /** Set once per write request by dbMiddleware (after writeGuard); routes reach server-core only through it. */
+  db: ServerCoreDb;
   /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
   actorSnapshotJsonById: Record<string, string>;
 };

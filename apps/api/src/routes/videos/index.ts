@@ -9,6 +9,7 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
+import { dbMiddleware } from "../../middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
 import { videoDetailRoutes } from "./detail.ts";
@@ -28,6 +29,7 @@ function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler
         requiredRole: null,
         activeX: { requireApprovedActiveXId: true, feature: "chapter_comment" },
       })(c, next),
+    dbMiddleware,
   ];
   return async (c, next) => {
     c.header("Cache-Control", "private, no-store");
