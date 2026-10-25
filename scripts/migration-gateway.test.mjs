@@ -616,7 +616,8 @@ test("only the exact allowlist bypasses the gate: detail, private, config and sm
   const inner = env.ASSETS.fetch;
   env.ASSETS.fetch = async (req) => {
     const { pathname } = new URL(req.url);
-    if (!pathname.startsWith("/_fn/routes/") && !pathname.endsWith("/")) bypassing.push(pathname);
+    // /404 is the known static error document, not a bypass to entity content.
+    if (!pathname.startsWith("/_fn/routes/") && !pathname.endsWith("/") && pathname !== "/404") bypassing.push(pathname);
     return inner(req);
   };
   for (const path of [
