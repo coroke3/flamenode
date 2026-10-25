@@ -51,6 +51,14 @@ function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new M
         const { pathname } = new URL(req.url);
         calls.assets.push(pathname);
         if (files.has(pathname)) return new Response(files.get(pathname), { status: 200 });
+        // Cloudflare Static Assets not_found_handling="404-page" answers
+        // /404 with 404 and the contents of 404.html, not HTTP 200.
+        if (Object.hasOwn(pages, pathname)) {
+          return new Response(pages[pathname], {
+            status: pathname === "/404" ? 404 : 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
+        }
         if (pathname.endsWith("/index.html")) {
           return new Response(null, { status: 307, headers: { Location: pathname.slice(0, -10) } });
         }
@@ -96,6 +104,258 @@ async function get(path, env, init) {
   resetRebuildMemory();
   return gateway.fetch(new Request(`https://flamenode.net${path}`, init), env);
 }
+
+test("MIG-0512 T01/T02/T03/T10: HTML error pages, text fallback and HEAD parity", async () => {
+  const html = createEnv({ pages: { "/404": "<html>not found</html>", "/503/": "<html>unavailable</html>" } });
+  for (const [path, status, body, method] of [
+    ["/does-not-exist", 404, "<html>not found</html>", "GET"],
+    ["/does-not-exist", 404, "", "HEAD"],
+    ["/video-public-1", 503, "<html>unavailable</html>", "GET"],
+    ["/video-public-1", 503, "", "HEAD"],
+  ]) {
+    const env = status === 503 ? { ...html.env, VISIBILITY_KV: undefined } : html.env;
+    const res = await get(path, env, { method });
+    assert.equal(res.status, status);
+    assert.equal(await res.text(), body);
+    assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(res.headers.get("cache-control"), "no-store, private");
+    assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+    assert.equal(res.headers.get("retry-after"), status === 503 ? "30" : null);
+  }
+  const textEnv = createEnv();
+  for (const method of ["GET", "HEAD"]) {
+    const res = await get("/video-public-1", { ...textEnv.env, VISIBILITY_KV: undefined }, { method });
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("retry-after"), "30");
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+  }
+  const auth = await get("/api/auth/session", textEnv.env);
+  assert.equal(auth.status, 503);
+  assert.equal(auth.headers.get("retry-after"), null);
+  assert.equal(await auth.text(), "Service Unavailable");
+});
+
+test("MIG-0512: genuine 404-page HTML is accepted, generic 404 bodies fail safely", async () => {
+  const htmlBody = "<html><title>custom not found</title></html>";
+  for (const method of ["GET", "HEAD"]) {
+    const calls = [];
+    const { env } = createEnv({ assets: { fetch: async (req) => {
+      const path = new URL(req.url).pathname;
+      calls.push(path);
+      if (path === "/404") {
+        return new Response(method === "HEAD" ? null : htmlBody, {
+          status: 404, headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+      return new Response(null, { status: 404 });
+    } } });
+    const res = await get("/%2f", env, { method });
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+    assert.equal(res.headers.get("cache-control"), "no-store, private");
+    assert.equal(await res.text(), method === "HEAD" ? "" : htmlBody);
+    assert.deepEqual(calls, ["/404"], "only one known static HTML error page is fetched");
+  }
+  // A plain-text 404 at /404, an empty response, or a zero-length HTML page
+  // must not be relabeled as the project's HTML error page.
+  for (const variant of [
+    { body: "generic missing", headers: { "Content-Type": "text/plain" } },
+    { body: null, headers: { "Content-Type": "text/html" } },
+    { body: "", headers: { "Content-Type": "text/html", "Content-Length": "0" } },
+  ]) {
+    const { env } = createEnv({ assets: { fetch: async () =>
+      new Response(variant.body, { status: 404, headers: variant.headers }),
+    } });
+    const res = await get("/%2f", env);
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), "Not Found");
+  }
+});
+
+test("MIG-0512: failing fixed HTML and maintenance Assets return retryable, fail-closed 503", async () => {
+  const { env, calls } = createEnv();
+  env.ASSETS = { fetch: async (request) => {
+    calls.assets.push(new URL(request.url).pathname);
+    throw new Error("asset binding unavailable");
+  } };
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of ["/about", "/maintenance"]) {
+      const res = await get(path, env, { method });
+      assert.equal(res.status, 503, path);
+      assert.equal(res.headers.get("retry-after"), "30", path);
+      assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+      assert.equal(res.headers.get("cache-control"), "no-store, private");
+      assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable", path);
+    }
+  }
+  const font = await get("/fonts/FlameNodeSans.otf", env);
+  assert.equal(font.status, 503);
+  assert.equal(font.headers.get("retry-after"), "30");
+  assert.equal(font.headers.get("content-type"), "text/plain; charset=utf-8", "never return HTML to an asset fetch");
+  assert.deepEqual(calls.kv, [], "no route or KV read for fixed assets");
+  assert.ok(!calls.assets.some((path) => path.startsWith("/_fn/routes/")));
+});
+
+test("MIG-0512: fixed HTML missing or upstream 503 uses a retryable response, not raw Assets error", async () => {
+  for (const assetStatus of [404, 503]) {
+    const calls = [];
+    const { env } = createEnv({ assets: {
+      fetch: async (req) => {
+        calls.push(new URL(req.url).pathname);
+        return new Response("upstream failure", { status: assetStatus });
+      },
+    } });
+    for (const method of ["GET", "HEAD"]) {
+      for (const path of ["/about", "/maintenance"]) {
+        const res = await get(path, env, { method });
+        assert.equal(res.status, 503, `${path} Assets ${assetStatus}`);
+        assert.equal(res.headers.get("retry-after"), "30");
+        assert.equal(res.headers.get("cache-control"), "no-store, private");
+        assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+        assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+      }
+    }
+    assert.ok(calls.includes("/503/"), "the gateway tried a safe static error page");
+  }
+});
+
+test("MIG-0512: upstream 5xx for build assets cannot be cached, HEAD has no body", async () => {
+  for (const assetStatus of [500, 502, 503, 504]) {
+    for (const method of ["GET", "HEAD"]) {
+      const calls = [];
+      const { env } = createEnv({
+        assets: {
+          fetch: async (req) => {
+            calls.push(new URL(req.url).pathname);
+            return new Response("upstream failure", {
+              status: assetStatus,
+              headers: { "Cache-Control": "public, max-age=86400", "Content-Type": "text/html" },
+            });
+          },
+        },
+      });
+      for (const assetPath of ["/_astro/main.abc123.js", "/fonts/main.woff2", "/user/index.json"]) {
+        const res = await get(assetPath, env, { method });
+        assert.equal(res.status, 503, `${assetStatus} ${method} ${assetPath}`);
+        assert.equal(res.headers.get("retry-after"), "30");
+        assert.equal(res.headers.get("cache-control"), "no-store, private");
+        assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+        assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+        assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+      }
+      assert.deepEqual(calls, ["/_astro/main.abc123.js", "/fonts/main.woff2", "/user/index.json"]);
+    }
+  }
+  // A missing asset stays a 404; it is not a transient upstream 5xx.
+  const { env: missing } = createEnv({ assets: { fetch: async () => new Response("missing", { status: 404 }) } });
+  const absent = await get("/fonts/missing.woff2", missing);
+  assert.equal(absent.status, 404);
+  assert.equal(await absent.text(), "missing");
+
+  // Exceptions also keep HEAD bodyless; no HTML fallback is supplied to binary assets.
+  const { env: broken } = createEnv({ assets: { fetch: async () => { throw new Error("upstream down"); } } });
+  const unavailable = await get("/_astro/main.abc123.js", broken, { method: "HEAD" });
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get("retry-after"), "30");
+  assert.equal(await unavailable.text(), "");
+});
+
+test("MIG-0512 T04/T05: event release and slots must pass one parent shard and revocation fence", async () => {
+  const pages = {
+    "/event/spring-fest-2026/release/": "<html>release</html>",
+    "/event/spring-fest-2026/slots/": "<html>slots</html>",
+  };
+  const live = createEnv({ pages });
+  const release = await get("/event/spring-fest-2026/release", live.env);
+  assert.equal(release.status, 200);
+  assert.equal(await release.text(), "<html>release</html>");
+  assert.deepEqual(live.calls.kv, ["deny:event:spring-fest-2026"]);
+  assert.equal(live.calls.assets.filter((p) => p.startsWith("/_fn/routes/")).length, 1);
+  assert.ok(live.calls.assets.includes("/event/spring-fest-2026/release/"));
+  const missing = await get("/event/spring-fest-2026/portfolio", live.env);
+  assert.equal(missing.status, 404);
+  const revoked = createEnv({
+    pages,
+    kv: new Map([[revocationKey("event", "spring-fest-2026"), "1"]]),
+  });
+  for (const sub of ["release", "slots"]) {
+    const res = await get(`/event/spring-fest-2026/${sub}`, revoked.env);
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("location"), null);
+  }
+  assert.deepEqual(revoked.calls.kv, ["deny:event:spring-fest-2026", "deny:event:spring-fest-2026"]);
+  assert.ok(!revoked.calls.assets.some((p) => p === "/event/spring-fest-2026/slots" ||
+    p === "/event/spring-fest-2026/release/"), "revoked pages cannot reach their assets");
+});
+
+test("MIG-0512 T06: an Assets 307 for a zero-slot event survives the parent fence", async () => {
+  const live = createEnv();
+  const original = live.env.ASSETS.fetch;
+  live.env.ASSETS.fetch = async (request) => {
+    if (new URL(request.url).pathname === "/event/spring-fest-2026/slots") {
+      live.calls.assets.push("/event/spring-fest-2026/slots");
+      return new Response(null, { status: 307, headers: { Location: "/event/spring-fest-2026" } });
+    }
+    return original(request);
+  };
+  const res = await get("/event/spring-fest-2026/slots", live.env);
+  assert.equal(res.status, 307);
+  assert.equal(res.headers.get("location"), "/event/spring-fest-2026");
+  assert.deepEqual(live.calls.kv, ["deny:event:spring-fest-2026"]);
+});
+
+test("MIG-0512 T07/T08: user portfolio canonicalization, deny and event alias sub-page redirects", async () => {
+  const user = createEnv({ pages: { "/user/mixed_case/portfolio/": "<html>portfolio</html>" } });
+  const res = await get("/user/Mixed_Case/portfolio", user.env);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "<html>portfolio</html>");
+  assert.deepEqual(user.calls.kv, ["deny:user:mixed_case"]);
+  assert.ok(user.calls.assets.includes("/user/mixed_case/portfolio/"));
+  const denied = createEnv({
+    pages: { "/user/mixed_case/portfolio/": "<html>private</html>" },
+    kv: new Map([["deny:user:mixed_case", "1"]]),
+  });
+  assert.equal((await get("/user/Mixed_Case/portfolio", denied.env)).status, 404);
+
+  const eventManifest = buildRouteMap([
+    { kind: "event", id: "canonical", aliases: ["alias"] },
+    { kind: "redirect", fromPath: "/event/alias-query", toPath: "/event/canonical?x=1", status: 307 },
+  ], GENERATION);
+  const alias = createEnv({ manifest: eventManifest });
+  const redir = await get("/event/alias/release?x=1", alias.env);
+  assert.equal(redir.status, 308);
+  assert.equal(redir.headers.get("location"), "/event/canonical/release?x=1");
+  assert.deepEqual(alias.calls.kv, ["deny:event:canonical"]);
+  const invalid = await get("/event/alias-query/release", alias.env);
+  assert.equal(invalid.status, 404);
+  assert.equal(invalid.headers.get("location"), null);
+});
+
+test("MIG-0512 T09: exact user index and safe fonts bypass the shard, never user detail", async () => {
+  const envData = createEnv({
+    pages: { "/user/index.json": '{"users":[]}', "/fonts/FlameNodeSans.otf": "font-data" },
+  });
+  for (const [path, expected] of [
+    ["/user/index.json", '{"users":[]}'],
+    ["/fonts/FlameNodeSans.otf", "font-data"],
+  ]) {
+    const res = await get(path, envData.env);
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), expected);
+  }
+  assert.deepEqual(envData.calls.kv, []);
+  assert.ok(!envData.calls.assets.some((p) => p.startsWith("/_fn/routes/")));
+  for (const path of ["/fonts/.x", "/fonts/../x", "/user/index.json.bak"]) {
+    assert.equal((await get(path, envData.env)).status, 404, path);
+  }
+  const details = await get("/user/creator-alpha", envData.env);
+  assert.equal(details.status, 503, "a known user detail still requires an asset/R2 page");
+  assert.deepEqual(envData.calls.kv.at(-1), "deny:user:creator-alpha");
+});
 
 test("R-GATEWAY 1: public canonical page is served from Static Assets in directory form", async () => {
   const { env, calls } = createEnv({ pages: { "/video-public-1/": "<html>v1</html>" } });
@@ -488,7 +748,8 @@ test("only the exact allowlist bypasses the gate: detail, private, config and sm
   const inner = env.ASSETS.fetch;
   env.ASSETS.fetch = async (req) => {
     const { pathname } = new URL(req.url);
-    if (!pathname.startsWith("/_fn/routes/") && !pathname.endsWith("/")) bypassing.push(pathname);
+    // /404 is the known static error document, not a bypass to entity content.
+    if (!pathname.startsWith("/_fn/routes/") && !pathname.endsWith("/") && pathname !== "/404") bypassing.push(pathname);
     return inner(req);
   };
   for (const path of [

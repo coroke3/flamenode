@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0631
-Current Owner: antigravity
+Current Task: MIG-0512
+Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0631
-Last Task PR: #398
+Last Completed Task: MIG-0512
+Last Task PR: #411
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -284,7 +284,7 @@ Validation:
 | --- | --- | --- | --- |
 | MIG-0501 | fixed/static routes | READY | MIG-0407 |
 | MIG-0502 | event routes | READY | MIG-0407 |
-| MIG-0503 | group routes | READY | MIG-0407 |
+| MIG-0503 | group routes | DONE | MIG-0407 |
 | MIG-0504 | user routes | READY | MIG-0407 |
 | MIG-0505 | list/search/recommend/trending | READY | MIG-0407 |
 | MIG-0506 | root/top | READY | MIG-0407 |
@@ -292,7 +292,7 @@ Validation:
 | MIG-0509 | all public data generated at build time (D-09) | READY | MIG-0409 |
 | MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | READY | MIG-0634 |
 | MIG-0511 | public X icon map projection at build time | READY | MIG-0407, MIG-0409 |
-| MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | READY | MIG-0405, MIG-0619 |
+| MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | DONE | MIG-0405, MIG-0619 |
 | MIG-0513 | `/[id]` interaction Islands on Phase 6 APIs (like/bookmark, status form) | BLOCKED | MIG-0603, MIG-0640, MIG-0518 |
 | MIG-0514 | `/event/[id]/slots` reservation Island on Phase 6 APIs | BLOCKED | MIG-0657 |
 | MIG-0515 | `/rules` consent form + header Active X switch on Phase 6 APIs | BLOCKED | MIG-0636, MIG-0641 |

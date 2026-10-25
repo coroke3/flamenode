@@ -55,8 +55,13 @@ export interface GatewayEnv extends EdgePolicyEnv {
 const NO_STORE = "no-store, private";
 const NOINDEX = "noindex, nofollow";
 
-function textResponse(status: number, body: string, extra: Record<string, string> = {}): Response {
-  return new Response(body, {
+function textResponse(
+  status: number,
+  body: string,
+  extra: Record<string, string> = {},
+  method: string = "GET",
+): Response {
+  return new Response(method === "HEAD" ? null : body, {
     status,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
@@ -68,7 +73,48 @@ function textResponse(status: number, body: string, extra: Record<string, string
 }
 
 const unavailable = () => textResponse(503, "Service Unavailable");
-const notFound = () => textResponse(404, "Not Found");
+
+async function errorPage(status: 404 | 503, env: GatewayEnv, url: URL, method: string): Promise<Response> {
+  const extra = status === 503 ? { "Retry-After": "30" } : {};
+  const assetPath = status === 404 ? "/404" : "/503/";
+  if (env.ASSETS) {
+    try {
+      const asset = await env.ASSETS.fetch(new Request(new URL(assetPath, url.origin), { method, redirect: "manual" }));
+      // With Static Assets not_found_handling="404-page", /404 serves the
+      // generated 404.html *with status 404*, not 200. Accept that response
+      // only for the explicitly requested error page, when it is HTML and has
+      // a body (HEAD has no body by definition). Never forward a generic 404.
+      const html404 = status === 404 && asset.status === 404 &&
+        /^text\/html(?:\s*;|$)/i.test(asset.headers.get("Content-Type") ?? "") &&
+        asset.headers.get("Content-Length") !== "0" &&
+        (method === "HEAD" || asset.body !== null);
+      if (asset.status === 200 || html404) {
+        return new Response(method === "HEAD" ? null : asset.body, {
+          status,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": NO_STORE,
+            "X-Robots-Tag": NOINDEX,
+            ...extra,
+          },
+        });
+      }
+    } catch {
+      // The static error page can be absent. Retain a fail-closed status and headers.
+    }
+  }
+  return new Response(method === "HEAD" ? null : status === 404 ? "Not Found" : "Service Unavailable", {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": NO_STORE,
+      "X-Robots-Tag": NOINDEX,
+      ...extra,
+    },
+  });
+}
+const notFoundPage = (env: GatewayEnv, url: URL, method: string) => errorPage(404, env, url, method);
+const unavailablePage = (env: GatewayEnv, url: URL, method: string) => errorPage(503, env, url, method);
 
 /**
  * Redirect Location: the target plus the incoming query. A target that has its own query
@@ -144,7 +190,15 @@ async function forwardToAuth(request: Request, env: GatewayEnv): Promise<Respons
   }
 }
 
-const EVENT_SLOTS_PATH = /^\/event\/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\/slots\/?$/;
+const EVENT_SUB_PAGE = /^\/event\/([^/]+)\/(release|slots)\/?$/;
+const USER_SUB_PAGE = /^\/user\/([^/]+)\/(portfolio)\/?$/;
+
+function entitySubPage(path: string): { parent: string; sub: string } | null {
+  const event = EVENT_SUB_PAGE.exec(path);
+  if (event) return { parent: `/event/${event[1]}`, sub: event[2] };
+  const user = USER_SUB_PAGE.exec(path);
+  return user ? { parent: `/user/${user[1]}`, sub: user[2] } : null;
+}
 const GROUP_SLUG_PATH = /^\/groups\/([^/]+)\/?$/;
 
 /** CURRENT `/groups` -> `/event`, `/groups/{slug}` -> `/event#event-group-{slug}`; null otherwise. */
@@ -172,22 +226,22 @@ async function servePage(
     try {
       asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method, headers: request.headers, redirect: "manual" }));
     } catch {
-      return unavailable();
+      return unavailablePage(env, url, request.method);
     }
     if (asset.status === 200 || asset.status === 304) return asset;
     // Anything but a miss (a redirect, an error) is not known-good public HTML.
-    if (asset.status !== 404) return unavailable();
+    if (asset.status !== 404) return unavailablePage(env, url, request.method);
   }
 
   // The route data says the page is public; without its HTML the answer is 503, not 404.
-  if (!env.R2_STORAGE) return unavailable();
+  if (!env.R2_STORAGE) return unavailablePage(env, url, request.method);
   const result = await loadR2PrebuiltHtml(env.R2_STORAGE, decision, request.method, env.REBUILD_QUEUE);
   if (result.rebuild) {
     if (ctx) ctx.waitUntil(result.rebuild);
     else await result.rebuild;
   }
   if (result.action === "serve") return result.response;
-  return unavailable();
+  return unavailablePage(env, url, request.method);
 }
 
 export default {
@@ -212,26 +266,68 @@ export default {
     if (group) {
       return new Response(null, { status: 307, headers: { Location: group, "Cache-Control": NO_STORE } });
     }
-    if (!env.ASSETS) return unavailable();
+    if (!env.ASSETS) return unavailablePage(env, url, request.method);
 
-    // `/event/{id}/slots`: Static Assets `_redirects` owns it (generated 307 to `/event/{id}`);
-    // `redirect: "manual"` hands that answer to the client instead of following it here.
-    if (EVENT_SLOTS_PATH.test(path)) {
+    // Sub-pages have no separate route-map entry: resolve the parent and its
+    // post-build revocation entry before serving any cached HTML or redirect.
+    const subPage = entitySubPage(path);
+    if (subPage) {
+      if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
+      let decision: GatewayDecision;
       try {
-        return await env.ASSETS.fetch(new Request(request, { redirect: "manual" }));
+        decision = await evaluateVisibility(
+          subPage.parent,
+          createShardLookup(env.ASSETS, url.origin),
+          createKvRevocationChecker(env.VISIBILITY_KV),
+        );
       } catch {
-        return unavailable();
+        return unavailablePage(env, url, request.method);
+      }
+      if (decision.action === "deny") return notFoundPage(env, url, request.method);
+      if (decision.action === "unavailable") return unavailablePage(env, url, request.method);
+      if (decision.action === "redirect") {
+        // A query/fragment in the target cannot safely receive another path segment.
+        if (/[?#]/.test(decision.targetPath)) return notFoundPage(env, url, request.method);
+        return new Response(null, {
+          status: decision.status,
+          headers: {
+            Location: redirectLocation(`${decision.targetPath.replace(/\/$/, "")}/${subPage.sub}`, url.search),
+            "Cache-Control": NO_STORE,
+          },
+        });
+      }
+      try {
+        // Zero-slot events still use the Assets _redirects 307 without following it.
+        const assetRequest = subPage.sub === "slots"
+          ? new Request(request, { redirect: "manual" })
+          : new Request(new URL(`/${decision.key}/${subPage.sub}/`, url.origin), {
+              method: request.method,
+              headers: request.headers,
+              redirect: "manual",
+            });
+        const asset = await env.ASSETS.fetch(assetRequest);
+        if (asset.status === 200 || asset.status === 304 ||
+          (subPage.sub === "slots" && asset.status >= 300 && asset.status < 400)) return asset;
+        if (asset.status === 404) return notFoundPage(env, url, request.method);
+        return unavailablePage(env, url, request.method);
+      } catch {
+        return unavailablePage(env, url, request.method);
       }
     }
 
     // The maintenance page itself: static, and exempt from the maintenance redirect above.
     if (path === "/maintenance" || path === "/maintenance/") {
       try {
-        return await env.ASSETS.fetch(
+        const asset = await env.ASSETS.fetch(
           new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers, redirect: "manual" }),
         );
+        // This page is known to exist. Asset 404/5xx means an incomplete build,
+        // not a stable public 404 or an uncacheable error supplied by the origin.
+        return asset.status === 200 || asset.status === 304
+          ? asset
+          : unavailablePage(env, url, request.method);
       } catch {
-        return unavailable();
+        return unavailablePage(env, url, request.method);
       }
     }
 
@@ -244,12 +340,25 @@ export default {
         ? new Request(new URL(`${fixed}/`, url.origin), { method: request.method, headers: request.headers, redirect: "manual" })
         : new Request(request, { redirect: "manual" });
       try {
-        return await env.ASSETS.fetch(target);
+        const asset = await env.ASSETS.fetch(target);
+        if (FIXED_PUBLIC_PAGES.has(fixed) && asset.status !== 200 && asset.status !== 304) {
+          // A listed public HTML page that is absent or failing is a temporary build error.
+          return unavailablePage(env, url, request.method);
+        }
+        if (!FIXED_PUBLIC_PAGES.has(fixed) && asset.status >= 500) {
+          // Static asset upstream failures must not leak cacheable 5xx responses.
+          // Do not substitute an HTML error page for CSS, JS, JSON, or fonts.
+          return textResponse(503, "Service Unavailable", { "Retry-After": "30" }, request.method);
+        }
+        return asset;
       } catch {
-        return unavailable();
+        // Failed public HTML should be retryable; hashed/font assets retain text 503.
+        return FIXED_PUBLIC_PAGES.has(fixed)
+          ? unavailablePage(env, url, request.method)
+          : textResponse(503, "Service Unavailable", { "Retry-After": "30" }, request.method);
       }
     }
-    if (!env.VISIBILITY_KV) return unavailable();
+    if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
 
     let decision: GatewayDecision;
     try {
@@ -259,7 +368,7 @@ export default {
         createKvRevocationChecker(env.VISIBILITY_KV),
       );
     } catch {
-      return unavailable();
+      return unavailablePage(env, url, request.method);
     }
 
     switch (decision.action) {
@@ -274,9 +383,9 @@ export default {
           },
         });
       case "deny":
-        return notFound();
+        return notFoundPage(env, url, request.method);
       case "unavailable":
-        return unavailable();
+        return unavailablePage(env, url, request.method);
       case "serve":
         return servePage(decision, request, env, ctx);
     }

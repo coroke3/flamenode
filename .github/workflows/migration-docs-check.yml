@@ -115,6 +115,8 @@ jobs:
         run: node --test --experimental-strip-types scripts/migration-route-map.test.mjs
       - name: MIG-0405 visibility gateway verification
         run: node --test --experimental-strip-types scripts/migration-gateway.test.mjs
+      - name: MIG-0512 real workerd 404-page and 503 asset verification
+        run: node scripts/migration-gateway-404.wrangler-smoke.mjs
       - name: MIG-0649 R2 artifact consumer registry
         run: |
           node --test scripts/check-r2-artifact-consumers.test.mjs
