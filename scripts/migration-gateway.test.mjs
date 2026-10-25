@@ -132,6 +132,31 @@ test("MIG-0512 T01/T02/T03/T10: HTML error pages, text fallback and HEAD parity"
   assert.equal(await auth.text(), "Service Unavailable");
 });
 
+test("MIG-0512: failing fixed HTML and maintenance Assets return retryable, fail-closed 503", async () => {
+  const { env, calls } = createEnv();
+  env.ASSETS = { fetch: async (request) => {
+    calls.assets.push(new URL(request.url).pathname);
+    throw new Error("asset binding unavailable");
+  } };
+  for (const method of ["GET", "HEAD"]) {
+    for (const path of ["/about", "/maintenance"]) {
+      const res = await get(path, env, { method });
+      assert.equal(res.status, 503, path);
+      assert.equal(res.headers.get("retry-after"), "30", path);
+      assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+      assert.equal(res.headers.get("cache-control"), "no-store, private");
+      assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable", path);
+    }
+  }
+  const font = await get("/fonts/FlameNodeSans.otf", env);
+  assert.equal(font.status, 503);
+  assert.equal(font.headers.get("retry-after"), "30");
+  assert.equal(font.headers.get("content-type"), "text/plain; charset=utf-8", "never return HTML to an asset fetch");
+  assert.deepEqual(calls.kv, [], "no route or KV read for fixed assets");
+  assert.ok(!calls.assets.some((path) => path.startsWith("/_fn/routes/")));
+});
+
 test("MIG-0512 T04/T05: event release and slots must pass one parent shard and revocation fence", async () => {
   const pages = {
     "/event/spring-fest-2026/release/": "<html>release</html>",
