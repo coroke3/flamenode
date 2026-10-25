@@ -71,6 +71,7 @@
     "./publicData/publicDto": "./src/publicData/publicDto.ts",
     "./publicData/publicApi": "./src/publicData/publicApi.ts",
     "./auth/approvedX": "./src/auth/approvedX.ts",
+    "./auth/approvedXPredicate": "./src/auth/approvedXPredicate.ts",
     "./video/generalEditPermissions": "./src/video/generalEditPermissions.ts",
     "./auth/ownership": "./src/auth/ownership.ts",
     "./event/eventOwnership": "./src/event/eventOwnership.ts",

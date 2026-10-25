@@ -16,7 +16,7 @@ test("approved X helper は x_user_account_links と approved だけを参照す
 });
 
 test("approved X membership stays below D1 bind limits for large link sets", () => {
-  const source = read("src/lib/auth/approvedXPredicate.ts");
+  const source = read("packages/server-core/src/auth/approvedXPredicate.ts");
   assert.match(source, /APPROVED_X_IDS_IN_ARRAY_MAX = 80/);
   assert.match(source, /approvedXIdsWhere/);
   assert.match(source, /approvedXIdsNotWhere/);
