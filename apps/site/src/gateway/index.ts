@@ -68,7 +68,40 @@ function textResponse(status: number, body: string, extra: Record<string, string
 }
 
 const unavailable = () => textResponse(503, "Service Unavailable");
-const notFound = () => textResponse(404, "Not Found");
+
+async function errorPage(status: 404 | 503, env: GatewayEnv, url: URL, method: string): Promise<Response> {
+  const extra = status === 503 ? { "Retry-After": "30" } : {};
+  const assetPath = status === 404 ? "/404" : "/503/";
+  if (env.ASSETS) {
+    try {
+      const asset = await env.ASSETS.fetch(new Request(new URL(assetPath, url.origin), { method, redirect: "manual" }));
+      if (asset.status === 200) {
+        return new Response(method === "HEAD" ? null : asset.body, {
+          status,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": NO_STORE,
+            "X-Robots-Tag": NOINDEX,
+            ...extra,
+          },
+        });
+      }
+    } catch {
+      // The static error page can be absent. Retain a fail-closed status and headers.
+    }
+  }
+  return new Response(method === "HEAD" ? null : status === 404 ? "Not Found" : "Service Unavailable", {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": NO_STORE,
+      "X-Robots-Tag": NOINDEX,
+      ...extra,
+    },
+  });
+}
+const notFoundPage = (env: GatewayEnv, url: URL, method: string) => errorPage(404, env, url, method);
+const unavailablePage = (env: GatewayEnv, url: URL, method: string) => errorPage(503, env, url, method);
 
 /**
  * Redirect Location: the target plus the incoming query. A target that has its own query
@@ -144,7 +177,15 @@ async function forwardToAuth(request: Request, env: GatewayEnv): Promise<Respons
   }
 }
 
-const EVENT_SLOTS_PATH = /^\/event\/[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\/slots\/?$/;
+const EVENT_SUB_PAGE = /^\/event\/([^/]+)\/(release|slots)\/?$/;
+const USER_SUB_PAGE = /^\/user\/([^/]+)\/(portfolio)\/?$/;
+
+function entitySubPage(path: string): { parent: string; sub: string } | null {
+  const event = EVENT_SUB_PAGE.exec(path);
+  if (event) return { parent: `/event/${event[1]}`, sub: event[2] };
+  const user = USER_SUB_PAGE.exec(path);
+  return user ? { parent: `/user/${user[1]}`, sub: user[2] } : null;
+}
 const GROUP_SLUG_PATH = /^\/groups\/([^/]+)\/?$/;
 
 /** CURRENT `/groups` -> `/event`, `/groups/{slug}` -> `/event#event-group-{slug}`; null otherwise. */
@@ -172,22 +213,22 @@ async function servePage(
     try {
       asset = await env.ASSETS.fetch(new Request(assetUrl, { method: request.method, headers: request.headers, redirect: "manual" }));
     } catch {
-      return unavailable();
+      return unavailablePage(env, url, request.method);
     }
     if (asset.status === 200 || asset.status === 304) return asset;
     // Anything but a miss (a redirect, an error) is not known-good public HTML.
-    if (asset.status !== 404) return unavailable();
+    if (asset.status !== 404) return unavailablePage(env, url, request.method);
   }
 
   // The route data says the page is public; without its HTML the answer is 503, not 404.
-  if (!env.R2_STORAGE) return unavailable();
+  if (!env.R2_STORAGE) return unavailablePage(env, url, request.method);
   const result = await loadR2PrebuiltHtml(env.R2_STORAGE, decision, request.method, env.REBUILD_QUEUE);
   if (result.rebuild) {
     if (ctx) ctx.waitUntil(result.rebuild);
     else await result.rebuild;
   }
   if (result.action === "serve") return result.response;
-  return unavailable();
+  return unavailablePage(env, url, request.method);
 }
 
 export default {
