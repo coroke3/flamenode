@@ -63,6 +63,7 @@ export function accessFactsColumnsSql(videoIdExpr: string, primaryEventExpr: str
 
 export function parseAccessFacts(veJson: unknown, staffJson: unknown): AccessFacts {
   const parse = (value: unknown): never[] => {
+    if (Array.isArray(value)) return value as never[];
     try {
       const parsed = typeof value === "string" ? JSON.parse(value) : [];
       return Array.isArray(parsed) ? (parsed as never[]) : [];
