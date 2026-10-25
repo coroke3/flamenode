@@ -55,8 +55,13 @@ export interface GatewayEnv extends EdgePolicyEnv {
 const NO_STORE = "no-store, private";
 const NOINDEX = "noindex, nofollow";
 
-function textResponse(status: number, body: string, extra: Record<string, string> = {}): Response {
-  return new Response(body, {
+function textResponse(
+  status: number,
+  body: string,
+  extra: Record<string, string> = {},
+  method: string = "GET",
+): Response {
+  return new Response(method === "HEAD" ? null : body, {
     status,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
@@ -343,14 +348,14 @@ export default {
         if (!FIXED_PUBLIC_PAGES.has(fixed) && asset.status >= 500) {
           // Static asset upstream failures must not leak cacheable 5xx responses.
           // Do not substitute an HTML error page for CSS, JS, JSON, or fonts.
-          return textResponse(503, "Service Unavailable", { "Retry-After": "30" });
+          return textResponse(503, "Service Unavailable", { "Retry-After": "30" }, request.method);
         }
         return asset;
       } catch {
         // Failed public HTML should be retryable; hashed/font assets retain text 503.
         return FIXED_PUBLIC_PAGES.has(fixed)
           ? unavailablePage(env, url, request.method)
-          : textResponse(503, "Service Unavailable", { "Retry-After": "30" });
+          : textResponse(503, "Service Unavailable", { "Retry-After": "30" }, request.method);
       }
     }
     if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
