@@ -111,6 +111,8 @@ jobs:
         run: node --test --experimental-strip-types scripts/migration-route-map.test.mjs
       - name: MIG-0405 visibility gateway verification
         run: node --test --experimental-strip-types scripts/migration-gateway.test.mjs
+      - name: MIG-0512 real workerd 404-page and 503 asset verification
+        run: node scripts/migration-gateway-404.wrangler-smoke.mjs
       - name: MIG-0406 CPU/build benchmark verification
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
