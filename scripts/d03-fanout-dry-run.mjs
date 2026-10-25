@@ -71,21 +71,29 @@ const LIKE_COUNT_DELTA = CANDIDATES + ",\n" + [
 ].join("\n");
 
 export function analyzeDatabase(db) {
-  const summary = db.prepare(SUMMARY).get();
-  const conflicts = db.prepare(CONFLICTS).all();
-  const likeCountDelta = db.prepare(LIKE_COUNT_DELTA).all();
-  return {
-    candidates: Number(summary.candidates),
-    skippedNoOwnerLink: Number(summary.skippedNoOwnerLink),
-    collapsedDuplicates: Number(summary.collapsedDuplicates),
-    conflictsWithVideoInteractions: {
-      count: Number(summary.collisionCount),
-      first50: conflicts,
-      truncated: Number(summary.collisionCount) > conflicts.length,
-    },
-    likeCountDelta,
-    maxDeltaVideo: likeCountDelta[0] ?? null,
-  };
+  // BEGIN keeps all three SELECTs on one SQLite snapshot. Without this,
+  // a local WAL writer can change collision/delta rows after SUMMARY ran.
+  // ROLLBACK ends the read transaction without ever committing data.
+  db.exec("BEGIN");
+  try {
+    const summary = db.prepare(SUMMARY).get();
+    const conflicts = db.prepare(CONFLICTS).all();
+    const likeCountDelta = db.prepare(LIKE_COUNT_DELTA).all();
+    return {
+      candidates: Number(summary.candidates),
+      skippedNoOwnerLink: Number(summary.skippedNoOwnerLink),
+      collapsedDuplicates: Number(summary.collapsedDuplicates),
+      conflictsWithVideoInteractions: {
+        count: Number(summary.collisionCount),
+        first50: conflicts,
+        truncated: Number(summary.collisionCount) > conflicts.length,
+      },
+      likeCountDelta,
+      maxDeltaVideo: likeCountDelta[0] ?? null,
+    };
+  } finally {
+    db.exec("ROLLBACK");
+  }
 }
 
 export function analyzeLocalFile(file) {
