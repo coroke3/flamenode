@@ -11,7 +11,7 @@ const loaderSource = await readFile(
   "utf8",
 );
 const ownershipSource = await readFile(
-  new URL("../../lib/auth/ownership.ts", import.meta.url),
+  new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url),
   "utf8",
 );
 const summarySource = await readFile(
