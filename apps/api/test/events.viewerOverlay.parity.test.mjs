@@ -57,9 +57,17 @@ if (runUnderRootTsx(import.meta.url)) {
   event("ov-anon", { slot_visibility_mode: "anonymous" });
   event("ov-hidden", { slot_visibility_mode: "hidden" });
   event("ov-priv", { visibility_status: "private" });
-  // Entry window not open yet and event not over: the case canUseSlotOperatorOverride would allow if the row
-  // carried visibility_status (it does not in CURRENT, so the answer stays false even for an admin).
+  // Public pre-entry event. An operator with event.slots may reserve before general entry starts.
   event("ov-window", { start_time: 4_000_000_000, end_time: 4_000_100_000, entry_start_time: 4_000_000_000 - 100 });
+  event("ov-ended", { start_time: 1_000, end_time: 2_000, entry_start_time: 500 });
+  const staff = (id, xId, preset, custom = null) => ins("event_staff", {
+    id, event_id: "ov-window", x_user_id: xId, display_name: id,
+    permission_preset: preset, custom_permission_keys_json: custom,
+  });
+  staff("staff-alice-slot", "alice_x", "slot_manager");
+  staff("staff-alice-editor", "alice_y", "content_editor");
+  staff("staff-frank-custom", "frank_a", "custom", JSON.stringify(["event.slots"]));
+  staff("staff-dave-rejected", "dave_r", "owner"); // rejected X must confer no permissions
   event("ov-big", { slot_visibility_mode: "anonymous" });
   event("ov-over");
   event("ov-bytes");
@@ -292,10 +300,35 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(d.got.status, 404);
   });
 
-  test("parity: operatorOverrideAllowed is false for everyone (CURRENT selects the event without visibility_status)", async () => {
-    const admin = await assertParity("ov-window", "carol", "admin in the pre-entry window");
-    assert.equal(admin.got.body.operatorOverrideAllowed, false);
-    assert.equal(admin.got.body.loggedIn, true);
+  test("FIX-0604-1: pre-entry override requires an approved staff permission and terms", async () => {
+    const allowed = await assertParity("ov-window", "alice", "approved slot manager");
+    assert.equal(allowed.got.body.operatorOverrideAllowed, true);
+    assert.ok(allowed.got.stats.statements <= 3, "session + event + viewer (staff inline) stays within S2");
+    const custom = await assertParity("ov-window", "frank", "approved custom event.slots permission");
+    assert.equal(custom.got.body.operatorOverrideAllowed, true);
+
+    for (const [user, reason] of [
+      ["dave", "rejected X staff cannot grant permissions"],
+      ["ivy", "approved X without event staff"],
+      ["carol", "admin must accept current terms"],
+      [null, "anonymous"],
+    ]) {
+      const { got } = await assertParity("ov-window", user, reason);
+      assert.equal(got.body.operatorOverrideAllowed, false, reason);
+    }
+    const notInWindow = await assertParity("ov-pub", "alice", "no entry window");
+    assert.equal(notInWindow.got.body.operatorOverrideAllowed, false);
+    const ended = await assertParity("ov-ended", "carol", "event ended");
+    assert.equal(ended.got.body.operatorOverrideAllowed, false);
+
+    // The admin exception is permission-based but must still pass onboarding.
+    sqlite.prepare("UPDATE \"user\" SET is_tos_accepted = 1, accepted_terms_version_id = 'T2' WHERE id = 'u_carol'").run();
+    try {
+      const admin = await assertParity("ov-window", "carol", "admin with terms accepted");
+      assert.equal(admin.got.body.operatorOverrideAllowed, true);
+    } finally {
+      sqlite.prepare("UPDATE \"user\" SET is_tos_accepted = 0, accepted_terms_version_id = NULL WHERE id = 'u_carol'").run();
+    }
   });
 
   test("S2 limits: exactly MAX_VIEWER_SLOTS own slots matches CURRENT; one more fails closed; a >64 KiB column fails closed", async () => {
