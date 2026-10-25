@@ -14,6 +14,8 @@
 3. 対象コードと関連test
 4. migration taskだけ `docs/migration/MIGRATION_START_HERE.md` → GitHubの全open PRを `gh` またはMCPで確認 → `AGENT_PROTOCOL.md` のWake decision → 自分の既存PRの再開を優先し、新規claim候補の場合にのみ `npm run migration:next` → `STATUS.md` 該当行
 
+ドキュメントと既存のコードが食い違うときはコードの書き方に従い、見つけた食い違いを最後の返答ですべて挙げること。
+
 `.claude/flamenode/requirements-map.md`、`archive/`、完了済みphaseは、過去仕様調査を明示されたときだけ読む。
 
 ## 役割の選び方

@@ -24,6 +24,8 @@ Do not bulk-load the repository, Historical/archive material, or completed migra
 5. `設計/` and other active design-intent documents when requirement reconciliation is needed
 6. Historical/archive material
 
+ドキュメントと既存のコードが食い違うときはコードの書き方に従い、見つけた食い違いを最後の返答ですべて挙げること。
+
 Migration work must distinguish **CURRENT** production behavior from **TARGET** architecture.
 
 `docs/design-redesign/` is obsolete and must not be used. The registered HTML mock in `docs/migration/UI_REFERENCE.md` (`docs/migration/mock/`) is the authoritative visual design source (D-08 DECIDED).
