@@ -253,15 +253,52 @@ export default {
     if (group) {
       return new Response(null, { status: 307, headers: { Location: group, "Cache-Control": NO_STORE } });
     }
-    if (!env.ASSETS) return unavailable();
+    if (!env.ASSETS) return unavailablePage(env, url, request.method);
 
-    // `/event/{id}/slots`: Static Assets `_redirects` owns it (generated 307 to `/event/{id}`);
-    // `redirect: "manual"` hands that answer to the client instead of following it here.
-    if (EVENT_SLOTS_PATH.test(path)) {
+    // Sub-pages have no separate route-map entry: resolve the parent and its
+    // post-build revocation entry before serving any cached HTML or redirect.
+    const subPage = entitySubPage(path);
+    if (subPage) {
+      if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
+      let decision: GatewayDecision;
       try {
-        return await env.ASSETS.fetch(new Request(request, { redirect: "manual" }));
+        decision = await evaluateVisibility(
+          subPage.parent,
+          createShardLookup(env.ASSETS, url.origin),
+          createKvRevocationChecker(env.VISIBILITY_KV),
+        );
       } catch {
-        return unavailable();
+        return unavailablePage(env, url, request.method);
+      }
+      if (decision.action === "deny") return notFoundPage(env, url, request.method);
+      if (decision.action === "unavailable") return unavailablePage(env, url, request.method);
+      if (decision.action === "redirect") {
+        // A query/fragment in the target cannot safely receive another path segment.
+        if (/[?#]/.test(decision.targetPath)) return notFoundPage(env, url, request.method);
+        return new Response(null, {
+          status: decision.status,
+          headers: {
+            Location: redirectLocation(`${decision.targetPath.replace(/\/$/, "")}/${subPage.sub}`, url.search),
+            "Cache-Control": NO_STORE,
+          },
+        });
+      }
+      try {
+        // Zero-slot events still use the Assets _redirects 307 without following it.
+        const assetRequest = subPage.sub === "slots"
+          ? new Request(request, { redirect: "manual" })
+          : new Request(new URL(`/${decision.key}/${subPage.sub}/`, url.origin), {
+              method: request.method,
+              headers: request.headers,
+              redirect: "manual",
+            });
+        const asset = await env.ASSETS.fetch(assetRequest);
+        if (asset.status === 200 || asset.status === 304 ||
+          (subPage.sub === "slots" && asset.status >= 300 && asset.status < 400)) return asset;
+        if (asset.status === 404) return notFoundPage(env, url, request.method);
+        return unavailablePage(env, url, request.method);
+      } catch {
+        return unavailablePage(env, url, request.method);
       }
     }
 
@@ -290,7 +327,7 @@ export default {
         return unavailable();
       }
     }
-    if (!env.VISIBILITY_KV) return unavailable();
+    if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
 
     let decision: GatewayDecision;
     try {
@@ -300,7 +337,7 @@ export default {
         createKvRevocationChecker(env.VISIBILITY_KV),
       );
     } catch {
-      return unavailable();
+      return unavailablePage(env, url, request.method);
     }
 
     switch (decision.action) {
@@ -315,9 +352,9 @@ export default {
           },
         });
       case "deny":
-        return notFound();
+        return notFoundPage(env, url, request.method);
       case "unavailable":
-        return unavailable();
+        return unavailablePage(env, url, request.method);
       case "serve":
         return servePage(decision, request, env, ctx);
     }
