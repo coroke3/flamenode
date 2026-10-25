@@ -269,12 +269,54 @@ Gate のPRをrevert。
 - 旧 Next の削除は、観測期間の終了と人間の承認の後だけ。削除PRは revert で旧経路を戻せる単位に分ける。
 - 本番の Route・Worker の停止・Remote D1・secret は明示承認事項。
 
+### MIG-0908: 旧構成に残る Worker・Cron・Queue・binding の棚卸し（code 側、MIG-0901 の前半）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-14: MIG-0901 のうち本番ログが要らない code 側の棚卸しを分割。本番の観測は MIG-0901 に残す。実装は Sonnet、review は Opus）
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
+- **Depends on:** — / **Decisions:** D-09 DECIDED, D-15-14
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- wrangler 設定: `wrangler.toml`（`flamenode-web`、`.open-next/worker.js`）, `workers/content-jobs/wrangler.toml`, `workers/fast-jobs/wrangler.toml`（crons `:12`）, `workers/sync-jobs/wrangler.toml`（crons `7,52 * * * *` `:12`、queue producer / consumer `:30-48`）。Worker の source: `workers/{cleanup,content-jobs,fast-jobs,ga-analytics,json-generator,notification-dispatcher,score-recalc,shared,sync-jobs,youtube-playlist-sync,youtube-sync}`。
+- 退役の計画: MIG-0907（json-generator / static rebuild queue）、MIG-0904（OpenNext / Next）。Cron Triggers は Free で 5 個まで。
+- page / route / helper の行き先は `FILE_MIGRATION_MATRIX.md` が持つ（MIG-0622 の検査で全 tracked file に行がある）。`/maintenance`（MIG-0619 で PARITY_VERIFIED）、`app/robots.ts` / `app/sitemap.ts`（MIG-0621）、`/dev/ui-surfaces`（`FILE_MIGRATION_MATRIX.md:96`、RETAIN/REVIEW in MIG-0901）。
+#### Owned paths
+- 新規: `+docs/migration/RESIDUAL_INVENTORY.md`（§1 code 側だけ。§2 本番観測は MIG-0901）, `+scripts/check-residual-inventory.mjs`, `+scripts/check-residual-inventory.test.mjs`
+- 変更: `package.json`（`check:residual-inventory` 1 行）, `.github/workflows/migration-docs-check.yml`（1 行）
+- 触らない: 全ての `wrangler.toml`、`workers/**`、`app/**`
+#### Micro-units
+- **U01 表**: `RESIDUAL_INVENTORY.md` §1 に、各 `wrangler.toml` の Worker 名・`main`・crons・`[[queues.producers]]` / `[[queues.consumers]]`・D1 / R2 / KV binding を 1 行ずつ書き、列「移行後の担当（Worker / MIG）」「退役 MIG」を埋める。担当が無いものは「未定」と書き、推測で埋めない。
+- **U02 検査**: `check-residual-inventory.mjs` が 4 つの `wrangler.toml` を読み、crons・queue・binding の全項目が §1 の表にあることを確かめる（無ければ exit 1）。TOML は依存を足さず、使っている key だけを読む小さな parser（test で固定）。
+- **U03 orphan の案**: `/dev/ui-surfaces` の行き先の案（移行しない / Astro に写す）を §1 に書く。決定は MIG-0901 の Gate で人間がする。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 現在の 4 file | PASS |
+| T02 | fixture の wrangler.toml に表に無い cron を足す | exit 1、その cron を名指し |
+| T03 | 表の「未定」 | PASS（警告として出す。MIG-0901 で 0 件にする） |
+#### Commands
+```bash
+node --test scripts/check-residual-inventory.test.mjs
+node scripts/check-residual-inventory.mjs
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に新規 3 file。MIG-0901 の Work Order から §1 を参照。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T03 が PASS
+- [ ] 本番ログ・Cloudflare account を読んでいない
+#### STOP
+- 本番の Worker 一覧や metrics が要ると分かったら止める（MIG-0901 の範囲）。
+- wrangler 設定を変える必要が出たら止める。
+#### Rollback
+PR を revert。
+
 ### MIG-0901: residual dependency inventory
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase 5〜8 の Gate 通過と、各ルートの本番切替が承認・実施済みであることが前提
 - **Recipe:** R-REMOVE
 - **Runtime:** N
-- **Depends on:** MIG-0508, MIG-0607, MIG-0706, MIG-0806 / **Decisions:** none
+- **Depends on:** MIG-0508, MIG-0607, MIG-0706, MIG-0806, MIG-0908 / **Decisions:** D-15-14
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - 旧 Worker: `wrangler.toml:1,3`（`flamenode-web`, `.open-next/worker.js`）。他の Worker は `workers/content-jobs`, `workers/fast-jobs`, `workers/sync-jobs`（各 `wrangler.toml`）。
@@ -285,7 +327,7 @@ Gate のPRをrevert。
 - 新規: `+docs/migration/RESIDUAL_INVENTORY.md`
 - 変更: `docs/migration/FILE_MIGRATION_MATRIX.md`（残存ファイルの disposition）
 #### Micro-units
-- **U01 inventory**: 全 path/method の新しい担当と、旧 Next に残る利用（asset URL、`/_next/*`、cron、Queue、auth callback、未知の404）を本番のログから列挙。
+- **U01 inventory**（code 側の Worker / Cron / Queue / binding の表は MIG-0908 の `RESIDUAL_INVENTORY.md` §1。本 task は §2 の本番観測）: 全 path/method の新しい担当と、旧 Next に残る利用（asset URL、`/_next/*`、cron、Queue、auth callback、未知の404）を本番のログから列挙。
 - **U02 orphans**: `/maintenance`、`/dev/ui-surfaces`、robots/sitemap の行き先を決める（`/maintenance` は mock の `Maintenance` ページがある）。
 #### Test cases
 | ID | 入力/操作 | 期待 |

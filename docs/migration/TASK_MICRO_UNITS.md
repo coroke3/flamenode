@@ -84,8 +84,9 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U01**: RH-014; viewer overlay split, public/private guards。RH-015 moved to MIG-0631 (2026-10-24)。
 - **U02**: RH-020..022 live/event slot status; 5s isolate cache/SWR and errors。
 - **U03**: moved out (2026-10-24): RH-012 to MIG-0631, RH-013 (export, legacy format/v5, CORS) to MIG-0632。
-- **U04**: SA-021..039 and SA-056..068 mutation equivalence; owner0 guard, reservation, Playlist + postcommit。
-- **Final audit**: no remaining event/slot methods without contract/test evidence.
+- **U04**: split by D-15-4 (2026-10-26): SA-021..024 → MIG-0652, SA-025..030 → MIG-0653, SA-031..034 → MIG-0654 (owner0 guard), SA-035/037..039 → MIG-0655 (Playlist + postcommit), SA-056..064 → MIG-0656, SA-065..068 → MIG-0657 (reservation)。
+- **U05 paging**: only if MIG-0639 finds the 6000-slot live read warm max >= 7ms (D-12)。
+- **Final audit**: no remaining event/slot methods without contract/test evidence (MIG-0631 / 0632 / 0652..0657).
 
 ## MIG-0605 — X / Admin / remaining Route Handlers（2026-10-25 分割、D-13-56）
 
@@ -94,13 +95,13 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **MIG-0637 へ**: SA-016..020, SA-077..081。D-14-10 で SA-045..049 / 051..055 → MIG-0642、SA-050 / 069..073 / 106 → MIG-0643、SA-092..097 / 110 → MIG-0644。
 - **MIG-0638 へ**: RH-004..008（F-1 を含む）。D-14-11 で RH-002 → MIG-0645、RH-023..025 → MIG-0646、RH-027 / 028 → MIG-0647、RH-019 → MIG-0648。
 - **MIG-0603 へ**: SA-043/044（可視性遷移の host を共有）。
-- **本 task U05x**: SA-090/091（MIG-0633 の後）。**U05d** D-03 fan-out dry-run（Remote D1 に触れない）。**U05e** D-04 checkpoint。
+- **本 task U05x**: SA-090/091（MIG-0633 は DONE）。**U05d** D-03 fan-out dry-run は MIG-0658 へ（D-15-7）。**U05e** D-04 checkpoint。
 - **U07 remaining method coverage**: RH-001..033 の担当表。RH-010/011 は旧 Auth。
 - **Final audit**: MIG-0602/0603/0604/0636〜0638/0640〜0648 との SA / RH の二重所有が無いこと。
 
 ## MIG-0704 — Ops SPA creation + Manage
 
-- **U01 scaffold**: `+apps/ops` package/tsconfig/entry/Vite/bundle, distinct `/_ops_assets/*` + CI build. No production routing。
+- **U01 scaffold**: MIG-0707 (D-15-13): `+apps/ops` package/tsconfig/entry/Vite/bundle, guard, distinct `/_ops_assets/*` + CI build. No production routing。This task keeps the Manage layout, `CostGuardBanner` and `apps/ops/wrangler.toml`。
 - **U02 Manage index/event overview**: `/manage`, `/manage/events/[id]`, `.../edit`, `.../audience`。
 - **U03 slots/staff**: `.../slots`, `.../staff`, event0-owner CAS/privilege。
 - **U04 videos/playlist**: `.../videos`, video detail, `.../youtube-playlist`, edit permission。`/manage/events/[id]/review`はCURRENT `/manage/events/[id]/videos?status=pending` への互換redirectとして扱い、同unitでdeep-linkを試験する。

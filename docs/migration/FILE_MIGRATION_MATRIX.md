@@ -347,6 +347,8 @@
 | `workers/content-jobs/index.test.mjs` | TEST | content-jobs budget/recovery wiring contract | MIG-0901 | RETAIN until audit; SAME | NOT_STARTED | — |
 | `workers/json-generator/publicProjection.test.mjs` | TEST | public static artifact projection tests | MIG-0901 | RETAIN until audit; SAME | NOT_STARTED | — |
 | `workers/json-generator/rebuild.ts` | HELPER | static rebuild generator (recommend.json generated_at = composition time) | MIG-0901 | RETAIN until audit; worker code target TBD | NOT_STARTED | — |
+| `workers/json-generator/optimizedRebuild.ts` | HELPER | `list/recent.json` producer (`:651`, `:669-678`); MIG-0517 copies its order/limit for the GA4 input | MIG-0907 | RETAIN until MIG-0907; SAME | NOT_STARTED | — |
+| `workers/ga-analytics/sync.ts` | HELPER | GA4 trending sync; input moves from R2 `list/recent.json` to D1 (D-15-11) | MIG-0517 | SAME | NOT_STARTED | — |
 | `packages/domain/src/software/labels.ts` | HELPER | pure software label normalization logic | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `packages/domain/src/slots/limits.ts` | HELPER | pure slot limit normalization logic | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
 | `packages/domain/test/softwareLabels.test.mjs` | TEST | softwareLabels T01-T03 normalization tests | MIG-0302 | SAME | RETAINED | PR#308 SHA=b8c405383f885e3e665a2fcafa756896d2b13700 TEST=npm run test --workspace=@flamenode/domain CI=https://github.com/coroke3/flamenode/actions/runs/38913652357 |
