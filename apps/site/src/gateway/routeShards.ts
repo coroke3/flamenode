@@ -95,7 +95,9 @@ export const PUBLIC_ASSET_FILES: ReadonlySet<string> = new Set([
   "/robots.txt",
 ]);
 /** Hashed Astro build output and CURRENT `public/brand/`. Never `ROUTE_SHARD_DIR`. */
-export const PUBLIC_ASSET_PREFIXES: readonly string[] = ["/_astro/", "/brand/"];
+/** Generated build output, not a user or entity route. */
+export const BUILD_OUTPUT_FILES: ReadonlySet<string> = new Set(["/user/index.json"]);
+export const PUBLIC_ASSET_PREFIXES: readonly string[] = ["/_astro/", "/brand/", "/fonts/"];
 const ASSET_SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const MAX_STATIC_PATH_LENGTH = 256;
 
@@ -113,6 +115,7 @@ export function fixedPublicPath(pathname: string): string | null {
   const page = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (FIXED_PUBLIC_PAGES.has(page)) return page;
   if (PUBLIC_ASSET_FILES.has(pathname)) return pathname;
+  if (BUILD_OUTPUT_FILES.has(pathname)) return pathname;
   for (const prefix of PUBLIC_ASSET_PREFIXES) {
     if (!pathname.startsWith(prefix)) continue;
     const segments = pathname.slice(prefix.length).split("/");
