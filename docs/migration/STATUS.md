@@ -338,7 +338,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0632 | event export API (RH-013) | BLOCKED | MIG-0614, MIG-0606 |
 | MIG-0633 | event ownership / permission resolver core (D-10) | READY | MIG-0613, MIG-0617 |
 | MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | DONE | MIG-0602, MIG-0614, MIG-0631 |
-| MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | READY | MIG-0624, MIG-0625 |
+| MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | DONE | MIG-0624, MIG-0625 |
 | MIG-0636 | Personal X / Active X / terms APIs (SA-074..076, SA-098..105) | READY | MIG-0602 |
 | MIG-0637 | admin ops writes + X merge admin (SA-016..020, 045..055, 069..073, 077..081, 092..097, 106, 110) | READY | MIG-0602, MIG-0618 |
 | MIG-0638 | remaining MIG-0605 Route Handlers (RH-002, RH-004..008, RH-019, RH-023..025, RH-027/028) | READY | MIG-0602, MIG-0631 |
