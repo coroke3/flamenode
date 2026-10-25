@@ -459,3 +459,16 @@ Documented differences (PHASE_6_SPEC.md MIG-0631 lead decisions):
 - L5: R2 failure returns 503 `public_data_unavailable` rather than stale cache.
 - RH-012: Hono has no D1 binding exception; missing D1 returns 503 `db_unavailable` (instead of `runtime_bindings_unavailable`).
 
+## MIG-0634 Hono public video list / viewer overlay APIs (Phase 6, RH-032, RH-031)
+
+Code landing only; no Worker Route / traffic change; CURRENT Next handlers stay. Parity: `apps/api/test/videosPublic.parity.test.mjs` (8/8 PASS) and `apps/api/test/videoViewerOverlay.parity.test.mjs` (9/9 PASS) run the Hono routes and CURRENT implementations over SQLite/R2. CPU: not measured (MIG-0606).
+
+| ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-032 | `GET /api/videos` | `apps/api/src/routes/videos/list.ts` (`GET /api/videos`) | public | Rate limit 60/min; query params `q` (<=100 chars), `sort`, `event` (<=128 chars), `limit` (1..48, default 24), `page` (1..ceil(5000/limit)); <2 chars query returns 0 items; branching: `event` -> `event_base`/`event` artifact, `q` -> search postings v1 with fallback to lite index, `sort=score` -> `list/popular.json`, default -> `list/recent.json`; R2 reads with visibility guard; D1 reads = 0, D1 writes = 0, Queue writes = 0; fail-closed 503 `static_list_unavailable` on miss; Cache-Control `public, max-age=30, s-maxage=60, stale-while-revalidate=120`, SHA-256 ETag / 304 | IN_PROGRESS |
+| RH-031 | `GET /api/videos/[id]/viewer-overlay` | `apps/api/src/routes/videos/viewerOverlay.ts` (`GET /api/videos/:id/viewer-overlay`; DTO `packages/contracts/src/videoViewerOverlay.ts`) | public route, per-viewer overlay (session optional; anonymous / banned get CURRENT fixed shapes) | id trimmed and cut to 128 chars (blank 400); R2 artifact `videos/<id>.json` gate (visibility_status !== 'public' -> 404, missing artifact -> 503 `viewer_overlay_unavailable` with Retry-After: 3 per D-13-46); optional playlist overlay `events/<playlist>/playlist.v1.json`; D1 = session + facts/TOS (1 stmt) + private chapters/interactions/lib-playlist (1 stmt); D1 writes = 0, Queue writes = 0; private chapters bounded to 500, filtered by canAdministerChapters or author approved X ID; all responses `private, no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0` | IN_PROGRESS |
+
+Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
+- D-13-46: GET endpoints never write (0 D1 writes, 0 Queue writes, no rebuild enqueue on miss, never returns `public_data_reflecting`). Missing R2 artifact returns 503 `static_list_unavailable` (RH-032) or 503 `viewer_overlay_unavailable` (RH-031) with `Retry-After: 3`. No degraded D1 fallback for public video listing.
+
+
