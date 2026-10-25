@@ -89,7 +89,7 @@ if (runTestWithTsx(import.meta.url)) {
     const [page, dbQueries, ownership, generator, degraded, overlay, utilityDock] = await Promise.all([
       readFile(new URL("../../../app/(public)/[id]/page.tsx", import.meta.url), "utf8"),
       readFile(new URL("../db/videoDetailQueries.ts", import.meta.url), "utf8"),
-      readFile(new URL("../auth/ownership.ts", import.meta.url), "utf8"),
+      readFile(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8"),
       readFile(new URL("../../../workers/json-generator/rebuild.ts", import.meta.url), "utf8"),
       readFile(new URL("./degradedQueries.ts", import.meta.url), "utf8"),
       readFile(new URL("../video/videoViewerOverlay.ts", import.meta.url), "utf8"),

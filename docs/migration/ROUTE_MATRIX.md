@@ -207,3 +207,6 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 | `/admin/workers` | MIG-0626 | `GET /api/admin-read/ops/workers` | DONE |
 | `/admin/youtube-quota` | MIG-0626 | `GET /api/admin-read/ops/youtube-quota` | DONE |
 | `/admin/youtube-sync/playlists` | MIG-0626 | `GET /api/admin-read/ops/youtube-playlists` | DONE |
+| `/admin/videos/[id]` | MIG-0635 | `GET /api/admin-read/videos/:id` | DONE |
+| `/admin/videos/[id]/members` | MIG-0635 | `GET /api/admin-read/videos/:id/members` | DONE |
+| `/admin/users/[id]/edit` | MIG-0635 | `GET /api/admin-read/users/:id/edit` | DONE |
