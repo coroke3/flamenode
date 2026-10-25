@@ -252,10 +252,10 @@ Phase 6 共通契約のとおり（U02a の移動は bridge なので revert で
 
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0633 待ち）。U01 RH-014（#391、5d4e980）、U02 RH-020..022 と SA-036（#334）は merge 済み。残りは U04（SA-021..035, 037..039, 056..068）と Final audit。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0633 と MIG-0639 待ち。MIG-0639 は D-12 の live slots 6000 枠の判定（additive paging の要否）を U04 の前に出す、D-14-7）。U01 RH-014（#391、5d4e980）、U02 RH-020..022 と SA-036（#334）は merge 済み。残りは U04（SA-021..035, 037..039, 056..068）と Final audit。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
 - **Recipe:** R-API
 - **Runtime:** S2, S3
-- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-12 DECIDED, D-13-48
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633, MIG-0639 / **Decisions:** D-12 DECIDED, D-13-48, D-14-7
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | file | 状態 |
@@ -299,7 +299,7 @@ npm run test:integration
 - [ ] owner 0 防止と予約の原子性がテストで実証されている
 #### STOP
 - 予約の transaction 境界を変える必要が出たら止める。
-- MIG-0633 DONE より前に U04 を始めない。
+- MIG-0633 と MIG-0639 が DONE になる前に U04 を始めない（MIG-0639 の D-12 判定で paging の追加 unit が要ると出たら、それを U04 に含める）。
 #### Rollback
 Phase 6 共通契約のとおり。
 

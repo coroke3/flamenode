@@ -298,7 +298,7 @@ Validation:
 | MIG-0515 | `/rules` consent form + header Active X switch on Phase 6 APIs | BLOCKED | MIG-0636, MIG-0641 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0501..MIG-0507, MIG-0509..MIG-0515, MIG-0621, MIG-0607 |
 
-Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。2026-10-25 の D-13（OPEN_DECISIONS.md）で残りを整理した: MIG-0501〜0506 は依存を MIG-0407 に替えて READY（共有 layout は #340 で merge 済み、D-13-1）。Phase 6 API を要る操作部品は MIG-0510（BLOCKED、MIG-0603 / 0604 / 0634 / 0636 待ち、D-13-2）、X アイコン map は MIG-0511（READY、D-13-3）、gateway の 404/503・sub-page の非公開 fence・allowlist は MIG-0512（READY、D-13-25）へ移した。MIG-0507 は MIG-0511 待ちの BLOCKED（D-13-22）だったが、D-14-6 で依存を外して READY（`/[id]` のアイコン投影は MIG-0511 T03 と MIG-0508 の checklist で見る）。MIG-0510 は D-14-12 で `/list` だけに縮め、MIG-0634（#401）の DONE で READY。`/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X 切替は MIG-0515 へ分けた。MIG-0509 は依存を MIG-0409 に替えて READY（D-13-13 で詳細 HTML は Static Assets のまま、build は R2 に HTML を書かない）。MIG-0409 は DONE（残りの実測と read-only token は MIG-0509 の owner 手順、D-13-10）。MIG-0411 は code の残り（render 経路の削除、r2Html.ts の P2、recovery の host）で READY、Queue / binding の作成は owner 手順。Island ページの queue 再生成は `excluded`（user / event / video、D-11）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
+Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。2026-10-25 の D-13（OPEN_DECISIONS.md）で残りを整理した: MIG-0501〜0506 は依存を MIG-0407 に替えて READY（共有 layout は #340 で merge 済み、D-13-1）。Phase 6 API を要る操作部品は MIG-0510（D-13-2 の時点では BLOCKED。現行は下の D-14 の記述と表の行を正とする）、X アイコン map は MIG-0511（READY、D-13-3）、gateway の 404/503・sub-page の非公開 fence・allowlist は MIG-0512（READY、D-13-25）へ移した。MIG-0507 は MIG-0511 待ちの BLOCKED（D-13-22）だったが、D-14-6 で依存を外して READY（`/[id]` のアイコン投影は MIG-0511 T03 と MIG-0508 の checklist で見る）。MIG-0510 は D-14-12 で `/list` だけに縮め、MIG-0634（#401）の DONE で READY。`/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X 切替は MIG-0515 へ分けた。MIG-0509 は依存を MIG-0409 に替えて READY（D-13-13 で詳細 HTML は Static Assets のまま、build は R2 に HTML を書かない）。MIG-0409 は DONE（残りの実測と read-only token は MIG-0509 の owner 手順、D-13-10）。MIG-0411 は code の残り（render 経路の削除、r2Html.ts の P2、recovery の host）で READY、Queue / binding の作成は owner 手順。Island ページの queue 再生成は `excluded`（user / event / video、D-11）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
@@ -313,7 +313,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
 | MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs (admin/manage visibility, collaborators, submit) | READY | MIG-0602 |
-| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602, MIG-0633 |
+| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602, MIG-0633, MIG-0639 |
 | MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602, MIG-0633 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648 |
 | MIG-0609 | background job CPU measurement (D-09) | READY | — |
@@ -360,7 +360,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 
 MIG-0617 は DONE（2026-10-25 統合）: PR #395 を owner が squash merge（`343b4a3b6a31b48b5bdad86461e80aaad6d70100`）、最終Head `3b3cc0de39c343193776a55842e330f6f5a9fa0d` はレビューした Head と同一、CI run 40061654686 green、独立レビューは builder（Sonnet）より上位の Claude Opus による APPROVE（[comment](https://github.com/coroke3/flamenode/pull/395#issuecomment-6379860192)。短縮 SHA で書かれているが Head は PR の最終 Head と一致）。L2 の `wrangler deploy --dry-run` 計測と request CPU はレビューの指摘どおり MIG-0628 / MIG-0606 へ送った。これで MIG-0629 / MIG-0633 は READY。MIG-0631 は PR #398 で DONE。MIG-0625 は範囲を縮めて DONE、残りは MIG-0635（D-13-48〜50）。MIG-0605 の残りは MIG-0636（Personal X / Active X / 規約）・MIG-0637（admin 運用の書き込み）・MIG-0638（残りの Route Handler）へ分け、親は MIG-0633 待ちの BLOCKED（D-13-56）。RH-031/032 は MIG-0603 から MIG-0634 へ（D-13-46）。MIG-0603 の U02c / U03b / U03c は MIG-0633 DONE 後（D-13-44）。MIG-0620 は DONE（`/_ops_assets/*` は MIG-0704 U01 へ、D-13-4）。MIG-0701 は stylesheet port（D-13-5）を決めて READY。MIG-0702 の依存は MIG-0605 から MIG-0636 へ（D-13-9）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため BLOCKED のまま。 D-14（2026-10-25）: MIG-0609 / 0621 / 0628 / 0632 / 0802 は不要な依存を外して READY（D-14-1〜5）。MIG-0603 U03a → MIG-0640、MIG-0606 U02 の前半 → MIG-0639、MIG-0627 U01 → MIG-0649、MIG-0636 U03 → MIG-0641、MIG-0637 → MIG-0637 / 0642 / 0643 / 0644、MIG-0638 → MIG-0638 / 0645 / 0646 / 0647 / 0648 に分けた（D-14-7〜13）。
 
-MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
+MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。（履歴: MIG-0802 は当初 MIG-0607 に依存していたが、D-14-5（2026-10-25）で現行の依存は MIG-0801, MIG-0608。非本番 PoC だけで、本番 cutover は MIG-0805。）
 
 ## Phase 7 — Private SPA
 
