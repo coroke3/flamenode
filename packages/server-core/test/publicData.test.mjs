@@ -150,7 +150,7 @@ test("artifactVisibility filters blocked entities", () => {
     ],
   };
 
-  const filtered = filterPublicArtifactPayload("videos_index", payload, context);
+  const filtered = filterPublicArtifactPayload("list_recent", payload, context);
   assert.ok(filtered);
   assert.equal(filtered.items.length, 1);
   assert.equal(filtered.items[0]?.id, "vid_ok");

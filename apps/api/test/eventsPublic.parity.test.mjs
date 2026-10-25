@@ -6,6 +6,14 @@ import { createFakeBucket, createFakeKv, createSqlite, createD1, insert } from "
 if (runUnderRootTsx(import.meta.url)) {
   const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
   const CLOUDFLARE_STUB = stub(`
+    export class CloudflareBindingsUnavailableError extends Error {
+      constructor(missing = [], cause) {
+        super("Cloudflare bindings unavailable: " + missing.join(", "));
+        this.name = "CloudflareBindingsUnavailableError";
+        this.missing = missing;
+        this.cause = cause;
+      }
+    }
     export async function withDatabaseRead(fn) {
       const r = globalThis.__pubRef; r.calls += 1;
       if (r.dbError) throw new Error("db_down");
@@ -55,6 +63,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { schema } = await import("@flamenode/db");
   const { app } = await import("../src/app.ts");
   const { GET: currentEventsGet } = await import("../../../app/api/events/route.ts");
+  const { GET: currentReleaseGet } = await import("../../../app/api/event-endpoints/[id]/release/route.ts");
   const { clearPublicApiRateLimitForTests } = await import("@flamenode/server-core/publicData/publicApi");
   const { resetOperationModeCachesForTests } = await import("../src/routes/live/operationMode.ts");
   const { resetPublicJsonIsolateCacheForTests } = await import("../../../src/lib/publicData/publicCacheIsolate.ts");
@@ -94,16 +103,20 @@ if (runUnderRootTsx(import.meta.url)) {
     globalThis.__pubRef.dbError = false;
     globalThis.__pubRef.calls = 0;
     globalThis.__pubRef.waitUntilPromises = [];
+    d1.stats.statements = 0;
+    d1.stats.writes = 0;
+    d1.stats.maxBinds = 0;
+    d1.stats.batches = 0;
   }
 
   // Seed events
   sqlite.exec(`
     DELETE FROM events;
-    INSERT INTO events (id, title, visibility_status, start_time, end_time, created_at, max_slots_per_video)
-    VALUES ('evt-1', 'Event One', 'public', 1700002000, 1700003000, 100, 1),
-           ('evt-2', 'Event Two', 'public', 1700001000, 1700002000, 200, 1),
-           ('evt-point', 'Point Event', 'public', 1700001500, NULL, 150, 1),
-           ('evt-priv', 'Private Event', 'private', 1700004000, 1700005000, 300, 1);
+    INSERT INTO events (id, title, visibility_status, start_time, end_time, created_at, max_slots_per_video, public_api_enabled)
+    VALUES ('evt-1', 'Event One', 'public', 1700002000, 1700003000, 100, 1, 1),
+           ('evt-2', 'Event Two', 'public', 1700001000, 1700002000, 200, 1, 0),
+           ('evt-point', 'Point Event', 'public', 1700001500, NULL, 150, 1, 1),
+           ('evt-priv', 'Private Event', 'private', 1700004000, 1700005000, 300, 1, 1);
   `);
 
   test("T01: RH-015 normal live mode matches CURRENT byte-by-byte", async () => {
@@ -347,5 +360,302 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("Cache-Control"), "public, max-age=60, s-maxage=120, stale-while-revalidate=300");
     assert.equal(res.headers.get("Pragma"), null);
+  });
+
+  test("T10: RH-012 public + enabled + artifact returns 200 matching CURRENT", async () => {
+    resetAll();
+    const artifact = {
+      schema_version: 1,
+      generated_at: 1700000000,
+      event: { id: "evt-1", title: "Event One", visibility_status: "public" },
+      videos: [
+        {
+          id: "vid-1",
+          title: "Video 1",
+          visibility_status: "public",
+          collaboration_type: "individual",
+          creator_display_name: "Alice",
+          members: [],
+        },
+      ],
+      total: 1,
+    };
+    await fakeBucket.put("events/evt-1/release.v1.json", artifact);
+
+    const curReq = new Request("http://localhost/api/event-endpoints/evt-1/release");
+    const curRes = await currentReleaseGet(curReq, { params: Promise.resolve({ id: "evt-1" }) });
+    const curBody = await curRes.text();
+
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    const honoBody = await honoRes.text();
+
+    assert.equal(honoRes.status, 200);
+    assert.equal(curRes.status, 200);
+    assert.equal(honoRes.headers.get("Cache-Control"), curRes.headers.get("Cache-Control"));
+    assert.equal(honoRes.headers.get("ETag"), curRes.headers.get("ETag"));
+    assert.equal(honoBody, curBody);
+  });
+
+  test("T11: RH-012 private / disabled / missing / overlong id returns 404 matching CURRENT", async () => {
+    resetAll();
+    const cases = [
+      "evt-priv", // private
+      "evt-2",    // public_api_enabled = 0
+      "evt-404",  // missing
+      "a".repeat(129), // > 128
+      "%E0%A4%A", // malformed percent
+    ];
+
+    for (const id of cases) {
+      const curReq = new Request(`http://localhost/api/event-endpoints/${id}/release`);
+      const curRes = await currentReleaseGet(curReq, { params: Promise.resolve({ id }) });
+
+      const honoRes = await app.request(`http://localhost/api/event-endpoints/${id}/release`, {}, {
+        DB: d1,
+        BUCKET: fakeBucket,
+        KV: fakeKv,
+      });
+
+      assert.equal(curRes.status, 404);
+      assert.equal(honoRes.status, 404);
+      assert.equal(honoRes.headers.get("Cache-Control"), "public, max-age=60");
+      assert.equal(await honoRes.json().then(j => j.error), "not_found");
+    }
+  });
+
+  test("T12: RH-012 missing artifact returns 503 public_data_unavailable", async () => {
+    resetAll();
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    assert.equal(honoRes.status, 503);
+    assert.equal(await honoRes.json().then(j => j.error), "public_data_unavailable");
+  });
+
+  test("T13: RH-012 artifact event.id mismatch returns 503 public_data_unavailable", async () => {
+    resetAll();
+    const artifact = {
+      schema_version: 1,
+      generated_at: 1700000000,
+      event: { id: "evt-OTHER", title: "Wrong Event", visibility_status: "public" },
+      videos: [],
+    };
+    await fakeBucket.put("events/evt-1/release.v1.json", artifact);
+
+    const curReq = new Request("http://localhost/api/event-endpoints/evt-1/release");
+    const curRes = await currentReleaseGet(curReq, { params: Promise.resolve({ id: "evt-1" }) });
+
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+
+    assert.equal(curRes.status, 503);
+    assert.equal(honoRes.status, 503);
+    assert.equal(await honoRes.json().then(j => j.error), "public_data_unavailable");
+  });
+
+  test("T14: RH-012 guard mode blocked event returns 404 in enforce mode", async () => {
+    resetAll();
+    const artifact = {
+      schema_version: 1,
+      generated_at: 1700000000,
+      event: { id: "evt-1", title: "Event One", visibility_status: "public" },
+      videos: [],
+    };
+    await fakeBucket.put("events/evt-1/release.v1.json", artifact);
+
+    await fakeBucket.put("visibility/blocked-entities.v1.json", {
+      schema_version: 1,
+      revision: 1,
+      generated_at: 1700000000,
+      entities: [
+        { entity_type: "event", entity_id: "evt-1", fence_token: "t1", blocked_at: 1700000000 },
+      ],
+    }, { httpMetadata: { etag: '"etag-1"' } });
+
+    process.env.PUBLIC_VISIBILITY_GUARD_MODE = "enforce";
+    const curReq = new Request("http://localhost/api/event-endpoints/evt-1/release");
+    const curRes = await currentReleaseGet(curReq, { params: Promise.resolve({ id: "evt-1" }) });
+
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+      PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+    });
+
+    assert.equal(curRes.status, 404);
+    assert.equal(honoRes.status, 404);
+  });
+
+  test("T15: RH-012 filters private videos and updates total", async () => {
+    resetAll();
+    const artifact = {
+      schema_version: 1,
+      generated_at: 1700000000,
+      event: { id: "evt-1", title: "Event One", visibility_status: "public" },
+      videos: [
+        { id: "vid-1", title: "Public", visibility_status: "public", collaboration_type: "individual", creator_display_name: "Alice", members: [] },
+        { id: "vid-2", title: "Private", visibility_status: "private", collaboration_type: "individual", creator_display_name: "Bob", members: [] },
+      ],
+      total: 2,
+    };
+    await fakeBucket.put("events/evt-1/release.v1.json", artifact);
+
+    const curReq = new Request("http://localhost/api/event-endpoints/evt-1/release");
+    const curRes = await currentReleaseGet(curReq, { params: Promise.resolve({ id: "evt-1" }) });
+    const curJson = await curRes.json();
+
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    const honoJson = await honoRes.json();
+
+    assert.equal(curRes.status, 200);
+    assert.equal(honoRes.status, 200);
+    assert.equal(honoJson.videos.length, 1);
+    assert.equal(honoJson.videos[0].id, "vid-1");
+    assert.equal(honoJson.total, 1);
+    assert.deepEqual(honoJson, curJson);
+  });
+
+  test("T17: S2 limits & budget measurements at boundary inputs (RH-015 and RH-012)", async () => {
+    resetAll();
+
+    // 1. RH-015 live mode with 60 public events having long explanation (500 chars)
+    const longExplanation = "x".repeat(500);
+    const stmt = sqlite.prepare(`
+      INSERT INTO events (id, title, visibility_status, start_time, end_time, created_at, max_slots_per_video, public_api_enabled, explanation)
+      VALUES (?, ?, 'public', ?, ?, ?, 1, 1, ?)
+    `);
+    for (let i = 10; i < 70; i++) {
+      stmt.run(`evt-long-${i}`, `Long Event ${i}`, 1700000000 + i * 10, 1700001000 + i * 10, i * 10, longExplanation);
+    }
+
+    d1.stats.statements = 0;
+    d1.stats.writes = 0;
+    const liveRes = await app.request("http://localhost/api/events?limit=60", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    const liveBody = await liveRes.text();
+    const liveBytes = Buffer.byteLength(liveBody);
+    const liveStatements = d1.stats.statements;
+    assert.equal(liveRes.status, 200);
+    assert.equal(liveStatements, 1);
+    assert.equal(d1.stats.writes, 0);
+
+    // Large page: OFFSET near total
+    d1.stats.statements = 0;
+    const largePageRes = await app.request("http://localhost/api/events?page=2&limit=60", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    const largePageStatements = d1.stats.statements;
+    assert.equal(largePageRes.status, 200);
+    assert.equal(largePageStatements, 1);
+
+    // 2. RH-015 static_only mode with 200 events + group sections, ~1 MiB manifest
+    const staticItems = Array.from({ length: 200 }, (_, i) => ({
+      id: `evt-static-${i}`,
+      title: `Static Event ${i}`,
+      visibility_status: "public",
+      start_time: 1700000000 + i * 10,
+      end_time: 1700001000 + i * 10,
+      format: "offline",
+      group_sections: [{ id: `grp-${i}`, title: `Group ${i}`, display_order: 1 }],
+    }));
+    await fakeBucket.put("events/index.json", {
+      schema_version: 1,
+      generated_at: 1700000000,
+      items: staticItems,
+      total: 200,
+    });
+    // Create ~1 MiB manifest: entities array with many entries (under 1024 * 1024 bytes)
+    const manifestEntities = Array.from({ length: 8000 }, (_, i) => ({
+      entity_type: "event",
+      entity_id: `blocked-evt-${i}`,
+      fence_token: `token-${i}`,
+      blocked_at: 1700000000,
+    }));
+    await fakeBucket.put("visibility/blocked-entities.v1.json", {
+      schema_version: 1,
+      revision: 1,
+      generated_at: 1700000000,
+      entities: manifestEntities,
+    }, { httpMetadata: { etag: '"manifest-1mib"' } });
+
+    d1.stats.statements = 0;
+    const staticRes = await app.request("http://localhost/api/events", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+      FORCE_STATIC_ONLY: "1",
+      PUBLIC_VISIBILITY_GUARD_MODE: "enforce",
+    });
+    const staticBody = await staticRes.text();
+    const staticBytes = Buffer.byteLength(staticBody);
+    const staticStatements = d1.stats.statements;
+    assert.equal(staticRes.status, 200);
+    assert.equal(staticStatements, 0);
+
+    // 3. RH-012 with 500 videos x 100 members
+    const members100 = Array.from({ length: 100 }, (_, i) => ({
+      user_id: `usr-${i}`,
+      display_name: `Member ${i}`,
+      role: "member",
+    }));
+    const videos500 = Array.from({ length: 500 }, (_, i) => ({
+      id: `vid-big-${i}`,
+      title: `Big Video ${i}`,
+      visibility_status: "public",
+      collaboration_type: "group",
+      creator_display_name: `Creator ${i}`,
+      members: members100,
+    }));
+    await fakeBucket.put("events/evt-big-rel/release.v1.json", {
+      schema_version: 1,
+      generated_at: 1700000000,
+      event: { id: "evt-big-rel", title: "Big Release Event", visibility_status: "public" },
+      videos: videos500,
+      total: 500,
+    });
+    sqlite.exec(`
+      INSERT INTO events (id, title, visibility_status, start_time, end_time, created_at, max_slots_per_video, public_api_enabled)
+      VALUES ('evt-big-rel', 'Big Release Event', 'public', 1700000000, 1700001000, 100, 1, 1);
+    `);
+
+    d1.stats.statements = 0;
+    d1.stats.writes = 0;
+    const releaseRes = await app.request("http://localhost/api/event-endpoints/evt-big-rel/release", {}, {
+      DB: d1,
+      BUCKET: fakeBucket,
+      KV: fakeKv,
+    });
+    const releaseBody = await releaseRes.text();
+    const releaseBytes = Buffer.byteLength(releaseBody);
+    const releaseStatements = d1.stats.statements;
+    assert.equal(releaseRes.status, 200);
+    assert.equal(releaseStatements, 1);
+    assert.equal(d1.stats.writes, 0);
+
+    console.log(
+      `[events-public budget] ` +
+      `RH-015_live: bytes=${liveBytes} D1_statements=${liveStatements} large_page_D1_statements=${largePageStatements} | ` +
+      `RH-015_static: bytes=${staticBytes} D1_statements=${staticStatements} | ` +
+      `RH-012: bytes=${releaseBytes} D1_statements=${releaseStatements} writes=0 CPU=unmeasured`
+    );
   });
 }

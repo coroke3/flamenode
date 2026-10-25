@@ -1,6 +1,8 @@
 import type { StaticRebuildTargetType } from "../staticRebuild/types.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "./publicXUser.ts";
-import type { PublicVisibilityBlockedEntitiesManifest } from "../visibility/manifestCore.ts";
+import type {
+  PublicVisibilityBlockedEntitiesManifest,
+} from "../visibility/manifestCore.ts";
 
 type PayloadRecord = Record<string, unknown>;
 type RowPredicate = (row: unknown) => boolean;
@@ -97,230 +99,290 @@ function isPublicUserRow(
 ): boolean {
   const row = asRecord(value);
   if (!row) return false;
-  const username =
-    typeof row.username === "string" ? row.username.trim().toLowerCase() : "";
-  if (username && context?.blockedUserIds.has(username)) return false;
-  const authorHandle =
-    typeof row.author_x_handle === "string"
-      ? row.author_x_handle.trim().toLowerCase()
-      : "";
-  if (authorHandle && context?.blockedUserIds.has(authorHandle)) return false;
+  const id = String(row.x_id ?? row.id ?? "").trim().toLowerCase();
+  if (id && context?.blockedUserIds.has(id)) return false;
   if (
     row.approval_status != null &&
-    !PUBLIC_LISTABLE_X_APPROVAL_STATUSES.includes(
-      row.approval_status as (typeof PUBLIC_LISTABLE_X_APPROVAL_STATUSES)[number],
-    )
+    (typeof row.approval_status !== "string" ||
+      !PUBLIC_LISTABLE_X_APPROVAL_STATUSES.includes(
+        row.approval_status as (typeof PUBLIC_LISTABLE_X_APPROVAL_STATUSES)[number],
+      ))
   ) {
     return false;
   }
+  if (
+    row.visibility_status != null &&
+    row.visibility_status !== "public"
+  ) {
+    return false;
+  }
+  if (row.status != null && row.status !== "public") return false;
   return true;
 }
 
-function filterArray(
-  rows: unknown,
+/**
+ * A member/staff projection may carry an internal `id` alongside the public
+ * X identity.  Only x_user_id/x_id participate in the X visibility fence;
+ * treating the internal row id as an X id would hide unrelated rows.
+ */
+function isPublicXReferenceRow(
+  value: unknown,
+  context?: PublicArtifactVisibilityContext,
+): boolean {
+  const row = asRecord(value);
+  if (!row || !context) return true;
+  const raw = row.x_user_id ?? row.x_id;
+  if (typeof raw !== "string" || !raw.trim()) return true;
+  return !context.blockedUserIds.has(raw.trim().toLowerCase());
+}
+
+function filterRows(
+  value: unknown,
   predicate: RowPredicate,
-): unknown[] | null {
-  if (!Array.isArray(rows)) return null;
-  return rows.filter(predicate);
+): { value: unknown; changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  const filtered = value.filter(predicate);
+  if (filtered.length === value.length) return { value, changed: false };
+  return { value: filtered, changed: true };
 }
 
-function filterEventSections(
-  sections: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  if (!Array.isArray(sections)) return null;
-  return sections
-    .map((section) => {
-      const row = asRecord(section);
-      if (!row || !isPublicEventGroupRow(row, context)) return null;
-      const events = filterArray(row.events, (item) =>
-        isPublicEventRow(item, context),
-      );
-      return {
-        ...row,
-        events: events ?? [],
-      };
-    })
-    .filter((section): section is PayloadRecord => section !== null);
+function withFilteredRows(
+  payload: PayloadRecord,
+  keys: readonly string[],
+  predicate: RowPredicate,
+): PayloadRecord {
+  let next = payload;
+  let changed = false;
+  for (const key of keys) {
+    const result = filterRows(next[key], predicate);
+    if (!result.changed) continue;
+    if (!changed) next = { ...next };
+    next[key] = result.value;
+    changed = true;
+  }
+  return next;
 }
 
-function filterGroupRows(
-  groups: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  if (!Array.isArray(groups)) return null;
-  return groups
-    .map((group) => {
-      const row = asRecord(group);
-      if (!row || !isPublicEventGroupRow(row, context)) return null;
-      const events = filterArray(row.events, (item) =>
-        isPublicEventRow(item, context),
-      );
-      return {
-        ...row,
-        events: events ?? [],
-      };
-    })
-    .filter((group): group is PayloadRecord => group !== null);
+function withFilteredNestedRows(
+  payload: PayloadRecord,
+  key: string,
+  nestedKeys: readonly string[],
+  predicate: RowPredicate,
+): PayloadRecord {
+  const rows = payload[key];
+  if (!Array.isArray(rows)) return payload;
+  let changed = false;
+  const nextRows = rows.map((value) => {
+    const row = asRecord(value);
+    if (!row) return value;
+    const next = withFilteredRows(row, nestedKeys, predicate);
+    if (next !== row) changed = true;
+    return next;
+  });
+  return changed ? { ...payload, [key]: nextRows } : payload;
 }
 
-function filterEventDetailGroupSections(
-  sections: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  if (!Array.isArray(sections)) return null;
-  return sections
-    .map((section) => {
-      const row = asRecord(section);
-      if (!row || !isPublicEventGroupRow(row, context)) return null;
-      const groups = filterGroupRows(row.groups, context);
-      return {
-        ...row,
-        groups: groups ?? [],
-      };
-    })
-    .filter((section): section is PayloadRecord => section !== null);
-}
-
-function filterScheduleEntries(
-  entries: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  if (!Array.isArray(entries)) return null;
-  return entries
-    .map((entry) => {
-      const row = asRecord(entry);
-      if (!row || !isPublicVideoRow(row.video, context)) return null;
-      return row;
-    })
-    .filter((entry): entry is PayloadRecord => entry !== null);
-}
-
-function filterPublicVideoRows(
-  rows: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  return filterArray(rows, (item) => isPublicVideoRow(item, context));
-}
-
-function filterPublicEventRows(
-  rows: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  return filterArray(rows, (item) => isPublicEventRow(item, context));
-}
-
-function filterPublicUserRows(
-  rows: unknown,
-  context?: PublicArtifactVisibilityContext,
-): unknown[] | null {
-  return filterArray(rows, (item) => isPublicUserRow(item, context));
+function withFilteredNestedObjectRows(
+  payload: PayloadRecord,
+  key: string,
+  nestedKeys: readonly string[],
+  predicate: RowPredicate,
+): PayloadRecord {
+  const nested = asRecord(payload[key]);
+  if (!nested) return payload;
+  const next = withFilteredRows(nested, nestedKeys, predicate);
+  return next === nested ? payload : { ...payload, [key]: next };
 }
 
 /**
- * Filter an in-memory R2 payload before serving or snapshotting.  Returns a
- * shallow-copied payload whose nested collection rows have had non-public
- * items dropped.  Returns null when the root payload is not a record, or
- * when a single-entity target (e.g. video_detail) has been blocked.
+ * Remove explicitly non-public rows from an R2 public artifact without any
+ * D1/KV/R2 access.  The function is deliberately payload-only and returns a
+ * new object only when a row was removed, so it can be applied to both Cache
+ * API and R2 reads without mutating the cached value.
+ *
+ * A top-level private video/event/user makes the artifact unusable and is
+ * represented by `null`; callers then follow their existing miss/degraded
+ * path.  Unknown/legacy rows without a visibility marker are preserved.
  */
-export function filterPublicArtifactPayload(
+export function filterPublicArtifactPayload<T>(
   targetType: StaticRebuildTargetType,
-  payload: unknown,
+  payload: T | null | undefined,
   context?: PublicArtifactVisibilityContext,
-): unknown {
+): T | null {
+  if (payload == null) return null;
   const root = asRecord(payload);
-  if (!root) return null;
+  if (!root) return payload;
 
   switch (targetType) {
-    case "top_videos":
-    case "videos_index":
-    case "ranking_videos":
-    case "tag_detail": {
-      const items = filterPublicVideoRows(root.items, context);
-      return items ? { ...root, items } : root;
-    }
-
-    case "top_announcements": {
-      return root;
-    }
-
-    case "events_index": {
-      const items = filterPublicEventRows(root.items, context);
-      const groupSections = filterEventSections(root.group_sections, context);
-      return {
-        ...root,
-        ...(items ? { items } : {}),
-        ...(groupSections ? { group_sections: groupSections } : {}),
-      };
-    }
-
-    case "users_index": {
-      const items = filterPublicUserRows(root.items, context);
-      return items ? { ...root, items } : root;
-    }
-
-    case "user_detail": {
-      const user = asRecord(root.user);
-      if (user && !isPublicUserRow(user, context)) return null;
-      const videos = filterPublicVideoRows(root.videos, context);
-      const events = filterPublicEventRows(root.events, context);
-      return {
-        ...root,
-        ...(videos ? { videos } : {}),
-        ...(events ? { events } : {}),
-      };
-    }
-
-    case "video_detail": {
-      const video = asRecord(root.video);
-      if (video && !isPublicVideoRow(video, context)) return null;
-      return root;
-    }
-
-    case "event_detail": {
-      const event = asRecord(root.event);
-      if (event && !isPublicEventRow(event, context)) return null;
-      const groupSections = filterEventDetailGroupSections(
-        root.group_sections,
-        context,
+    case "video": {
+      const video = root.video;
+      if (video != null && !isPublicVideoRow(video, context)) return null;
+      let next = withFilteredRows(root, ["public_events"], (row) =>
+        isPublicEventRow(row, context),
       );
-      return {
-        ...root,
-        ...(groupSections ? { group_sections: groupSections } : {}),
-      };
-    }
-
-    case "event_slots": {
-      const slots = filterArray(root.slots, (item) => {
-        const slot = asRecord(item);
-        if (!slot) return false;
-        return (
-          slot.status == null ||
-          slot.status === "public" ||
-          slot.status === "available"
+      next = withFilteredRows(
+        next,
+        ["related_videos", "related_reserve", "related_random_reserve"],
+        (row) => isPublicVideoRow(row, context),
+      );
+      const originalMembers = next.public_members;
+      const filteredMembers = filterRows(originalMembers, (row) =>
+        isPublicXReferenceRow(row, context),
+      );
+      if (filteredMembers.changed) {
+        next = { ...next, public_members: filteredMembers.value };
+        const removedMemberIds = new Set(
+          (Array.isArray(originalMembers) ? originalMembers : [])
+            .filter((row) => !isPublicXReferenceRow(row, context))
+            .map((row) => {
+              const record = asRecord(row);
+              return typeof record?.id === "string" ? record.id : null;
+            })
+            .filter((id): id is string => Boolean(id)),
         );
-      });
-      return slots ? { ...root, slots } : root;
+        if (removedMemberIds.size > 0) {
+          next = withFilteredRows(next, ["member_chapters"], (row) => {
+            const record = asRecord(row);
+            return !(
+              typeof record?.video_member_id === "string" &&
+              removedMemberIds.has(record.video_member_id)
+            );
+          });
+        }
+      }
+      return next as T;
     }
-
-    case "event_schedule": {
-      const entries = filterScheduleEntries(root.entries, context);
-      return entries ? { ...root, entries } : root;
+    case "event":
+    case "event_base": {
+      const event = root.event;
+      if (event != null && !isPublicEventRow(event, context)) return null;
+      let next = withFilteredRows(root, ["public_videos"], (row) =>
+        isPublicVideoRow(row, context),
+      );
+      next = withFilteredRows(next, ["public_staff"], (row) =>
+        isPublicXReferenceRow(row, context),
+      );
+      return next as T;
     }
-
     case "event_release": {
-      const event = asRecord(root.event);
-      if (event && !isPublicEventRow(event, context)) return null;
-      const videos = filterPublicVideoRows(root.videos, context);
-      const count = videos ? videos.length : (root.videos as unknown[])?.length ?? 0;
-      return {
-        ...root,
-        ...(videos ? { videos, total: count } : {}),
-      };
+      const event = root.event;
+      if (event != null && !isPublicEventRow(event, context)) return null;
+      const next = withFilteredRows(root, ["videos"], (row) =>
+        isPublicVideoRow(row, context),
+      );
+      // Do not expose the pre-filter count when a visibility fence removed a
+      // stale video from the public artifact. Preserve the truncation signal,
+      // but make the count describe only rows that can be returned.
+      if (next !== root && Array.isArray(next.videos)) {
+        return {
+          ...next,
+          total: next.videos.length,
+        } as T;
+      }
+      return next as T;
     }
-
-    case "tag_software_catalog":
-    case "rules_page":
-      return root;
+    case "events_index":
+      return withFilteredNestedRows(
+        withFilteredRows(
+          withFilteredRows(root, ["items"], (row) =>
+            isPublicEventRow(row, context),
+          ),
+          ["group_sections"],
+          (row) => isPublicEventGroupRow(row, context),
+        ),
+        "group_sections",
+        ["events"],
+        (row) => isPublicEventRow(row, context),
+      ) as T;
+    case "top_events":
+      return withFilteredRows(
+        root,
+        ["active_events", "latest_events"],
+        (row) => isPublicEventRow(row, context),
+      ) as T;
+    case "top": {
+      let next = withFilteredRows(
+        root,
+        ["recommended", "latest", "nostalgic", "nostalgic_pool", "items"],
+        (row) => isPublicVideoRow(row, context),
+      );
+      next = withFilteredRows(
+        next,
+        ["active_events", "latest_events"],
+        (row) => isPublicEventRow(row, context),
+      );
+      return withFilteredRows(next, ["creators"], (row) =>
+        isPublicUserRow(row, context),
+      ) as T;
+    }
+    case "top_recommended":
+    case "top_latest":
+      return withFilteredRows(
+        root,
+        ["items", "recommended", "latest"],
+        (row) => isPublicVideoRow(row, context),
+      ) as T;
+    case "top_nostalgic":
+      return withFilteredRows(
+        root,
+        ["pool", "display", "items"],
+        (row) => isPublicVideoRow(row, context),
+      ) as T;
+    case "recommend":
+    case "recommend_core":
+      return withFilteredRows(
+        withFilteredRows(
+          root,
+          ["recommended", "latest", "underrated"],
+          (row) => isPublicVideoRow(row, context),
+        ),
+        ["creators"],
+        (row) => isPublicUserRow(row, context),
+      ) as T;
+    case "list_recent":
+    case "list_popular":
+      return withFilteredRows(root, ["items"], (row) =>
+        isPublicVideoRow(row, context),
+      ) as T;
+    case "search_index":
+      {
+        let next = withFilteredRows(root, ["videos"], (row) =>
+          isPublicVideoRow(row, context),
+        );
+        next = withFilteredNestedRows(
+          next,
+          "records",
+          ["items"],
+          (row) => isPublicVideoRow(row, context),
+        );
+        return withFilteredRows(next, ["users"], (row) =>
+          isPublicUserRow(row, context),
+        ) as T;
+      }
+    case "user": {
+      const user = root.user;
+      if (user != null && !isPublicUserRow(user, context)) return null;
+      let next = withFilteredNestedObjectRows(
+        root,
+        "works",
+        ["items"],
+        (row) => isPublicVideoRow(row, context),
+      );
+      next = withFilteredNestedObjectRows(
+        next,
+        "collabs",
+        ["items"],
+        (row) => isPublicVideoRow(row, context),
+      );
+      return withFilteredRows(next, ["recent_videos", "items"], (row) =>
+        isPublicVideoRow(row, context),
+      ) as T;
+    }
+    case "users_index":
+      return withFilteredRows(root, ["items"], (row) =>
+        isPublicUserRow(row, context),
+      ) as T;
+    default:
+      return payload;
   }
 }
