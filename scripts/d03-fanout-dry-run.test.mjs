@@ -180,3 +180,54 @@ test("T08 projected like counts include only approved legacy X and eligible fan-
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM video_interactions").get().n, before,
     "dry-run never removes non-approved legacy rows");
 }));
+
+test("T09 one Auth interaction fans out to all approved owner X and deduplicates legacy likes", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1", 0);
+  for (const x of ["xa", "xb", "xc"]) {
+    add.x(insert, x);
+    add.link(insert, "auth", x, "owner");
+  }
+  add.x(insert, "manager"); add.link(insert, "auth", "manager", "manager");
+  add.x(insert, "pending", "pending"); add.link(insert, "auth", "pending", "owner");
+  add.auth(insert, "auth", "v1", "like", 55);
+  add.existing(insert, "xb", "v1", "like", 20);
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 3);
+  assert.equal(report.collapsedDuplicates, 0);
+  assert.equal(report.skippedNoOwnerLink, 0);
+  assert.equal(report.conflictsWithVideoInteractions.count, 1);
+  assert.equal(report.likeCountDeltaTotal, 1);
+  assert.equal(report.likeCountDeltaTruncated, false);
+  assert.deepEqual(report.likeCountDelta.map(({ videoId, projected, delta }) =>
+    [videoId, projected, delta]), [["v1", 3, 3]]);
+}));
+
+test("T10 like discrepancy report exposes total and truncation beyond 50 videos", () => fixture(({ insert, file }) => {
+  add.x(insert, "owner");
+  add.link(insert, "auth", "owner");
+  for (let i = 0; i < 57; i++) {
+    const videoId = "v" + String(i).padStart(3, "0");
+    add.video(insert, videoId, 0);
+    add.auth(insert, "auth", videoId, "like", i);
+  }
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 57);
+  assert.equal(report.likeCountDeltaTotal, 57);
+  assert.equal(report.likeCountDelta.length, 50);
+  assert.equal(report.likeCountDeltaTruncated, true);
+  assert.deepEqual(report.maxDeltaVideo, report.likeCountDelta[0]);
+  assert.equal(report.maxDeltaVideo.videoId, "v000");
+  assert.equal(report.likeCountDelta.at(-1).videoId, "v049");
+  assert.ok(report.likeCountDelta.every(row => !("totalDeltas" in row)),
+    "internal window count is not leaked into public row objects");
+}));
+
+test("T11 reports zero mismatches without falsely marking truncation", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1", 1);
+  add.x(insert, "x1"); add.existing(insert, "x1", "v1", "like", 10);
+  const report = analyzeLocalFile(file);
+  assert.equal(report.likeCountDeltaTotal, 0);
+  assert.equal(report.likeCountDeltaTruncated, false);
+  assert.deepEqual(report.likeCountDelta, []);
+  assert.equal(report.maxDeltaVideo, null);
+}));
