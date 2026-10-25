@@ -261,6 +261,21 @@ export async function requireAdminWrite(feature) {
     assert.deepStrictEqual(auditRows(hono.sqlite), auditRows(cur.sqlite));
   });
 
+  test("CASE 3b partial patch: untouched fields keep their values, before/after snapshots match CURRENT", async () => {
+    const { cur, current, hono, status, honoJson } = await settingsBothSides({
+      currentFields: { compact_after_days: "7" },
+      honoBody: { compact_after_days: 7 },
+    });
+    assert.equal(status, 200);
+    assert.deepStrictEqual(honoJson, current.result);
+    assert.equal(settingsRows(cur.sqlite)[0].audit_normal_retention_days, 30, "untouched field kept");
+    assert.deepStrictEqual(settingsRows(hono.sqlite), settingsRows(cur.sqlite));
+    assert.deepStrictEqual(auditRows(hono.sqlite), auditRows(cur.sqlite));
+  });
+
+  // No CASE for a missing system_settings row: Hono's CostGuard then fails closed (maintenance_mode)
+  // before the route runs, while this harness stubs CURRENT's requireAdminWrite, so the two are not comparable here.
+
   // ---------------- dry run (SA-010) ----------------
 
   const BEFORE_JSON = {
