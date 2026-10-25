@@ -66,8 +66,7 @@ interface RawVideoRow {
 
 export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) => {
   const videoId = c.req.param("id");
-  // CURRENT passes ?event= through untrimmed (page.tsx firstSearchParamValue).
-  const eventParam = c.req.query("event") || null;
+  const eventParam = c.req.query("event")?.trim() || null;
   const db = c.env.DB;
 
   const summary = reviewSummarySql("v.id");

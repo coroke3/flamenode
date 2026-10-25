@@ -350,13 +350,13 @@ if (runUnderRootTsx(import.meta.url)) {
     highlights: video.highlights, production_story: video.production_story,
   });
 
-  test("T01 videos/[id]: text fields, answers and untrimmed ?event match CURRENT", async () => {
+  test("T01 videos/[id]: text fields and answers match CURRENT; whitespace ?event is null (firstSearchParamValue trims)", async () => {
     const res = await call("/videos/av-pending-1?event=%20", "tok-root");
     assert.equal(res.status, 200);
     const current = await fetchVideoReviewDetail(refDb, "av-pending-1");
     assert.deepEqual(res.body.video.customAnswers, canon(current.customAnswers));
     assert.deepEqual(videoFields(res.body.video), videoFields(current));
-    assert.equal(res.body.event, " ");
+    assert.equal(res.body.event, null);
   });
 
   test("T01 videos/[id]: more than 100 rows on a surface returns the first 100 and truncated", async () => {
@@ -401,5 +401,15 @@ if (runUnderRootTsx(import.meta.url)) {
 
     const none = AdminUserEditResponseSchema.parse((await call("/users/u_root/edit", "tok-root")).body);
     assert.equal(none.truncated, false);
+  });
+
+  test("T01 videos/[id]/members: fractional chapter time is formatted like CURRENT formatMemberChapterTime", async () => {
+    insert(sqlite, "video_chapters", { id: "vm-1:member:chfrac", video_id: "av-pending-1", chapter_time: 61.5, chapter_label: "Frac", note: "", x_user_id: "alice_x", created_at: T0, updated_at: T0 });
+    const res = await call("/videos/av-pending-1/members", "tok-root");
+    assert.equal(res.status, 200);
+    const member = res.body.initialMembers.find((m) => m.name === "Member One");
+    const frac = member.chapters.find((ch) => ch.label === "Frac");
+    assert.equal(frac.time, formatMemberChapterTime(61.5));
+    assert.notEqual(frac.time, "1:01");
   });
 }
