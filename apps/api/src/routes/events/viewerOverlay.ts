@@ -151,7 +151,7 @@ function viewerStatement(db: D1Database, userId: string, eventId: string): D1Pre
         SELECT x_users.id AS x_user_id, x_users.approval_status AS approval_status
         FROM x_user_account_links
         INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
-        WHERE x_user_account_links.auth_user_id = ?
+        WHERE x_user_account_links.auth_user_id = u.id
         ORDER BY x_users.id
         LIMIT ?) q)`;
   // Match CURRENT getManageAuthorizationSnapshot: approved X links only, with permissions
@@ -163,8 +163,8 @@ function viewerStatement(db: D1Database, userId: string, eventId: string): D1Pre
         SELECT es.permission_preset, es.custom_permission_keys_json FROM event_staff es
         INNER JOIN x_user_account_links xl ON xl.x_user_id = es.x_user_id
         INNER JOIN x_users x ON x.id = xl.x_user_id
-        WHERE es.event_id = ? AND xl.auth_user_id = ? AND x.approval_status = 'approved'
-        LIMIT ?) q)`;
+        WHERE es.event_id = ? AND xl.auth_user_id = u.id AND x.approval_status = 'approved'
+        LIMIT ${MAX_OPERATOR_STAFF_ROWS + 1}) q)`;
   const pending = `(SELECT json_group_array(q.requested_x_id) FROM (
         SELECT requested_x_id FROM x_identity_requests
         WHERE requested_by_auth_user_id = ? AND status = 'pending'
@@ -183,8 +183,8 @@ function viewerStatement(db: D1Database, userId: string, eventId: string): D1Pre
          ${eventStaff} AS event_staff
        FROM "user" u WHERE u.id = ? LIMIT 1`,
     )
-    .bind(userId, MAX_LINKED_X_USERS, userId, ...types, MAX_PENDING_RESERVATION_REQUESTS,
-      eventId, userId, MAX_OPERATOR_STAFF_ROWS + 1, userId);
+    .bind(MAX_LINKED_X_USERS, userId, ...types, MAX_PENDING_RESERVATION_REQUESTS,
+      eventId, userId);
 }
 
 const utf8Length = (value: string): number => new TextEncoder().encode(value).length;
