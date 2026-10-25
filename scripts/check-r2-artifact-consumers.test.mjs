@@ -74,9 +74,6 @@ test("multiline expressions, same key across sources, and R2 constants are found
     'const blob = await bucket.get("rules/current.json");',
   ].join("\n");
   const got = extractArtifactKeys(src, "workers/fake.mjs");
-  assert.deepEqual(got.map((x) => x.key),
-    ["rules/current.json", "rules/current.json", "list/recent.json"].sort(
-      // Source-order is not guaranteed across scanner regex kinds.
-      () => 0,
-    ).sort());
+  assert.deepEqual(got.map((x) => x.key).sort(),
+    ["rules/current.json", "rules/current.json", "list/recent.json"].sort());
 });
