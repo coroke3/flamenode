@@ -51,6 +51,10 @@ function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new M
         const { pathname } = new URL(req.url);
         calls.assets.push(pathname);
         if (files.has(pathname)) return new Response(files.get(pathname), { status: 200 });
+        // Generated files and explicit error pages have a direct Static Assets path.
+        if (Object.hasOwn(pages, pathname)) {
+          return new Response(pages[pathname], { status: 200, headers: { "Content-Type": "text/html" } });
+        }
         if (pathname.endsWith("/index.html")) {
           return new Response(null, { status: 307, headers: { Location: pathname.slice(0, -10) } });
         }
@@ -96,6 +100,130 @@ async function get(path, env, init) {
   resetRebuildMemory();
   return gateway.fetch(new Request(`https://flamenode.net${path}`, init), env);
 }
+
+test("MIG-0512 T01/T02/T03/T10: HTML error pages, text fallback and HEAD parity", async () => {
+  const html = createEnv({ pages: { "/404": "<html>not found</html>", "/503/": "<html>unavailable</html>" } });
+  for (const [path, status, body, method] of [
+    ["/does-not-exist", 404, "<html>not found</html>", "GET"],
+    ["/does-not-exist", 404, "", "HEAD"],
+    ["/video-public-1", 503, "<html>unavailable</html>", "GET"],
+    ["/video-public-1", 503, "", "HEAD"],
+  ]) {
+    const env = status === 503 ? { ...html.env, VISIBILITY_KV: undefined } : html.env;
+    const res = await get(path, env, { method });
+    assert.equal(res.status, status);
+    assert.equal(await res.text(), body);
+    assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(res.headers.get("cache-control"), "no-store, private");
+    assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+    assert.equal(res.headers.get("retry-after"), status === 503 ? "30" : null);
+  }
+  const textEnv = createEnv();
+  for (const method of ["GET", "HEAD"]) {
+    const res = await get("/video-public-1", { ...textEnv.env, VISIBILITY_KV: undefined }, { method });
+    assert.equal(res.status, 503);
+    assert.equal(res.headers.get("retry-after"), "30");
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+  }
+  const auth = await get("/api/auth/session", textEnv.env);
+  assert.equal(auth.status, 503);
+  assert.equal(auth.headers.get("retry-after"), null);
+  assert.equal(await auth.text(), "Service Unavailable");
+});
+
+test("MIG-0512 T04/T05: event release and slots must pass one parent shard and revocation fence", async () => {
+  const pages = {
+    "/event/spring-fest-2026/release/": "<html>release</html>",
+    "/event/spring-fest-2026/slots/": "<html>slots</html>",
+  };
+  const live = createEnv({ pages });
+  const release = await get("/event/spring-fest-2026/release", live.env);
+  assert.equal(release.status, 200);
+  assert.equal(await release.text(), "<html>release</html>");
+  assert.deepEqual(live.calls.kv, ["deny:event:spring-fest-2026"]);
+  assert.equal(live.calls.assets.filter((p) => p.startsWith("/_fn/routes/")).length, 1);
+  assert.ok(live.calls.assets.includes("/event/spring-fest-2026/release/"));
+  const missing = await get("/event/spring-fest-2026/portfolio", live.env);
+  assert.equal(missing.status, 404);
+  const revoked = createEnv({
+    pages,
+    kv: new Map([[revocationKey("event", "spring-fest-2026"), "1"]]),
+  });
+  for (const sub of ["release", "slots"]) {
+    const res = await get(`/event/spring-fest-2026/${sub}`, revoked.env);
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("location"), null);
+  }
+  assert.deepEqual(revoked.calls.kv, ["deny:event:spring-fest-2026", "deny:event:spring-fest-2026"]);
+  assert.ok(!revoked.calls.assets.some((p) => p === "/event/spring-fest-2026/slots" ||
+    p === "/event/spring-fest-2026/release/"), "revoked pages cannot reach their assets");
+});
+
+test("MIG-0512 T06: an Assets 307 for a zero-slot event survives the parent fence", async () => {
+  const live = createEnv();
+  const original = live.env.ASSETS.fetch;
+  live.env.ASSETS.fetch = async (request) => {
+    if (new URL(request.url).pathname === "/event/spring-fest-2026/slots") {
+      live.calls.assets.push("/event/spring-fest-2026/slots");
+      return new Response(null, { status: 307, headers: { Location: "/event/spring-fest-2026" } });
+    }
+    return original(request);
+  };
+  const res = await get("/event/spring-fest-2026/slots", live.env);
+  assert.equal(res.status, 307);
+  assert.equal(res.headers.get("location"), "/event/spring-fest-2026");
+  assert.deepEqual(live.calls.kv, ["deny:event:spring-fest-2026"]);
+});
+
+test("MIG-0512 T07/T08: user portfolio canonicalization, deny and event alias sub-page redirects", async () => {
+  const user = createEnv({ pages: { "/user/mixed_case/portfolio/": "<html>portfolio</html>" } });
+  const res = await get("/user/Mixed_Case/portfolio", user.env);
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "<html>portfolio</html>");
+  assert.deepEqual(user.calls.kv, ["deny:user:mixed_case"]);
+  assert.ok(user.calls.assets.includes("/user/mixed_case/portfolio/"));
+  const denied = createEnv({
+    pages: { "/user/mixed_case/portfolio/": "<html>private</html>" },
+    kv: new Map([["deny:user:mixed_case", "1"]]),
+  });
+  assert.equal((await get("/user/Mixed_Case/portfolio", denied.env)).status, 404);
+
+  const eventManifest = buildRouteMap([
+    { kind: "event", id: "canonical", aliases: ["alias"] },
+    { kind: "redirect", fromPath: "/event/alias-query", toPath: "/event/canonical?x=1", status: 307 },
+  ], GENERATION);
+  const alias = createEnv({ manifest: eventManifest });
+  const redir = await get("/event/alias/release?x=1", alias.env);
+  assert.equal(redir.status, 308);
+  assert.equal(redir.headers.get("location"), "/event/canonical/release?x=1");
+  assert.deepEqual(alias.calls.kv, ["deny:event:canonical"]);
+  const invalid = await get("/event/alias-query/release", alias.env);
+  assert.equal(invalid.status, 404);
+  assert.equal(invalid.headers.get("location"), null);
+});
+
+test("MIG-0512 T09: exact user index and safe fonts bypass the shard, never user detail", async () => {
+  const envData = createEnv({
+    pages: { "/user/index.json": '{"users":[]}', "/fonts/FlameNodeSans.otf": "font-data" },
+  });
+  for (const [path, expected] of [
+    ["/user/index.json", '{"users":[]}'],
+    ["/fonts/FlameNodeSans.otf", "font-data"],
+  ]) {
+    const res = await get(path, envData.env);
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), expected);
+  }
+  assert.deepEqual(envData.calls.kv, []);
+  assert.ok(!envData.calls.assets.some((p) => p.startsWith("/_fn/routes/")));
+  for (const path of ["/fonts/.x", "/fonts/../x", "/user/index.json.bak"]) {
+    assert.equal((await get(path, envData.env)).status, 404, path);
+  }
+  const details = await get("/user/creator-alpha", envData.env);
+  assert.equal(details.status, 503, "a known user detail still requires an asset/R2 page");
+  assert.deepEqual(envData.calls.kv.at(-1), "deny:user:creator-alpha");
+});
 
 test("R-GATEWAY 1: public canonical page is served from Static Assets in directory form", async () => {
   const { env, calls } = createEnv({ pages: { "/video-public-1/": "<html>v1</html>" } });
