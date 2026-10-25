@@ -1030,6 +1030,9 @@
 | `src/lib/publicData/staticVideoDetailCore.ts` | HELPER | D-10 compatibility bridge (MIG-0634) | MIG-0634 | packages/server-core/src/publicData/videoDetailCore.ts | BRIDGED | PR#401 SHA=6bd41be5ed42bdfc60c76e7d6e521dedd6909f05 TEST=npm run test --workspace=@flamenode/server-core LOG=project-files/migration-review/pr401-server-core-test.log |
 | `src/lib/publicData/loaderPolicy.ts` | HELPER | D-10 compatibility bridge (MIG-0634) | MIG-0634 | packages/server-core/src/publicData/loaderPolicy.ts | BRIDGED | PR#401 SHA=6bd41be5ed42bdfc60c76e7d6e521dedd6909f05 TEST=npm run test --workspace=@flamenode/server-core LOG=project-files/migration-review/pr401-server-core-test.log |
 
+| `scripts/d03-fanout-dry-run.mjs` | HELPER | MIG-0658 read-only local D-03 X owner fan-out preview | MIG-0658 | SAME (node:sqlite readOnly/SELECT; no remote D1, no mutation) | IN_PROGRESS | PR#414 SHA=be10ad81c058832c17878d2a04cbef8d7d784f39 TEST=node --test scripts/d03-fanout-dry-run.test.mjs CI=pending |
+| `scripts/d03-fanout-dry-run.test.mjs` | HELPER | MIG-0658 synthetic SQLite test T01–T05 | MIG-0658 | SAME (local fixture DB, source file hash immutability) | IN_PROGRESS | PR#414 SHA=3c16e7343f6746ff575b909e8420083ab9bd635d TEST=node --test scripts/d03-fanout-dry-run.test.mjs CI=pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
