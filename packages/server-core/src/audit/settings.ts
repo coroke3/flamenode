@@ -5,6 +5,7 @@ import type { AuditLogSettings } from "./types.ts";
 import { DEFAULT_AUDIT_LOG_SETTINGS } from "./retention.ts";
 import { mutateWithAudit } from "./mutate.ts";
 import { AuditOperation } from "./types.ts";
+import type { PreloadedAuditContext } from "./logger.ts";
 
 const SETTINGS_ID = "default";
 
@@ -46,6 +47,7 @@ export async function updateAuditLogSettings(
   db: ServerCoreDb,
   userId: string,
   patch: Partial<AuditLogSettings>,
+  preloaded?: PreloadedAuditContext,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const before = await db
@@ -86,6 +88,7 @@ export async function updateAuditLogSettings(
   await mutateWithAudit(db, {
     mutationStatements: [mutation],
     expectedMutationChanges: 1,
+    preloaded,
     audits: [
       {
         table_name: "system_settings",

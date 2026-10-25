@@ -35,6 +35,8 @@ export const SCHEMA = `
     retention_class TEXT, restore_strategy TEXT, restore_status TEXT, payload_size_bytes INTEGER,
     expires_at INTEGER, created_at INTEGER, restore_unavailable_reason_code TEXT,
     restore_unavailable_message TEXT);
+  CREATE TABLE audit_restore_runs (id TEXT PRIMARY KEY, audit_log_id TEXT, executed_by_user_id TEXT,
+    reason TEXT, status TEXT, error_message TEXT, executed_at INTEGER);
   CREATE TABLE announcements (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
     severity TEXT, is_published INTEGER, publish_at INTEGER, expire_at INTEGER, target_audience TEXT,
     created_by_user_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
