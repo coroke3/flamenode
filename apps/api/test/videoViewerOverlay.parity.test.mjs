@@ -87,7 +87,16 @@ if (runUnderRootTsx(import.meta.url)) {
     const sqlite = createSqlite();
     seed(sqlite);
     const d1 = createD1(sqlite);
-    const db = drizzle(d1, { schema });
+    // CURRENT reads through drizzle's sqlite-proxy over the same node:sqlite database (not counted in d1.stats).
+    const db = drizzle(async (text, params, method) => {
+      const statement = sqlite.prepare(text);
+      if (method === "run") {
+        statement.run(...params);
+        return { rows: [] };
+      }
+      const rows = statement.all(...params).map((row) => Object.values(row));
+      return { rows: method === "get" ? rows[0] : rows };
+    }, { schema });
     const bucket = createFakeBucket();
     const kv = createFakeKv();
 
@@ -294,6 +303,8 @@ if (runUnderRootTsx(import.meta.url)) {
       ],
     };
     bucket.put("events/evt-1/playlist.v1.json", JSON.stringify(eventPlaylistArtifact));
+    // An event id outside CURRENT's /^[A-Za-z0-9_-]{1,64}$/ is never read, even when an object exists.
+    bucket.put("events/evt.1/playlist.v1.json", JSON.stringify({ ...eventPlaylistArtifact, event_id: "evt.1" }));
 
     const env = {
       DB: d1,
@@ -400,7 +411,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(ids.includes("chap-priv-staff"));
   });
 
-  test("T06: RH-031 banned user returns isBanned: true and 0 D1 query for overlay", async () => {
+  test("T06: RH-031 banned user returns isBanned: true and only the viewer read", async () => {
     const { env, d1 } = setupTestEnv();
     d1.stats.statements = 0;
 
@@ -416,8 +427,10 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.bookmarkActive, false);
     assert.deepEqual(json.privateChapters, []);
 
-    // Session resolution is 1 statement, no additional D1 queries made for banned user
-    assert.equal(d1.stats.statements, 1);
+    // Session + the viewer read (CURRENT reports the banned viewer's terms state and active X):
+    // no chapter / interaction read.
+    assert.equal(d1.stats.statements, 2);
+    assert.equal(json.isTosAccepted, true);
   });
 
   test("T06/T07: RH-031 non-public video (404) and missing artifact (503) with headers", async () => {
@@ -483,5 +496,75 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(d1.stats.writes, 0);
     assert.ok(d1.stats.statements <= 3, `Expected statements <= 3, got ${d1.stats.statements}`);
     assert.ok(bytes < 16 * 1024, `Expected response < 16KB, got ${bytes} bytes`);
+  });
+
+  // T06 parity: the real CURRENT route handler (app/api/videos/[id]/viewer-overlay/route.ts) and the Hono
+  // route answer the same request over the same D1 / R2, response by response.
+  async function current(id, user, query = "") {
+    const ctx = setupTestEnv();
+    ctx.pubRef.session = user ? { user: { id: `u_${user}` } } : null;
+    const response = await currentViewerOverlayGet(
+      new Request(`https://x.test/api/videos/${id}/viewer-overlay${query}`),
+      { params: Promise.resolve({ id }) },
+    );
+    return { status: response.status, cache: response.headers.get("Cache-Control"), body: await response.json() };
+  }
+
+  async function hono(id, user, query = "") {
+    const ctx = setupTestEnv();
+    ctx.d1.stats.statements = 0;
+    const headers = user ? { cookie: `authjs.session-token=tok-${user}` } : {};
+    const response = await app.request(`/api/videos/${id}/viewer-overlay${query}`, { headers }, ctx.env);
+    return {
+      status: response.status,
+      cache: response.headers.get("Cache-Control"),
+      body: await response.json(),
+      statements: ctx.d1.stats.statements,
+      writes: ctx.d1.stats.writes,
+    };
+  }
+
+  test("T06 parity: every viewer x playlist matches CURRENT (DTO, status, headers)", async () => {
+    // anon, normal user with approved X (alice), no X (bob), admin without X (carol), only a rejected X as
+    // active (dave), one approved X but no active X (ivy), event staff, banned.
+    const users = [null, "alice", "bob", "carol", "dave", "ivy", "staff", "banned"];
+    const queries = ["", "?playlist=evt-1", "?playlist=lib-like", "?playlist=lib-bookmark", "?playlist=evt.1"];
+    for (const user of users) {
+      for (const query of queries) {
+        const cur = await current("vid-pub", user, query);
+        const got = await hono("vid-pub", user, query);
+        const label = `${user ?? "anon"} ${query || "(no playlist)"}`;
+        assert.equal(got.status, cur.status, label);
+        assert.equal(got.cache, cur.cache, label);
+        assert.deepEqual(got.body, cur.body, label);
+        assert.equal(VideoViewerOverlayResponseSchema.safeParse(got.body).success, true, label);
+        // T08: session + 2 statements at most, never a write
+        assert.ok(got.statements <= 3, `${label}: ${got.statements} statements`);
+        assert.equal(got.writes, 0, label);
+      }
+    }
+    for (const id of ["vid-priv"]) {
+      const cur = await current(id, "alice");
+      const got = await hono(id, "alice");
+      assert.equal(got.status, cur.status, id);
+      assert.equal(got.cache, cur.cache, id);
+      assert.deepEqual(got.body, cur.body, id);
+    }
+  });
+
+  // CURRENT answers an artifact miss through loadStaticVideoDetail's degradedFetcher (D1): a YouTube id or
+  // a video whose artifact is missing gets 200, an unknown id 404. D-13-46 removes that D1 fallback.
+  test("T06 DOCUMENTED DIFFERENCE D-13-46: artifact miss -> CURRENT degraded D1 (200 / 404), Hono 503", async () => {
+    for (const [id, currentStatus] of [["vid-missing", 404], ["yt_pub", 200]]) {
+      const cur = await current(id, "alice");
+      assert.equal(cur.status, currentStatus, id);
+      const ctx = setupTestEnv();
+      ctx.d1.stats.statements = 0;
+      const res = await app.request(`/api/videos/${id}/viewer-overlay`, {}, ctx.env);
+      assert.equal(res.status, 503, id);
+      assert.equal(res.headers.get("Retry-After"), "3", id);
+      assert.deepEqual(await res.json(), { error: "viewer_overlay_unavailable" }, id);
+      assert.equal(ctx.d1.stats.statements, 0, id);
+    }
   });
 }
