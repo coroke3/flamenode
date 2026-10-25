@@ -44,6 +44,11 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 
 **Recovery rule:** Missing artifacts are regenerated only by the next public build. Public GET handlers must not write to D1, a Queue, or `public_build_state`.
 
+| `xicons/staging/<id>/<id>.<id>` | src/lib/actions/xid.ts:1088,1094 (temporary upload) | src/lib/actions/xid.ts:1127,1132 (rollback/cleanup) | RETAIN temporary uploaded media; do not treat as generated public snapshots | MIG-0649 / media domain |
+| `xicons/<id>/<id>.<id>` | src/lib/actions/xid.ts:1089,1095 (approved X icon upload) | src/lib/actions/xid.ts:1127; src/lib/media/publicMedia.ts (public serving) | RETAIN persistent icon objects; inspect user references before deletion | MIG-0649 / media domain |
+| `video-icons/<id>/<id>/` | src/lib/video/resolveVideoCreatorIcon.ts:87-91 (prefix + UUID.ext) | src/lib/video/resolveVideoCreatorIcon.ts:104 rollback; media handler | RETAIN persistent media. Scanner captures first interpolated prefix only; full key adds UUID and extension via string concatenation | MIG-0649 / media domain |
+| `internal/materialized/video-cards/v1/manifest.json` | workers/json-generator/videoMaterializedSource.ts:372 (conditional commit) | workers/json-generator/videoMaterializedSource.ts:211 (load) | RETAIN until materialized source retirement gate; generator output not an independent public HTML page | MIG-0627 / MIG-0907 |
+
 ## Static-audit limitations
 
 The CI checker validates literal `r2Key` property keys, literal calls on known R2 binding names, and stored-object key constants. It excludes test and fixture directories. Computed keys are listed explicitly above but need follow-up source auditing before MIG-0627 removes a reader. A green checker does not prove a dynamically generated key exists or that its consumer is safe to retire.
