@@ -44,32 +44,28 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - DONE: SA unitごとに同一requestで旧/新statusとDB副作用・監査・Queue結果が一致。
 
 ### MIG-0603 — video read/overlay/edit/chapters
-
-- 読む: RH-030..032、SA-001..003/012..015/040..042/082..089と実actions、`auth/README.md` privilege-mode + D-03 rules。
-- 変更: `GET /api/videos`, `/:id`, `/:id/viewer-overlay`を現行URLに保ち、writeは各Action相当の狭いcommandへ。公開summaryとprivate viewer overlayを別DTO/cacheにする。Active X主体の選択は1件、既存fan-outは別backfill。
-- 試験: normal/event/admin permissionの相互混入拒否、owner+collab+staff、chapterコメント残存、visibility revoke→stale static deny、like race/duplicate、rebuild Queue post-commit。
-- DONE: RH-030/031/032と該当SA/UX/FNのbefore-after matrixおよび403/404の漏洩防止を実証。
+- 読む: `PHASE_6_SPEC.md` の MIG-0603 Work Order（D-13-40〜66）、SA-001..003/043/044/040..042/082..089 の実 action、core `visibility/videoTransition.ts`。
+- 変更: U02a Hono 可視性 host、U02b admin 可視性 + moderation、U03a いいね。U02c / U03b / U03c は MIG-0633 の後。RH-031/032 は MIG-0634。
+- 試験: 権限の相互混入拒否、公開→非公開の fence と補償、voided の case、いいねの競合、wake 0 の記録した差。
+- DONE: 全 unit と Final audit、権限判定の全件一致。
 
 ### MIG-0604 — event / slot APIs
+- 読む: SA-021..039, SA-056..068、MIG-0633 の core。
+- 変更: U04（非 admin の event 権限と owner 0 guard は core を使う）。RH-012/015 は MIG-0631（DONE）、RH-013 は MIG-0632。
+- 試験: 最後の owner の解任拒否、同時予約、playlist と post-commit。
+- DONE: U04 と Final audit。MIG-0633 DONE まで着手しない。
 
-- 読む: RH-014, RH-020..022, SA-021..039, SA-056..068, `background-jobs/README.md`, `CURRENT_ROUTES.md`。
-- 変更: live viewer/slotted mutations/playlist/owner commandsを型付きサービスへ移行。RH-012/015 は MIG-0631、RH-013（export契約・version/format/legacy/CORS）は MIG-0632 へ移管（2026-10-24）。slot owner/CAS/予約人数制限はDB transactionで強制。
-- 試験: schedule full/empty/expired, double reservation, removing last operable owner forbidden, public/private event on live endpoint, replay/notify/outbox/error retry。
-- DONE: RH-014/020..022・対象SAの仕様/CPU/Queue/permission parity。高リスク操作は独立レビュー。
-
-### MIG-0605 — Auth User / Active X / Admin / remaining RH
-
-- 読む: RH-001..009,016,019,023..025,027..028,033とSA-016..020/043..055/069..081/090..106、`ACTIVE_X_MIGRATION_PLAN.md`, `auth/README.md`。
-- 変更: account summary, admin spreadsheet, signed/private media, CORS OPTIONS, public event staff, thumbnail proxy, X/account link/merge, moderation, notification, cost guardなどの**各契約**を漏れなく移行。RH番号で漏れを管理。D-03 fan-outは承認済み全owner-X、D-04一括切替のdry-runと運用別PRを分離。
-- 試験: every RH method/CORS/SSRF/header/cache, row-level admin/spreadsheet auth, X owner vs manager, session identity, merge+revert atomicity, 0X/multiX/duplicate, audit/notification/rebuild, public DTO allowlist。
-- DONE: 書き込み元と共有Xの重複件数を検証、対象RH/SAに「旧コード不要」と断言する前に全シナリオがE2E合格。本番backfill実行しない。
+### MIG-0605 — Auth User / Active X / Admin / remaining RH（親）
+- 読む: `PHASE_6_SPEC.md` の MIG-0605 Work Order、D-03 / D-04、`xid-admin.ts`。
+- 変更: SA-090/091（MIG-0633 の後）、D-03 fan-out dry-run script、D-04 checkpoint 文書、RH-001..033 の担当表。残りは MIG-0636 / 0637 / 0638（SA-043/044 は MIG-0603）。
+- 試験: 権限の無い staff の拒否、dry-run の規則、担当表に空欄なし。
+- DONE: 上の unit と Final audit。本番 backfill を実行しない。
 
 ### MIG-0606 — API CPU/security budgets
-
-- 読む: `cloudflare/PERFORMANCE_BASELINE.md`, `scripts/cloudflare-verify-fast.mjs`, runtime trace, route request inventory。
-- 変更: ステージ環境でメソッド別p50/p95/p99/request count/wall+CPU/D1 rows_read/read_bytesを書き出す測定スクリプト・fixtureを整備。CPU heavy処理をQueue移譲、SQL bound/index見直し。
-- 試験: large pagination/invalid input/rate limit/banned, D1 unavailable, R2/cache cold/miss, concurrent writes。Free 10ms/request前提でmutation p95<8ms/read p95<5ms目標（実際の1102=0を別監視）。
-- DONE: すべての公開/private endpointのCPUの実測・最大ケース・修正とerror rate、閾値逸脱時のBLOCKED理由を記録。
+- 読む: `API_CPU_BENCHMARK.md`、`scripts/benchmark-api-cpu.mjs`、各 task の上限入力。
+- 変更: `buildScenarios()` に残りのメソッドと上限入力、静かな host で U02。
+- 試験: 全メソッドの max、予算超過の担当 MIG。
+- DONE: 依存 task 全部の DONE 後に測定値を記録（RH-013 は MIG-0632）。
 
 ### MIG-0609 — background job CPU measurement (D-09)
 
@@ -143,10 +139,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0620 — static asset Cache-Control parity
 
-- 読む: `PHASE_6_SPEC.md` の MIG-0620 Work Order、`public/_headers`、`apps/site/src/gateway/routeShards.ts`。
-- 変更: 新 Worker の `_headers`（`/_astro` `/_personal_assets` `/_ops_assets` `/brand`）。
-- 試験: prefix ごとの Cache-Control、HTML が immutable にならないこと。
-- DONE: 全 prefix が表と一致。
+- 読む: `PHASE_6_SPEC.md` の MIG-0620 Work Order、`work-items/MIG-0620.md` の Table、`public/_headers`。
+- 変更: `apps/site/public/_headers`（`/_astro`、favicon、png/webp/svg）、`apps/app/public/_headers`（`/_personal_assets`）。`/_ops_assets` は MIG-0704 U01（D-13-4）。
+- 試験: `assetHeaders.test.mjs`（prefix ごとの Cache-Control、HTML が immutable にならない）。
+- DONE: PR #351（merge `e8ac0020`）、5/5、Opus APPROVE on `50712610`。
 
 ### MIG-0621 — robots.txt and sitemap.xml
 
@@ -177,18 +173,16 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - DONE: 12ルートの parity と権限が PASS。
 
 ### MIG-0625 — Admin read APIs part A
-
-- 読む: `PHASE_6_SPEC.md` の MIG-0625 Work Order、`app/(admin)/admin/**`（users / videos / events / moderation）、MIG-0611 の実装。
-- 変更: 対象 page の読み取り endpoint と DTO、admin 権限。
-- 試験: 実 loader と Hono の parity、admin 以外の拒否、D1 3文以下。
-- DONE: 担当範囲の parity PASS、MIG-0626 との分担に漏れが無い。
+- 読む: `work-items/MIG-0625.md` の U01 表。
+- 変更: なし（DONE、範囲を縮小。残りは MIG-0635 / MIG-0604 U04 / MIG-0705）。
+- 試験: 済み。
+- DONE: 済み。
 
 ### MIG-0626 — Admin read APIs part B
-
-- 読む: `PHASE_6_SPEC.md` の MIG-0626 Work Order、MIG-0625 の分担表、`app/(admin)/admin/**` の残り。
-- 変更: settings / audit / ops / 残りの読み取り endpoint と DTO。
-- 試験: Admin 45 の網羅、parity、admin 以外の拒否、外部診断失敗の劣化。
-- DONE: Admin 45 の全 page に read endpoint がある。
+- 読む: `PHASE_6_SPEC.md` の MIG-0626 Work Order（D-13-51 / 73 / 80）、`healthChecks.ts`、`integrityChecks.ts`、`deepHealth.ts`。
+- 変更: 3 つの check file と deepHealth を server-core へ（bridge）、check id ごとの endpoint、RH-017 の本体。
+- 試験: check id ごとの CURRENT 一致、admin 以外の拒否、RH-017 の token と body。
+- DONE: Admin 45（MIG-0627 の1面を除く）と RH-017。
 
 ### MIG-0627 — R2 artifact consumers to build-time snapshots
 
@@ -204,12 +198,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: Worker ごとの `wrangler deploy --dry-run`、env key の和集合、smoke list の網羅。
 - DONE: dry-run が CI で PASS、実 deploy・Route・secret は未実行（明示承認まで停止）。
 ### MIG-0629 — admin audit settings + restore dry-run APIs
-
-- 読む: SA-009..010（`src/lib/actions/audit-admin.ts`）, `mutate.ts`, `API_MATRIX.md`, `work-items/MIG-0602.md` Decision（MIG-0602 の分割）。
-- 変更: SA-009 を strict 監査 1 batch で、SA-010 を core の `restoreAuditLog(db, { dry_run: true })` で実装。両方 `POST` + `writeGuardMiddleware` + `costGuardMiddleware("admin_permissions")`。
-- 試験: 別 origin、非 admin、設定更新の監査が CURRENT と byte 一致、dry run の書き込み 0、CAS/競合。
-- DONE: SA-009/010 の旧/新 status・DB 副作用・監査が一致。SA-011 は MIG-0616 で個別実装。
-- 着手前: lead 決定 M1〜M3 は 2026-10-24 に決定済み。MIG-0617 が DONE になるまで着手しない。
+- 読む: `audit-admin.ts`、core `settings.ts` / `restore.ts`、`routes/admin/announcements.ts`。
+- 変更: `POST /api/admin/audit/settings`、`POST /api/admin/audit/dry-run`、core `updateAuditLogSettings` の省略可能な `preloaded`。
+- 試験: 別 origin、非 admin、監査 byte 一致、dry run の書き込み 0 と host 不使用。
+- DONE: SA-009/010 の parity。dry run の 6 文は記録した例外。
 
 ### MIG-0630 — Video edit page read APIs (/dashboard/edit/[id] + permissions)
 
@@ -232,19 +224,47 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: CORS・format / v5 + legacy・refresh minutes の parity、上限入力の max CPU。
 - DONE: 応答が CURRENT と一致し、64KB 超を D-12 の記録した例外として残す。
 
-### MIG-0633 — event ownership / permission resolver core (D-10)
-
-- 読む: `PHASE_6_SPEC.md` の MIG-0633 Work Order、`src/lib/auth/ownership.ts`、`src/lib/event/eventOwnership.ts`。
-- 変更: 純粋な resolver と owner 0 guard を server-core へ移し、Next は bridge。
-- 試験: 移動前の golden、最後の owner の解任が拒否される SQL guard。
-- DONE: golden の diff 0、既存 test の件数同一、呼び出し側の diff 0。
+### MIG-0633 — event ownership / permission resolver core
+- 読む: `ownership.ts`、`eventOwnership.ts`、`permissionResolver.ts`、`approvedX.ts`、`generalEditPermissions.ts`、`atomicLimits.ts`。
+- 変更: pure は domain、drizzle は server-core、src は bridge。
+- 試験: golden、最後の owner の解任拒否、既存 test の件数。
+- DONE: golden diff 0、呼び出し側 diff 0、利用 task に通知。
 
 ### MIG-0607 — Phase 6 API Gate
+- 読む: RH-001..033、`API_MATRIX.md`、0601..0606・0611..0638 の PR。
+- 変更: RH 行ごとの担当と記録した差の一覧。RH-010/011 は Phase 8。
+- 試験: 旧 Next → Hono の E2E、RH-017 の本体（MIG-0626 U07）。
+- DONE: 独立 review と人間の Gate 承認後だけ。
 
-- 読む: RH-001..033全method、`API_MATRIX.md`, SA-001..110相当契約、0601..0606・0631..0633のPR。
-- 変更: RH行ごとに担当Hono/旧Auth/legacy fallbackと契約実行ログを列挙。Auth.js RH-010/011の2メソッドはPhase8へ残す。その他31メソッドは移行先とtest evidenceが必要。
-- 試験: 旧Next→新HonoのE2E, same-origin auth, method OPTIONS, authn/authz, no1121/1102, DTO, cache/Queue/media/CSRF, CPU。
-- DONE: 独立reviewと人間Gate承認後のみPhase 7/8関係タスクを更新。未移行を0と偽らない。
+### MIG-0634 — public video list + video viewer overlay (RH-031, RH-032)
+- 読む: `PHASE_6_SPEC.md` の MIG-0634 Work Order（D-13-46 / 68）、`app/api/videos/route.ts`、`app/api/videos/[id]/viewer-overlay/route.ts`、`apps/api/src/routes/events/publicSnapshot.ts`。
+- 変更: video 一覧系の純粋部品を server-core へ（bridge）、`GET /api/videos`、`GET /api/videos/:id/viewer-overlay`。loader は移植しない。
+- 試験: 分岐ごとの byte 一致、guard mode、miss の 503（書かない）、overlay の権限と header。
+- DONE: T01〜T08 PASS、GET が書かない。
+
+### MIG-0635 — Admin read APIs part C
+- 読む: `app/(admin)/admin/videos/[id]/page.tsx`、`.../members/page.tsx`、`users/[id]/edit/page.tsx`、`videoReviewDetail.ts`。
+- 変更: 3 endpoint と DTO。icon_url は記録した差（D-13-49）。
+- 試験: CURRENT loader と一致、admin 以外の拒否、D1 3 文以下。
+- DONE: Admin 45 の担当表に TODO なし（MIG-0627 の1面を除く）。
+
+### MIG-0636 — Personal X / Active X / terms APIs
+- 読む: `xid.ts`、`terms.ts`、`onboarding.ts#maybeMarkOnboardingComplete`、G21。
+- 変更: SA-074..076, SA-098..105 の endpoint、body 上限 middleware、onboarding 完了 POST。
+- 試験: 二重送信、承認待ち X、next の sanitize、8 MiB の境界、監査と queue 行の一致。
+- DONE: 全 SA の parity。MIG-0702 / MIG-0510 が使える。
+
+### MIG-0637 — admin ops writes + X merge admin
+- 読む: `cost-guard.ts`、`notification-admin.ts`、`permissions-admin.ts`、`public-visibility-repair.ts`、`rules.ts`、`static-rebuild-admin.ts`、`user-admin.ts`、`youtube-sync-admin.ts`、`xid-merge-admin.ts`。
+- 変更: admin router の下に面ごとの route。queue は同じ batch、wake 0。
+- 試験: 各 SA の監査・副作用の一致、拒否、CAS 競合、merge と revert。
+- DONE: 全 SA の parity。
+
+### MIG-0638 — remaining MIG-0605 Route Handlers
+- 読む: spreadsheet data / import、legacy import、media 3 route、public staff、x-users search の CURRENT handler。
+- 変更: 書き込み半分の spreadsheet、import 2 つ、media 3 つ、public staff、X-user search。
+- 試験: 全件 rollback、SSRF と署名、CORS、検索の並び、D1 文数。
+- DONE: 全 RH の parity。spreadsheet の Routing は書き込み半分の merge 後。
 
 ## Private SPA common constraints (D-05)
 
@@ -252,10 +272,10 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0701 — Personal dashboard GET screens
 
-- 読む: `CURRENT_ROUTES.md` Personal 6、`frontend/AUTH_PERSONAL_ENTRY.md`、`screen-mapping/README.md`、`apps/app/src/{App,main}.tsx`。
-- 変更: `apps/app`のroot Routerに`/dashboard`, `/dashboard/library`, `/dashboard/settings`, `/dashboard/youtube-playlists`と旧リダイレクトを実装。認証loading/banned/not linked state、Hono read DTO、React Query採用時は限定scopeキャッシュ。
-- 試験: 0X/1X/multiX, Active X library表示、Discord logged out/role changes, direct reload/back/forward, private cache no-store, `/_personal_assets/*`。
-- DONE: Personal 6 route mapping、担当UX/FNと既存仕様の全stateが確認済み。
+- 読む: `PHASE_7_SPEC.md` の MIG-0701 Work Order、`work-items/MIG-0701.md`、`app/layout.tsx`、`app/(auth)/layout.tsx`、`src/styles/globals.css:7-10`、4つの CSS module。
+- 変更: CURRENT の global CSS 6 file を `apps/app/src/styles/current/` へそのまま copy、4 module を `apps/app/scripts/portCssModule.mjs` で `dash-` / `onb-` / `settings-` / `vcard-` に変換、`main.tsx` に CURRENT と同じ順で import、`index.html` に noindex と theme bootstrap、`router.tsx` に personal surface wrapper、`public/_headers` に HTML の no-store。
+- 試験: `apps/app/test/styles.test.mjs`（drift、変換、class の定義、import 順）、`document.test.mjs`（noindex、theme、no-store、wrapper）、既存54件。
+- DONE: 5ルートの本文と CSS が CURRENT と一致。header / footer / CostGuardBanner は FIX-0701-1、browser 確認は MIG-0706 の smoke。
 
 ### MIG-0702 — Personal dashboard mutations
 

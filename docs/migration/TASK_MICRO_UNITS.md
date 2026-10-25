@@ -87,16 +87,16 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **U04**: SA-021..039 and SA-056..068 mutation equivalence; owner0 guard, reservation, Playlist + postcommit。
 - **Final audit**: no remaining event/slot methods without contract/test evidence.
 
-## MIG-0605 — X / Admin / remaining Route Handlers
+## MIG-0605 — X / Admin / remaining Route Handlers（2026-10-25 分割、D-13-56）
 
-- **U01 account + suggestion**: RH-001 and RH-019. Session/ban/approved X DTO/no-store/invalid params。
-- **U02 spreadsheet**: RH-003..009. Read/update/insert/delete/export/import/table list, audit and owner protection。
-- **U03 external media proxies**: RH-016, RH-023..025, RH-033. Signed-private/public ACL/cache/SSRF/size bounds。
-- **U04 public staff**: RH-027 OPTIONS and RH-028 GET. CORS allowlist/visibility double-check/ETag。
-- **U05 X link + interactions**: SA-090..106, `ACTIVE_X_MIGRATION_PLAN.md`, D-03 approved owner fan-out dry-run and D-04 cutover checkpoint. Never run remote write。
-- **U06 admin ops**: SA-016..020/043..055/069..081. Compare audit+cost-guard/notifications/terms/admin user operations。
-- **U07 remaining method coverage**: compare all RH-001..033 ledger, RH-010/011 remains legacy Auth. Any RH not explicitly assigned in 0601-0605 gets a named owner + E2E test; no silent omission。
-- **Final audit**: overlapping SA ownership with MIG-0602/0603/0604 identified and not double-counted.
+- **済み**: U01 RH-001（#335）、U02 read RH-003/007/009（#392）、U03 の一部 RH-016/033（#335）。
+- **MIG-0636 へ**: SA-074..076, SA-098..105、G21 の body 上限。
+- **MIG-0637 へ**: SA-016..020, SA-045..055, SA-069..073, SA-077..081, SA-092..097, SA-106, SA-110。
+- **MIG-0638 へ**: RH-002, RH-004..008（F-1 を含む）, RH-019, RH-023..025, RH-027, RH-028。
+- **MIG-0603 へ**: SA-043/044（可視性遷移の host を共有）。
+- **本 task U05x**: SA-090/091（MIG-0633 の後）。**U05d** D-03 fan-out dry-run（Remote D1 に触れない）。**U05e** D-04 checkpoint。
+- **U07 remaining method coverage**: RH-001..033 の担当表。RH-010/011 は旧 Auth。
+- **Final audit**: MIG-0602/0603/0604/0636〜0638 との SA の二重所有が無いこと。
 
 ## MIG-0704 — Ops SPA creation + Manage
 
