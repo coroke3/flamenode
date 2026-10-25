@@ -1031,13 +1031,13 @@
 | `src/lib/publicData/loaderPolicy.ts` | HELPER | D-10 compatibility bridge (MIG-0634) | MIG-0634 | packages/server-core/src/publicData/loaderPolicy.ts | BRIDGED | PR#401 SHA=6bd41be5ed42bdfc60c76e7d6e521dedd6909f05 TEST=npm run test --workspace=@flamenode/server-core LOG=project-files/migration-review/pr401-server-core-test.log |
 
 
-| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | IN_PROGRESS | new read-only D-03 fan-out local SQLite report (PR#414, TEST=node --test scripts/d03-fanout-dry-run.test.mjs, CI pending) |
-| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | IN_PROGRESS | synthetic local fixture test T01–T05, hash immutability (PR#414, CI pending) |
 
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
+| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | IN_PROGRESS | new read-only D-03 fan-out local SQLite report (PR#414, TEST=node --test scripts/d03-fanout-dry-run.test.mjs, CI pending) |
+| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | IN_PROGRESS | synthetic local fixture test T01–T05, hash immutability (PR#414, CI pending) |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
