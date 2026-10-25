@@ -61,7 +61,7 @@ test("single/batchともvideo.permissionsとprivilege modeをServer側で再検�
 
 test("permission inputは最大100件かつcanonical X handle形式だけ許可する", async () => {
   const atomicLimits = await readFile(
-    new URL("../video/atomicLimits.ts", import.meta.url),
+    new URL("../../../packages/domain/src/video/atomicLimits.ts", import.meta.url),
     "utf8",
   );
   assert.match(atomicLimits, /MAX_COLLABORATOR_PERMISSION_BATCH = 100/);
@@ -151,7 +151,7 @@ test("ON時もpublic+hidden重複をX ID単位で統合する", () => {
 
 test("hidden editor上限は公開100人と分離し全intent後のnet countで判定する", async () => {
   const atomicLimits = await readFile(
-    new URL("../video/atomicLimits.ts", import.meta.url),
+    new URL("../../../packages/domain/src/video/atomicLimits.ts", import.meta.url),
     "utf8",
   );
   const body = functionBody("applyPermissionIntentsToVideo");

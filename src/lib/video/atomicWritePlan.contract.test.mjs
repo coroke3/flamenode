@@ -110,7 +110,7 @@ test("更新・削除planはscalar CASまたは集合CASを利用する", () => 
 });
 
 test("大規模合作はJSON1一括INSERTでbind上限を回避する", () => {
-  const limits = read("./atomicLimits.ts");
+  const limits = read("../../../packages/domain/src/video/atomicLimits.ts");
   const members =
     read("./replaceVideoMembers.ts");
   const memberSet =

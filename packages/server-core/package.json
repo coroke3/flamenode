@@ -69,7 +69,11 @@
     "./publicData/artifactVisibility": "./src/publicData/artifactVisibility.ts",
     "./publicData/publicXUser": "./src/publicData/publicXUser.ts",
     "./publicData/publicDto": "./src/publicData/publicDto.ts",
-    "./publicData/publicApi": "./src/publicData/publicApi.ts"
+    "./publicData/publicApi": "./src/publicData/publicApi.ts",
+    "./auth/approvedX": "./src/auth/approvedX.ts",
+    "./video/generalEditPermissions": "./src/video/generalEditPermissions.ts",
+    "./auth/ownership": "./src/auth/ownership.ts",
+    "./event/eventOwnership": "./src/event/eventOwnership.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
