@@ -66,7 +66,7 @@ node scripts/d03-fanout-dry-run.mjs --sqlite /absolute/path/to/local.sqlite
 node --test scripts/d03-fanout-dry-run.test.mjs
 ```
 
-`--sqlite` はローカルファイルのパスのみ。スクリプトは `node:sqlite` の `readOnly: true` と `PRAGMA query_only = ON` で接続し、SELECT のみを実行する。3 つの SELECT は単一の読み取りトランザクションで同じ SQLite snapshot を参照し、正常終了・異常終了のいずれでも ROLLBACK で終了する（同時 WAL writer による集計の時間差を防ぐ）。JSON 1 行を標準出力へ返す。`candidates` は承認済み owner リンクへ展開した後の一意な X/video/type の行数で、既存 X 操作と同じキーでも「候補」として計上する。`collapsedDuplicates` は複数 Auth の共通 X によって生成された重複候補の削減数。`skippedNoOwnerLink` は eligible な owner リンクが 0 の旧 Auth interaction 行数。`conflictsWithVideoInteractions` は既存 X 正本との衝突件数・先頭50件・省略状態。`likeCountDelta` は既存 X like と候補 like の union（X/video 単位で distinct）を `videos.app_like_count` と比較した絶対差が大きい上位50件で、`maxDeltaVideo` はその1件目。各操作の生データは書き換えない。
+`--sqlite` はローカルファイルのパスのみ。スクリプトは `node:sqlite` の `readOnly: true` と `PRAGMA query_only = ON` で接続し、SELECT のみを実行する。3 つの SELECT は単一の読み取りトランザクションで同じ SQLite snapshot を参照し、正常終了・異常終了のいずれでも ROLLBACK で終了する（同時 WAL writer による集計の時間差を防ぐ）。JSON 1 行を標準出力へ返す。`candidates` は承認済み owner リンクへ展開した後の一意な X/video/type の行数で、既存 X 操作と同じキーでも「候補」として計上する。`collapsedDuplicates` は複数 Auth の共通 X によって生成された重複候補の削減数。`skippedNoOwnerLink` は eligible な owner リンクが 0 の旧 Auth interaction 行数。`conflictsWithVideoInteractions` は既存 X 正本との衝突件数・先頭50件・省略状態。`likeCountDelta` は承認済み X に限定した既存 X like と候補 like の union（X/video 単位で distinct、未承認 X の既存行は**削除せず集計だけ除外**）を `videos.app_like_count` と比較した絶対差が大きい上位50件で、`maxDeltaVideo` はその1件目。各操作の生データは書き換えない。
 
 **重要:** dry-run はその時点の参照 snapshot に過ぎない。書き込み凍結、取消差分の照合、承認、バックフィル、切替、およびロールバック演習は別工程。衝突を無条件に上書きせず、ownerなし Auth の元データを消さず、`video_interactions_auth` を保持する。識別子のある report は共有範囲を限定する。
 
