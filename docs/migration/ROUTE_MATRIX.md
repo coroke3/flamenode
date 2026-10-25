@@ -210,3 +210,15 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 | `/admin/videos/[id]` | MIG-0635 | `GET /api/admin-read/videos/:id` | DONE |
 | `/admin/videos/[id]/members` | MIG-0635 | `GET /api/admin-read/videos/:id/members` | DONE |
 | `/admin/users/[id]/edit` | MIG-0635 | `GET /api/admin-read/users/:id/edit` | DONE |
+
+## MIG-0512 entity sub-page visibility fence (PR #411, review pending)
+
+`/event/{id}/{release,slots}` and `/user/{id}/portfolio` are public sub-pages without separate route-map entries. The Gateway resolves **the parent entity** first and checks the post-build `deny:` KV entry before requesting their Static Assets. No direct asset access or R2 fallback is allowed for an unpublished parent.
+
+| Logical public URL | Parent visibility key | Public asset behavior | Revoked / unavailable |
+| --- | --- | --- | --- |
+| `/event/[id]/release` | `event/{id}` | `event/{canonicalId}/release/` HTML; aliases redirect with the source query | 404 / 503 |
+| `/event/[id]/slots` | `event/{id}` | Static Assets via original URL; zero-slot 307 redirect preserved | 404 / 503 |
+| `/user/[id]/portfolio` | `user/{normalizedId}` | `user/{normalizedId}/portfolio/` HTML; case-insensitive aliases | 404 / 503 |
+
+`/user/index.json` and validated `/fonts/*` are the **only** new build-file bypasses (no shard / visibility KV). HTML 404 and 503 pages carry no-store/noindex, and 503 includes `Retry-After: 30`. Scope: MIG-0512 on PR #411, not yet approved or merged.
