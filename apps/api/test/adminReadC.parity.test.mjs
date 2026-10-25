@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cookie, createD1, createSqlite, runUnderRootTsx } from "./support/personalHarness.mjs";
+import { cookie, createD1, createSqlite, insert, runUnderRootTsx } from "./support/personalHarness.mjs";
 import { seed } from "./support/adminReadSeed.mjs";
 
 // MIG-0635 parity test: Admin read APIs part C (videos/[id], members, users/[id]/edit).
@@ -31,6 +31,9 @@ if (runUnderRootTsx(import.meta.url)) {
 
   const sqlite = createSqlite();
   seed(sqlite);
+  const T0 = 1_700_000_000;
+  insert(sqlite, "software_catalog", { id: "sw-1", name: "Blender", normalized_name: "blender", created_at: T0, updated_at: T0 });
+  insert(sqlite, "video_softwares", { video_id: "av-pending-1", software_id: "sw-1", raw_label: "Blender 4.0" });
   const refDb = drizzle(async (text, params, method) => {
     const statement = sqlite.prepare(text);
     if (method === "run") {

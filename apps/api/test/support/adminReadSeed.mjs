@@ -92,8 +92,6 @@ export function seed(sqlite) {
   ins("video_chapters", { id: "vm-1:legacy:ch2", video_id: "av-pending-1", chapter_time: 250, chapter_label: "Climax", note: "climax note", x_user_id: "alice_x", created_at: T0, updated_at: T0 });
   ins("video_chapters", { id: "vm-2:member:ch3", video_id: "av-pending-1", chapter_time: 300, chapter_label: "Outro", note: "", x_user_id: "orph_x", created_at: T0, updated_at: T0 });
 
-  ins("software_catalog", { id: "sw-1", name: "Blender", normalized_name: "blender", created_at: T0, updated_at: T0 });
-  ins("video_softwares", { video_id: "av-pending-1", software_id: "sw-1", raw_label: "Blender 4.0" });
 
   // Video with > 100 members to test 404 overflow (MIG-0635)
   av("av-overflow", { vis: "public", title: "Overflow Video" });
