@@ -57,6 +57,19 @@ CREATE INDEX video_interactions_video_type_idx
 5. **この選択は過去interactionの移行方法のみ。切替後の新規like/bookmarkは選択中Active Xに作用し、所有する全Xへ自動連動しない**（全X同期の追加仕様は別の承認対象）。
 6. fan-out件数は `old rows × owner approved links` に比例し、D1 Free枠の行数/CPU/statementを事前見積りする。数十万件なら複数実行枠に分割し、1リクエストで処理しない。
 
+## 3a. MIG-0658 — ローカル D-03 fan-out 読み取り専用 dry-run
+
+移行に先立ち、**ローカルにマイグレーション適用済みの SQLite DB だけ**を入力に、書き込みを行わず候補件数と衝突を確認する。Cloudflare D1 の remote DB、本番情報、R2 は参照しない。
+
+```bash
+node scripts/d03-fanout-dry-run.mjs --sqlite /absolute/path/to/local.sqlite
+node --test scripts/d03-fanout-dry-run.test.mjs
+```
+
+`--sqlite` はローカルファイルのパスのみ。スクリプトは `node:sqlite` の `readOnly: true` と `PRAGMA query_only = ON` で接続し、SELECT のみを実行する。JSON 1 行を標準出力へ返す。`candidates` は承認済み owner リンクへ展開した後の一意な X/video/type の行数で、既存 X 操作と同じキーでも「候補」として計上する。`collapsedDuplicates` は複数 Auth の共通 X によって生成された重複候補の削減数。`skippedNoOwnerLink` は eligible な owner リンクが 0 の旧 Auth interaction 行数。`conflictsWithVideoInteractions` は既存 X 正本との衝突件数・先頭50件・省略状態。`likeCountDelta` は既存 X like と候補 like の union（X/video 単位で distinct）を `videos.app_like_count` と比較した絶対差が大きい上位50件で、`maxDeltaVideo` はその1件目。各操作の生データは書き換えない。
+
+**重要:** dry-run はその時点の参照 snapshot に過ぎない。書き込み凍結、取消差分の照合、承認、バックフィル、切替、およびロールバック演習は別工程。衝突を無条件に上書きせず、ownerなし Auth の元データを消さず、`video_interactions_auth` を保持する。識別子のある report は共有範囲を限定する。
+
 ## 4. Cloudflare D1 Free 枠の制限遵守とバッチ設計
 
 Cloudflare D1 Free 枠制限:
