@@ -30,6 +30,8 @@ const SERVER_CORE_IMPORT_RULES = [
   },
 ];
 
+const API_ROUTE_DB_SPECIFIER = /^(?:drizzle-orm|@flamenode\/db)(?:\/|$)/;
+
 function findAmbientHostReferences(content, fileName) {
   const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true);
   const found = [];
@@ -91,6 +93,26 @@ export function validateServerCoreBoundaries(options = {}) {
             specifier,
             rule: "server-core is downstream of domain and db",
             message: "packages/domain and packages/db must not import @flamenode/server-core",
+          });
+        }
+      }
+    }
+  }
+
+  // MIG-0617 (L2): Hono routes reach D1 only through server-core (the db handle comes from
+  // dbMiddleware, the `sql` tag from @flamenode/server-core/sql).
+  const apiRouteDirs = options.apiRouteDirs ?? [path.join(rootDir, "apps", "api", "src", "routes")];
+  for (const dir of apiRouteDirs) {
+    for (const file of collectSourceFiles(dir)) {
+      const content = fs.readFileSync(file, "utf8");
+      for (const { specifier, line } of extractImportSpecifiers(content)) {
+        if (API_ROUTE_DB_SPECIFIER.test(specifier)) {
+          errors.push({
+            file: rel(file),
+            line,
+            specifier,
+            rule: "apps/api routes reach D1 through server-core",
+            message: "apps/api/src/routes must not import drizzle-orm or @flamenode/db; use @flamenode/server-core (and c.get(\"db\"))",
           });
         }
       }

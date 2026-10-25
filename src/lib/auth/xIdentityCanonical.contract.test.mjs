@@ -91,7 +91,7 @@ test("一般承認と統合・差し戻しは権限境界を分離する", () =>
 });
 
 test("公開DTOは認証ID・復元情報・内部申請情報を禁止する", () => {
-  const dto = read("src/lib/api/publicDto.ts");
+  const dto = read("packages/server-core/src/publicData/publicDto.ts");
   for (const key of [
     "auth_user_id",
     "requested_by_auth_user_id",

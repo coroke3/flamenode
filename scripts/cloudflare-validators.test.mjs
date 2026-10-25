@@ -216,7 +216,7 @@ function writeValidTemplate(root) {
   write(
     root,
     "workers/sync-jobs/wrangler.toml",
-    cronWorker("sync-jobs", { r2: true, crons: ["7 * * * *", "52 * * * *"] }),
+    cronWorker("sync-jobs", { r2: true, crons: ["7,52 * * * *"] }),
   );
 }
 

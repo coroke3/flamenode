@@ -1,0 +1,10 @@
+# MIG-0503: CURRENT app/(public)/groups/** are redirects only (Next redirect() = 307, no page):
+#   /groups        -> redirect("/event")
+#   /groups/[slug] -> redirect(eventGroupPublicHref(slug)) = /event#event-group-{slug}
+# Workers Static Assets: a placeholder (:slug) can be used in the destination, the fragment is kept, and a
+# request query string is appended to the destination (see work item MIG-0503 for the query divergence).
+# The trailing-slash forms are what the visibility gateway requests for a fixed page.
+/groups /event 307
+/groups/ /event 307
+/groups/:slug /event#event-group-:slug 307
+/groups/:slug/ /event#event-group-:slug 307

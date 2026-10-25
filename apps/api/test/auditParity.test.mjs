@@ -1,8 +1,9 @@
-// MIG-0602 U02: parity of the raw-D1 audit module with CURRENT
-// prepareAuditLogEntries (src/lib/audit/logger.ts) and the static rebuild
-// queue statement with CURRENT buildStaticRebuildQueueBatch. CURRENT code uses
-// "@/..." aliases, so (like src/lib/audit/mutate.execution.test.mjs) the file
-// re-runs itself under tsx.
+// MIG-0602 U02 / MIG-0617: parity of the audit rows and batches the Hono routes write
+// (packages/server-core with the guards' `preloaded` settings / actor snapshot, MIG-0617 L3)
+// with CURRENT prepareAuditLogEntries (src/lib/audit/logger.ts, which reads them itself), and of
+// the announcement queue statement with CURRENT buildAnnouncementChangeQueueBatch. CURRENT code
+// uses "@/..." aliases, so (like src/lib/audit/mutate.execution.test.mjs) the file re-runs
+// itself under tsx.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
@@ -39,8 +40,11 @@ if (!underTsx) {
   const dialect = new SQLiteSyncDialect();
   const current = await import("../../../src/lib/audit/logger.ts");
   const schema = await import("../../../src/lib/db/schema.ts");
-  const mine = await import("../src/audit/mutateWithAudit.ts");
-  const queue = await import("../src/audit/staticRebuildQueue.ts");
+  const core = await import("../../../packages/server-core/src/audit/logger.ts");
+  const coreSettings = await import("../../../packages/server-core/src/audit/settings.ts");
+  const { createAdminRoutes } = await import("../src/routes/admin/index.ts");
+  const { Hono } = await import("hono");
+  const { createAdminD1, seedBase } = await import("./helpers/sqliteD1.mjs");
   const announcements = await import("../src/routes/admin/announcements.ts");
   const apiEndpoints = await import("../src/routes/admin/apiEndpoints.ts");
   const enqueue = await import("../../../src/lib/staticRebuild/hooks.ts");
@@ -65,17 +69,14 @@ if (!underTsx) {
     return { select: () => ({ from: () => chain }) };
   }
 
-  function mineDb({ settings, actor }) {
+  /** What the Hono guards hand to mutateWithAudit: no audit read may run (the db throws on any use). */
+  function minePreloaded({ settings, actor }, actorUserId) {
     return {
-      prepare(sql) {
-        return {
-          bind: () => ({
-            first: async () => (sql.includes("system_settings") ? settings : actor),
-          }),
-        };
-      },
+      settings: coreSettings.mapAuditSettings(settings),
+      actorSnapshotJsonById: { [actorUserId]: JSON.stringify(core.actorSnapshotFromRow(actor)) },
     };
   }
+  const forbiddenDb = new Proxy({}, { get() { throw new Error("audit read although preloaded"); } });
 
   const SETTINGS = {
     audit_normal_retention_days: 30,
@@ -136,7 +137,11 @@ if (!underTsx) {
         restore();
         const restore2 = freeze();
         try {
-          const [actual] = await mine.prepareAuditEntries(mineDb({ settings, actor }), [c.input]);
+          const [actual] = await core.prepareAuditLogEntries(
+            forbiddenDb,
+            [{ ...c.input, strict: true }],
+            minePreloaded({ settings, actor }, c.input.actor_user_id),
+          );
           assert.equal(JSON.stringify(actual), JSON.stringify(expected));
         } finally {
           restore2();
@@ -169,72 +174,102 @@ if (!underTsx) {
     }
   });
 
-  test("static rebuild queue statement equals CURRENT buildAnnouncementChangeQueueBatch", async () => {
+  const SITE = "https://app.flamenode.example";
+  const norm = (s) => s.replace(/\s+/g, " ").trim();
+
+  /** The D1 batch the real route sends for POST /api/admin/announcements (guards, preloaded audit context and all). */
+  async function announcementCreateBatch() {
+    const { db, sqlite } = createAdminD1();
+    seedBase(sqlite);
+    const batches = [];
+    const original = db.batch.bind(db);
+    db.batch = async (statements) => {
+      batches.push(statements.map((s) => ({ sql: s._sql, params: [...s._params] })));
+      return original(statements);
+    };
+    const hono = new Hono();
+    hono.route("/api/admin", createAdminRoutes({
+      session: async (c, next) => {
+        c.set("user", { id: "admin-1", name: "Admin", email: null, image: null, role: "admin", is_banned: 0, active_x_user_id: null });
+        c.set("sessionState", "user");
+        await next();
+      },
+    }));
+    const res = await hono.request("/api/admin/announcements", {
+      method: "POST",
+      headers: { "content-type": "application/json", Origin: SITE },
+      body: JSON.stringify({ title: "T", body: "B", severity: "info", target_audience: "all", is_published: 1, id: "a-new" }),
+    }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+    assert.equal(res.status, 200);
+    assert.equal(batches.length, 1);
+    return batches[0];
+  }
+
+  test("announcement queue statement the route sends equals CURRENT buildAnnouncementChangeQueueBatch", async () => {
     const captured = [];
     const db = { run: (query) => { captured.push(dialect.sqlToQuery(query.getSQL ? query.getSQL() : query)); return { kind: "run" }; } };
     const restore = freeze();
     let expected;
     try {
-      await enqueue.buildAnnouncementChangeQueueBatch(db, { reason: "announcement_update", requestedByUserId: "admin-1" });
+      await enqueue.buildAnnouncementChangeQueueBatch(db, { reason: "announcement_create", requestedByUserId: "admin-1" });
       expected = captured[0];
     } finally {
       restore();
     }
     const restore2 = freeze();
-    let actual;
+    let batch;
     try {
-      actual = queue.buildAnnouncementChangeQueueStatement({ reason: "announcement_update", requestedByUserId: "admin-1" });
+      batch = await announcementCreateBatch();
     } finally {
       restore2();
     }
-    const norm = (s) => s.replace(/\s+/g, " ").trim();
-    assert.equal(norm(actual.statement.sql), norm(expected.sql));
-    assert.deepEqual([...actual.statement.params], expected.params);
-    assert.equal(actual.expectedChanges, 1);
+    // batch = [INSERT announcement, changes() assertion, queue UPSERT, changes() assertion, audit INSERT, audit assertion]
+    assert.equal(batch.length, 6);
+    assert.equal(norm(batch[2].sql), norm(expected.sql));
+    assert.deepEqual(batch[2].params, expected.params);
   });
 
-  test("audit INSERT / assertion SQL equals CURRENT mutateWithAudit shape", async () => {
+  test("audit INSERT / assertion SQL the route sends equals CURRENT mutateWithAudit shape", async () => {
     const { mutateWithAudit } = await import("../../../src/lib/audit/mutate.ts");
     const { sql } = await import("drizzle-orm");
     const restore = freeze();
+    let batch;
+    try {
+      batch = await announcementCreateBatch();
+    } finally {
+      restore();
+    }
+    const restore2 = freeze();
     let batchCurrent;
     try {
+      globalThis.crypto.randomUUID(); // the route spent its first uuid on the queue row
+      const base = currentDb({ settings: undefined, actor: { ...ACTOR, discord_id: "d-1", discord_name: "Admin", active_x_user_id: null, user_image: null, x_name: null, x_icon_url: null } });
       const db = {
-        select: () => ({ from: () => { const chain = { leftJoin: () => chain, where: () => ({ get: async () => undefined }) }; return chain; } }),
+        ...base,
         run: (query) => {
           const q = dialect.sqlToQuery(query);
           return { config: { action: "run" }, getSQL: () => query, getQuery: () => q, _prepare: () => ({ getQuery: () => q, stmt: { bind: () => ({}) } }) };
         },
         batch: async (items) => { batchCurrent = items.map((i) => i.getQuery()); },
       };
+      const now = NOW_MS / 1000;
       await mutateWithAudit(db, {
-        mutationStatements: [db.run(sql`UPDATE announcements SET title = ${"x"} WHERE id = ${"a1"}`)],
+        mutationStatements: [db.run(sql`SELECT 1`)],
         expectedMutationChanges: 1,
-        audits: [{ table_name: "announcements", target_id: "a1", operation: "UPDATE", before: { id: "a1" }, after: { id: "a1", t: 1 }, actor_user_id: "admin-1" }],
-      });
-    } finally {
-      restore();
-    }
-    const restore2 = freeze();
-    let batchMine = [];
-    try {
-      const db = {
-        prepare: (s) => ({ bind: (...params) => ({ _sql: s, _params: params, first: async () => null }) }),
-        batch: async (stmts) => { batchMine = stmts.map((s) => ({ sql: s._sql, params: s._params })); },
-      };
-      await mine.mutateWithAudit(db, {
-        mutationStatements: [{ sql: "UPDATE announcements SET title = ? WHERE id = ?", params: ["x", "a1"] }],
-        expectedMutationChanges: [1],
-        audits: [{ table_name: "announcements", target_id: "a1", operation: "UPDATE", before: { id: "a1" }, after: { id: "a1", t: 1 }, actor_user_id: "admin-1" }],
+        audits: [{
+          table_name: "announcements", target_id: "a-new", operation: "CREATE", before: null,
+          after: { id: "a-new", title: "T", body: "B", severity: "info", target_audience: "all", is_published: 1, publish_at: null, expire_at: null, created_by_user_id: "admin-1", created_at: now, updated_at: now },
+          actor_user_id: "admin-1", retention_class: "normal",
+        }],
       });
     } finally {
       restore2();
     }
-    const norm = (s) => s.replace(/\s+/g, " ").trim();
-    assert.equal(batchMine.length, batchCurrent.length);
-    for (const [i, expected] of batchCurrent.entries()) {
-      assert.equal(norm(batchMine[i].sql), norm(expected.sql), `statement ${i}`);
-      assert.deepEqual([...batchMine[i].params], expected.params, `params ${i}`);
+    assert.equal(batchCurrent.length, 4);
+    for (const [offset, expected] of batchCurrent.slice(-2).entries()) {
+      const actual = batch[batch.length - 2 + offset];
+      assert.equal(norm(actual.sql), norm(expected.sql), `statement ${offset}`);
+      assert.deepEqual(actual.params, expected.params, `params ${offset}`);
     }
   });
 }

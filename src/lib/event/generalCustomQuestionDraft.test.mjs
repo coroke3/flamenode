@@ -11,7 +11,7 @@ const planSource = await readFile(
   "utf8",
 );
 const limitsSource = await readFile(
-  new URL("./eventLimits.ts", import.meta.url),
+  new URL("../../../packages/domain/src/event/limits.ts", import.meta.url),
   "utf8",
 );
 

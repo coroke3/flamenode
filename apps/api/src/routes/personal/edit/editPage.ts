@@ -10,8 +10,8 @@ import { loadEditData, MAX_EDIT_COLLAB_SUBJECTS, MAX_EDIT_MEMBERS } from "./data
 // CURRENT: app/(auth)/dashboard/edit/[id]/page.tsx (loader part). GET only: nothing is written.
 // CURRENT's notFound() is 404 `{error:"not_found"}`; its "編集権限がありません" panel is `{kind:"no_access"}` (200, no video data).
 // D1 (S2, 3 statements incl. the session lookup): context = 1, then ONE data statement (see ./data.ts).
-// NOT in this unit (later unit of MIG-0630): event options, custom questions / answers, stage-permission answers,
-// software / icon / channel suggestions of the form.
+// Event options, custom questions / answers, stage-permission answers and the software / icon / channel suggestions of the form
+// are GET /:id/form-options (./formOptions.ts).
 
 const sortJa = (a: { x_name: string }, b: { x_name: string }) => a.x_name.localeCompare(b.x_name, "ja");
 

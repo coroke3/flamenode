@@ -96,8 +96,23 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 | SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
 | SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
 | SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+| SA-009 | `POST /api/admin/audit/settings` | `admin_permissions` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/audit.ts` |
+| SA-010 | `POST /api/admin/audit/dry-run` | `admin_permissions` | 200 / 400 / 413 | same (D-13-54 recorded exception: 6 D1 stmts, writes=0) |
 
-SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+SA-009 / SA-010 implemented in MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+
+### Hono endpoints (MIG-0603 U02b, PR #393)
+
+New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, TOS, CostGuard `chapter_comment`, approved active X) = CURRENT `writeGuard({ requireApprovedActiveXId: true, feature: "chapter_comment" })`. Every response is `Cache-Control: private, no-store`; body cap 64KB (413). Audit + video `static_rebuild_queue` row are one D1 batch (`mutateWithAudit`, `preloaded: auditPreloaded(c)`). Permission: own chapter, or `video.chapter_admin` in admin/event mode (bulk always). Source: `apps/api/src/routes/videos/chapters.ts` (+ `chapterAccess.ts`, `chapterCsv.ts`), body/result DTO `packages/contracts/src/videoChapter.ts`.
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Queue reason |
+| --- | --- | --- | --- | --- |
+| SA-012 | `POST /api/videos/:videoId/chapters` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_create` |
+| SA-013 | `PUT /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 400 / 403 / 404 / 413 / 500 | `chapter_update` |
+| SA-014 | `DELETE /api/videos/chapters/:chapterId` | `chapter_comment` | 200 / 403 / 404 / 500 | `chapter_delete` |
+| SA-015 | `POST /api/videos/:videoId/chapters/bulk` | `chapter_comment` | 200 / 400 / 403 / 404 / 409 / 413 / 500 | `chapter_bulk_create` |
+
+Known difference (DECIDED, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API sends 0 wakes by design. The `static_rebuild_queue` row is persisted in the same D1 batch, drained by the content-jobs Recovery Cron `15 * * * *` (worst case about 60 min, equal to the D-11 accepted delay). The Queue binding decision is made once with MIG-0614 U06.
 
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
@@ -352,7 +367,8 @@ New authenticated read-only endpoints (no CURRENT `/api/*` equivalent; CURRENT p
 | `GET /api/personal/library?tab&page` | `app/(auth)/dashboard/library/page.tsx` | `apps/api/src/routes/personal/library.ts` | 3 | 24/page, page 1..500, LIMIT 25 OFFSET | unmeasured | BRIDGED |
 | `GET /api/personal/settings?tab&x&onboarding` | `app/(auth)/dashboard/settings/page.tsx` | `apps/api/src/routes/personal/settings.ts` | 3 | profile text read as rows; request history 50; candidates for the shown panel only; response can exceed 64 KiB with long profiles (CURRENT parity) | unmeasured | BRIDGED |
 | `GET /api/personal/onboarding` | `app/(auth)/onboarding/page.tsx` | `apps/api/src/routes/personal/onboarding.ts` | 2 (+1 rules fallback) | no write: `maybeMarkOnboardingComplete` moves to MIG-0702 POST; rules via R2 `rules/current.json` (<= 64 KiB) then D1 published terms (<= 64 KiB), enforce-mode visibility guard | unmeasured | BRIDGED |
-| `GET /api/personal/edit/:id?privileged` | `app/(auth)/dashboard/edit/[id]/page.tsx` (loader part) | `apps/api/src/routes/personal/edit/editPage.ts` | 3 (3 binds) | access decision + form values; members <= 100 / 64 KiB with `membersTruncated`; event options / custom questions / answers / suggestions are MIG-0630 U02b; CURRENT `has_account_link` tautology reproduced | unmeasured | IN_PROGRESS |
+| `GET /api/personal/edit/:id?privileged` | `app/(auth)/dashboard/edit/[id]/page.tsx` (loader part) | `apps/api/src/routes/personal/edit/editPage.ts` | 3 (3 binds) | access decision + form values; members <= 100 / 64 KiB with `membersTruncated`; event options / custom questions / answers / suggestions are in `/form-options` (MIG-0630 U02b); CURRENT `has_account_link` tautology reproduced | unmeasured | IN_PROGRESS |
+| `GET /api/personal/edit/:id/form-options?privileged&offset` | `app/(auth)/dashboard/edit/[id]/page.tsx` (loader part feeding VideoForm) | `apps/api/src/routes/personal/edit/formOptions.ts` | 3 (4 binds) | same access gate as `GET /:id` (`no_access` otherwise); event options (accepting <= 100 per `?offset=` page + attached on page 0) cut by bytes to 64 KiB, questions, answers <= 100 (`customAnswersTruncated`), stage answers, suggestions / candidates; CURRENT throws (> 4 stage, > 18 questions) = 503 | unmeasured | IN_PROGRESS |
 | `GET /api/personal/edit/:id/permissions?privileged` | `app/(auth)/dashboard/edit/[id]/permissions/page.tsx` (loader part) | `apps/api/src/routes/personal/edit/permissions.ts` | 3 (3 binds) | collab subjects <= 100 / public members <= 100 cut by bytes (`truncated`); explicit mode fail-closed, else normal -> admin -> event | unmeasured | IN_PROGRESS |
 
 Divergences recorded: linked X rows capped at 100 (`MAX_LINKED_X_USERS`, ordered by id; CURRENT unbounded); no Cache API / rebuild enqueue for rules.
@@ -405,8 +421,11 @@ New admin-only read endpoints (no CURRENT `/api/*` equivalent). No Worker Route 
 | `GET /api/admin-read/x-id-merges?view&impact` | `app/(admin)/admin/x-id-merges/page.tsx` | `apps/api/src/routes/adminRead/xIdMerges.ts` | 2 (3 with `impact`) | merge requests 50, reverts 100; impact counts + preview (51) of the selected pending/approved request in ONE union statement; restore JSON never returned (`has_restore_snapshot`); D1 failure -> 503 | unmeasured | BRIDGED |
 | `GET /api/admin-read/events/templates` | `app/(admin)/admin/events/templates/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | CURRENT lists behind requireAdminWrite("admin_event_templates"): TOS / re-accept / CostGuard denial -> empty list (`guardOk:false`); list capped at 100 (CURRENT unbounded) | unmeasured | BRIDGED |
 | `GET /api/admin-read/events/new?template` | `app/(admin)/admin/events/new/page.tsx` | `apps/api/src/routes/adminRead/eventTemplates.ts` | 3 | same guard/list; selected template returned as name + raw `settings_json` (<= 64 KiB); `snapshotToFormInitial` not ported (`formInitial:"deferred"`) | unmeasured | PARTIAL |
+| `GET /api/admin-read/videos/:id?event` | `app/(admin)/admin/videos/[id]/page.tsx` | `apps/api/src/routes/adminRead/videoDetail.ts` | 3 | review detail 1 stmt + moderation cases (LIMIT 20) 1 stmt; event ids/questions/members/chapters/software capped at 100 rows, and a surface over 64 KiB is dropped, both reported as `truncated` (CURRENT reads all, Work Order U01); unknown id 404; D1 failure -> 503 | unmeasured | BRIDGED |
+| `GET /api/admin-read/videos/:id/members` | `app/(admin)/admin/videos/[id]/members/page.tsx` | `apps/api/src/routes/adminRead/videoMembers.ts` | 3 | public members <= 100 with correlated member chapters; >100 members -> 404 (CURRENT notFound); unknown id 404 | unmeasured | BRIDGED |
+| `GET /api/admin-read/users/:id/edit` | `app/(admin)/admin/users/[id]/edit/page.tsx` | `apps/api/src/routes/adminRead/userEdit.ts` | 2 | user row + correlated linked X user IDs in 1 stmt (first 100 by id, `truncated` when more; CURRENT reads all); unknown id 404 | unmeasured | BRIDGED |
 
-Not covered (see work item blockers): videos/[id], videos/[id]/members, events/[id]/*, events/new form initial, users/[id]/edit, xid icon projection.
+Not covered: events/[id]/* (redirect-only pages, ROUTE_MATRIX NONE, D-13-48); events/new form initial (D-13-48: MIG-0604 U04 / MIG-0705). Recorded difference D-13-49: users `?view=xid` `icon_url` is always null until MIG-0511. videos/[id], videos/[id]/members, users/[id]/edit are MIG-0635 (rows above).
 
 ## MIG-0601 Hono Route Handlers — bounded low-risk reads (Phase 6)
 
@@ -427,4 +446,37 @@ Code landing only; the CURRENT Next handlers/actions stay. CPU not measured (MIG
 | --- | --- | --- | --- | --- | --- |
 | RH-020..022 | `GET /api/live/events/[id]/{slots,submissions,summary}` | `apps/api/src/routes/live/events.ts` | public | id 1..128 else 400; DB missing 503; `live_api_enabled` per request (FORCE_STATIC_ONLY > isolate 30s > KV mirror > D1 > normal); 15s isolate micro-cache after the gate, success only; success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`, errors JSON `no-store`; public events only; non `public_name` hides video_id/display_name; slots limit 6000, submissions 50; D1 <= 2 reads | IN_PROGRESS |
 | SA-036 | `deleteEventTemplate` | `DELETE /api/admin/event-templates/:id` (`apps/api/src/routes/events/templates.ts`) | admin (session -> writeGuard -> CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` validation; single D1 batch: CAS DELETE on every preflight scalar column + changes() assertion + strict audit (context `admin_event_templates`, reason as CURRENT, restore none); 400 / 404 / 409 / 500; `private, no-store` | IN_PROGRESS |
-| RH-012..015, RH-014 overlay, SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on public-data loader / current-user + ownership port / role-parameterised write guard / audit restore strategies | BLOCKED |
+| RH-014 | `GET /api/events/[id]/slots/viewer-overlay` | `apps/api/src/routes/events/viewerOverlay.ts` (`GET /api/events/:id/slots/viewer-overlay`; DTO `packages/contracts/src/eventSlotViewerOverlay.ts`) | public route, per-viewer DTO (session optional; anonymous / unavailable-auth / banned get the CURRENT fixed shapes) | id trimmed and cut to 128 chars (blank 400); public events only (404 `event_not_found`); every response `private, no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0`, 503 adds `Retry-After: 3`; D1 = session + event/own-slots (1) + terms/linked X/pending requests (1), anonymous 1; own slots LIMIT 100 and JSON <= 64 KiB else fail-closed `authUnavailable` shape (S2 delta); `operatorOverrideAllowed` always false = CURRENT behaviour (event row has no `visibility_status`); parity vs the real CURRENT handler in `apps/api/test/events.viewerOverlay.parity.test.mjs` | IN_PROGRESS |
+| RH-012, RH-015 | see MIG-0631 section below | public | - | implemented in MIG-0631 (RH-015 GET /api/events, RH-012 GET /api/event-endpoints/:id/release) | IN_PROGRESS |
+| SA-021..034, SA-035 save, SA-037 list, SA-038..039, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented: blocked on MIG-0633 (ownership core), role-parameterised write guard (MIG-0604 U04a) and MIG-0617 (restore_strategy via core) | BLOCKED |
+
+## MIG-0631 Hono public event list / release APIs (Phase 6, RH-015, RH-012)
+
+Code landing only; no Worker Route / traffic change; CURRENT Next handlers stay. Parity: `apps/api/test/eventsPublic.parity.test.mjs` runs the Hono route and CURRENT implementation against the same SQLite/R2 double (18/18 PASS). CPU: not measured (MIG-0606).
+
+| ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-015 | `GET /api/events` | `apps/api/src/routes/events/publicList.ts` (`GET /api/events`) | public | Rate limit 60/min; `page`/`limit` normalization (`limit` 1..60, default 60; `page` >= 1); `resolvePublicOperationMode` (maintenance -> 503 `public_data_unavailable`); static_only reads R2 artifact `events/index.json` with visibility guard; live mode reads D1 (1 stmt, `LIMIT 60`, point events included); Cache-Control `public, max-age=60, s-maxage=120, stale-while-revalidate=300`; ETag support (304 on match) | IN_PROGRESS |
+| RH-012 | `GET /api/event-endpoints/[id]/release` | `apps/api/src/routes/events/publicRelease.ts` (`GET /api/event-endpoints/:id/release`) | public | Rate limit 60/min; id 1..128 chars (404 otherwise); D1 gate 1 stmt (`visibility_status = 'public' AND public_api_enabled = 1`); maintenance -> 503 `public_data_unavailable`; R2 artifact `events/<id>/release.v1.json` with visibility guard (fail-closed 503 on missing manifest in enforce mode, 404 on blocked event); filter private videos and recompute total; Cache-Control `public, max-age=30, s-maxage=60, stale-while-revalidate=120`, 404 has `public, max-age=60` | IN_PROGRESS |
+
+Documented differences (PHASE_6_SPEC.md MIG-0631 lead decisions):
+- L3: GET does not enqueue static rebuilds on miss (D1 writes = 0, Queue writes = 0). RH-012 returns 503 `public_data_unavailable` instead of `public_data_reflecting`.
+- L5: R2 failure returns 503 `public_data_unavailable` rather than stale cache.
+- RH-012: Hono has no D1 binding exception; missing D1 returns 503 `db_unavailable` (instead of `runtime_bindings_unavailable`).
+
+## MIG-0634 Hono public video list / viewer overlay APIs (Phase 6, RH-032, RH-031)
+
+Code landing only; no Worker Route / traffic change; CURRENT Next handlers stay. Parity: `apps/api/test/videosPublic.parity.test.mjs` (8/8 PASS) and `apps/api/test/videoViewerOverlay.parity.test.mjs` (12/12 PASS; 8 viewers x 5 playlists against the real CURRENT handler) run the Hono routes and CURRENT implementations over SQLite/R2. CPU: not measured (MIG-0606).
+
+| ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-032 | `GET /api/videos` | `apps/api/src/routes/videos/list.ts` (`GET /api/videos`) | public | Rate limit 60/min; query params `q` (<=100 chars), `sort`, `event` (<=128 chars), `limit` (1..48, default 24), `page` (1..ceil(5000/limit)); <2 chars query returns 0 items; branching: `event` -> `event_base`/`event` artifact, `q` -> search postings v1 with fallback to lite index, `sort=score` -> `list/popular.json`, default -> `list/recent.json`; R2 reads with visibility guard; D1 reads = 0, D1 writes = 0, Queue writes = 0; fail-closed 503 `static_list_unavailable` on miss; Cache-Control `public, max-age=30, s-maxage=60, stale-while-revalidate=120`, SHA-256 ETag / 304 | DONE |
+| RH-031 | `GET /api/videos/[id]/viewer-overlay` | `apps/api/src/routes/videos/viewerOverlay.ts` (`GET /api/videos/:id/viewer-overlay`; DTO `packages/contracts/src/videoViewerOverlay.ts`) | public route, per-viewer overlay (session optional; anonymous / banned get CURRENT fixed shapes) | id trimmed and cut to 128 chars (blank 400); R2 artifact `videos/<id>.json` gate (visibility_status !== 'public' -> 404, missing artifact -> 503 `viewer_overlay_unavailable` with Retry-After: 3 per D-13-46); optional playlist overlay `events/<playlist>/playlist.v1.json`; D1 = session + facts/TOS (1 stmt) + private chapters/interactions/lib-playlist (1 stmt); D1 writes = 0, Queue writes = 0; private chapters bounded to 500, filtered by canAdministerChapters or author approved X ID; activeXId / viewerXApproved by CURRENT resolveActiveXUserId; banned viewer = session + 1 statement; session resolved only after the artifact / operation-mode gates (signed-in 404 / 503 = 0 D1); playlist event id `^[A-Za-z0-9_-]{1,64}$`, artifact <= 8 MiB; all responses `private, no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0` | DONE |
+
+Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
+- D-13-46: GET endpoints never write (0 D1 writes, 0 Queue writes, no rebuild enqueue on miss, never returns `public_data_reflecting`). Missing R2 artifact returns 503 `static_list_unavailable` (RH-032) or 503 `viewer_overlay_unavailable` (RH-031) with `Retry-After: 3`. No degraded D1 fallback for public video listing.
+- D-13-46 consequence, RH-031: CURRENT answers an artifact miss through `loadStaticVideoDetail`'s degradedFetcher (D1), so a YouTube id or a video with no artifact gets 200 and an unknown id 404; Hono returns 503 for all three (pinned in the RH-031 test).
+- D-13-46 consequence, RH-032 `?event=`: an event with more than 500 public videos (`isOversizedEventBasePool`) is listed by CURRENT from D1 (`fetchDegradedEventListPage`, the only list path for such events while `PUBLIC_DEGRADED_D1_ENABLED` is on in `wrangler.toml`). Hono returns 503 for those events. **Cut-over blocker for RH-032**: a bounded R2 list artifact for oversized events, or an owner decision to accept 503, is needed before routing `/api/videos?event=` to Hono.
+- RH-031 playlist overlay: CURRENT re-reads the visibility manifest after the artifact under `enforce` (TOCTOU etag check); Hono reads it once before (same reader as MIG-0631). Not covered by a test.
+
+

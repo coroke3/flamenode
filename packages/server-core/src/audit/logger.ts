@@ -8,6 +8,7 @@ import type {
   RestoreStatus,
   WriteAuditLogInput,
   ActorSnapshot,
+  AuditLogSettings,
 } from "./types.ts";
 import { RestoreStrategy } from "./types.ts";
 import {
@@ -20,6 +21,38 @@ import {
 import { computeExpiresAt, DEFAULT_AUDIT_LOG_SETTINGS } from "./retention.ts";
 import { getAuditLogSettings } from "./settings.ts";
 import { evaluateRestoreCapability } from "./capability.ts";
+
+export type ActorSnapshotRow = {
+  discord_id: string | null;
+  discord_name: string | null;
+  active_x_user_id: string | null;
+  user_image: string | null;
+  x_name: string | null;
+  x_icon_url: string | null;
+};
+
+/** The audit actor snapshot of one `users` (+ active `x_users`) row; a missing user is the empty snapshot. */
+export function actorSnapshotFromRow(
+  row: ActorSnapshotRow | null | undefined,
+): ActorSnapshot {
+  if (!row) {
+    return {
+      discord_id: null,
+      discord_name: null,
+      x_user_id: null,
+      x_name: null,
+      icon_url: null,
+    };
+  }
+
+  return {
+    discord_id: row.discord_id ?? null,
+    discord_name: row.discord_name ?? null,
+    x_user_id: row.active_x_user_id ?? null,
+    x_name: row.x_name ?? null,
+    icon_url: row.x_icon_url || row.user_image || null,
+  };
+}
 
 async function buildActorSnapshot(
   db: ServerCoreDb,
@@ -39,23 +72,7 @@ async function buildActorSnapshot(
     .where(eq(users.id, userId))
     .get();
 
-  if (!row) {
-    return {
-      discord_id: null,
-      discord_name: null,
-      x_user_id: null,
-      x_name: null,
-      icon_url: null,
-    };
-  }
-
-  return {
-    discord_id: row.discord_id ?? null,
-    discord_name: row.discord_name ?? null,
-    x_user_id: row.active_x_user_id ?? null,
-    x_name: row.x_name ?? null,
-    icon_url: row.x_icon_url || row.user_image || null,
-  };
+  return actorSnapshotFromRow(row);
 }
 
 export type PreparedAuditLogEntry = {
@@ -215,19 +232,32 @@ function buildPreparedAuditLogEntry(
   };
 }
 
+/**
+ * Values the caller already read in the same request (a guard's single user / system_settings
+ * read), so the preparation skips those reads. `actorSnapshotJsonById` holds exactly the JSON
+ * `JSON.stringify(actorSnapshotFromRow(row))` builds. Omitted = the reads below run.
+ */
+export type PreloadedAuditContext = {
+  settings?: AuditLogSettings;
+  actorSnapshotJsonById?: Readonly<Record<string, string>>;
+};
+
 /** Prepare audit entries with bounded queries independent of entry count. */
 export async function prepareAuditLogEntries(
   db: ServerCoreDb,
   inputs: readonly WriteAuditLogInput[],
+  preloaded?: PreloadedAuditContext,
 ): Promise<(PreparedAuditLogEntry | null)[]> {
   const activeInputs = inputs.filter((input) => !BLOCKED_TABLES.has(input.table_name));
   if (activeInputs.length === 0) return inputs.map(() => null);
 
-  let settings = DEFAULT_AUDIT_LOG_SETTINGS;
-  try {
-    settings = await getAuditLogSettings(db);
-  } catch (error) {
-    if (inputs.some((input) => input.strict)) throw error;
+  let settings = preloaded?.settings ?? DEFAULT_AUDIT_LOG_SETTINGS;
+  if (!preloaded?.settings) {
+    try {
+      settings = await getAuditLogSettings(db);
+    } catch (error) {
+      if (inputs.some((input) => input.strict)) throw error;
+    }
   }
 
   const actorJsonById = new Map<string, string>();
@@ -237,6 +267,11 @@ export async function prepareAuditLogEntries(
   for (let offset = 0; offset < actorUserIds.length; offset += 4) {
     await Promise.all(
       actorUserIds.slice(offset, offset + 4).map(async (actorUserId) => {
+        const known = preloaded?.actorSnapshotJsonById?.[actorUserId];
+        if (known !== undefined) {
+          actorJsonById.set(actorUserId, known);
+          return;
+        }
         try {
           actorJsonById.set(
             actorUserId,

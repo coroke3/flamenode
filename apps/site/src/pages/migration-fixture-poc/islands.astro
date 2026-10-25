@@ -1,0 +1,28 @@
+---
+import { ButtonIsland } from "../../components/ButtonIsland.ts";
+---
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlameNode Public SSG</title>
+  </head>
+  <body>
+    <header>
+      <h1>FlameNode Public SSG</h1>
+      <p>静的配信ファーストの公開ポータルです。</p>
+    </header>
+    <main>
+      <section>
+        <h2>公開コンテンツ（静的HTML）</h2>
+        <p>JavaScriptが無効な環境でも、すべての静的本文とリンクは正常に閲覧できます。</p>
+        <p><a href="/about">FlameNodeについて</a></p>
+      </section>
+      <section>
+        <h2>インタラクティブ領域（React Island）</h2>
+        <ButtonIsland client:load label="即時ロード (client:load)" variant="primary" />
+        <ButtonIsland client:visible label="可視時ロード (client:visible)" variant="secondary" />
+      </section>
+    </main>
+  </body>
+</html>

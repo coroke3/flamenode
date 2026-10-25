@@ -15,7 +15,7 @@ const retiredEventAndSlotFields = [
 
 test("owner正本はevent_staff.permission_presetだけを使う", async () => {
   const [ownership, eventAdmin] = await Promise.all([
-    source("src/lib/event/eventOwnership.ts"),
+    source("packages/server-core/src/event/eventOwnership.ts"),
     source("src/lib/actions/event-admin.ts"),
   ]);
   assert.match(ownership, /permission_preset/);

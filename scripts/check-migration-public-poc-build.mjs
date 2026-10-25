@@ -17,5 +17,8 @@ else {
 }
 if(fs.existsSync(path.join(dir,"private_demo")))fail("private fixture produced an HTML route");
 const pages=fs.existsSync(dir)?fs.readdirSync(dir).filter(x=>fs.statSync(path.join(dir,x)).isDirectory()):[];
-if(pages.length!==1||pages[0]!=="public_demo")fail("unexpected public fixtures: "+pages.join(","));
-if(!process.exitCode)console.log("[MIG-0401 build] PASS: exactly one synthetic public HTML output; private fixture denied; no production routing");
+// `islands` is the MIG-0402 Island PoC page (it was `/` until MIG-0506 moved it here); it carries no fixture data.
+const allowed=["islands","public_demo"];
+if(pages.length!==allowed.length||pages.slice().sort().some((x,i)=>x!==allowed[i]))fail("unexpected public fixtures: "+pages.join(","));
+if(fs.existsSync(path.join(dir,"islands/index.html"))&&/Synthetic private video|private_demo/i.test(fs.readFileSync(path.join(dir,"islands/index.html"),"utf8")))fail("private fixture leaked to the islands PoC page");
+if(!process.exitCode)console.log("[MIG-0401 build] PASS: exactly one synthetic public fixture HTML output (plus the Island PoC page); private fixture denied; no production routing");

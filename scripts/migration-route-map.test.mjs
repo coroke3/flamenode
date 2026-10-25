@@ -332,3 +332,15 @@ test("U03 metrics: manifest bytes, entry count, parse and lookup CPU", () => {
       `lookupP99Ms=${percentile(lookupTimes, 0.99).toFixed(5)}`,
   );
 });
+
+test("MIG-0507: a video entry keeps the internal id as resolution.id while keys come from the slug", () => {
+  const manifest = buildRouteMap(
+    [{ kind: "video", id: "internal-v1", slug: "AAAAAAAAA01", aliases: ["internal-v1"] }],
+    "gen-01",
+  );
+  assert.deepEqual(Object.keys(manifest.routes), ["AAAAAAAAA01", "internal-v1"]);
+  assert.deepEqual(manifest.routes.AAAAAAAAA01, { type: "canonical", kind: "video", id: "internal-v1", canonicalPath: "/AAAAAAAAA01" });
+  assert.deepEqual(manifest.routes["internal-v1"], { type: "redirect", targetPath: "/AAAAAAAAA01", status: 308, reason: "alias" });
+  assert.throws(() => buildRouteMap([{ kind: "video", id: "v1", slug: "about" }], "gen-01"), (e) => e.code === "ROUTE_COLLISION");
+  assert.throws(() => buildRouteMap([{ kind: "video", id: "v1", slug: "a/b" }], "gen-01"), (e) => e.code === "INVALID_ROUTE_ID");
+});

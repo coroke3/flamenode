@@ -71,24 +71,24 @@
 
 ### MIG-0409 — build-time public data from D1 + build budget (D-09)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0409 Work Order、`OPEN_DECISIONS.md` D-09、`ZERO_1102.md`。
-- 変更: `+apps/site/scripts/readPublicData.ts`（1 family の PoC）、`+docs/migration/static-delivery/BUILD_TIME_DATA.md`（build / API の分類表、build 時間と1日の上限）。
-- 試験: CURRENT の生成関数と同じ fixture で出力一致、非公開の除外、`MAX_` 境界、同じ入力で同じ byte。
-- DONE: 公開までの最大の遅れをユーザーが承認。Queue consumer の CPU 上限を非本番で確かめ（U07、作る前に承認）、`ZERO_1102.md` §1 の暫定予算を確定か見直しにした。token・deploy hook・本番 D1 には触れていない。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0409 Work Order、`static-delivery/BUILD_TIME_DATA.md`。
+- 変更: なし（DONE、#323 `4f90bc9d`）。
+- 試験: `readPublicData.test.mjs`、`queue-cpu-probe/worker.test.mjs`。
+- DONE: D-13-10（2026-10-25）。Workers Builds 再測と token は MIG-0509 の owner 手順。
 
 ### MIG-0410 — deploy-hook build scheduler (D-09)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0410 Work Order、`IMPLEMENTATION_RECIPES.md` R-JOB。
-- 変更: `+workers/fast-jobs/publicBuildTrigger.ts`（`decidePublicBuild` と handler）、`public_build_state` 表、fast-jobs の毎時 Cron に1段。
-- 試験: T01〜T07（変更なし / 間隔未満 / trigger / 1日の上限 / 日付の切替 / 同時実行 / URL 未設定）。
-- DONE: fast-jobs Cron 1回の max < 8ms（非本番）。本番の migration・secret・deploy は承認待ち。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0410 Work Order、`work-items/MIG-0410.md` の owner 手順と 2026-10-23 の非本番表。
+- 変更: 証跡の記録だけ（work item、`PERF_HOTPATH_MATRIX.md`）。コードは #325 で merge 済み。
+- 試験: T01〜T07（merge 済み）、T08 = 本番 deploy 後の最初の Cron が `skipped: 1`。
+- DONE: B-add（+2 ms）PASS 済み。owner の本番手順（0065 確認、Deploy Hook、secret、deploy）と T08 の記録。
 
-### MIG-0411 — per-page R2 HTML regeneration via Queue (ISR equivalent, D-09)
+### MIG-0411 — per-page Queue consumer: DELETE + tracker close (D-09, D-11)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0411 Work Order、`OPEN_DECISIONS.md` D-09 の 2026-10-16 改訂、`IMPLEMENTATION_RECIPES.md` R-JOB / R-PAGE。
-- 変更: `+apps/site/src/gateway/renderPublicPage.ts`、`+apps/site/src/gateway/pageRenderQueue.ts`、`public_page_renders` 表、gateway の `queue` handler、既存 Cron の回復段。
-- 試験: 1ページだけ作り直す / 非公開化 / 生成中の再更新 / 同じ doorbell 2回 / R2 失敗 / 上限ちょうどの max < 8ms。
-- DONE: 種類ごとの max CPU と対象外の種類が PR にある。本番の D1・Queue・R2 は承認待ち。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0411 Work Order、`OPEN_DECISIONS.md` D-11、`apps/site/src/gateway/pageRenderQueue.ts`、`r2Html.ts`。
+- 変更: `renderPublicPage.ts` / `.measure.mjs` を削除、`pageRenderQueue.ts` は可視性の列だけ読む、`r2Html.ts` の send 失敗の P2、`pageRenderRecovery.ts` + fast-jobs の回復段。
+- 試験: T01〜T08（excluded / delete / CAS / 重複 / R2 失敗 / send 失敗 / Cron 回復 / renderPublicPage 0 件）。
+- DONE: 描画経路なし、bundle 再計測、Queue 見積り ≤ 50%、DELETE 経路の B-new（非本番は承認後）。Queue 作成と binding は owner。
 
 ### MIG-0407 — Phase 4 Gate
 
@@ -100,65 +100,107 @@
 - 試験: HTML mock visual acceptance、３代表route、no private leak、budget preflight、R2 HTMLの再配信/故障、ブラウザhydration。
 - DONE: 独立review・人間Phase Gate承認までBLOCKED/REVIEW、後続0501 READY化はレビュー後。
 
-### MIG-0501 — fixed pages /about & /rules
+### MIG-0501 — fixed pages /about & /rules (+ /maintenance shell)
 
-- 読む: CURRENT `/about` / `/rules`、`ROUTE_MATRIX.md`とUX IDs、登録済みHTML。
-- 変更: `+apps/site/src/pages/about.astro`, `+apps/site/src/pages/rules.astro`。ビルド時HTML/metadata/static assets、既存規約版へのリンク/利用条件を維持。
-- 試験: head/canonical/OGP、mobile nav、旧URL、空/不達時、no JSによる閲覧、robots/sitemap。
-- DONE: 2ルートのUX stateとSEOを証拠に、対象pathのみnonprodで移行確認。
+- 読む: `PHASE_4_5_SPEC.md` MIG-0501、`work-items/MIG-0501.md`、Phase 5 共通契約の画面確認手順、`app/(public)/maintenance/page.tsx`、`public/brand/`。
+- 変更: `apps/site/public/` へ CURRENT の brand 13 file を複製、`apps/site/src/pages/maintenance.astro` を PublicLayout へ、`scripts/migration-public-shell.test.mjs`。gateway は MIG-0512、/rules 同意 form は MIG-0510。
+- 試験: brand の byte 同一、/maintenance の head と shell、390/1440 の画面確認、about-stats の producer→build。
+- DONE: /about は PARITY_VERIFIED、/rules は MIG-0510 待ちの IN_PROGRESS、画面確認の (c) が0件。
 
 ### MIG-0502 — event page family
 
-- 読む: CURRENT `/event`, `/event/[id]`, `/event/[id]/release`, `/event/[id]/slots`、`functions/PUBLIC.md`, `background-jobs/README.md`。
-- 変更: `+apps/site/src/pages/event/index.astro`, `+apps/site/src/pages/event/[id]/{index,release,slots}.astro`。static HTMLとlive slot/overlay Island分離、private eventはvisibility gateway。
-- 試験: forthcoming/ongoing/finished event, full/empty slots, release order, current event, no access, Queue reflection lag, role-based slot overlay。
-- DONE: canonical/UX/FN、live API cache TTLとエラー時の表示、R2世代と現行表記一致。
+- 読む: `PHASE_4_5_SPEC.md` MIG-0502、`work-items/MIG-0502.md`、CURRENT `app/(public)/event/[id]/page.tsx:176-277`、`src/components/layout/EventRecruitCard.tsx`、`TopView.tsx`。
+- 変更: `EventDetailView` / `EventSlotsView` に accent、`RecruitCard`（TopView の export）を `/event/[id]` へ、`/event` 検索を `ImeSafeGetForm` へ、重複 key の test。予約は MIG-0510、icon map は MIG-0511、release 404 と slots の fence は MIG-0512。
+- 試験: accent の有無、受付中・開始前・終了の recruit card、満枠は Island 後だけ、`?q=a&q=b`、390/1440。
+- DONE: event 5行のうち index・~query・release は PARITY_VERIFIED、detail と slots は MIG-0511 / MIG-0510 待ち。
 
 ### MIG-0503 — group compatibility redirects
 
-- 読む: CURRENT `/groups`, `/groups/[slug]`, `CURRENT_ROUTES.md`。
-- 変更: 従来仕様の`/event`および`/event#event-group-{slug}`へredirectする静的/edge routingを追加。redirect status、query/fragment/URL encode扱いを既存に揃える。
-- 試験: 旧bookmark, target anchor, 404, invalid slug, percent encoded/path traversal, query。
-- DONE: 互換URLは残り、新たな別画面を作って重複させない。
+- 読む: `work-items/MIG-0503.md` の Findings、D-13-34。
+- 変更: 文書と ledger だけ（`_redirects` と gateway の 307 は merge 済み）。
+- 試験: `migration-group-routes.test.mjs`、`edgePolicy.test.mjs` の group 表、dist の `_redirects` 4行。
+- DONE: groups 2行と `_redirects` を PARITY_VERIFIED。CURRENT を実際に動かした比較は任意の owner step。
 
 ### MIG-0504 — user and portfolio pages
 
-- 読む: CURRENT `/user`, `/user/[id]`, `/user/[id]/portfolio`, X ID alias/approval/visibility。
-- 変更: `+apps/site/src/pages/user/{index,[id]/index,[id]/portfolio}.astro`。クリエイター索引/作品/portfolioをsnapshotで配信、非公開作品を事前HTMLへ含めない。
-- 試験: approved/unapproved/merged/rejected X、alias redirect、禁止表示、作品公開↔非公開、プロフィールOGP。
-- DONE: 旧user URL互換、visual + feature parity、D-03が表示名義のロジックへ不用意に介入していない。
+- 読む: `work-items/MIG-0504.md`、CURRENT `UserProfilePage.tsx`（`notFound()`）、`routeShards.ts:44-48`。
+- 変更: T03 を CURRENT 準拠に書き換え、`migration-user-routes.test.mjs` に props の量の test。icon map は MIG-0511、`/user/index.json` の gateway は MIG-0512。
+- 試験: 大小文字と `@`（gateway test）、15+15 page の props ≤ 256 KiB、390/1440。
+- DONE: /user は PARITY_VERIFIED、/user/[id]・paged・portfolio は MIG-0511 待ち。
 
 ### MIG-0505 — /list /recommend /trending
 
-- 読む: CURRENT3ルート、public DTO/cursor、`frontend/PUBLIC.md`の検索/ソート/filter/empty UX。
-- 変更: `+apps/site/src/pages/{list,recommend,trending}.astro`。first paint静的、client query/filter Isands、ランキング/R2 artifactをbuild snapshotで反映。
-- 試験: sort/filter/query/cache canonical, pagination, empty/broken thumbnails, dynamic refresh lag, public-only DTO。`/list/~query`、`/user/~query`、`/user/[id]/paged`は旧Nextの技術的renderer。新Astroに同名ページを複製する前提とせず、logical URLへのquery/deep-link/back-forward parity試験で代替してから旧技術URLを退役する。
-- DONE: URL/queryと検索戻り操作がCURRENT同等、CPU budgetではrequest時D1大量集計なし。
+- 読む: `work-items/MIG-0505.md`、`scripts/migration-list-discover.test.mjs`。
+- 変更: listing の fixture を `scripts/fixtures/listingSnapshotFixture.mjs` へ切り出し、画面確認、key 表の owner を MIG-0510 に。
+- 試験: list-discover test が前と同じ件数、390/1440（fixture の snapshot）。
+- DONE: recommend・trending は PARITY_VERIFIED、list は ListFilterIsland（MIG-0510）待ち。
 
 ### MIG-0506 — root/top /
 
-- 読む: CURRENT top page, hover/scroll shelf component, static projection freshness / public site metadata。
-- 変更: `apps/site/src/pages/index.astro`をmock target + Public top snapshotで置換。スクロール棚と軽いIslandだけ許可、同時リクエスト時に重いrebuildを起動しない。
-- 試験: desktop/mobile shelves, keyboard, news links, reload, R2 missing/stale, ranking freshness, cache, OGP。
-- DONE: top root URLの機能一覧・SEO・操作履歴をスクリーン/E2Eで固定。
+- 読む: `work-items/MIG-0506.md`、`scripts/migration-top-route.test.mjs`、`scripts/migration-top-shelf.test.mjs`。
+- 変更: top の fixture を `scripts/fixtures/topSnapshotFixture.mjs` へ切り出し、画面確認、shuffle と時計の決定（D-13-37/63）を記録。
+- 試験: top-route と top-shelf test、390/1440（fixture の snapshot）。
+- DONE: 画面確認の (c) が0件。`/` の ledger は検索帯（MIG-0510）待ちの IN_PROGRESS。
 
 ### MIG-0507 — video root slug /[id] final cutover
 
-- 読む: `CURRENT_ROUTES.md`, `ROUTE_MATRIX.md`, `frontend/PUBLIC.md`, current player/chapter/like/overlay code, `ACTIVE_X_MIGRATION_PLAN.md`。
-- 変更: root slugのresolveを固定ルートやasset pathより後に適用。静的作品情報 + player/chapters/Active X like/bookmark Islandを組み込み、既存APIの状態/403/202/503/リトライを維持。
-- 試験: collision with /event,/admin,/api,/user,/dashboard, unknown slug, video private→public and reverse, banned, 0X/複数X, chapter, editing, video canonical/OGP & share thumbnail。
-- DONE: LAST route migrationとして全Public UX/FN、SEO/OGP、visibility/cache/dynamic path parity。catch-all RouteをそのままCloudflareへ登録禁止。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0507 Work Order、`work-items/MIG-0507.md`、CURRENT `app/(public)/[id]/page.tsx`。
+- 変更: `apps/site/src/lib/videoPage.ts`（playlist link を build 時の event-detail snapshot から）。
+- 試験: T08/T09 playlist、既存 T01〜T07、browser 390px / 1440px。
+- DONE: U10〜U12 と Final audit。icon projection の確認は MIG-0511 T03 と MIG-0508（D-14-6）。Island は MIG-0513 / 0515、sign-out は Phase 8。catch-all Route を Cloudflare に登録しない。
 
 ### MIG-0509 — all public data generated at build time (D-09)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0509 Work Order、`static-delivery/BUILD_TIME_DATA.md`。
-- 変更: family ごとの `+apps/site/scripts/readPublicData/<family>.ts`、`apps/site/src/lib/publicDataLoader.ts` の読み先、GA4 同期の入力、CURRENT の更新での `requested_at` 記録。
-- 試験: family ごとの CURRENT 一致、非公開の除外、`requested_at` の更新有無、`apps/site` が R2 を読まない。
-- DONE: 「build」の全 family が移り、build 時間が承認した範囲内。`workers/json-generator` は残す（MIG-0907）。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0509 Work Order、`work-items/MIG-0509.md`、`static-delivery/BUILD_TIME_DATA.md` §2 / §5 / §6。
+- 変更: `produceSnapshots.ts` の `--d1-api` / `--trending-r2`、`+apps/site/scripts/buildPublicSite.ts`、`+apps/site/scripts/readR2Object.ts`、`build:public` script、server-core の request mark、GA4 同期の入力。
+- 試験: `--d1-api` と `--sqlite --batched` の byte 一致、`requested_at` の有無、build entry の dry-run、GA4 入力の一致。
+- DONE: build が R2 に書かない（D-13-13）、Workers Builds 5 回の実測（owner）、file 数と build 時間が予算内。
 
 ### MIG-0508 — Phase 5 Gate
 
-- 読む: 0501..0507の各PR、Public 16 Route matrix、432 UX台帳内のpublic該当部分。
+- 読む: 0501..0507 と 0509..0515 の各PR、Public 16 Route matrix、432 UX台帳内のpublic該当部分。
 - 変更: Route Matrix全件にlegacy→new disposition・根拠（URL/screenshot/test/rollback）を付け、公開pageまわりの残機能漏れを数える。
-- 試験: public+private+alias across 16 routes, SEO/OGP, direct reload, mobile/a11y, no1102/nonprod, deny-first for static.
+- 試験: public+private+alias across 16 routes, SEO/OGP, direct reload, mobile/a11y, no1102/nonprod, deny-first for static、操作 Island。
 - DONE: 人間Phase Gate承認+独立review必須、旧Next Workerの未移行Auth/API/private経路には触れない。
+
+### MIG-0511 — public X icon map projection at build time
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0511 Work Order、CURRENT `src/lib/publicData/staticSharedInputsLoader.ts:243-285,375`、`publicIconProjection.ts`。
+- 変更: `+apps/site/src/lib/publicIconMap.ts`、`publicDataLoader.ts` の loader、`produceSnapshots.ts` に1行、`videoPage.ts` / `userViews.ts` / `event/[id]/index.astro` / `portfolio.astro` の差し込み。
+- 試験: `scripts/migration-public-icon-map.test.mjs` T01〜T07、producer T08（CURRENT `users_index` 生成物と deep-equal）。
+- DONE: 3 consumer が map を使い、map が無くても build は成功し出力は従来どおり。
+
+### MIG-0510 — `/list` filter Island + top search band on RH-032
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0510 Work Order と Phase 5 共通契約、CURRENT `ListIndexView.tsx`、MIG-0634 の merge 後の RH-032 route。
+- 変更: `+ListFilterIsland.ts`、`+lib/publicApi.ts`、`list.astro` / `index.astro`、`ListView.tsx` / `TopView.tsx`。
+- 試験: list の query・key・空表示、top の GET form（JS なし）、RH-032 の 503。
+- DONE: Hono の RH-032 で CURRENT と同じ結果、Server Action を呼ばない、browser 確認。
+
+### MIG-0513 — `/[id]` interaction Islands on Phase 6 APIs
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0513 Work Order、CURRENT `InteractionButton.tsx` / `ChapterComposer.tsx` / `VideoStatusForm.tsx` / `VideoViewerUtilityDock.tsx`。
+- 変更: `+VideoInteractionIsland.ts`、`VideoPageIsland.ts`、`VideoDetailView.tsx`。
+- 試験: like の Active X 0 / 複数、chapter の各 status、状態 form の権限、JS なし。
+- DONE: MIG-0603 / 0634 / 0640 の API で CURRENT と同じ結果、browser 確認。
+
+### MIG-0514 — `/event/[id]/slots` reservation Island
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0514 Work Order、CURRENT `SlotGrid.tsx` / `EventSlotsViewerPanel.tsx`。
+- 変更: `EventSlotsIsland.ts`、`EventSlotsView.tsx`。
+- 試験: 予約・解除・延長、同時予約で負けた側、RH-014 の fail-closed、JS なし。
+- DONE: MIG-0604 U04 の API で CURRENT と同じ結果、browser 確認。
+
+### MIG-0515 — `/rules` consent + header Active X switch
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0515 Work Order、CURRENT `rules/page.tsx:43-96`、`useActiveXSwitcher.ts`。
+- 変更: `+RulesConsentIsland.ts`、`rules.astro`、`SiteHeader.ts`、`RulesView.tsx`。
+- 試験: `next` の sanitize、`?error=` の3 code、Active X の楽観更新と rollback、JS なし。
+- DONE: MIG-0636 / 0641 の API で CURRENT と同じ結果、D-04 を実行していない。
+
+### MIG-0512 — public gateway error pages and sub-page fence
+
+- 読む: `PHASE_4_5_SPEC.md` MIG-0512、`apps/site/src/gateway/index.ts`、`routeShards.ts`、`visibility.ts`、R-GATEWAY。
+- 変更: `index.ts` の 404/503 を build の HTML + `Retry-After: 30` に、`/event/{id}/release|slots` と `/user/{id}/portfolio` を親の fence に通す、`routeShards.ts` に `/user/index.json` と `/fonts/`。
+- 試験: 公開 / 非公開 / 不明 / alias / manifest 欠落 / 古い HTML が残った非公開（sub-page も）、HEAD、既存の text への後退。
+- DONE: build 後に非公開にした event の枠表・release と user の portfolio が 404、request ごとの読み取り回数は変わらない。

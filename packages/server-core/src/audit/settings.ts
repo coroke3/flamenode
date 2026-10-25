@@ -5,11 +5,22 @@ import type { AuditLogSettings } from "./types.ts";
 import { DEFAULT_AUDIT_LOG_SETTINGS } from "./retention.ts";
 import { mutateWithAudit } from "./mutate.ts";
 import { AuditOperation } from "./types.ts";
+import type { PreloadedAuditContext } from "./logger.ts";
 
 const SETTINGS_ID = "default";
 
-function mapAuditSettings(
-  row: typeof systemSettings.$inferSelect | null | undefined,
+/** The five `system_settings.audit_*` columns a guard can read together with its own columns. */
+export type AuditSettingsRow = Pick<
+  typeof systemSettings.$inferSelect,
+  | "audit_normal_retention_days"
+  | "audit_restorable_retention_days"
+  | "audit_long_retention_days"
+  | "audit_max_payload_bytes"
+  | "audit_compact_after_days"
+>;
+
+export function mapAuditSettings(
+  row: AuditSettingsRow | null | undefined,
 ): AuditLogSettings {
   if (!row) return { ...DEFAULT_AUDIT_LOG_SETTINGS };
   return {
@@ -36,6 +47,7 @@ export async function updateAuditLogSettings(
   db: ServerCoreDb,
   userId: string,
   patch: Partial<AuditLogSettings>,
+  preloaded?: PreloadedAuditContext,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const before = await db
@@ -76,6 +88,7 @@ export async function updateAuditLogSettings(
   await mutateWithAudit(db, {
     mutationStatements: [mutation],
     expectedMutationChanges: 1,
+    preloaded,
     audits: [
       {
         table_name: "system_settings",

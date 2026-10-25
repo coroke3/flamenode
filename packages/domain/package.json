@@ -14,8 +14,11 @@
     "./datetime": "./src/datetime.ts",
     "./auth/permissions": "./src/auth/permissions/index.ts",
     "./auth/permissions/presets": "./src/auth/permissions/presets.ts",
+    "./auth/permissions/resolver": "./src/auth/permissions/resolver.ts",
     "./video": "./src/video/index.ts",
+    "./video/atomicLimits": "./src/video/atomicLimits.ts",
     "./event": "./src/event/index.ts",
+    "./event/limits": "./src/event/limits.ts",
     "./xid": "./src/xid/index.ts",
     "./slots/slotIdentity": "./src/slots/slotIdentity.ts",
     "./slots/releaseGroups": "./src/slots/releaseGroups.ts",
@@ -24,7 +27,8 @@
     "./slots/reservationGroups": "./src/slots/reservationGroups.ts",
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts",
-    "./db/transientError": "./src/db/transientError.ts"
+    "./db/transientError": "./src/db/transientError.ts",
+    "./event/status": "./src/event/status.ts"
   },
   "scripts": {
     "build": "tsc",

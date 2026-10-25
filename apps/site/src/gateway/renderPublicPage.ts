@@ -39,23 +39,24 @@ import {
   videoScreenData,
 } from "../lib/publicPages.ts";
 
+// /user/[id] is PublicLayout + CreatorProfileIsland since MIG-0504; this renderer cannot reproduce Astro island output.
+// Island parity is an MIG-0411 follow-up (lead).
 export type PageRenderEntityKind = "video" | "user" | "event";
 
 /**
  * "server-rendered": the consumer writes the page. "excluded": it writes nothing and the
  * build keeps serving the kind (Work Order U05, max >= 8 ms).
  *
- * All kinds are server-rendered because the build's pages are static (no Island) and their
- * lists are empty, so the same render is small: see renderPublicPage.measure.mjs
- * (`--snapshot`, local Node, not workerd). The upper-bound inputs of the earlier
- * measurement (video 25-49 ms, event 5-9 ms, user 4-6 ms, project-files/migration-review/
- * pr326-u05a-render-to-string.log) apply once MIG-0502 / MIG-0507 add the lists to the
- * snapshot: re-measure then, and switch a kind back to "excluded" if it reaches 8 ms.
+ * Every kind is excluded: /user/[id] (MIG-0504), /event/[id] (MIG-0502) and /[id] (MIG-0507) are Island pages
+ * that this renderer cannot reproduce byte-for-byte, so the build output is the only HTML source for them.
+ * The render branch stays as test-only live code until the Island-parity follow-up (D-11, lead decides). Earlier measurement (renderPublicPage.measure.mjs `--snapshot`, local Node, not workerd; upper-bound
+ * inputs video 25-49 ms, event 5-9 ms, user 4-6 ms, project-files/migration-review/pr326-u05a-render-to-string.log)
+ * is the budget evidence if a kind is restored.
  */
 export const PAGE_BODY_FORMAT: Readonly<Record<PageRenderEntityKind, "server-rendered" | "excluded">> = {
-  video: "server-rendered",
-  user: "server-rendered",
-  event: "server-rendered",
+  video: "excluded",
+  user: "excluded",
+  event: "excluded",
 };
 
 /** Columns read by pageRenderQueue.ts (real D1 names, see packages/db/src/schema/base.ts). */

@@ -695,3 +695,23 @@ test("MIG-0406 U03: per-family time and reads with 52k routes, cold and warm sha
   }
   console.log(`[gateway-families] routes=52000 n=200 repeats=${REPEATS}(min kept)\n${lines.join("\n")}`);
 });
+
+test("MIG-0507: deny:video:<internal id> revokes both the YouTube-id URL and the internal-id alias", async () => {
+  const manifest = buildRouteMap(
+    [{ kind: "video", id: "internal-v1", slug: "AAAAAAAAA01", aliases: ["internal-v1"] }],
+    GENERATION,
+  );
+  const pages = { "/AAAAAAAAA01/": "<html>v</html>" };
+  const live = createEnv({ manifest, pages });
+  assert.equal((await get("/AAAAAAAAA01", live.env)).status, 200);
+  assert.deepEqual(live.calls.kv, ["deny:video:internal-v1"], "the fence key is the internal id");
+  assert.equal((await get("/internal-v1", live.env)).status, 308);
+
+  const kv = new Map([["deny:video:internal-v1", "1"]]);
+  const revoked = createEnv({ manifest, pages, kv });
+  for (const path of ["/AAAAAAAAA01", "/internal-v1"]) {
+    const res = await get(path, revoked.env);
+    assert.equal(res.status, 404, path);
+    assert.equal(res.headers.get("Location"), null, path);
+  }
+});

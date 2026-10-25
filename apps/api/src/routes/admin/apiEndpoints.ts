@@ -11,9 +11,12 @@ import {
   validateApiEndpointEventId,
   validateEventForApiActivation,
 } from "@flamenode/domain/apiEndpoints";
+import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
+import { sql } from "@flamenode/server-core/sql";
 import { Hono, type Context } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { MAX_SINGLE_ROW_LIMIT, mutateWithAudit } from "../../audit/mutateWithAudit.ts";
+import { MAX_SINGLE_ROW_LIMIT } from "../../lib/limits.ts";
 import {
   ApiEndpointCreateBodySchema,
   ApiEndpointSetActiveBodySchema,
@@ -44,38 +47,6 @@ type EventRow = Record<string, unknown> & {
   visibility_status: string;
   updated_at: number;
 };
-
-/**
- * src/lib/audit/expectedRowCondition.ts (expectedCurrent form): every column
- * read in preflight must still match, otherwise changes() != 1 and the batch
- * fails closed.
- */
-export function expectedRowCondition(expected: Record<string, unknown>): {
-  sql: string;
-  params: unknown[];
-} {
-  const predicates: string[] = [];
-  const params: unknown[] = [];
-  for (const [key, value] of Object.entries(expected)) {
-    const column = `"${key.replaceAll('"', '""')}"`;
-    if (value === null) {
-      predicates.push(`${column} IS NULL`);
-    } else if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "bigint" ||
-      typeof value === "boolean"
-    ) {
-      predicates.push(`${column} = ?`);
-      params.push(value);
-    } else {
-      return { sql: "0 = 1", params: [] };
-    }
-  }
-  return predicates.length > 0
-    ? { sql: predicates.join(" AND "), params }
-    : { sql: "0 = 1", params: [] };
-}
 
 // src/lib/api/eventExportCache.ts + publicCache.ts (Cache API entries only).
 const EVENT_EXPORT_CACHE_VERSION = 9;
@@ -129,7 +100,7 @@ async function setPublicApi(
   rawEventId: string,
   enabled: 0 | 1,
 ): Promise<Response> {
-  const db = c.env.DB;
+  const db = c.get("db");
   const userId = c.get("user")!.id;
   const validated = validateApiEndpointEventId(rawEventId);
   if (!validated.ok) return failure(c, 400, validated.message);
@@ -137,7 +108,7 @@ async function setPublicApi(
 
   let before: EventRow | null;
   try {
-    before = await db
+    before = await c.env.DB
       .prepare(
         `SELECT ${EVENT_COLUMNS.map((col) => `"${col}"`).join(", ")}
          FROM events WHERE id = ? LIMIT ${MAX_SINGLE_ROW_LIMIT}`,
@@ -156,15 +127,12 @@ async function setPublicApi(
 
   const now = Math.max(Math.floor(Date.now() / 1000), current.updated_at + 1);
   const after = { ...current, public_api_enabled: enabled, updated_at: now };
-  const condition = expectedRowCondition({ ...current });
+  const condition = expectedRowCondition({ expectedCurrent: { ...current } });
 
   try {
     await mutateWithAudit(db, {
       mutationStatements: [
-        {
-          sql: `UPDATE events SET public_api_enabled = ?, updated_at = ? WHERE id = ? AND ${condition.sql}`,
-          params: [enabled, now, eventId, ...condition.params],
-        },
+        db.run(sql`UPDATE events SET public_api_enabled = ${enabled}, updated_at = ${now} WHERE id = ${eventId} AND ${condition}`),
       ],
       expectedMutationChanges: [1],
       preloaded: auditPreloaded(c),

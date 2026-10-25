@@ -1,0 +1,34 @@
+---
+/**
+ * `/event/[id]/slots` (MIG-0502 U03 / Recipe R-PAGE / Runtime S0). Only events that have slots get a page:
+ * CURRENT redirects a zero-slot event to `/event/{id}` (307), which `integrations/eventRedirects.ts` writes
+ * into `_redirects` for the same events. The slot state is read in the browser (RH-020), never baked.
+ */
+import PublicLayout from "../../../layouts/PublicLayout.astro";
+import { EventSlotsIsland } from "../../../components/EventSlotsIsland.ts";
+import { getEventBuildData } from "../../../lib/eventData.ts";
+import { buildPageHead } from "../../../lib/pageHead.ts";
+import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
+
+export async function getStaticPaths() {
+  const { details } = await getEventBuildData();
+  return [...details.values()]
+    .filter((detail) => detail.slots.length > 0)
+    .map((detail) => ({ params: { id: detail.event.id }, props: { detail } }));
+}
+
+interface Props {
+  detail: StaticEventDetail;
+}
+
+const { detail } = Astro.props;
+const head = buildPageHead({
+  path: `/event/${detail.event.id}/slots`,
+  title: `${detail.event.title} 枠確保`,
+  noIndex: true,
+});
+const builtAt = Math.floor(Date.now() / 1000);
+---
+<PublicLayout head={head} currentPath="/event">
+  <EventSlotsIsland client:load detail={detail} builtAt={builtAt} />
+</PublicLayout>

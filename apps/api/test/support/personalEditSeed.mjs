@@ -6,7 +6,11 @@ const T0 = 1_700_000_000;
 
 export const EDIT_VIDEOS = [];
 /** videos whose lists exceed the S2 bounds (tested separately, excluded from the equality matrix) */
-export const BIG_VIDEOS = ["ed-many", "ed-bytes", "ed-huge-first", "ed-bigmember", "ed-bigcollab"];
+export const BIG_VIDEOS = [
+  "ed-many", "ed-bytes", "ed-huge-first", "ed-bigmember", "ed-bigcollab",
+  // MIG-0630 U02b: CURRENT throws (stage > 4 / > 18 questions) or the answers exceed the bound
+  "ed-stage-many", "ed-q-many", "ed-ans-many",
+];
 
 export function seedEdit(sqlite) {
   const ins = (table, row) => insert(sqlite, table, row);
@@ -136,4 +140,76 @@ export function seedEdit(sqlite) {
   member("mg1", "ed-bigmember", null, { comment: "z".repeat(70_000) });
   video("ed-bigcollab", { creator: "alice_x", collab: "collab", yt: "ytBIGC" });
   for (let i = 0; i < 120; i += 1) member(`bc${String(i).padStart(3, "0")}`, "ed-bigcollab", `bigc_${i}`, { order: i, edit: 1, name: `Collab ${i}` });
+
+  // ---- U02b form options: accepting / non-accepting events, questions, answers, suggestions, candidates
+  const NOW = Math.floor(Date.now() / 1000);
+  const open = (id, cols) => ins("events", { id, title: `Form ${id}`, visibility_status: "public", allow_user_video_event_links: 1, ...cols });
+  open("ee-open2", { entry_start_time: 5, parts_json: '["A","B"]', youtube_description_template: "tmpl", required_video_fields_json: '["title"]' });
+  open("ee-point", { start_time: NOW - 100, entry_start_time: 1, entry_end_time: NOW + 100_000 });
+  open("ee-closed", { entry_start_time: 1, entry_end_time: NOW - 1000 });
+  open("ee-ended", { start_time: NOW - 5000, end_time: NOW - 1000, entry_start_time: 1, entry_end_time: NOW + 100_000 });
+  open("ee-future", { entry_start_time: NOW + 100_000 });
+  open("ee-nolink", { entry_start_time: 1, allow_user_video_event_links: 0 });
+  open("ee-noentry", { start_time: NOW - 100, end_time: NOW + 100_000 });
+  ins("events", { id: "ee-private", title: "Form private", visibility_status: "private", allow_user_video_event_links: 1, entry_start_time: 1 });
+  const q = (id, eventId, key, o = {}) =>
+    ins("event_custom_questions", { id, event_id: eventId, question_key: key, label: o.label ?? `Label ${id}`, ...o.cols });
+  q("fq1", "ee1", "fq_text", { cols: { type: "text", required: 1, sort_order: 1, placeholder: "ph", max_length: 40 } });
+  q("fq2", "ee1", "fq_multi", { cols: { type: "checkbox", options_json: '["a","b","c"]', sort_order: 0 } });
+  q("fq3", "ee1", "fq_off", { cols: { is_active: 0, sort_order: 2 } });
+  q("fq4", "ee1", "fq_bad", { cols: { sort_order: 3 } });
+  q("fq5", "ee1", "stage_permission", { label: "Stage perm", cols: { sort_order: 0, required: 1, description: "d", placeholder: "p" } });
+  q("fq6", "ee1", "stage_permission_x y!", { label: "  ", cols: { sort_order: 1 } });
+  q("fq6b", "ee1", "stage_permission_off", { cols: { sort_order: 2, is_active: 0 } });
+  q("fq7", "ee-open", "open_q", { cols: { type: "select", options_json: '["x","y"]', sort_order: 0, visibility: "public" } });
+  q("fq8", "ee-open", "stage_permission_open", { label: "Stage open", cols: { sort_order: 0 } });
+  q("fq9", "ee2", "ee2_q", { cols: { type: "radio", options_json: '["1","2"]', sort_order: 0 } });
+  q("fq10", "ee-open2", "open2_q", { cols: { sort_order: 0 } });
+  const ans = (videoId, eventId, questionId, o = {}) =>
+    ins("video_custom_answers", { video_id: videoId, event_id: eventId, question_id: questionId, answer_text: o.text ?? null, answer_json: o.json ?? null });
+  ans("ed-own1", "ee1", "fq1", { text: "  hello  " });
+  ans("ed-own1", "ee1", "fq2", { json: '[" a ","b",1,"",null,"c"]', text: "ignored" });
+  ans("ed-own1", "ee1", "fq3", { text: "inactive question" });
+  ans("ed-own1", "ee1", "fq4", { json: "{broken", text: " fallback " });
+  ans("ed-own1", "ee1", "fq5", { text: " ok " });
+  ans("ed-own1", "ee1", "fq6", { text: "second" });
+  ans("ed-own1", "ee1", "fq6b", { text: "inactive stage" });
+  ans("ed-own1", "ee-open", "fq7", { text: "stray answer on an accepting event" });
+  ans("ed-own2", "ee2", "fq9", { json: "[]", text: "ignored: an array answer wins even when empty" });
+  ans("ed-own2", "ee-open", "fq8", { text: "open stage" });
+  ans("ed-own2", "ee-open", "fq7", { text: " y " });
+  // CURRENT throws (-> page error / 503): 5 stage questions, 19 general questions
+  ins("events", { id: "est5", title: "Stage five", visibility_status: "public" });
+  for (let i = 0; i < 5; i += 1) q(`st5-${i}`, "est5", `stage_permission_${i}`, { cols: { sort_order: i } });
+  video("ed-stage-many", { creator: "alice_x", events: ["est5"], yt: "ytSM" });
+  ins("events", { id: "eq19", title: "Nineteen", visibility_status: "public" });
+  for (let i = 0; i < 19; i += 1) q(`q19-${i}`, "eq19", `k${i}`, { cols: { sort_order: i } });
+  video("ed-q-many", { creator: "alice_x", events: ["eq19"], yt: "ytQM" });
+  // 6 events x 18 questions, all answered: 108 answers -> customAnswersTruncated, first 100 kept
+  const manyEvents = ["ea1", "ea2", "ea3", "ea4", "ea5", "ea6"];
+  for (const eventId of manyEvents) {
+    ins("events", { id: eventId, title: `Answers ${eventId}`, visibility_status: "public" });
+    for (let i = 0; i < 18; i += 1) q(`${eventId}-q${i}`, eventId, `a${i}`, { cols: { sort_order: i } });
+  }
+  video("ed-ans-many", { creator: "alice_x", events: manyEvents, yt: "ytAM" });
+  for (const eventId of manyEvents) for (let i = 0; i < 18; i += 1) ans("ed-ans-many", eventId, `${eventId}-q${i}`, { text: `${eventId}/${i}` });
+
+  // software suggestions (catalog names, then aliases) and candidates of alice_x (newest first, de-duplicated, normalized)
+  ins("software_aliases", { software_id: "sw1", alias: "Blend", normalized_alias: "blend" });
+  ins("software_aliases", { software_id: "sw2", alias: "AE", normalized_alias: "ae" });
+  ins("software_aliases", { software_id: "sw2", alias: "Blender", normalized_alias: "blender-alias" });
+  for (const [i, icon, channel, vis] of [
+    [1, "https://i.test/a.png", "https://www.youtube.com/@alice", "public"],
+    [2, "https://i.test/b.png", "https://youtube.com/c/alice2", "public"],
+    [3, "https://i.test/c.png", "not a url", "public"],
+    [4, "https://i.test/hidden.png", "https://www.youtube.com/@ALICE?x=1", "pending"],
+    [5, null, "https://example.com/z", "public"],
+    [6, "https://i.test/b.png", "https://m.youtube.com/user/alice6", "public"],
+  ]) {
+    ins("videos", {
+      id: `ed-ic${i}`, title: `Icon ${i}`, submitted_by_user_id: "u_zed_user", creator_display_name: "Alice", creator_x_user_id: "alice_x",
+      creator_icon_url: icon, creator_youtube_channel_url: channel, visibility_status: vis, collaboration_type: "individual",
+      scheduling_type: "slotted", source_type: "youtube", created_at: T0 + i * 10, updated_at: T0,
+    });
+  }
 }

@@ -9,14 +9,14 @@ const root = join(here, "../../..");
 const read = (path) => readFileSync(join(root, path), "utf8");
 
 test("approved X helper は x_user_account_links と approved だけを参照する", () => {
-  const source = read("src/lib/auth/approvedX.ts");
+  const source = read("packages/server-core/src/auth/approvedX.ts");
   assert.match(source, /xUserAccountLinks/);
   assert.match(source, /approval_status,\s*"approved"/);
   assert.doesNotMatch(source, /approval_status,\s*"imported"/);
 });
 
 test("approved X membership stays below D1 bind limits for large link sets", () => {
-  const source = read("src/lib/auth/approvedXPredicate.ts");
+  const source = read("packages/server-core/src/auth/approvedXPredicate.ts");
   assert.match(source, /APPROVED_X_IDS_IN_ARRAY_MAX = 80/);
   assert.match(source, /approvedXIdsWhere/);
   assert.match(source, /approvedXIdsNotWhere/);
@@ -26,13 +26,13 @@ test("approved X membership stays below D1 bind limits for large link sets", () 
 });
 
 test("event ownership は approved helper を使う", () => {
-  const source = read("src/lib/event/eventOwnership.ts");
+  const source = read("packages/server-core/src/event/eventOwnership.ts");
   assert.match(source, /getApprovedLinkedXUserIds/);
   assert.doesNotMatch(source, /from\(xUserAccountLinks\)/);
 });
 
 test("ownership.getApprovedXIds は approved helper へ委譲する", () => {
-  const source = read("src/lib/auth/ownership.ts");
+  const source = read("packages/server-core/src/auth/ownership.ts");
   assert.match(source, /getApprovedLinkedXUserIds/);
 });
 

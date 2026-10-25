@@ -1,28 +1,35 @@
 ---
-import { ButtonIsland } from "../components/ButtonIsland.ts";
+/**
+ * `/` (MIG-0506 / Recipe R-PAGE / Runtime S0): the whole top page as static HTML from the `top` and `trending`
+ * build snapshots. The loop/auto-scroll behaviour of the shelves is the MIG-0507 U09 Island (script below); native horizontal scroll
+ * works without it. The page title is the bare site name (CURRENT `title.absolute`).
+ */
+import { TopView } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { DEFAULT_SITE_DESCRIPTION, SITE_NAME, buildPageHead, siteOrigin } from "../lib/pageHead.ts";
+import { loadTopForBuild } from "../lib/topData.ts";
+
+const head = { ...buildPageHead({ path: "/", title: SITE_NAME, description: DEFAULT_SITE_DESCRIPTION }), title: SITE_NAME };
+const view = await loadTopForBuild();
+// CURRENT `websiteJsonLd` of `app/(public)/page.tsx` (WebSite + SearchAction).
+const websiteJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: SITE_NAME,
+  url: `${siteOrigin()}/`,
+  description: DEFAULT_SITE_DESCRIPTION,
+  inLanguage: "ja",
+  potentialAction: {
+    "@type": "SearchAction",
+    target: { "@type": "EntryPoint", urlTemplate: `${siteOrigin()}/list?q={search_term_string}` },
+    "query-input": "required name=search_term_string",
+  },
+};
 ---
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlameNode Public SSG</title>
-  </head>
-  <body>
-    <header>
-      <h1>FlameNode Public SSG</h1>
-      <p>静的配信ファーストの公開ポータルです。</p>
-    </header>
-    <main>
-      <section>
-        <h2>公開コンテンツ（静的HTML）</h2>
-        <p>JavaScriptが無効な環境でも、すべての静的本文とリンクは正常に閲覧できます。</p>
-        <p><a href="/about">FlameNodeについて</a></p>
-      </section>
-      <section>
-        <h2>インタラクティブ領域（React Island）</h2>
-        <ButtonIsland client:load label="即時ロード (client:load)" variant="primary" />
-        <ButtonIsland client:visible label="可視時ロード (client:visible)" variant="secondary" />
-      </section>
-    </main>
-  </body>
-</html>
+<PublicLayout head={head} currentPath="/" jsonLd={[websiteJsonLd]}>
+  <TopView {...view} />
+</PublicLayout>
+<script>
+  import { mountTopShelves } from "../components/mountTopShelves.ts";
+  mountTopShelves();
+</script>

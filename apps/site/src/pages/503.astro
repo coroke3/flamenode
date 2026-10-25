@@ -1,0 +1,24 @@
+---
+/**
+ * Static 503 body (MIG-0501 / G10). CURRENT `app/error.tsx` text, noindex. The "再試行" button is an
+ * Island and is not emitted. The status 503 and `Retry-After` belong to whoever serves this file
+ * (gateway, MIG-0404/0406 owned); see the MIG-0501 work item.
+ */
+import { EmptyState } from "@flamenode/ui";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { buildPageHead } from "../lib/pageHead.ts";
+
+const head = buildPageHead({ path: "/503", title: "問題が発生しました", noIndex: true });
+---
+<PublicLayout head={head} currentPath="/503">
+  <div class="p-root fn-screen">
+    <main class="wrap scr-empty">
+      <EmptyState
+        title="問題が発生しました"
+        description="読み込みに失敗しました。再試行するか、しばらくしてからお戻りください。"
+        tone="danger"
+        action={{ href: "/", label: "トップへ戻る", variant: "ghost" }}
+      />
+    </main>
+  </div>
+</PublicLayout>

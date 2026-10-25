@@ -1,3 +1,5 @@
+import type { AuditLogSettings } from "@flamenode/server-core/audit/types";
+import type { ServerCoreDb } from "@flamenode/server-core/db";
 import type { SessionUser, AuthSession } from "./auth/session.ts";
 
 export type Bindings = {
@@ -9,11 +11,16 @@ export type Bindings = {
   /** Manage icon signing (MIG-0624); the binding is an owner-approved step tracked in MIG-0628. */
   AUTH_SECRET?: string;
   PUBLIC_VISIBILITY_GUARD_MODE?: string;
+  FORCE_STATIC_ONLY?: string;
   YOUTUBE_DAILY_QUOTA_LIMIT?: string;
   /** Configured application origin for write origin verification. */
   NEXT_PUBLIC_SITE_URL?: string;
   /** "1" allows loopback origins (local preview only). */
   FLAMENODE_LOCAL_PREVIEW?: string;
+  /** MIG-0605 U02: "1" / "true" / "yes" enables the admin spreadsheet routes (CURRENT ADMIN_SPREADSHEET_ENABLED). */
+  ADMIN_SPREADSHEET_ENABLED?: string;
+  /** MIG-0605 U02: optional page size (clamped to the S2 row cap). */
+  ADMIN_SPREADSHEET_PAGE_SIZE?: string;
 };
 
 export type Variables = {
@@ -25,7 +32,9 @@ export type Variables = {
   /** Active X and approved X IDs read in the same user query. */
   activeX: { activeXId: string | null; approvedXIds: string[] };
   /** Set by costGuardMiddleware from its single system_settings read. */
-  auditSettings: import("./audit/mutateWithAudit.ts").AuditLogSettings;
+  auditSettings: AuditLogSettings;
+  /** Set once per write request by dbMiddleware (after writeGuard); routes reach server-core only through it. */
+  db: ServerCoreDb;
   /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
   actorSnapshotJsonById: Record<string, string>;
 };

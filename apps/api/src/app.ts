@@ -9,9 +9,14 @@ import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 import { createAdminRoutes } from "./routes/admin/index.ts";
 import { liveEventRoutes } from "./routes/live/events.ts";
 import { adminEventRoutes } from "./routes/events/index.ts";
+import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
+import { publicListRoutes } from "./routes/events/publicList.ts";
+import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
+
+import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
 
 export const app = new Hono<AppEnv>();
 
@@ -24,10 +29,18 @@ app.route("/api/personal", personalRoutes);
 // MIG-0625: authenticated, admin-only, read-only Admin screens API (users / videos / events / moderation).
 app.route("/api/admin-read", adminReadRoutes);
 app.route("/api/manage", manageRoutes);
+// MIG-0605 U02 (RH-003/007/009 reads): BEFORE createAdminRoutes() so the disabled flag answers before any session read.
+app.route("/api/admin/spreadsheet", createSpreadsheetReadRoutes());
 app.route("/api/admin", createAdminRoutes());
 // Must stay after createAdminRoutes(): reuses its session + writeGuard middleware.
 app.route("/api/admin", adminEventRoutes);
 app.route("/api/live/events", liveEventRoutes);
+// MIG-0604 U01 (RH-014): GET /api/events/:id/slots/viewer-overlay
+app.route("/api/events", slotViewerOverlayRoutes);
+// MIG-0631 (RH-015): GET /api/events
+app.route("/api/events", publicListRoutes);
+// MIG-0631 (RH-012): GET /api/event-endpoints/:id/release
+app.route("/api/event-endpoints", publicReleaseRoutes);
 app.route("/api/videos", videosRoutes);
 // MIG-0605 U01 (RH-001): GET /api/account/summary
 app.route("/api/account/summary", accountSummaryRoutes);

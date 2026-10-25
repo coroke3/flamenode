@@ -146,8 +146,8 @@ test("T03: an error inside one Island shows the error callout; static HTML and t
   }
 });
 
-test("T01: built index.html has static text and link outside the Islands and the Islands' server HTML", () => {
-  const file = path.join(siteRoot, "dist/index.html");
+test("T01: built islands PoC page has static text and link outside the Islands and the Islands' server HTML", () => {
+  const file = path.join(siteRoot, "dist/migration-fixture-poc/islands/index.html");
   assert.ok(fs.existsSync(file), "run `npm run build --workspace=@flamenode/site` first");
   const doc = new JSDOM(fs.readFileSync(file, "utf8")).window.document;
   const islands = [...doc.querySelectorAll("astro-island")];

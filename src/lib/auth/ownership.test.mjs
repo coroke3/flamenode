@@ -11,7 +11,7 @@ import {
 
 /** canEditVideo の DB 経路のうち、通常モード (所有者) の判定部分。 */
 function canEditVideoNormalBlock() {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   const normalBlock = source.match(
     /export async function canEditVideo\([\s\S]*?if \(privilegeMode !== "normal"\) return false;([\s\S]*?)\n}\r?\n/,
   )?.[1];
@@ -126,7 +126,7 @@ test("ownership.ts: normal モードは非所有者を早期拒否する", () =>
 });
 
 test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本のみ", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   const loadBody = source.match(
     /export async function loadEffectiveOwnerEditableFieldSet[\s\S]*?^}/m,
   )?.[0];
@@ -138,7 +138,7 @@ test("ownership.ts: loadEffectiveOwnerEditableFieldSet は primary_event 正本�
 });
 
 test("ownership.ts: event staff 判定は DB 経路と context 経路で同じ候補キーを使う", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   const grantBody = source.match(
     /export async function eventStaffHasExactVideoPermission[\s\S]*?\n}\r?\n/,
   )?.[0];
@@ -161,7 +161,7 @@ test("privilegeMode: admin/event 併用入口はロールごとに単一モー�
 });
 
 test("privilegeMode: any・省略可能引数・暗黙defaultを再導入しない", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /CanEditVideoPrivilegeMode[^;]+"any"/);
   assert.doesNotMatch(source, /privilegeMode\?\s*:/);
   assert.doesNotMatch(source, /privilegeMode\s*\?\?\s*/);
@@ -175,14 +175,14 @@ test("privilegeMode: adminPolicyAllows は admin ロールのみ既知キーを�
 });
 
 test("canEditVideo: normal モードで event staff バイパスを使わない", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /getEditableEventIds\(db, user\.id\)/);
   assert.doesNotMatch(source, /isEventDelegationGranted/);
   assert.doesNotMatch(source, /COLLABORATOR_VIDEO_EDIT_KEYS\.has/);
 });
 
 test("canEditVideo: normal モードは general fields で section 判定", () => {
-  const source = readFileSync(new URL("./ownership.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8");
   assert.match(source, /loadGeneralEditableFieldSet/);
   assert.match(canEditVideoNormalBlock(), /loadEffectiveOwnerEditableFieldSet\(db, video\)/);
   assert.doesNotMatch(

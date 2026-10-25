@@ -1,28 +1,30 @@
 ---
 /**
- * Representative video detail page `/[id]` (MIG-0403, Recipe R-PAGE, Runtime S0).
- * Built from the representative snapshots only; the full set is MIG-0507 / MIG-0411.
- * The internal ID and the YouTube ID alias both get a page with the same canonical,
- * as CURRENT serves both URLs. Non-public snapshots are rejected by the loader.
+ * `/[id]` video catch-all (MIG-0507 / R-PAGE / S0): one static page per public video snapshot, at the YouTube id
+ * and at the internal id (CURRENT serves both; canonical is the first). Fixed routes and assets win over these
+ * slugs, and a collision fails the build (MIG-0404 route map). Only when the snapshot env is completely unset the
+ * build uses the fixture videos (`videoFixtures.ts`: vid-aaa at its YouTube id and internal id, vid-bbb at its
+ * internal id); a partly set env or a broken snapshot fails the build.
+ * The page is `VideoPageIsland` (client:load): the player, like/save, chapter and comment controls are Islands;
+ * until their APIs exist the static HTML shows the display of the view.
  */
-import { VideoDetailView } from "@flamenode/ui";
-import PublicPage from "../layouts/PublicPage.astro";
-import { StaticScreen } from "../components/StaticScreen.ts";
-import { loadRepresentativeVideos } from "../lib/representativeFixtures.ts";
-import { videoMetadata, videoPaths, videoScreenData } from "../lib/publicPages.ts";
-import type { VideoPublicSnapshot } from "../lib/publicDataLoader.ts";
+import PublicLayout from "../layouts/PublicLayout.astro";
+import { VideoPageIsland } from "../components/VideoPageIsland.ts";
+import { gaMeasurementId } from "../lib/pageHead.ts";
+import { loadVideoPagesForBuild, type VideoPage } from "../lib/videoPage.ts";
 
 export async function getStaticPaths() {
-  const videos = await loadRepresentativeVideos();
-  return videos.flatMap((video) => videoPaths(video).map((id) => ({ params: { id }, props: { video } })));
+  const pages = await loadVideoPagesForBuild();
+  return pages.map((page) => ({ params: { id: page.slug }, props: { page } }));
 }
 
 interface Props {
-  video: VideoPublicSnapshot;
+  page: VideoPage;
 }
 
-const { video } = Astro.props;
+const { page } = Astro.props;
+const gaEnabled = gaMeasurementId() !== null;
 ---
-<PublicPage meta={videoMetadata(video)}>
-  <StaticScreen screen={VideoDetailView} props={{ video: videoScreenData(video) }} />
-</PublicPage>
+<PublicLayout head={page.head} currentPath={`/${page.slug}`} jsonLd={page.jsonLd}>
+  <VideoPageIsland client:load video={page.data} youtubeId={page.youtubeId} primaryEventId={page.data.primaryEvent?.id ?? null} gaEnabled={gaEnabled} />
+</PublicLayout>

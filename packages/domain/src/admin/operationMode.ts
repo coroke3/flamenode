@@ -62,3 +62,10 @@ export function resolveOperationMode(
   const operationMode = normalizeOperationMode(row?.operation_mode);
   return operationMode ?? "normal";
 }
+
+export function getPublicDataStrategy(mode: OperationMode): PublicDataStrategy {
+  if (mode === "maintenance") return "maintenance";
+  if (mode === "static_only") return "static_json_only";
+  return "static_json_with_live_overlay";
+}
+

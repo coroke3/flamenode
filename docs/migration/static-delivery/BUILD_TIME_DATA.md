@@ -82,6 +82,8 @@ Builds once a non-production build project exists (needs approval).
 binding limit (24 hooks/day, maximum delay ≈ 60 min + build); the constants only bind if the
 check ever runs more often. Re-derive both when Workers Builds timing replaces the local figure.
 
+**After Phase 5 (D-11, decided 2026-10-24):** an edit to a published page reaches visitors on the build cycle (at most about 60 min + one build), because the Island kinds (user / event / video) are built, not re-rendered by the Queue consumer. Unpublish stays immediate (KV `deny:` + consumer R2 DELETE). The constants 52 / 1,661,539 ms are provisional until they are re-derived from Workers Builds timing; do not raise the Cron frequency before that measurement. See `OPEN_DECISIONS.md` D-11.
+
 **Owner steps to re-measure on Workers Builds (approved, not run — no credentials here):**
 
 1. Dashboard → Workers & Pages → Create → Import a repository → `coroke3/flamenode`, project
@@ -110,6 +112,7 @@ Current gateway behaviour (MIG-0405/0406, `apps/site/src/gateway/index.ts`, `r2H
 The Work Order default ("serve a static shell and let the Island read the API") is **not
 implemented**. The 2026-10-18 approval did not cover it, so the current 404/503 behaviour stays;
 a new work is reachable once the next build (≤ ~60 min + build) adds its route.
+D-11 (2026-10-24) accepts that a new public page keeps answering 404 (not in the shards) or 503 (in the shards, no R2 HTML yet) until the next build; it is the same number the owner approved as the publish delay. Shortening it is follow-up E in `OPEN_DECISIONS.md` D-11.
 
 ### 3.2 Unpublished after the build
 
@@ -315,8 +318,8 @@ MIG-0411 consumer.
 
 R2 reads: each detail page view is one R2 GET (Class B; free 10 M/month ≈ 333,000/day) after one
 KV read and one route shard read. No traffic figures were read, so the volume is stated as that
-break-even: the free tier holds up to ~333 k detail views/day. R2 writes are one PUT per render
-(Class A; free 1 M/month) — at most the message volume below.
+break-even: the free tier holds up to ~333 k detail views/day. R2 writes (D-11): the Queue consumer renders nothing, so it makes 0 PUTs; detail HTML is
+PUT by the build (MIG-0509), at most 1,460 per build. Worst case, if all 24 builds/day PUT every page: 24 × 1,460 = 35,040/day ≈ 1.05 M/month against the free 1 M/month (Class A), i.e. not within the free tier at that extreme. A request mark does not make this safe by itself: with hourly edits, 24 builds/day is the normal case. Obligation for MIG-0509: use a differential PUT (only the pages that changed, for example whose content hash changed) or lower the build cadence, so that Class A stays within budget (at most 80 % = 800 k/month). A full-page PUT on every hourly build must not run until one of the two holds. MIG-0509 also records the PUT count per build (follow-up C).
 
 Queue messages (free 10,000 operations/day; one message ≈ 3 operations — write, read,
 delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources and estimate
@@ -326,6 +329,7 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | --- | --- | --- | --- |
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
+| Consumer page render (D-11: the consumer does not render; R2 PUT = 0). The doorbell / recovery rows above are unchanged; `rebuild-page` for an excluded kind is finished at once (`excluded_kind`) | — | 3 operations per message, as before | — |
 | Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
 
 With realistic update rates (far below one update per entity per day) the first two rows stay

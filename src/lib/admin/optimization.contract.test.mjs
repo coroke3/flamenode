@@ -41,7 +41,7 @@ const [
   readFile(new URL("../staticRebuild/liveApi.ts", import.meta.url), "utf8"),
   readFile(new URL("../publicData/loader.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../packages/domain/src/auth/permissions/presets.ts", import.meta.url), "utf8"),
-  readFile(new URL("../auth/permissions/permissionResolver.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/domain/src/auth/permissions/resolver.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventStaffCsv.ts", import.meta.url), "utf8"),
   readFile(new URL("../actions/event-staff-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../packages/server-core/src/audit/capability.ts", import.meta.url), "utf8"),
@@ -69,7 +69,7 @@ const [
   readFile(new URL("../../../app/(admin)/admin/page.tsx", import.meta.url), "utf8"),
   readFile(new URL("./adminPendingCounts.ts", import.meta.url), "utf8"),
   readFile(new URL("../../../app/(manage)/manage/page.tsx", import.meta.url), "utf8"),
-  readFile(new URL("../auth/ownership.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/auth/ownership.ts", import.meta.url), "utf8"),
 ]);
 const xIdMergesPage = await readFile(
   new URL("../../../app/(admin)/admin/x-id-merges/page.tsx", import.meta.url),

@@ -83,7 +83,7 @@ test("only GET is routed", async () => {
 });
 
 test("externalImageProxy.ts is CURRENT's file (only parse export dropped); sizes/limits pinned", () => {
-  const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8").replace(/^﻿/, "");
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8").replace(/^﻿/, "").replace(/\r\n/g, "\n");
   const current = read("../../../src/lib/media/externalImageProxy.ts");
   const ported = read("../src/routes/media/externalImageProxy.ts");
   assert.equal(

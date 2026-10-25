@@ -24,7 +24,7 @@ test("YouTube再生リスト同期は現行sync-jobsの52分Recovery枠と必要
     readFromRoot("workers/sync-jobs/index.ts"),
   ]);
 
-  assert.match(wrangler, /crons\s*=\s*\["7 \* \* \* \*", "52 \* \* \* \*"\]/);
+  assert.match(wrangler, /crons\s*=\s*\["7,52 \* \* \* \*"\]/);
   assert.match(wrangler, /binding\s*=\s*"DB"/);
   assert.match(wrangler, /binding\s*=\s*"KV"/);
   assert.match(wrangler, /binding\s*=\s*"YOUTUBE_SYNC_WAKE_QUEUE"/);

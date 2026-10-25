@@ -33,6 +33,21 @@ const [videos, events, users] = await Promise.all([loadRepresentativeVideos(), l
 const [video] = videos;
 const [event] = events;
 const [user] = users;
+// MIG-0504 builds /user/[id] from the user fixtures (PublicLayout + CreatorProfileIsland); rep_creator has no page.
+const { FIXTURE_USER_PROFILES } = await import("./userFixtures.ts");
+const profileUser = FIXTURE_USER_PROFILES.miku_producer.user;
+const PROFILE_ROUTE = "user/miku_producer";
+// MIG-0502 builds /event/[id] from the event fixtures (PublicLayout + EventDetailIsland); rep-event-2026 has no page.
+const { FIXTURE_EVENT_DETAIL_PAYLOADS } = await import("./eventFixtures.ts");
+const builtEvent = FIXTURE_EVENT_DETAIL_PAYLOADS["autumn-collab-2026"].event;
+const EVENT_ROUTE = "event/autumn-collab-2026";
+// MIG-0507 builds /[id] from the video fixtures (PublicLayout + VideoPageIsland): vid-aaa has a YouTube id (pages at
+// both slugs, canonical on the YouTube id), vid-bbb only the internal id. repvideo01 has no page.
+const { FIXTURE_VIDEO_DETAIL_PAYLOADS } = await import("./videoFixtures.ts");
+const builtVideo = FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-aaa"].video;
+const VIDEO_YT_ROUTE = builtVideo.youtube_video_id;
+const VIDEO_ID_ROUTE = builtVideo.id;
+const VIDEO_PLAIN_ROUTE = FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-bbb"].video.id;
 
 /** `<head>` as {title, canonical, tags: {"name|property": content}}. */
 function head(html) {
@@ -75,12 +90,10 @@ function currentHead(input) {
   return { title: `${md.title} | ${current.SITE_NAME}`, canonical: md.alternates.canonical, tags };
 }
 
-test("build output exists for the three representative pages", () => {
+test("build output exists for the MIG-0507 video, MIG-0502 event and MIG-0504 creator pages", () => {
   assert.ok(fs.existsSync(dist), "run astro build first");
   assert.deepEqual(videos.map((v) => v.id), ["repvideo01"]);
-  assert.deepEqual(events.map((e) => e.id), ["rep-event-2026"]);
-  assert.deepEqual(users.map((u) => u.id), ["rep_creator"]);
-  for (const route of ["repvideo01", video.youtubeVideoId, "event/rep-event-2026", "user/rep_creator"]) {
+  for (const route of [VIDEO_YT_ROUTE, VIDEO_ID_ROUTE, VIDEO_PLAIN_ROUTE, EVENT_ROUTE, PROFILE_ROUTE]) {
     assert.ok(fs.existsSync(path.join(dist, route, "index.html")), route);
   }
 });
@@ -108,45 +121,87 @@ test("T01: private, voided and deleted fixtures produce no HTML and leak no text
 });
 
 test("T02: the YouTube ID alias is the same page with the canonical of CURRENT (`/{youtube id}`)", () => {
-  const byId = read(video.id);
-  const byAlias = read(video.youtubeVideoId);
-  assert.equal(byAlias, byId);
-  assert.equal(head(byId).canonical, `https://flamenode.net/${video.youtubeVideoId}`);
+  const byId = read(VIDEO_ID_ROUTE);
+  const byAlias = read(VIDEO_YT_ROUTE);
+  assert.deepEqual(head(byId), head(byAlias), "both URLs carry the same head");
+  assert.equal(head(byId).canonical, `https://flamenode.net/${VIDEO_YT_ROUTE}`);
+  assert.equal(head(byAlias).canonical, `https://flamenode.net/${VIDEO_YT_ROUTE}`);
+  // a video without a YouTube id is canonical on its internal id
+  assert.equal(head(read(VIDEO_PLAIN_ROUTE)).canonical, `https://flamenode.net/${VIDEO_PLAIN_ROUTE}`);
 });
 
 test("T03: video <head> equals CURRENT generateMetadata (app/(public)/[id]/page.tsx:78-108)", () => {
   const expected = currentHead({
-    title: `${video.title} - ${video.creatorName ?? "unknown"}`,
-    description: current.compactText(video.introComment || video.highlights || [
-      video.music ? `使用楽曲: ${video.music}` : null,
-      video.credit ? `クレジット: ${video.credit}` : null,
-    ].filter(Boolean).join(" / ")),
-    path: `/${video.youtubeVideoId ?? video.id}`,
-    image: video.youtubeVideoId ? youtubeThumbUrl(video.youtubeVideoId, "maxresdefault") : video.creatorIconUrl,
+    title: `${builtVideo.title} - ${builtVideo.creator_display_name ?? "unknown"}`,
+    description: current.compactText(builtVideo.intro_comment || builtVideo.highlights || (builtVideo.music ? `使用楽曲: ${builtVideo.music}` : null)),
+    path: `/${VIDEO_YT_ROUTE}`,
+    image: youtubeThumbUrl(VIDEO_YT_ROUTE, "maxresdefault"),
     ogType: "video.other",
   });
-  assert.deepEqual(head(read(video.id)), expected);
+  // The production page uses PublicLayout, whose <head> also carries the CURRENT root layout
+  // metadata (app/layout.tsx); the page-level fields must equal CURRENT generateMetadata exactly.
+  const actual = head(read(VIDEO_ID_ROUTE));
+  assert.equal(actual.title, expected.title);
+  assert.equal(actual.canonical, expected.canonical);
+  for (const [key, value] of Object.entries(expected.tags)) assert.equal(actual.tags[key], value, key);
+  const rootLayoutTags = [
+    "application-name", "author", "creator", "publisher", "category", "mobile-web-app-capable",
+    "apple-mobile-web-app-title", "apple-mobile-web-app-status-bar-style", "msapplication-TileColor", "og:locale",
+  ];
+  assert.deepEqual(
+    Object.keys(actual.tags).filter((key) => !(key in expected.tags)).sort(),
+    [...rootLayoutTags].sort(),
+    "only the CURRENT root layout metadata is added on top of generateMetadata",
+  );
 });
 
 test("T03: event <head> equals CURRENT generateMetadata (app/(public)/event/[id]/page.tsx:100-114)", () => {
   const expected = currentHead({
-    title: event.title,
-    description: event.explanation,
-    path: `/event/${event.id}`,
-    image: event.imageUrl ?? event.iconUrl,
+    title: builtEvent.title,
+    description: builtEvent.explanation,
+    path: `/event/${builtEvent.id}`,
+    image: builtEvent.img_url ?? builtEvent.icon_url,
   });
-  assert.deepEqual(head(read(`event/${event.id}`)), expected);
+  // The production page uses PublicLayout, whose <head> also carries the CURRENT root layout
+  // metadata (app/layout.tsx); the page-level fields must equal CURRENT generateMetadata exactly.
+  const actual = head(read(EVENT_ROUTE));
+  assert.equal(actual.title, expected.title);
+  assert.equal(actual.canonical, expected.canonical);
+  for (const [key, value] of Object.entries(expected.tags)) assert.equal(actual.tags[key], value, key);
+  const rootLayoutTags = [
+    "application-name", "author", "creator", "publisher", "category", "mobile-web-app-capable",
+    "apple-mobile-web-app-title", "apple-mobile-web-app-status-bar-style", "msapplication-TileColor", "og:locale",
+  ];
+  assert.deepEqual(
+    Object.keys(actual.tags).filter((key) => !(key in expected.tags)).sort(),
+    [...rootLayoutTags].sort(),
+    "only the CURRENT root layout metadata is added on top of generateMetadata",
+  );
 });
 
 test("T03: creator <head> equals CURRENT generateMetadata (app/(public)/user/[id]/UserProfilePage.tsx:114-137)", () => {
   const expected = currentHead({
-    title: `${user.name} - クリエイター`,
-    description: user.profileText ?? `FlameNodeで公開されている${user.name}の作品。`,
-    path: `/user/${user.id}`,
-    image: user.iconUrl,
+    title: `${profileUser.x_name} - クリエイター`,
+    description: profileUser.profile_text ?? `FlameNodeで公開されている${profileUser.x_name}の作品。`,
+    path: `/user/${profileUser.id}`,
+    image: profileUser.icon_url,
     ogType: "profile",
   });
-  assert.deepEqual(head(read(`user/${user.id}`)), expected);
+  // The production page uses PublicLayout, whose <head> also carries the CURRENT root layout
+  // metadata (app/layout.tsx); the page-level fields must equal CURRENT generateMetadata exactly.
+  const actual = head(read(PROFILE_ROUTE));
+  assert.equal(actual.title, expected.title);
+  assert.equal(actual.canonical, expected.canonical);
+  for (const [key, value] of Object.entries(expected.tags)) assert.equal(actual.tags[key], value, key);
+  const rootLayoutTags = [
+    "application-name", "author", "creator", "publisher", "category", "mobile-web-app-capable",
+    "apple-mobile-web-app-title", "apple-mobile-web-app-status-bar-style", "msapplication-TileColor", "og:locale",
+  ];
+  assert.deepEqual(
+    Object.keys(actual.tags).filter((key) => !(key in expected.tags)).sort(),
+    [...rootLayoutTags].sort(),
+    "only the CURRENT root layout metadata is added on top of generateMetadata",
+  );
 });
 
 test("T03: site buildPageMetadata matches CURRENT for fallback, long, blank and absolute inputs", () => {
@@ -175,19 +230,24 @@ test("T03: site buildPageMetadata matches CURRENT for fallback, long, blank and 
 });
 
 test("T04: video paths do not collide with fixed routes, reserved slugs or assets", () => {
-  for (const id of [video.id, video.youtubeVideoId]) {
+  for (const id of [VIDEO_ID_ROUTE, VIDEO_YT_ROUTE, VIDEO_PLAIN_ROUTE]) {
     assert.equal(RESERVED_ROOT_SLUGS.has(id.toLowerCase()), false, id);
     assert.equal(RESERVED_ASSET_PATHS.has(id.toLowerCase()), false, id);
   }
+  // The video pages exist at both slugs and no fixed-route folder was shadowed by them.
+  for (const id of [VIDEO_ID_ROUTE, VIDEO_YT_ROUTE]) assert.ok(fs.existsSync(path.join(dist, id, "index.html")), id);
   // Fixed folders are served by their own route files, not by `[id].astro`.
-  assert.match(read(`event/${event.id}`), /class="[^"]*\bed-/);
-  assert.match(read(`user/${user.id}`), /class="[^"]*\bpf-head\b/);
+  assert.match(read(EVENT_ROUTE), /class="[^"]*\bed-/);
+  assert.match(read(PROFILE_ROUTE), /class="[^"]*\bpf-head\b/);
 });
 
-test("pages are static HTML with the shared CSS and no JavaScript", () => {
-  for (const route of [video.id, `event/${event.id}`, `user/${user.id}`]) {
+test("pages are static HTML with the shared CSS; the video, event and creator pages have only JSON-LD and Astro island hydration scripts", () => {
+  for (const route of [VIDEO_YT_ROUTE, VIDEO_ID_ROUTE, VIDEO_PLAIN_ROUTE, EVENT_ROUTE, PROFILE_ROUTE]) {
     const html = read(route);
-    assert.doesNotMatch(html, /<script\b|<astro-island\b/, `${route} ships no JS`);
+    const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1]);
+    assert.ok(scripts.some((a) => /application\/ld\+json/.test(a)), `${route}: JSON-LD`);
+    assert.ok(scripts.every((a) => /application\/ld\+json/.test(a) || /\bsrc="\/_astro\//.test(a) || /\btype="module"/.test(a) || a.trim() === ""), `only JSON-LD and island hydration: ${scripts.join(" | ")}`);
+    assert.match(html, /<astro-island\b/, route);
     const links = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
     assert.equal(links.length, 1, route);
     const css = fs.readFileSync(path.join(dist, links[0]), "utf8");
@@ -197,10 +257,10 @@ test("pages are static HTML with the shared CSS and no JavaScript", () => {
 });
 
 test("every image has an alt attribute (decorative avatars/posters use alt=\"\" as CURRENT UserAvatar/YoutubePlayer)", () => {
-  for (const route of [video.id, `event/${event.id}`, `user/${user.id}`]) {
+  for (const route of [VIDEO_YT_ROUTE, VIDEO_ID_ROUTE, VIDEO_PLAIN_ROUTE, EVENT_ROUTE, PROFILE_ROUTE]) {
     for (const img of read(route).matchAll(/<img\b[^>]*>/g)) assert.match(img[0], /\balt="[^"]*"/, `${route}: ${img[0]}`);
   }
-  assert.match(read(`event/${event.id}`), /<img[^>]*alt="代表イベント 2026 メインビジュアル"/);
+  assert.match(read(EVENT_ROUTE), /<img[^>]*alt="FlameNode Autumn Festival 2026 メインビジュアル"/);
 });
 
 test("creator pagination links keep CURRENT query names (worksPage / collabPage)", async () => {
@@ -236,5 +296,6 @@ test("event status badge follows CURRENT app/(public)/event/[id]/page.tsx:234-23
     assert.doesNotMatch(bare, /DRAFT/);
     assert.doesNotMatch(bare, /class="fn-status\b/);
   }
-  assert.match(read(`event/${event.id}`), /<span class="fn-status fn-status--public" data-status="public"><span>開始前<\/span><\/span>/);
+  // The MIG-0502 event page is built from the event fixture (entry window open until 2100): the same pill, 募集期間中.
+  assert.match(read(EVENT_ROUTE), /<span class="fn-status fn-status--public" data-status="public"><span>募集期間中<\/span><\/span>/);
 });

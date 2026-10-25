@@ -218,19 +218,37 @@ function checkedManifest(manifest: SnapshotManifest | null, generation: string, 
   return manifest;
 }
 
+const ENTITY_KEY_PATTERN = /^snapshot\/(video|user|event)\/[a-zA-Z0-9_-]+\.json$/;
+/** CURRENT `GET /api/public/about-stats` (RH-026) as one build-time object. */
+export const ABOUT_STATS_KEY = "snapshot/about-stats/current.json";
+
+export type AboutStatsSnapshot = Readonly<{ publicVideos: number; creators: number; events: number }>;
+
+/** CURRENT `AboutStats.normalizeStats`: three safe non-negative integers or nothing. */
+function validatedAboutStats(value: unknown): AboutStatsSnapshot | null {
+  if (!isRecord(value)) return null;
+  const publicVideos = Number(value.publicVideos);
+  const creators = Number(value.creators);
+  const events = Number(value.events);
+  for (const n of [publicVideos, creators, events]) {
+    if (!Number.isSafeInteger(n) || n < 0) return null;
+  }
+  return { publicVideos, creators, events };
+}
+
 /**
- * Strictly read a versioned, SHA-verified public-only projection.
- * Fail closed on private, stale, invalid, missing or oversized inputs.
- * Does not call D1, Queue, HTTP or production Workers.
+ * Verified envelope payload: manifest, key, size, JSON, generation, visibility and digest checks.
+ * Shared by every snapshot kind; the caller projects the payload strictly.
  */
-export async function loadPublicBuildSnapshot(
+async function readVerifiedPayload(
   source: SnapshotSource,
   key: string,
   options: SnapshotLoadOptions,
-): Promise<PublicSnapshot> {
-  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  metrics: SnapshotBuildMetrics,
+  keyPattern: RegExp,
+): Promise<unknown> {
   const manifest = checkedManifest(options.manifest, options.generation, metrics);
-  if (typeof key !== "string" || !/^snapshot\/(video|user|event)\/[a-zA-Z0-9_-]+\.json$/.test(key)) {
+  if (typeof key !== "string" || !keyPattern.test(key)) {
     return reject(metrics, "INVALID_KEY", "Invalid snapshot key");
   }
   if (manifest.blockedKeys.includes(key) || !manifest.allowedKeys.includes(key)) {
@@ -270,10 +288,152 @@ export async function loadPublicBuildSnapshot(
   if (!HEX_256.test(envelope.sha256)) return reject(metrics, "INVALID_HASH", "Snapshot digest missing");
   const actualHash = createHash("sha256").update(JSON.stringify(envelope.payload)).digest("hex");
   if (actualHash !== envelope.sha256) return reject(metrics, "HASH_MISMATCH", "Snapshot digest mismatch");
-  const dto = validatedPublicDto(envelope.payload);
+  return envelope.payload;
+}
+
+/**
+ * Strictly read a versioned, SHA-verified public-only projection.
+ * Fail closed on private, stale, invalid, missing or oversized inputs.
+ * Does not call D1, Queue, HTTP or production Workers.
+ */
+export async function loadPublicBuildSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<PublicSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, ENTITY_KEY_PATTERN);
+  const dto = validatedPublicDto(payload);
   if (!dto) return reject(metrics, "INVALID_PAYLOAD", "Snapshot public DTO invalid");
   const expectedKey = `snapshot/${dto.kind}/${dto.id}.json`;
   if (expectedKey !== key) return reject(metrics, "ENTITY_MISMATCH", "Snapshot entity ID does not match key");
   metrics.accepted += 1;
   return dto;
+}
+
+/** Listing artifacts rendered at build time by `/list`, `/recommend`, `/trending` (MIG-0505). */
+export const LIST_FIRST_PAGE_KEY = "snapshot/list/first-page.json";
+export const RECOMMEND_KEY = "snapshot/recommend/current.json";
+export const TRENDING_KEY = "snapshot/trending/current.json";
+/** CURRENT `top.json` as one build-time object for `/` (MIG-0506). */
+export const TOP_KEY = "snapshot/top/current.json";
+const LISTING_KEY_PATTERN = /^snapshot\/(list\/first-page|recommend\/current|trending\/current|top\/current)\.json$/;
+
+/**
+ * Verified payload of a listing snapshot (same manifest/generation/sha256/visibility checks as every kind).
+ * The caller projects it with CURRENT's public-only normalizers, which drop every non-public row.
+ */
+export async function loadListingPayload(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, LISTING_KEY_PATTERN);
+  metrics.accepted += 1;
+  return payload;
+}
+
+/** CURRENT `videos/{id}.json` artifact, one snapshot per public video (MIG-0507). */
+const VIDEO_DETAIL_KEY = /^snapshot\/video-detail\/[A-Za-z0-9_-]{1,64}\.json$/;
+
+/** Allowed, not blocked, well-formed video detail keys of a manifest. */
+export function videoDetailKeys(manifest: SnapshotManifest): string[] {
+  return manifest.allowedKeys.filter((key) => VIDEO_DETAIL_KEY.test(key) && !manifest.blockedKeys.includes(key));
+}
+
+export async function loadVideoDetailPayload(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, VIDEO_DETAIL_KEY);
+  metrics.accepted += 1;
+  return payload;
+}
+
+/** Same fail-closed checks as entities; the payload is the three RH-026 counts (MIG-0501). */
+export async function loadAboutStatsSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<AboutStatsSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, ABOUT_STATS_KEY, options, metrics, /^snapshot\/about-stats\/current\.json$/);
+  const stats = validatedAboutStats(payload);
+  if (!stats) return reject(metrics, "INVALID_PAYLOAD", "About stats payload invalid");
+  metrics.accepted += 1;
+  return stats;
+}
+
+/**
+ * Public event object keys (MIG-0502). The payloads are CURRENT's `events/index.json`,
+ * `events/{id}.json` and `events/{id}/release.v1.json` as they are; the normalizers stay CURRENT's
+ * (`staticEvents*Core`, imported by `eventData.ts`) so the visibility fences cannot drift.
+ */
+export const EVENT_INDEX_KEY = "snapshot/event-index/current.json";
+export const EVENT_DETAIL_KEY_PATTERN = /^snapshot\/event-detail\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const EVENT_RELEASE_KEY_PATTERN = /^snapshot\/event-release\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.json$/;
+export const eventDetailKey = (id: string): string => `snapshot/event-detail/${id}.json`;
+export const eventReleaseKey = (id: string): string => `snapshot/event-release/${id}.json`;
+
+/** Verified raw payload of one event object (manifest, generation, visibility, hash). Throws SnapshotBuildError. */
+export async function loadEventPayloadSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const pattern = key === EVENT_INDEX_KEY
+    ? /^snapshot\/event-index\/current\.json$/
+    : key.startsWith("snapshot/event-release/") ? EVENT_RELEASE_KEY_PATTERN : EVENT_DETAIL_KEY_PATTERN;
+  const payload = await readVerifiedPayload(source, key, options, metrics, pattern);
+  metrics.accepted += 1;
+  return payload;
+}
+/** CURRENT `users/index.json` (the R2 object `/user` reads) as one build-time object (MIG-0504). */
+export const USERS_INDEX_KEY = "snapshot/users-index/current.json";
+/**
+ * CURRENT `users/<id>.json` and its paged siblings (`users/<id>/works/<n>.json`, `collabs/<n>.json`) as
+ * build-time objects: `snapshot/user-profile/<x-id>[.works.<n>|.collabs.<n>].json` (n = 2..5).
+ */
+const USER_PROFILE_KEY_PATTERN = /^snapshot\/user-profile\/[a-z0-9_]{1,20}(\.(works|collabs)\.[2-9])?\.json$/;
+
+export function userProfileSnapshotKey(xId: string, section?: "works" | "collabs", page?: number): string {
+  return section && page
+    ? `snapshot/user-profile/${xId}.${section}.${page}.json`
+    : `snapshot/user-profile/${xId}.json`;
+}
+
+/**
+ * Same fail-closed envelope checks as entities; the payload is returned as the CURRENT R2 JSON object.
+ * The caller projects it with CURRENT `normalizeStaticUserProfile` / `normalizeStaticUsersIndex`, which
+ * forward only known fields and drop non-public videos.
+ */
+async function loadPublicRecord(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+  keyPattern: RegExp,
+): Promise<Record<string, unknown>> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(source, key, options, metrics, keyPattern);
+  if (!isRecord(payload)) return reject(metrics, "INVALID_PAYLOAD", "Snapshot payload is not an object");
+  metrics.accepted += 1;
+  return payload;
+}
+
+export function loadUserProfileSnapshot(
+  source: SnapshotSource,
+  key: string,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, key, options, USER_PROFILE_KEY_PATTERN);
+}
+
+export function loadUsersIndexSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<Record<string, unknown>> {
+  return loadPublicRecord(source, USERS_INDEX_KEY, options, /^snapshot\/users-index\/current\.json$/);
 }
