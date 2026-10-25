@@ -305,9 +305,14 @@ export default {
     // The maintenance page itself: static, and exempt from the maintenance redirect above.
     if (path === "/maintenance" || path === "/maintenance/") {
       try {
-        return await env.ASSETS.fetch(
+        const asset = await env.ASSETS.fetch(
           new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers, redirect: "manual" }),
         );
+        // This page is known to exist. Asset 404/5xx means an incomplete build,
+        // not a stable public 404 or an uncacheable error supplied by the origin.
+        return asset.status === 200 || asset.status === 304
+          ? asset
+          : unavailablePage(env, url, request.method);
       } catch {
         return unavailablePage(env, url, request.method);
       }
@@ -322,7 +327,12 @@ export default {
         ? new Request(new URL(`${fixed}/`, url.origin), { method: request.method, headers: request.headers, redirect: "manual" })
         : new Request(request, { redirect: "manual" });
       try {
-        return await env.ASSETS.fetch(target);
+        const asset = await env.ASSETS.fetch(target);
+        if (FIXED_PUBLIC_PAGES.has(fixed) && asset.status !== 200 && asset.status !== 304) {
+          // A listed public HTML page that is absent or failing is a temporary build error.
+          return unavailablePage(env, url, request.method);
+        }
+        return asset;
       } catch {
         // Failed public HTML should be retryable; hashed/font assets retain text 503.
         return FIXED_PUBLIC_PAGES.has(fixed)
