@@ -13,6 +13,9 @@ import { adminUsersRoutes } from "./users.ts";
 import { adminXIdMergesRoutes } from "./xIdMerges.ts";
 import { adminXLinkRequestsRoutes } from "./xLinkRequests.ts";
 import { adminVideosRoutes } from "./videos.ts";
+import { adminUserEditRoutes } from "./userEdit.ts";
+import { adminVideoDetailRoutes } from "./videoDetail.ts";
+import { adminVideoMembersRoutes } from "./videoMembers.ts";
 
 // MIG-0625: read-only Admin screens API (users / videos / events / moderation). GET only; nothing here writes.
 // Mounted at /api/admin-read so it never shares a path prefix with the mutating /api/admin write guard.
@@ -37,8 +40,11 @@ adminReadRoutes.use("*", async (c, next) => {
   await next();
 });
 
+adminReadRoutes.route("/users", adminUserEditRoutes);
 adminReadRoutes.route("/users", adminUsersRoutes);
 adminReadRoutes.route("/videos", adminVideosRoutes);
+adminReadRoutes.route("/videos", adminVideoMembersRoutes);
+adminReadRoutes.route("/videos", adminVideoDetailRoutes);
 adminReadRoutes.route("/event-groups", adminEventGroupsRoutes);
 adminReadRoutes.route("/events/templates", adminEventTemplatesRoutes);
 adminReadRoutes.route("/events/new", adminEventNewRoutes);
