@@ -21,6 +21,7 @@ import { adminReadGuardMiddleware, onlyReads } from "../../middleware/adminReadG
 import { dbMiddleware } from "../../middleware/db.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
+import { auditAdminRoutes } from "./audit.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -47,5 +48,6 @@ export function createAdminRoutes(
   admin.use("*", onlyReads(adminReadGuardMiddleware()));
   admin.route("/announcements", announcementRoutes);
   admin.route("/api-endpoints", apiEndpointRoutes);
+  admin.route("/audit", auditAdminRoutes);
   return admin;
 }

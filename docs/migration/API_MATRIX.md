@@ -96,8 +96,10 @@ Write guard order for every row: origin (pure) -> session -> origin/auth/identit
 | SA-006 | `DELETE /api/admin/announcements/:id` | `admin_announcement_broadcast` | 200 / 404 / 500 | same |
 | SA-007 | `POST /api/admin/api-endpoints` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | `apps/api/src/routes/admin/apiEndpoints.ts` |
 | SA-008 | `PATCH /api/admin/api-endpoints/:id` | `admin_api_endpoints` | 200 / 400 / 404 / 413 / 500 | same |
+| SA-009 | `POST /api/admin/audit/settings` | `admin_permissions` | 200 / 400 / 413 / 500 | `apps/api/src/routes/admin/audit.ts` |
+| SA-010 | `POST /api/admin/audit/dry-run` | `admin_permissions` | 200 / 400 / 413 | same (D-13-54 recorded exception: 6 D1 stmts, writes=0) |
 
-SA-009 / SA-010 move to MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
+SA-009 / SA-010 implemented in MIG-0629 (admin audit settings + restore dry-run APIs); SA-011 (audit restore) moves to a later task (see work-items/MIG-0602.md Decision). Safe methods (GET/HEAD) under `/api/admin` are denied by default unless an authenticated admin (`adminReadGuardMiddleware`).
 
 ### Hono endpoints (MIG-0603 U02b, PR #393)
 
