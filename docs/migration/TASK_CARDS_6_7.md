@@ -332,6 +332,72 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 表に無い key で exit 1、template key の正規化。
 - DONE: 全 key に producer と置き換え先、CI に入っている。
 
+### MIG-0650 — video collaborators / members APIs
+- 読む: `video-collab-perms.ts:891,949,995`、`video/adminMembers.ts:67`、core `ownership.ts:150,386,539`、D-15-2。
+- 変更: `+apps/api/src/routes/videos/collaborators.ts`、`loadVideoRebuildEventIds` の core 化（D-15-2）。
+- 試験: 役割 × 4 SA の可否、field 単位の parity、CAS 競合、wake 0。
+- DONE: SA-082..085 の parity、権限判定が全件一致。
+
+### MIG-0651 — video submit / update APIs
+- 読む: `video/{createFreeVideo,submitSlotVideo,updateVideo}.ts`、`API_MATRIX.md:84,86`、D-15-3（body 上限）。
+- 変更: `+apps/api/src/routes/videos/submit.ts`、必要な helper の core 化、`bodyLimit.ts`（先に無ければ）。
+- 試験: 再投稿・重複 URL・編集不可 section の拒否、8 MiB の境界、wake 0。
+- DONE: SA-086 / 088 / 089 の parity、forms の契約 test が PASS のまま。
+
+### MIG-0652 — event create / update / delete / rename APIs
+- 読む: `event-admin.ts:223,553,1096`、`event-admin-danger.ts:99`、core `visibility/eventTransition.ts`、D-15-5 / D-15-10。
+- 変更: `+events/lifecycle.ts`、`+manage/eventWrite.ts`、`+visibility/eventTransitionHost.ts`。
+- 試験: 非公開化・削除・ID 変更の manifest 順序と補償、revision CAS、wake 0。
+- DONE: SA-021..024 の parity、planner を変えていない。
+
+### MIG-0653 — event group APIs
+- 読む: `event-group-admin.ts:97,255,347,461,551,659`、`adminRead/eventGroups.ts`。
+- 変更: `+apps/api/src/routes/admin/eventGroups.ts`。
+- 試験: 各 SA の parity、group fence の順、非 admin の拒否。
+- DONE: SA-025..030 の parity。
+
+### MIG-0654 — event staff / owner transfer APIs
+- 読む: `event-staff-admin.ts:303,467,669,723`、core `event/eventOwnership.ts`、D-15-10。
+- 変更: `+apps/api/src/routes/manage/staffWrite.ts`。
+- 試験: owner 0 の並行 test、自分自身の変更、preset の付与制限。
+- DONE: SA-031..034 の parity、core を変えていない。
+
+### MIG-0655 — event template save/list + playlist settings APIs
+- 読む: `event-template-admin.ts:51,176`、`event-youtube-playlist.ts:55,253`、D-13-48、D-15-6。
+- 変更: `events/templates.ts` に SA-035 / 037、`+manage/playlistWrite.ts`、domain への 3 関数の移動。
+- 試験: 保存 → 一覧、非 admin の `[]`、sync 要求の行と wake 0。
+- DONE: SA-035 / 037..039 の parity、SA-036 の test が PASS のまま。
+
+### MIG-0656 — slot admin APIs
+- 読む: `slot-admin.ts:262,398,465,615,640,660,730`、`slot-admin-danger.ts:236,484`、D-15-10。
+- 変更: `+apps/api/src/routes/manage/slotsWrite.ts`、必要な slot helper の core 化。
+- 試験: version 競合、上限、危険操作の確認 field、wake 0。
+- DONE: SA-056..064 の parity。
+
+### MIG-0657 — slot reserve / release / extend / merge APIs
+- 読む: `slot.ts:632,852,900,1038`、`slotNotificationsPostCommit.ts`、`viewerOverlay.ts:194-200`（path 指定の stack）。
+- 変更: `+apps/api/src/routes/events/slotReservation.ts`、`app.ts` の mount 1 行。
+- 試験: 同時予約で 1 件だけ成功、予約上限の境界、wake 0。
+- DONE: SA-065..068 の parity、予約の原子性。
+
+### MIG-0658 — D-03 fan-out dry-run script
+- 読む: `OPEN_DECISIONS.md` D-03、`ACTIVE_X_MIGRATION_PLAN.md`、`scripts/check-video-interactions-auth.mjs`。
+- 変更: `+scripts/d03-fanout-dry-run.mjs` と test、`ACTIVE_X_MIGRATION_PLAN.md` の 1 節。
+- 試験: 対象外のリンク、複数 Auth User の畳み込み、衝突の列挙、DB の hash が不変。
+- DONE: 書き込み文が無く、Remote D1 を読まない。
+
+### MIG-0659 — X link request APIs
+- 読む: `xid.ts:147,300,558,740`、`xidPendingInsert.ts`、`xidRequestReliabilityCore.ts`、D-15-8。
+- 変更: `+apps/api/src/routes/xid/requests.ts`（`xid/index.ts` と mount は先に merge した方）。
+- 試験: 二重送信、他人所有・重複の拒否、監査の `actor_x_user_id`。
+- DONE: SA-099..101 の parity。
+
+### MIG-0660 — deep health Route Handler (RH-017)
+- 読む: `app/api/health/deep/route.ts:24-31`、`src/lib/health/*.ts`、`apps/api/src/routes/health.ts:53-78`、D-13-59。
+- 変更: `src/lib/health/*` と import 先を core へ（bridge）、`/deep` の仮実装を消す。
+- 試験: token の拒否、全 OK / 1 件 NG / 例外の status と body。
+- DONE: RH-017 の仮実装が残っていない。
+
 ## Private SPA common constraints (D-05)
 
 **Personal SPA = `apps/app`: `/dashboard`, `/entry`, `/onboarding`, `/_personal_assets/*`. Ops SPA = `+apps/ops` at MIG-0704: `/manage`, `/admin`, `/_ops_assets/*`.** CSS/JS chunks別、Cookie同一origin、認可はHono+旧Authと一致。現在`apps/ops`は未作成なのでビルド成功を要求するのはMIG-0704以降だけ。cross-SPA遷移は通常HTTP navigation。UIはCURRENT見た目を踏襲（公開HTMLの新visualをprivateへ無理に適用しない）。
@@ -371,6 +437,12 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: `apps/ops`にadmin lazy route chunksを設け、audit/spreadsheet/moderation/merge/health/cost guard/event/video/YouTube/admin operationsを旧UIと等価に移す。dangerous actionsには確認/CSRF/permission/strict audit、発行Tokenをブラウザへ漏らさない。
 - 試験: user/admin/moderator/owner/guest permission matrix; table edit/export/import atomicity; audit restore; X merge/revert; Cloudflare worker diagnostics; 403/no-store; CSS/JS bundle isolation。
 - DONE: Admin 45 route全件とそれらが所有するUX/FN IDの対応を示し、destructive/privileged operationsは独立レビューに通す。
+
+### MIG-0707 — Ops SPA scaffold (MIG-0704 U01)
+- 読む: `apps/app/{package.json,vite.config.ts,index.html,tsconfig.json}`、`apps/app/src/routes/guard.tsx`、`app/(manage)/layout.tsx`、`app/(admin)/layout.tsx`、`account/summary.ts:282-302`。
+- 変更: `+apps/ops/**`（package・build・router 枠・guard・`_headers`）、CI の build / test、`assetHeaders.test.mjs` の `ops`。
+- 試験: 2 SPA の build で asset が混ざらない、guard の Location、noindex、`/_ops_assets/*` immutable。
+- DONE: Ops の build が CI で動き、本番の Worker / Route を作っていない。
 
 ### MIG-0706 — Phase 7 Gate (2 SPAs)
 

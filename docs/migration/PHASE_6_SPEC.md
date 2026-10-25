@@ -180,10 +180,10 @@ Phase 6 共通契約のとおり。
 
 ### MIG-0603: video APIs（動画・チャプター API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（lead 決定 D-13-40〜66 で残りの unit を確定。U02a / U02b は今すぐ着手できる。U03a（SA-087）は D-14-8 で MIG-0640 へ分割。U02c / U03b / U03c は MIG-0633 が STATUS で DONE になるまで着手しない（D-13-44）。実装は Sonnet、レビューは Opus）
+- **Readiness:** NEEDS_REFINEMENT — READY（lead 決定 D-13-40〜66 で残りの unit を確定。U02a / U02b は今すぐ着手できる。U03a（SA-087）は D-14-8 で MIG-0640 へ分割。U02c は U02a の host を使うので U02a の後。MIG-0633 は DONE（#402）。U03b は D-15-1 で MIG-0650、U03c は MIG-0651 へ分割。実装は Sonnet、レビューは Opus）
 - **Recipe:** R-API, R-CORE
 - **Runtime:** S2, S3
-- **Depends on:** MIG-0602, MIG-0304 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-13-40〜66
+- **Depends on:** MIG-0602, MIG-0304 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-13-40〜66, D-15-1, D-15-2, D-15-10
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | file | 状態 |
@@ -193,25 +193,26 @@ Phase 6 共通契約のとおり。
 | video list / viewer overlay | RH-032 / RH-031 | `app/api/videos/route.ts`, `app/api/videos/[id]/viewer-overlay/route.ts` | **MIG-0634 へ移管** |
 | admin visibility | SA-001..003 | `src/lib/actions/admin.ts:70,77,85`（`setVideoStatus`） | U02a/U02b |
 | moderation case | SA-043/044 | `src/lib/actions/moderation-admin.ts:109,260` | U02b（MIG-0605 から移管、D-13-40） |
-| manage visibility | SA-040..042 | `src/lib/actions/manage-video.ts:58,65,73`（`canEditEvent` = `src/lib/auth/ownership.ts:306`） | U02c（MIG-0633 後） |
+| manage visibility | SA-040..042 | `src/lib/actions/manage-video.ts:58,65,73`（`canEditEvent` = `src/lib/auth/ownership.ts:306`） | U02c（U02a の後） |
 | like / bookmark | SA-087 | `src/lib/actions/video/interaction.ts:243` | **MIG-0640 へ分割**（D-14-8） |
-| collaborators / members | SA-082..085 | `src/lib/actions/video-collab-perms.ts:891,949,995`, `src/lib/actions/video/adminMembers.ts:67` | U03b（MIG-0633 後） |
-| submit / update | SA-086, SA-088, SA-089 | `src/lib/actions/video/{createFreeVideo,submitSlotVideo,updateVideo}.ts` | U03c（MIG-0633 後。別 MIG 推奨） |
+| collaborators / members | SA-082..085 | `src/lib/actions/video-collab-perms.ts:891,949,995`, `src/lib/actions/video/adminMembers.ts:67` | **MIG-0650 へ分割**（D-15-1） |
+| submit / update | SA-086, SA-088, SA-089 | `src/lib/actions/video/{createFreeVideo,submitSlotVideo,updateVideo}.ts` | **MIG-0651 へ分割**（D-15-1） |
 - 解消済みの blocker（2026-10-25 に code で確認）: B-1/B-2（`writeGuardMiddleware` の `requiredRole` / `activeX`、`apps/api/src/middleware/writeOrigin.ts:103-171`）、B-5（core `buildStaticRebuildQueueBatch` の prefetch 0、`packages/server-core/src/staticRebuild/enqueue.ts:69`。`chapters.ts:33` が使用済み）。B-3 は半分解消: planner は core（`packages/server-core/src/visibility/videoTransition.ts:195` `planVideoVisibilityTransition`、`:367` `preCommitVideoVisibilityDepublicization`、`:425` `runVideoVisibilityTransitionPostCommit`、`:626` `handleVideoVisibilityMutationFailure`）にあり、無いのは Hono 用 host（型 `VideoVisibilityTransitionHost`、`:45`）と `src/lib/video/videoVisibilityStatusAction.ts`（164 行、`executeVideoVisibilityStatusMutation`）、`src/lib/video/videoVisibilityStatusCore.ts#loadVideoRebuildEventIds`、`src/lib/admin/videoReviewQueueOrder.ts#attachApproveAndNextHref`（119 行）、`src/lib/moderation/voidCaseType.ts`（11 行）。
 - Next の host（写し元）: `src/lib/video/videoVisibilityTransition.ts:47-82`（manifest = `nextVisibilityManifestHost`、通知 builder、export cache 無効化、公開 cache 削除、通知 wake）。core 側の部品: `visibility/manifestR2.ts#readVisibilityManifestObject` / `#putVisibilityManifestWithCas`、`publicCache/delete.ts#deletePublicJsonCaches`、`notifications/videoStatusNotify.ts#buildVideoStatusChangeNotificationBatch`、`moderation/openCases.ts`。
 - 公開画面から直接呼ぶ部品: `src/components/video/InteractionButton.tsx:6`（SA-087）, `VideoStatusForm.tsx:7-8`（SA-001/040）。
 #### Owned paths
 - U02a: `+apps/api/src/visibility/videoTransitionHost.ts`, `+apps/api/src/visibility/publicCacheKeys.ts`（D-13-42 の定数）, `+packages/server-core/src/publicCache/eventExportKeys.ts`, `+packages/server-core/src/video/visibilityStatusAction.ts`（`executeVideoVisibilityStatusMutation`, `loadVideoRebuildEventIds`）, `+packages/server-core/src/video/reviewQueueOrder.ts`（`attachApproveAndNextHref`）, `+apps/api/test/videoTransitionHost.test.mjs`。変更（bridge）: `src/lib/api/eventExportCache.ts`, `src/lib/video/videoVisibilityStatusAction.ts`, `src/lib/video/videoVisibilityStatusCore.ts`, `src/lib/admin/videoReviewQueueOrder.ts`, `packages/server-core/package.json`（exports）
 - U02b: `+apps/api/src/routes/admin/videoStatus.ts`, `+apps/api/src/routes/admin/moderation.ts`, `+packages/contracts/src/admin/videoStatus.ts`, `+apps/api/test/adminVideoStatus.parity.test.mjs`。変更: `apps/api/src/routes/admin/index.ts`（route 2 行）, `packages/contracts/src/admin/index.ts`（export 1 行）
-- U02c / U03b / U03c: MIG-0633 の後に lead が file を確定する（`apps/api/src/routes/manage/videoStatus.ts`, `apps/api/src/routes/videos/collaborators.ts` などを予定）
+- U02c: `+apps/api/src/routes/manage/videoStatus.ts`, `+apps/api/test/manageVideoStatus.parity.test.mjs`。変更: `apps/api/src/routes/manage/index.ts`（route 1 行。書き込みの stack が無ければ D-15-10 の 3 行も）
+- U02a の `loadVideoRebuildEventIds` は D-15-2 の `packages/server-core/src/video/rebuildEventIds.ts` に置く（MIG-0650 が先に merge していればそれを使う）
 - 触らない: `src/lib/actions/**`, `app/api/**`, `apps/api/src/routes/videos/detail.ts`, `STATUS.md`
 #### Micro-units
 - **U02a Hono 可視性 host**（R-CORE + R-API）: D-13-42 のとおり移動と定数の写し。host は `c.env.BUCKET` に core の manifest read / CAS put、`caches.default` に `deletePublicJsonCaches`、`buildNotificationBatch` は core の builder に `NEXT_PUBLIC_SITE_URL` を束ねて渡す、`wakeNotificationQueueAfterCommit` は何もしない（D-13-41）、`rethrowFrameworkControl` は no-op。test: 定数 drift（src の実値と一致）、host の各メソッドが CURRENT host と同じ key 集合で呼ばれる。
 - **U02b SA-001..003 + SA-043/044**: `POST /api/admin/videos/:videoId/status`（body: `status`, `reason`, `case_id`, `and_next`, `review_event_id`, `force_notify`, `void_reason_category`。SA-001 = `status: "public"`、SA-002 = それ + `and_next: "1"`、SA-003 = 任意 status。CURRENT `admin.ts:70-85` の `formData.set` と同じ写像）、`POST /api/admin/moderation/cases`（SA-043）、`POST /api/admin/moderation/cases/:caseId/status`（SA-044）。guard: admin writeGuard + CostGuard（`admin_video_status` / `admin_moderation_create` / `admin_moderation_update`）。順序は CURRENT `setVideoStatus`（`admin.ts:85-221`）と同じ: 入力検証（domain `validateAdminVideoStatusInput`）→ video → `validateVideoPublicEligibility` → 同一 status は `SAME_VIDEO_STATUS_MESSAGE` → rebuild event ids → planner → voided の case open / resolve → `executeVideoVisibilityStatusMutation`（core へ移したもの）→ post-commit → `attachApproveAndNextHref`。失敗は `handleVideoVisibilityMutationFailure`（fence の補償）。parity: 実 CURRENT action と同じ node:sqlite で audit / `static_rebuild_queue` / `notification_outbox` / `video_moderation_cases` / manifest（fake bucket）を field 単位で比較。`DOCUMENTED DIFFERENCE D-0603-1` と `DOCUMENTED DIFFERENCE D-13-41`（CURRENT の wake 数 vs 0）を1件ずつ。D1 文数を test で固定（D-13-43）。
 - **U03a**: MIG-0640 へ分割（D-14-8）。
-- **U02c SA-040..042**（MIG-0633 後）: `POST /api/manage/events/:eventId/videos/:videoId/status`。権限は MIG-0633 の core `canEditEvent(..., "video.status")`。U02a の host を使う。
-- **U03b SA-082..085**（MIG-0633 後）、**U03c SA-086/088/089**（MIG-0633 後。G21 の body 上限は MIG-0636 の `apps/api/src/middleware/bodyLimit.ts` を使う。lead が別 MIG に切り出すなら本 Work Order から消す）。
-- **Final audit**: SA-001..003/012..015/040..044/082..089 と UX/FN の対応表。
+- **U02c SA-040..042**（U02a の後）: `POST /api/manage/events/:eventId/videos/:videoId/status`。権限は MIG-0633 の core `canEditEvent(..., "video.status")`。U02a の host を使う。mount は D-15-10。
+- **U03b**: MIG-0650 へ分割（D-15-1）。**U03c**: MIG-0651 へ分割（D-15-1）。
+- **Final audit**: SA-001..003/012..015/040..044 と UX/FN の対応表（SA-082..089 は MIG-0640 / 0650 / 0651 が持つ）。
 #### Rules
 - D-0603-1（queue 行は同じ batch、wake 0）と D-13-41（通知 wake 0）を全 write に適用。route file の先頭 comment に両方を書く。
 - 共有 module（`apps/api/src/middleware/**`, `apps/api/src/auth/session.ts`）は変えない。変える必要が出たら STOP。
@@ -237,25 +238,25 @@ npm run check:video-interactions-auth
 npm run typecheck && npm run test:unit && npm run test:integration
 ```
 #### Ledger updates
-`API_MATRIX.md` の SA-001〜003, 040〜044, 082〜089 に Hono endpoint と D-13-41/64 の参照。RH-031/032 は MIG-0634。`FILE_MIGRATION_MATRIX.md` に新規 file と bridge の行。
+`API_MATRIX.md` の SA-001〜003, 040〜044 に Hono endpoint と D-13-41/64 の参照。RH-031/032 は MIG-0634。`FILE_MIGRATION_MATRIX.md` に新規 file と bridge の行。
 #### DONE checklist
-- [ ] U02a / U02b / U02c / U03b / U03c（または lead が切り出した先）と Final audit が DONE（U03a は MIG-0640）
+- [ ] U02a / U02b / U02c と Final audit が DONE（U03a は MIG-0640、U03b は MIG-0650、U03c は MIG-0651）
 - [ ] 権限判定の結果が CURRENT と全件一致
 - [ ] wake 0 の差（D-0603-1 / D-13-41）が test 名 `DOCUMENTED DIFFERENCE` で残っている
 #### STOP
 - 権限判定が1件でも変わったら止める。
 - planner（core、Next と共有）の挙動を変える必要が出たら止める。
 - Queue binding、本番 R2 manifest の読み書き、Route 切替が必要になったら止める（owner の明示承認事項）。
-- U02c / U03b / U03c を MIG-0633 DONE より前に始めない。
+- U02c を U02a の merge より前に始めない。
 #### Rollback
 Phase 6 共通契約のとおり（U02a の移動は bridge なので revert で戻る）。
 
 ### MIG-0604: event/slot APIs（イベント・枠 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0633 と MIG-0639 待ち。MIG-0639 は D-12 の live slots 6000 枠の判定（additive paging の要否）を U04 の前に出す、D-14-7）。U01 RH-014（#391、5d4e980）、U02 RH-020..022 と SA-036（#334）は merge 済み。残りは U04（SA-021..035, 037..039, 056..068）と Final audit。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-15-4: U04 を MIG-0652〜0657 へ分割。本 task に残るのは Final audit と、MIG-0639 の D-12 判定で要ると出たときの live slots additive paging unit。MIG-0633 は DONE）。U01 RH-014（#391、5d4e980）、U02 RH-020..022 と SA-036（#334）は merge 済み。残りは Final audit と paging の判定（U04 は MIG-0652〜0657）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604
 - **Recipe:** R-API
 - **Runtime:** S2, S3
-- **Depends on:** MIG-0602, MIG-0305, MIG-0633, MIG-0639 / **Decisions:** D-12 DECIDED, D-13-48, D-14-7
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633, MIG-0639, MIG-0652..MIG-0657 / **Decisions:** D-12 DECIDED, D-13-48, D-14-7, D-15-4
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | file | 状態 |
@@ -264,18 +265,20 @@ Phase 6 共通契約のとおり（U02a の移動は bridge なので revert で
 | slot viewer overlay | RH-014 | `app/api/events/[id]/slots/viewer-overlay/route.ts` | DONE（#391） |
 | live slots / submissions / summary | RH-020..022 | `app/api/live/events/[id]/{slots,submissions,summary}/route.ts` | DONE（#334） |
 | event export | RH-012 / RH-013 | `app/api/event-endpoints/[id]/release/route.ts`, `app/api/event-endpoints/[id]/route.ts` | RH-012 は MIG-0631 で DONE、RH-013 は MIG-0632 |
-| event / staff / template / playlist | SA-021..039 | `src/lib/actions/event-*.ts`, `event-youtube-playlist.ts` | SA-036 DONE、残り U04 |
-| slot | SA-056..068 | `src/lib/actions/slot*.ts` | U04 |
+| event / staff / template / playlist | SA-021..039 | `src/lib/actions/event-*.ts`, `event-youtube-playlist.ts` | SA-036 DONE。SA-021..024 → MIG-0652、SA-025..030 → MIG-0653、SA-031..034 → MIG-0654、SA-035 / 037..039 → MIG-0655（D-15-4） |
+| slot | SA-056..068 | `src/lib/actions/slot*.ts` | SA-056..064 → MIG-0656、SA-065..068 → MIG-0657（D-15-4） |
 - 解消済み: B2（RH-014）、B5（MIG-0617 で `apps/api` が core `mutateWithAudit` を使い、監査入力 `WriteAuditLogInput` が `restore_strategy` / `actor_x_user_id` を持つ。`packages/server-core/src/audit/types.ts:75,81`）、B4 のうち guard 側（`writeGuardMiddleware` の `requiredRole: null`、`writeOrigin.ts:151,170`）。残る B4 は非 admin の event 権限と owner 0 guard（MIG-0633）。B6: SA-035 は `src/lib/admin/eventTemplateSettings.ts#snapshotFromEvent` を domain へ移す（同じ file の `parseEventTemplateSnapshot` / `snapshotToFormInitial` も一緒に移し、MIG-0705 が使う。D-13-48）。SA-037 は GET が admin write guard を通る CURRENT の形（拒否時 `[]`）の写像を U04 で決める。
 - 公開画面の `src/components/event/SlotGrid.tsx:15` が `@/lib/actions/slot` を直接呼ぶ。Phase 5 の枠 Island はこの MIG の API を使う。
 #### Owned paths
 - 新規: `+apps/api/src/routes/events/*.ts`（`publicList.ts` / `publicRelease.ts` / `publicSnapshot.ts` は MIG-0631 の所有で触らない）, `+apps/api/src/routes/live/*.ts`, `+packages/contracts/src/event*.ts`
 - 触らない: `src/lib/actions/**`, `app/api/events/**`, `app/api/live/**`
 #### Micro-units
-- U04 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0604 のとおり。U04 は MIG-0633 の core（`canEditEvent`, `remainingOperableEventOwnerSql` の owner 0 guard）を使い、写しを作らない。FIX-0604-1（slotViewerOverlay の `visibility_status` 欠落の修正）は MIG-0633 の後に lead が別 PR で追跡。
+- U04 は D-15-4 で MIG-0652〜0657 へ分割（各子 task は MIG-0633 の core（`canEditEvent`, `remainingOperableEventOwnerSql` の owner 0 guard）を使い、写しを作らない）。
+- **U05 paging**（MIG-0639 の判定が「要る」のときだけ）: RH-020 live slots の additive paging。判定が「要らない」なら恒久例外と書いて U05 は作らない。
+- **Final audit**: SA-021..039 / 056..068 と RH-012..015 / 020..022 の担当（MIG-0631 / 0632 / 0652〜0657）に抜けと二重所有が無いこと。FIX-0604-1（slotViewerOverlay の `visibility_status` 欠落の修正）は MIG-0633 の後に lead が別 PR で追跡。
 #### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
 - live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2 を超えるが CURRENT（`liveApi.ts`）と同じため変えない（D-12 で承認。MIG-0606 の 6000 枠入力で warm max ≥ 7ms のときだけ additive paging）。
-- RH-014: 本人の枠 LIMIT 100 / 64 KiB で fail-closed、own-slots 読み失敗は 503、ORDER BY の明示、pending 100 件、`operatorOverrideAllowed` 常に false（CURRENT の挙動）。D-12 で承認。詳細は `work-items/MIG-0604.md` Known differences。
+- RH-014: 本人の枠 LIMIT 100 / 64 KiB で fail-closed、own-slots 読み失敗は 503、ORDER BY の明示、pending 100 件。D-12 で承認。`operatorOverrideAllowed` 常に false（CURRENT の不具合）は FIX-0604-1（#410、`4ab5bd2`）で直した。詳細は `work-items/MIG-0604.md` Known differences。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -295,20 +298,20 @@ npm run test:integration
 #### Ledger updates
 `API_MATRIX.md` の SA-021〜039, 056〜068 に Hono エンドポイント。RH-012 / RH-015 は MIG-0631（DONE）、RH-013 は MIG-0632。
 #### DONE checklist
-- [ ] U01（済み）、U02（済み）、U04 と Final audit が DONE
+- [ ] U01（済み）、U02（済み）、MIG-0652〜0657 が DONE、U05（要るときだけ）と Final audit が DONE
 - [ ] owner 0 防止と予約の原子性がテストで実証されている
 #### STOP
 - 予約の transaction 境界を変える必要が出たら止める。
-- MIG-0633 と MIG-0639 が DONE になる前に U04 を始めない（MIG-0639 の D-12 判定で paging の追加 unit が要ると出たら、それを U04 に含める）。
+- MIG-0639 の DONE の前に U05 / Final audit を始めない。U04 の分割先（MIG-0652〜0657）は MIG-0639 を待たない（D-15-4: paging は RH-020 の読みの話で、書き込みに関係しない）。
 #### Rollback
 Phase 6 共通契約のとおり。
 
 ### MIG-0605: user/X/admin APIs（ユーザー・X・管理 API）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0633 待ち）。2026-10-25 に残りを MIG-0636 / 0637 / 0638 へ分けた（D-13-56）。本 task に残るのは SA-090/091、D-03 fan-out dry-run、D-04 checkpoint、U07、Final audit。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0633 は DONE（#402）。2026-10-25 に残りを MIG-0636 / 0637 / 0638 へ分けた（D-13-56）。D-15-7 で D-03 fan-out dry-run を MIG-0658 へ分割。本 task に残るのは SA-090/091、D-04 checkpoint、U07、Final audit）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0605
 - **Recipe:** R-API, R-EVIDENCE
 - **Runtime:** S3, N
-- **Depends on:** MIG-0602, MIG-0306, MIG-0633 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-56, D-13-57
+- **Depends on:** MIG-0602, MIG-0306, MIG-0633 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-56, D-13-57, D-15-7
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | 担当 |
@@ -324,15 +327,15 @@ Phase 6 共通契約のとおり。
 - 解消済み: B-1（`writeGuardMiddleware` の `requiredRole`、`writeOrigin.ts:151,170`）、B-2（#392）、B-3 / B-6 の「`apps/api` は src/lib を import できない」は `publicApi` / `publicDto` / `artifactVisibility` が server-core に移った（#398、`packages/server-core/src/publicData/`）ので MIG-0638 で解ける。
 - 公開画面の `src/components/user/useActiveXSwitcher.ts:5`（SA-098）と `app/(public)/rules/page.tsx:3,95`（SA-075）は MIG-0636。
 #### Owned paths
-- 新規: `+apps/api/src/routes/xid/linkRequests.ts`, `+packages/contracts/src/xidLinkRequest.ts`, `+apps/api/test/xidLinkRequests.parity.test.mjs`, `+scripts/d03-fanout-dry-run.mjs`, `+scripts/d03-fanout-dry-run.test.mjs`, `+docs/migration/D04_CUTOVER_CHECKPOINT.md`
+- 新規: `+apps/api/src/routes/xid/linkRequests.ts`, `+packages/contracts/src/xidLinkRequest.ts`, `+apps/api/test/xidLinkRequests.parity.test.mjs`, `+docs/migration/D04_CUTOVER_CHECKPOINT.md`
 - 変更: `apps/api/src/app.ts`（mount 1 行）, `docs/migration/API_MATRIX.md`, `docs/migration/route-handlers/README.md`（U07 の担当列）
 - 触らない: `src/lib/actions/**`, `app/api/**`、子 task（MIG-0636〜0638）の owned paths
 #### Micro-units
-- **U05x SA-090/091**（MIG-0633 後）: `POST /api/xid/link-requests/:requestId/approve`, `/reject`。guard は `writeGuardMiddleware({ requiredRole: null, activeX: { feature: "xid_links" } })`（CURRENT `xid-admin.ts:78`）+ core の `resolveXIdLinkRequestAuthorization`（監査の `actor_x_user_id` もそこから）。
-- **U05d D-03 fan-out dry-run**: `video_interactions_auth` → 承認済み owner X 全部への複製を node:sqlite で計算し、件数・衝突・like count の差分を出す script（`OPEN_DECISIONS.md` D-03、`ACTIVE_X_MIGRATION_PLAN.md`）。Remote D1 は読まない。入力は local の migration 済み DB だけ。
+- **U05x SA-090/091**: `POST /api/xid/link-requests/:requestId/approve`, `/reject`。guard は `writeGuardMiddleware({ requiredRole: null, activeX: { feature: "xid_links" } })`（CURRENT `xid-admin.ts:78`）+ core の `resolveXIdLinkRequestAuthorization`（監査の `actor_x_user_id` もそこから）。
+- **U05d**: MIG-0658 へ分割（D-15-7）。U05e の checkpoint は MIG-0658 の出力を参照する。
 - **U05e D-04 checkpoint**: 一括 cutover の手順と停止点を `D04_CUTOVER_CHECKPOINT.md` に書く。実行は owner の別承認。
 - **U07 coverage**: RH-001〜033 の全メソッドに担当 MIG（RH-010/011 は Phase 8）があることを表にする。SA-107〜110 の行（SA-107 = MIG-0703 / MIG-0802、SA-108/109 = MIG-0602 の型付き API へ写す、SA-110 = MIG-0637）。
-- **Final audit**: MIG-0602/0603/0604/0636〜0638/0640〜0648 と SA / RH の二重所有が無いこと。
+- **Final audit**: MIG-0602/0603/0604/0636〜0638/0640〜0648/0650〜0657/0659/0660 と SA / RH の二重所有が無いこと。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -340,13 +343,12 @@ Phase 6 共通契約のとおり。
 | T02 | media proxy に外部URL | SSRF 拒否（済み） |
 | T04 | X merge の revert | MIG-0637 で満たす |
 | T08 | 権限の無い staff が link request を承認 | CURRENT と同じ拒否、書き込み 0 |
-| T09 | D-03 dry-run（manager リンク・申請中・同じ X が複数 Auth User） | D-03 の規則どおり対象外 / 1 行に畳む。書き込み 0 |
+| T09 | D-03 dry-run | MIG-0658 で満たす |
 | T10 | RH-001〜033 の担当表 | RH-010/011 以外に空欄なし |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/api
 npm run test --workspace=@flamenode/api
-node --test scripts/d03-fanout-dry-run.test.mjs
 npm run check:x-link-dependencies
 npm run check:audit-actor-x
 npm run test:critical
@@ -355,13 +357,12 @@ npm run test:unit
 #### Ledger updates
 `API_MATRIX.md` の SA-090/091 に Hono endpoint。担当表は `route-handlers/README.md`。子 task の行は子 task が書く。
 #### DONE checklist
-- [ ] U05x / U05d / U05e / U07 / Final audit が DONE（子 task の DONE は MIG-0606 / MIG-0607 の依存で見る）
+- [ ] U05x / U05e / U07 / Final audit が DONE（U05d は MIG-0658）（子 task の DONE は MIG-0606 / MIG-0607 の依存で見る）
 - [ ] RH-010/011 以外の全メソッドに担当MIGがある
 - [ ] Remote D1 に書き込んでいない（D-03 は dry-run のみ）
 #### STOP
 - D-03 の fan-out を本番 D1 で実行する必要が出たら止める。
 - D-04 の切替を実行する必要が出たら止める（別承認）。
-- U05x を MIG-0633 DONE より前に始めない。
 #### Rollback
 Phase 6 共通契約のとおり。
 
@@ -370,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659, MIG-0660 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -1222,10 +1223,10 @@ PRをrevert。
 
 ### MIG-0626: Admin 読み取り API その B（settings・audit・ops・残り）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（#353 merge `27b69bfe`、Opus APPROVE on `ca461626`。残りは U05 integrity、U06 deep health、U07 RH-017。決定 D-13-51 / 73 / 80）
+- **Readiness:** NEEDS_REFINEMENT — READY（#353 merge `27b69bfe`、Opus APPROVE on `ca461626`。残りは U05 integrity、U06 deep health。U07 RH-017 は D-15-9 で MIG-0660 へ分割。決定 D-13-51 / 73 / 80）
 - **Recipe:** R-CORE, R-API
 - **Runtime:** S2
-- **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED, D-13-51, D-13-52, D-13-59
+- **Depends on:** MIG-0601, MIG-0608 / **Decisions:** D-05 DECIDED, D-13-51, D-13-52, D-13-59, D-15-9
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 済み: 25 endpoint + chunk 1（`apps/api/src/routes/adminRead/{settings,audit,ops}.ts`）。残りは `ops.ts` の STOP 記録 3 件:
@@ -1238,12 +1239,12 @@ PRをrevert。
 - U05: `+packages/server-core/src/admin/integrityChecks.ts`, `+packages/server-core/src/admin/permissionIntegrityChecks.ts`。bridge: `src/lib/admin/integrityChecks.ts`, `src/lib/admin/permissionIntegrityChecks.ts`
 - U06: `+packages/server-core/src/admin/healthChecks.ts`。bridge: `src/lib/admin/healthChecks.ts`
 - U05 / U06 共通: `apps/api/src/routes/adminRead/ops.ts`, `packages/contracts/src/adminReadOps.ts`, `apps/api/test/adminReadOps.parity.test.mjs`, `packages/server-core/package.json`（exports）
-- U07: `+packages/server-core/src/health/deepHealth.ts`（と import 先の `schemaContract` / `artifactSlo` / `queueEmergency`）, bridge `src/lib/health/deepHealth.ts`、`apps/api/src/routes/health.ts`, `apps/api/test/health.test.mjs`
+- U07: MIG-0660 へ分割（D-15-9）
 - 触らない: `app/**`, `src/lib/actions/**`
 #### Micro-units
 - **U05 integrity per check**（R-CORE → R-API）: 3 file を core へ移す（bridge の1行目 `// Compatibility bridge (MIG-0626, D-10): ...`）。core に `INTEGRITY_CHECK_IDS`（28 個、`runIntegrityChecks` の順）と `runIntegrityCheckById(db, id)` を足す（`runIntegrityChecks` は残し、同じ定義を使う）。`GET /api/admin-read/ops/integrity/:checkId`: 未知の id は 404、1 request = session + 1 文。`?run=1` の 501 は SPA が check id を1つずつ呼ぶ形に置き換え、`GET /ops/integrity` は `{ ran:false, results:[], checkIds }` を返す。
 - **U06 deep health per check**（D-13-51）: 同じ形で `HEALTH_CHECK_IDS`（22 個）と `runHealthCheckById(db, id)`、`GET /api/admin-read/ops/health/checks/:checkId`。`?deep=1` の 501 は `checkIds` を返す形に置き換える。
-- **U07 RH-017**（D-13-59）: `deepHealth.ts` を core へ移し、`health.ts` の `/deep` が token gate の後に core の `runDeepHealthChecks(env)` を呼ぶ。応答の status 写像は CURRENT（`app/api/health/deep/route.ts:24-31`）と同じ。
+- **U07 RH-017**: MIG-0660 へ分割（D-15-9）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -1252,7 +1253,7 @@ PRをrevert。
 | T03 | admin 以外 | 拒否 |
 | T04 | D1 statement 数 | integrity は session + 1、health は CURRENT の check と同じ数 |
 | T05 | 外部診断が失敗 | CURRENT と同じ劣化表示 |
-| T06 | RH-017 正しい token | CURRENT `runDeepHealthChecks` と同じ body と status |
+| T06 | RH-017 正しい token | MIG-0660 で満たす |
 | T07 | 移動前後の `npm run test:unit` | 件数と PASS が同じ |
 #### Commands
 ```bash
@@ -1269,7 +1270,7 @@ npm run typecheck && npm run test:unit && npm run test:critical
 #### DONE checklist
 - [ ] Admin 45 の全 page に read endpoint がある（static-builds の shared-input diagnostics は MIG-0627、D-13-52）
 - [ ] secret・token が response に出ない
-- [ ] RH-017 の仮実装が残っていない
+- [ ] RH-017 の仮実装が残っていない（MIG-0660 の DONE で満たす）
 #### STOP
 - 外部 request が budget を超えるなら lead に確認する。
 - check の SQL を1文字でも変える必要が出たら止める（移動だけ）。
@@ -1787,36 +1788,36 @@ PRをrevert。
 
 ### MIG-0636: Personal X / Active X の API（SA-098..105）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0605 から分割、D-13-56 / 78 / 81。D-14-9 で規約同意と onboarding（旧 U03）を MIG-0641 へ分割。MIG-0702 と MIG-0515 が使う。実装は Sonnet、review は Opus）
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0605 から分割、D-13-56 / 78 / 81。D-14-9 で規約同意と onboarding（旧 U03）を MIG-0641 へ、D-15-8 で SA-099..101（旧 U04）を MIG-0659 へ分割。MIG-0702 と MIG-0515 が使う。実装は Sonnet、review は Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-0603-1 DECIDED, D-13-57, D-14-9
+- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-0603-1 DECIDED, D-13-57, D-14-9, D-15-3, D-15-8
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | file |
 | --- | --- | --- |
 | 規約同意（**MIG-0641 へ分割**、D-14-9） | SA-074, SA-075, SA-076 | `src/lib/actions/terms.ts:51` `commitAcceptLatestTerms`, `:197` `acceptLatestTerms`（redirect、`sanitizeNextPath`）, `:293` `acceptOnboardingTerms` |
 | Active X | SA-098 | `src/lib/actions/xid.ts:243` `setActiveXId`（承認済みの linked X、user の CAS 更新、監査に `actor_x_user_id`） |
-| link / merge revert 申請 | SA-099, SA-100, SA-101 | `xid.ts:300`, `:558`, `:740` |
+| link / merge revert 申請（**MIG-0659 へ分割**、D-15-8） | SA-099, SA-100, SA-101 | `xid.ts:300`, `:558`, `:740` |
 | profile / 削除 / icon | SA-102, SA-103, SA-104, SA-105 | `xid.ts:840`, `:912`, `:992`, `:1049`（`uploadXIdIcon`、`validateIconImageUpload`、R2 put、`next.config.mjs` の `serverActions.bodySizeLimit` 8mb） |
 | onboarding 完了マーカー（**MIG-0641 へ分割**） | （MIG-0611 引き継ぎ） | `src/lib/auth/onboarding.ts#maybeMarkOnboardingComplete` |
 - 書き込みの共通 guard: `xid.ts:147`（`writeGuard({ feature: "xid_links" })`）。static rebuild は core `buildAfterXUserPublicUpdateQueueBatch`（`packages/server-core/src/staticRebuild/hooks.ts:404`）。
 - 公開画面の呼び出し元: `src/components/user/useActiveXSwitcher.ts:5`（SA-098、MIG-0515 が Island から呼ぶ）。SA-075 の `app/(public)/rules/page.tsx:3,95` は MIG-0641。
 #### Owned paths
-- 新規: `+apps/api/src/routes/xid/index.ts`, `+apps/api/src/routes/xid/activeX.ts`, `+apps/api/src/routes/xid/requests.ts`, `+apps/api/src/routes/xid/profile.ts`, `+apps/api/src/routes/xid/icon.ts`, `+apps/api/src/middleware/bodyLimit.ts`, `+packages/contracts/src/xid.ts`, `+apps/api/test/xid.parity.test.mjs`, `+apps/api/test/bodyLimit.test.mjs`
+- 新規: `+apps/api/src/routes/xid/index.ts`, `+apps/api/src/routes/xid/activeX.ts`, `+apps/api/src/routes/xid/profile.ts`, `+apps/api/src/routes/xid/icon.ts`, `+apps/api/src/middleware/bodyLimit.ts`, `+packages/contracts/src/xid.ts`, `+apps/api/test/xid.parity.test.mjs`, `+apps/api/test/bodyLimit.test.mjs`
 - 変更: `apps/api/src/app.ts`（mount 1 行）, `packages/contracts/src/index.ts`
 - 触らない: `src/lib/actions/**`, `apps/api/src/middleware/writeOrigin.ts`, `apps/api/src/auth/session.ts`
 #### Micro-units
 - **U01 inventory + G21**: SA-098..105 の行（入力、guard option、読み、batch、監査、queue 行、post-commit）を work item に表で書く。`bodyLimit.ts` に SA ごとの上限表（SA-105 = 8 MiB = `8 * 1024 * 1024`、他は 64 KiB）と middleware を作る（Content-Length と実読み byte の両方で判定、413）。
 - **U02 SA-098**: `POST /api/xid/active`（body `x_user_id`）。読み: guard の user（approved X ids を同じ文で）+ linked X 行 1 = S3 内。同じ X は「すでにこの X ID がアクティブです。」で書かない。
 - **U03**: MIG-0641 へ分割（D-14-9）。
-- **U04 SA-099..101**: `POST /api/xid/requests`、`POST /api/xid/requests/:id/cancel`、`POST /api/xid/merge-revert-requests`。
+- **U04**: MIG-0659 へ分割（D-15-8）。`routes/xid/index.ts` と `app.ts` の mount は先に merge した方が作る。
 - **U05 SA-102..104**: `PATCH /api/xid/:xUserId/profile`、`DELETE /api/xid/:xUserId`、`PUT /api/xid/:xUserId/icon`。queue 行は同じ batch、wake 0（D-0603-1）。
 - **U06 SA-105**: `POST /api/xid/:xUserId/icon/upload`（multipart、8 MiB）。R2 put は `c.env.BUCKET`、post-commit の `tryDeleteUnreferencedIcon` は CURRENT の順序。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | 二重送信（SA-098 / SA-099） | 1回だけ反映 |
+| T01 | 二重送信（SA-098） | 1回だけ反映 |
 | T02 | 承認待ち・manager リンクの X を Active に | CURRENT と同じ拒否 |
 | T04 | 8 MiB ちょうど / 8 MiB + 1 byte の icon（G21） | 通る / 413 |
 | T05 | 各 SA の監査行・queue 行 | CURRENT と field 単位で一致、wake 0（`DOCUMENTED DIFFERENCE D-0603-1`） |
@@ -1831,9 +1832,9 @@ npm run test:critical
 npm run typecheck && npm run test:unit
 ```
 #### Ledger updates
-`API_MATRIX.md` の SA-098〜105 に Hono endpoint。G21 の上限表を `API_MATRIX.md` に1節。
+`API_MATRIX.md` の SA-098, 102〜105 に Hono endpoint（SA-099〜101 は MIG-0659）。G21 の上限表を `API_MATRIX.md` に1節。
 #### DONE checklist
-- [ ] U01、U02、U04〜U06 が DONE、各 SA の parity が PASS（U03 は MIG-0641）
+- [ ] U01、U02、U05、U06 が DONE、各 SA の parity が PASS（U03 は MIG-0641、U04 は MIG-0659）
 - [ ] D-04（Active X 一斉切替）を実行していない
 #### STOP
 - `writeOrigin.ts` / `session.ts` を変える必要が出たら止める。
@@ -1954,6 +1955,7 @@ Phase 6 共通契約のとおり。
 - harness: `scripts/benchmark-api-cpu.mjs`（#341）。`buildScenarios()`（:179）の既存 scenario は health / health deep / about-stats / software suggestions / announcements 3 / api-endpoints 2 / S4 session / BASELINE（:202-293）。判定は max（`BUDGETS_MS` S2 7 / S3 8 / S4 2、:31）、`MIN_SAMPLES = 50`（:33）、4種類 `normal` / `limit` / `invalid` / `cold`（:32）。
 - MIG-0606 work item: Windows host では BASELINE の max が 7.2 / 12.5ms で予算と同じ大きさ。SA-007/008 は p50 8〜25ms で再現（`docs/migration/cloudflare/API_CPU_BENCHMARK.md` §6）。
 - main にある Hono route（`apps/api/src/app.ts:24-49`）: health、about-stats、software suggestions、`/api/personal`（MIG-0611）、`/api/admin-read`（MIG-0625）、`/api/manage`（MIG-0624 / 0630）、`/api/admin/spreadsheet`（read、#392）、`/api/admin`（MIG-0602 の announcements / api-endpoints など、admin events）、`/api/live/events`（RH-020..022）、`/api/events`（RH-014 viewer overlay、RH-015 list）、`/api/event-endpoints`（RH-012 release）、`/api/videos`（RH-030 detail、SA-012..015 chapters）、`/api/account/summary`（RH-001）、`/api/google-drive-image` / `/api/youtube-thumbnail`（RH-016 / 033）。Entry の読み（MIG-0623）の mount は U01 で `app.ts` と `routes/personal/index.ts` から確定する。
+- 2026-10-25（D-15-15）: D-14 の後に main に入った MIG-0629（#407）/ 0633（#402、core のみ）/ 0634（#401、RH-031 / 032）/ 0635（#406）の endpoint も「main にある Hono method」に含めて測る（T01）。MIG-0650〜0660 の endpoint は MIG-0606 で測る。
 - 指定の上限入力: live slots 6000 枠（`MAX_LIVE_SLOTS`、D-12）、RH-012 の 500 動画 × 100 member（MIG-0631 T17）、RH-014 own slots 100 件 / 64 KiB（D-12）、spreadsheet read の最大ページ。
 #### Owned paths
 - 変更: `scripts/benchmark-api-cpu.mjs`（scenario の追加だけ）, `scripts/benchmark-api-cpu.test.mjs`, `docs/migration/cloudflare/API_CPU_BENCHMARK.md`（新しい節「Linux run (MIG-0639)」）, `docs/migration/API_MATRIX.md`（測った method の値）
@@ -2427,6 +2429,533 @@ npm run check:project-docs
 #### Rollback
 PRをrevert（文書・script・CI step だけ）。
 
+### MIG-0650: 動画の共同編集者・member の API（SA-082..085）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-1: MIG-0603 U03b を分割。MIG-0633 は DONE（#402）。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-2
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/video-collab-perms.ts:891` `upsertVideoCollaborator`（SA-082）, `:949` `deleteVideoCollaborator`（SA-083）, `:995` `applyVideoCollaboratorPermissionsBatch`（SA-084）, `src/lib/actions/video/adminMembers.ts:67` `updateVideoMembersAdmin`（SA-085）。4 つとも `writeGuard({ feature: "edit_video" })`（`video-collab-perms.ts:894,952,998`、`adminMembers.ts:70`）。
+- 権限: core `packages/server-core/src/auth/ownership.ts` の `getCollaboratorPermissions` :150、`resolveVideoEditAccessContext` :386、`canEditVideo` :539（MIG-0633）。domain は `API_MATRIX.md:82-83`（`creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows`）。
+- 2 file とも `@/lib/video/videoVisibilityStatusAction#loadVideoRebuildEventIds`（`video-collab-perms.ts:45,833`、`adminMembers.ts:25,89`）を使う。実体は `src/lib/video/videoVisibilityStatusCore.ts:15`（36 行、`@/lib/db/client`・schema・`MAX_VIDEO_STATUS_REBUILD_EVENT_TARGETS`・domain `mergeVideoRebuildEventIds` だけ）。D-15-2 で core の置き場所を決めた。
+- `src/lib/**` からの import（U01 で core へ移すか、既に core にあるものを使う）: `video-collab-perms.ts` は `audit/mutate`, `audit/postCommit`, `auth/xIdentity`, `notifications/enqueue`, `notifications/templates/video`, `staticRebuild/{enqueue,hooks}`, `video/{atomicLimits,memberSetSnapshot}`。`adminMembers.ts` は `video/{atomicWritePlan,memberAggregationFanOut,replaceVideoMembers,submissionValidation}`, `staticRebuild/publicReflectionNotice`。
+- 手本: `apps/api/src/routes/videos/chapters.ts`（write stack、core `buildStaticRebuildQueueBatch`）。
+#### Owned paths
+- 新規: `+apps/api/src/routes/videos/collaborators.ts`, `+packages/contracts/src/videoCollaborators.ts`, `+apps/api/test/videoCollaborators.parity.test.mjs`, `+packages/server-core/src/video/rebuildEventIds.ts`（D-15-2。MIG-0603 U02a が先に merge していればそちらの file を使い、作らない）
+- 変更（bridge）: U01 の表で core へ移す `src/lib/video/*.ts` と `src/lib/video/videoVisibilityStatusCore.ts`、`packages/server-core/package.json`（exports）
+- 変更: `apps/api/src/routes/videos/index.ts`（mount 1 行）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/auth/session.ts`, MIG-0603 / MIG-0651 の owned paths
+#### Micro-units
+- **U01 inventory + core move**: 4 SA の入力・guard・読み・batch・監査・queue 行・通知行・post-commit を work item に表で書く。Hono から呼べない `src/lib/video/*` の helper を bridge 付きで core へ移す（1 行目 `// Compatibility bridge (MIG-0650, D-10): ...`、中身は変えない）。`loadVideoRebuildEventIds` は D-15-2 の場所へ。
+- write stack: `apps/api/src/routes/videos/index.ts` の `videoWriteStack`（origin → session → writeGuard → db、`:19-49`）を CURRENT の guard（`requiredRole: null`、CostGuard `edit_video`）で使う。option の渡し方は MIG-0640 と同じ形（先に merge した方に合わせる）。
+- **U02 SA-082..084**: `PUT /api/videos/:videoId/collaborators/:xUserId`、`DELETE /api/videos/:videoId/collaborators/:xUserId`、`POST /api/videos/:videoId/collaborators/batch`。
+- **U03 SA-085**: `PUT /api/videos/:videoId/members`（admin / 特権の判定は CURRENT と同じ core 関数）。
+- 全 write: queue 行と通知行は同じ batch、wake 0（D-0603-1 / D-13-41）。route file の先頭 comment に両方を書く。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | owner / collaborator / event staff / admin / 他人 × 4 SA | 可否が CURRENT と全件一致 |
+| T02 | 各 SA の成功 | `video_collaborators`・member・監査・queue 行・通知行が CURRENT と field 単位で一致 |
+| T03 | CAS 競合・上限超過（`video/atomicLimits`） | CURRENT と同じ文言、書き込み 0 |
+| T04 | 別 origin・未ログイン・BAN | CURRENT と同じ拒否、書き込み 0 |
+| T05 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-0603-1`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/videoCollaborators.parity.test.mjs
+npm run test --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run test:critical
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-082〜085 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に新規 file と bridge の行。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T05 が PASS
+- [ ] 権限判定の結果が CURRENT と全件一致
+#### STOP
+- 権限判定が1件でも変わったら止める。
+- core へ移す helper の挙動を変える必要が出たら止める。
+- 共有 module（`apps/api/src/middleware/**`, `apps/api/src/auth/session.ts`）を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり（core への移動は bridge なので revert で戻る）。
+
+### MIG-0651: 動画の投稿・更新の API（SA-086, SA-088, SA-089）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-1: MIG-0603 U03c を分割。MIG-0633 は DONE。body 上限は D-15-3。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-3
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/video/createFreeVideo.ts:60`（SA-086、430 行）, `src/lib/actions/video/submitSlotVideo.ts:719`（SA-088、732 行）, `src/lib/actions/video/updateVideo.ts:802`（SA-089、815 行）。guard は `createFreeVideo.ts:61`、`submitSlotVideo.ts:93`、`updateVideo.ts:72`（`feature: "edit_video"`）。
+- 3 file の `src/lib/**` import は 28〜39 個（`video/*`, `slots/*`, `slot/reservationGroupsCore`, `queues/{wakeBudget,youtubeSyncWake}`, `db/{software,youtubeChannelCandidates}`, `socialLinks`, `youtube/id`, `notifications/*`, `staticRebuild/*`）。可視性の planner は使っていない（`rg planVideoVisibility` が 0 件）。
+- domain は `API_MATRIX.md:84,86`（`requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `resolveAllowedVideoEditSections`）。権限は core `canEditVideo`（`packages/server-core/src/auth/ownership.ts:539`）。
+- body 上限: CURRENT は `next.config.mjs` の `serverActions.bodySizeLimit`（8mb）。Hono 側は `apps/api/src/middleware/bodyLimit.ts`（MIG-0636 U01 の仕様、D-15-3）。
+- 呼び出し元: `src/components/forms/VideoForm.tsx`, `UnslottedPostForm.tsx`（MIG-0703 が SPA から呼ぶ）。
+#### Owned paths
+- 新規: `+apps/api/src/routes/videos/submit.ts`, `+packages/contracts/src/videoSubmit.ts`, `+apps/api/test/videoSubmit.parity.test.mjs`
+- 新規（D-15-3。MIG-0636 が先に merge していればそちらを使い、作らない）: `+apps/api/src/middleware/bodyLimit.ts`, `+apps/api/test/bodyLimit.test.mjs`
+- 変更（bridge）: U01 の表で core へ移す `src/lib/video/*.ts`・`src/lib/slots/*.ts` など, `packages/server-core/package.json`（exports）
+- 変更: `apps/api/src/routes/videos/index.ts`（mount 1 行）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/writeOrigin.ts`, `apps/api/src/auth/session.ts`, MIG-0650 の owned paths
+#### Micro-units
+- **U01 inventory + core move**: 3 SA の import を「core に既にある / bridge で移す / Hono では使わない（`revalidatePath` など）」に分けて work item に表で書く。移すものは bridge 付き、中身は変えない。1 PR の差分が大きくなる場合は U01 だけで先に PR を出してよい（R-CORE）。
+- **U02 SA-086**: `POST /api/videos/free`。
+- **U03 SA-088**: `POST /api/slots/:slotId/video`（枠の所有・締切・Active X は CURRENT の順）。
+- **U04 SA-089**: `PATCH /api/videos/:videoId`（編集 section の許可は `resolveAllowedVideoEditSections`）。
+- write stack は MIG-0650 と同じ `videoWriteStack`（CURRENT の guard option をそのまま）。3 route とも `bodyLimit` を通す（上限は SA ごとの表。CURRENT 8 MiB）。queue 行・通知行は同じ batch、YouTube sync の wake も 0（`youtube_sync` の D1 行は CURRENT と同じ batch に書く。回収は sync-jobs の cron `7,52 * * * *`、`workers/sync-jobs/wrangler.toml:12`）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 投稿済みの枠で再投稿 | CURRENT と同じ拒否 |
+| T02 | 不正な YouTube URL・重複 | CURRENT と同じエラー |
+| T03 | 編集できない section を含む更新 | CURRENT と同じ拒否、書き込み 0 |
+| T04 | 各 SA の成功 | video・member・回答・slot・監査・queue 行が CURRENT と field 単位で一致 |
+| T05 | body 8 MiB ちょうど / +1 byte | 通る / 413 |
+| T06 | 別 origin・未ログイン・BAN・Active X 無し | CURRENT と同じ拒否、書き込み 0 |
+| T07 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-0603-1`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/videoSubmit.parity.test.mjs apps/api/test/bodyLimit.test.mjs
+npm run test --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run check:slot-domain-limits
+npm run test:critical
+npm run typecheck && npm run test:unit && npm run test:integration
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-086 / 088 / 089 に Hono endpoint と body 上限。`FILE_MIGRATION_MATRIX.md` に新規 file と bridge の行。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T07 が PASS
+- [ ] `src/components/forms/*.contract.test.mjs` 5 件が PASS のまま
+#### STOP
+- 枠の予約・提出の transaction 境界を変える必要が出たら止める。
+- `writeOrigin.ts` / `session.ts` を変える必要が出たら止める。
+- R2 の本番書き込み・Queue binding が必要になったら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0652: イベントの作成・更新・削除・ID 変更の API（SA-021..024）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。MIG-0633 は DONE。可視性 host は D-15-5。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-4, D-15-5, D-15-10
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/event-admin-danger.ts:99` `renameEventId`（SA-021、642 行）, `src/lib/actions/event-admin.ts:223` `createEvent`（SA-022）, `:553` `updateEvent`（SA-023、guard `:556` `manage_event_update`）, `:1096` `deleteEvent`（SA-024）。file は 1236 行。
+- 可視性: `event-admin.ts:605,1127` `planEventVisibilityTransition`、`:1015,1155` `preCommitEventVisibilityTransition`（Next 側 `@/lib/event/eventVisibilityTransition`）。core にある部品: `packages/server-core/src/visibility/eventTransition.ts:66` `planEventVisibilityTransition`, `:107` `preCommitEventVisibilityTransition`, `:172` `preCommitEventVisibilityFenceRename`, `:290` `preCommitEventVisibilityRenameTombstone`, `:355,411,465` の補償。
+- その他の import（U01 で分ける）: `admin/eventTemplateSettings`, `api/eventExportCache`, `event/{eventEditPermissions,eventForm,eventIdReuse,eventLimits,eventPayload,generalCustomQuestionDraft,generalCustomQuestionPlan}`, `publicData/{publicCache,staticEventDetailCore,publicVisibilityFenceStore}`, `video/{formSettings,requiredVideoFields,stagePermissionAnswers}`。
+- domain は `API_MATRIX.md:123-126`（`event/idReuse`, `planEventVisibilityFence`, `adminEventEditPermissions` / `delegatedEventEditPermissions`）。権限は core `canEditEvent` / `resolveEventEditAuthorization`（`ownership.ts:305,315`）。
+- 手本: `apps/api/src/routes/events/templates.ts`（SA-036、admin write、CAS DELETE + strict audit）。
+#### Owned paths
+- 新規: `+apps/api/src/routes/events/lifecycle.ts`（admin の SA-021 / 022 / 024）, `+apps/api/src/routes/manage/eventWrite.ts`（SA-023）, `+apps/api/src/visibility/eventTransitionHost.ts`（D-15-5）, `+packages/contracts/src/eventLifecycle.ts`, `+apps/api/test/eventLifecycle.parity.test.mjs`
+- 変更（bridge）: U01 の表で core へ移す `src/lib/event/*.ts` など, `packages/server-core/package.json`（exports）
+- 変更: `apps/api/src/routes/events/index.ts`（route 行。`/api/admin` に mount 済みの admin 専用 router）, `apps/api/src/routes/manage/index.ts`（route 1 行。書き込みの stack が無ければ D-15-10 の 3 行も）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/events/{publicList,publicRelease,templates,viewerOverlay}.ts`, MIG-0653〜0657 の owned paths
+#### Micro-units
+- **U01 inventory + core move**: 4 SA の表（guard、読み、batch、監査、queue 行、R2 manifest の pre-commit / 補償、cache 削除、export cache 無効化）。Hono から呼べない helper を bridge 付きで core へ。
+- **U02 host**: `eventTransitionHost.ts` = core の manifest read / CAS put（`c.env.BUCKET`）、`deletePublicJsonCaches`、通知 builder、wake は何もしない（D-13-41）。MIG-0603 U02a の `videoTransitionHost.ts` と同じ形（先に merge した方を手本にする）。
+- **U03 SA-022 / SA-023**: `POST /api/admin/events`（`events/index.ts`）、`PATCH /api/manage/events/:eventId`（admin と委任された staff、`manage/index.ts` に D-15-10 の stack。権限は core `resolveEventEditAuthorization`）。
+- **U04 SA-024 / SA-021**: `DELETE /api/admin/events/:eventId`、`POST /api/admin/events/:eventId/rename`。rename は fence rename と tombstone の pre-commit、失敗時の補償を CURRENT の順で。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 公開→非公開・削除・ID 変更 | manifest の block が D1 更新より先、補償が CURRENT と一致 |
+| T02 | 各 SA の成功 | event・staff・設定・監査・queue 行が CURRENT と field 単位で一致 |
+| T03 | revision CAS 競合 | CURRENT と同じ文言、書き込み 0 |
+| T04 | D1 batch 失敗 | fence の補償が CURRENT と一致 |
+| T05 | 非 admin・権限の無い staff・別 origin | CURRENT と同じ拒否、書き込み 0 |
+| T06 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-0603-1`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/eventLifecycle.parity.test.mjs
+npm run test --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run check:public-visibility-fences
+npm run test:critical
+npm run typecheck && npm run test:unit && npm run test:integration
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-021〜024 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に新規 file と bridge の行。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T06 が PASS
+- [ ] planner（core、Next と共有）の挙動を変えていない
+#### STOP
+- planner の挙動を変える必要が出たら止める。
+- 本番 R2 manifest の読み書き、Queue binding、Route 切替が必要になったら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0653: イベント group の API（SA-025..030）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。admin 専用。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S2, S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-15-4
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/event-group-admin.ts`（742 行）`:97` `searchEventGroupEventOptions`（SA-025、読み）, `:255` `createEventGroup`（SA-026）, `:347` `updateEventGroup`（SA-027）, `:461` `deleteEventGroup`（SA-028）, `:551` `addEventsToGroup`（SA-029）, `:659` `removeEventFromGroup`（SA-030）。
+- import: `admin/eventGroupEventOptions`, `audit/{mutate,mutateBudget,postCommit}`, `event/eventGroupVisibilityTransition`, `staticRebuild/{hooks,publicReflectionNotice}`。group の fence 判定は `status === "public"`（`API_MATRIX.md:127`）。
+- 読みの手本: `apps/api/src/routes/adminRead/eventGroups.ts`（MIG-0625）。書きの手本: `apps/api/src/routes/events/templates.ts`。
+#### Owned paths
+- 新規: `+apps/api/src/routes/admin/eventGroups.ts`, `+packages/contracts/src/admin/eventGroups.ts`, `+apps/api/test/adminEventGroups.parity.test.mjs`
+- 変更（bridge）: `src/lib/event/eventGroupVisibilityTransition.ts`、`src/lib/admin/eventGroupEventOptions.ts`（U01 で core へ移すと決めたものだけ）, `packages/server-core/package.json`
+- 変更: `apps/api/src/routes/admin/index.ts`（route 1 行）, `packages/contracts/src/admin/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/adminRead/**`
+#### Micro-units
+- **U01 inventory**: 6 SA の表（入力、読み、batch、監査、group fence、queue 行）。
+- **U02 SA-025**: `GET /api/admin/event-groups/event-options?q=`（LIMIT は CURRENT と同じ、`private, no-store`）。
+- **U03 SA-026..028**: `POST /api/admin/event-groups`、`PATCH` / `DELETE /api/admin/event-groups/:groupId`。
+- **U04 SA-029 / 030**: `POST /api/admin/event-groups/:groupId/events`、`DELETE /api/admin/event-groups/:groupId/events/:eventId`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 各 SA の成功 | group・relation・監査・queue 行が CURRENT と field 単位で一致 |
+| T02 | 公開 group の非公開化 | group fence が CURRENT と同じ順 |
+| T03 | 非 admin・別 origin | CURRENT と同じ拒否、書き込み 0 |
+| T04 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-0603-1`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/adminEventGroups.parity.test.mjs
+npm run check:public-visibility-fences
+npm run test:critical
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-025〜030 に Hono endpoint。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T04 が PASS
+#### STOP
+- group fence の意味を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0654: イベント staff と owner 移譲の API（SA-031..034）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。owner 0 guard は MIG-0633 の core。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-15-4, D-15-10
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/event-staff-admin.ts`（767 行）`:303` `upsertEventStaffMember`（SA-031）, `:467` `bulkUpsertEventStaffFromCsv`（SA-032）, `:669` `removeEventStaffMember`（SA-033）, `:723` `transferEventOwnershipAction`（SA-034）。guard `:63` `writeGuard({ feature: "manage_event_staff" })`。
+- core（MIG-0633、`packages/server-core/src/event/eventOwnership.ts`）: `remainingOperableEventOwnerSql` :58, `assertEventWillRetainOwner` :191, `validateEventStaffUniqueness` :204, `assertActorMayAssignOwner` :224, `assertSelfChangeRequirements` :246, `createEventStaffWithProtection` :272, `updateEventStaffWithProtection` :346, `deleteEventStaffWithProtection` :432, `bulkUpsertEventStaffWithProtection` :483, `transferEventOwnership` :776。写しを作らない。
+- 残る `src/lib` import: `auth/permissions/{aliases,keys,permissionResolver,presets}`（U01 で core / domain の場所を確かめる）。owner 0 の競合 test: `src/lib/event/eventOwnerZero.sqlite.execution.test.mjs`。
+#### Owned paths
+- 新規: `+apps/api/src/routes/manage/staffWrite.ts`, `+packages/contracts/src/manageStaffWrite.ts`, `+apps/api/test/manageStaffWrite.parity.test.mjs`
+- 変更: `apps/api/src/routes/manage/index.ts`（route 1 行。書き込みの stack が無ければ D-15-10 の 3 行も）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/manage/staff.ts`（MIG-0624 の読み）, `packages/server-core/src/event/eventOwnership.ts`
+#### Micro-units
+- **U01 inventory**: 4 SA の表。permission key / preset の置き場所（core か domain）を確かめ、無ければ bridge で移す。
+- **U02 SA-031 / 033**: `PUT /api/manage/events/:eventId/staff/:staffId`（新規は `POST .../staff`）、`DELETE .../staff/:staffId`。
+- **U03 SA-032**: `POST /api/manage/events/:eventId/staff/csv`（CSV の上限と検証は CURRENT と同じ）。
+- **U04 SA-034**: `POST /api/manage/events/:eventId/owner-transfer`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 最後の owner の解任・降格（同時 2 件を含む） | 拒否、owner は 1 人以上残る |
+| T02 | 各 SA の成功 | `event_staff`・監査・queue 行が CURRENT と field 単位で一致 |
+| T03 | 自分自身の変更（確認なし / あり） | CURRENT と同じ |
+| T04 | preset / admin 専用の権限を staff が付与 | CURRENT と同じ拒否 |
+| T05 | 権限の無い staff・別 origin | CURRENT と同じ拒否、書き込み 0 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/manageStaffWrite.parity.test.mjs
+npm run check:event-owners
+npm run test:critical
+npm run typecheck && npm run test:unit && npm run test:integration
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-031〜034 に Hono endpoint。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T05 が PASS
+- [ ] owner 0 防止が並行 test で実証されている
+#### STOP
+- core `eventOwnership.ts` を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0655: イベント template の保存・一覧と YouTube playlist 設定の API（SA-035, SA-037..039）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。SA-035 の domain 移動は D-13-48、playlist sync の wake は D-15-6。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S2, S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-48, D-15-4, D-15-6, D-15-10
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/event-template-admin.ts:51` `saveEventAsTemplate`（SA-035）, `:176` `listEventTemplatesForAdmin`（SA-037、GET が admin write guard を通る形、拒否時 `[]`）, `src/lib/actions/event-youtube-playlist.ts:55` `saveEventYoutubePlaylistSettings`（SA-038）, `:253` `queueEventYoutubePlaylistSync`（SA-039）。playlist の guard は `:61,257` `manage_event_update`、wake は `:247,365` `sendYoutubePlaylistSyncWakeBestEffort`。
+- SA-036 は merge 済み（`apps/api/src/routes/events/templates.ts`、`API_MATRIX.md:448`）。D-13-48: `src/lib/admin/eventTemplateSettings.ts` の `snapshotFromEvent` / `parseEventTemplateSnapshot` / `snapshotToFormInitial` を domain（`@flamenode/domain/eventTemplates`）へ移す（MIG-0705 も使う）。
+- playlist sync の回収: sync-jobs の cron `7,52 * * * *`（`workers/sync-jobs/wrangler.toml:12`）が `event_youtube_playlist_sync` を読む（`workers/sync-jobs/index.ts:278`）。
+#### Owned paths
+- 新規: `+apps/api/src/routes/manage/playlistWrite.ts`, `+packages/contracts/src/eventPlaylistWrite.ts`, `+apps/api/test/eventTemplateWrite.parity.test.mjs`, `+apps/api/test/eventPlaylistWrite.parity.test.mjs`
+- 変更: `apps/api/src/routes/events/templates.ts`（SA-035 / 037 の route を足す）, `packages/domain/src/eventTemplates/**`（D-13-48 の移動）, `src/lib/admin/eventTemplateSettings.ts`（bridge）, `apps/api/src/routes/manage/index.ts`（route 1 行。書き込みの stack が無ければ D-15-10 の 3 行も）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/manage/playlist.ts`（MIG-0624 の読み）
+#### Micro-units
+- **U01 domain move**（D-13-48）: 3 関数を domain へ、bridge を残す。中身は変えない。
+- **U02 SA-035 / 037**: `POST /api/admin/event-templates`（event から保存）、`GET /api/admin/event-templates`（非 admin は CURRENT と同じ `[]`、`private, no-store`）。
+- **U03 SA-038 / 039**: `PUT /api/manage/events/:eventId/youtube-playlist`、`POST /api/manage/events/:eventId/youtube-playlist/sync`。sync 要求の D1 行は CURRENT と同じ batch、wake 0（D-15-6）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | template の保存 → 一覧 | CURRENT と同じ行と順序 |
+| T02 | 非 admin の一覧 | `[]`（CURRENT と同じ） |
+| T03 | playlist 設定の保存・sync 要求 | 設定・sync 行・監査が CURRENT と field 単位で一致、wake 0（`DOCUMENTED DIFFERENCE D-15-6`） |
+| T04 | 権限の無い staff・別 origin | CURRENT と同じ拒否、書き込み 0 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/eventTemplateWrite.parity.test.mjs apps/api/test/eventPlaylistWrite.parity.test.mjs apps/api/test/eventTemplates.test.mjs
+npm run test --workspace=@flamenode/domain
+npm run test:critical
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-035 / 037〜039 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に bridge の行。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+- [ ] SA-036 の既存 test が PASS のまま
+#### STOP
+- Queue binding が必要になったら止める（D-15-6 の 45 分以内の回収を owner が拒否した場合も）。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0656: 枠の運営操作の API（SA-056..064）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-4, D-15-10
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/slot-admin-danger.ts:236` `forceReleaseSubmittedSlot`（SA-056）, `:484` `releaseSubmittedVideoKeepReservation`（SA-057）, `src/lib/actions/slot-admin.ts:262` `generateSlotsBatch`（SA-058）, `:398` `deleteAvailableSlots`（SA-059）, `:465` `releaseSlot`（SA-060）, `:615` `deleteSlot`（SA-061）, `:640` `batchDeleteAvailableSlots`（SA-062）, `:660` `batchReleaseReservedSlots`（SA-063）, `:730` `batchUpdateSlotLabels`（SA-064）。guard は `slot-admin.ts:107,470,620`、`slot-admin-danger.ts:49`（`manage_slot_update` / `manage_slot_delete`）。
+- import: `slots/{atomicLimits,limits,versionedPredicate}`, `slot/reservationGroupsCore`, `notifications/{enqueue,templates/slot}`, `staticRebuild/*`, `utils/dateInput`。danger の 2 SA は一般の枠 CRUD に混ぜない（`API_MATRIX.md:134`）。
+- 権限: core `canEditEvent(..., "slot.*")`（MIG-0633）。
+#### Owned paths
+- 新規: `+apps/api/src/routes/manage/slotsWrite.ts`, `+packages/contracts/src/manageSlotsWrite.ts`, `+apps/api/test/manageSlotsWrite.parity.test.mjs`
+- 変更（bridge）: U01 の表で core へ移す `src/lib/slots/*.ts` / `src/lib/slot/reservationGroupsCore.ts`（MIG-0657 と同じ file を移す場合は先に merge した方が移し、後の方は import だけ）, `packages/server-core/package.json`
+- 変更: `apps/api/src/routes/manage/index.ts`（route 1 行。書き込みの stack が無ければ D-15-10 の 3 行も）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/manage/slots.ts`（MIG-0624 の読み）
+#### Micro-units
+- **U01 inventory + core move**: 9 SA の表（versioned CAS、通知 outbox、queue 行）。
+- **U02 SA-058..064**: `POST /api/manage/events/:eventId/slots/generate`、`DELETE .../slots/available`、`POST .../slots/:slotId/release`、`DELETE .../slots/:slotId`、`POST .../slots/batch-delete`、`POST .../slots/batch-release`、`PATCH .../slots/labels`。
+- **U03 SA-056 / 057**（危険操作）: `POST .../slots/:slotId/force-release-submitted`、`POST .../slots/:slotId/release-video-keep-reservation`。確認 field は CURRENT と同じ。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 各 SA の成功 | slot・reservation・監査・通知行・queue 行が CURRENT と field 単位で一致 |
+| T02 | version 競合（同時 2 件） | 1 件だけ成功、CURRENT と同じ文言 |
+| T03 | 上限（`slots/limits`）超え | CURRENT と同じ拒否、書き込み 0 |
+| T04 | 権限の無い staff・別 origin | CURRENT と同じ拒否、書き込み 0 |
+| T05 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-13-41`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/manageSlotsWrite.parity.test.mjs
+npm run check:slot-domain-limits
+npm run check:slot-reservation-groups
+npm run test:critical
+npm run typecheck && npm run test:unit && npm run test:integration
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-056〜064 に Hono endpoint。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T05 が PASS
+#### STOP
+- 予約の transaction 境界を変える必要が出たら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0657: 枠の予約・解放・延長・統合の API（SA-065..068）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。MIG-0514 の予約 Island が使う。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-4
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/slot.ts`（1193 行）`:632` `reserveSlot`（SA-065）, `:852` `releaseOwnSlot`（SA-066、guard `:855` `release_slot`）, `:900` `extendOwnSlotGroup`（SA-067）, `:1038` `mergeOwnSlotGroups`（SA-068）。post-commit は `src/lib/actions/slotNotificationsPostCommit.ts:8` `enqueueSlotReserveOpsWebhookPostCommit`、`:60` `enqueueSlotSubmitNotificationsPostCommit`。
+- import: `slots/{atomicLimits,limits,operatorReservationCore,reservationIdentity,slotIdentityCore,slotReservationLimit,slotReservationLimitGuard,userSlotCore,versionedPredicate}`, `slot/reservationGroupsCore`, `utils/{eventStatus,slotGroupingCore}`。domain は `API_MATRIX.md:136-138`。
+- 公開画面の呼び出し元: `src/components/event/SlotGrid.tsx:15`（MIG-0514 が Island から呼ぶ）。
+- 既知の差だった RH-014 の `operatorOverrideAllowed` 常に false は FIX-0604-1（#410、`4ab5bd2`）で直った。本 task の予約 API も同じ判定（枠運営者の代理予約）に合わせ、別の判定を作らない。
+#### Owned paths
+- 新規: `+apps/api/src/routes/events/slotReservation.ts`, `+packages/contracts/src/slotReservation.ts`, `+apps/api/test/slotReservation.parity.test.mjs`
+- 変更（bridge）: U01 の表で core へ移す `src/lib/slots/*.ts` など（MIG-0656 と重なる file は先に merge した方が移す）, `packages/server-core/package.json`
+- 変更: `apps/api/src/app.ts`（`app.route("/api/events", slotReservationRoutes)` の 1 行。`events/index.ts` は `/api/admin` の admin 専用 router なので使わない）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/events/viewerOverlay.ts`, `apps/api/src/routes/events/index.ts`
+#### Micro-units
+- **U01 inventory + core move**: 4 SA の表（予約上限 guard SQL、`commitSlotMutationPlan`、ops webhook の post-commit）。
+- write stack: `/api/events` の public GET に session を足さないよう、`viewerOverlay.ts:194-200` と同じく path を指定した `use` で、`videoWriteStack`（`videos/index.ts:19-49`）と同じ順（origin → session → writeGuard `requiredRole: null` と CURRENT の activeX option → db）の stack を書き込み route だけに付ける。
+- **U02 SA-065**: `POST /api/events/:eventId/slots/:slotId/reserve`（Active X と entry 資格は CURRENT の順。ops webhook は post-commit で CURRENT と同じ best-effort）。
+- **U03 SA-066..068**: `POST .../slots/:slotId/release`、`POST .../slot-groups/:groupId/extend`、`POST .../slot-groups/merge`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 同じ枠の同時予約 | 1 件だけ成功 |
+| T02 | 予約上限ちょうど / +1 | 通る / CURRENT と同じ拒否 |
+| T03 | 各 SA の成功 | reservation・監査・通知行・queue 行が CURRENT と field 単位で一致 |
+| T04 | Active X 無し・BAN・別 origin | CURRENT と同じ拒否、書き込み 0 |
+| T05 | wake 数 | CURRENT n 回 vs Hono 0（`DOCUMENTED DIFFERENCE D-13-41`） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/slotReservation.parity.test.mjs
+npm run check:slot-domain-limits
+npm run check:slot-reservation-groups
+npm run test:critical
+npm run typecheck && npm run test:unit && npm run test:integration
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-065〜068 に Hono endpoint。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T05 が PASS
+- [ ] 予約の原子性が並行 test で実証されている
+#### STOP
+- 予約の transaction 境界を変える必要が出たら止める。
+- ops webhook の secret が要ると分かったら止める（Yugo の承認事項）。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0658: D-03 fan-out の dry-run script（MIG-0605 U05d）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-7: MIG-0605 U05d を分割。local の migration 済み DB だけを使い、Remote D1 を読まない。実装は Sonnet、review は Opus）
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
+- **Depends on:** — / **Decisions:** D-03 DECIDED, D-15-7
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- 規則: `OPEN_DECISIONS.md` D-03（所有判定 `x_user_account_links.auth_user_id`、`link_role='owner'`、`x_users.approval_status='approved'`。manager リンク・申請中・rejected・imported だけは対象外。同じ X が複数 Auth User から来たら `(x_user_id, video_id, interaction_type)` で 1 行に畳む。like count は承認済み X 単位の distinct）と `ACTIVE_X_MIGRATION_PLAN.md`。
+- 入力 table: `video_interactions_auth`（Auth User 単位、CURRENT の書き込み先。`src/lib/actions/video/interaction.ts:243`）、`video_interactions`（X 単位）、`x_user_account_links`、`x_users`、`videos.app_like_count`。検査 script `scripts/check-video-interactions-auth.mjs` が既にある。
+#### Owned paths
+- 新規: `+scripts/d03-fanout-dry-run.mjs`, `+scripts/d03-fanout-dry-run.test.mjs`
+- 変更: `package.json`（`check:d03-fanout-dry-run` script 1 行）, `docs/migration/ACTIVE_X_MIGRATION_PLAN.md`（dry-run の使い方 1 節）
+- 触らない: `migrations/**`, `src/**`, `apps/**`
+#### Micro-units
+- **U01 計算**: `node scripts/d03-fanout-dry-run.mjs --sqlite <path>` が node:sqlite で読むだけの SELECT を実行し、JSON 1 行（`candidates`, `skippedNoOwnerLink`, `collapsedDuplicates`, `conflictsWithVideoInteractions`, `likeCountDelta[]`（上位 50 件）, `maxDeltaVideo`）を出す。書き込み文は持たない（DB は read-only で開く）。
+- **U02 test**: fixture DB で T01〜T05。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | manager リンク・申請中・rejected・imported だけの X | 対象外 |
+| T02 | 同じ X が 2 人の Auth User から | 1 行に畳む |
+| T03 | owner リンクが 0 件の Auth User | `skippedNoOwnerLink` に数え、元の行はそのまま |
+| T04 | `video_interactions` と衝突 | `conflictsWithVideoInteractions` に列挙 |
+| T05 | 実行前後の DB の hash | 同じ（書き込み 0） |
+#### Commands
+```bash
+node --test scripts/d03-fanout-dry-run.test.mjs
+npm run check:video-interactions-auth
+npm run check:project-docs
+```
+#### Ledger updates
+`ACTIVE_X_MIGRATION_PLAN.md` に dry-run の節。`FILE_MIGRATION_MATRIX.md` に新規 2 file。
+#### DONE checklist
+- [ ] T01〜T05 が PASS
+- [ ] script に書き込み文が無い
+#### STOP
+- Remote D1 や本番データを読む必要が出たら止める（明示承認事項）。
+- D-03 の規則に無いケースが出たら止めて lead に返す。
+#### Rollback
+PR を revert。
+
+### MIG-0659: X 連携申請・取り消し・merge 取り消し申請の API（SA-099..101）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-8: MIG-0636 U04 を分割。共有 file の扱いは D-15-8。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-15-8
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/lib/actions/xid.ts:300` `requestXIdLink`（SA-099）, `:558` `cancelXIdLinkRequest`（SA-100）, `:740` `requestXIdMergeRevert`（SA-101）。共通 guard `xid.ts:147` `writeGuard({ feature: "xid_links" })`。
+- 使う helper: `src/lib/actions/xidPendingInsert.ts`, `src/lib/actions/xidRequestReliabilityCore.ts`, `src/lib/auth/{xIdentity,xIdentityRequestCore,xLinkDependencies}`, `src/lib/audit/expectedRowCondition`（core に `packages/server-core/src/audit/expectedRowCondition.ts` がある）、`notifications/enqueue`。
+- 既存 test: `src/lib/actions/xidPendingInsert.execution.test.mjs`, `xidRequestReliabilityCore.test.mjs`。
+#### Owned paths
+- 新規: `+apps/api/src/routes/xid/requests.ts`, `+packages/contracts/src/xidRequest.ts`, `+apps/api/test/xidRequests.parity.test.mjs`
+- 新規（D-15-8。MIG-0636 が先に merge していればそちらを使い、作らない）: `+apps/api/src/routes/xid/index.ts`
+- 変更（bridge）: U01 で core へ移す `src/lib/actions/xidPendingInsert.ts` / `xidRequestReliabilityCore.ts` / `src/lib/auth/xIdentityRequestCore.ts` など, `packages/server-core/package.json`
+- 変更: `apps/api/src/app.ts`（`/api/xid` の mount 1 行。MIG-0636 が先なら不要）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/xid.ts`, `apps/api/src/middleware/**`, `apps/api/src/auth/session.ts`, MIG-0636 の `activeX.ts` / `profile.ts` / `icon.ts`
+#### Micro-units
+- **U01 inventory + core move**: 3 SA の表（入力、guard、読み、batch、監査の `actor_x_user_id`、通知行、post-commit）。
+- **U02 SA-099 / 100**: `POST /api/xid/requests`、`POST /api/xid/requests/:id/cancel`。
+- **U03 SA-101**: `POST /api/xid/merge-revert-requests`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 二重送信 | 1 回だけ反映 |
+| T02 | 既に他人が所有する X・承認待ちの重複 | CURRENT と同じ拒否 |
+| T03 | 各 SA の成功 | request・監査・通知行が CURRENT と field 単位で一致、wake 0 |
+| T04 | 別 origin・未ログイン・BAN | CURRENT と同じ拒否、書き込み 0 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test apps/api/test/xidRequests.parity.test.mjs
+npm run check:x-link-dependencies
+npm run check:audit-actor-x
+npm run test:critical
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-099〜101 に Hono endpoint。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+#### STOP
+- `writeOrigin.ts` / `session.ts` を変える必要が出たら止める。
+- D-03 / D-04 の本番実行が必要に見えたら止める。
+#### Rollback
+Phase 6 共通契約のとおり。
+
+### MIG-0660: deep health の Route Handler（RH-017、MIG-0626 U07）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-9: MIG-0626 U07 を分割。手順は D-13-59 で確定済み。実装は Sonnet、review は Opus）
+- **Recipe:** R-CORE, R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0601 / **Decisions:** D-13-59, D-15-9
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `app/api/health/deep/route.ts`（status 写像 `:24-31`）、`src/lib/health/deepHealth.ts`（448 行）と import 先 `artifactSlo.ts`（383）、`queueEmergency.ts`（119）、`schemaContract.ts`（63）、`deepHealthQueues.ts`（5）。さらに `src/lib/publicData/{publicVisibilityManifestCore,randomVideoPoolCore,staticRecommendCore,staticYoutubeRelatedBlocklistCore}.ts` と `src/lib/queues/featureFlags.ts` を import する（`packages/server-core/src/r2Body.ts` は core に既にある）。
+- Hono: `apps/api/src/routes/health.ts:53-78`。token gate は CURRENT と同じ（`WORKER_ADMIN_TOKEN` 無しで 503、Bearer 不正で 401）で merge 済み。検査本体は fail-closed の仮実装（`deepHealthUnavailable()`、D-13-59）。test は `apps/api/test/health.test.mjs`。
+#### Owned paths
+- 新規: `+packages/server-core/src/health/{deepHealth,artifactSlo,queueEmergency,schemaContract,deepHealthQueues}.ts`、U01 の表で core に無いと分かった `+packages/server-core/src/publicData/*Core.ts` と `+packages/server-core/src/queues/featureFlags.ts`
+- 変更: `src/lib/health/*.ts` と移した `src/lib/publicData/*Core.ts`・`src/lib/queues/featureFlags.ts`（bridge）, `apps/api/src/routes/health.ts`, `apps/api/test/health.test.mjs`, `packages/server-core/package.json`（exports）, `docs/migration/API_MATRIX.md`
+- 触らない: `app/api/health/**`, MIG-0626 の `adminRead/ops.ts`
+#### Micro-units
+- **U01 core move**: `deepHealth.ts` とその import 先を core へ移す（bridge の 1 行目 `// Compatibility bridge (MIG-0660, D-10): ...`）。中身は変えない。移す file の一覧（core に既にあるか、行数）を先に work item に表で書く。差分が大きければ U01 だけで先に PR を出してよい（R-CORE）。
+- **U02 route**: `health.ts` の `/deep` が token gate の後に core の `runDeepHealthChecks(env)`（CURRENT と同じ名前）を呼び、`deepHealthUnavailable()` の仮実装を消す。応答の status 写像は CURRENT `route.ts:24-31` と同じ。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | token 無し / 不正 | CURRENT と同じ拒否 |
+| T02 | 全 check OK / 1 件 NG / 例外 | status と body が CURRENT と一致 |
+| T04 | 正しい token（MIG-0626 T06） | CURRENT `runDeepHealthChecks` と同じ body と status |
+| T03 | `node scripts/check-server-core-boundaries.mjs` | PASS |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test --experimental-strip-types apps/api/test/health.test.mjs
+npm run test --workspace=@flamenode/server-core
+node scripts/check-server-core-boundaries.mjs
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`API_MATRIX.md` の RH-017 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に bridge の行。
+#### DONE checklist
+- [ ] U01 / U02 が DONE、T01〜T04 が PASS
+- [ ] RH-017 の仮実装が残っていない
+#### STOP
+- deep health の check の中身を変える必要が出たら止める。
+- `deepHealth.ts` の import 先が `src/lib/publicData/loader.ts` に届くと分かったら止める（D-10 で loader は移さない。MIG-0626 STOP と同じ）。
+- token（secret）を新しく作る必要が出たら止める（Yugo の承認事項）。
+#### Rollback
+Phase 6 共通契約のとおり。
+
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
@@ -2507,7 +3036,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648 / **Decisions:** D-14-14
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0660 / **Decisions:** D-14-14, D-15-15
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。

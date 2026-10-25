@@ -231,10 +231,10 @@ PR を revert。`apps/app` は本番に route されていないので、本番�
 
 ### MIG-0702: dashboard mutations（Personal 更新系機能）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0636・MIG-0641・MIG-0701 の DONE 後（Active X / profile の API は MIG-0636、onboarding は MIG-0641）
+- **Readiness:** NEEDS_REFINEMENT — MIG-0636・MIG-0641・MIG-0659・MIG-0701 の DONE 後（Active X / profile の API は MIG-0636、link 申請は MIG-0659、onboarding は MIG-0641）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0602, MIG-0636, MIG-0641, MIG-0701 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-9 DECIDED（2026-10-25: 要る API は SA-076・SA-098〜105・onboarding complete の POST だけ。MIG-0605 全体には依存しない）, D-14-9（SA-076 と onboarding complete は MIG-0641、SA-098〜105 は MIG-0636）
+- **Depends on:** MIG-0602, MIG-0636, MIG-0641, MIG-0659, MIG-0701 / **Decisions:** D-15-8（SA-099〜101 は MIG-0659）, D-03 DECIDED, D-04 DECIDED, D-13-9 DECIDED（2026-10-25: 要る API は SA-076・SA-098〜105・onboarding complete の POST だけ。MIG-0605 全体には依存しない）, D-14-9（SA-076 と onboarding complete は MIG-0641、SA-098〜105 は MIG-0636）
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - SA-098〜105（`src/lib/actions/xid.ts`: `setActiveXId`, `requestXIdLink`, `cancelXIdLinkRequest`, `requestXIdMergeRevert`, `updateXIdProfile`, `deleteLinkedXId`, `setXIdIcon`, `uploadXIdIcon`）、SA-076 `acceptOnboardingTerms`（`src/lib/actions/terms.ts`）。
@@ -272,10 +272,10 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0703: entry（Entry 画面群）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿は MIG-0603、枠は MIG-0604 の API を使う
+- **Readiness:** NEEDS_REFINEMENT — MIG-0702 の後。作品投稿・更新は MIG-0651、共同編集者は MIG-0650、枠の予約は MIG-0657 の API を使う（D-15-1 / D-15-4）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 / **Decisions:** none
+- **Depends on:** MIG-0603, MIG-0650, MIG-0651, MIG-0657, MIG-0702, MIG-0623, MIG-0630 / **Decisions:** D-15-1, D-15-4
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(auth)/entry/page.tsx`, `app/(auth)/entry/slotted/page.tsx`, `app/(auth)/entry/unslotted/page.tsx`, `app/(auth)/dashboard/edit/[id]/page.tsx`, `app/(auth)/dashboard/edit/[id]/permissions/page.tsx`。
@@ -314,24 +314,22 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0704: manage（Manage イベント運営画面群）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0604 と MIG-0703 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
+- **Readiness:** NEEDS_REFINEMENT — MIG-0604・MIG-0703・MIG-0707 の後（D-15-13 で U01 の scaffold を MIG-0707 へ分割）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0604, MIG-0703, MIG-0624 / **Decisions:** D-05 DECIDED, D-14-3
+- **Depends on:** MIG-0604, MIG-0703, MIG-0624, MIG-0707 / **Decisions:** D-05 DECIDED, D-14-3, D-15-13
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT（12ファイル）: `app/(manage)/manage/page.tsx`, `app/(manage)/manage/events/[id]/{page,edit/page,audience/page,slots/page,staff/page,videos/page,videos/[videoId]/page,youtube-playlist/page,review/page}.tsx`, `app/(manage)/manage/notifications/page.tsx`, `app/(manage)/manage/x-link-requests/page.tsx`。
-- `apps/ops` はまだ無い（`FILE_MIGRATION_MATRIX.md` の Future files 表で NOT_CREATED）。
+- `apps/ops` の package・build・guard・`_headers` は MIG-0707 が作る（D-15-13）。本 task は画面と `CostGuardBanner`、`apps/ops/wrangler.toml`。
 - 部品: `src/components/manage/**`, `src/components/layout/ManageSidebarNav.tsx`, `ManageActiveXNotice.tsx`。
 #### Owned paths
-- 新規: `+apps/ops/package.json`（`@flamenode/ops`）, `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts`（`assetsDir: "_ops_assets"`）, `+apps/ops/src/**`, `+apps/ops/public/_headers`（MIG-0620 から引き継ぎ、D-13-4）, `+apps/ops/wrangler.toml`（MIG-0628 から引き継ぎ、D-14-3。MIG-0628 の `apps/app/wrangler.toml` と同じ形、id は placeholder、`wrangler deploy --dry-run` を CI に足す）
-- 変更（MIG-0620 から引き継ぎ）: `apps/site/src/gateway/assetHeaders.test.mjs`
-- 変更: `package-lock.json`, `.github/workflows/migration-docs-check.yml`（Ops の build を追加）
+- 新規: `+apps/ops/src/routes/manage/**`, `+apps/ops/wrangler.toml`（MIG-0628 から引き継ぎ、D-14-3。MIG-0628 の `apps/app/wrangler.toml` と同じ形、id は placeholder、`wrangler deploy --dry-run` を CI に足す）
+- 変更: `apps/ops/src/routes/router.tsx`（MIG-0707 の route 枠を埋める）
 - 触らない: `app/(manage)/**`, `apps/app/**`
 #### Micro-units
 - U01〜U05 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704 のとおり。
-- **U01 追加（coverage gap G10, G12）**: `(manage)/layout.tsx` の guard を写す。user 無しは `/entry`、enrichmentFailed は `/entry?error=auth_temporarily_unavailable`、manage / admin 権限無しは `/dashboard`。error boundary と `CostGuardBanner` を置く。`apps/ops/index.html` に noindex。読み取りは MIG-0624 の API を使う。
-- **U01 追加（MIG-0620 から引き継ぎ、D-13-4）**: `apps/ops/public/_headers` を `apps/app/public/_headers` の `/_personal_assets/*` rule と同じ形で作る（`/_ops_assets/*` に `Cache-Control: public, max-age=31536000, immutable`。HTML には rule を置かない）。`apps/site/src/gateway/assetHeaders.test.mjs` に `const ops = parse(await read("apps/ops/public/_headers"));` を足し、T01 で `/_ops_assets/index-AbC123.js`, `/_ops_assets/index-AbC123.css`, `/_ops_assets/a-AbC.svg` が `IMMUTABLE`、T03 の HTML の loop と `for (const rules of [site, app])` に `ops` を足し、build 出力の test に `apps/ops/dist/_headers` がある時の一致検査を足す。
+- **U01**: scaffold・guard・noindex・`_headers` は MIG-0707（D-15-13）。本 task の U01 は `CostGuardBanner`（読む API が無ければ lead が担当の 06xx を決めてから）と Manage の layout（`ConsoleShell` / sidebar、`GET /api/manage/navigation`）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -341,7 +339,7 @@ Phase 7 共通契約のとおり。
 | T04 | `/manage/events/[id]/review` | `videos?status=pending` へ互換 redirect |
 | T05 | route × role（guest, user, staff, owner, admin）（G12） | Location（`error` query を含む）が CURRENT の layout と同じ |
 | T06 | Ops の HTML（G12） | `meta robots noindex` または `X-Robots-Tag` がある |
-| T07 | `/_ops_assets/*`（MIG-0620 T01） | immutable 1年。HTML は null |
+| T07 | `/_ops_assets/*`（MIG-0620 T01） | MIG-0707 で満たす |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/app
@@ -355,7 +353,7 @@ node --test --experimental-strip-types apps/site/src/gateway/assetHeaders.test.m
 #### DONE checklist
 - [ ] U01〜U05 と Final audit が DONE
 - [ ] Ops の build が CI で動く
-- [ ] `apps/ops/public/_headers` の `/_ops_assets/*` が immutable 1年で、`assetHeaders.test.mjs` が `ops` を検査している（MIG-0620 から引き継ぎ、D-13-4）
+- [ ] MIG-0707 が DONE（`_headers` と `assetHeaders.test.mjs` の `ops`、D-13-4）
 #### STOP
 - Ops の Worker / Route を本番に作る必要が出たら止める（明示承認事項）。
 #### Rollback
@@ -366,7 +364,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638, MIG-0642..MIG-0648 / **Decisions:** D-05 DECIDED, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）, D-14-14（0637 / 0638 の分割先 0642〜0648 を依存に追加）
+- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638, MIG-0642..MIG-0648, MIG-0650..MIG-0657, MIG-0660 / **Decisions:** D-05 DECIDED, D-15-15（admin 画面が呼ぶ MIG-0650〜0657 / 0660 を依存に追加）, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）, D-14-14（0637 / 0638 の分割先 0642〜0648 を依存に追加）
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(admin)/**/page.tsx` 45件（`CURRENT_ROUTES.md` Admin 45）。部品は `src/components/admin/**`。
@@ -401,6 +399,56 @@ npm run typecheck
 - 任意SQLを実行できる画面が必要に見えたら止める。
 #### Rollback
 Phase 7 共通契約のとおり。
+
+### MIG-0707: Ops SPA の土台（`apps/ops` の package・build・guard、MIG-0704 U01）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-13: MIG-0704 U01 の scaffold を分割。読み API（MIG-0624 / MIG-0625 / RH-001）は DONE。画面は MIG-0704 / MIG-0705。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0102, MIG-0608, MIG-0624, MIG-0625 / **Decisions:** D-05 DECIDED, D-13-4, D-15-13
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- 手本（Personal SPA、MIG-0701）: `apps/app/package.json`（scripts `build: "tsc && vite build"`、`test: "tsc -p tsconfig.test.json && node --test test/*.test.mjs"`、deps `@flamenode/contracts` / `@flamenode/ui` / react 19 / react-router-dom 7）、`apps/app/vite.config.ts`（`base: "/"`, `build.assetsDir: "_personal_assets"`）、`apps/app/tsconfig.json`、`apps/app/index.html`、`apps/app/src/{main,App}.tsx`、`apps/app/src/routes/guard.tsx`（`LoginRequired` / `BannedNotice` / `AuthErrorView`）、`apps/app/public/_headers`。
+- CURRENT の guard: `app/(manage)/layout.tsx`（user 無し → `/entry`、`enrichmentFailed` → `/entry?error=auth_temporarily_unavailable`、`canAccessAdmin` も `canAccessManage` も無い → `/dashboard`、robots noindex/nofollow）、`app/(admin)/layout.tsx`（同じ順で、`role !== "admin"` → `/dashboard`）。
+- guard の入力: RH-001 `GET /api/account/summary`（`apps/api/src/routes/account/summary.ts`、`canAccessAdmin` / `canAccessManage` :282-302）。sidebar の event 一覧は `GET /api/manage/navigation`（`apps/api/src/routes/manage/navigation.ts`）。
+- `CostGuardBanner`（`src/components/layout/CostGuardBanner.tsx`、server で `resolveCostGuardBannerSnapshot` を読む）を返す HTTP endpoint は main に無い（`apps/api/src/routes/live/operationMode.ts` は live API 内部用）。D-15-13 で banner は MIG-0704 に残す。
+- CI: `.github/workflows/migration-docs-check.yml:103`（`npm run build --workspace=@flamenode/app`）。
+#### Owned paths
+- 新規: `+apps/ops/package.json`（`@flamenode/ops`）, `+apps/ops/index.html`（`<meta name="robots" content="noindex, nofollow">`）, `+apps/ops/tsconfig.json`, `+apps/ops/tsconfig.test.json`, `+apps/ops/vite.config.ts`（`base: "/"`, `build.assetsDir: "_ops_assets"`）, `+apps/ops/src/{main,App}.tsx`, `+apps/ops/src/routes/{router,guard}.tsx`, `+apps/ops/src/api/account.ts`, `+apps/ops/public/_headers`, `+apps/ops/test/{guard,build}.test.mjs`
+- 変更: `package-lock.json`, `.github/workflows/migration-docs-check.yml`（Ops の build と test を 2 行）, `apps/site/src/gateway/assetHeaders.test.mjs`（D-13-4 の `ops` 追加）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `apps/app/**`, `app/(manage)/**`, `app/(admin)/**`, `packages/ui/**`
+#### Micro-units
+- **U01 package + build**: `apps/app` と同じ形で package / tsconfig / vite.config / index.html を作る（`assetsDir` と noindex だけが違う）。`npm ci` で lock を更新。
+- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。
+- **U03 `_headers`**（D-13-4、MIG-0704 から移す）: `apps/ops/public/_headers` に `/_ops_assets/*` `Cache-Control: public, max-age=31536000, immutable`（HTML には rule を置かない）。`assetHeaders.test.mjs` に `const ops = parse(await read("apps/ops/public/_headers"));` を足し、T01 の `/_ops_assets/index-AbC123.js` / `.css` / `a-AbC.svg` が `IMMUTABLE`、T03 の HTML の loop と `for (const rules of [site, app])` に `ops` を足す。
+- **U04 CI**: workflow に `npm run build --workspace=@flamenode/ops` と `npm run test --workspace=@flamenode/ops`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | Personal と Ops の build | 両方成功、`dist/_personal_assets` と `dist/_ops_assets` に分かれ、互いの chunk 名が出ない |
+| T02 | guard: 未ログイン / enrichment 失敗 / manage 権限なし / admin 以外が `/admin` | Location が CURRENT の layout と同じ（`error` query を含む） |
+| T03 | Ops の HTML | `meta robots noindex` がある |
+| T04 | `/_ops_assets/*`（MIG-0620 T01） | immutable 1 年、HTML は null |
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+npm run build --workspace=@flamenode/app
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+node --test --experimental-strip-types apps/site/src/gateway/assetHeaders.test.mjs
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の Future files 表の `apps/ops/**` を作成済みに、`assetHeaders.test.mjs` 行に MIG-0707。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T04 が PASS
+- [ ] Ops の build が CI で動く
+#### STOP
+- Ops の Worker / Route / Custom Domain を作る必要が出たら止める（明示承認事項。`apps/ops/wrangler.toml` は MIG-0704）。
+- guard の判定に RH-001 に無い値が要ると分かったら止める（API を変えない）。
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない）。
 
 ### MIG-0706: Phase 7 Gate
 - **Model:** lead

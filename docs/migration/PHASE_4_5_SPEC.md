@@ -1030,10 +1030,10 @@ Phase 5 共通契約のとおり。
 
 ### MIG-0509: 全公開データの生成を build 時へ移す（D-09）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0409 DONE で着手可。lead 決定は D-13-11〜D-13-15 で済み。D1 / R2 の token、Workers Builds project、本番の実データ計測は owner 手順
+- **Readiness:** NEEDS_REFINEMENT — MIG-0409 DONE で着手可。lead 決定は D-13-11〜D-13-15 で済み。D-15-11 で U05（request mark）を MIG-0516、U06（GA4 の入力）を MIG-0517 へ分割。D1 / R2 の token、Workers Builds project、本番の実データ計測は owner 手順
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0409 / **Decisions:** D-06 DECIDED, D-09 DECIDED, D-11 DECIDED
+- **Depends on:** MIG-0409 / **Decisions:** D-06 DECIDED, D-09 DECIDED, D-11 DECIDED, D-15-11
 - **Verified against:** `7a19a42` (2026-10-25)
 #### Source snapshot
 - merge 済み pre-work: PR #354（merge `419fae28`）。`apps/site/scripts/produceSnapshots.ts`（`produceSnapshots` :255、`writeSnapshotDir` :395、CLI `main` :457 は `--sqlite` / `--sql-dump` だけで Cloudflare に接続しない、`DEFAULT_MAX_REMOTE_STATEMENTS = 200` :144、`limitedDb` :148）、`batchedUserReader.ts`、`mirrorTables.ts`、`scripts/migration-snapshot-producers.test.mjs`（C' parity、e2e astro build :323）。Phase 5 の全 page が読む snapshot kind を作る。
@@ -1044,26 +1044,26 @@ Phase 5 共通契約のとおり。
 - GA4 同期の入力: `workers/ga-analytics/sync.ts:20` `GA4_RECENT_LIST_KEY = "list/recent.json"`（R2）。
 #### Owned paths
 - 新規: `+apps/site/scripts/buildPublicSite.ts`, `+apps/site/scripts/readR2Object.ts`, `+scripts/migration-build-public-site.test.mjs`
-- 変更: `apps/site/scripts/produceSnapshots.ts`, `apps/site/package.json`（`build:public` script）, `scripts/migration-snapshot-producers.test.mjs`, `packages/server-core/src/staticRebuild/enqueue.ts`, `workers/ga-analytics/sync.ts`, `.github/workflows/migration-docs-check.yml`（test 1 行）, `docs/migration/static-delivery/BUILD_TIME_DATA.md`
+- 変更: `apps/site/scripts/produceSnapshots.ts`, `apps/site/package.json`（`build:public` script）, `scripts/migration-snapshot-producers.test.mjs`, `.github/workflows/migration-docs-check.yml`（test 1 行）, `docs/migration/static-delivery/BUILD_TIME_DATA.md`
 - 触らない: `workers/json-generator/**`（MIG-0907 まで動かす）、`apps/site/src/gateway/**`、本番の D1・R2・token・Workers Builds 設定
 #### Micro-units
 - **U01 D1 API mode**: `produceSnapshots.ts` の `main` に `--d1-api` を足す。`openD1HttpReader({ accountId, databaseId, token, maxStatements: DEFAULT_MAX_REMOTE_STATEMENTS })`（D-13-12、env は `D1_HTTP_ENV`）を `db` にし `mode: "batched"` に固定。`--sqlite` / `--sql-dump` と排他。test: `readPublicData.test.mjs` と同じ fake `/query` endpoint を同じ seed の SQLite に向け、`--d1-api` と `--sqlite --batched` の snapshot と manifest が byte 一致、statement 数 ≤ 200、token が log に出ない。
 - **U02 trending from R2（D-13-14）**: `readR2Object.ts` に `readR2Json({ accountId, bucket, key, token, fetchFn, maxBytes })` を書く（`GET /client/v4/accounts/<account>/r2/buckets/<bucket>/objects/<key>`、15 s timeout、2 MiB 上限、token を log に出さない、404 は null）。`main` に `--trending-r2` を足し `analytics/trending.json` を `trending` に渡す（env: `FLAMENODE_R2_READ_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`）。
 - **U03 build entry**: `buildPublicSite.ts` = `produceSnapshots` → `writeSnapshotDir(<tmp>)` → 返った env を足して `astro build` を子 process で実行 → `node scripts/check-public-site-build-budget.mjs`。`report`（keys / bytes / d1Statements / elapsedMs）と build の所要時間を JSON 1 行で stdout に出す。`apps/site/package.json` に `"build:public": "node --experimental-strip-types scripts/buildPublicSite.ts"`。CI dry-run: `scripts/migration-build-public-site.test.mjs` が seed SQLite で `--sqlite` 経路を通し、dist に `/user/creator_a/` と `/[id]` の page ができることを確かめる（REQUIRE_BUILT step に1行足す）。
 - **U04 owner 手順の文書**: `BUILD_TIME_DATA.md` §2 と §5 に Workers Builds の設定（build command `npm run build:public --workspace=@flamenode/site -- --d1-api --trending-r2 --generation $WORKERS_CI_COMMIT_SHA`、変数）と token 作成を書く。wrangler の deploy 設定は MIG-0628。
-- **U05 request mark**: `buildStaticRebuildQueueBatch` の batch に `UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1` を1つ足す（公開データを変える enqueue と同じ batch。S3 の D1 statement +1）。server-core の golden test を意図的に更新し PR に理由を書く。
-- **U06 GA4 input**: `workers/ga-analytics/sync.ts` の入力を R2 `list/recent.json` から D1 の `LIMIT` 付き query（CURRENT `list_recent` と同じ並びと上限）へ。出力 `analytics/trending.json`（最大 200 件、`workers/ga-analytics/ranking.ts:29`）は変えない。CURRENT の `list/recent.json` と同じ入力集合になる test。
+- **U05**: MIG-0516 へ分割（D-15-11）。
+- **U06**: MIG-0517 へ分割（D-15-11）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | `--d1-api`（fake endpoint）と `--sqlite --batched` | snapshot・manifest が byte 一致、statement ≤ 200 |
 | T02 | 非公開・削除済み | どの snapshot にも無い（既存 visibility test） |
-| T03 | 公開データを変える enqueue | `requested_at` が更新される |
-| T04 | 公開データを変えない更新 | `requested_at` が変わらない |
+| T03 | 公開データを変える enqueue | MIG-0516 で満たす |
+| T04 | 公開データを変えない更新 | MIG-0516 で満たす |
 | T05 | `rg -n "env\.(BUCKET\|R2)" apps/site/src/pages apps/site/src/lib` | 0 件 |
 | T06 | `buildPublicSite.ts --sqlite <seed>` | dist に user / video / event の page、budget check PASS |
 | T07 | trending の R2 読み取りが 404 / 401 | 404 = trending 無し（fail closed の build エラー）、401 = 終了コード 1、token が出力に無い |
-| T08 | GA4 同期の入力 | CURRENT `list/recent.json` と同じ id 集合と順序 |
+| T08 | GA4 同期の入力 | MIG-0517 で満たす |
 #### Commands
 ```bash
 REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-snapshot-producers.test.mjs scripts/migration-build-public-site.test.mjs
@@ -1085,13 +1085,13 @@ npm run typecheck
 - owner 手順（agent は実行しない。各手順の直前に明示承認）:
   1. API token `flamenode-build-read`: Account → D1 → Read と Workers R2 Storage → Read のみ、FlameNode account のみ（`BUILD_TIME_DATA.md` §5 手順 1）。
   2. 信頼できる shell で `SELECT 1` を `/query` に1回（§5 手順 2）。Read token が拒否されたら止めて lead に報告。D1 Edit に広げない。
-  3. 本番 D1 で 0065 が applied であることの read-only 確認（MIG-0410 STOP 1）。**U05 の merge はこれが済むまで止める**（未適用だと全ての編集の batch が失敗する）。
+  3. 本番 D1 で 0065 が applied であることの read-only 確認（MIG-0410 STOP 1）。**MIG-0516 の merge はこれが済むまで止める**（未適用だと全ての編集の batch が失敗する）。
   4. Workers Builds project を作り、build command と変数（`CLOUDFLARE_ACCOUNT_ID`, `FLAMENODE_D1_DATABASE_ID`, `FLAMENODE_D1_READ_TOKEN`, `FLAMENODE_R2_READ_TOKEN`）を登録。
   5. 5 回 build して所要時間・D1 statement 数・file 数を work item に貼る。
 - family の出力が CURRENT と一致しない理由が CURRENT の不具合に見えたら、直さずに PR に書く。privacy に関わる場合は止める。
 - build 時間が承認した値を超えたら止める。
 #### Rollback
-PR を revert。CURRENT の json-generator は動いたままなので公開ページは変わらない。U05 を revert すると `requested_at` が更新されなくなるだけ（MIG-0410 の段は skip）。
+PR を revert。CURRENT の json-generator は動いたままなので公開ページは変わらない。
 
 ### MIG-0510: `/list` の filter Island と top の search band を RH-032 につなぐ
 - **Model:** lead
@@ -1335,10 +1335,10 @@ PR を revert。fetch の分岐だけなので data の戻しは無い。
 
 ### MIG-0513: `/[id]` の操作 Island を Phase 6 の API につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0603 / MIG-0634 / MIG-0640 待ち。D-14-12 で MIG-0510 U02 から分割）。chapter composer の API（SA-012..015）は merge 済みなので、依存が DONE になったら lead が like / status / overlay の URL と DTO を写して READY にする
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0603 / MIG-0640 / MIG-0518 待ち。D-14-12 で MIG-0510 U02 から分割。D-15-12 で API が merge 済みの chapter composer（U02）と `?playlist=` dock（U04）、overlay の client を MIG-0518 へ分割。残りは like / bookmark と状態 form）
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
-- **Depends on:** MIG-0603, MIG-0634, MIG-0640 / **Decisions:** D-03 DECIDED, D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12
+- **Depends on:** MIG-0603, MIG-0640, MIG-0518 / **Decisions:** D-03 DECIDED, D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12, D-15-12
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - CURRENT: `src/components/video/InteractionButton.tsx`（SA-087）、`VideoInteractionActions.tsx`、`ChapterComposer.tsx`（SA-012..015）、`ChapterCommentPanel.tsx`、`VideoStatusForm.tsx`（SA-001 / SA-040）、`VideoViewerUtilityDock.tsx`（`?playlist=` dock）。
@@ -1350,14 +1350,14 @@ PR を revert。fetch の分岐だけなので data の戻しは無い。
 - 触らない: `app/**`, `src/components/**`, `apps/api/**`
 #### Micro-units
 - **U01 like / bookmark**: Active X 0件・複数の 403 / 202 / modal 誘導を CURRENT `InteractionButton.tsx` と同じに。
-- **U02 chapter composer + comments**: merge 済みの SA-012..015 API。応答 200/400/403/404/409/413 を CURRENT の表示に。
-- **U03 状態 form + viewer overlay**: SA-001 / SA-040 と RH-031。overlay の結果で操作部品の表示可否を決める（CURRENT と同じ条件）。
-- **U04 `?playlist=` dock**: CURRENT `VideoViewerUtilityDock.tsx` と同じ query key。
+- **U02**: MIG-0518 へ分割（D-15-12）。
+- **U03 状態 form**: SA-001 / SA-040。表示可否は MIG-0518 の `apps/site/src/lib/viewerOverlay.ts`（RH-031）の結果で決める（CURRENT と同じ条件）。
+- **U04**: MIG-0518 へ分割（D-15-12）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | like、Active X 0件 / 複数 | CURRENT と同じ 403 / 202 / modal |
-| T02 | chapter 作成・更新・削除・一括 | API の 200/400/403/404/409/413 を CURRENT の表示に |
+| T02 | chapter 作成・更新・削除・一括 | MIG-0518 で満たす |
 | T03 | 状態 form（admin / manage / 権限なし） | CURRENT と同じ表示と結果 |
 | T04 | JS なし | 静的表示が残り、何もしない control は出ない |
 #### Commands
@@ -1370,7 +1370,7 @@ npm run typecheck
 #### Ledger updates
 `FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0507.md` の Island の Parity gap を「MIG-0513 で解消」に。
 #### DONE checklist
-- [ ] U01〜U04 が DONE、T01〜T04 が PASS
+- [ ] U01 / U03 が DONE、T01 / T03 / T04 が PASS（U02 / U04 は MIG-0518）
 - [ ] 呼ぶ API は全て Hono の DONE task のもの
 - [ ] browser 確認（390px / 1440px）が PR にある
 #### STOP
@@ -1380,10 +1380,10 @@ PR を revert。静的表示に戻る。
 
 ### MIG-0514: `/event/[id]/slots` の予約 Island を Phase 6 の API につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0604 U04 待ち。D-14-12 で MIG-0510 U03 から分割）。viewer panel の API（RH-014）は merge 済み
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0657 待ち。D-15-4 で MIG-0604 U04 の予約部分が MIG-0657 になった。D-14-12 で MIG-0510 U03 から分割）。viewer panel の API（RH-014）は merge 済み
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
-- **Depends on:** MIG-0604 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-12 DECIDED, D-13-24, D-14-12
+- **Depends on:** MIG-0657 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-12 DECIDED, D-13-24, D-14-12, D-15-4
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - CURRENT: `src/components/event/SlotGrid.tsx:15`（`@/lib/actions/slot` 直呼び、SA-056..068）、`app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx`（RH-014）。
@@ -1464,12 +1464,138 @@ npm run typecheck
 #### Rollback
 PR を revert。
 
+### MIG-0516: 公開データを変える enqueue で build 要求を記録する（MIG-0509 U05）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-11: MIG-0509 U05 を分割。merge は owner の read-only 確認（本番 D1 で 0065 が applied）の後。実装は Sonnet、review は Opus）
+- **Recipe:** R-CORE
+- **Runtime:** S3
+- **Depends on:** MIG-0409 / **Decisions:** D-09 DECIDED, D-15-11
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- core: `packages/server-core/src/staticRebuild/enqueue.ts:85` `buildStaticRebuildQueueBatch`（`src/lib/staticRebuild/enqueue.ts` は bridge）。読み手: `workers/fast-jobs/publicBuildTrigger.ts:138`（SELECT）、`:160`（CAS UPDATE）。table: `migrations/0065_public_build_state.sql`（`id = 1` の 1 行、`requested_at INTEGER NOT NULL DEFAULT 0`）。
+- `requested_at` を書く経路は main に無い（`rg requested_at packages apps workers` は queue の wake message と fence だけ）。それまで fast-jobs の `public-build-trigger` 段は毎時 `skip`（MIG-0410 T01）。
+- 本番 D1 の 0065: 2026-10-23 の `npm run db:remote-apply`（未適用を番号順に全部適用）で 0066 と一緒に適用されたはずだが、文書に出力が無い（MIG-0410 Source snapshot、`PHASE_4_GATE.md` §5）。
+#### Owned paths
+- 変更: `packages/server-core/src/staticRebuild/enqueue.ts`, server-core の `buildStaticRebuildQueueBatch` の golden test（U01 で file を確定）, `docs/migration/static-delivery/BUILD_TIME_DATA.md`（§3 の request mark）
+- 触らない: `workers/fast-jobs/**`, `migrations/**`, `src/lib/staticRebuild/enqueue.ts`（bridge のまま）, MIG-0509 の owned paths
+#### Micro-units
+- **U01 request mark**: `buildStaticRebuildQueueBatch` が返す batch に `UPDATE public_build_state SET requested_at = MAX(requested_at, ?) WHERE id = 1` を 1 文足す（公開データを変える enqueue のときだけ。S3 の D1 文 +1）。`?` は enqueue の時刻（ms、既存の `now` と同じ値）。
+- **U02 test**: golden test を意図的に更新し、理由を PR 本文に書く。T01〜T03 を足す。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 公開データを変える enqueue | `requested_at` が更新される（MIG-0509 T03） |
+| T02 | 公開データを変えない更新 | `requested_at` が変わらない（MIG-0509 T04） |
+| T03 | 古い時刻で 2 回目 | `MAX` で値が戻らない |
+#### Commands
+```bash
+npm run test --workspace=@flamenode/server-core
+node --test --experimental-strip-types workers/fast-jobs/publicBuildTrigger.test.mjs
+npm run test:critical
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`BUILD_TIME_DATA.md` に request mark の 1 文と D1 文 +1。`work-items/MIG-0410.md` に「`requested_at` の書き手は MIG-0516」。
+#### DONE checklist
+- [ ] T01〜T03 が PASS
+- [ ] owner の read-only 確認（0065 が applied）の出力が work item にある
+#### STOP
+- **merge は owner の read-only 確認の後**（`npx wrangler d1 migrations list flamenode_db --remote` で 0065 が applied。未適用だと全ての編集の batch が失敗する。MIG-0509 STOP 3）。agent は Remote D1 を読まない。
+- 公開データを変えない enqueue まで mark を付ける必要が出たら止める。
+#### Rollback
+PR を revert。`requested_at` が更新されなくなるだけ（MIG-0410 の段は skip）。
+
+### MIG-0517: GA4 同期の入力を R2 `list/recent.json` から D1 にする（MIG-0509 U06）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-11: MIG-0509 U06 を分割。MIG-0907 で `list/recent.json` が無くなる前に要る。実装は Sonnet、review は Opus）
+- **Recipe:** R-JOB
+- **Runtime:** B
+- **Depends on:** MIG-0409 / **Decisions:** D-09 DECIDED, D-15-11
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- `workers/ga-analytics/sync.ts:20` `GA4_RECENT_LIST_KEY = "list/recent.json"`、`:151` `loadRecentListPayload`（`env.R2.get`、上限 `GA4_RECENT_LIST_MAX_OBJECT_BYTES`）、`:249-266`（`recent.items` → `rankTrendingItems`）。出力 `analytics/trending.json`（最大 200 件、`workers/ga-analytics/ranking.ts:29`）。型 `RecentListPayload` は `ranking.ts`。
+- `list/recent.json` の作り手: `workers/json-generator/optimizedRebuild.ts:651`（`recentPayload`）、`:669-678`（`putTrackedJson(..., "list/recent.json", ..., "list_recent")`）。並びと上限はこの query を写す。core の正規化 `packages/server-core/src/publicData/recentVideoCore.ts`（`normalizeStaticRecentVideoPage` :48）。
+- 既存 test: `workers/ga-analytics/{sync,ranking,ga-analytics.contract}.test.mjs`。
+#### Owned paths
+- 新規: `+workers/ga-analytics/recentFromD1.ts`, `+workers/ga-analytics/recentFromD1.test.mjs`
+- 変更: `workers/ga-analytics/sync.ts`（`loadRecentListPayload` の中身）, `workers/ga-analytics/sync.test.mjs`
+- 触らない: `workers/json-generator/**`（MIG-0907 まで動かす）, `workers/ga-analytics/ranking.ts`, 出力の key と形
+#### Micro-units
+- **U01 query**: `recentFromD1.ts` に `loadRecentListFromD1(db, { limit })` を書く。CURRENT `list/recent.json` と同じ公開条件・並び・上限の `LIMIT` 付き SELECT 1 文。返す形は `RecentListPayload`（`items` の field は ranking が使うものだけ）。
+- **U02 切替**: `loadRecentListPayload` が D1 を読む。R2 の読みは消す。`ga4_recent_list_missing` の代わりに 0 件なら CURRENT と同じ「同期しない」経路へ。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 同じ seed から json-generator の `list/recent.json` と `loadRecentListFromD1` | id の集合と順序が一致（MIG-0509 T08） |
+| T02 | 非公開・削除済みの動画 | 入力に入らない |
+| T03 | 0 件 | 同期しない、`analytics/trending.json` を書かない（CURRENT と同じ） |
+| T04 | D1 の文数 | 1 |
+#### Commands
+```bash
+node --test --experimental-strip-types workers/ga-analytics/recentFromD1.test.mjs workers/ga-analytics/sync.test.mjs workers/ga-analytics/ranking.test.mjs workers/ga-analytics/ga-analytics.contract.test.mjs
+npm run typecheck && npm run test:unit
+```
+#### Ledger updates
+`BUILD_TIME_DATA.md` の GA4 入力の行。`R2_ARTIFACT_CONSUMERS.md`（MIG-0649 が作っていれば）の `list/recent.json` の読み手から ga-analytics を消す。`FILE_MIGRATION_MATRIX.md` に新規 2 file。
+#### DONE checklist
+- [ ] T01〜T04 が PASS
+- [ ] `rg 'list/recent.json' workers/ga-analytics` が test 以外 0 件
+#### STOP
+- 本番の GA4 credential や secret が要ると分かったら止める（Yugo の承認事項）。
+- CPU 予算（B < 8ms、`ZERO_1102.md`）を超えそうなら止めて MIG-0609 の計測を待つ。
+#### Rollback
+PR を revert。R2 の `list/recent.json` は json-generator が書き続けているので戻せる。
+
+### MIG-0518: `/[id]` の chapter composer・コメントと `?playlist=` dock の Island（MIG-0513 U02 / U04）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-15-12: MIG-0513 から API が merge 済みの部分を分割。SA-012..015 は #393、RH-031 viewer overlay は MIG-0634（#401）。実装は Sonnet、review は Opus）
+- **Recipe:** R-PAGE, R-UI
+- **Runtime:** S0
+- **Depends on:** MIG-0407, MIG-0634 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-13-24, D-15-12
+- **Verified against:** `0a0f62a` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/components/video/ChapterComposer.tsx`（514 行、`next/link`・`next/navigation` と SA `createChapter` / `createChaptersBulk` を import）、`ChapterCommentPanel.tsx`（257 行）、`VideoViewerUtilityDock.tsx`（66 行、`useVideoViewerOverlay(videoId)` の `playlist` / `playlistLabel` / `playlistItems`、`:24-48`）。overlay の client は `src/lib/video/videoViewerOverlayClient.ts:267` `useVideoViewerOverlay`。
+- API: `apps/api/src/routes/videos/chapters.ts:604-607`（`POST /api/videos/:videoId/chapters`、`/bulk`、`PUT` / `DELETE /api/videos/chapters/:chapterId`）、RH-031 `GET /api/videos/:videoId/viewer-overlay`（`apps/api/src/routes/videos/viewerOverlay.ts`、MIG-0634）。
+- apps/site: `apps/site/src/components/VideoPageIsland.ts`（25 行、静的表示と view tracker だけ。`:15` のコメントが「chapter composer と comments はまだ」）。`apps/site/src/lib/publicApi.ts` は MIG-0510 U03 が作る（未 merge なら本 task が MIG-0510 の仕様で作る）。
+#### Owned paths
+- 新規: `+apps/site/src/components/VideoChapterIsland.ts`, `+apps/site/src/components/VideoUtilityDockIsland.ts`, `+apps/site/src/lib/viewerOverlay.ts`（RH-031 の client。MIG-0513 も使う）, `+scripts/migration-video-chapter-island.test.mjs`
+- 変更: `apps/site/src/components/VideoPageIsland.ts`（mount 2 行とコメント）, `packages/ui/src/screens/VideoDetailView.tsx`（slot を渡す prop だけ）
+- 触らない: `app/**`, `src/components/**`, `apps/api/**`, MIG-0513 の `VideoInteractionIsland.ts`
+#### Micro-units
+- **U01 overlay client**: `viewerOverlay.ts` = CURRENT `useVideoViewerOverlay` と同じ query key（`?playlist=`）と同じ表示可否の条件。失敗時は CURRENT と同じ「何も出さない」。
+- **U02 chapter composer + comments**: SA-012..015 の API を呼ぶ。応答 200/400/403/404/409/413 を CURRENT の表示に。`next/link` / `useRouter` は site の adapter（`SiteAdapterProvider.ts`）に替える。
+- **U03 `?playlist=` dock**: CURRENT `VideoViewerUtilityDock.tsx` と同じ query key と表示。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | chapter 作成・更新・削除・一括 | API の 200/400/403/404/409/413 を CURRENT の表示に（MIG-0513 T02） |
+| T02 | overlay で chapter の権限なし / あり | CURRENT と同じ表示可否 |
+| T03 | `?playlist=<id>` あり / なし | dock の表示と項目が CURRENT と同じ |
+| T04 | JS なし | 静的表示が残り、何もしない control は出ない |
+#### Commands
+```bash
+node --test --experimental-strip-types scripts/migration-video-chapter-island.test.mjs
+REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-video-page.test.mjs
+npm run build --workspace=@flamenode/site
+npm run typecheck
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0507.md` の Island の Parity gap のうち chapter / dock を「MIG-0518 で解消」に。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- API が無い・契約が CURRENT と違うときは止めて担当の 06xx に返す。
+- like / bookmark・状態 form（MIG-0513）に手を出す必要が出たら止める。
+#### Rollback
+PR を revert。静的表示に戻る。
+
 ### MIG-0508: Phase 5 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0501..MIG-0507, MIG-0509..MIG-0515, MIG-0621, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED, D-11 DECIDED, D-14-6, D-14-12
+- **Depends on:** MIG-0501..MIG-0507, MIG-0509..MIG-0518, MIG-0621, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED, D-11 DECIDED, D-14-6, D-14-12, D-15-15
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - `CURRENT_ROUTES.md` の Public 16 ルート（VISUAL_SCREEN 13 + COMPAT_REDIRECT 3）と `ROUTE_MATRIX.md`。

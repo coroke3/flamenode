@@ -53,6 +53,12 @@
 
 ## Phase 9: keep rollback until observed stable
 
+### MIG-0908 — code-side residual inventory (Workers / Cron / Queue / bindings)
+- 読む: 4 つの `wrangler.toml`、`workers/*`、MIG-0901 / 0904 / 0907 の Work Order。
+- 変更: `+docs/migration/RESIDUAL_INVENTORY.md` §1、`+scripts/check-residual-inventory.mjs` と test、CI 1 行。
+- 試験: 表に無い cron / queue / binding で exit 1、「未定」は警告。
+- DONE: 全項目が表にあり、本番ログや account を読んでいない。
+
 ### MIG-0901 — evidence-based residual dependency inventory
 
 - 読む: `CURRENT_ROUTES.md`, `ROUTE_MATRIX.md`, `API_MATRIX.md`, RH/SA ledgers, actual Worker request metrics, Cloudflare route ownership。

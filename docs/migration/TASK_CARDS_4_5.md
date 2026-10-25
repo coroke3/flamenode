@@ -198,6 +198,24 @@
 - 試験: `next` の sanitize、`?error=` の3 code、Active X の楽観更新と rollback、JS なし。
 - DONE: MIG-0636 / 0641 の API で CURRENT と同じ結果、D-04 を実行していない。
 
+### MIG-0516 — public build request mark (MIG-0509 U05)
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0516 Work Order、`packages/server-core/src/staticRebuild/enqueue.ts:85`、`workers/fast-jobs/publicBuildTrigger.ts:138,160`。
+- 変更: `buildStaticRebuildQueueBatch` に `public_build_state.requested_at` の `MAX` 更新 1 文、golden test。
+- 試験: 公開データを変える / 変えない enqueue、古い時刻で戻らない。
+- DONE: T01〜T03、merge は owner の 0065 read-only 確認の後。
+
+### MIG-0517 — GA4 sync input from D1 (MIG-0509 U06)
+- 読む: `workers/ga-analytics/sync.ts:20,151,249-266`、`workers/json-generator/optimizedRebuild.ts:651,669-678`。
+- 変更: `+workers/ga-analytics/recentFromD1.ts`、`loadRecentListPayload` の中身。
+- 試験: `list/recent.json` と同じ id 集合と順序、非公開を含まない、0 件で同期しない。
+- DONE: ga-analytics が R2 の `list/recent.json` を読まない。
+
+### MIG-0518 — `/[id]` chapter composer + `?playlist=` dock Islands
+- 読む: `ChapterComposer.tsx`、`ChapterCommentPanel.tsx`、`VideoViewerUtilityDock.tsx`、`videoViewerOverlayClient.ts:267`、`apps/api/src/routes/videos/{chapters,viewerOverlay}.ts`。
+- 変更: `+VideoChapterIsland.ts`、`+VideoUtilityDockIsland.ts`、`+apps/site/src/lib/viewerOverlay.ts`、`VideoPageIsland.ts` の mount。
+- 試験: chapter の 200/400/403/404/409/413、overlay の権限、`?playlist=`、JS なし。
+- DONE: T01〜T04 と 390px / 1440px の browser 確認。
+
 ### MIG-0512 — public gateway error pages and sub-page fence
 
 - 読む: `PHASE_4_5_SPEC.md` MIG-0512、`apps/site/src/gateway/index.ts`、`routeShards.ts`、`visibility.ts`、R-GATEWAY。
