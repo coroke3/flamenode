@@ -147,7 +147,7 @@
 - 読む: `PHASE_4_5_SPEC.md` の MIG-0507 Work Order、`work-items/MIG-0507.md`、CURRENT `app/(public)/[id]/page.tsx`。
 - 変更: `apps/site/src/lib/videoPage.ts`（playlist link を build 時の event-detail snapshot から）。
 - 試験: T08/T09 playlist、既存 T01〜T07、browser 390px / 1440px。
-- DONE: U10〜U12 と Final audit、MIG-0511 の icon projection が入っている。Island は MIG-0510、sign-out は Phase 8。catch-all Route を Cloudflare に登録しない。
+- DONE: U10〜U12 と Final audit。icon projection の確認は MIG-0511 T03 と MIG-0508（D-14-6）。Island は MIG-0513 / 0515、sign-out は Phase 8。catch-all Route を Cloudflare に登録しない。
 
 ### MIG-0509 — all public data generated at build time (D-09)
 
@@ -158,7 +158,7 @@
 
 ### MIG-0508 — Phase 5 Gate
 
-- 読む: 0501..0507 と 0509..0511 の各PR、Public 16 Route matrix、432 UX台帳内のpublic該当部分。
+- 読む: 0501..0507 と 0509..0515 の各PR、Public 16 Route matrix、432 UX台帳内のpublic該当部分。
 - 変更: Route Matrix全件にlegacy→new disposition・根拠（URL/screenshot/test/rollback）を付け、公開pageまわりの残機能漏れを数える。
 - 試験: public+private+alias across 16 routes, SEO/OGP, direct reload, mobile/a11y, no1102/nonprod, deny-first for static、操作 Island。
 - DONE: 人間Phase Gate承認+独立review必須、旧Next Workerの未移行Auth/API/private経路には触れない。
@@ -170,12 +170,33 @@
 - 試験: `scripts/migration-public-icon-map.test.mjs` T01〜T07、producer T08（CURRENT `users_index` 生成物と deep-equal）。
 - DONE: 3 consumer が map を使い、map が無くても build は成功し出力は従来どおり。
 
-### MIG-0510 — Phase 5 interactive Islands on Phase 6 APIs
+### MIG-0510 — `/list` filter Island + top search band on RH-032
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0510 Work Order と Phase 5 共通契約、各 unit の CURRENT component（Work Order の Source snapshot）。
-- 変更: `+ListFilterIsland.ts`、`+VideoInteractionIsland.ts`、`+RulesConsentIsland.ts`、`+lib/publicApi.ts`、各 page と `packages/ui` の screen。
-- 試験: list の query、like / chapter / 状態、枠予約、規約同意、Active X 切替、JS なし。
-- DONE: 5 unit とも Hono API で CURRENT と同じ結果、Server Action を呼ばない、browser 確認。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0510 Work Order と Phase 5 共通契約、CURRENT `ListIndexView.tsx`、MIG-0634 の merge 後の RH-032 route。
+- 変更: `+ListFilterIsland.ts`、`+lib/publicApi.ts`、`list.astro` / `index.astro`、`ListView.tsx` / `TopView.tsx`。
+- 試験: list の query・key・空表示、top の GET form（JS なし）、RH-032 の 503。
+- DONE: Hono の RH-032 で CURRENT と同じ結果、Server Action を呼ばない、browser 確認。
+
+### MIG-0513 — `/[id]` interaction Islands on Phase 6 APIs
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0513 Work Order、CURRENT `InteractionButton.tsx` / `ChapterComposer.tsx` / `VideoStatusForm.tsx` / `VideoViewerUtilityDock.tsx`。
+- 変更: `+VideoInteractionIsland.ts`、`VideoPageIsland.ts`、`VideoDetailView.tsx`。
+- 試験: like の Active X 0 / 複数、chapter の各 status、状態 form の権限、JS なし。
+- DONE: MIG-0603 / 0634 / 0640 の API で CURRENT と同じ結果、browser 確認。
+
+### MIG-0514 — `/event/[id]/slots` reservation Island
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0514 Work Order、CURRENT `SlotGrid.tsx` / `EventSlotsViewerPanel.tsx`。
+- 変更: `EventSlotsIsland.ts`、`EventSlotsView.tsx`。
+- 試験: 予約・解除・延長、同時予約で負けた側、RH-014 の fail-closed、JS なし。
+- DONE: MIG-0604 U04 の API で CURRENT と同じ結果、browser 確認。
+
+### MIG-0515 — `/rules` consent + header Active X switch
+
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0515 Work Order、CURRENT `rules/page.tsx:43-96`、`useActiveXSwitcher.ts`。
+- 変更: `+RulesConsentIsland.ts`、`rules.astro`、`SiteHeader.ts`、`RulesView.tsx`。
+- 試験: `next` の sanitize、`?error=` の3 code、Active X の楽観更新と rollback、JS なし。
+- DONE: MIG-0636 / 0641 の API で CURRENT と同じ結果、D-04 を実行していない。
 
 ### MIG-0512 — public gateway error pages and sub-page fence
 
