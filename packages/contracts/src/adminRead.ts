@@ -418,3 +418,113 @@ export const AdminEventGroupDetailResponseSchema = z.object({
   nextCursor: nullableString,
 });
 export type AdminEventGroupDetailResponse = z.infer<typeof AdminEventGroupDetailResponseSchema>;
+
+// ---- /videos/:id (MIG-0635) ----------------------------------------------------------------------------------
+
+export const AdminVideoDetailCustomAnswerSchema = z.object({
+  label: z.string(),
+  required: z.boolean(),
+  answer: z.string(),
+});
+export type AdminVideoDetailCustomAnswer = z.infer<typeof AdminVideoDetailCustomAnswerSchema>;
+
+export const AdminVideoDetailMemberSchema = z.object({
+  name: z.string(),
+  role: nullableString,
+  x_user_id: nullableString,
+  is_public_member: z.boolean(),
+  chapters: nullableString,
+});
+export type AdminVideoDetailMember = z.infer<typeof AdminVideoDetailMemberSchema>;
+
+export const AdminVideoDetailReviewVideoSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  creator_name: z.string(),
+  creator_x_user_id: nullableString,
+  created_at: z.number(),
+  source_type: z.string(),
+  youtube_video_id: nullableString,
+  music: nullableString,
+  credit: nullableString,
+  intro_comment: nullableString,
+  highlights: nullableString,
+  production_story: nullableString,
+  stagePermission: nullableString,
+  visibility_status: z.string(),
+  software_label: nullableString,
+  event_ids: z.array(z.string()),
+  customAnswers: z.array(AdminVideoDetailCustomAnswerSchema),
+  members: z.array(AdminVideoDetailMemberSchema),
+});
+export type AdminVideoDetailReviewVideo = z.infer<typeof AdminVideoDetailReviewVideoSchema>;
+
+export const AdminVideoModerationCaseSchema = z.object({
+  id: z.string(),
+  case_type: z.string(),
+  status: z.string(),
+  public_reason: nullableString,
+  private_note: nullableString,
+  due_at: nullableNumber,
+  related_x_user_id: nullableString,
+  created_at: z.number(),
+  resolved_at: nullableNumber,
+});
+export type AdminVideoModerationCase = z.infer<typeof AdminVideoModerationCaseSchema>;
+
+export const AdminVideoDetailResponseSchema = z.object({
+  video: AdminVideoDetailReviewVideoSchema,
+  moderationCases: z.array(AdminVideoModerationCaseSchema),
+  openCaseCount: z.number(),
+  openVoidCaseId: nullableString,
+  event: nullableString,
+  truncated: z.boolean(),
+});
+export type AdminVideoDetailResponse = z.infer<typeof AdminVideoDetailResponseSchema>;
+
+// ---- /videos/:id/members (MIG-0635) --------------------------------------------------------------------------
+
+export const AdminVideoMemberChapterInputSchema = z.object({
+  time: z.string(),
+  label: z.string(),
+  note: z.string(),
+});
+export type AdminVideoMemberChapterInput = z.infer<typeof AdminVideoMemberChapterInputSchema>;
+
+export const AdminVideoMemberInputSchema = z.object({
+  name: z.string(),
+  x_user_id: z.string(),
+  role: z.string(),
+  comment: z.string(),
+  order_index: z.number(),
+  can_edit: z.number(),
+  is_public_member: z.number(),
+  chapters: z.array(AdminVideoMemberChapterInputSchema),
+});
+export type AdminVideoMemberInput = z.infer<typeof AdminVideoMemberInputSchema>;
+
+export const AdminVideoMembersResponseSchema = z.object({
+  video: z.object({
+    id: z.string(),
+    title: z.string(),
+    youtube_video_id: nullableString,
+    collaboration_type: nullableString,
+  }),
+  initialMembers: z.array(AdminVideoMemberInputSchema),
+});
+export type AdminVideoMembersResponse = z.infer<typeof AdminVideoMembersResponseSchema>;
+
+// ---- /users/:id/edit (MIG-0635) -----------------------------------------------------------------------------
+
+export const AdminUserEditResponseSchema = z.object({
+  user: z.object({
+    id: z.string(),
+    name: nullableString,
+    role: z.enum(["user", "admin", "moderator"]),
+    is_banned: z.number(),
+    can_create_events: z.number(),
+    is_notification_enabled: z.number(),
+  }),
+  xUserIds: z.array(z.string()),
+});
+export type AdminUserEditResponse = z.infer<typeof AdminUserEditResponseSchema>;

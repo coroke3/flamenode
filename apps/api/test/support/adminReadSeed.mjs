@@ -83,6 +83,24 @@ export function seed(sqlite) {
   ans("av-private", "a-open", "q3", { text: "yes" });
   ans("av-pending-2", "a-ended", "q4", { text: "ignored (inactive)" });
 
+  // Video review detail members, chapters and software (MIG-0635)
+  ins("video_members", { id: "vm-1", video_id: "av-pending-1", name: "Member One", role: "Director", x_user_id: "alice_x", is_public_member: 1, order_index: 0, can_edit: 1, comment: "c1" });
+  ins("video_members", { id: "vm-2", video_id: "av-pending-1", name: "Member Two", role: "Illustrator", x_user_id: "orph_x", is_public_member: 1, order_index: 1, can_edit: 0, comment: "c2" });
+  ins("video_members", { id: "vm-hidden", video_id: "av-pending-1", name: "Hidden Member", role: "Editor", x_user_id: null, is_public_member: 0, order_index: 2, can_edit: 1, comment: "secret" });
+
+  ins("video_chapters", { id: "vm-1:member:ch1", video_id: "av-pending-1", chapter_time: 125, chapter_label: "Intro", note: "intro note", x_user_id: "alice_x", created_at: T0, updated_at: T0 });
+  ins("video_chapters", { id: "vm-1:legacy:ch2", video_id: "av-pending-1", chapter_time: 250, chapter_label: "Climax", note: "climax note", x_user_id: "alice_x", created_at: T0, updated_at: T0 });
+  ins("video_chapters", { id: "vm-2:member:ch3", video_id: "av-pending-1", chapter_time: 300, chapter_label: "Outro", note: "", x_user_id: "orph_x", created_at: T0, updated_at: T0 });
+
+  ins("software_catalog", { id: "sw-1", name: "Blender", normalized_name: "blender", created_at: T0, updated_at: T0 });
+  ins("video_softwares", { video_id: "av-pending-1", software_id: "sw-1", raw_label: "Blender 4.0" });
+
+  // Video with > 100 members to test 404 overflow (MIG-0635)
+  av("av-overflow", { vis: "public", title: "Overflow Video" });
+  for (let i = 0; i < 101; i += 1) {
+    ins("video_members", { id: `vm-ov-${i}`, video_id: "av-overflow", name: `Member ${i}`, is_public_member: 1, order_index: i, can_edit: 0 });
+  }
+
   // Moderation cases.
   const now = Math.floor(Date.now() / 1000);
   const mc = (id, o) =>
