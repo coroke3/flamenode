@@ -167,3 +167,12 @@ export function clearPublicApiRateLimitForTests(): void {
   rateLimitBuckets.clear();
   nextRateLimitCleanupAt = 0;
 }
+
+/** 公開作品 API / 一覧ページ用の sort 正規化（未知値は new）。 */
+export function parsePublicVideoSort(
+  value: string | null | undefined,
+): "new" | "old" | "score" {
+  if (value === "old" || value === "score") return value;
+  return "new";
+}
+

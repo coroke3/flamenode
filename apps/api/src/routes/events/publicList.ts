@@ -15,7 +15,7 @@ import {
 } from "@flamenode/server-core/publicData/publicApi";
 import { normalizeStaticEventsIndex } from "@flamenode/server-core/publicData/eventsIndexCore";
 import { resolvePublicOperationMode } from "../live/operationMode.ts";
-import { loadPublicSnapshot } from "./publicSnapshot.ts";
+import { loadPublicSnapshot } from "../../lib/publicSnapshot.ts";
 
 export const publicListRoutes = new Hono<AppEnv>();
 

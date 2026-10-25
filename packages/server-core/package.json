@@ -73,7 +73,17 @@
     "./auth/approvedX": "./src/auth/approvedX.ts",
     "./video/generalEditPermissions": "./src/video/generalEditPermissions.ts",
     "./auth/ownership": "./src/auth/ownership.ts",
-    "./event/eventOwnership": "./src/event/eventOwnership.ts"
+    "./event/eventOwnership": "./src/event/eventOwnership.ts",
+    "./publicData/videoCardCore": "./src/publicData/videoCardCore.ts",
+    "./publicData/recentVideoCore": "./src/publicData/recentVideoCore.ts",
+    "./publicData/popularVideoCore": "./src/publicData/popularVideoCore.ts",
+    "./publicData/searchPostingsCore": "./src/publicData/searchPostingsCore.ts",
+    "./publicData/searchIndexCore": "./src/publicData/searchIndexCore.ts",
+    "./publicData/eventListCore": "./src/publicData/eventListCore.ts",
+    "./publicData/eventDetailCore": "./src/publicData/eventDetailCore.ts",
+    "./publicData/videoDetailCore": "./src/publicData/videoDetailCore.ts",
+    "./publicData/eventPlaylistCore": "./src/publicData/eventPlaylistCore.ts",
+    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -1,0 +1,84 @@
+import {
+  normalizeCount,
+  normalizeNumericUnix as normalizeUnix,
+  normalizePresentString as normalizeNullableString,
+} from "./normalize.ts";
+import { normalizeStaticVideoCardBase } from "./videoCardCore.ts";
+
+export interface StaticRecentVideoRow {
+  id?: unknown;
+  title?: unknown;
+  youtube_video_id?: unknown;
+  display_name?: unknown;
+  creator_display_name?: unknown;
+  icon_url?: unknown;
+  creator_icon_url?: unknown;
+  primary_event_id?: unknown;
+  primary_event_title?: unknown;
+  scheduled_time?: unknown;
+  status?: unknown;
+  part?: unknown;
+}
+
+export interface StaticRecentVideosPayload {
+  generated_at?: unknown;
+  total?: unknown;
+  items?: unknown;
+}
+
+export interface StaticRecentVideo {
+  id: string;
+  title: string;
+  youtube_video_id: string | null;
+  display_name: string;
+  icon_url: string | null;
+  primary_event_id: string | null;
+  primary_event_title: string | null;
+  scheduled_time: number | null;
+  status: "public";
+  part: string | null;
+}
+
+export interface StaticRecentVideoPage {
+  videos: StaticRecentVideo[];
+  total: number;
+  generatedAt: number | null;
+}
+
+export function normalizeStaticRecentVideoPage(
+  payload: StaticRecentVideosPayload,
+  page: number,
+  pageSize: number,
+): StaticRecentVideoPage | null {
+  if (!Array.isArray(payload.items)) return null;
+  const normalized = payload.items
+    .map(normalizeStaticRecentVideoRow)
+    .filter((row): row is StaticRecentVideo => row !== null);
+  const rawTotal = normalizeCount(payload.total) ?? normalized.length;
+  const total = Math.min(rawTotal, normalized.length);
+  const pageNum = Math.max(1, Math.floor(page));
+  const size = Math.max(1, Math.floor(pageSize));
+  const offset = (pageNum - 1) * size;
+  return {
+    videos: normalized.slice(offset, offset + size),
+    total,
+    generatedAt: normalizeUnix(payload.generated_at),
+  };
+}
+
+function normalizeStaticRecentVideoRow(
+  value: unknown,
+): StaticRecentVideo | null {
+  const base = normalizeStaticVideoCardBase(value);
+  if (!base) return null;
+  const row = value as StaticRecentVideoRow;
+  return {
+    ...base,
+    primary_event_title: normalizeNullableString(row.primary_event_title),
+    status: "public",
+    part:
+      row.part == null || String(row.part).trim() === ""
+        ? null
+        : String(row.part).trim(),
+  };
+}

@@ -55,8 +55,10 @@ export async function loadPublicSnapshot(options: {
   targetType: StaticRebuildTargetType;
   guardModeRaw?: string | null;
   targetEntityId?: string; // e.g. event ID for event_release
+  /** Object size cap; defaults to MAX_PUBLIC_SNAPSHOT_OBJECT_BYTES. */
+  maxBytes?: number;
 }): Promise<SnapshotReadResult> {
-  const { bucket, key, targetType, guardModeRaw, targetEntityId } = options;
+  const { bucket, key, targetType, guardModeRaw, targetEntityId, maxBytes } = options;
   if (!bucket) return { kind: "unavailable" };
 
   const guardMode = resolveGuardMode(guardModeRaw);
@@ -88,7 +90,7 @@ export async function loadPublicSnapshot(options: {
     return { kind: "not_found" };
   }
 
-  const raw = await readBoundedR2Json(bucket, key);
+  const raw = await readBoundedR2Json(bucket, key, maxBytes);
   if (raw == null) return { kind: "unavailable" };
 
   const filtered = filterPublicArtifactPayload(
