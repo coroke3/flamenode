@@ -223,6 +223,47 @@ test("MIG-0512: fixed HTML missing or upstream 503 uses a retryable response, no
   }
 });
 
+test("MIG-0512: upstream 5xx for build assets cannot be cached, HEAD has no body", async () => {
+  for (const assetStatus of [500, 502, 503, 504]) {
+    for (const method of ["GET", "HEAD"]) {
+      const calls = [];
+      const { env } = createEnv({
+        assets: {
+          fetch: async (req) => {
+            calls.push(new URL(req.url).pathname);
+            return new Response("upstream failure", {
+              status: assetStatus,
+              headers: { "Cache-Control": "public, max-age=86400", "Content-Type": "text/html" },
+            });
+          },
+        },
+      });
+      for (const assetPath of ["/_astro/main.abc123.js", "/fonts/main.woff2", "/user/index.json"]) {
+        const res = await get(assetPath, env, { method });
+        assert.equal(res.status, 503, `${assetStatus} ${method} ${assetPath}`);
+        assert.equal(res.headers.get("retry-after"), "30");
+        assert.equal(res.headers.get("cache-control"), "no-store, private");
+        assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+        assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+        assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+      }
+      assert.deepEqual(calls, ["/_astro/main.abc123.js", "/fonts/main.woff2", "/user/index.json"]);
+    }
+  }
+  // A missing asset stays a 404; it is not a transient upstream 5xx.
+  const { env: missing } = createEnv({ assets: { fetch: async () => new Response("missing", { status: 404 }) } });
+  const absent = await get("/fonts/missing.woff2", missing);
+  assert.equal(absent.status, 404);
+  assert.equal(await absent.text(), "missing");
+
+  // Exceptions also keep HEAD bodyless; no HTML fallback is supplied to binary assets.
+  const { env: broken } = createEnv({ assets: { fetch: async () => { throw new Error("upstream down"); } } });
+  const unavailable = await get("/_astro/main.abc123.js", broken, { method: "HEAD" });
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get("retry-after"), "30");
+  assert.equal(await unavailable.text(), "");
+});
+
 test("MIG-0512 T04/T05: event release and slots must pass one parent shard and revocation fence", async () => {
   const pages = {
     "/event/spring-fest-2026/release/": "<html>release</html>",
