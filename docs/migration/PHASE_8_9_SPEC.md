@@ -62,19 +62,23 @@ PRをrevert（テスト追加のみ）。
 
 ### MIG-0802: Web Standard/Auth integration PoC
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0801 と MIG-0607 の後。`@auth/core` と `next-auth@5.0.0-beta.32` の cookie・CSRF の互換を非本番で確かめる
-- **Recipe:** R-API
+- **Readiness:** NEEDS_REFINEMENT — READY（D-14-5: 依存を MIG-0801 + MIG-0608 にした。非本番の PoC だけで、本番 cutover は MIG-0805。`@auth/core` は `0.41.3` に固定。実装は Sonnet、review は Opus）
+- **Recipe:** R-API, R-CORE
 - **Runtime:** S4
-- **Depends on:** MIG-0801, MIG-0607 / **Decisions:** D-07 DECIDED
-- **Verified against:** `aacf4fd` (2026-10-15)
+- **Depends on:** MIG-0801, MIG-0608 / **Decisions:** D-07 DECIDED, D-14-5
+- **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
-- MIG-0801 の baseline テスト、MIG-0608 の Hono session 読み取り（`apps/api/src/auth/session.ts`）。
+- MIG-0801 の baseline テスト（`src/lib/auth/authBaseline.characterization.test.mjs`、`authBaseline.fixture.mjs`、`authBaselineHarness.mjs`）、MIG-0608 の Hono session 読み取り（`apps/api/src/auth/session.ts`）。
+- CURRENT の Auth.js: `src/lib/auth/index.ts:216` `NextAuth(async () => await buildAuthConfig())`（database session、`@auth/drizzle-adapter` 1.11.3、`linkAccount` は `linkDiscordAccountAtomically`）。`package.json` は `next-auth` `5.0.0-beta.32`。`package-lock.json` の `node_modules/next-auth` の dependencies は `@auth/core` `0.41.3`（hoist 済み `node_modules/@auth/core` も 0.41.3）。
+- PoC の Hono 側は `@auth/core` の `Auth(request, config)` を使う。config は `buildAuthConfig()` から Next に依存しない部分（adapter・callbacks・cookie 設定）を U01 で `packages/server-core/src/auth/config.ts` へ移して Next と共有する（R-CORE、bridge。`apps/api` は `src/lib/**` を import できない）。Next 専用 API（`next/headers` など）が要る部分は移さず、U01 で列挙する。
 - `app/api/auth/[...nextauth]/route.ts`, `app/(auth-complete)/auth/complete/page.tsx`（`FILE_MIGRATION_MATRIX.md` で MIG-0802 所有）。
 #### Owned paths
-- 新規: `+apps/api/src/auth/authjs.ts`（`@auth/core` を Hono の Request/Response に接続）, `+apps/api/src/routes/auth.ts`
-- 触らない: 本番の Discord 設定、callback URL、secret
+- 新規: `+apps/api/src/auth/authjs.ts`（`@auth/core` を Hono の Request/Response に接続）, `+apps/api/src/routes/auth.ts`, `+apps/api/test/authjsCrossRuntime.test.mjs`
+- 変更: `apps/api/package.json`（`@auth/core` `0.41.3` と `@auth/drizzle-adapter` `1.11.3` を exact で追加）, `package-lock.json`, `src/lib/auth/index.ts`（U01 の bridge だけ）
+- 新規（R-CORE、U01）: `+packages/server-core/src/auth/config.ts`（`buildAuthConfig` のうち Next に依存しない adapter・callbacks・cookie 設定）
+- 触らない: 本番の Discord 設定、callback URL、secret、`apps/api/src/app.ts`（**mount しない**。PoC の route は test からだけ呼ぶ。本番の `/api/auth/*` は gateway の `AUTH_ORIGIN` のまま）
 #### Micro-units
-- **U01 adapter**: `@auth/core` を既存 D1 adapter・同じ cookie 名/属性で動かす。
+- **U01 adapter + core 移動**: golden test（cookie 名・属性・callbacks の出力）を先に commit し、Next に依存しない config を core へ移して byte 一致。`@auth/core` を既存 D1 adapter・同じ cookie 名/属性で動かす。
 - **U02 cross-runtime**: 旧 Next 発行の cookie を Hono で、Hono 発行の cookie を旧 Next で読む。logout も両方向。
 - **U03 auth/complete**: `/auth/complete` の安全な遷移を Hono 側で再現。
 - **U04 SA-107（coverage gap G22）**: entry の `discordSignInInline` と return-to の sanitize を Hono / SPA 側で再現する（MIG-0703 と対）。危険な URL は CURRENT と同じ移動先になる。
@@ -99,6 +103,8 @@ npm run test:critical
 - [ ] 既存ログインを無効化しない
 #### STOP
 - 独自の OAuth code exchange や token 形式が必要に見えたら止める（D-07）。
+- `@auth/core` を 0.41.3 以外にする必要が出たら止める（Next 側と cookie / CSRF の形が揃わなくなる）。
+- 本番の Discord application・callback URL・`AUTH_SECRET` の操作が必要になったら止める（owner の明示承認事項）。
 - PoC が失敗したら BLOCKED にして旧 Worker を維持する。
 #### Rollback
 PRをrevert。本番の認証は旧 Next のまま。
