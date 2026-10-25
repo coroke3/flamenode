@@ -45,7 +45,7 @@ export function extractArtifactKeys(source, path) {
   };
   // A local key declaration is resolved only when an R2 call uses it.
   const constants = new Map();
-  const declarations = new RegExp("\\b(?:export\\s+)?const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + literal, "g");
+  // The declaration name is capture #1; the quote becomes capture #2, so\n  // its closing-quote backreference must be \\2 rather than literal\u2019s \\1.\n  const declarationLiteral = literal.replaceAll("\\\\1", "\\\\2");\n  const declarations = new RegExp("\\b(?:export\\s+)?const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + declarationLiteral, "g");
   for (const match of source.matchAll(declarations)) constants.set(match[1], match[3]);
 
   const property = new RegExp("\\br2Key\\s*:\\s*" + literal, "g");
