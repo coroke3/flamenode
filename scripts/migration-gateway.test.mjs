@@ -157,6 +157,29 @@ test("MIG-0512: failing fixed HTML and maintenance Assets return retryable, fail
   assert.ok(!calls.assets.some((path) => path.startsWith("/_fn/routes/")));
 });
 
+test("MIG-0512: fixed HTML missing or upstream 503 uses a retryable response, not raw Assets error", async () => {
+  for (const assetStatus of [404, 503]) {
+    const calls = [];
+    const { env } = createEnv({ assets: {
+      fetch: async (req) => {
+        calls.push(new URL(req.url).pathname);
+        return new Response("upstream failure", { status: assetStatus });
+      },
+    } });
+    for (const method of ["GET", "HEAD"]) {
+      for (const path of ["/about", "/maintenance"]) {
+        const res = await get(path, env, { method });
+        assert.equal(res.status, 503, `${path} Assets ${assetStatus}`);
+        assert.equal(res.headers.get("retry-after"), "30");
+        assert.equal(res.headers.get("cache-control"), "no-store, private");
+        assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+        assert.equal(await res.text(), method === "HEAD" ? "" : "Service Unavailable");
+      }
+    }
+    assert.ok(calls.includes("/503/"), "the gateway tried a safe static error page");
+  }
+});
+
 test("MIG-0512 T04/T05: event release and slots must pass one parent shard and revocation fence", async () => {
   const pages = {
     "/event/spring-fest-2026/release/": "<html>release</html>",
