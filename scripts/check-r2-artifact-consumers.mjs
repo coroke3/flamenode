@@ -27,25 +27,69 @@ function lineOf(source, index) {
 }
 
 /**
- * Discover literal R2 key forms while excluding KV, Map.get, and URLs.
- * Dynamic computed expressions are inventoried manually in the accompanying
- * document: this intentionally does not guess their runtime values.
+ * Scan literal producers and readers for named R2 bindings. Resolve simple
+ * same-file const keys. Imported/computed keys are NOT assumed safe: record
+ * every occurrence in the reviewed dynamic-reference ledger.
+ *
+ * This is deliberately a conservative source scanner, not a TypeScript
+ * compiler. It does not infer storage semantics from arbitrary Map/KV calls.
  */
 export function extractArtifactKeys(source, path) {
   const hits = [];
+  const unresolved = [];
   const literal = "([\\\"'\\x60])((?:\\\\.|(?!\\1)[^\\n])*?)\\1";
-  const rules = [
-    ["r2Key", new RegExp("\\br2Key\\s*:\\s*" + literal, "g")],
-    ["bucket.get", new RegExp("\\b(?:env\\.)?(?:BUCKET|R2_STORAGE|R2|bucket|r2|safeBucket)\\s*\\.\\s*get\\s*\\(\\s*" + literal, "g")],
-    ["object-constant", new RegExp("\\b(?:export\\s+)?const\\s+(?:[A-Z][A-Z0-9_]*(?:_OBJECT|_R2|_ARTIFACT|_RECENT_LIST|_TRENDING_OUTPUT)_KEY)\\s*=\\s*" + literal, "g")],
-  ];
-  for (const [kind, regex] of rules) {
-    for (const match of source.matchAll(regex)) {
-      if (!isArtifactName(match[2])) continue;
-      hits.push({ path, line: lineOf(source, match.index), key: normalizeArtifactKey(match[2]), kind });
+  const addHit = (index, key, kind) => {
+    if (isArtifactName(key)) {
+      hits.push({ path, line: lineOf(source, index), key: normalizeArtifactKey(key), kind });
+    }
+  };
+  // A local key declaration is resolved only when an R2 call uses it.
+  const constants = new Map();
+  const declarations = new RegExp("\\b(?:export\\s+)?const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + literal, "g");
+  for (const match of source.matchAll(declarations)) constants.set(match[1], match[3]);
+
+  const property = new RegExp("\\br2Key\\s*:\\s*" + literal, "g");
+  for (const match of source.matchAll(property)) addHit(match.index, match[2], "r2Key");
+
+  // Existing *_KEY producers are tracked even when the use site imports them.
+  const named = new RegExp(
+    "\\b(?:export\\s+)?const\\s+(?:[A-Z][A-Z0-9_]*(?:_OBJECT|_R2|_ARTIFACT|_RECENT_LIST|_TRENDING_OUTPUT)_KEY)\\s*=\\s*" + literal, "g",
+  );
+  for (const match of source.matchAll(named)) addHit(match.index, match[2], "object-constant");
+
+  const calls = /\b(?:env\.)?(?:BUCKET|R2_STORAGE|R2|bucket|r2|safeBucket)\s*\.\s*(get|put|head|delete)\s*\(\s*/g;
+  for (const match of source.matchAll(calls)) {
+    const after = source.slice(match.index + match[0].length);
+    const quoted = new RegExp("^" + literal).exec(after);
+    if (quoted) {
+      addHit(match.index, quoted[2], "bucket." + match[1]);
+      continue;
+    }
+    const expression = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^()\n]*\))?)/.exec(after)?.[1];
+    if (!expression) {
+      unresolved.push({ path, line: lineOf(source, match.index), kind: "bucket." + match[1], expression: "<complex>" });
+      continue;
+    }
+    if (constants.has(expression)) {
+      addHit(match.index, constants.get(expression), "bucket." + match[1] + "-const");
+    } else {
+      // The source may import the symbol or compute it dynamically. It needs
+      // an explicit bounded exception until a future MIG resolves the reader.
+      unresolved.push({ path, line: lineOf(source, match.index), kind: "bucket." + match[1], expression });
     }
   }
+  Object.defineProperty(hits, "unresolved", { value: unresolved, enumerable: false });
   return hits;
+}
+
+export function readDynamicExceptions(markdown) {
+  const exceptions = new Map();
+  const section = markdown.split("## Reviewed dynamic R2 calls")[1]?.split("\n## ")[0] ?? "";
+  for (const line of section.split("\n")) {
+    const match = /^\|\s*\x60([^\x60]+)\x60\s*\|\s*\x60([^\x60]+)\x60\s*\|\s*(\d+)\s*\|/.exec(line);
+    if (match) exceptions.set(match[1] + "|" + match[2], Number(match[3]));
+  }
+  return exceptions;
 }
 
 export function matchesInventory(key, documented) {
@@ -85,11 +129,24 @@ function visit(root, sub = "") {
 
 export function checkInventory({ root, inventoryText, files = null }) {
   const known = readInventoryKeys(inventoryText);
+  const exceptions = readDynamicExceptions(inventoryText);
   const pathList = files ?? SOURCE_ROOTS.flatMap((dir) => visit(root, dir));
-  const hits = pathList.flatMap((file) =>
-    extractArtifactKeys(readFileSync(join(root, file), "utf8"), file.replaceAll("\\", "/")));
+  const hits = [];
+  const unresolved = [];
+  for (const file of pathList) {
+    const found = extractArtifactKeys(readFileSync(join(root, file), "utf8"), file.replaceAll("\\", "/"));
+    hits.push(...found);
+    unresolved.push(...found.unresolved);
+  }
   const missing = hits.filter(({ key }) => !matchesInventory(key, known));
-  return { known, hits, missing };
+  const counts = new Map();
+  for (const row of unresolved) {
+    const key = row.path + "|" + row.kind + "(" + row.expression + ")";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const unexpected = [...counts].filter(([key, count]) => !exceptions.has(key) || count > exceptions.get(key))
+    .map(([key, count]) => ({ key, count, limit: exceptions.get(key) ?? 0 }));
+  return { known, hits, missing, unresolved, unexpected };
 }
 
 const self = fileURLToPath(import.meta.url);
@@ -97,13 +154,16 @@ if (process.argv[1] && resolve(process.argv[1]) === self) {
   const root = resolve(dirname(self), "..");
   const inventoryText = readFileSync(join(root, "docs/migration/R2_ARTIFACT_CONSUMERS.md"), "utf8");
   const result = checkInventory({ root, inventoryText });
-  if (result.missing.length) {
+  if (result.missing.length || result.unexpected.length) {
     console.error("MIG-0649: undocumented literal R2 artifact keys:");
     for (const { path, line, key, kind } of result.missing) {
       console.error(path + ":" + line + " " + kind + " " + key);
     }
+    for (const { key, count, limit } of result.unexpected) {
+      console.error("unreviewed R2 call: " + key + " count=" + count + " documented_max=" + limit);
+    }
     process.exitCode = 1;
   } else {
-    console.log("MIG-0649 R2 inventory OK: " + result.hits.length + " references; " + result.known.size + " key patterns");
+    console.log("MIG-0649 R2 inventory OK: " + result.hits.length + " references; " + result.known.size + " key patterns; " + result.unresolved.length + " reviewed dynamic call instances");
   }
 }
