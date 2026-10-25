@@ -340,6 +340,11 @@ export default {
           // A listed public HTML page that is absent or failing is a temporary build error.
           return unavailablePage(env, url, request.method);
         }
+        if (!FIXED_PUBLIC_PAGES.has(fixed) && asset.status >= 500) {
+          // Static asset upstream failures must not leak cacheable 5xx responses.
+          // Do not substitute an HTML error page for CSS, JS, JSON, or fonts.
+          return textResponse(503, "Service Unavailable", { "Retry-After": "30" });
+        }
         return asset;
       } catch {
         // Failed public HTML should be retryable; hashed/font assets retain text 503.
