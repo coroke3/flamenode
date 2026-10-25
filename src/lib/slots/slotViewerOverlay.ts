@@ -52,6 +52,7 @@ export async function loadSlotViewerOverlay(
           end_time: eventsTable.end_time,
           entry_start_time: eventsTable.entry_start_time,
           entry_end_time: eventsTable.entry_end_time,
+          visibility_status: eventsTable.visibility_status,
           slot_visibility_mode: eventsTable.slot_visibility_mode,
         })
         .from(eventsTable)

@@ -21,7 +21,7 @@
   },
   "overrides": {
     "workerd": "1.20260730.1",
-    "sharp": "0.35.3",
+    "sharp": "0.35.5",
     "next": {
       "postcss": "8.5.25"
     }
@@ -108,8 +108,8 @@
     "drizzle-orm": "^0.45.2",
     "next": "15.5.28",
     "next-auth": "5.0.0-beta.32",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
+    "react": "19.0.9",
+    "react-dom": "19.0.9",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -120,7 +120,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.18.0",
     "eslint-config-next": "15.5.28",
-    "sharp": "0.35.3",
+    "sharp": "0.35.5",
     "typescript": "^5.7.3",
     "wrangler": "4.118.0"
   }

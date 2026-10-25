@@ -21,6 +21,7 @@
     "./event/limits": "./src/event/limits.ts",
     "./xid": "./src/xid/index.ts",
     "./slots/slotIdentity": "./src/slots/slotIdentity.ts",
+    "./slots/operatorReservation": "./src/slots/operatorReservation.ts",
     "./slots/releaseGroups": "./src/slots/releaseGroups.ts",
     "./slots/reservationIdentity": "./src/slots/reservationIdentity.ts",
     "./slots/reservationBind": "./src/slots/reservationBind.ts",
