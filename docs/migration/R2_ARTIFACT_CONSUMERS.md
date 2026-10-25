@@ -51,3 +51,65 @@ The CI checker validates literal `r2Key` property keys, literal calls on known R
 Media-upload blobs, legacy import previews, and persistent visibility manifests are **not** assumed to be disposable public-build artifacts. MIG-0907 must retain or separately audit them. Every new literal artifact reference that is absent from this table is a CI error.
 
 Referenced tasks: [MIG-0627](PHASE_6_SPEC.md) (reader replacement), [MIG-0907](PHASE_8_9_SPEC.md) (generator removal gate).
+## Reviewed dynamic R2 calls
+
+Conservative *bounded exception inventory* for R2 API calls whose first argument is imported, a computed key, or a key collection. This section is **not a removal authorization**. Source paths and method/expression strings are exact, and the maximum occurrence count is locked to the 2026-10-26 source audit. Adding a new untracked dynamic operation, changing its expression, or increasing its count breaks CI. Each expression must be verified before MIG-0627/MIG-0907 removes its storage dependency.
+
+| Source path | Method and argument expression | Maximum call sites | Disposition / reason |
+| --- | --- | ---: | --- |
+| `apps/site/src/gateway/r2Html.ts` | `bucket.get(r2HtmlKey(decision.key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
+| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
+| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.put(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
+| `workers/json-generator/rebuild.ts` | `bucket.delete(pendingPostingArtifacts.map)` | 2 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `bucket.get(staticVideoSearchPostingManifestObjectKey(""))` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `bucket.put(sourceKey)` | 2 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `bucket.head(sourceKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `bucket.get(sourceKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `bucket.delete(sourceKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `bucket.delete(obsoleteKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsArtifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsArtifacts.ts` | `bucket.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsArtifacts.ts` | `bucket.delete(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsArtifacts.ts` | `bucket.put(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/r2Dedup.ts` | `bucket.put(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/r2Dedup.ts` | `bucket.head(objectKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `bucket.head(publicXIconV2ShardObjectKey(generation, shard))` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `bucket.delete(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `bucket.delete(writtenKeys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/topSectionsEnqueue.ts` | `bucket.head(objectKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/topSlotStatsEnqueue.ts` | `bucket.head(TOP_SLOT_STATS_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersSharedInputsEnqueue.ts` | `bucket.head(USERS_INDEX_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersSharedInputsEnqueue.ts` | `bucket.head(PUBLIC_X_ICON_MAP_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersSharedInputsEnqueue.ts` | `bucket.head(PICKUP_CREATORS_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/youtubeRelatedSharedInputsEnqueue.ts` | `bucket.head(YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/youtubeRelatedSharedInputsEnqueue.ts` | `bucket.head(RANDOM_VIDEO_POOL_OBJECT_KEY)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/staleArtifactRefresh.ts` | `bucket.head(objectKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `bucket.delete(staleKeys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/staticArtifactTracking.ts` | `bucket.delete(<complex>)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/cleanup/incrementalCache.ts` | `bucket.delete(expired.map)` | 1 | Cleanup keys; do not retire while old storage remains |
+| `packages/server-core/src/r2Body.ts` | `bucket.get(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `app/api/public/about-stats/route.ts` | `bucket.get(TOP_STATS_OBJECT_KEY)` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `apps/api/src/lib/publicSnapshot.ts` | `bucket.get(key)` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `src/lib/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `src/lib/media/manageXIcon.ts` | `bucket.get(key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `src/lib/health/artifactSlo.ts` | `bucket.get(probe.key)` | 1 | Health/readiness probe; preserve coverage during migration |
+| `src/lib/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Health/readiness probe; preserve coverage during migration |
+| `src/lib/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `app/api/public/events/[id]/staff/route.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `src/lib/db/videoDetailQueries.ts` | `bucket.get(eventPlaylistObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `packages/server-core/src/visibility/manifestR2.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
+| `packages/server-core/src/visibility/manifestR2.ts` | `bucket.put(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
+| `src/lib/import/legacy/previewStore.ts` | `bucket.put(key)` | 5 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `src/lib/import/legacy/previewStore.ts` | `bucket.get(key)` | 2 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `src/lib/video/resolveVideoCreatorIcon.ts` | `bucket.delete(uploadedKey)` | 1 | Generator/producer key; MIG-0907 review required |
+| `src/lib/event/eventIdReuse.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `src/lib/admin/staticSharedInputDiagnostics.ts` | `bucket.head(key)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY)` | 2 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(<complex>)` | 1 | Generator/producer key; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
+| `src/lib/media/iconOrphanCleanup.ts` | `bucket.delete(objectKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+
+These dynamic references are retained for inspection. The static scanner cannot prove a computed value's full key domain or resolve imported symbols across files; owners must compare producer and consumer paths before removal.
