@@ -905,7 +905,7 @@
 | `app/(public)/page.module.css` | HELPER | top page CSS module | MIG-0506 | +apps/site top page styles | NOT_STARTED | — |
 | `src/lib/seo.ts` | HELPER | buildPageMetadata (G05); ported to apps/site/src/lib/pageMetadata.ts in MIG-0403, CURRENT file stays | MIG-0501 | SAME (apps/site/src/lib/pageMetadata.ts is the port) | NOT_STARTED | — |
 | `src/lib/cloudflare.ts` | HELPER | Cloudflare context accessor (D1/KV/R2 bindings) for Next | MIG-0904 | removed with OpenNext; ports in packages/server-core (MIG-0612) | NOT_STARTED | — |
-| `src/lib/eventGroupRoutes.ts` | HELPER | event group route helpers | MIG-0503 | group routes (closest owner) | NOT_STARTED | — |
+| `src/lib/eventGroupRoutes.ts` | HELPER | event group route helpers (`event-group-{slug}` anchor, `/event#…` href) | MIG-0503 | apps/site/src/gateway/index.ts groupCompatRedirect (`/event#event-group-{slug}`) + apps/site/src/lib/eventIndex.ts anchorId + apps/site/src/components/EventsIndexIsland.ts hash prefix (same literal; CURRENT file retires with Next in MIG-0903) | PARITY_VERIFIED | PR#409 SHA=295af37023ce5a98f70ae70a62a68797f8c9d9b4 TEST=node --test --experimental-strip-types apps/site/src/gateway/edgePolicy.test.mjs (12/12, group compat redirects) ; node --test --experimental-strip-types scripts/migration-group-routes.test.mjs (7 pass + 1 built-only skip) LOG=local |
 | `src/lib/profileContact.ts` | HELPER | profile contact helper | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
 | `src/lib/socialLinks.ts` | HELPER | social link normalization | MIG-0605 | user/X/admin APIs (closest owner) | NOT_STARTED | — |
 | `public/favicon.ico` | HELPER | favicon (G05) | MIG-0501 | +apps/site/public/favicon.ico | NOT_STARTED | — |
