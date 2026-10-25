@@ -24,7 +24,8 @@
     "./slots/reservationGroups": "./src/slots/reservationGroups.ts",
     "./admin": "./src/admin/index.ts",
     "./user": "./src/user/index.ts",
-    "./db/transientError": "./src/db/transientError.ts"
+    "./db/transientError": "./src/db/transientError.ts",
+    "./event/status": "./src/event/status.ts"
   },
   "scripts": {
     "build": "tsc",

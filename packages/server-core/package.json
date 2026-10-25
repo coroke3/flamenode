@@ -61,7 +61,15 @@
     "./xid/merge": "./src/xid/merge.ts",
     "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
     "./xid/mergeCore": "./src/xid/mergeCore.ts",
-    "./xid/mergeSafety": "./src/xid/mergeSafety.ts"
+    "./xid/mergeSafety": "./src/xid/mergeSafety.ts",
+    "./publicData/normalize": "./src/publicData/normalize.ts",
+    "./publicData/visibility": "./src/publicData/visibility.ts",
+    "./publicData/eventsIndexCore": "./src/publicData/eventsIndexCore.ts",
+    "./publicData/eventReleaseCore": "./src/publicData/eventReleaseCore.ts",
+    "./publicData/artifactVisibility": "./src/publicData/artifactVisibility.ts",
+    "./publicData/publicXUser": "./src/publicData/publicXUser.ts",
+    "./publicData/publicDto": "./src/publicData/publicDto.ts",
+    "./publicData/publicApi": "./src/publicData/publicApi.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

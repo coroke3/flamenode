@@ -85,7 +85,7 @@ export interface StaticEventDetail {
 
 export const EVENT_BASE_SCHEMA_VERSION = 1 as const;
 export const EVENT_SLOTS_SCHEMA_VERSION = 1 as const;
-export const EVENT_RELEASE_SCHEMA_VERSION = 1 as const;
+export { EVENT_RELEASE_SCHEMA_VERSION, eventReleaseObjectKey } from "@flamenode/server-core/publicData/eventReleaseCore";
 
 export function eventBaseObjectKey(eventId: string): string {
   return `events/${eventId}/base.v1.json`;
@@ -99,9 +99,6 @@ export function eventComposedObjectKey(eventId: string): string {
   return `events/${eventId}.json`;
 }
 
-export function eventReleaseObjectKey(eventId: string): string {
-  return `events/${eventId}/release.v1.json`;
-}
 
 export interface StaticEventSlotsPayload {
   generated_at?: unknown;
