@@ -10,7 +10,7 @@ import {
   normalizeStaticEventRelease,
 } from "@flamenode/server-core/publicData/eventReleaseCore";
 import { resolvePublicOperationMode } from "../live/operationMode.ts";
-import { loadPublicSnapshot } from "./publicSnapshot.ts";
+import { loadPublicSnapshot } from "../../lib/publicSnapshot.ts";
 
 export const publicReleaseRoutes = new Hono<AppEnv>();
 

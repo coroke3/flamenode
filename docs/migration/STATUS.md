@@ -340,7 +340,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0631 | public event list / release Hono route (RH-015: live mode = D1, static_only = R2 artifact; RH-012: D1 gate + R2 artifact) | DONE | MIG-0602, MIG-0614 |
 | MIG-0632 | event export API (RH-013) | READY | MIG-0614 |
 | MIG-0633 | event ownership / permission resolver core (D-10) | READY | MIG-0613, MIG-0617 |
-| MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | READY | MIG-0602, MIG-0614, MIG-0631 |
+| MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | DONE | MIG-0602, MIG-0614, MIG-0631 |
 | MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | READY | MIG-0624, MIG-0625 |
 | MIG-0636 | Personal X / Active X APIs (SA-098..105) | READY | MIG-0602 |
 | MIG-0637 | admin ops writes A: cost guard + user admin (SA-016..020, SA-077..081) | READY | MIG-0602 |

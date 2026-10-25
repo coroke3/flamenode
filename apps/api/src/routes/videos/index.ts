@@ -13,6 +13,8 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
 import { videoDetailRoutes } from "./detail.ts";
+import { videoListRoutes } from "./list.ts";
+import { createVideoViewerOverlayRoutes, videoViewerOverlayRoutes } from "./viewerOverlay.ts";
 
 function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
@@ -50,6 +52,8 @@ export function createVideosRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
 ): Hono<AppEnv> {
   const videos = new Hono<AppEnv>();
+  videos.route("/", videoListRoutes);
+  videos.route("/", createVideoViewerOverlayRoutes(options));
   videos.route("/", videoDetailRoutes);
   videos.route("/", createChapterRoutes(videoWriteStack(options.session)));
   return videos;
