@@ -77,3 +77,57 @@ test("multiline expressions, same key across sources, and R2 constants are found
   assert.deepEqual(got.map((x) => x.key).sort(),
     ["rules/current.json", "rules/current.json", "list/recent.json"].sort());
 });
+
+
+test("T04 R2 put, head, delete, local named constants and imported dynamic keys are audited", () => {
+  const src = [
+    'const NEW_KEY = "new/unlisted.json";',
+    'const x = await env.R2.get(NEW_KEY);',
+    'await env.R2.put("new/producer.json", payload);',
+    'await env.BUCKET.head("new/probe.json");',
+    'await env.R2_STORAGE.delete("new/removed.json");',
+    'const y = await env.R2.get(IMPORTED_KEY);',
+    'const z = await env.KV.get("kv/private.json");',
+  ].join("\n");
+  const hits = extractArtifactKeys(src, "src/key-ops.ts");
+  const keys = hits.map((row) => row.key).sort();
+  assert.deepEqual(keys, [
+    "new/unlisted.json", "new/producer.json", "new/probe.json", "new/removed.json",
+  ].sort());
+  assert.deepEqual(hits.unresolved.map((row) => [row.kind, row.expression]),
+    [["bucket.get", "IMPORTED_KEY"]]);
+  assert.equal(hits.find((row) => row.key === "new/unlisted.json")?.line, 2);
+  assert.equal(hits.find((row) => row.key === "new/producer.json")?.kind, "bucket.put");
+});
+
+test("T05 unresolved R2 references fail unless individually documented, and counts are capped", () => {
+  const root = mkdtempSync(join(tmpdir(), "fn-r2-dynamic-"));
+  try {
+    mkdirSync(join(root, "src"));
+    const file = "src/reader.ts";
+    writeFileSync(join(root, file), [
+      "const a = await env.R2.get(IMPORTED_KEY);",
+      "const b = await env.R2.get(IMPORTED_KEY);",
+    ].join("\n"));
+    const initial = checkInventory({ root, files: [file], inventoryText: table([]) });
+    assert.deepEqual(initial.missing, []);
+    assert.deepEqual(initial.unexpected.map((x) => [x.key, x.count, x.limit]),
+      [["src/reader.ts|bucket.get(IMPORTED_KEY)", 2, 0]]);
+    const approved = table([]) + [
+      "",
+      "## Reviewed dynamic R2 calls",
+      "| File | Method/expression | Maximum call sites | Review |",
+      "| --- | --- | --- | --- |",
+      "| " + tick + file + tick + " | " + tick + "bucket.get(IMPORTED_KEY)" + tick + " | 2 | Pending MIG-0627 |",
+    ].join("\n");
+    const checked = checkInventory({ root, files: [file], inventoryText: approved });
+    assert.deepEqual(checked.unexpected, []);
+    const reduced = approved.replace(" | 2 | Pending", " | 1 | Pending");
+    assert.equal(checkInventory({ root, files: [file], inventoryText: reduced }).unexpected.length, 1);
+    writeFileSync(join(root, file), 'const x = await env.R2.put("another/new.json", payload);');
+    const changed = checkInventory({ root, files: [file], inventoryText: approved });
+    assert.deepEqual(changed.missing.map((x) => x.key), ["another/new.json"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
