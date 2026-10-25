@@ -153,3 +153,30 @@ test("T07 an unexpected SELECT error still closes the read transaction", () => {
   }), /snapshot unavailable/);
   assert.deepEqual(operations, ["BEGIN", "ROLLBACK"]);
 });
+
+
+test("T08 projected like counts include only approved legacy X and eligible fan-out", () => fixture(({ insert, db, file }) => {
+  add.video(insert, "v1", 5);
+  add.video(insert, "v2", 2);
+  for (const [id, state] of [
+    ["owner", "approved"], ["approvedLegacy", "approved"],
+    ["pendingLegacy", "pending"], ["rejectedLegacy", "rejected"],
+    ["importedLegacy", "imported"],
+  ]) add.x(insert, id, state);
+  add.link(insert, "a", "owner");
+  add.auth(insert, "a", "v1", "like", 100);
+  for (const id of ["approvedLegacy", "pendingLegacy", "rejectedLegacy", "importedLegacy"]) {
+    add.existing(insert, id, "v1", "like", 10);
+  }
+  add.existing(insert, "owner", "v1", "bookmark", 12);
+  add.existing(insert, "pendingLegacy", "v2", "like", 10);
+  const before = db.prepare("SELECT COUNT(*) AS n FROM video_interactions").get().n;
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 1);
+  assert.equal(report.likeCountDelta.find(x => x.videoId === "v1")?.projected, 2);
+  assert.equal(report.likeCountDelta.find(x => x.videoId === "v1")?.delta, -3);
+  assert.equal(report.likeCountDelta.find(x => x.videoId === "v2")?.projected, 0);
+  assert.equal(report.likeCountDelta.find(x => x.videoId === "v2")?.delta, -2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM video_interactions").get().n, before,
+    "dry-run never removes non-approved legacy rows");
+}));
