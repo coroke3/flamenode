@@ -20,14 +20,15 @@ function requirePattern(relative, pattern, message, errors) {
 
 function runStaticCheck() {
   const errors = [];
+  const publicDtoTarget = fs.existsSync(path.join(root, "packages/server-core/src/publicData/publicDto.ts")) ? "packages/server-core/src/publicData/publicDto.ts" : "src/lib/api/publicDto.ts";
   requirePattern(
-    "src/lib/api/publicDto.ts",
+    publicDtoTarget,
     /PUBLIC_VIDEO_KEYS[\s\S]*PUBLIC_EVENT_KEYS[\s\S]*FORBIDDEN_PUBLIC_KEYS/,
     "公開動画・eventのallowlistと禁止key集合がありません。",
     errors,
   );
   requirePattern(
-    "src/lib/api/publicDto.ts",
+    publicDtoTarget,
     /MAX_PUBLIC_LIST_LIMIT\s*=\s*\d+[\s\S]*MAX_PUBLIC_EVENT_LIMIT\s*=\s*\d+[\s\S]*MAX_PUBLIC_SOFTWARE_SUGGESTION_LIMIT\s*=\s*\d+/,
     "公開一覧の絶対上限がありません。",
     errors,
