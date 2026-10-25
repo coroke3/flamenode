@@ -36,6 +36,11 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 | `videos/<id>.json` | workers/json-generator/rebuild.ts (video target) | src/lib/publicData/loader.ts:1964 | Build public video detail | MIG-0509 / MIG-0627 |
 | `search-index-postings.v1/manifest.json` | workers/json-generator/rebuild.ts (search posting builder) | src/lib/publicData/loader.ts:1191; apps/api/src/routes/videos/list.ts | Replace with bounded build/search shard | MIG-0509 / MIG-0627 |
 | `search-index-postings.v1/<id>.json` | workers/json-generator/rebuild.ts (search posting directories/pages) | src/lib/publicData/loader.ts:1223-1271; apps/api/src/routes/videos/list.ts | Document computed key pattern; replace with search shard | MIG-0509 / MIG-0627 |
+| `users/public-icons/v2/manifest.json` | workers/json-generator/publicIconV2Artifacts.ts (v2 icon manifest producer) | src/lib/publicData/publicIconProjectionV2.ts:10 | Build-time icon projection; retain versioned manifest until consumers migrate | MIG-0509 / MIG-0627 |
+| `top/slot-stats.v1.json` | workers/json-generator/topSlotStatsEnqueue.ts (slot statistics rebuild) | src/lib/publicData/staticTopSlotStatsCore.ts:8 | Build-time stats / do not remove until shared readers move | MIG-0509 / MIG-0627 |
+| `users/index.v2/manifest.json` | workers/json-generator/usersIndexV2Artifacts.ts (v2 index producer) | src/lib/publicData/staticUsersIndexV2Core.ts:23 | Build-time user index v2 | MIG-0509 / MIG-0627 |
+| `internal/member-suggestions/v1/manifest.json` | workers/json-generator/memberSuggestionsArtifacts.ts (v1 suggestion producer) | src/lib/video/memberSuggestionsCore.ts:12 | Internal member suggestion projection; not a public GET artifact | MIG-0627 / MIG-0907 |
+| `internal/member-suggestions/v2/manifest.json` | workers/json-generator/memberSuggestionsV2Artifacts.ts (v2 suggestion producer) | src/lib/video/memberSuggestionsPostingsV2.ts:20 | Internal member suggestion projection; retain until reader replacement | MIG-0627 / MIG-0907 |
 
 **Recovery rule:** Missing artifacts are regenerated only by the next public build. Public GET handlers must not write to D1, a Queue, or `public_build_state`.
 
