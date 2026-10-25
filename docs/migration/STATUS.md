@@ -310,8 +310,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0611 | Personal read APIs (dashboard/library/settings/onboarding) | DONE | MIG-0601, MIG-0608 |
 | MIG-0602 | low-risk mutations | DONE | MIG-0601, MIG-0608 |
 | MIG-0603 | video APIs | READY | MIG-0602 |
-| MIG-0604 | event/slot APIs | BLOCKED | MIG-0602, MIG-0633 |
-| MIG-0605 | user/X/admin APIs | BLOCKED | MIG-0602, MIG-0633 |
+| MIG-0604 | event/slot APIs | READY | MIG-0602, MIG-0633 |
+| MIG-0605 | user/X/admin APIs | READY | MIG-0602, MIG-0633 |
 | MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0638 |
 | MIG-0609 | background job CPU measurement (D-09) | BLOCKED | MIG-0606 |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
@@ -336,7 +336,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | DONE | MIG-0623 |
 | MIG-0631 | public event list / release Hono route (RH-015: live mode = D1, static_only = R2 artifact; RH-012: D1 gate + R2 artifact) | DONE | MIG-0602, MIG-0614 |
 | MIG-0632 | event export API (RH-013) | BLOCKED | MIG-0614, MIG-0606 |
-| MIG-0633 | event ownership / permission resolver core (D-10) | READY | MIG-0613, MIG-0617 |
+| MIG-0633 | event ownership / permission resolver core (D-10) | DONE | MIG-0613, MIG-0617 |
 | MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | DONE | MIG-0602, MIG-0614, MIG-0631 |
 | MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | READY | MIG-0624, MIG-0625 |
 | MIG-0636 | Personal X / Active X / terms APIs (SA-074..076, SA-098..105) | READY | MIG-0602 |
@@ -345,6 +345,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0638 |
 
 MIG-0617 は DONE（2026-10-25 統合）: PR #395 を owner が squash merge（`343b4a3b6a31b48b5bdad86461e80aaad6d70100`）、最終Head `3b3cc0de39c343193776a55842e330f6f5a9fa0d` はレビューした Head と同一、CI run 40061654686 green、独立レビューは builder（Sonnet）より上位の Claude Opus による APPROVE（[comment](https://github.com/coroke3/flamenode/pull/395#issuecomment-6379860192)。短縮 SHA で書かれているが Head は PR の最終 Head と一致）。L2 の `wrangler deploy --dry-run` 計測と request CPU はレビューの指摘どおり MIG-0628 / MIG-0606 へ送った。これで MIG-0629 / MIG-0633 は READY。MIG-0631 は PR #398 で DONE。MIG-0625 は範囲を縮めて DONE、残りは MIG-0635（D-13-48〜50）。MIG-0605 の残りは MIG-0636（Personal X / Active X / 規約）・MIG-0637（admin 運用の書き込み）・MIG-0638（残りの Route Handler）へ分け、親は MIG-0633 待ちの BLOCKED（D-13-56）。RH-031/032 は MIG-0603 から MIG-0634 へ（D-13-46）。MIG-0603 の U02c / U03b / U03c は MIG-0633 DONE 後（D-13-44）。MIG-0620 は DONE（`/_ops_assets/*` は MIG-0704 U01 へ、D-13-4）。MIG-0701 は stylesheet port（D-13-5）を決めて READY。MIG-0702 の依存は MIG-0605 から MIG-0636 へ（D-13-9）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため BLOCKED のまま。
+
+MIG-0633 は DONE（2026-10-25 統合）: PR #402（event ownership / permission resolver core: D-10 R-CORE）。owner 0 guard SQL（operableOwnerXSql, remainingOperableEventOwnerSql）のバイト完全一致を golden test で検証し、純粋ドメインロジックを packages/domain、drizzle query/loader を packages/server-core へ移管、src/lib/** に互換 bridge を配置。独立レビュー（antigravity/pro）APPROVE、CI run 40189582113 green。これにより MIG-0604, MIG-0605 が READY。
 
 MIG-0608 は Phase 8 の Auth.js 移行（MIG-0802 は MIG-0607 に依存）を待たずに、認証付き Hono API が旧 Next 発行の session cookie を読むための読み取り専用 task。cookie の発行・更新は Phase 8 まで旧 Next のまま。
 
