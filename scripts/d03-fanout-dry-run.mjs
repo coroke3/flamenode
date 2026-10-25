@@ -67,7 +67,8 @@ const LIKE_COUNT_DELTA = CANDIDATES + ",\n" + [
   ")",
   "SELECT v.id AS videoId, v.app_like_count AS current,",
   "       COALESCE(p.likes, 0) AS projected,",
-  "       COALESCE(p.likes, 0) - v.app_like_count AS delta",
+  "       COALESCE(p.likes, 0) - v.app_like_count AS delta,",
+  "       COUNT(*) OVER () AS totalDeltas",
   "FROM videos AS v",
   "LEFT JOIN predicted AS p ON p.video_id = v.id",
   "WHERE COALESCE(p.likes, 0) <> v.app_like_count",
@@ -83,7 +84,11 @@ export function analyzeDatabase(db) {
   try {
     const summary = db.prepare(SUMMARY).get();
     const conflicts = db.prepare(CONFLICTS).all();
-    const likeCountDelta = db.prepare(LIKE_COUNT_DELTA).all();
+    const deltaRows = db.prepare(LIKE_COUNT_DELTA).all();
+    // Window COUNT counts all mismatched videos before LIMIT 50. Strip the
+    // internal field so each report row keeps the established public shape.
+    const likeCountDeltaTotal = Number(deltaRows[0]?.totalDeltas ?? 0);
+    const likeCountDelta = deltaRows.map(({ totalDeltas, ...row }) => row);
     return {
       candidates: Number(summary.candidates),
       skippedNoOwnerLink: Number(summary.skippedNoOwnerLink),
@@ -94,6 +99,8 @@ export function analyzeDatabase(db) {
         truncated: Number(summary.collisionCount) > conflicts.length,
       },
       likeCountDelta,
+      likeCountDeltaTotal,
+      likeCountDeltaTruncated: likeCountDeltaTotal > likeCountDelta.length,
       maxDeltaVideo: likeCountDelta[0] ?? null,
     };
   } finally {
