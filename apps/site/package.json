@@ -14,7 +14,7 @@
     "@flamenode/ui": "*",
     "@astrojs/react": "^4.2.0",
     "astro": "^5.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "^19.0.9",
+    "react-dom": "^19.0.9"
   }
 }

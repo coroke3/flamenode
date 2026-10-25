@@ -12,8 +12,8 @@
   "dependencies": {
     "@flamenode/contracts": "*",
     "@flamenode/ui": "*",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.0.9",
+    "react-dom": "^19.0.9",
     "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
