@@ -109,10 +109,10 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403 DONE / MIG-0409 BLOCKED on owner Cloudflare steps / MIG-0411 code merged (#326), migration 0066 applied to production, Queue creation / gateway bindings / workerd CPU pending) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (MIG-0501 READY remainder after #340; MIG-0502 #355 / MIG-0503 #357 / MIG-0504 #352 / MIG-0505 #344 / MIG-0506 #350 / MIG-0507 #356 / MIG-0509 pre-work #354 merged partial and BLOCKED; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0618 / 0619 / 0622 / 0623 / 0624 / 0630 DONE) | CLOSED |
-| 7 | Private SPA (現行UI流用) | BLOCKED | CLOSED |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
+| 5 | Public migration | PARTIALLY_READY (D-13, 2026-10-25: MIG-0501..0506, MIG-0509, MIG-0511, MIG-0512 READY; MIG-0507 BLOCKED on MIG-0511; MIG-0510 BLOCKED on Phase 6 APIs; partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0617 / 0618 / 0619 / 0620 / 0622 / 0623 / 0624 / 0625 / 0630 / 0631 DONE; MIG-0603 / 0626 / 0629 / 0633..0638 READY) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (MIG-0701 READY remainder) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 BLOCKED) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
