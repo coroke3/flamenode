@@ -6,7 +6,7 @@ import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { analyzeLocalFile } from "./d03-fanout-dry-run.mjs";
+import { analyzeDatabase, analyzeLocalFile } from "./d03-fanout-dry-run.mjs";
 
 const CLI = new URL("./d03-fanout-dry-run.mjs", import.meta.url);
 function fixture(fn) {
@@ -106,3 +106,50 @@ test("T05 running the CLI never changes source SQLite file bytes", () => fixture
   assert.equal(JSON.parse(child.stdout).candidates, 1);
   assert.equal(hash(), before);
 }));
+
+
+test("T06 concurrent local WAL writer cannot mix collision snapshots within one report", () => fixture(({ db, file, insert }) => {
+  db.exec("PRAGMA journal_mode = WAL");
+  add.video(insert, "v1", 0);
+  add.x(insert, "x1"); add.link(insert, "a", "x1"); add.auth(insert, "a");
+  const reader = new DatabaseSync(file, { readOnly: true, open: true });
+  let writeCompleted = false;
+  try {
+    reader.exec("PRAGMA query_only = ON");
+    const view = {
+      exec: (sql) => reader.exec(sql),
+      prepare: (sql) => {
+        const stmt = reader.prepare(sql);
+        if (!sql.includes("AS collisionCount")) return stmt;
+        return {
+          get() {
+            const summary = stmt.get();
+            // This write commits between the first and second SELECT. WAL lets
+            // it proceed even while reader holds its read-only snapshot.
+            add.existing(insert, "x1", "v1", "like", 777);
+            writeCompleted = true;
+            return summary;
+          },
+        };
+      },
+    };
+    const report = analyzeDatabase(view);
+    assert.equal(writeCompleted, true);
+    assert.equal(report.candidates, 1);
+    assert.equal(report.conflictsWithVideoInteractions.count, 0);
+    assert.deepEqual(report.conflictsWithVideoInteractions.first50, []);
+    assert.equal(report.likeCountDelta[0].projected, 1);
+  } finally {
+    reader.close();
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM video_interactions").get().n, 1);
+}));
+
+test("T07 an unexpected SELECT error still closes the read transaction", () => {
+  const operations = [];
+  assert.throws(() => analyzeDatabase({
+    exec(sql) { operations.push(sql); },
+    prepare() { throw new Error("snapshot unavailable"); },
+  }), /snapshot unavailable/);
+  assert.deepEqual(operations, ["BEGIN", "ROLLBACK"]);
+});
