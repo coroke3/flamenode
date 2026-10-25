@@ -375,7 +375,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - DONE: SA-056..064 の parity。
 
 ### MIG-0657 — slot reserve / release / extend / merge APIs
-- 読む: `slot.ts:632,852,900,1038`、`slotNotificationsPostCommit.ts`、`viewerOverlay.ts:170-176`（path 指定の stack）。
+- 読む: `slot.ts:632,852,900,1038`、`slotNotificationsPostCommit.ts`、`viewerOverlay.ts:194-200`（path 指定の stack）。
 - 変更: `+apps/api/src/routes/events/slotReservation.ts`、`app.ts` の mount 1 行。
 - 試験: 同時予約で 1 件だけ成功、予約上限の境界、wake 0。
 - DONE: SA-065..068 の parity、予約の原子性。

@@ -2792,7 +2792,7 @@ Phase 6 共通契約のとおり。
 - 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `apps/api/src/routes/events/viewerOverlay.ts`, `apps/api/src/routes/events/index.ts`
 #### Micro-units
 - **U01 inventory + core move**: 4 SA の表（予約上限 guard SQL、`commitSlotMutationPlan`、ops webhook の post-commit）。
-- write stack: `/api/events` の public GET に session を足さないよう、`viewerOverlay.ts:170-176` と同じく path を指定した `use` で、`videoWriteStack`（`videos/index.ts:19-49`）と同じ順（origin → session → writeGuard `requiredRole: null` と CURRENT の activeX option → db）の stack を書き込み route だけに付ける。
+- write stack: `/api/events` の public GET に session を足さないよう、`viewerOverlay.ts:194-200` と同じく path を指定した `use` で、`videoWriteStack`（`videos/index.ts:19-49`）と同じ順（origin → session → writeGuard `requiredRole: null` と CURRENT の activeX option → db）の stack を書き込み route だけに付ける。
 - **U02 SA-065**: `POST /api/events/:eventId/slots/:slotId/reserve`（Active X と entry 資格は CURRENT の順。ops webhook は post-commit で CURRENT と同じ best-effort）。
 - **U03 SA-066..068**: `POST .../slots/:slotId/release`、`POST .../slot-groups/:groupId/extend`、`POST .../slot-groups/merge`。
 #### Test cases
