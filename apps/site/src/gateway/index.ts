@@ -309,7 +309,7 @@ export default {
           new Request(new URL("/maintenance/", url.origin), { method: request.method, headers: request.headers, redirect: "manual" }),
         );
       } catch {
-        return unavailable();
+        return unavailablePage(env, url, request.method);
       }
     }
 
@@ -324,7 +324,10 @@ export default {
       try {
         return await env.ASSETS.fetch(target);
       } catch {
-        return unavailable();
+        // Failed public HTML should be retryable; hashed/font assets retain text 503.
+        return FIXED_PUBLIC_PAGES.has(fixed)
+          ? unavailablePage(env, url, request.method)
+          : textResponse(503, "Service Unavailable", { "Retry-After": "30" });
       }
     }
     if (!env.VISIBILITY_KV) return unavailablePage(env, url, request.method);
