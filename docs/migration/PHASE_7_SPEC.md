@@ -231,10 +231,10 @@ PR を revert。`apps/app` は本番に route されていないので、本番�
 
 ### MIG-0702: dashboard mutations（Personal 更新系機能）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0602・MIG-0605・MIG-0701 の merge 後（Active X / profile の API は MIG-0605）
+- **Readiness:** NEEDS_REFINEMENT — MIG-0636・MIG-0641・MIG-0701 の DONE 後（Active X / profile の API は MIG-0636、onboarding は MIG-0641）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0602, MIG-0636, MIG-0701 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-9 DECIDED（2026-10-25: 要る API は SA-076・SA-098〜105・onboarding complete の POST だけで、すべて MIG-0636。MIG-0605 全体には依存しない）
+- **Depends on:** MIG-0602, MIG-0636, MIG-0641, MIG-0701 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-13-9 DECIDED（2026-10-25: 要る API は SA-076・SA-098〜105・onboarding complete の POST だけ。MIG-0605 全体には依存しない）, D-14-9（SA-076 と onboarding complete は MIG-0641、SA-098〜105 は MIG-0636）
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - SA-098〜105（`src/lib/actions/xid.ts`: `setActiveXId`, `requestXIdLink`, `cancelXIdLinkRequest`, `requestXIdMergeRevert`, `updateXIdProfile`, `deleteLinkedXId`, `setXIdIcon`, `uploadXIdIcon`）、SA-076 `acceptOnboardingTerms`（`src/lib/actions/terms.ts`）。
@@ -317,14 +317,14 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0604 と MIG-0703 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0604, MIG-0703, MIG-0624 / **Decisions:** D-05 DECIDED
+- **Depends on:** MIG-0604, MIG-0703, MIG-0624 / **Decisions:** D-05 DECIDED, D-14-3
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT（12ファイル）: `app/(manage)/manage/page.tsx`, `app/(manage)/manage/events/[id]/{page,edit/page,audience/page,slots/page,staff/page,videos/page,videos/[videoId]/page,youtube-playlist/page,review/page}.tsx`, `app/(manage)/manage/notifications/page.tsx`, `app/(manage)/manage/x-link-requests/page.tsx`。
 - `apps/ops` はまだ無い（`FILE_MIGRATION_MATRIX.md` の Future files 表で NOT_CREATED）。
 - 部品: `src/components/manage/**`, `src/components/layout/ManageSidebarNav.tsx`, `ManageActiveXNotice.tsx`。
 #### Owned paths
-- 新規: `+apps/ops/package.json`（`@flamenode/ops`）, `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts`（`assetsDir: "_ops_assets"`）, `+apps/ops/src/**`, `+apps/ops/public/_headers`（MIG-0620 から引き継ぎ、D-13-4）
+- 新規: `+apps/ops/package.json`（`@flamenode/ops`）, `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts`（`assetsDir: "_ops_assets"`）, `+apps/ops/src/**`, `+apps/ops/public/_headers`（MIG-0620 から引き継ぎ、D-13-4）, `+apps/ops/wrangler.toml`（MIG-0628 から引き継ぎ、D-14-3。MIG-0628 の `apps/app/wrangler.toml` と同じ形、id は placeholder、`wrangler deploy --dry-run` を CI に足す）
 - 変更（MIG-0620 から引き継ぎ）: `apps/site/src/gateway/assetHeaders.test.mjs`
 - 変更: `package-lock.json`, `.github/workflows/migration-docs-check.yml`（Ops の build を追加）
 - 触らない: `app/(manage)/**`, `apps/app/**`
@@ -366,7 +366,7 @@ Phase 7 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638 / **Decisions:** D-05 DECIDED, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）
+- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638, MIG-0642..MIG-0648 / **Decisions:** D-05 DECIDED, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）, D-14-14（0637 / 0638 の分割先 0642〜0648 を依存に追加）
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(admin)/**/page.tsx` 45件（`CURRENT_ROUTES.md` Admin 45）。部品は `src/components/admin/**`。

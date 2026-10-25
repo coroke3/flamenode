@@ -248,23 +248,89 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: CURRENT loader と一致、admin 以外の拒否、D1 3 文以下。
 - DONE: Admin 45 の担当表に TODO なし（MIG-0627 の1面を除く）。
 
-### MIG-0636 — Personal X / Active X / terms APIs
-- 読む: `xid.ts`、`terms.ts`、`onboarding.ts#maybeMarkOnboardingComplete`、G21。
-- 変更: SA-074..076, SA-098..105 の endpoint、body 上限 middleware、onboarding 完了 POST。
-- 試験: 二重送信、承認待ち X、next の sanitize、8 MiB の境界、監査と queue 行の一致。
-- DONE: 全 SA の parity。MIG-0702 / MIG-0510 が使える。
+### MIG-0636 — Personal X / Active X APIs
+- 読む: `xid.ts`、G21。
+- 変更: SA-098..105 の endpoint、body 上限 middleware（規約同意と onboarding は MIG-0641、D-14-9）。
+- 試験: 二重送信、承認待ち X、8 MiB の境界、監査と queue 行の一致。
+- DONE: SA-098..105 の parity。MIG-0702 / MIG-0515 が使える。
 
-### MIG-0637 — admin ops writes + X merge admin
-- 読む: `cost-guard.ts`、`notification-admin.ts`、`permissions-admin.ts`、`public-visibility-repair.ts`、`rules.ts`、`static-rebuild-admin.ts`、`user-admin.ts`、`youtube-sync-admin.ts`、`xid-merge-admin.ts`。
-- 変更: admin router の下に面ごとの route。queue は同じ batch、wake 0。
-- 試験: 各 SA の監査・副作用の一致、拒否、CAS 競合、merge と revert。
-- DONE: 全 SA の parity。
+### MIG-0637 — admin ops writes A (cost guard, user admin)
+- 読む: `cost-guard.ts`、`user-admin.ts`。
+- 変更: admin router の下に cost guard と user admin の route。queue は同じ batch、wake 0（残りは MIG-0642 / 0643 / 0644、D-14-10）。
+- 試験: 各 SA の監査・KV mirror の順序、拒否、CAS 競合。
+- DONE: SA-016..020 / 077..081 の parity。
 
-### MIG-0638 — remaining MIG-0605 Route Handlers
-- 読む: spreadsheet data / import、legacy import、media 3 route、public staff、x-users search の CURRENT handler。
-- 変更: 書き込み半分の spreadsheet、import 2 つ、media 3 つ、public staff、X-user search。
-- 試験: 全件 rollback、SSRF と署名、CORS、検索の並び、D1 文数。
-- DONE: 全 RH の parity。spreadsheet の Routing は書き込み半分の merge 後。
+### MIG-0638 — admin spreadsheet writes / import
+- 読む: spreadsheet data / import の CURRENT handler、`apps/api/src/routes/admin/spreadsheet/*`。
+- 変更: spreadsheet の書き込みと import（残りの RH は MIG-0645〜0648、D-14-11）。
+- 試験: 全件 rollback、secret 列・blocklist・owner 保護、監査 byte 一致。
+- DONE: RH-004..008 の parity。spreadsheet の Routing は本 task の merge 後。
+
+### MIG-0639 — API CPU benchmark part A
+- 読む: `scripts/benchmark-api-cpu.mjs`、`API_CPU_BENCHMARK.md`、`work-items/MIG-0606.md`、D-12。
+- 変更: main にある Hono method の scenario と上限入力、Linux run の表。
+- 試験: dry-run の self-check、全 method の測定値、BASELINE の noise。
+- DONE: D-12（live slots 6000）と MIG-0631 T17 の判定、超過の担当 MIG。
+
+### MIG-0640 — like / bookmark API
+- 読む: `src/lib/actions/video/interaction.ts`、`apps/api/src/routes/videos/chapters.ts`、D-13-45。
+- 変更: `POST /api/videos/:videoId/interaction`。
+- 試験: on / off、Active X 0 件、UNIQUE 競合、拒否。
+- DONE: SA-087 の parity、wake 0 の DOCUMENTED DIFFERENCE。
+
+### MIG-0641 — terms acceptance + onboarding APIs
+- 読む: `terms.ts`、`onboarding.ts#maybeMarkOnboardingComplete`、`writeOrigin.ts:172-180`。
+- 変更: `POST /api/personal/terms/accept`、`/onboarding/terms`、`/onboarding/complete`。
+- 試験: `next` の sanitize、未同意の user が呼べる、banned の拒否。
+- DONE: SA-074..076 と onboarding complete の parity。
+
+### MIG-0642 — admin ops writes B (terms versions, editable fields, notifications)
+- 読む: `rules.ts`、`permissions-admin.ts`、`notification-admin.ts`。
+- 変更: admin router の下に3つの route。
+- 試験: 監査・queue 行の一致、拒否、CAS 競合、wake 0。
+- DONE: SA-045..049 / 051..055 の parity。
+
+### MIG-0643 — admin ops writes C (static rebuild, YouTube resync, visibility repair)
+- 読む: `static-rebuild-admin.ts`、`youtube-sync-admin.ts`、`public-visibility-repair.ts`、core `manifestR2.ts`。
+- 変更: admin router の下に3つの route。
+- 試験: manifest の CAS（fake bucket）、拒否、wake 0。
+- DONE: SA-050 / 069..073 / 106 の parity。
+
+### MIG-0644 — admin X merge APIs
+- 読む: `xid-merge-admin.ts`、`x-id-merges/page.tsx#run`、core `xid/merge.ts`。
+- 変更: `apps/api/src/routes/admin/xidMerges.ts`。
+- 試験: merge と revert、100 件超の X、拒否。
+- DONE: SA-092..097 / 110 の parity。
+
+### MIG-0645 — legacy import Route Handler
+- 読む: `app/api/admin/import/legacy/route.ts`、`src/lib/import/legacy/*`。
+- 変更: `apps/api/src/routes/admin/legacyImport.ts`、純粋関数の core 移動。
+- 試験: preview → commit、途中失敗の全件 rollback、CPU budget。
+- DONE: RH-002 の parity。
+
+### MIG-0646 — media Route Handlers
+- 読む: media 3 route と `publicMedia.ts` / `manageXIcon.ts` / `slotSubmissionIcon.ts`、`apps/api/src/routes/media/proxies.ts`。
+- 変更: media 3 route。
+- 試験: SSRF・path traversal、署名改ざん、503 + `Retry-After: 30`。
+- DONE: RH-023..025 の parity。
+
+### MIG-0647 — public event staff Route Handler
+- 読む: `app/api/public/events/[id]/staff/route.ts`、`publicEventStaff.ts`、`publicSnapshot.ts`。
+- 変更: `apps/api/src/routes/public/eventStaff.ts`、`publicEventStaff.ts` の core 移動。
+- 試験: OPTIONS の allowlist、GET の公開 / 非公開 / 欠損、manifest etag の前後比較。
+- DONE: RH-027 / 028 の parity。
+
+### MIG-0648 — X-user search Route Handler
+- 読む: `app/api/internal/x-users/search/route.ts`、`memberSuggestion*`。
+- 変更: `apps/api/src/routes/internal/xUsersSearch.ts`、loader と ranking の core 移動。
+- 試験: 未ログイン、短い / 長い query の並び、artifact 欠損。
+- DONE: RH-019 の parity。
+
+### MIG-0649 — R2 artifact consumer inventory + CI checker
+- 読む: MIG-0627 Work Order、`loadPublicJson` の呼び出し、`workers/json-generator/rebuild.ts` の `putJson`。
+- 変更: `R2_ARTIFACT_CONSUMERS.md`、`scripts/check-r2-artifact-consumers.mjs` と test、CI step。
+- 試験: 表に無い key で exit 1、template key の正規化。
+- DONE: 全 key に producer と置き換え先、CI に入っている。
 
 ## Private SPA common constraints (D-05)
 

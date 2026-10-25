@@ -90,13 +90,13 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 ## MIG-0605 — X / Admin / remaining Route Handlers（2026-10-25 分割、D-13-56）
 
 - **済み**: U01 RH-001（#335）、U02 read RH-003/007/009（#392）、U03 の一部 RH-016/033（#335）。
-- **MIG-0636 へ**: SA-074..076, SA-098..105、G21 の body 上限。
-- **MIG-0637 へ**: SA-016..020, SA-045..055, SA-069..073, SA-077..081, SA-092..097, SA-106, SA-110。
-- **MIG-0638 へ**: RH-002, RH-004..008（F-1 を含む）, RH-019, RH-023..025, RH-027, RH-028。
+- **MIG-0636 へ**: SA-098..105、G21 の body 上限。SA-074..076 と onboarding complete は MIG-0641（D-14-9）。
+- **MIG-0637 へ**: SA-016..020, SA-077..081。D-14-10 で SA-045..049 / 051..055 → MIG-0642、SA-050 / 069..073 / 106 → MIG-0643、SA-092..097 / 110 → MIG-0644。
+- **MIG-0638 へ**: RH-004..008（F-1 を含む）。D-14-11 で RH-002 → MIG-0645、RH-023..025 → MIG-0646、RH-027 / 028 → MIG-0647、RH-019 → MIG-0648。
 - **MIG-0603 へ**: SA-043/044（可視性遷移の host を共有）。
 - **本 task U05x**: SA-090/091（MIG-0633 の後）。**U05d** D-03 fan-out dry-run（Remote D1 に触れない）。**U05e** D-04 checkpoint。
 - **U07 remaining method coverage**: RH-001..033 の担当表。RH-010/011 は旧 Auth。
-- **Final audit**: MIG-0602/0603/0604/0636〜0638 との SA の二重所有が無いこと。
+- **Final audit**: MIG-0602/0603/0604/0636〜0638/0640〜0648 との SA / RH の二重所有が無いこと。
 
 ## MIG-0704 — Ops SPA creation + Manage
 
