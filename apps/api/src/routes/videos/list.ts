@@ -146,12 +146,10 @@ async function loadSearchVideos(
       ? normalizeStaticVideoSearchPostingManifest(manifestSnapshot.data)
       : null;
 
-  if (manifest && manifest.generation.startsWith("videos-")) {
-    const query = q.trim().toLowerCase();
-    const grams = staticSearchQueryGrams(query);
-    if (grams.length === 0) {
-      return { videos: [], total: 0, generatedAt: manifest.generated_at };
-    }
+  const query = q.trim().toLowerCase();
+  const grams = staticSearchQueryGrams(query);
+  // CURRENT loadStaticVideoPostingPage: no gram falls through to search-index-lite.json.
+  if (manifest && manifest.generation.startsWith("videos-") && grams.length > 0) {
 
     const directories = new Map<number, StaticSearchPostingDirectory>();
     const options: Array<{ gram: string; total: number; pages: number[] }> = [];

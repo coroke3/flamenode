@@ -5,6 +5,7 @@ import { loadPublicSnapshot } from "../../lib/publicSnapshot.ts";
 import { isLiveApiEnabled, resolvePublicOperationMode } from "../live/operationMode.ts";
 import { normalizeStaticVideoDetail } from "@flamenode/server-core/publicData/videoDetailCore";
 import {
+  EVENT_PLAYLIST_MAX_OBJECT_BYTES,
   eventPlaylistObjectKey,
   normalizeStaticEventPlaylist,
 } from "@flamenode/server-core/publicData/eventPlaylistCore";
@@ -16,6 +17,7 @@ import {
   TERMS_REACCEPT_REQUIRED_CASE_SQL,
   TERMS_REACCEPT_REQUIRED_CTE_SQL,
 } from "../personal/context.ts";
+import { resolveActiveXUserId } from "../account/summary.ts";
 import type {
   VideoViewerOverlayDto,
   VideoViewerOverlayPlaylistItem,
@@ -26,6 +28,9 @@ const PRIVATE_HEADERS = {
   Pragma: "no-cache",
   Expires: "0",
 } as const;
+
+/** CURRENT src/lib/publicData/r2EventPlaylist.ts readVisibleEventArtifact: other ids are never read. */
+const PLAYLIST_EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 const UNAVAILABLE_HEADERS = {
   ...PRIVATE_HEADERS,
@@ -74,12 +79,16 @@ async function loadStaticEventPlaylistOverlay(
   if (!playlist || playlist === "lib-like" || playlist === "lib-bookmark") {
     return { playlistLabel: "再生リスト", playlistItems: [] };
   }
+  if (!PLAYLIST_EVENT_ID_PATTERN.test(playlist)) {
+    return { playlistLabel: "再生リスト", playlistItems: [] };
+  }
   const snapshot = await loadPublicSnapshot({
     bucket,
     key: eventPlaylistObjectKey(playlist),
     targetType: "event_slots",
     guardModeRaw,
     targetEntityId: playlist,
+    maxBytes: EVENT_PLAYLIST_MAX_OBJECT_BYTES,
   });
   if (snapshot.kind !== "ok" || !snapshot.data) {
     return { playlistLabel: "再生リスト", playlistItems: [] };
@@ -176,38 +185,16 @@ export function createVideoViewerOverlayRoutes(
       return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
     }
 
-    if (viewer.is_banned === 1) {
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          loggedIn: true,
-          isBanned: true,
-          isTosAccepted: false,
-          termsReacceptRequired: false,
-          activeXId: viewer.active_x_user_id ?? null,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
-    }
+    // CURRENT getCurrentUserContext: the user row (terms) and the approved linked X ids are read for
+    // every signed-in viewer, banned included; a failed read is "auth unavailable" (signed out shape).
+    const authUnavailable = () =>
+      c.json({ ...emptyOverlay(publicPlaylist), authUnavailable: true }, 200, PRIVATE_HEADERS);
+    if (!c.env.DB) return authUnavailable();
 
-    if (!c.env.DB) {
-      return c.json(
-        {
-          ...emptyOverlay(publicPlaylist),
-          loggedIn: true,
-          authUnavailable: true,
-          isBanned: false,
-          isTosAccepted: false,
-          termsReacceptRequired: false,
-          activeXId: viewer.active_x_user_id ?? null,
-          viewerXApproved: false,
-        },
-        200,
-        PRIVATE_HEADERS,
-      );
-    }
-
+    let degraded: Pick<
+      VideoViewerOverlayDto,
+      "isTosAccepted" | "termsReacceptRequired" | "activeXId" | "viewerXApproved"
+    > | null = null;
     try {
       // Statement 1: video + correlated permission facts + user TOS & linked X facts
       const stmt1Sql = `${TERMS_REACCEPT_REQUIRED_CTE_SQL}
@@ -240,38 +227,46 @@ SELECT
    WHERE u."id" = ?
    LIMIT 1) AS user_json`;
 
-      const row1 = await c.env.DB.prepare(stmt1Sql)
-        .bind(viewer.id, rawId, rawId, viewer.id)
-        .first<{ video_json: string | null; user_json: string | null }>();
+      let row1: { video_json: string | null; user_json: string | null } | null;
+      try {
+        row1 = await c.env.DB.prepare(stmt1Sql)
+          .bind(viewer.id, rawId, rawId, viewer.id)
+          .first<{ video_json: string | null; user_json: string | null }>();
+      } catch (error) {
+        console.error("[video-viewer-overlay] viewer read failed", { rawId, error });
+        return authUnavailable();
+      }
+      // CURRENT: a session whose user row is gone is signed out.
+      if (!row1?.user_json) return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
 
-      if (!row1) {
+      const userData = JSON.parse(row1.user_json) as Record<string, unknown>;
+      const isTosAccepted = userData.is_tos_accepted === 1;
+      const termsReacceptRequired = userData.terms_reaccept_required === 1;
+      const rawActiveX = typeof userData.active_x_id === "string" ? userData.active_x_id : null;
+      const approvedXIds = parseJsonArray<string>(userData.approved_x_ids);
+      // CURRENT resolveActiveXUserId: the D1 spelling of the matching approved X id, else the only
+      // approved X id, else null; viewerXApproved is approvedXIds.includes(activeXId).
+      const activeXId = resolveActiveXUserId(
+        rawActiveX,
+        approvedXIds.map((x_user_id) => ({ x_user_id, approval_status: "approved" })),
+      );
+      const viewerXApproved = Boolean(activeXId && approvedXIds.includes(activeXId));
+
+      if (viewer.is_banned === 1) {
         return c.json(
           {
             ...emptyOverlay(publicPlaylist),
             loggedIn: true,
-            authUnavailable: true,
-            isBanned: false,
-            isTosAccepted: false,
-            termsReacceptRequired: false,
-            activeXId: viewer.active_x_user_id ?? null,
-            viewerXApproved: false,
+            isBanned: true,
+            isTosAccepted,
+            termsReacceptRequired,
+            activeXId,
           },
           200,
           PRIVATE_HEADERS,
         );
       }
-
-      const userData = row1.user_json ? (JSON.parse(row1.user_json) as Record<string, unknown>) : null;
-      const isTosAccepted = userData?.is_tos_accepted === 1;
-      const termsReacceptRequired = userData?.terms_reaccept_required === 1;
-      const rawActiveX = typeof userData?.active_x_id === "string" ? userData.active_x_id : null;
-      const approvedXIds = parseJsonArray<string>(userData?.approved_x_ids);
-      const normalizedActiveX = rawActiveX?.trim().toLowerCase();
-      const matchedApprovedXId = normalizedActiveX
-        ? approvedXIds.find((id) => id.trim().toLowerCase() === normalizedActiveX) ?? null
-        : null;
-      const activeXId = matchedApprovedXId ?? rawActiveX?.trim() ?? null;
-      const viewerXApproved = Boolean(matchedApprovedXId);
+      degraded = { isTosAccepted, termsReacceptRequired, activeXId, viewerXApproved };
 
       let viewerCanEditChapters = false;
       if (row1.video_json) {
@@ -404,16 +399,14 @@ SELECT
       return c.json(result, 200, PRIVATE_HEADERS);
     } catch (error) {
       console.error("[video-viewer-overlay] db read failed", { rawId, error });
+      if (!degraded) return authUnavailable();
+      // CURRENT: the viewer is known, the overlay read failed.
       return c.json(
         {
           ...emptyOverlay(publicPlaylist),
           loggedIn: true,
           authUnavailable: true,
-          isBanned: false,
-          isTosAccepted: false,
-          termsReacceptRequired: false,
-          activeXId: viewer.active_x_user_id ?? null,
-          viewerXApproved: false,
+          ...degraded,
         },
         200,
         PRIVATE_HEADERS,
