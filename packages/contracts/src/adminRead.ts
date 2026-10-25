@@ -526,5 +526,6 @@ export const AdminUserEditResponseSchema = z.object({
     is_notification_enabled: z.number(),
   }),
   xUserIds: z.array(z.string()),
+  truncated: z.boolean(),
 });
 export type AdminUserEditResponse = z.infer<typeof AdminUserEditResponseSchema>;

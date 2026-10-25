@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { AdminVideoMembersResponse, AdminVideoMemberInput } from "@flamenode/contracts";
-import { formatChapterTime } from "@flamenode/domain/video";
 import type { AppEnv } from "../../env.ts";
 import { parseJsonColumn } from "../personal/context.ts";
 
@@ -19,6 +18,13 @@ interface RawMemberRow {
   is_public_member: number;
   x_user_id: string | null;
   chapters: string | null;
+}
+
+/** CURRENT formatMemberChapterTime (src/lib/video/memberInput.ts:58); no clamping, unlike domain formatChapterTime. */
+function formatMemberChapterTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
 export const adminVideoMembersRoutes = new Hono<AppEnv>().get("/:id/members", async (c) => {
@@ -77,7 +83,7 @@ export const adminVideoMembersRoutes = new Hono<AppEnv>().get("/:id/members", as
       can_edit: member.can_edit,
       is_public_member: member.is_public_member,
       chapters: rawChapters.map((ch) => ({
-        time: formatChapterTime(ch.time),
+        time: formatMemberChapterTime(ch.time),
         label: ch.label,
         note: ch.note ?? "",
       })),

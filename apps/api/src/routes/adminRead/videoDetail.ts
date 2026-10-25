@@ -3,7 +3,7 @@ import type { AdminVideoDetailResponse, AdminVideoModerationCase } from "@flamen
 import { formatChapterTime } from "@flamenode/domain/video";
 import type { AppEnv } from "../../env.ts";
 import { stagePermissionJson, reviewSummarySql, type StageQuestion } from "../../lib/videoReviewSummaries.ts";
-import { parseJsonColumn } from "../personal/context.ts";
+import { MAX_JSON_COLUMN_BYTES, parseJsonColumn } from "../personal/context.ts";
 
 // CURRENT: app/(admin)/admin/videos/[id]/page.tsx + src/lib/admin/videoReviewDetail.ts (fetchVideoReviewDetail)
 // + src/lib/admin/videoReviewAnswer.ts (formatVideoReviewAnswer) + videoModerationCases query.
@@ -11,6 +11,13 @@ import { parseJsonColumn } from "../personal/context.ts";
 // D1: S2 budget <= 3 statements incl. session: statement 1 for review detail + statement 2 for moderation cases.
 const MAX_DETAIL_ROWS = 100;
 const MODERATION_CASES_LIMIT = 20;
+
+/** Work Order U01: a surface over 100 rows or 64 KiB is reported as `truncated` instead of failing the page. */
+function parseSurface<T>(value: unknown): { items: T[]; truncated: boolean } {
+  if (typeof value === "string" && value.length > MAX_JSON_COLUMN_BYTES) return { items: [], truncated: true };
+  const items = parseJsonColumn<T[]>(value, []) ?? [];
+  return { items: items.slice(0, MAX_DETAIL_ROWS), truncated: items.length > MAX_DETAIL_ROWS };
+}
 
 function formatAnswer(answerText: string | null | undefined, answerJson: string | null | undefined): string {
   const text = answerText?.trim() ?? "";
@@ -59,7 +66,8 @@ interface RawVideoRow {
 
 export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) => {
   const videoId = c.req.param("id");
-  const eventParam = c.req.query("event")?.trim() || null;
+  // CURRENT passes ?event= through untrimmed (page.tsx firstSearchParamValue).
+  const eventParam = c.req.query("event") || null;
   const db = c.env.DB;
 
   const summary = reviewSummarySql("v.id");
@@ -74,7 +82,9 @@ export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) =
          v.highlights AS highlights, v.production_story AS production_story,
          v.visibility_status AS visibility_status,
          ${summary.sql},
-         (SELECT json_group_array(ve.event_id) FROM video_events ve WHERE ve.video_id = v.id) AS event_ids,
+         (SELECT json_group_array(q.event_id) FROM (
+            SELECT ve.event_id AS event_id FROM video_events ve WHERE ve.video_id = v.id ORDER BY ve.event_id ASC LIMIT ?
+          ) q) AS event_ids,
          (SELECT json_group_array(json_object('label', q.label, 'required', q.required, 'answer_text', q.answer_text, 'answer_json', q.answer_json)) FROM (
             SELECT c.label AS label, c.required AS required,
               (SELECT a.answer_text FROM video_custom_answers a WHERE a.video_id = v.id AND a.question_id = c.id LIMIT 1) AS answer_text,
@@ -113,6 +123,7 @@ export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) =
       MAX_DETAIL_ROWS + 1,
       MAX_DETAIL_ROWS + 1,
       MAX_DETAIL_ROWS + 1,
+      MAX_DETAIL_ROWS + 1,
       videoId,
     )
     .first<RawVideoRow>();
@@ -132,20 +143,16 @@ export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) =
     .bind(videoId, MODERATION_CASES_LIMIT)
     .all<AdminVideoModerationCase>();
 
-  const eventIds = parseJsonColumn<string[]>(row.event_ids, []) ?? [];
-  const questions = parseJsonColumn<{ label: string; required: number; answer_text: string | null; answer_json: string | null }[]>(row.questions, []) ?? [];
-  const members = parseJsonColumn<{ name: string; role: string | null; x_user_id: string | null; is_public_member: number }[]>(row.members, []) ?? [];
-  const chapters = parseJsonColumn<{ x_user_id: string | null; chapter_time: number; chapter_label: string }[]>(row.chapters, []) ?? [];
-  const software = parseJsonColumn<string[]>(row.software, []) ?? [];
+  const eventIds = parseSurface<string>(row.event_ids);
+  const questions = parseSurface<{ label: string; required: number; answer_text: string | null; answer_json: string | null }>(row.questions);
+  const members = parseSurface<{ name: string; role: string | null; x_user_id: string | null; is_public_member: number }>(row.members);
+  const chapters = parseSurface<{ x_user_id: string | null; chapter_time: number; chapter_label: string }>(row.chapters);
+  const software = parseSurface<string>(row.software);
 
-  const truncated =
-    questions.length > MAX_DETAIL_ROWS ||
-    members.length > MAX_DETAIL_ROWS ||
-    chapters.length > MAX_DETAIL_ROWS ||
-    software.length > MAX_DETAIL_ROWS;
+  const truncated = [eventIds, questions, members, chapters, software].some((surface) => surface.truncated);
 
   const chaptersByXUserId = new Map<string, string[]>();
-  for (const chapter of chapters.slice(0, MAX_DETAIL_ROWS)) {
+  for (const chapter of chapters.items) {
     if (!chapter.x_user_id) continue;
     const labels = chaptersByXUserId.get(chapter.x_user_id) ?? [];
     labels.push(`${formatChapterTime(chapter.chapter_time)} ${chapter.chapter_label}`);
@@ -174,14 +181,14 @@ export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) =
       production_story: row.production_story,
       stagePermission: stagePermissionJson({ stage_questions: parseJsonColumn<StageQuestion[]>(row.stage_questions, []) }),
       visibility_status: row.visibility_status,
-      software_label: software.length > 0 ? software.slice(0, MAX_DETAIL_ROWS).join(", ") : null,
-      event_ids: eventIds,
-      customAnswers: questions.slice(0, MAX_DETAIL_ROWS).map((q) => ({
+      software_label: software.items.length > 0 ? software.items.join(", ") : null,
+      event_ids: eventIds.items,
+      customAnswers: questions.items.map((q) => ({
         label: q.label,
         required: q.required === 1,
         answer: formatAnswer(q.answer_text, q.answer_json).trim() || "（未回答）",
       })),
-      members: members.slice(0, MAX_DETAIL_ROWS).map((member) => ({
+      members: members.items.map((member) => ({
         name: member.name,
         role: member.role,
         x_user_id: member.x_user_id,

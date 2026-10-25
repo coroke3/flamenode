@@ -344,4 +344,62 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(res.body, { error: "unavailable" }, path);
     }
   });
+
+  const videoFields = (video) => ({
+    music: video.music, credit: video.credit, intro_comment: video.intro_comment,
+    highlights: video.highlights, production_story: video.production_story,
+  });
+
+  test("T01 videos/[id]: text fields, answers and untrimmed ?event match CURRENT", async () => {
+    const res = await call("/videos/av-pending-1?event=%20", "tok-root");
+    assert.equal(res.status, 200);
+    const current = await fetchVideoReviewDetail(refDb, "av-pending-1");
+    assert.deepEqual(res.body.video.customAnswers, canon(current.customAnswers));
+    assert.deepEqual(videoFields(res.body.video), videoFields(current));
+    assert.equal(res.body.event, " ");
+  });
+
+  test("T01 videos/[id]: more than 100 rows on a surface returns the first 100 and truncated", async () => {
+    const res = await call("/videos/av-overflow", "tok-root");
+    assert.equal(res.status, 200);
+    const validated = AdminVideoDetailResponseSchema.parse(res.body);
+    const current = await fetchVideoReviewDetail(refDb, "av-overflow");
+    assert.equal(current.members.length, 101);
+    assert.equal(validated.truncated, true);
+    assert.deepEqual(validated.video.members, canon(current.members.slice(0, 100)));
+  });
+
+  test("T01 videos/[id]: a surface over 64 KiB is truncated instead of failing with 503", async () => {
+    const base = sqlite.prepare("SELECT * FROM videos WHERE id = 'av-overflow'").get();
+    insert(sqlite, "videos", { ...base, id: "av-huge", youtube_video_id: null });
+    for (let i = 0; i < 3; i += 1) {
+      insert(sqlite, "video_members", { id: `vm-huge-${i}`, video_id: "av-huge", name: "N".repeat(30_000), is_public_member: 1, order_index: i, can_edit: 0 });
+    }
+    const res = await call("/videos/av-huge", "tok-root");
+    assert.equal(res.status, 200);
+    const validated = AdminVideoDetailResponseSchema.parse(res.body);
+    assert.equal(validated.truncated, true);
+    assert.deepEqual(validated.video.members, []);
+    assert.equal(validated.video.id, "av-huge");
+  });
+
+  test("T01 users/[id]/edit: linked X IDs are capped at 100 with truncated; none gives []", async () => {
+    insert(sqlite, "user", { id: "u_linkcap", name: "Linkcap", discord_id: "d-linkcap", role: "user", is_banned: 0, is_tos_accepted: 1 });
+    for (let i = 0; i < 101; i += 1) {
+      const xid = `linkcap_x_${String(i).padStart(3, "0")}`;
+      insert(sqlite, "x_users", { id: xid, x_name: xid, approval_status: "approved" });
+      insert(sqlite, "x_user_account_links", { x_user_id: xid, auth_user_id: "u_linkcap", link_role: "owner", created_at: T0, updated_at: T0 });
+    }
+    const res = await call("/users/u_linkcap/edit", "tok-root");
+    assert.equal(res.status, 200);
+    const validated = AdminUserEditResponseSchema.parse(res.body);
+    const current = await getLinkedXUserIdsForAuthUser(refDb, "u_linkcap");
+    assert.equal(current.length, 101);
+    assert.equal(validated.truncated, true);
+    assert.equal(validated.xUserIds.length, 100);
+    assert.ok(validated.xUserIds.every((xid) => current.includes(xid)));
+
+    const none = AdminUserEditResponseSchema.parse((await call("/users/u_root/edit", "tok-root")).body);
+    assert.equal(none.truncated, false);
+  });
 }

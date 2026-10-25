@@ -38,12 +38,14 @@ export const adminUserEditRoutes = new Hono<AppEnv>().get("/:id/edit", async (c)
        WHERE u.id = ?
        LIMIT 1`,
     )
-    .bind(ADMIN_USER_DETAIL_LINKED_X_LIMIT, userId)
+    .bind(ADMIN_USER_DETAIL_LINKED_X_LIMIT + 1, userId)
     .first<RawUserEditRow>();
 
   if (!row) return c.json({ error: "Not Found" }, 404);
 
-  const xUserIds = parseJsonColumn<string[]>(row.x_user_ids, []) ?? [];
+  // CURRENT reads every linked X ID; the API caps at the shared limit and says so (Work Order U03).
+  const linkedXUserIds = parseJsonColumn<string[]>(row.x_user_ids, []) ?? [];
+  const xUserIds = linkedXUserIds.slice(0, ADMIN_USER_DETAIL_LINKED_X_LIMIT);
 
   const body: AdminUserEditResponse = {
     user: {
@@ -55,6 +57,7 @@ export const adminUserEditRoutes = new Hono<AppEnv>().get("/:id/edit", async (c)
       is_notification_enabled: row.is_notification_enabled,
     },
     xUserIds,
+    truncated: linkedXUserIds.length > ADMIN_USER_DETAIL_LINKED_X_LIMIT,
   };
 
   return c.json(body);
