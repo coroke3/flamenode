@@ -54,7 +54,12 @@ const CONFLICTS = CANDIDATES + "\n" + [
 
 const LIKE_COUNT_DELTA = CANDIDATES + ",\n" + [
   "all_likes AS (",
-  "  SELECT x_user_id, video_id FROM video_interactions WHERE interaction_type = 'like'",
+  // D-03 counts distinct approved X identities, including in the legacy
+  // X-side rows. Do not delete disapproved X rows; only exclude from counts.
+  "  SELECT existing.x_user_id, existing.video_id",
+  "  FROM video_interactions AS existing",
+  "  JOIN x_users AS x ON x.id = existing.x_user_id",
+  "  WHERE existing.interaction_type = 'like' AND x.approval_status = 'approved'",
   "  UNION",
   "  SELECT x_user_id, video_id FROM dedup WHERE interaction_type = 'like'",
   "), predicted AS (",
