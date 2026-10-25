@@ -12,15 +12,16 @@
  *   2. viewer terms + linked X + pending reservation X requests (one JSON each)
  * Anonymous requests stop after statement 1.
  *
- * CURRENT quirk kept: slotViewerOverlay.ts selects the event row WITHOUT
- * visibility_status, so canUseSlotOperatorOverride (which needs a public
- * event) is false for every viewer including admins; operatorOverrideAllowed
- * is therefore always false and the staff snapshot is never needed.
+ * FIX-0604-1: operator override must use the public event's timing and
+ * approved, linked staff permissions. Bound the staff snapshot inside the
+ * existing viewer statement to keep ZERO_1102's <= 3 statement budget.
  */
 import { Hono } from "hono";
 import type { SlotViewerOverlayResponse, SlotViewerOverlaySlot } from "@flamenode/contracts";
 import { resolveReservationXIdentityFromPending, SLOT_RESERVATION_X_REQUEST_TYPES } from "@flamenode/domain/slots/reservationIdentity";
 import { canActAsSlotActor, resolveSlotViewerRelation } from "@flamenode/domain/slots/slotIdentity";
+import { canUseSlotOperatorOverride } from "@flamenode/domain/slots/operatorReservation";
+import { staffRowHasPermissionKey, type StaffPermissionRow } from "@flamenode/domain/auth/permissions/resolver";
 import type { AppEnv } from "../../env.ts";
 import { sessionMiddleware } from "../../auth/session.ts";
 import {
@@ -38,6 +39,8 @@ const MAX_EVENT_ID_LEN = 128;
 /** ZERO_1102 S2 named LIMITs (<= 100). CURRENT reads these unbounded. */
 export const MAX_VIEWER_SLOTS = 100;
 export const MAX_PENDING_RESERVATION_REQUESTS = 100;
+export const MAX_OPERATOR_STAFF_ROWS = 100;
+export const MAX_OPERATOR_STAFF_JSON_BYTES = 64 * 1024;
 /** ZERO_1102 S2: a JSON column parsed here is <= 64 KiB (UTF-8 bytes). */
 export const MAX_VIEWER_SLOTS_JSON_BYTES = 64 * 1024;
 
@@ -66,6 +69,11 @@ export function emptySlotViewerOverlay(authUnavailable = false): SlotViewerOverl
 }
 
 interface EventRow {
+  visibility_status: string | null;
+  start_time: number | null;
+  end_time: number | null;
+  entry_start_time: number | null;
+  entry_end_time: number | null;
   slot_visibility_mode: string | null;
   viewer_slots: string | null;
 }
@@ -84,6 +92,7 @@ interface ViewerSlotRow {
 interface ViewerRow extends TermsRow {
   linked: string | null;
   pending: string | null;
+  event_staff: string | null;
 }
 
 function userNeedsTermsAcceptance(terms: TermsRow): boolean {
@@ -122,7 +131,9 @@ function eventStatement(db: D1Database, eventId: string, viewerId: string | null
   params.push(eventId);
   return db
     .prepare(
-      `SELECT e.slot_visibility_mode AS slot_visibility_mode, ${viewerSlots} AS viewer_slots
+      `SELECT e.visibility_status AS visibility_status, e.start_time AS start_time, e.end_time AS end_time,
+         e.entry_start_time AS entry_start_time, e.entry_end_time AS entry_end_time,
+         e.slot_visibility_mode AS slot_visibility_mode, ${viewerSlots} AS viewer_slots
        FROM events e WHERE e.id = ? AND e.visibility_status = 'public' LIMIT 1`,
     )
     .bind(...params);
@@ -134,15 +145,26 @@ function eventStatement(db: D1Database, eventId: string, viewerId: string | null
  * (Same linked-X SQL as personal/context.ts contextStatement; the pending request list is the full
  * newest-first list resolveReservationXIdentity needs, not contextStatement's single latest row.)
  */
-function viewerStatement(db: D1Database, userId: string): D1PreparedStatement {
+function viewerStatement(db: D1Database, userId: string, eventId: string): D1PreparedStatement {
   const types = SLOT_RESERVATION_X_REQUEST_TYPES;
   const linked = `(SELECT json_group_array(json_object('x_user_id', q.x_user_id, 'approval_status', q.approval_status)) FROM (
         SELECT x_users.id AS x_user_id, x_users.approval_status AS approval_status
         FROM x_user_account_links
         INNER JOIN x_users ON x_users.id = x_user_account_links.x_user_id
-        WHERE x_user_account_links.auth_user_id = ?
+        WHERE x_user_account_links.auth_user_id = u.id
         ORDER BY x_users.id
         LIMIT ?) q)`;
+  // Match CURRENT getManageAuthorizationSnapshot: approved X links only, with permissions
+  // unioned across the viewer's staff rows. LIMIT + 1 detects an incomplete snapshot.
+  const eventStaff = `(SELECT json_group_array(json_object(
+        'permission_preset', q.permission_preset,
+        'custom_permission_keys_json', q.custom_permission_keys_json
+      )) FROM (
+        SELECT es.permission_preset, es.custom_permission_keys_json FROM event_staff es
+        INNER JOIN x_user_account_links xl ON xl.x_user_id = es.x_user_id
+        INNER JOIN x_users x ON x.id = xl.x_user_id
+        WHERE es.event_id = ? AND xl.auth_user_id = u.id AND x.approval_status = 'approved'
+        LIMIT ${MAX_OPERATOR_STAFF_ROWS + 1}) q)`;
   const pending = `(SELECT json_group_array(q.requested_x_id) FROM (
         SELECT requested_x_id FROM x_identity_requests
         WHERE requested_by_auth_user_id = ? AND status = 'pending'
@@ -157,10 +179,12 @@ function viewerStatement(db: D1Database, userId: string): D1PreparedStatement {
          u.accepted_terms_version_id AS accepted_terms_version_id,
          ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS terms_reaccept_required,
          ${linked} AS linked,
-         ${pending} AS pending
+         ${pending} AS pending,
+         ${eventStaff} AS event_staff
        FROM "user" u WHERE u.id = ? LIMIT 1`,
     )
-    .bind(userId, MAX_LINKED_X_USERS, userId, ...types, MAX_PENDING_RESERVATION_REQUESTS, userId);
+    .bind(MAX_LINKED_X_USERS, userId, ...types, MAX_PENDING_RESERVATION_REQUESTS,
+      eventId, userId);
 }
 
 const utf8Length = (value: string): number => new TextEncoder().encode(value).length;
@@ -201,13 +225,19 @@ slotViewerOverlayRoutes.get("/:id/slots/viewer-overlay", async (c) => {
   let terms: TermsRow;
   let linkedRows: LinkedXRow[];
   let pendingXIds: string[];
+  let operatorStaffRows: StaffPermissionRow[];
   try {
-    const row = await viewerStatement(db, sessionUser.id).first<ViewerRow>();
+    const row = await viewerStatement(db, sessionUser.id, eventId).first<ViewerRow>();
     // The user row vanished after the session was resolved: CURRENT treats it as logged out.
     if (!row) return c.json(emptySlotViewerOverlay(false));
     terms = row;
     linkedRows = parseJsonColumn<LinkedXRow[]>(row.linked, []);
     pendingXIds = parseJsonColumn<string[]>(row.pending, []);
+    if (row.event_staff !== null && utf8Length(row.event_staff) > MAX_OPERATOR_STAFF_JSON_BYTES) {
+      throw new Error("event_staff_snapshot_too_large");
+    }
+    operatorStaffRows = parseJsonColumn<StaffPermissionRow[]>(row.event_staff, []);
+    if (operatorStaffRows.length > MAX_OPERATOR_STAFF_ROWS) throw new Error("event_staff_over_limit");
   } catch {
     console.error("[slot-viewer-overlay] viewer load failed");
     return c.json(emptySlotViewerOverlay(true));
@@ -257,6 +287,13 @@ slotViewerOverlayRoutes.get("/:id/slots/viewer-overlay", async (c) => {
     viewerXId = identity.snapshotXId;
   }
 
+  const operatorOverrideAllowed =
+    onboarding.canReserveSlot &&
+    canUseSlotOperatorOverride(event) &&
+    (viewer.role === "admin" ||
+      (onboarding.xIdentityStatus === "approved" &&
+        operatorStaffRows.some((row) => staffRowHasPermissionKey(row, "event.slots"))));
+
   const mode = event.slot_visibility_mode;
   const groupKeys = new Map<string, string>();
   const slots: SlotViewerOverlaySlot[] = slotRows.map((slot) => {
@@ -305,7 +342,7 @@ slotViewerOverlayRoutes.get("/:id/slots/viewer-overlay", async (c) => {
     needsTermsAcceptance: onboarding.needsTermsAcceptance,
     canReserveSlot: onboarding.canReserveSlot,
     canPost: onboarding.canPost,
-    operatorOverrideAllowed: false,
+    operatorOverrideAllowed,
     viewerXId,
     viewerXIdNotice: null,
     slots,
