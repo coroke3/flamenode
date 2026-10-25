@@ -20,7 +20,13 @@ function requirePattern(relative, pattern, message, errors) {
 
 function runStaticCheck() {
   const errors = [];
-  const publicDtoTarget = fs.existsSync(path.join(root, "packages/server-core/src/publicData/publicDto.ts")) ? "packages/server-core/src/publicData/publicDto.ts" : "src/lib/api/publicDto.ts";
+  const publicDtoTarget = "packages/server-core/src/publicData/publicDto.ts";
+  requirePattern(
+    "src/lib/api/publicDto.ts",
+    /export \* from "@flamenode\/server-core\/publicData\/publicDto"/,
+    "Next側の公開DTO bridgeがserver-coreの正本を指していません。",
+    errors,
+  );
   requirePattern(
     publicDtoTarget,
     /PUBLIC_VIDEO_KEYS[\s\S]*PUBLIC_EVENT_KEYS[\s\S]*FORBIDDEN_PUBLIC_KEYS/,
@@ -49,6 +55,24 @@ function runStaticCheck() {
     "app/api/events/route.ts",
     /pickKeys\(row, PUBLIC_EVENT_KEYS\)[\s\S]*assertNoForbiddenKeys/,
     "event一覧が公開DTO allowlistと禁止key検査を通っていません。",
+    errors,
+  );
+  requirePattern(
+    "apps/api/src/routes/events/publicList.ts",
+    /mode === "maintenance"[\s\S]*pickKeys\(row as any, PUBLIC_EVENT_KEYS\)[\s\S]*assertNoForbiddenKeys\(payload\)[\s\S]*WHERE visibility_status = 'public'[\s\S]*pickKeys\(row, PUBLIC_EVENT_KEYS\)[\s\S]*assertNoForbiddenKeys\(payload\)/,
+    "Hono event一覧（RH-015）がmaintenance 503、public限定、公開DTO allowlist、禁止key検査を通っていません。",
+    errors,
+  );
+  requirePattern(
+    "apps/api/src/routes/events/publicRelease.ts",
+    /visibility_status = 'public' AND public_api_enabled = 1[\s\S]*mode === "maintenance"[\s\S]*loadPublicSnapshot\([\s\S]*targetType: "event_release"[\s\S]*release\.event\.id !== eventId/,
+    "Hono event release（RH-012）がpublic + public_api_enabled gate、maintenance 503、可視性guard、event id照合を通っていません。",
+    errors,
+  );
+  requirePattern(
+    "apps/api/src/routes/events/publicSnapshot.ts",
+    /guardMode === "enforce"[\s\S]*return \{ kind: "unavailable" \}[\s\S]*filterPublicArtifactPayload\(/,
+    "Hono公開snapshot readerがenforceのfail-closedと行filterを通っていません。",
     errors,
   );
   requirePattern(

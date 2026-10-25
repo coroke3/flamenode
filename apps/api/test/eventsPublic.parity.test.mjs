@@ -67,6 +67,8 @@ if (runUnderRootTsx(import.meta.url)) {
   const { clearPublicApiRateLimitForTests } = await import("@flamenode/server-core/publicData/publicApi");
   const { resetOperationModeCachesForTests } = await import("../src/routes/live/operationMode.ts");
   const { resetPublicJsonIsolateCacheForTests } = await import("../../../src/lib/publicData/publicCacheIsolate.ts");
+  const { resetPublicOperationModeCacheForTests } = await import("../../../src/lib/operationMode/publicModeCore.ts");
+  const { resetDegradedCircuitBookkeepingForTests } = await import("../../../src/lib/publicData/degradedCircuitBreaker.ts");
 
   const sqlite = createSqlite();
   const d1 = createD1(sqlite);
@@ -92,10 +94,19 @@ if (runUnderRootTsx(import.meta.url)) {
     waitUntilPromises: [],
   };
 
+  // CURRENT's KV operation-mode mirror cache (src/lib/operationMode/kvMirror.ts, 30 s TTL) has no
+  // test reset; advance the clock past it on every reset so cases do not inherit the previous mode.
+  const realNow = Date.now.bind(Date);
+  let clockOffset = 0;
+  Date.now = () => realNow() + clockOffset;
+
   function resetAll() {
+    clockOffset += 31_000;
     clearPublicApiRateLimitForTests();
     resetOperationModeCachesForTests();
     resetPublicJsonIsolateCacheForTests();
+    resetPublicOperationModeCacheForTests();
+    resetDegradedCircuitBookkeepingForTests();
     fakeBucket.clear();
     fakeKv.clear();
     delete process.env.FORCE_STATIC_ONLY;
@@ -657,5 +668,212 @@ if (runUnderRootTsx(import.meta.url)) {
       `RH-015_static: bytes=${staticBytes} D1_statements=${staticStatements} | ` +
       `RH-012: bytes=${releaseBytes} D1_statements=${releaseStatements} writes=0 CPU=unmeasured`
     );
+  });
+
+  // --- Work Order T-case coverage added in review (T01 budget, T05/T07/T08/T09/T12/T14/T16 gaps) ---
+  const queueRows = () => sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n;
+  const failingD1 = {
+    prepare() {
+      const stmt = {
+        bind() { return stmt; },
+        async all() { throw new Error("d1_down"); },
+        async first() { throw new Error("d1_down"); },
+      };
+      return stmt;
+    },
+  };
+  function countingBucket() {
+    const counter = { gets: 0 };
+    const bucket = {
+      ...fakeBucket,
+      async get(key) {
+        counter.gets += 1;
+        return fakeBucket.get(key);
+      },
+    };
+    return { bucket, counter };
+  }
+  const INDEX_WITH_GROUP = {
+    generated_at: 1700000000,
+    items: [
+      { id: "evt-1", title: "Event One", start_time: 1700002000, end_time: 1700003000, visibility_status: "public" },
+      { id: "evt-blocked", title: "Blocked", start_time: 1700001900, end_time: 1700002900, visibility_status: "public" },
+    ],
+    group_sections: [
+      { id: "grp-open", title: "Open", visibility_status: "public", events: [{ id: "evt-1", title: "Event One", visibility_status: "public" }] },
+      { id: "grp-blocked", title: "Closed", visibility_status: "public", events: [] },
+    ],
+  };
+  const BLOCK_MANIFEST = {
+    schema_version: 1,
+    revision: 2,
+    generated_at: 1700000000,
+    entities: [
+      { entity_type: "event", entity_id: "evt-blocked", fence_token: "t1", blocked_at: 1700000000 },
+      { entity_type: "event_group", entity_id: "grp-blocked", fence_token: "t2", blocked_at: 1700000000 },
+    ],
+  };
+
+  async function compareList(env, label) {
+    clockOffset += 31_000;
+    resetPublicJsonIsolateCacheForTests();
+    resetPublicOperationModeCacheForTests();
+    resetDegradedCircuitBookkeepingForTests();
+    resetOperationModeCachesForTests();
+    clearPublicApiRateLimitForTests();
+    const curRes = await currentEventsGet(new Request("http://localhost/api/events"));
+    const curBody = await curRes.text();
+    const honoRes = await app.request("http://localhost/api/events", {}, { DB: d1, BUCKET: fakeBucket, KV: fakeKv, ...env });
+    const honoBody = await honoRes.text();
+    assert.equal(honoRes.status, curRes.status, `${label}: status`);
+    assert.equal(honoBody, curBody, `${label}: body`);
+    return { status: honoRes.status, body: honoBody };
+  }
+
+  test("T01b: RH-015 live mode uses exactly 1 D1 statement and 0 R2 reads per request", async () => {
+    resetAll();
+    const { bucket, counter } = countingBucket();
+    for (const url of ["http://localhost/api/events", "http://localhost/api/events?page=3&limit=2"]) {
+      d1.stats.statements = 0;
+      d1.stats.writes = 0;
+      counter.gets = 0;
+      const res = await app.request(url, {}, { DB: d1, BUCKET: bucket, KV: fakeKv });
+      assert.equal(res.status, 200);
+      assert.equal(d1.stats.statements, 1);
+      assert.equal(d1.stats.writes, 0);
+      assert.equal(counter.gets, 0);
+    }
+  });
+
+  test("T05b: DOCUMENTED DIFFERENCE L3 — static_only miss (missing / broken / >16 MiB): same 503 code, CURRENT enqueues, Hono writes nothing", async () => {
+    const variants = [
+      ["missing", () => {}],
+      ["broken", () => fakeBucket.setRaw("events/index.json", { data: "{broken", size: 7 })],
+      ["oversize", () => fakeBucket.setRaw("events/index.json", { data: INDEX_WITH_GROUP, size: 16 * 1024 * 1024 + 1 })],
+    ];
+    for (const [label, seed] of variants) {
+      resetAll();
+      sqlite.exec("DELETE FROM static_rebuild_queue");
+      process.env.FORCE_STATIC_ONLY = "1";
+      seed();
+      const curRes = await currentEventsGet(new Request("http://localhost/api/events"));
+      await Promise.allSettled(globalThis.__pubRef.waitUntilPromises);
+      const curRows = queueRows();
+      const honoRes = await app.request("http://localhost/api/events", {}, { DB: d1, BUCKET: fakeBucket, KV: fakeKv, FORCE_STATIC_ONLY: "1" });
+      assert.equal(curRes.status, 503, label);
+      assert.equal(honoRes.status, 503, label);
+      assert.equal((await honoRes.json()).error, (await curRes.json()).error, label);
+      assert.ok(curRows >= 1, `${label}: CURRENT enqueues a rebuild row`);
+      assert.equal(queueRows(), curRows, `${label}: Hono adds no queue row`);
+      assert.equal(d1.stats.statements, 0, `${label}: Hono issues no D1 statement`);
+    }
+  });
+
+  test("T07c: static_only x guard modes (enforce ETag-less / event+group block, observe, off) match CURRENT", async () => {
+    const modes = [
+      ["enforce-etagless", "enforce", { etag: null }],
+      ["enforce-block", "enforce", { etag: '"m-2"' }],
+      ["observe-block", "observe", { etag: '"m-2"' }],
+      ["off-block", "off", { etag: '"m-2"' }],
+    ];
+    const results = {};
+    for (const [label, mode, manifest] of modes) {
+      resetAll();
+      process.env.FORCE_STATIC_ONLY = "1";
+      process.env.PUBLIC_VISIBILITY_GUARD_MODE = mode;
+      await fakeBucket.put("events/index.json", INDEX_WITH_GROUP);
+      if (manifest.etag === null) {
+        fakeBucket.setRaw("visibility/blocked-entities.v1.json", { data: BLOCK_MANIFEST, etag: "" });
+      } else {
+        await fakeBucket.put("visibility/blocked-entities.v1.json", BLOCK_MANIFEST, { httpMetadata: { etag: manifest.etag } });
+      }
+      results[label] = await compareList({ FORCE_STATIC_ONLY: "1", PUBLIC_VISIBILITY_GUARD_MODE: mode }, label);
+    }
+    assert.equal(results["enforce-etagless"].status, 503);
+    const enforced = JSON.parse(results["enforce-block"].body);
+    assert.deepEqual(enforced.items.map((row) => row.id), ["evt-1"]);
+    for (const label of ["observe-block", "off-block"]) {
+      assert.deepEqual(JSON.parse(results[label].body).items.map((row) => row.id), ["evt-1", "evt-blocked"], label);
+    }
+  });
+
+  test("T08b: RH-012 under maintenance returns 503 public_data_unavailable like CURRENT", async () => {
+    resetAll();
+    await fakeBucket.put("events/evt-1/release.v1.json", { schema_version: 1, generated_at: 1700000000, event: { id: "evt-1", title: "Event One", visibility_status: "public" }, videos: [], total: 0 });
+    await fakeKv.put("operation_mode:mirror", JSON.stringify({ mode: "maintenance", updated_at: 1700000000 }));
+    const curRes = await currentReleaseGet(new Request("http://localhost/api/event-endpoints/evt-1/release"), { params: Promise.resolve({ id: "evt-1" }) });
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, { DB: d1, BUCKET: fakeBucket, KV: fakeKv });
+    assert.equal(curRes.status, 503);
+    assert.equal(honoRes.status, 503);
+    assert.equal((await honoRes.json()).error, "public_data_unavailable");
+    assert.equal((await curRes.json()).error, "public_data_unavailable");
+  });
+
+  test("T09b: live mode D1 query failure and missing DB both return CURRENT's 503 database_unavailable", async () => {
+    resetAll();
+    globalThis.__pubRef.dbError = true;
+    const curRes = await currentEventsGet(new Request("http://localhost/api/events"));
+    const curCode = (await curRes.json()).error;
+    for (const DB of [failingD1, undefined]) {
+      clearPublicApiRateLimitForTests();
+      const honoRes = await app.request("http://localhost/api/events", {}, { DB, BUCKET: fakeBucket, KV: fakeKv });
+      assert.equal(honoRes.status, curRes.status);
+      assert.equal((await honoRes.json()).error, curCode);
+    }
+    assert.equal(curCode, "database_unavailable");
+  });
+
+  test("T12b: DOCUMENTED DIFFERENCE L3 — RH-012 missing artifact: CURRENT public_data_reflecting + enqueue, Hono public_data_unavailable + no write", async () => {
+    resetAll();
+    sqlite.exec("DELETE FROM static_rebuild_queue");
+    const curRes = await currentReleaseGet(new Request("http://localhost/api/event-endpoints/evt-1/release"), { params: Promise.resolve({ id: "evt-1" }) });
+    await Promise.allSettled(globalThis.__pubRef.waitUntilPromises);
+    const curRows = queueRows();
+    d1.stats.statements = 0;
+    d1.stats.writes = 0;
+    const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, { DB: d1, BUCKET: fakeBucket, KV: fakeKv });
+    assert.equal(curRes.status, 503);
+    assert.equal((await curRes.json()).error, "public_data_reflecting");
+    assert.ok(curRows >= 1);
+    assert.equal(honoRes.status, 503);
+    assert.equal((await honoRes.json()).error, "public_data_unavailable");
+    assert.equal(queueRows(), curRows);
+    assert.equal(d1.stats.statements, 1);
+    assert.equal(d1.stats.writes, 0);
+  });
+
+  test("T14b: RH-012 guard modes (enforce without manifest, observe block, off block) match CURRENT", async () => {
+    const artifact = { schema_version: 1, generated_at: 1700000000, event: { id: "evt-1", title: "Event One", visibility_status: "public" }, videos: [], total: 0 };
+    const blockEvt1 = { ...BLOCK_MANIFEST, entities: [{ entity_type: "event", entity_id: "evt-1", fence_token: "t1", blocked_at: 1700000000 }] };
+    const cases = [
+      ["enforce-no-manifest", "enforce", null, 503],
+      ["observe-block", "observe", blockEvt1, 200],
+      ["off-block", "off", blockEvt1, 200],
+    ];
+    for (const [label, mode, manifest, expected] of cases) {
+      resetAll();
+      process.env.PUBLIC_VISIBILITY_GUARD_MODE = mode;
+      await fakeBucket.put("events/evt-1/release.v1.json", artifact);
+      if (manifest) await fakeBucket.put("visibility/blocked-entities.v1.json", manifest, { httpMetadata: { etag: '"m-3"' } });
+      const curRes = await currentReleaseGet(new Request("http://localhost/api/event-endpoints/evt-1/release"), { params: Promise.resolve({ id: "evt-1" }) });
+      const curBody = await curRes.text();
+      const honoRes = await app.request("http://localhost/api/event-endpoints/evt-1/release", {}, { DB: d1, BUCKET: fakeBucket, KV: fakeKv, PUBLIC_VISIBILITY_GUARD_MODE: mode });
+      const honoBody = await honoRes.text();
+      assert.equal(curRes.status, expected, label);
+      assert.equal(honoRes.status, expected, label);
+      assert.equal(honoBody, curBody, label);
+    }
+  });
+
+  test("T16b: GET /api/events with a session cookie sets no private headers and runs no session lookup", async () => {
+    resetAll();
+    d1.stats.statements = 0;
+    const res = await app.request("http://localhost/api/events", {
+      headers: { Cookie: "__Secure-authjs.session-token=abc; authjs.session-token=abc" },
+    }, { DB: d1, BUCKET: fakeBucket, KV: fakeKv });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("Pragma"), null);
+    assert.equal(res.headers.get("Expires"), null);
+    assert.equal(d1.stats.statements, 1, "only the list SELECT; no session/users lookup");
   });
 }
