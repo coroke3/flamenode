@@ -90,7 +90,7 @@ export const adminVideoDetailRoutes = new Hono<AppEnv>().get("/:id", async (c) =
               (SELECT a.answer_json FROM video_custom_answers a WHERE a.video_id = v.id AND a.question_id = c.id LIMIT 1) AS answer_json
             FROM event_custom_questions c
             WHERE c.event_id IN (SELECT ve.event_id FROM video_events ve WHERE ve.video_id = v.id)
-              AND c.question_key NOT LIKE 'stage_permission%'
+              AND substr(c.question_key, 1, 16) <> 'stage_permission' -- CURRENT startsWith (case-sensitive, no LIKE wildcards)
             ORDER BY c.event_id ASC, c.sort_order ASC, c.id ASC
             LIMIT ?
           ) q) AS questions,

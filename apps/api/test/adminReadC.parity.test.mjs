@@ -412,4 +412,18 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(frac.time, formatMemberChapterTime(61.5));
     assert.notEqual(frac.time, "1:01");
   });
+
+  test("T01 videos/[id]: question keys that only look like stage_permission stay custom answers (CURRENT startsWith)", async () => {
+    for (const [i, key] of ["stageXpermission_custom", "stage-permission_other", "Stage_permission_custom"].entries()) {
+      insert(sqlite, "event_custom_questions", { id: `q-look-${i}`, event_id: "a-open", question_key: key, label: `Look ${i}`, required: 0, sort_order: 10 + i, is_active: 1 });
+    }
+    const res = await call("/videos/av-pending-1", "tok-root");
+    assert.equal(res.status, 200);
+    const current = await fetchVideoReviewDetail(refDb, "av-pending-1");
+    const labels = (answers) => answers.map((answer) => answer.label).sort();
+    assert.deepEqual(labels(res.body.video.customAnswers), labels(canon(current.customAnswers)));
+    for (const label of ["Look 0", "Look 1", "Look 2"]) {
+      assert.ok(res.body.video.customAnswers.some((answer) => answer.label === label), label);
+    }
+  });
 }
