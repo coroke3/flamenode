@@ -80,6 +80,9 @@ export function extractArtifactKeys(source, path) {
       unresolved.push({ path, line: lineOf(source, match.index), kind: "bucket." + match[1], expression });
     }
   }
+  // Detection rules are grouped by syntax. Return references in source order,
+  // not grouped by rule, so line-based diagnostics and consumer tests stay stable.
+  hits.sort((a, b) => a.line - b.line);
   Object.defineProperty(hits, "unresolved", { value: unresolved, enumerable: false });
   return hits;
 }
