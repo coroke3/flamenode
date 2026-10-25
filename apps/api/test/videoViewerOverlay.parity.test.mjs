@@ -552,6 +552,19 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T08: artifact gate runs before the session lookup (signed-in 404 / 503 read no D1)", async () => {
+    for (const [id, status] of [["vid-priv", 404], ["vid-missing", 503]]) {
+      const ctx = setupTestEnv();
+      ctx.d1.stats.statements = 0;
+      const res = await app.request(`/api/videos/${id}/viewer-overlay`, {
+        headers: { cookie: "authjs.session-token=tok-alice" },
+      }, ctx.env);
+      assert.equal(res.status, status, id);
+      assert.equal(res.headers.get("Cache-Control"), "private, no-store, no-cache, must-revalidate", id);
+      assert.equal(ctx.d1.stats.statements, 0, id);
+    }
+  });
+
   // CURRENT answers an artifact miss through loadStaticVideoDetail's degradedFetcher (D1): a YouTube id or
   // a video whose artifact is missing gets 200, an unknown id 404. D-13-46 removes that D1 fallback.
   test("T06 DOCUMENTED DIFFERENCE D-13-46: artifact miss -> CURRENT degraded D1 (200 / 404), Hono 503", async () => {

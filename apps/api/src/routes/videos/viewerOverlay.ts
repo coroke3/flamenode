@@ -113,11 +113,10 @@ export function createVideoViewerOverlayRoutes(
 ): Hono<AppEnv> {
   const routes = new Hono<AppEnv>();
 
-  // Apply session middleware so c.get("session") and c.get("user") are resolved
-  routes.use(
-    "/:id/viewer-overlay",
-    options.session ?? (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>),
-  );
+  // Work Order U03 order: artifact gate -> operation mode -> session. The session lookup (1 D1
+  // statement) runs only once the video is known public, so 404 / 503 / static-mode answers read no D1.
+  const resolveSession = (options.session ??
+    (sessionMiddleware() as unknown as MiddlewareHandler<AppEnv>));
 
   routes.get("/:id/viewer-overlay", async (c) => {
     const id = c.req.param("id");
@@ -169,6 +168,7 @@ export function createVideoViewerOverlayRoutes(
       return c.json(emptyOverlay(publicPlaylist), 200, PRIVATE_HEADERS);
     }
 
+    await resolveSession(c, async () => {});
     if (c.get("sessionState") === "unavailable") {
       return c.json(
         {
