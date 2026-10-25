@@ -9,3 +9,4 @@ export * from "./adminRead.ts";
 export * from "./manage/index.ts";
 export * from "./admin/index.ts";
 export * from "./eventSlotViewerOverlay.ts";
+export * from "./videoViewerOverlay.ts";

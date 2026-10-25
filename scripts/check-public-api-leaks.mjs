@@ -70,7 +70,7 @@ function runStaticCheck() {
     errors,
   );
   requirePattern(
-    "apps/api/src/routes/events/publicSnapshot.ts",
+    "apps/api/src/lib/publicSnapshot.ts",
     /guardMode === "enforce"[\s\S]*return \{ kind: "unavailable" \}[\s\S]*filterPublicArtifactPayload\(/,
     "Hono公開snapshot readerがenforceのfail-closedと行filterを通っていません。",
     errors,
