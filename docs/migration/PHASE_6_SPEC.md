@@ -278,7 +278,7 @@ Phase 6 共通契約のとおり（U02a の移動は bridge なので revert で
 - **Final audit**: SA-021..039 / 056..068 と RH-012..015 / 020..022 の担当（MIG-0631 / 0632 / 0652〜0657）に抜けと二重所有が無いこと。FIX-0604-1（slotViewerOverlay の `visibility_status` 欠落の修正）は MIG-0633 の後に lead が別 PR で追跡。
 #### 記録した既知の差・例外（lead 決定。挙動を変える改善ではなく S2 制約との衝突）
 - live slots の `MAX_LIVE_SLOTS = 6000` は ZERO_1102 S2 を超えるが CURRENT（`liveApi.ts`）と同じため変えない（D-12 で承認。MIG-0606 の 6000 枠入力で warm max ≥ 7ms のときだけ additive paging）。
-- RH-014: 本人の枠 LIMIT 100 / 64 KiB で fail-closed、own-slots 読み失敗は 503、ORDER BY の明示、pending 100 件、`operatorOverrideAllowed` 常に false（CURRENT の挙動）。D-12 で承認。詳細は `work-items/MIG-0604.md` Known differences。
+- RH-014: 本人の枠 LIMIT 100 / 64 KiB で fail-closed、own-slots 読み失敗は 503、ORDER BY の明示、pending 100 件。D-12 で承認。`operatorOverrideAllowed` 常に false（CURRENT の不具合）は FIX-0604-1（#410、`4ab5bd2`）で直した。詳細は `work-items/MIG-0604.md` Known differences。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
