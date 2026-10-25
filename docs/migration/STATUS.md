@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0631
-Current Owner: antigravity
+Current Task: MIG-0503
+Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0631
-Last Task PR: #398
+Last Completed Task: MIG-0503
+Last Task PR: #409
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -284,7 +284,7 @@ Validation:
 | --- | --- | --- | --- |
 | MIG-0501 | fixed/static routes | READY | MIG-0407 |
 | MIG-0502 | event routes | READY | MIG-0407 |
-| MIG-0503 | group routes | READY | MIG-0407 |
+| MIG-0503 | group routes | DONE | MIG-0407 |
 | MIG-0504 | user routes | READY | MIG-0407 |
 | MIG-0505 | list/search/recommend/trending | READY | MIG-0407 |
 | MIG-0506 | root/top | READY | MIG-0407 |
