@@ -1095,20 +1095,20 @@ PR を revert。CURRENT の json-generator は動いたままなので公開ペ�
 
 ### MIG-0510: `/list` の filter Island と top の search band を RH-032 につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0634（RH-032、PR #401）が STATUS で DONE になったら READY。D-14-12 で `/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X は MIG-0515 へ分けた。着手時に MIG-0634 の merge 後の `apps/api/src/routes/videos/publicList.ts`（予定名。実名は #401 の merge で確定）の query key と応答 DTO を Source snapshot に写す
+- **Readiness:** NEEDS_REFINEMENT — READY（MIG-0634 は #401 で DONE、main `16ba53a`。RH-032 の query key と応答は下の Source snapshot に写した。D-14-12 で `/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X は MIG-0515 へ分けた。実装は Sonnet、review は Opus）
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
 - **Depends on:** MIG-0634 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12
-- **Verified against:** `dde6fa8` (2026-10-25)
+- **Verified against:** `16ba53a` (2026-10-25)
 #### Source snapshot
 - Phase 5 共通契約（`PHASE_4_5_SPEC.md` の表）: 公開画面の mutation / 動的読みは Hono API。ルートの本番切替は API の DONE 後。
 - CURRENT: `app/(public)/list/ListIndexView.tsx`（`ImeSafeGetForm` :275-303、`AutoSubmitSelect`、`Pagination`）、`app/(public)/list/~query/page.tsx`。
 - apps/site: `pages/list.astro`（既定 view だけ。:5 が `ListFilterIsland` を予告）、`lib/listQuery.ts`（key 規則、MIG-0505）。top の search band は mock にあり未実装（`work-items/MIG-0506.md:38`）。
-- API: RH-032 `GET /api/videos`（CURRENT `app/api/videos/route.ts`、Hono 化は MIG-0634 / PR #401）。
+- API: RH-032 `GET /api/videos`（CURRENT `app/api/videos/route.ts`、Hono は `apps/api/src/routes/videos/list.ts:317`、#401）。query: `q`（trim、100 文字まで :327、compact 2 文字未満は空の結果 :341-343）、`sort`（`parsePublicVideoSort`）、`event`（128 文字まで）、`limit`（既定 24、上限 `MAX_PUBLIC_LIST_LIMIT = 48`、`packages/server-core/src/publicData/publicDto.ts:147`）、`page`（上限 `ceil(5000 / limit)`）。応答 `{ items, total, page, limit }`（:401）、maintenance / 読めないときは 503（`publicServiceUnavailableResponse`）。`view` は API の key ではなく、Island 側だけで使う（CURRENT と同じ）。
 #### Owned paths
 - 新規: `+apps/site/src/components/ListFilterIsland.ts`, `+apps/site/src/lib/publicApi.ts`（fetch wrapper。MIG-0513 / 0514 / 0515 も import する）, `+scripts/migration-public-islands.test.mjs`
 - 変更: `apps/site/src/pages/list.astro`, `apps/site/src/pages/index.astro`, `packages/ui/src/screens/ListView.tsx`, `packages/ui/src/screens/TopView.tsx`
-- 触らない: `app/**`, `src/components/**`, `apps/api/**`（API は MIG-0634 の担当）
+- 触らない: `app/**`, `src/components/**`, `apps/api/**`（API は MIG-0634 の担当、DONE）
 #### Micro-units
 - **U01 list**: `ListFilterIsland` が `location.search` を `lib/listQuery.ts` で正規化し RH-032 を呼ぶ。検索・並び・view・event filter・chip・reset・pagination・deep link を CURRENT `ListIndexView.tsx` と同じ key で。
 - **U02 top search band**: `/list?q=` への GET form（JS なしでも動く）。`TopView.tsx` の mock の位置に置く。

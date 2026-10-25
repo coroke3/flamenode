@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0631
 Last Task PR: #398
-Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25)
+Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -110,8 +110,8 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (D-13 / D-14, 2026-10-25: MIG-0501..0507, MIG-0509, MIG-0511, MIG-0512 READY; MIG-0510 BLOCKED on MIG-0634, MIG-0513..0515 BLOCKED on Phase 6 APIs (D-14-12); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0617 / 0618 / 0619 / 0620 / 0622 / 0623 / 0624 / 0625 / 0630 / 0631 DONE; MIG-0603 / 0609 / 0621 / 0626 / 0628 / 0629 / 0632 / 0633..0649 READY (D-14 split 0603 / 0606 / 0627 / 0636 / 0637 / 0638 into MIG-0639..0649)) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (D-13 / D-14, 2026-10-25: MIG-0501..0507, MIG-0509, MIG-0511, MIG-0512 READY; MIG-0510 READY (MIG-0634 DONE via #401), MIG-0513..0515 BLOCKED on Phase 6 APIs (D-14-12); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0617 / 0618 / 0619 / 0620 / 0622 / 0623 / 0624 / 0625 / 0630 / 0631 / 0634 DONE; MIG-0603 / 0609 / 0621 / 0626 / 0628 / 0629 / 0632 / 0633 / 0635..0649 READY (D-14 split 0603 / 0606 / 0627 / 0636 / 0637 / 0638 into MIG-0639..0649)) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (MIG-0701 READY remainder) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -290,7 +290,7 @@ Validation:
 | MIG-0506 | root/top | READY | MIG-0407 |
 | MIG-0507 | `/:id` video catch-all | READY | MIG-0407 |
 | MIG-0509 | all public data generated at build time (D-09) | READY | MIG-0409 |
-| MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | BLOCKED | MIG-0634 |
+| MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | READY | MIG-0634 |
 | MIG-0511 | public X icon map projection at build time | READY | MIG-0407, MIG-0409 |
 | MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | READY | MIG-0405, MIG-0619 |
 | MIG-0513 | `/[id]` interaction Islands on Phase 6 APIs (like/bookmark, chapters, status, overlay) | BLOCKED | MIG-0603, MIG-0634, MIG-0640 |
@@ -298,7 +298,7 @@ Validation:
 | MIG-0515 | `/rules` consent form + header Active X switch on Phase 6 APIs | BLOCKED | MIG-0636, MIG-0641 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0501..MIG-0507, MIG-0509..MIG-0515, MIG-0621, MIG-0607 |
 
-Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。2026-10-25 の D-13（OPEN_DECISIONS.md）で残りを整理した: MIG-0501〜0506 は依存を MIG-0407 に替えて READY（共有 layout は #340 で merge 済み、D-13-1）。Phase 6 API を要る操作部品は MIG-0510（BLOCKED、MIG-0603 / 0604 / 0634 / 0636 待ち、D-13-2）、X アイコン map は MIG-0511（READY、D-13-3）、gateway の 404/503・sub-page の非公開 fence・allowlist は MIG-0512（READY、D-13-25）へ移した。MIG-0507 は MIG-0511 待ちの BLOCKED（D-13-22）だったが、D-14-6 で依存を外して READY（`/[id]` のアイコン投影は MIG-0511 T03 と MIG-0508 の checklist で見る）。MIG-0510 は D-14-12 で `/list` だけに縮め、`/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X 切替は MIG-0515 へ分けた。MIG-0509 は依存を MIG-0409 に替えて READY（D-13-13 で詳細 HTML は Static Assets のまま、build は R2 に HTML を書かない）。MIG-0409 は DONE（残りの実測と read-only token は MIG-0509 の owner 手順、D-13-10）。MIG-0411 は code の残り（render 経路の削除、r2Html.ts の P2、recovery の host）で READY、Queue / binding の作成は owner 手順。Island ページの queue 再生成は `excluded`（user / event / video、D-11）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
+Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。2026-10-25 の D-13（OPEN_DECISIONS.md）で残りを整理した: MIG-0501〜0506 は依存を MIG-0407 に替えて READY（共有 layout は #340 で merge 済み、D-13-1）。Phase 6 API を要る操作部品は MIG-0510（BLOCKED、MIG-0603 / 0604 / 0634 / 0636 待ち、D-13-2）、X アイコン map は MIG-0511（READY、D-13-3）、gateway の 404/503・sub-page の非公開 fence・allowlist は MIG-0512（READY、D-13-25）へ移した。MIG-0507 は MIG-0511 待ちの BLOCKED（D-13-22）だったが、D-14-6 で依存を外して READY（`/[id]` のアイコン投影は MIG-0511 T03 と MIG-0508 の checklist で見る）。MIG-0510 は D-14-12 で `/list` だけに縮め、MIG-0634（#401）の DONE で READY。`/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X 切替は MIG-0515 へ分けた。MIG-0509 は依存を MIG-0409 に替えて READY（D-13-13 で詳細 HTML は Static Assets のまま、build は R2 に HTML を書かない）。MIG-0409 は DONE（残りの実測と read-only token は MIG-0509 の owner 手順、D-13-10）。MIG-0411 は code の残り（render 経路の削除、r2Html.ts の P2、recovery の host）で READY、Queue / binding の作成は owner 手順。Island ページの queue 再生成は `excluded`（user / event / video、D-11）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
