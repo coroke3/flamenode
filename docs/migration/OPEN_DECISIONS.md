@@ -1,7 +1,7 @@
 # FlameNode Migration Decisions — adopted options & remaining evidence
 
 > Status: Active / 仕様上の採用方針と実行ゲートの正本
-> Last updated: 2026-10-25
+> Last updated: 2026-10-26
 > Decision owner: user (2026-10-09, this conversation)
 > Related: [STATUS.md](STATUS.md), [DB_PACKAGE_EXTRACTION_PLAN.md](DB_PACKAGE_EXTRACTION_PLAN.md), [ACTIVE_X_MIGRATION_PLAN.md](ACTIVE_X_MIGRATION_PLAN.md), [ROUTING_AND_DEPLOY_PLAN.md](ROUTING_AND_DEPLOY_PLAN.md), [PHASE_4_5_SPEC.md](PHASE_4_5_SPEC.md), [PHASE_7_SPEC.md](PHASE_7_SPEC.md)
 
@@ -28,6 +28,8 @@
 | D-11 | **Island ページの queue 再生成の parity: Option 4（hybrid）。内容編集は build cadence、非公開化は即時（KV `deny:` + consumer の R2 DELETE）、consumer は描画しない。Island serializer port / `experimental_AstroContainer` 同梱は却下（B-new 8ms 超過、build hash と `builtAt` で byte parity 不能）** | DECIDED | MIG-0411 follow-up, MIG-0502/0504/0507, MIG-0509, MIG-0614 U06, MIG-0615 | Workers Builds 実測で 52 / 1,661,539 ms を再導出（実測前に Cron 頻度を上げない）。S3 が同一 request で `deny:` を書く実装（MIG-0614 U06 / MIG-0615）が揃うまで「非公開化は即時」は成立しない |
 | D-12 | **Hono GET の S2 上限（LIMIT ≤ 100 / 応答 ≤ 64KB）と CURRENT 契約が衝突する read API は、CURRENT 契約を保ち「記録した例外」とする。viewer 固有の読みは named LIMIT で fail-closed（権限を増やさない形）、公開一覧の大応答は CURRENT 上限を維持して MIG-0606 の上限入力で max CPU を測り、7ms 超のときだけ additive paging を足す** | DECIDED | MIG-0604（live slots 6000、RH-014 own-slots 100 / 64KiB）、MIG-0611 の既存例外、以後の S2 task | MIG-0606 の実測（6000 枠入力、warm max）。推定値で判定しない。決定者: Fable（owner-delegate）2026-10-24、Yugo の standing instruction「検討事項は推奨で進めて」に基づく。Yugo には事後に伝える |
 | D-13 | **部分 merge 済み task の残りを分割（MIG-0510〜0512, MIG-0634〜0638 を登録）、Phase 5 ページの依存を MIG-0407 へ、MIG-0409/0617/0620/0625 を DONE に整理。個別の決定 D-13-1〜60 は §D-13** | DECIDED | MIG-0409〜0411, MIG-0501〜0512, MIG-0603〜0607, MIG-0617, MIG-0620, MIG-0625〜0629, MIG-0633〜0638, MIG-0701/0702/0704/0705 | 本番操作は各 Work Order の STOP の owner 手順。決定者: Claude Opus（owner-delegate）2026-10-25 |
+| D-14 | **依存の見直しと大きい READY task の分割（MIG-0639〜0649, MIG-0513〜0515 を登録）。個別の決定 D-14-1〜14 は §D-14** | DECIDED | MIG-0507, 0510, 0513〜0515, 0603, 0606, 0609, 0621, 0627, 0628, 0632, 0636〜0649, 0802 | 本番操作（Remote D1・secret・deploy・Route）は従来どおり作業直前の明示承認 |
+| D-15 | **MIG-0633 の DONE を受けて書き込み API を SA 群ごとに分割（MIG-0650〜0660）、build 側の残り（MIG-0516〜0518）、Ops SPA の土台（MIG-0707）、code 側の残存棚卸し（MIG-0908）を登録。個別の決定 D-15-1〜15 は §D-15** | DECIDED | MIG-0509, 0513, 0514, 0516〜0518, 0603〜0607, 0626, 0636, 0650〜0660, 0702〜0707, 0901, 0908 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）は従来どおり作業直前の明示承認 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -353,3 +355,31 @@ Option 4（hybrid）を採る。
 - **D-14-14**: 依存の付け替え: MIG-0606 → MIG-0603..0605, 0626, 0629, 0634..0648。MIG-0607 → MIG-0606, 0631, 0632, 0634..0648。MIG-0508 → MIG-0501..0507, 0509..0515, 0621, 0607。MIG-0702 → MIG-0602, 0636, 0641, 0701。MIG-0705 → 従来 + MIG-0642..0648。
 
 着手できないまま残す task と理由（2026-10-25 時点）: MIG-0604 / MIG-0605（MIG-0633 の core 待ち）、MIG-0606 / 0609 以外の計測後続（MIG-0610 は MIG-0609 の表待ち）、MIG-0410（owner の本番手順）、MIG-0627（MIG-0509 の build 経路待ち）、MIG-0702..0705（MIG-0701 の SPA 待ち）、MIG-0803..0805（MIG-0802 待ち）、Phase 9（各 Gate 待ち）、MIG-0513 / 0514 / 0515（API 待ち）。
+
+## D-15 — MIG-0633 の DONE を受けて書き込み API を分割し、着手できる task をさらに増やす（DECIDED、2026-10-26）
+
+決定者: Claude Opus（owner-delegate）2026-10-26 JST。Yugo の standing instruction「判断は推奨案で進め、事後に報告」と、2026-10-26 の依頼「また次の20タスクくらいを実装開始可能な状態にして」に基づく。Fable は使っていない（Yugo「fable使用禁止」）。本番操作（Remote D1・secret・deploy・Route・Queue binding）は従来どおり作業直前の明示承認。基準 commit は main `0a0f62a`（#407 の後）。
+
+状態の修正:
+
+- **D-15-0**: MIG-0605 を READY と書く。STATUS の行は既に READY だったが、Work Order の Readiness が「BLOCKED（MIG-0633 待ち）」のままだった。MIG-0633 は #402（`15f41ce`）で DONE。同じ理由で MIG-0603 の U02c（SA-040..042）の待ち条件を「MIG-0633」から「U02a の host」に直した（`manage-video.ts` は U02a の `videoTransitionHost.ts` を使う）。
+
+分割（同時に着手できる単位にする）:
+
+- **D-15-1**: MIG-0603 U03b（SA-082..085、共同編集者 / member）を MIG-0650、U03c（SA-086 / 088 / 089、投稿・更新）を MIG-0651 に切り出す。依存は MIG-0602, MIG-0633。U03c は旧 Work Order にも「別 MIG 推奨」とあった。MIG-0603 は U02a / U02b / U02c と Final audit。
+- **D-15-2**: `loadVideoRebuildEventIds`（`src/lib/video/videoVisibilityStatusCore.ts:15`、36 行）の core の置き場所を `packages/server-core/src/video/rebuildEventIds.ts` に決める。理由: MIG-0603 U02a と MIG-0650（`video-collab-perms.ts:45`、`adminMembers.ts:25`）の両方が使い、U02a の `visibilityStatusAction.ts` に入れると MIG-0650 が U02a を待つことになる。先に merge した方が作り、後の方は import だけ。
+- **D-15-3**: `apps/api/src/middleware/bodyLimit.ts` は MIG-0636 U01 の仕様（SA ごとの上限表、Content-Length と実読み byte の両方、413）のまま、MIG-0636 と MIG-0651 のうち先に merge した方が作る。後の方は上限表に自分の行を足すだけ。D-14 の `eventExportKeys.ts`（D-14-2）と同じ扱い。
+- **D-15-4**: MIG-0604 U04 を6つに分ける。MIG-0652 = SA-021..024（作成・更新・削除・ID 変更、可視性 fence あり）、MIG-0653 = SA-025..030（group、admin 専用）、MIG-0654 = SA-031..034（staff・owner 移譲、owner 0 guard）、MIG-0655 = SA-035 / 037..039（template の保存・一覧、playlist 設定）、MIG-0656 = SA-056..064（枠の運営操作）、MIG-0657 = SA-065..068（予約・解放・延長・統合）。依存は全て MIG-0602, MIG-0305, MIG-0633。**MIG-0639 は待たない**: MIG-0639 が出す D-12 の判定は RH-020 live slots（読み、#334 で merge 済み）の 6000 枠に additive paging が要るかどうかで、書き込みの SA には関係しない（`work-items/MIG-0604.md` Exceptions、`PHASE_6_SPEC.md` MIG-0604「記録した既知の差・例外」）。MIG-0604 は Final audit と、判定が「要る」ときだけの U05 paging を持ち、MIG-0639 と MIG-0652〜0657 に依存する。MIG-0514 の依存は MIG-0604 から MIG-0657 に替える。
+- **D-15-5**: event の可視性遷移の Hono host は `apps/api/src/visibility/eventTransitionHost.ts` に作る（MIG-0652）。形は MIG-0603 U02a の `videoTransitionHost.ts` と同じ（core の manifest read / CAS put、`deletePublicJsonCaches`、通知 builder、wake は何もしない）。両者は別 file なので並行できる。
+- **D-15-6**: SA-039（playlist sync 要求）の Queue wake は 0 にする（D-0603-1 / D-13-41 と同じ扱い）。sync 要求の D1 行は CURRENT と同じ batch に書き、回収は sync-jobs の cron `7,52 * * * *`（`workers/sync-jobs/wrangler.toml:12`、`workers/sync-jobs/index.ts:278`）で最悪約 45 分。理由: `apps/api` に Queue binding が無い。Phase 7 の UI 切替で owner が遅れを拒否したら binding を MIG-0628 で再検討（Yugo の明示承認事項）。
+- **D-15-7**: MIG-0605 U05d（D-03 fan-out の dry-run script）を MIG-0658 に切り出す。依存なし（local の migration 済み DB だけ、Remote D1 を読まない）。MIG-0605 は U05x（SA-090/091）、U05e（D-04 checkpoint）、U07、Final audit。
+- **D-15-8**: MIG-0636 U04（SA-099..101、X 連携申請・取り消し・merge 取り消し申請）を MIG-0659 に切り出す。依存 MIG-0602。`apps/api/src/routes/xid/index.ts` と `app.ts` の `/api/xid` mount は MIG-0636 と MIG-0659 のうち先に merge した方が作る。MIG-0702 は MIG-0659 にも依存する（U02 link 申請）。
+- **D-15-9**: MIG-0626 U07（RH-017 deep health の検査本体を core へ）を MIG-0660 に切り出す。依存 MIG-0601。U05 / U06 は `adminRead/ops.ts` を共有するので MIG-0626 に残すが、U07 は `health.ts` と `src/lib/health/*` だけで重ならない。
+- **D-15-10**: `/api/manage` の書き込みは既存の `manageRoutes`（`apps/api/src/routes/manage/index.ts`、MIG-0624 の読み専用 router）に、admin router（`apps/api/src/routes/admin/index.ts:37-47`）と同じ順の `onlyMutating` stack を足して載せる。具体的には (1) `sessionMiddleware()` の `use` の前に `manageRoutes.use("*", onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));`、(2) `requireAuth()` の後に `manageRoutes.use("*", onlyMutating((c, next) => writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));` と `manageRoutes.use("*", onlyMutating(dbMiddleware));`、(3) ファイル先頭の「nothing here writes」のコメントを「GET は書かない。書き込みは onlyMutating の stack を通る」に直す。`originOptions` は admin と同じ定義。GET の挙動は変わらない（`onlyMutating` が SAFE method を素通しする、`writeOrigin.ts:423-428`）。CostGuard は各 route module の中で feature ごと。`manageRoutes.onError` は全ての例外を 503 `unavailable` にするので、書き込み route は自分で例外を捕まえて CURRENT の文言を返す。理由: `/api/manage` に別の sub-app を重ねると `manageRoutes` の `use("*")` が二重に session を読む（`sessionMiddleware` は冪等ではない、`apps/api/src/auth/session.ts:365`）。これを最初に入れるのは MIG-0603 U02c / 0652 / 0654 / 0655 / 0656 のうち先に merge した task で、後の task は route 1 行だけ。user 向けの枠予約（MIG-0657）は `/api/events` に `viewerOverlay.ts:194-200` と同じく path を指定した stack で載せる（`events/index.ts` は `/api/admin` の admin 専用 router なので使わない）。
+- **D-15-11**: MIG-0509 U05（`public_build_state.requested_at` の mark）を MIG-0516、U06（GA4 同期の入力を D1 へ）を MIG-0517 に切り出す。依存は MIG-0409。理由: どちらも U01〜U03（`produceSnapshots.ts` / `buildPublicSite.ts`）と file が重ならない。MIG-0516 の merge は従来どおり owner の read-only 確認（本番 D1 で 0065 が applied）の後（MIG-0509 STOP 3）。
+- **D-15-12**: MIG-0513 から API が merge 済みの部分（U02 chapter composer + コメント、SA-012..015 は #393。U04 `?playlist=` dock と overlay の client、RH-031 は MIG-0634 #401）を MIG-0518 に切り出す。依存 MIG-0407, MIG-0634。MIG-0513 は like / bookmark（MIG-0640）と状態 form（MIG-0603）で、MIG-0518 の overlay client を使うので MIG-0518 にも依存する。
+- **D-15-13**: MIG-0704 U01 の Ops SPA の土台（`apps/ops` の package・build・router 枠・guard・noindex・`_headers`、CI）を MIG-0707 に切り出す。依存 MIG-0102, MIG-0608, MIG-0624, MIG-0625。guard は RH-001 `GET /api/account/summary` の `canAccessAdmin` / `canAccessManage`（`account/summary.ts:282-302`）で CURRENT の layout と同じ Location を返す。`CostGuardBanner` は読む HTTP endpoint が main に無いので MIG-0704 に残す。`apps/ops/wrangler.toml` も D-14-3 のとおり MIG-0704。
+- **D-15-14**: MIG-0901 のうち本番ログが要らない code 側の棚卸し（4 つの `wrangler.toml` の Worker・Cron・Queue・binding の表と CI の検査）を MIG-0908 に切り出す。依存なし。本番の観測（旧 Worker へのリクエスト）は MIG-0901 に残し、MIG-0901 は MIG-0908 にも依存する。`/dev/ui-surfaces` の行き先は案だけ書き、決定は MIG-0901 の Gate で人間がする。
+- **D-15-15**: 依存の付け替え: MIG-0606 → 従来 + MIG-0650..0657, 0659, 0660。MIG-0607 → 従来 + MIG-0650..0660。MIG-0508 → MIG-0501..0507, 0509..0518, 0621, 0607。MIG-0703 → MIG-0603, 0650, 0651, 0657, 0702, 0623, 0630（MIG-0604 を外す）。MIG-0704 → 従来 + MIG-0707。MIG-0705 → 従来 + MIG-0650..0657, 0660。MIG-0639 は D-14 の後に main に入った MIG-0629 / 0634 / 0635 の endpoint も測る（T01「main にある全 Hono method」の範囲の確認）。
+
+見送ったもの（着手できる単位にしなかった理由）: MIG-0603 U02c（U02a の host を使う）、MIG-0410（owner の本番手順だけ）、MIG-0610（MIG-0609 の表待ち）、MIG-0627（MIG-0509 の build 経路待ち）、MIG-0702..0705 の画面（API と MIG-0701 / 0707 の DONE 待ち）、MIG-0803..0805（MIG-0802 待ち）、MIG-0637 / 0642 / 0643 の再分割（1 task が 5〜9 SA で parity test を共有しており、分けても並行の利点が小さい）、API CPU benchmark の新しい part（MIG-0639 が「main にある全 method」を測るので重複）。
