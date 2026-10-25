@@ -51,9 +51,13 @@ function createEnv({ manifest = sampleManifest(), pages = {}, shards, kv = new M
         const { pathname } = new URL(req.url);
         calls.assets.push(pathname);
         if (files.has(pathname)) return new Response(files.get(pathname), { status: 200 });
-        // Generated files and explicit error pages have a direct Static Assets path.
+        // Cloudflare Static Assets not_found_handling="404-page" answers
+        // /404 with 404 and the contents of 404.html, not HTTP 200.
         if (Object.hasOwn(pages, pathname)) {
-          return new Response(pages[pathname], { status: 200, headers: { "Content-Type": "text/html" } });
+          return new Response(pages[pathname], {
+            status: pathname === "/404" ? 404 : 200,
+            headers: { "Content-Type": "text/html; charset=utf-8" },
+          });
         }
         if (pathname.endsWith("/index.html")) {
           return new Response(null, { status: 307, headers: { Location: pathname.slice(0, -10) } });
@@ -130,6 +134,45 @@ test("MIG-0512 T01/T02/T03/T10: HTML error pages, text fallback and HEAD parity"
   assert.equal(auth.status, 503);
   assert.equal(auth.headers.get("retry-after"), null);
   assert.equal(await auth.text(), "Service Unavailable");
+});
+
+test("MIG-0512: genuine 404-page HTML is accepted, generic 404 bodies fail safely", async () => {
+  const htmlBody = "<html><title>custom not found</title></html>";
+  for (const method of ["GET", "HEAD"]) {
+    const calls = [];
+    const { env } = createEnv({ assets: { fetch: async (req) => {
+      const path = new URL(req.url).pathname;
+      calls.push(path);
+      if (path === "/404") {
+        return new Response(method === "HEAD" ? null : htmlBody, {
+          status: 404, headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+      return new Response(null, { status: 404 });
+    } } });
+    const res = await get("/%2f", env, { method });
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(res.headers.get("x-robots-tag"), "noindex, nofollow");
+    assert.equal(res.headers.get("cache-control"), "no-store, private");
+    assert.equal(await res.text(), method === "HEAD" ? "" : htmlBody);
+    assert.deepEqual(calls, ["/404"], "only one known static HTML error page is fetched");
+  }
+  // A plain-text 404 at /404, an empty response, or a zero-length HTML page
+  // must not be relabeled as the project's HTML error page.
+  for (const variant of [
+    { body: "generic missing", headers: { "Content-Type": "text/plain" } },
+    { body: null, headers: { "Content-Type": "text/html" } },
+    { body: "", headers: { "Content-Type": "text/html", "Content-Length": "0" } },
+  ]) {
+    const { env } = createEnv({ assets: { fetch: async () =>
+      new Response(variant.body, { status: 404, headers: variant.headers }),
+    } });
+    const res = await get("/%2f", env);
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+    assert.equal(await res.text(), "Not Found");
+  }
 });
 
 test("MIG-0512: failing fixed HTML and maintenance Assets return retryable, fail-closed 503", async () => {
