@@ -167,13 +167,13 @@ const utf8Length = (value: string): number => new TextEncoder().encode(value).le
 
 export const slotViewerOverlayRoutes = new Hono<AppEnv>();
 
-slotViewerOverlayRoutes.use("*", async (c, next) => {
+slotViewerOverlayRoutes.use("/:id/slots/viewer-overlay", async (c, next) => {
   await next();
   for (const [name, value] of Object.entries(c.res.status === 503 ? UNAVAILABLE_HEADERS : PRIVATE_HEADERS)) {
     c.res.headers.set(name, value);
   }
 });
-slotViewerOverlayRoutes.use("*", sessionMiddleware());
+slotViewerOverlayRoutes.use("/:id/slots/viewer-overlay", sessionMiddleware());
 
 slotViewerOverlayRoutes.get("/:id/slots/viewer-overlay", async (c) => {
   const eventId = (c.req.param("id") ?? "").trim().slice(0, MAX_EVENT_ID_LEN);
