@@ -261,7 +261,7 @@ Option 4（hybrid）を採る。
 - viewer 固有の読み（RH-014 own slots 100 件 / 64 KiB、pending 申請 100 件）: named LIMIT を超えたら権限を増やさない fail-closed（CURRENT の既存 `authUnavailable` 形）で返す。ページング化しない。
 - MIG-0631（RH-015）の訂正（DECIDED、Fable（owner-delegate）2026-10-24。Yugo には事後に伝える）: 当初の追加差分「MIG-0631 は normal 時 D1 fallback を廃止」は前提が違っていたので取り消す。CURRENT の RH-015 は normal / economy / read_only で毎回 D1 が主経路で（`app/api/events/route.ts` L91-L113）、R2 artifact を使うのは `static_json_only` のときだけ（同 L40）。Hono も同じにする: live mode は D1 1 文（`WHERE visibility_status = 'public' ORDER BY start_time DESC, created_at DESC LIMIT ? OFFSET ?`。`LIMIT` は request の `limit`（既定 60、上限 `MAX_PUBLIC_EVENT_LIMIT` = 60。`route.ts` L27-L31 / L112-L113）、R2 read 0）、static_only は R2 artifact（欠損・空 `items`・壊れた JSON は 503 `public_data_unavailable`）、maintenance は 503。S2 に収まる。`ZERO_1102.md` §4.7 は miss 経路の規則で、主経路の bounded read には当たらない。D-09 とも整合する。採らない案: 全 mode で artifact（point event の消失・200 件の打ち切り・同時刻の並び・反映の遅れ・空 index の 503）。詳細は `PHASE_6_SPEC.md` MIG-0631 L4。
 - 読み取り失敗の status（200 固定形 → 503 + Retry-After）、暗黙の行順の明示（`ORDER BY`）は S2 のための差として承認。
-- CURRENT の不具合（`slotViewerOverlay.ts` の event select に `visibility_status` が無く `operatorOverrideAllowed` が常に false）は Hono でも bug-compatible のまま。修正は挙動変更なので FIX-0604-1（MIG-0633 の後、Next と Hono を同一 PR で）として扱う。
+- CURRENT の不具合（`slotViewerOverlay.ts` の event select に `visibility_status` が無く `operatorOverrideAllowed` が常に false）は Hono でも bug-compatible のまま。修正は挙動変更なので FIX-0604-1（MIG-0633 の後、Next と Hono を同一 PR で）として扱う。 → 2026-10-25 PR #410 で Next / Hono を同時に修正（event select に `visibility_status` を追加、承認済み linked X の staff `event.slots` または admin、規約同意、エントリー開始前の窓）。
 
 ## D-13 — 部分 merge 済み task の残りを分割し、着手可能な task を増やす（DECIDED、2026-10-25）
 

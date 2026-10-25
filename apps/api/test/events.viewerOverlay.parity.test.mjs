@@ -59,15 +59,17 @@ if (runUnderRootTsx(import.meta.url)) {
   event("ov-priv", { visibility_status: "private" });
   // Public pre-entry event. An operator with event.slots may reserve before general entry starts.
   event("ov-window", { start_time: 4_000_000_000, end_time: 4_000_100_000, entry_start_time: 4_000_000_000 - 100 });
+  event("ov-window2", { start_time: 4_000_000_000, end_time: 4_000_100_000, entry_start_time: 4_000_000_000 - 100 });
   event("ov-ended", { start_time: 1_000, end_time: 2_000, entry_start_time: 500 });
-  const staff = (id, xId, preset, custom = null) => ins("event_staff", {
-    id, event_id: "ov-window", x_user_id: xId, display_name: id,
+  const staff = (id, xId, preset, custom = null, eventId = "ov-window") => ins("event_staff", {
+    id, event_id: eventId, x_user_id: xId, display_name: id,
     permission_preset: preset, custom_permission_keys_json: custom,
   });
   staff("staff-alice-slot", "alice_x", "slot_manager");
   staff("staff-alice-editor", "alice_y", "content_editor");
   staff("staff-frank-custom", "frank_a", "custom", JSON.stringify(["event.slots"]));
   staff("staff-dave-rejected", "dave_r", "owner"); // rejected X must confer no permissions
+  staff("staff-ivy-other-event", "ivy_x", "slot_manager", null, "ov-window2"); // must not leak to ov-window
   event("ov-big", { slot_visibility_mode: "anonymous" });
   event("ov-over");
   event("ov-bytes");
@@ -309,13 +311,15 @@ if (runUnderRootTsx(import.meta.url)) {
 
     for (const [user, reason] of [
       ["dave", "rejected X staff cannot grant permissions"],
-      ["ivy", "approved X without event staff"],
+      ["ivy", "approved X with event.slots only on another event"],
       ["carol", "admin must accept current terms"],
       [null, "anonymous"],
     ]) {
       const { got } = await assertParity("ov-window", user, reason);
       assert.equal(got.body.operatorOverrideAllowed, false, reason);
     }
+    const otherEvent = await assertParity("ov-window2", "ivy", "staff permission on this event only");
+    assert.equal(otherEvent.got.body.operatorOverrideAllowed, true);
     const notInWindow = await assertParity("ov-pub", "alice", "no entry window");
     assert.equal(notInWindow.got.body.operatorOverrideAllowed, false);
     const ended = await assertParity("ov-ended", "carol", "event ended");
