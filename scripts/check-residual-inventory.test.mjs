@@ -325,3 +325,28 @@ test("T34: migration progress scanner can verify existing migration docs and scr
     "scripts/check-migration-file-progress.mjs"
   ]) assert.ok(existing.has(file),`migration ledger source not discovered: ${file}`);
 });
+
+test("T35: Wrangler vars cannot shadow a D1 binding in the Worker Env namespace",()=>{
+  const changed=web.replace('NEXT_PUBLIC_SITE_NAME = "FlameNode"','DB = "FlameNode"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    /binding name collision DB \(vars and d1\.binding\)/);
+});
+
+test("T36: repeated vars keys are rejected without looking at var values",()=>{
+  const changed=web.replace('NEXT_PUBLIC_SITE_NAME = "FlameNode"',
+    'NEXT_PUBLIC_SITE_NAME = "FlameNode"\nNEXT_PUBLIC_SITE_NAME = "shadow"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    /duplicate vars key NEXT_PUBLIC_SITE_NAME/);
+});
+
+test("T37: malformed vars assignment does not expose the value in diagnostics",()=>{
+  const marker="private-diagnostic-marker-123456";
+  const changed=web.replace('NEXT_PUBLIC_SITE_NAME = "FlameNode"',
+    "NEXT_PUBLIC_SITE_NAME := "+marker);
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    error=>error.message.includes("unsupported syntax (value redacted)") &&
+      !error.message.includes(marker));
+});
