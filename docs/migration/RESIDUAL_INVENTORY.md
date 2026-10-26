@@ -55,6 +55,8 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 
 **Tracked-template safety:** `scripts/check-residual-inventory.mjs` requires placeholder `database_id`, KV `id` and KV `preview_id` values in these checked-in templates. A non-placeholder value fails the CI gate with a redacted diagnostic; real account identifiers belong only in the separately verified generated deployment config. Unknown binding sections/keys fail closed until MIG-0908 explicitly audits and registers them. This safeguard checks checked-in source, not secrets or remote Cloudflare state.
 
+**Worker Env namespace guard:** While `[vars]` values are outside the 36-row Worker/Cron/Queue/binding inventory, the checker reads their **key names only** so a variable cannot shadow an Assets, Service, Queue producer, D1, R2 or KV binding name. Duplicate `[vars]` keys and malformed var declarations also fail closed without printing values (T35–T37). This checks the tracked code templates only; it does not enumerate remote secrets or generated deployment variables.
+
 **Boundaries:** This is an inventory of declarative `wrangler.toml` entries, not runtime secret bindings, generated production config, Cloudflare account inventory, Queue deletion authority, traffic observations or idle/unused proof. The tracked `[vars]` values are not secret evidence. No Worker, Cron, Queue, Route, D1, R2, KV or account was altered.
 
 ### U03 — DEV_ONLY `/dev/ui-surfaces`: decision options, not a cutover
