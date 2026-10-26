@@ -165,9 +165,12 @@ export function extractConfigRows(source,config) {
       catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
     } else if(block.section==="vars") {
       // Wrangler vars and bindings share the Worker Env namespace.
-      // Only record names, never values (which are outside this inventory).
+      // Values are not part of the resource inventory, but malformed TOML
+      // must never pass this CI gate. Validate without storing or echoing it.
       if(Object.hasOwn(block.fields,m[1]))
         throw Error(config+":"+(index+1)+": duplicate vars key "+m[1]);
+      try {decode(m[2].trim());}
+      catch {throw Error(config+":"+(index+1)+": invalid vars TOML value (redacted)");}
       block.fields[m[1]]=true;
     }
   });

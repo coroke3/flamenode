@@ -531,3 +531,31 @@ test("T55: linked workers root is rejected without traversing an external direct
       assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers"]);
     } finally { rmSync(temp,{recursive:true,force:true}); }
   });
+
+test("T56: invalid Wrangler vars values fail closed without echoing their contents",()=>{
+  const marker="never-log-malformed-value-823649";
+  const changed=sync.replace('GA4_SYNC_ENABLED = "0"',"GA4_SYNC_ENABLED = "+marker);
+  assert.notEqual(changed,sync);
+  assert.throws(()=>checkResidualInventory({sources:{[syncPath]:changed}}),
+    error=>/invalid vars TOML value \(redacted\)/.test(error.message) &&
+      !error.message.includes(marker));
+});
+
+test("T57: valid vars values remain outside the resource inventory",()=>{
+  const changed=web.replace('NEXT_PUBLIC_SITE_NAME = "FlameNode"',
+    'NEXT_PUBLIC_SITE_NAME = "Renamed for test"');
+  assert.notEqual(changed,web);
+  const r=checkResidualInventory({sources:{"wrangler.toml":changed}});
+  assert.deepEqual(r.missing,[]);
+  assert.deepEqual(r.stale,[]);
+  assert.equal(r.declaredCount,36);
+});
+
+test("T58: valid vars trailing comments and escaped TOML strings still parse",()=>{
+  const changed=sync.replace('GA4_SYNC_ENABLED = "0"',
+    'GA4_SYNC_ENABLED = "0" # local setting');
+  assert.notEqual(changed,sync);
+  const r=checkResidualInventory({sources:{[syncPath]:changed}});
+  assert.deepEqual(r.missing,[]);
+  assert.deepEqual(r.stale,[]);
+});

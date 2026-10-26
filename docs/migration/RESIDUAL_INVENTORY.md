@@ -63,6 +63,8 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 
 **Worker Env namespace guard:** While `[vars]` values are outside the 36-row Worker/Cron/Queue/binding inventory, the checker reads their **key names only** so a variable cannot shadow an Assets, Service, Queue producer, D1, R2 or KV binding name. Duplicate `[vars]` keys and malformed var declarations also fail closed without printing values (T35–T37). This checks the tracked code templates only; it does not enumerate remote secrets or generated deployment variables.
 
+**Vars TOML parsing (U02):** `[vars]` names remain subject to Worker Env collision/duplicate checks, and their values are still excluded from the 36-row resource inventory. The checker now validates that every assignment has a supported, well-formed TOML scalar or array without retaining or logging its value; invalid/unreviewed forms fail closed for explicit review (T56–T58). Valid value changes are not claimed as resource drift or proof of remote runtime configuration. Existing checked-in config values are unchanged.
+
 **Boundaries:** This is an inventory of declarative `wrangler.toml` entries, not runtime secret bindings, generated production config, Cloudflare account inventory, Queue deletion authority, traffic observations or idle/unused proof. The tracked `[vars]` values are not secret evidence. No Worker, Cron, Queue, Route, D1, R2, KV or account was altered.
 
 ### U03 — DEV_ONLY `/dev/ui-surfaces`: decision options, not a cutover
