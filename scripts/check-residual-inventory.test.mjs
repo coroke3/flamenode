@@ -66,7 +66,7 @@ test("T07: duplicate and stale table rows fail",()=>{
   const rows=readInventoryRows(docs);
   assert.equal(rows.length,36);
   const entry='| '+tick+'wrangler.toml'+tick+' | worker.name | '+tick+'name'+tick+' | '+tick+'flamenode-web'+tick+' | CURRENT | 未定 |\n';
-  assert.throws(()=>readInventoryRows(docs.replace("\n## 2.", "\n"+entry+"## 2.")),/duplicate inventory row/);
+  assert.throws(()=>readInventoryRows(docs.replace("\n### U03", "\n"+entry+"### U03")),/duplicate inventory row/);
   const orig='| '+tick+'wrangler.toml'+tick+' | worker.name | '+tick+'name'+tick+' | '+tick+'flamenode-web'+tick+' |';
   const modified=docs.replace(orig,orig.replace("flamenode-web","RENAMED"));
   assert.notEqual(modified,docs);
@@ -134,4 +134,13 @@ test("T15: a missing D1 database identifier fails closed",()=>{
   assert.notEqual(changed,web);
   assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
     /missing database_id/);
+});
+
+
+test("T16: U03 proposal table is not mistaken for the audited configuration table",()=>{
+  const rows=readInventoryRows(docs);
+  assert.equal(rows.length,36);
+  assert.ok(docs.includes("### U03 — DEV_ONLY"));
+  const extended=docs.replace("\n## 2.", "\n| supplementary | proposal | not a config |\n## 2.");
+  assert.equal(readInventoryRows(extended).length,36);
 });
