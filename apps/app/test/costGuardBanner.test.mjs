@@ -2,13 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createOperationModeBannerApi } from "../.test-dist/apps/app/src/api/operationMode.js";
 
-const respond = (status, body) => ({
-  status,
-  json: async () => {
-    if (body === undefined) throw new Error("invalid JSON");
-    return body;
-  },
-});
+const respond = (status, body) =>
+  new Response(body === undefined ? "{invalid" : JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 function client(result) {
   const calls = [];
   const api = createOperationModeBannerApi(async (path, init) => {
@@ -73,4 +71,61 @@ test("MIG-0718 U01 T02: reject malformed or huge reason before rendering", async
   assert.deepEqual(await client(respond(200, {
     mode: "maintenance", reason: "x".repeat(2048),
   })).api.getBanner(), { mode: "maintenance", reason: "x".repeat(2048) });
+});
+
+test("MIG-0718 U01 T03: announced oversized body is rejected before reading", async () => {
+  let started = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      started += 1;
+      controller.enqueue(new TextEncoder().encode('{"mode":"economy","reason":null}'));
+      controller.close();
+    },
+  });
+  const response = new Response(stream, {
+    status: 200,
+    headers: { "Content-Length": String(128 * 1024) },
+  });
+  assert.equal(await client(response).api.getBanner(), null);
+  // The browser may pre-pull; content-length rejection must not parse or show it.
+  assert.ok(started <= 1);
+});
+
+test("MIG-0718 U01 T03: chunked response over 16KiB is not buffered or displayed", async () => {
+  let cancelled = false;
+  let sent = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      sent += 1;
+      controller.enqueue(new Uint8Array(9000).fill(65));
+      if (sent === 3) controller.close();
+    },
+    cancel() { cancelled = true; },
+  });
+  assert.equal(await client(new Response(stream, { status: 200 })).api.getBanner(), null);
+  assert.equal(sent <= 3, true);
+  assert.equal(cancelled, true, "remaining response body must be cancelled");
+});
+
+test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely", async () => {
+  const expected = { mode: "economy", reason: "雪\u26c4" };
+  const utf8 = new TextEncoder().encode(JSON.stringify(expected));
+  const splitAt = utf8.findIndex((byte) => byte >= 0x80) + 1;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(utf8.slice(0, splitAt));
+      controller.enqueue(utf8.slice(splitAt));
+      controller.close();
+    },
+  });
+  assert.deepEqual(await client(new Response(stream, { status: 200 })).api.getBanner(), expected);
+});
+
+test("MIG-0718 U01 T03: aborted request ignores a late successful response", async () => {
+  const controller = new AbortController();
+  const c = createOperationModeBannerApi(async () => {
+    controller.abort();
+    return respond(200, { mode: "maintenance", reason: "stale" });
+  });
+  assert.equal(await c.getBanner(controller.signal), null);
 });

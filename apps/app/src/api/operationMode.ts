@@ -9,6 +9,39 @@ const NON_NORMAL_MODES: ReadonlySet<string> = new Set([
   "economy", "read_only", "static_only", "maintenance",
 ]);
 const MAX_REASON_CHARS = 2048; // Provisional cap aligned with the MIG-0661 implementation PR.
+const MAX_BANNER_RESPONSE_BYTES = 16 * 1024; // Only a tiny {mode,reason} DTO is expected.
+
+/** Bound streamed response bytes before JSON.parse. Content-Length is only an early
+ * rejection, never relied on as a trusted size bound. Do not buffer 64KiB+ responses.
+ */
+async function readBannerPayload(response: Response, signal?: AbortSignal): Promise<unknown> {
+  const announcedLength = response.headers.get("content-length");
+  if (announcedLength !== null && /^\d+$/.test(announcedLength) &&
+      Number(announcedLength) > MAX_BANNER_RESPONSE_BYTES) return null;
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const parts: string[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      if (signal?.aborted) return null;
+      const { done, value } = await reader.read();
+      if (signal?.aborted) return null;
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BANNER_RESPONSE_BYTES) return null;
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    if (signal?.aborted) return null;
+    parts.push(decoder.decode());
+    return JSON.parse(parts.join(""));
+  } finally {
+    // Also stop reading network data on oversized / aborted / malformed responses.
+    try { await reader.cancel(); } catch { /* Reader may already be closed. */ }
+    reader.releaseLock();
+  }
+}
 
 function parseBannerSnapshot(raw: unknown): BannerSnapshot | null {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -35,8 +68,10 @@ export function createOperationModeBannerApi(
           headers: { accept: "application/json" },
           signal,
         });
-        if (response.status !== 200) return null;
-        return parseBannerSnapshot(await response.json());
+        if (signal?.aborted || response.status !== 200) return null;
+        const payload = await readBannerPayload(response, signal);
+        if (signal?.aborted) return null;
+        return parseBannerSnapshot(payload);
       } catch {
         // Banner is optional public UX: a failed request does not block dashboard.
         return null;
