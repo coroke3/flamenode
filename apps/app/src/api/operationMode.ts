@@ -14,9 +14,11 @@ const MAX_BANNER_RESPONSE_BYTES = 16 * 1024; // Only a tiny {mode,reason} DTO is
 /** If headers/status cause an early return, explicitly stop the unread body.
  * Otherwise even rejected huge responses may continue consuming network resources.
  */
-async function discardResponseBody(response: Response): Promise<void> {
+function discardResponseBody(response: Response): void {
   try {
-    await response.body?.cancel();
+    // Start cleanup, but do not wait on a custom stream's cancel() promise:
+    // it may never settle and must not block the optional banner read.
+    void response.body?.cancel().catch(() => {});
   } catch {
     // Body may already be locked/closed by the platform.
   }
@@ -29,7 +31,7 @@ async function readBannerPayload(response: Response, signal?: AbortSignal): Prom
   const announcedLength = response.headers.get("content-length");
   if (announcedLength !== null && /^\d+$/.test(announcedLength) &&
       Number(announcedLength) > MAX_BANNER_RESPONSE_BYTES) {
-    await discardResponseBody(response);
+    discardResponseBody(response);
     return null;
   }
   if (!response.body) return null;
@@ -61,7 +63,9 @@ async function readBannerPayload(response: Response, signal?: AbortSignal): Prom
   } finally {
     signal?.removeEventListener("abort", onAbort);
     if (!reachedEnd) {
-      try { await reader.cancel(); } catch { /* Reader may already be closed. */ }
+      // Underlying stream cancellation is best-effort and can stall indefinitely.
+      // Never keep the caller waiting for a non-cooperative cancel hook.
+      try { void reader.cancel().catch(() => {}); } catch { /* Already closed. */ }
     }
     reader.releaseLock();
   }
@@ -93,7 +97,7 @@ export function createOperationModeBannerApi(
           signal,
         });
         if (signal?.aborted || response.status !== 200) {
-          await discardResponseBody(response);
+          discardResponseBody(response);
           return null;
         }
         const payload = await readBannerPayload(response, signal);
