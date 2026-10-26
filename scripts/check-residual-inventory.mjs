@@ -83,11 +83,12 @@ export function extractConfigRows(source,config) {
     if(line.startsWith("[")) {
       const m=/^(\[\[?)([\w.-]+)(\]\]?)$/.exec(line);
       if(!m || (m[1].length!==m[3].length)) throw Error(config+":"+(index+1)+": invalid section");
-      if(ARRAY_SECTIONS.has(m[2]) && m[1]!=="[[") throw Error(config+":"+(index+1)+": expected array section "+m[2]);
+      if(ARRAY_SECTIONS.has(m[2]) && m[1]!=="[[")
+        throw Error(config+":"+(index+1)+": expected array section "+m[2]);
+      if(!ARRAY_SECTIONS.has(m[2]) && m[1]!=="[")
+        throw Error(config+":"+(index+1)+": expected singleton section "+m[2]);
       if(!KNOWN.has(m[2]) && !INERT_SECTIONS.has(m[2]))
         throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
-      if(INERT_SECTIONS.has(m[2]) && m[1]==="[[")
-        throw Error(config+":"+(index+1)+": unsupported array section "+m[2]);
       if(m[1]==="[") {
         if(singletonSections.has(m[2]))
           throw Error(config+":"+(index+1)+": duplicate TOML section "+m[2]);
@@ -98,7 +99,7 @@ export function extractConfigRows(source,config) {
     }
     const block=blocks.at(-1), m=/^([A-Za-z_][\w-]*)\s*=\s*(.+)$/.exec(line);
     if(!m) {
-      if(KNOWN.has(block.section)) throw Error(config+":"+(index+1)+": unsupported syntax: "+line);
+      if(KNOWN.has(block.section)) throw Error(config+":"+(index+1)+": unsupported syntax (value redacted)");
       return;
     }
     if(KNOWN.has(block.section)) {
@@ -167,7 +168,8 @@ export function extractConfigRows(source,config) {
 export function readInventoryRows(markdown) {
   // Read only the first inventory table. Later subsection tables are
   // explanatory decision proposals, not Wrangler declaration records.
-  const body=markdown.split("## 1. Tracked code-side inventory")[1]
+  const body=markdown.replace(/\r\n/g,"\n")
+    .split("## 1. Tracked code-side inventory")[1]
     ?.split(/\n#{2,6}\s/)[0];
   if(!body) throw Error("inventory sections 1 and 2 required");
   const lines=body.split("\n").filter(x=>x.trim().startsWith("|"));
