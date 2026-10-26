@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
+import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync,symlinkSync} from "node:fs";
 import {dirname,resolve} from "node:path";
 import {tmpdir} from "node:os";
 import {parseFileRows,collectFiles} from "./check-migration-file-progress.mjs";
@@ -390,3 +390,29 @@ test("T42: adding a D1 migration directory on a background Worker requires revie
   assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
     /unexpected D1 migrations_dir/);
 });
+
+test("T43: alternate root Wrangler JSON/JSONC configs cannot shadow the audited TOML",()=>{
+  const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-root-"));
+  try {
+    mkdirSync(resolve(temp,"workers"));
+    writeFileSync(resolve(temp,"wrangler.json"),'{"name":"alternate"}');
+    writeFileSync(resolve(temp,"wrangler.jsonc"),'{"name":"alternate"}');
+    assert.deepEqual(findUntrackedWorkerConfigs(temp),["wrangler.json","wrangler.jsonc"]);
+    const sources={"wrangler.toml":web,[fastPath]:fast,[contentPath]:content,[syncPath]:sync};
+    assert.throws(()=>checkResidualInventory({root:temp,markdown:docs,sources}),
+      /unreviewed Worker Wrangler configs: wrangler.json, wrangler.jsonc/);
+  } finally { rmSync(temp,{recursive:true,force:true}); }
+});
+
+test("T44: symlinked Worker Wrangler configurations cannot bypass discovery",
+  {skip:process.platform==="win32"},()=>{
+    const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-links-"));
+    try {
+      const worker=resolve(temp,"workers","fast-jobs");
+      mkdirSync(worker,{recursive:true});
+      const target=resolve(temp,"external.toml");
+      writeFileSync(target,'name = "unexpected"\n');
+      symlinkSync(target,resolve(worker,"wrangler.toml"));
+      assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers/fast-jobs/wrangler.toml"]);
+    } finally { rmSync(temp,{recursive:true,force:true}); }
+  });
