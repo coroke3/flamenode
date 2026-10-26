@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync, readdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -355,3 +355,18 @@ test("T17 rejects malformed SQLite headers before opening a database", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("T18 CLI via symlink executes the dry-run instead of silently exiting 0",
+  { skip: process.platform === "win32" }, () => fixture(({ insert, file }) => {
+    add.video(insert, "v1");
+    add.x(insert, "x1");
+    add.link(insert, "auth", "x1");
+    add.auth(insert, "auth");
+    const linkedCli = join(dirname(file), "dry-run-linked.mjs");
+    symlinkSync(fileURLToPath(CLI), linkedCli);
+    const child = spawnSync(process.execPath, [linkedCli, "--sqlite", file], { encoding: "utf8" });
+    assert.equal(child.status, 0, child.stderr);
+    assert.ok(child.stdout.trim(), "symlink entrypoint must emit a JSON report");
+    assert.equal(JSON.parse(child.stdout).candidates, 1);
+  }));
