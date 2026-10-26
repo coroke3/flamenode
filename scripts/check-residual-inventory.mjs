@@ -3,7 +3,7 @@
  * MIG-0908: compare checked-in Wrangler declarations with the code-side
  * inventory. Strict for audited sections; never queries Cloudflare.
  */
-import {readFileSync} from "node:fs";
+import {readFileSync,readdirSync} from "node:fs";
 import {resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -36,6 +36,24 @@ const KV_PLACEHOLDER_ID = "00000000000000000000000000000000";
 const clean = value => String(value).replaceAll(String.fromCharCode(96),"").trim();
 const signature = r => [r.config,r.kind,r.setting,r.value].map(clean).join("|");
 const record = (config,kind,setting,value) => ({config,kind,setting,value});
+
+// Scope guard: a new Worker may have its own Wrangler file without any
+// changes to the existing four. Do not silently conclude the inventory is
+// complete when workers/** adds a new TOML/JSON/JSONC deployment config.
+// Local dev-only probes outside workers/ are intentionally excluded.
+export function findUntrackedWorkerConfigs(root) {
+  const workerDir=resolve(root,"workers"), files=[];
+  function visit(dir,relative) {
+    for(const item of readdirSync(dir,{withFileTypes:true})) {
+      const local=relative+"/"+item.name;
+      if(item.isDirectory()) visit(resolve(dir,item.name),local);
+      else if(item.isFile() && /^wrangler\\.(?:toml|json|jsonc)$/.test(item.name)
+        && !CONFIGS.includes(local)) files.push(local);
+    }
+  }
+  visit(workerDir,"workers");
+  return files.sort();
+}
 
 function removeComment(line) {
   let quote = "", escape = false;
@@ -193,6 +211,8 @@ export function readInventoryRows(markdown) {
 }
 export function checkResidualInventory({root,markdown,sources}={}) {
   const base=resolve(root??dirname(dirname(fileURLToPath(import.meta.url))));
+  const untracked=findUntrackedWorkerConfigs(base);
+  if(untracked.length) throw Error("unreviewed Worker Wrangler configs: "+untracked.join(", "));
   const docs=readInventoryRows(markdown??readFileSync(resolve(base,"docs/migration/RESIDUAL_INVENTORY.md"),"utf8"));
   const code=CONFIGS.flatMap(file=>extractConfigRows(sources?.[file]??readFileSync(resolve(base,file),"utf8"),file));
   const documentation=new Set(docs.map(signature)), declaration=new Set(code.map(signature));
