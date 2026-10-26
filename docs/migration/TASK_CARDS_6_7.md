@@ -398,6 +398,12 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: token の拒否、全 OK / 1 件 NG / 例外の status と body。
 - DONE: RH-017 の仮実装が残っていない。
 
+### MIG-0661 — CostGuardBanner read endpoints
+- 読む: `CostGuardBanner.tsx:57-67`、`publicMode.ts:108-117`、`kvMirrorCore.ts:12-32`、`apps/api/src/routes/live/operationMode.ts:42-108`、D-16-13。
+- 変更: `+routes/operationModeBanner.ts`（`/api/operation-mode/banner`）、`+routes/adminRead/costGuardBanner.ts`、`+packages/contracts/src/costGuardBanner.ts`。
+- 試験: KV mirror の mode と reason、KV 無し / 壊れた JSON / `FORCE_STATIC_ONLY`、admin の D1 行・行なし・例外、admin 以外の拒否。
+- DONE: 公開は D1 0 文、admin は 1 文。
+
 ## Private SPA common constraints (D-05)
 
 **Personal SPA = `apps/app`: `/dashboard`, `/entry`, `/onboarding`, `/_personal_assets/*`. Ops SPA = `+apps/ops` at MIG-0704: `/manage`, `/admin`, `/_ops_assets/*`.** CSS/JS chunks別、Cookie同一origin、認可はHono+旧Authと一致。現在`apps/ops`は未作成なのでビルド成功を要求するのはMIG-0704以降だけ。cross-SPA遷移は通常HTTP navigation。UIはCURRENT見た目を踏襲（公開HTMLの新visualをprivateへ無理に適用しない）。
@@ -409,20 +415,19 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: `apps/app/test/styles.test.mjs`（drift、変換、class の定義、import 順）、`document.test.mjs`（noindex、theme、no-store、wrapper）、既存54件。
 - DONE: 5ルートの本文と CSS が CURRENT と一致。header / footer / CostGuardBanner は FIX-0701-1、browser 確認は MIG-0706 の smoke。
 
-### MIG-0702 — Personal dashboard mutations
+### MIG-0702 — Personal dashboard mutations (Final audit)
 
-- 読む: SA-098..105, active-X link modal flow, `ACTIVE_X_MIGRATION_PLAN.md`, mutation status/error semantics。
-- 変更: profile settings, selected Active X, account link, like/bookmark command等をHono APIと接続。未連携の場合はモーダルで登録/承認の導線を提供、元のAuth User履歴は保持。
-- 試験: duplicate submit, approval pending, revoked link, manager-only, 0X, multiX, D-03の履歴fan-out結果、D-04の一斉cutover/負荷/ロールバック。通知の`既読化`はCURRENTで未実装のため勝手に新規追加しない（参照契約の状態を調べる）。
-- 引き継ぎ（MIG-0611）: `/onboarding` 到達時の `maybeMarkOnboardingComplete`（`onboarding_completed_at` の条件付き UPDATE）は GET API が書かないため、明示的な POST として実装する。
-- DONE: 既存のprofile/edit/like/notification UXを消さずに旧/新状態を再現。D-04本番切替自体は別承認。
+- 読む: `PHASE_7_SPEC.md` の MIG-0702 Work Order、MIG-0708〜0710 の merge 済み PR、D-16-10。
+- 変更: `work-items/MIG-0702.md` の audit 表だけ（画面は MIG-0708 / 0709 / 0710）。
+- 試験: 二重送信・承認待ち・manager リンクの X が分割先の test にあること。通知の既読化と誘導モーダルは CURRENT に無いので足さない（D-16-6）。
+- DONE: MIG-0708〜0710 が DONE、D-04 本番切替は別承認。
 
-### MIG-0703 — submission / edit / entry routes
+### MIG-0703 — submission / edit / entry routes (Final audit)
 
-- 読む: `CURRENT_ROUTES.md` Entry 3、`/dashboard/edit/[id]`/permissions, SA-086..089, permissions baseline。
-- 変更: `/entry`, `/entry/slotted`, `/entry/unslotted`, `/dashboard/edit/:id`, `/dashboard/edit/:id/permissions`をPersonalに入れる。existing form validation、YouTube ID重複停止、枠確保/期限、custom answersとstaff/collab privilegeを保持。
-- 試験: slotted/non slotted, already submitted, invalid url, upload/thumbnail/proxy failure, owner/collab/forbidden, edit timeout, back/refresh。
-- DONE: form states/actionsとBackend副作用をSA IDごとに照合し、privilege modeの安全性とURL互換を確認。
+- 読む: `PHASE_7_SPEC.md` の MIG-0703 Work Order、MIG-0711〜0717 の merge 済み PR、D-16-11 / 12。
+- 変更: `work-items/MIG-0703.md` の audit 表だけ。
+- 試験: 5ルートの form 状態と副作用が分割先の test で固定、画面が D1 / auth を import しない、`/entry` の return-to の sanitize。
+- DONE: MIG-0711〜0717 が DONE。
 
 ### MIG-0704 — create Ops SPA + Manage screens
 
@@ -443,6 +448,72 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: `+apps/ops/**`（package・build・router 枠・guard・`_headers`）、CI の build / test、`assetHeaders.test.mjs` の `ops`。
 - 試験: 2 SPA の build で asset が混ざらない、guard の Location、noindex、`/_ops_assets/*` immutable。
 - DONE: Ops の build が CI で動き、本番の Worker / Route を作っていない。
+
+### MIG-0708 — Personal settings: Active X / X profile / icon / delete (merge gate MIG-0636)
+- 読む: `XIdSettingsClient.tsx:243-290,294-437,439-648,650-`、`apps/app/src/routes/dashboard/Settings.tsx:400-489`、D-16-1〜4。
+- 変更: `+settings/XIdPanelActions.tsx`、`+api/xidProfile.ts`、`write.ts` と `useApiResult` の `refreshKey`（先に merge した方）、shared の leaf 部品（MIG-0712 と先に merge した方）。
+- 試験: 連打、Active ボタンの表示可否、失敗の文言、8 MiB 超、削除の確認文字列、成功後に LOADING にならない再取得。
+- DONE: MIG-0636 の DONE 後に merge、D-04 を実行していない。
+
+### MIG-0709 — Personal settings + onboarding: X link / merge / cancel / merge-revert (merge gate MIG-0659)
+- 読む: `XIdSettingsClient.tsx:16-237`、`XIdLinkedList.tsx:125-159`、`OnboardingXIdForm.tsx`、`Settings.tsx:259-281,519-`、`onboarding.tsx:196,259`。
+- 変更: `+settings/XIdRequestForms.tsx`、`+settings/XIdRequestActions.tsx`、`+routes/onboardingXIdForm.tsx`、`+api/xidRequests.ts`。
+- 試験: 連打、取り下げの文言と再取得、不正な X ID、onboarding の再取得。
+- DONE: MIG-0659 の DONE 後に merge。
+
+### MIG-0710 — `/onboarding` terms agree + onboarding complete (merge gate MIG-0641)
+- 読む: `OnboardingTermsForm.tsx`、`app/(auth)/onboarding/page.tsx:67`、`maybeMarkOnboardingComplete`、`onboarding.tsx:272-301`。
+- 変更: `+routes/onboardingTermsForm.tsx`、`+api/terms.ts`、`onboarding.tsx`（form と到達時の complete POST）。
+- 試験: checkbox 未チェック、連打、失敗の文言、complete の POST が1回。
+- DONE: MIG-0641 の DONE 後に merge。
+
+### MIG-0711 — `/entry` index screen
+- 読む: `app/(auth)/entry/page.tsx`、`authComplete.ts:105-108`、`entryIndex.ts:33`、`EntryIndexResponseSchema`、D-16-12。
+- 変更: `+routes/entry/EntryIndex.tsx`、`+routes/entry/discordSignIn.ts`、`+styles/entry.css`、router の 1 行。
+- 試験: 未ログイン section、csrf → POST form の値、外部 URL の `next`、csrf 失敗、`?error=` の文言、`kind` ごとの section。
+- DONE: Server Action を呼ばない、browser 確認。
+
+### MIG-0712 — video form part A: sub-field ports
+- 読む: `VideoForm.tsx:24-79` の import 先（CustomQuestionFields / SocialLinksEditor / VideoIconPicker / YoutubeDescriptionPreview / YoutubeChannelPicker / permission 3 部品 / SquareIconEditor）。
+- 変更: `+apps/app/src/components/{forms,permission,shared}/*.tsx`（file 名は Work Order）、pure module の port、`forms-a.css`。
+- 試験: custom question の type、social links、概要欄 preview、icon picker、`@/` と `next/` の import 0 件。
+- DONE: 部品が network を呼ばない。
+
+### MIG-0713 — video form part B: `VideoMembersField` port
+- 読む: `VideoMembersField.tsx:32,142-170,740-760`、`memberInput.ts`、`memberSuggestionRank.ts`。
+- 変更: `+apps/app/src/components/forms/VideoMembersField.tsx`（検索と権限一括は adapter）、`video-members.css`。
+- 試験: debounce、上限、権限一括の上限、adapter の失敗、`fetch(` と `@/lib/actions` 0 件。
+- DONE: 部品が network を呼ばない。
+
+### MIG-0714 — video form part C: `VideoForm` + `UnslottedPostForm` port
+- 読む: `VideoForm.tsx`（:112,142,193,442,469）、`UnslottedPostForm.tsx`、`src/components/forms/*.contract.test.mjs`。
+- 変更: `+apps/app/src/components/forms/{VideoForm,UnslottedPostForm}.tsx`（submit は adapter）、`+apps/app/src/lib/guardRedirect.ts`、`video-form.css`。
+- 試験: 不正な URL・重複、adapter の FormData が契約 test と同じ、下書きの key、guard の移動先。
+- DONE: MIG-0712 / 0713 の部品を使い、network を呼ばない。
+
+### MIG-0715 — `/dashboard/edit/:id/permissions` screen (merge gate MIG-0650)
+- 読む: `permissions/page.tsx:44-,220-226`、`VideoCollabPermsManager.tsx:274,294-330,346`、`EditPermissionsResponseSchema`。
+- 変更: `+routes/dashboard/edit/Permissions.tsx`、`+components/VideoCollabPermsManager.tsx`、`+api/videoCollaborators.ts`、router の 1 行。
+- 試験: 権限なしの表示、追加・解除の body と再取得、不正な X ID、失敗の文言。
+- DONE: MIG-0650 の DONE 後に merge。
+
+### MIG-0716 — `/entry/slotted` + `/entry/unslotted` screens (merge gate MIG-0651, 0648, 0650)
+- 読む: `entry/slotted/page.tsx`、`entry/unslotted/page.tsx`、`SlottedEntryResponseSchema` / `UnslottedEntryResponseSchema`。
+- 変更: `+routes/entry/{Slotted,Unslotted}.tsx`、`+api/videoSubmit.ts`、`+api/xUserSearch.ts`、router の 2 行。
+- 試験: 投稿済みの枠、成功の移動先、受付外のイベント。
+- DONE: MIG-0714 の form を使い、gate の 3 task の DONE 後に merge。
+
+### MIG-0717 — `/dashboard/edit/:id` screen (merge gate MIG-0651, 0648, 0650)
+- 読む: `dashboard/edit/[id]/page.tsx`、`EditPageResponseSchema` / `EditFormOptionsResponseSchema`。
+- 変更: `+routes/dashboard/edit/Edit.tsx`、権限 summary / overview の port、router の 1 行。
+- 試験: 編集中の再読込、編集できない section、失敗の文言。
+- DONE: MIG-0714 の form を使い、gate の 3 task の DONE 後に merge。
+
+### MIG-0718 — Personal SPA CostGuardBanner (merge gate MIG-0661, MIG-0701)
+- 読む: `app/(auth)/layout.tsx:27`、`CostGuardBanner.tsx:9-41,77-95`、D-13-6、D-16-13。
+- 変更: `+routes/CostGuardBanner.tsx`、`+api/operationMode.ts`、`cost-guard-banner.css`、wrapper の中に mount 1 行。
+- 試験: 4 mode の label / description / reason、normal と失敗で何も出さない。
+- DONE: MIG-0661 と MIG-0701 の DONE 後に merge（FIX-0701-1 の banner の部分）。
 
 ### MIG-0706 — Phase 7 Gate (2 SPAs)
 

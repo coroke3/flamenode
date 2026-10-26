@@ -130,6 +130,23 @@ test("every unfinished task needs a full work order whose dependencies match STA
   assert.match(validatePlanCompleteness({ status: graph.replace("| MIG-0302 | read | BLOCKED |", "| MIG-0302 | read | READY |"), specs: spec(order("MIG-0303", "MIG-0302")) }).join(" "), /MIG-0302: READY but dependency MIG-0301 is READY/);
 });
 
+test("a Merge gate task must be DONE before the gated task is DONE (D-16-1)", () => {
+  const graph = (state, gate = "READY") => `| ID | Task | State | Depends on |
+| --- | --- | --- | --- |
+| MIG-0108 | gate | DONE | — |
+| MIG-0301 | api | ${gate} | MIG-0108 |
+| MIG-0302 | ui | ${state} | MIG-0108 |
+`;
+  const order = (id, extra = "") => completeOrder(id, "lead", "NEEDS_REFINEMENT — x").replace("- **Verified against:**", "- **Depends on:** MIG-0108 / **Decisions:** none" + extra + "\n- **Verified against:**");
+  const specs = (gateLine) => ({ "docs/migration/PHASE_3_SPEC.md": [order("MIG-0301"), order("MIG-0302", gateLine)].join("\n") });
+  const gate = "\n- **Merge gate:** MIG-0301 が DONE";
+  assert.deepEqual(validatePlanCompleteness({ status: graph("READY"), specs: specs(gate) }), []);
+  assert.deepEqual(validatePlanCompleteness({ status: graph("DONE", "DONE"), specs: specs(gate) }), []);
+  assert.match(validatePlanCompleteness({ status: graph("DONE"), specs: specs(gate) }).join(" "), /MIG-0302: DONE but Merge gate MIG-0301 is READY/);
+  assert.match(validatePlanCompleteness({ status: graph("READY"), specs: specs("\n- **Merge gate:** MIG-0399") }).join(" "), /Merge gate MIG-0399 is not a STATUS task/);
+  assert.match(validatePlanCompleteness({ status: graph("READY"), specs: specs("\n- **Merge gate:** なし") }).join(" "), /Merge gate names no MIG task/);
+});
+
 import { validateSmallModelOrder } from "./check-migration-task-cards.mjs";
 
 test("small-model work order must be decided: commands, expectations, exact paths, no vague wording", () => {

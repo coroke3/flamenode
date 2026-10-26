@@ -37,6 +37,12 @@
 - 試験: cookie tamper, expiry, CSRF, wrong host, revoked/BAN immediate effect, SSRF redirect, D1 failure fail-closed, CPU p95<9msとtail measurement、1102=0。
 - DONE: security checklist/実測値/情報漏洩テストとレビューがそろい、未解決の高リスク差分なし。
 
+### MIG-0807 — security review of the Hono session + write guard on main
+- 読む: `apps/api/src/auth/session.ts`、`apps/api/src/middleware/{writeOrigin,adminReadGuard,costGuard}.ts`、既存の `authSession*` / `writeGuard*` / `adminGuards` test、D-16-14。
+- 変更: `+docs/migration/auth/SECURITY_REVIEW.md` §1、`+apps/api/test/securityReview.test.mjs`（不足の観点だけ）。code は直さない。
+- 試験: token 改ざん、別 origin の POST、D1 例外の fail-closed、BAN 直後。
+- DONE: 全観点の表、問題 0 件（あれば STOP して別 task）、独立レビュー。
+
 ### MIG-0805 — proposed production auth cutover (NO automatic operation)
 
 - 読む: `ROUTING_AND_DEPLOY_PLAN.md`, current Cloudflare/Discord config（秘密は表示しない）、Auth Session baseline and production monitoring。

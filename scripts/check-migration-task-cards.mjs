@@ -274,9 +274,19 @@ export function validatePlanCompleteness({ status, specs, recipes }) {
         if (states.get(dep) !== "DONE") errors.push(id + ": READY but dependency " + dep + " is " + (states.get(dep) ?? "unknown"));
       }
     }
-    if (task.state === "DONE" || task.state === "SKIPPED") continue;
     const file = specFileFor(id);
     const order = file ? extractWorkOrder(specs[file], id) : null;
+    // D-16-1: a contract-first task may start before the API it calls, but STATUS may not mark it DONE first.
+    const gateLine = order?.prose.match(/\*\*Merge gate:\*\*([^\n]*)/)?.[1];
+    if (gateLine !== undefined) {
+      const gates = expandMigRefs(gateLine);
+      if (!gates.size) errors.push(id + ": Merge gate names no MIG task");
+      for (const gate of gates) {
+        if (!states.has(gate)) errors.push(id + ": Merge gate " + gate + " is not a STATUS task");
+        else if (task.state === "DONE" && states.get(gate) !== "DONE") errors.push(id + ": DONE but Merge gate " + gate + " is " + states.get(gate));
+      }
+    }
+    if (task.state === "DONE" || task.state === "SKIPPED") continue;
     if (!order) { errors.push(id + ": unfinished task has no work order in " + file); continue; }
     if (!order.model || !order.readiness) errors.push(id + ": work order must declare valid Model and Readiness");
     if (!/\*\*Verified against:\*\*\s*`[0-9a-f]{7,40}`/.test(order.prose)) errors.push(id + ": work order needs Verified against `<sha>`");
