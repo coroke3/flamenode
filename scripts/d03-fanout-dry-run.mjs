@@ -121,7 +121,7 @@ function requireStandaloneSnapshot(localPath) {
   try {
     const bytesRead = readSync(handle, header, 0, header.length, 0);
     if (bytesRead !== header.length ||
-        !header.subarray(0, 16).equals(Buffer.from("SQLite format 3\\0"))) {
+        !header.subarray(0, 16).equals(Buffer.from("SQLite format 3" + String.fromCharCode(0)))) {
       throw new Error("Expected a valid SQLite snapshot file");
     }
     // SQLite header bytes 18 and 19: 1 = rollback journal, 2 = WAL.
