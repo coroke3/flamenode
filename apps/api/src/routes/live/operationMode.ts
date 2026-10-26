@@ -9,6 +9,10 @@ import { isOperationMode, type OperationMode } from "@flamenode/domain/admin";
 
 export const OPERATION_MODE_KV_KEY = "operation_mode:mirror";
 export const ISOLATE_MODE_TTL_MS = 30_000;
+/** Reject malformed/oversized KV blobs before JSON.parse (ZERO_1102 rule 3).
+ * Covers even worst-case escaped text from the normal 500-char reason input.
+ */
+export const MAX_OPERATION_MODE_KV_MIRROR_CHARS = 16_384;
 const KV_CACHE_TTL_MS = 30_000;
 const KV_ERROR_CACHE_TTL_MS = 5_000;
 
@@ -50,7 +54,7 @@ export type ParsedOperationModeKvMirror = {
 
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
 export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
-  if (!raw) return null;
+  if (!raw || raw.length > MAX_OPERATION_MODE_KV_MIRROR_CHARS) return null;
   try {
     const parsed = JSON.parse(raw) as {
       mode?: unknown;

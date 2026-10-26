@@ -280,3 +280,62 @@ test("MIG-0661 T05: admin success and missing-row fallback validate the same DTO
     sqlite.close();
   }
 });
+
+test("MIG-0661 T06: public KV reason beyond accepted size is omitted, not a 500", async () => {
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 }, kv = { count: 0 };
+  const oversizedReason = "X".repeat(4096);
+  const body = await requestWith({
+    DB: unavailableD1(d1),
+    KV: kvResponse(JSON.stringify({
+      mode: "maintenance", updated_at: 1, reason: oversizedReason,
+    }), kv),
+  });
+  assert.deepEqual(body, { mode: "maintenance", reason: null });
+  assert.equal(kv.count, 1);
+  assert.equal(d1.count, 0);
+  assert.equal(
+    CostGuardBannerResponseSchema.safeParse({ mode: "maintenance", reason: oversizedReason }).success,
+    false,
+  );
+});
+
+test("MIG-0661 T06: oversized KV blob is rejected before parsing, without D1 fallback", async () => {
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 }, kv = { count: 0 };
+  const body = await requestWith({
+    DB: unavailableD1(d1),
+    KV: kvResponse(JSON.stringify({
+      mode: "maintenance", updated_at: 1, reason: "X".repeat(70 * 1024),
+    }), kv),
+  });
+  assert.deepEqual(body, { mode: "normal", reason: null });
+  assert.equal(kv.count, 1);
+  assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T06: admin DB legacy oversized reason stays under S2 response budget", async () => {
+  const sqlite = createSqlite();
+  try {
+    seedAdminRead(sqlite);
+    const overlong = "X".repeat(70 * 1024);
+    sqlite.prepare("UPDATE system_settings SET operation_mode = ?, cost_guard_reason = ? WHERE id = 'default'")
+      .run("economy", overlong);
+    const db = createD1(sqlite);
+    const response = await app.request(
+      "/api/admin-read/cost-guard-banner",
+      { method: "GET", headers: cookie("tok-root") },
+      { DB: db },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const text = await response.text();
+    assert.ok(Buffer.byteLength(text, "utf8") < 64 * 1024);
+    assert.deepEqual(CostGuardBannerResponseSchema.parse(JSON.parse(text)),
+      { mode: "economy", reason: null });
+    assert.equal(db.stats.statements, 2);
+    assert.equal(db.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});

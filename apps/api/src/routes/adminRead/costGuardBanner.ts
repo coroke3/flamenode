@@ -1,5 +1,9 @@
 import { Hono } from "hono";
-import { CostGuardBannerResponseSchema, type CostGuardBannerResponse } from "@flamenode/contracts";
+import {
+  CostGuardBannerResponseSchema,
+  boundedCostGuardBannerReason,
+  type CostGuardBannerResponse,
+} from "@flamenode/contracts";
 import { resolveOperationMode } from "@flamenode/domain/admin";
 import type { AppEnv } from "../../env.ts";
 
@@ -18,7 +22,7 @@ adminCostGuardBannerRoutes.get("/", async (c) => {
     if (!row) return c.json(CostGuardBannerResponseSchema.parse(fallback));
     return c.json(CostGuardBannerResponseSchema.parse({
       mode: resolveOperationMode(row),
-      reason: typeof row.cost_guard_reason === "string" ? row.cost_guard_reason : null,
+      reason: boundedCostGuardBannerReason(row.cost_guard_reason),
     }));
   } catch {
     // Do not leak D1 error messages, schema details or raw setting values.
