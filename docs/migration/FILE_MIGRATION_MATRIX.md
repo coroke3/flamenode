@@ -1035,8 +1035,8 @@
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
 | `docs/migration/RESIDUAL_INVENTORY.md` | MIG-0908 | IN_PROGRESS | U01 code-side Worker/Cron/Queue/D1/R2/KV/asset/service inventory (4 tracked Wrangler templates); U03 DEV_ONLY `/dev/ui-surfaces` proposal; `scripts/check-residual-inventory.mjs` enforces §1; §2 production observation deferred to MIG-0901; PR#416, no account or production mutation |
-| `scripts/check-residual-inventory.mjs` | MIG-0908 | IN_PROGRESS | U02 fail-closed 4-Wrangler declaration scanner (cron, producer/consumer, D1/R2/KV, assets/service); PR#416 SHA=c1607d727a54a6d3f40311a90b5e011d5d9bcae0; scope is tracked code only, no Cloudflare API |
-| `scripts/check-residual-inventory.test.mjs` | MIG-0908 | IN_PROGRESS | U02 T01–T10 source fixture/config mutation regression; PR#416 SHA=c1607d727a54a6d3f40311a90b5e011d5d9bcae0; CI pending |
+| `scripts/check-residual-inventory.mjs` | MIG-0908 | IN_PROGRESS | U02 code-only strict inventory/Worker-config discovery scanner for 4 tracked Wrangler TOML templates; T01–T29 cover drift, unknown sections/keys, placeholders, syntax, duplicates and quoted values; PR#416; migration-contract CI success on ca5da9f5 (Actions 40353612240), final-head recheck required |
+| `scripts/check-residual-inventory.test.mjs` | MIG-0908 | IN_PROGRESS | U02 T01–T29 actual-template and mutation regression suite in GitHub migration-contract workflow; PR#416; prior source CI run 40353612240 contract success, current-head full CI and independent review pending |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
