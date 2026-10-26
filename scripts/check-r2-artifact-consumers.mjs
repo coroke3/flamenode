@@ -16,19 +16,35 @@ export function normalizeArtifactKey(key) {
   return key.trim().replace(/\x24\{[^{}]+\}/g, "<id>");
 }
 
-function isArtifactName(key) {
-  return key.length > 0 && key.length <= 512 &&
-    !key.startsWith("http:") && !key.startsWith("https:") &&
-    (key.includes("/") || /\.(?:json|html|webp|png|jpg)$/i.test(key));
-}
-
 function lineOf(source, index) {
   return source.slice(0, index).split("\n").length;
 }
 
+// Known R2 bindings. A file may add aliases (see bindingAliases).
+const R2_BINDINGS = ["BUCKET", "R2_STORAGE", "R2", "bucket", "r2", "safeBucket"];
+// Helpers whose second argument is the R2 object key (bucket/env first).
+// A new helper must call R2 directly, so its own body appears as a dynamic
+// call below and fails CI until reviewed; add its name here at that time.
+const R2_KEY_HELPERS = ["putJson", "putJsonUntracked", "putJsonArtifact", "readJsonObject", "readBoundedR2Json"];
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^\x24{}()|[\]\\]/g, "\\$&");
+}
+
+/** Same-file names bound to an R2 bucket: `const x = env.BUCKET` or `x: R2Bucket`. */
+function bindingAliases(source) {
+  const names = new Set(R2_BINDINGS);
+  const assigned = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n]+)?=\s*(?:[\w$]+\.)*env\.(?:BUCKET|R2_STORAGE|R2)\b(?!\s*\.)/g;
+  for (const match of source.matchAll(assigned)) names.add(match[1]);
+  const typed = /\b([A-Za-z_$][\w$]*)\??\s*:\s*(?:R2Bucket\b|Pick<\s*R2Bucket\b)/g;
+  for (const match of source.matchAll(typed)) names.add(match[1]);
+  return names;
+}
+
 /**
- * Scan literal producers and readers for named R2 bindings. Resolve simple
- * same-file const keys. Imported/computed keys are NOT assumed safe: record
+ * Scan literal producers and readers for named R2 bindings and R2 key
+ * helpers. Resolve same-file const keys only when the name has one value in
+ * the file. Imported/computed/ambiguous keys are NOT assumed safe: record
  * every occurrence in the reviewed dynamic-reference ledger.
  *
  * This is deliberately a conservative source scanner, not a TypeScript
@@ -38,17 +54,20 @@ export function extractArtifactKeys(source, path) {
   const hits = [];
   const unresolved = [];
   const literal = "([\\\"'\\x60])((?:\\\\.|(?!\\1)[^\\n])*?)\\1";
+  // Explicit R2 key positions are recorded whatever the key looks like.
   const addHit = (index, key, kind) => {
-    if (isArtifactName(key)) {
-      hits.push({ path, line: lineOf(source, index), key: normalizeArtifactKey(key), kind });
-    }
+    if (key.length > 0) hits.push({ path, line: lineOf(source, index), key: normalizeArtifactKey(key), kind });
   };
-  // A local key declaration is resolved only when an R2 call uses it.
+  // A local key declaration is resolved only when an R2 call uses it and
+  // every same-named declaration in the file agrees (no scope analysis).
   const constants = new Map();
   // Group 1 is the constant name; group 2 is the opening quote, with
   // the same-quote backreference \2. Never reuse literal's \1 here.
   const declarations = /\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(["'\x60])((?:\\.|(?!\2)[^\n])*?)\2/g;
-  for (const match of source.matchAll(declarations)) constants.set(match[1], match[3]);
+  for (const match of source.matchAll(declarations)) {
+    const previous = constants.get(match[1]);
+    constants.set(match[1], previous === undefined || previous === match[3] ? match[3] : null);
+  }
 
   const property = new RegExp("\\br2Key\\s*:\\s*" + literal, "g");
   for (const match of source.matchAll(property)) addHit(match.index, match[2], "r2Key");
@@ -59,26 +78,35 @@ export function extractArtifactKeys(source, path) {
   );
   for (const match of source.matchAll(named)) addHit(match.index, match[2], "object-constant");
 
-  const calls = /\b(?:env\.)?(?:BUCKET|R2_STORAGE|R2|bucket|r2|safeBucket)\s*\.\s*(get|put|head|delete)\s*\(\s*/g;
-  for (const match of source.matchAll(calls)) {
-    const after = source.slice(match.index + match[0].length);
+  const keyArgument = (index, after, kind) => {
     const quoted = new RegExp("^" + literal).exec(after);
     if (quoted) {
-      addHit(match.index, quoted[2], "bucket." + match[1]);
-      continue;
+      addHit(index, quoted[2], kind);
+      return;
     }
     const expression = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^()\n]*\))?)/.exec(after)?.[1];
-    if (!expression) {
-      unresolved.push({ path, line: lineOf(source, match.index), kind: "bucket." + match[1], expression: "<complex>" });
-      continue;
-    }
-    if (constants.has(expression)) {
-      addHit(match.index, constants.get(expression), "bucket." + match[1] + "-const");
+    if (expression && typeof constants.get(expression) === "string") {
+      addHit(index, constants.get(expression), kind + "-const");
     } else {
-      // The source may import the symbol or compute it dynamically. It needs
-      // an explicit bounded exception until a future MIG resolves the reader.
-      unresolved.push({ path, line: lineOf(source, match.index), kind: "bucket." + match[1], expression });
+      // Imported, computed, or ambiguous: needs an explicit bounded exception
+      // until a future MIG resolves the reader.
+      unresolved.push({ path, line: lineOf(source, index), kind, expression: expression ?? "<complex>" });
     }
+  };
+
+  const bindings = [...bindingAliases(source)].map(escapeRegExp).join("|");
+  const calls = new RegExp("(?<![\\w$])(?:env\\.)?(?:" + bindings + ")\\s*\\.\\s*(get|put|head|delete)\\s*\\(\\s*", "g");
+  for (const match of source.matchAll(calls)) {
+    keyArgument(match.index, source.slice(match.index + match[0].length), "bucket." + match[1]);
+  }
+  // Helper calls: skip the first argument (env/bucket), read the second.
+  const helpers = new RegExp("(?<![\\w$.])(" + R2_KEY_HELPERS.join("|") + ")(?:<[^>()]*>)?\\s*\\(\\s*", "g");
+  for (const match of source.matchAll(helpers)) {
+    const rest = source.slice(match.index + match[0].length);
+    const first = /^[^,()]*(?:\([^()]*\)[^,()]*)*,\s*/.exec(rest);
+    // A declaration (`putJson(env: Env, key: string`) has a typed parameter.
+    if (!first || /^[\w$]+\s*\??\s*:/.test(rest)) continue;
+    keyArgument(match.index, rest.slice(first[0].length), match[1]);
   }
   // Detection rules are grouped by syntax. Return references in source order,
   // not grouped by rule, so line-based diagnostics and consumer tests stay stable.
@@ -109,13 +137,47 @@ export function matchesInventory(key, documented) {
   return false;
 }
 
-export function readInventoryKeys(markdown) {
-  const keys = new Set();
-  for (const line of markdown.split("\n")) {
-    const match = /^\|\s*`([^`]+)`\s*\|/.exec(line);
-    if (match) keys.add(match[1]);
+const PLACEHOLDER_CELL = /^(?:|-+|—+|–+|tbd|todo|n\/a|none|unknown|\?+)$/i;
+
+/** Rows of every table whose header starts with `| Artifact key |`. */
+export function readInventoryRows(markdown) {
+  const rows = [];
+  let inTable = false;
+  markdown.split("\n").forEach((line, index) => {
+    if (/^\|\s*Artifact key\s*\|/.test(line)) {
+      inTable = true;
+      return;
+    }
+    if (!line.startsWith("|")) {
+      inTable = false;
+      return;
+    }
+    if (!inTable || /^\|[\s:|-]+\|$/.test(line)) return;
+    const cells = line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+    rows.push({ line: index + 1, cells, key: /^`([^`]+)`$/.exec(cells[0])?.[1] ?? null });
+  });
+  return rows;
+}
+
+/** Every key row must name a producer, consumer, target/retention and owner MIG. */
+export function validateInventoryRows(rows) {
+  const invalid = [];
+  for (const row of rows) {
+    const reasons = [];
+    if (!row.key) reasons.push("key cell is not one `code` value");
+    if (row.cells.length !== 5) reasons.push("expected 5 cells, got " + row.cells.length);
+    ["producer", "consumer", "target/retention", "owner MIG"].forEach((name, offset) => {
+      const cell = row.cells[offset + 1] ?? "";
+      if (PLACEHOLDER_CELL.test(cell)) reasons.push("empty " + name);
+    });
+    if (row.cells[4] !== undefined && !/\bMIG-\d{4}\b/.test(row.cells[4])) reasons.push("owner has no MIG-XXXX");
+    if (reasons.length) invalid.push({ line: row.line, key: row.key, reasons });
   }
-  return keys;
+  return invalid;
+}
+
+export function readInventoryKeys(markdown) {
+  return new Set(readInventoryRows(markdown).map((row) => row.key).filter(Boolean));
 }
 
 function visit(root, sub = "") {
@@ -133,7 +195,9 @@ function visit(root, sub = "") {
 }
 
 export function checkInventory({ root, inventoryText, files = null }) {
-  const known = readInventoryKeys(inventoryText);
+  const rows = readInventoryRows(inventoryText);
+  const invalid = validateInventoryRows(rows);
+  const known = new Set(rows.map((row) => row.key).filter(Boolean));
   const exceptions = readDynamicExceptions(inventoryText);
   const pathList = files ?? SOURCE_ROOTS.flatMap((dir) => visit(root, dir));
   const hits = [];
@@ -149,9 +213,12 @@ export function checkInventory({ root, inventoryText, files = null }) {
     const key = row.path + "|" + row.kind + "(" + row.expression + ")";
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const unexpected = [...counts].filter(([key, count]) => !exceptions.has(key) || count > exceptions.get(key))
+  // Counts are exact: a new call site fails, and a removed one must also be
+  // removed from the ledger so it never documents a reference that is gone.
+  for (const key of exceptions.keys()) if (!counts.has(key)) counts.set(key, 0);
+  const unexpected = [...counts].filter(([key, count]) => count !== (exceptions.get(key) ?? 0))
     .map(([key, count]) => ({ key, count, limit: exceptions.get(key) ?? 0 }));
-  return { known, hits, missing, unresolved, unexpected };
+  return { known, invalid, hits, missing, unresolved, unexpected };
 }
 
 const self = fileURLToPath(import.meta.url);
@@ -159,13 +226,16 @@ if (process.argv[1] && resolve(process.argv[1]) === self) {
   const root = resolve(dirname(self), "..");
   const inventoryText = readFileSync(join(root, "docs/migration/R2_ARTIFACT_CONSUMERS.md"), "utf8");
   const result = checkInventory({ root, inventoryText });
-  if (result.missing.length || result.unexpected.length) {
-    console.error("MIG-0649: undocumented literal R2 artifact keys:");
+  if (result.invalid.length || result.missing.length || result.unexpected.length) {
+    console.error("MIG-0649: R2 artifact inventory check failed:");
+    for (const { line, key, reasons } of result.invalid) {
+      console.error("docs/migration/R2_ARTIFACT_CONSUMERS.md:" + line + " " + (key ?? "<no key>") + " " + reasons.join("; "));
+    }
     for (const { path, line, key, kind } of result.missing) {
-      console.error(path + ":" + line + " " + kind + " " + key);
+      console.error(path + ":" + line + " " + kind + " undocumented key " + key);
     }
     for (const { key, count, limit } of result.unexpected) {
-      console.error("unreviewed R2 call: " + key + " count=" + count + " documented_max=" + limit);
+      console.error("dynamic R2 call count mismatch: " + key + " count=" + count + " documented=" + limit);
     }
     process.exitCode = 1;
   } else {

@@ -41,26 +41,27 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 | `users/index.v2/manifest.json` | workers/json-generator/usersIndexV2Artifacts.ts (v2 index producer) | src/lib/publicData/staticUsersIndexV2Core.ts:23 | Build-time user index v2 | MIG-0509 / MIG-0627 |
 | `internal/member-suggestions/v1/manifest.json` | workers/json-generator/memberSuggestionsArtifacts.ts (v1 suggestion producer) | src/lib/video/memberSuggestionsCore.ts:12 | Internal member suggestion projection; not a public GET artifact | MIG-0627 / MIG-0907 |
 | `internal/member-suggestions/v2/manifest.json` | workers/json-generator/memberSuggestionsV2Artifacts.ts (v2 suggestion producer) | src/lib/video/memberSuggestionsPostingsV2.ts:20 | Internal member suggestion projection; retain until reader replacement | MIG-0627 / MIG-0907 |
-
-**Recovery rule:** Missing artifacts are regenerated only by the next public build. Public GET handlers must not write to D1, a Queue, or `public_build_state`.
-
 | `xicons/staging/<id>/<id>.<id>` | src/lib/actions/xid.ts:1088,1094 (temporary upload) | src/lib/actions/xid.ts:1127,1132 (rollback/cleanup) | RETAIN temporary uploaded media; do not treat as generated public snapshots | MIG-0649 / media domain |
 | `xicons/<id>/<id>.<id>` | src/lib/actions/xid.ts:1089,1095 (approved X icon upload) | src/lib/actions/xid.ts:1127; src/lib/media/publicMedia.ts (public serving) | RETAIN persistent icon objects; inspect user references before deletion | MIG-0649 / media domain |
 | `video-icons/<id>/<id>/` | src/lib/video/resolveVideoCreatorIcon.ts:87-91 (prefix + UUID.ext) | src/lib/video/resolveVideoCreatorIcon.ts:104 rollback; media handler | RETAIN persistent media. Scanner captures first interpolated prefix only; full key adds UUID and extension via string concatenation | MIG-0649 / media domain |
 | `internal/materialized/video-cards/v1/manifest.json` | workers/json-generator/videoMaterializedSource.ts:372 (conditional commit) | workers/json-generator/videoMaterializedSource.ts:211 (load) | RETAIN until materialized source retirement gate; generator output not an independent public HTML page | MIG-0627 / MIG-0907 |
+| `__flamenode_read_only_health_probe__` | None: read-only probe of a key that is never written (src/lib/health/deepHealth.ts:26) | src/lib/health/deepHealth.ts:390 (`head`, expects null) | RETAIN health probe; not an artifact, nothing to replace or delete | MIG-0649 / health |
+
+**Recovery rule:** Missing artifacts are regenerated only by the next public build. Public GET handlers must not write to D1, a Queue, or `public_build_state`.
+
 
 ## Static-audit limitations
 
-The CI checker validates literal `r2Key` property keys, literal calls on known R2 binding names, and stored-object key constants. It excludes test and fixture directories. Computed keys are listed explicitly above but need follow-up source auditing before MIG-0627 removes a reader. A green checker does not prove a dynamically generated key exists or that its consumer is safe to retire.
+The CI checker (`npm run check:r2-artifact-consumers`) extracts: literal `r2Key:` values; `*_OBJECT_KEY`-style constants; the first argument of `.get/.put/.head/.delete` on a known R2 binding, on a same-file alias (`const x = env.BUCKET`) or on a name typed `R2Bucket`; and the second argument of the R2 key helpers `putJson`, `putJsonUntracked`, `putJsonArtifact`, `readJsonObject`, `readBoundedR2Json`. A literal at those positions is recorded whatever its shape. A same-file `const` is resolved only when every declaration of that name in the file has the same value; otherwise the call is treated as dynamic. Every key row must have non-empty producer, consumer, target/retention and an owner `MIG-XXXX`. It excludes test and fixture directories. Computed keys are listed explicitly above but need follow-up source auditing before MIG-0627 removes a reader. A green checker does not prove a dynamically generated key exists or that its consumer is safe to retire; a new R2 helper is caught only through its own direct bucket call, which then needs a reviewed row below and an entry in the checker helper list.
 
 Media-upload blobs, legacy import previews, and persistent visibility manifests are **not** assumed to be disposable public-build artifacts. MIG-0907 must retain or separately audit them. Every new literal artifact reference that is absent from this table is a CI error.
 
 Referenced tasks: [MIG-0627](PHASE_6_SPEC.md) (reader replacement), [MIG-0907](PHASE_8_9_SPEC.md) (generator removal gate).
 ## Reviewed dynamic R2 calls
 
-Conservative *bounded exception inventory* for R2 API calls whose first argument is imported, a computed key, or a key collection. This section is **not a removal authorization**. Source paths and method/expression strings are exact, and the maximum occurrence count is locked to the 2026-10-26 source audit. Adding a new untracked dynamic operation, changing its expression, or increasing its count breaks CI. Each expression must be verified before MIG-0627/MIG-0907 removes its storage dependency.
+Conservative *bounded exception inventory* for R2 API calls whose first argument is imported, a computed key, or a key collection. This section is **not a removal authorization**. Source paths and method/expression strings are exact, and the occurrence count is locked to the 2026-10-26 source audit. Adding a new untracked dynamic operation, changing its expression, or changing its count in either direction breaks CI, so a removed call must also be removed here. Each expression must be verified before MIG-0627/MIG-0907 removes its storage dependency.
 
-| Source path | Method and argument expression | Maximum call sites | Disposition / reason |
+| Source path | Method and argument expression | Call sites (exact) | Disposition / reason |
 | --- | --- | ---: | --- |
 | `apps/site/src/gateway/r2Html.ts` | `bucket.get(r2HtmlKey(decision.key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
 | `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
@@ -116,5 +117,43 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(<complex>)` | 1 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `bucket.delete(keys)` | 1 | Generator/producer key; MIG-0907 review required |
 | `src/lib/media/iconOrphanCleanup.ts` | `bucket.delete(objectKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `src/lib/publicData/loader.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `src/lib/publicData/r2EventPlaylist.ts` | `readBoundedR2Json(args.objectKey(normalizedId))` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `src/lib/publicData/staticSharedInputsLoader.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(memberSuggestionsIndexObjectKey(manifestResult.generation))` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `src/lib/video/memberSuggestionsV2Loader.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `apps/api/src/lib/publicSnapshot.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `workers/json-generator/memberSuggestionsArtifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `putJson(entry.key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `putJson(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/optimizedRebuild.ts` | `putJsonArtifact(objectKey)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/pickupCreatorsR2.ts` | `readBoundedR2Json(PICKUP_CREATORS_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `readBoundedR2Json(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `putJsonArtifact(PUBLIC_X_ICON_V2_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `readBoundedR2Json(PUBLIC_X_ICON_MAP_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/publicIconV2Artifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `bucket.delete(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `bucket.get(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJsonArtifact(key)` | 2 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(TOP_SLOT_STATS_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(objectKey)` | 3 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJsonUntracked(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(manifestKey)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(eventReleaseObjectKey(eventId))` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(USERS_INDEX_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(PUBLIC_X_ICON_MAP_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(PICKUP_CREATORS_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(YOUTUBE_RELATED_BLOCKLIST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(RANDOM_VIDEO_POOL_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(RECOMMEND_CORE_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/rebuild.ts` | `putJson(key)` | 2 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `readBoundedR2Json(USERS_INDEX_V2_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/usersIndexV2Artifacts.ts` | `readBoundedR2Json(USERS_INDEX_OBJECT_KEY)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
+| `workers/json-generator/videoMaterializedSource.ts` | `readJsonObject(manifest.source_key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
 
 These dynamic references are retained for inspection. The static scanner cannot prove a computed value's full key domain or resolve imported symbols across files; owners must compare producer and consumer paths before removal.
