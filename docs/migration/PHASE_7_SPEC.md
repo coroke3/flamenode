@@ -416,7 +416,7 @@ Phase 7 共通契約のとおり。
 - 触らない: `apps/app/**`, `app/(manage)/**`, `app/(admin)/**`, `packages/ui/**`
 #### Micro-units
 - **U01 package + build**: `apps/app` と同じ形で package / tsconfig / vite.config / index.html を作る（`assetsDir` と noindex だけが違う）。`npm ci` で lock を更新。
-- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。 RH-001 は CURRENT の `enrichmentFailed`（`src/lib/auth/requestAuthContext.ts:215-225`）を直接返さないので、`degraded: true` と 503 `unavailable` を `/entry?error=auth_temporarily_unavailable` に写す（D-17-3。`apps/api/src/routes/account/summary.ts:221-232,283-289` の degraded は管理権限・X の読みの失敗で立つ）。
+- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。 RH-001 は CURRENT の `enrichmentFailed`（`src/lib/auth/requestAuthContext.ts:215-225`）を返さないので、D-17-3 の写像に従う: 503 `unavailable` は `/entry?error=auth_temporarily_unavailable`、`/admin/*` の `degraded: true` は通す、`/manage/*` の `degraded: true` は admin なら通し非 admin なら `/entry?error=auth_temporarily_unavailable`（degraded では `canAccessManage` が計算されない、`apps/api/src/routes/account/summary.ts:167-190`）。`summary.ts:221-232` の degraded（pending 申請の読みの失敗）は CURRENT では `enrichmentFailed` ではないので、その差を `DOCUMENTED DIFFERENCE D-17-3` として PR に書く。
 - **U03 `_headers`**（D-13-4、MIG-0704 から移す）: `apps/ops/public/_headers` に `/_ops_assets/*` `Cache-Control: public, max-age=31536000, immutable`（HTML には rule を置かない）。`assetHeaders.test.mjs` に `const ops = parse(await read("apps/ops/public/_headers"));` を足し、T01 の `/_ops_assets/index-AbC123.js` / `.css` / `a-AbC.svg` が `IMMUTABLE`、T03 の HTML の loop と `for (const rules of [site, app])` に `ops` を足す。
 - **U04 CI**: workflow に `npm run build --workspace=@flamenode/ops` と `npm run test --workspace=@flamenode/ops`。
 #### Test cases
@@ -1354,7 +1354,7 @@ PR を revert（Ops は本番に配信されない）。
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | guest / user / moderator / owner / admin × `/admin` | guest は `/entry`、user / moderator / owner は `/dashboard`（moderator は admin ではない、`adminRead/index.ts:34`）、admin は表示（`layout.tsx:23,27` と同じ） |
-| T02 | enrichment が失敗した状態（`enrichmentFailed` 相当） | `/entry?error=auth_temporarily_unavailable`（`layout.tsx:24-26`）。RH-001 の `degraded: true` または 503 `unavailable`（D-17-3、MIG-0707 U02 と同じ写像） |
+| T02 | enrichment が失敗した状態（`enrichmentFailed` 相当） | `/entry?error=auth_temporarily_unavailable`（`layout.tsx:24-26`）。RH-001 の 503 `unavailable`、または非 admin の `degraded: true`（D-17-3、MIG-0707 U02 と同じ写像。admin の degraded は通る） |
 | T03 | 任意の `/admin/*` の HTML | `<meta name="robots" content="noindex, nofollow">`（`layout.tsx:11-13`） |
 | T04 | adminRead が 401 / 403 / 503 | 401 は `/entry`、403 は `/dashboard`（`adminRead/index.ts:37-38`）、503 は `app/error.tsx` の表示（`index.ts:61-65`） |
 | T05 | CostGuardBanner admin source: mode normal / maintenance / cost_guard の 3 状態、endpoint 失敗 | CURRENT と同じ表示。失敗時は非表示（`CostGuardBanner.tsx:67-68`） |
@@ -1382,7 +1382,7 @@ npm run check:project-docs
 - [ ] browser 確認（390px / 1440px）が PR にある
 
 #### STOP
-- guard の判定（role / enrichment 失敗）を SPA 側で決める必要が出たら止める（Hono が正）。CURRENT の `enrichmentFailed`（`requestAuthContext.ts:215-225`）は RH-001 に無いので、MIG-0707 の guard が `degraded: true` と 503 を同じ Location に写す（D-17-3）。本 task は MIG-0707 の guard を使い、写像を変えない。
+- guard の判定（role / enrichment 失敗）を SPA 側で決める必要が出たら止める（Hono が正）。CURRENT の `enrichmentFailed`（`requestAuthContext.ts:215-225`）は RH-001 に無いので、MIG-0707 の guard が D-17-3 の写像（503 と非 admin の degraded を `/entry?error=auth_temporarily_unavailable`）を持つ。本 task は MIG-0707 の guard を使い、写像を変えない。
 - `GET /api/admin-read/cost-guard-banner` が D1 を使わずに mode を出せない、または admin と public の出し分けが変わるなら MIG-0661 に返す。
 
 #### Rollback
