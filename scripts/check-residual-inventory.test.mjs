@@ -416,3 +416,39 @@ test("T44: symlinked Worker Wrangler configurations cannot bypass discovery",
       assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers/fast-jobs/wrangler.toml"]);
     } finally { rmSync(temp,{recursive:true,force:true}); }
   });
+
+test("T45: an unsafe TOML Queue integer cannot silently round into an audited value",()=>{
+  const big="9007199254740993";
+  const changed=fast.replace("max_concurrency = 1","max_concurrency = "+big);
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    error=>/unsafe TOML integer \(value redacted\)/.test(error.message)&&
+      !error.message.includes(big));
+});
+
+test("T46: zero Queue batch size is invalid even if documented",()=>{
+  const changed=fast.replace("max_batch_size = 10","max_batch_size = 0");
+  assert.notEqual(changed,fast);
+  assert.throws(()=>extractConfigRows(changed,fastPath),/invalid consumer limit range/);
+});
+
+test("T47: negative Queue retry and delay settings are rejected",()=>{
+  for(const [key,valid,bad] of [
+    ["max_retries",3,-1],
+    ["retry_delay",60,-60]
+  ]){
+    const changed=fast.replace(`${key} = ${valid}`,`${key} = ${bad}`);
+    assert.notEqual(changed,fast);
+    assert.throws(()=>extractConfigRows(changed,fastPath),/invalid consumer limit range/);
+  }
+});
+
+test("T48: zero Queue concurrency is rejected while zero retries remain valid",()=>{
+  const invalid=fast.replace("max_concurrency = 1","max_concurrency = 0");
+  assert.notEqual(invalid,fast);
+  assert.throws(()=>extractConfigRows(invalid,fastPath),/invalid consumer limit range/);
+  const valid=fast.replace("max_retries = 3","max_retries = 0");
+  assert.notEqual(valid,fast);
+  const rows=extractConfigRows(valid,fastPath);
+  assert.ok(rows.some(row=>row.kind==="queue.consumer" && row.value.includes("retry 0")));
+});
