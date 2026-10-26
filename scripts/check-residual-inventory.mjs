@@ -84,7 +84,15 @@ function scalar(value) {
     try {return JSON.parse(value);} catch {throw Error("invalid TOML quoted string");}
   }
   if(value.startsWith("'") && value.endsWith("'")) return value.slice(1,-1);
-  if(/^-?\d+$/.test(value)) return Number(value);
+  if(/^-?\d+$/.test(value)) {
+    // TOML supports 64-bit integers, but JavaScript Number rounds values
+    // above MAX_SAFE_INTEGER. Never silently treat distinct Queue limits
+    // as the same documented value after a lossy conversion.
+    const number=Number(value);
+    if(!Number.isSafeInteger(number))
+      throw Error("unsafe TOML integer (value redacted)");
+    return number;
+  }
   if(value==="true"||value==="false") return value==="true";
   throw Error("unsupported TOML value (redacted)");
 }
@@ -175,7 +183,13 @@ export function extractConfigRows(source,config) {
     else if(section==="queues.consumers") {
       const name=req("queue"), dlq=req("dead_letter_queue");
       const keys=["max_batch_size","max_batch_timeout","max_retries","retry_delay","max_concurrency"];
-      if(!keys.every(k=>Number.isInteger(d[k]))) throw Error(where+": missing consumer batch/timeout/retry/delay/concurrency");
+      if(!keys.every(k=>Number.isSafeInteger(d[k])))
+        throw Error(where+": missing consumer batch/timeout/retry/delay/concurrency");
+      // Invalid zero/negative delivery limits are not valid operational
+      // settings and must not become an "approved" inventory baseline.
+      if(d.max_batch_size<1||d.max_batch_timeout<0||d.max_retries<0||
+          d.retry_delay<0||d.max_concurrency<1)
+        throw Error(where+": invalid consumer limit range (review required)");
       add("queue.consumer",name,"DLQ "+dlq+"; batch "+d.max_batch_size+"; timeout "+d.max_batch_timeout+
         "; retry "+d.max_retries+"; delay "+d.retry_delay+"; concurrency "+d.max_concurrency);
     } else if(section==="d1_databases") {
