@@ -34,7 +34,10 @@ const ALLOWED_KEYS = {
 const D1_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000";
 const KV_PLACEHOLDER_ID = "00000000000000000000000000000000";
 const clean = value => String(value).replaceAll(String.fromCharCode(96),"").trim();
-const signature = r => [r.config,r.kind,r.setting,r.value].map(clean).join("|");
+// Markdown cells are normalized once when read. Never normalize the parsed
+// Wrangler values: quoted whitespace/backticks are semantically significant,
+// and stripping them can incorrectly mark drifted bindings as documented.
+const signature = r => [r.config,r.kind,r.setting,r.value].join("|");
 const record = (config,kind,setting,value) => ({config,kind,setting,value});
 
 // Scope guard: a new Worker may have its own Wrangler file without any
