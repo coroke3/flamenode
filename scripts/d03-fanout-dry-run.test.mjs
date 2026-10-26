@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -301,6 +301,53 @@ test("T15 refuses missing and non-regular SQLite inputs without creating files",
     assert.equal(child.status, 1, "directory input must exit unsuccessfully");
     assert.equal(child.stdout.trim(), "", "failed dry-run cannot emit a success report");
     assert.match(child.stderr, /Expected an existing local SQLite file/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T16 rejects WAL-mode input before creating SQLite -shm sidecar", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fn-mig-0658-wal-"));
+  const file = join(dir, "local.sqlite");
+  try {
+    // Exit with a live WAL connection to retain committed -wal frames and
+    // simulate a local snapshot where the -shm index is not present.
+    const setup = spawnSync(process.execPath, ["--input-type=module", "-e", [
+      'import { DatabaseSync } from "node:sqlite";',
+      "const db = new DatabaseSync(process.argv[1]);",
+      'db.exec("CREATE TABLE x (id INTEGER); PRAGMA journal_mode=WAL; INSERT INTO x VALUES(1)");',
+      "process.exit(0);",
+    ].join("\\n"), file], { encoding: "utf8" });
+    assert.equal(setup.status, 0, setup.stderr);
+    assert.equal(existsSync(file + "-wal"), true, "fixture must retain WAL frames");
+    if (existsSync(file + "-shm")) unlinkSync(file + "-shm");
+    assert.equal(existsSync(file + "-shm"), false);
+
+    const hash = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const before = { entries: readdirSync(dir).sort(), db: hash(file), wal: hash(file + "-wal") };
+    assert.throws(() => analyzeLocalFile(file), /WAL-mode or unsupported SQLite/);
+    const child = spawnSync(process.execPath,
+      [fileURLToPath(CLI), "--sqlite", file], { encoding: "utf8" });
+    assert.equal(child.status, 1, child.stderr);
+    assert.equal(child.stdout.trim(), "", "rejected WAL must not emit success JSON");
+    assert.match(child.stderr, /WAL-mode or unsupported SQLite/);
+    assert.deepEqual(
+      { entries: readdirSync(dir).sort(), db: hash(file), wal: hash(file + "-wal") },
+      before,
+      "a rejected WAL snapshot must not create -shm or change either source file",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T17 rejects malformed SQLite headers before opening a database", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fn-mig-0658-invalid-"));
+  try {
+    const file = join(dir, "invalid.sqlite");
+    writeFileSync(file, "not a sqlite snapshot");
+    assert.throws(() => analyzeLocalFile(file), /Expected a valid SQLite snapshot file/);
+    assert.deepEqual(readdirSync(dir), ["invalid.sqlite"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
