@@ -17,6 +17,22 @@ const KNOWN = new Set(["","triggers","assets","services","queues.producers",
   "queues.consumers","d1_databases","r2_buckets","kv_namespaces"]);
 const ARRAY_SECTIONS = new Set(["services","queues.producers","queues.consumers",
   "d1_databases","r2_buckets","kv_namespaces"]);
+// Fail closed on unreviewed binding families. Inert sections have no bindings.
+const INERT_SECTIONS = new Set(["build","observability","placement","vars"]);
+const ALLOWED_KEYS = {
+  "": ["name","main","compatibility_date","compatibility_flags","workers_dev","minify"],
+  triggers: ["crons"],
+  assets: ["directory","binding","run_worker_first"],
+  services: ["binding","service"],
+  "queues.producers": ["binding","queue"],
+  "queues.consumers": ["queue","dead_letter_queue","max_batch_size",
+    "max_batch_timeout","max_retries","retry_delay","max_concurrency"],
+  d1_databases: ["binding","database_name","database_id","migrations_dir"],
+  r2_buckets: ["binding","bucket_name"],
+  kv_namespaces: ["binding","id","preview_id"]
+};
+const D1_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000";
+const KV_PLACEHOLDER_ID = "00000000000000000000000000000000";
 const clean = value => String(value).replaceAll(String.fromCharCode(96),"").trim();
 const signature = r => [r.config,r.kind,r.setting,r.value].map(clean).join("|");
 const record = (config,kind,setting,value) => ({config,kind,setting,value});
@@ -67,6 +83,10 @@ export function extractConfigRows(source,config) {
       const m=/^(\[\[?)([\w.-]+)(\]\]?)$/.exec(line);
       if(!m || (m[1].length!==m[3].length)) throw Error(config+":"+(index+1)+": invalid section");
       if(ARRAY_SECTIONS.has(m[2]) && m[1]!=="[[") throw Error(config+":"+(index+1)+": expected array section "+m[2]);
+      if(!KNOWN.has(m[2]) && !INERT_SECTIONS.has(m[2]))
+        throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
+      if(INERT_SECTIONS.has(m[2]) && m[1]==="[[")
+        throw Error(config+":"+(index+1)+": unsupported array section "+m[2]);
       blocks.push({section:m[2],fields:{},line:index+1});
       return;
     }
@@ -76,6 +96,8 @@ export function extractConfigRows(source,config) {
       return;
     }
     if(KNOWN.has(block.section)) {
+      if(!ALLOWED_KEYS[block.section]?.includes(m[1]))
+        throw Error(config+":"+(index+1)+": unreviewed "+block.section+" key "+m[1]);
       if(Object.hasOwn(block.fields,m[1])) throw Error(config+":"+(index+1)+": duplicate "+m[1]);
       try {block.fields[m[1]]=decode(m[2].trim());}
       catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
@@ -104,11 +126,19 @@ export function extractConfigRows(source,config) {
       if(!keys.every(k=>Number.isInteger(d[k]))) throw Error(where+": missing consumer batch/timeout/retry/delay/concurrency");
       add("queue.consumer",name,"DLQ "+dlq+"; batch "+d.max_batch_size+"; timeout "+d.max_batch_timeout+
         "; retry "+d.max_retries+"; delay "+d.retry_delay+"; concurrency "+d.max_concurrency);
-    } else if(section==="d1_databases") add("d1.binding",req("binding"),req("database_name"));
+    } else if(section==="d1_databases") {
+      // Tracked templates must not embed a real D1 database identifier.
+      // Production uses separately generated config, never printed here.
+      if(req("database_id")!==D1_PLACEHOLDER_ID)
+        throw Error(where+": non-placeholder D1 identifier in tracked config (redacted)");
+      add("d1.binding",req("binding"),req("database_name"));
+    }
     else if(section==="r2_buckets") add("r2.binding",req("binding"),req("bucket_name"));
     else if(section==="kv_namespaces") {
-      const id=req("id");
-      add("kv.binding",req("binding"),/^0{32}$/.test(id) ? "checked-in placeholder ID" : "non-placeholder ID (redacted)");
+      if(req("id")!==KV_PLACEHOLDER_ID ||
+          ("preview_id" in d && d.preview_id!==KV_PLACEHOLDER_ID))
+        throw Error(where+": non-placeholder KV identifier in tracked config (redacted)");
+      add("kv.binding",req("binding"),"checked-in placeholder ID");
     }
   });
   const seen=new Set();
