@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.ts";
 import { resetOperationModeCachesForTests } from "../src/routes/live/operationMode.ts";
+import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
+import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
 
 function unavailableD1(calls) {
   return { prepare: () => {
@@ -128,4 +130,105 @@ test("MIG-0661 T02: forced static-only mode still reads at most one mirror", asy
   assert.deepEqual(await requestWith(env), { mode: "static_only", reason: "operator note" });
   assert.equal(kv.count, 1);
   assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T03: admin banner mirrors CURRENT D1 mode/reason with a single bounded read", async () => {
+  const sqlite = createSqlite();
+  try {
+    seedAdminRead(sqlite);
+    sqlite.prepare("UPDATE system_settings SET operation_mode = ?, cost_guard_reason = ? WHERE id = 'default'")
+      .run("read_only", "temporary freeze");
+    const db = createD1(sqlite);
+    const response = await app.request(
+      "/api/admin-read/cost-guard-banner",
+      { method: "GET", headers: cookie("tok-root") },
+      { DB: db },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.deepEqual(await response.json(), { mode: "read_only", reason: "temporary freeze" });
+    assert.equal(db.stats.statements, 2, "one auth session SELECT and one settings SELECT only");
+    assert.equal(db.stats.writes, 0);
+    assert.equal(db.stats.batches, 0);
+    sqlite.exec("DELETE FROM system_settings WHERE id = 'default'");
+    const missingDb = createD1(sqlite);
+    const missing = await app.request(
+      "/api/admin-read/cost-guard-banner",
+      { method: "GET", headers: cookie("tok-root") },
+      { DB: missingDb },
+    );
+    assert.equal(missing.status, 200);
+    assert.deepEqual(await missing.json(), { mode: "normal", reason: null });
+    assert.equal(missingDb.stats.statements, 2);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0661 T03: admin D1 settings failure fails soft without exposing internals", async () => {
+  const sqlite = createSqlite();
+  try {
+    seedAdminRead(sqlite);
+    const base = createD1(sqlite);
+    let settingsQueries = 0;
+    const wrapped = {
+      prepare(query) {
+        if (query.includes("cost_guard_reason")) {
+          settingsQueries += 1;
+          throw new Error("SENSITIVE-D1-DRIVER-DETAIL");
+        }
+        return base.prepare(query);
+      },
+    };
+    const response = await app.request(
+      "/api/admin-read/cost-guard-banner",
+      { method: "GET", headers: cookie("tok-root") },
+      { DB: wrapped },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    const body = await response.text();
+    assert.deepEqual(JSON.parse(body), { mode: "normal", reason: null });
+    assert.doesNotMatch(body, /SENSITIVE-D1/);
+    assert.equal(settingsQueries, 1);
+    assert.equal(base.stats.statements, 1, "authentication must still be required");
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0661 T04: admin banner inherits guest/user/moderator/banned refusal", async () => {
+  const sqlite = createSqlite();
+  try {
+    seedAdminRead(sqlite);
+    for (const [token, expected, body] of [
+      [null, 401, null],
+      ["tok-alice", 403, { error: "Forbidden", redirect: "/dashboard" }],
+      ["tok-bob", 403, { error: "Forbidden", redirect: "/dashboard" }],
+      ["tok-badmin", 403, { error: "Forbidden", message: "User is banned" }],
+    ]) {
+      const db = createD1(sqlite);
+      const response = await app.request(
+        "/api/admin-read/cost-guard-banner",
+        { method: "GET", headers: token ? cookie(token) : {} },
+        { DB: db },
+      );
+      assert.equal(response.status, expected, String(token));
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+      const actual = await response.json();
+      if (body) assert.deepEqual(actual, body);
+      assert.ok(db.stats.statements <= 1, "denied callers cannot query settings");
+      assert.equal(db.stats.writes, 0);
+    }
+    const db = createD1(sqlite);
+    const mutation = await app.request(
+      "/api/admin-read/cost-guard-banner",
+      { method: "POST", headers: cookie("tok-root") },
+      { DB: db },
+    );
+    assert.equal(mutation.status, 404, "admin-read endpoint is GET-only");
+    assert.equal(db.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
 });
