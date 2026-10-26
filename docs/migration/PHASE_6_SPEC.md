@@ -371,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0661 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0663 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-2, D-17-4
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -3076,12 +3076,104 @@ npm run check:public-api-leaks
 #### Rollback
 PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・旧 Next は変わらない。
 
+### MIG-0662: audit restore の実行 API（SA-011）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-4: SA-011 の HTTP endpoint に所有 task が無かった。MIG-0616 は core だけ、MIG-0629 は SA-009 / 010 だけ。restore は video / event の可視性 fence を戻すので、MIG-0603 U02a の Hono 用 `VideoVisibilityTransitionHost` の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0602, MIG-0616, MIG-0629, MIG-0603 / **Decisions:** D-10, D-13-53, D-13-54, D-13-55, D-16-1, D-17-4
+- **Verified against:** `13141d1` (2026-10-27)
+#### Source snapshot
+- CURRENT: `src/lib/actions/audit-admin.ts:142-171` `restoreAuditLogAction`（guard `requireAdminWrite("admin_permissions")` :22、schema `restoreSchema` :124-129 = `audit_id`、`reason`（1〜500）、`confirm_text`（任意）、`force_overwrite`（0 / 1、既定 0）、`restoreAuditLog(db, { ..., confirmText, forceOverwrite: force_overwrite === 1, dry_run: false })` :158-165、応答 `{ ok, message, restore_run_id, diff }` :167-171）。呼び出し元は `src/components/admin/AuditRestoreForm.tsx:66`（確認文字列 `RESTORE ${auditId}` :24、`confirm_text` / `force_overwrite` の set :64-65）。
+- CURRENT の host: `src/lib/audit/restore.ts:14-20`（`manifest: nextVisibilityManifestHost`、`publicCacheKeys: nextVideoPublicCacheKeyHost`、`deletePublicJsonCaches`、`invalidateEventExportCache`、`loadQueueWakeHost` は commit 後に `nextPorts` を動的 import）。
+- core: `packages/server-core/src/audit/restore.ts:35` `AuditRestoreHost`、:174 `restoreAuditLog(db, options, host)`（MIG-0616、D-10）。
+- Hono の隣: `apps/api/src/routes/admin/audit.ts`（MIG-0629。`/settings` :59、`/dry-run` :99。dry-run は全メソッドが throw する host :36-56 で `restoreAuditLog` を呼ぶ）。mount は `apps/api/src/routes/admin/index.ts:51`（session → origin / writeGuard → `dbMiddleware` の後、CostGuard は route 内 `admin_permissions`）。
+- Hono に既にある部品: `invalidateEventExportCache` 相当は `apps/api/src/routes/admin/apiEndpoints.ts:61-80`（`eventExportCacheKeys` を `caches.default` から消す。今は module private）。manifest / video の public cache key の host は MIG-0603 U02a（`PHASE_6_SPEC.md` の MIG-0603 U02a、D-13-42）が作る。Queue wake は D-0603-1 / D-13-41 と同じく何もしない（queue 行は batch に入る）。
+#### Owned paths
+- 新規: `+apps/api/src/visibility/auditRestoreHost.ts`（`AuditRestoreHost` の Hono 実装。manifest と publicCacheKeys は MIG-0603 U02a の host を import、`deletePublicJsonCaches` は同じ host のもの、`invalidateEventExportCache` は `apiEndpoints.ts` から export した関数、`loadQueueWakeHost` は wake 0 の loader）, `+apps/api/test/auditRestore.test.mjs`
+- 変更: `apps/api/src/routes/admin/audit.ts`（`POST /restore` を足す）, `apps/api/src/routes/admin/apiEndpoints.ts`（`invalidateEventExportCache` に `export` を付けるだけ）, `packages/contracts/src/admin/audit.ts`（`AuditRestoreSchema` と `RestoreAuditLogActionResult` 型）, `docs/migration/API_MATRIX.md`（SA-011 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `packages/server-core/src/audit/restore.ts`（core の意味を変えない）, `src/lib/**`, `apps/api/src/middleware/**`
+#### Micro-units
+- **U01 host**: `auditRestoreHost.ts`。CURRENT host の 5 つを Hono の値に対応させる。test は「各メソッドが CURRENT host と同じ key 集合で呼ばれる」（MIG-0603 U02a の test と同じ形）。
+- **U02 route**: `POST /api/admin/audit/restore`。`readAdminJsonBody` → `AuditRestoreSchema.safeParse`（CURRENT `restoreSchema` と同じ範囲と既定値）→ `restoreAuditLog(db, { auditId, userId, reason, confirmText, forceOverwrite, dry_run: false }, auditRestoreHost)`。応答は常に CURRENT と同じ `{ ok, message?, restore_run_id?, diff? }`。413 / 400 は `/dry-run` と同じ文言。
+- **U03 parity**: 実 CURRENT action と同じ node:sqlite の DB で、video の公開→非公開の audit を restore（fence の precommit / 補償を含む）、event の audit、確認文字列の不一致、競合あり（`force_overwrite` 0 / 1）を比べる。比べるのは audit 行・`audit_restore_runs`・`static_rebuild_queue`・manifest（fake bucket）。CURRENT の wake 数と Hono の 0 は `DOCUMENTED DIFFERENCE D-13-41` として 1 件。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 正しい `confirm_text` で restore | CURRENT と同じ行・`restore_run_id`、manifest の更新順も同じ |
+| T02 | `confirm_text` 無し / 不一致 | CURRENT と同じ `{ ok:false, message }`、書き込み 0 |
+| T03 | 競合あり、`force_overwrite` 0 / 1 | 0 は拒否と diff、1 は上書き（CURRENT と同じ） |
+| T04 | D1 batch 失敗 | fence の補償が CURRENT と一致 |
+| T05 | 非 admin・未ログイン・別 origin・BAN | 既存の `/api/admin/*` と同じ拒否、書き込み 0 |
+| T06 | 64KB 超の body / JSON でない body | `/dry-run` と同じ 413 / 400 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/contracts
+npm run build --workspace=@flamenode/api
+node --test --experimental-strip-types apps/api/test/auditRestore.test.mjs
+npm run test --workspace=@flamenode/api
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-011 行に `POST /api/admin/audit/restore`。`FILE_MIGRATION_MATRIX.md` に新規 file と `src/lib/actions/audit-admin.ts` 行の移植先。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T06 が PASS
+- [ ] 危険操作として独立レビューを通っている（restore は本番の公開状態を戻す）
+#### STOP
+- core の `restoreAuditLog` を変える必要が出たら止める（MIG-0616 の意味）。
+- MIG-0603 U02a の host に無い値（例: 別の cache key 集合）が要ると分かったら止める。
+- 本番の D1 で restore を試す必要が出たら止める（明示承認事項）。
+#### Rollback
+PR を revert（SA-011 は CURRENT の server action が引き続き動く）。
+
+### MIG-0663: Manage の sidebar 用に navigation へ active X と運営 X を足す
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-17-2: CURRENT の sidebar は active X と運営 X が食い違うと警告を出す（`ConsoleSidebar.tsx:106-108`）が、`GET /api/manage/navigation` はその 2 つを返さない。同じ値は `GET /api/manage` が既に返す。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0624 / **Decisions:** D-16-1, D-17-2
+- **Verified against:** `13141d1` (2026-10-27)
+#### Source snapshot
+- CURRENT: `src/components/layout/ConsoleSidebar.tsx:106-108`（`warnActiveX = shouldWarnManageActiveXMismatch(activeX, manageStaffXIds)`）、`src/components/layout/ManageSidebarNav.tsx:218`（警告の表示）。判定は `packages/domain/src/video/ownership.ts:206-214`（active X が空、または運営 X が 0 件なら false）。
+- Hono: `apps/api/src/routes/manage/navigation.ts:9-25`（`access` / `events` / `truncated` だけ）。同じ snapshot と data から `GET /api/manage` は `activeXUserId`（admin は null）と `manageStaffXUserIds`（admin は `[]`）を返している（`apps/api/src/routes/manage/dashboard.ts:38-39`、`resolveActiveXUserId(user.active_x_user_id, data.linked)`）。`loadManageData` は navigation でも既に呼ばれているので、D1 の文は増えない。
+- DTO: `packages/contracts/src/manage/shared.ts:28-34` `ManageNavigationResponseSchema`。
+#### Owned paths
+- 変更: `apps/api/src/routes/manage/navigation.ts`, `packages/contracts/src/manage/shared.ts`（`activeXUserId: z.string().nullable()`、`manageStaffXUserIds: z.array(z.string())` を足す。既存 field は変えない）, `apps/api/test/manage.parity.test.mjs`（navigation の case を足す）, `docs/migration/API_MATRIX.md`
+- 触らない: `apps/api/src/routes/manage/{access,events,dashboard}.ts`, `src/**`
+#### Micro-units
+- **U01**: navigation の応答に `activeXUserId: isAdmin ? null : resolveActiveXUserId(user.active_x_user_id, data.linked)` と `manageStaffXUserIds: isAdmin ? [] : snapshot.manageStaffXUserIds` を足す（`dashboard.ts:38-39` と同じ式）。
+- **U02 test**: 下の T01〜T04。D1 の文の数が変わらないことを数える。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 非 admin、active X と運営 X が一致 / 不一致 | `GET /api/manage` と同じ 2 値 |
+| T02 | admin | `activeXUserId: null`、`manageStaffXUserIds: []` |
+| T03 | active X 未選択、運営 X 0 件 | null / `[]`（`shouldWarnManageActiveXMismatch` は false） |
+| T04 | D1 の文の数 | 変更前と同じ（session を含め 3 以下、`navigation.ts:8` の comment） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/contracts
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+```
+#### Ledger updates
+`API_MATRIX.md` の `GET /api/manage/navigation` 行に 2 field。
+#### DONE checklist
+- [ ] T01〜T04 が PASS
+- [ ] 既存 field の値が変わっていない
+#### STOP
+- 運営 X の集合を navigation 用に別の query で読む必要が出たら止める（snapshot の値を使う）。
+#### Rollback
+PR を revert（追加 field だけ。読み手は MIG-0719 だけ）。
+
 ### MIG-0607: Phase 6 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0661 / **Decisions:** D-14-14, D-15-15, D-16-13
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0663 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-2, D-17-4
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。

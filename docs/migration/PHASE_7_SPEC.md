@@ -314,22 +314,20 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0704: manage（Manage イベント運営画面群）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0604・MIG-0703・MIG-0707 の後（D-15-13 で U01 の scaffold を MIG-0707 へ分割）。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704
+- **Readiness:** NEEDS_REFINEMENT — Final audit だけ（D-17-1: U01（layout の残り）〜U05 を MIG-0719..MIG-0723 へ分割した。画面の実装は子 task）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0604, MIG-0703, MIG-0624, MIG-0707, MIG-0661 / **Decisions:** D-05 DECIDED, D-14-3, D-15-13, D-16-5（manage の video 詳細の状態 form `ManageVideoStatusForm` は本 task）, D-16-13（`CostGuardBanner` は MIG-0661 の `GET /api/operation-mode/banner`）
+- **Depends on:** MIG-0719..MIG-0723 / **Decisions:** D-05 DECIDED, D-14-3, D-15-13, D-16-5（manage の video 詳細の状態 form `ManageVideoStatusForm` は本 task）, D-16-13（`CostGuardBanner` は MIG-0661 の `GET /api/operation-mode/banner`）, D-17-1
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT（12ファイル）: `app/(manage)/manage/page.tsx`, `app/(manage)/manage/events/[id]/{page,edit/page,audience/page,slots/page,staff/page,videos/page,videos/[videoId]/page,youtube-playlist/page,review/page}.tsx`, `app/(manage)/manage/notifications/page.tsx`, `app/(manage)/manage/x-link-requests/page.tsx`。
 - `apps/ops` の package・build・guard・`_headers` は MIG-0707 が作る（D-15-13）。本 task は画面と `CostGuardBanner`、`apps/ops/wrangler.toml`。
 - 部品: `src/components/manage/**`, `src/components/layout/ManageSidebarNav.tsx`, `ManageActiveXNotice.tsx`。
 #### Owned paths
-- 新規: `+apps/ops/src/routes/manage/**`, `+apps/ops/wrangler.toml`（MIG-0628 から引き継ぎ、D-14-3。MIG-0628 の `apps/app/wrangler.toml` と同じ形、id は placeholder、`wrangler deploy --dry-run` を CI に足す）
-- 変更: `apps/ops/src/routes/router.tsx`（MIG-0707 の route 枠を埋める）
-- 触らない: `app/(manage)/**`, `apps/app/**`
+- 新規・変更: なし（画面と部品は子 task が持つ）。Final audit の表は本 task の PR に置く
 #### Micro-units
-- U01〜U05 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0704 のとおり。
-- **U01**: scaffold・guard・noindex・`_headers` は MIG-0707（D-15-13）。本 task の U01 は `CostGuardBanner`（読む API は MIG-0661、D-16-13）と Manage の layout（`ConsoleShell` / sidebar、`GET /api/manage/navigation`）。
+- U01（layout の残り）〜U05: MIG-0719..MIG-0723（D-17-1）。
+- **Final audit**: [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) の Final audit（CURRENT_ROUTES の全 route、担当外の拒否、Ops の独立 build と deep URL）を、子 task の merge 後の main で確かめる。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -361,20 +359,19 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0705: admin（Admin 全体管理者画面群）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0605 と MIG-0704 の後。micro-unit の正本は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705
+- **Readiness:** NEEDS_REFINEMENT — Final audit だけ（D-17-1: U01〜U08（U08 の 45 route の sweep は本 task の Final audit に残す） を MIG-0724..MIG-0731 へ分割した。画面の実装は子 task）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638, MIG-0642..MIG-0648, MIG-0650..MIG-0657, MIG-0660, MIG-0661 / **Decisions:** D-05 DECIDED, D-15-15（admin 画面が呼ぶ MIG-0650〜0657 / 0660 を依存に追加）, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）, D-14-14（0637 / 0638 の分割先 0642〜0648 を依存に追加）, D-16-5（admin の video 詳細の状態 form `AdminVideoStatusForm` は本 task）, D-16-13（`CostGuardBanner source="admin"` は MIG-0661 の `GET /api/admin-read/cost-guard-banner`）
+- **Depends on:** MIG-0724..MIG-0731 / **Decisions:** D-05 DECIDED, D-15-15（admin 画面が呼ぶ MIG-0650〜0657 / 0660 を依存に追加）, D-13-56 DECIDED（2026-10-25: MIG-0605 の残りを MIG-0636〜0638 へ分割。admin 画面が呼ぶ 0635/0637/0638 を依存に追加）, D-14-14（0637 / 0638 の分割先 0642〜0648 を依存に追加）, D-16-5（admin の video 詳細の状態 form `AdminVideoStatusForm` は本 task）, D-16-13（`CostGuardBanner source="admin"` は MIG-0661 の `GET /api/admin-read/cost-guard-banner`）, D-17-1
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - CURRENT: `app/(admin)/**/page.tsx` 45件（`CURRENT_ROUTES.md` Admin 45）。部品は `src/components/admin/**`。
 - 危険操作（spreadsheet 書き込み、X merge、audit restore、BAN）は strict audit と確認が必要（`server-actions/README.md`）。
 #### Owned paths
-- 新規: `+apps/ops/src/routes/admin/**`（lazy chunk）
-- 触らない: `app/(admin)/**`, `apps/app/**`
+- 新規・変更: なし（画面と部品は子 task が持つ）。Final audit の表は本 task の PR に置く
 #### Micro-units
-- U01〜U08 と Final audit は [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) MIG-0705 のとおり。
-- **U01 追加（coverage gap G10, G12）**: `(admin)/layout.tsx` の guard（manage と同じ redirect に加え、admin 以外は `/dashboard`）、error boundary、noindex、`CostGuardBanner`。読み取りは MIG-0625 / MIG-0626 の API を使う。
+- U01〜U08（U08 の 45 route の sweep は本 task の Final audit に残す）: MIG-0724..MIG-0731（D-17-1）。
+- **Final audit**: [`TASK_MICRO_UNITS.md`](TASK_MICRO_UNITS.md) の Final audit（CURRENT_ROUTES の全 route、担当外の拒否、Ops の独立 build と deep URL）を、子 task の merge 後の main で確かめる。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -419,7 +416,7 @@ Phase 7 共通契約のとおり。
 - 触らない: `apps/app/**`, `app/(manage)/**`, `app/(admin)/**`, `packages/ui/**`
 #### Micro-units
 - **U01 package + build**: `apps/app` と同じ形で package / tsconfig / vite.config / index.html を作る（`assetsDir` と noindex だけが違う）。`npm ci` で lock を更新。
-- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。
+- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。 RH-001 は CURRENT の `enrichmentFailed`（`src/lib/auth/requestAuthContext.ts:215-225`）を直接返さないので、`degraded: true` と 503 `unavailable` を `/entry?error=auth_temporarily_unavailable` に写す（D-17-3。`apps/api/src/routes/account/summary.ts:221-232,283-289` の degraded は管理権限・X の読みの失敗で立つ）。
 - **U03 `_headers`**（D-13-4、MIG-0704 から移す）: `apps/ops/public/_headers` に `/_ops_assets/*` `Cache-Control: public, max-age=31536000, immutable`（HTML には rule を置かない）。`assetHeaders.test.mjs` に `const ops = parse(await read("apps/ops/public/_headers"));` を足し、T01 の `/_ops_assets/index-AbC123.js` / `.css` / `a-AbC.svg` が `IMMUTABLE`、T03 の HTML の loop と `for (const rules of [site, app])` に `ops` を足す。
 - **U04 CI**: workflow に `npm run build --workspace=@flamenode/ops` と `npm run test --workspace=@flamenode/ops`。
 #### Test cases
@@ -986,6 +983,963 @@ npm run check:project-docs
 - banner のために D1 を読む必要が出たら止める（公開 source は D1 を読まない）。
 #### Rollback
 Phase 7 共通契約のとおり。
+
+### MIG-0719: Manage layout（ConsoleShell・sidebar・ManageActiveXNotice・CostGuardBanner・`apps/ops/wrangler.toml`、MIG-0704 U01 の残り）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0704 を 0719〜0723 へ分割。MIG-0707 の merge 後、かつ banner は MIG-0661 の merge 後に READY。sidebar の active X 警告は MIG-0663（navigation に 2 field を足す API、READY）を Merge gate にする。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0624（DONE、manage read） / **Decisions:** D-05, D-14-3, D-15-13, D-16-1, D-16-2, D-16-4, D-16-13, D-17-1
+- **Merge gate:** MIG-0661（D-16-13、`GET /api/operation-mode/banner` の実装。現在 apps/api に route 無し）、MIG-0663（D-17-2、navigation の `activeXUserId` / `manageStaffXUserIds`）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT layout: `app/(manage)/layout.tsx`（52 行）。guard は :29-34（未ログイン→`/entry`、enrichment 失敗→`/entry?error=auth_temporarily_unavailable`、admin でも manage でも無い→`/dashboard`）。DOM は `<div data-manage-shell data-fn-surface="manage">` :38、`<CostGuardBanner />` :39（公開 source。`(manage)` は admin ではないので引数なし）、`<PublicHeader user hydrateAccount />` :40、`<ConsoleShell consoleMode="manage" navigation={<ConsoleSidebar>}>` :41-、`<PublicFooter />`。robots noindex は `layout.tsx` の metadata。
+- ConsoleShell: `src/components/layout/ConsoleShell.tsx:7-34`（class `manage-shell` / `fn-console-frame`、label「運営メニュー」、`ConsoleDrawer` に包む）。
+- ConsoleSidebar（server component、DB 直読み）: `src/components/layout/ConsoleSidebar.tsx:72-120`。非表示条件 `!isAdmin && navigation.events.length === 0 && !authorization.canManageXIdLinkRequests` が `:98-104`。`warnActiveX` は `:106-108`（`shouldWarnManageActiveXMismatch(activeX, manageStaffXIds)`）。モード説明 banner `SidebarModeBanner` は `:34-66`（manage 文言 `:54-64`）。
+- ManageSidebarNav（client）: `src/components/layout/ManageSidebarNav.tsx:107`（props `events` / `showXLinkRequests` / `warnActiveX` / `activeX`）。localStorage `flamenode:recent-manage-events` は `:119-122`（per-viewer の便利機能、SPA でも可）。`EventGroup` 「最近」「開催中・公開中」 `:265-266`。`/manage` link `:227`、`/manage/x-link-requests` link `:235-237`、`warnActiveX` の警告 `:218`。CSS は `@/components/admin/AdminSidebarNav.module.css` を import（`:13`、admin と共有）。
+- ManageActiveXNotice: `src/components/layout/ManageActiveXNotice.tsx:11-31`。`role="status"`、文言 `:23-27`、判定 `:15`（`shouldWarnManageActiveXMismatch`）。
+- CostGuardBanner: `src/components/layout/CostGuardBanner.tsx:9-41`（TONE の 4 mode の label / description / bg / border / color）、`:52` 本体、公開 source `:70-75`（`resolveCostGuardBannerSnapshot`、`src/lib/operationMode/publicMode.ts:108-117`、D1 を読まない）、`normal` は null `:77`、markup `:80-97`（`role="status"` `aria-live="polite"`、`fn-public-container` の中に label・description・`(理由: x)`）。CSS は `CostGuardBanner.module.css`（`:7`）。同 CSS は `src/components/layout/PublicDegradedBanner.tsx:3` からも使われる（Personal 側と共有）。
+- Read API（ナビ）: `GET /api/manage/navigation` = `apps/api/src/routes/manage/navigation.ts:9`（401 `:11`、`manageGate` 403 `:14`、`access` / `events` / `truncated` を返す `:17-24`）。mount は `apps/api/src/routes/manage/index.ts:33`、認証は `index.ts:30-31`。DTO は `packages/contracts/src/manage/shared.ts:28-37`。`manageGate` は `apps/api/src/routes/manage/access.ts:215-218`（403 `{reason:"manage_access_required"}`）。
+- Read API（banner）: `GET /api/operation-mode/banner`（MIG-0661、未実装。`apps/api/src` に route 無し。`PHASE_6_SPEC.md:2967-2971` の設計）。
+- Write: この task に SA は無い。
+- wrangler: `apps/ops/wrangler.toml` は main に無い。template は root の `wrangler.toml`（`name = "flamenode-web"` :1、`[assets]` :29-31、placeholder `database_id` :70、KV id :85）。`apps/app/wrangler.toml` は main に無い（D-14-3 の「同じ形」は当てにならない、D-17）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/manage/ManageShell.tsx`（layout 相当: `data-manage-shell`、CostGuardBanner、header/footer、ConsoleShell）, `+apps/ops/src/components/shared/{ConsoleShell,ConsoleDrawer,ConsolePageHeader,ManageSidebarNav,ManageActiveXNotice,CostGuardBanner,NotificationOutboxSummary}.tsx`（`NotificationOutboxSummary` は read のみ。`lib/notifications/display` の drizzle 部分は port せず、表示に要る pure 部分だけ）（`ConsoleSidebar` の server 部分は API 読みに置換し、ファイルは作らない）, `+apps/ops/src/lib/manage/sidebarEvents.ts`（1 行目 `// Port of CURRENT src/lib/manage/sidebarEvents.ts (MIG-0719). Same output.`。import `#utils/event-status-core` は `packages/domain` 側に同名があればそれを import）, `+apps/ops/src/api/manage.ts`（`getManageNavigation()`、`GET /api/manage/navigation`、`ManageNavigationResponseSchema` を `@flamenode/contracts` から import）, `+apps/ops/src/api/operationMode.ts`（1 行目 `// D-16-1 provisional: replace with @flamenode/contracts at merge`、`GET /api/operation-mode/banner`）, `+apps/ops/src/api/write.ts`（D-16-2 の `send()` と同じ中身。Manage の書き込みは全部これを使うので本 task が作る。D-17）, `+apps/ops/src/styles/`（下記 U03 の CSS port 3 件）, `+apps/ops/wrangler.toml`（D-14-3）, `+apps/ops/test/manageLayout.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（`/manage` 系の layout wrapper を `ManageShell` に 1 行。MIG-0707 の枠を埋める）, `apps/ops/src/main.tsx`（CSS import 行）, `.github/workflows/migration-docs-check.yml`（`wrangler deploy --dry-run` の step 1 つ。MIG-0707 が同 file に足す Ops build の行の後）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(manage)/**`（移植元）, `src/components/**`（移植元）, `apps/api/**`（navigation / banner の API は MIG-0663 / MIG-0661 が作る）, `apps/app/**`, `apps/ops/src/routes/manage/**` の画面（0720〜0723）
+
+#### Micro-units
+- **U01 ナビとシェル**: `GET /api/manage/navigation`（navigation.ts:9）を読む。ConsoleShell / ConsoleDrawer / ConsolePageHeader / ManageSidebarNav を移植。非表示条件を `ConsoleSidebar.tsx:98-104` と同じにする（`access.isAdmin` が false、events 0 件、`access.canManageXIdLinkRequests` が false で非表示）。`/manage` と `/manage/x-link-requests` の link 条件は `ManageSidebarNav.tsx:227,235` と同じ。`warnActiveX` は navigation の `activeXUserId` / `manageStaffXUserIds`（MIG-0663、D-17-2）を `@flamenode/domain/video` の `shouldWarnManageActiveXMismatch`（`packages/domain/src/video/ownership.ts:206-214`）に渡す（再実装しない）。
+- **U02 banner と通知**: CostGuardBanner を公開 source で移植（`GET /api/operation-mode/banner`、`{mode, reason}`。`normal` / fetch 失敗は null）。`ManageActiveXNotice` を shared に置く（0720 / 0721 / 0723 が import する。CURRENT `ManageActiveXNotice.tsx:11-31` と文言同じ）。merge は MIG-0661 の後（U02 の import 先を `packages/contracts/src/costGuardBanner.ts` に置き換える、D-16-1 の 5）。
+- **U03 CSS**: 次の 3 つを port する。(a) `src/styles/admin-manage.css`（3928 行。`[data-manage-shell]` の selector が `:842`、`:1378`、`:1382` などにある。`globals.css:9` で import されている）の manage/console 部分、(b) `src/styles/admin-mobile.css`（647 行、`globals.css:10`）の console 部分、(c) `CostGuardBanner.module.css` と `AdminSidebarNav.module.css`（module）。(a)(b)(c) は admin（MIG-0705）と共有するので、先に merge した方が作り、後の方は import だけ（D-17）。
+- **U04 wrangler**: `apps/ops/wrangler.toml` を root `wrangler.toml` の形（`[assets]`、`[observability]`、`[placement]`、binding の placeholder ID）で作る。OpenNext の `main`、`WORKER_SELF_REFERENCE`、queue producer は入れない。ID は `00000000-…` の placeholder（root `wrangler.toml:70,85` と同じ）。CI には `wrangler deploy --dry-run` だけを足す。本番の Worker・route・custom domain は作らない（D-14-3）。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | navigation の events 2 件（`start_time` 降順の API 順）で `/manage/events/:id` を開く | サイドバーに CURRENT と同じ順で 2 件。該当 event の link に `aria-current="page"`（ManageSidebarNav.tsx:50-54 と同じ判定） |
+| T02 | 非 admin、events 0 件、`canManageXIdLinkRequests=false` | サイドバー全体が非表示（ConsoleSidebar.tsx:98-104） |
+| T03 | 非 admin、events 0 件、`canManageXIdLinkRequests=true` | サイドバーは表示し、「X ID 連携申請」link のみ（ManageSidebarNav.tsx:235-237） |
+| T04 | navigation の 401 / 403（`manage_access_required`） | サイドバーを出さず、画面は MIG-0707 の guard の Location（CURRENT layout.tsx:29-34）。例外を投げない |
+| T05 | banner: `economy` / `read_only` / `static_only` / `maintenance` + reason | CURRENT と同じ label・description・`(理由: x)`（CostGuardBanner.tsx:9-41, :92-94） |
+| T06 | banner: `normal` / fetch 失敗 / JSON 不正 | 何も出さない（CostGuardBanner.tsx:77 と同じ） |
+| T07 | ManageActiveXNotice と sidebar の警告: active X と運営 X が不一致 / 一致 / active X 未選択 / 運営 X 0 件 | 不一致だけ `role="status"` と文言（ManageActiveXNotice.tsx:23-27）と sidebar の警告。他は null（`packages/domain/src/video/ownership.ts:206-214`） |
+| T08 | `wrangler deploy --dry-run --config apps/ops/wrangler.toml`（CI） | placeholder ID のまま通る。実 ID・route を含まない |
+| T09 | `rg "@/|next/" apps/ops/src` | 0 件 |
+
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npx wrangler deploy --dry-run --config apps/ops/wrangler.toml
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(manage)/layout.tsx`、`src/components/layout/{ConsoleShell,ConsoleSidebar,ConsoleDrawer,ConsolePageHeader,ManageSidebarNav,ManageActiveXNotice,CostGuardBanner}.tsx` を IN_PROGRESS（移植先 `apps/ops/...`）。`src/styles/admin-manage.css` 行に Ops の移植先を追記（admin と共有、D-17）。`API_MATRIX.md` に `GET /api/manage/navigation` の SPA 呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T09 が PASS
+- [ ] MIG-0661 が DONE、banner の client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] wrangler の dry-run が CI で動く。本番の Worker / route / custom domain が無い
+- [ ] browser 確認（390px / 1440px）が PR にある（サイドバーとシェルの折りたたみ）
+
+#### STOP
+- 警告の判定に navigation（MIG-0663 後）に無い値が要ると分かったら止める。
+- banner のために D1 を読む必要が出たら止める（公開 source は D1 を読まない、publicMode.ts:108-117）。
+- Ops の Worker / route / custom domain / 本番 ID を作る必要が出たら止める（明示承認事項、`PHASE_7_SPEC.md:447`（MIG-0707 の STOP）と同じ）。
+
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない。MIG-0707 と同じ）。
+
+### MIG-0720: Manage 入口・イベント概要・設定（edit）・登録者プレビュー（`/manage`、`/manage/events/[id]`、`.../edit`、`.../audience`、MIG-0704 U02）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0704 の U02 を分割。読みは MIG-0624 で DONE。書き込み（SA-021..024、SA-035）は契約先行で、merge は MIG-0652・MIG-0655 の DONE 後。MIG-0719 の shell を使う。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0624（DONE）, MIG-0719 / **Decisions:** D-05, D-16-1, D-16-2, D-16-3, D-16-4, D-17-1
+- **Merge gate:** MIG-0652（SA-021..024）、MIG-0655（SA-035）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT（4 ページ、計 1,336 行 + 共有部品）: `app/(manage)/manage/page.tsx`（439）、`app/(manage)/manage/events/[id]/page.tsx`（657）、`.../edit/page.tsx`（179）、`.../audience/page.tsx`（257）。
+- 入口 `/manage`: `requireSession({next:"/manage"})` `page.tsx:46`。`ManageActiveXNotice`（非 admin）`:172-177`。ヘッダー link（通知センター `:183`、`canManageXLinks` のとき X ID 連携申請 `:186-190`）。空のとき（担当 0 件）の `EmptyState` は admin / 非 admin の分岐 `:142-165`。通知 `NotificationOutboxSummary` `:349`。
+- 概要 `/manage/events/[id]`: `requireSession` `:81`、`notFound` `:88`、`:96`、`:100`。`ManageEventPageShell` `:252`（`showActiveXNotice` `:261`、`activeXUserId` `:262`、`manageStaffXUserIds` `:263`）。テンプレ化 section は admin 限定 `:436-440`（`SaveEventTemplateForm` `:440`）。`NotificationOutboxSummary` `:582`。
+- 設定 `/manage/events/[id]/edit`: `requireSession` `:35`、`notFound` `:42`、`:47`、`:69`。`canManageBasic/Publish/Questions/Slots`（`canEditEventFromSnapshot`）`:55-62`。`ManageEventPageShell` `:77`（`showActiveXNotice={!isAdmin}` `:86`）。`EventForm` `:102`（update のみ、create は manage では使わない）。危険操作は admin 限定 `:154-172`（`RenameEventIdForm` `:165`、`DeleteEventForm` `:172`、文言は「非公開化」）。
+- 登録者プレビュー `/manage/events/[id]/audience`: `requireSession` `:47`、`notFound` `:54`、`:63`、`:68`（`permissions.size === 0` かつ非 admin）。`ManageEventPageShell` `:187`。`ManageXIcon` `:226`。
+- 共有 shell: `src/components/manage/ManageEventPageShell.tsx:28-70`（`ManageActiveXNotice` `:46-51`、`ConsolePageHeader` `:52-61`、`ManageEventTabs` `:62-66`）、`src/components/manage/ManageEventTabs.tsx:57-181`（`resolveManageEventNav` `src/lib/manage/eventNavigation.ts` が pure、`:67-72`。tab 4 つ `:22-55`、content 副 tab `:123-147`、settings 副 tab `:149-173`）、`src/components/manage/ManageEventMoreMenu.tsx`（`/manage/notifications?event=` `:26-30`、`/event/:id` `:31`。admin 向け `/admin/videos`・`/admin/audit`・`/admin/notifications` `:37-68`、D-17）、`src/components/manage/ManageXIcon.tsx`（42 行）。
+- 部品（admin と共有、D-17）: `src/components/admin/EventForm.tsx`（`createEvent` / `updateEvent` を `:8`、呼び出し `:602`。子: `PermissionKeysField`、`YoutubeDescriptionTemplateEditor`、`EventSettingsPreview`、`EventCustomQuestionsEditor`、`lib/video/formSettings`、`lib/event/eventLimits`、`lib/event/generalCustomQuestionDraft`、`lib/video/customQuestions`、`lib/utils/eventStatus`（drizzle を import、`eventStatusCore` を使う）、`lib/interactions/useFormDraft`、`useUnsavedChangesGuard`、`lib/slots/limits`、`lib/video/requiredVideoFields`、`lib/event/youtubeDescriptionTemplate`）、`src/components/admin/DeleteEventForm.tsx`（`deleteEvent` `:42`、button 文言 `:99`）、`src/components/admin/RenameEventIdForm.tsx`（`renameEventId` `:24`）、`src/components/admin/SaveEventTemplateForm.tsx`（`saveEventAsTemplate` `:29`）、`src/components/notifications/NotificationOutboxSummary.tsx`（read のみ）。
+- Read API: 入口 `GET /api/manage` = `apps/api/src/routes/manage/dashboard.ts:13`（gate `:18-20`、`activeXUserId` / `manageStaffXUserIds` `:38-39`）。概要 `GET /api/manage/events/:id` = `overview.ts:51`（404 `:61`、`:147`、`:163`、`activeXUserId` / `manageStaffXUserIds` `:168-169`）。設定 `GET /api/manage/events/:id/edit` = `eventEdit.ts:82`（404 `:99`、`:140`、`:170-171`）。登録者 `GET /api/manage/events/:id/audience` = `audience.ts:27`（404 `:36`、`:76`）。mount は `index.ts:37-44`。
+- Write: SA-021 `renameEventId`（`src/lib/actions/event-admin-danger.ts:99`、MIG-0652 / admin のみ）、SA-023 `updateEvent`（`event-admin.ts:553`、MIG-0652、guard `manage_event_update`）、SA-024 `deleteEvent`（`event-admin.ts:1096`、MIG-0652、admin のみ、`manage_event_archive` `:1099`）、SA-035 `saveEventAsTemplate`（`event-template-admin.ts:51`、MIG-0655、admin のみ）。SA-022 `createEvent` は manage の画面からは呼ばれない（`EventForm.tsx:602` は create 分岐を持つが manage の edit は update のみ）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/manage/{ManageIndex,EventOverview,EventEdit,EventAudience}.tsx`, `+apps/ops/src/components/manage/{ManageEventPageShell,ManageEventTabs,ManageEventMoreMenu,ManageXIcon}.tsx`, `+apps/ops/src/lib/manage/eventNavigation.ts`（pure、1 行目 `// Port of CURRENT src/lib/manage/eventNavigation.ts (MIG-0720). Same output.`）, `+apps/ops/src/api/manageEvents.ts`（読み 4 本）, `+apps/ops/src/api/eventAdmin.ts`（SA-021..024 と SA-035 の client。1 行目は `// D-16-1 provisional: replace with @flamenode/contracts at merge`）, `+apps/ops/src/components/shared/{EventForm,PermissionKeysField,YoutubeDescriptionTemplateEditor,EventSettingsPreview,EventCustomQuestionsEditor,DeleteEventForm,RenameEventIdForm,SaveEventTemplateForm}.tsx`（admin（MIG-0705）と共有、先に merge した方が作る。D-17）, `+apps/ops/test/manageEvents.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（`/manage`、`/manage/events/:id`、`.../edit`、`.../audience` の 4 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`（CSS は MIG-0719 U03 の共有 file で足りる。main.tsx は触らない）
+- 触らない: `app/(manage)/**`, `src/components/**`（移植元）, `apps/api/**`, MIG-0719 の shell（import だけ）
+
+#### Micro-units
+- **U01 入口と共有 shell**: `GET /api/manage` を読む（dashboard.ts:13）。`ManageEventPageShell`、`ManageEventTabs`、`ManageEventMoreMenu`、`ManageXIcon`、`lib/manage/eventNavigation.ts` を移植（ManageEventTabs.tsx の tab 4 つと副 tab の link は CURRENT と同じ href）。入口の KPI・空状態（`ManagePageHeader` の link、担当 0 件の文言）を CURRENT と同じに。
+- **U02 概要の読みとテンプレ化**: `GET /api/manage/events/:id` を読む（overview.ts:51）。`ManageEventPageShell` の `showActiveXNotice`（非 admin）。テンプレ化 section は admin 限定（page.tsx:436）で `SaveEventTemplateForm`（SA-035、MIG-0655 の client）。通知 `NotificationOutboxSummary`。
+- **U03 設定の読みと書き込み**: `GET /api/manage/events/:id/edit` を読む（eventEdit.ts:82）。`EventForm` は update のみ（SA-023）。危険操作は admin 限定（edit/page.tsx:154）で `RenameEventIdForm`（SA-021）と `DeleteEventForm`（SA-024）。`write.ts` は MIG-0719 U04 で作られているので import だけ（D-17）。
+- **U04 登録者プレビュー（読みのみ）**: `GET /api/manage/events/:id/audience` を読む（audience.ts:27）。`FnTable` は `components/ui` を使うが、Ops では `packages/ui` の既存 UI を使うか MIG-0719 の shared と揃える（D-17）。表の行、`ManageXIcon`、空状態（`EmptyState`）を CURRENT と同じに。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 担当 0 件の `/manage`（非 admin） | CURRENT の非 admin 文言（manage/page.tsx:144-148） |
+| T02 | 非 admin で active X と運営 X が不一致の `/manage` | `role="status"` の notice（manage/page.tsx:172-177、ManageActiveXNotice.tsx:23-27） |
+| T03 | 担当外の `/manage/events/:id`（`manageableEventIds` に無い） | 404（overview.ts:61、page.tsx:96） |
+| T04 | tab の active 判定（`/videos?status=pending` / `videos?status=all` / `edit`）と副 tab の表示 | CURRENT と同じ `aria-current` と href（ManageEventTabs.tsx:84-173） |
+| T05 | 非 admin で `/manage/events/:id/edit` | 危険操作 section が無い（edit/page.tsx:154）。admin は 2 つ表示（:165, :172） |
+| T06 | `EventForm` の保存成功 / `{ok:false, message}` / reject | 成功で読み直し（D-16-3 の `refreshKey`）、失敗は CURRENT の文言。前の data を消さない |
+| T07 | `DeleteEventForm` の確認 | 確認文字列（event id）が一致しないと送らない（`deleteEvent` は `confirm !== eventId` で拒否、event-admin.ts:1106）。文言は CURRENT（「非公開化」） |
+| T08 | 担当外（permissions 0）の `/manage/events/:id/audience` | 404（audience/page.tsx:68、audience.ts:36） |
+| T09 | `rg "@/|next/" apps/ops/src/routes/manage apps/ops/src/components/manage` | 0 件 |
+
+#### Commands
+```bash
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(manage)/manage/page.tsx`、`.../events/[id]/page.tsx`、`.../edit/page.tsx`、`.../audience/page.tsx` と、admin と共有する部品の各行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-021 / 022（呼ばない）/ 023 / 024 / 035 に SPA の呼び出し元（D-17）。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T09 が PASS
+- [ ] MIG-0652（SA-021..024）と MIG-0655（SA-035）が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] 書き込みは `write.ts` の `send()` を通る（D-16-2）
+- [ ] browser 確認（390px / 1440px）が PR にある
+
+#### STOP
+- 権限の可否（`canEditEventFromSnapshot` の section 判定）を SPA 側で決める必要が出たら止める（API の読みが正）。
+- SA-024 の挙動（非公開化。行を消さない）が API 側の契約と違うと分かったら止める（D-17-9）。
+- 担当外の判定や owner の保護を SPA で決める必要が出たら止める（Hono が正、MIG-0633 の core）。
+
+#### Rollback
+PR を revert（Ops は本番に配信されない）。admin と共有する shared 部品は別 PR に分けてもよい（R-UI と同じ扱い）。
+
+### MIG-0721: イベントの枠（`.../slots`）と運営メンバー（`.../staff`、owner 0 件 guard・CAS、MIG-0704 U03）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0704 の U03 を分割。読みは MIG-0624 で DONE。書き込み（SA-031..034、SA-056..064）は契約先行で、merge は MIG-0654・MIG-0656 の DONE 後。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0624（DONE）, MIG-0720（`ManageEventPageShell` / `ManageEventTabs`）/ **Decisions:** D-05, D-15-4, D-16-1, D-16-2, D-16-3, D-16-4, D-17-1
+- **Merge gate:** MIG-0654（SA-031..034）、MIG-0656（SA-056..064）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT: `app/(manage)/manage/events/[id]/slots/page.tsx`（198 行）、`.../staff/page.tsx`（187 行）。
+- 枠: `requireSession` `slots/page.tsx:59`、`notFound` `:64`、`:67`。`canEditSlots = canEditEventFromSnapshot(…, "event.slots")` `:74-78`、無ければ `notFound` `:79-80`。`ManageEventPageShell` `:131`。`SlotBatchForm` `:163`、`SlotList` `:186`（`canManageSubmittedSlots={canEditSlots}` `:192`）。
+- 運営メンバー: `requireSession` `staff/page.tsx:41`、`notFound` `:47`、`:56`、`:61`（非 admin で権限 0 件）。`canManageMembers = isAdmin || has("event.members")` `:62-63`。`ManageEventPageShell` `:120`。`SummaryCard`（代表者 / 登録メンバー / 公開メンバー / 承認済み X 名義）`:137-140`。`EventStaffManager` `:145`（`canManageMembers` のとき）、`EventStaffReadOnlyList` `:162`（閲覧のみ文言は `:160`、section 全体 `:156-170`）。
+- 枠の部品（admin と共有）: `src/components/admin/SlotBatchForm.tsx`（`generateSlotsBatch` `:47`、`deleteAvailableSlots` `:66`、上限 `MAX_SLOT_BATCH_GENERATE_COUNT`（`lib/slots/atomicLimits`）を `:12` で import、文言 `:148`）、`src/components/admin/SlotList.tsx`（`releaseSubmittedVideoKeepReservation` / `forceReleaseSubmittedSlot` `:455-457`、`releaseSlot` / `deleteSlot` `:459`、`batchUpdateSlotLabels` `:466`、`batchReleaseReservedSlots` `:468`、`batchDeleteAvailableSlots` `:470`、`ConfirmDialog` 使用、`TableScroll`）。
+- 運営メンバーの部品（admin と共有）: `src/components/admin/EventStaffManager.tsx`（`upsertEventStaffMember` `:364`、`:551`、`removeEventStaffMember` `:503`、`transferEventOwnershipAction` `:638`、`bulkUpsertEventStaffFromCsv` `:729`、`ownerCount` `:139`、`isLastOwner` `:349`、preset select の disabled `:392`、「最後の代表者は削除・降格できません」`:436`、削除時の文言 `:474`、代表者 section `:627-628`）、`src/components/admin/EventStaffReadOnlyList.tsx`（`ManageXIcon`、`PRESET_DEFINITIONS`）。
+- Read API: 枠 `GET /api/manage/events/:id/slots` = `apps/api/src/routes/manage/slots.ts:55`（404 `:66`（`canEditEvent(...,"event.slots")`）、`:101`、`:122`）。運営メンバー `GET /api/manage/events/:id/staff` = `staff.ts:40`（404 `:51`、`:74`、`:107`）。
+- Write（SA）: SA-056 `forceReleaseSubmittedSlot`（`slot-admin-danger.ts:236`）、SA-057 `releaseSubmittedVideoKeepReservation`（`:484`）、SA-058 `generateSlotsBatch`（`slot-admin.ts:262`）、SA-059 `deleteAvailableSlots`（`:398`）、SA-060 `releaseSlot`、SA-061 `deleteSlot`、SA-062 `batchDeleteAvailableSlots`、SA-063 `batchReleaseReservedSlots`、SA-064 `batchUpdateSlotLabels`（すべて `slot-admin.ts`、MIG-0656）。SA-031 `upsertEventStaffMember`（`event-staff-admin.ts:303`）、SA-032 `bulkUpsertEventStaffFromCsv`（`:467`）、SA-033 `removeEventStaffMember`（`:669`）、SA-034 `transferEventOwnershipAction`（`:723`、MIG-0654）。
+- owner 0 件 guard / CAS の正本: `packages/server-core/src/event/eventOwnership.ts:58-73`（`remainingOperableEventOwnerSql`）、`:383-411`（既存 owner の降格・削除の `ownerCondition` を UPDATE の WHERE に入れ、`expectedMutationChanges` で 1 件を確かめる）、`:454-466`（削除側）。`src/lib/actions/event-staff-admin.ts:357-371`（owner 付与時の検査）、`:496`、`:568`。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/manage/{EventSlots,EventStaff}.tsx`, `+apps/ops/src/api/slotAdmin.ts`（SA-056..064 の client、provisional comment）, `+apps/ops/src/api/eventStaff.ts`（SA-031..034 の client、provisional comment）, `+apps/ops/src/components/shared/{SlotBatchForm,SlotList,EventStaffManager,EventStaffReadOnlyList}.tsx`（admin と共有、先に merge した方が作る。D-17）, `+apps/ops/src/lib/slots/`（CURRENT `src/lib/utils/slotGrouping.ts` が import する pure だけ、`slotGroupingCore` を含む。1 行目 `// Port of CURRENT <path> (MIG-0721). Same output.`）, `+apps/ops/test/eventSlotsStaff.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（2 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(manage)/**`, `src/components/**`, `apps/api/**`, `packages/server-core/**`（owner の正本、変えない）
+
+#### Micro-units
+- **U01 枠の読み**: `GET /api/manage/events/:id/slots`（slots.ts:55）。`canEditSlots`（`event.slots`）が無ければ 404 の表示（slots/page.tsx:79-80）。`SlotList` の表示部分（`buildSlotParts` / `resolveSlotPartDisplayLabel` は `lib/utils/slotGrouping` の pure port）。
+- **U02 枠の書き込み**: `SlotBatchForm` の生成と削除（SA-058 / SA-059）、`SlotList` の個別・一括操作（SA-056..057、SA-060..064）。確認は `ConfirmDialog`（CURRENT の文言）。結果の `{ok,message}` を表示し、成功で読み直す（D-16-3）。
+- **U03 運営メンバーの読み**: `GET /api/manage/events/:id/staff`（staff.ts:40）。`SummaryCard` 4 つ、`canManageMembers` で `EventStaffManager` か `EventStaffReadOnlyList`（閲覧のみ文言 page:160）。
+- **U04 運営メンバーの書き込み**: SA-031..034 を `eventStaff.ts` 経由で送る。owner の表示・disabled・文言（EventStaffManager.tsx:139, :349, :392, :436, :474）を CURRENT と同じに。CSV の一括登録（SA-032、:729）。サーバーの判定（owner 0 件、CAS）は core の結果だけを表示する。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `event.slots` 権限が無い `/manage/events/:id/slots` | 404（slots/page.tsx:79-80、slots.ts:66） |
+| T02 | 枠の一括生成で上限（`MAX_SLOT_BATCH_GENERATE_COUNT`）ちょうど / 超え | CURRENT と同じ表示。超えは送らない（SlotBatchForm.tsx の上限検査） |
+| T03 | 予約済み枠の強制解放（SA-056）と予約を残す解放（SA-057） | 確認ダイアログを経てから送る。CURRENT の文言と同じ（SlotList.tsx:455-457） |
+| T04 | `event.members` が無い（閲覧のみ）`/manage/events/:id/staff` | `EventStaffReadOnlyList` と「閲覧のみ」文言（staff/page.tsx:150-170）。送信 UI は出ない |
+| T05 | 最後の代表者の削除・降格・preset 変更（SA-033 / SA-031） | UI は disabled と文言（EventStaffManager.tsx:349, :392, :436, :474）。直接送っても core が拒否（eventOwnership.ts:383-411）。owner 1 件のとき 1 件だけ残る（同時 2 件送信でも 0 件にならない、CAS） |
+| T06 | 担当外（staff の権限 0 件）の `/manage/events/:id/staff` | 404（staff/page.tsx:61、staff.ts:51） |
+| T07 | `{ok:false, message}` / reject | CURRENT の文言。前の data を消さない（D-16-3） |
+| T08 | `rg "@/|next/" apps/ops/src/routes/manage apps/ops/src/components/shared` | 0 件 |
+
+#### Commands
+```bash
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:event-owners
+npm run check:slot-domain-limits
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `.../slots/page.tsx`、`.../staff/page.tsx`、`SlotBatchForm.tsx`、`SlotList.tsx`、`EventStaffManager.tsx`、`EventStaffReadOnlyList.tsx` 行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-031..034、SA-056..064 に SPA の呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T08 が PASS
+- [ ] MIG-0654 と MIG-0656 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] 最後の owner の拒否は、UI の disabled だけでなく API の拒否で確かめている（T05）
+
+#### STOP
+- owner 0 件の判定や CAS を SPA 側で決める必要が出たら止める（core が正、MIG-0633）。
+- 枠の予約の transaction 境界に触る必要が出たら止める（MIG-0604 の STOP と同じ）。
+
+#### Rollback
+PR を revert（Ops は本番に配信されない）。
+
+### MIG-0722: 作品・審査（`.../videos`、`.../videos/[videoId]`、`.../youtube-playlist`、`.../review` の互換 redirect、MIG-0704 U04）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0704 の U04 を分割。読みは MIG-0624 で DONE。審査の書き込み（SA-040..042）は MIG-0603 U02c、playlist の書き込み（SA-038/039）は MIG-0655 の DONE 後。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0624（DONE）, MIG-0719（`write.ts`）, MIG-0720（`ManageEventPageShell` / `ManageEventTabs`）/ **Decisions:** D-05, D-16-1, D-16-3, D-16-4, D-16-5, D-17-1
+- **Merge gate:** MIG-0603（SA-040..042、`POST /api/manage/events/:eventId/videos/:videoId/status` は MIG-0603 U02c、PHASE_6_SPEC.md:213）、MIG-0655（SA-038 / SA-039）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT: `app/(manage)/manage/events/[id]/videos/page.tsx`（218）、`.../videos/[videoId]/page.tsx`（138）、`.../youtube-playlist/page.tsx`（361）、`.../review/page.tsx`（13）。
+- 一覧: `requireSession` `videos/page.tsx:75`、`notFound` `:82`、`:90`（`canAccessManageEventFromSnapshot`）、`:92`。既定の status は `review`（`:68`）、`normalizeVideoVisibilityFilter(statusRaw,"review")` `:69`。`canApproveVideoStatus = canEditEventFromSnapshot(…,"video.status")` `:87-89`。`ManageEventPageShell` `:150`、フィルタ nav `:160-175`（`status=<value>` link）、`VideoReviewQueueTable` `:204`（`quickApproveAction={approveManageVideoPublic}` `:212`）。
+- 詳細: `requireSession` `[videoId]/page.tsx:42`、`notFound` `:49`、`:56`（担当外）、`:58`（event なし）、`:61`（video なし）。`canReview = canEditEventFromSnapshot(…)` `:65`。`VideoReviewDetailPanel` `:83`、審査操作 `:86-94`（`VideoApproveActions`、`approveAction={approveManageVideoPublic}` `:93`、`approveAndNextAction={approveManageVideoPublicAndNext}` `:94`）、`ManageVideoStatusForm` `:97`。
+- playlist: `requireSession` `youtube-playlist/page.tsx:106`、`notFound` `:112`、`:121`（`canAccessManageEventFromSnapshot`）、`:123`。`canEdit` `:125`。`ManageEventPageShell` `:191`（`showActiveXNotice` `:200`、`activeXUserId` `:201`、`manageStaffXUserIds` `:202`）。保存 `<form action={saveEventYoutubePlaylistSettings}>` `:228`（input の disabled `:237, :248, :261`、`canEdit` `:280`）。同期 `<form action={queueEventYoutubePlaylistSync}>` `:336`（`canEdit && config.enabled === 1` `:334`）。
+- review: `review/page.tsx:12` が `redirect("/manage/events/${id}/videos?status=pending")`（Next の既定の redirect。SPA は replace の Navigate）。
+- 部品: `src/components/admin/VideoReviewQueueTable.tsx`（`VideoReviewQuickApproveButton` `:11`、`VideoVisibilityBadge` の label は `lib/admin/videoVisibilityLabels`）、`src/components/admin/VideoReviewQuickApproveButton.tsx`（`useRouter`、`action(fd)` `:52`）、`src/components/admin/VideoReviewDetailPanel.tsx`（`VideoReviewDetail` 型 `lib/admin/videoReviewDetail`、`youtubeWatchUrl`、css module `:8`）、`src/components/video/VideoApproveActions.tsx`（`approveAction` / `approveAndNextAction` props `:23-24`）、`src/components/video/VideoStatusForm.tsx`（`ManageVideoStatusForm` `:91-127`、`setManageVideoStatus` `:8`、`MANAGE_STATUS_VALUES = ["pending","public","private"]` `:51`、`router.refresh()` `:223, :229, :241`）。
+- Read API: 一覧 `GET /api/manage/events/:id/videos?status=`= `apps/api/src/routes/manage/videos.ts:48`（`normalizeFilter` `:26-31`、既定 review `:27`、404 `:59`、`:82`）。詳細 `GET /api/manage/events/:id/videos/:videoId` = `videoDetail.ts:64`（404 `:73`、`:119`、`:121`）。playlist `GET /api/manage/events/:id/youtube-playlist` = `playlist.ts:64`（404 `:72`、`:107`、`activeXUserId` / `manageStaffXUserIds` `:125-126`）。
+- Write: SA-040 `approveManageVideoPublic`（`src/lib/actions/manage-video.ts:58`、一覧の quick approve と詳細）、SA-041 `approveManageVideoPublicAndNext`（`:65`、詳細）、SA-042 `setManageVideoStatus`（`:73`、詳細の状態 form、D-16-5）。`canEditEvent(…,"video.status")` が判定（PHASE_6_SPEC.md:196）。SA-038 `saveEventYoutubePlaylistSettings`、SA-039 `queueEventYoutubePlaylistSync`（`src/lib/actions/event-youtube-playlist.ts`、MIG-0655）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/manage/{EventVideos,EventVideoDetail,EventYoutubePlaylist,EventReviewRedirect}.tsx`, `+apps/ops/src/api/manageVideos.ts`（SA-040..042 の client、provisional comment）, `+apps/ops/src/api/youtubePlaylist.ts`（SA-038/039、provisional comment）, `+apps/ops/src/components/shared/{VideoReviewQueueTable,VideoReviewQuickApproveButton,VideoReviewDetailPanel,VideoApproveActions,VideoStatusForm}.tsx`（admin と共有、先に merge した方が作る。D-17）, `+apps/ops/src/components/manage/YoutubePlaylistSettings.tsx`（playlist の表示と form。CSS は ManageEventPageShell の既存 class）, `+apps/ops/src/lib/admin/videoVisibilityLabels.ts`（pure port、1 行目 `// Port of CURRENT src/lib/admin/videoVisibilityLabels.ts (MIG-0722). Same output.`）, `+apps/ops/test/manageVideos.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（4 行: `videos`、`videos/:videoId`、`youtube-playlist`、`review`）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(manage)/**`, `src/components/**`, `apps/api/**`, `src/lib/actions/manage-video.ts`（移植元）
+- 注意: `src/lib/admin/videoReviewQueueOrder.ts` は `@/lib/db/client` を import している（DB 依存）。一覧の並べ順は API の結果を使い、この module は port しない（STOP 参照）。
+
+#### Micro-units
+- **U01 作品一覧（読みと quick approve）**: `GET /api/manage/events/:id/videos?status=`（videos.ts:48）。既定 `review`、`all` は全件（videos.ts:27-29、ManageEventTabs.tsx:46）。フィルタ nav の link と `aria-current` は CURRENT と同じ（videos/page.tsx:160-175）。quick approve は SA-040 を `write.ts` で送り、成功で読み直す（D-16-3）。
+- **U02 作品詳細と審査**: `GET /api/manage/events/:id/videos/:videoId`（videoDetail.ts:64）。`VideoReviewDetailPanel` の表示、`canReview` のときだけ `VideoApproveActions`（SA-040/041）と `ManageVideoStatusForm`（SA-042、D-16-5）。`router.refresh` は `refreshKey` に置き換える（VideoStatusForm.tsx:223-241）。
+- **U03 YouTube 再生リスト**: `GET /api/manage/events/:id/youtube-playlist`（playlist.ts:64）。保存（SA-038、page:228）と同期（SA-039、page:336）。`canEdit` で disabled（page:237, :248, :261）、同期 form は `canEdit && enabled === 1` のときだけ（page:334）。
+- **U04 互換 redirect と深い URL の確認**: `/manage/events/:id/review` を `/manage/events/:id/videos?status=pending` へ replace で移す（review/page.tsx:12）。`ManageEventTabs` の「対応待ち」は `videos?status=pending`（ManageEventTabs.tsx:38-39）。deep-link（`videos?status=pending` / `all` / 未指定 / 不正な値）を試験する。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `/manage/events/:id/review` を開く | `/manage/events/:id/videos?status=pending` へ置き換わる（review/page.tsx:12、MIG-0704 T04） |
+| T02 | `/videos`（status 無し）/ `status=all` / `status=pending` / `status=abc`（不正） | 既定と不正値は審査待ち（videos.ts:26-31、page:69）。`all` は全件。`pending` は審査待ち |
+| T03 | 担当外の event の `/videos`、`/videos/:videoId` | 404（videos/page.tsx:90、[videoId]/page.tsx:56、videoDetail.ts:73） |
+| T04 | event に紐付かない video の詳細 | 404（videoDetail.ts:119-121、videoDetail.ts:12 の注釈） |
+| T05 | `video.status` 権限が無い（canReview=false）の詳細 | 審査 UI が出ない（page:65-88）。一覧の quick approve も出ない（videos/page.tsx:87-89） |
+| T06 | SA-040 / 041 / 042 の成功・`{ok:false,message}` | CURRENT の文言、成功で読み直し（D-16-3）。`pending/public/private` の 3 値だけを選べる（VideoStatusForm.tsx:51） |
+| T07 | playlist の保存（SA-038）と同期（SA-039） | `canEdit=false` は入力 disabled と同期 form 非表示（page:237-261、:334）。保存 body は CURRENT の FormData の key と同じ |
+| T08 | `rg "@/|next/" apps/ops/src/routes/manage apps/ops/src/components/shared` | 0 件 |
+
+#### Commands
+```bash
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `.../videos/page.tsx`、`.../videos/[videoId]/page.tsx`、`.../youtube-playlist/page.tsx`、`.../review/page.tsx`、`VideoStatusForm.tsx`（`ManageVideoStatusForm` の行）、`VideoReviewQueueTable.tsx`、`VideoApproveActions.tsx` を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-038..042 に SPA の呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T08 が PASS
+- [ ] MIG-0603（U02c）と MIG-0655 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] review の redirect と deep-link（T01、T02）が browser で確認されている
+
+#### STOP
+- 審査の可否（`video.status` / `canEditEvent`）を SPA 側で決める必要が出たら止める（API が正、MIG-0633）。
+- 一覧の並べ順を client で決める必要が出たら止める（`videoReviewQueueOrder` は DB 依存。API の順を使う）。
+- SA-040..042 の API 契約（`POST …/status`）が CURRENT の FormData key と違うと分かったら止めて MIG-0603 に返す。
+
+#### Rollback
+PR を revert（Ops は本番に配信されない）。
+
+### MIG-0723: 通知センター（`/manage/notifications`）と X ID 連携申請（`/manage/x-link-requests`、MIG-0704 U05）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0704 の U05 を分割。読みは MIG-0624 で DONE。X ID 連携申請の承認・却下（SA-090/091）は MIG-0605 U05x の DONE 後に merge。通知の読みは gate なしで進められるが、task 単位の gate に従う（D-17）。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0624（DONE）, MIG-0719（`ManageActiveXNotice`、`write.ts`）/ **Decisions:** D-05, D-16-1, D-16-2, D-16-3, D-16-4, D-17-1
+- **Merge gate:** MIG-0605（U05x、`POST /api/xid/link-requests/:requestId/approve` と `/reject`、MIG-0605 の Owned、PHASE_6_SPEC.md:326-334）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT 通知: `app/(manage)/manage/notifications/page.tsx`（304 行）。`requireSession({next:"/manage/notifications"})` `:62-63`、`notFound` `:79`、admin 判定 `:81`、閲覧可能 event `:93-98`、`?event=` が担当外なら `notFound` `:108-113`。フィルタは `<form method="get">` `:216`、`AutoSubmitSelect` 3 つ `:217, :229, :240`（GET のみ自動 submit、`src/components/forms/AutoSubmitSelect.tsx:22-24`）。`ManageActiveXNotice` `:185-187`。`NotificationOutboxSummary` `:274`（read のみ）。admin 向けの文言 `:207`。
+- CURRENT X 連携申請: `app/(manage)/manage/x-link-requests/page.tsx`（97 行）。`requireSession` `:20-21`、`notFound` `:23`、`canManageXIdLinkRequests` 無しで `notFound` `:28`。`ManagePageHeader` `:85`（title「X ID 申請」`:86`）。`XLinkRequestTable` を使う。
+- 部品: `src/components/admin/XLinkRequestTable.tsx`（`approveXIdLinkRequest` / `rejectXIdLinkRequest` `:5`、承認 `run(approveXIdLinkRequest, r.id)` `:249`、却下 `run(rejectXIdLinkRequest, r.id, reason)` `:288`、`ManageXIcon` `:8`、`formatUnix` `:6`）。`enrichXLinkPendingRows`（`src/lib/admin/enrichXLinkPendingRows.ts`、server 側で行を作る。SPA は API の行を使う）。`ConsolePageHeader`（layout）。
+- Read API: 通知 `GET /api/manage/notifications` = `apps/api/src/routes/manage/notificationCenter.ts:25`（404 `:37`、`manageManageableEventIds` 判定 `:17`、`manageStaffXUserIds` / `activeXUserId` `:76-77`、`:87`）。X 連携申請 `GET /api/manage/x-link-requests` = `xlink.ts:51`（404 `:58`、`:117`）。
+- Write（SA）: SA-090 `approveXIdLinkRequest`（`src/lib/actions/xid-admin.ts`、CURRENT `:78` は `writeGuard({ feature: "xid_links" })`。Hono 側は PHASE_6_SPEC.md:334 の `writeGuardMiddleware`、MIG-0605 U05x）、SA-091 `rejectXIdLinkRequest`（同）。通知に write は無い（`notification-admin.ts` の SA-045..048 は admin 側 `NotificationActionButton` と `NotificationCancelButton` でだけ使われ、manage 画面からは呼ばれない）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/manage/{EventNotifications,XLinkRequests}.tsx`（通知は `ManageNotifications.tsx` でもよい。名前は lead が決める）, `+apps/ops/src/api/manageNotifications.ts`（読みのみ）, `+apps/ops/src/api/xidAdmin.ts`（SA-090/091 の client、1 行目 `// D-16-1 provisional: replace with @flamenode/contracts at merge`）, `+apps/ops/src/components/shared/XLinkRequestTable.tsx`（admin と共有。先に merge した方が作る。D-17）。`NotificationOutboxSummary` は MIG-0719 の shared を import（重複させない）, `+apps/ops/test/manageNotifications.test.mjs`, `+apps/ops/test/xLinkRequests.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（2 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(manage)/**`, `src/components/**`, `apps/api/**`, `packages/server-core/**`
+
+#### Micro-units
+- **U01 通知の読み**: `GET /api/manage/notifications`（notificationCenter.ts:25）。フィルタ（GET、`AutoSubmitSelect` の形）と `NotificationOutboxSummary` の表示。`ManageActiveXNotice`（MIG-0719 の shared）を page の上に置く（page.tsx:185-187）。
+- **U02 通知の担当スコープと X 連携申請の読み**: `?event=` が担当外なら 404（notifications/page.tsx:108-113、notificationCenter.ts:37）。admin は全 event（page.tsx:93-98）。`/manage/x-link-requests` の読み（xlink.ts:51）と `ConsolePageHeader`、`XLinkRequestTable` の表示部分（approve / reject の UI は U03 まで出さない）。
+- **U03 承認と却下（SA-090 / 091）**: `xidAdmin.ts` 経由で送る。却下の理由入力（XLinkRequestTable.tsx:288 の `rejectReason`）。`{ok,message}` の表示と成功後の読み直し（D-16-3）。
+- **U04 最終確認（Manage 12 の棚卸し）**: `app/(manage)/manage/**/page.tsx` が 12 件（`find app/(manage) -name page.tsx`）あることを確かめ、12 件すべてに `apps/ops/src/routes` の route が対応することを表にする（review の互換 redirect を含む）。MIG-0704 の Final audit の一部（D-17）。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 非 admin で担当外 event の `/manage/notifications?event=…` | 404（notifications/page.tsx:113、notificationCenter.ts:37） |
+| T02 | admin で `/manage/notifications` | 全 event が対象（page.tsx:93-98） |
+| T03 | フィルタ `<select>` を変える | GET の遷移のみ。ページの読み直しで反映（AutoSubmitSelect.tsx:22-24） |
+| T04 | `canManageXIdLinkRequests=false` の `/manage/x-link-requests` | 404（x-link-requests/page.tsx:28、xlink.ts:58） |
+| T05 | 承認（SA-090）/ 却下（SA-091、理由あり / 空） | CURRENT の文言、成功で読み直し（D-16-3）。送信 body は CURRENT の引数（`r.id`、reason）と同じ |
+| T06 | 承認の二重押し | 2 回目は送らない（pending 表示。CURRENT の `run()` と同じ） |
+| T07 | U04: `find app/(manage) -name page.tsx` の 12 件と route の対応表 | 12 件すべて対応（review は redirect）。欠けが無い |
+| T08 | `rg "@/|next/" apps/ops/src/routes/manage apps/ops/src/components/shared` | 0 件 |
+
+#### Commands
+```bash
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(manage)/manage/notifications/page.tsx`、`app/(manage)/manage/x-link-requests/page.tsx`、`XLinkRequestTable.tsx`、`NotificationOutboxSummary.tsx` を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-090 / 091 に SPA の呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T08 が PASS
+- [ ] MIG-0605（U05x）が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] Manage 12 の表（U04）が PR にある
+
+#### STOP
+- 承認の可否（`canManageXIdLinkRequests`、activeX 判定）を SPA 側で決める必要が出たら止める（API が正）。
+- 通知の対象を SPA 側で絞り込む必要が出たら止める（API の読みが正）。
+
+#### Rollback
+PR を revert（Ops は本番に配信されない）。
+
+### MIG-0724: admin shell、top dashboard、permission simulator（CURRENT `app/(admin)/layout.tsx`、`admin/page.tsx`、`admin/permissions/simulator`）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 を 0724〜0731 に分割。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0608, MIG-0625 / **Decisions:** D-05 DECIDED, D-15-13, D-16-1, D-16-3, D-16-13, D-17-1
+- **Merge gate:** MIG-0626（top の `GET /api/admin-read/ops/top` と simulator の `GET /api/admin-read/permissions/simulator` は part B、READY）、MIG-0661（`GET /api/admin-read/cost-guard-banner` は未実装、READY）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- CURRENT layout: `app/(admin)/layout.tsx:16-41`。guard の順は `getLayoutAuthSurface()`（`src/lib/auth/requestAuthContext.ts:308`）→ `!headerUser` で `/entry`（:23）→ `enrichmentFailed` で `/entry?error=auth_temporarily_unavailable`（:24-26）→ `headerUser.role !== "admin"` で `/dashboard`（:27）。`metadata.robots = { index: false, follow: false }`（:11-13）、`dynamic = "force-dynamic"`（:14）。chrome は `<div data-admin-shell data-fn-surface="admin">`（:30）、`CostGuardBanner source="admin"`（:31）、`PublicHeader hydrateAccount`（:32）、`ConsoleShell consoleMode="admin"` + `ConsoleSidebar consoleMode="admin"`（:33-36）、`<main className="admin-main">`（:37）、`PublicFooter`（:39）。
+- admin の nav: `src/lib/admin/adminNavGroups.tsx:12-125`（href 一覧）、`src/components/admin/AdminSidebarNav.tsx:32`、`src/components/layout/ConsoleSidebar.tsx:72`、`src/components/layout/ConsoleShell.tsx:7`。
+- error boundary: `(admin)` 直下に `error.tsx` は無い。CURRENT は `app/error.tsx:1-33`（`"use client"`、「問題が発生しました」、「再試行」、ghost link「トップへ戻る」→ `/`）を使う。
+- top dashboard: `app/(admin)/admin/page.tsx:20-21`（`getDatabase()` を直接呼ぶ）、`adminPendingCounts` import（:5-9）、`Icon` / `EmptyState` / `OperationMode`（:10-13）。読みは `GET /api/admin-read/ops/top`（`apps/api/src/routes/adminRead/ops.ts:817`、MIG-0626 part B）。
+- permission simulator: `app/(admin)/admin/permissions/simulator/page.tsx:11-14`（`searchParams` の `event_id` / `x_user_id`）、`PermissionSimulatorPanel`（`src/components/admin/PermissionSimulatorPanel.tsx:13`）、判定 `simulateEventPermissions`（`src/lib/admin/permissionSimulator`）。読みは `GET /api/admin-read/permissions/simulator`（`apps/api/src/routes/adminRead/settings.ts:182-189`。入力が欠けると `result: null`、`x_user_id` の先頭 `@` は除く）。
+- CostGuardBanner admin source: `src/components/layout/CostGuardBanner.tsx:52-70`（admin は `getDatabase()` → `readAdminSystemSettings`（:58-67）、失敗時は `null`（:67-68））。HTTP endpoint は main に無く、`GET /api/admin-read/cost-guard-banner`（D-16-13、MIG-0661）を使う。
+- read API の共通 guard: `apps/api/src/routes/adminRead/index.ts:27-41`（session 無し 401 → `requireAuth`、`role !== "admin"` は 403 `{ error: "Forbidden", redirect: "/dashboard" }`（:35-39）。moderator も admin ではない（:34））。D1 失敗は 503 `{ error: "unavailable" }`（:61-65）。
+- layout の入力: RH-001 `GET /api/account/summary`（`apps/api/src/routes/account/summary.ts:187` `role`、:282 `canAccessAdmin`）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/AdminShell.tsx`（CURRENT `layout.tsx` の chrome と `CostGuardBanner` を組む。guard 本体は MIG-0707 U02 の `apps/ops/src/routes/guard.tsx` を呼ぶ）, `+apps/ops/src/routes/admin/AdminTop.tsx`, `+apps/ops/src/routes/admin/PermissionSimulator.tsx`, `+apps/ops/src/api/adminShell.ts`（`getAdminTop` / `getPermissionSimulation` / `getCostGuardBanner`。1 行目 `// D-16-1 provisional: replace with @flamenode/contracts at merge` は contract 未 merge の間だけ）, `+apps/ops/src/components/shared/{ConsoleShell,ConsoleSidebar,AdminSidebarNav,ConsolePageHeader,ConsolePanel,CostGuardBanner}.tsx` と css（D-16-4 と同じ規則: 0725〜0727 より先に merge した方が作り、後の方は import だけ）, `+apps/ops/src/components/admin/PermissionSimulatorPanel.tsx`, `+apps/ops/src/lib/adminNavGroups.ts`（`src/lib/admin/adminNavGroups.tsx` の pure な部分のみ、1 行目 `// Port of CURRENT src/lib/admin/adminNavGroups.tsx (MIG-0724). Same output.`）, `+apps/ops/test/adminShell.test.mjs`, `+apps/ops/test/permissionSimulator.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（`/admin` と `/admin/permissions/simulator` の Route 行。MIG-0707 の空枠を置き換え）, `apps/ops/scripts/portCssModule.mjs`（`MODULES` に行）, `apps/ops/src/main.tsx`（css import 1 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/**`（移植元）, `apps/api/**`, `apps/app/**`, `apps/ops/src/routes/guard.tsx` の判定（テストの追加だけ可）
+
+#### Micro-units
+- **U01 shell と guard の接続**: `AdminShell` で MIG-0707 の guard を呼び、CURRENT の chrome（`data-admin-shell` / `data-fn-surface="admin"` / `main.admin-main`）を組む。Location は MIG-0707 の出力をそのまま使い、admin 固有の表（`/entry`、`/entry?error=auth_temporarily_unavailable`、`/dashboard`）を test で固定する。error 表示は `app/error.tsx` の文言。
+- **U02 chrome 部品と CostGuardBanner**: `ConsoleShell` / `ConsoleSidebar` / `AdminSidebarNav` / `ConsolePageHeader` / `ConsolePanel` を React のまま移植（nav の href と順を変えない）。`CostGuardBanner` は `getCostGuardBanner()` で読む（MIG-0661 の merge 後）。
+- **U03 `/admin` top**: `AdminTop` は `GET /api/admin-read/ops/top`（`ops.ts:817`）の応答で件数と mode を描く。文言・件数・`EmptyState`（`app/(admin)/admin/page.tsx` の表示）を変えない。
+- **U04 `/admin/permissions/simulator`**: `PermissionSimulator` は URL の `event_id` / `x_user_id` を CURRENT と同じ名前で読み、`GET /api/admin-read/permissions/simulator` を呼ぶ。`PermissionSimulatorPanel` を移植（判定は Hono が正。SPA で判定しない）。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × `/admin` | guest は `/entry`、user / moderator / owner は `/dashboard`（moderator は admin ではない、`adminRead/index.ts:34`）、admin は表示（`layout.tsx:23,27` と同じ） |
+| T02 | enrichment が失敗した状態（`enrichmentFailed` 相当） | `/entry?error=auth_temporarily_unavailable`（`layout.tsx:24-26`）。RH-001 の `degraded: true` または 503 `unavailable`（D-17-3、MIG-0707 U02 と同じ写像） |
+| T03 | 任意の `/admin/*` の HTML | `<meta name="robots" content="noindex, nofollow">`（`layout.tsx:11-13`） |
+| T04 | adminRead が 401 / 403 / 503 | 401 は `/entry`、403 は `/dashboard`（`adminRead/index.ts:37-38`）、503 は `app/error.tsx` の表示（`index.ts:61-65`） |
+| T05 | CostGuardBanner admin source: mode normal / maintenance / cost_guard の 3 状態、endpoint 失敗 | CURRENT と同じ表示。失敗時は非表示（`CostGuardBanner.tsx:67-68`） |
+| T06 | `/admin` の件数（fixture は `AdminTopResponse` を `parse`） | `adminPendingCounts` の CURRENT 件数と同じ（`page.tsx:5-9`） |
+| T07 | simulator: `event_id` も `x_user_id` も無い | `result: null` の初期表示（`settings.ts:185-188`） |
+| T08 | simulator: `x_user_id` が `@` 付き | `@` を除いた値で判定（`settings.ts:189`） |
+| T09 | `rg "fetch\\(|@/lib|next/|getDatabase" apps/ops/src/routes/admin apps/ops/src/components/shared` | 直接 D1 / Next の import は 0 件 |
+
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/layout.tsx`、`app/(admin)/admin/page.tsx`、`app/(admin)/admin/permissions/simulator/page.tsx`、`src/components/layout/CostGuardBanner.tsx`（admin source 部分）を IN_PROGRESS（移植先）。`STATUS.md` は merge 直前の統合でだけ更新。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T09 が PASS
+- [ ] MIG-0626 と MIG-0661 が DONE になってから、top / simulator / banner の実 API で確認
+- [ ] この task の画面は write を呼ばない（Server Action も `POST` も無い）
+- [ ] browser 確認（390px / 1440px）が PR にある
+
+#### STOP
+- guard の判定（role / enrichment 失敗）を SPA 側で決める必要が出たら止める（Hono が正）。CURRENT の `enrichmentFailed`（`requestAuthContext.ts:215-225`）は RH-001 に無いので、MIG-0707 の guard が `degraded: true` と 503 を同じ Location に写す（D-17-3）。本 task は MIG-0707 の guard を使い、写像を変えない。
+- `GET /api/admin-read/cost-guard-banner` が D1 を使わずに mode を出せない、または admin と public の出し分けが変わるなら MIG-0661 に返す。
+
+#### Rollback
+Phase 7 共通契約のとおり。route 行を MIG-0707 の空枠に戻す。
+
+### MIG-0725: admin 内容ルール（CURRENT `admin/announcements`、`api-endpoints`、`rules`、`event-groups`、list navigation）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 を 0724〜0731 に分割。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0602, MIG-0625 / **Decisions:** D-05 DECIDED, D-15-13, D-16-1, D-16-2, D-16-3, D-16-4, D-17-1
+- **Merge gate:** MIG-0626（reads: `settings.ts:38,66,80,169,239`）、MIG-0642（SA-051〜055 の書き込み）、MIG-0653（SA-025〜030 の event group 書き込み）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- announcements: 一覧 `app/(admin)/admin/announcements/page.tsx`（drizzle の `announcements` を直接 select、:50-51）→ 読み `GET /api/admin-read/announcements`（`apps/api/src/routes/adminRead/settings.ts:38`）、詳細 `GET /api/admin-read/announcements/:id`（:66）。`new` は `AnnouncementForm`（`src/components/admin/AnnouncementForm.tsx:30`、server action import は :9）。`[id]/edit` は `AnnouncementForm` + `DeleteAnnouncementForm`（`src/components/admin/DeleteAnnouncementForm.tsx:9`、action import :6）。
+- API endpoints: `app/(admin)/admin/api-endpoints/page.tsx:30-48`（inline server action `createApiEndpointAction` / `setApiEndpointActiveAction` が redirect する。SA-108 / SA-109）、`lib/actions/api-endpoints`（:13）、一覧の D1 直接読み（:50-78）→ 読み `GET /api/admin-read/api-endpoints`（`settings.ts:239`）。`EventExportLinkBuilder`（`src/components/admin/EventExportLinkBuilder.tsx:15`）を使う。
+- rules: 一覧 `app/(admin)/admin/rules/page.tsx:26-`（drizzle の `termsVersions` を直接 select、:41-42）→ 読み `GET /api/admin-read/rules`（`settings.ts:80`）。`TermsReacceptBroadcastButton`（`src/components/admin/TermsReacceptBroadcastButton.tsx:13`、action import :5）。`rules/new` は `TermsForm`（`src/components/admin/TermsForm.tsx:29`）。`rules/[id]/edit` は `TermsForm` と読み `GET /api/admin-read/rules/:id`（`settings.ts:169`）。`TermsForm` の publish / archive は :86 / :94 で呼ぶ。
+- event groups: 一覧 `app/(admin)/admin/event-groups/page.tsx:38-`（drizzle の `eventGroups` を直接 select、:63）→ 読み `GET /api/admin-read/event-groups`（`apps/api/src/routes/adminRead/eventGroups.ts:22`）。`new` は `EventGroupForm`（`src/components/admin/EventGroupForm.tsx:39`、action は :6-8、呼び分け :60-61）。`[id]/edit` は `EventGroupForm` + `EventGroupMembersEditor`（`src/components/admin/EventGroupMembersEditor.tsx:32`）+ `DeleteEventGroupForm`（`:13`）。読み `GET /api/admin-read/event-groups/:id`（`eventGroups.ts:51`、候補の一覧は :69-83 の cursor 付き）。候補の検索（`queryEventGroupEventOptions`、`src/lib/admin/eventGroupEventOptions.ts:51`）に対応する GET は未確認（D-17）。
+- list navigation: `AdminSectionTabs`（`src/components/admin/AdminSectionTabs.tsx:41`）と `AutoSubmitSelect`（`src/components/forms/AutoSubmitSelect.tsx:95`、`navigateGetForm` :20）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/content/{AnnouncementList,AnnouncementNew,AnnouncementEdit,ApiEndpoints,RuleList,RuleNew,RuleEdit,EventGroupList,EventGroupNew,EventGroupEdit}.tsx`, `+apps/ops/src/api/adminContent.ts`（読みの関数。provisional の型は 1 行目に D-16-1 の注記）, `+apps/ops/src/api/write.ts`（D-16-2 と同じ。先に merge した方が作る。最初に write を持つのはこの task）, `+apps/ops/src/components/admin/{AnnouncementForm,DeleteAnnouncementForm,TermsForm,TermsReacceptBroadcastButton,EventGroupForm,EventGroupMembersEditor,DeleteEventGroupForm,EventExportLinkBuilder}.tsx`, `+apps/ops/src/components/shared/{AdminSectionTabs,AutoSubmitSelect,FnTable,Pagination,EmptyState}.tsx` と css（D-16-4 と同じ規則。0726〜0731 も import する）, `+apps/ops/src/styles/admin-content.css`, `+apps/ops/test/adminContent.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（route 行のみ）, `apps/ops/scripts/portCssModule.mjs`, `apps/ops/src/main.tsx`（css import）, `apps/ops/src/routes/guard.tsx`（D-16-3 の `refreshKey` 引数。main に既にあれば何もしない）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/**`（移植元）, `apps/api/**`, `packages/**`
+
+#### Micro-units
+- **U01 announcements**: 一覧 / new / edit / 削除。読みは `settings.ts:38,66`（MIG-0626 の merge 後）。書きは SA-004〜006（`POST /api/admin/announcements`、`PUT .../:id`、`DELETE .../:id`。MIG-0602 DONE、`API_MATRIX.md:94-96`）。
+- **U02 api-endpoints と list navigation**: `ApiEndpoints` を移植。SA-007 / SA-008（`API_MATRIX.md:97-98`、MIG-0602 DONE）と、page 内 inline action（SA-108 / SA-109）の代わりの typed API 呼び出し。`AdminSectionTabs` / `AutoSubmitSelect` を shared に置く（一覧の絞り込み URL は CURRENT と同じ）。
+- **U03 rules / terms**: 一覧 / new / edit、publish（SA-053）、archive（SA-055）、reaccept broadcast（SA-054）。書きは MIG-0642（READY）が merge されてから。読みは `settings.ts:80,169`（MIG-0626）。
+- **U04 event groups**: 一覧 / new / edit / 削除、member の追加（SA-029）・削除（SA-030）・候補検索（SA-025）。書きは MIG-0653（READY）、読みは `eventGroups.ts:22,51`（MIG-0625 DONE）。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | moderator / user が `/admin/announcements` と `/admin/event-groups` を開く | 読みは 403 `redirect: "/dashboard"`（`adminRead/index.ts:35-39`）、`/dashboard` へ移動 |
+| T02 | announcements 一覧・詳細の表示（fixture は `settings.ts:38,66` の応答） | CURRENT の列・文言・並びと同じ |
+| T03 | announcement 作成 / 更新 / 削除 | `API_MATRIX.md:94-96` の status（200 / 400 / 404 / 409 / 413 / 500）どおりの表示。成功後に読み直す |
+| T04 | api-endpoint の作成と有効・無効の切替 | `API_MATRIX.md:97-98` どおり。SA-108 / SA-109 の inline redirect と同じ遷移 |
+| T05 | rules: 公開・アーカイブ・再同意 broadcast | CURRENT の確認文言と成功文言（`TermsForm.tsx:86,94`）。確認なしの実行はしない |
+| T06 | event group: member の追加・削除、上限、削除 | CURRENT と同じ表示。上限超えは API を呼ばない |
+| T07 | `rg "@/|next/|getDatabase" apps/ops/src/routes/admin/content apps/ops/src/components/admin` | 0 件 |
+| T08 | 書きの 401 / 403 / 通信失敗 | CURRENT と同じ文言（各 component の「〜に失敗しました。」）。`write.ts` の `unavailable` で分岐 |
+
+#### Commands
+```bash
+node apps/ops/scripts/portCssModule.mjs
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の 10 route 行と各 component 行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-004〜008 と SA-051〜055、SA-025〜030 に Ops の呼び出し元を追記。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T08 が PASS
+- [ ] MIG-0626 / MIG-0642 / MIG-0653 が DONE、または該当 unit が Merge gate 未解消のまま merge されていない
+- [ ] 書きは `apps/ops/src/api/write.ts` だけを通る（画面から `fetch` を直接呼ばない）
+- [ ] browser 確認（390px / 1440px）が PR にある
+
+#### STOP
+- 権利の判定（moderator の書き込み可否など）を SPA で決める必要が出たら止める（Hono が正）。
+- terms の publish / archive で版の状態遷移が CURRENT（`src/lib/actions/rules.ts`）と違う場合は MIG-0642 に返す。
+
+#### Rollback
+Phase 7 共通契約のとおり。route と component を revert する（write client の追加は他の task が使い始めた後は revert しない）。
+
+### MIG-0726: admin イベントとワークフロー（CURRENT `admin/events`、`events/new`、`events/templates`、`events/[id]` 系の互換 redirect）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 を 0724〜0731 に分割。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0625 / **Decisions:** D-05 DECIDED, D-15-13, D-16-1, D-16-2, D-16-4, D-16-4（EventForm の shared 化）, D-17-1
+- **Merge gate:** MIG-0652（SA-022 `createEvent`、READY）、MIG-0655（`snapshotToFormInitial` / `parseEventTemplateSnapshot` の `@flamenode/domain/eventTemplates` への移動、D-13-48）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- 一覧: `app/(admin)/admin/events/page.tsx:37-`（`searchParams` :30-38、drizzle の `eventsTable` 直接 select）→ 読み `GET /api/admin-read/events`（`apps/api/src/routes/adminRead/events.ts:20`、MIG-0625 DONE）。`AdminSectionTabs`（:19）、`AutoSubmitSelect`（:21）。
+- new: `app/(admin)/admin/events/new/page.tsx:25-`。`EventForm`（`src/components/admin/EventForm.tsx:376`、`createEvent` / `updateEvent` の呼び分けは :602）。テンプレート一覧は `listEventTemplatesForAdmin`（page :15、SA-037 の読み）→ `GET /api/admin-read/events/new`（`eventTemplates.ts:105`、MIG-0625 DONE）。`EventForm` は `EventCustomQuestionsEditor`（`src/components/admin/EventCustomQuestionsEditor.tsx`、390 行）、`YoutubeDescriptionTemplateEditor`（465 行）、`EventSettingsPreview`（350 行）を使う。
+- templates: `app/(admin)/admin/events/templates/page.tsx:16-`、`DeleteEventTemplateButton`（`src/components/admin/DeleteEventTemplateButton.tsx:13`、SA-036）。読み `GET /api/admin-read/events/templates`（`eventTemplates.ts:96`、MIG-0625 DONE）。
+- 互換 redirect（replacement なしに消さない。`CURRENT_ROUTES.md` の COMPAT_REDIRECT）:
+  - `app/(admin)/admin/events/[id]/page.tsx` → `/manage/events/${id}`
+  - `app/(admin)/admin/events/[id]/edit/page.tsx` → `/manage/events/${id}/edit`
+  - `app/(admin)/admin/events/[id]/slots/page.tsx` → `/manage/events/${id}/slots`
+  - `app/(admin)/admin/events/[id]/staff/page.tsx` → `/manage/events/${id}/staff`
+  - いずれも next/navigation の `redirect()`（既定の一時 redirect）。redirect 先は MIG-0704（manage）の画面。
+- SA-036 の状態: `docs/migration/PHASE_6_SPEC.md:268` と `:2695` は「SA-036 DONE / merge 済み（`apps/api/src/routes/events/templates.ts`）」と書く。一方 `FILE_MIGRATION_MATRIX.md:874-876` と `API_MATRIX.md` の MIG-0604 節は IN_PROGRESS（D-17）。
+
+- `events/new` の読みは `formInitial: "deferred"` と `templateSettingsJson` を返す（`apps/api/src/routes/adminRead/eventTemplates.ts:105-121`）。CURRENT の変換は `src/lib/admin/eventTemplateSettings.ts:251,347`（`events/new/page.tsx:53-55`）で、MIG-0655 が `@flamenode/domain/eventTemplates` へ移す（D-13-48）。SPA は移した関数を import し、複製しない。test にテンプレートを選んだときの初期値の case を足す。
+- SA-036 の endpoint（`apps/api/src/routes/events/templates.ts`）は main にある。MIG-0604 は Final audit だけなので gate にしない（D-15-4）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/events/{EventList,EventNew,EventTemplates,EventCompatRedirect}.tsx`, `+apps/ops/src/api/adminEvents.ts`（`getAdminEvents` / `getEventTemplates` / `getEventNewOptions` / `deleteEventTemplate`。provisional 注記）, `+apps/ops/src/components/admin/{DeleteEventTemplateButton}.tsx`, `+apps/ops/src/components/shared/{EventForm,EventCustomQuestionsEditor,YoutubeDescriptionTemplateEditor,EventSettingsPreview}.tsx`（D-16-5 と同じ。`app/(manage)/manage/events/[id]/edit/page.tsx` も使うため、MIG-0704 は import だけ）, `+apps/ops/src/lib/eventRoutes.ts`（compat redirect の Location を組む pure 関数。新規の判定ロジックは書かない）, `+apps/ops/test/adminEvents.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（route 行のみ）, `apps/ops/scripts/portCssModule.mjs`, `apps/ops/src/main.tsx`, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `app/(manage)/**`（MIG-0704 の移植対象）, `src/components/**`（移植元）, `apps/api/**`
+
+#### Micro-units
+- **U01 events 一覧と templates**: 一覧（`events.ts:20`）と templates（`eventTemplates.ts:96`）を移植。`DeleteEventTemplateButton` は SA-036（DONE、`templates.ts`）を呼ぶ。`AdminSectionTabs` の表示は 0725 の shared を使う。
+- **U02 events/new（EventForm）**: `EventForm` と 3 つの editor を移植。書きは SA-022（`createEvent`、MIG-0652 READY）。テンプレート候補は `eventTemplates.ts:105`。`updateEvent`（SA-023）は manage 側のため本 task では呼ばない。
+- **U03 互換 redirect 4 件**: `[id]`、`[id]/edit`、`[id]/slots`、`[id]/staff` を `eventRoutes.ts` の Location で redirect。`encodeURIComponent(id)` を CURRENT と同じく使う。
+- **U04 Final audit（admin events）**: 一覧 / new / templates / 4 redirect の URL と遷移を 1 枚の表で確かめ、MIG-0704 の manage 画面に入る先が無くても 404 にならない（redirect 先は 0704 の枠）ことを確認。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | moderator / user が `/admin/events` と `/admin/events/new` を開く | 403 → `/dashboard`（`adminRead/index.ts:35-39`） |
+| T02 | 一覧の絞り込み（`searchParams`）と並び | CURRENT の query 名と結果が同じ（`events/page.tsx:30-38`） |
+| T03 | EventForm の作成（テンプレート有 / 無） | CURRENT と同じ項目と送る値。SA-022 の status と文言（MIG-0652 の契約） |
+| T04 | テンプレートの削除 | 確認を経てから SA-036 を呼ぶ。成功後に一覧を読み直す |
+| T05 | `/admin/events/abc/edit` など 4 redirect | Location が `/manage/events/abc/edit` 等（`encodeURIComponent` 済み）。`id` に `/` を含む入力でも 1 セグメント |
+| T06 | `rg "@/|next/|getDatabase" apps/ops/src/routes/admin/events apps/ops/src/components/shared/EventForm.tsx` | 0 件 |
+
+#### Commands
+```bash
+node apps/ops/scripts/portCssModule.mjs
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の events 系 7 route 行と `src/components/admin/EventForm.tsx` 行を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-022 と SA-036 に Ops の呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T06 が PASS
+- [ ] MIG-0652 が DONE、または SA-022 の呼び出しを Merge gate 未解消のまま merge していない
+- [ ] `EventForm` の shared 化を MIG-0704（manage edit）と合わせて確認した
+- [ ] browser 確認（390px / 1440px）が PR にある
+
+#### STOP
+- `EventForm`（1120 行）＋ editor 3 件で 1 wake に収まらないと分かったら止め、MIG-0726a（一覧・templates・redirect）と MIG-0726b（EventForm）に分けるよう lead に返す。
+- playlist の画面は本 task の対象外（D-17）。
+
+#### Rollback
+Phase 7 共通契約のとおり。
+
+### MIG-0727: admin 動画（CURRENT `admin/videos`、`videos/[id]`、`videos/[id]/members`）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 を 0724〜0731 に分割。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0625, MIG-0635 / **Decisions:** D-05 DECIDED, D-15-13, D-16-1, D-16-2, D-16-4, D-16-5（`AdminVideoStatusForm` は本 task。`app/(admin)/admin/videos/[id]/page.tsx:10,103` の呼び出し元）, D-17-1
+- **Merge gate:** MIG-0603（SA-001〜003 と SA-043。U02a / U02b、READY）、MIG-0648（RH-019 `GET /api/internal/x-users/search`。`VideoMembersField.tsx:161` の候補検索）、MIG-0650（SA-085 `updateVideoMembersAdmin`、READY）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+
+#### Source snapshot
+- 一覧: `app/(admin)/admin/videos/page.tsx:54-`（drizzle の `videosTable` を直接 select :122・:147）→ 読み `GET /api/admin-read/videos`（`apps/api/src/routes/adminRead/videos.ts:34`、MIG-0625 DONE）。`VideoReviewQueueTable`（`src/components/admin/VideoReviewQueueTable.tsx:57`）、`VideoReviewQuickApproveButton`（`src/components/admin/VideoReviewQuickApproveButton.tsx:26`、SA-001 は page:22 の import 元）、`AdminVideoManagementTabs`（`:39`）、`AutoSubmitSelect`（:32）。
+- 詳細: `app/(admin)/admin/videos/[id]/page.tsx:34-`（drizzle の `videoModerationCases` 直接 select、:7 / :50-62）→ 読み `GET /api/admin-read/videos/:id`（`apps/api/src/routes/adminRead/videoDetail.ts:67`、MIG-0635 DONE）。`AdminVideoStatusForm`（`src/components/video/VideoStatusForm.tsx:56`、`action={setVideoStatus}` は :78、import は :7。**src/components/admin の外**）、`VideoApproveActions`（`src/components/video/VideoApproveActions.tsx:31`。SA-001 / SA-002 は page:12-15 が props で渡す）、`VideoReviewDetailPanel`（`src/components/admin/VideoReviewDetailPanel.tsx:33`）、`CreateModerationCaseForm`（`src/components/admin/CreateModerationCaseForm.tsx:13`、page:20 / :195。SA-043）。
+- members: `app/(admin)/admin/videos/[id]/members/page.tsx:26-`（`notFound` は :31）→ 読み `GET /api/admin-read/videos/:id/members`（`apps/api/src/routes/adminRead/videoMembers.ts:30`、MIG-0635 DONE）。`AdminVideoMembersForm`（`src/components/admin/AdminVideoMembersForm.tsx:29`、`updateVideoMembersAdmin` import は :8）、`VideoMembersField`（`src/components/forms/VideoMembersField.tsx`、1503 行、apps/app 専用の場所）の型 import は page:14。`formatMemberChapterTime`（`src/lib/video/memberInput.ts`）、`extractVideoMemberIdFromChapterId`、`MAX_VIDEO_MEMBERS`（page:15-17）。`AdminVideoTabs`（`src/components/admin/AdminVideoTabs.tsx:11`）。
+- 書き（SA）: SA-001 `approveAdminVideoPublic`、SA-002 `approveAdminVideoPublicAndNext`（`src/lib/actions/admin.ts`、MIG-0603 U02a、READY）、SA-003 `setVideoStatus`（同 U02a / U02b、READY）、SA-043 `createModerationCase`（同 U02b、READY、`moderation-admin.ts:109`）、SA-085 `updateVideoMembersAdmin`（`src/lib/actions/video/adminMembers.ts:67`、MIG-0650 READY）。
+
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/videos/{VideoList,VideoDetail,VideoMembers}.tsx`, `+apps/ops/src/api/adminVideos.ts`（`getAdminVideos` / `getAdminVideo` / `getAdminVideoMembers` / `approveVideo` / `setVideoStatus` / `createModerationCase` / `updateVideoMembers`。provisional 注記）, `+apps/ops/src/components/admin/{AdminVideoMembersForm,AdminVideoTabs,AdminVideoManagementTabs,CreateModerationCaseForm,VideoReviewDetailPanel,VideoReviewQuickApproveButton,VideoReviewQueueTable}.tsx`, `+apps/ops/src/components/shared/{AdminVideoStatusForm,VideoApproveActions,VideoMembersField}.tsx` と css（`AdminVideoStatusForm` は manage（MIG-0704 U04）の `ManageVideoStatusForm`（`src/components/video/VideoStatusForm.tsx:91`）と同じファイルの port。先に merge した方が作る、D-16-4 と同じ規則）, `+apps/ops/src/lib/video/{memberInput,atomicLimits}.ts`（`src/lib/video/` の pure 部分のみ。1 行目 `// Port of CURRENT <path> (MIG-0727). Same output.`。`packages/domain` に同名があればそれを import）, `+apps/ops/test/adminVideos.test.mjs`
+- 変更: `apps/ops/src/routes/router.tsx`（route 行のみ）, `apps/ops/scripts/portCssModule.mjs`, `apps/ops/src/main.tsx`, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/**`（移植元）, `apps/app/**`（MIG-0713 の `VideoMembersField` 移植は apps/app 側。Ops は別に port する）, `apps/api/**`
+
+#### Micro-units
+- **U01 一覧**: `VideoList` を移植。`GET /api/admin-read/videos`（`videos.ts:34`）。承認ボタンは SA-001（MIG-0603 merge 後）。絞り込み URL（`status=pending` など）を CURRENT と同じに。
+- **U02 詳細と状態 form**: `VideoDetail` を移植。`AdminVideoStatusForm`（SA-003）、`VideoApproveActions`（SA-001 / SA-002）、`VideoReviewDetailPanel`、`CreateModerationCaseForm`（SA-043）。読みは `videoDetail.ts:67`。書きは MIG-0603 merge 後。
+- **U03 members**: `VideoMembers` を移植。`VideoMembersField` は port の adapter 形（MIG-0713 と同じ規則: `searchXUsers` と `applyPermissionBatch` は props）。書きは SA-085（MIG-0650 READY）。読みは `videoMembers.ts:30`。
+- **U04 shared の確認と Final audit**: `AdminVideoStatusForm` / `VideoApproveActions` の props を manage（MIG-0704 U04）と合わせて確認。admin の 3 route の表（URL・Location・書きの SA）を PR に載せる。
+
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner が `/admin/videos`、`/admin/videos/:id`、`/admin/videos/:id/members` を開く | 401 は `/entry`、403 は `/dashboard`（`adminRead/index.ts:35-39`）。moderator は admin ではないので `/dashboard` |
+| T02 | 一覧の承認（SA-001）・失敗 | CURRENT と同じ文言。成功で一覧を読み直す（LOADING にしない、D-16-3） |
+| T03 | 詳細の状態変更（SA-003）: 同じ状態への変更 | CURRENT の `SAME_VIDEO_STATUS_MESSAGE` と同じ表示（`validateAdminVideoStatusInput`、`API_MATRIX.md:79`） |
+| T04 | 詳細の moderation case 作成（SA-043） | CURRENT と同じ項目と送る値。未入力の検証は API を呼ばない |
+| T05 | members の追加・削除・上限 `MAX_VIDEO_MEMBERS` ちょうど / 超え | CURRENT と同じ表示。超えは API を呼ばない |
+| T06 | members の SA-085 失敗 / reject | CURRENT の文言（`AdminVideoMembersForm.tsx` の catch 文言）と同じ |
+| T07 | `/admin/videos/:id` で存在しない id | CURRENT の `notFound`（`videos/[id]/page.tsx:45`）と同じ 404 表示 |
+| T08 | `rg "fetch\\(|@/lib/actions|@/lib/db|next/" apps/ops/src/routes/admin/videos apps/ops/src/components/shared/AdminVideoStatusForm.tsx` | 0 件 |
+
+#### Commands
+```bash
+node apps/ops/scripts/portCssModule.mjs
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/admin/videos/**` 3 行と `src/components/video/VideoStatusForm.tsx`（admin 部分）、`src/components/admin/AdminVideoMembersForm.tsx` を IN_PROGRESS。`API_MATRIX.md` の SA-001〜003 / SA-043 / SA-085 に Ops の呼び出し元。
+
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T08 が PASS
+- [ ] MIG-0603 と MIG-0650 が DONE、または該当 unit を Merge gate 未解消のまま merge していない
+- [ ] 書きは `apps/ops/src/api/write.ts` を通る（MIG-0725 が先に作る。無ければ D-16-2 の規則で作る）
+- [ ] 危険操作（SA-001〜003、SA-043、SA-085）は独立レビュー（Opus）を通っている
+- [ ] browser 確認（390px / 1440px）が PR にある
+
+#### STOP
+- `VideoMembersField` の移植（1503 行）と他の form で 1 PR に収まらないと分かったら止め、一覧・詳細と members に分けるよう lead に返す。`VideoMembersField` は MIG-0713（Personal、`apps/app`）も移植するので、同じ中身を写す（D-17-5）。
+- 動画の状態遷移（公開・非公開の fence）を SPA 側で判定する必要が出たら止める（Hono が正、`planVideoVisibilityFence`）。
+- `VideoMembersField` の port で `packages/domain` に無い pure 関数が要る場合は、apps/app の複製を増やす前に止めて lead に返す（D-17）。
+
+#### Rollback
+Phase 7 共通契約のとおり。route と component を revert する。
+
+### MIG-0728: admin identity と moderation（users・ロール・BAN・X 連携申請・X ID 統合・moderation）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 を Admin 4 task（0728〜0731）と Final audit に分割。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0625, MIG-0635 / **Decisions:** D-05 DECIDED, D-13-40（SA-043/044 は MIG-0603 U02b）, D-14-10（SA-077..081 / SA-092..097 / SA-110 の分割先）, D-16-1, D-16-2, D-16-3, D-16-4, D-17-1
+- **Merge gate:** MIG-0603（SA-044）, MIG-0605（SA-090/091）, MIG-0637（SA-077..081）, MIG-0642（SA-049）, MIG-0644（SA-092..097, SA-110）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+#### Source snapshot
+- CURRENT 画面（6 route）:
+  - `app/(admin)/admin/users/page.tsx`（625 行）。`view=links` は `/admin/x-link-requests` へ redirect（:89）。`AdminUserManagementTabs`（:335）、`GlobalEditableFieldsPanel`（:374）。
+  - `app/(admin)/admin/users/[id]/page.tsx`（437 行、読み取りのみ。書き込み部品なし。`AdminUserTabs` :122）。
+  - `app/(admin)/admin/users/[id]/edit/page.tsx`（65 行、`UserAdminForm` :51）。
+  - `app/(admin)/admin/moderation/page.tsx`（216 行。`AutoSubmitSelect` の filter、`ModerationCaseStatusForm` :191、`ModerationFlashNotice`）。
+  - `app/(admin)/admin/x-id-merges/page.tsx`（384 行。ページ内の server action `run`（:32-34）が 6 つの SA を呼ぶ。tabs :150、create form :160、approve / reject / execute / revert の form :323, :324, :328, :366, :372）。
+  - `app/(admin)/admin/x-link-requests/page.tsx`（190 行、`XLinkRequestTable` :138、tabs :133）。
+- CURRENT components（`src/components/admin/**`）: `AdminUserManagementTabs.tsx`（47 行）, `AdminUserTabs.tsx`（29）, `GlobalEditableFieldsPanel.tsx`（462）, `UserAdminForm.tsx`（242）, `ModerationCaseStatusForm.tsx`（88）, `ModerationFlashNotice.tsx`（44）, `XLinkRequestTable.tsx`（312）。共通部品: `src/components/ui/ConfirmDialog`（`UserAdminForm.tsx:13`）, `src/components/manage/ManageXIcon`（`users/page.tsx:25`）, `src/components/ui/FnTable`。CSS module は使わず、global の `fn-*` class。
+- 読み（既存 Hono、`apps/api/src/routes/adminRead/**`）。全て `index.ts:33-38` の `sessionMiddleware` → `requireAuth` → `role === "admin"`（403 `{error, redirect:"/dashboard"}`）を通る。
+  - `GET /api/admin-read/users?view&q&status&page` … `users.ts:117`（`view=links` は `{redirect}`、API_MATRIX.md:413）
+  - `GET /api/admin-read/users/:id` … `users.ts:216`
+  - `GET /api/admin-read/users/:id/edit` … `userEdit.ts:19`
+  - `GET /api/admin-read/moderation` … `moderation.ts:11`
+  - `GET /api/admin-read/x-link-requests` … `xLinkRequests.ts:86`
+  - `GET /api/admin-read/x-id-merges?view&impact` … `xIdMerges.ts:86`
+  - 読み MIG-0625（DONE、users / moderation / x-link-requests / x-id-merges）、MIG-0635（DONE、users/[id]/edit）。
+- 書き（SA id → CURRENT の呼び出し元 → 所有 MIG → state）:
+
+| SA | CURRENT 関数 | 呼び出し元 | 所有 MIG | state |
+| --- | --- | --- | --- | --- |
+| SA-049 | `updateGlobalEditableFields` | `GlobalEditableFieldsPanel.tsx:84`（page :374） | MIG-0642 | READY |
+| SA-077 | `setUserRole` | `UserAdminForm.tsx:98`（`fd.set("role")` :97） | MIG-0637 | READY |
+| SA-078 | `setUserBanned` | BAN `UserAdminForm.tsx:236`（`ConfirmDialog` :223-238 の中）、解除 `:123` | MIG-0637 | READY |
+| SA-079 | `setUserNotifications` | `UserAdminForm.tsx:185` | MIG-0637 | READY |
+| SA-080 | `setUserCanCreateEvents` | `UserAdminForm.tsx:167` | MIG-0637 | READY |
+| SA-081 | `refreshXUserIcon` | `UserAdminForm.tsx:214` | MIG-0637 | READY |
+| SA-044 | `updateModerationCaseStatus` | `ModerationCaseStatusForm.tsx:24`（page :191） | MIG-0603 U02b | READY |
+| SA-090 | `approveXIdLinkRequest` | `XLinkRequestTable.tsx:249` | MIG-0605 U05x | READY |
+| SA-091 | `rejectXIdLinkRequest` | `XLinkRequestTable.tsx:288`（理由入力あり） | MIG-0605 U05x | READY |
+| SA-092 | `createXIdMergeRequest` | `x-id-merges/page.tsx:160` | MIG-0644 | READY |
+| SA-093 | `approveXIdMergeRequest` | `x-id-merges/page.tsx:323` | MIG-0644 | READY |
+| SA-094 | `rejectXIdMergeRequest` | `x-id-merges/page.tsx:324` | MIG-0644 | READY |
+| SA-096 | `executeXIdMergeRequest` | `x-id-merges/page.tsx:328`（確認 `MERGE` :330） | MIG-0644 | READY |
+| SA-097 | `approveXIdMergeRevert` | `x-id-merges/page.tsx:366`（確認 `REVERT` :368） | MIG-0644 | READY |
+| SA-095 | `rejectXIdMergeRevert` | `x-id-merges/page.tsx:372` | MIG-0644 | READY |
+| SA-110 | page 内 `run`（`x-id-merges/page.tsx:32-34`） | 上の 6 form を包む | MIG-0644 | READY |
+
+- 対象外: SA-043 `createModerationCase` は `app/(admin)/admin/videos/[id]/page.tsx:195` の `CreateModerationCaseForm` で使う（0727 の担当）。
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/identity/**`（6 route の画面と form component）, `+apps/ops/src/api/identity.ts`（読みは `/api/admin-read/*`、書きは各 MIG の endpoint。1 行目は D-16-1 の provisional comment）, `+apps/ops/test/adminIdentity.test.mjs`
+- 新規（先に merge した方が作る、D-16-2）: `+apps/ops/src/api/write.ts`
+- 新規（先に merge した方が作る、D-16-4）: `+apps/ops/src/components/shared/ConfirmDialog.tsx`（CURRENT `src/components/ui/ConfirmDialog`。0730 / 0731 も使う）
+- 変更: `apps/ops/src/routes/router.tsx`（`/admin/users*`, `/admin/moderation`, `/admin/x-link-requests`, `/admin/x-id-merges` の Route 行。MIG-0707 の route 枠を埋める）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/admin/**`（移植元は読むだけ）, `apps/api/**`, `apps/ops/src/routes/admin/{shell,events,videos,spreadsheet,ops,audit}/**`（他 task の担当）
+#### Micro-units
+- **U01 読み**: `identity.ts` の 6 本の読みと、一覧の query（`view` / `q` / `status` / `page`）、詳細、edit、moderation、X 連携、X ID 統合。`view=links` は `/admin/x-link-requests` へ移す（`users/page.tsx:89`）。エラーと 0 件の表示を CURRENT と同じにする。
+- **U02 users の書き込み**: `GlobalEditableFieldsPanel`（SA-049）と `UserAdminForm`（SA-077〜081）を React のまま移植。BAN は `ConfirmDialog`（`UserAdminForm.tsx:223-238`）を残す。成功後は `refreshKey` で読み直し、LOADING にしない（D-16-3）。
+- **U03 moderation と X 連携**: `ModerationCaseStatusForm`（SA-044、`:26` の失敗文言）と `XLinkRequestTable`（SA-090/091、`:121` の結果表示、`:288` の理由入力）。
+- **U04 X ID 統合**: merge の create / approve / reject / execute（`MERGE`）、revert の approve / reject（`REVERT`）（SA-092〜097、SA-110）。確認文字列と `required` / disabled の条件を CURRENT と同じにする。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × 6 route | guest は `/entry`（`app/(admin)/layout.tsx:23`）、user / moderator / owner は `/dashboard`（:27）、admin 以外の API は 401 / 403 `{redirect:"/dashboard"}`（`adminRead/index.ts:36-38`）。moderator は admin ではない |
+| T02 | `/admin/users?view=links` | `/admin/x-link-requests` へ移る（`users/page.tsx:89`） |
+| T03 | BAN を押して確認を閉じる | API を呼ばない（`UserAdminForm.tsx:143`, `:223-238`） |
+| T04 | ロール変更の成功 | 「ロールを … に変更しました。」（`:98`）、再取得で LOADING にならない |
+| T05 | `{ok:false, message}` / reject | `message`、無ければ「操作に失敗しました。」（`UserAdminForm.tsx:55`） |
+| T06 | X 連携 approve / reject の失敗 | `message`、無ければ「処理に失敗しました。」（`XLinkRequestTable.tsx:121`） |
+| T07 | merge の実行で確認欄が `MERGE` 以外 | 送信できない（`x-id-merges/page.tsx:330` の `required` と同じ）。revert は `REVERT`（:368） |
+| T08 | moderation 状態更新の失敗 | 「更新に失敗しました。」（`ModerationCaseStatusForm.tsx:26`） |
+| T09 | 読みの D1 失敗 | CURRENT と同じ表示（users は 200 `degraded`、API_MATRIX.md:413） |
+| T10 | 権限なしの書き込み（`requireAdminWrite(<feature>)` の拒否） | 返された `message` を CURRENT と同じ場所に出す |
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/admin/{users/**, moderation, x-id-merges, x-link-requests}` 行を IN_PROGRESS（移植先 `apps/ops/src/routes/admin/identity/**`）。`API_MATRIX.md` の SA-044, SA-049, SA-077〜081, SA-090〜097, SA-110 に SPA の呼び出し元。`work-items/MIG-0728.md` に U01〜U04 の表。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T10 が PASS
+- [ ] MIG-0603 / 0605 / 0637 / 0642 / 0644 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] BAN、merge、revert の確認が CURRENT と同じ
+- [ ] 独立レビュー（Opus）が APPROVE
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- role / BAN の可否を SPA 側で決める必要が出たら止める（Hono が正）。
+- `users?view=xid` の `icon_url` は D-13-49 の記録済みの差（`apps/api/src/routes/adminRead/users.ts:171-172` は常に null）。本 task は null のまま `ManageXIcon` の fallback を出す。CURRENT と同じ icon に戻すのは MIG-0511（public X icon map projection）の DONE 後の follow-up（D-17-7）。
+- SA-043（moderation case 作成）をこの task で実装しない（0727）。
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない）。
+
+### MIG-0729: admin spreadsheet と legacy import（table explorer、safe write / export / import）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 の分割。spreadsheet の読みは MIG-0605 U02 で main にあるが task は READY。書きと import は MIG-0638、legacy import は MIG-0645。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707 / **Decisions:** D-05 DECIDED, D-14-11（RH-002 → MIG-0645、RH-004..008 → MIG-0638）, D-16-1, D-16-2, D-16-4, D-17-1
+- **Merge gate:** MIG-0605（RH-003 / RH-007 / RH-009 の読み。U02 は main 済み）, MIG-0638（RH-004 / RH-005 / RH-006 / RH-008 の書きと import）, MIG-0645（RH-002 の legacy import）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+#### Source snapshot
+- CURRENT 画面:
+  - `app/(admin)/admin/spreadsheet/page.tsx`（76 行）。非 admin は `notFound()`（:18）、`ADMIN_SPREADSHEET_ENABLED` が偽なら `notFound()`（:20）、client は `AdminSpreadsheetClient`（:73）。ただし `(admin)/layout.tsx:27` の redirect が先に走る。
+  - `app/(admin)/admin/import/page.tsx`（27 行、`LegacyCanonicalImportClient` :24）。
+- CURRENT components（`src/components/admin/spreadsheet/**` と `src/components/admin/LegacyCanonicalImportClient.tsx`）: `AdminSpreadsheetClient.tsx`（+ `.module.css`）、`SpreadsheetGrid.tsx`、`SpreadsheetGridFindBar.tsx`、`SpreadsheetGridFormulaBar.tsx`、`SpreadsheetGridStatusBar.tsx`、`SpreadsheetImportModal.tsx`、`SpreadsheetUndoRedoButtons.tsx`、`SpreadsheetContextMenu.tsx`、`SpreadsheetDelimitedTools.tsx`、`useAdminSpreadsheet.ts`、`useSpreadsheetExport.ts`、`useSpreadsheetImport.ts`、`spreadsheetApi.ts`、`spreadsheetHistory.ts`、`clipboardGrid.ts`、`spreadsheetGridUtils.ts`、`spreadsheetTypes.ts`、`spreadsheetErrors.ts`、`spreadsheetClientUtils.ts`、`LegacyCanonicalImportClient.tsx`（1332 行 + `.module.css`）。
+- 純粋 module（移植候補、`@/lib/admin/spreadsheet/{validation,paste,cellFormat,apiTypes,importPrepCore,gridFind,constants}`、`@/lib/utils/{clipboardParse,delimited,clipboard,format}`、`@/lib/import/legacy/{range,cpuBudget}`、`@/lib/staticRebuild/publicReflectionNotice`）。`next/*`、`@/lib/db`、`@/lib/auth` を import するものは写さない（STOP）。
+- 読み（既存 Hono、MIG-0605 U02 の read half）:
+  - `GET /api/admin/spreadsheet/tables` … `apps/api/src/routes/admin/spreadsheet/read.ts:253`（client `spreadsheetApi.ts:34` の `fetchSpreadsheetCatalog`）
+  - `GET /api/admin/spreadsheet/data` … `read.ts:182`（`spreadsheetApi.ts:54` の `fetchSpreadsheetPage`）
+  - `GET /api/admin/spreadsheet/export` … `read.ts:216`（`spreadsheetApi.ts:133` / `:144`）
+  - 環境の gate は `read.ts:58`（`ADMIN_SPREADSHEET_ENABLED`、404 `spreadsheet_disabled`）。
+- 書き（SA は無し。Route Handler 系）:
+
+| RH | 操作 | CURRENT の呼び出し元 | 所有 MIG | state |
+| --- | --- | --- | --- | --- |
+| RH-004 | `PATCH /api/admin/spreadsheet/data`（cell） | `spreadsheetApi.ts:73-82` `patchSpreadsheetCell` | MIG-0638 | READY |
+| RH-005 | `POST /api/admin/spreadsheet/data`（row insert） | `spreadsheetApi.ts:90-98` `insertSpreadsheetRow` | MIG-0638 | READY |
+| RH-006 | `DELETE /api/admin/spreadsheet/data`（row delete） | `spreadsheetApi.ts:101-110` `deleteSpreadsheetRow` | MIG-0638 | READY |
+| RH-008 | `POST /api/admin/spreadsheet/import`（preview） | `spreadsheetApi.ts:155-165` `previewSpreadsheetImport` | MIG-0638 | READY |
+| RH-008 | `POST /api/admin/spreadsheet/import`（apply） | `spreadsheetApi.ts:187-198` `runSpreadsheetImport` | MIG-0638 | READY |
+| RH-002 | `POST /api/admin/import/legacy`（preview） | `LegacyCanonicalImportClient.tsx:660` | MIG-0645 | READY |
+| RH-002 | `POST /api/admin/import/legacy`（apply） | `LegacyCanonicalImportClient.tsx:730` | MIG-0645 | READY |
+
+- 既存の挙動: import の preview token は browser に返る（`spreadsheetApi.ts:177-193`、`useSpreadsheetImport.ts:180-200`）。legacy import は token を `sessionStorage` に置く（`LegacyCanonicalImportClient.tsx:204-236`）。batch 上限は `useSpreadsheetImport.ts:67`（`SPREADSHEET_IMPORT_MAX_BATCH_ROWS`）。
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/spreadsheet/**`（2 画面、grid の移植、import modal）, `+apps/ops/src/api/spreadsheet.ts`（RH-003 / 004 / 005 / 006 / 007 / 008 / 009。1 行目 D-16-1 provisional）, `+apps/ops/src/api/legacyImport.ts`（RH-002、同）, `+apps/ops/src/lib/admin/spreadsheet/**` と `+apps/ops/src/lib/import/legacy/**`（上の純粋 module を 1 file ずつ。1 行目 `// Port of CURRENT <path> (MIG-0729). Same output.`）, `+apps/ops/src/styles/spreadsheet.css`（`portCssModule.mjs` の `MODULES` に `AdminSpreadsheetClient.module.css` と `LegacyCanonicalImportClient.module.css`）, `+apps/ops/test/spreadsheet.test.mjs`
+- 新規（D-16-2）: `+apps/ops/src/api/write.ts`（先に merge した方が作る）
+- 変更: `apps/ops/src/routes/router.tsx`（`/admin/spreadsheet`、`/admin/import` の Route 行）, `apps/ops/scripts/portCssModule.mjs`, `apps/ops/src/main.tsx`（css import）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/admin/**`, `src/lib/**`（移植元）, `apps/api/**`
+#### Micro-units
+- **U01 読みと grid**: `tables` / `data` / `export` の読み、table 一覧、grid（表示、選択、find、formula bar、status bar）。環境 off（404）の表示を CURRENT と同じにする。
+- **U02 cell 編集**: PATCH / POST / DELETE（RH-004〜006）、undo / redo（`spreadsheetHistory.ts`）、context menu。失敗表示は `spreadsheetErrors.ts` の文言。
+- **U03 spreadsheet import**: preview と apply（RH-008）、`SpreadsheetImportModal`、batch 上限（`useSpreadsheetImport.ts:67`）。preview token の扱いは CURRENT と同じ（browser に返る範囲だけ）。
+- **U04 legacy import**: `/admin/import` の preview / apply（RH-002）、`sessionStorage` の credential（`LegacyCanonicalImportClient.tsx:204-236`）、`cpuBudget` と `range`。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × 2 route | `(admin)/layout.tsx:23-27` と同じ（guest `/entry`、他は `/dashboard`） |
+| T02 | `ADMIN_SPREADSHEET_ENABLED` 無効 | 404 相当の表示（`spreadsheet/page.tsx:20`、API `read.ts:58`） |
+| T03 | preview token | CURRENT と同じ保存先（import 中のメモリ、legacy は `sessionStorage` のみ）。`localStorage` / IndexedDB へ保存しない |
+| T04 | import 途中失敗 | 全件ロールバックの表示（API 側 MIG-0638。SPA は結果の表示だけ） |
+| T05 | batch 上限を超える import | CURRENT と同じ拒否（`useSpreadsheetImport.ts:67`） |
+| T06 | cell 編集 → undo → redo | `spreadsheetHistory.ts` の結果と同じ |
+| T07 | export（CSV / TSV） | 形式と列順が CURRENT と同じ（`useSpreadsheetExport.ts`） |
+| T08 | DOM を検査 | 任意 SQL を入力する欄と実行 button が無い |
+| T09 | legacy import の preview → apply | 2 段階、`planHash` と `expiresAt` が CURRENT と同じ（`LegacyCanonicalImportClient.tsx:691-694`） |
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+node apps/ops/scripts/portCssModule.mjs
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/admin/spreadsheet/**` と `app/(admin)/admin/import/page.tsx` を IN_PROGRESS（移植先）。`API_MATRIX.md` の RH-002 / 003 / 004 / 005 / 006 / 007 / 008 / 009 に SPA の呼び出し元。`work-items/MIG-0729.md` に U01〜U04 の表。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T09 が PASS
+- [ ] MIG-0605 / 0638 / 0645 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] 任意 SQL の入力欄が無い（T08）
+- [ ] 独立レビュー（Opus）が APPROVE
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- 任意 SQL を実行する画面が必要に見えたら止める（MIG-0705 の STOP）。
+- preview token を CURRENT より長く保持する実装が必要に見えたら止める。
+- `ADMIN_SPREADSHEET_ENABLED` の判定を SPA 側で持つ必要が出たら止める（Hono が正）。
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない）。
+
+### MIG-0730: admin operations（workers・health・integrity・security・cost-guard・notifications・static-builds・YouTube quota / sync・retry）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 の分割。読みは MIG-0626（READY）、書きは MIG-0637 / 0642 / 0643（READY）。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707 / **Decisions:** D-05 DECIDED, D-13-51（deep health の per-check 化）, D-14-10, D-15-9（RH-017 は MIG-0660。admin 画面の deep 実行とは別）, D-16-1, D-16-2, D-16-4, D-17-1
+- **Merge gate:** MIG-0626（ops の読み全部と integrity / health の per-check、U05 / U06）, MIG-0637（SA-016..020）, MIG-0642（SA-045..048）, MIG-0643（SA-050, SA-069..073, SA-106）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+#### Source snapshot
+- CURRENT 画面（10 route）:
+  - `app/(admin)/admin/workers/page.tsx`（305 行、`AdminSectionTabs` :73、読みは `lib/admin/workerMonitoring` :19 を直接）。
+  - `app/(admin)/admin/health/page.tsx`（130 行。`DiagnosticStatusResults` :122、`?deep=1` / `run=1` の full run :45、link :93）。
+  - `app/(admin)/admin/health/integrity/page.tsx`（318 行。`run=1` の 28 check :234 付近）。
+  - `app/(admin)/admin/security/page.tsx`（101 行、`DiagnosticStatusResults` :93）。
+  - `app/(admin)/admin/cost-guard/page.tsx`（266 行。`CostGuardForm` :156、`CostGuardOverrideForm` :161、`CostGuardDisabledFeaturesForm` :165）。
+  - `app/(admin)/admin/notifications/page.tsx`（476 行。`NotificationActionButton` :264 / :454 / :457、`NotificationCancelButton` :462、`NotificationPayloadButton` :445）。
+  - `app/(admin)/admin/static-builds/page.tsx`（740 行。`enqueueSharedRelatedInputsRebuildAdmin` :278、`enqueueStaticRebuildAdmin` :342 / :638、`repairDanglingPublicVisibilityManifestEntry` :400、`enqueueStaticBackfillBatch` :469、`StaticRebuildQueuePanel` :572〜574）。
+  - `app/(admin)/admin/youtube-quota/page.tsx`（151 行、読みのみ。`lib/youtube/quotaPolicy` :14）。
+  - `app/(admin)/admin/youtube-sync/page.tsx`（381 行。`queueYoutubeMetadataResync` form :325）。
+  - `app/(admin)/admin/youtube-sync/playlists/page.tsx`（452 行、読みのみ、filter の GET form :279）。
+- CURRENT components（`src/components/admin/**`）: `AdminSectionTabs.tsx`（50 行 + `.module.css`、0730 / 0731 / 0726 が共有）, `DiagnosticStatusResults.tsx`（249）, `CostGuardForm.tsx`（67）, `CostGuardOverrideForm.tsx`（79）, `CostGuardDisabledFeaturesForm.tsx`（150）, `NotificationActionButton.tsx`（174）, `NotificationCancelButton.tsx`（70）, `NotificationPayloadButton.tsx`（95）, `StaticRebuildQueuePanel.tsx`（190）。共通: `src/components/ui/ConfirmDialog`（`CostGuardForm.tsx:6`）、`src/components/notifications/NotificationOutboxSummary`。
+- 読み（既存 Hono、`apps/api/src/routes/adminRead/ops.ts`。MIG-0626 の code は main にあるが task は READY）:
+  - `GET /api/admin-read/ops/workers` … `ops.ts:462`（helper `workerMonitoring.ts`）
+  - `GET /api/admin-read/ops/health` … `ops.ts:236`（operational view のみ。`deep=1` / `run=1` は 501 `deep_unsupported`、`ops.ts:239-240`）
+  - `GET /api/admin-read/ops/integrity` … `ops.ts:328`（idle のみ。`run=1` は 501、`ops.ts:329`）
+  - `GET /api/admin-read/ops/security` … `ops.ts:573`（`run=1` 付き、API_MATRIX.md:399）
+  - `GET /api/admin-read/ops/cost-guard` … `ops.ts:880`
+  - `GET /api/admin-read/ops/notifications` … `ops.ts:110`
+  - `GET /api/admin-read/ops/static-builds` … `ops.ts:360`（shared-input の body 診断は未提供、API_MATRIX.md:401）
+  - `GET /api/admin-read/ops/youtube-quota` … `ops.ts:765`（ローカル usage counter のみ、YouTube には問い合わせない、API_MATRIX.md:396）
+  - `GET /api/admin-read/ops/youtube-sync` … `ops.ts:965`
+  - `GET /api/admin-read/ops/youtube-playlists` … `ops.ts:641`（helper `playlistHealth.ts`）
+- 書き（SA id → CURRENT の呼び出し元 → 所有 MIG → state）:
+
+| SA | CURRENT 関数 | 呼び出し元 | 所有 MIG | state |
+| --- | --- | --- | --- | --- |
+| SA-016 | `setCostGuardMode` | `CostGuardForm.tsx:30` | MIG-0637 | READY |
+| SA-017 | `setMaintenanceMode` | `CostGuardForm.tsx:30`（ON は ConfirmDialog :64） | MIG-0637 | READY |
+| SA-018 | `setCostGuardOverride` | `CostGuardOverrideForm.tsx:32`（`OVERRIDE` 入力 :73） | MIG-0637 | READY |
+| SA-020 | `clearCostGuardOverride` | `CostGuardOverrideForm.tsx:32`（`CLEAR` 入力 :74） | MIG-0637 | READY |
+| SA-019 | `setDisabledFeatures` | `CostGuardDisabledFeaturesForm.tsx:102`（`APPLY` 入力 :142） | MIG-0637 | READY |
+| SA-045 | `retryFailedNotification` | `NotificationActionButton.tsx:34`（kind `retry`、確認なし :45） | MIG-0642 | READY |
+| SA-047 | `forceResendNotification` | `NotificationActionButton.tsx:35`（確認 :55） | MIG-0642 | READY |
+| SA-048 | `retryAllFailedNotifications` | `NotificationActionButton.tsx:36`（page :264、確認 :67） | MIG-0642 | READY |
+| SA-046 | `cancelNotification` | `NotificationCancelButton.tsx:24`（page :462） | MIG-0642 | READY |
+| SA-050 | `repairDanglingPublicVisibilityManifestEntry` | `static-builds/page.tsx:400` | MIG-0643 | READY |
+| SA-069 | `enqueueStaticBackfillBatch` | `static-builds/page.tsx:469` | MIG-0643 | READY |
+| SA-071 | `enqueueStaticRebuildAdmin` | `static-builds/page.tsx:342`, `:638` | MIG-0643 | READY |
+| SA-072 | `enqueueSharedRelatedInputsRebuildAdmin` | `static-builds/page.tsx:278` | MIG-0643 | READY |
+| SA-070 | `retryFailedStaticRebuild` | `StaticRebuildQueuePanel.tsx:147`（retry） | MIG-0643 | READY |
+| SA-073 | `retryAllFailedStaticRebuild` | `static-builds/page.tsx:574` → `StaticRebuildQueuePanel.tsx:76` | MIG-0643 | READY |
+| SA-106 | `queueYoutubeMetadataResync` | `youtube-sync/page.tsx:325` | MIG-0643 | READY |
+
+- 対象外の操作: `workers` / `health` / `integrity` / `security` / `youtube-quota` / `youtube-sync/playlists` は書き込み無し（form / button 無し）。
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/ops/**`（10 route の画面と form component）, `+apps/ops/src/api/ops.ts`（読み `/api/admin-read/ops/*`、書きは各 MIG の endpoint。1 行目 D-16-1 provisional）, `+apps/ops/test/adminOps.test.mjs`
+- 新規（D-16-2、D-16-4）: `+apps/ops/src/api/write.ts` と `+apps/ops/src/components/shared/ConfirmDialog.tsx` は 0728 が先に merge していれば import のみ
+- 新規（D-16-4、先に merge した方が作る）: `+apps/ops/src/components/shared/AdminSectionTabs.tsx` と `.module.css`（0726 / 0731 と共有）、`portCssModule.mjs` の `MODULES` に `AdminSectionTabs.module.css` の行
+- 変更: `apps/ops/src/routes/router.tsx`（10 route 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/admin/**`, `src/lib/admin/**`（移植元）, `apps/api/**`, `apps/ops/src/routes/admin/{identity,spreadsheet,audit,shell,events,videos}/**`
+#### Micro-units
+- **U01 読みだけの画面**: `workers`、`health`（operational view）、`integrity`（idle）、`security`、`youtube-quota`、`youtube-sync/playlists`。`DiagnosticStatusResults` を共有 leaf として移植（`src/components/shared` に置くか、0730 内に置く）。`deep=1` / `run=1` は MIG-0626 U05 / U06 の per-check が main に入るまで出さない（D-17）。
+- **U02 cost-guard**: 読み（`ops/cost-guard`）と SA-016〜020。`CostGuardForm` の maintenance は `ConfirmDialog`（`:64`）、override は `OVERRIDE` / `CLEAR`、features は `APPLY`。
+- **U03 notifications と static-builds**: 読み（`ops/notifications`、`ops/static-builds`）、SA-045〜048（retry / force-resend / cancel / bulk、確認は `NotificationActionButton.tsx:55` と `:67`）、SA-050 / SA-069〜073。`retry` は CURRENT と同じく確認なし。
+- **U04 youtube-sync と retry**: `ops/youtube-sync` の読みと SA-106（`youtube-sync/page.tsx:325`）。再試行の表示（`StaticRebuildQueuePanel` の失敗件数 :78）を CURRENT と同じにする。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × 10 route | `(admin)/layout.tsx:23-27` と同じ（guest `/entry`、他は `/dashboard`）。API は `adminRead/index.ts:36-38` |
+| T02 | cost-guard の書き込みを権限なし（`requireCostGuardControlAdmin`、`src/lib/auth/writeGuard.ts:269`）で実行 | 返った `message` を表示（`CostGuardForm.tsx:31` の fallback「失敗しました。」） |
+| T03 | maintenance ON → 確認を閉じる | API を呼ばない（`CostGuardForm.tsx:64`） |
+| T04 | override の `OVERRIDE` / `CLEAR` 入力 | 入力が一致するまで button が無効（`CostGuardOverrideForm.tsx:73-74`） |
+| T05 | features 適用の `APPLY` 入力 | 入力が一致するまで無効（`CostGuardDisabledFeaturesForm.tsx:142`） |
+| T06 | notifications の retry（確認なし）/ force-resend（確認あり）/ bulk-retry（確認あり） | CURRENT と同じ確認の有無（`NotificationActionButton.tsx:45`, `:55`, `:67`、実行は `:92-93`） |
+| T07 | `health?deep=1` / `integrity?run=1` | 501 を見せず、MIG-0626 U05 / U06 までは実行 UI を出さない（`ops.ts:240`, `:329`） |
+| T08 | `youtube-quota` | YouTube へ問い合わせない表示（ローカル counter、API_MATRIX.md:396） |
+| T09 | `static-builds` の retry all | 失敗件数の表示と確認の有無が CURRENT と同じ（`StaticRebuildQueuePanel.tsx:76`, `:78`） |
+| T10 | 読みの失敗（`ops/notifications` の `query_failed`、`ops/cost-guard` の defaults） | CURRENT と同じ表示（API_MATRIX.md:390-391） |
+| T11 | `workers` | 外部 Cloudflare API を呼ばない（API_MATRIX.md:400） |
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+node apps/ops/scripts/portCssModule.mjs
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/admin/{workers, health/**, security, cost-guard, notifications, static-builds, youtube-quota, youtube-sync/**}` を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-016〜020, SA-045〜048, SA-050, SA-069〜073, SA-106 に SPA の呼び出し元。`work-items/MIG-0730.md` に U01〜U04 の表。
+#### DONE checklist
+- [ ] U01〜U04 が DONE、T01〜T11 が PASS
+- [ ] MIG-0626 / 0637 / 0642 / 0643 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] retry と cost guard の確認が CURRENT と同じ
+- [ ] `deep=1` / `run=1` の実行 UI が、MIG-0626 U05 / U06 の per-check endpoint を使うまで出ていない
+- [ ] 独立レビュー（Opus）が APPROVE
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- 運用モードや cost guard の判定を SPA 側で決める必要が出たら止める（Hono が正）。
+- `deep=1` / `run=1` を 1 request で実行する形にしそうになったら止める（MIG-0626 U05 / U06 へ返す）。
+- static-builds の shared-input body 診断（R2 の読み）が必要になったら止める（MIG-0627 は BLOCKED、STATUS.md:340）。
+- 任意の Worker / Route / Custom Domain を操作する必要が出たら止める（明示承認事項）。
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない）。
+
+### MIG-0731: admin audit（audit 一覧・詳細・restore（dry-run → apply）・settings・history redirect）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — BLOCKED（D-17-1: MIG-0705 の分割。読みは MIG-0626（READY）。dry-run と settings は MIG-0629（DONE）。apply（SA-011）は MIG-0662のため U03 は STOP。MIG-0707 の merge 後に READY。実装は Sonnet、review は Opus）
+- **Recipe:** R-SCREEN
+- **Runtime:** N
+- **Depends on:** MIG-0707, MIG-0629, MIG-0616 / **Decisions:** D-05 DECIDED, D-13-53（`auditPreloaded`）, D-13-54（dry-run の host）, D-13-55, D-16-1, D-16-2, D-17-1
+- **Merge gate:** MIG-0626（audit 一覧、詳細、payload chunk、restore 一覧、audit-settings の読み）, MIG-0662（SA-011 `POST /api/admin/audit/restore`、D-17-4）
+- **Verified against:** `08e7e8cc` (2026-10-27)
+#### Source snapshot
+- CURRENT 画面（5 route）:
+  - `app/(admin)/admin/audit/page.tsx`（821 行。tabs `AdminSectionTabs` :189、filter の GET form :191、`AuditDiffDetail` :451、`AuditTargetLink`）。
+  - `app/(admin)/admin/audit/[id]/page.tsx`（395 行。`AuditDiffDetail` :278、`AuditRestoreForm` :303。直接 DB 読み :53）。
+  - `app/(admin)/admin/audit/restore/page.tsx`（130 行。実行 form なし。直近 50 件の run の表示、tabs :53、`FnTable` :12）。
+  - `app/(admin)/admin/audit/settings/page.tsx`（106 行。`AuditSettingsForm` :101）。
+  - `app/(admin)/admin/history/page.tsx`（5 行、`redirect("/admin/audit")` :5）。
+- CURRENT components（`src/components/admin/**`）: `AuditDiffDetail.tsx`（164 行）, `AuditRestoreForm.tsx`（376）, `AuditSettingsForm.tsx`（178）, `AuditTargetLink.tsx`（111）, `AdminSectionTabs.tsx`（50 + `.module.css`、0730 と共有）。
+- 読み（既存 Hono、`apps/api/src/routes/adminRead/**`、MIG-0626 の code は main にある）:
+  - `GET /api/admin-read/audit?table&operation&actor&record&restore_status&limit&since&until` … `audit.ts:45`（本文は 48 KiB で truncate、API_MATRIX.md:387）
+  - `GET /api/admin-read/audit/:id` … `audit.ts:171`（prev / next を含む）
+  - `GET /api/admin-read/audit/:id/payload/:field?offset` … `audit.ts:210`（12,000 字の chunk、`nextOffset`）
+  - `GET /api/admin-read/audit/restore` … `audit.ts:137`（直近 50 件の run）
+  - `GET /api/admin-read/audit-settings` … `settings.ts:260`
+- 書き（SA id → CURRENT の呼び出し元 → 所有 MIG → state）:
+
+| SA | CURRENT 関数 | 呼び出し元 | 所有 MIG | state |
+| --- | --- | --- | --- | --- |
+| SA-009 | `updateAuditLogSettingsAction` | `AuditSettingsForm.tsx:50` → `POST /api/admin/audit/settings`（`apps/api/src/routes/admin/audit.ts:59`） | MIG-0629 | DONE |
+| SA-010 | `getAuditLogDryRun` | `AuditRestoreForm.tsx:48` → `POST /api/admin/audit/dry-run`（`admin/audit.ts:99`、write は 0） | MIG-0629 | DONE |
+| SA-011 | `restoreAuditLogAction` | `AuditRestoreForm.tsx:66`（apply） → Hono の endpoint は無し | MIG-0662 | BLOCKED |
+
+- SA-011 の core（`restoreAuditLog`）は MIG-0616（DONE）。Hono の apply endpoint は MIG-0662（D-17-4）。
+- 確認: `RESTORE ${auditId}` を入力するまで apply 不可（`AuditRestoreForm.tsx:24`, `:57`, `:229`）。
+#### Owned paths
+- 新規: `+apps/ops/src/routes/admin/audit/**`（一覧、詳細、restore 一覧、settings、history の redirect）, `+apps/ops/src/api/audit.ts`（読みは `/api/admin-read/audit*`、dry-run は `POST /api/admin/audit/dry-run`、settings は `POST /api/admin/audit/settings`、apply は `POST /api/admin/audit/restore`（MIG-0662）。1 行目 D-16-1 provisional）, `+apps/ops/test/adminAudit.test.mjs`
+- 新規（D-16-2）: `+apps/ops/src/api/write.ts`（先に merge した方が作る）
+- 新規（D-16-4、先に merge した方が作る）: `+apps/ops/src/components/shared/AdminSectionTabs.tsx` と `.module.css`（0730 / 0726 と共有。先に merge した方が作る）
+- 変更: `apps/ops/src/routes/router.tsx`（`/admin/audit`、`/admin/audit/:id`、`/admin/audit/restore`、`/admin/audit/settings`、`/admin/history`）, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `app/(admin)/**`, `src/components/admin/**`, `src/lib/audit/**`, `apps/api/**`（SA-011 の endpoint は MIG-0662）
+#### Micro-units
+- **U01 一覧・詳細・payload**: `audit`（filter 7 項目、truncate の表示）、`audit/:id`（prev / next、`AuditDiffDetail`）、`payload/:field` の chunk 読み。`AuditTargetLink` を移植。
+- **U02 restore 一覧と dry-run**: `audit/restore` の一覧（直近 50 件、`FnTable`）と、詳細の `AuditRestoreForm` の dry-run（SA-010）。dry-run は書き込みを行わない（D-13-54）。
+- **U03 apply（SA-011）**: `RESTORE <id>` の入力と apply。apply は MIG-0662 の `POST /api/admin/audit/restore`（D-17-4）を呼ぶ。client は D-16-1 の暫定の型で作る。
+- **U04 settings と history**: `audit/settings` の読みと `AuditSettingsForm`（SA-009）、`/admin/history` → `/admin/audit` の redirect（`history/page.tsx:5`）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | guest / user / moderator / owner / admin × 5 route | `(admin)/layout.tsx:23-27` と同じ（guest `/entry`、他は `/dashboard`） |
+| T02 | `/admin/audit` の filter（table / operation / actor / record / restore_status / since / until） | CURRENT と同じ行（`audit.ts:45`、API_MATRIX.md:387） |
+| T03 | 詳細の prev / next と payload の chunk（`nextOffset`） | 同じ順序と同じ文字列（`audit.ts:171`, `:210`） |
+| T04 | dry-run | diff の表示。書き込み 0 件（`admin/audit.ts:99`、D-13-54） |
+| T05 | `RESTORE <id>` が未入力 | apply が無効（`AuditRestoreForm.tsx:229`）。API を呼ばない |
+| T06 | apply の conflict / error / 結果 | CURRENT の 3 状態を表示（FEATURE_CATALOG.md UX-ADM-017） |
+| T07 | settings の保存（5 項目） | 検証文言と成功文言が CURRENT と同じ（`AuditSettingsForm.tsx:50` 周辺） |
+| T08 | `/admin/history` | `/admin/audit` へ redirect（`history/page.tsx:5`） |
+| T09 | 権限なしで dry-run / settings | `requireAdmin` の拒否 message を表示（`src/lib/actions/audit-admin.ts:22`, `:50`, `:94`） |
+#### Commands
+```bash
+npm ci --no-audit --no-fund
+npm run build --workspace=@flamenode/ops
+npm run test --workspace=@flamenode/ops
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` の `app/(admin)/admin/audit/**` と `app/(admin)/admin/history/page.tsx` を IN_PROGRESS（移植先）。`API_MATRIX.md` の SA-009 / SA-010 に SPA の呼び出し元。SA-011 は所有 MIG が決まった時点で記録する。`work-items/MIG-0731.md` に U01〜U04 の表（U03 は STOP と書く）。
+#### DONE checklist
+- [ ] U01〜U02 と U04 が DONE、T01〜T09 が PASS。MIG-0662 が DONE
+- [ ] MIG-0626 が DONE で、client が `packages/contracts` の schema（`adminReadOps.ts` の audit 系、`admin/audit.ts`）を使っている（D-16-1）
+- [ ] dry-run が書き込みを行わないことを確認
+- [ ] 独立レビュー（Opus）が APPROVE
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- restore が可能かどうかの判定（`restore_status`、`restore_strategy`）を SPA 側で決める必要が出たら止める（Hono が正）。
+- restore の apply を dry-run なしで実行できる形にしない（CURRENT は dry-run の後に確認して apply）。
+#### Rollback
+PR を revert（`apps/ops` は本番に配信されていない）。
 
 ### MIG-0706: Phase 7 Gate
 - **Model:** lead

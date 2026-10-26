@@ -101,6 +101,8 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 
 ## MIG-0704 — Ops SPA creation + Manage
 
+> D-17-1: U01（layout の残り）〜U05 は MIG-0719〜0723 の Work Order が正。本 MIG は Final audit だけ。
+
 - **U01 scaffold**: MIG-0707 (D-15-13): `+apps/ops` package/tsconfig/entry/Vite/bundle, guard, distinct `/_ops_assets/*` + CI build. No production routing。This task keeps the Manage layout, `CostGuardBanner` and `apps/ops/wrangler.toml`。
 - **U02 Manage index/event overview**: `/manage`, `/manage/events/[id]`, `.../edit`, `.../audience`。
 - **U03 slots/staff**: `.../slots`, `.../staff`, event0-owner CAS/privilege。
@@ -109,6 +111,8 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **Final audit**: count Manage12 incl compatibility, deny wrong scope, independent Ops build/deep URL.
 
 ## MIG-0705 — Admin 45 screens in Ops SPA
+
+> D-17-1: U01〜U08 は MIG-0724〜0731 の Work Order が正（U08 の 45 route sweep は本 MIG の Final audit）。
 
 - **U01 shell/security**: admin layout, 401/403, top dashboard, permission simulation, no-store, error/empty states。
 - **U02 content rules**: announcements, API endpoints, ToS/rules, event groups and list navigation。
