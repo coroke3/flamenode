@@ -3057,21 +3057,22 @@ PR を revert（`/api/admin/audit/*` の Route はまだ CURRENT に向いてい
 - **Verified against:** `13141d1` (2026-10-27)
 #### Source snapshot
 - CURRENT: `src/components/layout/ConsoleSidebar.tsx:106-108`（`warnActiveX = shouldWarnManageActiveXMismatch(activeX, manageStaffXIds)`）、`src/components/layout/ManageSidebarNav.tsx:218`（警告の表示）。判定は `packages/domain/src/video/ownership.ts:206-214`（active X が空、または運営 X が 0 件なら false）。
-- Hono: `apps/api/src/routes/manage/navigation.ts:9-25`（`access` / `events` / `truncated` だけ）。同じ snapshot と data から `GET /api/manage` は `activeXUserId`（admin は null）と `manageStaffXUserIds`（admin は `[]`）を返している（`apps/api/src/routes/manage/dashboard.ts:38-39`、`resolveActiveXUserId(user.active_x_user_id, data.linked)`）。`loadManageData` は navigation でも既に呼ばれているので、D1 の文は増えない。
+- Hono: `apps/api/src/routes/manage/navigation.ts:9-25`（`access` / `events` / `truncated` だけ）。同じ snapshot と data から `GET /api/manage` は `activeXUserId`（admin は null）と `manageStaffXUserIds`（admin は `[]`）を返している（`apps/api/src/routes/manage/dashboard.ts:38-39`、`resolveActiveXUserId(user.active_x_user_id, data.linked)`）。ただし navigation は `loadManageData(db, user, snapshot, {})`（`navigation.ts:16`）で呼んでおり、linked X の部分（`apps/api/src/routes/manage/events.ts:136-146`）は `parts.linked` が true のときだけ同じ SELECT に入る（:159）。`{}` のままだと `data.linked` は常に `[]` で `activeXUserId` は常に null になる。`linked: true` にしても同じ 1 文の中の JSON 部分が増えるだけで、D1 の文の数は増えない（`dashboard.ts:24, 28` は `linked: true` で呼んでいる）。
 - DTO: `packages/contracts/src/manage/shared.ts:28-34` `ManageNavigationResponseSchema`。
 #### Owned paths
 - 変更: `apps/api/src/routes/manage/navigation.ts`, `packages/contracts/src/manage/shared.ts`（`activeXUserId: z.string().nullable()`、`manageStaffXUserIds: z.array(z.string())` を足す。既存 field は変えない）, `apps/api/test/manage.parity.test.mjs`（navigation の case を足す）, `docs/migration/API_MATRIX.md`
 - 触らない: `apps/api/src/routes/manage/{access,events,dashboard}.ts`, `src/**`
 #### Micro-units
-- **U01**: navigation の応答に `activeXUserId: isAdmin ? null : resolveActiveXUserId(user.active_x_user_id, data.linked)` と `manageStaffXUserIds: isAdmin ? [] : snapshot.manageStaffXUserIds` を足す（`dashboard.ts:38-39` と同じ式）。
+- **U01**: navigation の呼び出しを `loadManageData(db, user, snapshot, { linked: !snapshot.isAdmin })` にする（admin は 2 値が固定なので linked を読まない）。そのうえで応答に `activeXUserId: isAdmin ? null : resolveActiveXUserId(user.active_x_user_id, data.linked)` と `manageStaffXUserIds: isAdmin ? [] : snapshot.manageStaffXUserIds` を足す（`dashboard.ts:38-39` と同じ式）。
 - **U02 test**: 下の T01〜T04。D1 の文の数が変わらないことを数える。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | 非 admin、active X と運営 X が一致 / 不一致 | `GET /api/manage` と同じ 2 値 |
+| T01 | 非 admin、承認済みの linked X が 1 件以上あり、active X と運営 X が一致 / 不一致 | navigation と `GET /api/manage` の `activeXUserId` / `manageStaffXUserIds` が同じ値（`activeXUserId` が null でない）、`shouldWarnManageActiveXMismatch` が false / true |
 | T02 | admin | `activeXUserId: null`、`manageStaffXUserIds: []` |
 | T03 | active X 未選択、運営 X 0 件 | null / `[]`（`shouldWarnManageActiveXMismatch` は false） |
 | T04 | D1 の文の数 | 変更前と同じ（session を含め 3 以下、`navigation.ts:8` の comment） |
+| T05 | `linked: true` の前後の応答 size | linked X の部分は `MAX_MANAGE_LINKED_X` 件以内で、既存 field の値が変わらない |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/contracts
@@ -3082,10 +3083,10 @@ npm run typecheck
 #### Ledger updates
 `API_MATRIX.md` の `GET /api/manage/navigation` 行に 2 field。
 #### DONE checklist
-- [ ] T01〜T04 が PASS
+- [ ] T01〜T05 が PASS
 - [ ] 既存 field の値が変わっていない
 #### STOP
-- 運営 X の集合を navigation 用に別の query で読む必要が出たら止める（snapshot の値を使う）。
+- 運営 X の集合や linked X を navigation 用に別の query で読む必要が出たら止める（snapshot と `loadManageData` の `linked` を使う）。
 #### Rollback
 PR を revert（追加 field だけ。読み手は MIG-0719 だけ）。
 

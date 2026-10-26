@@ -416,8 +416,8 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 ### MIG-0663 — Manage navigation の active X / 運営 X
 - 読む: `ConsoleSidebar.tsx:106-108`、`apps/api/src/routes/manage/{navigation,dashboard}.ts`、`packages/contracts/src/manage/shared.ts:28-34`、D-17-13。
-- 変更: navigation の応答に 2 field、contracts の schema、`manage.parity.test.mjs` に case。
-- 試験: 一致 / 不一致 / admin / 未選択、D1 の文の数が変わらない。
+- 変更: navigation の `loadManageData` を非 admin で `linked: true`、応答に 2 field、contracts の schema、`manage.parity.test.mjs` に case。
+- 試験: 承認済み linked X ありで一致 / 不一致（`GET /api/manage` と同値）/ admin / 未選択、D1 の文の数が変わらない。
 - DONE: 既存 field が変わらず 2 field が `GET /api/manage` と同じ値。
 
 ### MIG-0664 — RH-001 の degraded に原因（D-17-14）
