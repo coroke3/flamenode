@@ -84,10 +84,54 @@ test("T09: changed Worker entrypoint is detected",()=>{
   assert.ok(checkResidualInventory({sources:{"wrangler.toml":modified}}).missing.some(x=>x.kind==="worker.main"));
 });
 
-test("T10: KV identifier change is redacted and flagged",()=>{
-  const changed=web.replace('\nid = "00000000000000000000000000000000"','\nid = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"');
+test("T10: tracked KV ID changes fail closed without exposing identifiers",()=>{
+  const id="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const changed=web.replace('\nid = "00000000000000000000000000000000"', '\nid = "'+id+'"');
   assert.notEqual(changed,web);
-  const r=checkResidualInventory({sources:{"wrangler.toml":changed}});
-  assert.ok(r.missing.some(x=>x.kind==="kv.binding"&&x.value==="non-placeholder ID (redacted)"));
-  assert.equal(JSON.stringify(r).includes("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),false);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    error=>error.message.includes("non-placeholder KV")&&!error.message.includes(id));
+});
+
+test("T11: tracked D1 ID changes fail closed without exposing identifiers",()=>{
+  const id="eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const changed=web.replace(
+    'database_id = "00000000-0000-0000-0000-000000000000"',
+    'database_id = "'+id+'"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    error=>error.message.includes("non-placeholder D1")&&!error.message.includes(id));
+});
+
+test("T12: KV preview ID changes are not ignored",()=>{
+  const id="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+  const changed=fast.replace(
+    'preview_id = "00000000000000000000000000000000"',
+    'preview_id = "'+id+'"');
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    error=>error.message.includes("non-placeholder KV")&&!error.message.includes(id));
+});
+
+test("T13: unrecognized binding sections fail closed",()=>{
+  const mutated=fast+'\n[[durable_objects.bindings]]\nname = "DO"\nclass_name = "NewDO"\n';
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:mutated}}),
+    /unreviewed TOML section durable_objects.bindings/);
+});
+
+test("T14: unreviewed keys on a known Queue binding fail closed",()=>{
+  const mutated=content.replace(
+    'binding = "STATIC_REBUILD_WAKE_QUEUE"',
+    'binding = "STATIC_REBUILD_WAKE_QUEUE"\ndelivery_delay = 30');
+  assert.notEqual(mutated,content);
+  assert.throws(()=>checkResidualInventory({sources:{[contentPath]:mutated}}),
+    /unreviewed queues.producers key delivery_delay/);
+});
+
+test("T15: a missing D1 database identifier fails closed",()=>{
+  const changed=web.replace(
+    'database_id = "00000000-0000-0000-0000-000000000000"',
+    '');
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /missing database_id/);
 });
