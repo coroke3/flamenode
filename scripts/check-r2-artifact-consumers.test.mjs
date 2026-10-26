@@ -224,3 +224,34 @@ test("T10 key rows need producer, consumer, target and owner MIG; detached rows 
   assert.equal(result.missing.length, 0);
   assert.deepEqual(result.invalid.map((x) => x.key), ["new/untracked.json", "dash.json", "noowner.json", "short.json"]);
 });
+
+test("T11 optional/non-null/generic calls, member and aliased helpers, destructured bindings, list", () => {
+  const src = [
+    'import { putJson as pj } from "./rebuild";',
+    'await env.BUCKET?.get("opt.json");',
+    'await env.BUCKET!.head("bang.json");',
+    'await bucket.get<Foo>("generic.json");',
+    'await artifacts.putJson(env, "member.json", v);',
+    'await pj(env, "alias.json", 1);',
+    "const { BUCKET: store } = env;",
+    'await store.put("destructured.json", body);',
+    "await env.R2.list({ prefix: \"cache/\" });",
+  ].join("\n");
+  const hits = extractArtifactKeys(src, "src/forms.ts");
+  assert.deepEqual(hits.map((h) => h.key),
+    ["opt.json", "bang.json", "generic.json", "member.json", "alias.json", "destructured.json"]);
+  assert.deepEqual(hits.unresolved.map((r) => [r.kind, r.expression]), [["bucket.list", "<complex>"]]);
+});
+
+test("T12 partial literals, empty keys and typed consts", () => {
+  const src = [
+    "await bucket.get('a/' + id + '.json');",
+    "await bucket.get('a.json' + suffix);",
+    "const K = 'a.json'; await env.R2.get(K + '.bak');",
+    "await env.R2.get('');",
+    "const T: string = 'typed.json'; await env.R2.head(T);",
+  ].join("\n");
+  const hits = extractArtifactKeys(src, "src/partial.ts");
+  assert.deepEqual(hits.map((h) => h.key), ["typed.json"]);
+  assert.deepEqual(hits.unresolved.map((r) => r.expression), ["<complex>", "<complex>", "K", '""']);
+});

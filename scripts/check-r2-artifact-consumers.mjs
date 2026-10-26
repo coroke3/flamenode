@@ -38,6 +38,18 @@ function bindingAliases(source) {
   for (const match of source.matchAll(assigned)) names.add(match[1]);
   const typed = /\b([A-Za-z_$][\w$]*)\??\s*:\s*(?:R2Bucket\b|Pick<\s*R2Bucket\b)/g;
   for (const match of source.matchAll(typed)) names.add(match[1]);
+  const destructured = /\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*(?:[\w$]+\.)*env\b/g;
+  for (const match of source.matchAll(destructured)) {
+    for (const part of match[1].matchAll(/\b(?:BUCKET|R2_STORAGE|R2)\s*:\s*([A-Za-z_$][\w$]*)/g)) names.add(part[1]);
+  }
+  return names;
+}
+
+/** Helper names plus same-file import aliases (`import { putJson as pj }`). */
+function helperNames(source) {
+  const names = new Set(R2_KEY_HELPERS);
+  const aliased = new RegExp("\\b(" + R2_KEY_HELPERS.join("|") + ")\\s+as\\s+([A-Za-z_$][\\w$]*)", "g");
+  for (const match of source.matchAll(aliased)) names.add(match[2]);
   return names;
 }
 
@@ -54,16 +66,18 @@ export function extractArtifactKeys(source, path) {
   const hits = [];
   const unresolved = [];
   const literal = "([\\\"'\\x60])((?:\\\\.|(?!\\1)[^\\n])*?)\\1";
-  // Explicit R2 key positions are recorded whatever the key looks like.
+  // Explicit R2 key positions are recorded whatever the key looks like; an
+  // empty key cannot be documented, so it is reported as a dynamic call.
   const addHit = (index, key, kind) => {
     if (key.length > 0) hits.push({ path, line: lineOf(source, index), key: normalizeArtifactKey(key), kind });
+    else unresolved.push({ path, line: lineOf(source, index), kind, expression: '""' });
   };
   // A local key declaration is resolved only when an R2 call uses it and
   // every same-named declaration in the file agrees (no scope analysis).
   const constants = new Map();
   // Group 1 is the constant name; group 2 is the opening quote, with
   // the same-quote backreference \2. Never reuse literal's \1 here.
-  const declarations = /\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(["'\x60])((?:\\.|(?!\2)[^\n])*?)\2/g;
+  const declarations = /\b(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::\s*string\s*)?=\s*(["'\x60])((?:\\.|(?!\2)[^\n])*?)\2(?=\s*[;,\n)])/g;
   for (const match of source.matchAll(declarations)) {
     const previous = constants.get(match[1]);
     constants.set(match[1], previous === undefined || previous === match[3] ? match[3] : null);
@@ -78,15 +92,19 @@ export function extractArtifactKeys(source, path) {
   );
   for (const match of source.matchAll(named)) addHit(match.index, match[2], "object-constant");
 
+  // The key argument must end at `,` or `)`; `"a/" + id` is not the key "a/".
+  const argumentEnd = "(?=\\s*[,)])";
   const keyArgument = (index, after, kind) => {
-    const quoted = new RegExp("^" + literal).exec(after);
+    const quoted = new RegExp("^" + literal + argumentEnd).exec(after);
     if (quoted) {
       addHit(index, quoted[2], kind);
       return;
     }
-    const expression = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^()\n]*\))?)/.exec(after)?.[1];
-    if (expression && typeof constants.get(expression) === "string") {
-      addHit(index, constants.get(expression), kind + "-const");
+    const whole = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^()\n]*\))?)(?=\s*[,)])/.exec(after)?.[1];
+    const expression = whole ?? (new RegExp("^" + literal).test(after) ? undefined
+      : /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\([^()\n]*\))?)/.exec(after)?.[1]);
+    if (whole && typeof constants.get(whole) === "string") {
+      addHit(index, constants.get(whole), kind + "-const");
     } else {
       // Imported, computed, or ambiguous: needs an explicit bounded exception
       // until a future MIG resolves the reader.
@@ -95,17 +113,21 @@ export function extractArtifactKeys(source, path) {
   };
 
   const bindings = [...bindingAliases(source)].map(escapeRegExp).join("|");
-  const calls = new RegExp("(?<![\\w$])(?:env\\.)?(?:" + bindings + ")\\s*\\.\\s*(get|put|head|delete)\\s*\\(\\s*", "g");
+  // `?.`, `!.` and type arguments are allowed; list/multipart take options or
+  // a key and are audited like the other operations.
+  const calls = new RegExp("(?<![\\w$])(?:env\\.)?(?:" + bindings + ")\\s*(?:\\?\\.|!\\.|\\.)\\s*" +
+    "(get|put|head|delete|list|createMultipartUpload|resumeMultipartUpload)\\s*(?:<[^>()]*>)?\\s*\\(\\s*", "g");
   for (const match of source.matchAll(calls)) {
     keyArgument(match.index, source.slice(match.index + match[0].length), "bucket." + match[1]);
   }
   // Helper calls: skip the first argument (env/bucket), read the second.
-  const helpers = new RegExp("(?<![\\w$.])(" + R2_KEY_HELPERS.join("|") + ")(?:<[^>()]*>)?\\s*\\(\\s*", "g");
+  // Member calls (`ns.putJson(`) count too; method declarations are skipped below.
+  const helpers = new RegExp("(?<![\\w$])(" + [...helperNames(source)].map(escapeRegExp).join("|") + ")(?:<[^>()]*>)?\\s*\\(\\s*", "g");
   for (const match of source.matchAll(helpers)) {
     const rest = source.slice(match.index + match[0].length);
     const first = /^[^,()]*(?:\([^()]*\)[^,()]*)*,\s*/.exec(rest);
     // A declaration (`putJson(env: Env, key: string`) has a typed parameter.
-    if (!first || /^[\w$]+\s*\??\s*:/.test(rest)) continue;
+    if (!first || /^[\w$]+\s*\??\s*:/.test(rest) || /\bfunction\s+[\w$]+(?:<[^>()]*>)?\s*\($/.test(source.slice(0, match.index + match[0].length).split("\n").pop())) continue;
     keyArgument(match.index, rest.slice(first[0].length), match[1]);
   }
   // Detection rules are grouped by syntax. Return references in source order,
