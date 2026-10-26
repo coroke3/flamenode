@@ -122,7 +122,8 @@ export function extractConfigRows(source,config) {
     }
     const block=blocks.at(-1), m=/^([A-Za-z_][\w-]*)\s*=\s*(.+)$/.exec(line);
     if(!m) {
-      if(KNOWN.has(block.section)) throw Error(config+":"+(index+1)+": unsupported syntax (value redacted)");
+      if(KNOWN.has(block.section) || block.section==="vars")
+        throw Error(config+":"+(index+1)+": unsupported syntax (value redacted)");
       return;
     }
     if(KNOWN.has(block.section)) {
@@ -131,6 +132,12 @@ export function extractConfigRows(source,config) {
       if(Object.hasOwn(block.fields,m[1])) throw Error(config+":"+(index+1)+": duplicate "+m[1]);
       try {block.fields[m[1]]=decode(m[2].trim());}
       catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
+    } else if(block.section==="vars") {
+      // Wrangler vars and bindings share the Worker Env namespace.
+      // Only record names, never values (which are outside this inventory).
+      if(Object.hasOwn(block.fields,m[1]))
+        throw Error(config+":"+(index+1)+": duplicate vars key "+m[1]);
+      block.fields[m[1]]=true;
     }
   });
   const rows=[];
@@ -182,6 +189,14 @@ export function extractConfigRows(source,config) {
   const bindingKinds=new Set(["asset.binding","service.binding","queue.producer",
     "d1.binding","r2.binding","kv.binding"]);
   const bindingNames=new Map();
+  for(const {section,fields} of blocks) {
+    if(section!=="vars") continue;
+    for(const name of Object.keys(fields)) {
+      if(bindingNames.has(name))
+        throw Error(config+": duplicate vars key "+name);
+      bindingNames.set(name,"vars");
+    }
+  }
   rows.forEach(r=>{
     const key=[r.config,r.kind,r.setting,r.kind==="cron"?r.value:""].join("|");
     if(seen.has(key)) throw Error("duplicate declaration: "+key);
