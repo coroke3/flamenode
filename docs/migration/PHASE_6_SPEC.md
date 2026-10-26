@@ -371,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659, MIG-0660 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0661 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -1791,7 +1791,7 @@ PRをrevert。
 - **Readiness:** NEEDS_REFINEMENT — READY（MIG-0605 から分割、D-13-56 / 78 / 81。D-14-9 で規約同意と onboarding（旧 U03）を MIG-0641 へ、D-15-8 で SA-099..101（旧 U04）を MIG-0659 へ分割。MIG-0702 と MIG-0515 が使う。実装は Sonnet、review は Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-0603-1 DECIDED, D-13-57, D-14-9, D-15-3, D-15-8
+- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-04 DECIDED, D-0603-1 DECIDED, D-13-57, D-14-9, D-15-3, D-15-8, D-16-1（HTTP 契約。MIG-0708 / 0515 が契約先行で使う）
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 | CURRENT | ID | file |
@@ -1997,7 +1997,7 @@ PRをrevert。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-14-8: MIG-0603 U03a を分割。手順は D-13-45 で確定済み。実装は Sonnet、review は Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-13-45, D-14-8
+- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-13-45, D-14-8, D-16-1（HTTP 契約。MIG-0513 が契約先行で使う）
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - CURRENT: `src/lib/actions/video/interaction.ts:243`（SA-087）。guard は `interaction.ts:61-65` の `writeGuard({ requireActiveXId: false, requireApprovedActiveXId: false, feature: "like_or_bookmark" })`。公開画面の呼び出し元 `src/components/video/InteractionButton.tsx:6`。
@@ -2042,7 +2042,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-14-9: MIG-0636 U03 を分割。guard の扱いは MIG-0636 の旧 U03 記述で確定済み。実装は Sonnet、review は Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-13-60, D-14-9
+- **Depends on:** MIG-0602 / **Decisions:** D-13-60, D-14-9, D-16-1（HTTP 契約。MIG-0519 / 0710 が契約先行で使う）
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - CURRENT: `src/lib/actions/terms.ts:51` `commitAcceptLatestTerms`（SA-074、内部関数）, `:197` `acceptLatestTerms`（SA-075、redirect、`sanitizeNextPath` `src/lib/utils/next.ts:42`）, `:293` `acceptOnboardingTerms`（SA-076）。`acceptLatestTerms` / `acceptOnboardingTerms` は writeGuard ではなく `getCurrentUser` だけを使う（`terms.ts:293-297`）。onboarding 完了マーカー `src/lib/auth/onboarding.ts#maybeMarkOnboardingComplete`（X 申請済み / 承認済みのときだけの条件付き UPDATE、D-13-60）。
@@ -2352,7 +2352,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-14-11: MIG-0638 U06 を分割。実装は Sonnet、review は Opus）
 - **Recipe:** R-API, R-CORE
 - **Runtime:** S2
-- **Depends on:** MIG-0602, MIG-0631 / **Decisions:** D-14-11
+- **Depends on:** MIG-0602, MIG-0631 / **Decisions:** D-14-11, D-16-1（path と query は CURRENT と同じ `GET /api/internal/x-users/search?q=&limit=&offset=`。MIG-0716 / 0717 の `VideoMembersField` が使う）
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - CURRENT: `app/api/internal/x-users/search/route.ts`（273 行、`requireRouteUser`）、`src/lib/video/memberSuggestion{Search,sCore,sLoader,sV2Loader,Rank,sPostingsV2}.ts`、`src/lib/publicData/staticSearchPostingsCore.ts`（MIG-0634 U01 が先に core へ移すなら import するだけ）。R2 の member-suggestions artifact を読む（MIG-0649 の表に載る読み手）。
@@ -2434,7 +2434,7 @@ PRをrevert（文書・script・CI step だけ）。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-15-1: MIG-0603 U03b を分割。MIG-0633 は DONE（#402）。実装は Sonnet、review は Opus）
 - **Recipe:** R-API, R-CORE
 - **Runtime:** S3
-- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-2
+- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-2, D-16-1（HTTP 契約。MIG-0715 / 0716 / 0717 が契約先行で使う）
 - **Verified against:** `0a0f62a` (2026-10-26)
 #### Source snapshot
 - CURRENT: `src/lib/actions/video-collab-perms.ts:891` `upsertVideoCollaborator`（SA-082）, `:949` `deleteVideoCollaborator`（SA-083）, `:995` `applyVideoCollaboratorPermissionsBatch`（SA-084）, `src/lib/actions/video/adminMembers.ts:67` `updateVideoMembersAdmin`（SA-085）。4 つとも `writeGuard({ feature: "edit_video" })`（`video-collab-perms.ts:894,952,998`、`adminMembers.ts:70`）。
@@ -2487,7 +2487,7 @@ Phase 6 共通契約のとおり（core への移動は bridge なので revert 
 - **Readiness:** NEEDS_REFINEMENT — READY（D-15-1: MIG-0603 U03c を分割。MIG-0633 は DONE。body 上限は D-15-3。実装は Sonnet、review は Opus）
 - **Recipe:** R-API, R-CORE
 - **Runtime:** S3
-- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-3
+- **Depends on:** MIG-0602, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-1, D-15-3, D-16-1（HTTP 契約。MIG-0716 / 0717 が契約先行で使う）
 - **Verified against:** `0a0f62a` (2026-10-26)
 #### Source snapshot
 - CURRENT: `src/lib/actions/video/createFreeVideo.ts:60`（SA-086、430 行）, `src/lib/actions/video/submitSlotVideo.ts:719`（SA-088、732 行）, `src/lib/actions/video/updateVideo.ts:802`（SA-089、815 行）。guard は `createFreeVideo.ts:61`、`submitSlotVideo.ts:93`、`updateVideo.ts:72`（`feature: "edit_video"`）。
@@ -2778,7 +2778,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-15-4: MIG-0604 U04 を分割。MIG-0514 の予約 Island が使う。実装は Sonnet、review は Opus）
 - **Recipe:** R-API, R-CORE
 - **Runtime:** S3
-- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-4
+- **Depends on:** MIG-0602, MIG-0305, MIG-0633 / **Decisions:** D-0603-1 DECIDED, D-13-41, D-15-4, D-16-1（HTTP 契約。MIG-0514 が契約先行で使う。延長の path は D-16 で直した）
 - **Verified against:** `0a0f62a` (2026-10-26)
 #### Source snapshot
 - CURRENT: `src/lib/actions/slot.ts`（1193 行）`:632` `reserveSlot`（SA-065）, `:852` `releaseOwnSlot`（SA-066、guard `:855` `release_slot`）, `:900` `extendOwnSlotGroup`（SA-067）, `:1038` `mergeOwnSlotGroups`（SA-068）。post-commit は `src/lib/actions/slotNotificationsPostCommit.ts:8` `enqueueSlotReserveOpsWebhookPostCommit`、`:60` `enqueueSlotSubmitNotificationsPostCommit`。
@@ -2794,7 +2794,7 @@ Phase 6 共通契約のとおり。
 - **U01 inventory + core move**: 4 SA の表（予約上限 guard SQL、`commitSlotMutationPlan`、ops webhook の post-commit）。
 - write stack: `/api/events` の public GET に session を足さないよう、`viewerOverlay.ts:194-200` と同じく path を指定した `use` で、`videoWriteStack`（`videos/index.ts:19-49`）と同じ順（origin → session → writeGuard `requiredRole: null` と CURRENT の activeX option → db）の stack を書き込み route だけに付ける。
 - **U02 SA-065**: `POST /api/events/:eventId/slots/:slotId/reserve`（Active X と entry 資格は CURRENT の順。ops webhook は post-commit で CURRENT と同じ best-effort）。
-- **U03 SA-066..068**: `POST .../slots/:slotId/release`、`POST .../slot-groups/:groupId/extend`、`POST .../slot-groups/merge`。
+- **U03 SA-066..068**: `POST .../slots/:slotId/release`、`POST .../slots/:slotId/extend`（body `{ direction }`。CURRENT `extendSchema`（`slot.ts:107-110`）は group id ではなく `slot_id` と `direction` を受けるので、D-16 で旧記述 `slot-groups/:groupId/extend` を code に合わせた）、`POST .../slot-groups/merge`（body `{ gap_slot_id, display_name }`、`slot.ts:112-115`）。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -2870,7 +2870,7 @@ PR を revert。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-15-8: MIG-0636 U04 を分割。共有 file の扱いは D-15-8。実装は Sonnet、review は Opus）
 - **Recipe:** R-API
 - **Runtime:** S3
-- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-15-8
+- **Depends on:** MIG-0602 / **Decisions:** D-03 DECIDED, D-0603-1 DECIDED, D-15-8, D-16-1（HTTP 契約。MIG-0709 が契約先行で使う）
 - **Verified against:** `0a0f62a` (2026-10-26)
 #### Source snapshot
 - CURRENT: `src/lib/actions/xid.ts:300` `requestXIdLink`（SA-099）, `:558` `cancelXIdLinkRequest`（SA-100）, `:740` `requestXIdMergeRevert`（SA-101）。共通 guard `xid.ts:147` `writeGuard({ feature: "xid_links" })`。
@@ -2956,6 +2956,51 @@ npm run typecheck && npm run test:unit
 #### Rollback
 Phase 6 共通契約のとおり。
 
+### MIG-0661: CostGuardBanner の読み API（公開 = KV mirror、admin = D1）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-13: banner を返す HTTP endpoint が main に無い（D-15-13）ので新設。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0601 / **Decisions:** D-15-13, D-16-13
+- **Verified against:** `c2a6ecb` (2026-10-26)
+#### Source snapshot
+- CURRENT: `src/components/layout/CostGuardBanner.tsx`（98 行）。公開 source（`app/(auth)/layout.tsx:27`、`app/(manage)/layout.tsx:39`）は `resolveCostGuardBannerSnapshot()`（`src/lib/operationMode/publicMode.ts:108-117`: `resolvePublicOperationMode({ allowD1: false })` が `normal` なら null、それ以外は mode と KV mirror の `reason`）。admin source（`app/(admin)/layout.tsx:31`）は `readAdminSystemSettings(db)`（`src/lib/admin/adminSystemSettings.ts:27`）の `operation_mode` を `resolveOperationMode` に通し、`cost_guard_reason` を reason にする（`CostGuardBanner.tsx:57-67`、D1 が無い・失敗なら banner を出さない）。
+- KV mirror の parse: CURRENT `src/lib/operationMode/kvMirrorCore.ts:12-32` `parseOperationModeKvMirror`（`mode` / `updated_at` / `reason`）。Hono には mode だけを読む `parseKvMirrorMode`（`apps/api/src/routes/live/operationMode.ts:42-54`）と `resolvePublicOperationMode(env, { allowD1 })`（:95-108）がある。
+- admin の読み router: `apps/api/src/routes/adminRead/index.ts`（`role !== "admin"` の拒否 :36）。`system_settings` の `operation_mode` は `adminRead/ops.ts:379` も読んでいる。
+#### Owned paths
+- 新規: `+apps/api/src/routes/operationModeBanner.ts`, `+apps/api/src/routes/adminRead/costGuardBanner.ts`, `+packages/contracts/src/costGuardBanner.ts`（`{ mode: OperationMode, reason: string | null }` の zod schema）, `+apps/api/test/costGuardBanner.test.mjs`
+- 変更: `apps/api/src/app.ts`（`app.route("/api/operation-mode/banner", operationModeBannerRoutes);` 1 行）, `apps/api/src/routes/adminRead/index.ts`（`adminReadRoutes.route("/cost-guard-banner", adminCostGuardBannerRoutes);` 1 行）, `apps/api/src/routes/live/operationMode.ts`（`parseKvMirrorMode` の隣に reason も返す `parseKvMirror` を export。既存関数の挙動は変えない）, `packages/contracts/src/index.ts`, `docs/migration/API_MATRIX.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`
+- 触らない: `src/components/layout/**`, `src/lib/operationMode/**`, `apps/app/**`, `apps/ops/**`
+#### Micro-units
+- **U01 公開**: `GET /api/operation-mode/banner`。session を読まない。`resolvePublicOperationMode(c.env, { allowD1: false })` が `normal` なら `{ mode: "normal", reason: null }`。それ以外は `c.env.KV.get(OPERATION_MODE_KV_KEY, { cacheTtl: 30 })` を `parseKvMirror` に通した `reason`（無ければ null）。D1 は 0 文。header `Cache-Control: no-store`。KV の失敗は `{ mode, reason: null }`（CURRENT の mirror 失敗と同じ）。
+- **U02 admin**: `GET /api/admin-read/cost-guard-banner`。`SELECT operation_mode, cost_guard_reason FROM system_settings LIMIT 1` の 1 文、`resolveOperationMode` は `@flamenode/domain/admin` のものを使う。行が無い・D1 失敗は `{ mode: "normal", reason: null }`（CURRENT は banner を出さない = normal と同じ表示）。
+- **U03 contract**: `costGuardBanner.ts` の schema を両方の応答で使う。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | KV mirror `{"mode":"economy","updated_at":1,"reason":"x"}` | `{ mode: "economy", reason: "x" }`、D1 を呼ばない |
+| T02 | KV 無し / 壊れた JSON / `FORCE_STATIC_ONLY=1` | `normal` / `normal` / `static_only`（CURRENT `resolvePublicOperationMode` と同じ優先順） |
+| T03 | admin: `system_settings` が `read_only` + reason / 行なし / D1 例外 | `{ read_only, reason }` / normal / normal |
+| T04 | admin 以外・未ログインで `/api/admin-read/cost-guard-banner` | 既存の admin 読み router と同じ拒否 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test --experimental-strip-types apps/api/test/costGuardBanner.test.mjs
+npm run test --workspace=@flamenode/api
+npm run typecheck && npm run test:unit
+npm run check:project-docs
+```
+#### Ledger updates
+`API_MATRIX.md` に 2 endpoint の行（CURRENT は server component の直読みで RH 番号が無いので、`CostGuardBanner.tsx` を CURRENT として書く）。`FILE_MIGRATION_MATRIX.md` に新規 file。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+- [ ] 公開の endpoint が D1 を 0 文で返す（test で D1 の呼び出し数を 0 と固定）
+#### STOP
+- banner の mode の決め方を CURRENT から変える必要が出たら止める。
+- KV / D1 の binding を新しく作る必要が出たら止める（明示承認事項）。
+#### Rollback
+Phase 6 共通契約のとおり。
+
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
@@ -3036,7 +3081,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0660 / **Decisions:** D-14-14, D-15-15
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0661 / **Decisions:** D-14-14, D-15-15, D-16-13
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。
