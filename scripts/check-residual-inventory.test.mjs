@@ -3,7 +3,7 @@ import {test} from "node:test";
 import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 import {dirname,resolve} from "node:path";
 import {tmpdir} from "node:os";
-import {parseFileRows} from "./check-migration-file-progress.mjs";
+import {parseFileRows,collectFiles} from "./check-migration-file-progress.mjs";
 import {fileURLToPath} from "node:url";
 import {checkResidualInventory,extractConfigRows,readInventoryRows,findUntrackedWorkerConfigs} from "./check-residual-inventory.mjs";
 
@@ -314,4 +314,14 @@ test("T33: all three existing MIG-0908 files are registered in the validated mig
     assert.equal(row.state,"IN_PROGRESS");
     assert.match(row.evidence,/PR#416 SHA=[0-9a-f]{40}/);
   }
+});
+
+test("T34: migration progress scanner can verify existing migration docs and scripts",()=>{
+  const existing=new Set(collectFiles(root));
+  for(const file of [
+    "docs/migration/RESIDUAL_INVENTORY.md",
+    "scripts/check-residual-inventory.mjs",
+    "scripts/check-residual-inventory.test.mjs",
+    "scripts/check-migration-file-progress.mjs"
+  ]) assert.ok(existing.has(file),`migration ledger source not discovered: ${file}`);
 });
