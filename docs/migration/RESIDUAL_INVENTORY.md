@@ -49,7 +49,7 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 | `workers/sync-jobs/wrangler.toml` | r2.binding | `R2` | `flamenode-storage` | `flamenode-sync-jobs` pending MIG-0901 | 未定 |
 | `workers/sync-jobs/wrangler.toml` | kv.binding | `KV` | checked-in placeholder ID | `flamenode-sync-jobs` pending MIG-0901 | 未定 |
 
-**Counts (tracked source only):** 4 Worker names + 4 entrypoints, 3 cron *expressions* (4 schedule slots/hour), 9 Queue producer bindings, 3 Queue consumers with 3 DLQs, 4 D1 bindings, 3 R2 bindings, 4 KV bindings, 1 asset binding and 1 service binding. The queue name alone is not a dedicated consumer for every producer: compare each row by config + kind + binding.
+**Counts (tracked source only):** 4 Worker names + 4 entrypoints, 3 cron *expressions* (4 schedule slots/hour), 8 Queue producer bindings, 3 Queue consumers with 3 DLQs, 4 D1 bindings, 4 R2 bindings, 4 KV bindings, 1 asset binding and 1 service binding. The queue name alone is not a dedicated consumer for every producer: compare each row by config + kind + binding.
 
 **Boundaries:** This is an inventory of declarative `wrangler.toml` entries, not runtime secret bindings, generated production config, Cloudflare account inventory, Queue deletion authority, traffic observations or idle/unused proof. The tracked `[vars]` values are not secret evidence. No Worker, Cron, Queue, Route, D1, R2, KV or account was altered.
 
