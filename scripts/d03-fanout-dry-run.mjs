@@ -4,7 +4,7 @@
  * This program never performs migration writes or opens remote D1.
  */
 import { DatabaseSync } from "node:sqlite";
-import { realpathSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -109,6 +109,33 @@ export function analyzeDatabase(db) {
   }
 }
 
+/**
+ * A WAL-mode database can create or modify -wal/-shm siblings even with a
+ * read-only SQLite handle. Fail before opening such inputs: this offline
+ * evidence tool only accepts standalone rollback-journal snapshots.
+ * See https://www.sqlite.org/wal.html#readonly
+ */
+function requireStandaloneSnapshot(localPath) {
+  const header = Buffer.alloc(20);
+  const handle = openSync(localPath, "r");
+  try {
+    const bytesRead = readSync(handle, header, 0, header.length, 0);
+    if (bytesRead !== header.length ||
+        !header.subarray(0, 16).equals(Buffer.from("SQLite format 3\\0"))) {
+      throw new Error("Expected a valid SQLite snapshot file");
+    }
+    // SQLite header bytes 18 and 19: 1 = rollback journal, 2 = WAL.
+    // Unknown versions also fail closed to avoid unexpected side effects.
+    if (header[18] !== 1 || header[19] !== 1) {
+      throw new Error(
+        "WAL-mode or unsupported SQLite file: provide an offline rollback-journal (DELETE-mode) snapshot",
+      );
+    }
+  } finally {
+    closeSync(handle);
+  }
+}
+
 export function analyzeLocalFile(file) {
   // Refuse non-file inputs (directories, devices, FIFOs) before opening SQLite.
   // realpathSync also rejects nonexistent files without creating an empty DB.
@@ -116,6 +143,7 @@ export function analyzeLocalFile(file) {
   if (!statSync(localPath).isFile()) {
     throw new Error("Expected an existing local SQLite file");
   }
+  requireStandaloneSnapshot(localPath);
   const db = new DatabaseSync(localPath, { readOnly: true, open: true });
   try {
     // Defense in depth: accidental future statements must not mutate.
