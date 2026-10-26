@@ -317,7 +317,7 @@ test("T16 rejects WAL-mode input before creating SQLite -shm sidecar", () => {
       "const db = new DatabaseSync(process.argv[1]);",
       'db.exec("CREATE TABLE x (id INTEGER); PRAGMA journal_mode=WAL; INSERT INTO x VALUES(1)");',
       "process.exit(0);",
-    ].join("\\n"), file], { encoding: "utf8" });
+    ].join(String.fromCharCode(10)), file], { encoding: "utf8" });
     assert.equal(setup.status, 0, setup.stderr);
     assert.equal(existsSync(file + "-wal"), true, "fixture must retain WAL frames");
     if (existsSync(file + "-shm")) unlinkSync(file + "-shm");
