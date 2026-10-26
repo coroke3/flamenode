@@ -51,6 +51,8 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 
 **Counts (tracked source only):** 4 Worker names + 4 entrypoints, 3 cron *expressions* (4 schedule slots/hour), 8 Queue producer bindings, 3 Queue consumers with 3 DLQs, 4 D1 bindings, 4 R2 bindings, 4 KV bindings, 1 asset binding and 1 service binding. The queue name alone is not a dedicated consumer for every producer: compare each row by config + kind + binding. Consumer declarations also record batch size, timeout, retry count, retry delay, and concurrency to prevent silent configuration drift.
 
+**Tracked-template safety:** `scripts/check-residual-inventory.mjs` requires placeholder `database_id`, KV `id` and KV `preview_id` values in these checked-in templates. A non-placeholder value fails the CI gate with a redacted diagnostic; real account identifiers belong only in the separately verified generated deployment config. Unknown binding sections/keys fail closed until MIG-0908 explicitly audits and registers them. This safeguard checks checked-in source, not secrets or remote Cloudflare state.
+
 **Boundaries:** This is an inventory of declarative `wrangler.toml` entries, not runtime secret bindings, generated production config, Cloudflare account inventory, Queue deletion authority, traffic observations or idle/unused proof. The tracked `[vars]` values are not secret evidence. No Worker, Cron, Queue, Route, D1, R2, KV or account was altered.
 
 ## 2. Production traffic and usage observation — MIG-0901 only
