@@ -283,6 +283,57 @@ test("MIG-0718 U01 T04: mid-stream AbortSignal releases a hanging reader.read", 
   assert.equal(cancelled, true, "abort must cancel the still-open stream");
 });
 
+// A custom stream's cancellation hook is not guaranteed to resolve. UI reads
+// must finish when cancellation has been initiated, not when the hook settles.
+async function settlesWithoutAwaitingCancel(promise) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("banner request stalled on cancel()")), 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+test("MIG-0718 U01 T05: an unread error body cannot stall on a hanging cancel()", { timeout: 5000 }, async () => {
+  let cancelled = false;
+  const response = new Response(new ReadableStream({
+    start(stream) { stream.enqueue(new Uint8Array([123])); },
+    cancel() {
+      cancelled = true;
+      return new Promise(() => {}); // Simulate a non-cooperative custom stream.
+    },
+  }), { status: 503 });
+  assert.equal(await settlesWithoutAwaitingCancel(client(response).api.getBanner()), null);
+  assert.equal(cancelled, true, "the unread body still must be told to cancel");
+});
+
+test("MIG-0718 U01 T05: abort does not await a hanging stream cancel()", { timeout: 5000 }, async () => {
+  const abort = new AbortController();
+  let cancelled = false;
+  let markWaiting;
+  const waiting = new Promise((resolve) => { markWaiting = resolve; });
+  const response = new Response(new ReadableStream({
+    start(stream) {
+      stream.enqueue(new TextEncoder().encode('{"mode":"maintenance","reason":"'));
+    },
+    pull() { markWaiting(); },
+    cancel() {
+      cancelled = true;
+      return new Promise(() => {}); // A stalled underlying cancellation hook.
+    },
+  }, { highWaterMark: 0 }), { status: 200 });
+  const pending = client(response).api.getBanner(abort.signal);
+  await waiting;
+  abort.abort();
+  assert.equal(await settlesWithoutAwaitingCancel(pending), null);
+  assert.equal(cancelled, true);
+});
+
 test("MIG-0718 U02 T05: unexpected mode never crashes the Personal SPA banner", () => {
   for (const mode of ["bogus", "normal", "toString", "__proto__", null, 12]) {
     const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
