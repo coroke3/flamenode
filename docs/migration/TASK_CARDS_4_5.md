@@ -177,26 +177,26 @@
 - 試験: list の query・key・空表示、top の GET form（JS なし）、RH-032 の 503。
 - DONE: Hono の RH-032 で CURRENT と同じ結果、Server Action を呼ばない、browser 確認。
 
-### MIG-0513 — `/[id]` interaction Islands on Phase 6 APIs
+### MIG-0513 — `/[id]` like / bookmark Island (merge gate MIG-0640)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0513 Work Order、CURRENT `InteractionButton.tsx` / `ChapterComposer.tsx` / `VideoStatusForm.tsx` / `VideoViewerUtilityDock.tsx`。
-- 変更: `+VideoInteractionIsland.ts`、`VideoPageIsland.ts`、`VideoDetailView.tsx`。
-- 試験: like の Active X 0 / 複数、chapter の各 status、状態 form の権限、JS なし。
-- DONE: MIG-0603 / 0634 / 0640 の API で CURRENT と同じ結果、browser 確認。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0513 Work Order、CURRENT `VideoInteractionActions.tsx` / `InteractionButton.tsx`、D-16-1 / 5 / 6 / 7。
+- 変更: `+VideoInteractionIsland.ts`、`+apps/site/src/lib/videoInteraction.ts`、`VideoPageIsland.ts` の mount（`viewerOverlay.ts` は MIG-0518 と先に merge した方）。
+- 試験: 楽観更新と件数の補正、失敗の戻し、連打、overlay の disabled 理由、X 0件で modal を出さない、JS なし。
+- DONE: MIG-0640 の DONE 後に contracts の schema へ置き換えて merge、browser 確認。
 
-### MIG-0514 — `/event/[id]/slots` reservation Island
+### MIG-0514 — `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0514 Work Order、CURRENT `SlotGrid.tsx` / `EventSlotsViewerPanel.tsx`。
-- 変更: `EventSlotsIsland.ts`、`EventSlotsView.tsx`。
-- 試験: 予約・解除・延長、同時予約で負けた側、RH-014 の fail-closed、JS なし。
-- DONE: MIG-0604 U04 の API で CURRENT と同じ結果、browser 確認。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0514 Work Order、CURRENT `SlotGrid.tsx` / `EventSlotsViewerPanel.tsx` / `guardRedirect.ts`、`slot.ts:96-115`。
+- 変更: `+EventSlotsViewerIsland.ts`、`+slotReservation.ts`、`EventSlotsIsland.ts`、`EventSlotsView.tsx`（`guardRedirect.ts` は MIG-0515 / 0519 と先に merge した方）。
+- 試験: 予約・解除・延長・統合の body、同時予約で負けた側、RH-014 の fail-closed、guard の移動先、JS なし。
+- DONE: MIG-0657 の DONE 後に merge、Server Action を呼ばない、browser 確認。
 
-### MIG-0515 — `/rules` consent + header Active X switch
+### MIG-0515 — header Active X switch (merge gate MIG-0636)
 
-- 読む: `PHASE_4_5_SPEC.md` の MIG-0515 Work Order、CURRENT `rules/page.tsx:43-96`、`useActiveXSwitcher.ts`。
-- 変更: `+RulesConsentIsland.ts`、`rules.astro`、`SiteHeader.ts`、`RulesView.tsx`。
-- 試験: `next` の sanitize、`?error=` の3 code、Active X の楽観更新と rollback、JS なし。
-- DONE: MIG-0636 / 0641 の API で CURRENT と同じ結果、D-04 を実行していない。
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0515 Work Order、CURRENT `useActiveXSwitcher.ts`、`AccountMenu.ts:25,34,82-104`。
+- 変更: `+apps/site/src/lib/activeX.ts`、`SiteHeader.ts`（`AccountMenu` に注入するだけ）。
+- 試験: 楽観更新と rollback、「すでにこの X ID がアクティブです。」、JS なし。
+- DONE: MIG-0636 の DONE 後に merge、D-04 を実行していない。
 
 ### MIG-0516 — public build request mark (MIG-0509 U05)
 - 読む: `PHASE_4_5_SPEC.md` の MIG-0516 Work Order、`packages/server-core/src/staticRebuild/enqueue.ts:85`、`workers/fast-jobs/publicBuildTrigger.ts:138,160`。
@@ -215,6 +215,12 @@
 - 変更: `+VideoChapterIsland.ts`、`+VideoUtilityDockIsland.ts`、`+apps/site/src/lib/viewerOverlay.ts`、`VideoPageIsland.ts` の mount。
 - 試験: chapter の 200/400/403/404/409/413、overlay の権限、`?playlist=`、JS なし。
 - DONE: T01〜T04 と 390px / 1440px の browser 確認。
+
+### MIG-0519 — `/rules` consent Island (MIG-0515 U01, merge gate MIG-0641)
+- 読む: `PHASE_4_5_SPEC.md` の MIG-0519 Work Order、CURRENT `rules/page.tsx:54-59,95-98`、`terms.ts:198`。
+- 変更: `+RulesConsentIsland.ts`、`+apps/site/src/lib/terms.ts`、`rules.astro`、`RulesView.tsx`（`guardRedirect.ts` は MIG-0514 / 0515 と先に merge した方）。
+- 試験: `next` の sanitize、`?error=` の3 code、失敗の文言、JS なし。
+- DONE: MIG-0641 の DONE 後に merge、同意後に API の `next` へ移動。
 
 ### MIG-0512 — public gateway error pages and sub-page fence
 

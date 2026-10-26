@@ -151,13 +151,13 @@ PRをrevert。
 - **Readiness:** NEEDS_REFINEMENT — MIG-0803 の後
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0803 / **Decisions:** D-07 DECIDED
+- **Depends on:** MIG-0803, MIG-0807 / **Decisions:** D-07 DECIDED, D-16-14（main にある Hono session / write guard の review は MIG-0807 が `SECURITY_REVIEW.md` §1 に書く。本 task は Auth.js 側を §2 に足す）
 - **Verified against:** `aacf4fd` (2026-10-15)
 #### Source snapshot
 - 目標: `ZERO_1102.md` §3 の最大値。session 解決（S4）は 2ms 以内、それを含む API 全体は S2 < 7ms / S3 < 8ms。p95 は参考として記録する。
 - 既存の安全なリダイレクト: `src/lib/auth/origin.ts`, `#utils/next` の `sanitizeNextPath`。
 #### Owned paths
-- 新規: `+docs/migration/auth/SECURITY_REVIEW.md`
+- 変更: `docs/migration/auth/SECURITY_REVIEW.md`（MIG-0807 が作る。本 task は §2 Auth.js）
 - 変更: `apps/api/src/auth/**`（見つかった問題の修正のみ）
 #### Micro-units
 - **U01 measure**: request あたりの D1 query 数と CPU を非本番で測る。
@@ -175,7 +175,7 @@ npm run build --workspace=@flamenode/api
 npm run check:project-docs
 ```
 #### Ledger updates
-`SECURITY_REVIEW.md` を新規作成。
+`SECURITY_REVIEW.md` の §2 を足す（§1 は MIG-0807）。
 #### DONE checklist
 - [ ] 測定値と条件が記録されている
 - [ ] 高リスクの未解決差分が0件
@@ -184,6 +184,51 @@ npm run check:project-docs
 - 認可結果や secret を cache に入れる設計になったら止める。
 #### Rollback
 PRをrevert。
+
+### MIG-0807: main にある Hono session と write guard の security review（MIG-0804 U02 の前半）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-14: MIG-0804 U02 のうち MIG-0802 を待たない部分を分割。対象の code は全て main にある。review は Opus、修正が要れば別 PR）
+- **Recipe:** R-EVIDENCE
+- **Runtime:** N
+- **Depends on:** MIG-0602, MIG-0608 / **Decisions:** D-07 DECIDED, D-16-14
+- **Verified against:** `c2a6ecb` (2026-10-26)
+#### Source snapshot
+- session: `apps/api/src/auth/session.ts`（441 行。cookie 名 :45-46、chunk の上限 `MAX_SESSION_COOKIE_CHUNKS` / `MAX_SESSION_TOKEN_LENGTH` :59-66、`parseCookieHeader` :116、`extractSessionToken` :206、`resolveSessionUser` :252、D1 失敗の `SESSION_UNAVAILABLE_CODE` :327、`sessionMiddleware` :365、`requireAuth` :416）。
+- write guard: `apps/api/src/middleware/writeOrigin.ts`（533 行。`WRITE_GUARD_MESSAGES` :59、`evaluateActiveXAccess` :120、`evaluateAdminWriteGuard` :139、`onlyMutating` :423、`originGuardMiddleware` :459、`writeGuardMiddleware` :474）、`adminReadGuard.ts`（44 行）、`costGuard.ts`。
+- 既存 test: `apps/api/test/{authSession,authSession.parity,authSession.unavailable,writeGuard,writeGuard.extra,adminGuards}.test.mjs`。CURRENT の比較元: `src/lib/auth/origin.ts`、`#utils/next` の `sanitizeNextPath`。
+#### Owned paths
+- 新規: `+docs/migration/auth/SECURITY_REVIEW.md`（§1 Hono session / write guard。§2 は MIG-0804）, `+apps/api/test/securityReview.test.mjs`（足りない観点の test だけ）
+- 変更: `docs/migration/auth/README.md`（§1 への link 1 行）
+- 触らない: `apps/api/src/auth/session.ts`, `apps/api/src/middleware/**`（問題が見つかっても本 task では直さない。STOP）
+#### Micro-units
+- **U01 表**: 次の観点ごとに「code の場所 / 既存 test の名前 / 結果（PASS / 不足 / 問題）」を `SECURITY_REVIEW.md` §1 に表で書く: cookie 改ざん（署名でなく DB session の照合であること）、期限切れ session、chunk 数・長さの上限超え、Secure / 非 Secure cookie 名の取り違え、別 origin の書き込み（`originGuardMiddleware`）、GET が書き込み stack を素通りすること（`onlyMutating`）、BAN の即時反映（毎 request の D1 照合）、D1 失敗時の fail-closed（503 で書き込み 0）、admin 読みの role 検査、応答 header の `private, no-store`。
+- **U02 不足の test**: U01 で「不足」の観点だけ `securityReview.test.mjs` に test を足す（既存の test の helper を使う）。
+- **U03 問題**: 「問題」が1件でもあれば、内容と再現 test を §1 に書いて STOP（修正は別 task）。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 改ざんした session token | 未ログイン扱い |
+| T02 | 別 origin の POST | 拒否、D1 書き込み 0 |
+| T03 | D1 例外 | fail-closed（503） |
+| T04 | BAN 直後の request | 拒否 |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+node --test --experimental-strip-types apps/api/test/securityReview.test.mjs
+npm run test --workspace=@flamenode/api
+npm run check:project-docs
+```
+#### Ledger updates
+`SECURITY_REVIEW.md` §1 を新規作成。`auth/README.md` に link。
+#### DONE checklist
+- [ ] U01 の表が全観点を埋めている
+- [ ] 「問題」が 0 件、または STOP して別 task にした
+- [ ] 独立レビューの APPROVE
+#### STOP
+- session / write guard の code を変える必要が出たら止める（別 task にする）。
+- 認可結果や secret を cache に入れる設計を見つけたら止める。
+#### Rollback
+PR を revert（docs と test だけ）。
 
 ### MIG-0805: production cutover proposal
 - **Model:** lead

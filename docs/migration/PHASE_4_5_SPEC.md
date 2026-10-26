@@ -1333,134 +1333,155 @@ npm run check:migration-work-items
 #### Rollback
 PR を revert。fetch の分岐だけなので data の戻しは無い。
 
-### MIG-0513: `/[id]` の操作 Island を Phase 6 の API につなぐ
+### MIG-0513: `/[id]` の like / bookmark Island を SA-087 の API につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0603 / MIG-0640 / MIG-0518 待ち。D-14-12 で MIG-0510 U02 から分割。D-15-12 で API が merge 済みの chapter composer（U02）と `?playlist=` dock（U04）、overlay の client を MIG-0518 へ分割。残りは like / bookmark と状態 form）
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-1: 契約先行。API は MIG-0640 で、merge は MIG-0640 の DONE 後。D-16-5 で状態 form を範囲から外した。実装は Sonnet、review は Opus）
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
-- **Depends on:** MIG-0603, MIG-0640, MIG-0518 / **Decisions:** D-03 DECIDED, D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12, D-15-12
-- **Verified against:** `dde6fa8` (2026-10-25)
+- **Depends on:** MIG-0407, MIG-0634 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12, D-15-12, D-16-1, D-16-5, D-16-6, D-16-7
+- **Merge gate:** MIG-0640 が DONE（D-16-1。それまで PR は REVIEW のまま）
+- **Verified against:** `c2a6ecb` (2026-10-26)
 #### Source snapshot
-- CURRENT: `src/components/video/InteractionButton.tsx`（SA-087）、`VideoInteractionActions.tsx`、`ChapterComposer.tsx`（SA-012..015）、`ChapterCommentPanel.tsx`、`VideoStatusForm.tsx`（SA-001 / SA-040）、`VideoViewerUtilityDock.tsx`（`?playlist=` dock）。
-- API: SA-012..015 は Hono に merge 済み（#393、`apps/api/src/routes/videos/chapters.ts:604-607`: `POST /api/videos/:videoId/chapters`、`/bulk`、`PUT` / `DELETE /api/videos/chapters/:chapterId`）。SA-087 は MIG-0640（`POST /api/videos/:videoId/interaction`）、SA-001 は MIG-0603 U02b（`POST /api/admin/videos/:videoId/status`）、SA-040 は MIG-0603 U02c、RH-031 viewer overlay は MIG-0634。
-- apps/site: `components/VideoPageIsland.ts`（静的表示だけ）、`lib/publicApi.ts`（MIG-0510 U03。未 merge なら本 task が同じ仕様で作る）。
+- CURRENT: `src/components/video/VideoInteractionActions.tsx`（66 行。`useVideoViewerOverlay(videoId)` の `likeActive` / `bookmarkActive` / `loggedIn` / `isBanned` / `isTosAccepted` / `termsReacceptRequired` / `authUnavailable` から `canInteract`・`disabledReason`・`actionHref` を決める :16-46）と `InteractionButton.tsx`（210 行。二重送信防止 `actionInFlightRef` :74,86、楽観更新と失敗時の戻し :94-112、server の `active` で件数を直す :114-131、成功後 `notifyVideoViewerOverlayChanged(videoId)` :133、例外時の文言「操作に失敗しました。通信状態を確認してもう一度お試しください。」）。呼び出し元は `app/(public)/[id]/page.tsx:403-407`（`likeCount={vm.appLikeCount}`）。
+- CURRENT の guard は Active X を要らない（`src/lib/actions/video/interaction.ts:61` `requireActiveXId: false`）。誘導モーダルは CURRENT に無い（D-16-6）。
+- API（MIG-0640 の Work Order）: `POST /api/videos/:videoId/interaction`、body `{ "kind": "like" | "bookmark" }`（CURRENT の FormData `video_id` は path、`kind` は body、D-16-1）。応答は CURRENT `toggleVideoInteraction` の結果 `{ ok: true, active }` / `{ ok: false, message }`。
+- overlay の client: `apps/site/src/lib/viewerOverlay.ts`（MIG-0518 U01 の仕様。CURRENT `src/lib/video/videoViewerOverlayClient.ts:267` `useVideoViewerOverlay`、`:258-265` `notifyVideoViewerOverlayChanged` = cache を捨てて `VIDEO_VIEWER_OVERLAY_CHANGED_EVENT` を dispatch）。main に無ければ本 task が MIG-0518 U01 の仕様のまま作る（D-16-7）。
+- apps/site: `components/VideoPageIsland.ts`（静的表示と view tracker だけ）。
 #### Owned paths
-- 新規: `+apps/site/src/components/VideoInteractionIsland.ts`, `+scripts/migration-video-islands.test.mjs`
-- 変更: `apps/site/src/components/VideoPageIsland.ts`, `packages/ui/src/screens/VideoDetailView.tsx`
-- 触らない: `app/**`, `src/components/**`, `apps/api/**`
+- 新規: `+apps/site/src/components/VideoInteractionIsland.ts`, `+apps/site/src/lib/videoInteraction.ts`（API client。1 行目は D-16-1 の provisional comment）, `+scripts/migration-video-islands.test.mjs`
+- 新規（MIG-0518 と先に merge した方が作る、D-16-7）: `+apps/site/src/lib/viewerOverlay.ts`
+- 変更: `apps/site/src/components/VideoPageIsland.ts`（mount 1 行）, `packages/ui/src/screens/VideoDetailView.tsx`（slot を渡す prop だけ。MIG-0518 が先に足していればそれを使う）
+- 触らない: `app/**`, `src/components/**`, `apps/api/**`, MIG-0518 の `VideoChapterIsland.ts` / `VideoUtilityDockIsland.ts`
 #### Micro-units
-- **U01 like / bookmark**: Active X 0件・複数の 403 / 202 / modal 誘導を CURRENT `InteractionButton.tsx` と同じに。
-- **U02**: MIG-0518 へ分割（D-15-12）。
-- **U03 状態 form**: SA-001 / SA-040。表示可否は MIG-0518 の `apps/site/src/lib/viewerOverlay.ts`（RH-031）の結果で決める（CURRENT と同じ条件）。
-- **U04**: MIG-0518 へ分割（D-15-12）。
+- **U01 client**: `videoInteraction.ts` に `toggleInteraction(videoId, kind, signal?)` を作る。`fetch("/api/videos/" + encodeURIComponent(videoId) + "/interaction", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ kind }) })`。JSON に boolean `ok` があれば status に関係なくそれを返し、それ以外（network 失敗・JSON でない）は throw（CURRENT の catch と同じ扱いにするため）。
+- **U02 Island**: `VideoInteractionIsland.ts` = CURRENT `VideoInteractionActions` + `InteractionButton` を React のまま移植（文言・class・`aria-*`・`disabledReason` の分岐・`inferActionLabel` を変えない）。`next/link` は `<a>`（site の adapter）、`useVideoViewerOverlay` は `viewerOverlay.ts`、`toggleVideoInteraction(fd)` は U01、`notifyVideoViewerOverlayChanged` は `viewerOverlay.ts` の同名関数。`currentPath` は `location.pathname + location.search`。
+- **U03 mount**: `VideoPageIsland.ts` で like 数（静的 HTML の `appLikeCount`）を props にして mount。JS なしでは control を出さない（T04）。
+- **U04 merge 直前**（D-16-1 の 5）: MIG-0640 の `packages/contracts/src/videoInteraction.ts` の schema を import し、provisional の型を消し、test の fixture を schema の `parse` に通す。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | like、Active X 0件 / 複数 | CURRENT と同じ 403 / 202 / modal |
-| T02 | chapter 作成・更新・削除・一括 | MIG-0518 で満たす |
-| T03 | 状態 form（admin / manage / 権限なし） | CURRENT と同じ表示と結果 |
+| T01 | like / bookmark の on → off、fake fetch の `{ok:true, active}` | 楽観更新、server の `active` で件数を直す（CURRENT :114-131 と同じ計算） |
+| T02 | `{ok:false, message:"x"}`（409）/ fetch が reject | 状態と件数を戻し、`x` / 「操作に失敗しました。通信状態を確認してもう一度お試しください。」 |
+| T03 | 連打（応答前に2回 click） | fetch は1回 |
 | T04 | JS なし | 静的表示が残り、何もしない control は出ない |
+| T05 | overlay: 未ログイン / BAN / 規約未同意 / authUnavailable / loading | `disabledReason` と `actionHref`（`/entry?next=` / `/rules?next=`）が CURRENT :28-46 と同じ |
+| T06 | X 0件で like（D-16-6） | modal を出さず API を呼ぶ |
 #### Commands
 ```bash
 node --test --experimental-strip-types scripts/migration-video-islands.test.mjs
 REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-video-page.test.mjs
 npm run build --workspace=@flamenode/site
 npm run typecheck
+npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0507.md` の Island の Parity gap を「MIG-0513 で解消」に。
+`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0507.md` の Island の Parity gap のうち like / bookmark を「MIG-0513 で解消」に。`API_MATRIX.md` の SA-087 に呼び出し元 `VideoInteractionIsland.ts`。
 #### DONE checklist
-- [ ] U01 / U03 が DONE、T01 / T03 / T04 が PASS（U02 / U04 は MIG-0518）
-- [ ] 呼ぶ API は全て Hono の DONE task のもの
+- [ ] U01〜U04 が DONE、T01〜T06 が PASS
+- [ ] MIG-0640 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 - [ ] browser 確認（390px / 1440px）が PR にある
 #### STOP
-- 必要な API が無い・契約が CURRENT と違うときは止めて担当の 06xx に返す。
+- API が無い・契約が CURRENT と違うときは止めて MIG-0640 に返す（画面側で吸収しない）。
+- 状態 form（SA-001 / SA-040）を `/[id]` に出す必要が見えたら止める（D-16-5。Ops SPA の範囲）。
 #### Rollback
 PR を revert。静的表示に戻る。
 
-### MIG-0514: `/event/[id]/slots` の予約 Island を Phase 6 の API につなぐ
+### MIG-0514: `/event/[id]/slots` の viewer panel と予約 Island を Phase 6 の API につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0657 待ち。D-15-4 で MIG-0604 U04 の予約部分が MIG-0657 になった。D-14-12 で MIG-0510 U03 から分割）。viewer panel の API（RH-014）は merge 済み
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-9: 分けずに契約先行。viewer panel の RH-014 は #391 で merge 済み、予約の SA-065..068 は MIG-0657 で、merge は MIG-0657 の DONE 後。実装は Sonnet、review は Opus）
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
-- **Depends on:** MIG-0657 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-12 DECIDED, D-13-24, D-14-12, D-15-4
-- **Verified against:** `dde6fa8` (2026-10-25)
+- **Depends on:** MIG-0407 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-12 DECIDED, D-13-24, D-14-12, D-15-4, D-16-1, D-16-4, D-16-9
+- **Merge gate:** MIG-0657 が DONE（D-16-1）
+- **Verified against:** `c2a6ecb` (2026-10-26)
 #### Source snapshot
-- CURRENT: `src/components/event/SlotGrid.tsx:15`（`@/lib/actions/slot` 直呼び、SA-056..068）、`app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx`（RH-014）。
-- API: RH-014 は Hono に merge 済み（#391、`apps/api/src/routes/events/viewerOverlay.ts`、`GET /api/events/:id/slots/viewer-overlay`）。予約系 SA は MIG-0604 U04。
-- apps/site: `components/EventSlotsIsland.ts`、`lib/publicApi.ts`（MIG-0510 U03）。
+- CURRENT: `app/(public)/event/[id]/slots/EventSlotsViewerPanel.tsx`（369 行。RH-014 を `cache: "no-store"`・timeout 付きで読み :168-213、失敗は `authUnavailable: true` の空 overlay、`ACTIVE_X_CHANGED_EVENT` で再取得、`SlotGrid` と `SlotStatusBoard` を描く :333）と `src/components/event/SlotGrid.tsx`（1501 行。SA 呼び出し: 予約 :448-468 `slot_id` / `display_name` / `consecutive_count` / `operator_override`、解放 :501、延長 :530-532 `slot_id` / `direction`、統合 :566-568 `gap_slot_id` / `display_name`。成功後 `router.refresh()`、失敗時 `redirectForGuardReason(result.reason)` :472,509,540）。guard の移動先は `src/lib/client/guardRedirect.ts`（48 行）。
+- CURRENT の入力 schema: `src/lib/actions/slot.ts:96-115`（`reserveSchema` / `extendSchema` / `mergeSchema`）。延長は group id ではなく `slot_id` と `direction` を受ける。
+- API: RH-014 `GET /api/events/:id/slots/viewer-overlay`（`apps/api/src/routes/events/viewerOverlay.ts`、#391）。予約系（MIG-0657、D-16-1）: `POST /api/events/:eventId/slots/:slotId/reserve` body `{ display_name, consecutive_count, operator_override? }`、`POST /api/events/:eventId/slots/:slotId/release`、`POST /api/events/:eventId/slots/:slotId/extend` body `{ direction }`、`POST /api/events/:eventId/slot-groups/merge` body `{ gap_slot_id, display_name }`。応答は CURRENT の `SlotReserveResult`（`{ ok, reason?, message? ... }`）。
+- apps/site: `components/EventSlotsIsland.ts`（49 行。RH-020 を 30 秒ごとに読み、予約 control は無い）、`packages/ui/src/screens/EventSlotsView.tsx`（137 行）。
 #### Owned paths
-- 変更: `apps/site/src/components/EventSlotsIsland.ts`, `packages/ui/src/screens/EventSlotsView.tsx`
-- 新規: `+scripts/migration-slots-island.test.mjs`
+- 新規: `+apps/site/src/components/EventSlotsViewerIsland.ts`（viewer panel + `SlotGrid` の移植）, `+apps/site/src/lib/slotReservation.ts`（API client、1 行目は D-16-1 の provisional comment）, `+scripts/migration-slots-island.test.mjs`
+- 新規（MIG-0515 / 0519 と先に merge した方が作る、D-16-4）: `+apps/site/src/lib/guardRedirect.ts`（CURRENT `src/lib/client/guardRedirect.ts` をそのまま。`sanitizeNextPath` は site に既にあるものを使う）
+- 変更: `apps/site/src/components/EventSlotsIsland.ts`（viewer Island の mount）, `packages/ui/src/screens/EventSlotsView.tsx`（slot を渡す prop だけ）
 - 触らない: `app/**`, `src/components/**`, `apps/api/**`
 #### Micro-units
-- **U01 viewer panel**: RH-014 の結果で本人の枠・申請を表示（CURRENT `EventSlotsViewerPanel.tsx`）。
-- **U02 予約・解除・延長**: MIG-0604 U04 の SA-056..068 API。競合時は CURRENT と同じ文言と再取得。
+- **U01 viewer panel**: `EventSlotsViewerPanel` を移植。RH-014 の読み方（no-store、timeout、失敗は `authUnavailable`）と `ACTIVE_X_CHANGED_EVENT` の再取得を CURRENT と同じに。予約 control はこの unit では出さない。
+- **U02 client**: `slotReservation.ts` に `reserve` / `release` / `extend` / `merge` を作る。応答 JSON に boolean `ok` があれば返し、それ以外は throw。
+- **U03 予約 control**: `SlotGrid` の予約・解放・延長・統合を移植。`router.refresh()` は viewer overlay と RH-020 の再取得、`redirectForGuardReason` は `guardRedirect.ts` + `location.assign`。文言・確認 dialog・`PublicReflectionDelayNotice` は CURRENT と同じ。
+- **U04 merge 直前**（D-16-1 の 5）: MIG-0657 の `packages/contracts/src/slotReservation.ts` の schema に置き換え、fixture を `parse` に通す。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | 枠の予約・解除・延長 | CURRENT と同じ結果と再取得 |
-| T02 | 同じ枠の同時予約で負けた側 | CURRENT と同じ文言、枠表示を再取得 |
+| T01 | 枠の予約・解除・延長・統合（fake fetch） | CURRENT と同じ body を送り、成功で overlay と枠を再取得 |
+| T02 | 同じ枠の同時予約で負けた側（`{ok:false, message}` 409） | CURRENT と同じ文言、枠表示を再取得 |
 | T03 | RH-014 が fail-closed（D-12） | 権限を増やさない表示 |
-| T04 | JS なし | 静的表示が残る |
+| T04 | JS なし | 静的表示が残り、予約 control は出ない |
+| T05 | `{ok:false, reason:"unauthenticated"}` / `"tos_required"` | `/entry?next=` / `/onboarding?next=` へ移動（`guardRedirect.ts` と同じ） |
 #### Commands
 ```bash
 node --test --experimental-strip-types scripts/migration-slots-island.test.mjs
 REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-event-routes.test.mjs
 npm run build --workspace=@flamenode/site
 npm run typecheck
+npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0502.md` の枠 Island の Parity gap を「MIG-0514 で解消」に。
+`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0502.md` の枠 Island の Parity gap を「MIG-0514 で解消」に。`API_MATRIX.md` の SA-065..068 に呼び出し元。
 #### DONE checklist
-- [ ] U01 / U02 が DONE、T01〜T04 が PASS
+- [ ] U01〜U04 が DONE、T01〜T05 が PASS
+- [ ] MIG-0657 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 - [ ] Server Action を呼ばない
 - [ ] browser 確認（390px / 1440px）が PR にある
 #### STOP
-- 予約の transaction 境界や応答契約を変える必要が出たら止めて MIG-0604 に返す。
+- 予約の transaction 境界や応答契約を変える必要が出たら止めて MIG-0657 に返す。
+- 運営向けの枠操作（SA-056..064）が必要に見えたら止める（MIG-0656 と Ops SPA の範囲）。
 #### Rollback
 PR を revert。
 
-### MIG-0515: `/rules` の同意 form と header の Active X 切替を Phase 6 の API につなぐ
+### MIG-0515: header の Active X 切替を SA-098 の API につなぐ
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — BLOCKED（MIG-0636 の SA-098 と MIG-0641 の SA-075 待ち。D-14-12 で MIG-0510 U04 / U05 から分割）
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-8: `/rules` の同意 form は MIG-0519 へ分割。契約先行で、merge は MIG-0636 の DONE 後。実装は Sonnet、review は Opus）
 - **Recipe:** R-PAGE, R-UI
 - **Runtime:** S0
-- **Depends on:** MIG-0636, MIG-0641 / **Decisions:** D-04 DECIDED, D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12
-- **Verified against:** `dde6fa8` (2026-10-25)
+- **Depends on:** MIG-0407 / **Decisions:** D-04 DECIDED, D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12, D-16-1, D-16-8
+- **Merge gate:** MIG-0636 が DONE（D-16-1）
+- **Verified against:** `c2a6ecb` (2026-10-26)
 #### Source snapshot
-- `/rules`: CURRENT `app/(public)/rules/page.tsx:43-96`（`next` は `sanitizeNextPath` `src/lib/utils/next.ts:42`、`?error=` の3 code :54-59、form :95 が SA-075 `acceptLatestTerms`）。apps/site `pages/rules.astro`（form 無し）。API は MIG-0641（`POST /api/personal/terms/accept`、`{ok, next}`）。
-- Active X: CURRENT `src/components/user/useActiveXSwitcher.ts`（SA-098 `setActiveXId`）、`XIdSwitcher.tsx`。apps/site `components/AccountMenu.ts:25,34,82-104`（`switchActiveX` を注入すれば動く。site は渡していない）、`SiteHeader.ts`。API は MIG-0636（`POST /api/xid/active`）。
+- CURRENT: `src/components/user/useActiveXSwitcher.ts`（142 行、SA-098 `setActiveXId`、FormData `x_user_id`）、`XIdSwitcher.tsx`。
+- apps/site: `components/AccountMenu.ts`（364 行。`switchActiveX` を props で受ければ楽観更新と rollback をする :25,34,82-104。既存 test `scripts/migration-account-island.test.mjs`）、`components/SiteHeader.ts`（27 行、`switchActiveX` を渡していない）。
+- API（MIG-0636 U02）: `POST /api/xid/active`、body `{ "x_user_id": "..." }`。応答は CURRENT `setActiveXId` の結果（`{ ok, message?, reason? }`）。
 #### Owned paths
-- 新規: `+apps/site/src/components/RulesConsentIsland.ts`, `+scripts/migration-rules-activex-islands.test.mjs`
-- 変更: `apps/site/src/pages/rules.astro`, `apps/site/src/components/SiteHeader.ts`, `packages/ui/src/screens/RulesView.tsx`
-- 触らない: `app/**`, `src/components/**`, `apps/api/**`, `apps/site/src/components/AccountMenu.ts`（注入するだけ）
+- 新規: `+apps/site/src/lib/activeX.ts`（API client、1 行目は D-16-1 の provisional comment）, `+scripts/migration-activex-island.test.mjs`
+- 新規（MIG-0514 / 0519 と先に merge した方が作る、D-16-4）: `+apps/site/src/lib/guardRedirect.ts`
+- 変更: `apps/site/src/components/SiteHeader.ts`
+- 触らない: `app/**`, `src/components/**`, `apps/api/**`, `apps/site/src/components/AccountMenu.ts`（注入するだけ）, `apps/site/src/pages/rules.astro`（MIG-0519）
 #### Micro-units
-- **U01 rules**: 同意 form、`next`（`sanitizeNextPath`）、`?error=` の3 code の文言を CURRENT と同じに。成功時は API の `next` へ移動。
-- **U02 Active X**: `SiteHeader` から `AccountMenu` に `switchActiveX`（`POST /api/xid/active`）を渡す。
+- **U01 client**: `activeX.ts` に `switchActiveX(xUserId)`。CURRENT `useActiveXSwitcher.ts` と同じ成功・失敗の判定、`{ok:false, reason}` は `guardRedirect.ts` の移動先へ。
+- **U02 header**: `SiteHeader` から `AccountMenu` に `switchActiveX` を渡す。成功後の再読込は CURRENT `useActiveXSwitcher.ts` と同じ。
+- **U03 merge 直前**（D-16-1 の 5）: MIG-0636 の `packages/contracts/src/xid.ts` の schema に置き換える。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
-| T01 | `/rules?next=/x&error=concurrent_update` | CURRENT の文言、同意後に `/x` |
-| T02 | `next` に外部 URL | CURRENT と同じ移動先 |
-| T03 | Active X 切替の成功 / 失敗 | 楽観更新と rollback（`AccountMenu` の既存 test と同じ） |
-| T04 | JS なし | 静的表示が残り、何もしない control は出ない |
+| T01 | Active X 切替の成功 / 失敗（fake fetch） | 楽観更新と rollback（`AccountMenu` の既存 test と同じ） |
+| T02 | 「すでにこの X ID がアクティブです。」の `{ok:false}` | CURRENT と同じ表示 |
+| T03 | JS なし | 静的表示が残り、何もしない control は出ない |
 #### Commands
 ```bash
-node --test --experimental-strip-types scripts/migration-rules-activex-islands.test.mjs scripts/migration-account-island.test.mjs
-REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-fixed-routes.test.mjs
+node --test --experimental-strip-types scripts/migration-activex-island.test.mjs scripts/migration-account-island.test.mjs
 npm run build --workspace=@flamenode/site
 npm run typecheck
+npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0501.md` の `/rules` form の Parity gap を「MIG-0515 で解消」に。
+`FILE_MIGRATION_MATRIX.md` に新規 file。`API_MATRIX.md` の SA-098 に呼び出し元 `SiteHeader.ts`。
 #### DONE checklist
-- [ ] U01 / U02 が DONE、T01〜T04 が PASS
+- [ ] U01〜U03 が DONE、T01〜T03 が PASS
+- [ ] MIG-0636 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
 - [ ] D-04（Active X 一斉切替）を実行していない
 - [ ] browser 確認（390px / 1440px）が PR にある
 #### STOP
 - Active X の本番切替（D-04）は別承認。
-- API の契約が CURRENT と違うときは止めて MIG-0636 / MIG-0641 に返す。
+- API の契約が CURRENT と違うときは止めて MIG-0636 に返す。
 #### Rollback
 PR を revert。
 
@@ -1558,7 +1579,7 @@ PR を revert。R2 の `list/recent.json` は json-generator が書き続けて�
 - API: `apps/api/src/routes/videos/chapters.ts:604-607`（`POST /api/videos/:videoId/chapters`、`/bulk`、`PUT` / `DELETE /api/videos/chapters/:chapterId`）、RH-031 `GET /api/videos/:videoId/viewer-overlay`（`apps/api/src/routes/videos/viewerOverlay.ts`、MIG-0634）。
 - apps/site: `apps/site/src/components/VideoPageIsland.ts`（25 行、静的表示と view tracker だけ。`:15` のコメントが「chapter composer と comments はまだ」）。`apps/site/src/lib/publicApi.ts` は MIG-0510 U03 が作る（未 merge なら本 task が MIG-0510 の仕様で作る）。
 #### Owned paths
-- 新規: `+apps/site/src/components/VideoChapterIsland.ts`, `+apps/site/src/components/VideoUtilityDockIsland.ts`, `+apps/site/src/lib/viewerOverlay.ts`（RH-031 の client。MIG-0513 も使う）, `+scripts/migration-video-chapter-island.test.mjs`
+- 新規: `+apps/site/src/components/VideoChapterIsland.ts`, `+apps/site/src/components/VideoUtilityDockIsland.ts`, `+apps/site/src/lib/viewerOverlay.ts`（RH-031 の client。MIG-0513 も使い、MIG-0513 と先に merge した方が作る、D-16-7）, `+scripts/migration-video-chapter-island.test.mjs`
 - 変更: `apps/site/src/components/VideoPageIsland.ts`（mount 2 行とコメント）, `packages/ui/src/screens/VideoDetailView.tsx`（slot を渡す prop だけ）
 - 触らない: `app/**`, `src/components/**`, `apps/api/**`, MIG-0513 の `VideoInteractionIsland.ts`
 #### Micro-units
@@ -1590,21 +1611,68 @@ npm run typecheck
 #### Rollback
 PR を revert。静的表示に戻る。
 
+### MIG-0519: `/rules` の同意 form を SA-075 の API につなぐ（MIG-0515 U01）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-16-8: MIG-0515 から分割。契約先行で、merge は MIG-0641 の DONE 後。実装は Sonnet、review は Opus）
+- **Recipe:** R-PAGE, R-UI
+- **Runtime:** S0
+- **Depends on:** MIG-0407 / **Decisions:** D-06 DECIDED, D-08 DECIDED, D-13-24, D-14-12, D-16-1, D-16-8
+- **Merge gate:** MIG-0641 が DONE（D-16-1）
+- **Verified against:** `c2a6ecb` (2026-10-26)
+#### Source snapshot
+- CURRENT: `app/(public)/rules/page.tsx`（112 行。`next` は `sanitizeNextPath`（`src/lib/utils/next.ts:42`）、`?error=` の3 code の文言 :54-59、form :95 が SA-075 `acceptLatestTerms`（server で redirect））。
+- apps/site: `pages/rules.astro`（21 行、form 無し）、`packages/ui/src/screens/RulesView.tsx`（71 行）。
+- API（MIG-0641 U01）: `POST /api/personal/terms/accept`。redirect の代わりに `{ ok: true, next }`（`next` は server で `sanitizeNextPath` 済み）/ `{ ok: false, message, reason? }`。body は CURRENT の form の hidden field の key のまま `{ "next": "..." }`（D-16-1。`page.tsx:95-98` の `<input type="hidden" name="next">` 1つだけ、`terms.ts:198` が `formData.get("next")` を読む）。
+#### Owned paths
+- 新規: `+apps/site/src/components/RulesConsentIsland.ts`, `+apps/site/src/lib/terms.ts`（API client、1 行目は D-16-1 の provisional comment）, `+scripts/migration-rules-island.test.mjs`
+- 新規（MIG-0514 / 0515 と先に merge した方が作る、D-16-4）: `+apps/site/src/lib/guardRedirect.ts`
+- 変更: `apps/site/src/pages/rules.astro`, `packages/ui/src/screens/RulesView.tsx`（form の slot を渡す prop だけ）
+- 触らない: `app/**`, `src/components/**`, `apps/api/**`, `apps/site/src/components/SiteHeader.ts`（MIG-0515）
+#### Micro-units
+- **U01 client**: `terms.ts` に `acceptLatestTerms(next: string)`（body `{ next }`）。応答 JSON に boolean `ok` があれば返し、それ以外は throw。
+- **U02 Island**: 同意 form、`next`（`sanitizeNextPath`）、`?error=` の3 code の文言を CURRENT と同じに。成功時は API の `next` へ `location.assign`。`{ok:false, reason}` は `guardRedirect.ts` の移動先、それ以外は `message`。
+- **U03 merge 直前**（D-16-1 の 5）: MIG-0641 の `packages/contracts/src/terms.ts` の schema に置き換える。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `/rules?next=/x&error=concurrent_update` | CURRENT の文言、同意後に `/x` |
+| T02 | `next` に外部 URL | CURRENT と同じ移動先 |
+| T03 | `{ok:false, message}` / fetch が reject | CURRENT と同じ文言で form が残る |
+| T04 | JS なし | 静的表示が残り、何もしない control は出ない |
+#### Commands
+```bash
+node --test --experimental-strip-types scripts/migration-rules-island.test.mjs
+REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-fixed-routes.test.mjs
+npm run build --workspace=@flamenode/site
+npm run typecheck
+npm run check:project-docs
+```
+#### Ledger updates
+`FILE_MIGRATION_MATRIX.md` に新規 file。`work-items/MIG-0501.md` の `/rules` form の Parity gap を「MIG-0519 で解消」に。`API_MATRIX.md` の SA-075 に呼び出し元。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T04 が PASS
+- [ ] MIG-0641 が DONE で、client が `packages/contracts` の schema を使っている（D-16-1）
+- [ ] browser 確認（390px / 1440px）が PR にある
+#### STOP
+- API の契約が CURRENT と違うときは止めて MIG-0641 に返す。
+#### Rollback
+PR を revert。静的表示に戻る。
+
 ### MIG-0508: Phase 5 Gate
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0501..MIG-0507, MIG-0509..MIG-0518, MIG-0621, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED, D-11 DECIDED, D-14-6, D-14-12, D-15-15
+- **Depends on:** MIG-0501..MIG-0507, MIG-0509..MIG-0519, MIG-0621, MIG-0607 / **Decisions:** D-02 DECIDED, D-06 DECIDED, D-08 DECIDED, D-09 DECIDED, D-11 DECIDED, D-14-6, D-14-12, D-15-15, D-16-8
 - **Verified against:** `dde6fa8` (2026-10-25)
 #### Source snapshot
 - `CURRENT_ROUTES.md` の Public 16 ルート（VISUAL_SCREEN 13 + COMPAT_REDIRECT 3）と `ROUTE_MATRIX.md`。
-- MIG-0501〜0507、0509〜0515 の merge 済み PR と work item。
+- MIG-0501〜0507、0509〜0519 の merge 済み PR と work item。
 #### Owned paths
 - 新規: `+docs/migration/design/PHASE_5_GATE.md`
 - 変更: `docs/migration/ROUTE_MATRIX.md`（16ルートの disposition と証跡）, `docs/migration/STATUS.md`（承認後だけ）
 #### Micro-units
-- **U01 matrix**: 16ルートすべてに legacy→new の対応、URL・スクリーンショット・テスト・rollback の証跡を付ける。公開系 UX の取りこぼしを数える（MIG-0510 / 0513 / 0514 / 0515 の Island を含む）。
+- **U01 matrix**: 16ルートすべてに legacy→new の対応、URL・スクリーンショット・テスト・rollback の証跡を付ける。公開系 UX の取りこぼしを数える（MIG-0510 / 0513 / 0514 / 0515 / 0518 / 0519 の Island を含む）。
 - **U02 build**: MIG-0509 の Workers Builds 実測と file 数、icon map（MIG-0511）が本番データで入ったことを記録。
 - **U03 review**: 独立レビューと人間の Phase Gate 承認を依頼。
 #### Test cases
@@ -1627,7 +1695,7 @@ npm run check:project-docs
 - [ ] 16ルートの証跡が揃っている
 - [ ] 公開データがすべて build 時に作られている（MIG-0509）、icon map も（MIG-0511）
 - [ ] MIG-0511 のアイコン投影が `/[id]` に入っている（MIG-0511 T03。D-14-6 で MIG-0507 から移した）
-- [ ] 操作 Island が Phase 6 API につながっている（MIG-0510 / 0513 / 0514 / 0515）
+- [ ] 操作 Island が Phase 6 API につながっている（MIG-0510 / 0513 / 0514 / 0515 / 0518 / 0519）
 - [ ] 独立レビューの APPROVE と人間の Phase Gate 承認
 - [ ] 旧 Next の Auth/API/非公開経路に触れていない
 #### STOP
