@@ -452,3 +452,28 @@ test("T48: zero Queue concurrency is rejected while zero retries remain valid",(
   const rows=extractConfigRows(valid,fastPath);
   assert.ok(rows.some(row=>row.kind==="queue.consumer" && row.value.includes("retry 0")));
 });
+
+test("T49: symlinked Worker directory cannot hide an additional Wrangler config",
+  {skip:process.platform==="win32"},()=>{
+    const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-dirlink-"));
+    try {
+      const external=resolve(temp,"external-worker");
+      mkdirSync(external,{recursive:true});
+      mkdirSync(resolve(temp,"workers"));
+      writeFileSync(resolve(external,"wrangler.toml"),'name = "hidden"\n');
+      symlinkSync(external,resolve(temp,"workers","linked-worker"),"dir");
+      assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers/linked-worker"]);
+    } finally { rmSync(temp,{recursive:true,force:true}); }
+  });
+
+test("T50: symlinked root Wrangler TOML requires review even if its contents match",
+  {skip:process.platform==="win32"},()=>{
+    const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-rootlink-"));
+    try {
+      mkdirSync(resolve(temp,"workers"));
+      const external=resolve(temp,"source.toml");
+      writeFileSync(external,web);
+      symlinkSync(external,resolve(temp,"wrangler.toml"),"file");
+      assert.deepEqual(findUntrackedWorkerConfigs(temp),["wrangler.toml"]);
+    } finally { rmSync(temp,{recursive:true,force:true}); }
+  });
