@@ -238,3 +238,46 @@ test("MIG-0718 U02: prefixed CSS is byte-for-byte the CURRENT module rule set", 
     .replace(/\.reason(?=\s*\{)/g, ".cgb-reason");
   assert.equal(target, converted, "source CSS module drift or modified declarations");
 });
+
+test("MIG-0718 U01 T04: oversized Content-Length cancels unread response", async () => {
+  let cancelled = false;
+  const response = new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"mode":"maintenance","reason":null}'));
+      // Keep stream open so discarding a rejected body is observable.
+    },
+    cancel() { cancelled = true; },
+  }), { status: 200, headers: { "Content-Length": "70000" } });
+  assert.equal(await client(response).api.getBanner(), null);
+  assert.equal(cancelled, true, "header rejection must cancel unread network body");
+});
+
+test("MIG-0718 U01 T04: non-200 response cancels unread network body", async () => {
+  let cancelled = false;
+  const response = new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new Uint8Array([123])); },
+    cancel() { cancelled = true; },
+  }), { status: 503 });
+  assert.equal(await client(response).api.getBanner(), null);
+  assert.equal(cancelled, true);
+});
+
+test("MIG-0718 U01 T04: mid-stream AbortSignal releases a hanging reader.read", { timeout: 5000 }, async () => {
+  const controller = new AbortController();
+  let cancelled = false;
+  let markReadPending;
+  const readingAgain = new Promise((resolve) => { markReadPending = resolve; });
+  const response = new Response(new ReadableStream({
+    start(stream) {
+      stream.enqueue(new TextEncoder().encode('{"mode":"economy","reason":"'));
+      // Do not enqueue more bytes or close: a subsequent read would hang.
+    },
+    pull() { markReadPending(); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 }), { status: 200 });
+  const pending = client(response).api.getBanner(controller.signal);
+  await readingAgain;
+  controller.abort();
+  assert.equal(await pending, null);
+  assert.equal(cancelled, true, "abort must cancel the still-open stream");
+});
