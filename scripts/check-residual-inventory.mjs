@@ -75,6 +75,7 @@ function required(fields,key,where) {
 export function extractConfigRows(source,config) {
   if(!CONFIGS.includes(config)) throw Error("unsupported config: "+config);
   const blocks=[{section:"",fields:{},line:1}];
+  const singletonSections=new Set();
   source.split(/\r?\n/).forEach((raw,index)=>{
     let line;
     try {line=removeComment(raw);} catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
@@ -87,6 +88,11 @@ export function extractConfigRows(source,config) {
         throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
       if(INERT_SECTIONS.has(m[2]) && m[1]==="[[")
         throw Error(config+":"+(index+1)+": unsupported array section "+m[2]);
+      if(m[1]==="[") {
+        if(singletonSections.has(m[2]))
+          throw Error(config+":"+(index+1)+": duplicate TOML section "+m[2]);
+        singletonSections.add(m[2]);
+      }
       blocks.push({section:m[2],fields:{},line:index+1});
       return;
     }
