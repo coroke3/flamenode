@@ -46,12 +46,20 @@ const record = (config,kind,setting,value) => ({config,kind,setting,value});
 // Local dev-only probes outside workers/ are intentionally excluded.
 export function findUntrackedWorkerConfigs(root) {
   const workerDir=resolve(root,"workers"), files=[];
+  // A root JSON/JSONC variant can supersede the tracked root TOML and
+  // invalidate the 36-row audit without changing any of the four sources.
+  for(const item of readdirSync(root,{withFileTypes:true})) {
+    if((item.name==="wrangler.json" || item.name==="wrangler.jsonc") &&
+       (item.isFile() || item.isSymbolicLink())) files.push(item.name);
+  }
   function visit(dir,relative) {
     for(const item of readdirSync(dir,{withFileTypes:true})) {
       const local=relative+"/"+item.name;
       if(item.isDirectory()) visit(resolve(dir,item.name),local);
-      else if(item.isFile() && /^wrangler\.(?:toml|json|jsonc)$/.test(item.name)
-        && !CONFIGS.includes(local)) files.push(local);
+      // A symlinked Wrangler file must not evade the config discovery guard.
+      else if((item.isFile() || item.isSymbolicLink()) &&
+              /^wrangler\.(?:toml|json|jsonc)$/.test(item.name) &&
+              (!CONFIGS.includes(local) || item.isSymbolicLink())) files.push(local);
     }
   }
   visit(workerDir,"workers");
