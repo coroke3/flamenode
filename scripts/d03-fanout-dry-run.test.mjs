@@ -383,3 +383,45 @@ test("T19 importing CLI module tolerates an unrelated missing argv path", () => 
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stdout.trim(), "import-ok");
 });
+
+test("T20 owner links only to non-approved X count as skippedNoOwnerLink", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1");
+  add.x(insert, "pending", "pending"); add.x(insert, "rejected", "rejected");
+  add.x(insert, "imported", "imported"); add.x(insert, "nullState", null);
+  add.link(insert, "a", "pending"); add.link(insert, "a", "rejected");
+  add.link(insert, "b", "imported"); add.link(insert, "c", "nullState");
+  add.auth(insert, "a"); add.auth(insert, "b"); add.auth(insert, "c", "v1", "bookmark");
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 0);
+  assert.equal(report.skippedNoOwnerLink, 3);
+}));
+
+test("T21 runs against the schema built from migrations/*.sql", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fn-mig-0658-schema-"));
+  const file = join(dir, "migrated.sqlite");
+  const migrations = fileURLToPath(new URL("../migrations/", import.meta.url));
+  try {
+    const db = new DatabaseSync(file);
+    try {
+      for (const name of readdirSync(migrations).filter((n) => n.endsWith(".sql")).sort()) {
+        db.exec(readFileSync(join(migrations, name), "utf8"));
+      }
+      db.exec("PRAGMA foreign_keys = OFF");
+      db.exec([
+        "INSERT INTO x_users (id, x_name, approval_status) VALUES ('x1', 'x1', 'approved')",
+        "INSERT INTO user (id, email) VALUES ('a', 'a@example.test')",
+        "INSERT INTO x_user_account_links (x_user_id, auth_user_id, link_role) VALUES ('x1', 'a', 'owner')",
+        "INSERT INTO videos (id, submitted_by_user_id, creator_display_name, title, app_like_count) VALUES ('v1', 'a', 'c', 't', 1)",
+        "INSERT INTO video_interactions_auth (auth_user_id, video_id, interaction_type, created_at) VALUES ('a', 'v1', 'like', 10)",
+      ].join(";") + ";");
+    } finally {
+      db.close();
+    }
+    const report = analyzeLocalFile(file);
+    assert.equal(report.candidates, 1);
+    assert.equal(report.skippedNoOwnerLink, 0);
+    assert.equal(report.likeCountDeltaTotal, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

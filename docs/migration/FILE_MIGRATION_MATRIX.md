@@ -1030,14 +1030,12 @@
 | `src/lib/publicData/staticVideoDetailCore.ts` | HELPER | D-10 compatibility bridge (MIG-0634) | MIG-0634 | packages/server-core/src/publicData/videoDetailCore.ts | BRIDGED | PR#401 SHA=6bd41be5ed42bdfc60c76e7d6e521dedd6909f05 TEST=npm run test --workspace=@flamenode/server-core LOG=project-files/migration-review/pr401-server-core-test.log |
 | `src/lib/publicData/loaderPolicy.ts` | HELPER | D-10 compatibility bridge (MIG-0634) | MIG-0634 | packages/server-core/src/publicData/loaderPolicy.ts | BRIDGED | PR#401 SHA=6bd41be5ed42bdfc60c76e7d6e521dedd6909f05 TEST=npm run test --workspace=@flamenode/server-core LOG=project-files/migration-review/pr401-server-core-test.log |
 
-
-
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
-| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=2f5b85b526fcef8c8fe2e4f4ae1098b5b4dc1014 TEST=npm run check:d03-fanout-dry-run (T01–T15) CI=https://github.com/coroke3/flamenode/actions/runs/40250047741 (local synthetic D-03 only; not production cutover) |
-| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | synthetic local fixture tests T01–T15, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection; PR#414 SHA=94e8c743bae42d604b19a6cff97b70160f60720e TEST=npm run check:d03-fanout-dry-run CI=https://github.com/coroke3/flamenode/actions/runs/40250047741 (T01–T15 local synthetic fixture checks) |
+| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=0f9cdf66979697100a38ecac2bcd8ce2b442bf6f TEST=npm run check:d03-fanout-dry-run (T01–T21) CI=https://github.com/coroke3/flamenode/actions/runs/40311626295 (local synthetic D-03 only; not production cutover) |
+| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | fixture tests T01–T21, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection, WAL/header rejection, symlink/import entrypoint, non-approved owner skip, real migrations schema; PR#414 TEST=npm run check:d03-fanout-dry-run (SHA and CI recorded in work-items/MIG-0658.md) |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
