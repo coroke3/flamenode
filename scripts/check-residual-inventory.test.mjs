@@ -350,3 +350,43 @@ test("T37: malformed vars assignment does not expose the value in diagnostics",(
     error=>error.message.includes("unsupported syntax (value redacted)") &&
       !error.message.includes(marker));
 });
+
+test("T38: removing a background KV preview_id requires review",()=>{
+  const changed=fast.replace('preview_id = "00000000000000000000000000000000"',"");
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    /unexpected KV preview_id presence/);
+});
+
+test("T39: adding KV preview_id to the web Worker requires review",()=>{
+  const changed=web.replace(
+    'id = "00000000000000000000000000000000"',
+    'id = "00000000000000000000000000000000"\npreview_id = "00000000000000000000000000000000"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /unexpected KV preview_id presence/);
+});
+
+test("T40: removing the web D1 migration directory cannot evade inventory audit",()=>{
+  const changed=web.replace('migrations_dir = "migrations"',"");
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /unexpected D1 migrations_dir/);
+});
+
+test("T41: changing the web D1 migration directory cannot evade inventory audit",()=>{
+  const changed=web.replace('migrations_dir = "migrations"',
+    'migrations_dir = "other-migrations"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /unexpected D1 migrations_dir/);
+});
+
+test("T42: adding a D1 migration directory on a background Worker requires review",()=>{
+  const changed=fast.replace(
+    'database_id = "00000000-0000-0000-0000-000000000000"',
+    'database_id = "00000000-0000-0000-0000-000000000000"\nmigrations_dir = "migrations"');
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    /unexpected D1 migrations_dir/);
+});
