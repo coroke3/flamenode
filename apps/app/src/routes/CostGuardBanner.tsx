@@ -59,8 +59,13 @@ export function CostGuardBannerView({
 }: {
   snapshot: BannerSnapshot | null;
 }): React.ReactElement | null {
-  if (!snapshot) return null;
+  if (!snapshot || !Object.prototype.hasOwnProperty.call(TONE, snapshot.mode)) return null;
   const tone = TONE[snapshot.mode];
+  // Keep the render boundary resilient to stale/corrupt data even if a future
+  // caller bypasses the read client's provisional validator (U03 shared DTO).
+  const reason = typeof snapshot.reason === "string" && snapshot.reason.length <= 2048
+    ? snapshot.reason
+    : null;
   return (
     <div
       role="status"
@@ -75,7 +80,7 @@ export function CostGuardBannerView({
       <div className="fn-public-container cgb-inner">
         <strong>{tone.label}:</strong>
         <span>{tone.description}</span>
-        {snapshot.reason ? <em className="cgb-reason">(理由: {snapshot.reason})</em> : null}
+        {reason ? <em className="cgb-reason">(理由: {reason})</em> : null}
       </div>
     </div>
   );

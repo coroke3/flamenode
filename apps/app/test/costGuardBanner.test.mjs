@@ -3,6 +3,7 @@ import test from "node:test";
 import { createOperationModeBannerApi } from "../.test-dist/apps/app/src/api/operationMode.js";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { dom, flush } from "./helpers.mjs";
 const { CostGuardBanner, CostGuardBannerView } =
@@ -280,4 +281,27 @@ test("MIG-0718 U01 T04: mid-stream AbortSignal releases a hanging reader.read", 
   controller.abort();
   assert.equal(await pending, null);
   assert.equal(cancelled, true, "abort must cancel the still-open stream");
+});
+
+test("MIG-0718 U02 T05: unexpected mode never crashes the Personal SPA banner", () => {
+  for (const mode of ["bogus", "normal", "toString", "__proto__", null, 12]) {
+    const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
+      snapshot: { mode, reason: "should not appear" },
+    }));
+    assert.equal(html, "", "unexpected mode " + String(mode));
+  }
+});
+
+test("MIG-0718 U02 T05: malformed or oversized reason never crashes React render", () => {
+  for (const reason of [{ nested: "bad" }, ["bad"], 42, "x".repeat(2049)]) {
+    const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
+      snapshot: { mode: "economy", reason },
+    }));
+    assert.match(html, /省コストモード/);
+    assert.doesNotMatch(html, /\(理由:/);
+  }
+  const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
+    snapshot: { mode: "economy", reason: "valid" },
+  }));
+  assert.match(html, /\(理由: valid\)/);
 });
