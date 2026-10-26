@@ -415,6 +415,25 @@ Option 4（hybrid）を採る。
   | MIG-0716 | MIG-0648, MIG-0650, MIG-0651 |
   | MIG-0717 | MIG-0648, MIG-0650, MIG-0651 |
   | MIG-0718 | MIG-0661, MIG-0701 |
+  | MIG-0719 | MIG-0707, MIG-0661, MIG-0628 |
+  | MIG-0720 | MIG-0707, MIG-0719, MIG-0655 |
+  | MIG-0721 | MIG-0707, MIG-0719, MIG-0726, MIG-0652 |
+  | MIG-0722 | MIG-0707, MIG-0719, MIG-0656 |
+  | MIG-0723 | MIG-0707, MIG-0719, MIG-0654 |
+  | MIG-0724 | MIG-0707, MIG-0719, MIG-0603 |
+  | MIG-0725 | MIG-0707, MIG-0719, MIG-0655, MIG-0605 |
+  | MIG-0726 | MIG-0707, MIG-0661 |
+  | MIG-0727 | MIG-0707, MIG-0726, MIG-0642 |
+  | MIG-0728 | MIG-0707, MIG-0726, MIG-0653 |
+  | MIG-0729 | MIG-0707, MIG-0726, MIG-0603 |
+  | MIG-0730 | MIG-0707, MIG-0726, MIG-0650, MIG-0648 |
+  | MIG-0731 | MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603 |
+  | MIG-0732 | MIG-0707, MIG-0726, MIG-0605, MIG-0644 |
+  | MIG-0733 | MIG-0707, MIG-0726, MIG-0662 |
+  | MIG-0734 | MIG-0707, MIG-0726, MIG-0637, MIG-0642 |
+  | MIG-0735 | MIG-0707, MIG-0726, MIG-0643 |
+  | MIG-0736 | MIG-0707, MIG-0726, MIG-0626 |
+  | MIG-0737 | MIG-0707, MIG-0726, MIG-0638, MIG-0645 |
 
   <!-- merge-gates:end -->
   理由: 待っているのは merge 順だけで、契約の決め方（CURRENT の入力 key と結果 object を変えない）は R-API と各 API の Work Order が既に決めている。API と画面を同時に作れば、Phase 5 / 7 の画面が API の後に直列で並ばない。危険は契約のずれで、5 の置き換えと schema の parse で merge 前に必ず検出される。
@@ -438,3 +457,57 @@ Option 4（hybrid）を採る。
 依存の付け替え: MIG-0508 → MIG-0501..0507, 0509..0519, 0621, 0607。MIG-0606 → 従来 + MIG-0661。MIG-0607 → MIG-0606, 0631, 0632, 0634..0648, 0650..0661。MIG-0704 / 0705 → 従来 + MIG-0661。
 
 見送ったもの: Ops SPA の画面（MIG-0704 / 0705。`apps/ops` が無いので MIG-0707 の merge まで着手できない）、MIG-0610（MIG-0609 の測定値が要る）、MIG-0627 U04 / U05（MIG-0509 の build 経路が要る）、MIG-0803〜0805（MIG-0802 の `authjs.ts` が要る）、Gate と本番の観測・操作。
+
+## D-17 — Ops SPA の画面（Manage 12・Admin 45）を画面群に分けて契約先行で着手できるようにする（DECIDED、2026-10-27）
+
+決定者: Claude Opus（owner-delegate）2026-10-27 JST。Yugo の standing instruction「判断は推奨案で進め、事後に報告」と、2026-10-26 の依頼「また次の20タスクくらいを実装開始可能な状態にして」に基づく。Fable は使っていない（Yugo「fable使用禁止」）。基準 commit は main `08e7e8c`（#415 の後）。
+
+状況: D-16 の後、BLOCKED の大きな塊は Ops SPA の MIG-0704（Manage 12 画面）と MIG-0705（Admin 45 画面）だけで、どちらも 1 task のままでは 1 PR に収まらない。待っている理由は (a) `apps/ops` の土台（MIG-0707、READY、未着手）、(b) 書き込み API（Phase 6 の READY task 群）の merge で、読み API（MIG-0624 / 0625 / 0635 と account summary）は main にある（`apps/api/src/app.ts:30-31,46`）。画面ごとの CURRENT 部品・Server Action・読み endpoint は 2026-10-27 に code で確かめた（下の各 Work Order の Source snapshot）。
+
+方式:
+
+- **D-17-1（土台の Merge gate）**: Ops の画面 task は MIG-0707 を Depends on に書かず、`**Merge gate:**` に書く（D-16-1 の表に行を足す）。着手時に `apps/ops` が main に無ければ、PR の最初の commit で MIG-0707 の Work Order の U01〜U05 をその文面のとおりに作る（commit message `provisional MIG-0707 scaffold (D-17-1)`）。この暫定の土台の file は、`apps/ops/src/routes/router.tsx` に自分の route 行を足す以外は変えない。merge の直前に MIG-0707 が DONE の main を取り込み、MIG-0707 の Owned paths の file を `git checkout origin/main -- <path>` で main の版に戻し、自分の route 行だけを足し直して build と test を通す。MIG-0707 の版と食い違って自分の画面が動かないときは STOP して MIG-0707 に返す（画面側で土台を直さない）。Manage の画面（MIG-0720〜0725）は Manage の枠 MIG-0719 を、Admin の画面（MIG-0727〜0737）は Admin の枠 MIG-0726 を、同じ扱いの Merge gate にする（枠が無い間は MIG-0707 の route 枠の中に出る）。
+- **D-17-2（Ops の読み client）**: `apps/ops/src/api/read.ts`（MIG-0707 U05 が作る）に `getJson<T>(fetchFn, path, signal): Promise<OpsResult<T>>` を置く。`OpsResult<T> = {status:"ok", data:T} | {status:"anonymous"} | {status:"forbidden", redirect?: string, reason?: string} | {status:"notFound"} | {status:"unsupported"} | {status:"unavailable"}`。写像は 200 → ok、401 → anonymous、403 → forbidden（body の `redirect` / `reason` をそのまま）、404 → notFound、501 → unsupported、それ以外・network 失敗・JSON でない → unavailable。`credentials: "same-origin"`、`cache: "no-store"`、`accept: application/json`（`apps/app/src/api/personal.ts:61-79` と同じ）。画面は anonymous → `/entry`、`/api/manage/*` の forbidden → `/dashboard`、`/api/admin-read/*` の forbidden → body の `redirect`（`/dashboard`）へ `window.location.assign`（CURRENT の layout の redirect、D-05）。notFound は CURRENT の `notFound()` と同じ 404 画面（MIG-0707 U05 の `NotFoundView`）。画面ごとの client は `apps/ops/src/api/<name>.ts` に `create<Name>Api(fetchFn)` として作る。
+- **D-17-3（Ops の書き込み client と再取得）**: `apps/ops/src/api/write.ts` は D-16-2 の `send` と同じ signature・同じ写像で MIG-0707 U05 が作る。`useApiResult`（`apps/ops/src/routes/useApiResult.ts`）は D-16-3 の `refreshKey` 付きの形で MIG-0707 U05 が作る。CURRENT の `router.refresh()` は `refreshKey` を 1 増やし、`router.push(x)` は Ops 内なら `useNavigate()(x)`、Ops 外（`/dashboard`・公開 path）なら `window.location.assign(x)`。書き込み API の契約は D-16-1 の 1〜5 のとおり（暫定の型、merge 直前に `packages/contracts` の schema へ置き換え）。main に既にある書き込み API（announcements・api-endpoints・audit settings / dry-run・event template 削除）は最初から `packages/contracts` の schema を使う。
+- **D-17-4（URL が未確定だった書き込み API の path）**: MIG-0637 / 0642 / 0643 / 0644 の Work Order は「URL は U01 の表で確定」としていた。画面と並行に作るために、ここで決める（API task は U01 の表にこの path を書き、変えるときは D-17 の変更として理由を書く）。body は D-16-1 の 2（CURRENT の FormData の key をそのまま JSON の key、path の id は body に送らない）、応答は D-16-1 の 3。
+  - MIG-0637: SA-016 `POST /api/admin/cost-guard/mode`、SA-017 `POST /api/admin/cost-guard/maintenance`、SA-018 `POST /api/admin/cost-guard/override`、SA-019 `POST /api/admin/cost-guard/disabled-features`、SA-020 `POST /api/admin/cost-guard/override/clear`、SA-077 `POST /api/admin/users/:userId/role`、SA-078 `POST /api/admin/users/:userId/banned`、SA-079 `POST /api/admin/users/:userId/notifications`、SA-080 `POST /api/admin/users/:userId/can-create-events`、SA-081 `POST /api/admin/x-users/:xUserId/icon-refresh`。
+  - MIG-0642: SA-045 `POST /api/admin/notifications/:id/retry`、SA-046 `POST /api/admin/notifications/:id/cancel`、SA-047 `POST /api/admin/notifications/:id/force-resend`、SA-048 `POST /api/admin/notifications/retry-failed`、SA-049 `PUT /api/admin/permissions/editable-fields`、SA-051 `POST /api/admin/terms`、SA-052 `PATCH /api/admin/terms/:id`、SA-053 `POST /api/admin/terms/:id/publish`、SA-054 `POST /api/admin/terms/:id/reaccept-broadcast`、SA-055 `POST /api/admin/terms/:id/archive`。
+  - MIG-0643: SA-069 `POST /api/admin/static-builds/backfill`、SA-070 `POST /api/admin/static-builds/queue/:queueId/retry`、SA-071 `POST /api/admin/static-builds/rebuild`、SA-072 `POST /api/admin/static-builds/shared-inputs/rebuild`、SA-073 `POST /api/admin/static-builds/retry-failed`、SA-050 `POST /api/admin/visibility-repair`、SA-106 `POST /api/admin/youtube-sync/videos/:videoId/resync`。
+  - MIG-0644: SA-092 `POST /api/admin/x-id-merges`、SA-093 `POST /api/admin/x-id-merges/:id/approve`、SA-094 `POST /api/admin/x-id-merges/:id/reject`、SA-096 `POST /api/admin/x-id-merges/:id/execute`、SA-097 `POST /api/admin/x-id-merges/reverts/:id/approve`、SA-095 `POST /api/admin/x-id-merges/reverts/:id/reject`（SA-110 の dispatcher は画面側で action ごとにこの path を呼ぶ）。
+  - MIG-0662: SA-011 `POST /api/admin/audit/restore`。
+- **D-17-5（redirect で結果を返していた Server Action）**: CURRENT で `redirect()` / form action の再描画で結果を出していたもの（SA-038 / 039 `?saved=1`・`?queued=1`・`?error=`、SA-050 `?visibility_repair=`、SA-069 `?backfill_*`、SA-108 / 109 `?notice=`・`?error=`、SA-092〜097 と SA-106 の再描画）は、API が CURRENT の redirect 先の query と同じ値を JSON で返し、画面が成功・失敗とも同じ query の URL へ `useNavigate()` で移って再取得する。画面の banner の分岐は CURRENT の query のまま移植する。これで URL を共有したときの表示も CURRENT と同じになる。
+- **D-17-6（共有の部品と CSS）**: Ops の 2 task 以上が使う CURRENT の leaf 部品と global CSS は MIG-0707 U05 が 1 回だけ移す（一覧は MIG-0707 の Work Order）。画面 task の 2 つだけが使う部品は `apps/ops/src/components/<area>/` に先に merge した方が作り、後の方は import だけ（D-16-4 と同じ）: video 審査の部品（`VideoReviewQueueTable` / `VideoReviewQuickApproveButton` / `VideoApproveActions` / `VideoStatusForm` / `VideoReviewDetailPanel`）は MIG-0724 と MIG-0729、`XLinkRequestTable` は MIG-0725 と MIG-0732、`NotificationOutboxSummary` は MIG-0719 / 0720 / 0725 / 0734。`EventForm`（1120 行）は Manage の編集と `/admin/events/new` の両方を MIG-0721 が持つ。header / footer（`PublicHeader` / `PublicFooter`）は D-13-6 のとおり FIX-0701-1 が両 SPA に出すので、Ops の枠（MIG-0719 / 0726）には置かない。
+- **D-17-7（GET の絞り込み form と件数上限）**: CURRENT の `<form method="get">` と `AutoSubmitSelect` は、同じ name の query を `useSearchParams` で URL に書き、読み API を同じ query で呼ぶ。Hono の読みが CURRENT より少ない件数で切る所（slots 500 → 100 × `offset`、videos 200 → 100 × `offset`、`slots.ts:10`・`videos.ts:13`）は、画面が `offset` を進めて CURRENT と同じ件数まで読む（最大 5 回 / 2 回、順に await）。`truncated` / `degraded` の flag は CURRENT に同じ表示が無ければ出さない（STOP ではない）。
+- **D-17-8（health / integrity の全件実行）**: `GET /api/admin-read/ops/health?deep=1` と `/ops/integrity?run=1` は main では 501（`apps/api/src/routes/adminRead/ops.ts:240-242,328-329`）。これは MIG-0626 U05 / U06 が埋める予定なので、MIG-0736 の Merge gate に MIG-0626 を入れる。MIG-0626 が 501 を残すと決めたら、画面に「未対応」と出すことは機能の欠落なので MIG-0736 は STOP して Yugo の判断を待つ。
+- **D-17-9（監査 restore API の担当の欠落）**: SA-011（`restoreAuditLogAction`、`src/lib/actions/audit-admin.ts:142-171`）の HTTP API はどの task にも無かった（MIG-0602 は MIG-0616 へ、MIG-0616 は core だけ、MIG-0629 は SA-009 / 010 だけ。main の `apps/api/src/routes/admin/audit.ts` は `/settings` と `/dry-run` だけ）。MIG-0662 を作る。restore は manifest・公開 cache・event export cache・Queue wake の本物の host が要り、それは MIG-0603 U02a（`apps/api/src/visibility/{videoTransitionHost,publicCacheKeys}.ts`）が作るので、MIG-0662 は MIG-0603 に依存する（BLOCKED）。MIG-0733（監査画面）の Merge gate に MIG-0662 を入れる。
+- **D-17-10（admin の video member 画面）**: `/admin/videos/[id]/members` は `VideoMembersField`（1503 行）を使い、その移植は MIG-0713（Personal SPA、READY）。Ops から `apps/app` を import しないために、MIG-0730 が MIG-0713 の移植を `packages/ui/src/forms/videoMembers/` に移し、両 SPA がそこから import する。MIG-0730 は MIG-0713 に依存する（BLOCKED）。
+- **D-17-11（MIG-0704 / 0705 の残り）**: MIG-0704 は Manage の Final audit だけになり、依存は MIG-0719..0725。MIG-0705 は Admin の Final audit だけになり、依存は MIG-0726..0737。MIG-0704 の旧依存 MIG-0604 / 0703 は外す（画面が呼ぶ API は各画面 task の Merge gate にある。MIG-0703 は Personal SPA の audit で Ops の画面は使わない）。MIG-0706 は MIG-0704, MIG-0705 に依存する。`apps/ops/wrangler.toml`（D-14-3）は MIG-0719 が持ち、MIG-0628 の `apps/app/wrangler.toml` と同じ形にするので MIG-0628 を MIG-0719 の Merge gate に入れる。
+- **D-17-12（依存の付け替え）**: MIG-0606 → 従来 + MIG-0662。MIG-0607 → 従来 + MIG-0662。
+
+分割:
+
+| 新 task | 画面 | Merge gate |
+| --- | --- | --- |
+| MIG-0719 | Manage の枠（layout guard・sidebar・banner）、`/manage`、`/manage/events/:id/review` の redirect、`apps/ops/wrangler.toml` | MIG-0707, MIG-0661, MIG-0628 |
+| MIG-0720 | `/manage/events/:id`、`/audience`（SA-035） | MIG-0707, MIG-0719, MIG-0655 |
+| MIG-0721 | `EventForm` の移植、`/manage/events/:id/edit`（SA-021..024）、`/admin/events/new` | MIG-0707, MIG-0719, MIG-0726, MIG-0652 |
+| MIG-0722 | `/manage/events/:id/slots`（SA-056..064） | MIG-0707, MIG-0719, MIG-0656 |
+| MIG-0723 | `/manage/events/:id/staff`（SA-031..034） | MIG-0707, MIG-0719, MIG-0654 |
+| MIG-0724 | `/manage/events/:id/videos`、`/videos/:videoId`（SA-040..042） | MIG-0707, MIG-0719, MIG-0603 |
+| MIG-0725 | `/manage/events/:id/youtube-playlist`（SA-038 / 039）、`/manage/notifications`、`/manage/x-link-requests`（SA-090 / 091） | MIG-0707, MIG-0719, MIG-0655, MIG-0605 |
+| MIG-0726 | Admin の枠（layout guard・sidebar・banner）、`/admin`、`/admin/permissions/simulator`、redirect 5 本 | MIG-0707, MIG-0661 |
+| MIG-0727 | `/admin/announcements` 3 画面、`/admin/api-endpoints`、`/admin/rules` 3 画面（SA-051..055） | MIG-0707, MIG-0726, MIG-0642 |
+| MIG-0728 | `/admin/event-groups` 3 画面（SA-025..030）、`/admin/events`、`/admin/events/templates` | MIG-0707, MIG-0726, MIG-0653 |
+| MIG-0729 | `/admin/videos`、`/admin/videos/:id`（SA-001..003, 043） | MIG-0707, MIG-0726, MIG-0603 |
+| MIG-0730 | `/admin/videos/:id/members`（SA-085、BLOCKED on MIG-0713） | MIG-0707, MIG-0726, MIG-0650, MIG-0648 |
+| MIG-0731 | `/admin/users` 3 画面（SA-049, 077..081）、`/admin/moderation`（SA-044） | MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603 |
+| MIG-0732 | `/admin/x-link-requests`（SA-090 / 091）、`/admin/x-id-merges`（SA-092..097） | MIG-0707, MIG-0726, MIG-0605, MIG-0644 |
+| MIG-0733 | `/admin/audit` 4 画面（SA-009..011） | MIG-0707, MIG-0726, MIG-0662 |
+| MIG-0734 | `/admin/cost-guard`（SA-016..020）、`/admin/notifications`（SA-045..048） | MIG-0707, MIG-0726, MIG-0637, MIG-0642 |
+| MIG-0735 | `/admin/static-builds`（SA-050, 069..073）、`/admin/youtube-sync` 2 画面（SA-106）、`/admin/youtube-quota` | MIG-0707, MIG-0726, MIG-0643 |
+| MIG-0736 | `/admin/health`、`/admin/health/integrity`、`/admin/security`、`/admin/workers` | MIG-0707, MIG-0726, MIG-0626 |
+| MIG-0737 | `/admin/spreadsheet`（RH-003..009）、`/admin/import`（RH-002） | MIG-0707, MIG-0726, MIG-0638, MIG-0645 |
+
+理由: 画面群の境目は CURRENT の部品の境目（同じ client component を使う画面を同じ task に入れる）。1 task は CURRENT の client 部品で約 2,000 行以内。READY になるのは MIG-0719〜0729 と MIG-0731〜0737 の 18 件。MIG-0730 と MIG-0662 は依存の task が DONE になるまで BLOCKED。
+
+見送ったもの: MIG-0610（MIG-0609 の測定値が要る）、MIG-0627 U02〜U05（MIG-0509 の build 経路が要る）、MIG-0803〜0805（MIG-0802 の `authjs.ts` が要る）、MIG-0714 / 0716 / 0717（MIG-0712 / 0713 の部品が要る）、Gate と本番の観測・操作。

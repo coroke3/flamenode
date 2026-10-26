@@ -408,6 +408,12 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 
 **Personal SPA = `apps/app`: `/dashboard`, `/entry`, `/onboarding`, `/_personal_assets/*`. Ops SPA = `+apps/ops` at MIG-0704: `/manage`, `/admin`, `/_ops_assets/*`.** CSS/JS chunks別、Cookie同一origin、認可はHono+旧Authと一致。現在`apps/ops`は未作成なのでビルド成功を要求するのはMIG-0704以降だけ。cross-SPA遷移は通常HTTP navigation。UIはCURRENT見た目を踏襲（公開HTMLの新visualをprivateへ無理に適用しない）。
 
+### MIG-0662 — admin audit restore API (SA-011, D-17-9)
+- 読む: `audit-admin.ts:125-171`、`apps/api/src/routes/admin/audit.ts`、`packages/server-core/src/audit/restore.ts`、MIG-0603 U02a の host、D-13-41 / 54。
+- 変更: `+apps/api/src/visibility/auditRestoreHost.ts`、`admin/audit.ts` に `POST /restore`、`+packages/contracts/src/admin/auditRestore.ts`、parity test。
+- 試験: 拒否、確認文字列違い、競合と `force_overwrite`、可視性の host の key 集合、413。
+- DONE: MIG-0603 の DONE 後に着手、restore が独立レビュー済み。
+
 ### MIG-0701 — Personal dashboard GET screens
 
 - 読む: `PHASE_7_SPEC.md` の MIG-0701 Work Order、`work-items/MIG-0701.md`、`app/layout.tsx`、`app/(auth)/layout.tsx`、`src/styles/globals.css:7-10`、4つの CSS module。
@@ -429,23 +435,23 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 5ルートの form 状態と副作用が分割先の test で固定、画面が D1 / auth を import しない、`/entry` の return-to の sanitize。
 - DONE: MIG-0711〜0717 が DONE。
 
-### MIG-0704 — create Ops SPA + Manage screens
+### MIG-0704 — Manage screens (Final audit, D-17-11)
 
-- 読む: `CURRENT_ROUTES.md` Manage 12、`frontend/MANAGE_ADMIN.md`, `packages/ui`, `apps/app/{package.json,vite.config.ts}`。
-- 変更手順: (1)`+apps/ops/package.json` (`@flamenode/ops`), `+apps/ops/index.html`, `+apps/ops/tsconfig.json`, `+apps/ops/vite.config.ts` (`base:'/'`, `assetsDir:'_ops_assets'`)。`+apps/ops/src/{main,App}.tsx` Routerとerror boundary。(2)shared UI/contracts importとpackage-lock/npm ci。(3)`+flamenode-ops` Worker/static assets bindingは別MIG/PoCで契約テスト（本番route変更なし）。(4) Manage12画面をCURRENTから移植。
-- 試験: `npm run build --workspace=@flamenode/app`, `npm run build --workspace=@flamenode/ops` + CSS/JSに相互混入なし、bare/deep URL/browser back, no session, owner0防止、slot concurrency、staff editing, notification retry。
-- DONE: **別build/manifest/bindings** と同一cookie、owner/staff role権限、管理機能12のstate/UX/FNが揃う。
+- 読む: `PHASE_7_SPEC.md` の MIG-0704 Work Order、MIG-0719〜0725 の merge 済み PR、`CURRENT_ROUTES.md` Manage 12。
+- 変更: `work-items/MIG-0704.md` の audit 表、`ROUTE_MATRIX.md` の Manage 12 の移行先。
+- 試験: 12 ルートの対応表、担当外 event の拒否、2 SPA の asset 分離、owner 0 防止、route × role の Location。
+- DONE: MIG-0719〜0725 が DONE で、欠けたルート・機能が 0。
 
-### MIG-0705 — Admin 45 surfaces on Ops SPA
+### MIG-0705 — Admin screens (Final audit, D-17-11)
 
-- 読む: `CURRENT_ROUTES.md` Admin 45, `frontend/MANAGE_ADMIN.md`, `route-handlers/README.md`, `server-actions/README.md`, existing admin source/test。
-- 変更: `apps/ops`にadmin lazy route chunksを設け、audit/spreadsheet/moderation/merge/health/cost guard/event/video/YouTube/admin operationsを旧UIと等価に移す。dangerous actionsには確認/CSRF/permission/strict audit、発行Tokenをブラウザへ漏らさない。
-- 試験: user/admin/moderator/owner/guest permission matrix; table edit/export/import atomicity; audit restore; X merge/revert; Cloudflare worker diagnostics; 403/no-store; CSS/JS bundle isolation。
-- DONE: Admin 45 route全件とそれらが所有するUX/FN IDの対応を示し、destructive/privileged operationsは独立レビューに通す。
+- 読む: `PHASE_7_SPEC.md` の MIG-0705 Work Order、MIG-0721 / 0726〜0737 の merge 済み PR、`CURRENT_ROUTES.md` Admin 45。
+- 変更: `work-items/MIG-0705.md` の audit 表、`ROUTE_MATRIX.md` の Admin 45 の移行先。
+- 試験: 45 ルート × role の可否、Personal bundle に Ops の code が無い、危険操作の独立レビュー。
+- DONE: MIG-0726〜0737 が DONE で、欠けたルート・機能が 0。
 
 ### MIG-0707 — Ops SPA scaffold (MIG-0704 U01)
 - 読む: `apps/app/{package.json,vite.config.ts,index.html,tsconfig.json}`、`apps/app/src/routes/guard.tsx`、`app/(manage)/layout.tsx`、`app/(admin)/layout.tsx`、`account/summary.ts:282-302`。
-- 変更: `+apps/ops/**`（package・build・router 枠・guard・`_headers`）、CI の build / test、`assetHeaders.test.mjs` の `ops`。
+- 変更: `+apps/ops/**`（package・build・router 枠・guard・`_headers`、U05 の read / write client・`useApiResult`・共有部品 15 個・global CSS、D-17）、CI の build / test、`assetHeaders.test.mjs` の `ops`。
 - 試験: 2 SPA の build で asset が混ざらない、guard の Location、noindex、`/_ops_assets/*` immutable。
 - DONE: Ops の build が CI で動き、本番の Worker / Route を作っていない。
 
@@ -514,6 +520,120 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 変更: `+routes/CostGuardBanner.tsx`、`+api/operationMode.ts`、`cost-guard-banner.css`、wrapper の中に mount 1 行。
 - 試験: 4 mode の label / description / reason、normal と失敗で何も出さない。
 - DONE: MIG-0661 と MIG-0701 の DONE 後に merge（FIX-0701-1 の banner の部分）。
+
+### MIG-0719 — Ops Manage shell, `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628)
+- 読む: `app/(manage)/layout.tsx:27-45`、`ConsoleSidebar.tsx:93-117`、`ManageSidebarNav.tsx`、`manage/page.tsx`、`review/page.tsx:12`、`navigation.ts:9`、`dashboard.ts:13`、D-17-1〜6。
+- 変更: `+routes/manage/{ManageLayout,ManageSidebarNav,ManageActiveXNotice,ManageDashboard,ManageReviewRedirect}.tsx`、`CostGuardBanner`、`+apps/ops/wrangler.toml`、router 行。
+- 試験: guard の Location、sidebar の null 条件、KPI の warn / danger、review の replace、banner、wrangler dry-run。
+- DONE: MIG-0707・0661・0628 の DONE 後に merge、暫定の土台が残っていない。
+
+### MIG-0720 — `/manage/events/:id` + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655)
+- 読む: `events/[id]/page.tsx:73-100,440,519-601`、`audience/page.tsx`、`ManageEventPageShell.tsx`、`SaveEventTemplateForm.tsx`、`overview.ts:51`、`audience.ts:27`。
+- 変更: `+components/manage/{ManageEventPageShell,ManageEventTabs,ManageEventMoreMenu}.tsx`、`+routes/manage/{EventOverview,EventAudience,SaveEventTemplateForm}.tsx`、`+api/{manageEvent,eventTemplates}.ts`。
+- 試験: `?notif=` の正規化、担当外の 404、template 保存の連打と失敗、audience の並び。
+- DONE: MIG-0707・0719・0655 の DONE 後に merge。
+
+### MIG-0721 — Ops `EventForm` port: manage edit + `/admin/events/new` (SA-021..024; merge gate MIG-0707, MIG-0719, MIG-0726, MIG-0652)
+- 読む: `EventForm.tsx`（1120 行、:545-622）、`edit/page.tsx:35-176`、`RenameEventIdForm.tsx`、`DeleteEventForm.tsx`、`admin/events/new/page.tsx`、`eventEdit.ts:82`、`eventTemplates.ts:105`。
+- 変更: `+components/event/*`、`+lib/{useUnsavedChangesGuard,useFormDraft,eventTemplateSettings}.ts`、`+routes/manage/{EventEdit,RenameEventIdForm,DeleteEventForm}.tsx`、`+routes/admin/EventNew.tsx`、`+api/eventLifecycle.ts`。
+- 試験: 連打、選択肢 0、未保存の確認、create 後の遷移、削除の確認文字列、section 権限、template 無し。
+- DONE: MIG-0652 の DONE 後に merge、`EventForm` の挙動を変えていない。
+
+### MIG-0722 — `/manage/events/:id/slots` (SA-056..064; merge gate MIG-0707, MIG-0719, MIG-0656)
+- 読む: `slots/page.tsx`、`SlotBatchForm.tsx`、`SlotList.tsx:107-135,417-468`、`slots.ts:10,55`、D-17-7。
+- 変更: `+routes/manage/{EventSlots,SlotBatchForm,SlotList}.tsx`、`+api/manageSlots.ts`、`slot-batch.css`。
+- 試験: 450 枠の分割読み、全削除の確認、提出済みの権限、失敗でも再取得。
+- DONE: MIG-0656 の DONE 後に merge。
+
+### MIG-0723 — `/manage/events/:id/staff` (SA-031..034; merge gate MIG-0707, MIG-0719, MIG-0654)
+- 読む: `staff/page.tsx:41-167`、`EventStaffManager.tsx:140-165,366,494-552,638,726-729`、`EventStaffReadOnlyList.tsx`、`staff.ts:40`。
+- 変更: `+routes/manage/{EventStaff,EventStaffManager,EventStaffReadOnlyList}.tsx`、`+api/manageStaff.ts`。
+- 試験: 自分の解任の prompt、owner 0 の拒否、CSV の error、読み取り専用。
+- DONE: MIG-0654 の DONE 後に merge。
+
+### MIG-0724 — `/manage/events/:id/videos` + video detail (SA-040..042; merge gate MIG-0707, MIG-0719, MIG-0603)
+- 読む: `videos/page.tsx`、`videos/[videoId]/page.tsx`、`VideoReviewQueueTable.tsx`、`VideoReviewQuickApproveButton.tsx`、`VideoApproveActions.tsx`、`VideoStatusForm.tsx:181-242`、`videos.ts:13,48`、`videoDetail.ts:64`。
+- 変更: `+routes/manage/{EventVideos,EventVideoDetail}.tsx`、`+api/manageVideoStatus.ts`、共有の video 審査 5 部品（MIG-0729 と先に merge した方）。
+- 試験: 150 件の分割読み、即承認の連打、次へ、送る前の検査、権限なし。
+- DONE: MIG-0603 の DONE 後に merge。
+
+### MIG-0725 — `/manage` youtube-playlist, notifications, x-link-requests (SA-038/039, 090/091; merge gate MIG-0707, MIG-0719, MIG-0655, MIG-0605)
+- 読む: `youtube-playlist/page.tsx:106-336`、`event-youtube-playlist.ts:59-367`、`notifications/page.tsx`、`x-link-requests/page.tsx`、`XLinkRequestTable.tsx:104-300`、D-17-5。
+- 変更: `+routes/manage/{EventYoutubePlaylist,ManageNotifications,ManageXLinkRequests}.tsx`、`+api/{managePlaylist,xidLinkRequests}.ts`、`XLinkRequestTable`（MIG-0732 と先に merge した方）。
+- 試験: `?saved=1` の banner、権限なしの無効、通知の 404 と query、承認の連打、理由 500 字。
+- DONE: MIG-0655・0605 の DONE 後に merge。
+
+### MIG-0726 — Ops Admin shell, `/admin`, permission simulator, 5 redirects (merge gate MIG-0707, MIG-0661)
+- 読む: `app/(admin)/layout.tsx:23-39`、`ConsoleSidebar.tsx:78-89`、`AdminSidebarNav.tsx`、`admin/page.tsx`、`PermissionSimulatorPanel.tsx`、`adminRead/index.ts:27-41`、`ops.ts:817`、`settings.ts:182`。
+- 変更: `+routes/admin/{AdminLayout,AdminSidebarNav,AdminTop,PermissionSimulator,AdminRedirects}.tsx`、`+api/{adminTop,adminBanner}.ts`。
+- 試験: role ごとの Location、件数 0 の EmptyState、合計に入れない件数、simulator の空入力、redirect 5 本。
+- DONE: MIG-0707・0661 の DONE 後に merge。
+
+### MIG-0727 — `/admin` announcements x3, api-endpoints, rules x3 (merge gate MIG-0707, MIG-0726, MIG-0642)
+- 読む: `announcements/**`、`AnnouncementForm.tsx`、`api-endpoints/page.tsx:25-247`、`rules/**`、`TermsForm.tsx`、`TermsReacceptBroadcastButton.tsx`、`settings.ts:38-239`、D-17-4 / 5。
+- 変更: `+routes/admin/{Announcements,AnnouncementEdit,...,TermsReacceptBroadcastButton}.tsx`、`+api/{adminAnnouncements,adminApiEndpoints,adminTerms}.ts`。
+- 試験: 作成後の遷移、409、`?notice=` / `?error=`、readOnly、`TERMS` 確認、cursor。
+- DONE: MIG-0642 の DONE 後に merge。
+
+### MIG-0728 — `/admin` event-groups x3, events, templates (merge gate MIG-0707, MIG-0726, MIG-0653)
+- 読む: `event-groups/**`、`EventGroupForm.tsx`、`EventGroupMembersEditor.tsx:48-137`、`events/page.tsx`、`events/templates/page.tsx`、`eventGroups.ts:22,51`、`events.ts:20`。
+- 変更: `+routes/admin/{EventGroups,...,DeleteEventTemplateButton}.tsx`、`+api/{adminEventGroups,adminEvents}.ts`。
+- 試験: 古い検索の破棄、cursor の重複除去、作成後の遷移、template 削除の確認。
+- DONE: MIG-0653 の DONE 後に merge。
+
+### MIG-0729 — `/admin/videos` + `/admin/videos/:id` (SA-001..003, 043; merge gate MIG-0707, MIG-0726, MIG-0603)
+- 読む: `admin/videos/page.tsx`、`admin/videos/[id]/page.tsx`、`CreateModerationCaseForm.tsx`、`adminRead/videos.ts:34`、`videoDetail.ts:67`。
+- 変更: `+routes/admin/{AdminVideos,AdminVideoDetail,CreateModerationCaseForm}.tsx`、`+components/admin/{AdminVideoManagementTabs,AdminVideoTabs}.tsx`、`+api/adminVideoStatus.ts`、共有の video 審査 5 部品。
+- 試験: `review_event_id`、次へ、un-void の case、case 作成後の reset、page の href。
+- DONE: MIG-0603 の DONE 後に merge。
+
+### MIG-0730 — `/admin/videos/:id/members` (SA-085; `VideoMembersField` to `packages/ui`; merge gate MIG-0707, MIG-0726, MIG-0650, MIG-0648)
+- 読む: `members/page.tsx:31-60`、`AdminVideoMembersForm.tsx:39-126`、MIG-0713 の移植、`videoMembers.ts:30`、D-17-10。
+- 変更: `packages/ui/src/forms/videoMembers/`（MIG-0713 の移植を移動）、`+routes/admin/{AdminVideoMembers,AdminVideoMembersForm}.tsx`、`+api/adminVideoMembers.ts`。
+- 試験: 連打、collab 解除、101 人、移動後の Personal SPA。
+- DONE: MIG-0713 の DONE 後に着手、MIG-0650・0648 の DONE 後に merge。
+
+### MIG-0731 — `/admin/users` x3 + moderation (merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603)
+- 読む: `users/page.tsx:83-390`、`GlobalEditableFieldsPanel.tsx`、`UserAdminForm.tsx:41-239`、`moderation/page.tsx`、`ModerationCaseStatusForm.tsx`、`users.ts:117,216`、`userEdit.ts:19`、`moderation.ts:11`。
+- 変更: `+routes/admin/{AdminUsers,...,ModerationFlashNotice}.tsx`、`+components/admin/{AdminUserManagementTabs,AdminUserTabs}.tsx`、`+api/{adminUsers,adminModeration}.ts`。
+- 試験: `view=links`、BAN の理由と確認、flash、`overdue=1`。
+- DONE: MIG-0637・0642・0603 の DONE 後に merge、BAN・role が独立レビュー済み。
+
+### MIG-0732 — `/admin` x-link-requests + x-id-merges (merge gate MIG-0707, MIG-0726, MIG-0605, MIG-0644)
+- 読む: `x-link-requests/page.tsx`、`x-id-merges/page.tsx:32-384`、`xLinkRequests.ts:86`、`xIdMerges.ts:86`、D-17-4 / 5。
+- 変更: `+routes/admin/{AdminXLinkRequests,AdminXIdMerges}.tsx`、`+api/adminXidMerges.ts`、`XLinkRequestTable`（MIG-0725 と先に merge した方）。
+- 試験: `impact` 128 字、確認の required、期限切れ revert、承認後の再取得。
+- DONE: MIG-0605・0644 の DONE 後に merge、統合・revert が独立レビュー済み。
+
+### MIG-0733 — `/admin/audit` x4 (SA-009..011; merge gate MIG-0707, MIG-0726, MIG-0662)
+- 読む: `audit/page.tsx:45-451`、`audit/[id]/page.tsx`、`AuditRestoreForm.tsx:24-229`、`audit/restore/page.tsx`、`AuditSettingsForm.tsx`、`adminRead/audit.ts:45-210`、`settings.ts:260`、`admin/audit.ts:59,99`。
+- 変更: `+routes/admin/{AuditList,...,AuditSettingsForm}.tsx`、`+lib/auditPayload.ts`、`+api/adminAudit.ts`。
+- 試験: `operator` の旧名、limit 上限、payload の分割読み、restore の確認文字列、短縮の注意。
+- DONE: MIG-0662 の DONE 後に merge、restore が独立レビュー済み。
+
+### MIG-0734 — `/admin` cost-guard + notifications (merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642)
+- 読む: `cost-guard/page.tsx`、`CostGuard{,Override,DisabledFeatures}Form.tsx`、`notifications/page.tsx`、`Notification{Action,Cancel}Button.tsx`、`ops.ts:110,880`、D-17-4。
+- 変更: `+routes/admin/{AdminCostGuard,...,NotificationPayloadButton}.tsx`、`+api/{adminCostGuard,adminNotifications}.ts`。
+- 試験: maintenance の確認、`OVERRIDE` / `APPLY`、CAS の 409、`window.confirm`、failed の集合。
+- DONE: MIG-0637・0642 の DONE 後に merge、maintenance・override が独立レビュー済み。
+
+### MIG-0735 — `/admin` static-builds, youtube-sync x2, youtube-quota (merge gate MIG-0707, MIG-0726, MIG-0643)
+- 読む: `static-builds/page.tsx:59-653`、`StaticRebuildQueuePanel.tsx`、`youtube-sync/**`、`youtube-quota/page.tsx`、`ops.ts:343-360,641,765,965`、D-17-5。
+- 変更: `+routes/admin/{StaticBuilds,StaticRebuildQueuePanel,YoutubeSync,YoutubePlaylists,YoutubeQuota}.tsx`、`+api/adminStaticBuilds.ts`。
+- 試験: backfill の query、完了で continue 無効、visibility repair の query、絞り込み、`hasMore`。
+- DONE: MIG-0643 の DONE 後に merge。
+
+### MIG-0736 — `/admin` health, integrity, security, workers (merge gate MIG-0707, MIG-0726, MIG-0626)
+- 読む: `health/page.tsx`、`health/integrity/page.tsx`、`security/page.tsx`、`workers/page.tsx`、`DiagnosticStatusResults.tsx`、`ops.ts:236-242,328-329,462,573`、D-17-8。
+- 変更: `+routes/admin/{AdminHealth,AdminIntegrity,AdminSecurity,AdminWorkers,DiagnosticStatusResults}.tsx`、`+api/adminDiagnostics.ts`。
+- 試験: client の絞り込み、`deep=1` の全件（MIG-0626 の後）、integrity は link だけ、security の warn。
+- DONE: MIG-0626 の DONE 後に merge、501 が残っていない。
+
+### MIG-0737 — `/admin` spreadsheet + import (RH-002..009; merge gate MIG-0707, MIG-0726, MIG-0638, MIG-0645)
+- 読む: `spreadsheet/page.tsx:20-73`、`src/components/admin/spreadsheet/**`、`spreadsheetApi.ts:38-198`、`import/page.tsx`、`LegacyCanonicalImportClient.tsx:204-1206`、`read.ts:62-64,182-253`。
+- 変更: `+routes/admin/{AdminSpreadsheet,AdminImport}.tsx`、`+components/spreadsheet/**`、`+components/import/LegacyCanonicalImportClient.tsx`、CSS 2 つ。
+- 試験: flag 偽の説明 card、import の confirm、途中失敗、preview 後の変更、token を出さない。
+- DONE: MIG-0638・0645 の DONE 後に merge、書き込みと import が独立レビュー済み。
 
 ### MIG-0706 — Phase 7 Gate (2 SPAs)
 

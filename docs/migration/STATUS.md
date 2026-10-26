@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-26
+> Last updated: 2026-10-27
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -25,7 +25,7 @@ Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
 Last Completed Task: MIG-0649
 Last Task PR: #413
-Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26)
+Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
 
@@ -319,7 +319,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0603 | video APIs (admin/manage visibility, collaborators, submit) | READY | MIG-0602 |
 | MIG-0604 | event/slot APIs (Final audit + live slots paging verdict; writes split to MIG-0652..0657) | BLOCKED | MIG-0602, MIG-0633, MIG-0639, MIG-0652..MIG-0657 |
 | MIG-0605 | user/X/admin APIs | READY | MIG-0602, MIG-0633 |
-| MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0661 |
+| MIG-0606 | API CPU benchmark | BLOCKED | MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0662 |
 | MIG-0609 | background job CPU measurement (D-09) | READY | — |
 | MIG-0610 | split background jobs under 8ms (D-09) | BLOCKED | MIG-0609 |
 | MIG-0612 | shared server core scaffold, ports, boundary check (D-10) | DONE | — |
@@ -372,7 +372,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0659 | X link request / cancel / merge-revert request APIs (SA-099..101) | READY | MIG-0602 |
 | MIG-0660 | deep health Route Handler (RH-017, MIG-0626 U07) | READY | MIG-0601 |
 | MIG-0661 | CostGuardBanner read endpoints (public KV mirror + admin D1) for the SPAs | READY | MIG-0601 |
-| MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0661 |
+| MIG-0662 | admin audit restore API (SA-011, D-17-9) | BLOCKED | MIG-0603, MIG-0616, MIG-0629 |
+| MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0662 |
 
 MIG-0617 は DONE（2026-10-25 統合）: PR #395 を owner が squash merge（`343b4a3b6a31b48b5bdad86461e80aaad6d70100`）、最終Head `3b3cc0de39c343193776a55842e330f6f5a9fa0d` はレビューした Head と同一、CI run 40061654686 green、独立レビューは builder（Sonnet）より上位の Claude Opus による APPROVE（[comment](https://github.com/coroke3/flamenode/pull/395#issuecomment-6379860192)。短縮 SHA で書かれているが Head は PR の最終 Head と一致）。L2 の `wrangler deploy --dry-run` 計測と request CPU はレビューの指摘どおり MIG-0628 / MIG-0606 へ送った。これで MIG-0629 / MIG-0633 は READY。MIG-0631 は PR #398 で DONE。MIG-0625 は範囲を縮めて DONE、残りは MIG-0635（D-13-48〜50）。MIG-0605 の残りは MIG-0636（Personal X / Active X / 規約）・MIG-0637（admin 運用の書き込み）・MIG-0638（残りの Route Handler）へ分け、親は MIG-0633 待ちの BLOCKED（D-13-56）。RH-031/032 は MIG-0603 から MIG-0634 へ（D-13-46）。MIG-0603 の U02c / U03b / U03c は MIG-0633 DONE 後（D-13-44）。MIG-0620 は DONE（`/_ops_assets/*` は MIG-0704 U01 へ、D-13-4）。MIG-0701 は stylesheet port（D-13-5）を決めて READY。MIG-0702 の依存は MIG-0605 から MIG-0636 へ（D-13-9）。FIX-0604-1（slotViewerOverlay の visibility_status 欠落の修正）は MIG-0633 の後に lead が追跡する follow-up で MIG id ではない。MIG-0703 の依存は MIG-0603, MIG-0604, MIG-0702, MIG-0623, MIG-0630 のため BLOCKED のまま。 D-14（2026-10-25）: MIG-0609 / 0621 / 0628 / 0632 / 0802 は不要な依存を外して READY（D-14-1〜5）。MIG-0603 U03a → MIG-0640、MIG-0606 U02 の前半 → MIG-0639、MIG-0627 U01 → MIG-0649、MIG-0636 U03 → MIG-0641、MIG-0637 → MIG-0637 / 0642 / 0643 / 0644、MIG-0638 → MIG-0638 / 0645 / 0646 / 0647 / 0648 に分けた（D-14-7〜13）。 D-15（2026-10-26）: MIG-0633 の DONE（#402）で MIG-0605 は READY（D-03 dry-run は MIG-0658 へ）。MIG-0603 U03b → MIG-0650、U03c → MIG-0651、MIG-0604 U04 → MIG-0652〜0657（MIG-0639 の paging 判定は書き込みと無関係なので子 task は待たない。MIG-0604 は Final audit と paging 判定）、MIG-0636 U04 → MIG-0659、MIG-0626 U07 → MIG-0660（D-15-1〜10）。 D-16（2026-10-26）: API 待ちの画面・Island は契約先行で READY にし、API task は Depends on ではなく Work Order の `Merge gate` に書く（D-16-1、CI が gate 未 DONE の DONE を拒否）。MIG-0513 は like / bookmark だけ（状態 form は CURRENT の `/[id]` に無いので Ops SPA へ、D-16-5）、MIG-0515 U01 → MIG-0519、MIG-0702 → MIG-0708〜0710、MIG-0703 → MIG-0711〜0717、CostGuardBanner の読み API = MIG-0661、Personal の banner = MIG-0718、MIG-0804 の Hono 部分 = MIG-0807（D-16-5〜14）。MIG-0657 の延長の path を code に合わせて `slots/:slotId/extend` に直した。
 
@@ -388,8 +389,8 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0701 | dashboard read-only | READY | MIG-0102, MIG-0601, MIG-0608, MIG-0611 |
 | MIG-0702 | dashboard mutations (Final audit; units split to MIG-0708..0710, D-16) | BLOCKED | MIG-0708..MIG-0710 |
 | MIG-0703 | entry (Final audit; units split to MIG-0711..0717, D-16) | BLOCKED | MIG-0711, MIG-0715..MIG-0717 |
-| MIG-0704 | manage | BLOCKED | MIG-0604, MIG-0703, MIG-0624, MIG-0707, MIG-0661 |
-| MIG-0705 | admin | BLOCKED | MIG-0605, MIG-0704, MIG-0625, MIG-0626, MIG-0635, MIG-0637, MIG-0638, MIG-0642..MIG-0648, MIG-0650..MIG-0657, MIG-0660, MIG-0661 |
+| MIG-0704 | manage (Final audit; screens split to MIG-0719..0725, D-17) | BLOCKED | MIG-0719..MIG-0725 |
+| MIG-0705 | admin (Final audit; screens split to MIG-0726..0737, D-17) | BLOCKED | MIG-0726..MIG-0737 |
 | MIG-0707 | Ops SPA scaffold: `apps/ops` package, build, guard, `_headers` (MIG-0704 U01) | READY | MIG-0102, MIG-0608, MIG-0624, MIG-0625 |
 | MIG-0708 | Personal settings: Active X / X profile / icon / delete forms (SA-098, SA-102..105; merge gate MIG-0636) | READY | MIG-0611 |
 | MIG-0709 | Personal settings + onboarding: X link / merge request, cancel, merge-revert forms (SA-099..101; merge gate MIG-0659) | READY | MIG-0611 |
@@ -402,7 +403,26 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0716 | `/entry/slotted` + `/entry/unslotted` screens (SA-086, SA-088; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
 | MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
 | MIG-0718 | Personal SPA CostGuardBanner (merge gate MIG-0661, MIG-0701) | READY | MIG-0611 |
-| MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0705 |
+| MIG-0719 | Ops Manage shell (guard, sidebar, banner), `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628, D-17) | READY | MIG-0624, MIG-0608 |
+| MIG-0720 | `/manage/events/:id` overview + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655) | READY | MIG-0624 |
+| MIG-0721 | Ops `EventForm` port: `/manage/events/:id/edit` (SA-021..024) + `/admin/events/new` (merge gate MIG-0707, MIG-0719, MIG-0726, MIG-0652) | READY | MIG-0624, MIG-0625 |
+| MIG-0722 | `/manage/events/:id/slots` (SA-056..064; merge gate MIG-0707, MIG-0719, MIG-0656) | READY | MIG-0624 |
+| MIG-0723 | `/manage/events/:id/staff` (SA-031..034; merge gate MIG-0707, MIG-0719, MIG-0654) | READY | MIG-0624 |
+| MIG-0724 | `/manage/events/:id/videos` + video detail (SA-040..042; merge gate MIG-0707, MIG-0719, MIG-0603) | READY | MIG-0624, MIG-0630 |
+| MIG-0725 | `/manage/events/:id/youtube-playlist`, `/manage/notifications`, `/manage/x-link-requests` (SA-038/039, 090/091; merge gate MIG-0707, MIG-0719, MIG-0655, MIG-0605) | READY | MIG-0624 |
+| MIG-0726 | Ops Admin shell (guard, sidebar, banner), `/admin`, permission simulator, 5 compat redirects (merge gate MIG-0707, MIG-0661) | READY | MIG-0625 |
+| MIG-0727 | `/admin/announcements` x3, `/admin/api-endpoints`, `/admin/rules` x3 (SA-004..008, 051..055; merge gate MIG-0707, MIG-0726, MIG-0642) | READY | MIG-0602, MIG-0625 |
+| MIG-0728 | `/admin/event-groups` x3, `/admin/events`, `/admin/events/templates` (SA-025..030, 036; merge gate MIG-0707, MIG-0726, MIG-0653) | READY | MIG-0625 |
+| MIG-0729 | `/admin/videos`, `/admin/videos/:id` (SA-001..003, 043; merge gate MIG-0707, MIG-0726, MIG-0603) | READY | MIG-0625, MIG-0635 |
+| MIG-0730 | `/admin/videos/:id/members` (SA-085; `VideoMembersField` to `packages/ui`; merge gate MIG-0707, MIG-0726, MIG-0650, MIG-0648) | BLOCKED | MIG-0635, MIG-0713 |
+| MIG-0731 | `/admin/users` x3, `/admin/moderation` (SA-044, 049, 077..081; merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603) | READY | MIG-0625, MIG-0635 |
+| MIG-0732 | `/admin/x-link-requests`, `/admin/x-id-merges` (SA-090..097; merge gate MIG-0707, MIG-0726, MIG-0605, MIG-0644) | READY | MIG-0625 |
+| MIG-0733 | `/admin/audit` x4 (SA-009..011; merge gate MIG-0707, MIG-0726, MIG-0662) | READY | MIG-0625, MIG-0629 |
+| MIG-0734 | `/admin/cost-guard`, `/admin/notifications` (SA-016..020, 045..048; merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642) | READY | MIG-0625 |
+| MIG-0735 | `/admin/static-builds`, `/admin/youtube-sync` x2, `/admin/youtube-quota` (SA-050, 069..073, 106; merge gate MIG-0707, MIG-0726, MIG-0643) | READY | MIG-0625 |
+| MIG-0736 | `/admin/health`, `/admin/health/integrity`, `/admin/security`, `/admin/workers` (merge gate MIG-0707, MIG-0726, MIG-0626) | READY | MIG-0625 |
+| MIG-0737 | `/admin/spreadsheet`, `/admin/import` (RH-002..009; merge gate MIG-0707, MIG-0726, MIG-0638, MIG-0645) | READY | MIG-0625 |
+| MIG-0706 | Phase 7 Gate | BLOCKED | MIG-0704, MIG-0705 |
 
 ## Phase 8 — Auth
 

@@ -371,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0661 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0662 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -1866,7 +1866,7 @@ Phase 6 共通契約のとおり。
 - **U02 cost guard SA-016..020**: KV mirror の書き込みは CURRENT の順序（post-commit）。
 - **U03 user admin SA-077..081**。
 - **U04〜U07**: MIG-0642 / 0643 / 0644 へ分割（D-14-10）。
-- URL は `/api/admin/<面>/...`（U01 の表で確定し、PR 本文に貼る）。
+- URL は D-17-4 で確定（画面 MIG-0731 / 0734 が契約先行で使う）。変えるときは D-17 の変更として理由を書く。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -2102,7 +2102,7 @@ Phase 6 共通契約のとおり。
 - 変更: `apps/api/src/routes/admin/index.ts`（route 行）, `packages/contracts/src/admin/index.ts`（export 1 行）, `docs/migration/API_MATRIX.md`
 - 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`
 #### Micro-units
-- **U01 inventory**: 7 SA の feature key、読み、batch、監査、queue 行、KV / R2 / Queue の副作用を work item に表で書く。URL は `/api/admin/<面>/...` で確定し PR 本文に貼る。
+- **U01 inventory**: 7 SA の feature key、読み、batch、監査、queue 行、KV / R2 / Queue の副作用を work item に表で書く。URL は D-17-4 の path（画面 MIG-0727 / 0731 / 0734 が契約先行で使う）を表に書き、PR 本文に貼る。
 - **U02 terms SA-051..055 + editable fields SA-049**。
 - **U03 notifications SA-045..048**（通知 wake 0、D-13-41）。
 #### Test cases
@@ -2150,7 +2150,7 @@ Phase 6 共通契約のとおり。
 - 変更: `apps/api/src/routes/admin/index.ts`（route 行）, `packages/contracts/src/admin/index.ts`（export 1 行）, `docs/migration/API_MATRIX.md`
 - 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `packages/server-core/src/visibility/**`
 #### Micro-units
-- **U01 inventory**: 7 SA の feature key、読み、batch、監査、queue 行、R2 / Queue の副作用。SA-072 が R2 の shared input を読むなら件数を記録。
+- **U01 inventory**: 7 SA の feature key、読み、batch、監査、queue 行、R2 / Queue の副作用。SA-072 が R2 の shared input を読むなら件数を記録。URL は D-17-4、redirect で結果を返していた SA-050 / 069 は D-17-5（CURRENT の redirect の query 値を JSON で返す。画面 MIG-0735 が使う）。
 - **U02 static rebuild SA-069..073**。
 - **U03 visibility repair SA-050**（core `putVisibilityManifestWithCas`）。
 - **U04 youtube resync SA-106**（wake 0）。
@@ -2194,7 +2194,7 @@ Phase 6 共通契約のとおり。
 - 変更: `apps/api/src/routes/admin/index.ts`（route 行）, `packages/contracts/src/admin/index.ts`（export 1 行）, `docs/migration/API_MATRIX.md`
 - 触らない: `src/lib/actions/**`, `apps/api/src/middleware/**`, `packages/server-core/src/xid/**`（MIG-0618 の所有）
 #### Micro-units
-- **U01 inventory**: 6 SA と SA-110 の dispatcher の入力・読み・batch・監査を表にする。
+- **U01 inventory**: 6 SA と SA-110 の dispatcher の入力・読み・batch・監査を表にする。URL は D-17-4（画面 MIG-0732 が契約先行で使う）。
 - **U02 SA-092..097**: core `xid/merge` を呼ぶ。
 - **U03 SA-110**: page の dispatcher を型付き API の写像にする（action 名ごとに U02 の endpoint へ）。
 #### Test cases
@@ -3001,6 +3001,53 @@ npm run check:project-docs
 #### Rollback
 Phase 6 共通契約のとおり。
 
+### MIG-0662: admin 監査 restore の API（SA-011、D-17-9）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — MIG-0603 の後（D-17-9: SA-011 の HTTP API の担当が無かった。restore の host は MIG-0603 U02a の可視性 host と公開 cache key を使う。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S3
+- **Depends on:** MIG-0603, MIG-0616, MIG-0629 / **Decisions:** D-10 DECIDED, D-13-41, D-13-54, D-16-1, D-17-4, D-17-9
+- **Verified against:** `08e7e8c` (2026-10-27)
+#### Source snapshot
+- CURRENT: `src/lib/actions/audit-admin.ts:142-171` `restoreAuditLogAction`（schema `restoreSchema` :125-130: `audit_id` 1 字以上、`reason` 1〜500 字、`confirm_text` 任意、`force_overwrite` 0 / 1 既定 0。`restoreAuditLog(db, {auditId, userId, reason, confirmText, forceOverwrite, dry_run: false})`、結果 `{ok, message, restore_run_id, diff}`）。`requireAdmin()` の guard。
+- core: `packages/server-core/src/audit/restore.ts`（MIG-0616、`restoreAuditLog(db, options, host: AuditRestoreHost)`）。host は `manifest`（`VisibilityFenceHost`）、`publicCacheKeys`（`VideoPublicCacheKeyHost`）、`deletePublicJsonCaches`、`invalidateEventExportCache`、`loadQueueWakeHost`。
+- 手本: `apps/api/src/routes/admin/audit.ts`（147 行、MIG-0629）。`/dry-run`（:99-146）は全 method が throw する host で dry run を呼ぶ（D-13-54）。guard は `onlyMutating(costGuardMiddleware("admin_permissions"))`（:36）、body は `readAdminJsonBody`、413 / 400 の形。
+- host の部品: MIG-0603 U02a の `apps/api/src/visibility/videoTransitionHost.ts`（manifest の read / CAS put を `c.env.BUCKET` に）と `apps/api/src/visibility/publicCacheKeys.ts`（D-13-42 の定数）、`packages/server-core/src/publicCache/eventExportKeys.ts`、core `publicCache/delete.ts#deletePublicJsonCaches`。Queue wake は D-13-41 で何もしない（`apps/api` に Queue binding が無い）。
+#### Owned paths
+- 新規: `+apps/api/src/visibility/auditRestoreHost.ts`, `+packages/contracts/src/admin/auditRestore.ts`, `+apps/api/test/auditRestore.parity.test.mjs`
+- 変更: `apps/api/src/routes/admin/audit.ts`（`POST /restore` を足す）, `packages/contracts/src/admin/index.ts`（export 1 行）, `docs/migration/API_MATRIX.md`
+- 触らない: `src/lib/actions/**`, `packages/server-core/src/audit/restore.ts`, `apps/api/src/visibility/videoTransitionHost.ts`（MIG-0603 の所有。import だけ）
+#### Micro-units
+- **U01 host**: `auditRestoreHost.ts` に `createAuditRestoreHost(c): AuditRestoreHost`。`manifest` は MIG-0603 の video host と同じ値、`publicCacheKeys` は `publicCacheKeys.ts`、`deletePublicJsonCaches` は core、`invalidateEventExportCache` は `eventExportKeys.ts` の key を `caches.default` から消す、`loadQueueWakeHost` は wake 0 の host（D-13-41）。
+- **U02 route**: `POST /api/admin/audit/restore`（D-17-4）。body は `{ audit_id, reason, confirm_text?, force_overwrite? }`（CURRENT の FormData の key、D-16-1 の 2）、schema は CURRENT `restoreSchema` と同じ制約。応答は `{ ok, message?, restore_run_id?, diff? }` を 200（CURRENT と同じく失敗も `ok:false` の 200。413 / 400 は `/dry-run` と同じ）。
+- **U03 parity**: CURRENT の action と Hono route に同じ fixture（restorable の log、確認文字列違い、競合で `force_overwrite` 0 / 1、restore 済み）を通し、結果と D1 の差分（`audit_restore_runs`・対象 table）が一致。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | admin 以外 / 未ログイン | CURRENT と同じ拒否 |
+| T02 | `confirm_text` が `RESTORE <id>` でない | `ok:false`、D1 を変えない |
+| T03 | 競合あり `force_overwrite: 0` / `1` | CURRENT と同じ結果と D1 |
+| T04 | 可視性のある行（video / event）の restore | manifest の CAS と公開 cache の削除が CURRENT の host と同じ key 集合 |
+| T05 | body 過大 | 413 |
+#### Commands
+```bash
+node --test apps/api/test/auditRestore.parity.test.mjs
+npm run test --workspace=@flamenode/api
+npm run typecheck
+node scripts/check-server-core-boundaries.mjs
+npm run check:project-docs
+```
+#### Ledger updates
+`API_MATRIX.md` の SA-011 に Hono endpoint。`FILE_MIGRATION_MATRIX.md` に新規 file。
+#### DONE checklist
+- [ ] U01〜U03 が DONE、T01〜T05 が PASS
+- [ ] restore が独立レビュー（security / data integrity）を通っている
+#### STOP
+- `restore.ts`（core）を変える必要が出たら止める（MIG-0616 の所有）。
+- Queue wake を 0 にできない restore の経路が見つかったら止める（D-13-41 の例外は Yugo の判断）。
+#### Rollback
+PR を revert（`/api/admin/audit/*` の Route はまだ CURRENT に向いている）。
+
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
@@ -3081,7 +3128,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0661 / **Decisions:** D-14-14, D-15-15, D-16-13
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0662 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。
