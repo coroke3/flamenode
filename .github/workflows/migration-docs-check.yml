@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: MIG-0649 R2 static inventory (early fail-closed gate)
+        run: |
+          node --test scripts/check-r2-artifact-consumers.test.mjs
+          npm run check:r2-artifact-consumers
       - name: squash後もcheckpoint元commitを検証できるよう不足PR履歴を取得
         run: node scripts/check-migration-work-items.mjs --fetch-pr-history
       - name: 移行文書・タスク依存・Decision Gate
@@ -113,6 +117,10 @@ jobs:
         run: node --test --experimental-strip-types scripts/migration-gateway.test.mjs
       - name: MIG-0512 real workerd 404-page and 503 asset verification
         run: node scripts/migration-gateway-404.wrangler-smoke.mjs
+      - name: MIG-0649 R2 artifact consumer registry
+        run: |
+          node --test scripts/check-r2-artifact-consumers.test.mjs
+          npm run check:r2-artifact-consumers
       - name: MIG-0406 CPU/build benchmark verification
         run: |
           node --test --experimental-strip-types scripts/check-public-site-build-budget.test.mjs
