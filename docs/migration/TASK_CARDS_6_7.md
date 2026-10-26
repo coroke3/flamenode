@@ -414,6 +414,12 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 拒否、確認文字列違い、競合と `force_overwrite`、可視性の host の key 集合、413。
 - DONE: MIG-0603 の DONE 後に着手、restore が独立レビュー済み。
 
+### MIG-0663 — Manage navigation の active X / 運営 X
+- 読む: `ConsoleSidebar.tsx:106-108`、`apps/api/src/routes/manage/{navigation,dashboard}.ts`、`packages/contracts/src/manage/shared.ts:28-34`、D-17-13。
+- 変更: navigation の応答に 2 field、contracts の schema、`manage.parity.test.mjs` に case。
+- 試験: 一致 / 不一致 / admin / 未選択、D1 の文の数が変わらない。
+- DONE: 既存 field が変わらず 2 field が `GET /api/manage` と同じ値。
+
 ### MIG-0701 — Personal dashboard GET screens
 
 - 読む: `PHASE_7_SPEC.md` の MIG-0701 Work Order、`work-items/MIG-0701.md`、`app/layout.tsx`、`app/(auth)/layout.tsx`、`src/styles/globals.css:7-10`、4つの CSS module。
@@ -521,11 +527,11 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 4 mode の label / description / reason、normal と失敗で何も出さない。
 - DONE: MIG-0661 と MIG-0701 の DONE 後に merge（FIX-0701-1 の banner の部分）。
 
-### MIG-0719 — Ops Manage shell, `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628)
+### MIG-0719 — Ops Manage shell, `/manage`, review redirect, `apps/ops/wrangler.toml` (merge gate MIG-0707, MIG-0661, MIG-0628, MIG-0663)
 - 読む: `app/(manage)/layout.tsx:27-45`、`ConsoleSidebar.tsx:93-117`、`ManageSidebarNav.tsx`、`manage/page.tsx`、`review/page.tsx:12`、`navigation.ts:9`、`dashboard.ts:13`、D-17-1〜6。
 - 変更: `+routes/manage/{ManageLayout,ManageSidebarNav,ManageActiveXNotice,ManageDashboard,ManageReviewRedirect}.tsx`、`CostGuardBanner`、`+apps/ops/wrangler.toml`、router 行。
 - 試験: guard の Location、sidebar の null 条件、KPI の warn / danger、review の replace、banner、wrangler dry-run。
-- DONE: MIG-0707・0661・0628 の DONE 後に merge、暫定の土台が残っていない。
+- DONE: MIG-0707・0661・0628・0663 の DONE 後に merge、暫定の土台が残っていない。sidebar の active X 警告が CURRENT と同じ（D-17-13）。
 
 ### MIG-0720 — `/manage/events/:id` + `/audience` (SA-035; merge gate MIG-0707, MIG-0719, MIG-0655)
 - 読む: `events/[id]/page.tsx:73-100,440,519-601`、`audience/page.tsx`、`ManageEventPageShell.tsx`、`SaveEventTemplateForm.tsx`、`overview.ts:51`、`audience.ts:27`。

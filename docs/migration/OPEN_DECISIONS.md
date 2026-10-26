@@ -31,6 +31,7 @@
 | D-14 | **依存の見直しと大きい READY task の分割（MIG-0639〜0649, MIG-0513〜0515 を登録）。個別の決定 D-14-1〜14 は §D-14** | DECIDED | MIG-0507, 0510, 0513〜0515, 0603, 0606, 0609, 0621, 0627, 0628, 0632, 0636〜0649, 0802 | 本番操作（Remote D1・secret・deploy・Route）は従来どおり作業直前の明示承認 |
 | D-15 | **MIG-0633 の DONE を受けて書き込み API を SA 群ごとに分割（MIG-0650〜0660）、build 側の残り（MIG-0516〜0518）、Ops SPA の土台（MIG-0707）、code 側の残存棚卸し（MIG-0908）を登録。個別の決定 D-15-1〜15 は §D-15** | DECIDED | MIG-0509, 0513, 0514, 0516〜0518, 0603〜0607, 0626, 0636, 0650〜0660, 0702〜0707, 0901, 0908 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）は従来どおり作業直前の明示承認 |
 | D-16 | **API 待ちの画面・Island を契約先行で着手できるようにする（Merge gate）。MIG-0702 / 0703 / 0513〜0515 を分割（MIG-0519, 0708〜0718）、CostGuardBanner の読み API（MIG-0661）、既存 Hono session の security review（MIG-0807）。個別の決定 D-16-1〜14 は §D-16** | DECIDED | MIG-0513〜0515, 0519, 0606, 0607, 0636, 0640, 0641, 0648, 0650, 0651, 0657, 0659, 0661, 0701〜0705, 0708〜0718, 0804, 0807 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）と SPA の本番 Route 切替は従来どおり作業直前の明示承認 |
+| D-17 | **Ops SPA の画面を画面群に分割（MIG-0719〜0737）、SA-011 の API（MIG-0662）、Manage navigation の 2 field（MIG-0663）、Ops guard の degraded の写像。個別は §D-17** | DECIDED | MIG-0606, 0607, 0626, 0637, 0642〜0644, 0662, 0663, 0704〜0707, 0719〜0737 | 本番操作（Ops の Worker / Route / Custom Domain、Remote D1、secret）は従来どおり作業直前の明示承認 |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -415,7 +416,7 @@ Option 4（hybrid）を採る。
   | MIG-0716 | MIG-0648, MIG-0650, MIG-0651 |
   | MIG-0717 | MIG-0648, MIG-0650, MIG-0651 |
   | MIG-0718 | MIG-0661, MIG-0701 |
-  | MIG-0719 | MIG-0707, MIG-0661, MIG-0628 |
+  | MIG-0719 | MIG-0707, MIG-0661, MIG-0628, MIG-0663 |
   | MIG-0720 | MIG-0707, MIG-0719, MIG-0655 |
   | MIG-0721 | MIG-0707, MIG-0719, MIG-0726, MIG-0652 |
   | MIG-0722 | MIG-0707, MIG-0719, MIG-0656 |
@@ -482,13 +483,15 @@ Option 4（hybrid）を採る。
 - **D-17-9（監査 restore API の担当の欠落）**: SA-011（`restoreAuditLogAction`、`src/lib/actions/audit-admin.ts:142-171`）の HTTP API はどの task にも無かった（MIG-0602 は MIG-0616 へ、MIG-0616 は core だけ、MIG-0629 は SA-009 / 010 だけ。main の `apps/api/src/routes/admin/audit.ts` は `/settings` と `/dry-run` だけ）。MIG-0662 を作る。restore は manifest・公開 cache・event export cache・Queue wake の本物の host が要り、それは MIG-0603 U02a（`apps/api/src/visibility/{videoTransitionHost,publicCacheKeys}.ts`）が作るので、MIG-0662 は MIG-0603 に依存する（BLOCKED）。MIG-0733（監査画面）の Merge gate に MIG-0662 を入れる。
 - **D-17-10（admin の video member 画面）**: `/admin/videos/[id]/members` は `VideoMembersField`（1503 行）を使い、その移植は MIG-0713（Personal SPA、READY）。Ops から `apps/app` を import しないために、MIG-0730 が MIG-0713 の移植を `packages/ui/src/forms/videoMembers/` に移し、両 SPA がそこから import する。MIG-0730 は MIG-0713 に依存する（BLOCKED）。
 - **D-17-11（MIG-0704 / 0705 の残り）**: MIG-0704 は Manage の Final audit だけになり、依存は MIG-0719..0725。MIG-0705 は Admin の Final audit だけになり、依存は MIG-0726..0737。MIG-0704 の旧依存 MIG-0604 / 0703 は外す（画面が呼ぶ API は各画面 task の Merge gate にある。MIG-0703 は Personal SPA の audit で Ops の画面は使わない）。MIG-0706 は MIG-0704, MIG-0705 に依存する。`apps/ops/wrangler.toml`（D-14-3）は MIG-0719 が持ち、MIG-0628 の `apps/app/wrangler.toml` と同じ形にするので MIG-0628 を MIG-0719 の Merge gate に入れる。
-- **D-17-12（依存の付け替え）**: MIG-0606 → 従来 + MIG-0662。MIG-0607 → 従来 + MIG-0662。
+- **D-17-12（依存の付け替え）**: MIG-0606 → 従来 + MIG-0662, MIG-0663。MIG-0607 → 従来 + MIG-0662, MIG-0663。
+- **D-17-13（MIG-0663、Manage navigation の 2 field）**: CURRENT の sidebar は active X と運営 X が食い違うと警告を出す（`src/components/layout/ConsoleSidebar.tsx:108`、判定 `packages/domain/src/video/ownership.ts:206-214`）。`GET /api/manage/navigation`（`apps/api/src/routes/manage/navigation.ts:9-25`）は `access` / `events` / `truncated` しか返さず、MIG-0719 U01 の STOP に当たる。`GET /api/manage` は同じ snapshot と data から `activeXUserId` / `manageStaffXUserIds` を返している（`apps/api/src/routes/manage/dashboard.ts:38-39`）ので、navigation に同じ式で足す。D1 の文は増えない。MIG-0663（READY、依存 MIG-0624）にし、MIG-0719 の Merge gate に足す。
+- **D-17-14（Ops guard の `enrichmentFailed` の写像）**: CURRENT の `(manage)` / `(admin)` layout は `enrichmentFailed` で `/entry?error=auth_temporarily_unavailable` へ移す。`getLayoutAuthSurface` がこれを立てるのは管理権限の読みの失敗だけ（`src/lib/auth/requestAuthContext.ts:276-281`）。RH-001 はこの値を返さず、`degraded: true` は 2 つの原因で立ち応答では区別できない: 補助の pending 申請の読みの失敗（`apps/api/src/routes/account/summary.ts:221-232`、CURRENT では `enrichmentFailed` ではない）と、管理権限の読みの失敗（`:283-289`、CURRENT の `enrichmentFailed` に当たり、admin では起きない）。どちらでも `degradedBody`（`summary.ts:167-190`）は `canAccessManage = role === "admin"` にする。よって MIG-0707 U02 の guard は (1) 503 `unavailable` は両 SPA とも `/entry?error=auth_temporarily_unavailable`、(2) `degraded: true` は admin なら通し、非 admin なら両 SPA とも `/entry?error=auth_temporarily_unavailable`（運営権限が分からないまま `/dashboard` へ送らない）。API は変えない。差（非 admin で pending 申請の読みだけが失敗したとき、CURRENT は `/manage/*` を表示し `/admin/*` は `/dashboard`、Hono は両方 `/entry?error=...`）は `DOCUMENTED DIFFERENCE D-17-14` として MIG-0707 の PR に書く。完全に揃えるには RH-001 に原因の field が要り、要るかは owner が決める。
 
 分割:
 
 | 新 task | 画面 | Merge gate |
 | --- | --- | --- |
-| MIG-0719 | Manage の枠（layout guard・sidebar・banner）、`/manage`、`/manage/events/:id/review` の redirect、`apps/ops/wrangler.toml` | MIG-0707, MIG-0661, MIG-0628 |
+| MIG-0719 | Manage の枠（layout guard・sidebar・banner）、`/manage`、`/manage/events/:id/review` の redirect、`apps/ops/wrangler.toml` | MIG-0707, MIG-0661, MIG-0628, MIG-0663 |
 | MIG-0720 | `/manage/events/:id`、`/audience`（SA-035） | MIG-0707, MIG-0719, MIG-0655 |
 | MIG-0721 | `EventForm` の移植、`/manage/events/:id/edit`（SA-021..024）、`/admin/events/new` | MIG-0707, MIG-0719, MIG-0726, MIG-0652 |
 | MIG-0722 | `/manage/events/:id/slots`（SA-056..064） | MIG-0707, MIG-0719, MIG-0656 |

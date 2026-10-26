@@ -402,7 +402,7 @@ audit の PR を revert。
 - **Readiness:** NEEDS_REFINEMENT — READY（D-15-13: MIG-0704 U01 の scaffold を分割。読み API（MIG-0624 / MIG-0625 / RH-001）は DONE。D-17-1 で Ops の画面 task（MIG-0719〜0737）の Merge gate になり、D-17-2 / 3 / 6 の共通部品を U05 で持つ。最初に着手すると画面 task の暫定の土台が要らなくなる。実装は Sonnet、review は Opus）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0102, MIG-0608, MIG-0624, MIG-0625 / **Decisions:** D-05 DECIDED, D-13-4, D-15-13, D-17-1, D-17-2, D-17-3, D-17-6
+- **Depends on:** MIG-0102, MIG-0608, MIG-0624, MIG-0625 / **Decisions:** D-05 DECIDED, D-13-4, D-15-13, D-17-1, D-17-2, D-17-3, D-17-6, D-17-14
 - **Verified against:** `08e7e8c` (2026-10-27)
 #### Source snapshot
 - 手本（Personal SPA、MIG-0701）: `apps/app/package.json`（scripts `build: "tsc && vite build"`、`test: "tsc -p tsconfig.test.json && node --test test/*.test.mjs"`、deps `@flamenode/contracts` / `@flamenode/ui` / react 19 / react-router-dom 7）、`apps/app/vite.config.ts`（`base: "/"`, `build.assetsDir: "_personal_assets"`）、`apps/app/tsconfig.json`、`apps/app/index.html`、`apps/app/src/{main,App}.tsx`、`apps/app/src/routes/guard.tsx`（`LoginRequired` / `BannedNotice` / `AuthErrorView`）、`apps/app/public/_headers`。
@@ -418,7 +418,7 @@ audit の PR を revert。
 - 触らない: `apps/app/**`, `app/(manage)/**`, `app/(admin)/**`, `packages/ui/**`
 #### Micro-units
 - **U01 package + build**: `apps/app` と同じ形で package / tsconfig / vite.config / index.html を作る（`assetsDir` と noindex だけが違う）。`npm ci` で lock を更新。
-- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。error boundary は `apps/app` の `AuthErrorView` と同じ文言。
+- **U02 router + guard**: `/manage`、`/manage/*`、`/admin`、`/admin/*` の route 枠（中身は「未移行」の空ページ。MIG-0704 / 0705 が埋める）。guard は RH-001 の応答で CURRENT の layout と同じ Location に `window.location.assign`（SPA 間は通常の navigation、D-05）。RH-001 に `enrichmentFailed` は無いので、503 `unavailable` と非 admin の `degraded: true` を `/entry?error=auth_temporarily_unavailable` に、admin の `degraded` は通す（D-17-14）。残る差は PR に `DOCUMENTED DIFFERENCE D-17-14` として書く。error boundary は `apps/app` の `AuthErrorView` と同じ文言。
 - **U03 `_headers`**（D-13-4、MIG-0704 から移す）: `apps/ops/public/_headers` に `/_ops_assets/*` `Cache-Control: public, max-age=31536000, immutable`（HTML には rule を置かない）。`assetHeaders.test.mjs` に `const ops = parse(await read("apps/ops/public/_headers"));` を足し、T01 の `/_ops_assets/index-AbC123.js` / `.css` / `a-AbC.svg` が `IMMUTABLE`、T03 の HTML の loop と `for (const rules of [site, app])` に `ops` を足す。
 - **U04 CI**: workflow に `npm run build --workspace=@flamenode/ops` と `npm run test --workspace=@flamenode/ops`。
 - **U05 共通部品（D-17-2 / 3 / 6）**:
@@ -431,7 +431,7 @@ audit の PR を revert。
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | Personal と Ops の build | 両方成功、`dist/_personal_assets` と `dist/_ops_assets` に分かれ、互いの chunk 名が出ない |
-| T02 | guard: 未ログイン / enrichment 失敗 / manage 権限なし / admin 以外が `/admin` | Location が CURRENT の layout と同じ（`error` query を含む） |
+| T02 | guard: 未ログイン / 503 unavailable / degraded（admin・非 admin）/ manage 権限なし / admin 以外が `/admin` | Location が CURRENT の layout と同じ（`error` query を含む）。degraded は D-17-14 の写像（admin は通す、非 admin は `/entry?error=auth_temporarily_unavailable`） |
 | T03 | Ops の HTML | `meta robots noindex` がある |
 | T04 | `/_ops_assets/*`（MIG-0620 T01） | immutable 1 年、HTML は null |
 | T05 | `getJson` に 200 / 401 / 403 `{redirect}` / 404 / 501 / 500 | ok / anonymous / forbidden（redirect を保つ）/ notFound / unsupported / unavailable |
@@ -997,11 +997,11 @@ Phase 7 共通契約のとおり。
 
 ### MIG-0719: Ops の Manage の枠・`/manage`・review の互換 redirect・`apps/ops/wrangler.toml`（MIG-0704 U01/U02 の一部、D-17）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — READY（D-17: MIG-0704 から分割。契約先行で、merge は MIG-0707・MIG-0661・MIG-0628 の DONE 後。実装は Sonnet、review は Opus）
+- **Readiness:** NEEDS_REFINEMENT — READY（D-17: MIG-0704 から分割。契約先行で、merge は MIG-0707・MIG-0661・MIG-0628・MIG-0663 の DONE 後。実装は Sonnet、review は Opus）
 - **Recipe:** R-SCREEN
 - **Runtime:** N
-- **Depends on:** MIG-0624, MIG-0608 / **Decisions:** D-05 DECIDED, D-13-6, D-14-3, D-16-1, D-16-13, D-17-1, D-17-2, D-17-3, D-17-6, D-17-11
-- **Merge gate:** MIG-0707, MIG-0661, MIG-0628 が DONE（D-16-1, D-17-1）
+- **Depends on:** MIG-0624, MIG-0608 / **Decisions:** D-05 DECIDED, D-13-6, D-14-3, D-16-1, D-16-13, D-17-1, D-17-2, D-17-3, D-17-6, D-17-11, D-17-13, D-17-14
+- **Merge gate:** MIG-0707, MIG-0661, MIG-0628, MIG-0663 が DONE（D-16-1, D-17-1, D-17-13）
 - **Verified against:** `08e7e8c` (2026-10-27)
 #### Source snapshot
 - layout: `app/(manage)/layout.tsx`（52 行）。guard は `getLayoutAuthSurface()`（:27）→ user 無し `/entry`（:29）、`enrichmentFailed` → `/entry?error=auth_temporarily_unavailable`（:30-32）、`!canAccessAdmin && !canAccessManage` → `/dashboard`（:33-35）。robots noindex（:11-13）。wrapper `<div data-manage-shell data-fn-surface="manage">`（:38）、`<CostGuardBanner />`（:39、公開 source、D-16-13）、`ConsoleShell consoleMode="manage"` に `navigation=<ConsoleSidebar consoleMode="manage" />`（:41-44）、`<main className="manage-main">`（:45）。`PublicHeader` / `PublicFooter`（:40, :49）は FIX-0701-1（D-13-6、D-17-6）。
@@ -1016,17 +1016,18 @@ Phase 7 共通契約のとおり。
 - 変更: `apps/ops/src/routes/router.tsx`（`/manage` の枠を `ManageLayout` に、index と review の route 行）, `apps/ops/scripts/portCssModule.mjs`（`MODULES` に行）, `apps/ops/src/main.tsx`（css import 1 行）, `.github/workflows/migration-docs-check.yml`（`wrangler deploy --dry-run --config apps/ops/wrangler.toml` 1 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`
 - 触らない: `app/(manage)/**`, `src/components/**`, `apps/api/**`, `apps/app/**`, MIG-0707 の Owned paths（route 行を除く）
 #### Micro-units
-- **U01 枠**: `ManageLayout` が MIG-0707 の guard を通った後に `GET /api/manage/navigation` を読み、CURRENT の wrapper・banner・`ConsoleShell`・sidebar・`<main className="manage-main">` を同じ順で出す。navigation の 403 `{reason:"manage_access_required"}` は `/dashboard` へ（D-17-2）。sidebar が null になる条件は CURRENT :99-103 と同じ。応答に `showXLinkRequests` / `warnActiveX` / `activeX` の材料が無いと分かったら STOP（API を変えない）。
+- **U01 枠**: `ManageLayout` が MIG-0707 の guard を通った後に `GET /api/manage/navigation` を読み、CURRENT の wrapper・banner・`ConsoleShell`・sidebar・`<main className="manage-main">` を同じ順で出す。navigation の 403 `{reason:"manage_access_required"}` は `/dashboard` へ（D-17-2）。sidebar が null になる条件は CURRENT :99-103 と同じ。`warnActiveX` は navigation の `activeXUserId` / `manageStaffXUserIds`（MIG-0663、D-17-13）を `shouldWarnManageActiveXMismatch` に渡す（CURRENT :108）。MIG-0663 が未 merge の間は暫定の型で 2 field を optional にし、U06 で contracts の schema に置き換える。それ以外の材料が無いと分かったら STOP（API を変えない）。
 - **U02 banner**: `CostGuardBanner` は MIG-0718 と同じ表示（4 mode の label / 説明 / reason、normal と失敗で何も出さない）。client は `GET /api/operation-mode/banner`。
 - **U03 `/manage`**: `ManageDashboard` を CURRENT :46-328 の分岐の順に移植（文言・class を変えない）。`NotificationOutboxSummary` は D-17-6。
 - **U04 review redirect**: `/manage/events/:id/review` は `<Navigate to={"/manage/events/" + encodeURIComponent(id) + "/videos?status=pending"} replace />`。
 - **U05 wrangler**: MIG-0628 の `apps/app/wrangler.toml` を写し、`name = "flamenode-ops"` と assets の directory を `apps/ops/dist` にする。Route・Custom Domain は書かない。CI に dry-run 1 行。
-- **U06 merge 直前**（D-16-1 の 5、D-17-1）: MIG-0707・0661・0628 の DONE 後の main を取り込み、暫定の土台を main の版に戻し、`operationMode.ts` を MIG-0661 の contracts の schema に置き換える。
+- **U06 merge 直前**（D-16-1 の 5、D-17-1）: MIG-0707・0661・0628・0663 の DONE 後の main を取り込み、暫定の土台を main の版に戻し、`operationMode.ts` を MIG-0661 の、navigation の型を MIG-0663 の contracts の schema に置き換える。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | account summary: 未ログイン / enrichment 失敗 / manage 権限なし | Location が CURRENT layout :29-35 と同じ |
 | T02 | navigation の event 0 件・admin でない・X 承認権限なし | sidebar を出さない（:99-103） |
+| T07 | 非 admin、active X と運営 X が一致 / 不一致 / active X 未選択 | 警告なし / あり / なし（CURRENT :108、`ownership.ts:206-214`） |
 | T03 | `/manage` の pending 3 / failed 1 | KPI に warn / danger の class、failed の alert link |
 | T04 | `/manage/events/a%20b/review` | `/manage/events/a%20b/videos?status=pending` に replace |
 | T05 | banner の mode 4 種 / normal / 503 | CURRENT と同じ表示 / 何も出さない |
@@ -1043,8 +1044,8 @@ npm run check:project-docs
 #### Ledger updates
 `FILE_MIGRATION_MATRIX.md` に新規 file と、`app/(manage)/layout.tsx`・`app/(manage)/manage/page.tsx`・`.../review/page.tsx`・`ConsoleSidebar.tsx`・`ManageSidebarNav.tsx`・`ManageActiveXNotice.tsx` 行の移植先（MIG-0719、IN_PROGRESS）。
 #### DONE checklist
-- [ ] U01〜U06 が DONE、T01〜T06 が PASS
-- [ ] MIG-0707・0661・0628 が DONE で、暫定の土台と型が残っていない（D-17-1）
+- [ ] U01〜U06 が DONE、T01〜T07 が PASS
+- [ ] MIG-0707・0661・0628・0663 が DONE で、暫定の土台と型が残っていない（D-17-1）
 - [ ] browser 確認（390px / 1440px、guest / staff / admin）が PR にある
 #### STOP
 - Ops の Worker / Route / Custom Domain を作る必要が出たら止める（明示承認事項）。

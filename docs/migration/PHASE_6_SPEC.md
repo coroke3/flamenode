@@ -371,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0662 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-12
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0663 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -3048,6 +3048,47 @@ npm run check:project-docs
 #### Rollback
 PR を revert（`/api/admin/audit/*` の Route はまだ CURRENT に向いている）。
 
+### MIG-0663: Manage の sidebar 用に navigation へ active X と運営 X を足す
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-17-13: CURRENT の sidebar は active X と運営 X が食い違うと警告を出す（`ConsoleSidebar.tsx:106-108`）が、`GET /api/manage/navigation` はその 2 つを返さない。同じ値は `GET /api/manage` が既に返す。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0624 / **Decisions:** D-16-1, D-17-13
+- **Verified against:** `13141d1` (2026-10-27)
+#### Source snapshot
+- CURRENT: `src/components/layout/ConsoleSidebar.tsx:106-108`（`warnActiveX = shouldWarnManageActiveXMismatch(activeX, manageStaffXIds)`）、`src/components/layout/ManageSidebarNav.tsx:218`（警告の表示）。判定は `packages/domain/src/video/ownership.ts:206-214`（active X が空、または運営 X が 0 件なら false）。
+- Hono: `apps/api/src/routes/manage/navigation.ts:9-25`（`access` / `events` / `truncated` だけ）。同じ snapshot と data から `GET /api/manage` は `activeXUserId`（admin は null）と `manageStaffXUserIds`（admin は `[]`）を返している（`apps/api/src/routes/manage/dashboard.ts:38-39`、`resolveActiveXUserId(user.active_x_user_id, data.linked)`）。`loadManageData` は navigation でも既に呼ばれているので、D1 の文は増えない。
+- DTO: `packages/contracts/src/manage/shared.ts:28-34` `ManageNavigationResponseSchema`。
+#### Owned paths
+- 変更: `apps/api/src/routes/manage/navigation.ts`, `packages/contracts/src/manage/shared.ts`（`activeXUserId: z.string().nullable()`、`manageStaffXUserIds: z.array(z.string())` を足す。既存 field は変えない）, `apps/api/test/manage.parity.test.mjs`（navigation の case を足す）, `docs/migration/API_MATRIX.md`
+- 触らない: `apps/api/src/routes/manage/{access,events,dashboard}.ts`, `src/**`
+#### Micro-units
+- **U01**: navigation の応答に `activeXUserId: isAdmin ? null : resolveActiveXUserId(user.active_x_user_id, data.linked)` と `manageStaffXUserIds: isAdmin ? [] : snapshot.manageStaffXUserIds` を足す（`dashboard.ts:38-39` と同じ式）。
+- **U02 test**: 下の T01〜T04。D1 の文の数が変わらないことを数える。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | 非 admin、active X と運営 X が一致 / 不一致 | `GET /api/manage` と同じ 2 値 |
+| T02 | admin | `activeXUserId: null`、`manageStaffXUserIds: []` |
+| T03 | active X 未選択、運営 X 0 件 | null / `[]`（`shouldWarnManageActiveXMismatch` は false） |
+| T04 | D1 の文の数 | 変更前と同じ（session を含め 3 以下、`navigation.ts:8` の comment） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/contracts
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+```
+#### Ledger updates
+`API_MATRIX.md` の `GET /api/manage/navigation` 行に 2 field。
+#### DONE checklist
+- [ ] T01〜T04 が PASS
+- [ ] 既存 field の値が変わっていない
+#### STOP
+- 運営 X の集合を navigation 用に別の query で読む必要が出たら止める（snapshot の値を使う）。
+#### Rollback
+PR を revert（追加 field だけ。読み手は MIG-0719 だけ）。
+
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
@@ -3128,7 +3169,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0662 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-12
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0663 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。
