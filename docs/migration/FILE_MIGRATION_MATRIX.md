@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `apps/app/src/api/operationMode.ts` | TARGET_SKELETON | MIG-0718 U01 public operation-mode banner API client; GET /api/operation-mode/banner | MIG-0718 | SAME (new client; provisional DTO until MIG-0661 merged) | IN_PROGRESS | PR#420 SHA=4d5fc7036ca29096891b46f4d668f66e3a9b3f47 TEST=npm run test --workspace=@flamenode/app CI=pending U01 |
+| `apps/app/test/costGuardBanner.test.mjs` | TEST | MIG-0718 U01 public CostGuardBanner T01/T02 client fallback tests | MIG-0718 | SAME (new API client unit tests) | IN_PROGRESS | PR#420 SHA=4d5fc7036ca29096891b46f4d668f66e3a9b3f47 TEST=npm run test --workspace=@flamenode/app CI=pending U01 |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
