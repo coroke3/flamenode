@@ -147,6 +147,37 @@ test("a Merge gate task must be DONE before the gated task is DONE (D-16-1)", ()
   assert.match(validatePlanCompleteness({ status: graph("READY"), specs: specs("\n- **Merge gate:** なし") }).join(" "), /Merge gate names no MIG task/);
 });
 
+test("the OPEN_DECISIONS merge-gate registry keeps the D-16-1 check when a Work Order or gate line is removed", () => {
+  const graph = (state, gate = "READY") => `| ID | Task | State | Depends on |
+| --- | --- | --- | --- |
+| MIG-0108 | gate | DONE | — |
+| MIG-0301 | api | ${gate} | MIG-0108 |
+| MIG-0302 | ui | ${state} | MIG-0108 |
+`;
+  const order = (id, extra = "") => completeOrder(id, "lead", "NEEDS_REFINEMENT — x").replace("- **Verified against:**", "- **Depends on:** MIG-0108 / **Decisions:** none" + extra + "\n- **Verified against:**");
+  const specs = (uiOrder) => ({ "docs/migration/PHASE_3_SPEC.md": [order("MIG-0301"), uiOrder].join("\n") });
+  const gate = "\n- **Merge gate:** MIG-0301 が DONE";
+  const decisions = (rows = "| MIG-0302 | MIG-0301 |") => `x\n<!-- merge-gates:start -->\n| Task | Merge gate |\n| --- | --- |\n${rows}\n<!-- merge-gates:end -->\n`;
+  const run = (status, uiOrder, d = decisions()) => validatePlanCompleteness({ status, specs: specs(uiOrder), decisions: d }).join(" ");
+  // (a) gate not DONE, line kept
+  assert.match(run(graph("DONE"), order("MIG-0302", gate)), /MIG-0302: DONE but Merge gate MIG-0301 is READY/);
+  // (b) gate not DONE, line removed
+  assert.match(run(graph("DONE"), order("MIG-0302")), /MIG-0302: DONE but Merge gate MIG-0301 is READY/);
+  // (c) gate not DONE, Work Order removed
+  assert.match(run(graph("DONE"), ""), /MIG-0302: DONE but Merge gate MIG-0301 is READY/);
+  // (d) gate DONE
+  assert.equal(run(graph("DONE", "DONE"), ""), "");
+  assert.equal(run(graph("READY"), order("MIG-0302", gate)), "");
+  // SKIPPED does not wait on the gate
+  assert.equal(run(graph("SKIPPED"), ""), "");
+  // an unfinished task must keep its line in step with the registry
+  assert.match(run(graph("READY"), order("MIG-0302")), /registry declares MIG-0301 but the work order has no Merge gate line/);
+  assert.match(run(graph("READY"), order("MIG-0302", gate), decisions("")), /merge-gates registry has no row/);
+  assert.match(run(graph("READY"), order("MIG-0302", "\n- **Merge gate:** MIG-0108 が DONE")), /work order Merge gate differs from the registry/);
+  assert.match(run(graph("READY"), order("MIG-0302", gate), decisions("| MIG-0399 | MIG-0301 |")), /Merge gate registry: MIG-0399 is not a tracked STATUS task/);
+  assert.match(run(graph("READY"), order("MIG-0302", gate), "no registry"), /missing <!-- merge-gates:start -->/);
+});
+
 import { validateSmallModelOrder } from "./check-migration-task-cards.mjs";
 
 test("small-model work order must be decided: commands, expectations, exact paths, no vague wording", () => {

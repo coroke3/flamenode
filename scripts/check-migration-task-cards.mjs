@@ -256,9 +256,26 @@ function parseAllMigrationStates(status) {
   return states;
 }
 
-export function validatePlanCompleteness({ status, specs, recipes }) {
+// D-16-1 registry: the gated tasks are declared in OPEN_DECISIONS.md, so deleting a
+// Work Order or its Merge gate line cannot drop the check.
+export function parseMergeGateRegistry(decisions) {
+  const block = decisions.match(/<!-- merge-gates:start -->([\s\S]*?)<!-- merge-gates:end -->/)?.[1];
+  if (block === undefined) return null;
+  const registry = new Map();
+  for (const line of block.split("\n")) {
+    const cells = line.split("|").map((s) => s.trim());
+    if (/^MIG-\d{4}$/.test(cells[1] ?? "")) registry.set(cells[1], expandMigRefs(cells[2]));
+  }
+  return registry;
+}
+
+const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+export function validatePlanCompleteness({ status, specs, recipes, decisions }) {
   const recipeIds = recipes === undefined ? null : parseRecipeIds(recipes);
   const errors = [];
+  const registry = decisions === undefined ? null : parseMergeGateRegistry(decisions);
+  if (decisions !== undefined && !registry) errors.push("OPEN_DECISIONS.md: missing <!-- merge-gates:start --> … <!-- merge-gates:end --> registry (D-16-1)");
   const tasks = parseTrackedMigrationTasks(status);
   const states = parseAllMigrationStates(status);
   const deps = new Map([...tasks].map(([id, t]) => [id, expandMigRefs(t.dependency)]));
@@ -268,6 +285,10 @@ export function validatePlanCompleteness({ status, specs, recipes }) {
     }
     return seen;
   };
+  for (const [id, gates] of registry ?? []) {
+    if (!tasks.has(id)) errors.push("Merge gate registry: " + id + " is not a tracked STATUS task");
+    if (!gates.size) errors.push("Merge gate registry: " + id + " names no MIG task");
+  }
   for (const [id, task] of tasks) {
     if (task.state === "READY") {
       for (const dep of deps.get(id)) {
@@ -278,13 +299,17 @@ export function validatePlanCompleteness({ status, specs, recipes }) {
     const order = file ? extractWorkOrder(specs[file], id) : null;
     // D-16-1: a contract-first task may start before the API it calls, but STATUS may not mark it DONE first.
     const gateLine = order?.prose.match(/\*\*Merge gate:\*\*([^\n]*)/)?.[1];
-    if (gateLine !== undefined) {
-      const gates = expandMigRefs(gateLine);
-      if (!gates.size) errors.push(id + ": Merge gate names no MIG task");
-      for (const gate of gates) {
-        if (!states.has(gate)) errors.push(id + ": Merge gate " + gate + " is not a STATUS task");
-        else if (task.state === "DONE" && states.get(gate) !== "DONE") errors.push(id + ": DONE but Merge gate " + gate + " is " + states.get(gate));
-      }
+    const lineGates = gateLine === undefined ? null : expandMigRefs(gateLine);
+    if (lineGates && !lineGates.size) errors.push(id + ": Merge gate names no MIG task");
+    const registered = registry?.get(id);
+    if (registry && task.state !== "DONE" && task.state !== "SKIPPED" && order) {
+      if (registered && !lineGates) errors.push(id + ": Merge gate registry declares " + [...registered].join(", ") + " but the work order has no Merge gate line");
+      else if (lineGates?.size && !registered) errors.push(id + ": work order has a Merge gate but OPEN_DECISIONS.md merge-gates registry has no row");
+      else if (registered && lineGates.size && !sameSet(registered, lineGates)) errors.push(id + ": work order Merge gate differs from the registry");
+    }
+    for (const gate of new Set([...(registered ?? []), ...(lineGates ?? [])])) {
+      if (!states.has(gate)) errors.push(id + ": Merge gate " + gate + " is not a STATUS task");
+      else if (task.state === "DONE" && states.get(gate) !== "DONE") errors.push(id + ": DONE but Merge gate " + gate + " is " + states.get(gate));
     }
     if (task.state === "DONE" || task.state === "SKIPPED") continue;
     if (!order) { errors.push(id + ": unfinished task has no work order in " + file); continue; }
@@ -341,7 +366,7 @@ if(invoked){
     microUnits:read("docs/migration/TASK_MICRO_UNITS.md"),
   });
   errors.push(...validateWorkOrders({status:read("docs/migration/STATUS.md"),specs:readSpecs(read)}));
-  errors.push(...validatePlanCompleteness({status:read("docs/migration/STATUS.md"),specs:readSpecs(read),recipes:read("docs/migration/IMPLEMENTATION_RECIPES.md")}));
+  errors.push(...validatePlanCompleteness({status:read("docs/migration/STATUS.md"),specs:readSpecs(read),recipes:read("docs/migration/IMPLEMENTATION_RECIPES.md"),decisions:read("docs/migration/OPEN_DECISIONS.md")}));
   for(const error of errors)console.error("[migration-task-cards] "+error);
   if(errors.length)process.exitCode=1;
   else console.log("[migration-task-cards] OK: "+TASK_CARD_FILES.length+" card files cover all "+parseTrackedMigrationTasks(read("docs/migration/STATUS.md")).size+" active/future MIG tasks.");

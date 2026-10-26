@@ -399,7 +399,24 @@ Option 4（hybrid）を採る。
   3. response body: CURRENT の Server Action が返す結果 object をそのまま JSON にする（`{ ok: true, ... }` / `{ ok: false, message }`）。status は R-API のとおり 200 と 400 / 403 / 404 / 409 / 413（失敗も同じ形の body）。401 は未ログイン。
   4. 画面側は API が merge されるまで、client file の中に暫定の型を書き、1 行目に `// D-16-1 provisional: replace with @flamenode/contracts at merge` と書く。test の fixture は暫定の型で作る。
   5. merge の直前に、gate の task が DONE になった main を取り込み、暫定の型を API task が作った `packages/contracts` の schema の import に置き換え、test の fixture をその schema の `parse` に通す（`apps/app/test/helpers.mjs:19-24` と同じ形）。schema と合わない差が出たら STOP して API task に返す（画面側で吸収しない）。
-  6. CI: `scripts/check-migration-task-cards.mjs` の `validatePlanCompleteness` が、Merge gate の task が DONE でないのに画面側を DONE にした STATUS を失敗にする（D-16 の PR で追加、test は `scripts/check-migration-task-cards.test.mjs`）。
+  6. CI: Merge gate を持つ task は下の表（機械可読の台帳）に書く。`scripts/check-migration-task-cards.mjs` の `validatePlanCompleteness` はこの表を正として、gate の task が DONE でないのに画面側を DONE にした STATUS を失敗にする。Work Order を消しても `**Merge gate:**` 行を消しても、表の行が残る限り検査は外れない。DONE・SKIPPED になっていない task は、Work Order の `**Merge gate:**` 行と表の行が一致しないと失敗する（行が無い、表に無い、MIG が違う）。SKIPPED は gate を待たない（SKIPPED は別の承認で決まり、画面は作らない）。表の行を消すのは D-16-1 の決定を変えることなので、OPEN_DECISIONS の変更として理由を書く。test は `scripts/check-migration-task-cards.test.mjs`。
+  <!-- merge-gates:start -->
+
+  | Task | Merge gate |
+  | --- | --- |
+  | MIG-0513 | MIG-0640 |
+  | MIG-0514 | MIG-0657 |
+  | MIG-0515 | MIG-0636 |
+  | MIG-0519 | MIG-0641 |
+  | MIG-0708 | MIG-0636 |
+  | MIG-0709 | MIG-0659 |
+  | MIG-0710 | MIG-0641 |
+  | MIG-0715 | MIG-0650 |
+  | MIG-0716 | MIG-0648, MIG-0650, MIG-0651 |
+  | MIG-0717 | MIG-0648, MIG-0650, MIG-0651 |
+  | MIG-0718 | MIG-0661, MIG-0701 |
+
+  <!-- merge-gates:end -->
   理由: 待っているのは merge 順だけで、契約の決め方（CURRENT の入力 key と結果 object を変えない）は R-API と各 API の Work Order が既に決めている。API と画面を同時に作れば、Phase 5 / 7 の画面が API の後に直列で並ばない。危険は契約のずれで、5 の置き換えと schema の parse で merge 前に必ず検出される。
 - **D-16-2（Personal SPA の書き込み client）**: `apps/app/src/api/write.ts` を作る（MIG-0708 / 0709 / 0710 / 0715 のうち先に merge した方が作り、後の方は import だけ）。中身は `export async function send<T extends { ok: boolean }>(fetchFn, method: "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: object | FormData): Promise<{ status: "ok"; data: T } | { status: "anonymous" } | { status: "unavailable" }>`。`credentials: "same-origin"`、`cache: "no-store"`、`accept: application/json`、body が FormData でなければ `content-type: application/json`。応答の JSON に boolean の `ok` があれば status に関係なく `{status:"ok", data}`、401 で `ok` が無ければ `anonymous`、それ以外（network 失敗・JSON でない）は `unavailable`。画面は `unavailable` のとき CURRENT の catch の文言（各 component の「〜に失敗しました。」）を出す。各 task の client は `apps/app/src/api/<name>.ts` に `create<Name>Api(fetchFn)` として作り、`PersonalApi`（`apps/app/src/api/personal.ts:43-49`）に 1 行（例 `xidProfile: XidProfileApi;`）、`createPersonalApi` に 1 行足す。
 - **D-16-3（`router.refresh()` の置き換え）**: CURRENT の component は成功後に `router.refresh()` する。SPA では `useApiResult`（`apps/app/src/routes/guard.tsx:116-137`）に 4 番目の引数 `refreshKey = 0` を足し、`refreshKey` だけが変わったときは `LOADING` にせず、成功なら data を差し替え、失敗なら前の data を残す（画面が一瞬消えて入力中の message が失われるのを防ぐ）。先に merge した task が足す（MIG-0708 の Micro-units に code）。`router.push(next)` は `useNavigate()(next)`（SPA 内）か `window.location.assign(next)`（SPA 外、D-05）。
