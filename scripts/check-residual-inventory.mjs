@@ -57,7 +57,7 @@ function scalar(value) {
   if(value.startsWith("'") && value.endsWith("'")) return value.slice(1,-1);
   if(/^-?\d+$/.test(value)) return Number(value);
   if(value==="true"||value==="false") return value==="true";
-  throw Error("unsupported TOML value: "+value);
+  throw Error("unsupported TOML value (redacted)");
 }
 function decode(value) {
   if(!value.startsWith("[")) return scalar(value);
@@ -117,7 +117,14 @@ export function extractConfigRows(source,config) {
         if(typeof v!=="string"||!v) throw Error(where+": invalid cron");
         add("cron","triggers.crons",v);
       });
-    } else if(section==="assets") add("asset.binding",req("binding"),req("directory"));
+    } else if(section==="assets") {
+      // A true run_worker_first sends every asset request through the Worker.
+      // This can change public 404/visibility behavior; review via its own MIG
+      // before enabling it on the tracked legacy Worker template.
+      if(d.run_worker_first!==false)
+        throw Error(where+": expected explicit assets.run_worker_first = false");
+      add("asset.binding",req("binding"),req("directory"));
+    }
     else if(section==="services") add("service.binding",req("binding"),req("service"));
     else if(section==="queues.producers") add("queue.producer",req("binding"),req("queue"));
     else if(section==="queues.consumers") {
