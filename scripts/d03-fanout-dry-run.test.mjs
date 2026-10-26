@@ -251,3 +251,23 @@ test("T12 collision report preserves the full count when first50 is truncated", 
   assert.deepEqual(report.likeCountDelta, [],
     "pre-existing approved-X likes must not be double-counted");
 }));
+
+test("T13 dedup preserves earliest Auth timestamp and does not overwrite legacy X collision", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1", 1);
+  add.x(insert, "shared");
+  add.link(insert, "authA", "shared");
+  add.link(insert, "authB", "shared");
+  add.auth(insert, "authA", "v1", "like", 500);
+  add.auth(insert, "authB", "v1", "like", 200);
+  add.auth(insert, "authA", "v1", "bookmark", 600);
+  add.existing(insert, "shared", "v1", "like", 50);
+
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 2);
+  assert.equal(report.collapsedDuplicates, 1);
+  assert.equal(report.conflictsWithVideoInteractions.count, 1);
+  assert.deepEqual(report.conflictsWithVideoInteractions.first50.map(({ interactionType, candidateCreatedAt, existingCreatedAt }) =>
+    [interactionType, candidateCreatedAt, existingCreatedAt]), [["like", 200, 50]]);
+  assert.equal(report.likeCountDeltaTotal, 0, "existing X like and proposed duplicates count once");
+  assert.equal(report.likeCountDeltaTruncated, false);
+}));
