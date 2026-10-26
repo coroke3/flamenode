@@ -163,8 +163,7 @@ test("T18: malformed unquoted TOML IDs are never echoed in diagnostics",()=>{
 });
 
 test("T19: duplicate singleton sections fail before inventory comparison",()=>{
-  const changed=fast.replace("[triggers]\ncrons", "[triggers]\ncrons");
-  const extra=changed+"\n[triggers]\ncrons = [\"30 * * * *\"]\n";
+  const extra=fast+"\n[triggers]\ncrons = [\"30 * * * *\"]\n";
   assert.throws(()=>extractConfigRows(extra,fastPath),/duplicate TOML section triggers/);
 });
 
