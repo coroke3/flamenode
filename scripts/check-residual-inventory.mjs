@@ -83,12 +83,14 @@ export function extractConfigRows(source,config) {
     if(line.startsWith("[")) {
       const m=/^(\[\[?)([\w.-]+)(\]\]?)$/.exec(line);
       if(!m || (m[1].length!==m[3].length)) throw Error(config+":"+(index+1)+": invalid section");
+      // Unknown binding families must report "unreviewed", even when
+      // declared as [[arrays]]; allow known sections only in their own shape.
+      if(!KNOWN.has(m[2]) && !INERT_SECTIONS.has(m[2]))
+        throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
       if(ARRAY_SECTIONS.has(m[2]) && m[1]!=="[[")
         throw Error(config+":"+(index+1)+": expected array section "+m[2]);
       if(!ARRAY_SECTIONS.has(m[2]) && m[1]!=="[")
         throw Error(config+":"+(index+1)+": expected singleton section "+m[2]);
-      if(!KNOWN.has(m[2]) && !INERT_SECTIONS.has(m[2]))
-        throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
       if(m[1]==="[") {
         if(singletonSections.has(m[2]))
           throw Error(config+":"+(index+1)+": duplicate TOML section "+m[2]);
