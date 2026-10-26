@@ -273,3 +273,25 @@ test("T29: whitespace within a quoted Worker entrypoint is not silently trimmed"
   assert.ok(report.missing.some(r=>r.kind==="worker.main"&&r.value===" .open-next/worker.js"));
   assert.ok(report.stale.some(r=>r.kind==="worker.main"&&r.value===".open-next/worker.js"));
 });
+
+test("T30: Queue producer cannot reuse an existing D1 Env binding name",()=>{
+  const modified=web.replace('binding = "NOTIFICATION_WAKE_QUEUE"','binding = "DB"');
+  assert.notEqual(modified,web);
+  assert.throws(()=>extractConfigRows(modified,"wrangler.toml"),
+    /binding name collision DB \(queue\.producer and d1\.binding\)/);
+});
+
+test("T31: service binding cannot reuse the Static Assets Env binding name",()=>{
+  const modified=web.replace('binding = "WORKER_SELF_REFERENCE"','binding = "ASSETS"');
+  assert.notEqual(modified,web);
+  assert.throws(()=>extractConfigRows(modified,"wrangler.toml"),
+    /binding name collision ASSETS \(asset\.binding and service\.binding\)/);
+});
+
+test("T32: a Queue consumer name matching the producer queue does not cause an Env binding collision",()=>{
+  // Consumer queue names are not Env binding names and may intentionally
+  // match a producer queue. Check a real mixed producer/consumer Worker.
+  const rows=extractConfigRows(fast,fastPath);
+  assert.ok(rows.some(r=>r.kind==="queue.producer"));
+  assert.ok(rows.some(r=>r.kind==="queue.consumer"));
+});
