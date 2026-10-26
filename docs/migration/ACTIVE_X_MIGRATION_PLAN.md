@@ -1,7 +1,7 @@
 # FlameNode Active X データ移行詳細計画書（Active X Data Migration Plan）
 
 > 状態: Active / データ移行設計書
-> 最終検証: 2026-10-09（実スキーマ `src/lib/db/schema.canonical.ts` および `0052_video_interactions_auth_expand.sql` に基づき改定）
+> スキーマ参照: 2026-10-26（実スキーマ `packages/db/src/schema/canonical.ts` および `0052_video_interactions_auth_expand.sql` に基づき改定）
 > 関連ドキュメント: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md), [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-03, D-04)
 
 ## 1. 移行の背景と目的
@@ -56,6 +56,21 @@ CREATE INDEX video_interactions_video_type_idx
 4. 同一Xに複数Auth Userが紐づくときは同一video/typeが衝突する。重複行のtimestamp/削除競合・既存Xの先行操作を追跡して収束させる。既存レコードを無条件に上書きしない。
 5. **この選択は過去interactionの移行方法のみ。切替後の新規like/bookmarkは選択中Active Xに作用し、所有する全Xへ自動連動しない**（全X同期の追加仕様は別の承認対象）。
 6. fan-out件数は `old rows × owner approved links` に比例し、D1 Free枠の行数/CPU/statementを事前見積りする。数十万件なら複数実行枠に分割し、1リクエストで処理しない。
+
+## 3a. MIG-0658 — ローカル D-03 fan-out 読み取り専用 dry-run
+
+移行に先立ち、**ローカルにマイグレーション適用済みの SQLite DB だけ**を入力に、書き込みを行わず候補件数と衝突を確認する。Cloudflare D1 の remote DB、本番情報、R2 は参照しない。
+
+```bash
+node scripts/d03-fanout-dry-run.mjs --sqlite /absolute/path/to/local.sqlite
+node --test scripts/d03-fanout-dry-run.test.mjs
+```
+
+`--sqlite` は既に存在するローカルの通常ファイルのみ受け付ける。存在しないパス・ディレクトリ・デバイス等の非通常ファイルはSQLiteを開く前に拒否し、DBを新規作成しない。**WAL形式のファイルもSQLiteを開く前に拒否する**（ヘッダーのwrite/read versionが1/1のrollback-journal形式だけ許可。2/2のWALや未知の版は拒否）。SQLiteはread-only接続でもWAL用の `-shm` / `-wal` 補助ファイルを作成・変更し得るため、元ファイルを直接開くstrictなオフラインdry-runにWALは使わない。WALで取得したデータは、**元DBではなく別途作成した一貫したオフラインコピー**側で必要なcheckpoint/変換を完了し、`journal_mode=DELETE`の単独SQLiteファイルになったことを確認してから入力する。生のDBファイルだけをWALからコピーすると、未checkpointの更新を欠落する可能性がある。元DB・稼働中DBをその場で変換しない。例: 元DBへの書き込みを止めた後、`sqlite3 <元DB> "VACUUM INTO '/absolute/path/to/snapshot.sqlite'"` で別ファイルを作る（出力はヘッダー 1/1 の rollback-journal 形式。node:sqlite 22 で確認）。参照: [SQLite WAL公式仕様](https://www.sqlite.org/wal.html#readonly)。
+
+スクリプトは `node:sqlite` の `readOnly: true` と `PRAGMA query_only = ON` で接続し、SELECT のみを実行する。3 つの SELECT は単一の読み取りトランザクションで同じ SQLite snapshot を参照し、正常終了・異常終了のいずれでも ROLLBACK で終了する（CLI は WAL 入力を拒否するため、これは export された `analyzeDatabase()` を WAL 接続で使う場合の保護）。JSON 1 行を標準出力へ返す。`candidates` は承認済み owner リンクへ展開した後の一意な X/video/type の行数で、既存 X 操作と同じキーでも「候補」として計上する。`collapsedDuplicates` は複数 Auth の共通 X によって生成された重複候補の削減数。`skippedNoOwnerLink` は eligible な owner リンクが 0 の旧 Auth interaction 行数（Auth User の人数ではない）。`conflictsWithVideoInteractions` は既存 X 正本との衝突件数・先頭50件・省略状態。`likeCountDelta` は承認済み X に限定した既存 X like と候補 like の union（X/video 単位で distinct、未承認 X の既存行は**削除せず集計だけ除外**）を `videos.app_like_count` と比較した絶対差が大きい上位50件で、`maxDeltaVideo` はその1件目。`likeCountDeltaTotal` は差分のある動画の**全件数**、`likeCountDeltaTruncated` は上位50件以外に差分が存在することを示す。`likeCountDeltaTruncated: true` の場合は上位50件だけで移行差分の全量を判断してはいけない。各操作の生データは書き換えない。
+
+**重要:** dry-run はその時点の参照 snapshot に過ぎない。書き込み凍結、取消差分の照合、承認、バックフィル、切替、およびロールバック演習は別工程。衝突を無条件に上書きせず、ownerなし Auth の元データを消さず、`video_interactions_auth` を保持する。識別子のある report は共有範囲を限定する。
 
 ## 4. Cloudflare D1 Free 枠の制限遵守とバッチ設計
 
