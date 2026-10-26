@@ -370,3 +370,16 @@ test("T18 CLI via symlink executes the dry-run instead of silently exiting 0",
     assert.ok(child.stdout.trim(), "symlink entrypoint must emit a JSON report");
     assert.equal(JSON.parse(child.stdout).candidates, 1);
   }));
+
+test("T19 importing CLI module tolerates an unrelated missing argv path", () => {
+  const fakeEntry = join(tmpdir(), "missing-d03-entry-" + process.pid + "-" + Date.now() + ".mjs");
+  assert.equal(existsSync(fakeEntry), false);
+  const code = `import(${JSON.stringify(CLI.href)}).then((mod) => {
+    if (typeof mod.analyzeLocalFile !== "function") process.exitCode = 2;
+    else console.log("import-ok");
+  });`;
+  const child = spawnSync(process.execPath,
+    ["--input-type=module", "-e", code, fakeEntry], { encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), "import-ok");
+});
