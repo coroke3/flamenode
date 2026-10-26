@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import {test} from "node:test";
-import {readFileSync} from "node:fs";
+import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 import {dirname,resolve} from "node:path";
+import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
-import {checkResidualInventory,extractConfigRows,readInventoryRows} from "./check-residual-inventory.mjs";
+import {checkResidualInventory,extractConfigRows,readInventoryRows,findUntrackedWorkerConfigs} from "./check-residual-inventory.mjs";
 
 const root=dirname(dirname(fileURLToPath(import.meta.url)));
 const docs=readFileSync(resolve(root,"docs/migration/RESIDUAL_INVENTORY.md"),"utf8");
@@ -210,4 +211,45 @@ test("T24: CRLF ledger keeps U03 proposal table outside audited inventory",()=>{
   assert.equal(parsed.length,36);
   assert.deepEqual(checkResidualInventory({markdown:crlf}).missing,[]);
   assert.deepEqual(checkResidualInventory({markdown:crlf}).stale,[]);
+});
+
+
+test("T25: a newly added Worker Wrangler TOML cannot bypass the fixed four-file list",()=>{
+  const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-"));
+  try {
+    const newDir=resolve(temp,"workers","experimental");
+    mkdirSync(newDir,{recursive:true});
+    writeFileSync(resolve(newDir,"wrangler.toml"),'name = "experimental"\nmain = "index.ts"\n');
+    assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers/experimental/wrangler.toml"]);
+    const sources={
+      "wrangler.toml":web,
+      [fastPath]:fast,
+      [contentPath]:content,
+      [syncPath]:sync
+    };
+    assert.throws(()=>checkResidualInventory({root:temp,markdown:docs,sources}),
+      /unreviewed Worker Wrangler configs: workers\/experimental\/wrangler.toml/);
+  } finally {
+    rmSync(temp,{recursive:true,force:true});
+  }
+});
+
+test("T26: nested Worker JSONC and JSON deployment configs also require inventory review",()=>{
+  const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-"));
+  try {
+    const nested=resolve(temp,"workers","new-worker","deploy");
+    mkdirSync(nested,{recursive:true});
+    writeFileSync(resolve(nested,"wrangler.jsonc"),'{"name":"test"}');
+    writeFileSync(resolve(nested,"wrangler.json"),'{"name":"test"}');
+    assert.deepEqual(findUntrackedWorkerConfigs(temp),[
+      "workers/new-worker/deploy/wrangler.json",
+      "workers/new-worker/deploy/wrangler.jsonc"
+    ]);
+  } finally {
+    rmSync(temp,{recursive:true,force:true});
+  }
+});
+
+test("T27: existing four tracked Wrangler files have no untracked workers",()=>{
+  assert.deepEqual(findUntrackedWorkerConfigs(root),[]);
 });
