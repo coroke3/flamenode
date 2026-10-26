@@ -175,6 +175,10 @@ export function extractConfigRows(source,config) {
       // Production uses separately generated config, never printed here.
       if(req("database_id")!==D1_PLACEHOLDER_ID)
         throw Error(where+": non-placeholder D1 identifier in tracked config (redacted)");
+      // The web Worker owns the schema migration path; other tracked Workers
+      // currently omit it. Preserve both states until an explicit review.
+      if(config==="wrangler.toml" ? d.migrations_dir!=="migrations" : "migrations_dir" in d)
+        throw Error(where+": unexpected D1 migrations_dir (review required)");
       add("d1.binding",req("binding"),req("database_name"));
     }
     else if(section==="r2_buckets") add("r2.binding",req("binding"),req("bucket_name"));
@@ -182,6 +186,10 @@ export function extractConfigRows(source,config) {
       if(req("id")!==KV_PLACEHOLDER_ID ||
           ("preview_id" in d && d.preview_id!==KV_PLACEHOLDER_ID))
         throw Error(where+": non-placeholder KV identifier in tracked config (redacted)");
+      // The web template has no preview_id; all three background templates
+      // explicitly do. A removal/addition must not silently pass parity.
+      if(("preview_id" in d)!==(config!=="wrangler.toml"))
+        throw Error(where+": unexpected KV preview_id presence (review required)");
       add("kv.binding",req("binding"),"checked-in placeholder ID");
     }
   });
