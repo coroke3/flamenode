@@ -115,7 +115,10 @@ export function collectFiles(root=ROOT){
    else if(item.isFile())files.push(path.relative(root,child).replaceAll(path.sep,"/"));
   }
  }
- for(const sub of ["app","src/lib","src/components","src/styles","public","cloudflare","workers","apps","packages"])visit(path.join(root,sub));
+ // Existing migration source/verification records also include tracked docs and
+ // scripts. They are not mandatory baseline sources, but if explicitly listed
+ // as IN_PROGRESS in the ledger they must be resolved as real files.
+ for(const sub of ["app","src/lib","src/components","src/styles","public","cloudflare","workers","apps","packages","scripts","docs/migration"])visit(path.join(root,sub));
  for(const base of ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json","middleware.ts","next.config.mjs","open-next.config.ts","instrumentation.ts","next-env.d.ts","tsconfig.json"]){
   if(fs.existsSync(path.join(root,base)))files.push(base);
  }
