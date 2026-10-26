@@ -1,8 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env.ts";
 import {
-  OPERATION_MODE_KV_KEY,
-  parseKvMirror,
+  readOperationModeKvMirror,
   resolvePublicOperationMode,
 } from "./live/operationMode.ts";
 
@@ -20,14 +19,8 @@ operationModeBannerRoutes.get("/", async (c) => {
     return c.json({ mode: "normal", reason: null }, 200, NO_STORE);
   }
 
-  let reason: string | null = null;
-  if (c.env.KV) {
-    try {
-      const raw = await c.env.KV.get(OPERATION_MODE_KV_KEY, { cacheTtl: 30 });
-      reason = parseKvMirror(typeof raw === "string" ? raw : null)?.reason ?? null;
-    } catch {
-      // CURRENT readOperationModeKvMirror treats unavailable KV as no reason.
-    }
-  }
+  // Reuse the same 30s mirror as the mode resolver. A forced mode still
+  // performs one bounded KV read for the optional reason (CURRENT parity).
+  const reason = (await readOperationModeKvMirror(c.env.KV))?.reason ?? null;
   return c.json({ mode, reason }, 200, NO_STORE);
 });

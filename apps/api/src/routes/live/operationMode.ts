@@ -22,14 +22,17 @@ let isolateMode: { mode: OperationMode | null; expiresAt: number } = {
   mode: null,
   expiresAt: 0,
 };
-let kvCache: { mode: OperationMode | null; expiresAt: number } = {
-  mode: null,
+// Preserve the parsed reason alongside the mode. CURRENT caches the entire
+// mirror for 30 seconds, so the public banner must not bypass it with a
+// separate KV.get on every request.
+let kvCache: { mirror: ParsedOperationModeKvMirror | null; expiresAt: number } = {
+  mirror: null,
   expiresAt: 0,
 };
 
 export function resetOperationModeCachesForTests(): void {
   isolateMode = { mode: null, expiresAt: 0 };
-  kvCache = { mode: null, expiresAt: 0 };
+  kvCache = { mirror: null, expiresAt: 0 };
 }
 
 /** FORCE_STATIC_ONLY env: 1 / true / yes (case-insensitive). */
@@ -71,28 +74,35 @@ export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror |
   }
 }
 
-function parseKvMirrorMode(raw: string | null): OperationMode | null {
-  return parseKvMirror(raw)?.mode ?? null;
-}
-
-async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
+/**
+ * Return a bounded-stale mirror for both the live mode resolver and public
+ * banner. A single cache avoids two KV reads on a cold banner request and an
+ * additional KV read on every warm request. Errors cache for just 5 seconds.
+ */
+export async function readOperationModeKvMirror(
+  kv: KVNamespace | undefined,
+): Promise<ParsedOperationModeKvMirror | null> {
   const now = Date.now();
-  if (now < kvCache.expiresAt) return kvCache.mode;
+  if (now < kvCache.expiresAt) return kvCache.mirror;
   if (!kv) {
-    kvCache = { mode: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
+    kvCache = { mirror: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
     return null;
   }
   try {
     const raw = await kv.get(OPERATION_MODE_KV_KEY, {
       cacheTtl: KV_CACHE_TTL_MS / 1000,
     });
-    const mode = typeof raw === "string" ? parseKvMirrorMode(raw) : null;
-    kvCache = { mode, expiresAt: now + KV_CACHE_TTL_MS };
-    return mode;
+    const mirror = typeof raw === "string" ? parseKvMirror(raw) : null;
+    kvCache = { mirror, expiresAt: now + KV_CACHE_TTL_MS };
+    return mirror;
   } catch {
-    kvCache = { mode: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
+    kvCache = { mirror: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
     return null;
   }
+}
+
+async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
+  return (await readOperationModeKvMirror(kv))?.mode ?? null;
 }
 
 async function readD1Mode(db: D1Database): Promise<OperationMode | null> {
