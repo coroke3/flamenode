@@ -93,18 +93,16 @@ test("MIG-0718 U01 T03: announced oversized body is rejected before reading", as
 
 test("MIG-0718 U01 T03: chunked response over 16KiB is not buffered or displayed", async () => {
   let cancelled = false;
-  let sent = 0;
   const stream = new ReadableStream({
-    pull(controller) {
-      sent += 1;
+    start(controller) {
       controller.enqueue(new Uint8Array(9000).fill(65));
-      if (sent === 3) controller.close();
+      controller.enqueue(new Uint8Array(9000).fill(65));
+      // Do not close the stream: cancellation must stop an unfinished body.
     },
     cancel() { cancelled = true; },
   });
   assert.equal(await client(new Response(stream, { status: 200 })).api.getBanner(), null);
-  assert.equal(sent <= 3, true);
-  assert.equal(cancelled, true, "remaining response body must be cancelled");
+  assert.equal(cancelled, true, "unfinished response body must be cancelled");
 });
 
 test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely", async () => {
