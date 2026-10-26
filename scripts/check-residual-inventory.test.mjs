@@ -197,7 +197,7 @@ test("T23: malformed assignment never prints a credential-like value",()=>{
     error=>error.message.includes("unsupported TOML value (redacted)") &&
       !error.message.includes(marker));
   const empty=web.replace('id = "00000000000000000000000000000000"',
-    "id = "+marker+"\nsecret := "+marker);
+    'id = "00000000000000000000000000000000"\nsecret := '+marker);
   assert.notEqual(empty,web);
   assert.throws(()=>extractConfigRows(empty,"wrangler.toml"),
     error=>error.message.includes("unsupported syntax (value redacted)") &&
