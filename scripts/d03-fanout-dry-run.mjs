@@ -163,7 +163,7 @@ function parseArgs(args) {
   return args[1];
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
   try {
     const file = parseArgs(process.argv.slice(2));
     if (file === null) {
