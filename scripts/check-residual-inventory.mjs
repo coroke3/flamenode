@@ -47,7 +47,7 @@ export function findUntrackedWorkerConfigs(root) {
     for(const item of readdirSync(dir,{withFileTypes:true})) {
       const local=relative+"/"+item.name;
       if(item.isDirectory()) visit(resolve(dir,item.name),local);
-      else if(item.isFile() && /^wrangler\\.(?:toml|json|jsonc)$/.test(item.name)
+      else if(item.isFile() && /^wrangler\.(?:toml|json|jsonc)$/.test(item.name)
         && !CONFIGS.includes(local)) files.push(local);
     }
   }
