@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { copyFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { analyzeDatabase, analyzeLocalFile } from "./d03-fanout-dry-run.mjs";
@@ -278,7 +278,7 @@ test("T14 CLI script path containing spaces is decoded before spawning Node", ()
   add.link(insert, "auth", "x1");
   add.auth(insert, "auth");
 
-  const copiedScript = join(file.substring(0, file.lastIndexOf("/") >= 0 ? file.lastIndexOf("/") : file.lastIndexOf("\\")), "dry run with spaces.mjs");
+  const copiedScript = join(dirname(file), "dry run with spaces.mjs");
   copyFileSync(fileURLToPath(CLI), copiedScript);
   const scriptUrl = pathToFileURL(copiedScript);
   assert.match(scriptUrl.href, /%20/, "URL path must contain encoded spaces");
