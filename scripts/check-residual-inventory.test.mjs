@@ -172,3 +172,42 @@ test("T20: repeating queue producer array sections remains supported",()=>{
   const result=checkResidualInventory({sources:{[fastPath]:changed}});
   assert.ok(result.missing.some(r=>r.kind==="queue.producer"&&r.setting==="NEW_WAKE"));
 });
+
+
+test("T21: array-style assets section is rejected (Wrangler expects singleton)",()=>{
+  const changed=web.replace("\n[assets]\n","\n[[assets]]\n");
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    /expected singleton section assets/);
+});
+
+test("T22: cron array section is rejected",()=>{
+  const changed=fast.replace("\n[triggers]\n","\n[[triggers]]\n");
+  assert.notEqual(changed,fast);
+  assert.throws(()=>extractConfigRows(changed,fastPath),
+    /expected singleton section triggers/);
+});
+
+test("T23: malformed assignment never prints a credential-like value",()=>{
+  const marker="sensitive-example-ID-123456789";
+  const changed=web.replace('id = "00000000000000000000000000000000"',
+    "id = "+marker+" =");
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    error=>error.message.includes("unsupported TOML value (redacted)") &&
+      !error.message.includes(marker));
+  const empty=web.replace('id = "00000000000000000000000000000000"',
+    "id = "+marker+"\nsecret := "+marker);
+  assert.notEqual(empty,web);
+  assert.throws(()=>extractConfigRows(empty,"wrangler.toml"),
+    error=>error.message.includes("unsupported syntax (value redacted)") &&
+      !error.message.includes(marker));
+});
+
+test("T24: CRLF ledger keeps U03 proposal table outside audited inventory",()=>{
+  const crlf=docs.replace(/\n/g,"\r\n");
+  const parsed=readInventoryRows(crlf);
+  assert.equal(parsed.length,36);
+  assert.deepEqual(checkResidualInventory({markdown:crlf}).missing,[]);
+  assert.deepEqual(checkResidualInventory({markdown:crlf}).stale,[]);
+});
