@@ -4,6 +4,7 @@
  * This program never performs migration writes or opens remote D1.
  */
 import { DatabaseSync } from "node:sqlite";
+import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -109,7 +110,13 @@ export function analyzeDatabase(db) {
 }
 
 export function analyzeLocalFile(file) {
-  const db = new DatabaseSync(resolve(file), { readOnly: true, open: true });
+  // Refuse non-file inputs (directories, devices, FIFOs) before opening SQLite.
+  // realpathSync also rejects nonexistent files without creating an empty DB.
+  const localPath = realpathSync(resolve(file));
+  if (!statSync(localPath).isFile()) {
+    throw new Error("Expected an existing local SQLite file");
+  }
+  const db = new DatabaseSync(localPath, { readOnly: true, open: true });
   try {
     // Defense in depth: accidental future statements must not mutate.
     db.exec("PRAGMA query_only = ON");
