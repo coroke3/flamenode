@@ -163,7 +163,21 @@ function parseArgs(args) {
   return args[1];
 }
 
-if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {
+function isCliEntrypoint() {
+  if (!process.argv[1]) return false;
+  let invokedPath;
+  try {
+    invokedPath = realpathSync(resolve(process.argv[1]));
+  } catch (error) {
+    // When this module is imported from node -e, argv[1] belongs to the
+    // importing process and need not be a real script path.
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return false;
+    throw error;
+  }
+  return invokedPath === fileURLToPath(import.meta.url);
+}
+
+if (isCliEntrypoint()) {
   try {
     const file = parseArgs(process.argv.slice(2));
     if (file === null) {
