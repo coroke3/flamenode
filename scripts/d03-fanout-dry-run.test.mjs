@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { analyzeDatabase, analyzeLocalFile } from "./d03-fanout-dry-run.mjs";
 
@@ -100,7 +101,7 @@ test("T05 running the CLI never changes source SQLite file bytes", () => fixture
   add.link(insert, "a", "x1"); add.auth(insert, "a");
   const hash = () => createHash("sha256").update(readFileSync(file)).digest("hex");
   const before = hash();
-  const child = spawnSync(process.execPath, [CLI.pathname, "--sqlite", file], { encoding: "utf8" });
+  const child = spawnSync(process.execPath, [fileURLToPath(CLI), "--sqlite", file], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stdout.trim().split("\n").length, 1);
   assert.equal(JSON.parse(child.stdout).candidates, 1);
@@ -270,4 +271,19 @@ test("T13 dedup preserves earliest Auth timestamp and does not overwrite legacy 
     [interactionType, candidateCreatedAt, existingCreatedAt]), [["like", 200, 50]]);
   assert.equal(report.likeCountDeltaTotal, 0, "existing X like and proposed duplicates count once");
   assert.equal(report.likeCountDeltaTruncated, false);
+}));
+test("T14 CLI script path containing spaces is decoded before spawning Node", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1");
+  add.x(insert, "x1");
+  add.link(insert, "auth", "x1");
+  add.auth(insert, "auth");
+
+  const copiedScript = join(file.substring(0, file.lastIndexOf("/") >= 0 ? file.lastIndexOf("/") : file.lastIndexOf("\\")), "dry run with spaces.mjs");
+  copyFileSync(fileURLToPath(CLI), copiedScript);
+  const scriptUrl = pathToFileURL(copiedScript);
+  assert.match(scriptUrl.href, /%20/, "URL path must contain encoded spaces");
+  const child = spawnSync(process.execPath,
+    [fileURLToPath(scriptUrl), "--sqlite", file], { encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(JSON.parse(child.stdout).candidates, 1);
 }));
