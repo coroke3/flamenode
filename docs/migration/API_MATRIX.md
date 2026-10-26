@@ -480,3 +480,11 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 - RH-031 playlist overlay: CURRENT re-reads the visibility manifest after the artifact under `enforce` (TOCTOU etag check); Hono reads it once before (same reader as MIG-0631). Not covered by a test.
 
 
+
+
+## MIG-0661 — CostGuardBanner read DTO endpoints (in progress)
+
+| Endpoint | CURRENT source | Hono target | Guard and data read | State |
+| --- | --- | --- | --- | --- |
+| `GET /api/operation-mode/banner` | `src/lib/operationMode/publicMode.ts#resolveCostGuardBannerSnapshot`, `src/lib/operationMode/kvMirrorCore.ts` | `apps/api/src/routes/operationModeBanner.ts` | public, no session; `resolvePublicOperationMode({allowD1:false})` + KV mirror reason; D1 statements = 0; `Cache-Control: no-store` | MIG-0661 U01 IN_PROGRESS, PR#419 CI pending |
+| `GET /api/admin-read/cost-guard-banner` | `src/components/layout/CostGuardBanner.tsx` admin source | `apps/api/src/routes/adminRead/costGuardBanner.ts` (planned) | existing admin read auth + 1 D1 SELECT | MIG-0661 U02 NOT_STARTED |

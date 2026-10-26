@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "./env.ts";
 import { adminReadRoutes } from "./routes/adminRead/index.ts";
 import { healthRoutes } from "./routes/health.ts";
+import { operationModeBannerRoutes } from "./routes/operationModeBanner.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
 import { manageRoutes } from "./routes/manage/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
@@ -22,6 +23,8 @@ export const app = new Hono<AppEnv>();
 
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
+// MIG-0661 U01: public CostGuardBanner reads KV/env only; no session or D1.
+app.route("/api/operation-mode/banner", operationModeBannerRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 // MIG-0611: authenticated read-only Personal screens API (no CURRENT /api/* equivalent).

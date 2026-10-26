@@ -39,18 +39,40 @@ export function isForceStaticOnlyEnv(raw: string | undefined): boolean {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
-function parseKvMirrorMode(raw: string | null): OperationMode | null {
+export type ParsedOperationModeKvMirror = {
+  mode: OperationMode;
+  updated_at: number;
+  reason?: string | null;
+};
+
+/** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
+export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { mode?: unknown; updated_at?: unknown };
+    const parsed = JSON.parse(raw) as {
+      mode?: unknown;
+      updated_at?: unknown;
+      reason?: unknown;
+    };
     if (!isOperationMode(parsed.mode)) return null;
     if (typeof parsed.updated_at !== "number" || !Number.isFinite(parsed.updated_at)) {
       return null;
     }
-    return parsed.mode;
+    return {
+      mode: parsed.mode,
+      updated_at: parsed.updated_at,
+      reason:
+        typeof parsed.reason === "string" || parsed.reason === null
+          ? parsed.reason
+          : undefined,
+    };
   } catch {
     return null;
   }
+}
+
+function parseKvMirrorMode(raw: string | null): OperationMode | null {
+  return parseKvMirror(raw)?.mode ?? null;
 }
 
 async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
