@@ -183,10 +183,9 @@ test("MIG-0718 U02 T01: optional reason is omitted; normal/unavailable never ren
   await m.render({ getBanner: async () => { throw new Error("offline"); } });
   assert.equal(m.container.innerHTML, "");
   await m.unmount();
-  assert.equal(
-    (await renderBanner({ getBanner: async () => null })).container.innerHTML,
-    "",
-  );
+  const none = await renderBanner({ getBanner: async () => null });
+  assert.equal(none.container.innerHTML, "");
+  await none.unmount();
 });
 
 test("MIG-0718 U02 T02: late async response from previous API never overwrites new mode", async () => {
@@ -234,8 +233,8 @@ test("MIG-0718 U02: prefixed CSS is byte-for-byte the CURRENT module rule set", 
     "utf8",
   );
   const converted = source
-    .replace(/\\.banner(?=\\s*\\{)/g, ".cgb-banner")
-    .replace(/\\.inner(?=\\s*\\{)/g, ".cgb-inner")
-    .replace(/\\.reason(?=\\s*\\{)/g, ".cgb-reason");
+    .replace(/\.banner(?=\s*\{)/g, ".cgb-banner")
+    .replace(/\.inner(?=\s*\{)/g, ".cgb-inner")
+    .replace(/\.reason(?=\s*\{)/g, ".cgb-reason");
   assert.equal(target, converted, "source CSS module drift or modified declarations");
 });
