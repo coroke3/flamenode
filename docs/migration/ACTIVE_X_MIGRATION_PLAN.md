@@ -1,7 +1,7 @@
 # FlameNode Active X データ移行詳細計画書（Active X Data Migration Plan）
 
 > 状態: Active / データ移行設計書
-> 最終検証: 2026-10-09（実スキーマ `src/lib/db/schema.canonical.ts` および `0052_video_interactions_auth_expand.sql` に基づき改定）
+> スキーマ参照: 2026-10-26（実スキーマ `packages/db/src/schema/canonical.ts` および `0052_video_interactions_auth_expand.sql` に基づき改定）
 > 関連ドキュメント: [`PRODUCT_REQUIREMENTS.md`](PRODUCT_REQUIREMENTS.md), [`README.md`](README.md), [`STATUS.md`](STATUS.md), [`OPEN_DECISIONS.md`](OPEN_DECISIONS.md) (D-03, D-04)
 
 ## 1. 移行の背景と目的
