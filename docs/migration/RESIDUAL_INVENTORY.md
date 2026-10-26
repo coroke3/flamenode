@@ -27,14 +27,14 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 | `workers/fast-jobs/wrangler.toml` | worker.main | `main` | `index.ts` | `flamenode-fast-jobs` retained pending MIG-0901 | 未定 |
 | `workers/fast-jobs/wrangler.toml` | cron | `triggers.crons` | `0 * * * *` | `flamenode-fast-jobs` hourly recovery | 未定 |
 | `workers/fast-jobs/wrangler.toml` | queue.producer | `NOTIFICATION_WAKE_QUEUE` | `flamenode-notification-wake` | `flamenode-fast-jobs` recovery wake | 未定 |
-| `workers/fast-jobs/wrangler.toml` | queue.consumer | `flamenode-notification-wake` | DLQ `flamenode-notification-dlq`; batch 10; retry 3 | `flamenode-fast-jobs` dispatch | 未定 |
+| `workers/fast-jobs/wrangler.toml` | queue.consumer | `flamenode-notification-wake` | DLQ `flamenode-notification-dlq`; batch 10; timeout 1; retry 3; delay 60; concurrency 1 | `flamenode-fast-jobs` dispatch | 未定 |
 | `workers/fast-jobs/wrangler.toml` | d1.binding | `DB` | `flamenode_db` | `flamenode-fast-jobs` | 未定 |
 | `workers/fast-jobs/wrangler.toml` | kv.binding | `KV` | checked-in placeholder ID | `flamenode-fast-jobs` | 未定 |
 | `workers/content-jobs/wrangler.toml` | worker.name | `name` | `flamenode-content-jobs` | CURRENT rebuild/recovery/cleanup; post-MIG-0907 owner 未定 | 未定 |
 | `workers/content-jobs/wrangler.toml` | worker.main | `main` | `index.ts` | `flamenode-content-jobs` pending MIG-0901 | 未定 |
 | `workers/content-jobs/wrangler.toml` | cron | `triggers.crons` | `15 * * * *` | `flamenode-content-jobs` recovery/cleanup | 未定 |
 | `workers/content-jobs/wrangler.toml` | queue.producer | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-static-rebuild-wake` | MIG-0907 legacy static rebuild; other jobs retained | MIG-0907 (queue only) |
-| `workers/content-jobs/wrangler.toml` | queue.consumer | `flamenode-static-rebuild-wake` | DLQ `flamenode-static-rebuild-dlq`; batch 10; retry 3 | MIG-0907 (legacy queue removal) | MIG-0907 (approval required) |
+| `workers/content-jobs/wrangler.toml` | queue.consumer | `flamenode-static-rebuild-wake` | DLQ `flamenode-static-rebuild-dlq`; batch 10; timeout 1; retry 3; delay 60; concurrency 1 | MIG-0907 (legacy queue removal) | MIG-0907 (approval required) |
 | `workers/content-jobs/wrangler.toml` | d1.binding | `DB` | `flamenode_db` | `flamenode-content-jobs` pending MIG-0901 | 未定 |
 | `workers/content-jobs/wrangler.toml` | r2.binding | `R2` | `flamenode-storage` | `flamenode-content-jobs` pending MIG-0901 | 未定 |
 | `workers/content-jobs/wrangler.toml` | kv.binding | `KV` | checked-in placeholder ID | `flamenode-content-jobs` pending MIG-0901 | 未定 |
@@ -44,12 +44,12 @@ Every distinct `name`, `main`, cron expression, Queue producer/consumer and bind
 | `workers/sync-jobs/wrangler.toml` | queue.producer | `YOUTUBE_SYNC_WAKE_QUEUE` | `flamenode-youtube-sync-wake` | `flamenode-sync-jobs` | 未定 |
 | `workers/sync-jobs/wrangler.toml` | queue.producer | `STATIC_REBUILD_WAKE_QUEUE` | `flamenode-static-rebuild-wake` | MIG-0907 legacy static rebuild | MIG-0907 (queue only) |
 | `workers/sync-jobs/wrangler.toml` | queue.producer | `NOTIFICATION_WAKE_QUEUE` | `flamenode-notification-wake` | `flamenode-fast-jobs` (consumer) | 未定 |
-| `workers/sync-jobs/wrangler.toml` | queue.consumer | `flamenode-youtube-sync-wake` | DLQ `flamenode-youtube-sync-dlq`; batch 10; retry 3 | `flamenode-sync-jobs` | 未定 |
+| `workers/sync-jobs/wrangler.toml` | queue.consumer | `flamenode-youtube-sync-wake` | DLQ `flamenode-youtube-sync-dlq`; batch 10; timeout 1; retry 3; delay 300; concurrency 1 | `flamenode-sync-jobs` | 未定 |
 | `workers/sync-jobs/wrangler.toml` | d1.binding | `DB` | `flamenode_db` | `flamenode-sync-jobs` | 未定 |
 | `workers/sync-jobs/wrangler.toml` | r2.binding | `R2` | `flamenode-storage` | `flamenode-sync-jobs` pending MIG-0901 | 未定 |
 | `workers/sync-jobs/wrangler.toml` | kv.binding | `KV` | checked-in placeholder ID | `flamenode-sync-jobs` pending MIG-0901 | 未定 |
 
-**Counts (tracked source only):** 4 Worker names + 4 entrypoints, 3 cron *expressions* (4 schedule slots/hour), 8 Queue producer bindings, 3 Queue consumers with 3 DLQs, 4 D1 bindings, 4 R2 bindings, 4 KV bindings, 1 asset binding and 1 service binding. The queue name alone is not a dedicated consumer for every producer: compare each row by config + kind + binding.
+**Counts (tracked source only):** 4 Worker names + 4 entrypoints, 3 cron *expressions* (4 schedule slots/hour), 8 Queue producer bindings, 3 Queue consumers with 3 DLQs, 4 D1 bindings, 4 R2 bindings, 4 KV bindings, 1 asset binding and 1 service binding. The queue name alone is not a dedicated consumer for every producer: compare each row by config + kind + binding. Consumer declarations also record batch size, timeout, retry count, retry delay, and concurrency to prevent silent configuration drift.
 
 **Boundaries:** This is an inventory of declarative `wrangler.toml` entries, not runtime secret bindings, generated production config, Cloudflare account inventory, Queue deletion authority, traffic observations or idle/unused proof. The tracked `[vars]` values are not secret evidence. No Worker, Cron, Queue, Route, D1, R2, KV or account was altered.
 
