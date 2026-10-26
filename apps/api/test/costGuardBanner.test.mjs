@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.ts";
+import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
 import { resetOperationModeCachesForTests } from "../src/routes/live/operationMode.ts";
 import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
 import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
@@ -25,7 +26,7 @@ async function requestWith(env) {
   const response = await app.request("/api/operation-mode/banner", { method: "GET" }, env);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
-  return response.json();
+  return CostGuardBannerResponseSchema.parse(await response.json());
 }
 
 test("MIG-0661 T01: public economy mirror returns mode + reason without session or D1", async () => {
@@ -228,6 +229,53 @@ test("MIG-0661 T04: admin banner inherits guest/user/moderator/banned refusal", 
     );
     assert.equal(mutation.status, 404, "admin-read endpoint is GET-only");
     assert.equal(db.stats.writes, 0);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0661 T05: shared response contract recognizes every mode and nullable reason", () => {
+  for (const mode of ["normal", "economy", "read_only", "static_only", "maintenance"]) {
+    assert.deepEqual(
+      CostGuardBannerResponseSchema.parse({ mode, reason: null }),
+      { mode, reason: null },
+    );
+  }
+  assert.deepEqual(
+    CostGuardBannerResponseSchema.parse({ mode: "maintenance", reason: "scheduled" }),
+    { mode: "maintenance", reason: "scheduled" },
+  );
+  for (const invalid of [
+    { mode: "arbitrary", reason: null },
+    { mode: "normal" },
+    { mode: "normal", reason: 3 },
+    { mode: null, reason: null },
+  ]) {
+    assert.equal(CostGuardBannerResponseSchema.safeParse(invalid).success, false);
+  }
+});
+
+test("MIG-0661 T05: admin success and missing-row fallback validate the same DTO", async () => {
+  const sqlite = createSqlite();
+  try {
+    seedAdminRead(sqlite);
+    for (const [mode, reason] of [["maintenance", "scheduled"], ["invalid-mode", null]]) {
+      sqlite.prepare("UPDATE system_settings SET operation_mode = ?, cost_guard_reason = ? WHERE id = 'default'")
+        .run(mode, reason);
+      const db = createD1(sqlite);
+      const response = await app.request(
+        "/api/admin-read/cost-guard-banner",
+        { method: "GET", headers: cookie("tok-root") },
+        { DB: db },
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+      assert.deepEqual(CostGuardBannerResponseSchema.parse(await response.json()), {
+        mode: mode === "invalid-mode" ? "normal" : mode,
+        reason,
+      });
+      assert.equal(db.stats.statements, 2);
+    }
   } finally {
     sqlite.close();
   }

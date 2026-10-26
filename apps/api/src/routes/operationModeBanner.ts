@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
 import type { AppEnv } from "../env.ts";
 import {
   readOperationModeKvMirror,
@@ -16,11 +17,11 @@ export const operationModeBannerRoutes = new Hono<AppEnv>();
 operationModeBannerRoutes.get("/", async (c) => {
   const mode = await resolvePublicOperationMode(c.env, { allowD1: false });
   if (mode === "normal") {
-    return c.json({ mode: "normal", reason: null }, 200, NO_STORE);
+    return c.json(CostGuardBannerResponseSchema.parse({ mode: "normal", reason: null }), 200, NO_STORE);
   }
 
   // Reuse the same 30s mirror as the mode resolver. A forced mode still
   // performs one bounded KV read for the optional reason (CURRENT parity).
   const reason = (await readOperationModeKvMirror(c.env.KV))?.reason ?? null;
-  return c.json({ mode, reason }, 200, NO_STORE);
+  return c.json(CostGuardBannerResponseSchema.parse({ mode, reason }), 200, NO_STORE);
 });

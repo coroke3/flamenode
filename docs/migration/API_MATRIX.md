@@ -482,9 +482,11 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 
 
 
-## MIG-0661 — CostGuardBanner read DTO endpoints (in progress)
+## MIG-0661 — CostGuardBanner read DTO endpoints (U01–U03 code implemented; CI/review pending)
 
 | Endpoint | CURRENT source | Hono target | Guard and data read | State |
 | --- | --- | --- | --- | --- |
 | `GET /api/operation-mode/banner` | `src/lib/operationMode/publicMode.ts#resolveCostGuardBannerSnapshot`, `src/lib/operationMode/kvMirrorCore.ts` | `apps/api/src/routes/operationModeBanner.ts` | public, no session; `resolvePublicOperationMode({allowD1:false})` + KV mirror reason; D1 statements = 0; `Cache-Control: no-store` | MIG-0661 U01 IN_PROGRESS, PR#419 SHA=dfbf250bb7ec6aea3fe60c4185239a157d057138 (shared 30s KV mirror cache, exact-head CI running) |
 | `GET /api/admin-read/cost-guard-banner` | `src/components/layout/CostGuardBanner.tsx` admin source | `apps/api/src/routes/adminRead/costGuardBanner.ts` (implemented in PR#419) | existing admin read session/admin guard + 1 D1 SELECT; missing/failed row => normal; private no-store | MIG-0661 U02 IN_PROGRESS; tests T03/T04 added, CI pending |
+
+U03 contract: both Hono handlers validate successful and fallback JSON via `@flamenode/contracts#CostGuardBannerResponseSchema` (`packages/contracts/src/costGuardBanner.ts`) before serialization. `mode` is the five-value OperationMode vocabulary; `reason` is string or null. Regression checks are in `apps/api/test/costGuardBanner.test.mjs` T05. PR#419 source Head 66af40edddc45cb0b5cf46ea0d513cf3e33a2cd1 is the prior green U02 checkpoint; U03 CI is pending.
