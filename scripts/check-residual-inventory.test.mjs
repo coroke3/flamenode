@@ -253,3 +253,23 @@ test("T26: nested Worker JSONC and JSON deployment configs also require inventor
 test("T27: existing four tracked Wrangler files have no untracked workers",()=>{
   assert.deepEqual(findUntrackedWorkerConfigs(root),[]);
 });
+
+test("T28: embedded backtick in quoted Queue resource name cannot evade inventory drift",()=>{
+  const modified=content.replace(
+    'queue = "flamenode-static-rebuild-wake"',
+    'queue = "flamenode-static-re`build-wake"');
+  assert.notEqual(modified,content);
+  const report=checkResidualInventory({sources:{[contentPath]:modified}});
+  assert.ok(report.missing.some(r=>r.kind==="queue.producer"&&r.value.includes("re`build")));
+  assert.ok(report.stale.some(r=>r.kind==="queue.producer"&&r.value==="flamenode-static-rebuild-wake"));
+});
+
+test("T29: whitespace within a quoted Worker entrypoint is not silently trimmed",()=>{
+  const modified=web.replace(
+    'main = ".open-next/worker.js"',
+    'main = " .open-next/worker.js"');
+  assert.notEqual(modified,web);
+  const report=checkResidualInventory({sources:{"wrangler.toml":modified}});
+  assert.ok(report.missing.some(r=>r.kind==="worker.main"&&r.value===" .open-next/worker.js"));
+  assert.ok(report.stale.some(r=>r.kind==="worker.main"&&r.value===".open-next/worker.js"));
+});
