@@ -13,14 +13,15 @@ export const CONFIGS = [
   "workers/content-jobs/wrangler.toml",
   "workers/sync-jobs/wrangler.toml"
 ];
-const KNOWN = new Set(["","triggers","assets","services","queues.producers",
+const KNOWN = new Set(["","build","triggers","assets","services","queues.producers",
   "queues.consumers","d1_databases","r2_buckets","kv_namespaces"]);
 const ARRAY_SECTIONS = new Set(["services","queues.producers","queues.consumers",
   "d1_databases","r2_buckets","kv_namespaces"]);
 // Fail closed on unreviewed binding families. Inert sections have no bindings.
-const INERT_SECTIONS = new Set(["build","observability","placement","vars"]);
+const INERT_SECTIONS = new Set(["observability","placement","vars"]);
 const ALLOWED_KEYS = {
   "": ["name","main","compatibility_date","compatibility_flags","workers_dev","minify"],
+  build: ["command"],
   triggers: ["crons"],
   assets: ["directory","binding","run_worker_first"],
   services: ["binding","service"],
@@ -49,6 +50,7 @@ export function findUntrackedWorkerConfigs(root) {
   // A root JSON/JSONC variant can supersede the tracked root TOML and
   // invalidate the 36-row audit without changing any of the four sources.
   for(const item of readdirSync(root,{withFileTypes:true})) {
+    if(item.name==="workers" && item.isSymbolicLink()) files.push(item.name);
     if(item.name==="wrangler.toml" && item.isSymbolicLink()) files.push(item.name);
     if((item.name==="wrangler.json" || item.name==="wrangler.jsonc") &&
        (item.isFile() || item.isSymbolicLink())) files.push(item.name);
@@ -74,7 +76,8 @@ export function findUntrackedWorkerConfigs(root) {
               !CONFIGS.includes(local)) files.push(local);
     }
   }
-  visit(workerDir,"workers");
+  // Never descend into a linked workers/ root: it may point outside the repo.
+  if(!files.includes("workers")) visit(workerDir,"workers");
   return files.sort();
 }
 
@@ -176,6 +179,13 @@ export function extractConfigRows(source,config) {
     if(section==="") {
       if("name" in d) add("worker.name","name",req("name"));
       if("main" in d) add("worker.main","main",req("main"));
+    } else if(section==="build") {
+      // A commented-out or replaced Workers Builds guard must not pass the
+      // inventory CI just because the rest of the bindings still match.
+      if(config!=="wrangler.toml")
+        throw Error(where+": unreviewed background Worker build section");
+      if(d.command!=="node scripts/workers-ci-wrangler-guard.mjs")
+        throw Error(where+": expected guarded build.command (review required)");
     } else if(section==="triggers") {
       if(!Array.isArray(d.crons)) throw Error(where+": missing crons array");
       d.crons.forEach(v=>{
@@ -254,6 +264,8 @@ export function extractConfigRows(source,config) {
       bindingNames.set(r.setting,r.kind);
     }
   });
+  if(config==="wrangler.toml" && !blocks.some(x=>x.section==="build"))
+    throw Error(config+": missing guarded [build] section");
   if(rows.filter(x=>x.kind==="worker.name").length!==1||rows.filter(x=>x.kind==="worker.main").length!==1)
     throw Error(config+": expected exactly one worker name and main");
   return rows;

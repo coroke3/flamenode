@@ -477,3 +477,57 @@ test("T50: symlinked root Wrangler TOML requires review even if its contents mat
       assert.deepEqual(findUntrackedWorkerConfigs(temp),["wrangler.toml"]);
     } finally { rmSync(temp,{recursive:true,force:true}); }
   });
+
+test("T51: commented-out Workers Builds guard is not treated as an active command",()=>{
+  const guard='command = "node scripts/workers-ci-wrangler-guard.mjs"';
+  const changed=web.replace(guard,"# "+guard);
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /expected guarded build\.command/);
+});
+
+test("T52: altered or malformed build command fails closed without printing values",()=>{
+  const guard='command = "node scripts/workers-ci-wrangler-guard.mjs"';
+  const marker="do-not-leak-build-value-45678";
+  const changed=web.replace(guard,'command = "'+marker+'"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    error=>error.message.includes("expected guarded build.command") &&
+      !error.message.includes(marker));
+  const malformed=web.replace(guard,"command = "+marker);
+  assert.throws(()=>extractConfigRows(malformed,"wrangler.toml"),
+    error=>error.message.includes("unsupported TOML value (redacted)") &&
+      !error.message.includes(marker));
+});
+
+test("T53: removing the entire build block cannot disable the guard unnoticed",()=>{
+  const block='[build]\ncommand = "node scripts/workers-ci-wrangler-guard.mjs"\n';
+  const changed=web.replace(block,"");
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    /missing guarded \[build\] section/);
+});
+
+test("T54: unknown build keys and unexpected background builds require review",()=>{
+  const changed=web.replace(
+    'command = "node scripts/workers-ci-wrangler-guard.mjs"',
+    'run = "node scripts/workers-ci-wrangler-guard.mjs"');
+  assert.notEqual(changed,web);
+  assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
+    /unreviewed build key run/);
+  const background=fast+'\n[build]\ncommand = "node scripts/workers-ci-wrangler-guard.mjs"\n';
+  assert.throws(()=>extractConfigRows(background,fastPath),
+    /unreviewed background Worker build section/);
+});
+
+test("T55: linked workers root is rejected without traversing an external directory",
+  {skip:process.platform==="win32"},()=>{
+    const temp=mkdtempSync(resolve(tmpdir(),"flamenode-inventory-rootworkers-"));
+    try {
+      const external=resolve(temp,"external-workers");
+      mkdirSync(external,{recursive:true});
+      writeFileSync(resolve(external,"wrangler.toml"),'name = "unexpected"\n');
+      symlinkSync(external,resolve(temp,"workers"),"dir");
+      assert.deepEqual(findUntrackedWorkerConfigs(temp),["workers"]);
+    } finally { rmSync(temp,{recursive:true,force:true}); }
+  });
