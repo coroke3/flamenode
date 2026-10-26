@@ -3,6 +3,7 @@ import {test} from "node:test";
 import {readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync} from "node:fs";
 import {dirname,resolve} from "node:path";
 import {tmpdir} from "node:os";
+import {parseFileRows} from "./check-migration-file-progress.mjs";
 import {fileURLToPath} from "node:url";
 import {checkResidualInventory,extractConfigRows,readInventoryRows,findUntrackedWorkerConfigs} from "./check-residual-inventory.mjs";
 
@@ -294,4 +295,23 @@ test("T32: a Queue consumer name matching the producer queue does not cause an E
   const rows=extractConfigRows(fast,fastPath);
   assert.ok(rows.some(r=>r.kind==="queue.producer"));
   assert.ok(rows.some(r=>r.kind==="queue.consumer"));
+});
+
+test("T33: all three existing MIG-0908 files are registered in the validated migration ledger",()=>{
+  const matrix=readFileSync(resolve(root,"docs/migration/FILE_MIGRATION_MATRIX.md"),"utf8");
+  const {rows,errors}=parseFileRows(matrix);
+  assert.deepEqual(errors,[]);
+  const registered=new Map([
+    ["docs/migration/RESIDUAL_INVENTORY.md","CONFIG"],
+    ["scripts/check-residual-inventory.mjs","HELPER"],
+    ["scripts/check-residual-inventory.test.mjs","TEST"]
+  ]);
+  for(const [path,kind] of registered){
+    const row=rows.get(path);
+    assert.ok(row,`${path} must be in the Migration ledger, not the future-file list`);
+    assert.equal(row.kind,kind);
+    assert.equal(row.owner,"MIG-0908");
+    assert.equal(row.state,"IN_PROGRESS");
+    assert.match(row.evidence,/PR#416 SHA=[0-9a-f]{40}/);
+  }
 });
