@@ -371,7 +371,7 @@ Phase 6 共通契約のとおり。
 - **Readiness:** NEEDS_REFINEMENT — U01 harness は #341 で merge 済み。U02 は依存 task 全部の DONE と静かな host（`work-items/MIG-0606.md`: local の雑音が 7〜8ms の予算と同じ大きさ）の後。lead が測定条件（host、サンプル数、cold の作り方）を確定したら READY_FOR_SMALL_MODEL
 - **Recipe:** R-BUILD
 - **Runtime:** N
-- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0663 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-12
+- **Depends on:** MIG-0603..MIG-0605, MIG-0626, MIG-0629, MIG-0634..MIG-0648, MIG-0650..MIG-0657, MIG-0659..MIG-0664 / **Decisions:** D-06 DECIDED, D-12 DECIDED, D-13-58, D-14-7, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - 予算: `ZERO_1102.md` §3 の**最大値**で判定（参照 S2 < 7ms、更新 S3 < 8ms、session S4 は 2ms 以内）。p50/p95/p99 は記録だけ。入力は §5 の4種類を各 50 回以上。
@@ -3089,6 +3089,47 @@ npm run typecheck
 #### Rollback
 PR を revert（追加 field だけ。読み手は MIG-0719 だけ）。
 
+### MIG-0664: account summary（RH-001）の degraded に原因を足す（Ops guard 用、D-17-14）
+- **Model:** lead
+- **Readiness:** NEEDS_REFINEMENT — READY（D-17-14: MIG-0707 の guard が CURRENT の `enrichmentFailed` と同じ判定をするには、RH-001 の `degraded: true` がどちらの読みの失敗かを知る必要がある。実装は Sonnet、review は Opus）
+- **Recipe:** R-API
+- **Runtime:** S2
+- **Depends on:** MIG-0608 / **Decisions:** D-16-1, D-17-14
+- **Verified against:** `13141d1` (2026-10-27)
+#### Source snapshot
+- Hono: `apps/api/src/routes/account/summary.ts`。`degradedBody`（:167-190）は `degraded: true` と `canAccessManage: role === "admin"` を返す。呼ばれるのは 2 か所: `loadXRows` の失敗で `loadLinkedOnly` が成功したとき（:221-232、補助の pending 申請の読みの失敗）と、`hasEditableEvent` の失敗（:283-289、管理権限の読みの失敗）。
+- CURRENT: `src/lib/auth/requestAuthContext.ts:276-281` は `loadManagementAccess` の失敗だけで `enrichmentFailed` を立てる。layout はこれで `/entry?error=auth_temporarily_unavailable`（`app/(manage)/layout.tsx:30-32`）。
+- 読み手: `apps/site/src/lib/accountSummary.ts:20-31`（`degraded?: true` だけを読む。追加 field は無視される）。MIG-0707（Ops guard）。
+- test: `apps/api/test/accountSummary.test.mjs:161-177`（管理権限の読みの失敗の case）。
+#### Owned paths
+- 変更: `apps/api/src/routes/account/summary.ts`（`degradedBody` に引数 `reason` を足し、2 か所の呼び出しで渡す）, `apps/api/test/accountSummary.test.mjs`, `docs/migration/API_MATRIX.md`（RH-001 行）
+- 触らない: `apps/site/**`, `src/**`, summary の他の値・SQL・D1 の文の数
+#### Micro-units
+- **U01**: `degradedBody(user, active, linked, reason)` にし、:221-232 は `"pending_requests_unavailable"`、:283-289 は `"management_access_unavailable"` を渡す。応答に `degradedReason: reason` を足す。他の key と値は変えない。
+- **U02 test**: 下の T01〜T04。既存の :161 の case は `degradedReason` を足すだけ。
+#### Test cases
+| ID | 入力/操作 | 期待 |
+| --- | --- | --- |
+| T01 | `FROM event_staff` が失敗（非 admin） | 既存の期待 + `degradedReason: "management_access_unavailable"` |
+| T02 | `x_identity_requests` の読みだけが失敗（linked は成功、非 admin） | `degraded: true`、`degradedReason: "pending_requests_unavailable"`、他は既存の degraded と同じ |
+| T03 | 両方成功 | `degraded` も `degradedReason` も無い（既存の case が変わらない） |
+| T04 | linked も失敗 | 503 `{loggedIn:false, unavailable:true}`（既存どおり） |
+#### Commands
+```bash
+npm run build --workspace=@flamenode/api
+npm run test --workspace=@flamenode/api
+npm run typecheck
+```
+#### Ledger updates
+`API_MATRIX.md` の RH-001 行に `degradedReason`（D-17-14）。
+#### DONE checklist
+- [ ] T01〜T04 が PASS
+- [ ] 既存 key の値と D1 の文の数が変わっていない
+#### STOP
+- `canAccessManage` の計算や degraded の条件を変える必要が出たら止める（RH-001 の CURRENT parity を壊す。D-17-14 は field の追加だけ）。
+#### Rollback
+PR を revert（追加 field だけ。読み手は MIG-0707 だけで、reason が無ければ fail closed）。
+
 ### MIG-0611: Personal read APIs（dashboard / library / settings / onboarding の参照 API）
 - **Model:** lead
 - **Readiness:** NEEDS_REFINEMENT — 実装済み（PR #333）。merge 後の状態は STATUS（DONE）が正本。認証付き参照 API のため lead が所有する
@@ -3169,7 +3210,7 @@ PRをrevert。`apps/api` に route が増えるだけで、本番 Route・D1・�
 - **Readiness:** NEEDS_REFINEMENT — Phase Gate はエージェントが自動承認しない
 - **Recipe:** R-EVIDENCE
 - **Runtime:** N
-- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0663 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-12
+- **Depends on:** MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0664 / **Decisions:** D-14-14, D-15-15, D-16-13, D-17-12
 - **Verified against:** `a1b910b4` (2026-10-25)
 #### Source snapshot
 - `route-handlers/README.md` の RH-001〜033（33メソッド）。RH-010/011（Auth.js）は Phase 8 まで旧 Next。

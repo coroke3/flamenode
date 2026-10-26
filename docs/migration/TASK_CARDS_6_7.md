@@ -420,6 +420,12 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 一致 / 不一致 / admin / 未選択、D1 の文の数が変わらない。
 - DONE: 既存 field が変わらず 2 field が `GET /api/manage` と同じ値。
 
+### MIG-0664 — RH-001 の degraded に原因（D-17-14）
+- 読む: `apps/api/src/routes/account/summary.ts:167-190, 221-232, 283-289`、CURRENT の `requestAuthContext.ts:276-281`、`apps/site/src/lib/accountSummary.ts:20-31`、D-17-14。
+- 変更: 2 つの degraded 応答に `degradedReason` を足す（他の値は変えない）、`accountSummary.test.mjs` に case。
+- 試験: pending だけの失敗 / 管理権限の読みの失敗 / 両方成功で field なし / 503。
+- DONE: 既存の応答の値が変わらず、`degradedReason` が原因どおり。
+
 ### MIG-0701 — Personal dashboard GET screens
 
 - 読む: `PHASE_7_SPEC.md` の MIG-0701 Work Order、`work-items/MIG-0701.md`、`app/layout.tsx`、`app/(auth)/layout.tsx`、`src/styles/globals.css:7-10`、4つの CSS module。
@@ -455,7 +461,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 試験: 45 ルート × role の可否、Personal bundle に Ops の code が無い、危険操作の独立レビュー。
 - DONE: MIG-0726〜0737 が DONE で、欠けたルート・機能が 0。
 
-### MIG-0707 — Ops SPA scaffold (MIG-0704 U01)
+### MIG-0707 — Ops SPA scaffold (MIG-0704 U01) (merge gate MIG-0664)
 - 読む: `apps/app/{package.json,vite.config.ts,index.html,tsconfig.json}`、`apps/app/src/routes/guard.tsx`、`app/(manage)/layout.tsx`、`app/(admin)/layout.tsx`、`account/summary.ts:282-302`。
 - 変更: `+apps/ops/**`（package・build・router 枠・guard・`_headers`、U05 の read / write client・`useApiResult`・共有部品 15 個・global CSS、D-17）、CI の build / test、`assetHeaders.test.mjs` の `ops`。
 - 試験: 2 SPA の build で asset が混ざらない、guard の Location、noindex、`/_ops_assets/*` immutable。
