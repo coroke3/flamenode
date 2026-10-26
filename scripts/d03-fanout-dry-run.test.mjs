@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { analyzeDatabase, analyzeLocalFile } from "./d03-fanout-dry-run.mjs";
+import { analyzeDatabase, analyzeLocalFile, openReadOnly } from "./d03-fanout-dry-run.mjs";
 
 const CLI = new URL("./d03-fanout-dry-run.mjs", import.meta.url);
 function fixture(fn) {
@@ -425,3 +425,15 @@ test("T21 runs against the schema built from migrations/*.sql", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("T22 the analysis handle rejects writes (readOnly and query_only)", () => fixture(({ file }) => {
+  const ro = openReadOnly(file);
+  try {
+    assert.equal(ro.prepare("PRAGMA query_only").get().query_only, 1);
+    assert.throws(() => ro.exec("INSERT INTO videos VALUES ('w', 0)"), /readonly|query_only/i);
+    ro.exec("PRAGMA query_only = OFF");
+    assert.throws(() => ro.exec("INSERT INTO videos VALUES ('w', 0)"), /readonly/i);
+  } finally {
+    ro.close();
+  }
+}));

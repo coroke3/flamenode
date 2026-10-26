@@ -144,14 +144,19 @@ export function analyzeLocalFile(file) {
     throw new Error("Expected an existing local SQLite file");
   }
   requireStandaloneSnapshot(localPath);
-  const db = new DatabaseSync(localPath, { readOnly: true, open: true });
+  const db = openReadOnly(localPath);
   try {
-    // Defense in depth: accidental future statements must not mutate.
-    db.exec("PRAGMA query_only = ON");
     return analyzeDatabase(db);
   } finally {
     db.close();
   }
+}
+
+export function openReadOnly(localPath) {
+  const db = new DatabaseSync(localPath, { readOnly: true, open: true });
+  // Defense in depth: accidental future statements must not mutate.
+  db.exec("PRAGMA query_only = ON");
+  return db;
 }
 
 function parseArgs(args) {

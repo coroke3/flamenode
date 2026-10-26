@@ -1034,8 +1034,8 @@
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
-| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=0f9cdf66979697100a38ecac2bcd8ce2b442bf6f TEST=npm run check:d03-fanout-dry-run (T01–T21) CI=https://github.com/coroke3/flamenode/actions/runs/40311626295 (local synthetic D-03 only; not production cutover) |
-| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | fixture tests T01–T21, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection, WAL/header rejection, symlink/import entrypoint, non-approved owner skip, real migrations schema; PR#414 TEST=npm run check:d03-fanout-dry-run (SHA and CI recorded in work-items/MIG-0658.md) |
+| `scripts/d03-fanout-dry-run.mjs` | MIG-0658 | PARITY_VERIFIED | new read-only D-03 fan-out local SQLite report; PR#414 SHA=0f9cdf66979697100a38ecac2bcd8ce2b442bf6f TEST=npm run check:d03-fanout-dry-run (T01–T22) CI=https://github.com/coroke3/flamenode/actions/runs/40311626295 (local synthetic D-03 only; not production cutover) |
+| `scripts/d03-fanout-dry-run.test.mjs` | MIG-0658 | PARITY_VERIFIED | fixture tests T01–T22, including snapshot, approved-X, collisions, immutable SQLite, Windows/space paths, non-file input rejection, WAL/header rejection, symlink/import entrypoint, non-approved owner skip, real migrations schema, read-only handle; PR#414 TEST=npm run check:d03-fanout-dry-run (SHA and CI recorded in work-items/MIG-0658.md) |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
 | `apps/site/src/gateway/**` | MIG-0405 | IN_PROGRESS | index.ts / visibility.ts / routeShards.ts registered above; build emission of shards and lower-case user dirs is MIG-0409, Route PoC needs approval |
 | `scripts/check-public-site-build-budget.mjs` | MIG-0406 | IN_PROGRESS | created in PR#314; counts `apps/site/dist` by type, warns at 18,000 and fails above 20,000 (Free); CI runs it after the site build |
