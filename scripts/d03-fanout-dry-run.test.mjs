@@ -231,3 +231,23 @@ test("T11 reports zero mismatches without falsely marking truncation", () => fix
   assert.deepEqual(report.likeCountDelta, []);
   assert.equal(report.maxDeltaVideo, null);
 }));
+
+test("T12 collision report preserves the full count when first50 is truncated", () => fixture(({ insert, file }) => {
+  add.video(insert, "v1", 57);
+  add.auth(insert, "auth", "v1", "like", 999);
+  for (let i = 0; i < 57; i++) {
+    const xId = "x" + String(i).padStart(3, "0");
+    add.x(insert, xId);
+    add.link(insert, "auth", xId);
+    add.existing(insert, xId, "v1", "like", i);
+  }
+  const report = analyzeLocalFile(file);
+  assert.equal(report.candidates, 57);
+  assert.equal(report.conflictsWithVideoInteractions.count, 57);
+  assert.equal(report.conflictsWithVideoInteractions.first50.length, 50);
+  assert.equal(report.conflictsWithVideoInteractions.truncated, true);
+  assert.equal(report.conflictsWithVideoInteractions.first50[0].xUserId, "x000");
+  assert.equal(report.conflictsWithVideoInteractions.first50.at(-1).xUserId, "x049");
+  assert.deepEqual(report.likeCountDelta, [],
+    "pre-existing approved-X likes must not be double-counted");
+}));
