@@ -144,3 +144,32 @@ test("T16: U03 proposal table is not mistaken for the audited configuration tabl
   const extended=docs.replace("\n## 2.", "\n| supplementary | proposal | not a config |\n## 2.");
   assert.equal(readInventoryRows(extended).length,36);
 });
+
+test("T17: changing asset routing to Worker-first requires explicit review",()=>{
+  const changed=web.replace("run_worker_first = false","run_worker_first = true");
+  assert.notEqual(changed,web);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+    /expected explicit assets\.run_worker_first = false/);
+  assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":web.replace("run_worker_first = false","")}}),
+    /expected explicit assets\.run_worker_first = false/);
+});
+
+test("T18: malformed unquoted TOML IDs are never echoed in diagnostics",()=>{
+  const marker="never-log-this-id-0987654321";
+  const changed=fast.replace('id = "00000000000000000000000000000000"','id = '+marker);
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    error=>/unsupported TOML value \(redacted\)/.test(error.message)&&!error.message.includes(marker));
+});
+
+test("T19: duplicate singleton sections fail before inventory comparison",()=>{
+  const changed=fast.replace("[triggers]\ncrons", "[triggers]\ncrons");
+  const extra=changed+"\n[triggers]\ncrons = [\"30 * * * *\"]\n";
+  assert.throws(()=>extractConfigRows(extra,fastPath),/duplicate TOML section triggers/);
+});
+
+test("T20: repeating queue producer array sections remains supported",()=>{
+  const changed=fast+'\n[[queues.producers]]\nqueue = "new-wake"\nbinding = "NEW_WAKE"\n';
+  const result=checkResidualInventory({sources:{[fastPath]:changed}});
+  assert.ok(result.missing.some(r=>r.kind==="queue.producer"&&r.setting==="NEW_WAKE"));
+});
