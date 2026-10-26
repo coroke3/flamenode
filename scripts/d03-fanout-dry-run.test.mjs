@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
-import { copyFileSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -287,3 +287,21 @@ test("T14 CLI script path containing spaces is decoded before spawning Node", ()
   assert.equal(child.status, 0, child.stderr);
   assert.equal(JSON.parse(child.stdout).candidates, 1);
 }));
+
+test("T15 refuses missing and non-regular SQLite inputs without creating files", () => {
+  const dir = mkdtempSync(join(tmpdir(), "fn-mig-0658-path-"));
+  try {
+    const missing = join(dir, "missing.sqlite");
+    assert.throws(() => analyzeLocalFile(missing), /ENOENT/);
+    assert.equal(existsSync(missing), false, "missing input must not be created");
+
+    assert.throws(() => analyzeLocalFile(dir), /Expected an existing local SQLite file/);
+    const child = spawnSync(process.execPath,
+      [fileURLToPath(CLI), "--sqlite", dir], { encoding: "utf8" });
+    assert.equal(child.status, 1, "directory input must exit unsuccessfully");
+    assert.equal(child.stdout.trim(), "", "failed dry-run cannot emit a success report");
+    assert.match(child.stderr, /Expected an existing local SQLite file/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
