@@ -3,7 +3,7 @@
  * MIG-0908: compare checked-in Wrangler declarations with the code-side
  * inventory. Strict for audited sections; never queries Cloudflare.
  */
-import {readFileSync,readdirSync} from "node:fs";
+import {readFileSync,readdirSync,statSync} from "node:fs";
 import {resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -49,6 +49,7 @@ export function findUntrackedWorkerConfigs(root) {
   // A root JSON/JSONC variant can supersede the tracked root TOML and
   // invalidate the 36-row audit without changing any of the four sources.
   for(const item of readdirSync(root,{withFileTypes:true})) {
+    if(item.name==="wrangler.toml" && item.isSymbolicLink()) files.push(item.name);
     if((item.name==="wrangler.json" || item.name==="wrangler.jsonc") &&
        (item.isFile() || item.isSymbolicLink())) files.push(item.name);
   }
@@ -56,10 +57,21 @@ export function findUntrackedWorkerConfigs(root) {
     for(const item of readdirSync(dir,{withFileTypes:true})) {
       const local=relative+"/"+item.name;
       if(item.isDirectory()) visit(resolve(dir,item.name),local);
-      // A symlinked Wrangler file must not evade the config discovery guard.
-      else if((item.isFile() || item.isSymbolicLink()) &&
-              /^wrangler\.(?:toml|json|jsonc)$/.test(item.name) &&
-              (!CONFIGS.includes(local) || item.isSymbolicLink())) files.push(local);
+      else if(item.isSymbolicLink()) {
+        // Following a directory link can hide external Wrangler configs or
+        // recurse forever through a cycle. Flag it for explicit review.
+        if(/^wrangler\.(?:toml|json|jsonc)$/.test(item.name)) files.push(local);
+        else {
+          try {
+            if(statSync(resolve(dir,item.name)).isDirectory()) files.push(local);
+          } catch {
+            // A broken or inaccessible link is also unreviewed.
+            files.push(local);
+          }
+        }
+      }
+      else if(item.isFile() && /^wrangler\.(?:toml|json|jsonc)$/.test(item.name) &&
+              !CONFIGS.includes(local)) files.push(local);
     }
   }
   visit(workerDir,"workers");
