@@ -1034,6 +1034,7 @@
 
 | Planned path or family | Owning MIG | Status | Required connection |
 | --- | --- | --- | --- |
+| `docs/migration/RESIDUAL_INVENTORY.md` | MIG-0908 | IN_PROGRESS | U01 code-side Worker/Cron/Queue/D1/R2/KV/asset/service inventory (4 tracked Wrangler templates); U03 DEV_ONLY `/dev/ui-surfaces` proposal; `scripts/check-residual-inventory.mjs` enforces §1; §2 production observation deferred to MIG-0901; PR#416, no account or production mutation |
 | `scripts/check-residual-inventory.mjs` | MIG-0908 | IN_PROGRESS | U02 fail-closed 4-Wrangler declaration scanner (cron, producer/consumer, D1/R2/KV, assets/service); PR#416 SHA=c1607d727a54a6d3f40311a90b5e011d5d9bcae0; scope is tracked code only, no Cloudflare API |
 | `scripts/check-residual-inventory.test.mjs` | MIG-0908 | IN_PROGRESS | U02 T01–T10 source fixture/config mutation regression; PR#416 SHA=c1607d727a54a6d3f40311a90b5e011d5d9bcae0; CI pending |
 | `apps/ops/{package.json,tsconfig.json,index.html,vite.config.ts,src/**}` | MIG-0704 | NOT_CREATED | `/manage`, `/admin`, Ops assets / session, `@flamenode/ui` |
