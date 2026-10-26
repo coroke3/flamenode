@@ -179,10 +179,23 @@ export function extractConfigRows(source,config) {
     }
   });
   const seen=new Set();
+  const bindingKinds=new Set(["asset.binding","service.binding","queue.producer",
+    "d1.binding","r2.binding","kv.binding"]);
+  const bindingNames=new Map();
   rows.forEach(r=>{
     const key=[r.config,r.kind,r.setting,r.kind==="cron"?r.value:""].join("|");
     if(seen.has(key)) throw Error("duplicate declaration: "+key);
     seen.add(key);
+    // A Worker Env key must belong to exactly one binding, regardless of
+    // whether the duplicate belongs to a different binding family. Queue
+    // consumers only declare queue names, not Env keys.
+    if(bindingKinds.has(r.kind)) {
+      const previous=bindingNames.get(r.setting);
+      if(previous)
+        throw Error(config+": binding name collision "+r.setting+
+          " ("+previous+" and "+r.kind+")");
+      bindingNames.set(r.setting,r.kind);
+    }
   });
   if(rows.filter(x=>x.kind==="worker.name").length!==1||rows.filter(x=>x.kind==="worker.main").length!==1)
     throw Error(config+": expected exactly one worker name and main");
