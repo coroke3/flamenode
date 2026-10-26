@@ -152,7 +152,10 @@ export function extractConfigRows(source,config) {
   return rows;
 }
 export function readInventoryRows(markdown) {
-  const body=markdown.split("## 1. Tracked code-side inventory")[1]?.split("\n## 2.")[0];
+  // Read only the first inventory table. Later subsection tables are
+  // explanatory decision proposals, not Wrangler declaration records.
+  const body=markdown.split("## 1. Tracked code-side inventory")[1]
+    ?.split(/\n#{2,6}\s/)[0];
   if(!body) throw Error("inventory sections 1 and 2 required");
   const lines=body.split("\n").filter(x=>x.trim().startsWith("|"));
   const head=lines[0]?.split("|").slice(1,-1).map(clean).join("|");
