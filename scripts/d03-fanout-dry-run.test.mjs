@@ -101,11 +101,14 @@ test("T05 running the CLI never changes source SQLite file bytes", () => fixture
   add.link(insert, "a", "x1"); add.auth(insert, "a");
   const hash = () => createHash("sha256").update(readFileSync(file)).digest("hex");
   const before = hash();
+  const beforeEntries = readdirSync(dirname(file)).sort();
   const child = spawnSync(process.execPath, [fileURLToPath(CLI), "--sqlite", file], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stdout.trim().split("\n").length, 1);
   assert.equal(JSON.parse(child.stdout).candidates, 1);
   assert.equal(hash(), before);
+  assert.deepEqual(readdirSync(dirname(file)).sort(), beforeEntries,
+    "supported SQLite snapshot must not produce sibling sidecar files");
 }));
 
 
