@@ -5,9 +5,12 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { buildRobotsText, GET, ROBOTS_DISALLOW } from "../apps/site/src/pages/robots.txt.ts";
 import { siteOrigin } from "../apps/site/src/lib/pageHead.ts";
+import { buildSitemapEntries, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
+import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
+import { SITEMAP_VIDEOS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 
 const require = createRequire(import.meta.url);
-const { resolveRobots } = require("next/dist/build/webpack/loaders/metadata/resolve-route-data.js");
+const { resolveRobots, resolveSitemap } = require("next/dist/build/webpack/loaders/metadata/resolve-route-data.js");
 const root = new URL("../", import.meta.url);
 const origin = "https://flamenode.net";
 
@@ -54,3 +57,68 @@ test("MIG-0621 U01: built robots.txt matches the exact Next output (REQUIRE_BUIL
   const built = await readFile(new URL("apps/site/dist/robots.txt", root));
   assert.equal(Buffer.compare(built, Buffer.from(expected)), 0);
 });
+
+test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", () => {
+  assert.equal(typeof resolveSitemap, "function", "Next sitemap serializer must exist");
+  const entries = buildSitemapEntries({
+    origin,
+    videos: [{ id: "video_1", youtube_video_id: "yt-1", scheduled_time: 1_700_000_000 }],
+    events: [{ id: "event 1", end_time: null, start_time: 1_700_000_100 }],
+    creators: [{ x_id: "creator_a", updated_at: null }],
+    generatedAt: [1_700_000_020],
+    now: new Date("2026-10-27T00:00:00.000Z"),
+  });
+  assert.equal(entries.length, 10, "seven static entries and three dynamic entries");
+  assert.deepEqual(entries.map((row) => new URL(row.url).pathname.slice(0, 6)).filter((x) => x === "/event").length, 2);
+  assert.ok(entries.some((row) => row.url === origin + "/yt-1"));
+  assert.ok(entries.some((row) => row.url === origin + "/event/event%201"));
+  assert.ok(entries.some((row) => row.url === origin + "/user/creator_a"));
+  assert.equal(entries.at(-1).lastModified.toISOString(), new Date(1_700_000_020_000).toISOString());
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries), "Next 15.5 XML serialization must remain identical");
+});
+
+test("MIG-0621 U03 T04: missing manifest sitemap key warns once and omits only video URLs", async () => {
+  const warnings = [];
+  const access = {
+    source: { read: async () => null },
+    options: {
+      manifest: { schemaVersion: 1, generation: "g1", allowedKeys: [], blockedKeys: [] },
+      generation: "g1",
+    },
+  };
+  const omitted = await sitemapVideosOrEmpty(access, (message) => warnings.push(message));
+  assert.deepEqual(omitted, { generated_at: null, videos: [] });
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes(SITEMAP_VIDEOS_KEY));
+  const entries = buildSitemapEntries({
+    origin,
+    videos: omitted.videos,
+    events: [{ id: "public-event", start_time: null, end_time: null }],
+    creators: [],
+    generatedAt: [],
+    now: new Date("2026-10-27T00:00:00.000Z"),
+  });
+  assert.equal(entries.length, 8, "missing video snapshot must not delete the public event/static URLs");
+});
+
+test("MIG-0621 U03: hash-corrupted optional video snapshot fails closed, not silently omitted", async () => {
+  const warnings = [];
+  const payload = {
+    schemaVersion: 1, generation: "g1", key: SITEMAP_VIDEOS_KEY,
+    visibility: "public", sha256: "0".repeat(64),
+    payload: { generated_at: null, videos: [] },
+  };
+  const access = {
+    source: { read: async () => new TextEncoder().encode(JSON.stringify(payload)) },
+    options: {
+      manifest: { schemaVersion: 1, generation: "g1", allowedKeys: [SITEMAP_VIDEOS_KEY], blockedKeys: [] },
+      generation: "g1",
+    },
+  };
+  await assert.rejects(
+    sitemapVideosOrEmpty(access, (message) => warnings.push(message)),
+    (error) => error?.code === "HASH_MISMATCH",
+  );
+  assert.equal(warnings.length, 0);
+});
+
