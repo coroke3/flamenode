@@ -165,7 +165,8 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
   const loaded = await loadSitemapVideosSnapshot(source, {
     manifest: produced.result.manifest, generation: "gen-1",
   });
-  assert.deepEqual(loaded, expected, "manifest-verified sitemap snapshot must match CURRENT");
+  assert.deepEqual(loaded.videos, expected, "manifest-verified sitemap snapshot must match CURRENT");
+  assert.equal(loaded.generated_at, normalizeStaticRecentVideoPage(recent, 1, 500)?.generatedAt ?? null);
   await assert.rejects(
     loadSitemapVideosSnapshot(source, {
       manifest: { ...produced.result.manifest, allowedKeys: produced.result.manifest.allowedKeys.filter((key) => key !== SITEMAP_VIDEOS_KEY) },
