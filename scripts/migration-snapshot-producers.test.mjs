@@ -190,7 +190,12 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
   assert.ok(!paths.includes("/user/banned_c"), "non-listable creator may not leak");
   assert.ok(!paths.includes("/ytprivate001"), "private video may not leak");
 
-  assert.equal(loaded.generated_at, normalizeStaticRecentVideoPage(recent, 1, 500)?.generatedAt ?? null);
+  // The producer intentionally pins Date.now to NOW, while the separately rebuilt
+  // CURRENT oracle above uses real wall time. Assert each clock's provenance,
+  // not equality between unrelated instants.
+  assert.equal(loaded.generated_at, NOW, "snapshot generator uses the injected build timestamp");
+  assert.ok((normalizeStaticRecentVideoPage(recent, 1, 500)?.generatedAt ?? 0) > 0,
+    "CURRENT oracle exposes a valid source generated_at timestamp");
   await assert.rejects(
     loadSitemapVideosSnapshot(source, {
       manifest: { ...produced.result.manifest, allowedKeys: produced.result.manifest.allowedKeys.filter((key) => key !== SITEMAP_VIDEOS_KEY) },
