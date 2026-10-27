@@ -65,6 +65,13 @@ test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration 
   assert.ok(plan.publicSmoke.some(x => x.path === "/robots.txt"));
   assert.ok(plan.publicSmoke.some(x => x.path === "/sitemap.xml"));
   assert.ok(plan.apiSmoke.every(x => ["candidate", "fixture-required"].includes(x.mode)));
+  // No currently mounted Hono root can be silently omitted; where API_MATRIX
+  // lacks entries the source-anchored overlay supplies concrete actual paths.
+  assert.deepEqual(plan.coverage.filter(x => x.needsManualAudit), []);
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/manage/navigation" && x.method === "GET"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/admin/spreadsheet/data" && x.method === "GET"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/google-drive-image/:id" && x.mode === "fixture-required"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/youtube-thumbnail/:id/:size" && x.mode === "fixture-required"));
 });
 
 test("MIG-0628 U04: method/route parser flags undocumented mounted groups for review", () => {
