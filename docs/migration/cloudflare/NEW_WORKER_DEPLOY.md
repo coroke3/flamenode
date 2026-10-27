@@ -92,6 +92,15 @@ The bracketed `/api/live/events/[id]/{slots,submissions,summary}` shorthand
 is deliberately omitted and replaced by three verified Hono `/:id/...`
 routes, each requiring an event fixture. Never replay mutation probes against
 live production data merely from this checklist.
+The `/api/health/deep` endpoint is **not** a public health probe: it
+requires `WORKER_ADMIN_TOKEN` for authorization and currently fails closed
+(401 with an invalid Bearer token, 503 without a configured token or while
+deep-health parity is incomplete). It must be validated with owner-controlled
+fixtures, not counted as a public 200 smoke success. The `React/Vite app`
+route group is authenticated/private and excluded entirely from
+`publicSmoke`; only `Astro/site` paths and the three fixed public roots
+enter that list.
+
 An owner-run future smoke executor must explicitly require isolated fixtures,
 credentials scoped to the test environment, and a separate authorization gate.
 
