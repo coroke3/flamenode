@@ -734,7 +734,7 @@
     grid-template-columns: 1fr;
   }
 
-  .addRow .fn-btn {
+  .addRow :global(.fn-btn) {
     width: 100%;
     min-height: var(--fn-control-h-touch);
     justify-content: center;
