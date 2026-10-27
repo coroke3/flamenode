@@ -74,8 +74,12 @@ node scripts/new-worker-dry-run.mjs
 ```
 
 The auditable `scripts/new-worker-dry-run.mjs` wrapper internally runs only
-the three fixed `wrangler deploy --dry-run` commands, using `npx --no-install`
-and a non-shell argument vector. CI has an anti-deployment test that forbids
+the three fixed `wrangler deploy --dry-run` commands. It executes the locally
+installed `node_modules/wrangler/bin/wrangler.js` with `process.execPath`,
+using a non-shell argument vector on all platforms (including Windows).
+It fails closed if the installed CLI is missing; no `npx.cmd`, package install,
+login or production deploy fallback is allowed.
+CI has an anti-deployment test that forbids
 placing direct Wrangler deploy commands in GitHub Actions YAML; this rule is
 preserved, not weakened. `--plan` never invokes any external command.
 
