@@ -6,7 +6,6 @@ import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../
 import { siteOrigin } from "../lib/pageHead.ts";
 import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
-import { loadVideoPagesForBuild } from "../lib/videoPage.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../lib/videoFixtures.ts";
 import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
@@ -26,24 +25,22 @@ export async function sitemapVideosOrEmpty(
   warn: (message: string) => void = console.warn,
 ): Promise<SitemapVideoSnapshot> {
   if (!access) {
-    // Astro still publishes the local public video fixtures in this build mode.
-    // Derive only canonical pages from the same emitter used by /[id].astro.
-    const canonicalPages = (await loadVideoPagesForBuild({}))
-      .filter((page) => page.slug === page.canonicalSlug);
+    // /[id].astro uses these same fixtures and the CURRENT video-detail normalizer.
+    // Avoid importing its page renderer: Node's test runner cannot load its
+    // extensionless legacy imports, and the sitemap needs only public metadata.
+    const videos = Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS).map(([id, raw]) => {
+      const detail = normalizeStaticVideoDetail(raw as Parameters<typeof normalizeStaticVideoDetail>[0]);
+      if (!detail || detail.video.visibility_status !== "public" || detail.video.id !== id) {
+        throw new Error(`[sitemap] fixture ${id} is not a public, matching video detail`);
+      }
+      return {
+        id,
+        youtube_video_id: detail.video.youtube_video_id?.trim() || null,
+        scheduled_time: detail.video.scheduled_time,
+      };
+    });
     warn("[sitemap] no build snapshot configured; using published video fixtures");
-    return {
-      generated_at: null,
-      videos: canonicalPages.map((page) => {
-        const raw = FIXTURE_VIDEO_DETAIL_PAYLOADS[page.videoId];
-        const detail = raw ? normalizeStaticVideoDetail(raw as Parameters<typeof normalizeStaticVideoDetail>[0]) : null;
-        const scheduled = detail?.video.scheduled_time ?? null;
-        return {
-          id: page.videoId,
-          youtube_video_id: page.youtubeId ? page.canonicalSlug : null,
-          scheduled_time: scheduled,
-        };
-      }),
-    };
+    return { generated_at: null, videos };
   }
   try {
     return await loadSitemapVideosSnapshot(access.source, access.options);
