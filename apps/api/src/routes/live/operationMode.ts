@@ -9,10 +9,11 @@ import { isOperationMode, type OperationMode } from "@flamenode/domain/admin";
 
 export const OPERATION_MODE_KV_KEY = "operation_mode:mirror";
 export const ISOLATE_MODE_TTL_MS = 30_000;
-/** Reject malformed/oversized KV blobs before JSON.parse (ZERO_1102 rule 3).
- * Covers even worst-case escaped text from the normal 500-char reason input.
+/** Preserve CURRENT mode semantics even when a legacy KV reason is large.
+ * Rejecting the entire JSON by length can silently turn maintenance/static_only
+ * into normal. The banner bounds the reason separately before serialization.
+ * Normal writes already limit reason length; oversized legacy mirrors are rare.
  */
-export const MAX_OPERATION_MODE_KV_MIRROR_CHARS = 16_384;
 const KV_CACHE_TTL_MS = 30_000;
 const KV_ERROR_CACHE_TTL_MS = 5_000;
 
@@ -54,7 +55,7 @@ export type ParsedOperationModeKvMirror = {
 
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
 export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
-  if (!raw || raw.length > MAX_OPERATION_MODE_KV_MIRROR_CHARS) return null;
+  if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as {
       mode?: unknown;
