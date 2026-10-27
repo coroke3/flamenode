@@ -1,7 +1,7 @@
 # FlameNode 移行 引き継ぎメモ (Handoff)
 
 > **初版**: 2026-10-26 02:10 JST — `main=0a0f62a2` 時点の履歴スナップショット  
-> **追補**: 2026-10-27 JST — GitHub の open PR、各PR最終Headの Actions とレビュー一覧を再照合  
+> **追補**: 2026-10-27 20:05 JST — GitHub の open PR、各PR最終Headの Actions とレビュー一覧を再照合（#422 を追加）  
 > **確認した main**: `fc5b97856abf82c31bda8e1d1f5def1ca2d9e05e`（2026-10-27のPR base SHA）  
 > **注意**: 初版の「open PR 0件」「#386 のみ」は現在の作業状態を表していない。最新の正本は GitHub の open PR、PR branch の work-item、および main の `docs/migration/STATUS.md`。
 
@@ -17,12 +17,13 @@
 | [#419](https://github.com/coroke3/flamenode/pull/419) | MIG-0661 | `4f84a4e9` | [40456482435](https://github.com/coroke3/flamenode/actions/runs/40456482435): 両job SUCCESS | 0 | **BLOCKED**: 64 KiB超の有効KV mirrorのmode保持とJSON.parse CPU予算を両立する方針・非本番測定が未完。サイズだけでnormalに戻さない |
 | [#420](https://github.com/coroke3/flamenode/pull/420) | MIG-0718 | `bf6aee9b` | [40450876830](https://github.com/coroke3/flamenode/actions/runs/40450876830): 両job SUCCESS | 0 | **Draft**: U01–U02のみ。U03統合はMIG-0661・MIG-0701の両方がmainでDONEになってから |
 | [#421](https://github.com/coroke3/flamenode/pull/421) | MIG-0664 | `74db20d7` | [40471288115](https://github.com/coroke3/flamenode/actions/runs/40471288115): 両job SUCCESS | 0 | REVIEW: 最終Headの独立レビューと統合ゲート確認 |
-| [#408](https://github.com/coroke3/flamenode/pull/408) | handoff docs | `87875aeb`（本追補の変更前） | [40215059191](https://github.com/coroke3/flamenode/actions/runs/40215059191): 両job SUCCESS（**変更前のみ**） | 0 | Draft: 古い引き継ぎ記述を訂正中。本追補後は新しいHeadのCI確認が必要 |
+| [#422](https://github.com/coroke3/flamenode/pull/422) | MIG-0701 U04–U06 | `5b97f752` | [40486390396](https://github.com/coroke3/flamenode/actions/runs/40486390396): 両job SUCCESS | 0 | **Draft / REVIEW**: CSS/font、root documentとledger実装済み。独立レビュー、390/1440ブラウザ視覚検証（MIG-0706）と人間の判断が別途必要。MIG-0718 U03は#419と本件がmainでDONEになるまで着手不可 |
+| [#408](https://github.com/coroke3/flamenode/pull/408) | handoff docs | `2cd05029`（本追補の変更前） | [40478440345](https://github.com/coroke3/flamenode/actions/runs/40478440345): 両job SUCCESS（**変更前のみ**） | 0 | Draft: 最新のPR情報を同期中。本追補後は新しいHeadのCIが必要 |
 
 **次に解除すべき依存関係**:
-- MIG-0701 は main の `docs/migration/work-items/MIG-0701.md` で **READY / ownerなし**。U04 stylesheet port・U05 root documentが未完。PR #420 の U03 はこれと #419 の双方がDONEになるまで着手しない。
+- MIG-0701 は [PR #422](https://github.com/coroke3/flamenode/pull/422) のオーナーブランチ上で **REVIEW / 未マージ**。U04 CSS/font、U05 root document、U06 evidence は実装済みで、最終Head CI（40486390396）は両job SUCCESS。ただし独立承認なし。main の古い `STATUS.md` / work-item が READY と見えても、進行中PRを未着手と誤認しない。PR #420 の U03 は MIG-0701 と MIG-0661 (#419) の双方が main で DONE になるまで着手しない。
 - #419 のCPU/パリティトレードオフは `docs/migration/ZERO_1102.md` の予算と、CURRENT `src/lib/operationMode/kvMirrorCore.ts` の振る舞いを照合する。単純な生JSON長上限による `normal` fallback は mode を壊すので禁止。非本番測定のない段階で「1102解消」とは記録しない。
-- #416, #421 は最終HeadのCIはgreenだがレビュー0。**CI成功 != レビュー承認**。PRごとに独立した非実装者のレビューと、人間のsquash merge判断が必要。
+- #416, #421, #422 は最終HeadのCIがgreenだが独立レビュー0。**CI成功 != レビュー承認**。#422はDraftでもある。PRごとに独立した非実装者のレビューと、人間のsquash merge判断が必要。
 - mainへの直接push、自動マージ、本番Cloudflare/Worker Route/Remote D1/R2/KV/Queue/Secrets変更は禁止。STATUSのDONE更新はPRの承認・統合段階に行う。
 
 **再開の照合コマンド例**（出力を現在値として信用する。上表はスナップショット）:
@@ -69,12 +70,13 @@ npm run check:project-docs
 ```
 
 ### Step 3: 着手可能タスクの選定
+まず GitHub の open PR と各オーナーブランチの work-item を確認し、main の `STATUS.md` に反映前の進行中タスクを重複claimしない。
 ```bash
 npm run migration:next -- --model small
 ```
 または `PHASE_6_SPEC.md` / `PHASE_4_5_SPEC.md` より候補を確認。
 
-#### おすすめの次回着手候補
+#### 初版時点の着手候補（最新の READY とは限らない）
 1. **小型モデル向け (READY_FOR_SMALL_MODEL)**:
    - **MIG-0501**: `fixed/static routes (/about & /rules + /maintenance shell)`
      - Work order: `docs/migration/PHASE_4_5_SPEC.md ### MIG-0501`
