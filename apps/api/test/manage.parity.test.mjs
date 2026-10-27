@@ -30,6 +30,8 @@ if (runUnderRootTsx(import.meta.url)) {
   const { parseEventPartsJson } = await import("../../../src/lib/video/parseEventIds.ts");
   const { PRESET_PERMISSIONS, resolveStaffPermissionKeys } = await import("../src/routes/manage/access.ts");
   const order = await import("../src/routes/manage/eventOrder.ts");
+  const { shouldWarnManageActiveXMismatch } = await import("../../../packages/domain/src/video/ownership.ts");
+  const { ManageNavigationResponseSchema } = await import("@flamenode/contracts");
 
   const sqlite = createSqlite();
   seed(sqlite);
@@ -279,6 +281,91 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(r.body.truncated, ref.events.length > 100 || name === "many", name);
       assert.deepEqual(r.body.access, canon({ isAdmin: ref.snapshot.isAdmin, canAccessAdmin: ref.snapshot.canAccessAdmin, canAccessManage: ref.snapshot.canAccessManage, canManageXIdLinkRequests: ref.snapshot.canManageXIdLinkRequests }), name);
       record("navigation", r);
+    }
+  });
+
+
+  // MIG-0663: navigation feeds the same active/staff X mismatch warning as CURRENT.
+  test("MIG-0663 T01/T06: nav X IDs equal dashboard and resolve stale Active X before warning", async () => {
+    for (const name of ["owner", "mgr", "two", "ghost", "outsider"]) {
+      const nav = await call("/api/manage/navigation", `tok-${name}`);
+      const dash = await call("/api/manage", `tok-${name}`);
+      assert.equal(nav.status, 200, name);
+      assert.equal(dash.status, 200, name);
+      assert.equal(nav.body.activeXUserId, dash.body.activeXUserId, name);
+      assert.deepEqual(nav.body.manageStaffXUserIds, dash.body.manageStaffXUserIds, name);
+      assert.deepEqual(ManageNavigationResponseSchema.parse(nav.body), nav.body, name);
+      assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), false, name);
+      assert.equal(nav.stats.statements, 3, name);
+      assert.equal(nav.stats.writes, 0, name);
+    }
+    assert.equal((await call("/api/manage/navigation", "tok-owner")).body.activeXUserId, "owner_x",
+      "stored other_x must resolve to the sole approved linked X");
+    assert.equal((await call("/api/manage/navigation", "tok-two")).body.activeXUserId, "two_x1",
+      "legacy mixed-case stored X must resolve to the approved canonical ID");
+  });
+
+  test("MIG-0663 T01: approved Active X not in staff list yields CURRENT mismatch warning", async () => {
+    sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)").run("two_extra", "Extra", "approved");
+    sqlite.prepare("INSERT INTO x_user_account_links (x_user_id, auth_user_id, link_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("two_extra", "u_two", "owner", NOW, NOW);
+    sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run("two_extra", "u_two");
+    try {
+      const nav = await call("/api/manage/navigation", "tok-two");
+      const dash = await call("/api/manage", "tok-two");
+      assert.equal(nav.status, 200);
+      assert.equal(nav.body.activeXUserId, "two_extra");
+      assert.deepEqual(nav.body.manageStaffXUserIds, ["two_x1", "two_x2"]);
+      assert.equal(nav.body.activeXUserId, dash.body.activeXUserId);
+      assert.deepEqual(nav.body.manageStaffXUserIds, dash.body.manageStaffXUserIds);
+      assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), true);
+      assert.equal(nav.stats.statements, 3, "linked subquery must not add a D1 statement");
+    } finally {
+      sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(" TWO_X1 ", "u_two");
+      sqlite.prepare("DELETE FROM x_user_account_links WHERE x_user_id = ?").run("two_extra");
+      sqlite.prepare("DELETE FROM x_users WHERE id = ?").run("two_extra");
+    }
+  });
+
+  test("MIG-0663 T02/T03: admin has no Active/staff X; unresolved choice hides warning", async () => {
+    const admin = await call("/api/manage/navigation", "tok-admin");
+    assert.equal(admin.status, 200);
+    assert.equal(admin.body.activeXUserId, null);
+    assert.deepEqual(admin.body.manageStaffXUserIds, []);
+    assert.equal(shouldWarnManageActiveXMismatch(admin.body.activeXUserId, admin.body.manageStaffXUserIds), false);
+    assert.equal(admin.stats.statements, 2, "admin does not read linked X or staff snapshot");
+    sqlite.prepare('UPDATE "user" SET active_x_user_id = NULL WHERE id = ?').run("u_two");
+    try {
+      const nav = await call("/api/manage/navigation", "tok-two");
+      assert.equal(nav.body.activeXUserId, null, "two approved linked X with no active choice");
+      assert.deepEqual(nav.body.manageStaffXUserIds, ["two_x1", "two_x2"]);
+      assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), false);
+      assert.equal(nav.stats.statements, 3);
+    } finally {
+      sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(" TWO_X1 ", "u_two");
+    }
+  });
+
+  test("MIG-0663 T04/T05: existing navigation fields and S2 read/response budgets stay unchanged", async () => {
+    for (const name of ["owner", "two", "admin", "many"]) {
+      const nav = await call("/api/manage/navigation", `tok-${name}`);
+      const ref = await refNavigation(name);
+      assert.equal(nav.status, 200);
+      assert.deepEqual(nav.body.access, canon({
+        isAdmin: ref.snapshot.isAdmin,
+        canAccessAdmin: ref.snapshot.canAccessAdmin,
+        canAccessManage: ref.snapshot.canAccessManage,
+        canManageXIdLinkRequests: ref.snapshot.canManageXIdLinkRequests,
+      }), name);
+      assert.deepEqual(nav.body.events, canon(ref.events.slice(0, 100)), name);
+      assert.equal(nav.body.truncated, ref.events.length > 100 || name === "many", name);
+      assert.equal(nav.stats.statements, name === "admin" ? 2 : 3, name);
+      assert.equal(nav.stats.writes, 0, name);
+      assert.equal(nav.stats.batches, 0, name);
+      assert.ok(nav.stats.maxBinds <= 100, name);
+      assert.ok(nav.bytes <= 64 * 1024, name);
+      assert.deepEqual(Object.keys(nav.body).sort(),
+        ["access", "activeXUserId", "events", "manageStaffXUserIds", "truncated"].sort(), name);
     }
   });
 
