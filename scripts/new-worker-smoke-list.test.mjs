@@ -306,6 +306,10 @@ test("MIG-0628 U04: non-readonly APIs always require owner fixtures", () => {
       "| GET /api/a/items/:id | parameter fixture |",
     ].join("\n"),
     routeMatrix: "",
+    sourceRoutes: [
+      { method: "GET", path: "/api/a/status" },
+      { method: "HEAD", path: "/api/a/status" },
+    ],
   });
   const byMethodAndPath = (method, path) =>
     plan.apiSmoke.find((row) => row.method === method && row.path === path);
@@ -369,6 +373,7 @@ test("MIG-0628 U04: private GETs, query GETs, and grouped route shorthand fail c
     ].join("\n"),
     routeMatrix: "",
     sourceRoutes: [
+      { method: "GET", path: "/api/health" },
       { method: "GET", path: "/api/live/events/:id/slots" },
       { method: "GET", path: "/api/live/events/:id/submissions" },
       { method: "GET", path: "/api/live/events/:id/summary" },
@@ -408,6 +413,7 @@ test("MIG-0628 U04: deep health is authenticated and cannot be an ordinary smoke
       "| GET /api/health/deep | authenticated diagnostics |",
     ].join("\n"),
     routeMatrix: "",
+    sourceRoutes: [{ method: "GET", path: "/api/health" }],
   });
   const health = plan.apiSmoke.find(x => x.path === "/api/health");
   const deep = plan.apiSmoke.find(x => x.path === "/api/health/deep");
@@ -489,4 +495,21 @@ test("MIG-0628 U04: plan construction never contacts real network", () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("MIG-0628 U04: matrix-only fictitious GET stays manual even under a real mount", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: 'app.route("/api/health", healthRoutes);',
+    apiMatrix: [
+      "| GET /api/health | real source-verified |",
+      "| GET /api/health/not-registered | documentation drift |",
+    ].join("\n"),
+    routeMatrix: "",
+    sourceRoutes: [{ method: "GET", path: "/api/health" }],
+  });
+  const real = plan.apiSmoke.find(r => r.path === "/api/health");
+  const invented = plan.apiSmoke.find(r => r.path === "/api/health/not-registered");
+  assert.equal(real?.mode, "candidate");
+  assert.equal(invented?.mode, "fixture-required",
+    "a mounted prefix does not prove the documented leaf handler exists");
 });
