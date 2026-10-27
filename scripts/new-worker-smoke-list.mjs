@@ -145,36 +145,34 @@ const SOURCE_ROUTE_GAPS = Object.freeze([
 export function sourceDeclaresGetRoute(source, local) {
   if (typeof source !== "string" || typeof local !== "string" ||
       !local.startsWith("/")) return false;
-  let withoutComments = "";
-  let quote = null;
-  let escaped = false;
-  let lineComment = false;
-  let blockComment = false;
+  let quote = null, escaped = false, lineComment = false, blockComment = false;
   for (let i = 0; i < source.length; i++) {
     const ch = source[i], next = source[i + 1];
     if (lineComment) {
-      if (ch === "\n") { lineComment = false; withoutComments += ch; }
-    } else if (blockComment) {
+      if (ch === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
       if (ch === "*" && next === "/") { blockComment = false; i++; }
-      else if (ch === "\n") withoutComments += ch;
-    } else if (quote !== null) {
-      withoutComments += ch;
+      continue;
+    }
+    if (quote !== null) {
       if (escaped) escaped = false;
       else if (ch === "\\") escaped = true;
       else if (ch === quote) quote = null;
-    } else if (ch === '"' || ch === "'" || ch === "`") {
-      quote = ch;
-      withoutComments += ch;
-    } else if (ch === "/" && next === "/") {
-      lineComment = true; i++;
-    } else if (ch === "/" && next === "*") {
-      blockComment = true; i++;
-    } else withoutComments += ch;
+      continue;
+    }
+    if (ch === "/" && next === "/") { lineComment = true; i++; continue; }
+    if (ch === "/" && next === "*") { blockComment = true; i++; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+    // Match only actual source tokens, not commented-out snippets or string
+    // examples mentioning an otherwise nonexistent route.
+    if (ch === "." && source.startsWith(".get", i)) {
+      const match = /^\.get\s*\(\s*(["'])(.*?)\1\s*,/s.exec(source.slice(i));
+      if (match?.[2] === local) return true;
+    }
   }
-  const escapedLocal = [...local].map((ch) =>
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_:-".includes(ch)
-      ? ch : "\\" + ch).join("");
-  return new RegExp("\\.get\\(\\s*[\"']" + escapedLocal + "[\"']\\s*,").test(withoutComments);
+  return false;
 }
 
 function verifiedSourceRoutes() {
