@@ -83,6 +83,15 @@ test("existing source mentioned in MIG cards requires its own ledger row",()=>{
  assert.match(errors.join("\\n"),/missing file progress row for source/);
 });
 
+test("a .tsx source named in a MIG card requires its own ledger row",()=>{
+ const extra="src/components/layout/EventRecruitCard.tsx";
+ const input={...base,filePaths:[...filePaths,extra],taskCardsText:"### MIG-0501 \\n- 読む: "+extra};
+ assert.ok(validateFileProgress(input).includes("missing file progress row for source: "+extra));
+ const row="| \x60"+extra+"\x60 | HELPER | recruit card | MIG-0501 | apps/site event detail | NOT_STARTED | — |";
+ const withRow=matrix.replace("## Future files",row+"\n## Future files");
+ assert.deepEqual(validateFileProgress({...input,matrix:withRow}),[]);
+});
+
 test("MIG marked DONE cannot leave owned files NOT_STARTED",()=>{
  const completed=status.replace("MIG-0501 | about | BLOCKED","MIG-0501 | about | DONE");
  const errors=validateFileProgress({...base,status:completed});
