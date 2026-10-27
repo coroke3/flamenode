@@ -93,6 +93,7 @@ export const PUBLIC_ASSET_FILES: ReadonlySet<string> = new Set([
   "/logo.png",
   "/manifest.webmanifest",
   "/robots.txt",
+  "/sitemap.xml",
 ]);
 /** Hashed Astro build output and CURRENT `public/brand/`. Never `ROUTE_SHARD_DIR`. */
 /** Generated build output, not a user or entity route. */

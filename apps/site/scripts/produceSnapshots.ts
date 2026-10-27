@@ -26,6 +26,7 @@ import { readUserObjects } from "./batchedUserReader.ts";
 import {
   ABOUT_STATS_KEY,
   LIST_FIRST_PAGE_KEY,
+  SITEMAP_VIDEOS_KEY,
   RECOMMEND_KEY,
   TOP_KEY,
   TRENDING_KEY,
@@ -46,8 +47,21 @@ const ID_LIST_LIMIT = 5000;
 const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
 import { normalizeStaticUsersIndex } from "../../../src/lib/publicData/staticUsersIndexCore.ts";
+import { normalizeStaticRecentVideoPage } from "../../../src/lib/publicData/staticRecentVideoCore.ts";
+import { normalizeStaticVideoDetail } from "../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { normalizeXId } from "../../../src/lib/utils/xid.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../../src/lib/utils/publicXUser.ts";
+
+/** A recent-list alias is indexable only when it is the canonical URL of a public, built detail. */
+export function sitemapVideoMatchesDetail(
+  row: { id: string; youtube_video_id: string | null },
+  rawDetail: unknown,
+): boolean {
+  if (!rawDetail || typeof rawDetail !== "object") return false;
+  const detail = normalizeStaticVideoDetail(rawDetail as Parameters<typeof normalizeStaticVideoDetail>[0]);
+  if (!detail || detail.video.visibility_status !== "public" || detail.video.id !== row.id) return false;
+  return (detail.video.youtube_video_id?.trim() || detail.video.id) === (row.youtube_video_id ?? row.id);
+}
 
 /** CURRENT `/list` page size: the first page is the only list content rendered at build time. */
 export const LIST_FIRST_PAGE_SIZE = 24;
@@ -324,6 +338,18 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     add(RECOMMEND_KEY, objects.get("recommend.json"));
     const recent = objects.get("list/recent.json") as { items?: unknown[]; total?: number } | undefined;
     add(LIST_FIRST_PAGE_KEY, recent ? { videos: (recent.items ?? []).slice(0, LIST_FIRST_PAGE_SIZE), total: recent.total } : undefined);
+    // CURRENT sitemap uses the first 500 normalized public recent videos, not the 24-item UI page.
+    const sitemapPage = recent ? normalizeStaticRecentVideoPage(recent, 1, 500) : null;
+    add(SITEMAP_VIDEOS_KEY, sitemapPage ? {
+      generated_at: sitemapPage.generatedAt,
+      videos: sitemapPage.videos
+        .filter((video) => sitemapVideoMatchesDetail(video, evObjects.get(`videos/${video.id}.json`)))
+        .map((video) => ({
+        id: video.id,
+        youtube_video_id: video.youtube_video_id ?? null,
+        scheduled_time: video.scheduled_time ?? null,
+      })),
+    } : undefined);
     add(TRENDING_KEY, input.trending);
     add(USERS_INDEX_KEY, objects.get("users/index.json"));
     for (const id of creatorIds) {
