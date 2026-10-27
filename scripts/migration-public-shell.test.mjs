@@ -183,6 +183,28 @@ test("G05: root-layout head extras (manifest, icons, apple, robots, locale, them
   assert.equal(buildPageHead({ path: "/x", title: "t", noIndex: true }).noindex, true);
 });
 
+test("G07: invalid analytics ids never reach inline JavaScript or the loader URL", () => {
+  for (const raw of [
+    "G-ABC'123",
+    "G-ABC\\nDEF",
+    "G-ABC</script><script>alert(1)</script>",
+    "G-ABC?debug=1",
+    "G-ABC/extra",
+    "G-ABC&x=1",
+    "G-" + "X".repeat(80),
+  ]) {
+    assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: raw }), null, raw);
+  }
+  assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: " G-ABC123 " }), "G-ABC123");
+  assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: "GT-ABC123" }), "GT-ABC123");
+  assert.equal(gaMeasurementId({ NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-LEGACY" }), "G-LEGACY");
+  // Invalid primary input must not silently switch to a different analytics property.
+  assert.equal(gaMeasurementId({
+    PUBLIC_GA_MEASUREMENT_ID: "G-BAD'ID",
+    NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-OTHER",
+  }), null);
+});
+
 test("G07: GA4 tag is absent without the env and identical to @next/third-parties when set", { skip: skip || skipUi }, () => {
   for (const route of ["about/index.html", "rules/index.html"]) assert.equal(html(route).includes("googletagmanager"), false);
   assert.equal(gaMeasurementId({}), null);
