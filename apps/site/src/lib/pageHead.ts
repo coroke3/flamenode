@@ -1,3 +1,5 @@
+import { looksLikeMojibake } from "../../../../src/lib/utils/mojibake.ts";
+
 /**
  * Head metadata for fixed public pages (MIG-0501). Mirrors CURRENT `buildPageMetadata` (`src/lib/seo.ts`):
  * title `"<title> | FlameNode"`, canonical, Open Graph and Twitter card with the brand social image.
@@ -22,7 +24,7 @@ export function siteOrigin(env: Record<string, string | undefined> = process.env
 /** CURRENT `compactText`: collapse whitespace, cap at `max`, fall back to the site description. */
 export function compactText(value: string | null | undefined, max = 160): string {
   const compacted = (value ?? "").replace(/\s+/g, " ").trim();
-  if (!compacted) return DEFAULT_SITE_DESCRIPTION;
+  if (!compacted || looksLikeMojibake(compacted)) return DEFAULT_SITE_DESCRIPTION;
   if (compacted.length <= max) return compacted;
   return `${compacted.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
