@@ -64,10 +64,12 @@ export function AuthErrorView({ error, reset }: {
 export function OpsGate({ surface, api, children }: {
   surface: OpsSurface; api: OpsApi; children: React.ReactNode;
 }): React.ReactElement {
-  const [allowed, setAllowed] = React.useState(false);
+  // Bind the grant to both route surface and API instance. React may reuse this
+  // component when switching /manage -> /admin before the new effect runs.
+  const [grant, setGrant] = React.useState<{ surface: OpsSurface; api: OpsApi } | null>(null);
   React.useEffect(() => {
     const controller = new AbortController();
-    setAllowed(false);
+    setGrant(null);
     async function resolve(): Promise<void> {
       let decision = decideOpsAccess(surface, await api.getSummary(controller.signal));
       if (controller.signal.aborted) return;
@@ -75,7 +77,7 @@ export function OpsGate({ surface, api, children }: {
         decision = decideNavigation(await api.checkManageNavigation(controller.signal));
       }
       if (controller.signal.aborted) return;
-      if (decision === "allow") setAllowed(true);
+      if (decision === "allow") setGrant({ surface, api });
       else window.location.assign(decision);
     }
     void resolve().catch(() => {
@@ -83,7 +85,7 @@ export function OpsGate({ surface, api, children }: {
     });
     return () => controller.abort();
   }, [api, surface]);
-  if (!allowed) {
+  if (grant?.surface !== surface || grant.api !== api) {
     return <div role="status" aria-busy="true" className="fn-public-container fn-page">読み込み中...</div>;
   }
   return <>{children}</>;
