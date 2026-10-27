@@ -44,9 +44,14 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sour
   ].map((route) => [route.method + " " + route.path, route])).values()];
   const api = documented.filter((r) =>
     mounts.some((m) => r.path === m.path || r.path.startsWith(m.path + "/")));
-  const manual = api.filter(({ path }) => /[:\[\]{}]/.test(path))
+  // The generated JSON is a review checklist, never a live test runner.
+  // Mutating methods must not look safe to automate merely because their URL
+  // has no parameters (e.g. POST /api/admin/audit/settings).
+  const isReadOnlyCandidate = ({ method, path }) =>
+    (method === "GET" || method === "HEAD") && !/[:\[\]{}]/.test(path);
+  const manual = api.filter((route) => !isReadOnlyCandidate(route))
     .map((r) => ({ ...r, mode: "fixture-required", expected: "owner-verified contract" }));
-  const automated = api.filter(({ path }) => !/[:\[\]{}]/.test(path))
+  const automated = api.filter(isReadOnlyCandidate)
     .map((r) => ({ ...r, mode: "candidate", expected: r.path === "/api/health" ? 200 : "owner-verified contract" }));
   const routeRows = [];
   for (const row of routeMatrix.split("\n")) {
