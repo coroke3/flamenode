@@ -49,7 +49,7 @@ export function buildSitemapEntries(input: {
     changeFrequency,
     priority,
   });
-  return [
+  const candidates: SitemapEntry[] = [
     entry("/", "daily", 1),
     entry("/recommend", "daily", 0.8),
     entry("/list", "daily", 0.8),
@@ -61,6 +61,15 @@ export function buildSitemapEntries(input: {
     ...input.events.map((e) => entry(`/event/${encodeURIComponent(e.id)}`, "weekly", 0.7, e.end_time ?? e.start_time)),
     ...input.creators.map((u) => entry(`/user/${encodeURIComponent(u.x_id)}`, "weekly", 0.6, u.updated_at)),
   ];
+  // A repeated YouTube alias / duplicated creator can otherwise publish the same
+  // canonical URL twice. URL() also collapses "." / ".." aliases into the root.
+  // Keep the first entry in CURRENT order (static, videos, events, creators).
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.url)) return false;
+    seen.add(candidate.url);
+    return true;
+  });
 }
 
 /** Replicates Next 15.5 resolveSitemap for our loc/lastmod/changefreq/priority-only entries. */
