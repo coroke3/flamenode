@@ -251,6 +251,31 @@ test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration 
     "smoke must only list real normalized Hono paths");
 });
 
+test("MIG-0628 U04: Hono mount parser excludes comments and quoted app.route examples", () => {
+  const source = [
+    'app.route("/api/real", realRoutes);',
+    '// app.route("/api/commented", ghostRoutes);',
+    '/* app.route("/api/block", ghostRoutes); */',
+    '/*\napp.route("/api/block-multiline", ghostRoutes);\n*/',
+    'const stringExample = \'app.route("/api/string", ghostRoutes)\';',
+    'const templateExample = `app.route("/api/template", ghostRoutes)`;',
+    'const url = "https://example.invalid/path"; app.route("/api/other", otherRoutes);',
+    'app.route(\n  "/api/multiline", makeRoutes());',
+  ].join("\n");
+  assert.deepEqual(listHonoMounts(source), [
+    { path: "/api/multiline", owner: "makeRoutes" },
+    { path: "/api/other", owner: "otherRoutes" },
+    { path: "/api/real", owner: "realRoutes" },
+  ]);
+  assert.deepEqual(listHonoMounts('// app.route("/api/ghost", ghostRoutes)\n'), []);
+  assert.throws(() => buildNewWorkerSmokePlan({
+    appEntry: '/* app.route("/api/ghost", ghostRoutes); */',
+    apiMatrix: "| GET /api/ghost/health | example |",
+    routeMatrix: "",
+  }), /no parsable Hono mounts/,
+  "only commented mounts must not satisfy the source coverage gate");
+});
+
 test("MIG-0628 U04: method/route parser flags undocumented mounted groups for review", () => {
   const fake = buildNewWorkerSmokePlan({
     appEntry: 'app.route("/api/a", aRoutes);\napp.route("/api/b", makeBRoutes());',
