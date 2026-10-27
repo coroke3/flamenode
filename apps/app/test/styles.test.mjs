@@ -37,6 +37,15 @@ test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class
       `dashboard action ${href} must use the global fn-btn class`);
   }
   assert.equal(target, portCssModule(source, "dash"), "generated SPA CSS must match CURRENT");
+  const [settingsCurrent, settingsSpa] = await Promise.all([
+    read("src/components/settings/settings-page.module.css"),
+    read("apps/app/src/styles/settings.css"),
+  ]);
+  assert.match(settingsCurrent, /\\.addRow\\s+:global\\(\\.fn-btn\\)\\s*\\{/);
+  assert.match(settingsSpa, /\\.settings-addRow\\s+\\.fn-btn\\s*\\{\\s*width:\\s*100%/);
+  assert.doesNotMatch(settingsSpa, /\\.settings-addRow\\s+\\.settings-fn-btn\\b/);
+  assert.equal(settingsSpa, portCssModule(settingsCurrent, "settings"),
+    "settings SPA CSS must match CURRENT after global-class fix");
 });
 
 async function getTsx(dir) {
