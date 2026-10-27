@@ -328,6 +328,12 @@ test("MIG-0628 U04: only the real app receiver counts as a Hono mount", () => {
       { path: "/api/real", owner: "realRoutes" },
     ], example);
   }
+  // A conditional-expression '?' before app is not optional property access.
+  const conditional = 'const result = flag ? app.route("/api/conditional", conditionalRoutes) : app;';
+  assert.equal(countActiveHonoMountCalls(conditional), 1);
+  assert.deepEqual(listHonoMounts(conditional), [
+    { path: "/api/conditional", owner: "conditionalRoutes" },
+  ]);
   const withComment = '// note ending with a period.\n' + real;
   assert.equal(countActiveHonoMountCalls(withComment), 1);
   assert.deepEqual(listHonoMounts(withComment), [
