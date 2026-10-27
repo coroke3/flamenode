@@ -135,6 +135,30 @@ test("MIG-0621: unpublished video/event detail must never appear in sitemap", ()
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
 
+test("MIG-0621: snapshot-free sitemap includes the same canonical fixture videos Astro emits", async () => {
+  const warnings = [];
+  const snapshot = await sitemapVideosOrEmpty(null, (message) => warnings.push(message));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /published video fixtures/);
+  assert.deepEqual(snapshot.videos, [
+    { id: "vid-aaa", youtube_video_id: "dKw1xV41f8s", scheduled_time: 1_760_000_000 },
+    { id: "vid-bbb", youtube_video_id: null, scheduled_time: 1_760_000_000 },
+  ]);
+  const entries = buildSitemapEntries({
+    origin,
+    videos: snapshot.videos,
+    events: [],
+    creators: [],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  assert.equal(entries.length, 9, "7 fixed URLs and 2 emitted canonical fixture pages");
+  const urls = entries.map((row) => row.url);
+  assert.ok(urls.includes(origin + "/dKw1xV41f8s"));
+  assert.ok(urls.includes(origin + "/vid-bbb"));
+  assert.equal(urls.includes(origin + "/vid-aaa"), false, "internal alias is not canonical");
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
 test("MIG-0621 U03 T04: missing manifest sitemap key warns once and omits only video URLs", async () => {
   const warnings = [];
   const access = {
