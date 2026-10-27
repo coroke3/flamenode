@@ -29,12 +29,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseAccountSummary(value: unknown): SummaryResult {
   if (!isRecord(value)) return { status: "unavailable" };
   if (value.loggedIn === false) {
-    return value.unavailable === true ? { status: "unavailable" } : { status: "anonymous" };
+    if (value.unavailable === true) return { status: "unavailable" };
+    return value.unavailable === undefined ? { status: "anonymous" } : { status: "unavailable" };
   }
   if (value.loggedIn !== true ||
       (value.role !== "admin" && value.role !== "user" && value.role !== "moderator") ||
       typeof value.canAccessAdmin !== "boolean" ||
-      typeof value.canAccessManage !== "boolean") {
+      typeof value.canAccessManage !== "boolean" ||
+      // Never treat inconsistent or future degraded metadata as a healthy permission read.
+      (value.degradedReason !== undefined && value.degraded !== true)) {
     return { status: "unavailable" };
   }
   // Unknown degradedReason is deliberately not trusted; guard fails closed.
