@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildNewWorkerSmokePlan, listHonoMounts, loadNewWorkerSmokePlan } from "./new-worker-smoke-list.mjs";
+import { buildNewWorkerSmokePlan, collectApiMatrixRoutes, listHonoMounts, loadNewWorkerSmokePlan } from "./new-worker-smoke-list.mjs";
 
 const read = (path) => readFileSync(new URL("../" + path, import.meta.url), "utf8");
 const gateway = read("apps/site/wrangler.toml");
@@ -180,6 +180,14 @@ test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration 
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/admin/spreadsheet/data" && x.method === "GET"));
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/google-drive-image/:id" && x.mode === "fixture-required"));
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/youtube-thumbnail/:id/:size" && x.mode === "fixture-required"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/personal/library" && x.mode === "fixture-required"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/admin-read/ops/security" && x.mode === "fixture-required"));
+  for (const suffix of ["slots", "submissions", "summary"]) {
+    assert.ok(plan.apiSmoke.some(x => x.path === "/api/live/events/:id/" + suffix &&
+      x.mode === "fixture-required"), "live endpoint fixture missing: " + suffix);
+  }
+  assert.ok(plan.apiSmoke.every(x => !/[?\[\]{}]/.test(x.path)),
+    "smoke must only list real normalized Hono paths");
 });
 
 test("MIG-0628 U04: method/route parser flags undocumented mounted groups for review", () => {
@@ -225,6 +233,66 @@ test("MIG-0628 U04: non-readonly APIs always require owner fixtures", () => {
     assert.equal(probe.expected, "owner-verified contract");
   }
   assert.equal(plan.apiSmoke.filter(x => x.mode === "candidate").length, 2);
+});
+
+test("MIG-0628 U04: API_MATRIX query syntax becomes fixture-bound real path", () => {
+  const routes = collectApiMatrixRoutes([
+    "| GET /api/personal/library?tab&page | user route |",
+    "| GET /api/admin-read/ops/security?run=1 | privileged read |",
+    "| GET /api/admin-read/ops/youtube-sync?... | query shorthand |",
+    "| GET /api/live/events/[id]/{slots,submissions,summary} | Next shorthand only |",
+    "| GET /api/events/[id]/slots/viewer-overlay | Next shorthand |",
+    "| GET /api/health | public read |",
+    "| GET /api/health?verbose | fixture even if plain also documented |",
+    "| GET /api/event-endpoints/:id/release) | punctuation from prose |",
+  ].join("\n"));
+  const find = (path) => routes.find(r => r.path === path);
+  for (const path of [
+    "/api/personal/library", "/api/admin-read/ops/security",
+    "/api/admin-read/ops/youtube-sync", "/api/health",
+  ]) {
+    assert.equal(find(path)?.requiresFixture, true, path);
+  }
+  assert.equal(find("/api/event-endpoints/:id/release")?.requiresFixture, false);
+  assert.ok(routes.every(r => !/[?[\]{}]/.test(r.path)),
+    "never include query text, Next brackets, or grouped shorthand as a route");
+  assert.equal(routes.length, 5);
+});
+
+test("MIG-0628 U04: private GETs, query GETs, and grouped route shorthand fail closed", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: [
+      'app.route("/api/personal", personal);',
+      'app.route("/api/admin-read", adminRead);',
+      'app.route("/api/manage", manage);',
+      'app.route("/api/health", health);',
+      'app.route("/api/live/events", live);',
+    ].join("\n"),
+    apiMatrix: [
+      "| GET /api/personal/dashboard | private |",
+      "| GET /api/personal/library?tab&page | filter |",
+      "| GET /api/admin-read/ops/security?run=1 | audited expensive read |",
+      "| GET /api/manage/navigation | private |",
+      "| GET /api/health | public read |",
+      "| GET /api/live/events/[id]/{slots,submissions,summary} | doc shorthand |",
+    ].join("\n"),
+    routeMatrix: "",
+    sourceRoutes: [
+      { method: "GET", path: "/api/live/events/:id/slots" },
+      { method: "GET", path: "/api/live/events/:id/submissions" },
+      { method: "GET", path: "/api/live/events/:id/summary" },
+    ],
+  });
+  const get = path => plan.apiSmoke.find(r => r.path === path && r.method === "GET");
+  for (const path of [
+    "/api/personal/dashboard", "/api/personal/library",
+    "/api/admin-read/ops/security", "/api/manage/navigation",
+    "/api/live/events/:id/slots", "/api/live/events/:id/submissions",
+    "/api/live/events/:id/summary",
+  ]) assert.equal(get(path)?.mode, "fixture-required", path);
+  assert.equal(get("/api/health")?.mode, "candidate");
+  assert.ok(!plan.apiSmoke.some(r => /[?[\]{}]/.test(r.path)));
+  assert.deepEqual(plan.coverage.filter(r => r.needsManualAudit), []);
 });
 
 test("MIG-0628 U04: plan construction never contacts real network", () => {
