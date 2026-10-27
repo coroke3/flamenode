@@ -144,7 +144,7 @@ ignoring commented-out registrations and route examples inside quoted
 strings/templates. It accepts ordinary JavaScript whitespace/newlines around
 `app . route(...)`; a syntactically valid reformat must not evade coverage.
 A separate call counter recognizes optional and computed forms such as
-`app?.route(...)` and `app["route"](...)` even though these forms are not
+`app?.route(...)` and computed property access to the same method even though these forms are not
 accepted by the literal mount parser: CI rejects their count mismatch for
 explicit review instead of silently losing routes. An additional unparsed
 or dynamic mount also fails closed. The parser is intentionally limited
