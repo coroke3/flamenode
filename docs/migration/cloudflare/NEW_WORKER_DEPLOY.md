@@ -134,6 +134,14 @@ route group is authenticated/private and excluded entirely from
 `publicSmoke`; only `Astro/site` paths and the three fixed public roots
 enter that list.
 
+The Hono mount inventory scans only active `app.route(...)` calls,
+ignoring commented-out registrations and route examples inside quoted
+strings/templates. A separate count of **all active mount calls** is
+compared with the recognized literal mount list: any new dynamic or
+unparsed mount must fail CI for explicit coverage review instead of silently
+disappearing. The parser is intentionally limited to the tracked `app.ts`
+syntax and is not an arbitrary JavaScript interpreter.
+
 An owner-run future smoke executor must explicitly require isolated fixtures,
 credentials scoped to the test environment, and a separate authorization gate.
 
