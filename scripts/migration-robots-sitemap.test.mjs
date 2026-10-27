@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { buildRobotsText, GET, ROBOTS_DISALLOW } from "../apps/site/src/pages/robots.txt.ts";
 import { siteOrigin } from "../apps/site/src/lib/pageHead.ts";
-import { buildSitemapEntries, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
+import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
 import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
 import { SITEMAP_VIDEOS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 
@@ -107,6 +107,31 @@ test("MIG-0621: duplicate video aliases and creators never duplicate sitemap loc
   assert.equal(urls.filter((url) => url === origin + "/shared_alias").length, 1);
   assert.equal(entries.find((item) => item.url === origin + "/shared_alias")?.lastModified.toISOString(),
     new Date(first * 1000).toISOString(), "first canonical video entry must retain CURRENT ordering");
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
+test("MIG-0621: unpublished video/event detail must never appear in sitemap", () => {
+  const videos = [
+    { id: "published", youtube_video_id: "published_yt", scheduled_time: null },
+    { id: "missing_detail", youtube_video_id: "missing_yt", scheduled_time: null },
+  ];
+  const events = [
+    { id: "published_event", start_time: null, end_time: null },
+    { id: "missing_event", start_time: null, end_time: null },
+  ];
+  const entries = buildSitemapEntries({
+    origin,
+    videos: publishedSitemapRows(videos, new Set(["published"])),
+    events: publishedSitemapRows(events, new Set(["published_event"])),
+    creators: [],
+    generatedAt: [],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  const urls = entries.map((row) => row.url);
+  assert.ok(urls.includes(origin + "/published_yt"));
+  assert.ok(urls.includes(origin + "/event/published_event"));
+  assert.equal(urls.includes(origin + "/missing_yt"), false);
+  assert.equal(urls.includes(origin + "/event/missing_event"), false);
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
 
