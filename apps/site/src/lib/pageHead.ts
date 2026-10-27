@@ -120,6 +120,18 @@ export function absoluteUrl(path: string, origin: string = siteOrigin()): string
   }
 }
 
+const PAGE_TITLE_FALLBACKS: Readonly<Record<string, string>> = {
+  "/": SITE_NAME,
+  "/about": "FlameNodeについて",
+  "/rules": "利用規約",
+};
+
+/** CURRENT readableTitle: reject empty/mojibake titles, retain fixed-route fallbacks. */
+function readableTitle(value: string, path: string): string {
+  const title = value.trim();
+  return title && !looksLikeMojibake(title) ? title : (PAGE_TITLE_FALLBACKS[path] ?? SITE_NAME);
+}
+
 export function buildPageHead(input: {
   path: string;
   title: string;
@@ -130,12 +142,13 @@ export function buildPageHead(input: {
   ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
+  const title = readableTitle(input.title, input.path);
   const base = {
     noindex: input.noIndex === true,
-    title: `${input.title} | ${SITE_NAME}`,
+    title: `${title} | ${SITE_NAME}`,
     description: compactText(input.description),
     canonical: `${origin}${input.path}`,
-    ogTitle: input.title,
+    ogTitle: title,
     ogType: input.ogType ?? "website",
   } as const;
   if (input.image) {
@@ -145,7 +158,7 @@ export function buildPageHead(input: {
       ogImageWidth: null,
       ogImageHeight: null,
       ogImageType: null,
-      ogImageAlt: input.title,
+      ogImageAlt: title,
     };
   }
   return {
