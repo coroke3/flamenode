@@ -6,6 +6,8 @@ import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../
 import { siteOrigin } from "../lib/pageHead.ts";
 import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
+import { loadVideoPagesForBuild } from "../lib/videoPage.ts";
+import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../lib/videoFixtures.ts";
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
 import {
   loadSitemapVideosSnapshot,
@@ -23,8 +25,22 @@ export async function sitemapVideosOrEmpty(
   warn: (message: string) => void = console.warn,
 ): Promise<SitemapVideoSnapshot> {
   if (!access) {
-    warn("[sitemap] no build snapshot configured; video URLs omitted");
-    return EMPTY_VIDEOS;
+    // Astro still publishes the local public video fixtures in this build mode.
+    // Derive only canonical pages from the same emitter used by /[id].astro.
+    const canonicalPages = (await loadVideoPagesForBuild({}))
+      .filter((page) => page.slug === page.canonicalSlug);
+    warn("[sitemap] no build snapshot configured; using published video fixtures");
+    return {
+      generated_at: null,
+      videos: canonicalPages.map((page) => {
+        const scheduled = FIXTURE_VIDEO_DETAIL_PAYLOADS[page.videoId]?.video?.scheduled_time;
+        return {
+          id: page.videoId,
+          youtube_video_id: page.youtubeId ? page.canonicalSlug : null,
+          scheduled_time: typeof scheduled === "number" && Number.isFinite(scheduled) ? scheduled : null,
+        };
+      }),
+    };
   }
   try {
     return await loadSitemapVideosSnapshot(access.source, access.options);
@@ -59,7 +75,7 @@ export async function GET(): Promise<Response> {
   }
   const publishedVideoIds = manifest
     ? new Set(videoDetailKeys(manifest).map((key) => key.slice("snapshot/video-detail/".length, -".json".length)))
-    : new Set<string>();
+    : new Set(videos.videos.map((video) => video.id)); // no snapshot: verified fixture page emitter
   const publishedEventIds = new Set(events.details.keys());
   const entries = buildSitemapEntries({
     origin: siteOrigin(),
