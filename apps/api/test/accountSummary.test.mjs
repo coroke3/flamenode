@@ -166,6 +166,7 @@ test("management query failure -> degraded with linked rows", async () => {
   assert.deepEqual(await res.json(), {
     loggedIn: true,
     degraded: true,
+    degradedReason: "management_access_unavailable",
     displayName: " Alice ",
     icon: "img",
     role: "moderator",
@@ -176,11 +177,49 @@ test("management query failure -> degraded with linked rows", async () => {
   });
 });
 
+test("MIG-0664 T02: pending-only read failure is distinguishable without changing existing fields or queries", async () => {
+  const s = setup({ role: "moderator", active: "a", failOn: ["x_identity_requests"] });
+  addX(s.sqlite, "a", "approved", "A");
+  s.sqlite.prepare(`INSERT INTO x_identity_requests VALUES ('r1', 'u1', 'pending', 'pending')`).run();
+  s.sqlite.prepare(`INSERT INTO event_staff VALUES ('s1', 'ev', 'a', 'owner', NULL)`).run();
+  const res = await s.get();
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Cache-Control"), CACHE);
+  assert.deepEqual(await res.json(), {
+    loggedIn: true,
+    degraded: true,
+    degradedReason: "pending_requests_unavailable",
+    displayName: " Alice ",
+    icon: "img",
+    role: "moderator",
+    activeXId: "a",
+    xIds: [{ x_user_id: "a", x_name: "A", icon_url: "icon", approval_status: "approved", is_active: true }],
+    canAccessAdmin: false,
+    canAccessManage: false,
+  });
+  // Session + failed combined query + successful linked-only fallback; no management query.
+  assert.equal(s.stmts.length, 3);
+  assert.equal(s.stmts.some((sql) => sql.includes("FROM event_staff")), false);
+});
+
+test("MIG-0664 T03: healthy account response has neither degraded field", async () => {
+  const s = setup();
+  addX(s.sqlite, "a", "approved");
+  const res = await s.get();
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(Object.hasOwn(body, "degraded"), false);
+  assert.equal(Object.hasOwn(body, "degradedReason"), false);
+  assert.equal(s.stmts.length, 3);
+});
+
 test("X rows query failure -> 503 unavailable", async () => {
   const s = setup({ failOn: ["x_user_account_links"] });
   const res = await s.get();
   assert.equal(res.status, 503);
-  assert.deepEqual(await res.json(), { loggedIn: false, unavailable: true });
+  const body = await res.json();
+  assert.deepEqual(body, { loggedIn: false, unavailable: true });
+  assert.equal(Object.hasOwn(body, "degradedReason"), false);
 });
 
 test("PRESETS_WITH_PERMISSIONS matches CURRENT presets.ts", async () => {
