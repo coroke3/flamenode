@@ -81,9 +81,10 @@ It fails closed if the installed CLI is missing; no `npx.cmd`, package install,
 login or production deploy fallback is allowed. Before invoking Wrangler, the
 wrapper validates the **entire** three-Worker invocation plan (Worker names,
 config files, build paths, Node executable, exact argument sequence and count).
-It also requires a **non-empty file** at `apps/site/dist/index.html`,
-`apps/app/dist/index.html` and `apps/api/src/index.ts`; an empty or
-missing static build directory is never treated as a successful dry-run input.
+It also requires a **non-empty regular file** at `apps/site/dist/index.html`,
+`apps/app/dist/index.html` and `apps/api/src/index.ts`; a missing, empty,
+directory-only or symlink entrypoint is rejected before any Wrangler invocation.
+This check uses `lstat` instead of following symlinks into unrelated files.
 Extra `--env`, `--route`, `--name`, replacement config, reordered Workers
 and relative output directories are rejected, even when `--dry-run` remains
 present. Before the local CLI starts, Cloudflare token/API key/account ID
