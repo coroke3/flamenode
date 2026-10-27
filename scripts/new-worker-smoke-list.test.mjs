@@ -440,27 +440,42 @@ test("MIG-0628 U04: private React/Vite SPA routes never enter public smoke", () 
   assert.ok(plan.publicSmoke.every(x => x.mode === "candidate"));
 });
 
-test("MIG-0628 U04: source route audit ignores commented-out Hono GET handlers", () => {
+test("MIG-0628 U04: source route audit requires an actual Hono router receiver", () => {
+  const hono = 'import { Hono } from "hono";\nconst routes = new Hono<AppEnv>();\n';
   for (const commented of [
     '// routes.get("/data", handler);\n',
     '/* routes.get("/data", handler); */\n',
     '/*\nroutes.get("/data", handler);\n*/\n',
     'const url = "https://example.test/api"; // routes.get("/data", handler)\n',
     'const text = ".get(\\"/data\\", handler)";\n',
+    'const sample = `.get("/data", handler)`;\n',
   ]) {
-    assert.equal(sourceDeclaresGetRoute(commented, "/data"), false,
+    assert.equal(sourceDeclaresGetRoute(hono + commented, "/data"), false,
       "commented or quoted route cannot satisfy smoke coverage");
   }
-  assert.equal(sourceDeclaresGetRoute('const sample = `.get("/data", handler)`;', "/data"), false,
-    "route examples inside template strings do not count as registrations");
-  assert.equal(sourceDeclaresGetRoute('const example = "https://test.invalid"; routes.get("/data", handler);',
-    "/data"), true, "quoted URLs do not suppress following real route registrations");
-  assert.equal(sourceDeclaresGetRoute('routes.get("/data", handler);', "/data"), true);
-  assert.equal(sourceDeclaresGetRoute("routes.get('/data', handler);", "/data"), true);
-  assert.equal(sourceDeclaresGetRoute('routes.get(\n  "/data", async (c) => {})', "/data"), true);
+
+  assert.equal(sourceDeclaresGetRoute('routes.get("/data", handler);', "/data"), false,
+    "a source snippet without Hono must fail closed");
+  for (const unrelated of [
+    'const cache = new Map(); cache.get("/data", handler);',
+    'const client = { get() {} }; client.get("/data", handler);',
+    'const object = { routes }; object.routes.get("/data", handler);',
+    'const fake = "const proxy = new Hono();"; proxy.get("/data", handler);',
+    'const hidden = /* new Hono() */ new Map(); hidden.get("/data", handler);',
+  ]) {
+    assert.equal(sourceDeclaresGetRoute(hono + unrelated, "/data"), false,
+      "non-Hono receiver must not satisfy smoke coverage: " + unrelated);
+  }
+  assert.equal(sourceDeclaresGetRoute(hono +
+    'const url = "https://test.invalid"; routes.get("/data", handler);',
+    "/data"), true, "quoted URLs do not suppress a real registration");
+  assert.equal(sourceDeclaresGetRoute(hono + 'routes.get("/data", handler);', "/data"), true);
+  assert.equal(sourceDeclaresGetRoute(hono + "routes.get('/data', handler);", "/data"), true);
+  assert.equal(sourceDeclaresGetRoute(hono + 'routes.get(\n  "/data", async (c) => {})', "/data"), true);
   assert.equal(sourceDeclaresGetRoute(
-    'const dashboard = new Hono().get("/", async (c) => {});', "/"), true);
-  assert.equal(sourceDeclaresGetRoute('routes.get("/other", handler);', "/data"), false);
+    'import { Hono } from "hono";\n' +
+    'const dashboard = new Hono<AppEnv>().get("/", async (c) => {});', "/"), true);
+  assert.equal(sourceDeclaresGetRoute(hono + 'routes.get("/other", handler);', "/data"), false);
 });
 
 test("MIG-0628 U04: plan construction never contacts real network", () => {
