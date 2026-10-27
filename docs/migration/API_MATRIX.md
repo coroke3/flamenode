@@ -479,4 +479,10 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 - D-13-46 consequence, RH-032 `?event=`: an event with more than 500 public videos (`isOversizedEventBasePool`) is listed by CURRENT from D1 (`fetchDegradedEventListPage`, the only list path for such events while `PUBLIC_DEGRADED_D1_ENABLED` is on in `wrangler.toml`). Hono returns 503 for those events. **Cut-over blocker for RH-032**: a bounded R2 list artifact for oversized events, or an owner decision to accept 503, is needed before routing `/api/videos?event=` to Hono.
 - RH-031 playlist overlay: CURRENT re-reads the visibility manifest after the artifact under `enforce` (TOCTOU etag check); Hono reads it once before (same reader as MIG-0631). Not covered by a test.
 
+## MIG-0663 — Manage navigation の Active X / 運営 X 表示契約（D-17-13）
 
+| Endpoint | CURRENT | TARGET | 追加契約 | 既存契約・予算 | 状態 |
+| --- | --- | --- | --- | --- | --- |
+| `GET /api/manage/navigation` | `src/components/layout/ConsoleSidebar.tsx` の active/staff X 警告、`GET /api/manage` の同値 | `apps/api/src/routes/manage/navigation.ts` + `packages/contracts/src/manage/shared.ts` | `activeXUserId: string \| null`（承認済み linked X で解決、admin は null）、`manageStaffXUserIds: string[]`（運営スタッフ X、admin は空配列）。`shouldWarnManageActiveXMismatch` が描画側で同じ判定に使用できる | `access`, `events`, `truncated` の値は不変。非 admin は `loadManageData(..., { linked: true })` の同じ1 SQL 文で linked X を最大100件取得し、session を含め3 D1 statement以下、応答64KiB以下。GET専用、`private, no-store`、D1書込0 | MIG-0663 PR#423 IN_PROGRESS |
+
+回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
