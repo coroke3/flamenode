@@ -72,6 +72,14 @@ export function buildSitemapEntries(input: {
   });
 }
 
+/** Do not advertise URLs for entries whose static detail page was not published. */
+export function publishedSitemapRows<T extends { id: string }>(
+  rows: readonly T[],
+  publishedIds: ReadonlySet<string>,
+): T[] {
+  return rows.filter((row) => publishedIds.has(row.id));
+}
+
 /** Replicates Next 15.5 resolveSitemap for our loc/lastmod/changefreq/priority-only entries. */
 export function serializeSitemap(entries: readonly SitemapEntry[]): string {
   let result = '<?xml version="1.0" encoding="UTF-8"?>\n';
