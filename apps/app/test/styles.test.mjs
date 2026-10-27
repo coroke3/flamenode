@@ -22,6 +22,23 @@ test("MIG-0701 U04 T07: generated CSS modules match CURRENT without :global", as
     assert.equal(output.includes(":global("), false, to);
   }
 });
+test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class", async () => {
+  const [source, target, dashboard] = await Promise.all([
+    read("app/(auth)/dashboard/page.module.css"),
+    read("apps/app/src/styles/dashboard.css"),
+    read("apps/app/src/routes/dashboard/Dashboard.tsx"),
+  ]);
+  // CSS modules must not hash the existing global fn-btn class.
+  assert.match(source, /\\.accountActions\\s+:global\\(\\.fn-btn\\)\\s*\\{/);
+  assert.match(target, /\\.dash-accountActions\\s+\\.fn-btn\\s*\\{\\s*width:\\s*100%/);
+  assert.doesNotMatch(target, /\\.dash-accountActions\\s+\\.dash-fn-btn\\b/);
+  for (const href of ["/dashboard/settings", "/entry"]) {
+    assert.ok(dashboard.includes(`href="${href}" className="fn-btn `),
+      `dashboard action ${href} must use the global fn-btn class`);
+  }
+  assert.equal(target, portCssModule(source, "dash"), "generated SPA CSS must match CURRENT");
+});
+
 async function getTsx(dir) {
   const entries = await readdir(new URL(dir, root), { withFileTypes: true });
   const out = [];
