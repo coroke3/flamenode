@@ -63,7 +63,7 @@ test("MIG-0628 U03: an existing directory does not count as a built static Worke
   const seen = [];
   const inspect = (entry) => {
     seen.push(entry);
-    return { isFile: () => true, size: 42 };
+    return { isFile: () => true, isSymbolicLink: () => false, size: 42 };
   };
   assert.doesNotThrow(() => assertBuiltEntrypoints(plan, inspect));
   assert.deepEqual(seen.map(entry => path.relative(path.resolve("."), entry)), expected);
@@ -71,11 +71,17 @@ test("MIG-0628 U03: an existing directory does not count as a built static Worke
   for (const failed of [0, 1, 2]) {
     const target = seen[failed];
     assert.throws(() => assertBuiltEntrypoints(plan, (entry) =>
-      entry === target ? { isFile: () => true, size: 0 } : inspect(entry)),
+      entry === target ? { isFile: () => true, isSymbolicLink: () => false, size: 0 } : inspect(entry)),
     /Missing or empty Worker build entrypoint/);
     assert.throws(() => assertBuiltEntrypoints(plan, (entry) =>
-      entry === target ? { isFile: () => false, size: 900 } : inspect(entry)),
+      entry === target ? { isFile: () => false, isSymbolicLink: () => false, size: 900 } : inspect(entry)),
     /Missing or empty Worker build entrypoint/);
+    assert.throws(() => assertBuiltEntrypoints(plan, (entry) =>
+      entry === target
+        ? { isFile: () => true, isSymbolicLink: () => true, size: 900 }
+        : inspect(entry)),
+    /Missing or empty Worker build entrypoint/,
+    "a symlink to a real nonempty file must fail closed");
     assert.throws(() => assertBuiltEntrypoints(plan, (entry) => {
       if (entry === target) throw new Error("ENOENT");
       return inspect(entry);
