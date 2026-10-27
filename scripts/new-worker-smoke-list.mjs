@@ -113,10 +113,15 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sour
   // The generated JSON is a review checklist, never a live test runner.
   // Mutating methods must not look safe to automate merely because their URL
   // has no parameters (e.g. POST /api/admin/audit/settings).
+  // API_MATRIX may list planned/CURRENT-only paths under a mounted prefix.
+  // Treat unverified documentation-only GETs as manual/fixture-required, not
+  // automated smoke candidates. loadNewWorkerSmokePlan verifies the source.
+  const verifiedReadPaths = new Set(sourceRoutes.map(({ method, path }) => method + " " + path));
   const privilegedPrefixes = ["/api/personal", "/api/admin", "/api/admin-read",
     "/api/manage", "/api/account", "/api/health/deep"];
   const isReadOnlyCandidate = ({ method, path, requiresFixture }) =>
     (method === "GET" || method === "HEAD") &&
+    verifiedReadPaths.has(method + " " + path) &&
     !requiresFixture && !/[:\[\]{}]/.test(path) &&
     !privilegedPrefixes.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
   const manual = api.filter((route) => !isReadOnlyCandidate(route))
@@ -165,6 +170,9 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sour
 // live-route index. Explicit source-anchored gaps must be audited and sampled
 // before a cutover; do not invent endpoints for uncovered Hono mounts.
 const SOURCE_ROUTE_GAPS = Object.freeze([
+  // Only this fixed public GET is initially source-verified as an unauthenticated
+  // smoke candidate; BUILD_COMMIT_SHA must be a real SHA before actual probing.
+  { method: "GET", path: "/api/health", source: "apps/api/src/routes/health.ts", local: "/" },
   { method: "GET", path: "/api/manage", source: "apps/api/src/routes/manage/dashboard.ts", local: "/" },
   { method: "GET", path: "/api/manage/navigation", source: "apps/api/src/routes/manage/navigation.ts", local: "/" },
   { method: "GET", path: "/api/admin/spreadsheet/data", source: "apps/api/src/routes/admin/spreadsheet/read.ts", local: "/data" },
