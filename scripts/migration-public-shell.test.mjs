@@ -107,7 +107,7 @@ test("G05: all generated head, structured-data and webmanifest brand URLs resolv
   referenced.add(socialImage);
 
   const organization = JSON.parse(doc.querySelector('script#flamenode-site-structured-data')?.textContent ?? "null")
-    ?."@graph"?.find((entry) => entry?.["@type"] === "Organization");
+    ?.["@graph"]?.find((entry) => entry?.["@type"] === "Organization");
   assert.ok(organization?.logo?.url, "organization logo needs a public URL");
   referenced.add(organization.logo.url);
   referenced.add(organization.logo.contentUrl);
@@ -124,7 +124,9 @@ test("G05: all generated head, structured-data and webmanifest brand URLs resolv
   for (const raw of referenced) {
     const url = new URL(raw, baseUrl);
     assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
-    assert.match(url.pathname, /^\\/(?:brand\\/|favicon\\.ico$|manifest\\.webmanifest$)/);
+    assert.ok(url.pathname.startsWith("/brand/") ||
+      url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
+      `Unexpected head/manifest asset path: ${url.pathname}`);
     const builtAsset = path.join(DIST, url.pathname.slice(1));
     assert.ok(fs.statSync(builtAsset).isFile(), `Broken head/manifest brand asset: ${url.pathname}`);
     assert.ok(fs.statSync(builtAsset).size > 0, `Empty head/manifest brand asset: ${url.pathname}`);
