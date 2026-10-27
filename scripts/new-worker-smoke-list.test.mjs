@@ -476,6 +476,16 @@ test("MIG-0628 U04: source route audit requires an actual Hono router receiver",
     'const url = "https://test.invalid"; routes.get("/data", handler);',
     "/data"), true, "quoted URLs do not suppress a real registration");
   assert.equal(sourceDeclaresGetRoute(hono + 'routes.get("/data", handler);', "/data"), true);
+  assert.equal(sourceDeclaresGetRoute(hono +
+    '// route documentation.\nroutes.get("/", handler);', "/"), true,
+    "a preceding comment ending in punctuation must not suppress a live route");
+  assert.equal(sourceDeclaresGetRoute(hono +
+    '// previously quoted "route"\nroutes.get("/", handler);', "/"), true);
+  assert.equal(sourceDeclaresGetRoute(hono +
+    'const object = { routes }; object.\nroutes.get("/data", handler);', "/data"), false,
+    "member access split over a line must stay rejected");
+  assert.equal(sourceDeclaresGetRoute(read("apps/api/src/routes/health.ts"), "/"), true,
+    "real Hono health endpoint must pass source verification");
   assert.equal(sourceDeclaresGetRoute(hono + "routes.get('/data', handler);", "/data"), true);
   assert.equal(sourceDeclaresGetRoute(hono + 'routes.get(\n  "/data", async (c) => {})', "/data"), true);
   assert.equal(sourceDeclaresGetRoute(
