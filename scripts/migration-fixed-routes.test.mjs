@@ -71,6 +71,19 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
 });
 
+test("pageHead: canonical and OGP URLs normalize relative paths like CURRENT absoluteUrl", () => {
+  for (const [route, expected] of [
+    ["about", "https://flamenode.net/about"],
+    ["/about", "https://flamenode.net/about"],
+    ["rules?version=1", "https://flamenode.net/rules?version=1"],
+    ["/about#mission", "https://flamenode.net/about#mission"],
+  ]) {
+    const head = buildPageHead({ path: route, title: "Page" });
+    assert.equal(head.canonical, expected, route);
+    assert.ok(head.canonical.startsWith("https://flamenode.net/"), route);
+  }
+});
+
 test("pageHead: CURRENT readableTitle rejects broken or empty headings and preserves OG alt", () => {
   const cases = [
     { path: "/about", fallback: "FlameNodeについて" },
