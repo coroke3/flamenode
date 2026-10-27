@@ -9,7 +9,7 @@
  * for IDs or secrets. CI only; no production command is exported.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,18 +70,33 @@ export function assertFixedDryRunPlan(plan) {
   }
 }
 
+/** Building an empty directory is not enough to validate a static Worker. */
+export function assertBuiltEntrypoints(plan, inspect = statSync) {
+  assertFixedDryRunPlan(plan);
+  for (const entry of plan) {
+    const relative = entry.name === "api" ? entry.built : path.join(entry.built, "index.html");
+    let valid = false;
+    try {
+      const info = inspect(path.join(ROOT, relative));
+      valid = info.isFile() && info.size > 0;
+    } catch {
+      // Missing files, unreadable paths and symbolic build placeholders fail closed.
+    }
+    if (!valid) throw new Error("Missing or empty Worker build entrypoint: " + relative);
+  }
+}
+
 export function assertDryRunInputs(plan) {
   assertFixedDryRunPlan(plan);
   if (!existsSync(WRANGLER_CLI)) {
     throw new Error("Local Wrangler CLI missing; run npm ci first");
   }
   for (const entry of plan) {
-    for (const p of [entry.config, entry.built]) {
-      if (!existsSync(path.join(ROOT, p))) {
-        throw new Error("Missing local build/config for dry-run: " + p);
-      }
+    if (!existsSync(path.join(ROOT, entry.config))) {
+      throw new Error("Missing Worker config for dry-run: " + entry.config);
     }
   }
+  assertBuiltEntrypoints(plan);
 }
 
 // Avoid both inherited API credentials and cached Wrangler OAuth credentials.
