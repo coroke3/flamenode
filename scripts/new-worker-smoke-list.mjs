@@ -35,10 +35,13 @@ export function collectApiMatrixRoutes(matrix) {
     .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
 }
 
-export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry }) {
+export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sourceRoutes = [] }) {
   const mounts = listHonoMounts(appEntry);
   if (mounts.length === 0) throw new Error("apps/api/src/app.ts has no parsable Hono mounts");
-  const documented = collectApiMatrixRoutes(apiMatrix);
+  const documented = [...new Map([
+    ...collectApiMatrixRoutes(apiMatrix),
+    ...sourceRoutes.map(({ method, path }) => ({ method, path })),
+  ].map((route) => [route.method + " " + route.path, route])).values()];
   const api = documented.filter((r) =>
     mounts.some((m) => r.path === m.path || r.path.startsWith(m.path + "/")));
   const manual = api.filter(({ path }) => /[:\[\]{}]/.test(path))
@@ -73,11 +76,36 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry }) {
   };
 }
 
+
+// The API_MATRIX is an integration inventory, not necessarily an exhaustive
+// live-route index. Explicit source-anchored gaps must be audited and sampled
+// before a cutover; do not invent endpoints for uncovered Hono mounts.
+const SOURCE_ROUTE_GAPS = Object.freeze([
+  { method: "GET", path: "/api/manage", source: "apps/api/src/routes/manage/dashboard.ts", local: "/" },
+  { method: "GET", path: "/api/manage/navigation", source: "apps/api/src/routes/manage/navigation.ts", local: "/" },
+  { method: "GET", path: "/api/admin/spreadsheet/data", source: "apps/api/src/routes/admin/spreadsheet/read.ts", local: "/data" },
+  { method: "GET", path: "/api/admin/spreadsheet/export", source: "apps/api/src/routes/admin/spreadsheet/read.ts", local: "/export" },
+  { method: "GET", path: "/api/admin/spreadsheet/tables", source: "apps/api/src/routes/admin/spreadsheet/read.ts", local: "/tables" },
+  { method: "GET", path: "/api/google-drive-image/:id", source: "apps/api/src/routes/media/proxies.ts", local: "/:id" },
+  { method: "GET", path: "/api/youtube-thumbnail/:id/:size", source: "apps/api/src/routes/media/proxies.ts", local: "/:id/:size" },
+]);
+
+function verifiedSourceRoutes() {
+  return SOURCE_ROUTE_GAPS.map((row) => {
+    const content = read(row.source);
+    if (!content.includes('.get("' + row.local + '"')) {
+      throw new Error("Source route changed: " + row.source + " GET " + row.local);
+    }
+    return row;
+  });
+}
+
 export function loadNewWorkerSmokePlan() {
   return buildNewWorkerSmokePlan({
     routeMatrix: read("docs/migration/ROUTE_MATRIX.md"),
     apiMatrix: read("docs/migration/API_MATRIX.md"),
     appEntry: read("apps/api/src/app.ts"),
+    sourceRoutes: verifiedSourceRoutes(),
   });
 }
 
