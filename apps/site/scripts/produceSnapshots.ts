@@ -329,6 +329,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     // CURRENT sitemap uses the first 500 normalized public recent videos, not the 24-item UI page.
     const sitemapPage = recent ? normalizeStaticRecentVideoPage(recent, 1, 500) : null;
     add(SITEMAP_VIDEOS_KEY, sitemapPage ? {
+      generated_at: sitemapPage.generatedAt,
       videos: sitemapPage.videos.map((video) => ({
         id: video.id,
         youtube_video_id: video.youtube_video_id ?? null,
