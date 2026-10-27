@@ -9,7 +9,11 @@ const BRAND_SOCIAL_IMAGE_PATH = "/brand/flamenode-social-card.png";
 
 export function siteOrigin(env: Record<string, string | undefined> = process.env): string {
   try {
-    return new URL(env.PUBLIC_SITE_URL?.trim() || FALLBACK_SITE_ORIGIN).origin;
+    const url = new URL(env.PUBLIC_SITE_URL?.trim() || FALLBACK_SITE_ORIGIN);
+    // Opaque URL schemes (file:, data:, javascript:, mailto:) have origin "null".
+    // Never emit broken canonical/OGP/JSON-LD URLs such as "null/about".
+    if (url.protocol !== "https:" && url.protocol !== "http:") return FALLBACK_SITE_ORIGIN;
+    return url.origin;
   } catch {
     return FALLBACK_SITE_ORIGIN;
   }
