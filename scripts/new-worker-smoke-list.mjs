@@ -74,20 +74,29 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sour
   // Mutating methods must not look safe to automate merely because their URL
   // has no parameters (e.g. POST /api/admin/audit/settings).
   const privilegedPrefixes = ["/api/personal", "/api/admin", "/api/admin-read",
-    "/api/manage", "/api/account"];
+    "/api/manage", "/api/account", "/api/health/deep"];
   const isReadOnlyCandidate = ({ method, path, requiresFixture }) =>
     (method === "GET" || method === "HEAD") &&
     !requiresFixture && !/[:\[\]{}]/.test(path) &&
     !privilegedPrefixes.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
   const manual = api.filter((route) => !isReadOnlyCandidate(route))
-    .map((r) => ({ ...r, mode: "fixture-required", expected: "owner-verified contract" }));
+    .map((r) => ({
+      ...r, mode: "fixture-required",
+      // RH-017 deep health intentionally fails closed until the CURRENT
+      // authenticated probes are migrated. A 200 expectation is unsafe.
+      expected: r.path === "/api/health/deep"
+        ? "401 with invalid bearer; 503 until deep-health parity is implemented"
+        : "owner-verified contract",
+    }));
   const automated = api.filter(isReadOnlyCandidate)
     .map((r) => ({ ...r, mode: "candidate", expected: r.path === "/api/health" ? 200 : "owner-verified contract" }));
   const routeRows = [];
   for (const row of routeMatrix.split("\n")) {
     if (!row.startsWith("|")) continue;
     const match = /^\|\s*\x60(\/[^\x60]*)\x60\s*\|/.exec(row);
-    if (!match || !/\b(Astro\/site|React\/Vite app)\b/.test(row)) continue;
+    // Only Astro owns public Static Assets. React/Vite app represents
+    // authenticated SPA shells and must never enter unauthenticated smoke.
+    if (!match || !/\bAstro\/site\b/.test(row)) continue;
     const path = match[1];
     if (!path.includes("*") && !/[:\[\]{}]/.test(path)) routeRows.push(path);
   }
