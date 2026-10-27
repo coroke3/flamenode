@@ -168,6 +168,7 @@ function degradedBody(
   user: SessionUser,
   resolvedActive: string | null,
   linked: readonly LinkedRow[],
+  reason: "pending_requests_unavailable" | "management_access_unavailable",
 ) {
   const xIds = linked.map((entry) => ({
     x_user_id: entry.x_user_id,
@@ -179,6 +180,7 @@ function degradedBody(
   return {
     loggedIn: true,
     degraded: true,
+    degradedReason: reason,
     displayName: user.name,
     icon: user.image,
     role: user.role,
@@ -230,7 +232,7 @@ accountSummaryRoutes.get("/", async (c) => {
       return respond(c, { loggedIn: false, unavailable: true }, 503);
     }
     const active = resolveActiveXUserId(user.active_x_user_id, linked);
-    return respond(c, degradedBody(user, active, linked));
+    return respond(c, degradedBody(user, active, linked, "pending_requests_unavailable"));
   }
 
   const linked = rows.filter((row) => row.kind === "linked");
@@ -287,7 +289,7 @@ accountSummaryRoutes.get("/", async (c) => {
       : await hasEditableEvent(db, Array.from(new Set(approved.map((r) => r.x_user_id))));
   } catch {
     console.error("[account-summary] management check failed");
-    return respond(c, degradedBody(user, contextActive, linked));
+    return respond(c, degradedBody(user, contextActive, linked, "management_access_unavailable"));
   }
 
   const activeEntry = xIds.find((entry) => entry.is_active);
