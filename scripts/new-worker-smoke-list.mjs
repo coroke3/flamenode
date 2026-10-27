@@ -39,6 +39,15 @@ function isCodePosition(source, offset) {
   return quote === null && !lineComment && !blockComment;
 }
 
+/** Count active app.route calls even when their syntax is not covered by
+ * listHonoMounts. This must remain independent from the accepted path parser,
+ * so new nonliteral/dynamic mounts fail the coverage test instead of vanishing.
+ */
+export function countActiveHonoMountCalls(entry) {
+  return [...entry.matchAll(/\bapp\.route\s*\(/g)]
+    .filter((match) => isCodePosition(entry, match.index)).length;
+}
+
 export function listHonoMounts(entry) {
   const found = [...entry.matchAll(/app\.route\(\s*["'](\/api\/[^"']+)["']\s*,\s*([A-Za-z_$][\w$]*)(?:\(\))?\s*\)/g)]
     .filter((match) => isCodePosition(entry, match.index))
