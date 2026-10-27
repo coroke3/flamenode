@@ -83,7 +83,11 @@ wrapper validates the **entire** three-Worker invocation plan (Worker names,
 config files, build paths, Node executable, exact argument sequence and count).
 Extra `--env`, `--route`, `--name`, replacement config, reordered Workers
 and relative output directories are rejected, even when `--dry-run` remains
-present. This is a fail-closed plan gate, not a production deploy interface.
+present. Before the local CLI starts, Cloudflare token/API key/account ID
+environment variables are removed **from the child process only**; stdin is
+disabled and unexpected hangs time out after four minutes. These controls do
+not authorize connecting to a live Cloudflare account or deploying Workers.
+This is a fail-closed plan gate, not a production deploy interface.
 CI has an anti-deployment test that forbids
 placing direct Wrangler deploy commands in GitHub Actions YAML; this rule is
 preserved, not weakened. `--plan` never invokes any external command.
