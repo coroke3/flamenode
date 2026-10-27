@@ -65,6 +65,32 @@ test("G08: font file and @font-face match CURRENT FlameNodeSans.otf", { skip }, 
   assert.ok(doc.querySelector('link[rel="preload"][as="font"][href="/fonts/FlameNodeSans.otf"]'));
 });
 
+test("G05: brand assets are CURRENT public files byte for byte", { skip }, () => {
+  const assets = [
+    "brand/flamenode-apple-touch-icon.png",
+    "brand/flamenode-favicon.svg",
+    "brand/flamenode-icon-192.png",
+    "brand/flamenode-icon-32.png",
+    "brand/flamenode-icon-512.png",
+    "brand/flamenode-icon-maskable-512.png",
+    "brand/flamenode-mark.png",
+    "brand/flamenode-mark.svg",
+    "brand/flamenode-social-card.png",
+    "brand/flamenode-wordmark.svg",
+    "favicon.ico",
+    "manifest.webmanifest",
+    "logo.png",
+  ];
+  assert.equal(assets.length, 13);
+  for (const relative of assets) {
+    const current = path.join("public", relative);
+    const builtAsset = path.join(DIST, relative);
+    assert.ok(fs.existsSync(builtAsset), `Missing built public asset: ${relative}`);
+    assert.ok(fs.readFileSync(current).equals(fs.readFileSync(builtAsset)),
+      `Built public asset differs from CURRENT: ${relative}`);
+  }
+});
+
 test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is emitted on every page", { skip }, () => {
   const ld = buildSiteJsonLd("https://flamenode.net");
   assert.equal(ld["@graph"][1]["@type"], "WebSite");
