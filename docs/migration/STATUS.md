@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0701
+Current Task: MIG-0621
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0701
-Last Task PR: #422
+Last Completed Task: MIG-0621
+Last Task PR: #425
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -331,7 +331,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0618 | xid merge core (D-10) | DONE | MIG-0613 |
 | MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
 | MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | DONE | MIG-0405 |
-| MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | READY | MIG-0409 |
+| MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | DONE | MIG-0409 |
 | MIG-0622 | ledger completeness checker (every tracked CURRENT file has a FILE_MIGRATION_MATRIX row) | DONE | — |
 | MIG-0623 | Entry page read APIs | DONE | MIG-0601, MIG-0608 |
 | MIG-0624 | Manage page read APIs | DONE | MIG-0601, MIG-0608 |
