@@ -45,7 +45,7 @@ function isCodePosition(source, offset) {
 function isDirectAppReference(entry, offset) {
   if (!isCodePosition(entry, offset)) return false;
   const preceding = entry.slice(0, offset);
-  const match = /\\S(?=\\s*$)/.exec(preceding);
+  const match = /\S(?=\s*$)/.exec(preceding);
   return !match || !/[.?]/.test(match[0]) ||
     !isCodePosition(entry, match.index);
 }
