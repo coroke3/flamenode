@@ -55,10 +55,19 @@ export function collectApiMatrixRoutes(matrix) {
 export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sourceRoutes = [] }) {
   const mounts = listHonoMounts(appEntry);
   if (mounts.length === 0) throw new Error("apps/api/src/app.ts has no parsable Hono mounts");
-  const documented = [...new Map([
+  const documentedByKey = new Map();
+  for (const route of [
     ...collectApiMatrixRoutes(apiMatrix),
     ...sourceRoutes.map(({ method, path }) => ({ method, path })),
-  ].map((route) => [route.method + " " + route.path, route])).values()];
+  ]) {
+    const key = route.method + " " + route.path;
+    const previous = documentedByKey.get(key);
+    documentedByKey.set(key, {
+      ...route,
+      requiresFixture: Boolean(route.requiresFixture || previous?.requiresFixture),
+    });
+  }
+  const documented = [...documentedByKey.values()];
   const api = documented.filter((r) =>
     mounts.some((m) => r.path === m.path || r.path.startsWith(m.path + "/")));
   // The generated JSON is a review checklist, never a live test runner.
