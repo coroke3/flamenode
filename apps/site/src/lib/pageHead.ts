@@ -80,7 +80,9 @@ export function serializeJsonLd(value: unknown): string {
 /** CURRENT `(public)/layout.tsx`: the GA4 tag exists only when the measurement id is configured. */
 export function gaMeasurementId(env: Record<string, string | undefined> = process.env): string | null {
   const id = (env.PUBLIC_GA_MEASUREMENT_ID ?? env.NEXT_PUBLIC_GA_MEASUREMENT_ID)?.trim();
-  return id ? id : null;
+  // The id is embedded inside a JS string literal and used as a query parameter.
+  // Reject quotes, slashes, markup and controls rather than generating broken HTML.
+  return id && /^[A-Za-z0-9_-]{3,64}$/.test(id) ? id : null;
 }
 
 /** Same init script and loader URL as `@next/third-parties` `GoogleAnalytics` (default dataLayer). */
