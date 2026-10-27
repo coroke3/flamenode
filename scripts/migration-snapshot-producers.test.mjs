@@ -170,6 +170,12 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
   // video-detail envelope determines which canonical URLs Astro can actually publish.
   const expectedPublished = expected.filter((video) =>
     sitemapVideoMatchesDetail(video, byKey.get(`snapshot/video-detail/${video.id}.json`)?.payload ?? null));
+  // T02 (D-14-4 (e)): assert the CURRENT candidate set and the exclusion set separately. The seed
+  // has a public detail for every CURRENT candidate, so nothing may be excluded here; the
+  // exclusion reasons themselves are covered by the stale-alias test above.
+  const excluded = expected.filter((video) => !expectedPublished.includes(video));
+  assert.deepEqual(excluded, [], "seeded CURRENT sitemap candidates must all have a published canonical detail");
+  assert.deepEqual(expectedPublished, expected, "with no exclusions TARGET equals the CURRENT candidate set");
   const gotPayload = byKey.get(SITEMAP_VIDEOS_KEY).payload;
   assert.deepEqual(gotPayload.videos, expectedPublished);
   assert.ok(gotPayload.videos.length > LIST_FIRST_PAGE_SIZE, "sitemap must not inherit 24-item UI truncation");

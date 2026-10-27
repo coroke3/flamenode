@@ -1018,7 +1018,7 @@ PR #351 を revert（`git revert -m 1 e8ac0020`）。wrangler / Route / Custom D
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | `dist/robots.txt` | Next `resolveRobots` の出力と byte 一致（origin `https://flamenode.net`） |
-| T02 | `dist/sitemap.xml` の URL 集合（seed） | CURRENT `buildStaticSitemapEntries` + `buildStaticSitemapStaticEntries` と同じ集合。ただし page の無い creator は除く（D-14-4） |
+| T02 | `dist/sitemap.xml` の URL 集合（seed） | CURRENT `buildStaticSitemapEntries` + `buildStaticSitemapStaticEntries` と同じ集合。ただし page の無い creator と、detail page を出さない video / event は除く（D-14-4、D-14-4 (e)）。候補集合と除外集合は別々に assert する |
 | T03 | 非公開の video / event / creator | sitemap に 0 件 |
 | T04 | `SITEMAP_VIDEOS_KEY` が manifest に無い | 動画 0 件、build 成功、warn 1 回 |
 | T05 | 同じ entry 配列を Next `resolveSitemap` と `lib/sitemap.ts` で文字列化 | byte 一致 |
