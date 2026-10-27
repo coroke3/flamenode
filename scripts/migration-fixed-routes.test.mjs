@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { RESERVED_ROOT_SLUGS } from "../apps/site/src/lib/routeMap.ts";
-import { buildPageHead, compactText } from "../apps/site/src/lib/pageHead.ts";
+import { buildPageHead, compactText, siteOrigin } from "../apps/site/src/lib/pageHead.ts";
 import { loadRulesForBuild, rulesSourceFromEnv, RulesBuildError } from "../apps/site/src/lib/rulesLoader.ts";
 import { parseLegalMarkdown } from "../src/lib/terms/legalMarkdown.ts";
 import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "../src/lib/terms/defaultTerms.ts";
@@ -69,6 +69,24 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.ok(compactText("x".repeat(200)).endsWith("..."));
   assert.equal(compactText(""), "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。");
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
+});
+
+test("pageHead: only HTTP(S) site origins may be emitted into canonical and structured data", () => {
+  const fallback = "https://flamenode.net";
+  const maliciousOrInvalid = [
+    "data:text/html,hello",
+    "javascript:alert(1)",
+    "file:///tmp/site",
+    "mailto:admin@example.com",
+    "ftp://example.com/site",
+    "not a URL",
+  ];
+  for (const raw of maliciousOrInvalid) {
+    assert.equal(siteOrigin({ PUBLIC_SITE_URL: raw }), fallback, raw);
+  }
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "https://flamenode.net/a?x=1" }), fallback);
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "http://localhost:4321/about" }), "http://localhost:4321");
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "" }), fallback);
 });
 
 test("about T01: every CURRENT text is in the built HTML without JS (static body)", { skip }, () => {
