@@ -13,15 +13,17 @@ export const CONFIGS = [
   "workers/content-jobs/wrangler.toml",
   "workers/sync-jobs/wrangler.toml"
 ];
-const KNOWN = new Set(["","build","triggers","assets","services","queues.producers",
+const KNOWN = new Set(["","build","observability","placement","triggers","assets","services","queues.producers",
   "queues.consumers","d1_databases","r2_buckets","kv_namespaces"]);
 const ARRAY_SECTIONS = new Set(["services","queues.producers","queues.consumers",
   "d1_databases","r2_buckets","kv_namespaces"]);
-// Fail closed on unreviewed binding families. Inert sections have no bindings.
-const INERT_SECTIONS = new Set(["observability","placement","vars"]);
+// Fail closed on every tracked Wrangler section. Vars are validated and redacted.
+const INERT_SECTIONS = new Set(["vars"]);
 const ALLOWED_KEYS = {
   "": ["name","main","compatibility_date","compatibility_flags","workers_dev","minify"],
   build: ["command"],
+  observability: ["enabled"],
+  placement: ["mode"],
   triggers: ["crons"],
   assets: ["directory","binding","run_worker_first"],
   services: ["binding","service"],
@@ -228,6 +230,16 @@ export function extractConfigRows(source,config) {
         throw Error(where+": unreviewed background Worker build section");
       if(d.command!=="node scripts/workers-ci-wrangler-guard.mjs")
         throw Error(where+": expected guarded build.command (review required)");
+    } else if(section==="observability") {
+      // Source-side observability should not be disabled or made syntactically
+      // invalid without a dedicated Worker operations review.
+      if(d.enabled!==true)
+        throw Error(where+": expected observability.enabled = true (review required)");
+    } else if(section==="placement") {
+      // Only the existing web template has Smart Placement. Adding or changing
+      // background placement requires a separate CPU/latency review.
+      if(config!=="wrangler.toml" || d.mode!=="smart")
+        throw Error(where+": unexpected placement.mode (review required)");
     } else if(section==="triggers") {
       if(!Array.isArray(d.crons)) throw Error(where+": missing crons array");
       d.crons.forEach(v=>{
@@ -308,6 +320,10 @@ export function extractConfigRows(source,config) {
   });
   if(config==="wrangler.toml" && !blocks.some(x=>x.section==="build"))
     throw Error(config+": missing guarded [build] section");
+  if(!blocks.some(x=>x.section==="observability"))
+    throw Error(config+": missing [observability] section (review required)");
+  if(config==="wrangler.toml" && !blocks.some(x=>x.section==="placement"))
+    throw Error(config+": missing [placement] section (review required)");
   if(rows.filter(x=>x.kind==="worker.name").length!==1||rows.filter(x=>x.kind==="worker.main").length!==1)
     throw Error(config+": expected exactly one worker name and main");
   return rows;
