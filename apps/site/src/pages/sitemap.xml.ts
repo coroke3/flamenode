@@ -53,8 +53,12 @@ export async function GET(): Promise<Response> {
   }
   // The recent index may contain a public row without a static detail asset.
   // Match the same manifest / detail map that Astro uses to emit the pages.
-  const publishedVideoIds = access
-    ? new Set(videoDetailKeys(access.options.manifest).map((key) => key.slice("snapshot/video-detail/".length, -".json".length)))
+  const manifest = access?.options.manifest;
+  if (access && !manifest) {
+    throw new Error("[sitemap] configured snapshot manifest is missing");
+  }
+  const publishedVideoIds = manifest
+    ? new Set(videoDetailKeys(manifest).map((key) => key.slice("snapshot/video-detail/".length, -".json".length)))
     : new Set<string>();
   const publishedEventIds = new Set(events.details.keys());
   const entries = buildSitemapEntries({
