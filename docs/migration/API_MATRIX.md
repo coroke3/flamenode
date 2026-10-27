@@ -480,3 +480,11 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 - RH-031 playlist overlay: CURRENT re-reads the visibility manifest after the artifact under `enforce` (TOCTOU etag check); Hono reads it once before (same reader as MIG-0631). Not covered by a test.
 
 
+
+## MIG-0664 — RH-001 degraded 原因の区別（D-17-14）
+
+| RH | Endpoint | TARGET | Existing contract maintained | Additive response field | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-001 | `GET /api/account/summary` | `apps/api/src/routes/account/summary.ts` | 200 degraded の他の値、session / linked / management 権限、最大 D1 3 statements、private no-store、503 fallback を変更しない | combined linked + pending query の失敗時に linked-only fallback が成功: `degradedReason: "pending_requests_unavailable"`; management check の失敗: `degradedReason: "management_access_unavailable"`。成功・503・ログアウトには field を追加しない | MIG-0664 PR#421 REVIEW pending |
+
+これらの値は CURRENT `src/lib/auth/requestAuthContext.ts` の `enrichmentFailed`（管理権限判定の失敗のみ）と、Ops guard MIG-0707 の D-17-14 対応に必要な区別である。既存 `apps/site/src/lib/accountSummary.ts` は追加 field を利用せず、既存 UI への変更なし。
