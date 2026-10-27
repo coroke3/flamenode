@@ -39,6 +39,17 @@ function isCodePosition(source, offset) {
   return quote === null && !lineComment && !blockComment;
 }
 
+/** A member named "app" on another object is not the Hono app variable.
+ * Check the preceding executable token, not comment text or whitespace.
+ */
+function isDirectAppReference(entry, offset) {
+  if (!isCodePosition(entry, offset)) return false;
+  const preceding = entry.slice(0, offset);
+  const match = /\\S(?=\\s*$)/.exec(preceding);
+  return !match || !/[.?]/.test(match[0]) ||
+    !isCodePosition(entry, match.index);
+}
+
 /** Count active app.route calls even when their syntax is not covered by
  * listHonoMounts. This must remain independent from the accepted path parser,
  * so new nonliteral/dynamic mounts fail the coverage test instead of vanishing.
@@ -51,12 +62,12 @@ export function countActiveHonoMountCalls(entry) {
     ...entry.matchAll(/\bapp\s*(?:\.|\?\.)\s*route\s*\(/g),
     ...entry.matchAll(/\bapp\s*(?:\?\.)?\s*\[\s*(["'`])route\1\s*\]\s*\(/g),
   ];
-  return calls.filter((match) => isCodePosition(entry, match.index)).length;
+  return calls.filter((match) => isDirectAppReference(entry, match.index)).length;
 }
 
 export function listHonoMounts(entry) {
   const found = [...entry.matchAll(/\bapp\s*\.\s*route\s*\(\s*["'](\/api\/[^"']+)["']\s*,\s*([A-Za-z_$][\w$]*)(?:\(\))?\s*\)/g)]
-    .filter((match) => isCodePosition(entry, match.index))
+    .filter((match) => isDirectAppReference(entry, match.index))
     .map(([, path, owner]) => ({ path, owner }));
   const unique = [...new Map(found.map((row) => [row.path + ":" + row.owner, row])).values()];
   return unique.sort((a, b) => a.path.localeCompare(b.path) || a.owner.localeCompare(b.owner));
