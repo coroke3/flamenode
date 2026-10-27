@@ -147,7 +147,9 @@ export function buildPageHead(input: {
     noindex: input.noIndex === true,
     title: `${title} | ${SITE_NAME}`,
     description: compactText(input.description),
-    canonical: `${origin}${input.path}`,
+    // CURRENT buildPageMetadata uses absoluteUrl(path), including relative paths.
+    // String concatenation produced invalid URLs such as https://flamenode.netabout.
+    canonical: absoluteUrl(input.path, origin),
     ogTitle: title,
     ogType: input.ogType ?? "website",
   } as const;
