@@ -218,8 +218,13 @@ export function sourceDeclaresGetRoute(source, local) {
     if (directHono.test(before)) return true; // new Hono<AppEnv>().get(...)
     const owner = /([A-Za-z_$][\w$]*)\s*$/.exec(before);
     if (!owner || !routers.has(owner[1])) continue;
-    const preceding = before.slice(0, owner.index).trimEnd();
-    if (/[.?'"`]/.test(preceding.slice(-1))) continue;
+    // Reject only a member chain in executable code. Punctuation inside a
+    // preceding comment is not a receiver separator for a later Hono call.
+    const preceding = before.slice(0, owner.index);
+    const punctuationIndex = preceding.search(/[^\s](?=\s*$)/);
+    if (punctuationIndex >= 0 &&
+        /[.?'"`]/.test(preceding[punctuationIndex]) &&
+        isCodePosition(source, punctuationIndex)) continue;
     return true; // const routes = new Hono(); routes.get(...)
   }
   return false;
