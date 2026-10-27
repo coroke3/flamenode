@@ -23,7 +23,6 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| `.github/workflows/migration-docs-check.yml` | CONFIG | CI only: new Worker config test and 3 Wrangler deploy --dry-run | MIG-0628 | SAME (new migration-only config file) | IN_PROGRESS | PR#426 SHA=c4586a6047f351ccc308348c773449eba26d95ec TEST=scripts/new-worker-smoke-list.test.mjs CI=latest-head pending (nonproduction/no remote) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
