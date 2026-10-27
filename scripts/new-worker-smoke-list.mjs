@@ -17,21 +17,38 @@ export function listHonoMounts(entry) {
 }
 
 const METHOD = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
-function normalizeRoutePath(path) {
-  if (!path.startsWith("/api/")) return null;
-  const result = path.replace(/[,;.)\]]+$/, "");
-  if (result.includes("*") || result.includes("?")) return null;
-  return result;
+function normalizeRoutePath(rawPath) {
+  // The API matrix documents query parameters as shorthand (?tab&page).
+  // Strip them from the Hono pathname but keep a fixture requirement so an
+  // incomplete or privileged GET is never considered a default smoke probe.
+  const trimmed = rawPath.replace(/[,;.)\]]+$/, "");
+  const hasQuery = trimmed.includes("?");
+  const path = trimmed.split("?")[0];
+  if (!path.startsWith("/api/") || /[\[\]{}*]/.test(path)) return null;
+  // Bracket notation and grouped Next.js documentation paths are not Hono
+  // route patterns. Exact real routes must be source-anchored separately.
+  if (!/^\/api\/(?:[\w.~-]+|:[A-Za-z_][\w]*)(?:\/(?:[\w.~-]+|:[A-Za-z_][\w]*))*$/.test(path)) return null;
+  return { path, requiresFixture: hasQuery };
 }
 
 export function collectApiMatrixRoutes(matrix) {
   const out = [];
   for (const match of matrix.matchAll(/\b(GET|HEAD|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s\x60|"<>]+)/g)) {
     const method = match[1];
-    const path = normalizeRoutePath(match[2]);
-    if (path && METHOD.has(method)) out.push({ method, path });
+    const parsed = normalizeRoutePath(match[2]);
+    if (parsed && METHOD.has(method)) {
+      out.push({ method, path: parsed.path, requiresFixture: parsed.requiresFixture });
+    }
   }
-  return [...new Map(out.map((route) => [route.method + " " + route.path, route])).values()]
+  // If a route appears both with and without documented query parameters,
+  // conservatively retain the query fixture requirement.
+  const unique = new Map();
+  for (const row of out) {
+    const key = row.method + " " + row.path;
+    const previous = unique.get(key);
+    unique.set(key, { ...row, requiresFixture: row.requiresFixture || Boolean(previous?.requiresFixture) });
+  }
+  return [...unique.values()]
     .sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
 }
 
@@ -47,8 +64,12 @@ export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sour
   // The generated JSON is a review checklist, never a live test runner.
   // Mutating methods must not look safe to automate merely because their URL
   // has no parameters (e.g. POST /api/admin/audit/settings).
-  const isReadOnlyCandidate = ({ method, path }) =>
-    (method === "GET" || method === "HEAD") && !/[:\[\]{}]/.test(path);
+  const privilegedPrefixes = ["/api/personal", "/api/admin", "/api/admin-read",
+    "/api/manage", "/api/account"];
+  const isReadOnlyCandidate = ({ method, path, requiresFixture }) =>
+    (method === "GET" || method === "HEAD") &&
+    !requiresFixture && !/[:\[\]{}]/.test(path) &&
+    !privilegedPrefixes.some((prefix) => path === prefix || path.startsWith(prefix + "/"));
   const manual = api.filter((route) => !isReadOnlyCandidate(route))
     .map((r) => ({ ...r, mode: "fixture-required", expected: "owner-verified contract" }));
   const automated = api.filter(isReadOnlyCandidate)
@@ -93,6 +114,11 @@ const SOURCE_ROUTE_GAPS = Object.freeze([
   { method: "GET", path: "/api/admin/spreadsheet/tables", source: "apps/api/src/routes/admin/spreadsheet/read.ts", local: "/tables" },
   { method: "GET", path: "/api/google-drive-image/:id", source: "apps/api/src/routes/media/proxies.ts", local: "/:id" },
   { method: "GET", path: "/api/youtube-thumbnail/:id/:size", source: "apps/api/src/routes/media/proxies.ts", local: "/:id/:size" },
+  // API_MATRIX uses Next.js [id]/{a,b,c} documentation shorthand here.
+  // Probe only the three real mounted Hono endpoints, with id fixtures.
+  { method: "GET", path: "/api/live/events/:id/slots", source: "apps/api/src/routes/live/events.ts", local: "/:id/slots" },
+  { method: "GET", path: "/api/live/events/:id/submissions", source: "apps/api/src/routes/live/events.ts", local: "/:id/submissions" },
+  { method: "GET", path: "/api/live/events/:id/summary", source: "apps/api/src/routes/live/events.ts", local: "/:id/summary" },
 ]);
 
 function verifiedSourceRoutes() {
