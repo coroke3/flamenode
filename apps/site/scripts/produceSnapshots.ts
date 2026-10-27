@@ -26,6 +26,7 @@ import { readUserObjects } from "./batchedUserReader.ts";
 import {
   ABOUT_STATS_KEY,
   LIST_FIRST_PAGE_KEY,
+  SITEMAP_VIDEOS_KEY,
   RECOMMEND_KEY,
   TOP_KEY,
   TRENDING_KEY,
@@ -46,6 +47,7 @@ const ID_LIST_LIMIT = 5000;
 const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
 import { normalizeStaticUsersIndex } from "../../../src/lib/publicData/staticUsersIndexCore.ts";
+import { normalizeStaticRecentVideoPage } from "../../../src/lib/publicData/staticRecentVideoCore.ts";
 import { normalizeXId } from "../../../src/lib/utils/xid.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../../src/lib/utils/publicXUser.ts";
 
@@ -324,6 +326,15 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     add(RECOMMEND_KEY, objects.get("recommend.json"));
     const recent = objects.get("list/recent.json") as { items?: unknown[]; total?: number } | undefined;
     add(LIST_FIRST_PAGE_KEY, recent ? { videos: (recent.items ?? []).slice(0, LIST_FIRST_PAGE_SIZE), total: recent.total } : undefined);
+    // CURRENT sitemap uses the first 500 normalized public recent videos, not the 24-item UI page.
+    const sitemapPage = recent ? normalizeStaticRecentVideoPage(recent, 1, 500) : null;
+    add(SITEMAP_VIDEOS_KEY, sitemapPage ? {
+      videos: sitemapPage.videos.map((video) => ({
+        id: video.id,
+        youtube_video_id: video.youtube_video_id ?? null,
+        scheduled_time: video.scheduled_time ?? null,
+      })),
+    } : undefined);
     add(TRENDING_KEY, input.trending);
     add(USERS_INDEX_KEY, objects.get("users/index.json"));
     for (const id of creatorIds) {
