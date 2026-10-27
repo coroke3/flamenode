@@ -171,15 +171,9 @@ export function sourceDeclaresGetRoute(source, local) {
       blockComment = true; i++;
     } else withoutComments += ch;
   }
-  const escapedLocal = local.replace(/[.*+?^${}()|[\]\\]/g, "\\function verifiedSourceRoutes() {
-  return SOURCE_ROUTE_GAPS.map((row) => {
-    const content = read(row.source);
-    if (!content.includes('.get("' + row.local + '"')) {
-      throw new Error("Source route changed: " + row.source + " GET " + row.local);
-    }
-    return row;
-  });
-}");
+  const escapedLocal = [...local].map((ch) =>
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_:-".includes(ch)
+      ? ch : "\\" + ch).join("");
   return new RegExp("\\.get\\(\\s*[\"']" + escapedLocal + "[\"']\\s*,").test(withoutComments);
 }
 
