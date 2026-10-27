@@ -59,12 +59,17 @@ npm run build --workspace=@flamenode/ui
 npm run build --workspace=@flamenode/site
 npm run build --workspace=@flamenode/app
 npm run build --workspace=@flamenode/api
-npx wrangler deploy --dry-run --outdir /tmp/wr-site --config apps/site/wrangler.toml
-npx wrangler deploy --dry-run --outdir /tmp/wr-api --config apps/api/wrangler.toml
-npx wrangler deploy --dry-run --outdir /tmp/wr-app --config apps/app/wrangler.toml
-node --test scripts/new-worker-smoke-list.test.mjs
+node --test scripts/new-worker-smoke-list.test.mjs scripts/new-worker-dry-run.test.mjs
+node scripts/new-worker-dry-run.mjs --plan
 node scripts/new-worker-smoke-list.mjs
+node scripts/new-worker-dry-run.mjs
 ```
+
+The auditable `scripts/new-worker-dry-run.mjs` wrapper internally runs only
+the three fixed `wrangler deploy --dry-run` commands, using `npx --no-install`
+and a non-shell argument vector. CI has an anti-deployment test that forbids
+placing direct Wrangler deploy commands in GitHub Actions YAML; this rule is
+preserved, not weakened. `--plan` never invokes any external command.
 
 Any dry-run requiring `wrangler login` or real Cloudflare IDs is a **STOP**,
 not permission to configure an account or insert secrets. CI must never execute
