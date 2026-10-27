@@ -281,6 +281,37 @@ test("MIG-0628 U04: Hono mount parser excludes comments and quoted app.route exa
   "only commented mounts must not satisfy the source coverage gate");
 });
 
+test("MIG-0628 U04: whitespace-formatted Hono mount calls cannot escape route coverage", () => {
+  const formatted = [
+    'app.route("/api/compact", compactRoutes);',
+    'app . route("/api/spaced", spacedRoutes);',
+    'app\\n  .route("/api/multiline", multilineRoutes);',
+    '// app . route("/api/comment-only", ghostRoutes);',
+    'const example = \'app . route("/api/quoted-only", ghostRoutes)\';',
+  ].join("\\n");
+  assert.equal(countActiveHonoMountCalls(formatted), 3);
+  assert.deepEqual(listHonoMounts(formatted), [
+    { path: "/api/compact", owner: "compactRoutes" },
+    { path: "/api/multiline", owner: "multilineRoutes" },
+    { path: "/api/spaced", owner: "spacedRoutes" },
+  ]);
+
+  // Computed/optional method access remains intentionally unsupported by
+  // the literal mount parser: CI must flag it rather than silently pass.
+  for (const unsupported of [
+    'app?.route("/api/optional", optionalRoutes);',
+    'app["route"]("/api/computed", computedRoutes);',
+    "app['route']('/api/quoted-computed', computedRoutes);",
+    'app?.["route"]("/api/optional-computed", computedRoutes);',
+  ]) {
+    const entry = formatted + "\\n" + unsupported;
+    assert.equal(countActiveHonoMountCalls(entry), 4, unsupported);
+    assert.equal(listHonoMounts(entry).length, 3, unsupported);
+    assert.notEqual(countActiveHonoMountCalls(entry), listHonoMounts(entry).length,
+      "unsupported executable Hono mount syntax must be a review gate");
+  }
+});
+
 test("MIG-0628 U04: method/route parser flags undocumented mounted groups for review", () => {
   const fake = buildNewWorkerSmokePlan({
     appEntry: 'app.route("/api/a", aRoutes);\napp.route("/api/b", makeBRoutes());',
