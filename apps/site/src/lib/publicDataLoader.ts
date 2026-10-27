@@ -328,7 +328,7 @@ export async function loadSitemapVideosSnapshot(
 ): Promise<SitemapVideoRow[]> {
   const metrics = options.metrics ?? newSnapshotBuildMetrics();
   const payload = await readVerifiedPayload(
-    source, SITEMAP_VIDEOS_KEY, options, metrics, /^snapshot\\/sitemap\\/videos\\.json$/,
+    source, SITEMAP_VIDEOS_KEY, options, metrics, /^snapshot\/sitemap\/videos\.json$/,
   );
   if (!isRecord(payload) || !Array.isArray(payload.videos) || payload.videos.length > 500 ||
     !payload.videos.every((row: unknown) =>
