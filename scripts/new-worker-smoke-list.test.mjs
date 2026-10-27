@@ -285,10 +285,10 @@ test("MIG-0628 U04: whitespace-formatted Hono mount calls cannot escape route co
   const formatted = [
     'app.route("/api/compact", compactRoutes);',
     'app . route("/api/spaced", spacedRoutes);',
-    'app\\n  .route("/api/multiline", multilineRoutes);',
+    'app\n  .route("/api/multiline", multilineRoutes);',
     '// app . route("/api/comment-only", ghostRoutes);',
     'const example = \'app . route("/api/quoted-only", ghostRoutes)\';',
-  ].join("\\n");
+  ].join("\n");
   assert.equal(countActiveHonoMountCalls(formatted), 3);
   assert.deepEqual(listHonoMounts(formatted), [
     { path: "/api/compact", owner: "compactRoutes" },
@@ -304,7 +304,7 @@ test("MIG-0628 U04: whitespace-formatted Hono mount calls cannot escape route co
     "app['route']('/api/quoted-computed', computedRoutes);",
     'app?.["route"]("/api/optional-computed", computedRoutes);',
   ]) {
-    const entry = formatted + "\\n" + unsupported;
+    const entry = formatted + "\n" + unsupported;
     assert.equal(countActiveHonoMountCalls(entry), 4, unsupported);
     assert.equal(listHonoMounts(entry).length, 3, unsupported);
     assert.notEqual(countActiveHonoMountCalls(entry), listHonoMounts(entry).length,
