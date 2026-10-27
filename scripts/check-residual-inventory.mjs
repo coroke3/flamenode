@@ -1,0 +1,378 @@
+#!/usr/bin/env node
+/**
+ * MIG-0908: compare checked-in Wrangler declarations with the code-side
+ * inventory. Strict for audited sections; never queries Cloudflare.
+ */
+import {readFileSync,readdirSync,statSync} from "node:fs";
+import {resolve,dirname} from "node:path";
+import {fileURLToPath} from "node:url";
+
+export const CONFIGS = [
+  "wrangler.toml",
+  "workers/fast-jobs/wrangler.toml",
+  "workers/content-jobs/wrangler.toml",
+  "workers/sync-jobs/wrangler.toml"
+];
+const KNOWN = new Set(["","build","observability","placement","triggers","assets","services","queues.producers",
+  "queues.consumers","d1_databases","r2_buckets","kv_namespaces"]);
+const ARRAY_SECTIONS = new Set(["services","queues.producers","queues.consumers",
+  "d1_databases","r2_buckets","kv_namespaces"]);
+// Fail closed on every tracked Wrangler section. Vars are validated and redacted.
+const INERT_SECTIONS = new Set(["vars"]);
+const ALLOWED_KEYS = {
+  "": ["name","main","compatibility_date","compatibility_flags","workers_dev","minify"],
+  build: ["command"],
+  observability: ["enabled"],
+  placement: ["mode"],
+  triggers: ["crons"],
+  assets: ["directory","binding","run_worker_first"],
+  services: ["binding","service"],
+  "queues.producers": ["binding","queue"],
+  "queues.consumers": ["queue","dead_letter_queue","max_batch_size",
+    "max_batch_timeout","max_retries","retry_delay","max_concurrency"],
+  d1_databases: ["binding","database_name","database_id","migrations_dir"],
+  r2_buckets: ["binding","bucket_name"],
+  kv_namespaces: ["binding","id","preview_id"]
+};
+const D1_PLACEHOLDER_ID = "00000000-0000-0000-0000-000000000000";
+const KV_PLACEHOLDER_ID = "00000000000000000000000000000000";
+const clean = value => String(value).replaceAll(String.fromCharCode(96),"").trim();
+// Markdown cells are normalized once when read. Never normalize the parsed
+// Wrangler values: quoted whitespace/backticks are semantically significant,
+// and stripping them can incorrectly mark drifted bindings as documented.
+const signature = r => [r.config,r.kind,r.setting,r.value].join("|");
+const record = (config,kind,setting,value) => ({config,kind,setting,value});
+
+// Scope guard: a new Worker may have its own Wrangler file without any
+// changes to the existing four. Do not silently conclude the inventory is
+// complete when workers/** adds a new TOML/JSON/JSONC deployment config.
+// Local dev-only probes outside workers/ are intentionally excluded.
+export function findUntrackedWorkerConfigs(root) {
+  const workerDir=resolve(root,"workers"), files=[];
+  // A root JSON/JSONC variant can supersede the tracked root TOML and
+  // invalidate the 36-row audit without changing any of the four sources.
+  for(const item of readdirSync(root,{withFileTypes:true})) {
+    if(item.name==="workers" && item.isSymbolicLink()) files.push(item.name);
+    if(item.name==="wrangler.toml" && item.isSymbolicLink()) files.push(item.name);
+    if((item.name==="wrangler.json" || item.name==="wrangler.jsonc") &&
+       (item.isFile() || item.isSymbolicLink())) files.push(item.name);
+  }
+  function visit(dir,relative) {
+    for(const item of readdirSync(dir,{withFileTypes:true})) {
+      const local=relative+"/"+item.name;
+      if(item.isDirectory()) visit(resolve(dir,item.name),local);
+      else if(item.isSymbolicLink()) {
+        // Following a directory link can hide external Wrangler configs or
+        // recurse forever through a cycle. Flag it for explicit review.
+        if(/^wrangler\.(?:toml|json|jsonc)$/.test(item.name)) files.push(local);
+        else {
+          try {
+            if(statSync(resolve(dir,item.name)).isDirectory()) files.push(local);
+          } catch {
+            // A broken or inaccessible link is also unreviewed.
+            files.push(local);
+          }
+        }
+      }
+      else if(item.isFile() && /^wrangler\.(?:toml|json|jsonc)$/.test(item.name) &&
+              !CONFIGS.includes(local)) files.push(local);
+    }
+  }
+  // Never descend into a linked workers/ root: it may point outside the repo.
+  if(!files.includes("workers")) visit(workerDir,"workers");
+  return files.sort();
+}
+
+function removeComment(line) {
+  let quote = "", escape = false;
+  for(let i=0;i<line.length;i++) {
+    const c = line[i];
+    if(escape) {escape=false;continue;}
+    if(quote==='"' && c==="\\") {escape=true;continue;}
+    if(quote) {if(c===quote) quote="";continue;}
+    if(c==='"'||c==="'") quote=c;
+    else if(c==="#") return line.slice(0,i).trim();
+  }
+  if(quote) throw Error("unclosed TOML string");
+  return line.trim();
+}
+// Decode TOML 1.0 single-line basic strings, not JSON strings: JSON permits
+// \/" escapes that Wrangler rejects. Keep diagnostics redacted for [vars].
+function basicString(value) {
+  const raw=value.slice(1,-1), escapes={
+    '"':'"', '\\':'\\', b:'\b', t:'\t', n:'\n', f:'\f', r:'\r'
+  };
+  let out="";
+  for(let i=0;i<raw.length;i++) {
+    const ch=raw[i];
+    if(ch==='"' || /[\u0000-\u001f\u007f]/.test(ch))
+      throw Error("invalid TOML quoted string");
+    if(ch!=="\\") {out+=ch;continue;}
+    const esc=raw[++i];
+    if(Object.hasOwn(escapes,esc)) {out+=escapes[esc];continue;}
+    if(esc==="u" || esc==="U") {
+      const width=esc==="u"?4:8, digits=raw.slice(i+1,i+1+width);
+      if(digits.length!==width || !/^[0-9a-fA-F]+$/.test(digits))
+        throw Error("invalid TOML quoted string");
+      const cp=Number.parseInt(digits,16);
+      if(cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))
+        throw Error("invalid TOML quoted string");
+      out+=String.fromCodePoint(cp);
+      i+=width;
+      continue;
+    }
+    throw Error("invalid TOML quoted string");
+  }
+  return out;
+}
+function scalar(value) {
+  if(value.startsWith('"') && value.endsWith('"')) return basicString(value);
+  if(value.startsWith("'") && value.endsWith("'")) {
+    const inner=value.slice(1,-1);
+    if(/['\u0000-\u001f\u007f]/.test(inner)) throw Error("invalid TOML literal string");
+    return inner;
+  }
+  // TOML decimal integers cannot have leading zeros (01 / -01).
+  if(/^-?(?:0|[1-9]\d*)$/.test(value)) {
+    // TOML supports 64-bit integers, but JavaScript Number rounds values
+    // above MAX_SAFE_INTEGER. Never silently treat distinct Queue limits
+    // as the same documented value after a lossy conversion.
+    const number=Number(value);
+    if(!Number.isSafeInteger(number))
+      throw Error("unsafe TOML integer (value redacted)");
+    return number;
+  }
+  if(value==="true"||value==="false") return value==="true";
+  throw Error("unsupported TOML value (redacted)");
+}
+function decode(value) {
+  if(!value.startsWith("[")) return scalar(value);
+  if(!value.endsWith("]")) throw Error("unsupported multiline TOML array");
+  const inner=value.slice(1,-1).trim();
+  if(!inner) return [];
+  const tokens=inner.match(/"(?:[^"\\]|\\.)*"|'[^']*'/g)||[];
+  if(tokens.join(",").replace(/\s/g,"")!==inner.replace(/\s/g,"")) throw Error("unsupported TOML array");
+  return tokens.map(scalar);
+}
+function required(fields,key,where) {
+  if(typeof fields[key]!=="string" || !fields[key]) throw Error(where+": missing "+key);
+  return fields[key];
+}
+export function extractConfigRows(source,config) {
+  if(!CONFIGS.includes(config)) throw Error("unsupported config: "+config);
+  const blocks=[{section:"",fields:{},line:1}];
+  const singletonSections=new Set();
+  source.split(/\r?\n/).forEach((raw,index)=>{
+    let line;
+    try {line=removeComment(raw);} catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
+    if(!line) return;
+    if(line.startsWith("[")) {
+      const m=/^(\[\[?)([\w.-]+)(\]\]?)$/.exec(line);
+      if(!m || (m[1].length!==m[3].length)) throw Error(config+":"+(index+1)+": invalid section");
+      // Unknown binding families must report "unreviewed", even when
+      // declared as [[arrays]]; allow known sections only in their own shape.
+      if(!KNOWN.has(m[2]) && !INERT_SECTIONS.has(m[2]))
+        throw Error(config+":"+(index+1)+": unreviewed TOML section "+m[2]);
+      if(ARRAY_SECTIONS.has(m[2]) && m[1]!=="[[")
+        throw Error(config+":"+(index+1)+": expected array section "+m[2]);
+      if(!ARRAY_SECTIONS.has(m[2]) && m[1]!=="[")
+        throw Error(config+":"+(index+1)+": expected singleton section "+m[2]);
+      if(m[1]==="[") {
+        if(singletonSections.has(m[2]))
+          throw Error(config+":"+(index+1)+": duplicate TOML section "+m[2]);
+        singletonSections.add(m[2]);
+      }
+      blocks.push({section:m[2],fields:{},line:index+1});
+      return;
+    }
+    const block=blocks.at(-1), m=/^([A-Za-z_][\w-]*)\s*=\s*(.+)$/.exec(line);
+    if(!m) {
+      if(KNOWN.has(block.section) || block.section==="vars")
+        throw Error(config+":"+(index+1)+": unsupported syntax (value redacted)");
+      return;
+    }
+    if(KNOWN.has(block.section)) {
+      if(!ALLOWED_KEYS[block.section]?.includes(m[1]))
+        throw Error(config+":"+(index+1)+": unreviewed "+block.section+" key "+m[1]);
+      if(Object.hasOwn(block.fields,m[1])) throw Error(config+":"+(index+1)+": duplicate "+m[1]);
+      try {block.fields[m[1]]=decode(m[2].trim());}
+      catch(e){throw Error(config+":"+(index+1)+": "+e.message);}
+    } else if(block.section==="vars") {
+      // Wrangler vars and bindings share the Worker Env namespace.
+      // Values are not part of the resource inventory, but malformed TOML
+      // must never pass this CI gate. Validate without storing or echoing it.
+      if(Object.hasOwn(block.fields,m[1]))
+        throw Error(config+":"+(index+1)+": duplicate vars key "+m[1]);
+      try {decode(m[2].trim());}
+      catch {throw Error(config+":"+(index+1)+": invalid vars TOML value (redacted)");}
+      block.fields[m[1]]=true;
+    }
+  });
+  const rows=[];
+  blocks.forEach(({section,fields:d,line})=>{
+    const where=config+":"+line+" ["+section+"]";
+    const req=k=>required(d,k,where);
+    const add=(kind,key,value)=>rows.push(record(config,kind,key,value));
+    if(section==="") {
+      // `workers_dev` controls Worker preview-host exposure. Even though it
+      // is not one of the 36 binding records, silently changing its presence
+      // or value during migration must require explicit route review.
+      if(config==="wrangler.toml" && d.workers_dev!==true)
+        throw Error(where+": expected root workers_dev = true (review required)");
+      if(config!=="wrangler.toml" && Object.hasOwn(d,"workers_dev"))
+        throw Error(where+": unexpected background workers_dev (review required)");
+      if("name" in d) add("worker.name","name",req("name"));
+      if("main" in d) add("worker.main","main",req("main"));
+    } else if(section==="build") {
+      // A commented-out or replaced Workers Builds guard must not pass the
+      // inventory CI just because the rest of the bindings still match.
+      if(config!=="wrangler.toml")
+        throw Error(where+": unreviewed background Worker build section");
+      if(d.command!=="node scripts/workers-ci-wrangler-guard.mjs")
+        throw Error(where+": expected guarded build.command (review required)");
+    } else if(section==="observability") {
+      // Source-side observability should not be disabled or made syntactically
+      // invalid without a dedicated Worker operations review.
+      if(d.enabled!==true)
+        throw Error(where+": expected observability.enabled = true (review required)");
+    } else if(section==="placement") {
+      // Only the existing web template has Smart Placement. Adding or changing
+      // background placement requires a separate CPU/latency review.
+      if(config!=="wrangler.toml" || d.mode!=="smart")
+        throw Error(where+": unexpected placement.mode (review required)");
+    } else if(section==="triggers") {
+      if(!Array.isArray(d.crons)) throw Error(where+": missing crons array");
+      d.crons.forEach(v=>{
+        if(typeof v!=="string"||!v) throw Error(where+": invalid cron");
+        add("cron","triggers.crons",v);
+      });
+    } else if(section==="assets") {
+      // A true run_worker_first sends every asset request through the Worker.
+      // This can change public 404/visibility behavior; review via its own MIG
+      // before enabling it on the tracked legacy Worker template.
+      if(d.run_worker_first!==false)
+        throw Error(where+": expected explicit assets.run_worker_first = false");
+      add("asset.binding",req("binding"),req("directory"));
+    }
+    else if(section==="services") add("service.binding",req("binding"),req("service"));
+    else if(section==="queues.producers") add("queue.producer",req("binding"),req("queue"));
+    else if(section==="queues.consumers") {
+      const name=req("queue"), dlq=req("dead_letter_queue");
+      const keys=["max_batch_size","max_batch_timeout","max_retries","retry_delay","max_concurrency"];
+      if(!keys.every(k=>Number.isSafeInteger(d[k])))
+        throw Error(where+": missing consumer batch/timeout/retry/delay/concurrency");
+      // Invalid zero/negative delivery limits are not valid operational
+      // settings and must not become an "approved" inventory baseline.
+      if(d.max_batch_size<1||d.max_batch_timeout<0||d.max_retries<0||
+          d.retry_delay<0||d.max_concurrency<1)
+        throw Error(where+": invalid consumer limit range (review required)");
+      add("queue.consumer",name,"DLQ "+dlq+"; batch "+d.max_batch_size+"; timeout "+d.max_batch_timeout+
+        "; retry "+d.max_retries+"; delay "+d.retry_delay+"; concurrency "+d.max_concurrency);
+    } else if(section==="d1_databases") {
+      // Tracked templates must not embed a real D1 database identifier.
+      // Production uses separately generated config, never printed here.
+      if(req("database_id")!==D1_PLACEHOLDER_ID)
+        throw Error(where+": non-placeholder D1 identifier in tracked config (redacted)");
+      // The web Worker owns the schema migration path; other tracked Workers
+      // currently omit it. Preserve both states until an explicit review.
+      if(config==="wrangler.toml" ? d.migrations_dir!=="migrations" : "migrations_dir" in d)
+        throw Error(where+": unexpected D1 migrations_dir (review required)");
+      add("d1.binding",req("binding"),req("database_name"));
+    }
+    else if(section==="r2_buckets") add("r2.binding",req("binding"),req("bucket_name"));
+    else if(section==="kv_namespaces") {
+      if(req("id")!==KV_PLACEHOLDER_ID ||
+          ("preview_id" in d && d.preview_id!==KV_PLACEHOLDER_ID))
+        throw Error(where+": non-placeholder KV identifier in tracked config (redacted)");
+      // The web template has no preview_id; all three background templates
+      // explicitly do. A removal/addition must not silently pass parity.
+      if(("preview_id" in d)!==(config!=="wrangler.toml"))
+        throw Error(where+": unexpected KV preview_id presence (review required)");
+      add("kv.binding",req("binding"),"checked-in placeholder ID");
+    }
+  });
+  const seen=new Set();
+  const bindingKinds=new Set(["asset.binding","service.binding","queue.producer",
+    "d1.binding","r2.binding","kv.binding"]);
+  const bindingNames=new Map();
+  for(const {section,fields} of blocks) {
+    if(section!=="vars") continue;
+    for(const name of Object.keys(fields)) {
+      if(bindingNames.has(name))
+        throw Error(config+": duplicate vars key "+name);
+      bindingNames.set(name,"vars");
+    }
+  }
+  rows.forEach(r=>{
+    const key=[r.config,r.kind,r.setting,r.kind==="cron"?r.value:""].join("|");
+    if(seen.has(key)) throw Error("duplicate declaration: "+key);
+    seen.add(key);
+    // A Worker Env key must belong to exactly one binding, regardless of
+    // whether the duplicate belongs to a different binding family. Queue
+    // consumers only declare queue names, not Env keys.
+    if(bindingKinds.has(r.kind)) {
+      const previous=bindingNames.get(r.setting);
+      if(previous)
+        throw Error(config+": binding name collision "+r.setting+
+          " ("+previous+" and "+r.kind+")");
+      bindingNames.set(r.setting,r.kind);
+    }
+  });
+  if(config==="wrangler.toml" && !blocks.some(x=>x.section==="build"))
+    throw Error(config+": missing guarded [build] section");
+  if(!blocks.some(x=>x.section==="observability"))
+    throw Error(config+": missing [observability] section (review required)");
+  if(config==="wrangler.toml" && !blocks.some(x=>x.section==="placement"))
+    throw Error(config+": missing [placement] section (review required)");
+  if(rows.filter(x=>x.kind==="worker.name").length!==1||rows.filter(x=>x.kind==="worker.main").length!==1)
+    throw Error(config+": expected exactly one worker name and main");
+  return rows;
+}
+export function readInventoryRows(markdown) {
+  // Read only the first inventory table. Later subsection tables are
+  // explanatory decision proposals, not Wrangler declaration records.
+  const body=markdown.replace(/\r\n/g,"\n")
+    .split("## 1. Tracked code-side inventory")[1]
+    ?.split(/\n#{2,6}\s/)[0];
+  if(!body) throw Error("inventory sections 1 and 2 required");
+  const lines=body.split("\n").filter(x=>x.trim().startsWith("|"));
+  const head=lines[0]?.split("|").slice(1,-1).map(clean).join("|");
+  if(head!=="Config|Kind|Setting / binding|Value / resource|移行後の担当（Worker / MIG）|退役 MIG")
+    throw Error("inventory table header mismatch");
+  if(!/^\|(?:\s*:?-{3,}:?\s*\|){6}\s*$/.test(lines[1]??"")) throw Error("bad table separator");
+  const seen=new Set();
+  return lines.slice(2).map((line,i)=>{
+    const cols=line.split("|").slice(1,-1).map(clean);
+    if(cols.length!==6||cols.some(v=>!v)) throw Error("invalid inventory row "+(i+1));
+    if(!CONFIGS.includes(cols[0])) throw Error("untracked inventory config: "+cols[0]);
+    const r={...record(cols[0],cols[1],cols[2],cols[3]),owner:cols[4],retirement:cols[5]};
+    const key=[r.config,r.kind,r.setting,r.kind==="cron"?r.value:""].join("|");
+    if(seen.has(key)) throw Error("duplicate inventory row: "+key);
+    seen.add(key);
+    return r;
+  });
+}
+export function checkResidualInventory({root,markdown,sources}={}) {
+  const base=resolve(root??dirname(dirname(fileURLToPath(import.meta.url))));
+  const untracked=findUntrackedWorkerConfigs(base);
+  if(untracked.length) throw Error("unreviewed Worker Wrangler configs: "+untracked.join(", "));
+  const docs=readInventoryRows(markdown??readFileSync(resolve(base,"docs/migration/RESIDUAL_INVENTORY.md"),"utf8"));
+  const code=CONFIGS.flatMap(file=>extractConfigRows(sources?.[file]??readFileSync(resolve(base,file),"utf8"),file));
+  const documentation=new Set(docs.map(signature)), declaration=new Set(code.map(signature));
+  return {
+    missing:code.filter(r=>!documentation.has(signature(r))),
+    stale:docs.filter(r=>!declaration.has(signature(r))),
+    unknown:docs.filter(r=>r.owner.includes("未定")||r.retirement.includes("未定")),
+    declaredCount:code.length,documentedCount:docs.length
+  };
+}
+if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+  try {
+    const r=checkResidualInventory();
+    r.missing.forEach(x=>console.error("MISSING: "+signature(x)));
+    r.stale.forEach(x=>console.error("STALE: "+signature(x)));
+    if(r.unknown.length) console.warn("WARN: "+r.unknown.length+" unresolved entries (MIG-0901)");
+    if(r.missing.length||r.stale.length) process.exitCode=1;
+    else console.log("PASS: "+r.declaredCount+" tracked config records");
+  } catch(e){console.error("FAIL residual inventory: "+e.message);process.exitCode=1;}
+}
