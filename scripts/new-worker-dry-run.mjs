@@ -84,6 +84,21 @@ export function assertDryRunInputs(plan) {
   }
 }
 
+// A dry-run must not inherit account credentials from a developer workstation
+// or a CI job with Cloudflare access. This also prevents Wrangler from using
+// those values for an accidental account lookup during local packaging.
+const CLOUDFLARE_AUTH_KEYS = Object.freeze([
+  "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL",
+  "CLOUDFLARE_ACCOUNT_ID", "CF_API_TOKEN", "CF_API_KEY",
+  "CF_EMAIL", "CF_ACCOUNT_ID",
+]);
+
+export function offlineWranglerEnv(parent = process.env) {
+  const env = { ...parent, CI: "true", WRANGLER_SEND_METRICS: "false" };
+  for (const key of CLOUDFLARE_AUTH_KEYS) delete env[key];
+  return env;
+}
+
 function main(argv) {
   if (argv.length > 1 || (argv.length === 1 && argv[0] !== "--plan")) {
     throw new Error("Only --plan is supported; arbitrary deployment flags forbidden");
@@ -96,8 +111,9 @@ function main(argv) {
   assertDryRunInputs(plan);
   for (const item of plan) {
     const out = spawnSync(item.executable, item.args, {
-      cwd: ROOT, stdio: "inherit", shell: false,
-      env: { ...process.env, CI: "true", WRANGLER_SEND_METRICS: "false" },
+      cwd: ROOT, stdio: ["ignore", "inherit", "inherit"], shell: false,
+      timeout: 240_000, // Fail closed instead of hanging on an unexpected prompt.
+      env: offlineWranglerEnv(),
     });
     if (out.error) throw out.error;
     if (out.status !== 0) throw new Error(item.name + " Wrangler local dry-run failed: " + out.status);
