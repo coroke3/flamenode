@@ -6,7 +6,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
-import { WORKER_TARGETS, WRANGLER_CLI, assertFixedDryRunPlan, dryRunArgs, dryRunPlan, offlineWranglerEnv } from "./new-worker-dry-run.mjs";
+import { WORKER_TARGETS, WRANGLER_CLI, assertBuiltEntrypoints, assertFixedDryRunPlan, dryRunArgs, dryRunPlan, offlineWranglerEnv } from "./new-worker-dry-run.mjs";
 
 test("MIG-0628 U03: exactly site, api, app and only fixed --dry-run commands", () => {
   assert.deepEqual(WORKER_TARGETS.map(w => w.name), ["site", "api", "app"]);
@@ -55,6 +55,33 @@ test("MIG-0628 U03: altered or extra Wrangler flags never reach spawn", () => {
   reject(plan => { plan.reverse(); });
 });
 
+
+test("MIG-0628 U03: an existing directory does not count as a built static Worker", () => {
+  const plan = dryRunPlan(path.resolve("dry-run-artifact-fixture"));
+  const expected = ["apps/site/dist/index.html", "apps/api/src/index.ts",
+    "apps/app/dist/index.html"].map((entry) => path.join(entry));
+  const seen = [];
+  const inspect = (entry) => {
+    seen.push(entry);
+    return { isFile: () => true, size: 42 };
+  };
+  assert.doesNotThrow(() => assertBuiltEntrypoints(plan, inspect));
+  assert.deepEqual(seen.map(entry => path.relative(path.resolve("."), entry)), expected);
+
+  for (const failed of [0, 1, 2]) {
+    const target = seen[failed];
+    assert.throws(() => assertBuiltEntrypoints(plan, (entry) =>
+      entry === target ? { isFile: () => true, size: 0 } : inspect(entry)),
+    /Missing or empty Worker build entrypoint/);
+    assert.throws(() => assertBuiltEntrypoints(plan, (entry) =>
+      entry === target ? { isFile: () => false, size: 900 } : inspect(entry)),
+    /Missing or empty Worker build entrypoint/);
+    assert.throws(() => assertBuiltEntrypoints(plan, (entry) => {
+      if (entry === target) throw new Error("ENOENT");
+      return inspect(entry);
+    }), /Missing or empty Worker build entrypoint/);
+  }
+});
 
 test("MIG-0628 U03: dry-run never inherits Cloudflare account credentials", () => {
   const secret = "DO_NOT_LEAK_SAMPLE_TOKEN";
