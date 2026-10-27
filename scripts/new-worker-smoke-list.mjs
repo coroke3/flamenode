@@ -139,10 +139,54 @@ const SOURCE_ROUTE_GAPS = Object.freeze([
   { method: "GET", path: "/api/live/events/:id/summary", source: "apps/api/src/routes/live/events.ts", local: "/:id/summary" },
 ]);
 
-function verifiedSourceRoutes() {
+// A route named only in a commented-out migration snippet is not a live
+// Hono registration. Strip JS/TS comments while preserving quoted path strings
+// before checking source-backed smoke coverage.
+export function sourceDeclaresGetRoute(source, local) {
+  if (typeof source !== "string" || typeof local !== "string" ||
+      !local.startsWith("/")) return false;
+  let withoutComments = "";
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i], next = source[i + 1];
+    if (lineComment) {
+      if (ch === "\n") { lineComment = false; withoutComments += ch; }
+    } else if (blockComment) {
+      if (ch === "*" && next === "/") { blockComment = false; i++; }
+      else if (ch === "\n") withoutComments += ch;
+    } else if (quote !== null) {
+      withoutComments += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      withoutComments += ch;
+    } else if (ch === "/" && next === "/") {
+      lineComment = true; i++;
+    } else if (ch === "/" && next === "*") {
+      blockComment = true; i++;
+    } else withoutComments += ch;
+  }
+  const escapedLocal = local.replace(/[.*+?^${}()|[\]\\]/g, "\\function verifiedSourceRoutes() {
   return SOURCE_ROUTE_GAPS.map((row) => {
     const content = read(row.source);
     if (!content.includes('.get("' + row.local + '"')) {
+      throw new Error("Source route changed: " + row.source + " GET " + row.local);
+    }
+    return row;
+  });
+}");
+  return new RegExp("\\.get\\(\\s*[\"']" + escapedLocal + "[\"']\\s*,").test(withoutComments);
+}
+
+function verifiedSourceRoutes() {
+  return SOURCE_ROUTE_GAPS.map((row) => {
+    const content = read(row.source);
+    if (!sourceDeclaresGetRoute(content, row.local)) {
       throw new Error("Source route changed: " + row.source + " GET " + row.local);
     }
     return row;
