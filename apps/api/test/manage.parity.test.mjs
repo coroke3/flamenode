@@ -294,6 +294,11 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(dash.status, 200, name);
       assert.equal(nav.body.activeXUserId, dash.body.activeXUserId, name);
       assert.deepEqual(nav.body.manageStaffXUserIds, dash.body.manageStaffXUserIds, name);
+      // Independent CURRENT oracle: dashboard and navigation share the Hono resolver,
+      // so checking only those two could silently preserve the same regression.
+      const current = await refDashboard(name);
+      assert.equal(nav.body.activeXUserId, current.activeXUserId, `${name}: CURRENT active X`);
+      assert.deepEqual(nav.body.manageStaffXUserIds, current.manageStaffXUserIds, `${name}: CURRENT staff X IDs`);
       assert.deepEqual(ManageNavigationResponseSchema.parse(nav.body), nav.body, name);
       assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), false, name);
       assert.equal(nav.stats.statements, 3, name);
@@ -318,6 +323,9 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(nav.body.manageStaffXUserIds, ["two_x1", "two_x2"]);
       assert.equal(nav.body.activeXUserId, dash.body.activeXUserId);
       assert.deepEqual(nav.body.manageStaffXUserIds, dash.body.manageStaffXUserIds);
+      const current = await refDashboard("two");
+      assert.equal(nav.body.activeXUserId, current.activeXUserId, "CURRENT also warns for non-staff approved X");
+      assert.deepEqual(nav.body.manageStaffXUserIds, current.manageStaffXUserIds);
       assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), true);
       assert.equal(nav.stats.statements, 3, "linked subquery must not add a D1 statement");
     } finally {
@@ -343,6 +351,27 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(nav.stats.statements, 3);
     } finally {
       sqlite.prepare('UPDATE "user" SET active_x_user_id = ? WHERE id = ?').run(" TWO_X1 ", "u_two");
+    }
+  });
+
+
+  test("MIG-0663 T01/T06: revoked Active X falls back to remaining approved staff X", async () => {
+    // This is a safety boundary: an old session preference cannot reselect
+    // an X whose approval was revoked, or leak it through the sidebar.
+    sqlite.prepare("UPDATE x_users SET approval_status = 'pending' WHERE id = 'two_x1'").run();
+    try {
+      const nav = await call("/api/manage/navigation", "tok-two");
+      assert.equal(nav.status, 200);
+      assert.equal(nav.body.activeXUserId, "two_x2");
+      assert.deepEqual(nav.body.manageStaffXUserIds, ["two_x2"]);
+      const current = await refDashboard("two");
+      assert.equal(nav.body.activeXUserId, current.activeXUserId);
+      assert.deepEqual(nav.body.manageStaffXUserIds, current.manageStaffXUserIds);
+      assert.equal(shouldWarnManageActiveXMismatch(nav.body.activeXUserId, nav.body.manageStaffXUserIds), false);
+      assert.equal(nav.stats.statements, 3);
+      assert.equal(nav.stats.writes, 0);
+    } finally {
+      sqlite.prepare("UPDATE x_users SET approval_status = 'approved' WHERE id = 'two_x1'").run();
     }
   });
 
