@@ -22,7 +22,11 @@ root TOML names and the service's table-scoped target; dry-run alone cannot
 prove name isolation or the correct authentication dependency.
 
 All target templates retain CURRENT `compatibility_date=2026-07-21`
-and `nodejs_compat`, `global_fetch_strictly_public`. Resource IDs are
+and `nodejs_compat`, `global_fetch_strictly_public`. Both compatibility
+flags must appear at the TOML **root** as `compatibility_flags = ["nodejs_compat",
+"global_fetch_strictly_public"]`, not under `[vars]` or `[assets]`. The
+MIG-0628 topology tests reject misplaced, duplicated or reduced flags; a
+whole-file text match does not prove Wrangler will apply them. Resource IDs are
 **intentionally invalid placeholders**; there are no Route, Custom Domain,
 OAuth credential, JWT or secret values in the tracked files.
 
