@@ -19,6 +19,7 @@ import {
   LIST_FIRST_PAGE_KEY,
   SITEMAP_VIDEOS_KEY,
   loadSitemapVideosSnapshot,
+  videoDetailKeys,
   RECOMMEND_KEY,
   TRENDING_KEY,
   ABOUT_STATS_KEY,
@@ -32,7 +33,7 @@ import { loadRulesForBuild, rulesSourceFromEnv } from "../apps/site/src/lib/rule
 import { computeUsersIndexView, buildSectionPages } from "../apps/site/src/lib/userViews.ts";
 import { normalizeStaticUserProfile } from "../src/lib/publicData/staticUserProfileCore.ts";
 import { normalizeStaticRecentVideoPage } from "../src/lib/publicData/staticRecentVideoCore.ts";
-import { buildSitemapEntries } from "../apps/site/src/lib/sitemap.ts";
+import { buildSitemapEntries, publishedSitemapRows } from "../apps/site/src/lib/sitemap.ts";
 import { loadEventBuildData } from "../apps/site/src/lib/eventData.ts";
 
 const NOW = 1_760_000_000;
@@ -172,19 +173,31 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
     loadEventBuildData(env),
     loadUserBuildDataFrom(userPayloadSourceFromEnv(env)),
   ]);
+  const publishedIds = new Set(videoDetailKeys(produced.result.manifest).map((key) =>
+    key.slice("snapshot/video-detail/".length, -".json".length)));
+  const publishedVideos = publishedSitemapRows(loaded.videos, publishedIds);
+  const publishedEvents = publishedSitemapRows(eventBuild.index?.events ?? [], new Set(eventBuild.details.keys()));
   const sitemap = buildSitemapEntries({
     origin: "https://flamenode.net",
-    videos: loaded.videos,
-    events: eventBuild.index?.events ?? [],
+    videos: publishedVideos,
+    events: publishedEvents,
     creators: userBuild.index ?? [],
     generatedAt: [loaded.generated_at, eventBuild.index?.generatedAt],
     now: new Date(NOW * 1000),
   });
   const paths = sitemap.map((row) => new URL(row.url).pathname);
-  assert.deepEqual(paths.slice(7, 7 + expected.length),
-    expected.map((video) => "/" + encodeURIComponent(video.youtube_video_id ?? video.id)),
+  assert.deepEqual(paths.slice(7, 7 + publishedVideos.length),
+    publishedVideos.map((video) => "/" + encodeURIComponent(video.youtube_video_id ?? video.id)),
     "dynamic sitemap video URL set must match CURRENT recent index (not truncated to 24)");
   assert.ok(paths.includes("/event/public-event"), "public event is included");
+  assert.deepEqual(publishedSitemapRows(
+    [...loaded.videos, { id: "unbuilt_video", youtube_video_id: "not_built", scheduled_time: null }],
+    publishedIds,
+  ), publishedVideos, "unbuilt video snapshot must not create a sitemap route");
+  assert.deepEqual(publishedSitemapRows(
+    [...(eventBuild.index?.events ?? []), { id: "orphan_event" }],
+    new Set(eventBuild.details.keys()),
+  ), publishedEvents, "unbuilt event page must not be indexed");
   assert.ok(paths.includes("/user/creator_a"), "published creator page is included");
   assert.ok(!paths.includes("/event/private-event"), "private events may not leak");
   assert.ok(!paths.includes("/user/banned_c"), "non-listable creator may not leak");
