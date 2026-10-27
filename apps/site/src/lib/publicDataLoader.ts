@@ -312,6 +312,44 @@ export async function loadPublicBuildSnapshot(
 }
 
 /** Listing artifacts rendered at build time by `/list`, `/recommend`, `/trending` (MIG-0505). */
+/** Build-time public video URL candidates for sitemap, from CURRENT recent list (MIG-0621). */
+export const SITEMAP_VIDEOS_KEY = "snapshot/sitemap/videos.json";
+
+export interface SitemapVideoRow {
+  id: string;
+  youtube_video_id: string | null;
+  scheduled_time: number | null;
+}
+
+export interface SitemapVideoSnapshot {
+  generated_at: number | null;
+  videos: SitemapVideoRow[];
+}
+
+/** Same manifest/generation/hash/visibility checks as every other public build snapshot. */
+export async function loadSitemapVideosSnapshot(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<SitemapVideoSnapshot> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(
+    source, SITEMAP_VIDEOS_KEY, options, metrics, /^snapshot\/sitemap\/videos\.json$/,
+  );
+  if (!isRecord(payload) ||
+    !(payload.generated_at === null || typeof payload.generated_at === "number" && Number.isFinite(payload.generated_at)) ||
+    !Array.isArray(payload.videos) || payload.videos.length > 500 ||
+    !payload.videos.every((row: unknown) =>
+      isRecord(row) &&
+      typeof row.id === "string" && row.id.length > 0 &&
+      (row.youtube_video_id === null || typeof row.youtube_video_id === "string") &&
+      (row.scheduled_time === null || typeof row.scheduled_time === "number" && Number.isFinite(row.scheduled_time))
+    )) {
+    return reject(metrics, "INVALID_PAYLOAD", "Sitemap video snapshot payload invalid");
+  }
+  metrics.accepted += 1;
+  return payload as unknown as SitemapVideoSnapshot;
+}
+
 export const LIST_FIRST_PAGE_KEY = "snapshot/list/first-page.json";
 export const RECOMMEND_KEY = "snapshot/recommend/current.json";
 export const TRENDING_KEY = "snapshot/trending/current.json";

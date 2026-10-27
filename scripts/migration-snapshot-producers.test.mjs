@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
-import { produceSnapshots, writeSnapshotDir, wrapSnapshot, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import { produceSnapshots, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
   loadListingPayload,
@@ -17,6 +17,9 @@ import {
   SnapshotBuildError,
   TOP_KEY,
   LIST_FIRST_PAGE_KEY,
+  SITEMAP_VIDEOS_KEY,
+  loadSitemapVideosSnapshot,
+  videoDetailKeys,
   RECOMMEND_KEY,
   TRENDING_KEY,
   ABOUT_STATS_KEY,
@@ -29,6 +32,9 @@ import { loadUserBuildDataFrom, userPayloadSourceFromEnv } from "../apps/site/sr
 import { loadRulesForBuild, rulesSourceFromEnv } from "../apps/site/src/lib/rulesLoader.ts";
 import { computeUsersIndexView, buildSectionPages } from "../apps/site/src/lib/userViews.ts";
 import { normalizeStaticUserProfile } from "../src/lib/publicData/staticUserProfileCore.ts";
+import { normalizeStaticRecentVideoPage } from "../src/lib/publicData/staticRecentVideoCore.ts";
+import { buildSitemapEntries, publishedSitemapRows } from "../apps/site/src/lib/sitemap.ts";
+import { loadEventBuildData } from "../apps/site/src/lib/eventData.ts";
 
 const NOW = 1_760_000_000;
 const migrationsDir = path.resolve("migrations");
@@ -125,6 +131,113 @@ test("every snapshot kind the pages read is produced as a verifiable envelope", 
   assert.deepEqual(produced.result.manifest.allowedKeys, [...new Set(produced.result.snapshots.map((s) => s.key))].sort());
   assert.ok(fs.existsSync(path.join(dir, "snapshot/top/current.json")));
   assert.equal(produced.result.report.trending, "produced");
+});
+
+test("MIG-0621: sitemap excludes stale aliases, revoked videos and missing detail snapshots", () => {
+  const row = byKey.get(SITEMAP_VIDEOS_KEY).payload.videos.find((video) => video.id === "a-0");
+  const detail = byKey.get("snapshot/video-detail/a-0.json").payload;
+  assert.ok(row && detail, "fixture must contain a published video and its detail");
+  assert.equal(sitemapVideoMatchesDetail(row, detail), true);
+  assert.equal(sitemapVideoMatchesDetail({ ...row, youtube_video_id: "stale_alias" }, detail), false);
+  assert.equal(sitemapVideoMatchesDetail({ ...row, id: "different_id" }, detail), false);
+  assert.equal(sitemapVideoMatchesDetail(row, { ...detail, video: { ...detail.video, visibility_status: "private" } }), false);
+  assert.equal(sitemapVideoMatchesDetail(row, null), false);
+});
+
+test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent recent generator", async () => {
+  assert.ok(byKey.has(SITEMAP_VIDEOS_KEY), "missing sitemap video projection");
+  const oracleSqlite = migrated();
+  seed(oracleSqlite);
+  const objects = new Map();
+  const oracleEnv = {
+    DB: d1(oracleSqlite),
+    R2: {
+      async get(key) { const v = objects.get(key); return v === undefined ? null : { async json() { return structuredClone(v); } }; },
+      async head() { return null; },
+      async put(key, body) { objects.set(key, JSON.parse(String(body))); },
+      async delete(key) { objects.delete(key); },
+    },
+    KV: { async get() { return null; }, async put() {} },
+  };
+  await rebuildTarget(oracleEnv, "list_recent", "global");
+  const recent = objects.get("list/recent.json");
+  const expected = (normalizeStaticRecentVideoPage(recent, 1, 500)?.videos ?? []).map((video) => ({
+    id: video.id,
+    youtube_video_id: video.youtube_video_id ?? null,
+    scheduled_time: video.scheduled_time ?? null,
+  }));
+  // The independent CURRENT recent index is the candidate source, while the public
+  // video-detail envelope determines which canonical URLs Astro can actually publish.
+  const expectedPublished = expected.filter((video) =>
+    sitemapVideoMatchesDetail(video, byKey.get(`snapshot/video-detail/${video.id}.json`)?.payload ?? null));
+  // T02 (D-14-4 (e)): assert the CURRENT candidate set and the exclusion set separately. The seed
+  // has a public detail for every CURRENT candidate, so nothing may be excluded here; the
+  // exclusion reasons themselves are covered by the stale-alias test above.
+  const excluded = expected.filter((video) => !expectedPublished.includes(video));
+  assert.deepEqual(excluded, [], "seeded CURRENT sitemap candidates must all have a published canonical detail");
+  assert.deepEqual(expectedPublished, expected, "with no exclusions TARGET equals the CURRENT candidate set");
+  const gotPayload = byKey.get(SITEMAP_VIDEOS_KEY).payload;
+  assert.deepEqual(gotPayload.videos, expectedPublished);
+  assert.ok(gotPayload.videos.length > LIST_FIRST_PAGE_SIZE, "sitemap must not inherit 24-item UI truncation");
+  assert.ok(gotPayload.videos.length <= 500);
+  assert.equal(gotPayload.videos.some((video) => video.id === "a-private"), false);
+  const source = {
+    read: async (key) => fs.existsSync(path.join(dir, key))
+      ? new Uint8Array(fs.readFileSync(path.join(dir, key)))
+      : null,
+  };
+  const loaded = await loadSitemapVideosSnapshot(source, {
+    manifest: produced.result.manifest, generation: "gen-1",
+  });
+  assert.deepEqual(loaded.videos, expectedPublished, "sitemap snapshot must match CURRENT public recent candidates with published canonical details");
+  const [eventBuild, userBuild] = await Promise.all([
+    loadEventBuildData(env),
+    loadUserBuildDataFrom(userPayloadSourceFromEnv(env)),
+  ]);
+  const publishedIds = new Set(videoDetailKeys(produced.result.manifest).map((key) =>
+    key.slice("snapshot/video-detail/".length, -".json".length)));
+  const publishedVideos = publishedSitemapRows(loaded.videos, publishedIds);
+  const publishedEvents = publishedSitemapRows(eventBuild.index?.events ?? [], new Set(eventBuild.details.keys()));
+  const sitemap = buildSitemapEntries({
+    origin: "https://flamenode.net",
+    videos: publishedVideos,
+    events: publishedEvents,
+    creators: userBuild.index ?? [],
+    generatedAt: [loaded.generated_at, eventBuild.index?.generatedAt],
+    now: new Date(NOW * 1000),
+  });
+  const paths = sitemap.map((row) => new URL(row.url).pathname);
+  assert.deepEqual(paths.slice(7, 7 + publishedVideos.length),
+    publishedVideos.map((video) => "/" + encodeURIComponent(video.youtube_video_id ?? video.id)),
+    "dynamic sitemap video URL set must match CURRENT recent index (not truncated to 24)");
+  assert.ok(paths.includes("/event/public-event"), "public event is included");
+  assert.deepEqual(publishedSitemapRows(
+    [...loaded.videos, { id: "unbuilt_video", youtube_video_id: "not_built", scheduled_time: null }],
+    publishedIds,
+  ), publishedVideos, "unbuilt video snapshot must not create a sitemap route");
+  assert.deepEqual(publishedSitemapRows(
+    [...(eventBuild.index?.events ?? []), { id: "orphan_event" }],
+    new Set(eventBuild.details.keys()),
+  ), publishedEvents, "unbuilt event page must not be indexed");
+  assert.ok(paths.includes("/user/creator_a"), "published creator page is included");
+  assert.ok(!paths.includes("/event/private-event"), "private events may not leak");
+  assert.ok(!paths.includes("/user/banned_c"), "non-listable creator may not leak");
+  assert.ok(!paths.includes("/ytprivate001"), "private video may not leak");
+
+  // The producer intentionally pins Date.now to NOW, while the separately rebuilt
+  // CURRENT oracle above uses real wall time. Assert each clock's provenance,
+  // not equality between unrelated instants.
+  assert.equal(loaded.generated_at, NOW, "snapshot generator uses the injected build timestamp");
+  assert.ok((normalizeStaticRecentVideoPage(recent, 1, 500)?.generatedAt ?? 0) > 0,
+    "CURRENT oracle exposes a valid source generated_at timestamp");
+  await assert.rejects(
+    loadSitemapVideosSnapshot(source, {
+      manifest: { ...produced.result.manifest, allowedKeys: produced.result.manifest.allowedKeys.filter((key) => key !== SITEMAP_VIDEOS_KEY) },
+      generation: "gen-1",
+    }),
+    /NOT_PUBLIC|denied|visibility/i,
+    "missing manifest allow entry must fail closed in the loader",
+  );
 });
 
 test("loaders accept the output: about-stats equals CURRENT RH-026 counts, listing and top build from it", async () => {
