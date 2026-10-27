@@ -389,6 +389,10 @@ test("MIG-0628 U04: source route audit ignores commented-out Hono GET handlers",
     assert.equal(sourceDeclaresGetRoute(commented, "/data"), false,
       "commented or quoted route cannot satisfy smoke coverage");
   }
+  assert.equal(sourceDeclaresGetRoute('const sample = `.get("/data", handler)`;', "/data"), false,
+    "route examples inside template strings do not count as registrations");
+  assert.equal(sourceDeclaresGetRoute('const example = "https://test.invalid"; routes.get("/data", handler);',
+    "/data"), true, "quoted URLs do not suppress following real route registrations");
   assert.equal(sourceDeclaresGetRoute('routes.get("/data", handler);', "/data"), true);
   assert.equal(sourceDeclaresGetRoute("routes.get('/data', handler);", "/data"), true);
   assert.equal(sourceDeclaresGetRoute('routes.get(\n  "/data", async (c) => {})', "/data"), true);
