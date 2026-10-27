@@ -295,6 +295,20 @@ test("MIG-0628 U04: private GETs, query GETs, and grouped route shorthand fail c
   assert.deepEqual(plan.coverage.filter(r => r.needsManualAudit), []);
 });
 
+test("MIG-0628 U04: source overlays cannot erase documented query fixture requirements", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: 'app.route("/api/health", health);',
+    apiMatrix: "| GET /api/health?probe=1 | explicit query fixture |",
+    routeMatrix: "",
+    sourceRoutes: [{ method: "GET", path: "/api/health" }],
+  });
+  assert.equal(plan.apiSmoke.length, 1);
+  assert.equal(plan.apiSmoke[0].path, "/api/health");
+  assert.equal(plan.apiSmoke[0].requiresFixture, true);
+  assert.equal(plan.apiSmoke[0].mode, "fixture-required");
+  assert.deepEqual(plan.coverage.filter(x => x.needsManualAudit), []);
+});
+
 test("MIG-0628 U04: plan construction never contacts real network", () => {
   const original = globalThis.fetch;
   let calls = 0;
