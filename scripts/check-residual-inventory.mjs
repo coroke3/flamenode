@@ -212,6 +212,13 @@ export function extractConfigRows(source,config) {
     const req=k=>required(d,k,where);
     const add=(kind,key,value)=>rows.push(record(config,kind,key,value));
     if(section==="") {
+      // `workers_dev` controls Worker preview-host exposure. Even though it
+      // is not one of the 36 binding records, silently changing its presence
+      // or value during migration must require explicit route review.
+      if(config==="wrangler.toml" && d.workers_dev!==true)
+        throw Error(where+": expected root workers_dev = true (review required)");
+      if(config!=="wrangler.toml" && Object.hasOwn(d,"workers_dev"))
+        throw Error(where+": unexpected background workers_dev (review required)");
       if("name" in d) add("worker.name","name",req("name"));
       if("main" in d) add("worker.main","main",req("main"));
     } else if(section==="build") {

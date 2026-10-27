@@ -600,3 +600,20 @@ test("T61: legitimate TOML basic escapes parse while invalid Unicode is rejected
       /invalid vars TOML value \(redacted\)/);
   }
 });
+
+test("T62: changing or removing root workers_dev requires route-exposure review",()=>{
+  const flag="workers_dev = true";
+  assert.ok(web.includes(flag));
+  for(const changed of [web.replace(flag,"workers_dev = false"),web.replace(flag,"")]){
+    assert.notEqual(changed,web);
+    assert.throws(()=>checkResidualInventory({sources:{"wrangler.toml":changed}}),
+      /expected root workers_dev = true \(review required\)/);
+  }
+});
+
+test("T63: adding workers_dev to a background Worker requires review",()=>{
+  const changed=fast.replace("minify = true","minify = true\nworkers_dev = false");
+  assert.notEqual(changed,fast);
+  assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+    /unexpected background workers_dev \(review required\)/);
+});
