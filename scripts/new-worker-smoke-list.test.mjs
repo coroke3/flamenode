@@ -177,6 +177,8 @@ test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration 
   // lacks entries the source-anchored overlay supplies concrete actual paths.
   assert.deepEqual(plan.coverage.filter(x => x.needsManualAudit), []);
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/manage/navigation" && x.method === "GET"));
+  assert.ok(plan.apiSmoke.some(x => x.path === "/api/health/deep" &&
+    x.mode === "fixture-required"), "deep-health requires a bearer fixture");
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/admin/spreadsheet/data" && x.method === "GET"));
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/google-drive-image/:id" && x.mode === "fixture-required"));
   assert.ok(plan.apiSmoke.some(x => x.path === "/api/youtube-thumbnail/:id/:size" && x.mode === "fixture-required"));
@@ -307,6 +309,46 @@ test("MIG-0628 U04: source overlays cannot erase documented query fixture requir
   assert.equal(plan.apiSmoke[0].requiresFixture, true);
   assert.equal(plan.apiSmoke[0].mode, "fixture-required");
   assert.deepEqual(plan.coverage.filter(x => x.needsManualAudit), []);
+});
+
+test("MIG-0628 U04: deep health is authenticated and cannot be an ordinary smoke candidate", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: 'app.route("/api/health", healthRoutes);',
+    apiMatrix: [
+      "| GET /api/health | ordinary health |",
+      "| GET /api/health/deep | authenticated diagnostics |",
+    ].join("\n"),
+    routeMatrix: "",
+  });
+  const health = plan.apiSmoke.find(x => x.path === "/api/health");
+  const deep = plan.apiSmoke.find(x => x.path === "/api/health/deep");
+  assert.equal(health?.mode, "candidate");
+  assert.equal(health.expected, 200);
+  assert.equal(deep?.mode, "fixture-required");
+  assert.match(deep.expected, /401.*503/);
+  assert.ok(!plan.apiSmoke.some(x => x.path === "/api/health/deep" && x.mode === "candidate"));
+});
+
+test("MIG-0628 U04: private React/Vite SPA routes never enter public smoke", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: 'app.route("/api/health", healthRoutes);',
+    apiMatrix: "| GET /api/health | public |",
+    routeMatrix: [
+      "| Route group | CURRENT | TARGET | Render | Data | Visibility/Auth |",
+      "| --- | --- | --- | --- | --- | --- |",
+      "| \`/about\` | Next/OpenNext | Astro/site | SSG | snapshot | public |",
+      "| \`/dashboard\` | Next/OpenNext | React/Vite app | SPA | Hono | auth |",
+      "| \`/dashboard/*\` | Next/OpenNext | React/Vite app | SPA | Hono | auth |",
+      "| \`/manage/navigation\` | Next/OpenNext | React/Vite app | SPA | Hono | auth |",
+      "| \`/admin\` | Next/OpenNext | React/Vite app | SPA | Hono | admin |",
+    ].join("\n"),
+  });
+  assert.ok(plan.publicSmoke.some(x => x.path === "/about"));
+  for (const path of ["/dashboard", "/manage/navigation", "/admin"]) {
+    assert.ok(!plan.publicSmoke.some(x => x.path === path),
+      "private SPA route cannot be a public smoke candidate: " + path);
+  }
+  assert.ok(plan.publicSmoke.every(x => x.mode === "candidate"));
 });
 
 test("MIG-0628 U04: plan construction never contacts real network", () => {
