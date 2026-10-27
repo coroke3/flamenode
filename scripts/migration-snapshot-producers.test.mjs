@@ -8,7 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
-import { produceSnapshots, writeSnapshotDir, wrapSnapshot, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import { produceSnapshots, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
   loadListingPayload,
@@ -131,6 +131,17 @@ test("every snapshot kind the pages read is produced as a verifiable envelope", 
   assert.deepEqual(produced.result.manifest.allowedKeys, [...new Set(produced.result.snapshots.map((s) => s.key))].sort());
   assert.ok(fs.existsSync(path.join(dir, "snapshot/top/current.json")));
   assert.equal(produced.result.report.trending, "produced");
+});
+
+test("MIG-0621: sitemap excludes stale aliases, revoked videos and missing detail snapshots", () => {
+  const row = byKey.get(SITEMAP_VIDEOS_KEY).payload.videos.find((video) => video.id === "a-0");
+  const detail = byKey.get("snapshot/video-detail/a-0.json").payload;
+  assert.ok(row && detail, "fixture must contain a published video and its detail");
+  assert.equal(sitemapVideoMatchesDetail(row, detail), true);
+  assert.equal(sitemapVideoMatchesDetail({ ...row, youtube_video_id: "stale_alias" }, detail), false);
+  assert.equal(sitemapVideoMatchesDetail({ ...row, id: "different_id" }, detail), false);
+  assert.equal(sitemapVideoMatchesDetail(row, { ...detail, video: { ...detail.video, visibility_status: "private" } }), false);
+  assert.equal(sitemapVideoMatchesDetail(row, null), false);
 });
 
 test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent recent generator", async () => {
