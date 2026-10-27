@@ -4,7 +4,8 @@
  * The workflow MUST NOT embed "wrangler deploy" directly: the repo's
  * cloudflare-ci safety policy rejects deployment commands in Actions YAML.
  * Instead this audited wrapper pins --dry-run, disallows arbitrary arguments,
- * invokes only the three tracked target configs, and never contacts the account
+ * invokes only the three tracked target configs via the locally installed
+ * Wrangler JS entrypoint (never npx.cmd/shell), and never contacts the account
  * for IDs or secrets. CI only; no production command is exported.
  */
 import { spawnSync } from "node:child_process";
@@ -14,6 +15,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Using the JS entrypoint avoids Win32 .cmd execution (shell:false), and
+// prevents npx from resolving a different Wrangler or installing a package.
+export const WRANGLER_CLI = path.join(ROOT, "node_modules", "wrangler", "bin", "wrangler.js");
 export const WORKER_TARGETS = Object.freeze([
   Object.freeze({ name: "site", config: "apps/site/wrangler.toml", built: "apps/site/dist" }),
   Object.freeze({ name: "api", config: "apps/api/wrangler.toml", built: "apps/api/src/index.ts" }),
@@ -24,7 +28,7 @@ export const WORKER_TARGETS = Object.freeze([
 export function dryRunArgs(target, outdir) {
   if (!WORKER_TARGETS.includes(target)) throw new Error("Unknown or mutable Worker target");
   if (!path.isAbsolute(outdir)) throw new Error("Outdir must be absolute");
-  return ["--no-install", "wrangler", "deploy", "--dry-run",
+  return [WRANGLER_CLI, "deploy", "--dry-run",
     "--outdir", outdir, "--config", target.config];
 }
 
@@ -32,20 +36,24 @@ export function dryRunPlan(tmpdir) {
   const base = tmpdir || path.join(os.tmpdir(), "flamenode-new-worker-dry-run");
   return WORKER_TARGETS.map(target => ({
     name: target.name, config: target.config, built: target.built,
-    executable: process.platform === "win32" ? "npx.cmd" : "npx",
+    executable: process.execPath,
     args: dryRunArgs(target, path.resolve(base, target.name)),
   }));
 }
 
 export function assertDryRunInputs(plan) {
+  if (!existsSync(WRANGLER_CLI)) {
+    throw new Error("Local Wrangler CLI missing; run npm ci first");
+  }
   for (const entry of plan) {
     for (const p of [entry.config, entry.built]) {
       if (!existsSync(path.join(ROOT, p))) {
         throw new Error("Missing local build/config for dry-run: " + p);
       }
     }
-    if (!entry.args.includes("--dry-run") || entry.args.includes("--env")) {
-      throw new Error("Non-dry-run or environment-specific deploy forbidden");
+    if (entry.executable !== process.execPath || entry.args[0] !== WRANGLER_CLI ||
+        !entry.args.includes("--dry-run") || entry.args.includes("--env")) {
+      throw new Error("Non-local, non-dry-run or environment-specific deploy forbidden");
     }
   }
 }
