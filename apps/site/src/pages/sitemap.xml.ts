@@ -2,7 +2,7 @@
  * MIG-0621 U03 — static Astro sitemap; no per-request DB/R2 reads.
  * All records are projected from build-time, public-only verified snapshots.
  */
-import { buildSitemapEntries, serializeSitemap } from "../lib/sitemap.ts";
+import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../lib/sitemap.ts";
 import { siteOrigin } from "../lib/pageHead.ts";
 import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
@@ -12,6 +12,7 @@ import {
   loadUsersIndexSnapshot,
   SnapshotBuildError,
   SITEMAP_VIDEOS_KEY,
+  videoDetailKeys,
   type SitemapVideoSnapshot,
 } from "../lib/publicDataLoader.ts";
 
@@ -50,10 +51,16 @@ export async function GET(): Promise<Response> {
     const value = Number(index.generated_at);
     if (Number.isFinite(value) && value > 0) userGeneratedAt = value;
   }
+  // The recent index may contain a public row without a static detail asset.
+  // Match the same manifest / detail map that Astro uses to emit the pages.
+  const publishedVideoIds = access
+    ? new Set(videoDetailKeys(access.options.manifest).map((key) => key.slice("snapshot/video-detail/".length, -".json".length)))
+    : new Set<string>();
+  const publishedEventIds = new Set(events.details.keys());
   const entries = buildSitemapEntries({
     origin: siteOrigin(),
-    videos: videos.videos,
-    events: events.index?.events ?? [],
+    videos: publishedSitemapRows(videos.videos, publishedVideoIds),
+    events: publishedSitemapRows(events.index?.events ?? [], publishedEventIds),
     creators: users.index ?? [],
     generatedAt: [videos.generated_at, events.index?.generatedAt, userGeneratedAt],
   });
