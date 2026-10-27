@@ -321,16 +321,23 @@ export interface SitemapVideoRow {
   scheduled_time: number | null;
 }
 
+export interface SitemapVideoSnapshot {
+  generated_at: number | null;
+  videos: SitemapVideoRow[];
+}
+
 /** Same manifest/generation/hash/visibility checks as every other public build snapshot. */
 export async function loadSitemapVideosSnapshot(
   source: SnapshotSource,
   options: SnapshotLoadOptions,
-): Promise<SitemapVideoRow[]> {
+): Promise<SitemapVideoSnapshot> {
   const metrics = options.metrics ?? newSnapshotBuildMetrics();
   const payload = await readVerifiedPayload(
     source, SITEMAP_VIDEOS_KEY, options, metrics, /^snapshot\/sitemap\/videos\.json$/,
   );
-  if (!isRecord(payload) || !Array.isArray(payload.videos) || payload.videos.length > 500 ||
+  if (!isRecord(payload) ||
+    !(payload.generated_at === null || typeof payload.generated_at === "number" && Number.isFinite(payload.generated_at)) ||
+    !Array.isArray(payload.videos) || payload.videos.length > 500 ||
     !payload.videos.every((row: unknown) =>
       isRecord(row) &&
       typeof row.id === "string" && row.id.length > 0 &&
@@ -340,7 +347,7 @@ export async function loadSitemapVideosSnapshot(
     return reject(metrics, "INVALID_PAYLOAD", "Sitemap video snapshot payload invalid");
   }
   metrics.accepted += 1;
-  return payload.videos as SitemapVideoRow[];
+  return payload as unknown as SitemapVideoSnapshot;
 }
 
 export const LIST_FIRST_PAGE_KEY = "snapshot/list/first-page.json";
