@@ -185,32 +185,34 @@ const SOURCE_ROUTE_GAPS = Object.freeze([
 export function sourceDeclaresGetRoute(source, local) {
   if (typeof source !== "string" || typeof local !== "string" ||
       !local.startsWith("/")) return false;
-  let quote = null, escaped = false, lineComment = false, blockComment = false;
-  for (let i = 0; i < source.length; i++) {
-    const ch = source[i], next = source[i + 1];
-    if (lineComment) {
-      if (ch === "\n") lineComment = false;
-      continue;
-    }
-    if (blockComment) {
-      if (ch === "*" && next === "/") { blockComment = false; i++; }
-      continue;
-    }
-    if (quote !== null) {
-      if (escaped) escaped = false;
-      else if (ch === "\\") escaped = true;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "/" && next === "/") { lineComment = true; i++; continue; }
-    if (ch === "/" && next === "*") { blockComment = true; i++; continue; }
-    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
-    // Match only actual source tokens, not commented-out snippets or string
-    // examples mentioning an otherwise nonexistent route.
-    if (ch === "." && source.startsWith(".get", i)) {
-      const match = /^\.get\s*\(\s*(["'])(.*?)\1\s*,/s.exec(source.slice(i));
-      if (match?.[2] === local) return true;
-    }
+
+  // Only a router constructed from the real Hono import can declare a
+  // source-backed smoke route. A generic .get() (Map, fetch wrapper, etc.)
+  // previously satisfied this check even though no HTTP route existed.
+  const honoImported = [...source.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*["']hono["']/g)]
+    .some((match) => isCodePosition(source, match.index) && /\bHono\b/.test(match[1]));
+  if (!honoImported) return false;
+
+  const constructor = "new\\s+Hono(?:<[^<>\\n]+>)?\\s*\\(\\s*\\)";
+  const declarations = new RegExp(
+    "\\b(?:const|let)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*" + constructor, "g");
+  const routers = new Set([...source.matchAll(declarations)]
+    .filter((match) => isCodePosition(source, match.index))
+    .map((match) => match[1]));
+  const directHono = new RegExp("\\b" + constructor + "\\s*$");
+
+  // The local pathname must be a literal first argument; dynamic paths fail
+  // closed. Reject member chains (e.g. object.routes.get) even when the final
+  // identifier happens to equal a registered Hono variable.
+  for (const call of source.matchAll(/\.get\s*\(\s*(["'])([^"'\\]*)\1\s*,/g)) {
+    if (call[2] !== local || !isCodePosition(source, call.index)) continue;
+    const before = source.slice(0, call.index);
+    if (directHono.test(before)) return true; // new Hono<AppEnv>().get(...)
+    const owner = /([A-Za-z_$][\w$]*)\s*$/.exec(before);
+    if (!owner || !routers.has(owner[1])) continue;
+    const preceding = before.slice(0, owner.index).trimEnd();
+    if (/[.?'"`]/.test(preceding.slice(-1))) continue;
+    return true; // const routes = new Hono(); routes.get(...)
   }
   return false;
 }
