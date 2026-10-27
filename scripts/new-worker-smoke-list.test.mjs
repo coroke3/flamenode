@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildNewWorkerSmokePlan, collectApiMatrixRoutes, listHonoMounts, loadNewWorkerSmokePlan, sourceDeclaresGetRoute } from "./new-worker-smoke-list.mjs";
+import { buildNewWorkerSmokePlan, collectApiMatrixRoutes, countActiveHonoMountCalls, listHonoMounts, loadNewWorkerSmokePlan, sourceDeclaresGetRoute } from "./new-worker-smoke-list.mjs";
 
 const read = (path) => readFileSync(new URL("../" + path, import.meta.url), "utf8");
 const gateway = read("apps/site/wrangler.toml");
@@ -218,7 +218,7 @@ test("MIG-0628 U01/U02: gateway is Worker-first and API binding names match decl
 test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration matrices", () => {
   const entry = read("apps/api/src/app.ts");
   const mounts = listHonoMounts(entry);
-  const attempted = [...entry.matchAll(/\bapp\.route\(/g)].length;
+  const attempted = countActiveHonoMountCalls(entry);
   assert.equal(mounts.length, attempted, "new API mount is missing from smoke coverage parser");
   const plan = loadNewWorkerSmokePlan();
   assert.equal(plan.schemaVersion, 1);
@@ -262,12 +262,17 @@ test("MIG-0628 U04: Hono mount parser excludes comments and quoted app.route exa
     'const url = "https://example.invalid/path"; app.route("/api/other", otherRoutes);',
     'app.route(\n  "/api/multiline", makeRoutes());',
   ].join("\n");
+  assert.equal(countActiveHonoMountCalls(source), 3,
+    "quoted and commented app.route calls cannot count as live mounts");
   assert.deepEqual(listHonoMounts(source), [
     { path: "/api/multiline", owner: "makeRoutes" },
     { path: "/api/other", owner: "otherRoutes" },
     { path: "/api/real", owner: "realRoutes" },
   ]);
   assert.deepEqual(listHonoMounts('// app.route("/api/ghost", ghostRoutes)\n'), []);
+  assert.equal(countActiveHonoMountCalls('// app.route("/api/ghost", ghostRoutes)\n'), 0);
+  assert.equal(countActiveHonoMountCalls('app.route("/api/health", makeRoutes(options));'), 1,
+    "unparsable active mounts must still be counted for explicit audit");
   assert.throws(() => buildNewWorkerSmokePlan({
     appEntry: '/* app.route("/api/ghost", ghostRoutes); */',
     apiMatrix: "| GET /api/ghost/health | example |",
