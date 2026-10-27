@@ -110,9 +110,9 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (D-13 / D-14, 2026-10-25: MIG-0501..0507, MIG-0509, MIG-0511, MIG-0512 READY; MIG-0510 READY (MIG-0634 DONE via #401), MIG-0513..0515 BLOCKED on Phase 6 APIs (D-14-12); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0617 / 0618 / 0619 / 0620 / 0622 / 0623 / 0624 / 0625 / 0630 / 0631 / 0634 DONE; MIG-0603 / 0609 / 0621 / 0626 / 0628 / 0629 / 0632 / 0633 / 0635..0649 READY (D-14 split 0603 / 0606 / 0627 / 0636 / 0637 / 0638 into MIG-0639..0649)) | CLOSED |
-| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (MIG-0701 READY remainder) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-28: MIG-0503 / 0512 DONE; MIG-0501, 0502, 0504..0507, 0509..0511, 0513..0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-10-28: 28 DONE — MIG-0601 / 0602 / 0608 / 0611..0625 / 0629..0631 / 0633..0635 / 0649 / 0658 / 0663 / 0664; 30 READY; MIG-0604 / 0606 / 0607 / 0610 / 0627 / 0662 BLOCKED) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701 DONE; MIG-0707..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
