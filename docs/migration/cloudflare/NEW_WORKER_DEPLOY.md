@@ -78,7 +78,12 @@ the three fixed `wrangler deploy --dry-run` commands. It executes the locally
 installed `node_modules/wrangler/bin/wrangler.js` with `process.execPath`,
 using a non-shell argument vector on all platforms (including Windows).
 It fails closed if the installed CLI is missing; no `npx.cmd`, package install,
-login or production deploy fallback is allowed.
+login or production deploy fallback is allowed. Before invoking Wrangler, the
+wrapper validates the **entire** three-Worker invocation plan (Worker names,
+config files, build paths, Node executable, exact argument sequence and count).
+Extra `--env`, `--route`, `--name`, replacement config, reordered Workers
+and relative output directories are rejected, even when `--dry-run` remains
+present. This is a fail-closed plan gate, not a production deploy interface.
 CI has an anti-deployment test that forbids
 placing direct Wrangler deploy commands in GitHub Actions YAML; this rule is
 preserved, not weakened. `--plan` never invokes any external command.
