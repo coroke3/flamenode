@@ -84,9 +84,13 @@ config files, build paths, Node executable, exact argument sequence and count).
 Extra `--env`, `--route`, `--name`, replacement config, reordered Workers
 and relative output directories are rejected, even when `--dry-run` remains
 present. Before the local CLI starts, Cloudflare token/API key/account ID
-environment variables are removed **from the child process only**; stdin is
-disabled and unexpected hangs time out after four minutes. These controls do
-not authorize connecting to a live Cloudflare account or deploying Workers.
+environment variables are removed **from the child process only** (including
+case variants). Wrangler also runs with a fresh temporary HOME / USERPROFILE /
+APPDATA / XDG profile so an existing developer or CI OAuth login cannot be
+picked up from disk. The temporary directory is removed even on non-zero exit.
+stdin is disabled and unexpected hangs time out after four minutes.
+This is still a local build verification step, **not an account-connection
+permission, remote preview, or production deploy authorization**.
 This is a fail-closed plan gate, not a production deploy interface.
 CI has an anti-deployment test that forbids
 placing direct Wrangler deploy commands in GitHub Actions YAML; this rule is
