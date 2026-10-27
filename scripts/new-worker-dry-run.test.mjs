@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
-import { WORKER_TARGETS, WRANGLER_CLI, assertFixedDryRunPlan, dryRunArgs, dryRunPlan } from "./new-worker-dry-run.mjs";
+import { WORKER_TARGETS, WRANGLER_CLI, assertFixedDryRunPlan, dryRunArgs, dryRunPlan, offlineWranglerEnv } from "./new-worker-dry-run.mjs";
 
 test("MIG-0628 U03: exactly site, api, app and only fixed --dry-run commands", () => {
   assert.deepEqual(WORKER_TARGETS.map(w => w.name), ["site", "api", "app"]);
@@ -51,6 +51,37 @@ test("MIG-0628 U03: altered or extra Wrangler flags never reach spawn", () => {
   reject(plan => { plan[0].built = "some-other-path"; });
   reject(plan => { plan.pop(); });
   reject(plan => { plan.reverse(); });
+});
+
+
+test("MIG-0628 U03: dry-run never inherits Cloudflare account credentials", () => {
+  const secret = "DO_NOT_LEAK_SAMPLE_TOKEN";
+  const parent = {
+    PATH: "/usr/bin",
+    HOME: "/example-home",
+    CI: "false",
+    WRANGLER_SEND_METRICS: "true",
+    CLOUDFLARE_API_TOKEN: secret,
+    CLOUDFLARE_API_KEY: secret,
+    CLOUDFLARE_EMAIL: "secret@example.invalid",
+    CLOUDFLARE_ACCOUNT_ID: secret,
+    CF_API_TOKEN: secret,
+    CF_API_KEY: secret,
+    CF_EMAIL: "secret@example.invalid",
+    CF_ACCOUNT_ID: secret,
+  };
+  const sanitized = offlineWranglerEnv(parent);
+  assert.equal(sanitized.CI, "true");
+  assert.equal(sanitized.WRANGLER_SEND_METRICS, "false");
+  assert.equal(sanitized.PATH, parent.PATH);
+  assert.equal(sanitized.HOME, parent.HOME);
+  for (const key of [
+    "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL",
+    "CLOUDFLARE_ACCOUNT_ID", "CF_API_TOKEN", "CF_API_KEY",
+    "CF_EMAIL", "CF_ACCOUNT_ID",
+  ]) assert.equal(Object.hasOwn(sanitized, key), false, key);
+  assert.equal(parent.CLOUDFLARE_API_TOKEN, secret,
+    "Sanitizing the child must not mutate parent env");
 });
 
 test("MIG-0628 U03: --plan is purely local, rejects all deploy/remote flags", () => {
