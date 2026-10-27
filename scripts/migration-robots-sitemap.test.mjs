@@ -122,3 +122,19 @@ test("MIG-0621 U03: hash-corrupted optional video snapshot fails closed, not sil
   assert.equal(warnings.length, 0);
 });
 
+
+test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once", async (t) => {
+  if (process.env.REQUIRE_BUILT !== "1") return t.skip("set REQUIRE_BUILT=1 after Astro build");
+  const xml = await readFile(new URL("apps/site/dist/sitemap.xml", root), "utf8");
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\\n'));
+  assert.ok(xml.endsWith("</urlset>\\n"));
+  const urls = [...xml.matchAll(/<loc>([^<]+)<\\/loc>/g)].map((match) => match[1]);
+  assert.equal(urls.length, new Set(urls).size, "sitemap cannot contain duplicated canonical URLs");
+  for (const path of ["/", "/recommend", "/list", "/event", "/user", "/about", "/rules"]) {
+    assert.ok(urls.includes(origin + path), `missing static sitemap URL ${path}`);
+  }
+  assert.equal(urls.some((url) => url.includes("/admin/") || url.includes("/dashboard/")), false,
+    "private workspace URLs cannot appear in sitemap");
+  assert.equal([...xml.matchAll(/<url>/g)].length, urls.length, "all sitemap entries need a loc");
+});
+
