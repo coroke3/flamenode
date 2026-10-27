@@ -94,46 +94,52 @@ test("G05: brand assets are CURRENT public files byte for byte", { skip }, () =>
 test("G05: all fixed-page heads, structured-data and webmanifest brand URLs resolve to real built assets", { skip }, () => {
   const pages = ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html", "503/index.html"];
   for (const page of pages) {
-  const doc = dom(page);
-  const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
-  assert.ok(baseUrl, `${page}: canonical is required for same-site URL resolution`);
-  const referenced = new Set();
+    const doc = dom(page);
+    const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
+    assert.ok(baseUrl, `${page}: canonical is required for same-site URL resolution`);
+    const referenced = new Set();
+    for (const selector of ['link[rel="manifest"]', 'link[rel="icon"][type="image/svg+xml"]', 'link[rel="apple-touch-icon"]']) {
+      assert.ok(doc.querySelector(selector), `${page}: missing required icon or PWA manifest link ${selector}`);
+    }
 
-  for (const link of doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')) {
-    const href = link.getAttribute("href");
-    assert.ok(href, "head asset href must exist");
-    referenced.add(href);
-  }
-  const socialImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
-  assert.ok(socialImage, "social preview image must be configured");
-  referenced.add(socialImage);
+    for (const link of doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')) {
+      const href = link.getAttribute("href");
+      assert.ok(href, "head asset href must exist");
+      referenced.add(href);
+    }
+    const socialImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+    assert.ok(socialImage, "social preview image must be configured");
+    referenced.add(socialImage);
 
-  const organization = JSON.parse(doc.querySelector('script#flamenode-site-structured-data')?.textContent ?? "null")
-    ?.["@graph"]?.find((entry) => entry?.["@type"] === "Organization");
-  assert.ok(organization?.logo?.url, "organization logo needs a public URL");
-  referenced.add(organization.logo.url);
-  referenced.add(organization.logo.contentUrl);
+    const organization = JSON.parse(doc.querySelector('script#flamenode-site-structured-data')?.textContent ?? "null")
+      ?.["@graph"]?.find((entry) => entry?.["@type"] === "Organization");
+    assert.ok(organization?.logo?.url, "organization logo needs a public URL");
+    referenced.add(organization.logo.url);
+    referenced.add(organization.logo.contentUrl);
 
-  const manifest = JSON.parse(fs.readFileSync(path.join(DIST, "manifest.webmanifest"), "utf8"));
-  assert.equal(manifest.start_url, "/");
-  assert.equal(manifest.scope, "/");
-  assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0, "manifest icons required");
-  for (const icon of manifest.icons) {
-    assert.ok(icon.src && icon.sizes && icon.type === "image/png", "manifest icon needs src, size and type");
-    referenced.add(icon.src);
-  }
+    const manifest = JSON.parse(fs.readFileSync(path.join(DIST, "manifest.webmanifest"), "utf8"));
+    assert.equal(manifest.start_url, "/");
+    assert.equal(manifest.scope, "/");
+    assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0, "manifest icons required");
+    for (const requiredIcon of ["/brand/flamenode-icon-192.png", "/brand/flamenode-icon-512.png", "/brand/flamenode-icon-maskable-512.png"]) {
+      assert.ok(manifest.icons.some((icon) => icon.src === requiredIcon), `${page}: missing PWA icon ${requiredIcon}`);
+    }
+    for (const icon of manifest.icons) {
+      assert.ok(icon.src && icon.sizes && icon.type === "image/png", "manifest icon needs src, size and type");
+      referenced.add(icon.src);
+    }
 
-  for (const raw of referenced) {
-    const url = new URL(raw, baseUrl);
-    assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
-    assert.ok(url.pathname.startsWith("/brand/") ||
-      url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
-      `Unexpected head/manifest asset path: ${url.pathname}`);
-    const builtAsset = path.join(DIST, url.pathname.slice(1));
-    assert.ok(fs.existsSync(builtAsset), `${page}: missing head/manifest brand asset: ${url.pathname}`);
-    assert.ok(fs.statSync(builtAsset).isFile(), `${page}: not a file: ${url.pathname}`);
-    assert.ok(fs.statSync(builtAsset).size > 0, `${page}: empty head/manifest brand asset: ${url.pathname}`);
-  }
+    for (const raw of referenced) {
+      const url = new URL(raw, baseUrl);
+      assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
+      assert.ok(url.pathname.startsWith("/brand/") ||
+        url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
+        `Unexpected head/manifest asset path: ${url.pathname}`);
+      const builtAsset = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(builtAsset), `${page}: missing head/manifest brand asset: ${url.pathname}`);
+      assert.ok(fs.statSync(builtAsset).isFile(), `${page}: not a file: ${url.pathname}`);
+      assert.ok(fs.statSync(builtAsset).size > 0, `${page}: empty head/manifest brand asset: ${url.pathname}`);
+    }
   }
 });
 
