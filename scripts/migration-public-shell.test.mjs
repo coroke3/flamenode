@@ -98,6 +98,22 @@ test("G05: all fixed-page heads, structured-data and webmanifest brand URLs reso
     const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
     assert.ok(baseUrl, `${page}: canonical is required for same-site URL resolution`);
     const referenced = new Set();
+    // Fixed error/maintenance pages must load the same font and compiled styles
+    // as /about; checking only the HTML would miss a missing CSS/font asset.
+    const font = doc.querySelector('link[rel="preload"][as="font"][href="/fonts/FlameNodeSans.otf"]');
+    assert.ok(font, `${page}: missing shared public font preload`);
+    const styleLinks = [...doc.querySelectorAll('link[rel="stylesheet"][href]')];
+    assert.ok(styleLinks.length > 0, `${page}: missing bundled CSS stylesheet`);
+    for (const link of styleLinks) {
+      const href = link.getAttribute("href");
+      const url = new URL(href, baseUrl);
+      if (url.origin !== new URL(baseUrl).origin) continue;
+      assert.ok(url.pathname.startsWith("/_astro/"), `${page}: unexpected local CSS path: ${url.pathname}`);
+      const assetFile = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(assetFile) && fs.statSync(assetFile).size > 0,
+        `${page}: missing or empty bundled CSS: ${url.pathname}`);
+    }
+    referenced.add(font.getAttribute("href"));
     for (const selector of ['link[rel="manifest"]', 'link[rel="icon"][type="image/svg+xml"]', 'link[rel="apple-touch-icon"]']) {
       assert.ok(doc.querySelector(selector), `${page}: missing required icon or PWA manifest link ${selector}`);
     }
@@ -133,6 +149,7 @@ test("G05: all fixed-page heads, structured-data and webmanifest brand URLs reso
       const url = new URL(raw, baseUrl);
       assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
       assert.ok(url.pathname.startsWith("/brand/") ||
+        url.pathname === "/fonts/FlameNodeSans.otf" ||
         url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
         `Unexpected head/manifest asset path: ${url.pathname}`);
       const builtAsset = path.join(DIST, url.pathname.slice(1));
