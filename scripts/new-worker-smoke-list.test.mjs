@@ -62,6 +62,16 @@ function assertStrictWranglerTopology(siteBody, apiBody, appBody) {
       "Worker name must remain isolated from CURRENT production flamenode-web");
     assert.deepEqual(matches(root, "compatibility_date"), ["2026-07-21"],
       "compatibility_date must remain at TOML root");
+    // Compatibility flags are Wrangler top-level settings. A whole-file
+    // regex also matches [vars].compatibility_flags, leaving the actual
+    // Worker without nodejs_compat and global_fetch_strictly_public.
+    const compatibilityFlags = "compatibility_flags = [\"nodejs_compat\", \"global_fetch_strictly_public\"]";
+    assert.deepEqual(root.split("\n").filter((line) => /^\s*compatibility_flags\s*=/.test(line)),
+      [compatibilityFlags], "compatibility_flags must be exact and at TOML root");
+    assert.equal(sections.slice(1).filter(({ content }) =>
+      /^\s*compatibility_flags\s*=/m.test(content)).length, 0,
+    "compatibility_flags must not appear in nested TOML sections");
+
     assert.match(root, /^workers_dev\s*=\s*false$/m,
       "workers_dev=false must remain at TOML root");
     assert.deepEqual(matches(root, "main"), main === null ? [] : [main],
@@ -101,6 +111,28 @@ test("MIG-0628 U02: strict TOML section and binding topology resists drift", () 
 
   const movedAssetBinding = gateway.replace('binding = "ASSETS"\n', "")
     .replace("[vars]\n", '[vars]\nbinding = "ASSETS"\n');
+
+  const flags = 'compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]\n';
+  const moveFlags = (body, table) => body.replace(flags, "")
+    .replace(table + "\n", table + "\n" + flags);
+  const gatewayFlagsInVars = moveFlags(gateway, "[vars]");
+  assert.throws(() => assertStrictWranglerTopology(gatewayFlagsInVars, api, personal),
+    /compatibility_flags must be exact and at TOML root/);
+  const apiFlagsInVars = moveFlags(api, "[vars]");
+  assert.throws(() => assertStrictWranglerTopology(gateway, apiFlagsInVars, personal),
+    /compatibility_flags must be exact and at TOML root/);
+  const personalFlagsInAssets = moveFlags(personal, "[assets]");
+  assert.throws(() => assertStrictWranglerTopology(gateway, api, personalFlagsInAssets),
+    /compatibility_flags must be exact and at TOML root/);
+  const duplicatedFlagsInVars = gateway.replace("[vars]\n", "[vars]\n" + flags);
+  assert.throws(() => assertStrictWranglerTopology(duplicatedFlagsInVars, api, personal),
+    /compatibility_flags must not appear in nested TOML sections/);
+  const swappedFlags = api.replace(flags,
+    'compatibility_flags = ["nodejs_compat"]\n');
+  assert.throws(() => assertStrictWranglerTopology(gateway, swappedFlags, personal),
+    /compatibility_flags must be exact and at TOML root/);
+
+
   assert.throws(() => assertStrictWranglerTopology(movedAssetBinding, api, personal),
     /Each binding must remain/);
 
