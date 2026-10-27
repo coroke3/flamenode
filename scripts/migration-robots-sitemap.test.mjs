@@ -77,6 +77,39 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   assert.equal(serializeSitemap(entries), resolveSitemap(entries), "Next 15.5 XML serialization must remain identical");
 });
 
+test("MIG-0621: duplicate video aliases and creators never duplicate sitemap locs", () => {
+  const first = 1_700_000_000;
+  const entries = buildSitemapEntries({
+    origin,
+    videos: [
+      { id: "vid_a", youtube_video_id: "shared_alias", scheduled_time: first },
+      { id: "vid_b", youtube_video_id: "shared_alias", scheduled_time: first + 60 },
+      { id: "about", youtube_video_id: null, scheduled_time: null },
+      { id: "dot", youtube_video_id: ".", scheduled_time: null },
+      { id: "vid_c", youtube_video_id: "unique_alias", scheduled_time: null },
+    ],
+    events: [
+      { id: "public-event", start_time: first, end_time: null },
+      { id: "public-event", start_time: first + 60, end_time: null },
+    ],
+    creators: [
+      { x_id: "creator_a", updated_at: null },
+      { x_id: "creator_a", updated_at: first },
+    ],
+    generatedAt: [first],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  const urls = entries.map((item) => item.url);
+  assert.equal(entries.length, 11, "7 fixed pages, 2 unique video URLs, 1 event, 1 creator");
+  assert.equal(new Set(urls).size, urls.length);
+  assert.equal(urls.filter((url) => url === origin + "/").length, 1);
+  assert.equal(urls.filter((url) => url === origin + "/about").length, 1);
+  assert.equal(urls.filter((url) => url === origin + "/shared_alias").length, 1);
+  assert.equal(entries.find((item) => item.url === origin + "/shared_alias")?.lastModified.toISOString(),
+    new Date(first * 1000).toISOString(), "first canonical video entry must retain CURRENT ordering");
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
 test("MIG-0621 U03 T04: missing manifest sitemap key warns once and omits only video URLs", async () => {
   const warnings = [];
   const access = {
