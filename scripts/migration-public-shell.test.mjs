@@ -91,10 +91,12 @@ test("G05: brand assets are CURRENT public files byte for byte", { skip }, () =>
   }
 });
 
-test("G05: all generated head, structured-data and webmanifest brand URLs resolve to real built assets", { skip }, () => {
-  const doc = dom("about/index.html");
+test("G05: all fixed-page heads, structured-data and webmanifest brand URLs resolve to real built assets", { skip }, () => {
+  const pages = ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html", "503/index.html"];
+  for (const page of pages) {
+  const doc = dom(page);
   const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
-  assert.ok(baseUrl, "about canonical is required for same-site URL resolution");
+  assert.ok(baseUrl, `${page}: canonical is required for same-site URL resolution`);
   const referenced = new Set();
 
   for (const link of doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')) {
@@ -128,8 +130,10 @@ test("G05: all generated head, structured-data and webmanifest brand URLs resolv
       url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
       `Unexpected head/manifest asset path: ${url.pathname}`);
     const builtAsset = path.join(DIST, url.pathname.slice(1));
-    assert.ok(fs.statSync(builtAsset).isFile(), `Broken head/manifest brand asset: ${url.pathname}`);
-    assert.ok(fs.statSync(builtAsset).size > 0, `Empty head/manifest brand asset: ${url.pathname}`);
+    assert.ok(fs.existsSync(builtAsset), `${page}: missing head/manifest brand asset: ${url.pathname}`);
+    assert.ok(fs.statSync(builtAsset).isFile(), `${page}: not a file: ${url.pathname}`);
+    assert.ok(fs.statSync(builtAsset).size > 0, `${page}: empty head/manifest brand asset: ${url.pathname}`);
+  }
   }
 });
 
