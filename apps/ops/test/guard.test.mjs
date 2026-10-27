@@ -13,7 +13,9 @@ test("MIG-0707 T02: no session, 503/unavailable and malformed response never ren
     assert.equal(decide(surface, { loggedIn: false }), "/entry");
     assert.equal(decide(surface, { loggedIn: false, unavailable: true }), AUTH_UNAVAILABLE);
     for (const raw of [null, {}, [], { loggedIn: true }, summary({ role: "owner" }),
-      summary({ canAccessManage: "yes" })]) {
+      summary({ canAccessManage: "yes" }),
+      summary({ degradedReason: "management_access_unavailable" }),
+      { loggedIn: false, unavailable: "invalid" }]) {
       assert.equal(decide(surface, raw), AUTH_UNAVAILABLE);
     }
   }
