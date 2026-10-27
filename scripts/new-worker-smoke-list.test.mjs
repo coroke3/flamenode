@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildNewWorkerSmokePlan, collectApiMatrixRoutes, listHonoMounts, loadNewWorkerSmokePlan } from "./new-worker-smoke-list.mjs";
+import { buildNewWorkerSmokePlan, collectApiMatrixRoutes, listHonoMounts, loadNewWorkerSmokePlan, sourceDeclaresGetRoute } from "./new-worker-smoke-list.mjs";
 
 const read = (path) => readFileSync(new URL("../" + path, import.meta.url), "utf8");
 const gateway = read("apps/site/wrangler.toml");
@@ -376,6 +376,25 @@ test("MIG-0628 U04: private React/Vite SPA routes never enter public smoke", () 
       "private SPA route cannot be a public smoke candidate: " + path);
   }
   assert.ok(plan.publicSmoke.every(x => x.mode === "candidate"));
+});
+
+test("MIG-0628 U04: source route audit ignores commented-out Hono GET handlers", () => {
+  for (const commented of [
+    '// routes.get("/data", handler);\n',
+    '/* routes.get("/data", handler); */\n',
+    '/*\nroutes.get("/data", handler);\n*/\n',
+    'const url = "https://example.test/api"; // routes.get("/data", handler)\n',
+    'const text = ".get(\\"/data\\", handler)";\n',
+  ]) {
+    assert.equal(sourceDeclaresGetRoute(commented, "/data"), false,
+      "commented or quoted route cannot satisfy smoke coverage");
+  }
+  assert.equal(sourceDeclaresGetRoute('routes.get("/data", handler);', "/data"), true);
+  assert.equal(sourceDeclaresGetRoute("routes.get('/data', handler);", "/data"), true);
+  assert.equal(sourceDeclaresGetRoute('routes.get(\n  "/data", async (c) => {})', "/data"), true);
+  assert.equal(sourceDeclaresGetRoute(
+    'const dashboard = new Hono().get("/", async (c) => {});', "/"), true);
+  assert.equal(sourceDeclaresGetRoute('routes.get("/other", handler);', "/data"), false);
 });
 
 test("MIG-0628 U04: plan construction never contacts real network", () => {
