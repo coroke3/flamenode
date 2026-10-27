@@ -91,6 +91,46 @@ test("G05: brand assets are CURRENT public files byte for byte", { skip }, () =>
   }
 });
 
+test("G05: all generated head, structured-data and webmanifest brand URLs resolve to real built assets", { skip }, () => {
+  const doc = dom("about/index.html");
+  const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  assert.ok(baseUrl, "about canonical is required for same-site URL resolution");
+  const referenced = new Set();
+
+  for (const link of doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')) {
+    const href = link.getAttribute("href");
+    assert.ok(href, "head asset href must exist");
+    referenced.add(href);
+  }
+  const socialImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+  assert.ok(socialImage, "social preview image must be configured");
+  referenced.add(socialImage);
+
+  const organization = JSON.parse(doc.querySelector('script#flamenode-site-structured-data')?.textContent ?? "null")
+    ?."@graph"?.find((entry) => entry?.["@type"] === "Organization");
+  assert.ok(organization?.logo?.url, "organization logo needs a public URL");
+  referenced.add(organization.logo.url);
+  referenced.add(organization.logo.contentUrl);
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(DIST, "manifest.webmanifest"), "utf8"));
+  assert.equal(manifest.start_url, "/");
+  assert.equal(manifest.scope, "/");
+  assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0, "manifest icons required");
+  for (const icon of manifest.icons) {
+    assert.ok(icon.src && icon.sizes && icon.type === "image/png", "manifest icon needs src, size and type");
+    referenced.add(icon.src);
+  }
+
+  for (const raw of referenced) {
+    const url = new URL(raw, baseUrl);
+    assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
+    assert.match(url.pathname, /^\\/(?:brand\\/|favicon\\.ico$|manifest\\.webmanifest$)/);
+    const builtAsset = path.join(DIST, url.pathname.slice(1));
+    assert.ok(fs.statSync(builtAsset).isFile(), `Broken head/manifest brand asset: ${url.pathname}`);
+    assert.ok(fs.statSync(builtAsset).size > 0, `Empty head/manifest brand asset: ${url.pathname}`);
+  }
+});
+
 test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is emitted on every page", { skip }, () => {
   const ld = buildSiteJsonLd("https://flamenode.net");
   assert.equal(ld["@graph"][1]["@type"], "WebSite");
