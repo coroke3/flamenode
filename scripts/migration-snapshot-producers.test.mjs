@@ -32,6 +32,8 @@ import { loadRulesForBuild, rulesSourceFromEnv } from "../apps/site/src/lib/rule
 import { computeUsersIndexView, buildSectionPages } from "../apps/site/src/lib/userViews.ts";
 import { normalizeStaticUserProfile } from "../src/lib/publicData/staticUserProfileCore.ts";
 import { normalizeStaticRecentVideoPage } from "../src/lib/publicData/staticRecentVideoCore.ts";
+import { buildSitemapEntries } from "../apps/site/src/lib/sitemap.ts";
+import { loadEventBuildData } from "../apps/site/src/lib/eventData.ts";
 
 const NOW = 1_760_000_000;
 const migrationsDir = path.resolve("migrations");
@@ -166,6 +168,28 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
     manifest: produced.result.manifest, generation: "gen-1",
   });
   assert.deepEqual(loaded.videos, expected, "manifest-verified sitemap snapshot must match CURRENT");
+  const [eventBuild, userBuild] = await Promise.all([
+    loadEventBuildData(env),
+    loadUserBuildDataFrom(userPayloadSourceFromEnv(env)),
+  ]);
+  const sitemap = buildSitemapEntries({
+    origin: "https://flamenode.net",
+    videos: loaded.videos,
+    events: eventBuild.index?.events ?? [],
+    creators: userBuild.index ?? [],
+    generatedAt: [loaded.generated_at, eventBuild.index?.generatedAt],
+    now: new Date(NOW * 1000),
+  });
+  const paths = sitemap.map((row) => new URL(row.url).pathname);
+  assert.deepEqual(paths.slice(7, 7 + expected.length),
+    expected.map((video) => "/" + encodeURIComponent(video.youtube_video_id ?? video.id)),
+    "dynamic sitemap video URL set must match CURRENT recent index (not truncated to 24)");
+  assert.ok(paths.includes("/event/public-event"), "public event is included");
+  assert.ok(paths.includes("/user/creator_a"), "published creator page is included");
+  assert.ok(!paths.includes("/event/private-event"), "private events may not leak");
+  assert.ok(!paths.includes("/user/banned_c"), "non-listable creator may not leak");
+  assert.ok(!paths.includes("/ytprivate001"), "private video may not leak");
+
   assert.equal(loaded.generated_at, normalizeStaticRecentVideoPage(recent, 1, 500)?.generatedAt ?? null);
   await assert.rejects(
     loadSitemapVideosSnapshot(source, {
