@@ -559,3 +559,44 @@ test("T58: valid vars trailing comments and escaped TOML strings still parse",()
   assert.deepEqual(r.missing,[]);
   assert.deepEqual(r.stale,[]);
 });
+
+test("T59: leading-zero TOML Queue integers never normalize to the audited value",()=>{
+  for(const invalid of ["01","-01"]) {
+    const changed=fast.replace("max_concurrency = 1","max_concurrency = "+invalid);
+    assert.notEqual(changed,fast);
+    assert.throws(()=>checkResidualInventory({sources:{[fastPath]:changed}}),
+      error=>/unsupported TOML value \(redacted\)/.test(error.message));
+  }
+  const vars=sync.replace('GA4_SYNC_ENABLED = "0"',"GA4_SYNC_ENABLED = 01");
+  assert.notEqual(vars,sync);
+  assert.throws(()=>extractConfigRows(vars,syncPath),/invalid vars TOML value \(redacted\)/);
+});
+
+test("T60: JSON-only slash escapes are invalid in TOML values",()=>{
+  const invalid='GA4_SYNC_ENABLED = "bad\\/escape"';
+  const changed=sync.replace('GA4_SYNC_ENABLED = "0"',invalid);
+  assert.notEqual(changed,sync);
+  assert.throws(()=>checkResidualInventory({sources:{[syncPath]:changed}}),
+    error=>/invalid vars TOML value \(redacted\)/.test(error.message) &&
+      !error.message.includes("bad"));
+  const queue=fast.match(/^queue = "[^"]+"$/m)?.[0];
+  assert.ok(queue);
+  const changedQueue=fast.replace(queue,'queue = "bad\\/escape"');
+  assert.throws(()=>extractConfigRows(changedQueue,fastPath),/invalid TOML quoted string/);
+});
+
+test("T61: legitimate TOML basic escapes parse while invalid Unicode is rejected",()=>{
+  const valid='GA4_SYNC_ENABLED = "tab\\t unicode\\u00e9 emoji\\U0001F600 backslash\\\\"';
+  const changed=sync.replace('GA4_SYNC_ENABLED = "0"',valid);
+  assert.notEqual(changed,sync);
+  const result=checkResidualInventory({sources:{[syncPath]:changed}});
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.stale,[]);
+  assert.equal(result.declaredCount,36);
+  for(const invalid of ["\\uD800","\\U00110000","\\x41"]) {
+    const source=sync.replace('GA4_SYNC_ENABLED = "0"',
+      'GA4_SYNC_ENABLED = "'+invalid+'"');
+    assert.throws(()=>extractConfigRows(source,syncPath),
+      /invalid vars TOML value \(redacted\)/);
+  }
+});
