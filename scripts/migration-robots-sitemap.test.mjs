@@ -218,5 +218,14 @@ test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once"
   assert.equal(urls.some((url) => url.includes("/admin/") || url.includes("/dashboard/")), false,
     "private workspace URLs cannot appear in sitemap");
   assert.equal([...xml.matchAll(/<url>/g)].length, urls.length, "all sitemap entries need a loc");
+  // With no snapshot env, Astro emits the fixture /[id] pages. A sitemap
+  // containing only its seven static URLs would silently miss those pages.
+  if (!process.env.FLAMENODE_SNAPSHOT_DIR &&
+      !process.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE &&
+      !process.env.FLAMENODE_SNAPSHOT_GENERATION) {
+    assert.ok(urls.includes(origin + "/dKw1xV41f8s"), "missing emitted canonical YouTube fixture");
+    assert.ok(urls.includes(origin + "/vid-bbb"), "missing emitted no-YouTube fixture");
+    assert.equal(urls.includes(origin + "/vid-aaa"), false, "fixture internal alias is not canonical");
+  }
 });
 
