@@ -226,6 +226,14 @@ test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once"
     assert.ok(urls.includes(origin + "/dKw1xV41f8s"), "missing emitted canonical YouTube fixture");
     assert.ok(urls.includes(origin + "/vid-bbb"), "missing emitted no-YouTube fixture");
     assert.equal(urls.includes(origin + "/vid-aaa"), false, "fixture internal alias is not canonical");
+    // Prove these indexed URLs actually have built public HTML pages and the
+    // canonical tag points at the same URL. Listing a URL alone misses 404s.
+    for (const slug of ["dKw1xV41f8s", "vid-bbb"]) {
+      const html = await readFile(new URL(`apps/site/dist/${slug}/index.html`, root), "utf8");
+      const canonical = /<link rel="canonical" href="([^"]+)">/.exec(html)?.[1];
+      assert.equal(canonical, origin + "/" + slug,
+        `sitemap ${slug} must match its emitted public HTML canonical URL`);
+    }
   }
 });
 
