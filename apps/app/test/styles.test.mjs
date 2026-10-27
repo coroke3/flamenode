@@ -29,9 +29,9 @@ test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class
     read("apps/app/src/routes/dashboard/Dashboard.tsx"),
   ]);
   // CSS modules must not hash the existing global fn-btn class.
-  assert.match(source, /\\.accountActions\\s+:global\\(\\.fn-btn\\)\\s*\\{/);
-  assert.match(target, /\\.dash-accountActions\\s+\\.fn-btn\\s*\\{\\s*width:\\s*100%/);
-  assert.doesNotMatch(target, /\\.dash-accountActions\\s+\\.dash-fn-btn\\b/);
+  assert.match(source, /\.accountActions\s+:global\(\.fn-btn\)\s*\{/);
+  assert.match(target, /\.dash-accountActions\s+\.fn-btn\s*\{\s*width:\s*100%/);
+  assert.doesNotMatch(target, /\.dash-accountActions\s+\.dash-fn-btn\b/);
   for (const href of ["/dashboard/settings", "/entry"]) {
     assert.ok(dashboard.includes(`href="${href}" className="fn-btn `),
       `dashboard action ${href} must use the global fn-btn class`);
@@ -41,9 +41,9 @@ test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class
     read("src/components/settings/settings-page.module.css"),
     read("apps/app/src/styles/settings.css"),
   ]);
-  assert.match(settingsCurrent, /\\.addRow\\s+:global\\(\\.fn-btn\\)\\s*\\{/);
-  assert.match(settingsSpa, /\\.settings-addRow\\s+\\.fn-btn\\s*\\{\\s*width:\\s*100%/);
-  assert.doesNotMatch(settingsSpa, /\\.settings-addRow\\s+\\.settings-fn-btn\\b/);
+  assert.match(settingsCurrent, /\.addRow\s+:global\(\.fn-btn\)\s*\{/);
+  assert.match(settingsSpa, /\.settings-addRow\s+\.fn-btn\s*\{\s*width:\s*100%/);
+  assert.doesNotMatch(settingsSpa, /\.settings-addRow\s+\.settings-fn-btn\b/);
   assert.equal(settingsSpa, portCssModule(settingsCurrent, "settings"),
     "settings SPA CSS must match CURRENT after global-class fix");
 });
