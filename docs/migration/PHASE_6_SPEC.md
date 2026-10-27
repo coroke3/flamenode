@@ -3073,6 +3073,7 @@ PR を revert（`/api/admin/audit/*` の Route はまだ CURRENT に向いてい
 | T03 | active X 未選択、運営 X 0 件 | null / `[]`（`shouldWarnManageActiveXMismatch` は false） |
 | T04 | D1 の文の数 | 変更前と同じ（session を含め 3 以下、`navigation.ts:8` の comment） |
 | T05 | `linked: true` の前後の応答 size | linked X の部分は `MAX_MANAGE_LINKED_X` 件以内で、既存 field の値が変わらない |
+| T06 | 保存値 `active_x_user_id="old-x"`、承認済み linked `["new-x"]`、運営 X `["new-x"]`（非 admin） | `activeXUserId: "new-x"`、警告なし。CURRENT の sidebar の `u.active_x_user_id` は `getCurrentUser()`（`src/lib/auth/currentUser.ts:163-180`）で解決済みの値なので同じ結果になる |
 #### Commands
 ```bash
 npm run build --workspace=@flamenode/contracts
@@ -3083,7 +3084,7 @@ npm run typecheck
 #### Ledger updates
 `API_MATRIX.md` の `GET /api/manage/navigation` 行に 2 field。
 #### DONE checklist
-- [ ] T01〜T05 が PASS
+- [ ] T01〜T06 が PASS
 - [ ] 既存 field の値が変わっていない
 #### STOP
 - 運営 X の集合や linked X を navigation 用に別の query で読む必要が出たら止める（snapshot と `loadManageData` の `linked` を使う）。
