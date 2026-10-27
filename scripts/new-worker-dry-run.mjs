@@ -41,7 +41,37 @@ export function dryRunPlan(tmpdir) {
   }));
 }
 
+/**
+ * Reject altered plans before performing any filesystem checks or spawning a
+ * subprocess. Merely checking args.includes("--dry-run") is insufficient:
+ * a trailing --env, --name, --route or a replaced --config may still deploy
+ * a different target while retaining that flag.
+ */
+export function assertFixedDryRunPlan(plan) {
+  if (!Array.isArray(plan) || plan.length !== WORKER_TARGETS.length) {
+    throw new Error("Dry-run plan must contain exactly three fixed Workers");
+  }
+  for (const [i, entry] of plan.entries()) {
+    const target = WORKER_TARGETS[i];
+    if (!entry || entry.name !== target.name ||
+        entry.config !== target.config || entry.built !== target.built ||
+        entry.executable !== process.execPath || !Array.isArray(entry.args)) {
+      throw new Error("Mutated Worker target or executable forbidden");
+    }
+    const outdir = entry.args[4];
+    if (typeof outdir !== "string" || !path.isAbsolute(outdir)) {
+      throw new Error("Dry-run output directory must be absolute");
+    }
+    const expected = dryRunArgs(target, outdir);
+    if (entry.args.length !== expected.length ||
+        entry.args.some((arg, j) => arg !== expected[j])) {
+      throw new Error("Mutated or extra Wrangler deployment flags forbidden");
+    }
+  }
+}
+
 export function assertDryRunInputs(plan) {
+  assertFixedDryRunPlan(plan);
   if (!existsSync(WRANGLER_CLI)) {
     throw new Error("Local Wrangler CLI missing; run npm ci first");
   }
@@ -50,10 +80,6 @@ export function assertDryRunInputs(plan) {
       if (!existsSync(path.join(ROOT, p))) {
         throw new Error("Missing local build/config for dry-run: " + p);
       }
-    }
-    if (entry.executable !== process.execPath || entry.args[0] !== WRANGLER_CLI ||
-        !entry.args.includes("--dry-run") || entry.args.includes("--env")) {
-      throw new Error("Non-local, non-dry-run or environment-specific deploy forbidden");
     }
   }
 }
