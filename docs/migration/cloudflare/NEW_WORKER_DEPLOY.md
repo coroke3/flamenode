@@ -75,6 +75,17 @@ Any dry-run requiring `wrangler login` or real Cloudflare IDs is a **STOP**,
 not permission to configure an account or insert secrets. CI must never execute
 `wrangler deploy` without `--dry-run`; do not run `wrangler secret put`.
 
+### Smoke-plan execution safety (U04)
+
+`node scripts/new-worker-smoke-list.mjs` **only prints JSON**: it does not issue HTTP requests.
+Only fixed-path `GET`/`HEAD` endpoints may be marked `candidate`, and even those
+require an owner-verified response/authentication contract before execution.
+All `POST`/`PUT`/`PATCH`/`DELETE` methods and parameterized paths are
+`fixture-required`, including endpoints named `dry-run`. Never replay
+mutation probes against live production data merely from this checklist.
+An owner-run future smoke executor must explicitly require isolated fixtures,
+credentials scoped to the test environment, and a separate authorization gate.
+
 ## Human-owned cutover and smoke chain (U05)
 
 1. Require Phase 5–8 gates, a fresh independent review of these templates,
