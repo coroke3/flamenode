@@ -67,10 +67,17 @@ function assertStrictWranglerTopology(siteBody, apiBody, appBody) {
       "Each binding must remain in its explicitly authorized TOML section");
     const asset = sections.find((section) => section.name === "[assets]");
     if (asset) {
+      assert.deepEqual(matches(asset.content, "directory"), ["./dist"],
+        "assets.directory must be explicitly set within [assets]");
       assert.match(asset.content, /^run_worker_first\s*=\s*(?:true|false)$/m,
         "run_worker_first must be within [assets]");
       if (main === "./src/gateway/index.ts") {
-        assert.match(asset.content, /^run_worker_first\s*=\s*true$/m);
+        assert.match(asset.content, /^run_worker_first\s*=\s*true$/m,
+          "Gateway must be Worker-first; [vars] values cannot override [assets]");
+        assert.deepEqual(matches(asset.content, "not_found_handling"), ["404-page"]);
+      } else {
+        assert.match(asset.content, /^run_worker_first\s*=\s*false$/m);
+        assert.deepEqual(matches(asset.content, "not_found_handling"), ["single-page-application"]);
       }
     }
     // A naked route property (including nested env tables) is forbidden even
@@ -91,6 +98,21 @@ test("MIG-0628 U02: strict TOML section and binding topology resists drift", () 
     .replace("[assets]\n", "[assets]\nworkers_dev = false\n");
   assert.throws(() => assertStrictWranglerTopology(misplacedWorkerFlag, api, personal),
     /workers_dev=false must remain/);
+
+  const misplacedWorkerFirst = gateway.replace("run_worker_first = true\n", "run_worker_first = false\n")
+    .replace("[vars]\n", "[vars]\nrun_worker_first = true\n");
+  assert.throws(() => assertStrictWranglerTopology(misplacedWorkerFirst, api, personal),
+    /Gateway must be Worker-first/);
+  const missingWorkerFirst = gateway.replace("run_worker_first = true\n", "");
+  assert.throws(() => assertStrictWranglerTopology(missingWorkerFirst, api, personal),
+    /run_worker_first must be within/);
+
+  const missingDirectory = gateway.replace('directory = "./dist"\n', "");
+  assert.throws(() => assertStrictWranglerTopology(missingDirectory, api, personal),
+    /assets.directory must be explicitly set/);
+  const missing404Handling = gateway.replace('not_found_handling = "404-page"\n', "");
+  assert.throws(() => assertStrictWranglerTopology(missing404Handling, api, personal),
+    /deep-equal/);
 
   const injectedRouteTable = api + '\n[[env.production.routes]]\npattern = "example.com/*"\n';
   assert.throws(() => assertStrictWranglerTopology(gateway, injectedRouteTable, personal),
