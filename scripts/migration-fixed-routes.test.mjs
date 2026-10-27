@@ -71,6 +71,25 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
 });
 
+test("pageHead: CURRENT readableTitle rejects broken or empty headings and preserves OG alt", () => {
+  const cases = [
+    { path: "/about", fallback: "FlameNodeについて" },
+    { path: "/rules", fallback: "利用規約" },
+    { path: "/maintenance", fallback: "FlameNode" },
+  ];
+  for (const { path, fallback } of cases) {
+    for (const title of [" ", "Broken\uFFFD title", "bad\u0001title"]) {
+      const head = buildPageHead({ path, title, image: "/brand/flamenode-social-card.png" });
+      assert.equal(head.title, `${fallback} | FlameNode`, path);
+      assert.equal(head.ogTitle, fallback, path);
+      assert.equal(head.ogImageAlt, fallback, path);
+    }
+  }
+  const valid = buildPageHead({ path: "/about", title: " 正常なタイトル " });
+  assert.equal(valid.title, "正常なタイトル | FlameNode");
+  assert.equal(valid.ogTitle, "正常なタイトル");
+});
+
 test("pageHead: CURRENT rejects mojibake or control characters in description metadata", () => {
   const fallback = "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。";
   for (const value of ["broken\\uFFFD text", "bad\\u0001content"]) {
