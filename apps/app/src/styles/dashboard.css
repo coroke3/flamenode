@@ -1,0 +1,215 @@
+.dash-page {
+  width: 100%;
+  margin: 0;
+}
+
+.dash-accountHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--hairline, var(--border-subtle));
+}
+
+.dash-accountIdentity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.dash-accountAvatar,
+.dash-accountAvatarFallback {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.dash-accountAvatar {
+  object-fit: cover;
+  background: var(--bg-elevated);
+}
+
+.dash-accountAvatarFallback {
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  color: var(--accent-primary-strong);
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 900;
+}
+
+.dash-eyebrow {
+  color: var(--text-muted);
+  font-family: var(--font-brand);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.dash-handle {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dash-accountActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-statsGrid {
+  margin-bottom: 0;
+}
+
+.dash-statCard {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.dash-section {
+  margin-top: 38px;
+}
+
+.dash-sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dash-sectionHeader > .dash-sectionTitle {
+  margin-bottom: 0;
+}
+
+.dash-sectionTitle {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 900;
+  letter-spacing: 0;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.dash-galleryGrid {
+  width: 100%;
+}
+
+.dash-xidList {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 768px) {
+  .dash-xidList { grid-template-columns: 1fr 1fr; }
+}
+
+.dash-xidCard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--hairline, var(--border-subtle));
+  border-radius: 6px;
+}
+
+.dash-xidIcon,
+.dash-xidIconFb {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dash-xidIcon {
+  object-fit: cover;
+  background-color: var(--bg-elevated);
+}
+
+.dash-xidIconFb {
+  background-color: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.dash-xidBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.dash-xidName {
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-xidId {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .dash-accountHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dash-accountActions {
+    justify-content: flex-start;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .dash-accountActions .dash-fn-btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .dash-galleryGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-accountAvatar,
+  .dash-accountAvatarFallback {
+    width: 58px;
+    height: 58px;
+  }
+
+  .dash-statsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-statCard {
+    min-height: 84px;
+    padding: 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline, var(--border-subtle));
+  }
+
+  .dash-statCard:last-child {
+    border-bottom: 0;
+  }
+}
