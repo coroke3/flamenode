@@ -9,8 +9,39 @@ import { fileURLToPath } from "node:url";
 const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 
+/**
+ * Ignore route registrations appearing only inside comments or string literals.
+ * A text-only match would report coverage for code that is not executed.
+ * This limited scanner is for the fixed app.ts mount syntax, not a JS parser.
+ */
+function isCodePosition(source, offset) {
+  let quote = null, escaped = false, lineComment = false, blockComment = false;
+  for (let i = 0; i < offset; i++) {
+    const ch = source[i], next = source[i + 1];
+    if (lineComment) {
+      if (ch === "\n") lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (ch === "*" && next === "/") { blockComment = false; i++; }
+      continue;
+    }
+    if (quote !== null) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "/" && next === "/") { lineComment = true; i++; continue; }
+    if (ch === "/" && next === "*") { blockComment = true; i++; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+  }
+  return quote === null && !lineComment && !blockComment;
+}
+
 export function listHonoMounts(entry) {
   const found = [...entry.matchAll(/app\.route\(\s*["'](\/api\/[^"']+)["']\s*,\s*([A-Za-z_$][\w$]*)(?:\(\))?\s*\)/g)]
+    .filter((match) => isCodePosition(entry, match.index))
     .map(([, path, owner]) => ({ path, owner }));
   const unique = [...new Map(found.map((row) => [row.path + ":" + row.owner, row])).values()];
   return unique.sort((a, b) => a.path.localeCompare(b.path) || a.owner.localeCompare(b.owner));
