@@ -103,15 +103,28 @@ test("G05: all fixed-page heads, structured-data and webmanifest brand URLs reso
     const font = doc.querySelector('link[rel="preload"][as="font"][href="/fonts/FlameNodeSans.otf"]');
     assert.ok(font, `${page}: missing shared public font preload`);
     const styleLinks = [...doc.querySelectorAll('link[rel="stylesheet"][href]')];
-    assert.ok(styleLinks.length > 0, `${page}: missing bundled CSS stylesheet`);
-    for (const link of styleLinks) {
-      const href = link.getAttribute("href");
-      const url = new URL(href, baseUrl);
-      if (url.origin !== new URL(baseUrl).origin) continue;
-      assert.ok(url.pathname.startsWith("/_astro/"), `${page}: unexpected local CSS path: ${url.pathname}`);
+    // External CSS alone is not evidence that the local Astro stylesheet was emitted.
+    const localStyleUrls = styleLinks.map((link) => new URL(link.getAttribute("href"), baseUrl))
+      .filter((url) => url.origin === new URL(baseUrl).origin);
+    assert.ok(localStyleUrls.length > 0, `${page}: missing local Astro CSS stylesheet`);
+    for (const url of localStyleUrls) {
+      assert.match(url.pathname, /^\/_astro\/[\w.-]+\.css$/, `${page}: unexpected local CSS path: ${url.pathname}`);
       const assetFile = path.join(DIST, url.pathname.slice(1));
       assert.ok(fs.existsSync(assetFile) && fs.statSync(assetFile).size > 0,
         `${page}: missing or empty bundled CSS: ${url.pathname}`);
+    }
+    // A rendered header with missing client chunks looks correct but has broken
+    // navigation, theme and account controls after hydration.
+    const headerIslands = [...doc.querySelectorAll('astro-island[client="load"]')];
+    assert.equal(headerIslands.length, 1, `${page}: expected one hydrated public header`);
+    for (const [attribute, raw] of ["component-url", "renderer-url"].map((key) => [key, headerIslands[0].getAttribute(key)])) {
+      assert.ok(raw, `${page}: missing Astro Island ${attribute}`);
+      const url = new URL(raw, baseUrl);
+      assert.equal(url.origin, new URL(baseUrl).origin, `${page}: cross-origin Island ${attribute}`);
+      assert.match(url.pathname, /^\/_astro\/[\w.-]+\.js$/, `${page}: unexpected Island ${attribute} path: ${url.pathname}`);
+      const assetFile = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(assetFile) && fs.statSync(assetFile).size > 0,
+        `${page}: missing or empty Island ${attribute}: ${url.pathname}`);
     }
     referenced.add(font.getAttribute("href"));
     for (const selector of ['link[rel="manifest"]', 'link[rel="icon"][type="image/svg+xml"]', 'link[rel="apple-touch-icon"]']) {
