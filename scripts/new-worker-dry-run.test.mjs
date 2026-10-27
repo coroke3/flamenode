@@ -2,17 +2,22 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 import test from "node:test";
-import { WORKER_TARGETS, dryRunArgs, dryRunPlan } from "./new-worker-dry-run.mjs";
+import { WORKER_TARGETS, WRANGLER_CLI, dryRunArgs, dryRunPlan } from "./new-worker-dry-run.mjs";
 
 test("MIG-0628 U03: exactly site, api, app and only fixed --dry-run commands", () => {
   assert.deepEqual(WORKER_TARGETS.map(w => w.name), ["site", "api", "app"]);
-  const plan = dryRunPlan("/tmp/flamenode-mig-0628");
+  const outdir = path.resolve("flamenode-mig-0628-test-output");
+  const plan = dryRunPlan(outdir);
   assert.equal(plan.length, 3);
   for (const [i, x] of plan.entries()) {
+    assert.equal(x.executable, process.execPath, "Always execute JS via Node, not npx.cmd");
     assert.deepEqual(x.args,
-      ["--no-install", "wrangler", "deploy", "--dry-run",
-        "--outdir", "/tmp/flamenode-mig-0628/" + x.name, "--config", WORKER_TARGETS[i].config]);
+      [WRANGLER_CLI, "deploy", "--dry-run",
+        "--outdir", path.join(outdir, x.name), "--config", WORKER_TARGETS[i].config]);
+    assert.match(WRANGLER_CLI, /node_modules[\\/]wrangler[\\/]bin[\\/]wrangler\.js$/);
+    assert.ok(!/\.(?:cmd|bat)$/i.test(x.executable));
     assert.ok(x.args.includes("--dry-run"));
     assert.ok(!x.args.some(a => /^(?:--env|--route|--name|--legacy-env)$/.test(a)));
     assert.match(x.config, /^apps\/(?:site|api|app)\/wrangler\.toml$/);
