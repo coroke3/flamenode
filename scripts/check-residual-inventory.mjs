@@ -94,12 +94,44 @@ function removeComment(line) {
   if(quote) throw Error("unclosed TOML string");
   return line.trim();
 }
-function scalar(value) {
-  if(value.startsWith('"') && value.endsWith('"')) {
-    try {return JSON.parse(value);} catch {throw Error("invalid TOML quoted string");}
+// Decode TOML 1.0 single-line basic strings, not JSON strings: JSON permits
+// \/" escapes that Wrangler rejects. Keep diagnostics redacted for [vars].
+function basicString(value) {
+  const raw=value.slice(1,-1), escapes={
+    '"':'"', '\\':'\\', b:'\b', t:'\t', n:'\n', f:'\f', r:'\r'
+  };
+  let out="";
+  for(let i=0;i<raw.length;i++) {
+    const ch=raw[i];
+    if(ch==='"' || /[\u0000-\u001f\u007f]/.test(ch))
+      throw Error("invalid TOML quoted string");
+    if(ch!=="\\") {out+=ch;continue;}
+    const esc=raw[++i];
+    if(Object.hasOwn(escapes,esc)) {out+=escapes[esc];continue;}
+    if(esc==="u" || esc==="U") {
+      const width=esc==="u"?4:8, digits=raw.slice(i+1,i+1+width);
+      if(digits.length!==width || !/^[0-9a-fA-F]+$/.test(digits))
+        throw Error("invalid TOML quoted string");
+      const cp=Number.parseInt(digits,16);
+      if(cp>0x10ffff || (cp>=0xd800 && cp<=0xdfff))
+        throw Error("invalid TOML quoted string");
+      out+=String.fromCodePoint(cp);
+      i+=width;
+      continue;
+    }
+    throw Error("invalid TOML quoted string");
   }
-  if(value.startsWith("'") && value.endsWith("'")) return value.slice(1,-1);
-  if(/^-?\d+$/.test(value)) {
+  return out;
+}
+function scalar(value) {
+  if(value.startsWith('"') && value.endsWith('"')) return basicString(value);
+  if(value.startsWith("'") && value.endsWith("'")) {
+    const inner=value.slice(1,-1);
+    if(/['\u0000-\u001f\u007f]/.test(inner)) throw Error("invalid TOML literal string");
+    return inner;
+  }
+  // TOML decimal integers cannot have leading zeros (01 / -01).
+  if(/^-?(?:0|[1-9]\d*)$/.test(value)) {
     // TOML supports 64-bit integers, but JavaScript Number rounds values
     // above MAX_SAFE_INTEGER. Never silently treat distinct Queue limits
     // as the same documented value after a lossy conversion.
