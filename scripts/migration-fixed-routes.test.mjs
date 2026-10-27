@@ -71,6 +71,16 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
 });
 
+test("pageHead: CURRENT rejects mojibake or control characters in description metadata", () => {
+  const fallback = "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。";
+  for (const value of ["broken\\uFFFD text", "bad\\u0001content"]) {
+    const bad = value.replace("\\uFFFD", "\uFFFD").replace("\\u0001", "\u0001");
+    assert.equal(compactText(bad), fallback);
+    assert.equal(buildPageHead({ path: "/about", title: "A", description: bad }).description, fallback);
+  }
+  assert.equal(compactText("   正常な 説明文  "), "正常な 説明文");
+});
+
 test("pageHead: only HTTP(S) site origins may be emitted into canonical and structured data", () => {
   const fallback = "https://flamenode.net";
   const maliciousOrInvalid = [
