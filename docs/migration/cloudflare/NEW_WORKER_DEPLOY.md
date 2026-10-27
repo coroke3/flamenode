@@ -81,8 +81,17 @@ not permission to configure an account or insert secrets. CI must never execute
 Only fixed-path `GET`/`HEAD` endpoints may be marked `candidate`, and even those
 require an owner-verified response/authentication contract before execution.
 All `POST`/`PUT`/`PATCH`/`DELETE` methods and parameterized paths are
-`fixture-required`, including endpoints named `dry-run`. Never replay
-mutation probes against live production data merely from this checklist.
+`fixture-required`, including endpoints named `dry-run`. So are GET/HEAD
+routes documented with query parameters and all `/api/personal`,
+`/api/admin`, `/api/admin-read`, `/api/manage`, and `/api/account`
+read paths: these need test identities and explicit expected 401/403/200
+contracts, not unauthenticated automatic requests. A query shorthand such as
+`/api/personal/library?tab&page` is represented by the canonical pathname
+`/api/personal/library` plus a fixture flag; it is never silently excluded.
+The bracketed `/api/live/events/[id]/{slots,submissions,summary}` shorthand
+is deliberately omitted and replaced by three verified Hono `/:id/...`
+routes, each requiring an event fixture. Never replay mutation probes against
+live production data merely from this checklist.
 An owner-run future smoke executor must explicitly require isolated fixtures,
 credentials scoped to the test environment, and a separate authorization gate.
 
