@@ -111,7 +111,12 @@ not permission to configure an account or insert secrets. CI must never execute
 ### Smoke-plan execution safety (U04)
 
 `node scripts/new-worker-smoke-list.mjs` **only prints JSON**: it does not issue HTTP requests.
-Only fixed-path `GET`/`HEAD` endpoints may be marked `candidate`, and even those
+Only fixed-path `GET`/`HEAD` endpoints **verified against a Hono source handler**
+may be marked `candidate`. Entries found only in API_MATRIX remain
+`fixture-required` for an owner audit, even when their parent Hono prefix is
+mounted: a mounted prefix does not prove that every documented leaf handler
+exists. At this checkpoint only source-verified `GET /api/health` is a public
+API candidate; no probe is executed here. Even source-verified candidates
 require an owner-verified response/authentication contract before execution.
 All `POST`/`PUT`/`PATCH`/`DELETE` methods and parameterized paths are
 `fixture-required`, including endpoints named `dry-run`. So are GET/HEAD
