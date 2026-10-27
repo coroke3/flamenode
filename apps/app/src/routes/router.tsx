@@ -32,14 +32,18 @@ export class RouteErrorBoundary extends React.Component<{ children: React.ReactN
 
 export function PersonalRoutes({ api }: { api: PersonalApi }): React.ReactElement {
   return (
-    <RouteErrorBoundary>
-      <Routes>
+    <div data-fn-surface="personal" className="fn-personal-shell fn-app">
+      <main className="fn-main flex-1 w-full">
+        <RouteErrorBoundary>
+          <Routes>
         <Route path="/dashboard" element={<Dashboard api={api} />} />
         <Route path="/dashboard/library" element={<Library api={api} />} />
         <Route path="/dashboard/settings" element={<Settings api={api} />} />
         <Route path="/dashboard/youtube-playlists" element={<YoutubePlaylists api={api} />} />
         <Route path="/onboarding" element={<Onboarding api={api} />} />
-      </Routes>
-    </RouteErrorBoundary>
+          </Routes>
+        </RouteErrorBoundary>
+      </main>
+    </div>
   );
 }

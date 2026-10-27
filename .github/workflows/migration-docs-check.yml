@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: MIG-0908 Wrangler residual inventory (strict tracked-config gate)
+        run: |
+          node --test scripts/check-residual-inventory.test.mjs
+          node scripts/check-residual-inventory.mjs
       - name: MIG-0649 R2 static inventory (early fail-closed gate)
         run: |
           node --test scripts/check-r2-artifact-consumers.test.mjs
@@ -105,6 +109,7 @@ jobs:
           npm run test --workspace=@flamenode/ui
           npm run test --workspace=@flamenode/site  # astro build + Island tests (MIG-0402)
           npm run build --workspace=@flamenode/app
+          npm run test --workspace=@flamenode/app
           npm run build --workspace=@flamenode/api
           npm run test --workspace=@flamenode/api
       - name: MIG-0401 synthetic public-only HTML verification
