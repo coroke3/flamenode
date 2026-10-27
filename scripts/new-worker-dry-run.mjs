@@ -9,7 +9,7 @@
  * for IDs or secrets. CI only; no production command is exported.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,18 +84,27 @@ export function assertDryRunInputs(plan) {
   }
 }
 
-// A dry-run must not inherit account credentials from a developer workstation
-// or a CI job with Cloudflare access. This also prevents Wrangler from using
-// those values for an accidental account lookup during local packaging.
-const CLOUDFLARE_AUTH_KEYS = Object.freeze([
-  "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL",
-  "CLOUDFLARE_ACCOUNT_ID", "CF_API_TOKEN", "CF_API_KEY",
-  "CF_EMAIL", "CF_ACCOUNT_ID",
-]);
+// Avoid both inherited API credentials and cached Wrangler OAuth credentials.
+// Local dry-run packaging needs no account profile or production access.
+const CLOUDFLARE_AUTH_KEY =
+  /^(?:CLOUDFLARE_|CF_)(?:API_TOKEN|API_KEY|EMAIL|ACCOUNT_ID)$/i;
 
-export function offlineWranglerEnv(parent = process.env) {
+export function offlineWranglerEnv(parent = process.env, isolatedProfile) {
   const env = { ...parent, CI: "true", WRANGLER_SEND_METRICS: "false" };
-  for (const key of CLOUDFLARE_AUTH_KEYS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (CLOUDFLARE_AUTH_KEY.test(key)) delete env[key];
+  }
+  if (isolatedProfile !== undefined) {
+    if (typeof isolatedProfile !== "string" || !path.isAbsolute(isolatedProfile)) {
+      throw new Error("Wrangler profile directory must be absolute");
+    }
+    // Preserve PATH / system runtime variables, but prevent an existing login
+    // or cache in HOME/APPDATA from being selected by the local CLI.
+    for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+      "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
+      env[key] = isolatedProfile;
+    }
+  }
   return env;
 }
 
@@ -109,14 +118,19 @@ function main(argv) {
     return;
   }
   assertDryRunInputs(plan);
-  for (const item of plan) {
-    const out = spawnSync(item.executable, item.args, {
-      cwd: ROOT, stdio: ["ignore", "inherit", "inherit"], shell: false,
-      timeout: 240_000, // Fail closed instead of hanging on an unexpected prompt.
-      env: offlineWranglerEnv(),
-    });
-    if (out.error) throw out.error;
-    if (out.status !== 0) throw new Error(item.name + " Wrangler local dry-run failed: " + out.status);
+  const isolatedProfile = mkdtempSync(path.join(os.tmpdir(), "flamenode-wrangler-offline-"));
+  try {
+    for (const item of plan) {
+      const out = spawnSync(item.executable, item.args, {
+        cwd: ROOT, stdio: ["ignore", "inherit", "inherit"], shell: false,
+        timeout: 240_000, // Fail closed instead of hanging on an unexpected prompt.
+        env: offlineWranglerEnv(process.env, isolatedProfile),
+      });
+      if (out.error) throw out.error;
+      if (out.status !== 0) throw new Error(item.name + " Wrangler local dry-run failed: " + out.status);
+    }
+  } finally {
+    rmSync(isolatedProfile, { recursive: true, force: true });
   }
 }
 
