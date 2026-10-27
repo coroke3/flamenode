@@ -37,6 +37,7 @@ function assertStrictWranglerTopology(siteBody, apiBody, appBody) {
       headers: ["[assets]", "[vars]", "[[d1_databases]]", "[[r2_buckets]]",
         "[[kv_namespaces]]", "[[kv_namespaces]]", "[[services]]"],
       main: "./src/gateway/index.ts",
+      workerName: "flamenode-public-gateway",
       bindings: [["[assets]", "ASSETS"], ["[[d1_databases]]", "DB"],
         ["[[r2_buckets]]", "R2_STORAGE"], ["[[kv_namespaces]]", "KV"],
         ["[[kv_namespaces]]", "VISIBILITY_KV"], ["[[services]]", "AUTH_ORIGIN"]],
@@ -45,16 +46,20 @@ function assertStrictWranglerTopology(siteBody, apiBody, appBody) {
       body: apiBody,
       headers: ["[vars]", "[[d1_databases]]", "[[r2_buckets]]", "[[kv_namespaces]]"],
       main: "./src/index.ts",
+      workerName: "flamenode-hono-api",
       bindings: [["[[d1_databases]]", "DB"], ["[[r2_buckets]]", "BUCKET"],
         ["[[kv_namespaces]]", "KV"]],
     },
-    { body: appBody, headers: ["[assets]"], main: null, bindings: [] },
+    { body: appBody, headers: ["[assets]"], main: null,
+      workerName: "flamenode-personal", bindings: [] },
   ];
-  for (const { body, headers, main, bindings } of cases) {
+  for (const { body, headers, main, workerName, bindings } of cases) {
     const sections = tomlSections(body);
     assert.deepEqual(sections.map((section) => section.name), ["<root>", ...headers],
       "Unexpected Wrangler TOML section or changed section order");
     const root = sections[0].content;
+    assert.deepEqual(matches(root, "name"), [workerName],
+      "Worker name must remain isolated from CURRENT production flamenode-web");
     assert.deepEqual(matches(root, "compatibility_date"), ["2026-07-21"],
       "compatibility_date must remain at TOML root");
     assert.match(root, /^workers_dev\s*=\s*false$/m,
@@ -65,6 +70,11 @@ function assertStrictWranglerTopology(siteBody, apiBody, appBody) {
       matches(content, "binding").map((binding) => [name, binding]));
     assert.deepEqual(actualBindings, bindings,
       "Each binding must remain in its explicitly authorized TOML section");
+    const auth = sections.find((section) => section.name === "[[services]]");
+    if (auth) {
+      assert.deepEqual(matches(auth.content, "service"), ["flamenode-web"],
+        "AUTH_ORIGIN must target unchanged CURRENT Auth.js service");
+    }
     const asset = sections.find((section) => section.name === "[assets]");
     if (asset) {
       assert.deepEqual(matches(asset.content, "directory"), ["./dist"],
@@ -106,6 +116,23 @@ test("MIG-0628 U02: strict TOML section and binding topology resists drift", () 
   const missingWorkerFirst = gateway.replace("run_worker_first = true\n", "");
   assert.throws(() => assertStrictWranglerTopology(missingWorkerFirst, api, personal),
     /run_worker_first must be within/);
+
+  const reusedProductionWorkerName = gateway.replace('name = "flamenode-public-gateway"',
+    'name = "flamenode-web"');
+  assert.throws(() => assertStrictWranglerTopology(reusedProductionWorkerName, api, personal),
+    /Worker name must remain isolated/);
+  const reusedApiProductionName = api.replace('name = "flamenode-hono-api"',
+    'name = "flamenode-web"');
+  assert.throws(() => assertStrictWranglerTopology(gateway, reusedApiProductionName, personal),
+    /Worker name must remain isolated/);
+  const reusedPersonalProductionName = personal.replace('name = "flamenode-personal"',
+    'name = "flamenode-web"');
+  assert.throws(() => assertStrictWranglerTopology(gateway, api, reusedPersonalProductionName),
+    /Worker name must remain isolated/);
+  const invalidAuthTarget = gateway.replace('service = "flamenode-web"',
+    'service = "flamenode-unapproved-auth"');
+  assert.throws(() => assertStrictWranglerTopology(invalidAuthTarget, api, personal),
+    /AUTH_ORIGIN must target unchanged/);
 
   const missingDirectory = gateway.replace('directory = "./dist"\n', "");
   assert.throws(() => assertStrictWranglerTopology(missingDirectory, api, personal),
