@@ -166,8 +166,12 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
     youtube_video_id: video.youtube_video_id ?? null,
     scheduled_time: video.scheduled_time ?? null,
   }));
+  // The independent CURRENT recent index is the candidate source, while the public
+  // video-detail envelope determines which canonical URLs Astro can actually publish.
+  const expectedPublished = expected.filter((video) =>
+    sitemapVideoMatchesDetail(video, byKey.get(`snapshot/video-detail/${video.id}.json`)?.payload ?? null));
   const gotPayload = byKey.get(SITEMAP_VIDEOS_KEY).payload;
-  assert.deepEqual(gotPayload.videos, expected);
+  assert.deepEqual(gotPayload.videos, expectedPublished);
   assert.ok(gotPayload.videos.length > LIST_FIRST_PAGE_SIZE, "sitemap must not inherit 24-item UI truncation");
   assert.ok(gotPayload.videos.length <= 500);
   assert.equal(gotPayload.videos.some((video) => video.id === "a-private"), false);
@@ -179,7 +183,7 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
   const loaded = await loadSitemapVideosSnapshot(source, {
     manifest: produced.result.manifest, generation: "gen-1",
   });
-  assert.deepEqual(loaded.videos, expected, "manifest-verified sitemap snapshot must match CURRENT");
+  assert.deepEqual(loaded.videos, expectedPublished, "sitemap snapshot must match CURRENT public recent candidates with published canonical details");
   const [eventBuild, userBuild] = await Promise.all([
     loadEventBuildData(env),
     loadUserBuildDataFrom(userPayloadSourceFromEnv(env)),
