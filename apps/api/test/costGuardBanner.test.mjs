@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.ts";
 import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
-import { resetOperationModeCachesForTests } from "../src/routes/live/operationMode.ts";
+import { resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
 import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
 import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
 
@@ -300,16 +300,30 @@ test("MIG-0661 T06: public KV reason beyond accepted size is omitted, not a 500"
   );
 });
 
-test("MIG-0661 T06: oversized KV blob is rejected before parsing, without D1 fallback", async () => {
+test("MIG-0661 T06: oversized valid KV reason never clears the live operation mode", async () => {
+  for (const mode of ["maintenance", "read_only", "static_only", "economy"]) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const env = {
+      DB: unavailableD1(d1),
+      KV: kvResponse(JSON.stringify({
+        mode, updated_at: 1, reason: "X".repeat(70 * 1024),
+      }), kv),
+    };
+    assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), mode);
+    assert.deepEqual(await requestWith(env), { mode, reason: null });
+    assert.equal(kv.count, 1, "live resolver and banner must share the same mirror");
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T06: oversized malformed KV remains normal without D1", async () => {
   resetOperationModeCachesForTests();
   const d1 = { count: 0 }, kv = { count: 0 };
-  const body = await requestWith({
+  assert.deepEqual(await requestWith({
     DB: unavailableD1(d1),
-    KV: kvResponse(JSON.stringify({
-      mode: "maintenance", updated_at: 1, reason: "X".repeat(70 * 1024),
-    }), kv),
-  });
-  assert.deepEqual(body, { mode: "normal", reason: null });
+    KV: kvResponse('{"mode":"maintenance","updated_at":1,"reason":"' + "X".repeat(70 * 1024), kv),
+  }), { mode: "normal", reason: null });
   assert.equal(kv.count, 1);
   assert.equal(d1.count, 0);
 });
