@@ -1,6 +1,8 @@
 // MIG-0628 — fixed no-upload dry-run wrapper regression (zero Cloudflare mutations).
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
@@ -69,6 +71,8 @@ test("MIG-0628 U03: dry-run never inherits Cloudflare account credentials", () =
     CF_API_KEY: secret,
     CF_EMAIL: "secret@example.invalid",
     CF_ACCOUNT_ID: secret,
+    cloudflare_api_token: secret,
+    cf_account_id: secret,
   };
   const sanitized = offlineWranglerEnv(parent);
   assert.equal(sanitized.CI, "true");
@@ -80,8 +84,34 @@ test("MIG-0628 U03: dry-run never inherits Cloudflare account credentials", () =
     "CLOUDFLARE_ACCOUNT_ID", "CF_API_TOKEN", "CF_API_KEY",
     "CF_EMAIL", "CF_ACCOUNT_ID",
   ]) assert.equal(Object.hasOwn(sanitized, key), false, key);
+  assert.equal(Object.hasOwn(sanitized, "cloudflare_api_token"), false);
+  assert.equal(Object.hasOwn(sanitized, "cf_account_id"), false);
   assert.equal(parent.CLOUDFLARE_API_TOKEN, secret,
     "Sanitizing the child must not mutate parent env");
+});
+
+test("MIG-0628 U03: offline Wrangler uses an empty temporary login profile", () => {
+  const isolated = mkdtempSync(path.join(os.tmpdir(), "flamenode-mig-0628-profile-test-"));
+  const parent = {
+    PATH: "test-node-bin", HOME: "/home/existing-wrangler-login",
+    USERPROFILE: "C:\\Users\\logged-in", APPDATA: "C:\\Users\\logged-in\\AppData\\Roaming",
+    XDG_CONFIG_HOME: "/home/existing-wrangler-login/.config",
+    CLOUDFLARE_API_TOKEN: "SAMPLE_DO_NOT_LEAK",
+  };
+  try {
+    const env = offlineWranglerEnv(parent, isolated);
+    for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+      "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
+      assert.equal(env[key], isolated, key + " must not select saved Wrangler credentials");
+    }
+    assert.equal(env.PATH, parent.PATH);
+    assert.equal(Object.hasOwn(env, "CLOUDFLARE_API_TOKEN"), false);
+    assert.equal(parent.HOME, "/home/existing-wrangler-login");
+    assert.throws(() => offlineWranglerEnv(parent, "relative/config-home"), /must be absolute/);
+    assert.throws(() => offlineWranglerEnv(parent, null), /must be absolute/);
+  } finally {
+    rmSync(isolated, { recursive: true, force: true });
+  }
 });
 
 test("MIG-0628 U03: --plan is purely local, rejects all deploy/remote flags", () => {
