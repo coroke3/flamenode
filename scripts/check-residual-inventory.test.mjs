@@ -621,11 +621,11 @@ test("T63: adding workers_dev to a background Worker requires review",()=>{
 test("T64: invalid observability TOML is rejected and its contents redacted",()=>{
   const marker="never-show-observability-value-456";
   for(const [path,source] of [["wrangler.toml",web],[fastPath,fast],[contentPath,content],[syncPath,sync]]) {
-    const changed=source.replace("[observability]\\nenabled = true",
-      "[observability]\\nenabled = "+marker);
+    const changed=source.replace("[observability]\nenabled = true",
+      "[observability]\nenabled = "+marker);
     assert.notEqual(changed,source);
     assert.throws(()=>extractConfigRows(changed,path),
-      error=>/unsupported TOML value \\(redacted\\)/.test(error.message)&&
+      error=>/unsupported TOML value \(redacted\)/.test(error.message)&&
         !error.message.includes(marker));
   }
 });
@@ -635,13 +635,13 @@ test("T65: invalid placement TOML is rejected, not silently ignored",()=>{
   const changed=web.replace('mode = "smart"',"mode = "+marker);
   assert.notEqual(changed,web);
   assert.throws(()=>extractConfigRows(changed,"wrangler.toml"),
-    error=>/unsupported TOML value \\(redacted\\)/.test(error.message)&&
+    error=>/unsupported TOML value \(redacted\)/.test(error.message)&&
       !error.message.includes(marker));
 });
 
 test("T66: unreviewed observability/placement fields fail closed",()=>{
-  const obs=web.replace("enabled = true","enabled = true\\nlogs = true");
-  const placement=web.replace('mode = "smart"','mode = "smart"\\nregion = "EU"');
+  const obs=web.replace("enabled = true","enabled = true\nlogs = true");
+  const placement=web.replace('mode = "smart"','mode = "smart"\nregion = "EU"');
   assert.throws(()=>extractConfigRows(obs,"wrangler.toml"),
     /unreviewed observability key logs/);
   assert.throws(()=>extractConfigRows(placement,"wrangler.toml"),
@@ -655,18 +655,18 @@ test("T67: tracked observability and placement semantics cannot silently drift",
   assert.deepEqual(baseline.stale,[]);
   const obsOff=web.replace("enabled = true","enabled = false");
   const placementChanged=web.replace('mode = "smart"','mode = "off"');
-  const withoutObservability=fast.replace("[observability]\\nenabled = true\\n","");
-  const withoutPlacement=web.replace('[placement]\\nmode = "smart"\\n',"");
-  const background=fast.replace("[observability]\\nenabled = true",
-    '[observability]\\nenabled = true\\n[placement]\\nmode = "smart"');
+  const withoutObservability=fast.replace("[observability]\nenabled = true\n","");
+  const withoutPlacement=web.replace('[placement]\nmode = "smart"\n',"");
+  const background=fast.replace("[observability]\nenabled = true",
+    '[observability]\nenabled = true\n[placement]\nmode = "smart"');
   assert.throws(()=>extractConfigRows(obsOff,"wrangler.toml"),
     /expected observability.enabled = true/);
   assert.throws(()=>extractConfigRows(placementChanged,"wrangler.toml"),
     /unexpected placement.mode/);
   assert.throws(()=>extractConfigRows(withoutObservability,fastPath),
-    /missing \\[observability\\] section/);
+    /missing \[observability\] section/);
   assert.throws(()=>extractConfigRows(withoutPlacement,"wrangler.toml"),
-    /missing \\[placement\\] section/);
+    /missing \[placement\] section/);
   assert.throws(()=>extractConfigRows(background,fastPath),
     /unexpected placement.mode/);
 });
