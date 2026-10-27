@@ -312,6 +312,29 @@ test("MIG-0628 U04: whitespace-formatted Hono mount calls cannot escape route co
   }
 });
 
+test("MIG-0628 U04: only the real app receiver counts as a Hono mount", () => {
+  const real = 'app.route("/api/real", realRoutes);';
+  const unrelated = [
+    'other.app.route("/api/ghost", ghostRoutes);',
+    'other?.app.route("/api/optional-ghost", ghostRoutes);',
+    'other . app . route("/api/spaced-ghost", ghostRoutes);',
+  ];
+  for (const example of unrelated) {
+    assert.equal(countActiveHonoMountCalls(example), 0, example);
+    assert.deepEqual(listHonoMounts(example), [], example);
+    const mixed = real + "\n" + example;
+    assert.equal(countActiveHonoMountCalls(mixed), 1, example);
+    assert.deepEqual(listHonoMounts(mixed), [
+      { path: "/api/real", owner: "realRoutes" },
+    ], example);
+  }
+  const withComment = '// note ending with a period.\n' + real;
+  assert.equal(countActiveHonoMountCalls(withComment), 1);
+  assert.deepEqual(listHonoMounts(withComment), [
+    { path: "/api/real", owner: "realRoutes" },
+  ]);
+});
+
 test("MIG-0628 U04: method/route parser flags undocumented mounted groups for review", () => {
   const fake = buildNewWorkerSmokePlan({
     appEntry: 'app.route("/api/a", aRoutes);\napp.route("/api/b", makeBRoutes());',
