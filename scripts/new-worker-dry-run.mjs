@@ -9,7 +9,7 @@
  * for IDs or secrets. CI only; no production command is exported.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -71,14 +71,14 @@ export function assertFixedDryRunPlan(plan) {
 }
 
 /** Building an empty directory is not enough to validate a static Worker. */
-export function assertBuiltEntrypoints(plan, inspect = statSync) {
+export function assertBuiltEntrypoints(plan, inspect = lstatSync) {
   assertFixedDryRunPlan(plan);
   for (const entry of plan) {
     const relative = entry.name === "api" ? entry.built : path.join(entry.built, "index.html");
     let valid = false;
     try {
       const info = inspect(path.join(ROOT, relative));
-      valid = info.isFile() && info.size > 0;
+      valid = info.isFile() && !info.isSymbolicLink() && info.size > 0;
     } catch {
       // Missing files, unreadable paths and symbolic build placeholders fail closed.
     }
