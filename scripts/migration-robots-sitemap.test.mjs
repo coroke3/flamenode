@@ -218,6 +218,20 @@ test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once"
   assert.equal(urls.some((url) => url.includes("/admin/") || url.includes("/dashboard/")), false,
     "private workspace URLs cannot appear in sitemap");
   assert.equal([...xml.matchAll(/<url>/g)].length, urls.length, "all sitemap entries need a loc");
+  // Under the fixture build, every sitemap URL must resolve to an emitted
+  // public HTML asset, including event and creator detail URLs. This catches
+  // index/detail drift that a bare <loc> assertion would miss.
+  if (!process.env.FLAMENODE_SNAPSHOT_DIR &&
+      !process.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE &&
+      !process.env.FLAMENODE_SNAPSHOT_GENERATION) {
+    for (const url of urls) {
+      const pathname = new URL(url);
+      assert.equal(pathname.origin, origin, "sitemap must not advertise external hosts");
+      const relative = pathname.pathname === "/" ? "" : pathname.pathname.slice(1) + "/";
+      const html = await readFile(new URL(`apps/site/dist/${relative}index.html`, root), "utf8");
+      assert.match(html, /<html\b/i, `published sitemap URL must have HTML: ${url}`);
+    }
+  }
   // With no snapshot env, Astro emits the fixture /[id] pages. A sitemap
   // containing only its seven static URLs would silently miss those pages.
   if (!process.env.FLAMENODE_SNAPSHOT_DIR &&
