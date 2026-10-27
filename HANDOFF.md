@@ -1,14 +1,46 @@
 # FlameNode 移行 引き継ぎメモ (Handoff)
 
-> **作成日時**: 2026-10-26 02:10 (JST)  
-> **ベースコミット**: `0a0f62a2` (`origin/main`)  
-> **オープンPR状態**: 自PR 0件（完了済み）。#386 のみセキュリティ関連の別PRで放置。
+> **初版**: 2026-10-26 02:10 JST — `main=0a0f62a2` 時点の履歴スナップショット  
+> **追補**: 2026-10-27 JST — GitHub の open PR、各PR最終Headの Actions とレビュー一覧を再照合  
+> **確認した main**: `fc5b97856abf82c31bda8e1d1f5def1ca2d9e05e`（2026-10-27のPR base SHA）  
+> **注意**: 初版の「open PR 0件」「#386 のみ」は現在の作業状態を表していない。最新の正本は GitHub の open PR、PR branch の work-item、および main の `docs/migration/STATUS.md`。
+
+---
+
+## 0. 2026-10-27 最新の引き継ぎ・未完了ゲート
+
+**mainの状態**: `fc5b97856abf82c31bda8e1d1f5def1ca2d9e05e` をPRのbaseとして確認。Production Cutoverは `docs/migration/STATUS.md` で **NOT STARTED**。作業ブランチのチェックポイントを main の DONE とみなさない。
+
+| Open PR | Task | Head SHA (照合時点) | 最終Head CI | 独立 APPROVE | 依存・次の行動 |
+| --- | --- | --- | --- | --- | --- |
+| [#416](https://github.com/coroke3/flamenode/pull/416) | MIG-0908 | `4e9f5f39` | [40458494865](https://github.com/coroke3/flamenode/actions/runs/40458494865): contract/workspaces SUCCESS | 0 | 最終コード・TOML parserと36 declaration rowsの独立レビュー。27件の未確定処遇は勝手にretireしない |
+| [#419](https://github.com/coroke3/flamenode/pull/419) | MIG-0661 | `4f84a4e9` | [40456482435](https://github.com/coroke3/flamenode/actions/runs/40456482435): 両job SUCCESS | 0 | **BLOCKED**: 64 KiB超の有効KV mirrorのmode保持とJSON.parse CPU予算を両立する方針・非本番測定が未完。サイズだけでnormalに戻さない |
+| [#420](https://github.com/coroke3/flamenode/pull/420) | MIG-0718 | `bf6aee9b` | [40450876830](https://github.com/coroke3/flamenode/actions/runs/40450876830): 両job SUCCESS | 0 | **Draft**: U01–U02のみ。U03統合はMIG-0661・MIG-0701の両方がmainでDONEになってから |
+| [#421](https://github.com/coroke3/flamenode/pull/421) | MIG-0664 | `74db20d7` | [40471288115](https://github.com/coroke3/flamenode/actions/runs/40471288115): 両job SUCCESS | 0 | REVIEW: 最終Headの独立レビューと統合ゲート確認 |
+| [#408](https://github.com/coroke3/flamenode/pull/408) | handoff docs | `87875aeb`（本追補の変更前） | [40215059191](https://github.com/coroke3/flamenode/actions/runs/40215059191): 両job SUCCESS（**変更前のみ**） | 0 | Draft: 古い引き継ぎ記述を訂正中。本追補後は新しいHeadのCI確認が必要 |
+
+**次に解除すべき依存関係**:
+- MIG-0701 は main の `docs/migration/work-items/MIG-0701.md` で **READY / ownerなし**。U04 stylesheet port・U05 root documentが未完。PR #420 の U03 はこれと #419 の双方がDONEになるまで着手しない。
+- #419 のCPU/パリティトレードオフは `docs/migration/ZERO_1102.md` の予算と、CURRENT `src/lib/operationMode/kvMirrorCore.ts` の振る舞いを照合する。単純な生JSON長上限による `normal` fallback は mode を壊すので禁止。非本番測定のない段階で「1102解消」とは記録しない。
+- #416, #421 は最終HeadのCIはgreenだがレビュー0。**CI成功 != レビュー承認**。PRごとに独立した非実装者のレビューと、人間のsquash merge判断が必要。
+- mainへの直接push、自動マージ、本番Cloudflare/Worker Route/Remote D1/R2/KV/Queue/Secrets変更は禁止。STATUSのDONE更新はPRの承認・統合段階に行う。
+
+**再開の照合コマンド例**（出力を現在値として信用する。上表はスナップショット）:
+
+```bash
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git rev-parse HEAD
+gh pr list --state open --json number,title,isDraft,headRefOid,url
+npm run migration:next -- --model small
+```
 
 ---
 
 ## 1. 直近で完了・mainにマージされたタスク（全件Green・マージ済み）
 
-以下の直近5タスク（Tier 1〜4 + 関連タスク）はすべて独立レビュー（APPROVE）およびCI全項目（`migration-contract`, `migration-workspaces`）を通過し、`origin/main` に squash merge 済みです。
+以下は **初版時点のマージ履歴**。この追補では各履歴PRのレビュー証跡を再検証していないため、全件独立 APPROVE 済みとは断定しない。現在の open PR の統合可否は次節で別途判断する。
 
 | タスクID | PR | 内容 | マージコミット |
 | :--- | :--- | :--- | :--- |
@@ -28,7 +60,7 @@ git checkout main
 git pull --ff-only origin main
 git status
 ```
-最新コミットが `0a0f62a2`（またはそれ以降）であることを確認。
+固定 SHA `0a0f62a2` を最新と誤認しない。GitHub の現在の main と照合し、`git rev-parse HEAD` で実 HEAD を確認する。2026-10-27照合時の main は `fc5b9785`。
 
 ### Step 2: 依存関係・チェッカー確認
 ```bash
