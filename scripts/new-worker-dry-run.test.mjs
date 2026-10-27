@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
-import { WORKER_TARGETS, WRANGLER_CLI, dryRunArgs, dryRunPlan } from "./new-worker-dry-run.mjs";
+import { WORKER_TARGETS, WRANGLER_CLI, assertFixedDryRunPlan, dryRunArgs, dryRunPlan } from "./new-worker-dry-run.mjs";
 
 test("MIG-0628 U03: exactly site, api, app and only fixed --dry-run commands", () => {
   assert.deepEqual(WORKER_TARGETS.map(w => w.name), ["site", "api", "app"]);
@@ -27,6 +27,30 @@ test("MIG-0628 U03: exactly site, api, app and only fixed --dry-run commands", (
 test("MIG-0628 U03: mutable Worker target and relative output cannot bypass the guard", () => {
   assert.throws(() => dryRunArgs({ name: "prod", config: "wrangler.toml" }, "/tmp/test"), /Unknown/);
   assert.throws(() => dryRunArgs(WORKER_TARGETS[0], "../unexpected"), /absolute/);
+});
+
+
+test("MIG-0628 U03: altered or extra Wrangler flags never reach spawn", () => {
+  const validPlan = () => structuredClone(dryRunPlan(path.resolve("dry-run-test-output")));
+  assert.doesNotThrow(() => assertFixedDryRunPlan(validPlan()));
+
+  const reject = (mutate) => {
+    const plan = validPlan();
+    mutate(plan);
+    assert.throws(() => assertFixedDryRunPlan(plan),
+      /(?:Mutated|fixed Workers|output directory)/);
+  };
+  reject(plan => { plan[0].args.push("--route", "example.com/*"); });
+  reject(plan => { plan[0].args.push("--env", "production"); });
+  reject(plan => { plan[1].args[6] = "wrangler.toml"; });
+  reject(plan => { plan[2].args[2] = "deploy"; });
+  reject(plan => { plan[0].args[0] = "/usr/local/bin/unsafe-wrapper"; });
+  reject(plan => { plan[0].args[4] = "../not-absolute"; });
+  reject(plan => { plan[1].executable = "npx"; });
+  reject(plan => { plan[1].name = "flamenode-web"; });
+  reject(plan => { plan[0].built = "some-other-path"; });
+  reject(plan => { plan.pop(); });
+  reject(plan => { plan.reverse(); });
 });
 
 test("MIG-0628 U03: --plan is purely local, rejects all deploy/remote flags", () => {
