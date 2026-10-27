@@ -13,6 +13,14 @@
 | Personal SPA | `flamenode-web` Next pages | `apps/app/wrangler.toml` | assets-only | `dist`, SPA fallback |
 | Manage/Admin SPA | `flamenode-web` Next pages | **not in MIG-0628** (MIG-0704) | — | — |
 
+The three Worker names are explicitly isolated: `flamenode-public-gateway`,
+`flamenode-hono-api`, and `flamenode-personal`. They must never silently
+become `flamenode-web` (the CURRENT production Worker) or each other's names.
+The gateway `AUTH_ORIGIN` service target remains exactly `flamenode-web`
+until the separately approved authentication migration. CI verifies these
+root TOML names and the service's table-scoped target; dry-run alone cannot
+prove name isolation or the correct authentication dependency.
+
 All target templates retain CURRENT `compatibility_date=2026-07-21`
 and `nodejs_compat`, `global_fetch_strictly_public`. Resource IDs are
 **intentionally invalid placeholders**; there are no Route, Custom Domain,
