@@ -44,12 +44,18 @@ function isCodePosition(source, offset) {
  * so new nonliteral/dynamic mounts fail the coverage test instead of vanishing.
  */
 export function countActiveHonoMountCalls(entry) {
-  return [...entry.matchAll(/\bapp\.route\s*\(/g)]
-    .filter((match) => isCodePosition(entry, match.index)).length;
+  // JavaScript permits spaces/newlines around the property access. Computed
+  // and optional property access also execute at runtime, but are unsupported
+  // by listHonoMounts; count them so the coverage assertion fails closed.
+  const calls = [
+    ...entry.matchAll(/\bapp\s*(?:\.|\?\.)\s*route\s*\(/g),
+    ...entry.matchAll(/\bapp\s*(?:\?\.)?\s*\[\s*(["'`])route\1\s*\]\s*\(/g),
+  ];
+  return calls.filter((match) => isCodePosition(entry, match.index)).length;
 }
 
 export function listHonoMounts(entry) {
-  const found = [...entry.matchAll(/app\.route\(\s*["'](\/api\/[^"']+)["']\s*,\s*([A-Za-z_$][\w$]*)(?:\(\))?\s*\)/g)]
+  const found = [...entry.matchAll(/\bapp\s*\.\s*route\s*\(\s*["'](\/api\/[^"']+)["']\s*,\s*([A-Za-z_$][\w$]*)(?:\(\))?\s*\)/g)]
     .filter((match) => isCodePosition(entry, match.index))
     .map(([, path, owner]) => ({ path, owner }));
   const unique = [...new Map(found.map((row) => [row.path + ":" + row.owner, row])).values()];
