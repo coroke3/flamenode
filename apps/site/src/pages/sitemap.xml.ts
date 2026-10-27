@@ -8,6 +8,7 @@ import { getEventBuildData } from "../lib/eventData.ts";
 import { loadUserBuildData } from "../lib/userData.ts";
 import { loadVideoPagesForBuild } from "../lib/videoPage.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../lib/videoFixtures.ts";
+import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { snapshotAccessFromEnv, type SnapshotAccess } from "../lib/snapshotEnv.ts";
 import {
   loadSitemapVideosSnapshot,
@@ -33,11 +34,13 @@ export async function sitemapVideosOrEmpty(
     return {
       generated_at: null,
       videos: canonicalPages.map((page) => {
-        const scheduled = FIXTURE_VIDEO_DETAIL_PAYLOADS[page.videoId]?.video?.scheduled_time;
+        const raw = FIXTURE_VIDEO_DETAIL_PAYLOADS[page.videoId];
+        const detail = raw ? normalizeStaticVideoDetail(raw as Parameters<typeof normalizeStaticVideoDetail>[0]) : null;
+        const scheduled = detail?.video.scheduled_time ?? null;
         return {
           id: page.videoId,
           youtube_video_id: page.youtubeId ? page.canonicalSlug : null,
-          scheduled_time: typeof scheduled === "number" && Number.isFinite(scheduled) ? scheduled : null,
+          scheduled_time: scheduled,
         };
       }),
     };
