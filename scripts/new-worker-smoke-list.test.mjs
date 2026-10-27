@@ -171,6 +171,8 @@ test("MIG-0628 U04: smoke list is sourced from mounted API groups and migration 
   assert.ok(plan.publicSmoke.some(x => x.path === "/robots.txt"));
   assert.ok(plan.publicSmoke.some(x => x.path === "/sitemap.xml"));
   assert.ok(plan.apiSmoke.every(x => ["candidate", "fixture-required"].includes(x.mode)));
+  assert.ok(plan.apiSmoke.every(x => ["GET", "HEAD"].includes(x.method) || x.mode === "fixture-required"),
+    "mutation endpoints cannot be automatic smoke candidates");
   // No currently mounted Hono root can be silently omitted; where API_MATRIX
   // lacks entries the source-anchored overlay supplies concrete actual paths.
   assert.deepEqual(plan.coverage.filter(x => x.needsManualAudit), []);
@@ -190,6 +192,39 @@ test("MIG-0628 U04: method/route parser flags undocumented mounted groups for re
     [["/api/a", false], ["/api/b", true]]);
   assert.ok(fake.apiSmoke.some(x => x.method === "GET" && x.path === "/api/a/health"));
   assert.ok(!fake.apiSmoke.some(x => x.path.startsWith("/api/b")));
+});
+
+test("MIG-0628 U04: non-readonly APIs always require owner fixtures", () => {
+  const plan = buildNewWorkerSmokePlan({
+    appEntry: 'app.route("/api/a", aRoutes);',
+    apiMatrix: [
+      "| GET /api/a/status | read |",
+      "| HEAD /api/a/status | read |",
+      "| POST /api/a/rebuild | write |",
+      "| PUT /api/a/settings | write |",
+      "| PATCH /api/a/settings | write |",
+      "| DELETE /api/a/reset | write |",
+      "| GET /api/a/items/:id | parameter fixture |",
+    ].join("\n"),
+    routeMatrix: "",
+  });
+  const byMethodAndPath = (method, path) =>
+    plan.apiSmoke.find((row) => row.method === method && row.path === path);
+  for (const method of ["GET", "HEAD"]) {
+    assert.equal(byMethodAndPath(method, "/api/a/status")?.mode, "candidate");
+  }
+  for (const [method, path] of [
+    ["POST", "/api/a/rebuild"],
+    ["PUT", "/api/a/settings"],
+    ["PATCH", "/api/a/settings"],
+    ["DELETE", "/api/a/reset"],
+    ["GET", "/api/a/items/:id"],
+  ]) {
+    const probe = byMethodAndPath(method, path);
+    assert.equal(probe?.mode, "fixture-required", method + " " + path);
+    assert.equal(probe.expected, "owner-verified contract");
+  }
+  assert.equal(plan.apiSmoke.filter(x => x.mode === "candidate").length, 2);
 });
 
 test("MIG-0628 U04: plan construction never contacts real network", () => {
