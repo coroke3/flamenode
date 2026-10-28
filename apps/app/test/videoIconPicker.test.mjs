@@ -97,3 +97,27 @@ test("MIG-0712 U02 T04: editor and boundary display safe upload and selection sh
   const boundary = renderToStaticMarkup(React.createElement(SquareIconEditorBoundary, null, React.createElement("div", null, "表示可")));
   assert.match(boundary, /表示可/);
 });
+
+test("MIG-0712 U02 T04: crop boundary catches a render failure and retries the editor", async () => {
+  const caught = [];
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container, { onCaughtError: error => caught.push(error) });
+  let shouldThrow = true;
+  const Child = () => {
+    if (shouldThrow) throw new Error("crop_decoder_failed");
+    return React.createElement("span", null, "画像エディタ復帰");
+  };
+  try {
+    await act(async () => {
+      root.render(React.createElement(SquareIconEditorBoundary, null, React.createElement(Child)));
+    });
+    assert.match(container.textContent, /画像エディタで問題が発生しました/);
+    assert.equal(caught.length, 1);
+    const retry = [...container.querySelectorAll("button")].find(b => b.textContent.includes("やり直す"));
+    assert.ok(retry);
+    shouldThrow = false;
+    await act(async () => { retry.click(); });
+    assert.match(container.textContent, /画像エディタ復帰/);
+    assert.doesNotMatch(container.textContent, /問題が発生しました/);
+  } finally { await act(async () => root.unmount()); }
+});
