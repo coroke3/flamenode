@@ -178,11 +178,11 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("T02: longer queries use V1 compatibility ranking and preserve paging/parameters", async () => {
-    const { response, body, stats } = await request("?q=alice&limit=1&offset=1");
+    const { response, body, stats } = await request("?q=alice&limit=20&offset=1");
     assert.equal(response.status, 200);
     verifyPrivate(response);
     assert.equal(body.source, "v1");
-    const current = searchMemberSuggestions(members, { query: "alice", limit: 1, offset: 1 });
+    const current = searchMemberSuggestions(members, { query: "alice", limit: 20, offset: 1 });
     assert.deepEqual(body.items, current.items.map((item) => ({
       id: item.x_user_id, x_name: item.name, score: item.score, matchedBy: item.matchedBy,
     })));
