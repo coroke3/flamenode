@@ -1,6 +1,7 @@
 import "./styles/current/globals.css";
 import "./styles/current/mobile-hardening.css";
 import "./styles/fonts.css";
+import "./styles/shared.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App.js";
