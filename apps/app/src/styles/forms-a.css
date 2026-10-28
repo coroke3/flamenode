@@ -1,0 +1,131 @@
+.ydesc-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary-soft) 42%, var(--bg-surface));
+}
+
+.ydesc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ydesc-titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ydesc-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.ydesc-modeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ydesc-modeBadge[data-mode="manual"] {
+  background: color-mix(in srgb, var(--accent-warning-soft) 72%, var(--bg-elevated));
+  color: var(--text-primary);
+}
+
+.ydesc-event {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ydesc-copyButton {
+  flex: 0 0 auto;
+}
+
+.ydesc-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.ydesc-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ydesc-hint,
+.ydesc-warning,
+.ydesc-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.ydesc-hint {
+  flex: 1 1 320px;
+  color: var(--text-muted);
+}
+
+.ydesc-warning {
+  color: var(--status-warning, #a46b00);
+}
+
+.ydesc-warningList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.ydesc-warningBox {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-warning-soft) 70%, var(--bg-surface));
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.ydesc-warningBox p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.ydesc-status {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .ydesc-copyButton,
+  .ydesc-footer > button,
+  .ydesc-warningBox > button {
+    width: 100%;
+    justify-content: center;
+  }
+}
