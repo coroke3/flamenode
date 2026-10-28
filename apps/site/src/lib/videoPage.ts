@@ -18,8 +18,8 @@ import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
 import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
-import { loadPublicXIconMapForBuild } from "./publicIconMap.ts";
-import { hasProjectedPublicProfile, resolveProjectedIcon, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
+import { loadPublicXIconMapForBuild, projectVideoMemberPresentation } from "./publicIconMap.ts";
+import { hasProjectedPublicProfile, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "./videoFixtures.ts";
 
 export class VideoPageBuildError extends Error {
@@ -105,10 +105,9 @@ export function buildVideoPages(
       id: m.id,
       name: m.display_name,
       xUserId: m.x_user_id,
-      iconUrl: cachedGoogleImageUrl(resolveProjectedIcon({ xUserId: m.x_user_id, iconMap, legacyIconUrl: m.icon_url ?? null })),
+      ...projectVideoMemberPresentation(m, iconMap),
       role: m.role_label,
       comment: m.comment ?? null,
-      profileHref: m.x_user_id && ((m.has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: m.x_user_id, iconMap })) ? `/user/${m.x_user_id}` : null,
       chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
     })),
     chapters: chapters.map((c) => ({ id: c.id, timeLabel: formatChapterTime(c.t), label: c.label, authorName: c.author, kind: c.kind })),
