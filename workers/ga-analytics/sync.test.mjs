@@ -384,3 +384,70 @@ test("syncGa4Trending preserves existing trending when GA returns empty periods"
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("MIG-0517: invalid D1 result cannot silently skip GA4 or overwrite R2", async () => {
+  let writes = 0;
+  const env = enabledGa4Env({
+    DB: {
+      prepare() {
+        return { bind() { return { async all() { return {}; } }; } };
+      },
+    },
+    R2: { get() { throw Error("unexpected R2 read"); }, put() { writes += 1; } },
+  });
+  await assert.rejects(() => syncGa4Trending(env), /ga4_recent_d1_invalid_result/);
+  assert.equal(writes, 0);
+});
+
+test("MIG-0517: over-1MiB ASCII and UTF-8 ranking preserve last-good R2 artifact", async () => {
+  let writes = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (!url.includes("analyticsdata.googleapis.com")) {
+      throw Error("unexpected request: " + url);
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "video-a" }],
+        metricValues: [{ value: "1" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  try {
+    // The second title is shorter than 1 MiB in JS string length but
+    // exceeds the wire limit in UTF-8 bytes.
+    for (const title of ["A".repeat(1_048_576), "界".repeat(400_000)]) {
+      const env = enabledGa4Env({
+        DB: recentDb([{
+          id: "video-a", title, youtube_video_id: "yt-a",
+          display_name: "Creator", scheduled_time: 1_700_000_000,
+        }]),
+        KV: { async get() { return token; } },
+        R2: {
+          get() { throw Error("unexpected R2 read"); },
+          put() { writes += 1; },
+        },
+      });
+      await assert.rejects(
+        () => syncGa4Trending(env),
+        /ga4_trending_output_exceeds_size_limit/,
+      );
+    }
+    assert.equal(writes, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
