@@ -322,3 +322,36 @@ test("RH-017: schema mismatch returns CURRENT's private 503 without leaking DB v
   assert.deepEqual(body, { ok: false, service: "flamenode-web" });
   assert.doesNotMatch(JSON.stringify(body), /sensitive-private-version-marker/);
 });
+
+test("RH-017: production configuration without queue flags fails closed, never reports healthy", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const env = createBaseEnv(now, {
+    QUEUE_DISPATCH_ENABLED: undefined,
+    QUEUE_CONTINUATION_ENABLED: undefined,
+    QUEUE_YOUTUBE_SYNC_ENABLED: undefined,
+  });
+  const response = await apiHealth(env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), { ok: false, service: "flamenode-web" });
+});
+
+test("RH-017: authorized emergency-stop degrades health rather than falsely reporting OK", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const env = createBaseEnv(now, {
+    QUEUE_DISPATCH_ENABLED: "0",
+    QUEUE_CONTINUATION_ENABLED: "0",
+    QUEUE_YOUTUBE_SYNC_ENABLED: "0",
+    QUEUE_EMERGENCY_DISABLED: "1",
+    QUEUE_EMERGENCY_REASON: "scheduled-incident-drill",
+    QUEUE_EMERGENCY_EXPIRES_AT: String(now + 300),
+  });
+  const expected = await runDeepHealthChecks(env);
+  const response = await apiHealth(env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), expected);
+  assert.equal(expected.ok, false);
+  assert.equal(expected.status, "degraded");
+  assert.equal(expected.checks.queues, "degraded");
+});
