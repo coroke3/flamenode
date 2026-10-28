@@ -191,6 +191,47 @@ test("MIG-0713 U03 T01: pending debounce uses the latest injected search adapter
   }
 });
 
+test("MIG-0713 U03 T01: stale X search response never overwrites newer results", async () => {
+  const requests = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      searchXUsers: (query, offset, signal) => new Promise((resolve) => {
+        requests.push({ query, offset, signal, resolve });
+      }),
+    })));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].query, "alice");
+
+    await act(async () => typeInto(input, "bob"));
+    assert.equal(requests[0].signal.aborted, true, "the superseded search is aborted");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].query, "bob");
+    await act(async () => requests[1].resolve({
+      items: [{ id: "bob", x_name: "Bob" }], hasMore: false, nextOffset: null,
+    }));
+
+    const names = () => [...container.querySelectorAll("#member-name-suggestions option")]
+      .map((node) => node.value);
+    assert.deepEqual(names(), ["Bob"], "new query results are visible");
+    await act(async () => requests[0].resolve({
+      items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null,
+    }));
+    assert.deepEqual(names(), ["Bob"], "late results for the aborted query are ignored");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T01: fewer than two searchable characters never call the search adapter", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
