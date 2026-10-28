@@ -66,6 +66,55 @@ test("MIG-0713 U02: table/card switching preserves serialized hidden rows", asyn
   } finally { await act(async () => root.unmount()); }
 });
 
+test("MIG-0713 U03: onChange stays synchronized with member order, edits, additions and members_json", async () => {
+  const changes = [];
+  const initial = [
+    alice,
+    { name: "Bob", x_user_id: "bob", role: "作画", comment: "", chapters: [] },
+  ];
+  const onChange = (members) => {
+    changes.push(members.map((member) => ({
+      name: member.name, x_user_id: member.x_user_id, role: member.role,
+    })));
+  };
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const ids = () => JSON.parse(container.querySelector('input[name="members_json"]').value)
+    .map((member) => member.x_user_id);
+  const lastIds = () => changes.at(-1).map((member) => member.x_user_id);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters, initialMembers: initial, onChange,
+    })));
+    assert.deepEqual(ids(), ["alice", "bob"]);
+    assert.deepEqual(lastIds(), ["alice", "bob"]);
+    await act(async () => container.querySelector('[aria-label="2人目を上へ移動"]').click());
+    assert.deepEqual(ids(), ["bob", "alice"], "reordering updates the hidden payload");
+    assert.deepEqual(lastIds(), ids(), "reordering notifies the parent");
+    await act(async () => container.querySelector('[aria-label="1人目を削除"]').click());
+    assert.deepEqual(ids(), ["alice"], "removing a row updates the hidden payload");
+    assert.deepEqual(lastIds(), ids(), "removing a row notifies the parent");
+    const role = container.querySelector('input[placeholder="作画 / 編集 / 音響など"]');
+    assert.ok(role);
+    await act(async () => typeInto(role, "編集"));
+    assert.equal(changes.at(-1)[0].role, "編集");
+    assert.equal(JSON.parse(container.querySelector('input[name="members_json"]').value)[0].role, "編集");
+
+    await act(async () => buttonNamed(container, "行を追加").click());
+    assert.deepEqual(ids(), ["alice"], "blank rows are excluded from member serialization");
+    const names = container.querySelectorAll('input[placeholder="表示名"]');
+    assert.equal(names.length, 2, "the form exposes the added blank row");
+    await act(async () => typeInto(names[1], "Cara"));
+    assert.deepEqual(ids(), ["alice", ""], "a name-only member is kept with an empty X ID");
+    assert.deepEqual(lastIds(), ids(), "adding and editing rows notifies the parent");
+    assert.equal(changes.at(-1)[1].name, "Cara");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U02: component has injected search/permission adapters, never directly fetches or invokes a Server Action", async () => {
   const source = await readFile(new URL("../src/components/forms/VideoMembersField.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(/);
