@@ -283,6 +283,31 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(fullStats.gets.length, 0);
   });
 
+  test("T01: anonymous requests still return CURRENT 401 when the D1 binding getter fails", async () => {
+    // sessionMiddleware reads env.DB even for absent/ignored session cookies.
+    // Only a recognized Auth.js session token may turn a binding failure into 503.
+    for (const headers of [
+      {},
+      { Cookie: "unrelated=present" },
+      { Cookie: "authjs.session-token=not-secure-on-https" },
+    ]) {
+      const { env, stats } = makeEnv({ throwDbGetter: true });
+      const response = await fullHonoApp.request(URL_BASE + "?q=alice", { headers }, env);
+      assert.equal(response.status, 401);
+      verifyPrivate(response);
+      assert.deepEqual(await response.json(), { error: "unauthorized" });
+      assert.equal(stats.reads, 0);
+      assert.equal(stats.writes, 0);
+      assert.equal(stats.gets.length, 0);
+    }
+    const isolated = await request("?q=alice", { anonymous: true, throwDbGetter: true });
+    assert.equal(isolated.response.status, 401);
+    verifyPrivate(isolated.response);
+    assert.deepEqual(isolated.body, { error: "unauthorized" });
+    assert.equal(isolated.stats.reads, 0);
+    assert.equal(isolated.stats.gets.length, 0);
+  });
+
   test("T01/T03: provider errors never disclose binding or R2 exception details in Worker logs", async () => {
     const output = [];
     const beforeWarn = console.warn;
@@ -457,6 +482,7 @@ if (runUnderRootTsx(import.meta.url)) {
       { path: "?q=alice&limit=0&offset=bad", note: "bounded params" },
       { path: "?q=%E3%82%82%E3%81%A1", note: "Unicode" },
       { path: "?q=al", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, note: "401" },
+      { path: "?q=alice", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, throwDbGetter: true, note: "anonymous 401 even if D1 binding getter throws" },
       { path: "?q=al", guard: { ok: false, status: 403, error: "account_disabled" }, banned: true, note: "403" },
       { path: "?q=al", guard: { ok: false, status: 503, error: "database_unavailable" }, dbFailure: true, note: "auth 503" },
       { path: "?q=aa&limit=2&offset=1", budgetExceeded: true, note: "V2 over-budget refine without V1" },
@@ -504,6 +530,7 @@ if (runUnderRootTsx(import.meta.url)) {
         noBucket: entry.noBucket,
         throwBucketGetter: entry.throwBucketGetter,
         throwR2Get: entry.throwR2Get,
+        throwDbGetter: entry.throwDbGetter,
       });
       assert.deepEqual({
         status: target.response.status,
