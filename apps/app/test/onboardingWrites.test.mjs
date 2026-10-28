@@ -83,3 +83,103 @@ test("D-16-3: refreshKey reload is silent and preserves the prior value on error
     await act(async () => root.unmount());
   }
 });
+
+const { createTermsApi } = await import("../.test-dist/apps/app/src/api/terms.js");
+const { OnboardingTermsForm } = await import("../.test-dist/apps/app/src/routes/onboardingTermsForm.js");
+
+function renderTerms(api, onAccepted = () => {}) {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const form = React.createElement(OnboardingTermsForm, {
+    versionLabel: "v-test",
+    termsBody: React.createElement("p", null, "test terms body"),
+    api,
+    onAccepted,
+  });
+  const render = () => act(async () => { root.render(form); });
+  return {
+    container,
+    render,
+    submit: () => act(async () => {
+      container.querySelector("form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    }),
+    agree: () => act(async () => { container.querySelector('input[type="checkbox"]').click(); }),
+    unmount: () => act(async () => { root.unmount(); }),
+  };
+}
+
+test("MIG-0710 U02: terms client POSTs an empty JSON body to provisional endpoint", async () => {
+  let request;
+  const api = createTermsApi(async (input, init) => {
+    request = { input, init };
+    return asJson({ ok: true });
+  });
+  assert.deepEqual(await api.accept(), { status: "ok", data: { ok: true } });
+  assert.equal(request.input, "/api/personal/onboarding/terms");
+  assert.equal(request.init.method, "POST");
+  assert.equal(request.init.body, "{}");
+  assert.equal(request.init.credentials, "same-origin");
+});
+
+test("MIG-0710 U02: unchecked form refuses writes with CURRENT error", async () => {
+  let calls = 0;
+  const t = renderTerms({ accept: async () => { calls += 1; return { status: "ok", data: { ok: true } }; } });
+  try {
+    await t.render();
+    assert.equal(t.container.querySelector('button[type="submit"]').disabled, true);
+    await t.submit();
+    assert.equal(calls, 0);
+    assert.match(t.container.querySelector('[role="alert"]').textContent, /チェックボックスをオンにしてください/);
+  } finally {
+    await t.unmount();
+  }
+});
+
+test("MIG-0710 U02: double submit is one write; success reports CURRENT text and refresh callback", async () => {
+  let calls = 0;
+  let finish;
+  let accepted = 0;
+  const t = renderTerms({
+    accept: () => {
+      calls += 1;
+      return new Promise((resolve) => { finish = resolve; });
+    },
+  }, () => { accepted += 1; });
+  try {
+    await t.render();
+    await t.agree();
+    assert.equal(t.container.querySelector('button[type="submit"]').disabled, false);
+    await act(async () => {
+      const form = t.container.querySelector("form");
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(calls, 1);
+    assert.equal(t.container.querySelector('button[type="submit"]').disabled, true);
+    await act(async () => { finish({ status: "ok", data: { ok: true } }); });
+    assert.equal(accepted, 1);
+    assert.match(t.container.textContent, /利用規約への同意が完了しました/);
+  } finally {
+    await t.unmount();
+  }
+});
+
+test("MIG-0710 U02: structured failure exposes server message; network failure uses CURRENT fallback", async () => {
+  for (const [accept,pattern] of [
+    [async () => ({ status: "ok", data: { ok: false, message: "利用規約の再確認が必要です。" } }), /利用規約の再確認が必要です/],
+    [async () => ({ status: "unavailable" }), /同意の保存に失敗しました。時間をおいて再試行してください/],
+    [async () => { throw Error("internal backend info"); }, /同意の保存に失敗しました。時間をおいて再試行してください/],
+  ]) {
+    const t = renderTerms({ accept });
+    try {
+      await t.render();
+      await t.agree();
+      await t.submit();
+      assert.match(t.container.querySelector('[role="alert"]').textContent, pattern);
+      assert.doesNotMatch(t.container.textContent, /internal backend info/);
+      assert.equal(t.container.querySelector('input[type="checkbox"]').checked, true);
+    } finally {
+      await t.unmount();
+    }
+  }
+});
