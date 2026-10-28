@@ -64,6 +64,32 @@ export async function loadPublicXIconMapForBuild(
   }
 }
 
+/** Preserve CURRENT video-member icon and profile-link rules in one pure projection.
+ * A map entry with a null icon deliberately suppresses the legacy icon; only
+ * registered/none entries (or an existing public-profile flag) add a link.
+ */
+export function projectVideoMemberPresentation(
+  member: {
+    x_user_id: string | null;
+    icon_url: string | null;
+    has_public_profile?: boolean | null;
+  },
+  iconMap: ReadonlyMap<string, PublicXIconEntry>,
+): { iconUrl: string | null; profileHref: string | null } {
+  const xUserId = member.x_user_id;
+  return {
+    iconUrl: cachedGoogleImageUrl(resolveProjectedIcon({
+      xUserId,
+      iconMap,
+      legacyIconUrl: member.icon_url ?? null,
+    })),
+    profileHref: xUserId &&
+      ((member.has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId, iconMap }))
+      ? `/user/${xUserId}`
+      : null,
+  };
+}
+
 /** Keep the detail object immutable; only user-facing public projection fields change. */
 export function projectEventDetailIcons(
   detail: StaticEventDetail,
