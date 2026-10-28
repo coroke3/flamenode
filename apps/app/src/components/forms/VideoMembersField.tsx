@@ -408,7 +408,8 @@ export function VideoMembersField({
   const add = () => {
     if (disabled) return;
     setRows((prev) => {
-      if (normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
+      // Blank editor rows also consume UI resources; never add more than the display cap.
+      if (prev.length >= MAX_VIDEO_MEMBERS || normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
       return [...prev, { ...EMPTY_ROW }];
     });
   };
@@ -1150,7 +1151,7 @@ export function VideoMembersField({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={add}
-          disabled={disabled || normalizedRows.length >= MAX_VIDEO_MEMBERS}
+          disabled={disabled || rows.length >= MAX_VIDEO_MEMBERS || normalizedRows.length >= MAX_VIDEO_MEMBERS}
         >
           <Icon name="plus" size={11} aria-hidden /> 行を追加
         </button>

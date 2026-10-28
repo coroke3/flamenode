@@ -510,6 +510,36 @@ async function previewTsv(container, data) {
   await act(async () => buttonNamed(container, "内容を確認").click());
 }
 
+test("MIG-0713 U03 T02: empty editor rows cannot exceed the 100-row display limit", async () => {
+  for (const rowCount of [99, 100]) {
+    const container = dom.window.document.createElement("div");
+    dom.window.document.body.append(container);
+    const root = createRoot(container);
+    const empty = () => ({ name: "", x_user_id: "", role: "", comment: "", chapters: [] });
+    const initialMembers = [alice, ...Array.from({ length: rowCount - 1 }, empty)];
+    try {
+      await act(async () => root.render(React.createElement(VideoMembersField, {
+        ...noopAdapters,
+        initialMembers,
+      })));
+      const countInputs = () => container.querySelectorAll('input[placeholder="表示名"]').length;
+      const addRow = buttonNamed(container, "行を追加");
+      assert.equal(countInputs(), rowCount);
+      assert.equal(addRow.disabled, rowCount === 100,
+        "empty rows count toward the visible editing limit");
+      await act(async () => addRow.click());
+      assert.equal(countInputs(), 100, "the add action must never create a 101st blank row");
+      assert.equal(buttonNamed(container, "行を追加").disabled, true);
+      const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
+      assert.equal(members.length, 1, "blank editor rows remain excluded from the payload");
+      assert.equal(members[0].x_user_id, "alice");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  }
+});
+
 test("MIG-0713 U03 T02: 100 TSV members are previewed but 101 fail closed without partial import", async () => {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
