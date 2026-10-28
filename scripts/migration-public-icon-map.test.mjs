@@ -172,3 +172,51 @@ test("T04/T05: event detail icons and portfolio fallback keep current public pro
     "https://example.com/portfolio.png");
   assert.equal(portfolioIconUrl({ id: "unknown", icon_url: null }, iconMap), null);
 });
+
+// Work Order T03 calls buildVideoPages itself, so the creatorHref change and the iconMap pass-through are covered.
+// videoPage.ts reaches CURRENT modules with extensionless relative imports, which Node strip-types cannot
+// resolve; a resolve hook retries those as `.ts` for this test only (no CURRENT file is changed).
+test("T03 (Work Order): buildVideoPages projects member icon/profile and creatorHref from the icon map", async () => {
+  const { registerHooks } = await import("node:module");
+  registerHooks({
+    resolve(specifier, context, next) {
+      try {
+        return next(specifier, context);
+      } catch (error) {
+        if (/^\.\.?\//.test(specifier) && !path.extname(specifier)) return next(specifier + ".ts", context);
+        throw error;
+      }
+    },
+  });
+  const { buildVideoPages } = await import("../apps/site/src/lib/videoPage.ts");
+  const { FIXTURE_VIDEO_DETAIL_PAYLOADS } = await import("../apps/site/src/lib/videoFixtures.ts");
+  const base = FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-bbb"];
+  const withMember = {
+    ...base,
+    video: { ...base.video, creator_has_public_profile: false },
+    public_members: [{
+      id: "m1", display_name: "メンバーA", x_user_id: "member_a", role_label: "映像",
+      icon_url: "https://example.com/old.png", has_public_profile: false,
+    }],
+  };
+  const build = (iconMap) => {
+    const pages = buildVideoPages(withMember, "fixture:vid-bbb", 1_760_000_000, iconMap);
+    assert.equal(pages.length, 1);
+    return pages[0].data;
+  };
+  const fromMap = build(new Map([
+    ["member_a", entry("registered", "https://example.com/new.png")],
+    ["hato", entry("none", null)],
+  ]));
+  assert.equal(fromMap.members[0].iconUrl, "https://example.com/new.png");
+  assert.equal(fromMap.members[0].profileHref, "/user/member_a");
+  assert.equal(fromMap.creator.profileHref, "/user/hato", "projected public profile links the creator (CURRENT [id]/page.tsx:228-233)");
+
+  const empty = build(new Map());
+  assert.equal(empty.members[0].iconUrl, "https://example.com/old.png");
+  assert.equal(empty.members[0].profileHref, null);
+  assert.equal(empty.creator.profileHref, null);
+
+  const videoOnly = build(new Map([["hato", entry("video", "https://example.com/v.png")]]));
+  assert.equal(videoOnly.creator.profileHref, null, "a video-only entry must not link the creator profile");
+});
