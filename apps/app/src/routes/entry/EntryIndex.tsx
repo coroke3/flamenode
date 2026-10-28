@@ -72,7 +72,7 @@ export function EntryIndexView({
   }, [data?.user.id]);
 
   const events = data
-    ? [...new Map([data, ...extraPages].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
+    ? [...new Map([data, ...extraPages.filter((page) => page.user.id === data.user.id)].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
     : [];
   const lastPage = extraPages.at(-1) ?? data;
   const nextOffset = lastPage?.truncated ? lastPage.nextOffset : null;
