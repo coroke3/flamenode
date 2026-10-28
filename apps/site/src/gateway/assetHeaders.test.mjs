@@ -43,6 +43,7 @@ const read = (p) => readFile(new URL(p, root), "utf8");
 const current = parse(await read("public/_headers"));
 const site = parse(await read("apps/site/public/_headers"));
 const app = parse(await read("apps/app/public/_headers"));
+const ops = parse(await read("apps/ops/public/_headers"));
 const IMMUTABLE = cacheControl(current, "/_next/static/chunks/a.js");
 const DAY = cacheControl(current, "/favicon.ico");
 const SWR = cacheControl(current, "/logo.png");
@@ -60,6 +61,9 @@ test("T01 hashed prefixes are immutable 1y (no SWR merge)", () => {
   for (const p of ["/_personal_assets/index-AbC123.js", "/_personal_assets/index-AbC123.css", "/_personal_assets/a-AbC.svg"]) {
     assert.equal(cacheControl(app, p), IMMUTABLE, p);
   }
+  for (const p of ["/_ops_assets/index-AbC123.js", "/_ops_assets/index-AbC123.css", "/_ops_assets/a-AbC.svg"]) {
+    assert.equal(cacheControl(ops, p), IMMUTABLE, p);
+  }
 });
 
 test("T02 brand, fonts, favicon follow CURRENT", () => {
@@ -76,8 +80,9 @@ test("T03 HTML and unhashed paths are never immutable", () => {
   for (const p of ["/", "/about", "/index.html", "/maintenance/index.html", "/abc123xyz", "/user/u1", "/event/e1"]) {
     assert.equal(cacheControl(site, p), null, p);
     assert.equal(cacheControl(app, p), null, p);
+    assert.equal(cacheControl(ops, p), null, p);
   }
-  for (const rules of [site, app]) {
+  for (const rules of [site, app, ops]) {
     assert.equal(rules.some((r) => r.pattern === "/*" || r.pattern === "/"), false);
   }
 });
@@ -86,5 +91,8 @@ test("build output carries _headers", { skip: !existsSync(new URL("apps/site/dis
   assert.equal(await read("apps/site/dist/_headers"), await read("apps/site/public/_headers"));
   if (existsSync(new URL("apps/app/dist/_headers", root))) {
     assert.equal(await read("apps/app/dist/_headers"), await read("apps/app/public/_headers"));
+  }
+  if (existsSync(new URL("apps/ops/dist/_headers", root))) {
+    assert.equal(await read("apps/ops/dist/_headers"), await read("apps/ops/public/_headers"));
   }
 });

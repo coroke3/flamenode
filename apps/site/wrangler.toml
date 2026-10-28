@@ -1,0 +1,45 @@
+# MIG-0628 U02 — non-production template ONLY. Human approval required before any deploy.
+name = "flamenode-public-gateway"
+main = "./src/gateway/index.ts"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+workers_dev = false
+minify = true
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "404-page"
+
+[vars]
+NEXT_PUBLIC_SITE_URL = "https://flamenode.net"
+AUTH_URL = "https://flamenode.net"
+MAINTENANCE_MODE = "0"
+PUBLIC_PAGE_STYLESHEETS = ""
+
+# Cloudflare IDs must remain placeholders in this tracked template.
+[[d1_databases]]
+binding = "DB"
+database_name = "flamenode_db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../migrations"
+
+[[r2_buckets]]
+binding = "R2_STORAGE"
+bucket_name = "flamenode-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[[kv_namespaces]]
+binding = "VISIBILITY_KV"
+id = "00000000000000000000000000000000"
+
+# Auth.js remains in CURRENT until Phase 8. This is a service binding, not a Route.
+[[services]]
+binding = "AUTH_ORIGIN"
+service = "flamenode-web"
+
+# REBUILD_QUEUE is optional in this template, only to be wired after owner approval.
