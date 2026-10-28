@@ -512,3 +512,60 @@ test("MIG-0517: R2 commit point after cancellation is reported as written, not f
     console.log = originalLog;
   }
 });
+
+
+test("MIG-0517: R2 PUT rejection remains a real sync failure with no success log", async () => {
+  let writes = 0;
+  const events = [];
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  console.log = (line) => { events.push(JSON.parse(String(line))); };
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw new Error("unexpected GA4 request");
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "video-a" }],
+        metricValues: [{ value: "2" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = enabledGa4Env({
+    KV: {
+      async get() {
+        return JSON.stringify({
+          access_token: "cached-token",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        });
+      },
+    },
+    R2: {
+      get() { throw new Error("unexpected old ranking read"); },
+      async put() {
+        writes += 1;
+        throw new Error("ga4_r2_put_unavailable");
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      () => syncGa4Trending(env),
+      /ga4_r2_put_unavailable/,
+    );
+    assert.equal(writes, 1);
+    const lastEvent = events.at(-1);
+    assert.equal(lastEvent.result, "failed");
+    assert.equal(lastEvent.r2_written, false);
+    assert.ok(events.every((event) => event.result !== "ok"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+});
