@@ -422,12 +422,64 @@ test("MIG-0713 U03 T03: permission intents use one injected batch of at most 100
     assert.equal(calls.length, 1);
     assert.equal(calls[0].videoId, "vid1");
     assert.equal(calls[0].notify, true);
+    assert.equal(Object.hasOwn(calls[0], "edit_privilege_mode"), false, "normal mode leaves permission scope to the server");
     assert.equal(calls[0].intents.length, 100);
     assert.deepEqual(calls[0].intents[0], { x_user_id: "x0", display_name: "Name0", intent: "on" });
     assert.deepEqual(calls[0].intents[1], { x_user_id: "x1", display_name: "Name1", intent: "off" });
     assert.equal(JSON.parse(container.querySelector('input[name="members_json"]').value).length, 100);
   } finally {
     await act(async () => root.unmount());
+  }
+});
+
+test("MIG-0713 U03 T03: privileged event replace requires confirmation and keeps permission flags out of members_json", async () => {
+  const previousUrl = dom.window.location.href;
+  dom.window.history.replaceState({}, "", "/dashboard/edit/vid1?privileged=event");
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      initialMembers: [alice],
+      permissionTargetVideoId: "vid1",
+      applyPermissionBatch: async (input) => {
+        calls.push(input);
+        return { ok: true, message: "saved" };
+      },
+    })));
+    const hidden = () => JSON.parse(container.querySelector('input[name="members_json"]').value);
+    assert.equal(hidden()[0].x_user_id, "alice");
+    await previewTsv(container, "Bob\tbob\t\t\t\tON");
+    await act(async () => buttonNamed(container, "現在のメンバーを置き換え").click());
+    assert.match(container.querySelector('[role="alertdialog"]').textContent, /現在のメンバーを置き換えますか/);
+    assert.equal(calls.length, 0);
+    assert.equal(hidden()[0].x_user_id, "alice", "preview does not write member data");
+
+    await act(async () => buttonNamed(container, "キャンセル").click());
+    assert.equal(container.querySelector('[role="alertdialog"]'), null);
+    assert.equal(hidden()[0].x_user_id, "alice", "cancel preserves existing data");
+    await act(async () => buttonNamed(container, "現在のメンバーを置き換え").click());
+    await act(async () => buttonNamed(container, "置き換える").click());
+    assert.match(container.querySelector('[role="alertdialog"]').textContent, /以下の編集権限を変更します/);
+    assert.equal(hidden()[0].x_user_id, "alice", "members remain unchanged before permission success");
+
+    await act(async () => buttonNamed(container, "変更を反映").click());
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].videoId, "vid1");
+    assert.equal(calls[0].edit_privilege_mode, "event", "explicit privileged event is forwarded");
+    assert.equal(calls[0].notify, true);
+    assert.deepEqual(calls[0].intents, [{ x_user_id: "bob", display_name: "Bob", intent: "on" }]);
+    assert.equal(container.querySelector('[role="alertdialog"]'), null);
+    const members = hidden();
+    assert.equal(members.length, 1);
+    assert.equal(members[0].x_user_id, "bob", "successful replace commits the new rows");
+    assert.equal(Object.hasOwn(members[0], "can_edit"), false, "permissions must never be serialized in members_json");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    dom.window.history.replaceState({}, "", previousUrl);
   }
 });
 
