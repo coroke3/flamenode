@@ -396,3 +396,39 @@ test("MIG-0517 T01 optimized generator: materialized-source list/recent agrees w
   );
   assert.doesNotMatch(JSON.stringify(d1Recent.items), /Private Event|excluded-linked|excluded-primary|hidden/);
 });
+
+
+test("MIG-0517: real 5000-row D1 source is accepted, but row 5001 fails closed", async (t) => {
+  const f = fixture();
+  t.after(() => f.sqlite.close());
+  const insert = f.sqlite.prepare(
+    `INSERT INTO videos (
+      id, title, youtube_video_id, creator_display_name,
+      creator_x_user_id, scheduled_time, visibility_status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  f.sqlite.exec("BEGIN");
+  try {
+    for (let i = 0; i <= GA4_RECENT_D1_MAX_ROWS; i += 1) {
+      const id = "v-" + String(i).padStart(5, "0");
+      insert.run(id, "Video " + id, "yt-" + id, "Creator", "x-1", i, "public");
+    }
+    f.sqlite.exec("COMMIT");
+  } catch (error) {
+    f.sqlite.exec("ROLLBACK");
+    throw error;
+  }
+
+  await assert.rejects(
+    () => loadRecentListFromD1(f.db),
+    /ga4_recent_d1_pool_exceeds_limit/,
+  );
+  // Removing only the final row gives the exact supported public corpus size.
+  f.sqlite.prepare("DELETE FROM videos WHERE id = ?")
+    .run("v-" + String(GA4_RECENT_D1_MAX_ROWS).padStart(5, "0"));
+  const payload = await loadRecentListFromD1(f.db);
+  assert.equal(payload.items.length, GA4_RECENT_D1_MAX_ROWS);
+  assert.equal(payload.items[0].id, "v-04999");
+  assert.equal(payload.items.at(-1).id, "v-00000");
+  assert.equal(f.getStatementCount(), 2);
+});
