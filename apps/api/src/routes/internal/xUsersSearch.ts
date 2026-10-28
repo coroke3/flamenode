@@ -157,7 +157,17 @@ xUsersSearchRoutes.get("/", async (c) => {
     return emptyResult(c, query, limit, offset, "search_too_short");
   }
 
-  const bucket = c.env?.BUCKET;
+  // CURRENT catches getEnv()/BUCKET binding access failures and returns a
+  // private 503. The binding can be absent or exposed by a throwing host getter.
+  let bucket: R2Bucket | undefined;
+  try {
+    bucket = c.env?.BUCKET;
+  } catch (error) {
+    console.warn("[x-users-search] bucket binding unavailable", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return unavailable(c);
+  }
   if (!bucket) {
     console.warn("[x-users-search] bucket binding unavailable");
     return unavailable(c);
