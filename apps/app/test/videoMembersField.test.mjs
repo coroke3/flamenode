@@ -419,6 +419,38 @@ test("MIG-0713 U03 T02: 100 TSV members are previewed but 101 fail closed withou
   }
 });
 
+test("MIG-0713 U03 T03: a new video imports member TSV without writing edit permissions", async () => {
+  const permissionCalls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      applyPermissionBatch: async (input) => {
+        permissionCalls.push(input);
+        return { ok: true };
+      },
+    })));
+    assert.match(container.textContent, /この画面ではメンバー情報だけ取り込みます/);
+    await previewTsv(container, "Alice\talice\t\t映像\t\tON");
+    assert.match(container.textContent, /確認（1行）/);
+    await act(async () => buttonNamed(container, "追加").click());
+    assert.equal(container.querySelector('[role="alertdialog"]'), null,
+      "new videos must not prompt for a permission write without a video ID");
+    assert.deepEqual(permissionCalls, [], "permission adapter must not run on create");
+    const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
+    assert.equal(members.length, 1);
+    assert.equal(members[0].name, "Alice");
+    assert.equal(members[0].x_user_id, "alice");
+    assert.equal(Object.hasOwn(members[0], "can_edit"), false,
+      "the TSV privilege must not be included in members_json");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T03: permission intents use one injected batch of at most 100, never a direct Server Action", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
