@@ -71,7 +71,7 @@ export async function loadPublicXIconMapForBuild(
 export function projectVideoMemberPresentation(
   member: {
     x_user_id: string | null;
-    icon_url: string | null;
+    icon_url?: string | null;
     has_public_profile?: boolean | null;
   },
   iconMap: ReadonlyMap<string, PublicXIconEntry>,
