@@ -176,3 +176,33 @@ test("continuation: rapid double click performs one bounded API read", async () 
     await m.unmount();
   }
 });
+
+test("continuation: session expiry or ban immediately removes authenticated event and slot data", async () => {
+  for (const [status, expected] of [
+    ["anonymous", "ログインが必要です"],
+    ["banned", "利用が停止されています"],
+  ]) {
+    const first = entryData({
+      truncated: true, nextOffset: 100,
+      reservedSlots: [{
+        id: "private-slot", event_id: "event-1", video_id: null, slot_label: "非公開枠",
+        start_time: null, status: "reserved", event_title: "非公開イベント",
+        event_entry_end_time: null,
+      }],
+    });
+    const api = fakeApi({ getEntryIndex: (offset) =>
+      offset == null ? { status: "ok", data: first } : { status },
+    });
+    const m = await mount("/entry", api);
+    try {
+      assert.match(m.container.textContent, /非公開イベント/);
+      const button = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("イベントをさらに表示"));
+      assert.ok(button);
+      await act(async () => { button.click(); });
+      assert.match(m.container.textContent, new RegExp(expected), status);
+      assert.doesNotMatch(m.container.textContent, /非公開イベント|非公開枠|受付中イベント/, status);
+    } finally {
+      await m.unmount();
+    }
+  }
+});
