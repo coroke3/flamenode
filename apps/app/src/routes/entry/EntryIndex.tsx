@@ -70,7 +70,7 @@ export function EntryIndexView({
   const writeCtaLabel = (defaultLabel: string): string => {
     if (!data) return defaultLabel;
     if (!data.state.canReserveSlot) return "初期設定を続ける";
-    if (!data.state.canPost) return data.data.state.xIdentityStatus === "pending" ? "承認待ち" : "X ID 連携が必要";
+    if (!data.state.canPost) return data.state.xIdentityStatus === "pending" ? "承認待ち" : "X ID 連携が必要";
     return defaultLabel;
   };
   const startSignIn = (): void => {
@@ -114,9 +114,9 @@ export function EntryIndexView({
         </div>
       ) : !data.state.canPost ? (
         <div className="fn-entry-status fn-entry-status--warn" role="status">
-          <Icon name={state.xIdentityStatus === "pending" ? "clock" : "alert"} size={18} aria-hidden />
+          <Icon name={data.state.xIdentityStatus === "pending" ? "clock" : "alert"} size={18} aria-hidden />
           <div>
-            {state.xIdentityStatus === "pending" ? (
+            {data.state.xIdentityStatus === "pending" ? (
               <>
                 <h2 className="fn-jp fn-panel-title">X ID 承認待ち</h2>
                 <p className="fn-jp fn-entry-status-lead">枠確保は可能です。投稿は X ID 承認後に利用できます。</p>
