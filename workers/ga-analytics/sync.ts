@@ -1,6 +1,6 @@
 /**
- * GA4 trending 同期: list/recent.json → GA4 report → rank → analytics/trending.json。
- * 失敗時は R2 put しない（fail-closed）。D1 は使わない。
+ * GA4 trending 同期: D1 公開作品 → GA4 report → rank → analytics/trending.json。
+ * D1/GA4 失敗時は R2 put しない（fail-closed）。
  */
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
@@ -15,15 +15,14 @@ import {
 } from "./dataApi.ts";
 import type { Ga4DataApiEnv } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
+import { loadRecentListFromD1 } from "./recentFromD1.ts";
 import type { RecentListPayload, TrendingItem } from "./ranking.ts";
 
-export const GA4_RECENT_LIST_KEY = "list/recent.json";
 export const GA4_TRENDING_OUTPUT_KEY = "analytics/trending.json";
 export const GA4_TRENDING_CACHE_CONTROL = staticR2CacheControl(
   STATIC_R2_MAX_AGE_SEC.trending,
   3600,
 );
-export const GA4_RECENT_LIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 export const GA4_TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
 export const TRENDING_SCHEMA_VERSION = 1;
 export const TRENDING_RANKING_RULE = [
@@ -94,6 +93,7 @@ function countMatchedVideos(
 }
 
 export interface Ga4TrendingSyncEnv extends Ga4DataApiEnv {
+  DB: D1Database;
   R2: R2Bucket;
   GA4_SYNC_ENABLED?: string;
 }
@@ -117,6 +117,7 @@ function hasRequiredGa4Config(env: Ga4TrendingSyncEnv): boolean {
       env.GA4_SERVICE_ACCOUNT_EMAIL?.trim() &&
       env.GA4_SERVICE_ACCOUNT_PRIVATE_KEY?.trim() &&
       env.R2 &&
+      env.DB &&
       env.KV,
   );
 }
@@ -152,24 +153,7 @@ async function loadRecentListPayload(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
 ): Promise<RecentListPayload> {
-  signal?.throwIfAborted();
-  const object = await env.R2.get(GA4_RECENT_LIST_KEY);
-  if (signal?.aborted) {
-    await cancelR2BodyBestEffort(object);
-    signal.throwIfAborted();
-  }
-  if (!object) throw new Error("ga4_recent_list_missing");
-  if (isOversizedR2Object(object, GA4_RECENT_LIST_MAX_OBJECT_BYTES)) {
-    await cancelR2BodyBestEffort(object);
-    throw new Error("ga4_recent_list_too_large");
-  }
-  const text = await object.text();
-  signal?.throwIfAborted();
-  try {
-    return JSON.parse(text) as RecentListPayload;
-  } catch {
-    throw new Error("ga4_recent_list_invalid_json");
-  }
+  return loadRecentListFromD1(env.DB, {}, signal);
 }
 
 async function loadExistingTrendingItemCount(
@@ -247,6 +231,20 @@ export async function syncGa4Trending(
 
   try {
     const recent = await loadRecentListPayload(env, signal);
+    // No public videos: do not spend GA4 quota or overwrite the last R2
+    // success with an empty ranking. D1 remains read-only.
+    if (!recent.items || !Array.isArray(recent.items) || recent.items.length === 0) {
+      logGa4TrendingEvent({
+        service: "flamenode-sync-jobs",
+        worker: "sync-jobs",
+        job: "ga4-trending-sync",
+        enabled: true,
+        result: "skipped",
+        reason: "no_public_videos",
+        r2_written: false,
+      });
+      return emptyResult({ processed: 0, failed: 0, skipped: 1 });
+    }
     const { periods, quota } = await fetchVideoViewPeriods(
       env,
       budget,
