@@ -5013,6 +5013,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000012",
@@ -5086,6 +5098,8 @@
           1,
           0,
           9,
+          0,
+          1,
           0,
           1,
           0,
@@ -5594,6 +5608,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000012",
@@ -5667,6 +5693,8 @@
           1,
           0,
           9,
+          0,
+          1,
           0,
           1,
           0,
@@ -6120,6 +6148,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000011",
@@ -6191,6 +6231,8 @@
           1,
           0,
           9,
+          0,
+          1,
           0,
           1,
           0,
@@ -6679,6 +6721,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000020",
@@ -6752,6 +6806,8 @@
           1,
           0,
           17,
+          0,
+          1,
           0,
           1,
           0,
@@ -7463,6 +7519,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000020",
@@ -7536,6 +7604,8 @@
           1,
           0,
           17,
+          0,
+          1,
           0,
           1,
           0,
@@ -8207,6 +8277,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000020",
@@ -8280,6 +8362,8 @@
           1,
           0,
           17,
+          0,
+          1,
           0,
           1,
           0,
@@ -8951,6 +9035,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000020",
@@ -9024,6 +9120,8 @@
           1,
           0,
           17,
+          0,
+          1,
           0,
           1,
           0,
@@ -10196,6 +10294,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000012",
@@ -10617,6 +10727,18 @@
             "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
               17
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
             ]
           },
           {
@@ -11074,6 +11196,18 @@
             "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
             "params": [
               9
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
             ]
           },
           {
@@ -11790,6 +11924,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000012",
@@ -11863,6 +12009,8 @@
           1,
           0,
           9,
+          0,
+          1,
           0,
           1,
           0,
@@ -12473,6 +12621,18 @@
             ]
           },
           {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
+          },
+          {
+            "sql": "\n    SELECT CASE\n      WHEN changes() = ? THEN 1\n      ELSE json_extract('not-valid-json', '$')\n    END\n  ",
+            "params": [
+              1
+            ]
+          },
+          {
             "sql": "\n    INSERT INTO audit_logs (\n  id, table_name, target_id, operation, before_json, after_json,\n  changed_keys_json, inverse_patch_json, actor_user_id, actor_x_user_id, actor_snapshot_json,\n  reason, context, retention_class, restore_strategy, restore_status,\n  payload_size_bytes, expires_at, created_at,\n  restore_unavailable_reason_code, restore_unavailable_message\n)\n    \n    SELECT\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?, ?,\n      ?, ?, ?,\n      ?, ?, ?,\n      ?, ?,\n      ?, ?\n    WHERE (1 = 1)\n  \n  ",
             "params": [
               "audit_00000000-0000-4000-8000-000000000012",
@@ -12546,6 +12706,8 @@
           1,
           0,
           9,
+          0,
+          1,
           0,
           1,
           0,
