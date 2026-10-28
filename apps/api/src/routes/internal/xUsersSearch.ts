@@ -134,7 +134,27 @@ xUsersSearchRoutes.use("*", async (c, next) => {
   await next();
   for (const [name, value] of Object.entries(PRIVATE_HEADERS)) c.header(name, value);
 });
-xUsersSearchRoutes.use("*", sessionMiddleware());
+// sessionMiddleware reads the D1 binding before entering its database-error
+// guard. If a Workers binding getter throws, Hono would otherwise emit an
+// unstructured 500 instead of CURRENT's private database_unavailable 503.
+// Catch only failures *before* downstream middleware is entered; errors thrown
+// by the route itself must retain their own failure mapping.
+const resolveSession = sessionMiddleware();
+xUsersSearchRoutes.use("*", async (c, next) => {
+  let enteredDownstream = false;
+  try {
+    await resolveSession(c, async () => {
+      enteredDownstream = true;
+      await next();
+    });
+  } catch (error) {
+    if (enteredDownstream) throw error;
+    console.error("[x-users-search] session resolution unavailable", {
+      reason: error instanceof Error ? error.name : "unknown",
+    });
+    return c.json({ error: "database_unavailable" }, 503, PRIVATE_HEADERS);
+  }
+});
 xUsersSearchRoutes.use("*", async (c, next) => {
   const denied = await requireAuth()(c, next);
   if (!denied) return;
