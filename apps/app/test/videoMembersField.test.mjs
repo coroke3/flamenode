@@ -179,6 +179,10 @@ test("MIG-0713 U02: component has injected search/permission adapters, never dir
   assert.match(source, /await searchXUsers\(/);
   assert.match(source, /await applyPermissionBatch\(/);
   assert.match(source, /MAX_COLLABORATOR_PERMISSION_BATCH/);
+  assert.match(source, /React\.useEffect\(\(\) => \{\s*searchXUsersRef\.current = searchXUsers;\s*\}, \[searchXUsers\]\);/,
+    "the latest injected adapter must be installed after commit");
+  assert.doesNotMatch(source, /const searchXUsersRef = React\.useRef\(searchXUsers\);\s*searchXUsersRef\.current = searchXUsers;/,
+    "render-phase mutation could leak an abandoned render's adapter");
   assert.doesNotMatch(source, /from\s+["'](?:@\/|next\/)/);
 });
 

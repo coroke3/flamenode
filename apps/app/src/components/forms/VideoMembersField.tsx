@@ -161,10 +161,13 @@ export function VideoMembersField({
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
   const suggestionRequestIdRef = React.useRef(0);
   const loadMoreControllerRef = React.useRef<AbortController | null>(null);
-  // The adapter may be recreated by a parent render without changing the query.
-  // Keep pending debounce/in-flight requests stable while using the latest adapter on new calls.
+  // A parent may replace the adapter without changing the query.
+  // Synchronize after commit: an abandoned concurrent render must not replace
+  // the adapter used by a request that is already pending.
   const searchXUsersRef = React.useRef(searchXUsers);
-  searchXUsersRef.current = searchXUsers;
+  React.useEffect(() => {
+    searchXUsersRef.current = searchXUsers;
+  }, [searchXUsers]);
 
   const fetchSuggestions = React.useCallback(
     async (q: string, offset: number, signal: AbortSignal) => {
@@ -183,7 +186,7 @@ export function VideoMembersField({
             matchedBy: row.matchedBy,
           }),
         );
-        if (signal?.aborted || requestId !== suggestionRequestIdRef.current) return;
+        if (signal.aborted || requestId !== suggestionRequestIdRef.current) return;
         setFetched((prev) => {
           const map = new Map<string, VideoMemberSuggestion>();
           if (offset > 0) {
@@ -205,7 +208,7 @@ export function VideoMembersField({
       } catch (e) {
         if (
           isAbortError(e) ||
-          signal?.aborted ||
+          signal.aborted ||
           requestId !== suggestionRequestIdRef.current
         ) {
           return;
