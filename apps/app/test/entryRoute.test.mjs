@@ -1,5 +1,6 @@
 // MIG-0711 U03: /entry UI sections, read-only route, and status/error preservation.
 import assert from "node:assert/strict";
+import { act } from "react";
 import test from "node:test";
 import { fakeApi, mount, onboardingState, user } from "./helpers.mjs";
 
@@ -86,4 +87,59 @@ test("failed entry reads never impersonate guests; banned and loading protect th
   }
   const m = await entry({ status: "ok", data: entryData({ user: user({ is_banned: 1 }) }) });
   try { assert.match(m.container.textContent, /利用が停止されています/); } finally { await m.unmount(); }
+});
+
+test("continuation: authenticated pages use offset, merge distinct events, and end without a repeat", async () => {
+  const offsets = [];
+  const first = entryData({ truncated: true, nextOffset: 100 });
+  const next = entryData({
+    events: [
+      { id: "event-1", title: "受付中イベント", entry_end_time: 1_800_000_000, slots_available: 3 },
+      { id: "event-2", title: "追加イベント", entry_end_time: null, slots_available: 5 },
+    ],
+    truncated: false, nextOffset: null,
+  });
+  const api = fakeApi({ getEntryIndex: (offset) => {
+    offsets.push(offset);
+    return { status: "ok", data: offset === 100 ? next : first };
+  } });
+  const m = await mount("/entry", api);
+  try {
+    assert.deepEqual(offsets, [undefined]);
+    let button = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("イベントをさらに表示"));
+    assert.ok(button, "truncated API page must have an accessible continuation action");
+    await act(async () => { button.click(); });
+    assert.deepEqual(offsets, [undefined, 100]);
+    assert.equal(m.container.querySelectorAll('a[href="/event/event-1/slots"]').length, 1, "deduplicate repeated event IDs");
+    assert.equal(m.container.querySelectorAll('a[href="/event/event-2/slots"]').length, 1);
+    assert.doesNotMatch(m.container.textContent, /イベントをさらに表示|一部のみ表示しています/);
+  } finally { await m.unmount(); }
+});
+
+test("continuation: failed or cross-account reads cannot display another account's event data", async () => {
+  const offsets = [];
+  let response = { status: "unavailable" };
+  const api = fakeApi({ getEntryIndex: (offset) => {
+    offsets.push(offset);
+    return offset === 100 ? response : { status: "ok", data: entryData({ truncated: true, nextOffset: 100 }) };
+  } });
+  const m = await mount("/entry", api);
+  try {
+    const click = async () => {
+      const button = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("イベントをさらに表示"));
+      assert.ok(button);
+      await act(async () => { button.click(); });
+    };
+    await click();
+    assert.match(m.container.textContent, /続きのイベントを取得できませんでした/);
+    response = { status: "ok", data: entryData({
+      user: user({ id: "other-user" }),
+      events: [{ id: "secret", title: "別アカウントのイベント", entry_end_time: null, slots_available: 1 }],
+      truncated: false, nextOffset: null,
+    }) };
+    await click();
+    assert.doesNotMatch(m.container.textContent, /別アカウントのイベント/);
+    assert.match(m.container.textContent, /続きのイベントを取得できませんでした/);
+    assert.deepEqual(offsets, [undefined, 100, 100]);
+  } finally { await m.unmount(); }
 });
