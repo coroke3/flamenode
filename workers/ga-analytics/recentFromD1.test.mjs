@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { loadRecentListFromD1, GA4_RECENT_D1_MAX_ROWS } from "./recentFromD1.ts";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { rebuildTarget } from "../json-generator/rebuild.ts";
+
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -165,4 +170,109 @@ test("MIG-0517: invalid public id rejects the entire source instead of ranking a
   f.add(" ", 5);
   await assert.rejects(() => loadRecentListFromD1(f.db), /ga4_recent_d1_invalid_public_row/);
   assert.equal(f.getStatementCount(), 1);
+});
+
+
+function canonicalSqliteFixture() {
+  const sqlite = new DatabaseSync(":memory:");
+  const migrationDir = fileURLToPath(new URL("../../migrations/", import.meta.url));
+  for (const name of readdirSync(migrationDir).filter((n) => n.endsWith(".sql")).sort((a, b) => a.localeCompare(b))) {
+    const sql = readFileSync(join(migrationDir, name), "utf8");
+    // Match the CURRENT json-generator projection fixture's handling of the
+    // canonical baseline migration, which has its own transaction statements.
+    if (name !== "0043_db_canonical_migration.sql") {
+      sqlite.exec(sql);
+    } else {
+      sqlite.exec("BEGIN IMMEDIATE");
+      try {
+        sqlite.exec(sql);
+        sqlite.exec("COMMIT");
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
+    }
+  }
+  sqlite.exec("PRAGMA foreign_keys = ON");
+  const d1 = {
+    prepare(sql) {
+      let args = [];
+      const statement = {
+        bind(...params) {
+          args = params;
+          return statement;
+        },
+        async first() {
+          return sqlite.prepare(sql).get(...args) ?? null;
+        },
+        async all() {
+          return { results: sqlite.prepare(sql).all(...args) };
+        },
+        async run() {
+          const changes = sqlite.prepare(sql).run(...args);
+          return { meta: { changes: Number(changes.changes) } };
+        },
+      };
+      return statement;
+    },
+  };
+  return { sqlite, d1 };
+}
+
+test("MIG-0517 T01 integration: actual json-generator list/recent.json matches D1 public IDs and order", async (t) => {
+  const { sqlite, d1 } = canonicalSqliteFixture();
+  t.after(() => sqlite.close());
+  sqlite.prepare('INSERT INTO "user" (id) VALUES (?)').run("auth-1");
+  sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)").run("creator-1", "Creator", "approved");
+  const event = sqlite.prepare("INSERT INTO events (id, title, visibility_status) VALUES (?, ?, ?)");
+  event.run("event-public", "Public Event", "public");
+  event.run("event-hidden", "Sensitive Event", "private");
+  event.run("PVSFSummary", "Summary", "public");
+  const insert = sqlite.prepare(
+    `INSERT INTO videos (
+      id, title, youtube_video_id, creator_display_name, creator_x_user_id,
+      submitted_by_user_id, visibility_status, scheduled_time, primary_event_id,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const add = (id, time, visibility = "public", eventId = null) =>
+    insert.run(id, "Video " + id, "yt-" + id, "Creator", "creator-1", "auth-1", visibility, time, eventId, 123);
+  add("video-new", 500, "public", "event-public");
+  add("video-mid", 300, "public", "event-hidden");
+  add("video-old", 100);
+  add("video-private", 600, "private");
+  add("video-summary", 700, "public", "PVSFSummary");
+  add("video-linked", 800);
+  sqlite.prepare("INSERT INTO video_events (video_id, event_id) VALUES (?, ?)").run("video-linked", "PVSFSummary");
+
+  const objects = new Map();
+  const env = {
+    DB: d1,
+    R2: {
+      async get(key) {
+        const payload = objects.get(key);
+        return payload == null ? null : { async json() { return structuredClone(payload); } };
+      },
+      async head() { return null; },
+      async put(key, body) { objects.set(key, JSON.parse(String(body))); },
+      async delete(key) { objects.delete(key); },
+    },
+    KV: { async put() {} },
+  };
+  await rebuildTarget(env, "list_recent", "global");
+  const artifact = objects.get("list/recent.json");
+  assert.ok(artifact, "CURRENT json-generator must publish the real artifact");
+  const fromD1 = await loadRecentListFromD1(d1);
+  const ids = fromD1.items.map((row) => row.id);
+  assert.deepEqual(ids, artifact.items.map((row) => row.id));
+  assert.deepEqual(ids, ["video-new", "video-mid", "video-old"]);
+  assert.deepEqual(
+    fromD1.items.map((row) => row.primary_event_title),
+    artifact.items.map((row) => row.primary_event_title),
+  );
+  assert.deepEqual(
+    fromD1.items.map((row) => row.status),
+    artifact.items.map((row) => row.status),
+  );
+  assert.doesNotMatch(JSON.stringify(fromD1.items), /Sensitive Event|video-summary|video-private|video-linked/);
 });
