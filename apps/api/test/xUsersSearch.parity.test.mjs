@@ -265,6 +265,37 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(optionsEnv.stats.gets.length, 0);
   });
 
+  test("U03: only the registered search URL invokes auth/R2; unknown nested paths remain 404", async () => {
+    // The child Hono route has an exact '/' GET handler. Wildcard middleware
+    // would intercept /search/missing, causing 401/503 or a D1 read before 404.
+    for (const path of ["/missing", "/missing/deeper"]) {
+      for (const method of ["GET", "POST", "OPTIONS"]) {
+        for (const headers of [{}, { Cookie: COOKIE }]) {
+          const { env, stats } = makeEnv({ throwDbGetter: true });
+          const response = await fullHonoApp.request(URL_BASE + path + "?q=alice", {
+            method, headers,
+          }, env);
+          assert.equal(response.status, 404, method + " " + path);
+          assert.equal(stats.reads, 0, "unknown endpoint must not resolve a session");
+          assert.equal(stats.writes, 0);
+          assert.equal(stats.gets.length, 0, "unknown endpoint must not read R2");
+        }
+      }
+    }
+
+    // HEAD is synthesized from the GET route by Hono, with no response body.
+    const { env, stats } = makeEnv();
+    const head = await fullHonoApp.request(URL_BASE + "?q=al", {
+      method: "HEAD", headers: { Cookie: COOKIE },
+    }, env);
+    assert.equal(head.status, 200);
+    verifyPrivate(head);
+    assert.equal(await head.text(), "");
+    assert.equal(stats.reads, 1);
+    assert.equal(stats.writes, 0);
+    assert.ok(stats.gets.length > 0);
+  });
+
   test("T01: anonymous, expired, banned and unavailable sessions preserve CURRENT guard codes", async () => {
     const anonymous = await request("?q=alice", { anonymous: true });
     assert.equal(anonymous.response.status, 401);
