@@ -27,8 +27,13 @@ test("MIG-0701/MIG-0712 T07: CSS modules merge deterministically without overwri
     assert.equal(output, chunks.join("\n"), to);
     assert.equal(output.includes(":global("), false, to);
   }
-  assert.equal(targets.get("apps/app/src/styles/forms-a.css")?.length, 2,
-    "both current question and description modules must be present");
+  for (const [path, expected] of [
+    ["apps/app/src/styles/forms-a.css", ["ydesc", "cq", "perm-badge", "perm-lock", "perm-label"]],
+    ["apps/app/src/styles/shared-social.css", ["social", "ychan", "cdlg", "sqicon"]],
+  ]) {
+    const prefixes = MODULES.filter((entry) => entry[2] === path).map((entry) => entry[0]);
+    for (const prefix of expected) assert.ok(prefixes.includes(prefix), path + " must include " + prefix);
+  }
 });
 test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class", async () => {
   const [source, target, dashboard] = await Promise.all([
