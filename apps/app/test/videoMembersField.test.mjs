@@ -118,14 +118,16 @@ test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 2
 });
 
 
-test("MIG-0713 U03 T01: equivalent parent adapter re-render does not restart a pending query", async () => {
+test("MIG-0713 U03 T01: equivalent parent adapter re-render preserves in-flight search", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
   dom.window.document.body.append(container);
   const root = createRoot(container);
-  const newAdapter = () => async (query, offset, signal) => {
+  let settleSearch;
+  const newAdapter = () => (query, offset, signal) => {
     calls.push({ query, offset, signal });
-    return { items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null };
+    // Keep the first request pending across the parent render.
+    return new Promise((resolve) => { settleSearch = resolve; });
   };
   const props = { ...noopAdapters, searchXUsers: newAdapter() };
   try {
@@ -136,14 +138,53 @@ test("MIG-0713 U03 T01: equivalent parent adapter re-render does not restart a p
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].signal.aborted, false);
-    // Equivalent callbacks get new identities when the parent renders inline props.
     await act(async () => root.render(React.createElement(VideoMembersField, {
       ...props,
       searchXUsers: newAdapter(),
     })));
-    assert.equal(calls[0].signal.aborted, false, "unrelated parent render must not abort the search");
+    assert.equal(calls[0].signal.aborted, false, "parent rerender must not abort an in-flight search");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
-    assert.equal(calls.length, 1, "the unchanged query must not be fetched again");
+    assert.equal(calls.length, 1, "the unchanged query must not trigger another request");
+    await act(async () => settleSearch({
+      items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null,
+    }));
+    assert.ok(container.textContent.includes("Alice"), "the original request can still render its result");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("MIG-0713 U03 T01: pending debounce uses the latest injected search adapter", async () => {
+  const oldCalls = [];
+  const newCalls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const props = {
+    ...noopAdapters,
+    searchXUsers: async (...args) => {
+      oldCalls.push(args);
+      return { items: [], hasMore: false, nextOffset: null };
+    },
+  };
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, props)));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...props,
+      searchXUsers: async (...args) => {
+        newCalls.push(args);
+        return { items: [], hasMore: false, nextOffset: null };
+      },
+    })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(oldCalls.length, 0, "stale adapter must never run after the parent updates it");
+    assert.equal(newCalls.length, 1, "the same query is sent only once");
+    assert.equal(newCalls[0][0], "alice");
+    assert.equal(newCalls[0][1], 0);
   } finally {
     await act(async () => root.unmount());
     container.remove();
