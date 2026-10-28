@@ -14,6 +14,7 @@ import {
 import { PUBLIC_X_ICON_MAP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 import { buildVideoPages } from "../apps/site/src/lib/videoPage.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../apps/site/src/lib/videoFixtures.ts";
+import { buildPortfolioHead } from "../apps/site/src/lib/userViews.ts";
 
 const entry = (source, icon_url) => ({ source, icon_url });
 const user = (id, icon_url) => ({ x_id: id, x_name: id, icon_url });
@@ -119,6 +120,16 @@ test("T03: video members and creator profile links use only registered/none publ
   assert.equal(enriched.data.creator.profileHref, "/user/hato");
   assert.equal(enriched.data.creator.iconUrl, noMap.data.creator.iconUrl,
     "CURRENT does not project the primary video's creator icon here");
+});
+
+test("T05: portfolio OGP projection stays browser-safe and matches the pure helper", () => {
+  const iconMap = new Map([["portfolio", entry("registered", "https://example.com/portfolio.png")]]);
+  const profile = { user: { id: "portfolio", x_name: "Creator", profile_text: null, icon_url: null } };
+  const head = buildPortfolioHead(profile, iconMap);
+  assert.equal(head.ogImage, portfolioIconUrl(profile.user, iconMap));
+  const sharedViewModel = fs.readFileSync("apps/site/src/lib/userViews.ts", "utf8");
+  assert.doesNotMatch(sharedViewModel, /from ["']\\.\\/publicIconMap\\.ts["']/,
+    "browser UsersIndexIsland must not import Node fs/crypto snapshot loader transitively");
 });
 
 test("T04/T05: event detail icons and portfolio fallback keep current public profile semantics", () => {
