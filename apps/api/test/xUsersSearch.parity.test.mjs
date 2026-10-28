@@ -7,6 +7,7 @@ import { runUnderRootTsx } from "./support/personalHarness.mjs";
 if (runUnderRootTsx(import.meta.url)) {
   const { Hono } = await import("hono");
   const { xUsersSearchRoutes } = await import("../src/routes/internal/xUsersSearch.ts");
+  const { app: fullHonoApp } = await import("../src/app.ts");
   const { searchMemberSuggestions } = await import("../../../src/lib/video/memberSuggestionSearch.ts");
   const {
     buildMemberSuggestionArtifacts,
@@ -198,6 +199,33 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(response.headers.get("Expires"), "0");
     assert.equal(response.headers.get("Retry-After"), unavailable ? "3" : null);
   }
+
+  test("U03: the actual Hono app registers GET RH-019 with the same private contract", async () => {
+    const objects = artifacts();
+    const { env, stats } = makeEnv({ objects });
+    resetMemberSuggestionsCacheForTest();
+    resetMemberSuggestionsV2CacheForTest();
+    const res = await fullHonoApp.request(URL_BASE + "?q=al&onlyApproved=1&limit=2", {
+      headers: { Cookie: COOKIE },
+    }, env);
+    assert.equal(res.status, 200);
+    verifyPrivate(res);
+    const body = await res.json();
+    assert.equal(body.source, "v2");
+    assert.deepEqual(body.items.map((row) => row.id),
+      searchMemberSuggestions(members, { query: "al", limit: 2, offset: 0, onlyApproved: true }).items.map((row) => row.x_user_id));
+    assert.equal(stats.reads, 1, "app.ts mount must not introduce a second session lookup");
+    assert.equal(stats.writes, 0);
+    assert.ok(stats.gets.every((key) => key.startsWith("internal/member-suggestions/")));
+
+    const anonymousEnv = makeEnv({ objects });
+    const denied = await fullHonoApp.request(URL_BASE + "?q=alice", {}, anonymousEnv.env);
+    assert.equal(denied.status, 401);
+    verifyPrivate(denied);
+    assert.deepEqual(await denied.json(), { error: "unauthorized" });
+    assert.equal(anonymousEnv.stats.gets.length, 0);
+    assert.equal(anonymousEnv.stats.reads, 0);
+  });
 
   test("T01: anonymous, expired, banned and unavailable sessions preserve CURRENT guard codes", async () => {
     const anonymous = await request("?q=alice", { anonymous: true });
