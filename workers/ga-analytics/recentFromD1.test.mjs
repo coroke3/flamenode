@@ -276,3 +276,41 @@ test("MIG-0517 T01 integration: actual json-generator list/recent.json matches D
   );
   assert.doesNotMatch(JSON.stringify(fromD1.items), /Sensitive Event|video-summary|video-private|video-linked/);
 });
+
+
+test("MIG-0517: malformed D1 driver response fails rather than reporting zero public videos", async () => {
+  for (const malformed of [undefined, null, {}, { results: null }, { results: {} }]) {
+    let reads = 0;
+    const db = {
+      prepare() {
+        reads += 1;
+        return {
+          bind() {
+            return { async all() { return malformed; } };
+          },
+        };
+      },
+    };
+    await assert.rejects(
+      () => loadRecentListFromD1(db),
+      /ga4_recent_d1_invalid_result/,
+    );
+    assert.equal(reads, 1);
+  }
+});
+
+test("MIG-0517: malformed D1 result rows fail closed", async () => {
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return { async all() { return { results: [null] }; } };
+        },
+      };
+    },
+  };
+  await assert.rejects(
+    () => loadRecentListFromD1(db),
+    /ga4_recent_d1_invalid_public_row/,
+  );
+});
