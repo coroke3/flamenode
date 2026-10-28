@@ -204,7 +204,8 @@ async function putTrendingPayload(
       cacheControl: GA4_TRENDING_CACHE_CONTROL,
     },
   });
-  signal?.throwIfAborted();
+  // R2 PUT is the commit point. If cancellation arrives while it succeeds,
+  // do not report an unwritten failure and trigger duplicate retries.
 }
 
 export async function syncGa4Trending(
