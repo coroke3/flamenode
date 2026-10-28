@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0701
+Current Task: MIG-0663
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0701
-Last Task PR: #422
+Last Completed Task: MIG-0663
+Last Task PR: #423
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -110,9 +110,9 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (D-13 / D-14, 2026-10-25: MIG-0501..0507, MIG-0509, MIG-0511, MIG-0512 READY; MIG-0510 READY (MIG-0634 DONE via #401), MIG-0513..0515 BLOCKED on Phase 6 APIs (D-14-12); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; none DONE; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (MIG-0601 / 0602 / 0608 / 0611 / 0612 / 0613 / 0614 / 0615 / 0616 / 0617 / 0618 / 0619 / 0620 / 0622 / 0623 / 0624 / 0625 / 0630 / 0631 / 0634 DONE; MIG-0603 / 0609 / 0621 / 0626 / 0628 / 0629 / 0632 / 0633 / 0635..0649 READY (D-14 split 0603 / 0606 / 0627 / 0636 / 0637 / 0638 into MIG-0639..0649)) | CLOSED |
-| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (MIG-0701 READY remainder) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-28: MIG-0503 / 0512 DONE; MIG-0501, 0502, 0504..0507, 0509..0511, 0513..0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-10-28: 28 DONE — MIG-0601 / 0602 / 0608 / 0611..0625 / 0629..0631 / 0633..0635 / 0649 / 0658 / 0663 / 0664; 30 READY; MIG-0604 / 0606 / 0607 / 0610 / 0627 / 0662 BLOCKED) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701 DONE; MIG-0707..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
@@ -331,7 +331,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0618 | xid merge core (D-10) | DONE | MIG-0613 |
 | MIG-0619 | edge policy parity in the public gateway: canonical host 308, maintenance redirect, /maintenance page | DONE | MIG-0405 |
 | MIG-0620 | static asset Cache-Control parity for new prefixes and `_headers` | DONE | MIG-0405 |
-| MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | READY | MIG-0409 |
+| MIG-0621 | robots.txt byte parity + sitemap.xml from public visibility manifest | DONE | MIG-0409 |
 | MIG-0622 | ledger completeness checker (every tracked CURRENT file has a FILE_MIGRATION_MATRIX row) | DONE | — |
 | MIG-0623 | Entry page read APIs | DONE | MIG-0601, MIG-0608 |
 | MIG-0624 | Manage page read APIs | DONE | MIG-0601, MIG-0608 |
@@ -373,7 +373,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0660 | deep health Route Handler (RH-017, MIG-0626 U07) | READY | MIG-0601 |
 | MIG-0661 | CostGuardBanner read endpoints (public KV mirror + admin D1) for the SPAs | READY | MIG-0601 |
 | MIG-0662 | admin audit restore API (SA-011, D-17-9) | BLOCKED | MIG-0603, MIG-0616, MIG-0629 |
-| MIG-0663 | Manage navigation: add `activeXUserId` / `manageStaffXUserIds` for the sidebar warning (D-17-13) | READY | MIG-0624 |
+| MIG-0663 | Manage navigation: add `activeXUserId` / `manageStaffXUserIds` for the sidebar warning (D-17-13) | DONE | MIG-0624 |
 | MIG-0664 | Account summary (RH-001): add `degradedReason` to degraded responses for the Ops guard (D-17-14) | DONE | MIG-0608 |
 | MIG-0607 | Phase 6 Gate | BLOCKED | MIG-0606, MIG-0631, MIG-0632, MIG-0634..MIG-0648, MIG-0650..MIG-0664 |
 

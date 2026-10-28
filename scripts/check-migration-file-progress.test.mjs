@@ -70,10 +70,26 @@ test("a syntactically valid advanced target still must exist in source tree",()=
  assert.match(validateFileProgress({...base,matrix:m}).join("\\n"),/unverified target path/);
 });
 
+test("an existing .tsx advanced target is verified as the full .tsx path",()=>{
+ const target="apps/app/src/routes/about/About.tsx";
+ const evidence="PR#278 SHA="+("a".repeat(40))+" TEST=npm-run-typecheck CI=https://github.com/example/repo/actions/runs/123";
+ const m=matrix.replace("+apps/site/src/pages/about.astro | NOT_STARTED | — |",target+" | BRIDGED | "+evidence+" |");
+ assert.equal(validateFileProgress({...base,matrix:m,filePaths:[...filePaths,target]}).some(x=>/unverified target path/.test(x)),false);
+ assert.match(validateFileProgress({...base,matrix:m}).join("\n"),/unverified target path/);
+});
 test("existing source mentioned in MIG cards requires its own ledger row",()=>{
  const extra="src/lib/slots/slotReservationLimit.ts";
  const errors=validateFileProgress({...base,filePaths:[...filePaths,extra],taskCardsText:"### MIG-0301 \\n- 読む: "+extra});
  assert.match(errors.join("\\n"),/missing file progress row for source/);
+});
+
+test("a .tsx source named in a MIG card requires its own ledger row",()=>{
+ const extra="src/components/layout/EventRecruitCard.tsx";
+ const input={...base,filePaths:[...filePaths,extra],taskCardsText:"### MIG-0501 \\n- 読む: "+extra};
+ assert.ok(validateFileProgress(input).includes("missing file progress row for source: "+extra));
+ const row="| \x60"+extra+"\x60 | HELPER | recruit card | MIG-0501 | apps/site event detail | NOT_STARTED | — |";
+ const withRow=matrix.replace("## Future files",row+"\n## Future files");
+ assert.deepEqual(validateFileProgress({...input,matrix:withRow}),[]);
 });
 
 test("MIG marked DONE cannot leave owned files NOT_STARTED",()=>{

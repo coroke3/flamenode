@@ -734,7 +734,7 @@
     grid-template-columns: 1fr;
   }
 
-  .settings-addRow .settings-fn-btn {
+  .settings-addRow .fn-btn {
     width: 100%;
     min-height: var(--fn-control-h-touch);
     justify-content: center;

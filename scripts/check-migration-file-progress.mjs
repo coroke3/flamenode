@@ -130,7 +130,7 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  const pages=parsePageLedger(currentRoutes), RH=parseRouteHandlerLedger(routeHandlers),SA=parseActionLedger(serverActions),migs=parseMigs(status);
  const actual=new Set(filePaths);
  const mandatory=new Set(filePaths.filter(isTrackedSourceCandidate));
- for(const referenced of [...taskCardsText.matchAll(/(?:src\/components|src\/lib|app\/|workers\/|apps\/|packages\/)[a-zA-Z0-9_./\-\[\]]+\.(?:ts|tsx|mjs|astro)/g)].map(x=>x[0]))if(actual.has(referenced))mandatory.add(referenced);
+ for(const referenced of [...taskCardsText.matchAll(/(?:src\/components|src\/lib|app\/|workers\/|apps\/|packages\/)[a-zA-Z0-9_./\-\[\]]+\.(?:tsx|ts|mjs|astro)\b/g)].map(x=>x[0]))if(actual.has(referenced))mandatory.add(referenced);
  for(const file of mandatory)if(!rows.has(file))errors.push("missing file progress row for source: "+file);
  for(const [file,row] of rows){
   if(!ALLOWED_KINDS.has(row.kind))errors.push(file+" invalid file kind "+row.kind);
@@ -151,7 +151,7 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
    if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED","RETAINED"].includes(row.state)&&(!/\bTEST=/.test(row.evidence)||!/(?:\bCI=https:\/\/|\bLOG=)/.test(row.evidence)))errors.push(file+" advanced state requires TEST=... plus CI=https://... or LOG=...");
    if(["CUTOVER","RETIRED"].includes(row.state)&&!/\bAPPROVAL=/.test(row.evidence))errors.push(file+" production/destructive state requires APPROVAL=...");
    if(["BRIDGED","PARITY_VERIFIED","CUTOVER","RETIRED"].includes(row.state)){
-    const candidates=[...row.target.matchAll(/(?:apps|packages|src|workers|app)\/[a-zA-Z0-9_\-./\[\]]+\.(?:ts|tsx|astro|mjs|js)/g)].map(x=>x[0]);
+    const candidates=[...row.target.matchAll(/(?:apps|packages|src|workers|app)\/[a-zA-Z0-9_\-./\[\]]+\.(?:tsx|ts|astro|mjs|js)\b/g)].map(x=>x[0]);
     if(/\bTBD\b|\bcandidate\b/i.test(row.target)||row.target.startsWith("+")||!candidates.length||candidates.some(x=>x.includes("..")||!actual.has(x)))errors.push(file+" advanced state has unverified target path");
    }
   }
