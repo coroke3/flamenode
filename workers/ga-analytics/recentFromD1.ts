@@ -71,7 +71,12 @@ export async function loadRecentListFromD1(
      LIMIT ?`,
   ).bind(limit + 1).all<RecentD1Row>();
   signal?.throwIfAborted();
-  const rows = result.results ?? [];
+  // A malformed D1 response is an operational failure, not a genuinely
+  // empty public-video collection. Never silently skip sync on driver errors.
+  if (!result || !Array.isArray(result.results)) {
+    throw new Error("ga4_recent_d1_invalid_result");
+  }
+  const rows = result.results;
   if (rows.length > limit) {
     // Publishing a partial allow-list could turn a valid GA4 report into
     // misleading rankings. Preserve the last successful R2 output instead.
@@ -79,6 +84,9 @@ export async function loadRecentListFromD1(
   }
 
   const items = rows.map((row) => {
+    if (!row || typeof row !== "object") {
+      throw new Error("ga4_recent_d1_invalid_public_row");
+    }
     const id = presentString(row.id);
     const title = presentString(row.title);
     if (!id || !title) throw new Error("ga4_recent_d1_invalid_public_row");
