@@ -4,7 +4,7 @@ import { Hono } from "hono";
 
 import { requireAuth, sessionMiddleware } from "../src/auth/session.ts";
 import { costGuardMiddleware } from "../src/middleware/costGuard.ts";
-import { onlyMutating } from "../src/middleware/writeOrigin.ts";
+import { onlyMutating, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 
 const NOW_MS = 1_800_000_000_000;
 const TOKEN = "audit-session-token";
@@ -152,4 +152,51 @@ test("MIG-0807: onlyMutating skips GET/HEAD/OPTIONS without consulting write gua
   assert.deepEqual(await post.json(), { ok: false, reason: "invalid_origin" });
   assert.equal(guardCalls, 1, "safe methods must not run the write guard");
   assert.equal(handlerCalls, 2, "GET and synthesized HEAD are handled without a mutation");
+});
+
+test("MIG-0807 U03 finding: a throwing D1 binding getter escapes shared guards", async () => {
+  // Reproducer only: this test intentionally pins a KNOWN defect so the
+  // review cannot claim that these handlers convert *every* DB exception to
+  // the required private 503. Code repair belongs to a separate MIG task.
+  const secret = "SYNCHRONOUS_DB_BINDING_ERROR";
+  const env = Object.defineProperty({}, "DB", {
+    get() { throw new Error(secret); },
+  });
+  const context = {
+    env,
+    req: {
+      url: "https://flamenode.example/protected",
+      header(name) {
+        if (name.toLowerCase() === "cookie") {
+          return "__Secure-authjs.session-token=valid-token";
+        }
+        if (name.toLowerCase() === "origin") {
+          return "https://flamenode.example";
+        }
+        return undefined;
+      },
+    },
+    set() {},
+    get() { return null; },
+    header() {},
+  };
+  let downstream = 0;
+  const next = async () => { downstream += 1; };
+  await assert.rejects(() => sessionMiddleware()(context, next), {
+    message: secret,
+  }, "sessionMiddleware DB getter is outside its resolution catch");
+  await assert.rejects(
+    () => writeGuardMiddleware({
+      loadSiteUrl: () => "https://flamenode.example",
+      allowLocalPreview: () => false,
+    })(context, next),
+    { message: secret },
+    "writeGuardMiddleware DB getter is outside its fail-closed result mapping",
+  );
+  await assert.rejects(
+    () => costGuardMiddleware("manage_event_update")(context, next),
+    { message: secret },
+    "costGuardMiddleware DB getter is outside CostGuard's fail-closed handler",
+  );
+  assert.equal(downstream, 0, "no mutation is permitted after the DB binding failure");
 });
