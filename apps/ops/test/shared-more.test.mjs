@@ -27,7 +27,7 @@ test("MIG-0707 T06: ConsoleShell/Drawer keep CURRENT navigation and aria names",
   const manage = doc(h(ConsoleShell, { consoleMode: "manage", navigation: "イベント一覧" },
     h("main", null, "運営")), "/manage/events/event-1/slots");
   assert.equal(manage.querySelector('[data-console-mode="manage"]')?.className, "manage-shell");
-  assert.match(manage.querySelector("button[aria-haspopup='dialog']")?.getAttribute("aria-label") ?? "", /イベント運営/);
+  assert.match(manage.querySelector("button[aria-haspopup='dialog']")?.getAttribute("aria-label") ?? "", /event-1 \/ 枠管理/);
 });
 test("MIG-0707 T06: FnTable keeps CURRENT scroll accessibility", () => {
   const document = doc(h(FnTable, { className: "custom" }, h("tbody", null,
