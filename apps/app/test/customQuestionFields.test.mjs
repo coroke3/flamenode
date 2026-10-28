@@ -36,10 +36,14 @@ test("MIG-0712 U02 T01: select/radio/checkbox choice options and selection match
   assert.match(radio, /role="radiogroup"/);
   assert.match(radio, /cq-customChoiceOption/);
   assert.match(radio, /type="radio"/);
-  assert.match(radio, /value="B" checked=""/);
+  const selectedRadio = radio.match(/<input[^>]*checked=""[^>]*>/)?.[0];
+  assert.ok(selectedRadio);
+  assert.match(selectedRadio, /value="B"/, "selected radio value is B, regardless of attribute serialization order");
   const checkbox = html({ type: "checkbox", options, values: ["A"], required: true });
   assert.match(checkbox, /type="checkbox"/);
-  assert.match(checkbox, /value="A" checked=""/);
+  const selectedCheckbox = checkbox.match(/<input[^>]*checked=""[^>]*>/)?.[0];
+  assert.ok(selectedCheckbox);
+  assert.match(selectedCheckbox, /value="A"/, "checked box retains its selected value");
   assert.doesNotMatch(checkbox, /required=""/, "checkbox group required is validated at form level");
   for (const type of ["select", "radio", "checkbox"]) assert.equal(questionTypeNeedsOptions(type), true);
   for (const type of ["text", "textarea"]) assert.equal(questionTypeNeedsOptions(type), false);
