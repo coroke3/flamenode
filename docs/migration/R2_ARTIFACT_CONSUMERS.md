@@ -24,7 +24,7 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 | `analytics/trending.json` | workers/ga-analytics/sync.ts:21 | public trending builder; workers/ga-analytics/sync.ts (read previous count) | Keep until GA4 producer replacement; do not delete blindly | MIG-0517 / MIG-0907 |
 | `youtube/related-blocklist.v1.json` | workers/json-generator/rebuild.ts (youtube_related_blocklist target) | src/lib/publicData/staticSharedInputsLoader.ts; src/lib/health/artifactSlo.ts:160 | Build shared inputs; retire old reader after cutover | MIG-0509 / MIG-0907 |
 | `videos/random-pool.v1.json` | workers/json-generator/rebuild.ts (random_video_pool target) | src/lib/publicData/staticSharedInputsLoader.ts; src/lib/health/artifactSlo.ts:165 | Build random pool; retire old reader after cutover | MIG-0509 / MIG-0907 |
-| `visibility/blocked-entities.v1.json` | packages/server-core/src/visibility/manifestR2.ts (state writer) | src/lib/health/deepHealth.ts:299; packages/server-core/src/visibility/manifestR2.ts | RETAIN: visibility revocation manifest used beyond migration | MIG-0614 / MIG-0615 |
+| `visibility/blocked-entities.v1.json` | packages/server-core/src/visibility/manifestR2.ts (state writer) | packages/server-core/src/health/deepHealth.ts; packages/server-core/src/visibility/manifestR2.ts | RETAIN: visibility revocation manifest used beyond migration | MIG-0614 / MIG-0615 |
 | `events/<id>.json` | workers/json-generator/rebuild.ts (event detail producer) | src/lib/publicData/loader.ts:1006 | Replace with build event snapshot | MIG-0509 / MIG-0627 |
 | `events/<id>/base.v1.json` | workers/json-generator/rebuild.ts:1990 | app/api/public/events/[id]/staff/route.ts:177; apps/api/src/routes/events (RH-028) | Build event base; retain while Hono reader requires artifact | MIG-0509 / MIG-0627 |
 | `events/<id>/slots.v1.json` | workers/json-generator/rebuild.ts:1994 | CURRENT event slots public readers | Build slot list; preserve public visibility filtering | MIG-0509 / MIG-0627 |
@@ -101,8 +101,8 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `apps/api/src/lib/publicSnapshot.ts` | `bucket.get(key)` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `src/lib/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/media/manageXIcon.ts` | `bucket.get(key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
-| `src/lib/health/artifactSlo.ts` | `bucket.get(probe.key)` | 1 | Health/readiness probe; preserve coverage during migration |
-| `src/lib/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Health/readiness probe; preserve coverage during migration |
+| `packages/server-core/src/health/artifactSlo.ts` | `bucket.get(probe.key)` | 1 | MIG-0660 moved core provider; CURRENT compatibility bridge delegates to this path |
+| `packages/server-core/src/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | MIG-0660 moved core provider; CURRENT compatibility bridge delegates to this path |
 | `src/lib/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `app/api/public/events/[id]/staff/route.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `src/lib/db/videoDetailQueries.ts` | `bucket.get(eventPlaylistObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
