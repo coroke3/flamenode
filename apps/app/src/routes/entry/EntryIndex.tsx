@@ -59,12 +59,14 @@ export function EntryIndexView({
   const [signInPending, setSignInPending] = React.useState(false);
   const [extraPages, setExtraPages] = React.useState<EntryIndexResponse[]>([]);
   const [pagingBusy, setPagingBusy] = React.useState(false);
+  const pagingBusyRef = React.useRef(false);
   const [pagingFailed, setPagingFailed] = React.useState(false);
   const pageAbort = React.useRef<AbortController | null>(null);
 
   // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
   React.useEffect(() => {
     pageAbort.current?.abort();
+    pagingBusyRef.current = false;
     setExtraPages([]);
     setPagingFailed(false);
     setPagingBusy(false);
@@ -86,7 +88,9 @@ export function EntryIndexView({
   const lastPage = matchingPages.at(-1) ?? data;
   const nextOffset = lastPage?.truncated ? lastPage.nextOffset : null;
   const loadNextPage = (): void => {
-    if (!data || pagingBusy || nextOffset == null) return;
+    if (!data || pagingBusyRef.current || nextOffset == null) return;
+    // React state is asynchronous. Lock synchronously to prevent duplicate D1 reads on rapid clicks.
+    pagingBusyRef.current = true;
     const controller = new AbortController();
     pageAbort.current?.abort();
     pageAbort.current = controller;
@@ -109,7 +113,10 @@ export function EntryIndexView({
         if (!controller.signal.aborted) setPagingFailed(true);
       },
     ).finally(() => {
-      if (!controller.signal.aborted) setPagingBusy(false);
+      if (!controller.signal.aborted) {
+        pagingBusyRef.current = false;
+        setPagingBusy(false);
+      }
     });
   };
   const loggedIn = data !== null;
