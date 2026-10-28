@@ -24,8 +24,11 @@ import {
   TRENDING_KEY,
   ABOUT_STATS_KEY,
   USERS_INDEX_KEY,
+  PUBLIC_X_ICON_MAP_KEY,
 } from "../apps/site/src/lib/publicDataLoader.ts";
 import { loadAboutStatsForBuild } from "../apps/site/src/lib/aboutStats.ts";
+import { projectPublicXIconMap } from "../apps/site/src/lib/publicIconMap.ts";
+import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../src/lib/publicData/publicIconProjection.ts";
 import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
 import { loadTopForBuild } from "../apps/site/src/lib/topData.ts";
 import { loadUserBuildDataFrom, userPayloadSourceFromEnv } from "../apps/site/src/lib/userData.ts";
@@ -119,7 +122,7 @@ const env = writeSnapshotDir(dir, produced.result);
 const byKey = new Map(produced.result.snapshots.map((s) => [s.key, JSON.parse(s.json)]));
 
 test("every snapshot kind the pages read is produced as a verifiable envelope", () => {
-  for (const key of [ABOUT_STATS_KEY, TOP_KEY, RECOMMEND_KEY, LIST_FIRST_PAGE_KEY, TRENDING_KEY, USERS_INDEX_KEY, userProfileSnapshotKey("creator_a"), userProfileSnapshotKey("creator_b")]) {
+  for (const key of [ABOUT_STATS_KEY, TOP_KEY, RECOMMEND_KEY, LIST_FIRST_PAGE_KEY, TRENDING_KEY, USERS_INDEX_KEY, PUBLIC_X_ICON_MAP_KEY, userProfileSnapshotKey("creator_a"), userProfileSnapshotKey("creator_b")]) {
     assert.ok(byKey.has(key), `missing ${key}`);
     const e = byKey.get(key);
     assert.equal(e.schemaVersion, 1);
@@ -131,6 +134,35 @@ test("every snapshot kind the pages read is produced as a verifiable envelope", 
   assert.deepEqual(produced.result.manifest.allowedKeys, [...new Set(produced.result.snapshots.map((s) => s.key))].sort());
   assert.ok(fs.existsSync(path.join(dir, "snapshot/top/current.json")));
   assert.equal(produced.result.report.trending, "produced");
+});
+
+test("MIG-0511 T08: projected public X icon map entries equal CURRENT users_index artifacts", async () => {
+  const sqlite = migrated();
+  seed(sqlite);
+  const objects = new Map();
+  const cur = {
+    DB: d1(sqlite),
+    R2: {
+      async get(k) {
+        const v = objects.get(k);
+        return v === undefined ? null : { async json() { return structuredClone(v); } };
+      },
+      async head() { return null; },
+      async put(k, b) { objects.set(k, JSON.parse(String(b))); },
+      async delete(k) { objects.delete(k); },
+    },
+    KV: { async get() { return null; }, async put() {} },
+  };
+  await rebuildTarget(cur, "users_index", "global");
+  const expected = projectPublicXIconMap(
+    objects.get(PUBLIC_X_ICON_MAP_OBJECT_KEY),
+    objects.get("users/index.json"),
+  );
+  assert.ok(expected, "CURRENT users_index should produce public icon map rows");
+  const snapshot = byKey.get(PUBLIC_X_ICON_MAP_KEY);
+  assert.ok(snapshot, "MIG-0511 icon map snapshot must be produced");
+  assert.deepEqual(snapshot.payload.entries, expected.entries, "public icon resolution must match CURRENT projection");
+  assert.ok(produced.result.manifest.allowedKeys.includes(PUBLIC_X_ICON_MAP_KEY));
 });
 
 test("MIG-0621: sitemap excludes stale aliases, revoked videos and missing detail snapshots", () => {
