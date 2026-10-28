@@ -100,7 +100,8 @@ export async function buildStaticRebuildQueueBatch(
 
   const statements: BatchItem<"sqlite">[] = [];
   const expectedChanges: number[] = [];
-  const now = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
   const rows = normalizedItems.map((item) => ({
     id: generateId("srb"),
     target_type: item.targetType,
@@ -160,6 +161,19 @@ export async function buildStaticRebuildQueueBatch(
     );
     expectedChanges.push(chunk.length);
   }
+
+  // Invalidate the next public build in the same atomic D1 batch as the
+  // source mutation's queue invalidation. Keep the scheduler's millisecond
+  // clock separate from the queue rows' existing second timestamps.
+  // MAX avoids losing a newer request when an older clock wins a race.
+  statements.push(
+    db.run(sql`
+      UPDATE public_build_state
+      SET requested_at = MAX(requested_at, ${nowMs})
+      WHERE id = 1
+    `),
+  );
+  expectedChanges.push(1);
 
   return {
     statements,
