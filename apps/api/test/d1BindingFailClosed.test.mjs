@@ -48,12 +48,13 @@ test("SEC-0807-01: session DB getter failure is private 503, never an unhandled 
     console.error = originalLog;
   }
   assert.equal(response.status, 503);
+  const body = await response.clone().text();
   assert.deepEqual(await response.json(), { error: "database_unavailable" });
   assert.equal(response.headers.get("cache-control"), PRIVATE);
   assert.equal(accesses(), 1);
   assert.equal(downstream, 0);
   assert.doesNotMatch(logs.join(" "), /PROVIDER_SECRET_FROM_DB_GETTER/);
-  assert.doesNotMatch(JSON.stringify(await response.clone().text()), /PROVIDER_SECRET_FROM_DB_GETTER/);
+  assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
 });
 
 test("SEC-0807-01: unauthenticated request never reads a throwing session DB getter", async () => {
@@ -86,13 +87,14 @@ test("SEC-0807-01: write DB getter failure returns private 503 without mutation"
     method: "POST", headers: { Origin: SITE },
   }, env);
   assert.equal(response.status, 503);
+  const body = await response.clone().text();
   assert.deepEqual(await response.json(), {
     ok: false, reason: "db_unavailable", message: "DB に接続できません。",
   });
   assert.equal(response.headers.get("cache-control"), PRIVATE);
   assert.equal(accesses(), 1);
   assert.equal(mutations, 0);
-  assert.doesNotMatch(await response.clone().text(), /PROVIDER_SECRET_FROM_DB_GETTER/);
+  assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
 });
 
 test("SEC-0807-01: Origin and identity denials happen before DB binding access", async () => {
@@ -136,6 +138,7 @@ test("SEC-0807-01: CostGuard DB getter failure returns private 503 without mutat
   });
   const response = await app.request(`${SITE}/write`, { method: "POST" }, env);
   assert.equal(response.status, 503);
+  const body = await response.clone().text();
   assert.deepEqual(await response.json(), {
     ok: false,
     reason: "cost_guard_blocked",
@@ -144,5 +147,5 @@ test("SEC-0807-01: CostGuard DB getter failure returns private 503 without mutat
   assert.equal(response.headers.get("cache-control"), PRIVATE);
   assert.equal(accesses(), 1);
   assert.equal(mutations, 0);
-  assert.doesNotMatch(await response.clone().text(), /PROVIDER_SECRET_FROM_DB_GETTER/);
+  assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
 });
