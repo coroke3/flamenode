@@ -439,3 +439,120 @@
 
 /* ボタンスタイルは globals.css の fn-btn クラスを className で直接指定するため、
    ここではレイアウト上の補助のみ定義する */
+
+.sqicon-root {
+  display: grid;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.sqicon-pickRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sqicon-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.sqicon-editor {
+  display: grid;
+  gap: 12px;
+  max-width: min(100%, 360px);
+}
+
+.sqicon-viewportWrap {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 1;
+  margin: 0 auto;
+  touch-action: none;
+  user-select: none;
+}
+
+.sqicon-viewport {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: var(--radius-md);
+  background: repeating-conic-gradient(
+    var(--bg-elevated) 0% 25%,
+    var(--bg-base) 0% 50%
+  )
+    50% / 16px 16px;
+  cursor: grab;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
+}
+
+.sqicon-viewportDragging {
+  cursor: grabbing;
+}
+
+.sqicon-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.sqicon-sliderLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sqicon-slider {
+  width: 100%;
+  accent-color: var(--accent-primary);
+}
+
+.sqicon-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sqicon-fileInputHidden {
+  display: none;
+}
+
+.sqicon-statusOk {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.sqicon-statusErr {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent-danger);
+}
+
+@media (max-width: 480px) {
+  .sqicon-editor {
+    max-width: 100%;
+  }
+
+  .sqicon-viewportWrap {
+    max-width: min(100vw - 48px, 320px);
+  }
+
+  .sqicon-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sqicon-actions > * {
+    width: 100%;
+    justify-content: center;
+  }
+}
