@@ -673,6 +673,55 @@ test("MIG-0713 U03 T03: privileged event replace requires confirmation and keeps
   }
 });
 
+test("MIG-0713 U03 T03: explicit admin is forwarded but unknown privilege modes are never elevated", async () => {
+  const previousUrl = dom.window.location.href;
+  try {
+    for (const { mode, expectedMode } of [
+      { mode: "admin", expectedMode: "admin" },
+      { mode: "owner", expectedMode: undefined },
+      { mode: "normal", expectedMode: undefined },
+    ]) {
+      dom.window.history.replaceState({}, "", "/dashboard/edit/vid1?privileged=" + mode);
+      const calls = [];
+      const container = dom.window.document.createElement("div");
+      dom.window.document.body.append(container);
+      const root = createRoot(container);
+      try {
+        await act(async () => root.render(React.createElement(VideoMembersField, {
+          ...noopAdapters,
+          permissionTargetVideoId: "vid1",
+          applyPermissionBatch: async (input) => {
+            calls.push(input);
+            return { ok: true };
+          },
+        })));
+        await previewTsv(container, "Alice\talice\t\t\t\tON");
+        await act(async () => buttonNamed(container, "追加").click());
+        assert.ok(container.querySelector('[role="alertdialog"]'),
+          "permission confirmation is always required");
+        await act(async () => buttonNamed(container, "変更を反映").click());
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].videoId, "vid1");
+        assert.equal(calls[0].notify, true);
+        assert.deepEqual(calls[0].intents,
+          [{ x_user_id: "alice", display_name: "Alice", intent: "on" }]);
+        assert.equal(calls[0].edit_privilege_mode, expectedMode);
+        assert.equal(Object.hasOwn(calls[0], "edit_privilege_mode"),
+          expectedMode !== undefined,
+          "unrecognized and normal URL modes must not claim elevated permission");
+        const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
+        assert.equal(members.length, 1);
+        assert.equal(Object.hasOwn(members[0], "can_edit"), false);
+      } finally {
+        await act(async () => root.unmount());
+        container.remove();
+      }
+    }
+  } finally {
+    dom.window.history.replaceState({}, "", previousUrl);
+  }
+});
+
 test("MIG-0713 U03 T03: pending permission batch prevents duplicate writes or early member commits", async () => {
   const calls = [];
   let finishWrite;
