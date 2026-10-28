@@ -64,3 +64,67 @@ test("MIG-0713 U02: component has injected search/permission adapters, never dir
   assert.match(source, /MAX_COLLABORATOR_PERMISSION_BATCH/);
   assert.doesNotMatch(source, /from\s+["'](?:@\/|next\/)/);
 });
+
+
+/** React's controlled input requires the native value setter before a bubbling input event. */
+function typeInto(input, value) {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+  assert.ok(setter, "native input value setter");
+  setter.call(input, value);
+  input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+}
+
+test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 250ms and aborts on unmount", async () => {
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      searchXUsers: async (query, offset, signal) => {
+        calls.push({ query, offset, signal });
+        return { items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null };
+      },
+    })));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input, "name field is present");
+    await act(async () => typeInto(input, "al"));
+    await act(async () => typeInto(input, "ali"));
+    await act(async () => typeInto(input, "alice"));
+    assert.equal(calls.length, 0, "no search before debounce");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1, "intermediate queries must be cancelled");
+    assert.equal(calls[0].query, "alice");
+    assert.equal(calls[0].offset, 0);
+    assert.equal(calls[0].signal.aborted, false);
+    await act(async () => root.unmount());
+    assert.equal(calls[0].signal.aborted, true, "unmount aborts in-flight search signal");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("MIG-0713 U03 T01: fewer than two searchable characters never call the search adapter", async () => {
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      searchXUsers: async (...args) => {
+        calls.push(args);
+        return { items: [], hasMore: false, nextOffset: null };
+      },
+    })));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "@"));
+    await act(async () => typeInto(input, "@a"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+    assert.equal(calls.length, 0, "punctuation is excluded from the search length");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
