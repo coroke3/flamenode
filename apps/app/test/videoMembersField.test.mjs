@@ -148,7 +148,7 @@ test("MIG-0713 U03 T01: equivalent parent adapter re-render preserves in-flight 
     await act(async () => settleSearch({
       items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null,
     }));
-    assert.ok(container.textContent.includes("Alice"), "the original request can still render its result");
+    assert.ok(container.querySelector('#member-name-suggestions option[value="Alice"]'), "the original request can still render a suggestion");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -480,6 +480,41 @@ test("MIG-0713 U03 T03: privileged event replace requires confirmation and keeps
     await act(async () => root.unmount());
     container.remove();
     dom.window.history.replaceState({}, "", previousUrl);
+  }
+});
+
+test("MIG-0713 U03 T03: pending permission batch prevents duplicate writes or early member commits", async () => {
+  const calls = [];
+  let finishWrite;
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      permissionTargetVideoId: "vid1",
+      applyPermissionBatch: (input) => new Promise((resolve) => {
+        calls.push(input);
+        finishWrite = resolve;
+      }),
+    })));
+    await previewTsv(container, "Alice\talice\t\t\t\tON");
+    await act(async () => buttonNamed(container, "追加").click());
+    await act(async () => buttonNamed(container, "変更を反映").click());
+    assert.equal(calls.length, 1);
+    assert.equal(buttonNamed(container, "反映中...").disabled, true, "submit is disabled until the adapter settles");
+    assert.equal(buttonNamed(container, "キャンセル").disabled, true, "pending permission change cannot be dismissed");
+    buttonNamed(container, "反映中...").click();
+    assert.equal(calls.length, 1, "a second click must never start another permission write");
+    assert.equal(container.querySelector('input[name="members_json"]').value, "[]",
+      "member data is not committed before server confirmation");
+    await act(async () => finishWrite({ ok: true }));
+    assert.equal(container.querySelector('[role="alertdialog"]'), null);
+    assert.equal(JSON.parse(container.querySelector('input[name="members_json"]').value).length, 1,
+      "members are committed exactly once after permission success");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
   }
 });
 
