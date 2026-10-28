@@ -2,17 +2,13 @@
 import assert from "node:assert/strict";
 import { act } from "react";
 import test from "node:test";
-import { fakeApi, mount, onboardingState, user } from "./helpers.mjs";
+import { entryIndex, fakeApi, mount, onboardingState, user } from "./helpers.mjs";
 
-const entryData = (over = {}) => ({
-  user: user(),
-  state: onboardingState(),
-  events: [{ id: "event-1", title: "受付中イベント", entry_end_time: 1_800_000_000, slots_available: 3 }],
-  reservedSlots: [],
-  truncated: false,
-  nextOffset: null,
-  ...over,
-});
+const entryData = (over = {}) =>
+  entryIndex({
+    events: [{ id: "event-1", title: "受付中イベント", entry_end_time: 1_800_000_000, slots_available: 3 }],
+    ...over,
+  });
 
 async function entry(data, path = "/entry") {
   return mount(path, fakeApi({ getEntryIndex: data }));
