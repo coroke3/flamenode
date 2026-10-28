@@ -305,6 +305,45 @@ test("MIG-0713 U03: rejected X search reports failure and recovers on next input
   }
 });
 
+test("MIG-0713 U03: disabling the form aborts an in-flight search and ignores late results", async () => {
+  let resolveSearch;
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const props = {
+    ...noopAdapters,
+    searchXUsers: (query, offset, signal) => new Promise((resolve) => {
+      calls.push({ query, offset, signal });
+      resolveSearch = resolve;
+    }),
+  };
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, props)));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].signal.aborted, false);
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...props,
+      disabled: true,
+    })));
+    assert.equal(calls[0].signal.aborted, true, "disabled form must cancel its active search");
+    await act(async () => resolveSearch({
+      items: [{ id: "alice", x_name: "Alice" }], hasMore: true, nextOffset: 20,
+    }));
+    assert.equal(container.querySelectorAll("#member-name-suggestions option").length, 0);
+    assert.equal(container.querySelectorAll("#member-xid-suggestions option").length, 0);
+    assert.equal([...container.querySelectorAll("button")]
+      .some((button) => button.textContent.trim() === "候補をさらに読み込む"), false);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T01: fewer than two searchable characters never call the search adapter", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");

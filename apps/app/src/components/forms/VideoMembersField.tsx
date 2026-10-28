@@ -167,14 +167,14 @@ export function VideoMembersField({
   searchXUsersRef.current = searchXUsers;
 
   const fetchSuggestions = React.useCallback(
-    async (q: string, offset: number, signal?: AbortSignal) => {
+    async (q: string, offset: number, signal: AbortSignal) => {
       if (disabled) return;
       const requestId = ++suggestionRequestIdRef.current;
       setSearchStatus("loading");
       setSearchHint(null);
       try {
         const searchXUsers = searchXUsersRef.current;
-        const json = await searchXUsers(q, offset, signal ?? new AbortController().signal);
+        const json = await searchXUsers(q, offset, signal);
         const items = (json.items ?? []).map(
           (row) => ({
             name: row.x_name ?? row.id,
