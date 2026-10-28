@@ -1073,7 +1073,7 @@
 
 | `apps/app/src/components/forms/VideoMembersField.tsx` | TARGET_SKELETON | CURRENT member form with injected searchXUsers/applyPermissionBatch; no fetch/action | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=0ccf932f1116a8a43f912b6097538cd5442e9849 TEST=apps/app/test/videoMembersField.test.mjs CI=pending |
 | `apps/app/src/styles/video-members.css` | CONFIG | CURRENT VideoMembersField.module.css deterministic vmembers-* stylesheet | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=926f79eb1be3787d94143bb3146d876dd73a5140 TEST=apps/app/test/videoMembersField.test.mjs CI=pending |
-| `apps/app/test/videoMembersField.test.mjs` | TEST | SSR member payload, table/card, injected adapter and no-server-effect checks | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=2f3b78be7fd5e4f5d7c793f49429ce72d143ed6f TEST=apps/app/test/videoMembersField.test.mjs CI=pending ; PR#435 SHA=e8fedf8a08cb9182f29ec449f4fdf4ffd9fdbfa4 TEST=apps/app/test/videoMembersField.test.mjs T01 debounce/abort/min-query CI=pending |
+| `apps/app/test/videoMembersField.test.mjs` | TEST | SSR member payload, table/card, injected adapter and no-server-effect checks | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=2f3b78be7fd5e4f5d7c793f49429ce72d143ed6f TEST=apps/app/test/videoMembersField.test.mjs CI=pending ; PR#435 SHA=e8fedf8a08cb9182f29ec449f4fdf4ffd9fdbfa4 TEST=apps/app/test/videoMembersField.test.mjs T01 debounce/abort/min-query CI=pending ; PR#435 SHA=13900b8f060115098534cef7cbca7e093676de35 TEST=apps/app/test/videoMembersField.test.mjs T02/T03/T04 limit/batch/reject CI=pending |
 
 ## Future files requiring source/target registration
 
