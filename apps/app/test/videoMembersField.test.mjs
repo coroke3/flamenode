@@ -1,11 +1,22 @@
 // MIG-0713 U02: the field port may render/edit entirely in-browser, without direct fetch/Server Actions.
 import assert from "node:assert/strict";
 import test from "node:test";
-import React, { act } from "react";
-import { createRoot } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import { readFile } from "node:fs/promises";
-import { dom } from "./helpers.mjs";
+import { JSDOM } from "jsdom";
+
+// React DOM must be imported AFTER jsdom globals are installed: otherwise
+// its event plugin detects a non-DOM environment and controlled onChange
+// input/textarea events cannot update component state in this Node test.
+const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://flamenode.test/" });
+for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
+  Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] });
+}
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const React = await import("react");
+const { act } = React;
+const { createRoot } = await import("react-dom/client");
+const { renderToStaticMarkup } = await import("react-dom/server");
 const { VideoMembersField } = await import("../.test-dist/apps/app/src/components/forms/VideoMembersField.js");
 
 const noopAdapters = {
