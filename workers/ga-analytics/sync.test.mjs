@@ -574,6 +574,7 @@ test("MIG-0517: R2 PUT rejection remains a real sync failure with no success log
 test("MIG-0517: GA4 orphan rows do not erase existing public rankings", async () => {
   const prior = JSON.stringify({
     schema_version: 1,
+    generated_at: 1_700_000_000,
     items: [{ id: "video-a", rank: 1, views_30d: 2 }],
   });
   const token = JSON.stringify({
@@ -856,6 +857,56 @@ test("MIG-0517: oversized existing R2 body cannot bypass cap via absent or wrong
       assert.equal(result.failed, 0);
       assert.equal(reads, 1);
       assert.equal(puts, 1);
+      assert.deepEqual(output.items, []);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("MIG-0517: invalid old R2 schema cannot block usable empty refresh", async () => {
+  const token = JSON.stringify({ access_token: "cached-token", expires_at: Math.floor(Date.now() / 1000) + 3600 });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) throw Error("unexpected request");
+    return new Response(JSON.stringify({
+      dimensionHeaders: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+      metricHeaders: [{ name: "eventCount" }], rowCount: 1,
+      rows: [{ dimensionValues: [{ value: "last_30" }, { value: "orphan-video" }], metricValues: [{ value: "9" }] }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    for (const metadata of [
+      { schema_version: 99, generated_at: 1_700_000_000 },
+      { schema_version: 1 },
+      { schema_version: 1, generated_at: "not-a-time" },
+    ]) {
+      const prior = JSON.stringify({ ...metadata, items: [{ id: "video-a", rank: 1, views_30d: 2 }] });
+      let reads = 0;
+      let puts = 0;
+      let output = null;
+      const env = enabledGa4Env({
+        KV: { async get() { return token; } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads++;
+            return { size: Buffer.byteLength(prior), async text() { return prior; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            puts++;
+            output = JSON.parse(String(body));
+          },
+        },
+      });
+      const result = await syncGa4Trending(env);
+      assert.equal(result.failed, 0);
+      assert.equal(reads, 1);
+      assert.equal(puts, 1);
+      assert.equal(output.schema_version, 1);
+      assert.ok(Number.isFinite(output.generated_at));
       assert.deepEqual(output.items, []);
     }
   } finally {
