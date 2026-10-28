@@ -294,3 +294,54 @@ test("MIG-0641 U01e: repair branch uses one CAS UPDATE and no duplicate consent 
   assert.deepEqual(plan.expectedMutationChanges, [1]);
   assert.deepEqual(plan.audits.map(a => a.table_name), ["user"]);
 });
+
+test("MIG-0641 U01f: snapshot performs ONE bounded D1 statement with published-order and exact consent", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { loadTermsSnapshot, TERMS_SNAPSHOT_SQL } = await import("../src/routes/personal/termsSnapshot.ts");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "name" TEXT, "emailVerified" INTEGER, "is_tos_accepted" INTEGER, "accepted_terms_version_id" TEXT, "terms_reaccept_required" INTEGER)');
+    sqlite.exec('CREATE TABLE "terms_versions" ("id" TEXT PRIMARY KEY, "status" TEXT, "published_at" INTEGER, "updated_at" INTEGER)');
+    sqlite.exec('CREATE TABLE "user_tos_consents" ("id" TEXT PRIMARY KEY, "user_id" TEXT, "terms_version_id" TEXT)');
+    sqlite.prepare('INSERT INTO "user" VALUES (?, ?, ?, ?, ?, ?)').run("u1", "Name", 1760000000000, 0, null, 0);
+    for(const [id,status,pub,updated] of [
+      ["old", "published", 100, 100], ["new-a", "published", 200, 100],
+      ["new-b", "published", 200, 200], ["draft", "draft", 900, 900],
+    ]) sqlite.prepare('INSERT INTO "terms_versions" VALUES (?, ?, ?, ?)').run(id, status, pub, updated);
+    sqlite.prepare('INSERT INTO "user_tos_consents" VALUES (?, ?, ?)').run("consent", "u1", "new-b");
+    let count = 0;
+    const d1 = { prepare(query) {
+      count += 1;
+      assert.equal(query, TERMS_SNAPSHOT_SQL);
+      return { bind: (...values) => ({ first: async () => sqlite.prepare(query).get(...values) ?? null }) };
+    } };
+    const result = await loadTermsSnapshot(d1, "u1");
+    assert.equal(count, 1);
+    assert.equal(result.termsVersionId, "new-b");
+    assert.equal(result.existingConsentId, "consent");
+    assert.equal(result.userBefore.id, "u1");
+    assert.equal(result.userBefore.name, "Name");
+    assert.equal(result.userBefore.emailVerified.getTime(), 1760000000000);
+    assert.equal(Object.hasOwn(result.userBefore, "__terms_version_id"), false);
+    assert.equal(await loadTermsSnapshot(d1, "missing"), null);
+    assert.equal(count, 2, "one statement for each lookup, no follow-up read");
+  } finally { sqlite.close(); }
+});
+
+test("MIG-0641 U01f: snapshot fallback and no-consent return, without publishing drafts", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { loadTermsSnapshot } = await import("../src/routes/personal/termsSnapshot.ts");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "emailVerified" INTEGER)');
+    sqlite.exec('CREATE TABLE "terms_versions" ("id" TEXT PRIMARY KEY, "status" TEXT, "published_at" INTEGER, "updated_at" INTEGER)');
+    sqlite.exec('CREATE TABLE "user_tos_consents" ("id" TEXT PRIMARY KEY, "user_id" TEXT, "terms_version_id" TEXT)');
+    sqlite.prepare('INSERT INTO "user" VALUES (?, ?)').run("u1", null);
+    sqlite.prepare('INSERT INTO "terms_versions" VALUES (?, ?, ?, ?)').run("not-published", "draft", 999, 999);
+    const d1 = { prepare: q => ({ bind: (...values) => ({ first: async () => sqlite.prepare(q).get(...values) ?? null }) }) };
+    assert.deepEqual(await loadTermsSnapshot(d1, "u1"), {
+      userBefore: { id: "u1", emailVerified: null },
+      termsVersionId: "fallback-current", existingConsentId: null,
+    });
+  } finally { sqlite.close(); }
+});
