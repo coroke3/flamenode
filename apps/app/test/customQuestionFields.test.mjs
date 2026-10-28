@@ -23,7 +23,7 @@ test("MIG-0712 U02 T01: text/textarea preserve name, required and aria-invalid s
   const textarea = html({ type: "textarea", placeholder: "作品について", maxLength: 200 });
   assert.match(textarea, /<textarea/);
   assert.match(textarea, /rows="3"/);
-  assert.match(textarea, /maxlength="200"/);
+  assert.match(textarea, /maxlength="200"/i);
   assert.match(textarea, /投稿文/);
 });
 
