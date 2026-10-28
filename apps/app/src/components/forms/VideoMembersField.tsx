@@ -569,6 +569,8 @@ export function VideoMembersField({
   const [replaceConfirmOpen, setReplaceConfirmOpen] = React.useState(false);
   const [permConfirmOpen, setPermConfirmOpen] = React.useState(false);
   const [permPending, setPermPending] = React.useState(false);
+  // State updates are batched: guard repeated submits in the same event turn.
+  const permPendingRef = React.useRef(false);
   const [permResult, setPermResult] = React.useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -741,7 +743,8 @@ export function VideoMembersField({
 
   /** 編集権限だけを専用batch Server Actionで一括反映する。 */
   const applyPermissionsBatch = async () => {
-    if (!bulkPreview || !permissionTargetVideoId || permPending) return;
+    if (!bulkPreview || !permissionTargetVideoId || permPendingRef.current) return;
+    permPendingRef.current = true;
     const intents = bulkPreview.permissionIntents.slice(0, MAX_COLLABORATOR_PERMISSION_BATCH);
     const explicitPrivilegeMode = currentExplicitPermissionPrivilegeMode();
     setPermPending(true);
@@ -774,6 +777,7 @@ export function VideoMembersField({
     } catch {
       setPermResult({ ok: false, message: "編集権限の反映中にエラーが発生しました。" });
     } finally {
+      permPendingRef.current = false;
       setPermPending(false);
     }
   };

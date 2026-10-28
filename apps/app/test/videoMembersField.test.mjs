@@ -774,8 +774,12 @@ test("MIG-0713 U03 T03: pending permission batch prevents duplicate writes or ea
     })));
     await previewTsv(container, "Alice\talice\t\t\t\tON");
     await act(async () => buttonNamed(container, "追加").click());
-    await act(async () => buttonNamed(container, "変更を反映").click());
-    assert.equal(calls.length, 1);
+    const submit = buttonNamed(container, "変更を反映");
+    await act(async () => {
+      submit.click();
+      submit.click();
+    });
+    assert.equal(calls.length, 1, "two clicks in the same React batch start only one write");
     assert.equal(buttonNamed(container, "反映中...").disabled, true, "submit is disabled until the adapter settles");
     assert.equal(buttonNamed(container, "キャンセル").disabled, true, "pending permission change cannot be dismissed");
     buttonNamed(container, "反映中...").click();
