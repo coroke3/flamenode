@@ -673,3 +673,56 @@ test("MIG-0517: GA4 orphan rows may publish an empty ranking on first generation
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("MIG-0517: generated_at and GA4 windows share the exact UTC date", async () => {
+  const originalNow = Date.now;
+  const originalFetch = globalThis.fetch;
+  const atBoundary = Date.parse("2031-03-01T23:59:59.999Z");
+  let payload = null;
+  Date.now = () => atBoundary;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw new Error("unexpected request");
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 0,
+      rows: [],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = enabledGa4Env({
+    KV: { async get() {
+      return JSON.stringify({
+        access_token: "cached-token",
+        expires_at: Math.floor(atBoundary / 1000) + 3600,
+      });
+    } },
+    R2: {
+      async get() { return null; },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        payload = JSON.parse(String(body));
+      },
+    },
+  });
+  try {
+    const result = await syncGa4Trending(env);
+    assert.equal(result.failed, 0);
+    assert.ok(payload);
+    assert.equal(payload.generated_at, Math.floor(atBoundary / 1000));
+    assert.deepEqual(payload.windows, {
+      views_2d: { start_date: "2031-02-28", end_date: "2031-03-01" },
+      views_5d: { start_date: "2031-02-25", end_date: "2031-03-01" },
+      views_7d: { start_date: "2031-02-23", end_date: "2031-03-01" },
+      views_30d: { start_date: "2031-01-31", end_date: "2031-03-01" },
+    });
+  } finally {
+    Date.now = originalNow;
+    globalThis.fetch = originalFetch;
+  }
+});
