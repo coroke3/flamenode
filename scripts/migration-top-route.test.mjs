@@ -34,6 +34,17 @@ test("visual fixture writer refuses cwd, root, and nonempty directories", () => 
     assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
     assert.equal(fs.readFileSync(existing, "utf8"), "unchanged");
     fs.rmSync(existing);
+    if (process.platform !== "win32") {
+      const target = path.join(dir, "target");
+      const alias = path.join(dir, "alias");
+      fs.mkdirSync(target);
+      fs.symlinkSync(target, alias, "dir");
+      assert.throws(() => writeFixtureSnapshot(alias), /must exist and be empty/,
+        "a symlink must not redirect fixture writes to another directory");
+      assert.deepEqual(fs.readdirSync(target), [], "symlink target remains untouched");
+      fs.unlinkSync(alias);
+      fs.rmdirSync(target);
+    }
     const env = writeFixtureSnapshot(dir);
     assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);
     assert.ok(fs.statSync(env.FLAMENODE_SNAPSHOT_MANIFEST_FILE).size > 0);
