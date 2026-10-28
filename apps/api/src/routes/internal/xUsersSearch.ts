@@ -7,12 +7,12 @@
  * No public artifact or write-side access is permitted here.
  */
 import { Hono, type Context } from "hono";
-import {
-  loadMemberSuggestionsCandidatesV2FromBucket,
-  loadMemberSuggestionsIndexFromBucket,
-  searchMemberSuggestions,
-  type MemberSuggestionItem,
-} from "@flamenode/server-core";
+// Temporary source-level imports until the other writers release
+// packages/server-core/package.json. U03 replaces these with package subpaths.
+import { loadMemberSuggestionsCandidatesV2FromBucket } from "../../../../../packages/server-core/src/memberSuggestion/v2Loader.ts";
+import { loadMemberSuggestionsIndexFromBucket } from "../../../../../packages/server-core/src/memberSuggestion/loader.ts";
+import { searchMemberSuggestions } from "../../../../../packages/server-core/src/memberSuggestion/search.ts";
+import type { MemberSuggestionItem } from "../../../../../packages/server-core/src/memberSuggestion/core.ts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
 
