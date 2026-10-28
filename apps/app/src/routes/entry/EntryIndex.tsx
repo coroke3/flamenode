@@ -73,8 +73,15 @@ export function EntryIndexView({
 
   // A stale continuation cannot drive the new account's list or offset, even before effect cleanup.
   const matchingPages = data ? extraPages.filter((page) => page.user.id === data.user.id) : [];
+  // CURRENT sorts accepting events by entry deadline. Across paged API reads, restore that global order.
+  // The read DTO does not include start_time, so equal deadlines retain the API's stable page order.
   const events = data
     ? [...new Map([data, ...matchingPages].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
+        .sort((a, b) => {
+          const aDeadline = a.entry_end_time ?? Number.POSITIVE_INFINITY;
+          const bDeadline = b.entry_end_time ?? Number.POSITIVE_INFINITY;
+          return aDeadline === bDeadline ? 0 : aDeadline < bDeadline ? -1 : 1;
+        })
     : [];
   const lastPage = matchingPages.at(-1) ?? data;
   const nextOffset = lastPage?.truncated ? lastPage.nextOffset : null;
