@@ -1,0 +1,2 @@
+@font-face { font-family: "FlameNode Sans"; src: url("../assets/FlameNodeSans.otf") format("opentype"); font-weight: 400; font-display: swap; }
+html { --font-flamenode: "FlameNode Sans"; }

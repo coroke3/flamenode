@@ -18,6 +18,8 @@ import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
 import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
+import { loadPublicXIconMapForBuild, projectVideoMemberPresentation } from "./publicIconMap.ts";
+import { hasProjectedPublicProfile, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "./videoFixtures.ts";
 
 export class VideoPageBuildError extends Error {
@@ -41,7 +43,12 @@ export type VideoPage = Readonly<{
 
 const TONE = { active: "public", published: "public", scheduled: "warning", ended: "draft", private: "draft" } as const;
 
-export function buildVideoPages(payload: unknown, key: string, now: number = Math.floor(Date.now() / 1000)): VideoPage[] {
+export function buildVideoPages(
+  payload: unknown,
+  key: string,
+  now: number = Math.floor(Date.now() / 1000),
+  iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
+): VideoPage[] {
   const detail = normalizeStaticVideoDetail((payload ?? {}) as Parameters<typeof normalizeStaticVideoDetail>[0]);
   if (!detail || detail.video.visibility_status !== "public") throw new VideoPageBuildError(key);
   const vm = buildPublicVideoViewModelFromStatic(detail);
@@ -51,7 +58,7 @@ export function buildVideoPages(payload: unknown, key: string, now: number = Mat
   const canonicalSlug = youtubeVideoId ?? video.id;
   const creatorId = video.creator_x_user_id ?? "anonymous";
   const creatorName = video.creator_display_name?.trim() || "作者未設定";
-  const creatorHref = creatorId !== "anonymous" && (video.creator_has_public_profile ?? false) ? `/user/${creatorId}` : null;
+  const creatorHref = creatorId !== "anonymous" && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
   const primary = vm.primaryEvent;
   const primaryStatus = primary ? computeEventStatus(primary, now) : null;
 
@@ -98,10 +105,9 @@ export function buildVideoPages(payload: unknown, key: string, now: number = Mat
       id: m.id,
       name: m.display_name,
       xUserId: m.x_user_id,
-      iconUrl: cachedGoogleImageUrl(m.icon_url ?? null),
+      ...projectVideoMemberPresentation(m, iconMap),
       role: m.role_label,
       comment: m.comment ?? null,
-      profileHref: m.x_user_id && (m.has_public_profile ?? false) ? `/user/${m.x_user_id}` : null,
       chapterTimes: vm.memberChapters.filter((c) => c.video_member_id === m.id).map((c) => formatChapterTime(c.chapter_time)),
     })),
     chapters: chapters.map((c) => ({ id: c.id, timeLabel: formatChapterTime(c.t), label: c.label, authorName: c.author, kind: c.kind })),
@@ -151,12 +157,13 @@ export async function loadVideoPagesForBuild(
   now: number = Math.floor(Date.now() / 1000),
 ): Promise<VideoPage[]> {
   const access = snapshotAccessFromEnv(env);
+  const iconMap = await loadPublicXIconMapForBuild(env);
   const pages: VideoPage[] = [];
   if (!access) {
-    for (const [id, p] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) pages.push(...buildVideoPages(p, `fixture:${id}`, now));
+    for (const [id, p] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) pages.push(...buildVideoPages(p, `fixture:${id}`, now, iconMap));
   } else {
     for (const key of videoDetailKeys(access.options.manifest!)) {
-      pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now));
+      pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now, iconMap));
     }
   }
   // MIG-0404 route map: reserved roots, assets, duplicates and traversal are build errors.

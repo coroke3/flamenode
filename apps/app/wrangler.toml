@@ -1,0 +1,13 @@
+# MIG-0628 U02 — Personal SPA static-only Worker template.
+# Never deploy this file before the human cutover gate (MIG-0805).
+name = "flamenode-personal"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+workers_dev = false
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = false
+
+# No D1, KV, R2, secret or API binding: all personal data stays behind Hono auth.

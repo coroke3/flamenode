@@ -8,13 +8,17 @@
 import PublicLayout from "../../../layouts/PublicLayout.astro";
 import { EventDetailIsland } from "../../../components/EventDetailIsland.ts";
 import { getEventBuildData } from "../../../lib/eventData.ts";
+import { loadPublicXIconMapForBuild, projectEventDetailIcons } from "../../../lib/publicIconMap.ts";
 import { buildEventJsonLd } from "../../../lib/eventDetail.ts";
 import { buildPageHead, serializeJsonLd } from "../../../lib/pageHead.ts";
 import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
 
 export async function getStaticPaths() {
-  const { details } = await getEventBuildData();
-  return [...details.values()].map((detail) => ({ params: { id: detail.event.id }, props: { detail } }));
+  const [{ details }, iconMap] = await Promise.all([getEventBuildData(), loadPublicXIconMapForBuild()]);
+  return [...details.values()].map((detail) => ({
+    params: { id: detail.event.id },
+    props: { detail: projectEventDetailIcons(detail, iconMap) },
+  }));
 }
 
 interface Props {
