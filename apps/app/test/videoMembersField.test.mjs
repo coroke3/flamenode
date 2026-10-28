@@ -85,6 +85,24 @@ function typeInto(input, value) {
   input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
 }
 
+test("MIG-0713 U03: each vmembers class used by the form is defined in ported CSS", async () => {
+  const [component, css] = await Promise.all([
+    readFile(new URL("../src/components/forms/VideoMembersField.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/styles/video-members.css", import.meta.url), "utf8"),
+  ]);
+  const used = new Set([...component.matchAll(/\bvmembers-[A-Za-z][\w-]*/g)].map((m) => m[0]));
+  const defined = new Set([...css.matchAll(/\.vmembers-[A-Za-z][\w-]*/g)].map((m) => m[0].slice(1)));
+  assert.ok(used.size > 10, "the member-form CSS scope must be represented");
+  assert.deepEqual([...used].filter((name) => !defined.has(name)), [],
+    "ported form classes must have a stylesheet definition");
+  assert.deepEqual([...defined].filter((name) => !used.has(name)), [],
+    "generated member classes should match the migrated form");
+  assert.match(css, /\.vmembers-sampleTableScroll\s*\{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*auto;/s,
+    "on mobile, wide TSV tables must scroll inside the form instead of overflowing the viewport");
+  assert.match(css, /\.vmembers-sampleTable\s*\{[^}]*min-width:\s*620px;/s,
+    "CURRENT table width is preserved inside the scrollable wrapper");
+});
+
 test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 250ms and aborts on unmount", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
