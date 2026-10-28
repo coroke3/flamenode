@@ -1,4 +1,9 @@
 import { Hono } from "hono";
+import {
+  authorizeDeepHealth,
+  buildDeepHealthFailureResponse,
+  runDeepHealthChecks,
+} from "@flamenode/server-core/health/deepHealth";
 import type { AppEnv } from "../env.ts";
 
 // CURRENT: src/lib/health/publicHealth.ts, src/lib/health/deepHealth.ts
@@ -10,15 +15,6 @@ function stringBinding(env: unknown, key: string): string | undefined {
   if (!env || typeof env !== "object") return undefined;
   const value = (env as Record<string, unknown>)[key];
   return typeof value === "string" ? value : undefined;
-}
-
-function constantTimeEqual(left: string, right: string): boolean {
-  const length = Math.max(left.length, right.length);
-  let mismatch = left.length ^ right.length;
-  for (let index = 0; index < length; index += 1) {
-    mismatch |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
-  }
-  return mismatch === 0;
 }
 
 function deepHealthUnavailable(): Response {
@@ -50,29 +46,25 @@ healthRoutes.get("/", (c) => {
   );
 });
 
-// RH-017: GET /api/health/deep
-//
-// The token gate matches CURRENT exactly (503 when WORKER_ADMIN_TOKEN is not
-// configured, 401 for a missing/malformed/wrong Bearer token).
-//
-// The authorized check body (schema version + runtime tables, tracked detail
-// artifact SLO, global artifact SLO probes, queue configuration and the
-// public-visibility manifest/fence join) still lives only in
-// src/lib/health/deepHealth.ts and its ~2,000-line public-data normalizer
-// closure, which apps/api must not import. Until that logic moves into a
-// package, this route fails closed with CURRENT's own failure response
-// instead of reporting checks it did not run as "ok". It reads no D1/KV/R2.
-healthRoutes.get("/deep", (c) => {
-  const token = stringBinding(c.env, "WORKER_ADMIN_TOKEN")?.trim();
-  if (!token) return deepHealthUnavailable();
+// RH-017: same token gate and read-only D1/KV/R2/Queue/visibility diagnostics as CURRENT.
+// Missing required bindings fail closed; the production Worker Route is not changed.
+healthRoutes.get("/deep", async (c) => {
+  const unauthorized = authorizeDeepHealth(
+    c.req.raw,
+    stringBinding(c.env, "WORKER_ADMIN_TOKEN"),
+  );
+  if (unauthorized) return unauthorized;
 
-  const match = /^Bearer ([^\s]+)$/.exec(c.req.header("Authorization") ?? "");
-  if (!match || !constantTimeEqual(match[1], token)) {
-    return Response.json(
-      { ok: false, service: "flamenode-web" },
-      { status: 401, headers: NO_STORE },
-    );
+  const { DB, KV, BUCKET } = c.env;
+  if (!DB || !KV || !BUCKET) return deepHealthUnavailable();
+
+  try {
+    const result = await runDeepHealthChecks({ ...c.env, DB, KV, BUCKET });
+    return Response.json(result, {
+      status: result.status === "degraded" ? 200 : result.ok ? 200 : 503,
+      headers: NO_STORE,
+    });
+  } catch (error) {
+    return buildDeepHealthFailureResponse(error);
   }
-
-  return deepHealthUnavailable();
 });
