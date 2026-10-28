@@ -17,13 +17,6 @@ function stringBinding(env: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function deepHealthUnavailable(): Response {
-  return Response.json(
-    { ok: false, service: "flamenode-web" },
-    { status: 503, headers: NO_STORE },
-  );
-}
-
 export const healthRoutes = new Hono<AppEnv>();
 
 // RH-018: GET /api/health — exposes only the validated deployment commit.
@@ -56,7 +49,13 @@ healthRoutes.get("/deep", async (c) => {
   if (unauthorized) return unauthorized;
 
   const { DB, KV, BUCKET } = c.env;
-  if (!DB || !KV || !BUCKET) return deepHealthUnavailable();
+  if (!DB || !KV || !BUCKET) {
+    // No silent success if the runtime lacks a mandatory read-only diagnostic binding.
+    return Response.json(
+      { ok: false, service: "flamenode-web" },
+      { status: 503, headers: NO_STORE },
+    );
+  }
 
   try {
     const result = await runDeepHealthChecks({ ...c.env, DB, KV, BUCKET });
