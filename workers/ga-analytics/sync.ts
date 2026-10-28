@@ -189,7 +189,14 @@ async function loadExistingTrendingItemCount(
   if (isOversizedUtf8Text(text, GA4_TRENDING_MAX_OBJECT_BYTES)) return 0;
   try {
     const payload = JSON.parse(text) as TrendingOutputPayload;
-    if (!Array.isArray(payload?.items) || payload.items.length === 0) return 0;
+    // The public reader rejects a missing/unknown schema version or a
+    // nonnumeric generation time. Do not preserve an artifact it cannot load.
+    if (
+      payload?.schema_version !== TRENDING_SCHEMA_VERSION ||
+      !Number.isFinite(Number(payload.generated_at)) ||
+      !Array.isArray(payload.items) ||
+      payload.items.length === 0
+    ) return 0;
     // A last-success ranking may outlive a video's public visibility. Only
     // preserve the artifact if ALL its IDs are still in the current D1
     // allow-list; keeping one old private/deleted row would leak stale data.
