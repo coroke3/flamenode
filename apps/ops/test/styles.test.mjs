@@ -33,7 +33,7 @@ test("MIG-0707 T07: Ops font and font-face CSS match Personal/CURRENT", async ()
 
 test("MIG-0707 U05c: global CSS loads in CURRENT order before Ops React", async () => {
   const main = (await read("apps/ops/src/main.tsx")).toString("utf8");
-  const imports = [...main.matchAll(/^import "([^"]+\\.css)";$/gm)].map((match) => match[1]);
+  const imports = [...main.matchAll(/^import "([^"]+\.css)";$/gm)].map((match) => match[1]);
   assert.deepEqual(imports, [
     "./styles/current/globals.css",
     "./styles/current/mobile-hardening.css",
