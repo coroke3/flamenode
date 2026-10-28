@@ -345,3 +345,85 @@ test("MIG-0641 U01f: snapshot fallback and no-consent return, without publishing
     });
   } finally { sqlite.close(); }
 });
+
+test("MIG-0641 U01g: orchestrated fresh consent creates one plan and returns accepted", async () => {
+  const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
+  let reads = 0, commits = 0, ids = 0, clock = 0;
+  const read = () => ({ userBefore: {
+    id: "u1", accepted_terms_version_id: null,
+    is_tos_accepted: 0, terms_reaccept_required: 0,
+  }, termsVersionId: "v1", existingConsentId: null });
+  const port = {
+    load: async (id) => { reads += 1; assert.equal(id, "u1"); return read(); },
+    commit: async plan => {
+      commits += 1;
+      assert.equal(plan.kind, "mutate");
+      assert.deepEqual(plan.expectedMutationChanges, [1, 1]);
+      assert.equal(plan.insertConsent.id, "tos_generated");
+      assert.equal(plan.insertConsent.consented_at, 123);
+      assert.deepEqual(plan.audits.map(x => x.table_name), ["user_tos_consents", "user"]);
+      return "accepted";
+    },
+    generateConsentId: () => { ids += 1; return "tos_generated"; },
+    now: () => { clock += 1; return 123; },
+  };
+  assert.deepEqual(await commitLatestTermsForUser(port, "u1"), { kind: "accepted", termsVersionId: "v1" });
+  assert.deepEqual({reads,commits,ids,clock}, {reads:1,commits:1,ids:1,clock:1});
+});
+
+test("MIG-0641 U01g: already-accepted short-circuits without ids, time, commits or audit", async () => {
+  const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
+  const unexpected = () => { throw new Error("side effect must not happen"); };
+  const port = {
+    load: async () => ({ userBefore: {
+      id: "u1", accepted_terms_version_id: "v1", is_tos_accepted: 1, terms_reaccept_required: 0,
+    }, termsVersionId: "v1", existingConsentId: "already" }),
+    commit: unexpected, generateConsentId: unexpected, now: unexpected,
+  };
+  assert.deepEqual(await commitLatestTermsForUser(port, "u1"), { kind: "already_accepted", termsVersionId: "v1" });
+  assert.deepEqual(await commitLatestTermsForUser(port, null), { kind: "not_authenticated" });
+});
+
+test("MIG-0641 U01g: no user, invalid session snapshot, D1 error fail closed", async () => {
+  const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
+  const make = load => ({
+    load, commit: () => { throw Error("no writes allowed"); },
+    generateConsentId: () => "tos", now: () => 123,
+  });
+  assert.deepEqual(await commitLatestTermsForUser(make(async () => null), "u1"), { kind: "user_missing" });
+  assert.deepEqual(await commitLatestTermsForUser(make(async () => ({
+    userBefore: { id: "other", accepted_terms_version_id: null, is_tos_accepted: 0, terms_reaccept_required: 0 },
+    termsVersionId: "v", existingConsentId: null,
+  })), "u1"), { kind: "database_unavailable", retryable: true });
+  assert.deepEqual(await commitLatestTermsForUser(make(async () => { throw Error("private query secret"); }), "u1"),
+    { kind: "database_unavailable", retryable: true });
+});
+
+test("MIG-0641 U01g: audited CAS collision treats concurrent same-version acceptance as idempotent", async () => {
+  const { AuditMutationError } = await import("@flamenode/server-core/audit/mutate");
+  const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
+  const original = { id: "u1", is_tos_accepted: 0, accepted_terms_version_id: "old", terms_reaccept_required: 0 };
+  const accepted = { ...original, is_tos_accepted: 1, accepted_terms_version_id: "v1" };
+  let reads=0, commits=0;
+  const port = {
+    load: async () => ({ userBefore: reads++ ? accepted : original, termsVersionId: "v1", existingConsentId: "c1" }),
+    commit: async () => { commits++; throw new AuditMutationError("unique constraint with secrets"); },
+    generateConsentId: () => "unused", now: () => 120,
+  };
+  assert.deepEqual(await commitLatestTermsForUser(port, "u1"), { kind: "already_accepted", termsVersionId: "v1" });
+  assert.equal(reads, 2); assert.equal(commits, 1);
+});
+
+test("MIG-0641 U01g: stale CAS returns retryable conflict; unexpected mutation errors are redacted", async () => {
+  const { AuditMutationError } = await import("@flamenode/server-core/audit/mutate");
+  const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
+  const before = { id: "u1", is_tos_accepted: 0, accepted_terms_version_id: "old", terms_reaccept_required: 0 };
+  const mk = commit => ({
+    load: async () => ({userBefore: before, termsVersionId: "v1", existingConsentId: null}),
+    commit, generateConsentId: () => "c", now: () => 123,
+  });
+  assert.deepEqual(await commitLatestTermsForUser(mk(async () => { throw new AuditMutationError("internal info"); }), "u1"),
+    { kind: "concurrent_update", retryable: true });
+  assert.deepEqual(await commitLatestTermsForUser(mk(async () => { throw Error("sql with secret"); }), "u1"),
+    { kind: "commit_failed" });
+});
