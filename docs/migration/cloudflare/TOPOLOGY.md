@@ -172,3 +172,21 @@ Optimization blockers requiring frontend change: 0
 - MIG-0006 may now use this topology as the boundary for Cloudflare CPU/1102/request metrics.
 - MIG-0009 may now use the Queue/Cron graph as the platform baseline for background-job semantic inventory.
 - Any production topology mutation remains a separate explicitly approved operation.
+
+## TARGET (MIG-0628 Draft; **not CURRENT**, no deploy)
+
+This section is the proposed non-production verification topology, not a change
+to the four deployed Workers or the two CURRENT Custom Domains above. The
+tracked templates contain placeholder IDs and no Route/Custom Domain claims.
+
+| Proposed Worker | Entrypoint | Static assets | Binding boundary | State |
+| --- | --- | --- | --- | --- |
+| `flamenode-public-gateway` | `apps/site/src/gateway/index.ts` | Astro `apps/site/dist`, **Worker-first** | ASSETS, R2_STORAGE, VISIBILITY_KV, KV, DB (queue only), AUTH_ORIGIN service -> CURRENT Auth.js | Draft / dry-run only |
+| `flamenode-hono-api` | `apps/api/src/index.ts` | none | DB, BUCKET, KV; AUTH_SECRET and WORKER_ADMIN_TOKEN owner-provided **secrets**, not in tracked config | Draft / dry-run only |
+| `flamenode-personal` | Static Assets | Vite `apps/app/dist`, SPA fallback | no server bindings; authorization remains in Hono | Draft / dry-run only |
+| Ops SPA | MIG-0704 owner | not in MIG-0628 | TBD by separate task | Not built here |
+
+The production `flamenode-web` Workers Builds trigger remains unchanged.
+No additional Cloudflare account resources are created in this task.
+Local/CI-only verification and explicit future owner approval are described
+in [NEW_WORKER_DEPLOY.md](NEW_WORKER_DEPLOY.md).

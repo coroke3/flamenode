@@ -1,7 +1,7 @@
 # FlameNode Migration Status
 
 > Status: Active / progress source of truth
-> Last updated: 2026-10-27
+> Last updated: 2026-10-28
 > Architecture: [`README.md`](README.md)
 > Execution: [`AGENT_PROTOCOL.md`](AGENT_PROTOCOL.md)
 > Per-file progress: [`FILE_MIGRATION_MATRIX.md`](FILE_MIGRATION_MATRIX.md) / [`FILE_PROGRESS_PROTOCOL.md`](FILE_PROGRESS_PROTOCOL.md)
@@ -291,7 +291,7 @@ Validation:
 | MIG-0507 | `/:id` video catch-all | READY | MIG-0407 |
 | MIG-0509 | all public data generated at build time (D-09) | READY | MIG-0409 |
 | MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | READY | MIG-0634 |
-| MIG-0511 | public X icon map projection at build time | READY | MIG-0407, MIG-0409 |
+| MIG-0511 | public X icon map projection at build time | DONE | MIG-0407, MIG-0409 |
 | MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | DONE | MIG-0405, MIG-0619 |
 | MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | READY | MIG-0407, MIG-0634 |
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
@@ -338,7 +338,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0625 | Admin read APIs part A (users/videos/events/moderation) | DONE | MIG-0601, MIG-0608 |
 | MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | READY | MIG-0601, MIG-0608 |
 | MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509, MIG-0649 |
-| MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | READY | MIG-0405 |
+| MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | DONE | MIG-0405 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | DONE | MIG-0602, MIG-0616, MIG-0617 |
 | MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | DONE | MIG-0623 |
 | MIG-0631 | public event list / release Hono route (RH-015: live mode = D1, static_only = R2 artifact; RH-012: D1 gate + R2 artifact) | DONE | MIG-0602, MIG-0614 |
