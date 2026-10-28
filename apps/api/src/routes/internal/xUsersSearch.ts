@@ -149,9 +149,8 @@ xUsersSearchRoutes.use("*", async (c, next) => {
     });
   } catch (error) {
     if (enteredDownstream) throw error;
-    console.error("[x-users-search] session resolution unavailable", {
-      reason: error instanceof Error ? error.name : "unknown",
-    });
+    // A host exception may embed credentials. Do not log its message, stack or name.
+    console.error("[x-users-search] SESSION_RESOLUTION_UNAVAILABLE");
     return c.json({ error: "database_unavailable" }, 503, PRIVATE_HEADERS);
   }
 });
@@ -180,10 +179,9 @@ xUsersSearchRoutes.get("/", async (c) => {
   let bucket: R2Bucket | undefined;
   try {
     bucket = c.env?.BUCKET;
-  } catch (error) {
-    console.warn("[x-users-search] bucket binding unavailable", {
-      error: error instanceof Error ? error.name : "unknown",
-    });
+  } catch {
+    // Binding access failures must not disclose provider exception details.
+    console.warn("[x-users-search] R2_BINDING_UNAVAILABLE");
     return unavailable(c);
   }
   if (!bucket) {
@@ -217,8 +215,9 @@ xUsersSearchRoutes.get("/", async (c) => {
       return unavailable(c);
     }
     return searchResult(c, v1.items, query, limit, offset, onlyApproved, "v1").response;
-  } catch (error) {
-    console.error("[x-users-search] suggestion lookup failed", error);
+  } catch {
+    // R2 client exceptions may contain request metadata or private keys.
+    console.error("[x-users-search] SUGGESTIONS_LOOKUP_FAILED");
     return unavailable(c);
   }
 });
