@@ -127,7 +127,7 @@ if (runUnderRootTsx(import.meta.url)) {
     return objects;
   }
 
-  function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, throwBucketGetter = false, throwR2Get = false, noDb = false, objects = artifacts() } = {}) {
+  function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, throwBucketGetter = false, throwR2Get = false, throwDbGetter = false, noDb = false, objects = artifacts() } = {}) {
     const stats = { reads: 0, sql: [], gets: [], writes: 0 };
     const DB = {
       prepare(sql) {
@@ -175,6 +175,12 @@ if (runUnderRootTsx(import.meta.url)) {
     if (throwBucketGetter) {
       Object.defineProperty(env, "BUCKET", {
         get() { throw new Error("R2_BINDING_ACCESS_FAILURE_DO_NOT_EXPOSE"); },
+        configurable: true,
+      });
+    }
+    if (throwDbGetter) {
+      Object.defineProperty(env, "DB", {
+        get() { throw new Error("D1_BINDING_SECRET_SENTINEL"); },
         configurable: true,
       });
     }
@@ -254,6 +260,27 @@ if (runUnderRootTsx(import.meta.url)) {
       verifyPrivate(unavailable.response);
       assert.equal(unavailable.stats.gets.length, 0);
     }
+  });
+
+  test("T01: throwing D1 binding getter fails closed with private 503, not default Hono 500", async () => {
+    const { response, body, stats } = await request("?q=alice", { throwDbGetter: true });
+    assert.equal(response.status, 503);
+    assert.deepEqual(body, { error: "database_unavailable" });
+    verifyPrivate(response);
+    assert.ok(!JSON.stringify(body).includes("D1_BINDING_SECRET_SENTINEL"));
+    assert.equal(stats.reads, 0, "binding access must fail before any D1 statement");
+    assert.equal(stats.writes, 0);
+    assert.equal(stats.gets.length, 0, "failure must prevent all R2 candidate reads");
+
+    const { env, stats: fullStats } = makeEnv({ throwDbGetter: true });
+    const fullResponse = await fullHonoApp.request(URL_BASE + "?q=alice", {
+      headers: { Cookie: COOKIE },
+    }, env);
+    assert.equal(fullResponse.status, 503);
+    verifyPrivate(fullResponse);
+    assert.deepEqual(await fullResponse.json(), { error: "database_unavailable" });
+    assert.equal(fullStats.reads, 0);
+    assert.equal(fullStats.gets.length, 0);
   });
 
   test("T02: empty/one-character queries return exact CURRENT envelopes without R2 reads", async () => {
