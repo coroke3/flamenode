@@ -22,6 +22,35 @@ if (runUnderRootTsx(import.meta.url)) {
   const { resetMemberSuggestionsCacheForTest } = await import("../../../packages/server-core/src/memberSuggestion/loader.ts");
   const { resetMemberSuggestionsV2CacheForTest } = await import("../../../packages/server-core/src/memberSuggestion/v2Loader.ts");
 
+  // Import the real Next RH-019 handler under controlled Auth/Cloudflare ports.
+  // The source ranking/loaders remain the actual CURRENT implementation.
+  const { registerHooks } = await import("node:module");
+  const asStub = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
+  const legacyGuardStub = asStub(
+    "export async function requireRouteUser() { return globalThis.__mig0648LegacyTest.guard; }"
+  );
+  const legacyEnvStub = asStub(
+    "export function getEnv() { return globalThis.__mig0648LegacyTest.env; }"
+  );
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier === "@/lib/auth/routeGuard") {
+        return { url: legacyGuardStub, shortCircuit: true };
+      }
+      if (specifier === "@/lib/cloudflare") {
+        return { url: legacyEnvStub, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+  const { GET: legacyGET } = await import("../../../app/api/internal/x-users/search/route.ts");
+  const {
+    resetMemberSuggestionsCacheForTest: resetLegacyV1,
+  } = await import("../../../src/lib/video/memberSuggestionsLoader.ts");
+  const {
+    resetMemberSuggestionsV2CacheForTest: resetLegacyV2,
+  } = await import("../../../src/lib/video/memberSuggestionsV2Loader.ts");
+
   const URL_BASE = "https://flamenode.example/api/internal/x-users/search";
   const COOKIE = "__Secure-authjs.session-token=test-session-token";
   const REFINE_HINT = "候補が多いため、名前またはX IDを追加で入力してください。";
@@ -227,4 +256,60 @@ if (runUnderRootTsx(import.meta.url)) {
     verifyPrivate(response);
     assert.equal(stats.reads, 1);
   });
+  test("RH-019 full HTTP golden: Next CURRENT and Hono adapter match status, body, cache and R2 keys", async () => {
+    const testCases = [
+      { path: "", note: "empty" },
+      { path: "?q=a", note: "short" },
+      { path: "?q=al&limit=2&onlyApproved=1", note: "V2" },
+      { path: "?q=alice&limit=20&offset=1", note: "V1 fuzzy/pagination compatibility fallback" },
+      { path: "?q=alice&limit=0&offset=bad", note: "bounded params" },
+      { path: "?q=%E3%82%82%E3%81%A1", note: "Unicode" },
+      { path: "?q=al", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, note: "401" },
+      { path: "?q=al", guard: { ok: false, status: 403, error: "account_disabled" }, banned: true, note: "403" },
+      { path: "?q=al", guard: { ok: false, status: 503, error: "database_unavailable" }, dbFailure: true, note: "auth 503" },
+      { path: "?q=alice", missingArtifacts: true, note: "missing artifacts 503" },
+      { path: "?q=alice", noBucket: true, note: "no bucket 503" },
+    ];
+    for (const entry of testCases) {
+      const objects = entry.missingArtifacts ? new Map() : artifacts();
+      const legacy = makeEnv({ objects, noBucket: entry.noBucket });
+      const guard = entry.guard ?? { ok: true, user: { id: "user-1", is_banned: 0 } };
+      resetLegacyV1();
+      resetLegacyV2();
+      globalThis.__mig0648LegacyTest = { guard, env: legacy.env };
+      let current;
+      try {
+        const response = await legacyGET(new Request(URL_BASE + entry.path));
+        current = {
+          status: response.status,
+          body: await response.json(),
+          cache: response.headers.get("Cache-Control"),
+          pragma: response.headers.get("Pragma"),
+          expires: response.headers.get("Expires"),
+          retry: response.headers.get("Retry-After"),
+        };
+      } finally {
+        delete globalThis.__mig0648LegacyTest;
+      }
+      const target = await request(entry.path, {
+        anonymous: entry.anonymous,
+        banned: entry.banned,
+        dbFailure: entry.dbFailure,
+        objects,
+        noBucket: entry.noBucket,
+      });
+      assert.deepEqual({
+        status: target.response.status,
+        body: target.body,
+        cache: target.response.headers.get("Cache-Control"),
+        pragma: target.response.headers.get("Pragma"),
+        expires: target.response.headers.get("Expires"),
+        retry: target.response.headers.get("Retry-After"),
+      }, current, entry.note);
+      assert.deepEqual(target.stats.gets, legacy.stats.gets, `R2 key path: ${entry.note}`);
+      assert.ok(target.stats.reads <= 1, `session D1 read bound: ${entry.note}`);
+      assert.equal(target.stats.writes, 0);
+    }
+  });
+
 }
