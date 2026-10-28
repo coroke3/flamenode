@@ -451,3 +451,64 @@ test("MIG-0517: over-1MiB ASCII and UTF-8 ranking preserve last-good R2 artifact
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("MIG-0517: R2 commit point after cancellation is reported as written, not failed", async () => {
+  const controller = new AbortController();
+  const writes = [];
+  const logLines = [];
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  console.log = (line) => { logLines.push(String(line)); };
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw new Error("unexpected GA4 request: " + String(input));
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "video-a" }],
+        metricValues: [{ value: "3" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = enabledGa4Env({
+    KV: {
+      async get() {
+        return JSON.stringify({
+          access_token: "cached-token",
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        });
+      },
+    },
+    R2: {
+      get() { throw new Error("unexpected old ranking read"); },
+      async put(key, body) {
+        writes.push({ key, body: JSON.parse(String(body)) });
+        // R2 PUT completed, but caller's guard expires at the same boundary.
+        controller.abort();
+      },
+    },
+  });
+
+  try {
+    const result = await syncGa4Trending(env, controller.signal);
+    assert.equal(result.failed, 0);
+    assert.equal(result.processed, 1);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].key, GA4_TRENDING_OUTPUT_KEY);
+    assert.equal(writes[0].body.items[0].id, "video-a");
+    const lastEvent = JSON.parse(logLines.at(-1));
+    assert.equal(lastEvent.result, "ok");
+    assert.equal(lastEvent.r2_written, true);
+    assert.equal(controller.signal.aborted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+});
