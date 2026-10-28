@@ -43,7 +43,7 @@ test("MIG-0505 U02 capture records six complete images but never claims visual p
 
     const wrongSizeCli = path.join(dir, "wrong-size-playwright-stub");
     const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnUqQAAAABJRU5ErkJggg==";
-    fs.writeFileSync(wrongSizeCli, "#!/usr/bin/env node\\nrequire('node:fs').writeFileSync(process.argv.at(-1), Buffer.from('" + onePixelPng + "', 'base64'));\\n".replaceAll("\\\\n", "\\n"));
+    fs.writeFileSync(wrongSizeCli, "#!/usr/bin/env node\nrequire('node:fs').writeFileSync(process.argv.at(-1), Buffer.from('" + onePixelPng + "', 'base64'));\n");
     fs.chmodSync(wrongSizeCli, 0o755);
     const wrongSizeOutput = path.join(dir, "wrong-size-shots");
     fs.mkdirSync(wrongSizeOutput);
