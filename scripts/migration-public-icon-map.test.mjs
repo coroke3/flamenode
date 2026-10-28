@@ -9,11 +9,10 @@ import {
   loadPublicXIconMapForBuild,
   portfolioIconUrl,
   projectEventDetailIcons,
+  projectVideoMemberPresentation,
   projectPublicXIconMap,
 } from "../apps/site/src/lib/publicIconMap.ts";
 import { PUBLIC_X_ICON_MAP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
-import { buildVideoPages } from "../apps/site/src/lib/videoPage.ts";
-import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "../apps/site/src/lib/videoFixtures.ts";
 import { buildPortfolioHead } from "../apps/site/src/lib/userViews.ts";
 
 const entry = (source, icon_url) => ({ source, icon_url });
@@ -99,27 +98,37 @@ test("T02: optional icon map accepts only a SHA-verified, manifest-allowed publi
   }
 });
 
-test("T03: video members and creator profile links use only registered/none public icon projections", () => {
-  const payload = structuredClone(FIXTURE_VIDEO_DETAIL_PAYLOADS["vid-bbb"]);
-  payload.video.creator_has_public_profile = false;
-  payload.public_members = [{
-    id: "m1", display_name: "Member A", x_user_id: "member_a",
-    role_label: "制作", icon_url: "https://example.com/old.png", has_public_profile: false,
-  }];
-  const noMap = buildVideoPages(payload, "fixture:vid-bbb", 1_790_000_000, new Map())[0];
-  assert.equal(noMap.data.members[0].iconUrl, "https://example.com/old.png");
-  assert.equal(noMap.data.members[0].profileHref, null);
-  assert.equal(noMap.data.creator.profileHref, null);
-  const iconMap = new Map([
-    ["member_a", entry("registered", "https://example.com/new.png")],
-    ["hato", entry("none", null)],
-  ]);
-  const enriched = buildVideoPages(payload, "fixture:vid-bbb", 1_790_000_000, iconMap)[0];
-  assert.equal(enriched.data.members[0].iconUrl, "https://example.com/new.png");
-  assert.equal(enriched.data.members[0].profileHref, "/user/member_a");
-  assert.equal(enriched.data.creator.profileHref, "/user/hato");
-  assert.equal(enriched.data.creator.iconUrl, noMap.data.creator.iconUrl,
-    "CURRENT does not project the primary video's creator icon here");
+test("T03: video member icon and profile projections preserve CURRENT fail-closed semantics", () => {
+  const member = {
+    x_user_id: "member_a",
+    icon_url: "https://example.com/old.png",
+    has_public_profile: false,
+  };
+  assert.deepEqual(projectVideoMemberPresentation(member, new Map()), {
+    iconUrl: "https://example.com/old.png",
+    profileHref: null,
+  }, "missing optional icon map retains the legacy icon without adding a profile link");
+
+  const registeredMap = new Map([["member_a", entry("registered", "https://example.com/new.png")]]);
+  assert.deepEqual(projectVideoMemberPresentation(member, registeredMap), {
+    iconUrl: "https://example.com/new.png",
+    profileHref: "/user/member_a",
+  });
+  const noIconMap = new Map([["member_a", entry("none", null)]]);
+  assert.deepEqual(projectVideoMemberPresentation(member, noIconMap), {
+    iconUrl: null,
+    profileHref: "/user/member_a",
+  }, "known no-icon users suppress stale icons but retain public profile links");
+
+  const videoMap = new Map([["member_a", entry("video", "https://example.com/video.png")]]);
+  assert.equal(projectVideoMemberPresentation(member, videoMap).profileHref, null,
+    "a video-only icon must not authorize a public profile");
+  assert.equal(projectVideoMemberPresentation({ ...member, has_public_profile: true }, videoMap).profileHref,
+    "/user/member_a", "existing CURRENT profile visibility is preserved");
+  assert.deepEqual(projectVideoMemberPresentation({ ...member, x_user_id: null }, registeredMap), {
+    iconUrl: "https://example.com/old.png",
+    profileHref: null,
+  }, "missing identity never creates a profile link");
 });
 
 test("T05: portfolio OGP projection stays browser-safe and matches the pure helper", () => {
