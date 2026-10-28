@@ -28,7 +28,7 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | `events/index.json` (event list + group sections) | 30 s (`app/(public)/event/page.tsx:8`); R2 object `max-age=300` (`workers/json-generator/rebuild.ts` `rebuildEventsIndex`) | event / group / public staff edit, visibility change | **build** (`apps/site/scripts/readPublicData.ts`, this PR) | MIG-0409 → MIG-0509 |
 | Home `top.json` sections | 120 s (`app/(public)/page.tsx:53`) | video publish, featured edit, stats | build (sections faster than the build interval → API) | MIG-0509 / MIG-06xx |
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
-| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
+| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | GA4 input: D1 bounded public snapshot, 1 SELECT / no R2 list read (MIG-0517 PR #442; code review/CI pending) | MIG-0409 U06 → MIG-0517 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | Queue → R2 HTML, **server-rendered like the build's static page** (MIG-0403 mapping, empty lists; warm max ≈ 1.2 ms local Node wall). **Re-measure when MIG-0502 / MIG-0507 add lists** (upper-bound with lists: 25–49 ms) | MIG-0411 |
 | User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
