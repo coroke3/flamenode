@@ -27,6 +27,10 @@ export const ManageStaffRoleSchema = z.enum(["representative", "editor"]);
 
 export const ManageNavigationResponseSchema = z.object({
   access: ManageAccessSchema,
+  /** CURRENT sidebar active X (approved linked ID, resolved consistently with /api/manage). */
+  activeXUserId: z.string().nullable(),
+  /** Approved event-staff X IDs used for the mismatch warning (non-admin only). */
+  manageStaffXUserIds: z.array(z.string()),
   /** Sidebar order: start_time DESC, created_at DESC, id DESC. */
   events: z.array(ManageNavigationEventSchema),
   /** true when the manageable event list was cut at the API cap (CURRENT is unbounded). */

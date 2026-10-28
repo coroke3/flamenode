@@ -1,0 +1,253 @@
+// MIG-0621 U01 — byte-exact robots.txt parity with CURRENT's real Next.js serializer.
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import test from "node:test";
+import { buildRobotsText, GET, ROBOTS_DISALLOW } from "../apps/site/src/pages/robots.txt.ts";
+import { siteOrigin } from "../apps/site/src/lib/pageHead.ts";
+import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
+import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
+import { SITEMAP_VIDEOS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
+
+const require = createRequire(import.meta.url);
+const { resolveRobots, resolveSitemap } = require("next/dist/build/webpack/loaders/metadata/resolve-route-data.js");
+const root = new URL("../", import.meta.url);
+const origin = "https://flamenode.net";
+
+function currentRobotsContract(source) {
+  // Deliberately fail if CURRENT changes syntax or directives: silently accepting
+  // an old hardcoded list would weaken the migration parity guarantee.
+  const match = source.match(/disallow:\s*\[([\s\S]*?)\]/);
+  assert.ok(match, "CURRENT robots.ts must contain an explicit disallow array");
+  assert.match(source, /userAgent:\s*["']\*["']/);
+  assert.match(source, /allow:\s*["']\/["']/);
+  assert.match(source, /sitemap:\s*absoluteUrl\(["']\/sitemap\.xml["']\)/);
+  assert.match(source, /host:\s*site\.origin/);
+  const entries = [...match[1].matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  assert.equal(entries.length, 9, "CURRENT must explicitly list 9 disallows");
+  return {
+    rules: [{ userAgent: "*", allow: "/", disallow: entries }],
+    host: origin,
+    sitemap: `${origin}/sitemap.xml`,
+  };
+}
+
+test("MIG-0621 U01 T01: Astro robots output equals Next resolveRobots byte-for-byte", async () => {
+  assert.equal(typeof resolveRobots, "function", "Next metadata serializer must exist");
+  const source = await readFile(new URL("app/robots.ts", root), "utf8");
+  const contract = currentRobotsContract(source);
+  assert.deepEqual([...ROBOTS_DISALLOW], contract.rules[0].disallow);
+  const expected = resolveRobots(contract);
+  assert.equal(buildRobotsText(origin), expected);
+  assert.equal(Buffer.compare(Buffer.from(buildRobotsText(origin)), Buffer.from(expected)), 0);
+  assert.ok(expected.endsWith("\n"), "must retain trailing newline");
+});
+
+test("MIG-0621 U01: Astro GET is plain text and keeps the configured public origin", async () => {
+  const response = GET();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/plain/i);
+  assert.equal(await response.text(), buildRobotsText(siteOrigin()));
+});
+
+test("MIG-0621 U01: built robots.txt matches the exact Next output (REQUIRE_BUILT gate)", async (t) => {
+  if (process.env.REQUIRE_BUILT !== "1") return t.skip("set REQUIRE_BUILT=1 after Astro build");
+  const source = await readFile(new URL("app/robots.ts", root), "utf8");
+  const expected = resolveRobots(currentRobotsContract(source));
+  const built = await readFile(new URL("apps/site/dist/robots.txt", root));
+  assert.equal(Buffer.compare(built, Buffer.from(expected)), 0);
+});
+
+test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", () => {
+  assert.equal(typeof resolveSitemap, "function", "Next sitemap serializer must exist");
+  const entries = buildSitemapEntries({
+    origin,
+    videos: [{ id: "video_1", youtube_video_id: "yt-1", scheduled_time: 1_700_000_000 }],
+    events: [{ id: "event 1", end_time: null, start_time: 1_700_000_100 }],
+    creators: [{ x_id: "creator_a", updated_at: null }],
+    generatedAt: [1_700_000_020],
+    now: new Date("2026-10-27T00:00:00.000Z"),
+  });
+  assert.equal(entries.length, 10, "seven static entries and three dynamic entries");
+  assert.deepEqual(entries.map((row) => new URL(row.url).pathname.slice(0, 6)).filter((x) => x === "/event").length, 2);
+  assert.ok(entries.some((row) => row.url === origin + "/yt-1"));
+  assert.ok(entries.some((row) => row.url === origin + "/event/event%201"));
+  assert.ok(entries.some((row) => row.url === origin + "/user/creator_a"));
+  assert.equal(entries.at(-1).lastModified.toISOString(), new Date(1_700_000_020_000).toISOString());
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries), "Next 15.5 XML serialization must remain identical");
+});
+
+test("MIG-0621: duplicate video aliases and creators never duplicate sitemap locs", () => {
+  const first = 1_700_000_000;
+  const entries = buildSitemapEntries({
+    origin,
+    videos: [
+      { id: "vid_a", youtube_video_id: "shared_alias", scheduled_time: first },
+      { id: "vid_b", youtube_video_id: "shared_alias", scheduled_time: first + 60 },
+      { id: "about", youtube_video_id: null, scheduled_time: null },
+      { id: "dot", youtube_video_id: ".", scheduled_time: null },
+      { id: "vid_c", youtube_video_id: "unique_alias", scheduled_time: null },
+    ],
+    events: [
+      { id: "public-event", start_time: first, end_time: null },
+      { id: "public-event", start_time: first + 60, end_time: null },
+    ],
+    creators: [
+      { x_id: "creator_a", updated_at: null },
+      { x_id: "creator_a", updated_at: first },
+    ],
+    generatedAt: [first],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  const urls = entries.map((item) => item.url);
+  assert.equal(entries.length, 11, "7 fixed pages, 2 unique video URLs, 1 event, 1 creator");
+  assert.equal(new Set(urls).size, urls.length);
+  assert.equal(urls.filter((url) => url === origin + "/").length, 1);
+  assert.equal(urls.filter((url) => url === origin + "/about").length, 1);
+  assert.equal(urls.filter((url) => url === origin + "/shared_alias").length, 1);
+  assert.equal(entries.find((item) => item.url === origin + "/shared_alias")?.lastModified.toISOString(),
+    new Date(first * 1000).toISOString(), "first canonical video entry must retain CURRENT ordering");
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
+test("MIG-0621: unpublished video/event detail must never appear in sitemap", () => {
+  const videos = [
+    { id: "published", youtube_video_id: "published_yt", scheduled_time: null },
+    { id: "missing_detail", youtube_video_id: "missing_yt", scheduled_time: null },
+  ];
+  const events = [
+    { id: "published_event", start_time: null, end_time: null },
+    { id: "missing_event", start_time: null, end_time: null },
+  ];
+  const entries = buildSitemapEntries({
+    origin,
+    videos: publishedSitemapRows(videos, new Set(["published"])),
+    events: publishedSitemapRows(events, new Set(["published_event"])),
+    creators: [],
+    generatedAt: [],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  const urls = entries.map((row) => row.url);
+  assert.ok(urls.includes(origin + "/published_yt"));
+  assert.ok(urls.includes(origin + "/event/published_event"));
+  assert.equal(urls.includes(origin + "/missing_yt"), false);
+  assert.equal(urls.includes(origin + "/event/missing_event"), false);
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
+test("MIG-0621: snapshot-free sitemap includes the same canonical fixture videos Astro emits", async () => {
+  const warnings = [];
+  const snapshot = await sitemapVideosOrEmpty(null, (message) => warnings.push(message));
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /published video fixtures/);
+  assert.deepEqual(snapshot.videos, [
+    { id: "vid-aaa", youtube_video_id: "dKw1xV41f8s", scheduled_time: 1_760_000_000 },
+    { id: "vid-bbb", youtube_video_id: null, scheduled_time: 1_760_000_000 },
+  ]);
+  const entries = buildSitemapEntries({
+    origin,
+    videos: snapshot.videos,
+    events: [],
+    creators: [],
+    now: new Date("2026-10-27T00:00:00Z"),
+  });
+  assert.equal(entries.length, 9, "7 fixed URLs and 2 emitted canonical fixture pages");
+  const urls = entries.map((row) => row.url);
+  assert.ok(urls.includes(origin + "/dKw1xV41f8s"));
+  assert.ok(urls.includes(origin + "/vid-bbb"));
+  assert.equal(urls.includes(origin + "/vid-aaa"), false, "internal alias is not canonical");
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries));
+});
+
+test("MIG-0621 U03 T04: missing manifest sitemap key warns once and omits only video URLs", async () => {
+  const warnings = [];
+  const access = {
+    source: { read: async () => null },
+    options: {
+      manifest: { schemaVersion: 1, generation: "g1", allowedKeys: [], blockedKeys: [] },
+      generation: "g1",
+    },
+  };
+  const omitted = await sitemapVideosOrEmpty(access, (message) => warnings.push(message));
+  assert.deepEqual(omitted, { generated_at: null, videos: [] });
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0].includes(SITEMAP_VIDEOS_KEY));
+  const entries = buildSitemapEntries({
+    origin,
+    videos: omitted.videos,
+    events: [{ id: "public-event", start_time: null, end_time: null }],
+    creators: [],
+    generatedAt: [],
+    now: new Date("2026-10-27T00:00:00.000Z"),
+  });
+  assert.equal(entries.length, 8, "missing video snapshot must not delete the public event/static URLs");
+});
+
+test("MIG-0621 U03: hash-corrupted optional video snapshot fails closed, not silently omitted", async () => {
+  const warnings = [];
+  const payload = {
+    schemaVersion: 1, generation: "g1", key: SITEMAP_VIDEOS_KEY,
+    visibility: "public", sha256: "0".repeat(64),
+    payload: { generated_at: null, videos: [] },
+  };
+  const access = {
+    source: { read: async () => new TextEncoder().encode(JSON.stringify(payload)) },
+    options: {
+      manifest: { schemaVersion: 1, generation: "g1", allowedKeys: [SITEMAP_VIDEOS_KEY], blockedKeys: [] },
+      generation: "g1",
+    },
+  };
+  await assert.rejects(
+    sitemapVideosOrEmpty(access, (message) => warnings.push(message)),
+    (error) => error?.code === "HASH_MISMATCH",
+  );
+  assert.equal(warnings.length, 0);
+});
+
+
+test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once", async (t) => {
+  if (process.env.REQUIRE_BUILT !== "1") return t.skip("set REQUIRE_BUILT=1 after Astro build");
+  const xml = await readFile(new URL("apps/site/dist/sitemap.xml", root), "utf8");
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n'));
+  assert.ok(xml.endsWith("</urlset>\n"));
+  const urls = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  assert.equal(urls.length, new Set(urls).size, "sitemap cannot contain duplicated canonical URLs");
+  for (const path of ["/", "/recommend", "/list", "/event", "/user", "/about", "/rules"]) {
+    assert.ok(urls.includes(origin + path), `missing static sitemap URL ${path}`);
+  }
+  assert.equal(urls.some((url) => url.includes("/admin/") || url.includes("/dashboard/")), false,
+    "private workspace URLs cannot appear in sitemap");
+  assert.equal([...xml.matchAll(/<url>/g)].length, urls.length, "all sitemap entries need a loc");
+  // Under the fixture build, every sitemap URL must resolve to an emitted
+  // public HTML asset, including event and creator detail URLs. This catches
+  // index/detail drift that a bare <loc> assertion would miss.
+  if (!process.env.FLAMENODE_SNAPSHOT_DIR &&
+      !process.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE &&
+      !process.env.FLAMENODE_SNAPSHOT_GENERATION) {
+    for (const url of urls) {
+      const pathname = new URL(url);
+      assert.equal(pathname.origin, origin, "sitemap must not advertise external hosts");
+      const relative = pathname.pathname === "/" ? "" : pathname.pathname.slice(1) + "/";
+      const html = await readFile(new URL(`apps/site/dist/${relative}index.html`, root), "utf8");
+      assert.match(html, /<html\b/i, `published sitemap URL must have HTML: ${url}`);
+    }
+  }
+  // With no snapshot env, Astro emits the fixture /[id] pages. A sitemap
+  // containing only its seven static URLs would silently miss those pages.
+  if (!process.env.FLAMENODE_SNAPSHOT_DIR &&
+      !process.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE &&
+      !process.env.FLAMENODE_SNAPSHOT_GENERATION) {
+    assert.ok(urls.includes(origin + "/dKw1xV41f8s"), "missing emitted canonical YouTube fixture");
+    assert.ok(urls.includes(origin + "/vid-bbb"), "missing emitted no-YouTube fixture");
+    assert.equal(urls.includes(origin + "/vid-aaa"), false, "fixture internal alias is not canonical");
+    // Prove these indexed URLs actually have built public HTML pages and the
+    // canonical tag points at the same URL. Listing a URL alone misses 404s.
+    for (const slug of ["dKw1xV41f8s", "vid-bbb"]) {
+      const html = await readFile(new URL(`apps/site/dist/${slug}/index.html`, root), "utf8");
+      const canonical = /<link rel="canonical" href="([^"]+)">/.exec(html)?.[1];
+      assert.equal(canonical, origin + "/" + slug,
+        `sitemap ${slug} must match its emitted public HTML canonical URL`);
+    }
+  }
+});
+
