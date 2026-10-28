@@ -8,6 +8,9 @@ export const MODULES = [
   ["vcard", "src/components/video/VideoCard.module.css", "apps/app/src/styles/video-card.css"],
   ["ydesc", "src/components/forms/YoutubeDescriptionPreview.module.css", "apps/app/src/styles/forms-a.css"],
   ["cq", "src/components/forms/CustomQuestionFields.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-badge", "src/components/video/permission/PermissionBadge.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-lock", "src/components/video/permission/FieldLockNote.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-label", "src/components/video/permission/PermissionFieldLabel.module.css", "apps/app/src/styles/forms-a.css"],
 ];
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
