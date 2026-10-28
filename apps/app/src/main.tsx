@@ -7,6 +7,7 @@ import "./styles/video-card.css";
 import "./styles/dashboard.css";
 import "./styles/settings.css";
 import "./styles/onboarding.css";
+import "./styles/forms-a.css";
 import { App } from "./App.js";
 
 const rootElement = document.getElementById("root");
