@@ -6,6 +6,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { rebuildTarget } from "../json-generator/rebuild.ts";
+import { optimizedRebuildTarget } from "../json-generator/optimizedRebuild.ts";
 
 
 function fixture() {
@@ -313,4 +314,85 @@ test("MIG-0517: malformed D1 result rows fail closed", async () => {
     () => loadRecentListFromD1(db),
     /ga4_recent_d1_invalid_public_row/,
   );
+});
+
+
+test("MIG-0517 T01 optimized generator: materialized-source list/recent agrees with D1 for tied times and privacy", async (t) => {
+  const { sqlite, d1 } = canonicalSqliteFixture();
+  t.after(() => sqlite.close());
+  sqlite.prepare('INSERT INTO "user" (id) VALUES (?)').run("auth-1");
+  sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)").run("creator-1", "Creator", "approved");
+  const event = sqlite.prepare("INSERT INTO events (id, title, visibility_status) VALUES (?, ?, ?)");
+  event.run("event-public", "Public Event", "public");
+  event.run("event-hidden", "Private Event", "private");
+  event.run("PVSFSummary", "Summary", "public");
+  const video = sqlite.prepare(
+    `INSERT INTO videos (
+      id, title, youtube_video_id, creator_display_name, creator_x_user_id,
+      submitted_by_user_id, visibility_status, scheduled_time, primary_event_id,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const insert = (id, time, visibility = "public", eventId = null) =>
+    video.run(id, "Title " + id, "yt-" + id, "Creator", "creator-1", "auth-1", visibility, time, eventId, 123);
+  insert("tied-z", 500, "public", "event-public");
+  insert("tied-a", 500, "public", "event-hidden");
+  insert("middle", 300);
+  insert("old", null);
+  insert("hidden", 700, "private");
+  insert("excluded-primary", 650, "public", "PVSFSummary");
+  insert("excluded-linked", 600);
+  sqlite.prepare("INSERT INTO video_events (video_id, event_id) VALUES (?, ?)").run("excluded-linked", "PVSFSummary");
+
+  const stored = new Map();
+  let writeNumber = 0;
+  const r2 = {
+    async get(key) {
+      const item = stored.get(key);
+      return item
+        ? {
+            etag: item.etag,
+            size: Buffer.byteLength(item.body),
+            customMetadata: item.customMetadata,
+            async json() { return JSON.parse(item.body); },
+            async text() { return item.body; },
+          }
+        : null;
+    },
+    async head(key) {
+      const item = stored.get(key);
+      return item
+        ? { etag: item.etag, customMetadata: item.customMetadata, uploaded: new Date(), size: Buffer.byteLength(item.body) }
+        : null;
+    },
+    async put(key, body, options = {}) {
+      const item = {
+        body: String(body),
+        customMetadata: options.customMetadata ?? {},
+        etag: "test-" + (++writeNumber),
+      };
+      stored.set(key, item);
+      return { etag: item.etag };
+    },
+    async delete(key) { stored.delete(key); },
+  };
+  const env = { DB: d1, R2: r2, KV: { async put() {} } };
+  await optimizedRebuildTarget(env, "list_recent", "global", 123);
+  const artifact = stored.get("list/recent.json");
+  assert.ok(artifact, "optimized materialized source must publish list/recent.json");
+  assert.ok(stored.has("internal/materialized/video-cards/v1/manifest.json"), "optimized materialization must be exercised");
+  const generated = JSON.parse(artifact.body);
+  const d1Recent = await loadRecentListFromD1(d1);
+  const expectedIds = ["tied-a", "tied-z", "middle", "old"];
+  assert.deepEqual(generated.items.map((row) => row.id), expectedIds);
+  assert.deepEqual(d1Recent.items.map((row) => row.id), expectedIds);
+  assert.deepEqual(
+    d1Recent.items.map((row) => row.primary_event_title),
+    generated.items.map((row) => row.primary_event_title),
+  );
+  assert.deepEqual(
+    d1Recent.items.map((row) => row.status),
+    generated.items.map((row) => row.status),
+  );
+  assert.doesNotMatch(JSON.stringify(d1Recent.items), /Private Event|excluded-linked|excluded-primary|hidden/);
 });
