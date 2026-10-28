@@ -14,6 +14,7 @@ import { AdminResourceTabs } from "../.test-dist/apps/ops/src/components/shared/
 import { AdminSectionTabs } from "../.test-dist/apps/ops/src/components/shared/AdminSectionTabs.js";
 import { OpsLink } from "../.test-dist/apps/ops/src/components/shared/OpsLink.js";
 import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
 
 const render = (element, at = "/admin/audit") =>
   renderToStaticMarkup(React.createElement(MemoryRouter, { initialEntries: [at] }, element));
@@ -49,8 +50,8 @@ test("MIG-0707 T06: EmptyState uses prefixed CURRENT CSS and the same accessible
   assert.match(html, /fn-empty-state empty-empty empty-tone-warning/);
   assert.match(html, /class="empty-icon" aria-hidden="true"/);
   assert.match(html, /<h2 class="empty-title">空です<\/h2>/);
-  assert.match(html, /href="\/admin\/audit" class="fn-btn fn-btn-primary"/);
-  assert.match(html, /href="\/" class="fn-btn fn-btn-ghost"/);
+  assert.equal(new JSDOM(html).window.document.querySelector('a[href="/admin/audit"]')?.className, "fn-btn fn-btn-primary");
+  assert.equal(new JSDOM(html).window.document.querySelector('a[href="/"]')?.className, "fn-btn fn-btn-ghost");
 });
 test("MIG-0707 T06: ConsolePageHeader preserves accent, actions, back link", () => {
   const html = render(h(ConsolePageHeader, { title: "配信", description: "詳細", accent: true,
@@ -58,7 +59,7 @@ test("MIG-0707 T06: ConsolePageHeader preserves accent, actions, back link", () 
   }));
   assert.match(html, /fn-console-head manage-event-hero/);
   assert.match(html, /href="\/dashboard"/);
-  assert.match(html, /href="\/manage\/events" class="fn-btn fn-btn-danger fn-btn-sm"/);
+  assert.equal(new JSDOM(html).window.document.querySelector('a[href="/manage/events"]')?.className, "fn-btn fn-btn-danger fn-btn-sm");
   assert.match(html, /<h1 class="fn-console-title">配信<\/h1>/);
 });
 test("MIG-0707 T06: notices preserve CURRENT delay wording and conditional status", () => {
@@ -82,5 +83,5 @@ test("MIG-0707 T06: Admin tabs preserve hub labels, pathname and aria-current", 
   assert.match(html, /aria-current="page"/);
   const hub = render(h(AdminSectionTabs, { hub: "audit" }), "/admin/audit/settings");
   assert.match(hub, /class="sectabs-tabs" aria-label="監査メニュー"/);
-  assert.match(hub, /href="\/admin\/audit\/settings" class="fn-btn fn-btn-sm fn-btn-primary" aria-current="page"/);
+  assert.equal(new JSDOM(hub).window.document.querySelector('a[href="/admin/audit/settings"]')?.getAttribute("aria-current"), "page");
 });
