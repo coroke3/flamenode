@@ -73,7 +73,7 @@ export async function loadRecentListFromD1(
   signal?.throwIfAborted();
   // A malformed D1 response is an operational failure, not a genuinely
   // empty public-video collection. Never silently skip sync on driver errors.
-  if (!result || !Array.isArray(result.results)) {
+  if (!result || result.success === false || !Array.isArray(result.results)) {
     throw new Error("ga4_recent_d1_invalid_result");
   }
   const rows = result.results;
