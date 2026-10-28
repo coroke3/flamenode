@@ -11,7 +11,7 @@ import { loadMemberSuggestionsCandidatesV2FromBucket } from "@flamenode/server-c
 import { loadMemberSuggestionsIndexFromBucket } from "@flamenode/server-core/memberSuggestion/loader";
 import { searchMemberSuggestions } from "@flamenode/server-core/memberSuggestion/search";
 import type { MemberSuggestionItem } from "@flamenode/server-core/memberSuggestion/core";
-import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
+import { extractSessionToken, requireAuth, sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
 
 const MAX_LIMIT = 50;
@@ -149,6 +149,17 @@ xUsersSearchRoutes.use("*", async (c, next) => {
     });
   } catch (error) {
     if (enteredDownstream) throw error;
+    // sessionMiddleware accesses DB before checking the cookie. If that
+    // binding getter throws for a request without an Auth.js session token,
+    // CURRENT requires 401, not a misleading database_unavailable 503.
+    // Reuse the same cookie parser and secure-cookie selection as the shared
+    // resolver; do not treat unrelated cookies as authenticated.
+    const token = extractSessionToken(c.req.header("cookie"), {
+      secure: new URL(c.req.url).protocol === "https:",
+    });
+    if (!token) {
+      return c.json({ error: "unauthorized" }, 401, PRIVATE_HEADERS);
+    }
     // A host exception may embed credentials. Do not log its message, stack or name.
     console.error("[x-users-search] SESSION_RESOLUTION_UNAVAILABLE");
     return c.json({ error: "database_unavailable" }, 503, PRIVATE_HEADERS);
