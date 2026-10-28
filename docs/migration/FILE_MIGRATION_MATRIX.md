@@ -1066,6 +1066,8 @@
 | `apps/app/test/memberSuggestionRank.test.mjs` | TEST | CURRENT ranking and alias normalization cases against SPA copy | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=6e50382bffc07c1df6eadb1e37f8ee21d31f2580 TEST=npm run test --workspace=@flamenode/app CI=pending |
 | `apps/app/test/clipboardPort.test.mjs` | TEST | CURRENT Clipboard API success/rejection/DOM fallback against SPA copy | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=7d7e6d864265a43d2e62ba9a4ab7507592edc3fc TEST=npm run test --workspace=@flamenode/app CI=pending |
 
+| `apps/app/test/delimitedPort.test.mjs` | TEST | UTF8 BOM, quoted CSV/TSV, maxRows and Unicode roundtrip member input tests | MIG-0713 | SAME | IN_PROGRESS | PR#435 SHA=97a3290510a6c410c84f6dad56b13f721116a42d TEST=apps/app/test/delimitedPort.test.mjs CI=pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
