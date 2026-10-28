@@ -44,7 +44,8 @@ test("T06: logged in pending terms, pending X and approved X match CURRENT secti
     try {
       assert.match(m.container.textContent, new RegExp(title));
       assert.ok(hrefs(m).includes(target), title);
-      assert.ok(hrefs(m).includes("/event/event-1/slots"), "event list route preserved");
+      const eventHref = state.canReserveSlot ? "/event/event-1/slots" : "/onboarding?next=%2Fevent%2Fevent-1%2Fslots";
+      assert.ok(hrefs(m).includes(eventHref), `CURRENT reservation guard for ${title}`);
       assert.match(m.container.textContent, /残り 3 枠/);
     } finally { await m.unmount(); }
   }
