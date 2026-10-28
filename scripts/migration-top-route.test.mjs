@@ -22,6 +22,28 @@ const page = fs.readFileSync("app/(public)/page.tsx", "utf-8");
 const recruitSrc = fs.readFileSync("src/components/layout/EventRecruitCard.tsx", "utf-8");
 
 const NOW = 1_790_000_000;
+test("visual fixture writer refuses cwd, root, and nonempty directories", () => {
+  for (const unsafe of ["", ".", "../existing", path.parse(process.cwd()).root, null]) {
+    assert.throws(() => writeFixtureSnapshot(unsafe), { name: "TypeError" },
+      `unsafe fixture destination: ${String(unsafe)}`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-top-safe-fixture-"));
+  try {
+    const existing = path.join(dir, "keep.txt");
+    fs.writeFileSync(existing, "unchanged");
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
+    assert.equal(fs.readFileSync(existing, "utf8"), "unchanged");
+    fs.rmSync(existing);
+    const env = writeFixtureSnapshot(dir);
+    assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);
+    assert.ok(fs.statSync(env.FLAMENODE_SNAPSHOT_MANIFEST_FILE).size > 0);
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/,
+      "repeat invocation must not silently replace prior fixture snapshots");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("recruit card: state labels and countdown headings are CURRENT EventRecruitCard's", () => {
   for (const s of ["募集開始前", "募集期間中", "公開前作品受付中", "近日公開", "開催中", "終了", "満枠", "募集開始まで", "募集締切まで", "投稿期間まで", "投稿期間終了まで", "終了済み", "詳細ページへ"]) assert.ok(recruitSrc.includes(s), s);
   const accepting = ev("a", { entry_start_time: NOW - D, entry_end_time: NOW + 12 * D - 3600, start_time: NOW + 20 * D, end_time: NOW + 21 * D });
