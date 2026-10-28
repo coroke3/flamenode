@@ -427,3 +427,88 @@ test("MIG-0641 U01g: stale CAS returns retryable conflict; unexpected mutation e
   assert.deepEqual(await commitLatestTermsForUser(mk(async () => { throw Error("sql with secret"); }), "u1"),
     { kind: "commit_failed" });
 });
+
+test("MIG-0641 U01h: isolated route factory refuses to construct without an explicit CostGuard", async () => {
+  const { createIsolatedTermsWriteRoutes } = await import("../src/routes/personal/termsRoutes.ts");
+  assert.throws(() => createIsolatedTermsWriteRoutes({}), /CostGuard middleware is required/);
+});
+
+test("MIG-0641 U01h: bad origin/anonymous/banned/cost-denied never call terms mutation", async () => {
+  const { Hono } = await import("hono");
+  const { createIsolatedTermsWriteRoutes } = await import("../src/routes/personal/termsRoutes.ts");
+  const SITE = "https://app.flamenode.example";
+  const USER = { id: "u1", name: "U", email: null, image: null, role: "user", is_banned: 0, active_x_user_id: null };
+  for (const scenario of ["bad-origin", "anonymous", "banned", "cost-denied"]) {
+    let sessions = 0, gates = 0, commits = 0;
+    const app = new Hono();
+    app.route("/api/personal", createIsolatedTermsWriteRoutes({
+      session: async (c, next) => {
+        sessions += 1;
+        const u = scenario === "anonymous" ? null : { ...USER, is_banned: scenario === "banned" ? 1 : 0 };
+        c.set("user", u); c.set("sessionState", u ? "user" : "none");
+        await next();
+      },
+      operationGuard: async (c, next) => {
+        gates += 1;
+        if (scenario === "cost-denied") return c.json({ ok: false, reason: "cost_guard_blocked" }, 503);
+        await next();
+      },
+      commit: async () => { commits += 1; return {kind:"accepted",termsVersionId:"v1"}; },
+    }));
+    const response = await app.request("/api/personal/onboarding/terms", {
+      method: "POST", headers: { Origin: scenario === "bad-origin" ? "https://evil.example" : SITE,
+        "Content-Type": "application/json" }, body: "{}",
+    }, { DB: { prepare: () => { throw Error("must not read"); } }, NEXT_PUBLIC_SITE_URL: SITE });
+    assert.equal(response.status, scenario === "anonymous" ? 401 : scenario === "banned" || scenario === "bad-origin" ? 403 : 503, scenario);
+    assert.equal(commits, 0);
+    assert.equal(gates, scenario === "cost-denied" ? 1 : 0);
+    assert.equal(sessions, scenario === "bad-origin" ? 0 : 1);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  }
+});
+
+test("MIG-0641 U01h: ToS-unaccepted but authenticated user may accept once after mandatory guards", async () => {
+  const { Hono } = await import("hono");
+  const { createIsolatedTermsWriteRoutes } = await import("../src/routes/personal/termsRoutes.ts");
+  const site="https://app.flamenode.example";
+  const calls=[];
+  const app = new Hono();
+  app.route("/api/personal", createIsolatedTermsWriteRoutes({
+    session: async (c,next) => { calls.push("session"); c.set("user", {id:"u1", is_banned:0, role:"user",
+      name:null,email:null,image:null,active_x_user_id:null}); c.set("sessionState","user"); await next(); },
+    operationGuard: async (_c,next) => { calls.push("cost"); await next(); },
+    commit: async (_c,id) => { calls.push("commit:"+id); return {kind:"accepted",termsVersionId:"v1"}; },
+  }));
+  const db={ prepare: () => { throw Error("unexpected D1 read"); } };
+  const res=await app.request("/api/personal/onboarding/terms", {
+    method:"POST", headers:{Origin:site,"Content-Type":"application/json"},body:"{}",
+  },{DB:db,NEXT_PUBLIC_SITE_URL:site});
+  assert.equal(res.status,200);
+  assert.deepEqual(await res.json(), {ok:true,alreadyAccepted:false});
+  assert.deepEqual(calls, ["session","cost","commit:u1"]);
+  assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+});
+
+test("MIG-0641 U01h: SA-075 sanitized JSON next, CAS conflict, malformed and oversized bodies", async () => {
+  const { Hono } = await import("hono");
+  const { createIsolatedTermsWriteRoutes } = await import("../src/routes/personal/termsRoutes.ts");
+  const site="https://app.flamenode.example";
+  let writes=0;
+  const app=new Hono();
+  app.route("/api/personal",createIsolatedTermsWriteRoutes({
+    session: async (c,next)=>{c.set("user",{id:"u1",is_banned:0});c.set("sessionState","user");await next();},
+    operationGuard: async (_c,next)=>next(),
+    commit: async ()=>{writes++;return {kind:"concurrent_update",retryable:true};},
+  }));
+  const request = (body)=>app.request("/api/personal/terms/accept",{
+    method:"POST",headers:{Origin:site,"Content-Type":"application/json"},body
+  },{DB:{prepare:()=>{throw Error("no read");}},NEXT_PUBLIC_SITE_URL:site});
+  const err=await request(JSON.stringify({next:"//evil.example"}));
+  assert.equal(err.status,409);
+  assert.deepEqual(await err.json(),{ok:false,next:"/rules?next=%2Fdashboard&error=concurrent_update"});
+  assert.equal(writes,1);
+  assert.equal((await request('{"next":42}')).status,400);
+  assert.equal((await request("{broken json")).status,400);
+  assert.equal((await request("x".repeat(2049))).status,413);
+  assert.equal(writes,1,"invalid requests must not invoke the consent commit");
+});
