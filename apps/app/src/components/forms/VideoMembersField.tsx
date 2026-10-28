@@ -161,6 +161,10 @@ export function VideoMembersField({
   const [nextOffset, setNextOffset] = React.useState<number | null>(null);
   const suggestionRequestIdRef = React.useRef(0);
   const loadMoreControllerRef = React.useRef<AbortController | null>(null);
+  // The adapter may be recreated by a parent render without changing the query.
+  // Keep pending debounce/in-flight requests stable while using the latest adapter on new calls.
+  const searchXUsersRef = React.useRef(searchXUsers);
+  searchXUsersRef.current = searchXUsers;
 
   const fetchSuggestions = React.useCallback(
     async (q: string, offset: number, signal?: AbortSignal) => {
@@ -169,6 +173,7 @@ export function VideoMembersField({
       setSearchStatus("loading");
       setSearchHint(null);
       try {
+        const searchXUsers = searchXUsersRef.current;
         const json = await searchXUsers(q, offset, signal ?? new AbortController().signal);
         const items = (json.items ?? []).map(
           (row) => ({
@@ -209,7 +214,7 @@ export function VideoMembersField({
         setSearchHint("候補の取得に失敗しました。少し待って再入力してください。");
       }
     },
-    [disabled, searchXUsers],
+    [disabled],
   );
 
   React.useEffect(() => {

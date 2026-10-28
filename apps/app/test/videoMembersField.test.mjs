@@ -117,6 +117,39 @@ test("MIG-0713 U03 T01: search debounce invokes only the last query, preserves 2
   }
 });
 
+
+test("MIG-0713 U03 T01: equivalent parent adapter re-render does not restart a pending query", async () => {
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const newAdapter = () => async (query, offset, signal) => {
+    calls.push({ query, offset, signal });
+    return { items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null };
+  };
+  const props = { ...noopAdapters, searchXUsers: newAdapter() };
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, props)));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].signal.aborted, false);
+    // Equivalent callbacks get new identities when the parent renders inline props.
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...props,
+      searchXUsers: newAdapter(),
+    })));
+    assert.equal(calls[0].signal.aborted, false, "unrelated parent render must not abort the search");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.equal(calls.length, 1, "the unchanged query must not be fetched again");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T01: fewer than two searchable characters never call the search adapter", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
