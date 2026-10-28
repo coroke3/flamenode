@@ -559,6 +559,41 @@ test("MIG-0713 U03 T02: 100 TSV members are previewed but 101 fail closed withou
   }
 });
 
+test("MIG-0713 U03: repeated TSV merge fills missing fields without replacing existing identity or duplicating chapters", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const initialMembers = [{
+    name: "Alice", x_user_id: "alice", role: "映像", comment: "",
+    chapters: [{ time: "0:12", label: "既存", note: "" }],
+  }];
+  const readMembers = () => JSON.parse(container.querySelector('input[name="members_json"]').value);
+  const tsv = "Alice\t@ALICE\t0:12;1:05\t上書き不可\t新しいコメント\t";
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters, initialMembers,
+    })));
+    assert.equal(readMembers().length, 1);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await previewTsv(container, tsv);
+      assert.match(container.textContent, /重複するX IDがあります/,
+        "duplicate identity must be visible in the TSV preview");
+      await act(async () => buttonNamed(container, "追加").click());
+      const members = readMembers();
+      assert.equal(members.length, 1, "merge must not create another record for the same canonical X ID");
+      assert.equal(members[0].x_user_id, "alice");
+      assert.equal(members[0].name, "Alice");
+      assert.equal(members[0].role, "映像", "nonempty existing role wins over imported data");
+      assert.equal(members[0].comment, "新しいコメント", "missing comment is filled");
+      assert.deepEqual(members[0].chapters.map((chapter) => chapter.time), ["0:12", "1:05"],
+        "matching chapter timestamps are not duplicated, even after a repeated import");
+    }
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T03: a new video imports member TSV without writing edit permissions", async () => {
   const permissionCalls = [];
   const container = dom.window.document.createElement("div");
