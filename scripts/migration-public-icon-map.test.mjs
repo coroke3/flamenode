@@ -128,7 +128,7 @@ test("T05: portfolio OGP projection stays browser-safe and matches the pure help
   const head = buildPortfolioHead(profile, iconMap);
   assert.equal(head.ogImage, portfolioIconUrl(profile.user, iconMap));
   const sharedViewModel = fs.readFileSync("apps/site/src/lib/userViews.ts", "utf8");
-  assert.doesNotMatch(sharedViewModel, /from ["']\\.\\/publicIconMap\\.ts["']/,
+  assert.doesNotMatch(sharedViewModel, /from ["']\.\/publicIconMap\.ts["']/,
     "browser UsersIndexIsland must not import Node fs/crypto snapshot loader transitively");
 });
 
