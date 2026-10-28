@@ -69,6 +69,13 @@ export const settings = (over = {}) =>
   });
 export const onboarding = (over = {}) =>
   must(contracts.OnboardingResponseSchema, { user: user(), state: onboardingState(), rules: null, ...over });
+/** Entry screen fixtures are also schema-checked (MIG-0711 U03), not only PersonalUser/OnboardingState. */
+export const entryIndex = (over = {}) =>
+  must(contracts.EntryIndexResponseSchema, {
+    user: user(), state: onboardingState(), events: [], reservedSlots: [],
+    truncated: false, nextOffset: null, ...over,
+  });
+
 
 export const ok = (data) => ({ status: "ok", data });
 const un = { status: "unavailable" };
