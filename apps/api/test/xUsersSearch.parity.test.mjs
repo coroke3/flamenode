@@ -15,6 +15,7 @@ if (runUnderRootTsx(import.meta.url)) {
   } = await import("../../../src/lib/video/memberSuggestionsCore.ts");
   const {
     buildMemberSuggestionsV2Artifacts,
+    memberSuggestionPostingBucket,
     MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
     memberSuggestionsV2DirectoryObjectKey,
     memberSuggestionsV2PageObjectKey,
@@ -78,6 +79,27 @@ if (runUnderRootTsx(import.meta.url)) {
       map.set(memberSuggestionsV2PageObjectKey(generation, bucket, page.page), page);
     }
     return map;
+  }
+
+  /** Well-formed v1/v2 commit points with an over-budget posting directory.
+   * No page objects are needed: the 9-page guard must reject before any page GET.
+   */
+  function pageBudgetExceededArtifacts() {
+    const objects = artifacts();
+    const generation = "golden-rh-019";
+    const gram = "aa";
+    const bucketId = memberSuggestionPostingBucket(gram);
+    const v1 = objects.get(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY);
+    const v2 = objects.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+    objects.set(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, { ...v1, total: 2000 });
+    objects.set(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY, { ...v2, total: 2000 });
+    objects.set(memberSuggestionsV2DirectoryObjectKey(generation, bucketId), {
+      schema_version: 1,
+      generation,
+      bucket: bucketId,
+      grams: { [gram]: { pages: [1, 2, 3, 4, 5, 6, 7, 8, 9], total: 2000 } },
+    });
+    return objects;
   }
 
   function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, noDb = false, objects = artifacts() } = {}) {
@@ -235,6 +257,28 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(["v1", "v2"].includes(long.body.source));
   });
 
+  test("T03: V2 posting page budget exceeds eight pages -> query refinement without partial ranking", async () => {
+    const { response, body, stats } = await request("?q=aa&limit=2&offset=1", {
+      objects: pageBudgetExceededArtifacts(),
+    });
+    assert.equal(response.status, 200);
+    verifyPrivate(response);
+    assert.deepEqual(body, {
+      items: [],
+      query: "aa",
+      limit: 2,
+      offset: 1,
+      nextOffset: null,
+      hasMore: true,
+      hint: REFINE_HINT,
+      source: "v2",
+    });
+    assert.equal(stats.reads, 1);
+    assert.equal(stats.writes, 0);
+    assert.equal(stats.gets.length, 3, "read canonical + V2 manifest + directory, never page or V1 fallback");
+    assert.ok(!stats.gets.some((key) => key.endsWith("/index.json")));
+  });
+
   test("T03: missing V1 and V2 artifacts or bucket binding return CURRENT retryable 503", async () => {
     for (const options of [{ objects: new Map() }, { noBucket: true }]) {
       const { response, body, stats } = await request("?q=alice", options);
@@ -267,11 +311,14 @@ if (runUnderRootTsx(import.meta.url)) {
       { path: "?q=al", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, note: "401" },
       { path: "?q=al", guard: { ok: false, status: 403, error: "account_disabled" }, banned: true, note: "403" },
       { path: "?q=al", guard: { ok: false, status: 503, error: "database_unavailable" }, dbFailure: true, note: "auth 503" },
+      { path: "?q=aa&limit=2&offset=1", budgetExceeded: true, note: "V2 over-budget refine without V1" },
       { path: "?q=alice", missingArtifacts: true, note: "missing artifacts 503" },
       { path: "?q=alice", noBucket: true, note: "no bucket 503" },
     ];
     for (const entry of testCases) {
-      const objects = entry.missingArtifacts ? new Map() : artifacts();
+      const objects = entry.missingArtifacts
+        ? new Map()
+        : entry.budgetExceeded ? pageBudgetExceededArtifacts() : artifacts();
       const legacy = makeEnv({ objects, noBucket: entry.noBucket });
       const guard = entry.guard ?? { ok: true, user: { id: "user-1", is_banned: 0 } };
       resetLegacyV1();
