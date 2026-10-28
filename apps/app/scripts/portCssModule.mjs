@@ -14,6 +14,7 @@ export const MODULES = [
   ["social", "src/components/forms/SocialLinksEditor.module.css", "apps/app/src/styles/shared-social.css"],
   ["ychan", "src/components/settings/YoutubeChannelPicker.module.css", "apps/app/src/styles/shared-social.css"],
   ["cdlg", "src/components/ui/ConfirmDialog.module.css", "apps/app/src/styles/shared-social.css"],
+  ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
 ];
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
