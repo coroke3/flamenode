@@ -158,6 +158,7 @@ async function loadRecentListPayload(
 
 async function loadExistingTrendingItemCount(
   env: Ga4TrendingSyncEnv,
+  recent: RecentListPayload,
   signal?: AbortSignal,
 ): Promise<number> {
   signal?.throwIfAborted();
@@ -175,7 +176,23 @@ async function loadExistingTrendingItemCount(
   signal?.throwIfAborted();
   try {
     const payload = JSON.parse(text) as TrendingOutputPayload;
-    return Array.isArray(payload.items) ? payload.items.length : 0;
+    if (!Array.isArray(payload?.items) || payload.items.length === 0) return 0;
+    // A last-success ranking may outlive a video's public visibility. Only
+    // preserve the artifact if ALL its IDs are still in the current D1
+    // allow-list; keeping one old private/deleted row would leak stale data.
+    if (!Array.isArray(recent.items)) return 0;
+    const publicIds = new Set<string>();
+    for (const item of recent.items) {
+      if (item && typeof item === "object" &&
+        typeof item.id === "string" && item.id.trim()) {
+        publicIds.add(item.id.trim());
+      }
+    }
+    return payload.items.every(
+      (item) => item && typeof item === "object" &&
+        typeof item.id === "string" && publicIds.has(item.id.trim()) &&
+        (item.status === undefined || item.status === "public"),
+    ) ? payload.items.length : 0;
   } catch {
     return 0;
   }
@@ -268,7 +285,7 @@ export async function syncGa4Trending(
     // unusable as an empty GA4 report. Do not replace a working public ranking
     // with [] because the GA4 property temporarily reports unrelated IDs.
     if (items.length === 0) {
-      const existingItemCount = await loadExistingTrendingItemCount(env, signal);
+      const existingItemCount = await loadExistingTrendingItemCount(env, recent, signal);
       if (existingItemCount > 0) {
         throw new Error("ga4_empty_report_preserving_existing");
       }
