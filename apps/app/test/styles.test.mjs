@@ -83,6 +83,6 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
   assert.deepEqual(actual, [
     "./styles/current/globals.css", "./styles/current/mobile-hardening.css",
     "./styles/fonts.css", "./styles/video-card.css", "./styles/dashboard.css",
-    "./styles/settings.css", "./styles/onboarding.css",
+    "./styles/settings.css", "./styles/onboarding.css", "./styles/forms-a.css",
   ]);
 });
