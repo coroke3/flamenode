@@ -211,3 +211,86 @@ test("MIG-0641 U03a: failed completion update is non-fatal and never leaks D1 er
   const db = { prepare: () => ({ bind: () => ({ run: async () => { throw Error("private binding!"); } }) }) };
   assert.equal(await markOnboardingComplete(db, "u1", "pending", 123), false);
 });
+
+test("MIG-0641 U01e: compiled consent SQL is parametrized and CAS matches CURRENT columns", async () => {
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const { buildTermsMutationSql } = await import("../src/routes/personal/termsAtomic.ts");
+  const dialect = new SQLiteSyncDialect();
+  const plan = planTermsConsent({
+    userBefore: { id: "u1", accepted_terms_version_id: "old",
+      is_tos_accepted: 0, terms_reaccept_required: 1 },
+    termsVersionId: "new'; DROP TABLE user; --",
+    existingConsentId: null, generatedConsentId: "tos_id", now: 123,
+  });
+  assert.equal(plan.kind, "mutate");
+  const queries = buildTermsMutationSql(plan).map((stmt) => dialect.sqlToQuery(stmt));
+  assert.equal(queries.length, 2);
+  assert.match(queries[0].sql, /INSERT INTO "user_tos_consents"/);
+  assert.match(queries[1].sql, /UPDATE "user"/);
+  assert.match(queries[1].sql, /"is_tos_accepted" = \?/);
+  assert.match(queries[1].sql, /"terms_reaccept_required" = \?/);
+  assert.match(queries[1].sql, /"accepted_terms_version_id" = \?/);
+  assert.ok(queries[0].params.includes("new'; DROP TABLE user; --"));
+  assert.ok(queries[1].params.includes("new'; DROP TABLE user; --"));
+  assert.doesNotMatch(queries.map((q) => q.sql).join("\n"), /DROP TABLE/);
+  assert.deepEqual(plan.expectedMutationChanges, [1, 1]);
+});
+
+test("MIG-0641 U01e: real SQLite consent CAS rejects concurrent update and preserves prior snapshot", async () => {
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const { buildTermsMutationSql } = await import("../src/routes/personal/termsAtomic.ts");
+  const dialect = new SQLiteSyncDialect();
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "is_tos_accepted" INTEGER, "accepted_terms_version_id" TEXT, "terms_reaccept_required" INTEGER)');
+    db.exec('CREATE TABLE "user_tos_consents" ("id" TEXT PRIMARY KEY, "user_id" TEXT, "terms_version_id" TEXT, "consented_at" INTEGER, "consent_context" TEXT)');
+    db.prepare('INSERT INTO "user" VALUES (?, ?, ?, ?)').run("u1", 0, "old", 0);
+    const build = (version, consent) => planTermsConsent({
+      userBefore: { id: "u1", is_tos_accepted: 0, accepted_terms_version_id: "old", terms_reaccept_required: 0 },
+      termsVersionId: version, existingConsentId: null, generatedConsentId: consent, now: 123,
+    });
+    const execute = (plan, stale = false) => {
+      const queries = buildTermsMutationSql(plan).map(x => dialect.sqlToQuery(x));
+      db.exec("BEGIN");
+      try {
+        for (const q of queries) {
+          const result = db.prepare(q.sql).run(...q.params);
+          if (result.changes !== 1) throw new Error("CAS conflict");
+        }
+        db.exec("COMMIT");
+        return true;
+      } catch {
+        db.exec("ROLLBACK");
+        return false;
+      }
+    };
+    assert.equal(execute(build("v1", "c1")), true);
+    assert.equal(db.prepare('SELECT accepted_terms_version_id FROM "user" WHERE id = ?').get("u1").accepted_terms_version_id, "v1");
+    assert.equal(execute(build("v2", "c2")), false);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM user_tos_consents').get().n, 1,
+      "failed CAS rolls back the preceding insert");
+    assert.equal(db.prepare('SELECT terms_version_id FROM user_tos_consents').get().terms_version_id, "v1");
+    assert.equal(db.prepare('SELECT accepted_terms_version_id FROM "user"').get().accepted_terms_version_id, "v1");
+  } finally {
+    db.close();
+  }
+});
+
+test("MIG-0641 U01e: repair branch uses one CAS UPDATE and no duplicate consent insertion", async () => {
+  const { SQLiteSyncDialect } = await import("drizzle-orm/sqlite-core");
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const { buildTermsMutationSql } = await import("../src/routes/personal/termsAtomic.ts");
+  const plan = planTermsConsent({
+    userBefore: { id: "u1", accepted_terms_version_id: "old", is_tos_accepted: 1, terms_reaccept_required: 1 },
+    termsVersionId: "v1", existingConsentId: "existing", generatedConsentId: "unused", now: 20,
+  });
+  assert.equal(plan.kind, "mutate");
+  const queries = buildTermsMutationSql(plan).map(x => new SQLiteSyncDialect().sqlToQuery(x));
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].sql, /UPDATE "user"/);
+  assert.deepEqual(plan.expectedMutationChanges, [1]);
+  assert.deepEqual(plan.audits.map(a => a.table_name), ["user"]);
+});
