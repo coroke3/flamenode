@@ -148,3 +148,31 @@ test("continuation: failed or cross-account reads cannot display another account
     assert.deepEqual(offsets, [undefined, 100, 100]);
   } finally { await m.unmount(); }
 });
+
+test("continuation: rapid double click performs one bounded API read", async () => {
+  const offsets = [];
+  let finishNextPage;
+  const first = entryData({ truncated: true, nextOffset: 100 });
+  const api = fakeApi({ getEntryIndex: (offset) => {
+    offsets.push(offset);
+    if (offset == null) return { status: "ok", data: first };
+    return new Promise((resolve) => { finishNextPage = resolve; });
+  } });
+  const m = await mount("/entry", api);
+  try {
+    const button = [...m.container.querySelectorAll("button")].find(b => b.textContent.includes("イベントをさらに表示"));
+    assert.ok(button);
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    assert.deepEqual(offsets, [undefined, 100], "button double click must not double the D1 read");
+    assert.equal(button.disabled, true);
+    await act(async () => {
+      finishNextPage({ status: "ok", data: entryData({ events: [], truncated: false, nextOffset: null }) });
+    });
+    assert.doesNotMatch(m.container.textContent, /イベントをさらに表示/);
+  } finally {
+    await m.unmount();
+  }
+});
