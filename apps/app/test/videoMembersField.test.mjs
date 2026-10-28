@@ -128,3 +128,93 @@ test("MIG-0713 U03 T01: fewer than two searchable characters never call the sear
     await act(async () => root.unmount());
   }
 });
+
+
+function buttonNamed(container, label) {
+  const button = [...container.querySelectorAll("button")]
+    .find((node) => node.textContent.trim() === label);
+  assert.ok(button, "button " + label + " is present");
+  return button;
+}
+
+async function previewTsv(container, data) {
+  const textarea = container.querySelector("#members-tsv-input");
+  assert.ok(textarea);
+  await act(async () => typeInto(textarea, data));
+  await act(async () => buttonNamed(container, "内容を確認").click());
+}
+
+test("MIG-0713 U03 T02: 100 TSV members are previewed but 101 fail closed without partial import", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const tsv = (count) => Array.from({ length: count }, (_, i) => "Name" + i + "\tx" + i + "\t\t\t\tON").join("\n");
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, { ...noopAdapters })));
+    await previewTsv(container, tsv(100));
+    assert.match(container.textContent, /確認（100行）/);
+    assert.equal(container.querySelectorAll(".vmembers-bulkPreviewTable tbody tr").length, 100);
+    await previewTsv(container, tsv(101));
+    assert.match(container.textContent, /最大100人/);
+    assert.match(container.textContent, /確認（0行）/);
+    assert.equal(buttonNamed(container, "追加").disabled, true);
+    assert.equal(container.querySelector('input[name="members_json"]').value, "[]", "no implicit partial import");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+test("MIG-0713 U03 T03: permission intents use one injected batch of at most 100, never a direct Server Action", async () => {
+  const calls = [];
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const rows = Array.from({ length: 100 }, (_, i) => "Name" + i + "\tx" + i + "\t\t\t\t" + (i % 2 ? "OFF" : "ON")).join("\n");
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      permissionTargetVideoId: "vid1",
+      applyPermissionBatch: async (input) => {
+        calls.push(input);
+        return { ok: true };
+      },
+    })));
+    await previewTsv(container, rows);
+    await act(async () => buttonNamed(container, "追加").click());
+    assert.match(container.querySelector('[role="alertdialog"]').textContent, /以下の編集権限を変更します/);
+    await act(async () => buttonNamed(container, "変更を反映").click());
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].videoId, "vid1");
+    assert.equal(calls[0].notify, true);
+    assert.equal(calls[0].intents.length, 100);
+    assert.deepEqual(calls[0].intents[0], { x_user_id: "x0", display_name: "Name0", intent: "on" });
+    assert.deepEqual(calls[0].intents[1], { x_user_id: "x1", display_name: "Name1", intent: "off" });
+    assert.equal(JSON.parse(container.querySelector('input[name="members_json"]').value).length, 100);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+test("MIG-0713 U03 T04: rejected and failed permission adapters leave member payload unchanged", async () => {
+  for (const adapter of [
+    async () => ({ ok: false, message: "permission denied" }),
+    async () => { throw new Error("backend unavailable"); },
+  ]) {
+    const container = dom.window.document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(React.createElement(VideoMembersField, {
+        ...noopAdapters,
+        permissionTargetVideoId: "vid1",
+        applyPermissionBatch: adapter,
+      })));
+      await previewTsv(container, "Alice\talice\t\t\t\tON");
+      await act(async () => buttonNamed(container, "追加").click());
+      await act(async () => buttonNamed(container, "変更を反映").click());
+      const dialog = container.querySelector('[role="alertdialog"]');
+      assert.ok(dialog, "no successful transition on failed write");
+      assert.match(dialog.textContent, /permission denied|編集権限の反映中にエラーが発生しました/);
+      assert.equal(container.querySelector('input[name="members_json"]').value, "[]");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }
+});
