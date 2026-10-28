@@ -1092,7 +1092,7 @@
 | `apps/app/src/components/shared/SquareIconEditor.tsx` | TARGET_SKELETON | CURRENT browser crop editor using pure encode and SPA Icon | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=cdbefed26579c89639b3c93b0ba51cb86d6dda08 TEST=apps/app/test/videoIconPicker.test.mjs CI=pending |
 | `apps/app/src/components/shared/SquareIconEditorBoundary.tsx` | TARGET_SKELETON | CURRENT editor error boundary and reset UI | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=ad88cb5bae47f5066cd8778edf7e62a1cfefb8a2 TEST=apps/app/test/videoIconPicker.test.mjs CI=pending |
 | `apps/app/src/components/forms/VideoIconPicker.tsx` | TARGET_SKELETON | CURRENT icon candidate, keep, none and upload/crop client UI | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=38890c8cde9f6d7ed836007d1c721f6891ca5ecc TEST=apps/app/test/videoIconPicker.test.mjs CI=pending |
-| `apps/app/test/videoIconPicker.test.mjs` | TEST | T04 icon candidate/edit/keep/none/upload, disabled and crop validators | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=f56516518ddc4f84092fdf9b050b3bf8d10d7f25 TEST=apps/app/test/videoIconPicker.test.mjs CI=pending |
+| `apps/app/test/videoIconPicker.test.mjs` | TEST | T04 icon candidate/edit/keep/none/upload, disabled and crop validators | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=f56516518ddc4f84092fdf9b050b3bf8d10d7f25 TEST=apps/app/test/videoIconPicker.test.mjs CI=pending ; MIG-0712 PR#434 SHA=d2c1844985d705546b1798f99ec57a78fd3dfb68 boundary caught-error retry test, CI=pending |
 
 ## Future files requiring source/target registration
 
