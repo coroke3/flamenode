@@ -102,7 +102,7 @@ if (runUnderRootTsx(import.meta.url)) {
     return objects;
   }
 
-  function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, throwBucketGetter = false, noDb = false, objects = artifacts() } = {}) {
+  function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, throwBucketGetter = false, throwR2Get = false, noDb = false, objects = artifacts() } = {}) {
     const stats = { reads: 0, sql: [], gets: [], writes: 0 };
     const DB = {
       prepare(sql) {
@@ -135,6 +135,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const BUCKET = {
       async get(key) {
         stats.gets.push(key);
+        if (throwR2Get) throw new Error("R2_GET_SECRET_SENTINEL");
         const value = objects.get(key);
         if (value === undefined) return null;
         const serialized = JSON.stringify(value);
@@ -287,7 +288,7 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   test("T03: missing V1 and V2 artifacts or bucket binding return CURRENT retryable 503", async () => {
-    for (const options of [{ objects: new Map() }, { noBucket: true }, { throwBucketGetter: true }]) {
+    for (const options of [{ objects: new Map() }, { noBucket: true }, { throwBucketGetter: true }, { throwR2Get: true }]) {
       const { response, body, stats } = await request("?q=alice", options);
       assert.equal(response.status, 503);
       assert.deepEqual(body, { error: "suggestions_unavailable" });
@@ -322,12 +323,13 @@ if (runUnderRootTsx(import.meta.url)) {
       { path: "?q=alice", missingArtifacts: true, note: "missing artifacts 503" },
       { path: "?q=alice", noBucket: true, note: "no bucket 503" },
       { path: "?q=alice", throwBucketGetter: true, note: "R2 getter throws 503, no secret leak" },
+      { path: "?q=alice", throwR2Get: true, note: "R2 GET rejects 503, no secret leak" },
     ];
     for (const entry of testCases) {
       const objects = entry.missingArtifacts
         ? new Map()
         : entry.budgetExceeded ? pageBudgetExceededArtifacts() : artifacts();
-      const legacy = makeEnv({ objects, noBucket: entry.noBucket, throwBucketGetter: entry.throwBucketGetter });
+      const legacy = makeEnv({ objects, noBucket: entry.noBucket, throwBucketGetter: entry.throwBucketGetter, throwR2Get: entry.throwR2Get });
       const guard = entry.guard ?? { ok: true, user: { id: "user-1", is_banned: 0 } };
       resetLegacyV1();
       resetLegacyV2();
@@ -353,6 +355,7 @@ if (runUnderRootTsx(import.meta.url)) {
         objects,
         noBucket: entry.noBucket,
         throwBucketGetter: entry.throwBucketGetter,
+        throwR2Get: entry.throwR2Get,
       });
       assert.deepEqual({
         status: target.response.status,
