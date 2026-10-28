@@ -187,7 +187,18 @@ async function putTrendingPayload(
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
-  await env.R2.put(GA4_TRENDING_OUTPUT_KEY, JSON.stringify(payload), {
+  const body = JSON.stringify(payload);
+  // The public consumer rejects analytics/trending.json above this cap.
+  // Count UTF-8 bytes (not JS UTF-16 units) before replacing last-good R2.
+  if (
+    body.length > GA4_TRENDING_MAX_OBJECT_BYTES ||
+    (body.length * 3 > GA4_TRENDING_MAX_OBJECT_BYTES &&
+      new TextEncoder().encode(body).byteLength > GA4_TRENDING_MAX_OBJECT_BYTES)
+  ) {
+    throw new Error("ga4_trending_output_exceeds_size_limit");
+  }
+  signal?.throwIfAborted();
+  await env.R2.put(GA4_TRENDING_OUTPUT_KEY, body, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl: GA4_TRENDING_CACHE_CONTROL,
