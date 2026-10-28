@@ -232,6 +232,79 @@ test("MIG-0713 U03 T01: stale X search response never overwrites newer results",
   }
 });
 
+test("MIG-0713 U03: paginated X suggestions preserve prior results and dedupe canonical handles", async () => {
+  const offsets = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      searchXUsers: async (query, offset, signal) => {
+        offsets.push({ query, offset, signal });
+        return offset === 0
+          ? { items: [{ id: "alice", x_name: "Alice" }], hasMore: true, nextOffset: 20 }
+          : { items: [
+              { id: "ALICE", x_name: "Alice Updated" },
+              { id: "bob", x_name: "Bob" },
+            ], hasMore: false, nextOffset: null };
+      },
+    })));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.deepEqual(offsets.map((call) => call.offset), [0]);
+    assert.equal(offsets[0].query, "alice");
+    const more = buttonNamed(container, "候補をさらに読み込む");
+    await act(async () => more.click());
+    assert.deepEqual(offsets.map((call) => call.offset), [0, 20]);
+    assert.equal(offsets[1].query, "alice");
+    assert.equal(offsets[1].signal.aborted, false);
+    const names = [...container.querySelectorAll("#member-name-suggestions option")]
+      .map((node) => node.value);
+    assert.equal(names.length, 2, "the two page responses dedupe the case-insensitive X handle");
+    assert.ok(names.includes("Alice Updated"), "the later page wins for duplicate handles");
+    assert.ok(names.includes("Bob"), "the first page is retained when loading more");
+    assert.ok(!container.textContent.includes("候補をさらに読み込む"), "no further page after hasMore:false");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("MIG-0713 U03: rejected X search reports failure and recovers on next input", async () => {
+  const queries = [];
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      searchXUsers: async (query) => {
+        queries.push(query);
+        if (query === "error") throw new Error("backend unavailable");
+        return { items: [{ id: "alice", x_name: "Alice" }], hasMore: false, nextOffset: null };
+      },
+    })));
+    const input = container.querySelector('input[placeholder="表示名"]');
+    assert.ok(input);
+    await act(async () => typeInto(input, "error"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.match(container.textContent, /候補の取得に失敗しました。少し待って再入力してください。/);
+    await act(async () => typeInto(input, "alice"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 320)); });
+    assert.deepEqual(queries, ["error", "alice"]);
+    const names = [...container.querySelectorAll("#member-name-suggestions option")]
+      .map((node) => node.value);
+    assert.deepEqual(names, ["Alice"], "success after failure renders the new suggestions");
+    assert.doesNotMatch(container.textContent, /候補の取得に失敗しました。/);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U03 T01: fewer than two searchable characters never call the search adapter", async () => {
   const calls = [];
   const container = dom.window.document.createElement("div");
