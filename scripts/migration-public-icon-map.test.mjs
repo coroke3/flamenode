@@ -109,6 +109,11 @@ test("T03: video member icon and profile projections preserve CURRENT fail-close
     profileHref: null,
   }, "missing optional icon map retains the legacy icon without adding a profile link");
 
+  assert.deepEqual(projectVideoMemberPresentation({
+    x_user_id: "member_a", has_public_profile: false,
+  }, new Map()), { iconUrl: null, profileHref: null },
+  "CURRENT static members may omit icon_url altogether");
+
   const registeredMap = new Map([["member_a", entry("registered", "https://example.com/new.png")]]);
   assert.deepEqual(projectVideoMemberPresentation(member, registeredMap), {
     iconUrl: "https://example.com/new.png",
