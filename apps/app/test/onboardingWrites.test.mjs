@@ -4,7 +4,8 @@ import { test } from "node:test";
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
-import { dom, flush } from "./helpers.mjs";
+import { dom, flush, fakeApi, onboarding, onboardingState, ok } from "./helpers.mjs";
+import { MemoryRouter } from "react-router-dom";
 
 const { send } = await import("../.test-dist/apps/app/src/api/write.js");
 const { useApiResult } = await import("../.test-dist/apps/app/src/routes/guard.js");
@@ -86,6 +87,7 @@ test("D-16-3: refreshKey reload is silent and preserves the prior value on error
 
 const { createTermsApi } = await import("../.test-dist/apps/app/src/api/terms.js");
 const { OnboardingTermsForm } = await import("../.test-dist/apps/app/src/routes/onboardingTermsForm.js");
+const { Onboarding } = await import("../.test-dist/apps/app/src/routes/onboarding.js");
 
 function renderTerms(api, onAccepted = () => {}) {
   const container = dom.window.document.createElement("div");
@@ -180,6 +182,84 @@ test("MIG-0710 U02: structured failure exposes server message; network failure u
       assert.equal(t.container.querySelector('input[type="checkbox"]').checked, true);
     } finally {
       await t.unmount();
+    }
+  }
+});
+
+test("MIG-0710 U03: completion marker POST sends empty body and same-origin/no-store settings", async () => {
+  let request;
+  const terms = createTermsApi(async (input, init) => {
+    request = { input, init };
+    return asJson({ ok: true });
+  });
+  assert.deepEqual(await terms.complete(), { status: "ok", data: { ok: true } });
+  assert.equal(request.input, "/api/personal/onboarding/complete");
+  assert.equal(request.init.method, "POST");
+  assert.equal(request.init.body, "{}");
+  assert.equal(request.init.credentials, "same-origin");
+  assert.equal(request.init.cache, "no-store");
+});
+
+async function mountOnboardingWithTerms(readApi, termsApi) {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  await act(async () => root.render(
+    React.createElement(MemoryRouter, { initialEntries: ["/onboarding"] },
+      React.createElement(Onboarding, { api: readApi, termsApi }),
+    ),
+  ));
+  await flush();
+  return { container, unmount: () => act(async () => root.unmount()) };
+}
+
+test("MIG-0710 U03: complete is sent once only after successful read, even after terms refresh", async () => {
+  let reads = 0;
+  let completions = 0;
+  const readApi = fakeApi({
+    getOnboarding: () => {
+      reads += 1;
+      return ok(onboarding({ state: onboardingState({ needsTermsAcceptance: reads === 1 }) }));
+    },
+  });
+  const termsApi = {
+    accept: async () => ({ status: "ok", data: { ok: true } }),
+    complete: async () => {
+      completions += 1;
+      throw new Error("synthetic private completion error");
+    },
+  };
+  const m = await mountOnboardingWithTerms(readApi, termsApi);
+  try {
+    assert.equal(reads, 1);
+    assert.equal(completions, 1);
+    await act(async () => m.container.querySelector('input[type="checkbox"]').click());
+    await act(async () => {
+      m.container.querySelector("form").dispatchEvent(
+        new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
+    await flush();
+    assert.equal(reads, 2);
+    assert.equal(completions, 1, "refreshKey must never issue a second complete POST");
+    assert.doesNotMatch(m.container.textContent, /synthetic private completion error/);
+    assert.match(m.container.textContent, /FlameNode を利用する準備/);
+  } finally {
+    await m.unmount();
+  }
+});
+
+test("MIG-0710 U03: read 401/403/unavailable prevents all completion writes", async () => {
+  for (const status of ["anonymous", "banned", "unavailable"]) {
+    let completions = 0;
+    const termsApi = {
+      accept: async () => ({ status: "ok", data: { ok: true } }),
+      complete: async () => { completions += 1; return { status: "ok", data: { ok: true } }; },
+    };
+    const m = await mountOnboardingWithTerms(fakeApi({ getOnboarding: { status } }), termsApi);
+    try {
+      assert.equal(completions, 0, status);
+    } finally {
+      await m.unmount();
     }
   }
 });

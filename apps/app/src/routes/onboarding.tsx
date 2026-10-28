@@ -2,7 +2,7 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { OnboardingResponse } from "@flamenode/contracts";
 import type { PersonalApi } from "../api/personal.js";
-import { createTermsApi } from "../api/terms.js";
+import { createTermsApi, type TermsApi } from "../api/terms.js";
 import { OnboardingTermsForm } from "./onboardingTermsForm.js";
 import { ResultView, useApiResult } from "./guard.js";
 import { onboardingHref, sanitizeOnboardingNext } from "./next.js";
@@ -34,14 +34,29 @@ function renderMarkdown(markdown: string): React.ReactNode[] {
  * U02 (MIG-0710) adds the terms form; the X ID request forms remain MIG-0709 and maybeMarkOnboardingComplete is U03.
  * Class names that were CSS-module members in CURRENT are plain `onb-*` classes until the stylesheet port lands.
  */
-export function Onboarding({ api }: { api: PersonalApi }): React.ReactElement {
+export function Onboarding({ api, termsApi: suppliedTermsApi }: {
+  api: PersonalApi;
+  /** Optional injection for U03 read-only/one-write parity tests. */
+  termsApi?: TermsApi;
+}): React.ReactElement {
   useDocumentTitle("初期設定");
   const [params] = useSearchParams();
   const next = sanitizeOnboardingNext(params.get("next"), "/dashboard");
   const selfHref = onboardingHref(next);
   const [refreshKey, setRefreshKey] = React.useState(0);
-  const termsApi = React.useMemo(() => createTermsApi(), []);
+  const defaultTermsApi = React.useMemo(() => createTermsApi(), []);
+  const termsApi = suppliedTermsApi ?? defaultTermsApi;
   const state = useApiResult(api, "onboarding", (a, signal) => a.getOnboarding(signal), refreshKey);
+  const completionSent = React.useRef(false);
+  React.useEffect(() => {
+    // CURRENT's page marks completion after reading the onboarding snapshot.
+    // The POST is an idempotent auxiliary marker, never a UI/auth signal.
+    if (state.status !== "ok" || completionSent.current) return;
+    completionSent.current = true; // StrictMode and refreshKey must not double-submit.
+    void termsApi.complete().catch(() => {
+      // CURRENT ignores completion-marker errors; keep the read-only page visible.
+    });
+  }, [state.status, termsApi]);
   return (
     <ResultView state={state} next={selfHref}>
       {(data) => (

@@ -2,8 +2,10 @@
 import { send, type FetchLike, type WriteResult } from "./write.js";
 
 export type TermsAcceptResponse = { ok: boolean; message?: string };
+export type OnboardingCompleteResponse = { ok: boolean; message?: string };
 export type TermsApi = {
   accept(): Promise<WriteResult<TermsAcceptResponse>>;
+  complete(): Promise<WriteResult<OnboardingCompleteResponse>>;
 };
 
 export function createTermsApi(
@@ -11,5 +13,6 @@ export function createTermsApi(
 ): TermsApi {
   return {
     accept: () => send<TermsAcceptResponse>(fetchFn, "POST", "/api/personal/onboarding/terms", {}),
+    complete: () => send<OnboardingCompleteResponse>(fetchFn, "POST", "/api/personal/onboarding/complete", {}),
   };
 }
