@@ -12,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } from "../apps/site/src/lib/listQuery.ts";
 import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
-import { writeSnapshot, fixture } from "./fixtures/listingSnapshotFixture.mjs";
+import { writeSnapshot, writeFixtureSnapshot, fixture } from "./fixtures/listingSnapshotFixture.mjs";
 import { formatUnix } from "../src/lib/utils/format.ts";
 
 const DIST = path.resolve("apps/site/dist");
@@ -110,7 +110,7 @@ test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and pu
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-listing-"));
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-listing-out-"));
   try {
-    const env = writeSnapshot(dir, fixture());
+    const env = writeFixtureSnapshot(dir);
     execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], { cwd: path.resolve("apps/site"), env: { ...process.env, ...env }, stdio: "pipe" });
 
     const list = dom(out, "list/index.html");
