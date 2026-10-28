@@ -19,8 +19,7 @@ import {
   prepareUsersIndexItems,
   type StaticUsersIndexEntry,
 } from "../../../../src/lib/publicData/staticUsersIndexCore.ts";
-import { normalizePublicIconUrl, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
-import { portfolioIconUrl } from "./publicIconMap.ts";
+import { normalizePublicIconUrl, resolveProjectedIcon, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatSocialLinkLabel, parseSocialLinks, profileHeaderSocialLinks } from "../../../../src/lib/socialLinks.ts";
@@ -194,7 +193,12 @@ export function buildPortfolioHead(
     title: `${name} - Portfolio`,
     description: compactText(user.profile_text),
     path: `/user/${user.id}/portfolio`,
-    image: portfolioIconUrl(user, iconMap),
+    // userViews is imported by the browser UsersIndexIsland: never import the
+    // server-only snapshotEnv/publicDataLoader dependency graph from here.
+    image: cachedGoogleImageUrl(
+      normalizePublicIconUrl(user.icon_url) ??
+      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null }),
+    ),
     noIndex: true,
   });
 }
