@@ -88,12 +88,13 @@ export function fakeApi(results = {}) {
     getLibrary: (q, s) => pick("getLibrary", q, s),
     getSettings: (q, s) => pick("getSettings", q, s),
     getOnboarding: (s) => pick("getOnboarding", s),
+    getEntryIndex: (s) => pick("getEntryIndex", s),
   };
 }
 
 /** Every endpoint answers with the same non-ok status (anonymous / banned / unavailable). */
 export const uniformApi = (status) =>
-  fakeApi(Object.fromEntries(["getSession", "getDashboard", "getLibrary", "getSettings", "getOnboarding"].map((n) => [n, { status }])));
+  fakeApi(Object.fromEntries(["getSession", "getDashboard", "getLibrary", "getSettings", "getOnboarding", "getEntryIndex"].map((n) => [n, { status }])));
 
 export async function flush() {
   for (let i = 0; i < 4; i += 1) await act(async () => { await Promise.resolve(); });
