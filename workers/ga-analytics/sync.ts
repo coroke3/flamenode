@@ -149,6 +149,16 @@ function isOversizedR2Object(
   );
 }
 
+function isOversizedUtf8Text(text: string, maxBytes: number): boolean {
+  // UTF-8 never uses fewer bytes than UTF-16 code units. Avoid encoding the
+  // usual small ASCII artifact; count real bytes when multibyte is possible.
+  return (
+    text.length > maxBytes ||
+    (text.length * 3 > maxBytes &&
+      new TextEncoder().encode(text).byteLength > maxBytes)
+  );
+}
+
 async function loadRecentListPayload(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
@@ -174,6 +184,9 @@ async function loadExistingTrendingItemCount(
   }
   const text = await object.text();
   signal?.throwIfAborted();
+  // R2 object.size may be absent in mocks/proxies or disagree with the body.
+  // Never JSON.parse an oversized artifact, even when metadata looked safe.
+  if (isOversizedUtf8Text(text, GA4_TRENDING_MAX_OBJECT_BYTES)) return 0;
   try {
     const payload = JSON.parse(text) as TrendingOutputPayload;
     if (!Array.isArray(payload?.items) || payload.items.length === 0) return 0;
@@ -207,11 +220,7 @@ async function putTrendingPayload(
   const body = JSON.stringify(payload);
   // The public consumer rejects analytics/trending.json above this cap.
   // Count UTF-8 bytes (not JS UTF-16 units) before replacing last-good R2.
-  if (
-    body.length > GA4_TRENDING_MAX_OBJECT_BYTES ||
-    (body.length * 3 > GA4_TRENDING_MAX_OBJECT_BYTES &&
-      new TextEncoder().encode(body).byteLength > GA4_TRENDING_MAX_OBJECT_BYTES)
-  ) {
+  if (isOversizedUtf8Text(body, GA4_TRENDING_MAX_OBJECT_BYTES)) {
     throw new Error("ga4_trending_output_exceeds_size_limit");
   }
   signal?.throwIfAborted();
