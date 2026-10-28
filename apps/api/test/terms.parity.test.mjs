@@ -94,3 +94,74 @@ test("MIG-0641 U01c: CURRENT onboarding-complete condition accepts pending/appro
     ["none", false], ["pending", true], ["approved", true], ["rejected", false],
   ]) assert.equal(canMarkOnboardingComplete(status), expected, status);
 });
+
+test("MIG-0641 U01d: latest accepted terms is a no-write no-audit plan", async () => {
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const userBefore = {
+    id: "u1", is_tos_accepted: 1, accepted_terms_version_id: "v1",
+    terms_reaccept_required: 0, role: "user",
+  };
+  assert.deepEqual(planTermsConsent({
+    userBefore, termsVersionId: "v1", existingConsentId: null,
+    generatedConsentId: "tos_unused", now: 123,
+  }), { kind: "already_accepted" });
+});
+
+test("MIG-0641 U01d: new consent produces exact CURRENT CAS, DML counts and strict audit order", async () => {
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const original = {
+    id: "u1", is_tos_accepted: null, accepted_terms_version_id: null,
+    terms_reaccept_required: null, role: "user", onboarded: "keep me",
+  };
+  const result = planTermsConsent({
+    userBefore: original, termsVersionId: "fallback-current",
+    existingConsentId: null, generatedConsentId: "tos_42", now: 1700000000,
+  });
+  assert.equal(result.kind, "mutate");
+  assert.deepEqual(result.casExpected, {
+    id: "u1", is_tos_accepted: 0, accepted_terms_version_id: null,
+    terms_reaccept_required: 0,
+  });
+  assert.deepEqual(result.insertConsent, {
+    id: "tos_42", user_id: "u1", terms_version_id: "fallback-current",
+    consented_at: 1700000000, consent_context: "entry",
+  });
+  assert.deepEqual(result.expectedMutationChanges, [1, 1]);
+  assert.deepEqual(result.userAfter, {
+    ...original, is_tos_accepted: 1,
+    accepted_terms_version_id: "fallback-current", terms_reaccept_required: 0,
+  });
+  assert.deepEqual(result.audits.map(x => [x.table_name, x.operation, x.reason]), [
+    ["user_tos_consents", "CREATE", "規約 fallback-current への同意"],
+    ["user", "UPDATE", "規約 fallback-current への同意状態更新"],
+  ]);
+  assert.ok(result.audits.every(x => x.strict && x.retention_class === "long_audit" && x.context === "terms_accept"));
+  assert.deepEqual(original, {
+    id: "u1", is_tos_accepted: null, accepted_terms_version_id: null,
+    terms_reaccept_required: null, role: "user", onboarded: "keep me",
+  }, "planning must not mutate the source snapshot");
+});
+
+test("MIG-0641 U01d: existing consent repairs user only with a single CAS UPDATE and audit", async () => {
+  const { planTermsConsent } = await import("../src/routes/personal/termsConsentPlan.ts");
+  const result = planTermsConsent({
+    userBefore: { id: "u1", is_tos_accepted: 1, accepted_terms_version_id: "old",
+      terms_reaccept_required: 1, name: "unchanged" },
+    termsVersionId: "new",
+    existingConsentId: "tos_existing", generatedConsentId: "tos_unused", now: 10,
+  });
+  assert.equal(result.kind, "mutate");
+  assert.equal(result.insertConsent, null);
+  assert.deepEqual(result.expectedMutationChanges, [1]);
+  assert.equal(result.audits.length, 1);
+  assert.equal(result.audits[0].table_name, "user");
+  assert.equal(result.audits[0].reason, "規約 new への同意状態修復");
+  assert.deepEqual(result.casExpected, {
+    id: "u1", accepted_terms_version_id: "old", is_tos_accepted: 1,
+    terms_reaccept_required: 1,
+  });
+  assert.deepEqual(result.userAfter, {
+    id: "u1", is_tos_accepted: 1,
+    accepted_terms_version_id: "new", terms_reaccept_required: 0, name: "unchanged",
+  });
+});
