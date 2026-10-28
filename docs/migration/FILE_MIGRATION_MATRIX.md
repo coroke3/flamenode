@@ -1096,6 +1096,8 @@
 
 | `apps/app/test/squareIconEncode.test.mjs` | TEST | CURRENT all 21 canvas/format/transform/fallback/image contract tests on SPA copy | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=60f8e27f4ad6e081b6ee849380957f0d5e6361f3 TEST=apps/app/test/squareIconEncode.test.mjs CI=pending |
 
+| `apps/app/test/squareIconEditorContract.test.mjs` | TEST | CURRENT 8 editor decode race, canvas pointer, zoom, error handling contracts re-run against SPA source | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=3d0c3ab7cba04106f975ef3dc89b8db58b1173e8 TEST=apps/app/test/squareIconEditorContract.test.mjs CI=pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
