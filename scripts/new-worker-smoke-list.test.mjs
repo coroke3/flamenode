@@ -211,6 +211,11 @@ test("MIG-0628 U01/U02: gateway is Worker-first and API binding names match decl
   for (const opt of bindings.filter(x => !["DB", "BUCKET", "KV", "AUTH_SECRET", "WORKER_ADMIN_TOKEN"].includes(x))) {
     assert.ok(new RegExp("^" + opt + "\\s*=", "m").test(api), "API public runtime var missing " + opt);
   }
+  const apiVars = [...api.matchAll(/^([A-Z][A-Z0-9_]+)\s*=/gm)].map((row) => row[1]);
+  for (const name of apiVars) {
+    assert.ok(bindings.includes(name), "API Wrangler var not declared in env.ts: " + name);
+  }
+  assert.doesNotMatch(api, /\[\[queues\./, "apps/api has no Queue binding (D-13-41 / D-15-6)");
   assert.match(personal, /not_found_handling\s*=\s*"single-page-application"/);
   assert.doesNotMatch(personal, /\[\[(?:d1_databases|r2_buckets|kv_namespaces|services)\]\]/);
 });

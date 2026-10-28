@@ -927,7 +927,7 @@
 | `next-env.d.ts` | CONFIG | Next generated type reference | MIG-0904 | removed with OpenNext | NOT_STARTED | — |
 | `tsconfig.json` | CONFIG | root Next tsconfig (paths, jsx) | MIG-0904 | removed with OpenNext; apps/* tsconfig extend tsconfig.base.json | NOT_STARTED | — |
 | `workers/tsconfig.json` | CONFIG | CURRENT Workers tsconfig | MIG-0901 | residual inventory; removed with the last CURRENT Worker | NOT_STARTED | — |
-| `cloudflare/ids.example.json` | CONFIG | example resource ids (D1/KV/R2) | MIG-0628 | +per-Worker binding injection for new Workers | NOT_STARTED | — |
+| `cloudflare/ids.example.json` | CONFIG | example resource ids (D1/KV/R2) | MIG-0628 | SAME (unchanged CURRENT Workers Builds example; new Workers keep placeholder IDs in `apps/*/wrangler.toml` and the owner injects real IDs at deploy, NEW_WORKER_DEPLOY.md) | RETAINED | PR#426 SHA=2f5d65db85f6152cb27b2c9f758ed4d67dd9043a TEST=node --test scripts/new-worker-smoke-list.test.mjs (MIG-0628 T05 placeholder-only IDs) CI=https://github.com/coroke3/flamenode/actions/runs/40596686400 |
 | `app/layout.tsx` | HELPER | root layout: metadata, manifest/icons, theme bootstrap, JSON-LD WebSite (G05/G06/G08) | MIG-0501 | +apps/site/src/layouts/PublicPage.astro (extend) | NOT_STARTED | — |
 | `app/(public)/layout.tsx` | HELPER | public layout: GoogleAnalytics tag, header/footer, PublicMetricsShell/PublicDegradedBanner (G07/G08) | MIG-0501 | +apps/site/src/layouts/PublicPage.astro (extend) | NOT_STARTED | — |
 | `app/(auth)/layout.tsx` | HELPER | auth route-group layout guard: redirects, noindex, CostGuardBanner (G12) | MIG-0703 | +apps/app route guard | NOT_STARTED | — |

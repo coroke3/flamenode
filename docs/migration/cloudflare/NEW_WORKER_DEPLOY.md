@@ -47,6 +47,7 @@ OAuth credential, JWT or secret values in the tracked files.
 | API | DB | D1 | CURRENT web DB | owner-approved id; local benchmark before launch |
 | API | BUCKET | R2 | CURRENT web BUCKET | owner-approved resource |
 | API | KV | KV | CURRENT web KV | owner-approved id |
+| API | (Queue producer) | **none** | CURRENT has no `apps/api` Queue binding | MIG-0628 keeps D-13-41 / D-15-6: no Queue binding on `apps/api` (notification wake via fast-jobs cron ~60 min, playlist sync via sync-jobs cron ~45 min). Adding one needs Yugo's explicit approval |
 | API | AUTH_SECRET | **secret (absent)** | CURRENT auth-related secret | explicit owner secret binding (name only in docs) |
 | API | WORKER_ADMIN_TOKEN | **secret (absent)** | CURRENT admin token | explicit owner secret binding (name only in docs) |
 | API | BUILD_COMMIT_SHA | build variable | CURRENT production deploy commit | must replace UNVERIFIED_DRY_RUN_ONLY at deploy |
