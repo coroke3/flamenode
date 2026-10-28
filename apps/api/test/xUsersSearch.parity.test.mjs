@@ -102,6 +102,30 @@ if (runUnderRootTsx(import.meta.url)) {
     return objects;
   }
 
+  // V2 cannot serve entries from another generation. CURRENT falls back to
+  // the canonical V1 index rather than returning stale suggestions.
+  function staleV2Artifacts() {
+    const objects = artifacts();
+    const current = objects.get(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
+    objects.set(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY, {
+      ...current,
+      generation: "obsolete-rh-019",
+    });
+    return objects;
+  }
+
+  // When V2's manifest is malformed, the canonical V1 artifact remains the
+  // only source of truth. Never let a corrupt V2 object suppress V1 fallback.
+  function malformedV2Artifacts() {
+    const objects = artifacts();
+    objects.set(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY, {
+      schema_version: 999,
+      generation: "golden-rh-019",
+      total: members.length,
+    });
+    return objects;
+  }
+
   function makeEnv({ banned = false, userFound = true, dbFailure = false, noBucket = false, throwBucketGetter = false, throwR2Get = false, noDb = false, objects = artifacts() } = {}) {
     const stats = { reads: 0, sql: [], gets: [], writes: 0 };
     const DB = {
@@ -298,6 +322,29 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  test("T03: stale or corrupt V2 manifests fall back to canonical V1 without D1 scan", async () => {
+    for (const objects of [staleV2Artifacts(), malformedV2Artifacts()]) {
+      const { response, body, stats } = await request("?q=alice&limit=20", { objects });
+      assert.equal(response.status, 200);
+      verifyPrivate(response);
+      assert.equal(body.source, "v1");
+      const current = searchMemberSuggestions(members, {
+        query: "alice",
+        limit: 20,
+        offset: 0,
+      });
+      assert.deepEqual(body.items, current.items.map((item) => ({
+        id: item.x_user_id,
+        x_name: item.name,
+        score: item.score,
+        matchedBy: item.matchedBy,
+      })));
+      assert.equal(stats.reads, 1);
+      assert.equal(stats.writes, 0);
+      assert.ok(stats.gets.some((key) => key.endsWith("/index.json")));
+    }
+  });
+
   test("T03: missing V2 commit point safely falls back to valid V1 index", async () => {
     const objects = artifacts();
     objects.delete(MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY);
@@ -320,6 +367,8 @@ if (runUnderRootTsx(import.meta.url)) {
       { path: "?q=al", guard: { ok: false, status: 403, error: "account_disabled" }, banned: true, note: "403" },
       { path: "?q=al", guard: { ok: false, status: 503, error: "database_unavailable" }, dbFailure: true, note: "auth 503" },
       { path: "?q=aa&limit=2&offset=1", budgetExceeded: true, note: "V2 over-budget refine without V1" },
+      { path: "?q=alice&limit=20", staleV2: true, note: "stale V2 generation uses canonical V1" },
+      { path: "?q=alice&limit=20", malformedV2: true, note: "malformed V2 manifest uses canonical V1" },
       { path: "?q=alice", missingArtifacts: true, note: "missing artifacts 503" },
       { path: "?q=alice", noBucket: true, note: "no bucket 503" },
       { path: "?q=alice", throwBucketGetter: true, note: "R2 getter throws 503, no secret leak" },
@@ -328,7 +377,13 @@ if (runUnderRootTsx(import.meta.url)) {
     for (const entry of testCases) {
       const objects = entry.missingArtifacts
         ? new Map()
-        : entry.budgetExceeded ? pageBudgetExceededArtifacts() : artifacts();
+        : entry.budgetExceeded
+          ? pageBudgetExceededArtifacts()
+          : entry.staleV2
+            ? staleV2Artifacts()
+            : entry.malformedV2
+              ? malformedV2Artifacts()
+              : artifacts();
       const legacy = makeEnv({ objects, noBucket: entry.noBucket, throwBucketGetter: entry.throwBucketGetter, throwR2Get: entry.throwR2Get });
       const guard = entry.guard ?? { ok: true, user: { id: "user-1", is_banned: 0 } };
       resetLegacyV1();
