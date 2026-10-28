@@ -19,7 +19,8 @@ import {
   prepareUsersIndexItems,
   type StaticUsersIndexEntry,
 } from "../../../../src/lib/publicData/staticUsersIndexCore.ts";
-import { normalizePublicIconUrl } from "../../../../src/lib/publicData/publicIconProjection.ts";
+import { normalizePublicIconUrl, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
+import { portfolioIconUrl } from "./publicIconMap.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
 import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatSocialLinkLabel, parseSocialLinks, profileHeaderSocialLinks } from "../../../../src/lib/socialLinks.ts";
@@ -183,14 +184,17 @@ export function buildProfileHead(profile: StaticUserProfile): PageHead {
 }
 
 /** CURRENT `generateMetadata` of `/user/[id]/portfolio` (always noindex). */
-export function buildPortfolioHead(profile: StaticUserProfile): PageHead {
+export function buildPortfolioHead(
+  profile: StaticUserProfile,
+  iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
+): PageHead {
   const { user } = profile;
   const name = user.x_name || user.id;
   return buildPageHead({
     title: `${name} - Portfolio`,
     description: compactText(user.profile_text),
     path: `/user/${user.id}/portfolio`,
-    image: cachedGoogleImageUrl(normalizePublicIconUrl(user.icon_url)),
+    image: portfolioIconUrl(user, iconMap),
     noIndex: true,
   });
 }
