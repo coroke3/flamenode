@@ -12,8 +12,7 @@ test("MIG-0505 U02 capture records six complete images but never claims visual p
   const output = path.join(dir, "shots");
   fs.mkdirSync(output);
   const goodCli = path.join(dir, "playwright-stub");
-  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnUqQAAAABJRU5ErkJggg==";
-  fs.writeFileSync(goodCli, `#!/usr/bin/env node\nrequire("node:fs").writeFileSync(process.argv.at(-1), Buffer.from("${png}", "base64"));\n`);
+  fs.writeFileSync(goodCli, "#!/usr/bin/env node\nconst fs = require(\"node:fs\");\nconst zlib = require(\"node:zlib\");\nconst args = process.argv;\nconst pos = args.indexOf(\"--viewport-size\");\nif (pos < 0) process.exit(3);\nconst [width, height] = args[pos + 1].split(\",\").map(Number);\nconst crc32 = (buf) => { let crc = 0xffffffff; for (const byte of buf) { crc ^= byte; for (let i=0; i<8; i++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0); } return (crc ^ 0xffffffff) >>> 0; };\nfunction chunk(tag, data) { const name = Buffer.from(tag); const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const checksum = Buffer.alloc(4); checksum.writeUInt32BE(crc32(Buffer.concat([name, data]))); return Buffer.concat([len, name, data, checksum]); }\nconst ihdr = Buffer.alloc(13);\nihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; // 8-bit grayscale\nconst pixels = Buffer.alloc(height * (width + 1)); // zero filter, black scanlines\nconst bytes = Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk(\"IHDR\", ihdr), chunk(\"IDAT\", zlib.deflateSync(pixels)), chunk(\"IEND\", Buffer.alloc(0))]);\nfs.writeFileSync(args.at(-1), bytes);\n");
   fs.chmodSync(goodCli, 0o755);
   const server = createServer((req, res) => {
     if (["/list/", "/recommend/", "/trending/"].includes(req.url)) {
@@ -37,7 +36,19 @@ test("MIG-0505 U02 capture records six complete images but never claims visual p
     ]);
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(output, "evidence.json"), "utf8")), evidence);
     assert.ok(evidence.files.every((x) => /^[a-f0-9]{64}$/.test(x.sha256) && x.bytes > 8));
+    assert.deepEqual(evidence.files.map((x) => x.imageSize), [
+      "390x844", "1440x900", "390x844", "1440x900", "390x844", "1440x900",
+    ]);
     await assert.rejects(captureListingEvidence(origin, output, goodCli), /be empty/);
+
+    const wrongSizeCli = path.join(dir, "wrong-size-playwright-stub");
+    const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WnUqQAAAABJRU5ErkJggg==";
+    fs.writeFileSync(wrongSizeCli, "#!/usr/bin/env node\\nrequire('node:fs').writeFileSync(process.argv.at(-1), Buffer.from('" + onePixelPng + "', 'base64'));\\n".replaceAll("\\\\n", "\\n"));
+    fs.chmodSync(wrongSizeCli, 0o755);
+    const wrongSizeOutput = path.join(dir, "wrong-size-shots");
+    fs.mkdirSync(wrongSizeOutput);
+    await assert.rejects(captureListingEvidence(origin, wrongSizeOutput, wrongSizeCli), /PNG dimensions mismatch/);
+    assert.deepEqual(fs.readdirSync(wrongSizeOutput), [], "wrong-size evidence must not remain");
 
     const corruptCli = path.join(dir, "corrupt-playwright-stub");
     fs.writeFileSync(corruptCli, "#!/usr/bin/env node\nrequire('node:fs').writeFileSync(process.argv.at(-1), 'not-a-png');\n");

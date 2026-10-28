@@ -46,10 +46,18 @@ function screenshot(cli, url, destination, viewport) {
     url, destination,
   ], { stdio: "inherit", timeout: 90_000 });
   const bytes = fs.readFileSync(destination);
-  if (bytes.length <= PNG_SIGNATURE.length || !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
-    throw new Error(`Playwright did not produce a valid PNG: ${destination}`);
+  if (bytes.length < 24 || !bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) ||
+      bytes.toString("ascii", 12, 16) !== "IHDR") {
+    throw new Error(`Playwright did not produce a valid PNG header: ${destination}`);
   }
-  return { sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  // Full-page capture may be taller than the viewport but must not be narrower.
+  // Reject wrong-size captures (including thumbnails) before writing evidence.
+  if (width !== viewport.width || height < viewport.height) {
+    throw new Error(`PNG dimensions mismatch: expected ${viewport.width}x>=${viewport.height}, got ${width}x${height}`);
+  }
+  return { sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length, imageSize: `${width}x${height}` };
 }
 
 async function assertLocalHtml(url) {
@@ -70,8 +78,8 @@ export async function captureListingEvidence(origin, dir, cli = "playwright") {
       for (const viewport of VIEWPORTS) {
         const name = `${route}.${viewport.name}.png`;
         const url = `${baseUrl}/${route}/`;
-        const { sha256, bytes } = screenshot(cli, url, path.join(output, name), viewport);
-        files.push({ file: name, url, viewport: `${viewport.width}x${viewport.height}`, sha256, bytes });
+        const { sha256, bytes, imageSize } = screenshot(cli, url, path.join(output, name), viewport);
+        files.push({ file: name, url, viewport: `${viewport.width}x${viewport.height}`, imageSize, sha256, bytes });
       }
     }
     const evidence = {
