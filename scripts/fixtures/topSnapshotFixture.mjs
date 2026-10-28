@@ -52,7 +52,7 @@ export function writeFixtureSnapshot(dir) {
   if (typeof dir !== "string" || !path.isAbsolute(dir) || dir === path.parse(dir).root) {
     throw new TypeError("Fixture directory must be a non-root absolute path");
   }
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length !== 0) {
+  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory() || fs.readdirSync(dir).length !== 0) {
     throw new Error("Fixture directory must exist and be empty");
   }
   return writeSnapshot(dir);
