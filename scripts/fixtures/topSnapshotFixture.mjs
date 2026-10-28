@@ -47,5 +47,13 @@ export function writeSnapshot(dir, { top = topPayload(), trending = trendingPayl
 }
 
 export function writeFixtureSnapshot(dir) {
+  // Only write the visual fixture into a newly created temporary directory.
+  // An empty or relative path would write snapshot/ and manifest.json into cwd.
+  if (typeof dir !== "string" || !path.isAbsolute(dir) || dir === path.parse(dir).root) {
+    throw new TypeError("Fixture directory must be a non-root absolute path");
+  }
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory() || fs.readdirSync(dir).length !== 0) {
+    throw new Error("Fixture directory must exist and be empty");
+  }
   return writeSnapshot(dir);
 }
