@@ -56,22 +56,21 @@ export function EntryIndexView({
 }): React.ReactElement {
   const [signInPending, setSignInPending] = React.useState(false);
   const loggedIn = data !== null;
-  const state = data?.state;
   const onboardingNext = onboardingHref(next);
   const resolveSlotHref = (target: string): string => {
-    if (!loggedIn) return `/entry?next=${encodeURIComponent(target)}`;
-    if (!state.canReserveSlot) return onboardingHref(target);
+    if (!data) return `/entry?next=${encodeURIComponent(target)}`;
+    if (!data.state.canReserveSlot) return onboardingHref(target);
     return target;
   };
   const resolvePostHref = (target: string): string => {
-    if (!loggedIn) return `/entry?next=${encodeURIComponent(target)}`;
-    if (!state.canReserveSlot || !state.canPost) return onboardingHref(target);
+    if (!data) return `/entry?next=${encodeURIComponent(target)}`;
+    if (!data.state.canReserveSlot || !data.state.canPost) return onboardingHref(target);
     return target;
   };
   const writeCtaLabel = (defaultLabel: string): string => {
-    if (!loggedIn) return defaultLabel;
-    if (!state.canReserveSlot) return "初期設定を続ける";
-    if (!state.canPost) return state.xIdentityStatus === "pending" ? "承認待ち" : "X ID 連携が必要";
+    if (!data) return defaultLabel;
+    if (!data.state.canReserveSlot) return "初期設定を続ける";
+    if (!data.state.canPost) return data.data.state.xIdentityStatus === "pending" ? "承認待ち" : "X ID 連携が必要";
     return defaultLabel;
   };
   const startSignIn = (): void => {
@@ -90,7 +89,7 @@ export function EntryIndexView({
         </p>
       </header>
 
-      {!loggedIn ? (
+      {!data ? (
         <section className="fn-entry-status fn-entry-status--warn">
           <div className="fn-entry-status-body">
             <h2 className="fn-jp fn-panel-title">まず Discord でログインしてください</h2>
@@ -104,7 +103,7 @@ export function EntryIndexView({
             </div>
           </div>
         </section>
-      ) : !state.canReserveSlot ? (
+      ) : !data.state.canReserveSlot ? (
         <div className="fn-entry-status fn-entry-status--warn" role="status">
           <Icon name="alert" size={18} aria-hidden />
           <div>
@@ -113,7 +112,7 @@ export function EntryIndexView({
             <AppLink href={onboardingNext} className="fn-btn fn-btn-primary fn-mt-12">初期設定を続ける</AppLink>
           </div>
         </div>
-      ) : !state.canPost ? (
+      ) : !data.state.canPost ? (
         <div className="fn-entry-status fn-entry-status--warn" role="status">
           <Icon name={state.xIdentityStatus === "pending" ? "clock" : "alert"} size={18} aria-hidden />
           <div>
