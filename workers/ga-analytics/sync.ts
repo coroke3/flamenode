@@ -263,17 +263,16 @@ export async function syncGa4Trending(
       fetch,
       signal,
     );
-    if (
-      periods.length === 0 &&
-      Array.isArray(recent.items) &&
-      recent.items.length > 0
-    ) {
+    const items = rankTrendingItems(recent, periods);
+    // A report with rows only for removed/private/unknown videos is just as
+    // unusable as an empty GA4 report. Do not replace a working public ranking
+    // with [] because the GA4 property temporarily reports unrelated IDs.
+    if (items.length === 0) {
       const existingItemCount = await loadExistingTrendingItemCount(env, signal);
       if (existingItemCount > 0) {
         throw new Error("ga4_empty_report_preserving_existing");
       }
     }
-    const items = rankTrendingItems(recent, periods);
     const generatedAt = Math.floor(Date.now() / 1000);
     const outputPayload: TrendingOutputPayload = {
       schema_version: TRENDING_SCHEMA_VERSION,
