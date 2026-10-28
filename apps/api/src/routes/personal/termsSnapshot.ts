@@ -60,12 +60,14 @@ export async function loadTermsSnapshot(
   ) throw new Error("invalid_terms_snapshot");
   // Drizzle's users.emailVerified is timestamp_ms, and CURRENT's audit before
   // snapshot contains Date|null rather than D1's raw millisecond number.
+  let userBefore: TermsUserSnapshot = user;
   if (user.emailVerified !== null && user.emailVerified !== undefined) {
     if (!Number.isFinite(user.emailVerified)) throw new Error("invalid_terms_timestamp");
-    user.emailVerified = new Date(user.emailVerified);
+    // A fresh audit snapshot allows Date while the raw D1 row remains numeric.
+    userBefore = { ...user, emailVerified: new Date(user.emailVerified) };
   }
   return {
-    userBefore: user,
+    userBefore,
     termsVersionId: __terms_version_id,
     existingConsentId: __existing_consent_id,
   };
