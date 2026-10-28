@@ -117,3 +117,52 @@ test("MIG-0517: malformed title fails closed instead of writing partial trending
   await assert.rejects(() => loadRecentListFromD1(f.db), /ga4_recent_d1_invalid_public_row/);
   assert.equal(f.getStatementCount(), 1);
 });
+
+
+test("MIG-0517: pool exactly at the limit succeeds and sorts Unicode ids by generator localeCompare", async (t) => {
+  const f = fixture();
+  t.after(() => f.sqlite.close());
+  const ids = ["video-10", "video-2", "あ", "い"];
+  for (const id of ids) f.add(id, 100);
+  const payload = await loadRecentListFromD1(f.db, { limit: ids.length });
+  assert.deepEqual(payload.items.map((item) => item.id), ids.sort((a, b) => a.localeCompare(b)));
+  assert.equal(f.getStatementCount(), 1);
+});
+
+test("MIG-0517: abort during D1 read discards result without yielding an allow-list", async () => {
+  const controller = new AbortController();
+  let reads = 0;
+  const db = {
+    prepare(sql) {
+      reads += 1;
+      assert.match(sql, /COUNTABLE|visibility_status/);
+      return {
+        bind(limit) {
+          assert.equal(limit, 5001);
+          return {
+            async all() {
+              controller.abort();
+              return { results: [{
+                id: "video-a", title: "Video A", scheduled_time: 1,
+                display_name: "Creator", youtube_video_id: "yt-a",
+              }] };
+            },
+          };
+        },
+      };
+    },
+  };
+  await assert.rejects(
+    () => loadRecentListFromD1(db, {}, controller.signal),
+    (error) => error?.name === "AbortError",
+  );
+  assert.equal(reads, 1);
+});
+
+test("MIG-0517: invalid public id rejects the entire source instead of ranking a partial set", async (t) => {
+  const f = fixture();
+  t.after(() => f.sqlite.close());
+  f.add(" ", 5);
+  await assert.rejects(() => loadRecentListFromD1(f.db), /ga4_recent_d1_invalid_public_row/);
+  assert.equal(f.getStatementCount(), 1);
+});
