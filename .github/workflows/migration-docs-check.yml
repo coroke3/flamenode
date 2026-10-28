@@ -112,6 +112,8 @@ jobs:
           npm run test --workspace=@flamenode/site  # astro build + Island tests (MIG-0402)
           npm run build --workspace=@flamenode/app
           npm run test --workspace=@flamenode/app
+          npm run build --workspace=@flamenode/ops
+          npm run test --workspace=@flamenode/ops
           npm run build --workspace=@flamenode/api
           npm run test --workspace=@flamenode/api
       - name: MIG-0628 no-upload wrapper for target Workers
