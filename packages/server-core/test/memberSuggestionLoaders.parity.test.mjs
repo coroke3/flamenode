@@ -9,6 +9,7 @@ import {
 } from "../../../src/lib/video/memberSuggestionsCore.ts";
 import {
   buildMemberSuggestionsV2Artifacts,
+  memberSuggestionPostingBucket,
   memberSuggestionsV2DirectoryObjectKey,
   memberSuggestionsV2PageObjectKey,
   MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY,
@@ -45,7 +46,6 @@ const members = [
   { x_user_id: "charlie", name: "Charlie", xAliases: [], nameAliases: [], occurrenceCount: 1, lastSeenAt: null, approvalStatus: "pending" },
 ];
 const generation = "migration-golden-01";
-const bytes = (json) => new TextEncoder().encode(JSON.stringify(json)).length;
 
 function fixture() {
   const generatedAt = 1800000000;
@@ -161,17 +161,71 @@ test("MIG-0648 U01b: V2 manifest absence and generation mismatch preserve fallba
   assert.deepEqual(await equalV2(mismatch, "alice"), { ok: false, reason: "generation_mismatch" });
 });
 
-test("MIG-0648 U01b: V2 truncated/corrupt directory and page are never accepted as complete", async () => {
+test("MIG-0648 U01b: malformed V2 directory and page fail closed like CURRENT", async () => {
+  const firstGram = currentQueryGrams("alice")[0];
+  assert.ok(firstGram);
+  const bucketId = memberSuggestionPostingBucket(firstGram);
+  const directoryKey = memberSuggestionsV2DirectoryObjectKey(generation, bucketId);
+
   const invalidDir = fixture();
-  const [directoryKey, directory] = [...invalidDir].find(([key]) => key.includes("/directory/"));
+  const directory = invalidDir.get(directoryKey);
+  assert.ok(directory && directory.grams[firstGram]);
   invalidDir.set(directoryKey, { ...directory, generation: "stale" });
-  assert.deepEqual(await equalV2(invalidDir, "alice"), await currentV2(bucket(invalidDir, []), "alice"));
+  assert.deepEqual(await equalV2(invalidDir, "alice"), { ok: false, reason: "directory_invalid" });
 
   const brokenPage = fixture();
-  const [pageKey, page] = [...brokenPage].find(([key]) => key.includes("/bucket/") && key.endsWith("/1.json"));
-  brokenPage.set(pageKey, { ...page, page: 999 });
-  for (const query of ["alice", "bob"]) {
-    await equalV2(brokenPage, query);
+  const pageNumber = directory.grams[firstGram].pages[0];
+  const pageKey = memberSuggestionsV2PageObjectKey(generation, bucketId, pageNumber);
+  const page = brokenPage.get(pageKey);
+  assert.ok(page);
+  brokenPage.set(pageKey, { ...page, page: pageNumber + 100 });
+  assert.deepEqual(await equalV2(brokenPage, "alice"), { ok: false, reason: "page_invalid" });
+});
+
+function boundaryFixture(count) {
+  const gen = `boundary-${count}`;
+  const gram = "aa";
+  const bucketId = memberSuggestionPostingBucket(gram);
+  const pages = Array.from({ length: Math.ceil(count / 256) }, (_, i) => i + 1);
+  const objects = new Map([
+    [MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY, { schema_version: 1, generation: gen, generated_at: 1, total: count }],
+    [MEMBER_SUGGESTIONS_V2_MANIFEST_OBJECT_KEY, {
+      schema_version: 1, generation: gen, generated_at: 1,
+      total: count, bucket_count: 16, backend: "postings-v1", buckets: [bucketId],
+    }],
+    [memberSuggestionsV2DirectoryObjectKey(gen, bucketId), {
+      schema_version: 1, generation: gen, bucket: bucketId,
+      grams: { [gram]: { pages, total: count } },
+    }],
+  ]);
+  for (let i = 0; i < pages.length; i++) {
+    const start = i * 256;
+    const items = Array.from({ length: Math.min(256, count - start) }, (_, j) => ({
+      x_user_id: `aa${(start + j).toString(36).padStart(4, "0")}`,
+      name: `Member ${start + j}`, xAliases: [], nameAliases: [],
+      occurrenceCount: 1, lastSeenAt: null, approvalStatus: "approved",
+    }));
+    const page = pages[i];
+    objects.set(memberSuggestionsV2PageObjectKey(gen, bucketId, page), {
+      schema_version: 1, generation: gen, bucket: bucketId, page,
+      records: [{ gram, part: i, total: count, items }],
+    });
+  }
+  return objects;
+}
+
+test("MIG-0648 U01b: V2 exact candidate bound and truncation are identical to CURRENT", async () => {
+  const atLimit = await equalV2(boundaryFixture(1536), "aa");
+  assert.equal(atLimit.ok, true);
+  if (atLimit.ok) {
+    assert.equal(atLimit.items.length, 1536);
+    assert.equal(atLimit.truncated, false);
+  }
+  const overflow = await equalV2(boundaryFixture(1537), "aa");
+  assert.equal(overflow.ok, true);
+  if (overflow.ok) {
+    assert.equal(overflow.items.length, 1536);
+    assert.equal(overflow.truncated, true);
   }
 });
 
