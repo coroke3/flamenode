@@ -28,6 +28,10 @@ if (runTestWithTsx(import.meta.url)) {
     new URL("../../../migrations/0000_flame_node_baseline.sql", import.meta.url),
     "utf8",
   );
+  const buildStateMigration = readFileSync(
+    new URL("../../../migrations/0065_public_build_state.sql", import.meta.url),
+    "utf8",
+  );
 
   function createDb(sqlite) {
     return drizzle(async (sql, params, method) => {
@@ -77,6 +81,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case A: processing行へのenqueueはleaseを保持しupdated_atだけ進める", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -111,6 +116,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case B: pending行へのenqueueは同一active行を更新する", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -150,6 +156,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case C: active行がなければpendingを新規insertする", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
 
     await runBatch(sqlite, [{
       targetType: "top",
@@ -167,6 +174,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case D: 256 targetは50行chunkの6 UPSERT文でbind上限内", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     const items = Array.from({ length: MAX_STATIC_REBUILD_BATCH_TARGETS }, (_, index) => ({
       targetType: "event",
       targetId: `event-${index}`,
@@ -174,8 +182,8 @@ if (runTestWithTsx(import.meta.url)) {
     }));
     const db = createDb(sqlite);
     const batch = await buildStaticRebuildQueueBatch(db, items);
-    assert.equal(batch.statements.length, 3);
-    assert.deepEqual(batch.expectedChanges, [100, 100, 56]);
+    assert.equal(batch.statements.length, 4);
+    assert.deepEqual(batch.expectedChanges, [100, 100, 56, 1]);
     for (const statement of batch.statements) {
       const { params } = sqlFromStatement(statement);
       assert.ok(params.length <= 100);
@@ -191,6 +199,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case E: processing行へのUPSERTはstatus CASなしで成功する", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -219,6 +228,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("低優先度enqueueは高優先度reasonを上書きしない", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -245,6 +255,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("requested_by_user_idはincomingがnullなら既存を保持する", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -269,6 +280,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("video visibility fence reason survives a competing active enqueue", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -295,6 +307,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("a visibility enqueue restores its release reason even at lower incoming priority", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -321,6 +334,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("old-event cleanup reason survives a competing active enqueue", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
@@ -375,6 +389,7 @@ if (runTestWithTsx(import.meta.url)) {
   test("Case F: UPSERT dirty during processing then markDone requeues to pending", async () => {
     const sqlite = new DatabaseSync(":memory:");
     sqlite.exec(baseline);
+    sqlite.exec(buildStateMigration);
     sqlite.exec(`
       INSERT INTO static_rebuild_queue (
         id, target_type, target_id, reason, priority, status,
