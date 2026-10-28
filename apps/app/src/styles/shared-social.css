@@ -115,3 +115,327 @@
     grid-column: 1 / -1;
   }
 }
+
+.ychan-root {
+  display: grid;
+  gap: 8px;
+}
+
+.ychan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ychan-currentLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 180px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.ychan-currentLink:hover {
+  background: var(--accent-primary-soft);
+}
+
+.ychan-currentLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ychan-emptyLabel {
+  flex: 1 1 180px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.ychan-dialog {
+  width: min(100%, 520px);
+}
+
+.ychan-modeSwitch {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 14px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  gap: 3px;
+}
+
+.ychan-modeButton {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: var(--fn-control-h);
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.ychan-modeButton:hover:not(:disabled),
+.ychan-modeButton:focus-visible {
+  color: var(--text-primary);
+  outline: none;
+}
+
+.ychan-modeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ychan-modeButtonActive {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.ychan-candidateList {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ychan-candidateEmpty {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.ychan-candidateButton {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.ychan-candidateButton:hover:not(:disabled),
+.ychan-candidateButton:focus-visible {
+  background: var(--accent-primary-soft);
+  outline: none;
+}
+
+.ychan-candidateButtonActive {
+  background: var(--accent-primary-soft);
+}
+
+.ychan-candidateLabel {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ychan-candidateUrl {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ychan-candidateLeadIcon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.ychan-candidateCheck {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--accent-primary-strong);
+}
+
+.ychan-customPanel {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ychan-customLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ychan-customInput {
+  width: 100%;
+  min-height: var(--fn-control-h);
+  padding: 9px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.ychan-customInput:hover {
+  border-color: var(--border-strong);
+}
+
+.ychan-customInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+.ychan-customActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ychan-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--accent-danger);
+}
+
+/* ConfirmDialog.cdlg-module.cdlg-css */
+.cdlg-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop-scrim);
+  display: grid;
+  place-items: center;
+  z-index: 9000;
+  padding: 16px;
+}
+
+.cdlg-dialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--shadow-overlay);
+  width: min(100%, 440px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.cdlg-body {
+  padding: 24px 24px 20px;
+}
+
+.cdlg-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 8px;
+  line-height: 1.3;
+}
+
+.cdlg-message {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.cdlg-confirmation {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.cdlg-confirmationLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cdlg-confirmationLabel code {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.cdlg-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.cdlg-footer .fn-btn-primary {
+  background-color: var(--event-accent, var(--accent-primary));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.cdlg-footer .fn-btn-primary:hover:not(:disabled) {
+  background-color: var(--event-accent-strong, var(--accent-primary-strong));
+  color: var(--event-accent-text, var(--accent-ink));
+}
+
+.cdlg-footer .fn-btn-ghost:hover:not(:disabled) {
+  background-color: var(--event-accent-soft, var(--accent-primary-soft));
+}
+
+@media (max-width: 640px) {
+  .cdlg-backdrop {
+    padding: max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    align-items: flex-end;
+  }
+
+  .cdlg-dialog {
+    width: 100%;
+    max-height: min(90vh, 100%);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .cdlg-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .cdlg-footer .cdlg-fn-btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+/* ボタンスタイルは globals.css の fn-btn クラスを className で直接指定するため、
+   ここではレイアウト上の補助のみ定義する */
