@@ -69,3 +69,16 @@ test("U01: partial or malformed public entry payloads cannot be rendered as vali
     assert.deepEqual(result, { status: "unavailable" });
   }
 });
+
+test("U01 continuation: offset=100 is encoded exactly once and still validates the DTO", async () => {
+  const targets = [];
+  const api = createPersonalApi(async (target, init) => {
+    targets.push([target, init]);
+    return respond(200, { ...valid(), events: [], truncated: false, nextOffset: null });
+  });
+  const result = await api.getEntryIndex(undefined, 100);
+  assert.equal(result.status, "ok");
+  assert.deepEqual(targets.map(([target]) => target), ["/api/personal/entry?offset=100"]);
+  assert.equal(targets[0][1].method, "GET");
+  assert.equal(targets[0][1].body, undefined);
+});
