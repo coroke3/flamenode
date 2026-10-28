@@ -165,3 +165,49 @@ test("MIG-0641 U01d: existing consent repairs user only with a single CAS UPDATE
     accepted_terms_version_id: "new", terms_reaccept_required: 0, name: "unchanged",
   });
 });
+
+test("MIG-0641 U03a: absent/rejected X state runs zero D1 statements", async () => {
+  const { markOnboardingComplete } = await import("../src/routes/personal/termsCompletion.ts");
+  let calls = 0;
+  const db = { prepare: () => { calls += 1; throw Error("must not query"); } };
+  assert.equal(await markOnboardingComplete(db, "u1", "none", 11), false);
+  assert.equal(await markOnboardingComplete(db, "u1", "rejected", 11), false);
+  assert.equal(calls, 0);
+});
+
+test("MIG-0641 U03a: pending and approved update only null completion, never overwrite", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { markOnboardingComplete } = await import("../src/routes/personal/termsCompletion.ts");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "onboarding_completed_at" INTEGER NULL)');
+    sqlite.prepare('INSERT INTO "user" ("id") VALUES (?)').run("u1");
+    sqlite.prepare('INSERT INTO "user" ("id") VALUES (?)').run("u2");
+    const statements = [];
+    const fakeD1 = {
+      prepare(query) {
+        statements.push(query);
+        const stmt = sqlite.prepare(query);
+        return { bind: (...args) => ({ run: async () => stmt.run(...args) }) };
+      },
+    };
+    assert.equal(await markOnboardingComplete(fakeD1, "u1", "pending", 100), true);
+    assert.equal(await markOnboardingComplete(fakeD1, "u1", "approved", 200), true);
+    assert.equal(await markOnboardingComplete(fakeD1, "u2", "approved", 300), true);
+    assert.equal(await markOnboardingComplete(fakeD1, "missing-user", "approved", 400), true);
+    const get = (id) => sqlite.prepare('SELECT "onboarding_completed_at" AS t FROM "user" WHERE "id" = ?').get(id)?.t;
+    assert.equal(get("u1"), 100, "same user marker can only be set once");
+    assert.equal(get("u2"), 300);
+    assert.equal(get("missing-user"), undefined);
+    assert.equal(statements.length, 4);
+    assert.ok(statements.every(s => s.includes('WHERE "id" = ? AND "onboarding_completed_at" IS NULL')));
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("MIG-0641 U03a: failed completion update is non-fatal and never leaks D1 errors", async () => {
+  const { markOnboardingComplete } = await import("../src/routes/personal/termsCompletion.ts");
+  const db = { prepare: () => ({ bind: () => ({ run: async () => { throw Error("private binding!"); } }) }) };
+  assert.equal(await markOnboardingComplete(db, "u1", "pending", 123), false);
+});
