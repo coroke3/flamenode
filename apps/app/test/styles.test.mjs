@@ -15,12 +15,20 @@ test("MIG-0701 U04 T07: CURRENT CSS and font are byte-identical", async () => {
   ]);
   assert.ok(a.equals(b));
 });
-test("MIG-0701 U04 T07: generated CSS modules match CURRENT without :global", async () => {
+test("MIG-0701/MIG-0712 T07: CSS modules merge deterministically without overwriting a shared target", async () => {
+  const targets = new Map();
   for (const [prefix, from, to] of MODULES) {
+    const chunks = targets.get(to) ?? [];
+    chunks.push(portCssModule(await read(from), prefix));
+    targets.set(to, chunks);
+  }
+  for (const [to, chunks] of targets) {
     const output = await read(to);
-    assert.equal(output, portCssModule(await read(from), prefix), to);
+    assert.equal(output, chunks.join("\n"), to);
     assert.equal(output.includes(":global("), false, to);
   }
+  assert.equal(targets.get("apps/app/src/styles/forms-a.css")?.length, 2,
+    "both current question and description modules must be present");
 });
 test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class", async () => {
   const [source, target, dashboard] = await Promise.all([
