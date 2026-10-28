@@ -783,7 +783,7 @@ PR を revert（文書だけ）。
 - 解消済みの境界: `apps/site/src/pages/user/[id]/portfolio.astro` は `loadPublicXIconMapForBuild` / `portfolioIconUrl` / `resolveProjectedIcon` を使用（MIG-0511）。`scripts/migration-public-icon-map.test.mjs` が投影・fallback・build の回帰試験。`scripts/migration-gateway.test.mjs` は `/user/index.json` の exact path と lookalike 拒否を検証（MIG-0512）。ここでは両方の実装を変更せず回帰試験だけを実行する。
 - mock: `docs/migration/mock/screenshots/Creators.*`, `Creator.*`, `Portfolio.*`。fixture の user: `miku_producer`, `long_list`, `minimal_user`（`apps/site/src/lib/userFixtures.ts`）。
 #### Owned paths
-- 変更: `scripts/migration-user-routes.test.mjs`, `docs/migration/work-items/MIG-0504.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（user 5行）, `docs/migration/PERF_HOTPATH_MATRIX.md`（既存 `/user/*` 行への U02 byte 数のみ）。この order の T03 は既に D-13-35 準拠で、書き換え不要
+- 変更: `scripts/migration-user-routes.test.mjs`, `docs/migration/work-items/MIG-0504.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（user 5行）, `docs/migration/PERF_HOTPATH_MATRIX.md`（既存ユーザーページ行への U02 byte 数のみ）。この order の T03 は既に D-13-35 準拠で、書き換え不要
 - 触らない: `apps/site/src/gateway/**`（MIG-0512）, `app/(public)/user/**`, `src/lib/x/**`（icon map は MIG-0511）
 #### Micro-units
 - **U01 T03 と gap 1 の記録（D-13-35）**: T03「不明・merge 済みの X ID → CURRENT と同じ 404」を CURRENT code/test と照合し、その契約を維持する。gap 1 は「大小文字と `@` は gateway が畳む（routeShards.ts:44-48 と gateway test :175）。旧 ID の redirect は CURRENT に無い」と書いて閉じる。コードは変えない。
