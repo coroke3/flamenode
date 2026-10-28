@@ -220,6 +220,7 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
     logLine = String(value);
   };
   const env = {
+    DB: recentDb(),
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
@@ -323,19 +324,13 @@ test("syncGa4Trending preserves existing trending when GA returns empty periods"
     items: [{ id: "video-a", rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
   });
   const env = {
+    DB: recentDb(),
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
     GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     R2: {
       get(key) {
-        if (key === GA4_RECENT_LIST_KEY) {
-          return {
-            async text() {
-              return recentPayload();
-            },
-          };
-        }
         if (key === GA4_TRENDING_OUTPUT_KEY) {
           return {
             async text() {
