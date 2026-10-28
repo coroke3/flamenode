@@ -279,7 +279,9 @@ export async function syncGa4Trending(
       generated_at: generatedAt,
       source: "ga4",
       ranking_rule: [...TRENDING_RANKING_RULE],
-      windows: buildTrendingWindows(),
+      // Anchor the four reported windows to the same UTC second as generated_at.
+      // Two independent clock reads can straddle UTC midnight.
+      windows: buildTrendingWindows(new Date(generatedAt * 1000)),
       items,
     };
     await putTrendingPayload(env, outputPayload, signal);
