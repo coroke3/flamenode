@@ -127,10 +127,14 @@ async function withIndexTimeout<T>(promise: Promise<T>): Promise<T> {
 
 export const xUsersSearchRoutes = new Hono<AppEnv>();
 
+// Scope each middleware to this exact GET endpoint (including its
+// framework-synthesized HEAD). A wildcard here would authenticate requests to
+// /api/internal/x-users/search/unknown before Hono can return its 404,
+// causing an unnecessary D1 read and leaking the session state on a missing URL.
 // Auth.js cookie D1 lookup is the only permitted D1 read. The shared auth
 // guard decides the status; this endpoint maps its bodies to CURRENT
 // requireRouteUser error codes (lower-case), without changing other APIs.
-xUsersSearchRoutes.use("*", async (c, next) => {
+xUsersSearchRoutes.use("/", async (c, next) => {
   // Next App Router automatically rejects unsupported methods before invoking
   // GET, without probing the Auth.js session/D1 or R2. Hono's wildcard auth
   // middleware would otherwise return 401/403/503 for an unsupported POST.
@@ -157,7 +161,7 @@ xUsersSearchRoutes.use("*", async (c, next) => {
 // Catch only failures *before* downstream middleware is entered; errors thrown
 // by the route itself must retain their own failure mapping.
 const resolveSession = sessionMiddleware();
-xUsersSearchRoutes.use("*", async (c, next) => {
+xUsersSearchRoutes.use("/", async (c, next) => {
   let enteredDownstream = false;
   try {
     await resolveSession(c, async () => {
@@ -182,7 +186,7 @@ xUsersSearchRoutes.use("*", async (c, next) => {
     return c.json({ error: "database_unavailable" }, 503, PRIVATE_HEADERS);
   }
 });
-xUsersSearchRoutes.use("*", async (c, next) => {
+xUsersSearchRoutes.use("/", async (c, next) => {
   const denied = await requireAuth()(c, next);
   if (!denied) return;
   if (denied.status === 401) return c.json({ error: "unauthorized" }, 401, PRIVATE_HEADERS);
