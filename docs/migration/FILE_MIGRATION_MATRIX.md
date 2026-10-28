@@ -1094,6 +1094,8 @@
 | `apps/app/src/components/forms/VideoIconPicker.tsx` | TARGET_SKELETON | CURRENT icon candidate, keep, none and upload/crop client UI | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=38890c8cde9f6d7ed836007d1c721f6891ca5ecc TEST=apps/app/test/videoIconPicker.test.mjs CI=pending |
 | `apps/app/test/videoIconPicker.test.mjs` | TEST | T04 icon candidate/edit/keep/none/upload, disabled and crop validators | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=f56516518ddc4f84092fdf9b050b3bf8d10d7f25 TEST=apps/app/test/videoIconPicker.test.mjs CI=pending ; MIG-0712 PR#434 SHA=d2c1844985d705546b1798f99ec57a78fd3dfb68 boundary caught-error retry test, CI=pending |
 
+| `apps/app/test/squareIconEncode.test.mjs` | TEST | CURRENT all 21 canvas/format/transform/fallback/image contract tests on SPA copy | MIG-0712 | SAME | IN_PROGRESS | PR#434 SHA=60f8e27f4ad6e081b6ee849380957f0d5e6361f3 TEST=apps/app/test/squareIconEncode.test.mjs CI=pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
