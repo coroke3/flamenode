@@ -2,7 +2,6 @@
 // states, public-only projection) and the /list query-key table (G03 / T05) vs CURRENT ListIndexView + next.config.
 // Run `npm run build -w @flamenode/ui && npm run build -w @flamenode/site` first (default-build tests read apps/site/dist).
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } from "../apps/site/src/lib/listQuery.ts";
 import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
-import { LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, TOP_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
+import { writeSnapshot, fixture } from "./fixtures/listingSnapshotFixture.mjs";
 import { formatUnix } from "../src/lib/utils/format.ts";
 
 const DIST = path.resolve("apps/site/dist");
@@ -105,39 +104,6 @@ test("CURRENT titles/descriptions/empty strings are the ones in the pages", () =
   for (const s of ["次に見る作品を探す", "いま見るなら", "まだおすすめできる作品がありません。", "イベントから見る", "新着だけど良さそう", "一覧でさらに探す", "すべて見る →", 'moreHref="/list?sort=new"', "RAIL_DISPLAY_LIMIT = 8"]) assert.ok(rec.includes(s), s);
   for (const s of ["FlameNode内で最近よく視聴されている作品のランキングです。", "TRENDING_PAGE_LIMIT = 30", "ランキングデータが古い可能性があります。しばらくしてから再度ご確認ください。", "最終更新（JST）:", "1週間", "回視聴"]) assert.ok(trend.includes(s) || fs.readFileSync("src/components/video/RankedVideoCard.tsx", "utf-8").includes(s), s);
   assert.ok(listSrc.includes("作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。"));
-});
-
-function envelope(key, payload, over = {}) {
-  return { schemaVersion: 1, generation: "g1", key, visibility: "public", payload, sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), ...over };
-}
-const row = (n, extra = {}) => ({ id: `v${n}`, title: `作品${n}`, youtube_video_id: `AAAAAAAAA${String(n).padStart(2, "0")}`, display_name: `作者${n}`, icon_url: null, primary_event_id: n % 2 ? "ev1" : null, scheduled_time: 1790000000 + n, status: "public", ...extra });
-function writeSnapshot(dir, { list, recommend, trending }, over = {}) {
-  fs.mkdirSync(path.join(dir, "snapshot/list"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "snapshot/recommend"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "snapshot/trending"), { recursive: true });
-  fs.writeFileSync(path.join(dir, LIST_FIRST_PAGE_KEY), JSON.stringify(envelope(LIST_FIRST_PAGE_KEY, list, over.list)));
-  fs.writeFileSync(path.join(dir, RECOMMEND_KEY), JSON.stringify(envelope(RECOMMEND_KEY, recommend, over.recommend)));
-  fs.writeFileSync(path.join(dir, TRENDING_KEY), JSON.stringify(envelope(TRENDING_KEY, trending, over.trending)));
-  // `/` is built from the same snapshot set (MIG-0506); a configured build is all-or-nothing.
-  fs.mkdirSync(path.join(dir, "snapshot/top"), { recursive: true });
-  fs.writeFileSync(path.join(dir, TOP_KEY), JSON.stringify(envelope(TOP_KEY, { generated_at: 1, recommended: [row(1)] })));
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: [LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, TOP_KEY], blockedKeys: [] }));
-  return { FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
-}
-const fixture = () => ({
-  list: { videos: [row(1), row(2), row(3, { status: "private" }), row(4, { status: "voided" })], total: 1234 },
-  recommend: {
-    generated_at: 1790000000,
-    recommended: Array.from({ length: 12 }, (_, i) => row(10 + i, { creator_x_user_id: `c${i}` })),
-    latest: Array.from({ length: 4 }, (_, i) => row(30 + i, { creator_x_user_id: `d${i}` })),
-    underrated: [row(40, { creator_x_user_id: "u0" }), row(41, { status: "private" })],
-    creators: [],
-  },
-  trending: { schema_version: 1, generated_at: 1790000000, items: [
-    { ...row(50), primary_event_title: "第一回", views_2d: 10, views_5d: 20, views_7d: 12345, views_30d: 99, rank: 1 },
-    { ...row(51), primary_event_title: null, views_2d: 1, views_5d: 2, views_7d: 7, views_30d: 9, rank: 2 },
-    { ...row(52, { status: "private" }), primary_event_title: null, views_2d: 1, views_5d: 2, views_7d: 7, views_30d: 9 },
-  ] },
 });
 
 test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and public-only projection", { skip }, () => {
