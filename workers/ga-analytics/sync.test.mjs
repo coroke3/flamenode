@@ -569,3 +569,107 @@ test("MIG-0517: R2 PUT rejection remains a real sync failure with no success log
     console.log = originalLog;
   }
 });
+
+
+test("MIG-0517: GA4 orphan rows do not erase existing public rankings", async () => {
+  const prior = JSON.stringify({
+    schema_version: 1,
+    items: [{ id: "video-a", rank: 1, views_30d: 2 }],
+  });
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  let puts = 0;
+  let reads = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw Error("unexpected request");
+    }
+    // GA4 can return views for a removed/private video whose id is absent
+    // from the canonical D1 public allow-list.
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "orphan-video" }],
+        metricValues: [{ value: "9" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = enabledGa4Env({
+    KV: { async get() { return token; } },
+    R2: {
+      async get(key) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        reads += 1;
+        return { size: Buffer.byteLength(prior), async text() { return prior; } };
+      },
+      async put() { puts += 1; },
+    },
+  });
+  try {
+    await assert.rejects(
+      () => syncGa4Trending(env),
+      /ga4_empty_report_preserving_existing/,
+    );
+    assert.equal(reads, 1);
+    assert.equal(puts, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("MIG-0517: GA4 orphan rows may publish an empty ranking on first generation", async () => {
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  let puts = 0;
+  let output = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw Error("unexpected request");
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "orphan-video" }],
+        metricValues: [{ value: "9" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const env = enabledGa4Env({
+    KV: { async get() { return token; } },
+    R2: {
+      async get(key) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        return null;
+      },
+      async put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        puts += 1;
+        output = JSON.parse(String(body));
+      },
+    },
+  });
+  try {
+    const result = await syncGa4Trending(env);
+    assert.deepEqual([result.failed, result.processed], [0, 0]);
+    assert.equal(puts, 1);
+    assert.deepEqual(output.items, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
