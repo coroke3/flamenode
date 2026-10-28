@@ -285,3 +285,40 @@ test("RH-017: incorrect Bearer is rejected before any binding read", async () =>
   assert.equal(response.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(await response.json(), { ok: false, service: "flamenode-web" });
 });
+
+test("RH-017: missing known artifact returns a fixed reason/key without leaking data", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const normal = createBucket(now);
+  const env = createBaseEnv(now, {
+    BUCKET: {
+      head: normal.head,
+      get: async (key) => key === "top.json" ? null : normal.get(key),
+    },
+  });
+  const response = await apiHealth(env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    service: "flamenode-web",
+    reason: "artifact_missing",
+    key: "top.json",
+  });
+});
+
+test("RH-017: schema mismatch returns CURRENT's private 503 without leaking DB values", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const env = createBaseEnv(now, {
+    DB: {
+      prepare: () => ({
+        first: async () => ({ version: "sensitive-private-version-marker" }),
+      }),
+    },
+  });
+  const response = await apiHealth(env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  const body = await response.json();
+  assert.deepEqual(body, { ok: false, service: "flamenode-web" });
+  assert.doesNotMatch(JSON.stringify(body), /sensitive-private-version-marker/);
+});
