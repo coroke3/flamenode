@@ -2,7 +2,7 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { EntryIndexResponse } from "@flamenode/contracts";
 import type { PersonalApi } from "../../api/personal.js";
-import { AuthUnavailable, BannedNotice, SessionLoading, useApiResult } from "../guard.js";
+import { AuthUnavailable, BannedNotice, LoginRequired, SessionLoading, useApiResult } from "../guard.js";
 import { onboardingHref, sanitizeNextPath } from "../next.js";
 import { AppLink, useDocumentTitle } from "../ui/AppLink.js";
 import { formatUnix } from "../ui/format.js";
@@ -61,6 +61,7 @@ export function EntryIndexView({
   const [pagingBusy, setPagingBusy] = React.useState(false);
   const pagingBusyRef = React.useRef(false);
   const [pagingFailed, setPagingFailed] = React.useState(false);
+  const [continuationAccess, setContinuationAccess] = React.useState<"anonymous" | "banned" | null>(null);
   const pageAbort = React.useRef<AbortController | null>(null);
 
   // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
@@ -69,6 +70,7 @@ export function EntryIndexView({
     pagingBusyRef.current = false;
     setExtraPages([]);
     setPagingFailed(false);
+    setContinuationAccess(null);
     setPagingBusy(false);
     return () => pageAbort.current?.abort();
   }, [data?.user.id]);
@@ -99,6 +101,12 @@ export function EntryIndexView({
     void api.getEntryIndex(controller.signal, nextOffset).then(
       (response) => {
         if (controller.signal.aborted) return;
+        // A revoked session must not leave the previous account's private slot list on screen.
+        if (response.status === "anonymous" || response.status === "banned") {
+          setContinuationAccess(response.status);
+          setExtraPages([]);
+          return;
+        }
         if (
           response.status !== "ok" ||
           response.data.user.id !== data.user.id ||
@@ -119,6 +127,9 @@ export function EntryIndexView({
       }
     });
   };
+  if (continuationAccess === "banned") return <BannedNotice />;
+  if (continuationAccess === "anonymous") return <LoginRequired next="/entry" />;
+
   const loggedIn = data !== null;
   const onboardingNext = onboardingHref(next);
   const resolveSlotHref = (target: string): string => {
