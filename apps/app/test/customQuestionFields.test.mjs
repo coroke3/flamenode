@@ -50,7 +50,7 @@ test("MIG-0712 U02 T01: preview never serializes form field names or activates r
     const output = html({ type, options: ["A"], values: ["A"], preview: true, required: true });
     assert.doesNotMatch(output, /name="answers\[/);
     assert.doesNotMatch(output, /required=""/);
-    assert.match(output, /tabindex="-1"/);
+    assert.match(output, /tabindex="-1"/i);
   }
   assert.match(html({ type: "radio", options: [], preview: true }), /選択肢を追加すると/);
   assert.match(html({ type: "radio", options: [] }), /この質問の選択肢がまだ設定されていません/);
