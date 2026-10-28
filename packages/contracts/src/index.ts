@@ -10,3 +10,5 @@ export * from "./manage/index.ts";
 export * from "./admin/index.ts";
 export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
+
+export * from "./terms.ts"; // MIG-0641: Personal write contract
