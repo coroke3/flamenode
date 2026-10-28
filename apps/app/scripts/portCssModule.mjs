@@ -7,6 +7,7 @@ export const MODULES = [
   ["settings", "src/components/settings/settings-page.module.css", "apps/app/src/styles/settings.css"],
   ["vcard", "src/components/video/VideoCard.module.css", "apps/app/src/styles/video-card.css"],
   ["ydesc", "src/components/forms/YoutubeDescriptionPreview.module.css", "apps/app/src/styles/forms-a.css"],
+  ["cq", "src/components/forms/CustomQuestionFields.module.css", "apps/app/src/styles/forms-a.css"],
 ];
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
@@ -22,7 +23,14 @@ export function portCssModule(css, prefix) {
 
 if (import.meta.url === new URL(process.argv[1], "file://").href) {
   const root = new URL("../../../", import.meta.url);
+  const byTarget = new Map();
   for (const [prefix, from, to] of MODULES) {
-    fs.writeFileSync(new URL(to, root), portCssModule(fs.readFileSync(new URL(from, root), "utf8"), prefix));
+    const chunks = byTarget.get(to) ?? [];
+    chunks.push(portCssModule(fs.readFileSync(new URL(from, root), "utf8"), prefix));
+    byTarget.set(to, chunks);
+  }
+  // Multiple current CSS modules can share forms-a.css: never overwrite an earlier module.
+  for (const [to, chunks] of byTarget) {
+    fs.writeFileSync(new URL(to, root), chunks.join("\n"));
   }
 }
