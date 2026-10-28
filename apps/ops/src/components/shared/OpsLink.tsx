@@ -1,15 +1,21 @@
-// MIG-0707 U05: preserve SPA-local navigation; leave Personal/public/external URLs as documents.
+// MIG-0707 U05: preserve Ops SPA navigation; use document links outside its route space.
 import * as React from "react";
 import { Link } from "react-router-dom";
 
-export function OpsLink({ href, className, children, "aria-current": current }: {
+type OpsLinkProps = {
   href: string;
   className?: string;
-  children: React.ReactNode;
-  "aria-current"?: "page";
-}): React.ReactElement {
-  const local = /^(?:\/admin|\/manage)(?:\/|$)/.test(href);
-  return local
-    ? <Link to={href} className={className} aria-current={current}>{children}</Link>
-    : <a href={href} className={className} aria-current={current}>{children}</a>;
+  children?: React.ReactNode;
+  "aria-current"?: React.AriaAttributes["aria-current"];
+  "aria-label"?: string;
+  style?: React.CSSProperties;
+  /** CURRENT Next.js prop. React Router's SPA links do not prefetch. */
+  prefetch?: boolean;
+};
+
+export function OpsLink({ href, className, children, "aria-current": current,
+  "aria-label": label, style }: OpsLinkProps): React.ReactElement {
+  const props = { className, "aria-current": current, "aria-label": label, style, children };
+  const local = /^\/(?:admin|manage)(?:\/|[?#]|$)/.test(href);
+  return local ? <Link to={href} {...props} /> : <a href={href} {...props} />;
 }
