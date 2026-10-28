@@ -7,6 +7,8 @@
 import { PortfolioView, type PortfolioData } from "@flamenode/ui";
 import PublicLayout from "../../../layouts/PublicLayout.astro";
 import { loadUserBuildData, type UserBuildEntry } from "../../../lib/userData.ts";
+import { loadPublicXIconMapForBuild, portfolioIconUrl } from "../../../lib/publicIconMap.ts";
+import { resolveProjectedIcon, type PublicXIconEntry } from "../../../../../src/lib/publicData/publicIconProjection.ts";
 import {
   PORTFOLIO_WORK_LIMIT,
   buildCreatorHeader,
@@ -15,22 +17,33 @@ import {
 } from "../../../lib/userViews.ts";
 
 export async function getStaticPaths() {
-  const data = await loadUserBuildData();
-  return [...data.users].map(([id, entry]) => ({ params: { id }, props: { entry } }));
+  const [data, iconMap] = await Promise.all([loadUserBuildData(), loadPublicXIconMapForBuild()]);
+  return [...data.users].map(([id, entry]) => ({ params: { id }, props: { entry, iconMap } }));
 }
 
 interface Props {
   entry: UserBuildEntry;
+  iconMap: ReadonlyMap<string, PublicXIconEntry>;
 }
 
 const { profile } = Astro.props.entry;
-const head = buildPortfolioHead(profile);
+const { iconMap } = Astro.props;
+const head = buildPortfolioHead(profile, iconMap);
 const header = buildCreatorHeader(profile);
-const works = profile.works.items.slice(0, PORTFOLIO_WORK_LIMIT).map(toScreenVideoCard);
+const works = profile.works.items.slice(0, PORTFOLIO_WORK_LIMIT).map((v) =>
+  toScreenVideoCard({
+    ...v,
+    icon_url: resolveProjectedIcon({
+      xUserId: v.creator_x_user_id,
+      iconMap,
+      legacyIconUrl: v.icon_url,
+    }),
+  }),
+);
 const portfolio: PortfolioData = {
   id: header.id,
   name: header.name,
-  iconUrl: header.iconUrl,
+  iconUrl: portfolioIconUrl(profile.user, iconMap),
   youtubeChannelUrl: header.youtubeChannelUrl,
   socialLinks: header.socialLinks,
   profileText: header.profileText,
