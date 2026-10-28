@@ -95,7 +95,7 @@ test("continuation: authenticated pages use offset, merge distinct events, and e
   const next = entryData({
     events: [
       { id: "event-1", title: "受付中イベント", entry_end_time: 1_800_000_000, slots_available: 3 },
-      { id: "event-2", title: "追加イベント", entry_end_time: null, slots_available: 5 },
+      { id: "event-2", title: "追加イベント", entry_end_time: 1_700_000_000, slots_available: 5 },
     ],
     truncated: false, nextOffset: null,
   });
@@ -112,6 +112,11 @@ test("continuation: authenticated pages use offset, merge distinct events, and e
     assert.deepEqual(offsets, [undefined, 100]);
     assert.equal(m.container.querySelectorAll('a[href="/event/event-1/slots"]').length, 1, "deduplicate repeated event IDs");
     assert.equal(m.container.querySelectorAll('a[href="/event/event-2/slots"]').length, 1);
+    assert.deepEqual(
+      [...m.container.querySelectorAll("a.entry-eventCard")].map(a => a.getAttribute("href")),
+      ["/event/event-2/slots", "/event/event-1/slots"],
+      "event deadline ordering remains global across API pages",
+    );
     assert.doesNotMatch(m.container.textContent, /イベントをさらに表示|一部のみ表示しています/);
   } finally { await m.unmount(); }
 });
