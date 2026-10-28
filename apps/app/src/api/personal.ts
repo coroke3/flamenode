@@ -47,7 +47,7 @@ export interface PersonalApi {
   getLibrary(query: LibraryQuery, signal?: AbortSignal): Promise<ApiResult<LibraryResponse>>;
   getSettings(query: SettingsQuery, signal?: AbortSignal): Promise<ApiResult<SettingsResponse>>;
   getOnboarding(signal?: AbortSignal): Promise<ApiResult<OnboardingResponse>>;
-  getEntryIndex(signal?: AbortSignal): Promise<ApiResult<EntryIndexResponse>>;
+  getEntryIndex(signal?: AbortSignal, offset?: number): Promise<ApiResult<EntryIndexResponse>>;
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -95,8 +95,8 @@ export function createPersonalApi(fetchFn: FetchLike = (input, init) => fetch(in
     getSettings: (q, signal) =>
       read(fetchFn, url("settings", { tab: q.tab, x: q.x, onboarding: q.onboarding }), signal),
     getOnboarding: (signal) => read(fetchFn, url("onboarding"), signal),
-    async getEntryIndex(signal) {
-      const result = await read<unknown>(fetchFn, url("entry"), signal);
+    async getEntryIndex(signal, offset) {
+      const result = await read<unknown>(fetchFn, url("entry", { offset: offset == null ? undefined : String(offset) }), signal);
       if (result.status !== "ok") return result;
       // Do not let a malformed or partial read look like a valid entry state.
       const parsed = EntryIndexResponseSchema.safeParse(result.data);
