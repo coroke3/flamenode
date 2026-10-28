@@ -28,6 +28,39 @@ const text = (el) => el.textContent.replace(/\s+/g, " ").trim();
 const listSrc = fs.readFileSync("app/(public)/list/ListIndexView.tsx", "utf-8");
 const nextConfig = fs.readFileSync("next.config.mjs", "utf-8");
 
+test("listing visual fixture refuses unsafe destinations and preserves existing files", () => {
+  for (const unsafe of ["", ".", "../existing", path.parse(process.cwd()).root, null]) {
+    assert.throws(() => writeFixtureSnapshot(unsafe), { name: "TypeError" },
+      `unsafe fixture destination: ${String(unsafe)}`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-listing-safe-fixture-"));
+  try {
+    const existing = path.join(dir, "keep.txt");
+    fs.writeFileSync(existing, "unchanged");
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
+    assert.equal(fs.readFileSync(existing, "utf8"), "unchanged");
+    fs.rmSync(existing);
+
+    if (process.platform !== "win32") {
+      const target = path.join(dir, "target");
+      const alias = path.join(dir, "alias");
+      fs.mkdirSync(target);
+      fs.symlinkSync(target, alias, "dir");
+      assert.throws(() => writeFixtureSnapshot(alias), /must exist and be empty/);
+      assert.deepEqual(fs.readdirSync(target), []);
+      fs.unlinkSync(alias);
+      fs.rmdirSync(target);
+    }
+
+    const env = writeFixtureSnapshot(dir);
+    assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);
+    assert.ok(fs.statSync(env.FLAMENODE_SNAPSHOT_MANIFEST_FILE).size > 0);
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("G03/T05: /list keys equal next.config.mjs rewrite keys and CURRENT normalization limits", () => {
   const keys = nextConfig.match(/source: "\/list", destination: "\/list\/~query", keys: \[([^\]]*)\]/)[1].match(/"(\w+)"/g).map((k) => k.replaceAll('"', ""));
   assert.deepEqual([...LIST_QUERY_KEYS], keys);

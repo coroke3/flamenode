@@ -41,5 +41,13 @@ export const fixture = () => ({
 });
 
 export function writeFixtureSnapshot(dir) {
+  // Visual fixtures must never replace existing files in cwd or arbitrary paths.
+  // Keep writeSnapshot low-level for controlled test callers.
+  if (typeof dir !== "string" || !path.isAbsolute(dir) || path.resolve(dir) === path.parse(dir).root) {
+    throw new TypeError("Fixture directory must be a non-root absolute path");
+  }
+  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory() || fs.readdirSync(dir).length !== 0) {
+    throw new Error("Fixture directory must exist and be empty");
+  }
   return writeSnapshot(dir, fixture());
 }
