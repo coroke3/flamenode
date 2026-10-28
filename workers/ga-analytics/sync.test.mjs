@@ -792,3 +792,73 @@ test("MIG-0517: now-private R2 rows must not survive GA4 orphan-only refresh", a
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("MIG-0517: oversized existing R2 body cannot bypass cap via absent or wrong metadata", async () => {
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw new Error("unexpected request");
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "orphan-video" }],
+        metricValues: [{ value: "9" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    for (const [title, size] of [
+      ["A".repeat(1_048_576), undefined],
+      ["界".repeat(400_000), 100],
+    ]) {
+      // The previous ranking's ID is currently public. Without a wire-size
+      // guard on the actual R2 text, it would be preserved even though a
+      // public trending consumer rejects this >1MiB JSON object.
+      const stale = JSON.stringify({
+        schema_version: 1,
+        items: [{ id: "video-a", status: "public", title }],
+      });
+      assert.ok(Buffer.byteLength(stale, "utf8") > 1_048_576);
+      let reads = 0;
+      let puts = 0;
+      let output;
+      const env = enabledGa4Env({
+        KV: { async get() { return token; } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            reads += 1;
+            return {
+              ...(size === undefined ? {} : { size }),
+              async text() { return stale; },
+            };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            puts += 1;
+            output = JSON.parse(String(body));
+          },
+        },
+      });
+      const result = await syncGa4Trending(env);
+      assert.equal(result.failed, 0);
+      assert.equal(reads, 1);
+      assert.equal(puts, 1);
+      assert.deepEqual(output.items, []);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
