@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
-Current Task: MIG-0663
+Current Task: MIG-0628
 Current Owner: chatgpt
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0663
-Last Task PR: #423
+Last Completed Task: MIG-0628
+Last Task PR: #426
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -338,7 +338,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0625 | Admin read APIs part A (users/videos/events/moderation) | DONE | MIG-0601, MIG-0608 |
 | MIG-0626 | Admin read APIs part B (settings/audit/ops/rest) | READY | MIG-0601, MIG-0608 |
 | MIG-0627 | R2 artifact consumers to build-time snapshots (prerequisite of MIG-0907) | BLOCKED | MIG-0509, MIG-0649 |
-| MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | READY | MIG-0405 |
+| MIG-0628 | new Worker deploy + smoke chain (dry-run in CI; real deploy needs approval) | DONE | MIG-0405 |
 | MIG-0629 | admin audit settings + restore dry-run APIs (SA-009/SA-010) | DONE | MIG-0602, MIG-0616, MIG-0617 |
 | MIG-0630 | Video edit page read APIs (/dashboard/edit/[id] + permissions) | DONE | MIG-0623 |
 | MIG-0631 | public event list / release Hono route (RH-015: live mode = D1, static_only = R2 artifact; RH-012: D1 gate + R2 artifact) | DONE | MIG-0602, MIG-0614 |
