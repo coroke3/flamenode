@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  GA4_RECENT_LIST_KEY,
   GA4_TRENDING_OUTPUT_KEY,
   syncGa4Trending,
 } from "./sync.ts";
@@ -21,6 +20,31 @@ function recentPayload() {
       },
     ],
   });
+}
+
+function recentDb(items = JSON.parse(recentPayload()).items) {
+  let reads = 0;
+  return {
+    get reads() { return reads; },
+    prepare(sql) {
+      reads += 1;
+      assert.match(sql, /FROM videos AS v/);
+      return {
+        bind(limit) {
+          assert.equal(limit, 5001);
+          return { async all() {
+            return { results: items.map((item) => ({
+              ...item,
+              creator_x_user_id: item.creator_x_user_id ?? null,
+              icon_url: item.icon_url ?? null,
+              primary_event_id: item.primary_event_id ?? null,
+              primary_event_title: item.primary_event_title ?? null,
+            })) };
+          } };
+        },
+      };
+    },
+  };
 }
 
 test("syncGa4Trending skips when GA4_SYNC_ENABLED is not 1", async () => {
@@ -65,6 +89,7 @@ test("syncGa4Trending fails closed with config_missing when secrets are absent",
     logLine = String(value);
   };
   const env = {
+    DB: recentDb(),
     GA4_SYNC_ENABLED: "1",
     R2: {
       get() {
@@ -94,10 +119,11 @@ test("syncGa4Trending fails closed with config_missing when secrets are absent",
 
 function enabledGa4Env(overrides = {}) {
   return {
+    DB: recentDb(),
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
-    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     KV: {
       async get() {
         return null;
@@ -107,22 +133,32 @@ function enabledGa4Env(overrides = {}) {
   };
 }
 
-test("syncGa4Trending does not put when list/recent.json is missing", async () => {
-  let putCalls = 0;
+test("syncGa4Trending fails closed on D1 source failure", async () => {
+  let writes = 0;
   const env = enabledGa4Env({
-    R2: {
-      async get(key) {
-        assert.equal(key, GA4_RECENT_LIST_KEY);
-        return null;
-      },
-      put() {
-        putCalls += 1;
-      },
-    },
+    DB: { prepare() { throw Error("d1_recent_unavailable"); } },
+    R2: { get() { throw Error("unexpected R2 read"); }, put() { writes += 1; } },
   });
+  await assert.rejects(() => syncGa4Trending(env), /d1_recent_unavailable/);
+  assert.equal(writes, 0);
+});
 
-  await assert.rejects(() => syncGa4Trending(env), /ga4_recent_list_missing/);
-  assert.equal(putCalls, 0);
+test("MIG-0517 T03: zero D1 rows skips GA4 and preserves R2 result", async () => {
+  const db = recentDb([]);
+  let writes = 0;
+  const env = enabledGa4Env({
+    DB: db,
+    R2: { get() { throw Error("unexpected R2 read"); }, put() { writes += 1; } },
+  });
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = () => { throw Error("unexpected GA4 request"); };
+  try {
+    const result = await syncGa4Trending(env);
+    assert.deepEqual([result.processed, result.failed, result.skipped], [0, 0, 1]);
+    assert.equal(result.external_api_calls, 0);
+    assert.equal(db.reads, 1);
+    assert.equal(writes, 0);
+  } finally { globalThis.fetch = oldFetch; }
 });
 
 test("syncGa4Trending does not put when AbortSignal is already aborted", async () => {
@@ -150,19 +186,13 @@ test("syncGa4Trending does not put when AbortSignal is already aborted", async (
 test("syncGa4Trending fail-closed: does not put trending.json on GA failure", async () => {
   let putCalls = 0;
   const env = {
+    DB: recentDb(),
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
-    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     R2: {
-      get(key) {
-        assert.equal(key, GA4_RECENT_LIST_KEY);
-        return {
-          async text() {
-            return recentPayload();
-          },
-        };
-      },
+      get() { throw Error("unexpected R2 recent read"); },
       put(key) {
         putCalls += 1;
         assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
@@ -193,17 +223,9 @@ test("syncGa4Trending puts empty items when GA returns no matching views", async
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
-    GA4_SERVICE_ACCOUNT_PRIVATE_KEY:
-      "-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7VJTUt9Us8cKB\nwI/EUEP8zBksFHPNMyWUdXJLKf/PssAtb2xRHmpM2fo8pYE7L3R5Bo1w4Mkw0ujX\njbNkNN6Ts8WfMgW56DjmXOfVZ8GKZr6fkEXNAfqFKvXYnGWqPa5VbX5c25ll1G27\nh4wLswBP0A16aMpjG1CNdP/ZMEPuB5HzR/5N5Rtt0h9Nekxd4mjUy/2ABEj8M4O9\nX0m6vXh+2J0hmW6zupJRW5s87qXUoYONX3awfIy45C740C+V1pRyvyPtTCXbag9\nP4ZGd9xZng8PDvqcIGfudkGT2ioWEHTuH2N36KAQmQfi8tmTkEdOpaulgwsHovCN\nBZUs9ipQAgMBAAECggEBAKTmjaS6tkK8BlPXClTQ2vpz/N6uxDeS35mXpqasqskV\nlaAidgg/zKNuOmgW2gauvlKJVejU8JEK4RyFVE3wyGkcgtcRcJ/qMMNOIynlhFzS\nf1MZKSAzZTxaxHFrerY2Ra2FAo5A5PUDHYtKurOcmVHwVXwOV9D5K8AA5+4zxE7N\nzQLT2vnKojZlBA9VPeNSfR2wJi1B0TAZ4rIpuTe4OzlTdRovTbF5DZP0PBz+SSIG\nZ2ZhMj1oZFhkbSdXQVhVbTl2WVhNemtNVEV6TkMweE1UUXhMVEUzTURBdE9UUTFOQzA0\nTlRBMk1UWXhPVFk1T1RBZ0VBQW9HQkFOLWNwemJHTVhpNWhZbUpwYVdOa0lHOSs=\n-----END PRIVATE KEY-----",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     R2: {
       get(key) {
-        if (key === GA4_RECENT_LIST_KEY) {
-          return {
-            async text() {
-              return recentPayload();
-            },
-          };
-        }
         if (key === GA4_TRENDING_OUTPUT_KEY) {
           return null;
         }
@@ -304,8 +326,7 @@ test("syncGa4Trending preserves existing trending when GA returns empty periods"
     GA4_SYNC_ENABLED: "1",
     GA4_PROPERTY_ID: "123",
     GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
-    GA4_SERVICE_ACCOUNT_PRIVATE_KEY:
-      "-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7VJTUt9Us8cKB\nwI/EUEP8zBksFHPNMyWUdXJLKf/PssAtb2xRHmpM2fo8pYE7L3R5Bo1w4Mkw0ujX\njbNkNN6Ts8WfMgW56DjmXOfVZ8GKZr6fkEXNAfqFKvXYnGWqPa5VbX5c25ll1G27\nh4wLswBP0A16aMpjG1CNdP/ZMEPuB5HzR/5N5Rtt0h9Nekxd4mjUy/2ABEj8M4O9\nX0m6vXh+2J0hmW6zupJRW5s87qXUoYONX3awfIy45C740C+V1pRyvyPtTCXbag9\nP4ZGd9xZng8PDvqcIGfudkGT2ioWEHTuH2N36KAQmQfi8tmTkEdOpaulgwsHovCN\nBZUs9ipQAgMBAAECggEBAKTmjaS6tkK8BlPXClTQ2vpz/N6uxDeS35mXpqasqskV\nlaAidgg/zKNuOmgW2gauvlKJVejU8JEK4RyFVE3wyGkcgtcRcJ/qMMNOIynlhFzS\nf1MZKSAzZTxaxHFrerY2Ra2FAo5A5PUDHYtKurOcmVHwVXwOV9D5K8AA5+4zxE7N\nzQLT2vnKojZlBA9VPeNSfR2wJi1B0TAZ4rIpuTe4OzlTdRovTbF5DZP0PBz+SSIG\nZ2ZhMj1oZFhkbSdXQVhVbTl2WVhNemtNVEV6TkMweE1UUXhMVEUzTURBdE9UUTFOQzA0\nTlRBMk1UWXhPVFk1T1RBZ0VBQW9HQkFOLWNwemJHTVhpNWhZbUpwYVdOa0lHOSs=\n-----END PRIVATE KEY-----",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: "test-private-key",
     R2: {
       get(key) {
         if (key === GA4_RECENT_LIST_KEY) {
