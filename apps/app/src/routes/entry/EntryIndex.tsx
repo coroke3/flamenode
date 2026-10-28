@@ -42,19 +42,67 @@ export function EntryIndex({ api }: { api: PersonalApi }): React.ReactElement {
   if (result.status === "banned" || (result.status === "ok" && result.data.user.is_banned === 1)) {
     return <BannedNotice />;
   }
-  return <EntryIndexView data={result.status === "ok" ? result.data : null} next={next} authError={authError} />;
+  return <EntryIndexView api={api} data={result.status === "ok" ? result.data : null} next={next} authError={authError} />;
 }
 
 export function EntryIndexView({
+  api,
   data,
   next,
   authError,
 }: {
+  api: PersonalApi;
   data: EntryIndexResponse | null;
   next: string;
   authError: string | null;
 }): React.ReactElement {
   const [signInPending, setSignInPending] = React.useState(false);
+  const [extraPages, setExtraPages] = React.useState<EntryIndexResponse[]>([]);
+  const [pagingBusy, setPagingBusy] = React.useState(false);
+  const [pagingFailed, setPagingFailed] = React.useState(false);
+  const pageAbort = React.useRef<AbortController | null>(null);
+
+  // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
+  React.useEffect(() => {
+    pageAbort.current?.abort();
+    setExtraPages([]);
+    setPagingFailed(false);
+    setPagingBusy(false);
+    return () => pageAbort.current?.abort();
+  }, [data?.user.id]);
+
+  const events = data
+    ? [...new Map([data, ...extraPages].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
+    : [];
+  const lastPage = extraPages.at(-1) ?? data;
+  const nextOffset = lastPage?.truncated ? lastPage.nextOffset : null;
+  const loadNextPage = (): void => {
+    if (!data || pagingBusy || nextOffset == null) return;
+    const controller = new AbortController();
+    pageAbort.current?.abort();
+    pageAbort.current = controller;
+    setPagingBusy(true);
+    setPagingFailed(false);
+    void api.getEntryIndex(controller.signal, nextOffset).then(
+      (response) => {
+        if (controller.signal.aborted) return;
+        if (
+          response.status !== "ok" ||
+          response.data.user.id !== data.user.id ||
+          (response.data.truncated && response.data.nextOffset != null && response.data.nextOffset <= nextOffset)
+        ) {
+          setPagingFailed(true);
+          return;
+        }
+        setExtraPages((pages) => [...pages, response.data]);
+      },
+      () => {
+        if (!controller.signal.aborted) setPagingFailed(true);
+      },
+    ).finally(() => {
+      if (!controller.signal.aborted) setPagingBusy(false);
+    });
+  };
   const loggedIn = data !== null;
   const onboardingNext = onboardingHref(next);
   const resolveSlotHref = (target: string): string => {
@@ -180,10 +228,10 @@ export function EntryIndexView({
           <div className="entry-eventList">
             {!data ? (
               <p className="fn-text-muted-sm">ログイン後に受付中のイベントを確認できます。</p>
-            ) : data.events.length === 0 ? (
+            ) : events.length === 0 ? (
               <p className="fn-text-muted-sm">現在受付中のイベントはありません。</p>
             ) : (
-              data.events.map((event) => (
+              events.map((event) => (
                 <AppLink key={event.id} href={resolveSlotHref(`/event/${event.id}/slots`)} className="entry-eventCard">
                   <span className="entry-eventCardTitle">{event.title}</span>
                   <span className="entry-eventCardMeta">残り {event.slots_available} 枠</span>
@@ -193,8 +241,17 @@ export function EntryIndexView({
                 </AppLink>
               ))
             )}
-            {data?.truncated ? (
+            {lastPage?.truncated ? (
               <p className="fn-text-muted-sm" role="status">受付中イベントの一部のみ表示しています。</p>
+            ) : null}
+            {nextOffset != null ? (
+              <button type="button" className="fn-btn" onClick={loadNextPage}
+                disabled={pagingBusy} aria-busy={pagingBusy}>イベントをさらに表示</button>
+            ) : null}
+            {pagingFailed ? (
+              <p className="fn-text-muted-sm" role="alert">
+                続きのイベントを取得できませんでした。再度お試しください。
+              </p>
             ) : null}
           </div>
         </section>
