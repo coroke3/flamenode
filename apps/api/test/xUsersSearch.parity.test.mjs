@@ -233,6 +233,38 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(anonymousEnv.stats.reads, 0);
   });
 
+  test("U03: unsupported methods and OPTIONS never touch the Auth.js D1 or R2 bindings", async () => {
+    // Next App Router returns 405 for unsupported methods before GET's
+    // requireRouteUser(); Hono must not consult DB just to reject a POST.
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      for (const headers of [{}, { Cookie: COOKIE }]) {
+        const { env, stats } = makeEnv({ throwDbGetter: true });
+        const response = await fullHonoApp.request(URL_BASE + "?q=alice", {
+          method, headers,
+        }, env);
+        assert.equal(response.status, 405, method);
+        verifyPrivate(response);
+        assert.match(response.headers.get("Allow") ?? "", /GET/);
+        assert.equal(await response.text(), "");
+        assert.equal(stats.reads, 0);
+        assert.equal(stats.writes, 0);
+        assert.equal(stats.gets.length, 0);
+      }
+    }
+    const optionsEnv = makeEnv({ throwDbGetter: true });
+    const options = await fullHonoApp.request(URL_BASE + "?q=alice", {
+      method: "OPTIONS",
+      headers: { Cookie: COOKIE },
+    }, optionsEnv.env);
+    assert.equal(options.status, 204);
+    verifyPrivate(options);
+    assert.match(options.headers.get("Allow") ?? "", /OPTIONS/);
+    assert.equal(await options.text(), "");
+    assert.equal(optionsEnv.stats.reads, 0);
+    assert.equal(optionsEnv.stats.writes, 0);
+    assert.equal(optionsEnv.stats.gets.length, 0);
+  });
+
   test("T01: anonymous, expired, banned and unavailable sessions preserve CURRENT guard codes", async () => {
     const anonymous = await request("?q=alice", { anonymous: true });
     assert.equal(anonymous.response.status, 401);
