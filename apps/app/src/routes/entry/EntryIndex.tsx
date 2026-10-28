@@ -71,10 +71,12 @@ export function EntryIndexView({
     return () => pageAbort.current?.abort();
   }, [data?.user.id]);
 
+  // A stale continuation cannot drive the new account's list or offset, even before effect cleanup.
+  const matchingPages = data ? extraPages.filter((page) => page.user.id === data.user.id) : [];
   const events = data
-    ? [...new Map([data, ...extraPages.filter((page) => page.user.id === data.user.id)].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
+    ? [...new Map([data, ...matchingPages].flatMap((page) => page.events).map((event) => [event.id, event])).values()]
     : [];
-  const lastPage = extraPages.at(-1) ?? data;
+  const lastPage = matchingPages.at(-1) ?? data;
   const nextOffset = lastPage?.truncated ? lastPage.nextOffset : null;
   const loadNextPage = (): void => {
     if (!data || pagingBusy || nextOffset == null) return;
