@@ -1,0 +1,117 @@
+.social-root {
+  display: grid;
+  gap: 8px;
+}
+
+.social-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.social-label {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.social-rows {
+  display: grid;
+  gap: 8px;
+}
+
+.social-row {
+  display: grid;
+  grid-template-columns: minmax(118px, 150px) minmax(0, 1fr) var(--fn-control-h);
+  gap: 8px;
+  align-items: center;
+}
+
+.social-select {
+  width: 150px;
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.25;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.social-select:hover {
+  border-color: var(--border-strong);
+}
+
+.social-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+.social-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-base) 86%, var(--bg-elevated));
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.25;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.social-input:hover {
+  border-color: var(--border-strong);
+}
+
+.social-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: none;
+}
+
+.social-iconOnlyButton {
+  display: inline-grid;
+  place-items: center;
+  width: var(--fn-control-h);
+  height: var(--fn-control-h);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.social-iconOnlyButton:hover:not(:disabled),
+.social-iconOnlyButton:focus-visible {
+  color: var(--accent-danger);
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--accent-danger);
+}
+
+.social-iconOnlyButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .social-row {
+    grid-template-columns: minmax(0, 1fr) var(--fn-control-h);
+  }
+
+  .social-row .social-select {
+    width: 100%;
+    grid-column: 1 / -1;
+  }
+}
