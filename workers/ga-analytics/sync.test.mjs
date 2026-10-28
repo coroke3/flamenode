@@ -726,3 +726,69 @@ test("MIG-0517: generated_at and GA4 windows share the exact UTC date", async ()
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("MIG-0517: now-private R2 rows must not survive GA4 orphan-only refresh", async () => {
+  const token = JSON.stringify({
+    access_token: "cached-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (!String(input).includes("analyticsdata.googleapis.com")) {
+      throw new Error("unexpected request");
+    }
+    return new Response(JSON.stringify({
+      dimensionHeaders: [
+        { name: "dateRange" },
+        { name: "customEvent:video_id" },
+      ],
+      metricHeaders: [{ name: "eventCount" }],
+      rowCount: 1,
+      rows: [{
+        dimensionValues: [{ value: "last_30" }, { value: "removed-video" }],
+        metricValues: [{ value: "7" }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    // Both an entirely revoked ranking and a partially revoked ranking must
+    // be replaced, rather than retaining private IDs through stale R2.
+    for (const ids of [
+      ["removed-video"],
+      ["video-a", "removed-video"],
+    ]) {
+      let puts = 0;
+      let written = null;
+      let gets = 0;
+      const previous = JSON.stringify({
+        schema_version: 1,
+        generated_at: 1_700_000_000,
+        items: ids.map((id) => ({ id, status: "public" })),
+      });
+      const env = enabledGa4Env({
+        KV: { async get() { return token; } },
+        R2: {
+          async get(key) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            gets += 1;
+            return { size: Buffer.byteLength(previous), async text() { return previous; } };
+          },
+          async put(key, body) {
+            assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+            puts += 1;
+            written = JSON.parse(String(body));
+          },
+        },
+      });
+      const outcome = await syncGa4Trending(env);
+      assert.equal(outcome.failed, 0);
+      assert.equal(gets, 1);
+      assert.equal(puts, 1);
+      assert.deepEqual(written.items, []);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
