@@ -283,6 +283,44 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(fullStats.gets.length, 0);
   });
 
+  test("T01/T03: provider errors never disclose binding or R2 exception details in Worker logs", async () => {
+    const output = [];
+    const beforeWarn = console.warn;
+    const beforeError = console.error;
+    const capture = (...args) => output.push(args.map((arg) =>
+      typeof arg === "string" ? arg : String(arg)).join(" "));
+    try {
+      console.warn = capture;
+      console.error = capture;
+      for (const scenario of [
+        { throwDbGetter: true, expected: "database_unavailable" },
+        { throwBucketGetter: true, expected: "suggestions_unavailable" },
+        { throwR2Get: true, expected: "suggestions_unavailable" },
+      ]) {
+        const { response, body, stats } = await request("?q=alice", scenario);
+        assert.equal(response.status, 503);
+        assert.deepEqual(body, { error: scenario.expected });
+        verifyPrivate(response, !scenario.throwDbGetter);
+        assert.equal(stats.writes, 0);
+      }
+    } finally {
+      console.warn = beforeWarn;
+      console.error = beforeError;
+    }
+    const logText = output.join("\n");
+    assert.ok(output.length >= 3, "each provider failure should have a diagnostic marker");
+    for (const secret of [
+      "D1_BINDING_SECRET_SENTINEL",
+      "R2_BINDING_ACCESS_FAILURE_DO_NOT_EXPOSE",
+      "R2_GET_SECRET_SENTINEL",
+    ]) {
+      assert.ok(!logText.includes(secret), "private provider exception details must never be logged");
+    }
+    assert.match(logText, /SESSION_RESOLUTION_UNAVAILABLE/);
+    assert.match(logText, /R2_BINDING_UNAVAILABLE/);
+    assert.match(logText, /SUGGESTIONS_LOOKUP_FAILED/);
+  });
+
   test("T02: empty/one-character queries return exact CURRENT envelopes without R2 reads", async () => {
     for (const [path, hint] of [["", null], ["?q=@", "search_too_short"], ["?q=%EF%BC%A1", "search_too_short"]]) {
       const { response, body, stats } = await request(path);
