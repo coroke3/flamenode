@@ -280,7 +280,11 @@ test("MIG-0517 T01 integration: actual json-generator list/recent.json matches D
 
 
 test("MIG-0517: malformed D1 driver response fails rather than reporting zero public videos", async () => {
-  for (const malformed of [undefined, null, {}, { results: null }, { results: {} }]) {
+  for (const malformed of [
+    undefined, null, {}, { results: null }, { results: {} },
+    { success: false, results: [] },
+    { success: false, results: [{ id: "video-a", title: "Video A" }] },
+  ]) {
     let reads = 0;
     const db = {
       prepare() {
