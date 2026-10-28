@@ -177,3 +177,124 @@
     transition: none;
   }
 }
+
+.perm-badge-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.perm-badge-icon {
+  flex-shrink: 0;
+}
+
+.perm-badge-editable {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.perm-badge-editable.perm-badge-privilegedEditable {
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-mixed {
+  border-color: color-mix(in srgb, var(--accent-warning) 52%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-warning-soft) 82%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-ownerDenied {
+  border-color: color-mix(in srgb, var(--accent-warning) 50%, var(--border-subtle));
+  background: var(--accent-warning-soft);
+  color: var(--text-primary);
+}
+
+.perm-badge-event {
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, var(--border-subtle));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-admin {
+  border-color: color-mix(in srgb, var(--accent-danger) 55%, var(--border-subtle));
+  background: var(--accent-danger-soft);
+  color: var(--text-primary);
+}
+
+.perm-badge-locked {
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.perm-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.perm-lock-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.perm-lock-copy {
+  min-width: 0;
+}
+
+.perm-lock-reason {
+  margin: 0;
+}
+
+.perm-lock-hint {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.perm-label-labelRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.perm-label-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.perm-label-required::after {
+  content: "*";
+  margin-left: 4px;
+  color: var(--accent-danger);
+}
+
+.perm-label-badge {
+  font-size: 10px;
+}
