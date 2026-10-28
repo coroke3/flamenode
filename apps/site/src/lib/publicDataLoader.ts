@@ -404,6 +404,27 @@ export async function loadAboutStatsSnapshot(
   return stats;
 }
 
+/** Optional build-time X icon map projection (MIG-0511).
+ * Keep the manifest/generation/digest/private fences used by every snapshot.
+ */
+export const PUBLIC_X_ICON_MAP_KEY = "snapshot/public-x-icon-map/current.json";
+
+export async function loadPublicXIconMapPayload(
+  source: SnapshotSource,
+  options: SnapshotLoadOptions,
+): Promise<unknown> {
+  const metrics = options.metrics ?? newSnapshotBuildMetrics();
+  const payload = await readVerifiedPayload(
+    source,
+    PUBLIC_X_ICON_MAP_KEY,
+    options,
+    metrics,
+    /^snapshot\/public-x-icon-map\/current\.json$/,
+  );
+  metrics.accepted += 1;
+  return payload;
+}
+
 /**
  * Public event object keys (MIG-0502). The payloads are CURRENT's `events/index.json`,
  * `events/{id}.json` and `events/{id}/release.v1.json` as they are; the normalizers stay CURRENT's
