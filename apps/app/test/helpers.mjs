@@ -88,7 +88,7 @@ export function fakeApi(results = {}) {
     getLibrary: (q, s) => pick("getLibrary", q, s),
     getSettings: (q, s) => pick("getSettings", q, s),
     getOnboarding: (s) => pick("getOnboarding", s),
-    getEntryIndex: (s) => pick("getEntryIndex", s),
+    getEntryIndex: (s, offset) => pick("getEntryIndex", offset, s),
   };
 }
 
