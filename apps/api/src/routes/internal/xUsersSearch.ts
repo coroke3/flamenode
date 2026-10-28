@@ -131,6 +131,23 @@ export const xUsersSearchRoutes = new Hono<AppEnv>();
 // guard decides the status; this endpoint maps its bodies to CURRENT
 // requireRouteUser error codes (lower-case), without changing other APIs.
 xUsersSearchRoutes.use("*", async (c, next) => {
+  // Next App Router automatically rejects unsupported methods before invoking
+  // GET, without probing the Auth.js session/D1 or R2. Hono's wildcard auth
+  // middleware would otherwise return 401/403/503 for an unsupported POST.
+  // Keep the endpoint read-only, even when an unrelated method is sent.
+  const method = c.req.method.toUpperCase();
+  if (method === "OPTIONS") {
+    return c.body(null, 204, {
+      ...PRIVATE_HEADERS,
+      Allow: "GET, HEAD, OPTIONS",
+    });
+  }
+  if (method !== "GET" && method !== "HEAD") {
+    return c.body(null, 405, {
+      ...PRIVATE_HEADERS,
+      Allow: "GET, HEAD, OPTIONS",
+    });
+  }
   await next();
   for (const [name, value] of Object.entries(PRIVATE_HEADERS)) c.header(name, value);
 });
