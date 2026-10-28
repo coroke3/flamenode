@@ -26,3 +26,21 @@ test("MIG-0641 U01a: complete marker only carries status and optional message", 
   assert.deepEqual(OnboardingCompleteResponseSchema.parse({ ok: true }), { ok: true });
   assert.equal(OnboardingCompleteResponseSchema.safeParse({ ok: "yes" }).success, false);
 });
+
+test("MIG-0641 U01b: SA-075 redirect sanitizer exactly matches CURRENT on safe, external and invalid next", async () => {
+  const { sanitizeNextPath } = await import("../../../src/lib/utils/next.ts");
+  const { sanitizeTermsNextPath } = await import("../src/routes/personal/termsNext.ts");
+  const samples = [
+    undefined, null, "", "  ", "/", "/dashboard", "/entry/slotted?slot=abc",
+    " /dashboard?tab=a ", "//evil.example/steal", "https://evil.example",
+    "javascript:alert(1)", "entry", "/\\evil.example", "/x://bad",
+    "/ok\nbad", "/ok\u007f", "/" + "a".repeat(511), "/" + "a".repeat(512),
+    "/path#fragment", "/%2Fexternal", "/?next=https://evil.example",
+  ];
+  for (const value of samples) {
+    assert.equal(sanitizeTermsNextPath(value), sanitizeNextPath(value),
+      JSON.stringify(value));
+  }
+  assert.equal(sanitizeTermsNextPath("//evil.example"), "/dashboard");
+  assert.equal(sanitizeTermsNextPath("/entry/slotted?slot=x"), "/entry/slotted?slot=x");
+});
