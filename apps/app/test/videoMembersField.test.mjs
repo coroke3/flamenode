@@ -115,6 +115,63 @@ test("MIG-0713 U03: onChange stays synchronized with member order, edits, additi
   }
 });
 
+test("MIG-0713 U03: unique creator name populates X ID on blur, but ambiguous names never resolve", async () => {
+  for (const { suggestions, shouldFill } of [
+    { suggestions: [{ name: "Alice", x_user_id: "alice" }], shouldFill: "alice" },
+    { suggestions: [
+      { name: "Alice", x_user_id: "alice_one" },
+      { name: "Alice", x_user_id: "alice_two" },
+    ], shouldFill: "" },
+  ]) {
+    const container = dom.window.document.createElement("div");
+    dom.window.document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(React.createElement(VideoMembersField, {
+        ...noopAdapters, suggestions,
+      })));
+      const nameInput = container.querySelector('input[placeholder="表示名"]');
+      assert.ok(nameInput);
+      await act(async () => {
+        typeInto(nameInput, "Alice");
+        nameInput.dispatchEvent(new dom.window.FocusEvent("focusout", { bubbles: true }));
+      });
+      const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
+      assert.equal(members.length, 1);
+      assert.equal(members[0].name, "Alice");
+      assert.equal(members[0].x_user_id, shouldFill,
+        "only an unambiguous creator name may auto-assign an X account");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  }
+});
+
+test("MIG-0713 U03: matching an X ID on blur fills name and canonicalizes the handle", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters, suggestions: [{ name: "Bob", x_user_id: "bob" }],
+    })));
+    const xidInput = container.querySelector('input[placeholder="@なし"]');
+    assert.ok(xidInput);
+    await act(async () => {
+      typeInto(xidInput, "@BoB");
+      xidInput.dispatchEvent(new dom.window.FocusEvent("focusout", { bubbles: true }));
+    });
+    const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
+    assert.equal(members.length, 1);
+    assert.equal(members[0].x_user_id, "bob");
+    assert.equal(members[0].name, "Bob", "a known X handle suggests the matching display name");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test("MIG-0713 U02: component has injected search/permission adapters, never directly fetches or invokes a Server Action", async () => {
   const source = await readFile(new URL("../src/components/forms/VideoMembersField.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\bfetch\s*\(/);
