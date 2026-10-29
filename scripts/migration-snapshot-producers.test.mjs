@@ -448,6 +448,8 @@ test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages i
   sqlite.exec("VACUUM INTO '"+sqlitePath.replaceAll("'","''")+"'");
   const trendingFile=path.join(fixtureDir,"trending.json");
   fs.writeFileSync(trendingFile,JSON.stringify(TRENDING));
+  // Snapshot E2E must not overwrite the shared default dist read by later parity tests.
+  const siteOutput=path.join(fixtureDir,"site-output");
   const commands=[];
   const isFull=process.env.REQUIRE_BUILT==="1";
   const runner=async command=>{
@@ -455,7 +457,12 @@ test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages i
     assert.equal(command.env.FLAMENODE_D1_READ_TOKEN,undefined);
     assert.equal(command.env.FLAMENODE_R2_READ_TOKEN,undefined);
     assert.ok(fs.existsSync(command.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE));
-    if(isFull)await runBuildCommand(command);
+    if(isFull){
+      const isolatedArgs=command.args[0]==="run"
+        ? [...command.args,"--","--outDir",siteOutput]
+        : [...command.args,siteOutput];
+      await runBuildCommand({...command,args:isolatedArgs});
+    }
   };
   const oldLog=console.log;
   let report;
@@ -473,10 +480,10 @@ test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages i
   assert.ok(report.d1Statements<=200,"snapshot reader query count");
   assert.ok(fs.existsSync(path.join(report.snapshotDir,"manifest.json")));
   if(isFull){
-    const html=fs.readFileSync(path.resolve("apps/site/dist/user/creator_a/index.html"),"utf8");
+    const html=fs.readFileSync(path.join(siteOutput,"user/creator_a/index.html"),"utf8");
     assert.match(html,/Creator A/);
-    assert.equal(fs.existsSync(path.resolve("apps/site/dist/user/banned_c/index.html")),false);
-    assert.match(fs.readFileSync(path.resolve("apps/site/dist/event/public-event/index.html"),"utf8"),/Public Event/);
+    assert.equal(fs.existsSync(path.join(siteOutput,"user/banned_c/index.html")),false);
+    assert.match(fs.readFileSync(path.join(siteOutput,"event/public-event/index.html"),"utf8"),/Public Event/);
   }
 });
 
