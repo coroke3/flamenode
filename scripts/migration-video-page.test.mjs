@@ -78,6 +78,7 @@ function build(videos, over = {}) {
     fs.writeFileSync(path.join(dir, eventKey), JSON.stringify(envelope(eventKey, eventPayload)));
     keys.push(eventKey);
   }
+  for (const id of over.manifestOnlyEventIds ?? []) keys.push(`snapshot/event-detail/${id}.json`);
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: keys, blockedKeys: over.blocked ?? [] }));
   const env = { ...process.env, FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
   try {
@@ -222,11 +223,15 @@ test("T08: future scheduled public primary event exposes the verified playlist; 
 test("T09: missing, non-public, mismatched and invalid event playlist never leaks a link", { skip: skipUi }, () => {
   for (const [label, events] of [
     ["missing", []],
+    ["manifest lists missing object", []],
     ["non-public", [["ev1", playlistEvent("private")]]],
     ["wrong event ID", [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another")]]],
     ["invalid playlist ID", [["ev1", playlistEvent("public", "INVALID!")]]],
   ]) {
-    const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], { events });
+    const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+      events,
+      manifestOnlyEventIds: label === "manifest lists missing object" ? ["ev1"] : [],
+    });
     try {
       assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
       assert.deepEqual(playlistLinks(r), [], label);
