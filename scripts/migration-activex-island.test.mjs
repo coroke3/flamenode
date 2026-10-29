@@ -1,6 +1,7 @@
 // MIG-0515 SA-098: Astro public header's Active X HTTP client + guards.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -13,7 +14,7 @@ const React = (await import("react")).default;
 const { renderToStaticMarkup } = await import("react-dom/server");
 const { switchActiveX } = await import("../apps/site/src/lib/activeX.ts");
 const { getGuardRedirectPath, shouldShowGuardErrorOnly } = await import("../apps/site/src/lib/guardRedirect.ts");
-const { SiteHeader } = await import("../apps/site/src/components/SiteHeader.ts");
+const { AccountSlot } = await import("../apps/site/src/components/AccountMenu.ts");
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -87,9 +88,24 @@ test("T02: network errors, non-JSON and invalid responses cannot be mistaken for
   }
 });
 
-test("T03: SSR retains header structure without a no-JS Active X switch button", () => {
-  const html = renderToStaticMarkup(React.createElement(SiteHeader, { currentPath: "/list" }));
-  assert.match(html, /header|hd-/);
+test("T03: header injects the client and JS-off account markup has no inactive switch controls", () => {
+  // Root test:unit runs before @flamenode/ui is built, so verify SiteHeader's
+  // wiring at source level and SSR render only the already build-independent AccountSlot.
+  const header = readFileSync(new URL("../apps/site/src/components/SiteHeader.ts", import.meta.url), "utf8");
+  assert.match(header, /import \\{ switchActiveX \\} from "\.\.\/lib\/activeX\.ts"/);
+  assert.match(header, /React\.createElement\(AccountSlot, \\{ currentPath, switchActiveX \\}\)/);
+  assert.match(header, /ACTIVE_X_CHANGED_EVENT/);
+
+  const state = {
+    loading: false, unavailable: false, confirmedLoggedOut: true,
+    user: null, details: null, detailsLoading: false, detailsUnavailable: false,
+  };
+  const store = {
+    getState: () => state, subscribe: () => () => {}, start() {},
+    requestDetails() {}, retryDetails() {}, dispose() {},
+  };
+  const html = renderToStaticMarkup(React.createElement(AccountSlot, { currentPath: "/list", store }));
+  assert.match(html, /参加する/);
   assert.doesNotMatch(html, /別の X ID に切り替え/);
   assert.doesNotMatch(html, /x_user_id/);
 });
