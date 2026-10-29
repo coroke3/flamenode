@@ -24,6 +24,15 @@ test("T01: CURRENT three error-code branches are unchanged", () => {
   assert.ok(fs.readFileSync("app/(public)/rules/page.tsx", "utf8").includes(RULES_GENERIC_ERROR));
 });
 
+test("T01: like/save guidance matches the Auth User-only write guard, not the legacy copy", () => {
+  const currentGuard = fs.readFileSync("src/lib/actions/video/interaction.ts", "utf8");
+  assert.match(currentGuard, /requireActiveXId:\\s*false/);
+  assert.match(currentGuard, /requireApprovedActiveXId:\\s*false/);
+  const island = fs.readFileSync("apps/site/src/components/RulesConsentIsland.ts", "utf8");
+  assert.match(island, /承認済みの活動名義は不要です/);
+  assert.doesNotMatch(island, /いいね・セーブには利用規約への同意と承認済みの活動名義が必要/);
+});
+
 test("T01: accepted POST preserves CURRENT hidden next and navigates using server next", async () => {
   let sent;
   const fetcher = mkFetch(200, { ok: true, next: "/x" }, (url, options) => { sent = { url, options }; });
