@@ -92,8 +92,12 @@ export async function fetchSlotViewerOverlay(
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
-    if (!response.ok) return unavailableSlotViewerOverlay();
-    return parseSlotViewerOverlay(await response.json()) ?? unavailableSlotViewerOverlay();
+    // Some custom fetch implementations resolve after AbortSignal is fired.
+    // Never grant stale viewer permissions after timeout or a cancelled refresh.
+    if (controller.signal.aborted || !response.ok) return unavailableSlotViewerOverlay();
+    const payload = await response.json();
+    if (controller.signal.aborted) return unavailableSlotViewerOverlay();
+    return parseSlotViewerOverlay(payload) ?? unavailableSlotViewerOverlay();
   } catch {
     return unavailableSlotViewerOverlay();
   } finally {
