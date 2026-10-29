@@ -23,6 +23,7 @@ type RawUserRow = Record<string, string | number | null> & {
   id: string;
   active_x_user_id: string | null;
   linked_approval_status?: string | null;
+  resolved_x_user_id?: string | null;
 };
 
 /**
@@ -35,7 +36,7 @@ async function loadSelectedIdentity(
   db: D1Database,
   authUserId: string,
   requestedXId: string,
-): Promise<{ user: Record<string, unknown>; linkedApproval: string | null } | null> {
+): Promise<{ user: Record<string, unknown>; linkedApproval: string | null; canonicalXId: string | null } | null> {
   // Identical fail-closed alias/direct collision policy to
   // @flamenode/domain/xid#decideCanonicalXUserResolution, in one D1 read.
   const row = await db.prepare(`
@@ -80,6 +81,7 @@ async function loadSelectedIdentity(
       FROM facts
     )
     SELECT u.*,
+      (SELECT canonical_id FROM resolved) AS resolved_x_user_id,
       (SELECT x.approval_status FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
        CROSS JOIN resolved r
@@ -90,12 +92,12 @@ async function loadSelectedIdentity(
   `).bind(requestedXId, requestedXId, authUserId).first<RawUserRow>();
 
   if (!row) return null;
-  const { linked_approval_status, ...user } = row;
+  const { linked_approval_status, resolved_x_user_id, ...user } = row;
   // Drizzle timestamp_ms columns are Date objects in CURRENT select().
   if (typeof user.emailVerified === "number") {
     (user as Record<string, unknown>).emailVerified = new Date(user.emailVerified);
   }
-  return { user, linkedApproval: linked_approval_status ?? null };
+  return { user, linkedApproval: linked_approval_status ?? null, canonicalXId: resolved_x_user_id ?? null };
 }
 
 export const activeXRoutes = new Hono<AppEnv>();
@@ -118,20 +120,21 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c) => {
     return c.json({ ok: false, message: MUTATION_FAILED }, 503);
   }
   if (!selected) return c.json({ ok: false, message: USER_NOT_FOUND }, 404);
-  if (!selected.linkedApproval) return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
+  if (!selected.canonicalXId || !selected.linkedApproval) return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
   if (selected.linkedApproval !== "approved") {
     return c.json({ ok: false, message: NOT_APPROVED }, 403);
   }
-  if (normalizeXId(selected.user.active_x_user_id as string | null) === xUserId) {
+  const canonicalXId = selected.canonicalXId;
+  if (normalizeXId(selected.user.active_x_user_id as string | null) === canonicalXId) {
     return c.json({ ok: true, message: "すでにこの X ID がアクティブです。" });
   }
 
   const before = selected.user;
-  const after = { ...before, active_x_user_id: xUserId };
+  const after = { ...before, active_x_user_id: canonicalXId };
   try {
     await mutateWithAudit(c.get("db"), {
       mutationStatements: [
-        c.get("db").run(sql`UPDATE "user" SET active_x_user_id = ${xUserId}
+        c.get("db").run(sql`UPDATE "user" SET active_x_user_id = ${canonicalXId}
           WHERE id = ${userId} AND (${expectedRowCondition({ expectedCurrent: before })})`),
       ],
       expectedMutationChanges: [1],
@@ -143,7 +146,7 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c) => {
         before: { ...before },
         after: { ...after },
         actor_user_id: userId,
-        actor_x_user_id: xUserId,
+        actor_x_user_id: canonicalXId,
         retention_class: "normal",
       }],
     });
