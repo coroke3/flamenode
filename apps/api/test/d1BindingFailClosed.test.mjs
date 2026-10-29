@@ -154,7 +154,6 @@ test("SEC-0807-01: unavailable Origin configuration denies before throwing D1 bi
   assert.deepEqual(await response.json(), {
     ok: false,
     reason: "origin_verification_unavailable",
-    message: "Origin を検証できません。",
   });
   assert.equal(response.headers.get("cache-control"), PRIVATE);
   assert.equal(accesses(), 0, "Origin failure must not consult DB getter");
