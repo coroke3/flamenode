@@ -23,7 +23,7 @@ export interface AuditMutations {
   restore(auditId: string, reason: string, confirm: string, force: boolean): Promise<OpsWriteResult<RestoreAuditResult>>;
   saveSettings(patch: AdminAuditSettingsResponse["settings"]): Promise<OpsWriteResult<UpdateAuditLogSettingsResult>>;
 }
-function auditMutationResult<T extends {ok:boolean}>(result: OpsWriteResult<T>): OpsWriteResult<T> {
+function auditMutationResult<T extends {ok:boolean;message?:string}>(result: OpsWriteResult<T>): OpsWriteResult<T> {
   if (result.status !== "ok") return result;
   if (typeof result.data.ok !== "boolean" ||
       (result.data.message !== undefined && typeof result.data.message !== "string")) {
