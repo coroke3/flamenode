@@ -68,27 +68,29 @@ export const mediaRoutes = new Hono<AppEnv>();
 // RH-024 — 404 for bad/expired/tampered signature, not 403 (CURRENT policy).
 mediaRoutes.get("/manage-x-icon/*", async (c) => {
   const key = pathValue(c, "/api/media/manage-x-icon/");
-  if (!c.env?.BUCKET || !c.env.AUTH_SECRET) return notFound();
-  return serveManageXIcon(
-    { BUCKET: c.env.BUCKET, AUTH_SECRET: c.env.AUTH_SECRET },
-    key,
-    c.req.raw,
-  );
+  try {
+    const { BUCKET, AUTH_SECRET } = c.env ?? {};
+    if (!BUCKET || !AUTH_SECRET) return notFound();
+    return await serveManageXIcon({ BUCKET, AUTH_SECRET }, key, c.req.raw);
+  } catch {
+    // Signed icons must not disclose binding or signature internals.
+    return notFound();
+  }
 });
 
 // RH-025 — unauthorized private images remain indistinguishable from missing ones.
 mediaRoutes.get("/slot-submission-icon/:slotId", async (c) => {
   const slotId = pathValue(c, "/api/media/slot-submission-icon/");
   if (!isValidSlotSubmissionIconSlotId(slotId)) return notFound(true);
-  if (!c.env?.DB || !c.env.BUCKET) return unavailable("Media access check unavailable");
-
   try {
-    const probe = await probeSlotSubmissionIcon({ DB: c.env.DB }, slotId);
+    const { DB, BUCKET } = c.env ?? {};
+    if (!DB || !BUCKET) return unavailable("Media access check unavailable");
+    const probe = await probeSlotSubmissionIcon({ DB }, slotId);
     if (probe.kind === "unavailable") return unavailable("Media access check unavailable");
     if (probe.kind === "not_found") return notFound(true);
     const options = { waitUntil: executionWaitUntil(c) };
     if (probe.kind === "public") {
-      return serveSlotSubmissionIconRow({ BUCKET: c.env.BUCKET }, probe.row, null, c.req.raw, options);
+      return serveSlotSubmissionIconRow({ BUCKET }, probe.row, null, c.req.raw, options);
     }
 
     // Auth.js is loaded only when D1 says the submitted slot needs a viewer.
@@ -98,7 +100,7 @@ mediaRoutes.get("/slot-submission-icon/:slotId", async (c) => {
     let viewer: { id: string; active_x_user_id: string | null } | null = null;
     if (token) {
       try {
-        const user = await resolveSessionUser(c.env.DB, token);
+        const user = await resolveSessionUser(DB, token);
         if (user && user.is_banned !== 1) {
           viewer = { id: user.id, active_x_user_id: user.active_x_user_id };
         }
@@ -109,7 +111,7 @@ mediaRoutes.get("/slot-submission-icon/:slotId", async (c) => {
         throw error;
       }
     }
-    return serveSlotSubmissionIconRow({ BUCKET: c.env.BUCKET }, probe.row, viewer, c.req.raw, options);
+    return serveSlotSubmissionIconRow({ BUCKET }, probe.row, viewer, c.req.raw, options);
   } catch {
     console.error("[slot-submission-icon] media read failed");
     return unavailable("Media temporarily unavailable");
@@ -121,14 +123,19 @@ mediaRoutes.get("/*", async (c) => {
   const key = pathValue(c, "/api/media/");
   if (!isValidPublicMediaKey(key)) return notFound();
 
-  const cached = await getCachedPublicMediaResponse(c.req.raw, key);
-  if (cached) return cached;
-  if (!c.env?.DB || !c.env.BUCKET) return unavailable("Storage temporarily unavailable");
-
-  return servePublicMedia(
-    { DB: c.env.DB, BUCKET: c.env.BUCKET },
-    key,
-    c.req.raw,
-    { skipEdgeCacheLookup: true, waitUntil: executionWaitUntil(c) },
-  );
+  try {
+    // Public cache may return before binding acquisition, even if the runtime is degraded.
+    const cached = await getCachedPublicMediaResponse(c.req.raw, key);
+    if (cached) return cached;
+    const { DB, BUCKET } = c.env ?? {};
+    if (!DB || !BUCKET) return unavailable("Storage temporarily unavailable");
+    return await servePublicMedia(
+      { DB, BUCKET },
+      key,
+      c.req.raw,
+      { skipEdgeCacheLookup: true, waitUntil: executionWaitUntil(c) },
+    );
+  } catch {
+    return unavailable("Storage temporarily unavailable");
+  }
 });
