@@ -37,6 +37,8 @@ const h = React.createElement;
 const { loadEventBuildData, buildEventDataFromPayloads } = await import("../apps/site/src/lib/eventData.ts");
 const { parseEventsQuery, buildEventsIndexModel } = await import("../apps/site/src/lib/eventIndex.ts");
 const { buildEventDetailData, buildEventJsonLd, getDayMetric, formatEventRange } = await import("../apps/site/src/lib/eventDetail.ts");
+// Test-only reference for CURRENT EventRecruitCard projection; never imported into the browser Island.
+const { toRecruit: topRecruitReference } = await import("../apps/site/src/lib/topData.ts");
 const { buildEventSlotsModel } = await import("../apps/site/src/lib/eventSlots.ts");
 const { buildEventReleaseModel, formatDateKey, formatTime } = await import("../apps/site/src/lib/eventRelease.ts");
 const { parseLiveSlots, fetchLiveSlots } = await import("../apps/site/src/lib/liveSlots.ts");
@@ -294,11 +296,17 @@ test("U02 model: status, entry action, day metric, slot parts follow CURRENT", (
   assert.equal(open.statusLabel, "募集期間中");
   assert.equal(open.entryAction, "reserve");
   assert.equal(open.recruit?.ctaLabel, "枠を確保する");
+  const parityFields = ["statusLabel", "kind", "countdownHeading", "countdownRange", "countdownValue", "countdownUnit", "slotFilled", "slotTotal"];
+  const reference = topRecruitReference(detail.event, undefined, NOW);
+  for (const field of parityFields) assert.deepEqual(open.recruit?.[field], reference[field], "CURRENT recruit parity: " + field);
   assert.equal(open.recruit?.slotTotal, null, "SSG must not include live slot totals");
   assert.equal(open.recruit?.slotFilled, null, "SSG must not include live fill");
   assert.ok(open.accentStyle?.["--event-accent"]);
   const allFilled = { slots: detail.slots.map((slot) => ({ id: slot.id, status: "reserved" })) };
-  assert.equal(buildEventDetailData(detail, NOW, allFilled).recruit?.statusLabel, "満枠");
+  const fullRecruit = buildEventDetailData(detail, NOW, allFilled).recruit;
+  assert.equal(fullRecruit?.statusLabel, "満枠");
+  const fullReference = topRecruitReference(detail.event, { available: 0, total: detail.slots.length }, NOW);
+  for (const field of parityFields) assert.deepEqual(fullRecruit?.[field], fullReference[field], "RH-020 full recruit parity: " + field);
   assert.deepEqual(open.dayMetric, { label: "投稿期間まで", days: Math.ceil((detail.event.start_time - NOW) / 86400) });
   assert.deepEqual(open.slotParts.map((p) => [p.label, p.total, p.filled]), [["第1部", 2, null], ["第2部", 2, null]]);
   assert.equal(open.slotFilled, null);
