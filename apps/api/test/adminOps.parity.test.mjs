@@ -54,7 +54,7 @@ function setup({user=ADMIN,settings="normal",onFirst,mirror=true}={}){
     audit:sqlite.prepare("SELECT COUNT(*) n FROM audit_logs").get().n,
     rebuild:sqlite.prepare("SELECT COUNT(*) n FROM static_rebuild_queue").get().n,
   });
-  return {sqlite,stats,request,counts,kvPuts};
+  return {db,sqlite,stats,request,counts,kvPuts};
 }
 test("MIG-0637 contracts define FormData keys used by both clients",()=>{
   assert.equal(CostGuardModeBodySchema.safeParse({mode:"economy",reason:"x"}).success,true);
@@ -259,4 +259,36 @@ test("MIG-0637 SA-081: no request body is valid for path-only icon refresh",asyn
   const res=await x.request("/x-users/twitter1/icon-refresh",undefined);
   assert.equal(res.status,200,JSON.stringify(await res.clone().json()));
   assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='twitter1'").get().icon_url,"new.png");
+});
+
+test("MIG-0637: failed D1 audit batches never log provider secrets or persist partial changes",async()=>{
+  const sentinel="SECRET_FROM_D1_AUDIT_BATCH_SHOULD_NEVER_BE_LOGGED";
+  for(const [path,body] of [
+    ["/cost-guard/mode",{mode:"economy",reason:"safe"}],
+    ["/users/target-1/role",{role:"moderator"}],
+    ["/x-users/twitter1/icon-refresh",{}],
+  ]){
+    const x=setup();
+    x.db.batch=async()=>{throw new Error(sentinel)};
+    const originalError=console.error;
+    const recorded=[];
+    console.error=(...args)=>recorded.push(args.map(String).join(" "));
+    let res;
+    try{
+      res=await x.request(path,body);
+    }finally{
+      console.error=originalError;
+    }
+    assert.equal(res.status,409,path);
+    const response=await res.text();
+    assert.doesNotMatch(response,/SECRET_FROM_D1_AUDIT_BATCH/,path);
+    assert.doesNotMatch(recorded.join("\\n"),/SECRET_FROM_D1_AUDIT_BATCH/,path);
+    assert.equal(recorded.length,1,path);
+    assert.equal(x.counts().audit,0,path);
+    assert.equal(x.counts().rebuild,0,path);
+    assert.equal(x.kvPuts.length,0,path);
+    assert.equal(x.sqlite.prepare("SELECT operation_mode FROM system_settings").get().operation_mode,"normal",path);
+    assert.equal(x.sqlite.prepare('SELECT role FROM "user" WHERE id=?').get("target-1").role,"user",path);
+    assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id=?").get("twitter1").icon_url,"old.png",path);
+  }
 });
