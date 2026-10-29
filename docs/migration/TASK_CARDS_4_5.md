@@ -207,7 +207,7 @@
 ### MIG-0517 — GA4 sync input from D1 (MIG-0509 U06)
 - 読む: `workers/ga-analytics/sync.ts:20,151,249-266`、`workers/json-generator/optimizedRebuild.ts:651,669-678`。
 - 変更: `+workers/ga-analytics/recentFromD1.ts`、`loadRecentListPayload` の中身。
-- 試験: `list/recent.json` と同じ id 集合と順序、非公開を含まない、0 件で同期しない。
+- 試験: `list/recent.json` と同じ id 集合と順序、非公開を含まない、D1の公開動画0件でGA4リクエストを省き空の有効なR2ランキングを1回PUT、D1失敗時にはR2書込0回。旧R2保持は公開readerの全item検証と一致。
 - DONE: ga-analytics が R2 の `list/recent.json` を読まない。
 
 ### MIG-0518 — `/[id]` chapter composer + `?playlist=` dock Islands
