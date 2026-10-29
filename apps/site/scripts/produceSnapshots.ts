@@ -9,13 +9,12 @@
  * forbidden-key sanitizing and LIMITs are CURRENT's, not a copy. The bucket is captured, never uploaded.
  *
  * Safety: CURRENT's generators also write tracking rows (static_artifacts, static_rebuild_queue). The CLI
- * therefore only accepts a local file (a sqlite copy or a `wrangler d1 export` SQL dump) that it loads into a scratch
- * in-memory database; it never talks to Cloudflare. Production D1 access (read-only REST token, MIG-0409
- * `--d1-api`) is not used here: this producer runs about 6 statements per creator, far above that reader's
- * 19-request cap. How the build obtains the local copy is the MIG-0509 decision (see the work item).
+ * therefore routes those writes to a migrated in-memory scratch database. --d1-api uses the bounded
+ * read-only REST reader with batched/set-based SQL (max 200 SELECT statements); it never sends writes to D1.
+ * Local --sqlite and --sql-dump fixtures remain supported, with explicit --batched parity mode.
  *
  * CLI: node --experimental-strip-types apps/site/scripts/produceSnapshots.ts
- *        (--sqlite FILE | --sql-dump FILE) --out DIR --generation ID [--trending-file FILE] [--now SEC]
+ *        (--sqlite FILE | --sql-dump FILE | --d1-api) --out DIR --generation ID [--trending-file FILE] [--now SEC]
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -40,6 +39,7 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
+import { D1_HTTP_ENV, openD1HttpReader } from "./readPublicData.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -481,27 +481,64 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   };
 }
 
-function argValue(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+export interface SnapshotCliOptions {
+  env?: Record<string, string | undefined>;
+  fetchFn?: typeof fetch;
+}
+type SnapshotCliArgs = {
+  out: string; generation: string;
+  sqlite?: string; sqlDump?: string; d1Api: boolean; batched: boolean;
+  trendingFile?: string; now?: number;
+};
+const CLI_USAGE = "expected exactly one of --sqlite FILE, --sql-dump FILE, --d1-api, plus --out DIR --generation ID";
+export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
+  const values = new Map<string,string>();
+  let d1Api = false, batched = false;
+  const known = new Set(["--out","--generation","--sqlite","--sql-dump","--trending-file","--now"]);
+  for (let i = 0; i < argv.length; i++) {
+    const key = argv[i];
+    if (key === "--d1-api" || key === "--batched") {
+      if (key === "--d1-api" ? d1Api : batched) throw new Error(CLI_USAGE);
+      if (key === "--d1-api") d1Api = true; else batched = true;
+      continue;
+    }
+    if (!known.has(key) || values.has(key) || !argv[i+1] || argv[i+1].startsWith("--")) throw new Error(CLI_USAGE);
+    values.set(key,argv[++i]);
+  }
+  const sqlite = values.get("--sqlite"), sqlDump = values.get("--sql-dump");
+  const sourceCount = Number(d1Api)+Number(Boolean(sqlite))+Number(Boolean(sqlDump));
+  if (sourceCount !== 1 || !values.get("--out") || !values.get("--generation")) throw new Error(CLI_USAGE);
+  const nowRaw = values.get("--now");
+  const now = nowRaw === undefined ? undefined : Number(nowRaw);
+  if (now !== undefined && (!Number.isSafeInteger(now)||now<0)) throw new Error(CLI_USAGE);
+  return {
+    out:values.get("--out")!,generation:values.get("--generation")!,
+    sqlite,sqlDump,d1Api,batched:batched||d1Api,trendingFile:values.get("--trending-file"),now,
+  };
 }
 
-export async function main(argv: string[]): Promise<void> {
-  const out = argValue(argv, "--out");
-  const generation = argValue(argv, "--generation");
-  if (!out || !generation) throw new Error("--out DIR and --generation ID are required");
-  const db = await openScratchDb({ sqlite: argValue(argv, "--sqlite"), sqlDump: argValue(argv, "--sql-dump") });
-  const trendingFile = argValue(argv, "--trending-file");
-  const nowArg = argValue(argv, "--now");
+export async function main(argv: string[], options: SnapshotCliOptions = {}): Promise<void> {
+  const args = parseSnapshotCliArgs(argv);
+  const env = options.env ?? process.env;
+  const db = args.d1Api
+    ? openD1HttpReader({
+        accountId: env[D1_HTTP_ENV.accountId]?.trim() ?? "",
+        databaseId: env[D1_HTTP_ENV.databaseId]?.trim() ?? "",
+        token: env[D1_HTTP_ENV.token]?.trim() ?? "",
+        fetchFn: options.fetchFn,
+        maxStatements: DEFAULT_MAX_REMOTE_STATEMENTS,
+      }).db
+    : await openScratchDb({sqlite: args.sqlite,sqlDump: args.sqlDump});
   const result = await produceSnapshots({
     db,
-    mode: argv.includes("--batched") ? "batched" : "oracle",
-    generation,
-    nowSec: nowArg ? Number(nowArg) : undefined,
-    trending: trendingFile ? JSON.parse(fs.readFileSync(trendingFile, "utf-8")) : undefined,
+    mode:args.batched ? "batched" : "oracle",
+    maxRemoteStatements:DEFAULT_MAX_REMOTE_STATEMENTS,
+    generation:args.generation,
+    nowSec:args.now,
+    trending:args.trendingFile ? JSON.parse(fs.readFileSync(args.trendingFile,"utf8")) : undefined,
   });
-  const env = writeSnapshotDir(out, result);
-  console.log(JSON.stringify({ report: result.report, env }, null, 2));
+  const buildEnv = writeSnapshotDir(args.out, result);
+  console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
   if (result.report.trending === "missing") {
     console.warn("[snapshots] trending was not produced (no --trending-file): the /trending and / builds fail closed until it is supplied");
   }
