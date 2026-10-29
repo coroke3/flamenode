@@ -42,10 +42,10 @@ if (runUnderRootTsx(import.meta.url)) {
     sqlite.prepare("UPDATE videos SET created_at = 100, updated_at = 100").run();
     return { sqlite, d1: atomicD1(sqlite, options) };
   }
-  const freeze = () => {
+  const freeze = (initialId = 0) => {
     const originalNow = Date.now;
     const originalUuid = globalThis.crypto.randomUUID;
-    let n = 0;
+    let n = initialId;
     Date.now = () => 1800000000000;
     globalThis.crypto.randomUUID = () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
     return () => { Date.now = originalNow; globalThis.crypto.randomUUID = originalUuid; };
@@ -114,11 +114,12 @@ if (runUnderRootTsx(import.meta.url)) {
       const { a, b, expected } = await compare(user, "v_pub", kind, 200);
       assert.equal(expected.result.active, true);
       assert.equal(a.sqlite.prepare("SELECT COUNT(*) AS n FROM video_interactions_auth").get().n, 1);
-      const aRestore = freeze();
+      const aRestore = freeze(100);
       const currentOff = await current(a, user, "v_pub", kind).finally(aRestore);
-      const bRestore = freeze();
+      const bRestore = freeze(100);
       const mineOff = await target(b, user, "v_pub", kind).finally(bRestore);
       assert.deepEqual(mineOff.result, currentOff.result, "toggle off parity");
+      assert.equal(currentOff.result.ok, true, "CURRENT off must succeed, not collide with prior audit IDs");
       assert.equal(mineOff.status, 200);
       assert.deepEqual(state(b), state(a), "toggle off DB/audit/queue parity");
       assert.equal(mineOff.result.active, false);
