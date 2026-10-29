@@ -217,3 +217,39 @@ test("U03 private playlist and chapters are excluded entirely from JS-disabled H
   }));
   assert.equal(html, "");
 });
+
+test("U01/U03 VideoPageIsland keeps static public chapters without client JavaScript", async () => {
+  const { VideoPageIsland } = await import("../apps/site/src/components/VideoPageIsland.ts");
+  const video = {
+    id: "video", title: "Video", creator: { name: "Creator" }, hasYoutube: false,
+    chapters: [{ id: "public", timeLabel: "0:14", label: "PUBLIC_CHAPTER" }],
+    related: [],
+  };
+  const html = renderToString(React.createElement(VideoPageIsland, {
+    video, youtubeId: null, primaryEventId: null, gaEnabled: false,
+  }));
+  assert.match(html, /PUBLIC_CHAPTER/);
+  assert.doesNotMatch(html, /CSV で一括登録|チャプターコメント投稿|ログイン状態を確認中/);
+});
+
+test("U03 play seek event dispatch retains the same CURRENT bridge event contract", async () => {
+  const { seekToTime } = await import("../src/components/video/playerBridge.ts");
+  const { JSDOM } = await import("jsdom");
+  const dom = new JSDOM("", { url: "https://flamenode.net/video" });
+  const former = globalThis.window;
+  const formerCustomEvent = globalThis.CustomEvent;
+  globalThis.window = dom.window;
+  globalThis.CustomEvent = dom.window.CustomEvent;
+  let target = null;
+  dom.window.addEventListener("flamenode:seek", (event) => {
+    target = event.detail.time;
+  });
+  try {
+    seekToTime(65.9);
+    assert.equal(target, 65);
+  } finally {
+    globalThis.window = former;
+    globalThis.CustomEvent = formerCustomEvent;
+    dom.window.close();
+  }
+});
