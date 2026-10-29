@@ -4,6 +4,7 @@ import { createAdminAuditApi, type AuditAuditApi } from "../../api/adminAudit.js
 import type { OpsFetch } from "../../api/read.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
 import { AuditRestoreForm } from "./AuditRestoreForm.js";
+import { AuditDiffGrid } from "./AuditDiffGrid.js";
 
 const STATUS_LABELS:Record<string,string> = {
   restorable:"復元可能",restored:"復元済み",expired:"期限切れ",
@@ -128,7 +129,7 @@ export function AuditDiffDetail({before,after,inverse,changedKeys}:{
   return <div>
     <button type="button" className="fn-btn fn-btn-ghost" aria-expanded={showDiff}
       onClick={()=>setShowDiff(value=>!value)}>{showDiff?"閉じる":"差分"}</button>
-    {showDiff&&<div role="region" aria-label="変更差分"><p>変更キー: {changedKeys.join(", ")||"変更なし"}</p>
+    {showDiff&&<div role="region" aria-label="変更差分"><p>変更キー: {changedKeys.join(", ")||"変更なし"}</p><AuditDiffGrid before={before} after={after}/>
       <div className="fn-grid"><section><h3>変更前</h3><pre>{jsonPretty(before)}</pre></section>
         <section><h3>変更後</h3><pre>{jsonPretty(after)}</pre></section></div></div>}
     <section><h3>before</h3><pre>{jsonPretty(before)}</pre></section>
