@@ -4,6 +4,7 @@ import { createAdminAuditApi, type AuditAuditApi } from "../../api/adminAudit.js
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { auditViewHref, parseAuditListQuery, type AuditListQuery, type AuditView } from "../../lib/auditListQuery.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
+import { AuditDiffGrid } from "./AuditDiffGrid.js";
 
 type AuditRow = AdminAuditListResponse["rows"][number];
 type Operator = AdminAuditListResponse["operators"][number];
@@ -189,10 +190,10 @@ export function AuditDiff({ row, api }: { row: AuditRow; api: AuditAuditApi }): 
     {open && <div className="fn-panel" role="region" aria-label="変更差分">
       {state.status === "loading" ? <p role="status">差分を読み込み中...</p>
         : state.status === "unavailable" ? <p role="alert">差分の取得に失敗しました。</p>
-        : <div className="fn-grid">
+        : <div><AuditDiffGrid before={state.before} after={state.after}/><div className="fn-grid">
           <section><h4>変更前</h4><pre style={{whiteSpace:"pre-wrap", overflowWrap:"anywhere"}}>{state.before ?? "(null)"}</pre></section>
           <section><h4>変更後</h4><pre style={{whiteSpace:"pre-wrap", overflowWrap:"anywhere"}}>{state.after ?? "(null)"}</pre></section>
-        </div>}
+        </div></div>}
     </div>}
   </>;
 }
