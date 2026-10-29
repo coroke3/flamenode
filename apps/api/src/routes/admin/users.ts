@@ -85,8 +85,16 @@ export async function mutateUserWithAudit(
     return fail(c,409,ATOMIC_FAILURE);
   }
 }
+// Never let a failed preflight D1 read or a late binding getter throw into
+// Hono's default error handler. Keep the provider error out of logs/responses.
+const failClosedPreflight = (_error: Error, c: Context<AppEnv>) => {
+  c.header("Cache-Control", "private, no-store");
+  return c.json<AdminOpsResult>({ ok: false, message: "管理操作を処理できませんでした。再度お試しください。" }, 503);
+};
 export const adminUsersRoutes=new Hono<AppEnv>();
 export const adminXUsersRoutes=new Hono<AppEnv>();
+adminUsersRoutes.onError(failClosedPreflight);
+adminXUsersRoutes.onError(failClosedPreflight);
 adminUsersRoutes.use("/:userId/role",onlyMutating(costGuardMiddleware("admin_user_role")));
 adminUsersRoutes.use("/:userId/banned",onlyMutating(costGuardMiddleware("admin_user_ban")));
 adminUsersRoutes.use("/:userId/notifications",onlyMutating(costGuardMiddleware("admin_user_notifications")));
