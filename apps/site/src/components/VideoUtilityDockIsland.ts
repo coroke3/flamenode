@@ -40,6 +40,30 @@ export function canPostVideoChapter(overlay: VideoViewerOverlayDto, loading: boo
     !overlay.isBanned && overlay.isTosAccepted && !overlay.termsReacceptRequired &&
     !overlay.authUnavailable;
 }
+export function chapterPostPolicy(
+  overlay: VideoViewerOverlayDto,
+  loading: boolean,
+  currentPath: string,
+): { canPost: boolean; reason?: string; href?: string | null; linkLabel?: string } {
+  if (loading) return { canPost: false, reason: "ログイン状態を確認中です。", href: null };
+  if (overlay.authUnavailable) return {
+    canPost: false, reason: "ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。", href: null,
+  };
+  if (!overlay.loggedIn) return {
+    canPost: false, reason: "コメント投稿にはログインが必要です。",
+    href: `/entry?next=${encodeURIComponent(currentPath)}`, linkLabel: "ログイン",
+  };
+  if (overlay.isBanned) return { canPost: false, reason: "現在、このアカウントは利用停止中です。", href: null };
+  if (!overlay.isTosAccepted || overlay.termsReacceptRequired) return {
+    canPost: false, reason: "コメント投稿には利用規約への同意が必要です。",
+    href: `/rules?next=${encodeURIComponent(currentPath)}`, linkLabel: "利用規約へ",
+  };
+  if (!overlay.viewerXApproved || !overlay.activeXId) return {
+    canPost: false, reason: "コメント投稿には承認済み X ID が必要です。",
+    href: `/dashboard/settings?next=${encodeURIComponent(currentPath)}`, linkLabel: "X ID設定へ",
+  };
+  return { canPost: true };
+}
 export function chapterRowsForViewer(
   publicChapters: readonly PublicVideoChapter[],
   overlay: VideoViewerOverlayDto,
@@ -143,7 +167,8 @@ export function VideoUtilityDockIsland({
 
   // Never put viewer-specific playlist data, author names, or write controls in SSG HTML.
   if (!mounted) return null;
-  const canPost = canPostVideoChapter(overlay, loading);
+  const postPolicy = chapterPostPolicy(overlay, loading, window.location.pathname + window.location.search);
+  const canPost = postPolicy.canPost;
   const href = (item: NonNullable<typeof next>) => playlistItemHref(item, playlist);
   return h("aside", { className: "fn-video-utility-dock", "aria-label": "動画補助機能" },
     h("nav", { role: "group", "aria-label": "動画補助メニュー" },
@@ -198,6 +223,9 @@ export function VideoUtilityDockIsland({
       h(VideoChapterIsland, {
         videoId, activeXId: overlay.activeXId, canPost,
         canBulk: canPost && canBulk, chapters: editableChapters,
+        disabledReason: postPolicy.reason,
+        disabledHref: postPolicy.href,
+        disabledLinkLabel: postPolicy.linkLabel,
         onChanged: onRefresh,
       }),
     ),
