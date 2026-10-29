@@ -204,6 +204,76 @@ test("T04 invalid slot and storage outage, no storage on malformed id", async ()
   assert.equal(missing.status, 503);
 });
 
+test("T04: throwing Cloudflare binding getters fail closed without leaking provider errors", async () => {
+  const sentinel = "PRIVATE_MEDIA_GETTER_SENTINEL";
+  for (const key of ["DB", "BUCKET"]) {
+    const { env, calls } = bindings();
+    Object.defineProperty(env, key, {
+      configurable: true,
+      get() { throw new Error(sentinel); },
+    });
+    for (const path of [
+      "/api/media/video-icons/owner/icon.png",
+      `/api/media/slot-submission-icon/${SLOT}`,
+    ]) {
+      clearPublicMediaAccessCacheForTest();
+      const response = await request(path, env);
+      assert.equal(response.status, 503, key + " " + path);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("retry-after"), "30");
+      assert.doesNotMatch(await response.text(), /PRIVATE_MEDIA_GETTER_SENTINEL/);
+    }
+    assert.equal(calls.queries.length, 0);
+    assert.equal(calls.objects.length, 0);
+  }
+  for (const key of ["BUCKET", "AUTH_SECRET"]) {
+    const { env, calls } = bindings();
+    Object.defineProperty(env, key, {
+      configurable: true,
+      get() { throw new Error(sentinel); },
+    });
+    const response = await request("/api/media/manage-x-icon/xicons/u/icon.png", env);
+    assert.equal(response.status, 404, key);
+    assert.doesNotMatch(await response.text(), /PRIVATE_MEDIA_GETTER_SENTINEL/);
+    assert.deepEqual(calls.objects, []);
+    assert.deepEqual(calls.queries, []);
+  }
+});
+
+test("T04: public Cache API HIT does not touch a throwing DB or BUCKET getter", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const { env, calls } = bindings();
+  const sentinel = "CACHE_HIT_MUST_NOT_READ_BINDINGS";
+  for (const key of ["DB", "BUCKET"]) {
+    Object.defineProperty(env, key, {
+      configurable: true,
+      get() { throw new Error(sentinel); },
+    });
+  }
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() {
+          return new Response(new Uint8Array(bytes), {
+            headers: { "content-type": "image/png", "etag": '"cached"' },
+          });
+        },
+      },
+    },
+  });
+  try {
+    const response = await request("/api/media/video-icons/owner/icon.png", env);
+    assert.equal(response.status, 200);
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+    assert.equal(calls.queries.length, 0);
+    assert.equal(calls.objects.length, 0);
+  } finally {
+    if (original) Object.defineProperty(globalThis, "caches", original);
+    else delete globalThis.caches;
+  }
+});
+
 test("GET-only and CURRENT signature 404 contract despite task card T02 saying 403", async () => {
   const { env } = bindings();
   const res = await app.request("https://flamenode.net/api/media/video-icons/owner/icon.png", { method: "POST" }, env);
