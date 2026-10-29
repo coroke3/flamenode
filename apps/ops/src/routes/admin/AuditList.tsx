@@ -5,6 +5,7 @@ import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { auditViewHref, parseAuditListQuery, type AuditListQuery, type AuditView } from "../../lib/auditListQuery.js";
 import { useApiResult, type OpsDataState } from "../useApiResult.js";
 import { AuditDiffGrid } from "./AuditDiffGrid.js";
+import { AuditTargetLink } from "./AuditTargetLink.js";
 
 type AuditRow = AdminAuditListResponse["rows"][number];
 type Operator = AdminAuditListResponse["operators"][number];
@@ -143,14 +144,8 @@ function OperationLabel({ operation }: {operation: string}): React.ReactElement 
   return <span className={"fn-badge fn-badge-" + tone}>{operation}</span>;
 }
 function AuditTarget({ row }: { row: AuditRow }): React.ReactElement {
-  const id = encodeURIComponent(row.target_id);
-  const href = row.table_name === "videos" ? "/admin/videos/" + id
-    : row.table_name === "events" ? "/manage/events/" + id + "/edit"
-    : row.table_name === "users" ? "/admin/users/" + id
-    : row.table_name === "x_users" ? "/admin/users?view=xid&q=" + id
-    : row.table_name === "x_identity_requests" ? "/admin/x-link-requests?record=" + id
-    : null;
-  return <span><strong>{row.table_name}</strong> <code>{row.target_id}</code> {href && <a href={href}>管理</a>}</span>;
+  return <span><strong>{row.table_name}</strong> <AuditTargetLink tableName={row.table_name}
+    recordId={row.target_id}/></span>;
 }
 function ActorLabel({ row, operators }: { row: AuditRow; operators: Map<string,Operator> }): React.ReactElement {
   const operator = operators.get(row.actor_user_id);
