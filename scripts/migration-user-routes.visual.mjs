@@ -48,6 +48,8 @@ try {
           h1: document.querySelector("h1")?.textContent?.trim() ?? "",
           headerBottom: document.querySelector(".hd2")?.getBoundingClientRect().bottom ?? null,
           headingTop: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
+          backLinkTop: document.querySelector('main.cr-wrap > a[href="/user"]')?.getBoundingClientRect().top ?? null,
+          backLinkVisible: Boolean(document.querySelector('main.cr-wrap > a[href="/user"]')?.getClientRects().length),
         }));
         const screenshot = path.join(destination, route.name + "." + viewport.name + ".png");
         await page.screenshot({ path: screenshot, fullPage: true });
@@ -57,6 +59,15 @@ try {
         if (shape.headerBottom !== null && shape.headingTop !== null && shape.headingTop < shape.headerBottom - 2) {
           failures += 1;
           console.error("MIG-0504 U03 heading covered by header: " + JSON.stringify({route:route.url,viewport:viewport.name,...shape}));
+        }
+        // The profile mock shows a back-to-creators link above the avatar.
+        // Mobile fixed-header behavior must not hide this link while h1 remains visible.
+        if ((route.name === "Creator" || route.name === "CreatorLongList") &&
+            (!shape.backLinkVisible || shape.backLinkTop === null ||
+              (shape.headerBottom !== null && shape.backLinkTop < shape.headerBottom - 2))) {
+          failures += 1;
+          console.error("MIG-0504 U03 back navigation hidden by fixed header: " +
+            JSON.stringify({route:route.url, viewport:viewport.name, ...shape}));
         }
         if (shape.docWidth > shape.viewportWidth + 2) {
           failures += 1;
