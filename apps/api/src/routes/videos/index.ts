@@ -10,6 +10,7 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
 import { createVideoInteractionRoutes } from "./interaction.ts";
@@ -33,10 +34,17 @@ function videoWriteStack(
       writeGuardMiddleware({
         ...originOptions(c),
         requiredRole: null,
+        // With zero Active X requirements, CURRENT guard can run without an
+        // activeX object. writeGuardMiddleware({activeX}) assumes a non-null
+        // active_x snapshot; supplying false/false would incorrectly return 503
+        // for every SA-087 request. CostGuard runs separately below instead.
         activeX: feature === "chapter_comment"
           ? { requireApprovedActiveXId: true, feature: "chapter_comment" }
-          : { requireActiveXId: false, requireApprovedActiveXId: false, feature: "like_or_bookmark" },
+          : undefined,
       })(c, next),
+    ...(feature === "like_or_bookmark"
+      ? [costGuardMiddleware("like_or_bookmark") as MiddlewareHandler<AppEnv>]
+      : []),
     dbMiddleware,
   ];
   return async (c, next) => {
