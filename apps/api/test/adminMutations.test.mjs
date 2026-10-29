@@ -127,6 +127,9 @@ test("T03 SA-004 create: 1 announcement + 1 audit + top_announcements queue row"
   const q = sqlite.prepare("SELECT * FROM static_rebuild_queue").all();
   assert.equal(q.length, 1);
   assert.deepEqual([q[0].target_type, q[0].target_id, q[0].reason, q[0].priority, q[0].status, q[0].requested_by_user_id], ["top_announcements", "global", "announcement_create", "normal", "pending", null]);
+  // MIG-0516: real Hono mutation must atomically mark the pending public build.
+  const build = sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get();
+  assert.ok(Number.isSafeInteger(build.requested_at) && build.requested_at > 0);
 });
 
 test("queue UPSERT: a second mutation merges into the active top_announcements row", async () => {
@@ -195,6 +198,8 @@ test("T04 SA-005 update: race after preflight -> CAS batch fails, full rollback,
   assert.equal(sqlite.prepare("SELECT title FROM announcements WHERE id='a1'").get().title, "Old");
   assert.equal(count(sqlite, "audit_logs"), 0);
   assert.equal(count(sqlite, "static_rebuild_queue"), 0);
+  // The queue write and build marker are part of the rejected CAS batch.
+  assert.equal(sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, 0);
 });
 
 test("SA-006 delete: success writes DELETE audit; missing -> 404", async () => {
@@ -244,6 +249,9 @@ test("T03 SA-007 create: enables public API, long_audit audit with context/reaso
   assert.equal(a.expires_at - a.created_at, 365 * 86400);
   assert.deepEqual(JSON.parse(a.changed_keys_json).sort(), ["public_api_enabled", "updated_at"]);
   assert.equal(count(sqlite, "static_rebuild_queue"), 0);
+  // A successful audit-only admin write without public queue invalidation
+  // must not request a new build.
+  assert.equal(sqlite.prepare("SELECT requested_at FROM public_build_state WHERE id = 1").get().requested_at, 0);
 });
 
 test("SA-007 create: event missing -> 404; non-public -> 400; bad id -> 400", async () => {
