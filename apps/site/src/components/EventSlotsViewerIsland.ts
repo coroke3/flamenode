@@ -158,13 +158,16 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   const [overlayState, setOverlayState] = React.useState<{
     value: SlotViewerOverlayDto;
     baseSlots: readonly T[] | null;
-  }>({ value: EMPTY_OVERLAY, baseSlots: null });
+    eventId: string | null;
+  }>({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null });
   const [loading, setLoading] = React.useState(true);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
+  const generation = React.useRef(0);
 
   const refresh = React.useCallback(() => {
-    // Immediately invalidate the previous Active X ownership before network refetch.
-    setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null });
+    // Invalidate in-flight responses synchronously, even before React's effect cleanup.
+    generation.current += 1;
+    setOverlayState({ value: EMPTY_OVERLAY, baseSlots: null, eventId: null });
     setLoading(true);
     setRefreshNonce((n) => n + 1);
   }, []);
@@ -173,10 +176,11 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
     let active = true;
     const controller = new AbortController();
     const capturedBase = baseSlots;
+    const requestGeneration = ++generation.current;
     setLoading(true);
     void fetchSlotViewerOverlay(eventId, controller.signal).then((value) => {
-      if (!active) return;
-      setOverlayState({ value, baseSlots: capturedBase });
+      if (!active || generation.current !== requestGeneration) return;
+      setOverlayState({ value, baseSlots: capturedBase, eventId });
       setLoading(false);
     });
     return () => {
@@ -191,7 +195,7 @@ export function useEventSlotsViewer<T extends ViewerSlotBase>(
   }, [refresh]);
 
   // Do not associate an old viewer response with a newly refreshed public slot array.
-  const current = overlayState.baseSlots === baseSlots;
+  const current = overlayState.baseSlots === baseSlots && overlayState.eventId === eventId;
   const value = current ? overlayState.value : EMPTY_OVERLAY;
   const pending = loading || !current;
   const canManageOwnSlots = !pending && value.loggedIn &&
