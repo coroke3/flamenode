@@ -210,19 +210,27 @@ export function EventSlotsViewerIsland<T extends ViewerSlotBase>({
   eventId,
   baseSlots,
   accepting,
+  eventStatus,
   children,
 }: {
   eventId: string;
   baseSlots: readonly T[];
   accepting: boolean;
+  eventStatus: string;
   children: (viewer: ViewerSlotsState<T>) => React.ReactNode;
 }): React.ReactElement {
   const state = useEventSlotsViewer(eventId, baseSlots, accepting);
   const currentPath = `/event/${encodeURIComponent(eventId)}/slots`;
   const link = (path: string, label: string) =>
     React.createElement("a", { href: `${path}?next=${encodeURIComponent(currentPath)}` }, label);
-  const message = state.loading
-    ? "ログイン状態を確認しています。"
+  const message = !accepting && !state.overlay.operatorOverrideAllowed
+    ? eventStatus === "ended"
+      ? "終了済みのため新規確保はできません。"
+      : eventStatus === "scheduled"
+        ? "受付開始までお待ちください。"
+        : "現在は受付停止中です。"
+    : state.loading
+      ? "ログイン状態を確認しています。"
     : state.overlay.authUnavailable
       ? "ログイン状態を一時的に確認できません。時間をおいて再読み込みしてください。"
       : !state.overlay.loggedIn
