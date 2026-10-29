@@ -45,11 +45,12 @@ test("T01: switch success uses D-16-1 JSON key, same-origin credentials and no-s
   assert.deepEqual(JSON.parse(init.body), { x_user_id: "second" });
 });
 
-test("T02: failure preserves CURRENT message, including already-active error from API", async () => {
+test("T02: CURRENT already-active success and rejected API messages preserve their result contracts", async () => {
+  // CURRENT src/lib/actions/xid.ts returns ok:true for an already active X ID,
+  // despite MIG-0515's Work Order describing this result as ok:false.
   const special = "すでにこの X ID がアクティブです。";
-  const fetcher = fakeFetch(json({ ok: false, message: special }, 409));
-  const result = await switchActiveX("second", fetcher, () => assert.fail("no redirect"));
-  assert.deepEqual(result, { ok: false, message: special });
+  const result = await switchActiveX("second", fakeFetch(json({ ok: true, message: special })), () => assert.fail("no redirect"));
+  assert.deepEqual(result, { ok: true, message: special });
   const forbidden = await switchActiveX("second", fakeFetch(json({ ok: false, message: "承認済みの X ID だけをアクティブにできます。" }, 403)), () => assert.fail("no redirect"));
   assert.equal(forbidden.ok, false);
   assert.match(forbidden.message, /承認済み/);
