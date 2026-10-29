@@ -14,13 +14,15 @@ import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
 import { extractYoutubeId, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
-import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
+import { eventDetailKey, loadEventPayloadSnapshot, loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import { loadPublicXIconMapForBuild, projectVideoMemberPresentation } from "./publicIconMap.ts";
 import { hasProjectedPublicProfile, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { FIXTURE_VIDEO_DETAIL_PAYLOADS } from "./videoFixtures.ts";
+import { FIXTURE_EVENT_DETAIL_PAYLOADS } from "./eventFixtures.ts";
 
 export class VideoPageBuildError extends Error {
   readonly code = "VIDEO_DETAIL_INVALID";
@@ -152,6 +154,19 @@ export function buildVideoPages(
   return [{ ...page, slug: canonicalSlug }, ...(canonicalSlug !== video.id ? [{ ...page, slug: video.id }] : [])];
 }
 
+/**
+ * CURRENT's optional R2 event-base lookup is represented by a verified event-detail build snapshot.
+ * Never expose a playlist for a mismatched or non-public event, even when its envelope is allowed.
+ */
+function publicEventPlaylistId(payload: unknown, expectedId: string): string | null {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const event = (payload as { event?: unknown }).event;
+  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
+  const row = event as Record<string, unknown>;
+  if (row.id !== expectedId || row.visibility_status !== "public") return null;
+  return extractYoutubePlaylistId(typeof row.youtube_playlist_id === "string" ? row.youtube_playlist_id : null);
+}
+
 export async function loadVideoPagesForBuild(
   env: Record<string, string | undefined> = process.env,
   now: number = Math.floor(Date.now() / 1000),
@@ -159,11 +174,63 @@ export async function loadVideoPagesForBuild(
   const access = snapshotAccessFromEnv(env);
   const iconMap = await loadPublicXIconMapForBuild(env);
   const pages: VideoPage[] = [];
+  const playlistIds = new Map<string, string | null>();
+  const buildWithPlaylist = async (payload: unknown, key: string): Promise<void> => {
+    const built = buildVideoPages(payload, key, now, iconMap);
+    const eventId = built[0]?.data.primaryEvent?.id;
+    const video = payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as { video?: unknown }).video
+      : null;
+    const scheduledTime = video && typeof video === "object" && !Array.isArray(video)
+      ? (video as { scheduled_time?: unknown }).scheduled_time
+      : null;
+
+    // CURRENT only shows the playlist for a future-scheduled video with a public primary event.
+    if (!eventId || typeof scheduledTime !== "number" || scheduledTime <= now) {
+      pages.push(...built);
+      return;
+    }
+
+    if (!playlistIds.has(eventId)) {
+      let eventPayload: unknown = null;
+      if (!access) {
+        eventPayload = FIXTURE_EVENT_DETAIL_PAYLOADS[eventId] ?? null;
+      } else {
+        const eventKey = eventDetailKey(eventId);
+        const manifest = access.options.manifest!;
+        // A missing or explicitly blocked event is an optional absent link, not a build failure.
+        if (manifest.allowedKeys.includes(eventKey) && !manifest.blockedKeys.includes(eventKey)) {
+          // If an allowed snapshot is tampered with, the verified loader fails the build.
+          eventPayload = await loadEventPayloadSnapshot(access.source, eventKey, access.options);
+        }
+      }
+      playlistIds.set(eventId, publicEventPlaylistId(eventPayload, eventId));
+    }
+    const playlistId = playlistIds.get(eventId);
+    if (!playlistId) {
+      pages.push(...built);
+      return;
+    }
+
+    const playlistUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`;
+    pages.push(...built.map((page) => ({
+      ...page,
+      data: {
+        ...page.data,
+        primaryEvent: page.data.primaryEvent
+          ? { ...page.data.primaryEvent, playlistUrl }
+          : null,
+      },
+    })));
+  };
+
   if (!access) {
-    for (const [id, p] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) pages.push(...buildVideoPages(p, `fixture:${id}`, now, iconMap));
+    for (const [id, payload] of Object.entries(FIXTURE_VIDEO_DETAIL_PAYLOADS)) {
+      await buildWithPlaylist(payload, `fixture:${id}`);
+    }
   } else {
     for (const key of videoDetailKeys(access.options.manifest!)) {
-      pages.push(...buildVideoPages(await loadVideoDetailPayload(access.source, key, access.options), key, now, iconMap));
+      await buildWithPlaylist(await loadVideoDetailPayload(access.source, key, access.options), key);
     }
   }
   // MIG-0404 route map: reserved roots, assets, duplicates and traversal are build errors.
