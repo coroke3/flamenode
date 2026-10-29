@@ -4,6 +4,7 @@
  * No Next cache invalidation is required by the Hono API; browser clients
  * invalidate their session display after a successful response.
  */
+import { SetActiveXBodySchema } from "@flamenode/contracts";
 import { normalizeXId } from "@flamenode/domain/xid";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
@@ -67,9 +68,8 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c) => {
   } catch {
     return c.json({ ok: false, message: "入力内容を確認してください。" }, 400);
   }
-  const xUserInput = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>).x_user_id : undefined;
-  const xUserId = typeof xUserInput === "string" ? normalizeXId(xUserInput) : "";
+  const parsed = SetActiveXBodySchema.safeParse(raw);
+  const xUserId = parsed.success ? normalizeXId(parsed.data.x_user_id) : "";
   if (!xUserId) return c.json({ ok: false, message: "X ID が指定されていません。" }, 400);
 
   const userId = c.get("user")!.id;
