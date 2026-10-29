@@ -78,6 +78,18 @@ test("SA-098 refuses an unlinked X ID and an unapproved X ID", async () => {
   }
 });
 
+test("SA-098 resolves a non-conflicting alias into its canonical active X ID", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x-one', 'old')").run();
+  const response = await request({ x_user_id: "@old" });
+  assert.equal(response.status, 200);
+  assert.equal(sqlite.prepare('SELECT active_x_user_id FROM "user"').get().active_x_user_id, "x-one");
+  const audit = sqlite.prepare("SELECT actor_x_user_id, after_json FROM audit_logs").get();
+  assert.equal(audit.actor_x_user_id, "x-one");
+  assert.equal(JSON.parse(audit.after_json).active_x_user_id, "x-one");
+  assert.equal(stats.batches, 1);
+});
+
 test("SA-098 denies a canonical / alias collision before any mutation", async () => {
   const { sqlite, request, stats } = setup();
   sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-two','Other','approved')").run();
