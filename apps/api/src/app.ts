@@ -13,6 +13,7 @@ import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
 import { publicListRoutes } from "./routes/events/publicList.ts";
 import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
+import { xidRoutes } from "./routes/xid/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
 
@@ -44,6 +45,8 @@ app.route("/api/event-endpoints", publicReleaseRoutes);
 app.route("/api/videos", videosRoutes);
 // MIG-0605 U01 (RH-001): GET /api/account/summary
 app.route("/api/account/summary", accountSummaryRoutes);
+// MIG-0636: authenticated Personal X mutations (no production cutover).
+app.route("/api/xid", xidRoutes);
 // MIG-0605 U03 (part): RH-016, RH-033
 app.route("/api/google-drive-image", googleDriveImageRoutes);
 app.route("/api/youtube-thumbnail", youtubeThumbnailRoutes);
