@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import {
   BUDGETS_MS, KINDS, MIN_SAMPLES, aggregate, buildScenarios, judge, parseArgs, percentile, renderMarkdown, summarize,
 } from "./benchmark-api-cpu.mjs";
@@ -161,4 +162,27 @@ test("MIG-0639: RH-021 limit seeds 50 public videos and 50 event memberships", (
   assert.ok(limit.setup[1].sql.includes("'public'"), "fixture videos must be visible");
   assert.deepEqual(limit.expect, [200]);
   assert.equal(s.kinds.invalid(0, "t").expect[0], 400);
+});
+
+
+test("MIG-0639: boundary fixture SQL executes locally and seeds exact row counts", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE events(id TEXT PRIMARY KEY, title TEXT, event_type TEXT, visibility_status TEXT, start_time INTEGER, end_time INTEGER, created_at INTEGER, updated_at INTEGER, public_api_enabled INTEGER)");
+    db.exec("CREATE TABLE slots(id TEXT PRIMARY KEY, event_id TEXT, start_time INTEGER, status TEXT)");
+    db.exec("CREATE TABLE videos(id TEXT PRIMARY KEY, submitted_by_user_id TEXT, creator_display_name TEXT, title TEXT, visibility_status TEXT, updated_at INTEGER)");
+    db.exec("CREATE TABLE video_events(video_id TEXT, event_id TEXT)");
+    const scenarios = Object.fromEntries(buildScenarios({ adminToken: "t" }).map((x) => [x.id, x]));
+    for (const id of ["RH-020", "RH-021", "RH-022"]) {
+      const spec = scenarios[id].kinds.limit(0, "sqlite");
+      for (const step of spec.setup) db.prepare(step.sql).run(...step.params);
+    }
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM slots WHERE event_id = ?").get("live-slots-sqlite-0").n, 6000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM slots WHERE event_id = ?").get("live-summary-sqlite-0").n, 6000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 50);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM video_events WHERE event_id = ?").get("live-submissions-sqlite-0").n, 50);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM videos WHERE visibility_status = 'public'").get().n, 50);
+  } finally {
+    db.close();
+  }
 });
