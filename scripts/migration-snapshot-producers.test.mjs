@@ -461,7 +461,7 @@ test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages i
   let report;
   try{
     console.log=()=>undefined;
-    report=await buildPublicSite(["--sqlite",sqlitePath,"--trending-file",trendingFile,
+    report=await buildPublicSite(["--sqlite",sqlitePath,"--batched","--trending-file",trendingFile,
       "--now",String(NOW),"--generation","gen-1"],{
         env:{...process.env,FLAMENODE_D1_READ_TOKEN:"do-not-pass-to-astro",
           FLAMENODE_R2_READ_TOKEN:"do-not-pass-to-astro"},
