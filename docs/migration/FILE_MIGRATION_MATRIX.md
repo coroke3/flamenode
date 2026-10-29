@@ -1142,6 +1142,7 @@
 | `apps/ops/test/manageShell.test.mjs` | TEST | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 | `docs/migration/work-items/MIG-0719.md` | TARGET_SKELETON | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 
+| `apps/ops/scripts/dryRun.mjs` | HELPER | MIG-0719 Ops static no-upload dry-run | MIG-0719 | SAME (fixed offline Wrangler packaging guard) | IN_PROGRESS | PR#458 SHA=ef057bc5cd41171faed15c0f057b7e438a953c6b TEST=CI-pending (MIG-0719 T06) |
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |

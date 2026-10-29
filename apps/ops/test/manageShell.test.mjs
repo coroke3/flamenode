@@ -88,3 +88,18 @@ test("MIG-0719 T05: operation-mode banner all modes, normal and failed", async (
   assert.equal(summarizePayload(JSON.stringify({ content: "one\ntwo" })), "one");
   assert.equal(summarizePayload("{"), "—");
 });
+
+test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/bindings", async () => {
+  const { assertOpsStaticConfig, opsDryRunArgs } = await import("../scripts/dryRun.mjs");
+  const { readFileSync } = await import("node:fs");
+  const { resolve } = await import("node:path");
+  const config = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  assert.equal(assertOpsStaticConfig(config), true);
+  assert.throws(() => assertOpsStaticConfig(config + '\\nroute = "example.invalid/*"'), /Unapproved/);
+  assert.throws(() => assertOpsStaticConfig(config + '\\n[[d1_databases]]'), /only one assets table/);
+  assert.throws(() => assertOpsStaticConfig(config.replace("workers_dev = false", "workers_dev = true")), /Unsafe/);
+  const args = opsDryRunArgs(resolve("/tmp/ops-review-only"));
+  assert.ok(args.includes("--dry-run"));
+  assert.ok(args.includes("apps/ops/wrangler.toml"));
+  assert.throws(() => opsDryRunArgs("relative/path"), /Absolute/);
+});
