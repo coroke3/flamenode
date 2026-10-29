@@ -21,7 +21,7 @@ export interface AuditMutations {
   settings(signal?: AbortSignal): Promise<OpsResult<AdminAuditSettingsResponse>>;
   dryRun(auditId: string, reason: string): Promise<OpsWriteResult<AuditLogDryRunResult>>;
   restore(auditId: string, reason: string, confirm: string, force: boolean): Promise<OpsWriteResult<RestoreAuditResult>>;
-  saveSettings(patch: Record<string, number>): Promise<OpsWriteResult<UpdateAuditLogSettingsResult>>;
+  saveSettings(patch: AdminAuditSettingsResponse["settings"]): Promise<OpsWriteResult<UpdateAuditLogSettingsResult>>;
 }
 function auditMutationResult<T extends {ok:boolean}>(result: OpsWriteResult<T>): OpsWriteResult<T> {
   if (result.status !== "ok") return result;
