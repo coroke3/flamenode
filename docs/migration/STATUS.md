@@ -111,7 +111,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
 | 5 | Public migration | PARTIALLY_READY (2026-10-28: MIG-0503 / 0512 DONE; MIG-0501, 0502, 0504..0507, 0509..0511, 0513..0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (2026-10-28: 28 DONE — MIG-0601 / 0602 / 0608 / 0611..0625 / 0629..0631 / 0633..0635 / 0649 / 0658 / 0663 / 0664; 30 READY; MIG-0604 / 0606 / 0607 / 0610 / 0627 / 0662 BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-10-30: 30 DONE — MIG-0601 / 0602 / 0608 / 0611..0625 / 0628..0631 / 0633..0635 / 0646 / 0649 / 0658 / 0663 / 0664; 28 READY; MIG-0604 / 0606 / 0607 / 0610 / 0627 / 0662 BLOCKED. MIG-0646 RH-023..025 parity verified in PR#451; no production cutover) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701, MIG-0707 DONE; MIG-0708..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -356,7 +356,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0643 | admin ops writes C: static rebuild admin, YouTube resync, visibility repair (SA-050, SA-069..073, SA-106) | READY | MIG-0602 |
 | MIG-0644 | admin X merge APIs (SA-092..097, SA-110) | READY | MIG-0602, MIG-0618 |
 | MIG-0645 | legacy import Route Handler (RH-002) | READY | MIG-0602, MIG-0631 |
-| MIG-0646 | media Route Handlers (RH-023..025) | READY | MIG-0602, MIG-0631 |
+| MIG-0646 | media Route Handlers (RH-023..025) | DONE | MIG-0602, MIG-0631 |
 | MIG-0647 | public event staff Route Handler (RH-027, RH-028) | READY | MIG-0602, MIG-0631 |
 | MIG-0648 | X-user search Route Handler (RH-019) | READY | MIG-0602, MIG-0631 |
 | MIG-0649 | R2 artifact consumer inventory + CI checker (MIG-0627 U01) | DONE | — |
