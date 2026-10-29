@@ -106,6 +106,18 @@ export async function readOperationModeKvMirror(
   }
 }
 
+/** Treat a throwing KV binding accessor like an unavailable KV read.
+ * The public mode/banner must never expose binding acquisition exceptions or
+ * fall through to D1 solely because a property getter throws.
+ */
+export function getOperationModeKvBinding(env: OperationModeEnv): KVNamespace | undefined {
+  try {
+    return env.KV;
+  } catch {
+    return undefined;
+  }
+}
+
 async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
   return (await readOperationModeKvMirror(kv))?.mode ?? null;
 }
@@ -135,7 +147,7 @@ export async function resolvePublicOperationMode(
 ): Promise<OperationMode> {
   if (isForceStaticOnlyEnv(env.FORCE_STATIC_ONLY)) return remember("static_only");
   if (isolateMode.mode && Date.now() < isolateMode.expiresAt) return isolateMode.mode;
-  const fromKv = await readKvMode(env.KV);
+  const fromKv = await readKvMode(getOperationModeKvBinding(env));
   if (fromKv) return remember(fromKv);
   if (options.allowD1 && env.DB) {
     const fromD1 = await readD1Mode(env.DB);
