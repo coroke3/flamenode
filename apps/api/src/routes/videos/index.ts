@@ -12,11 +12,15 @@ import type { AppEnv } from "../../env.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
+import { createVideoInteractionRoutes } from "./interaction.ts";
 import { videoDetailRoutes } from "./detail.ts";
 import { videoListRoutes } from "./list.ts";
 import { createVideoViewerOverlayRoutes, videoViewerOverlayRoutes } from "./viewerOverlay.ts";
 
-function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
+function videoWriteStack(
+  session?: MiddlewareHandler<AppEnv>,
+  feature: "chapter_comment" | "like_or_bookmark" = "chapter_comment",
+): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     // Never derived from NODE_ENV: only the explicit preview flag.
@@ -29,7 +33,9 @@ function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler
       writeGuardMiddleware({
         ...originOptions(c),
         requiredRole: null,
-        activeX: { requireApprovedActiveXId: true, feature: "chapter_comment" },
+        activeX: feature === "chapter_comment"
+          ? { requireApprovedActiveXId: true, feature: "chapter_comment" }
+          : { requireActiveXId: false, requireApprovedActiveXId: false, feature: "like_or_bookmark" },
       })(c, next),
     dbMiddleware,
   ];
@@ -56,6 +62,7 @@ export function createVideosRoutes(
   videos.route("/", createVideoViewerOverlayRoutes(options));
   videos.route("/", videoDetailRoutes);
   videos.route("/", createChapterRoutes(videoWriteStack(options.session)));
+  videos.route("/", createVideoInteractionRoutes(videoWriteStack(options.session, "like_or_bookmark")));
   return videos;
 }
 
