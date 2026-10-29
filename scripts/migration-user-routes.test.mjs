@@ -109,6 +109,18 @@ test("U02 body: every CURRENT profile entry point is in the static HTML (texts, 
   assert.equal(links.filter((l) => l === "https://x.com/miku_producer").length, 1);
 });
 
+test("MIG-0504 mobile profile back navigation stays clear of the fixed 52px header", { skip }, () => {
+  const doc = loadHtml("user/miku_producer/index.html");
+  const back = doc.querySelector('main.cr-wrap > a[href="/user"]');
+  assert.ok(back, "the profile needs a mock-compatible back-to-creators link");
+  assert.match(text(back), /クリエイター一覧/);
+  const styles = [...doc.querySelectorAll("style")].map((style) => style.textContent).join("\n");
+  assert.match(styles, /@media\s*\(max-width:\s*640px\)/,
+    "a mobile-specific fixed-header offset must be in generated HTML");
+  assert.match(styles, /\.p-root\s+\.cr-wrap\s*\{\s*padding-top:\s*calc\(52px\s*\+\s*24px\)\s*!important;/,
+    "mobile back navigation must clear the 52px fixed header without altering desktop");
+});
+
 test("T02: private and voided works never reach the profile or portfolio HTML; banned users have no page", { skip }, () => {
   for (const file of ["user/miku_producer/index.html", "user/miku_producer/portfolio/index.html"]) {
     const html = fs.readFileSync(path.join(DIST, file), "utf-8");
