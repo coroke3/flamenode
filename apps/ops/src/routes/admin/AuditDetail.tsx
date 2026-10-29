@@ -65,7 +65,10 @@ function AuditDetailBody({id,detail,api}:{
     // The detail screen displays all three raw fields; list view does not.
     const read=async(field:"before"|"after"|"inverse")=>{
       if(detail.payload[field]===null)return {status:"ok" as const,data:null};
-      return api.payload(id,field,controller.signal);
+      const fetched=await api.payload(id,field,controller.signal);
+      // A non-null length and a missing payload is an inconsistency, not valid SQL NULL.
+      return fetched.status==="ok" && fetched.data===null
+        ? {status:"unavailable" as const} : fetched;
     };
     void Promise.all([read("before"),read("after"),read("inverse")])
       .then(([before,after,inverse])=>{
