@@ -11,6 +11,7 @@
 import { VideoInteractionBodySchema, type VideoInteractionResult } from "@flamenode/contracts";
 import { nextVideoAppLikeCount } from "@flamenode/domain/video";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import type { WriteAuditLogInput } from "@flamenode/server-core/audit/types";
 import { sql } from "@flamenode/server-core/sql";
 import { buildStaticRebuildQueueBatch } from "@flamenode/server-core/staticRebuild/enqueue";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
@@ -116,9 +117,9 @@ export function createVideoInteractionRoutes(guard: MiddlewareHandler<AppEnv>): 
             AND created_at = ${existing!.created_at}
             AND ${publicSnapshotExists}`);
 
-    const mutationStatements = [interactionStatement];
+    const mutationStatements: Array<Parameters<typeof mutateWithAudit>[1]["mutationStatements"][number]> = [interactionStatement];
     const expectedChanges = [1];
-    const audits = [{
+    const audits: WriteAuditLogInput[] = [{
       table_name: "video_interactions_auth",
       target_id: auditTargetId(user.id, videoId, kind),
       operation: active ? "CREATE" as const : "DELETE" as const,
