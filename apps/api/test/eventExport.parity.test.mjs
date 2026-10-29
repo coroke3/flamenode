@@ -213,6 +213,17 @@ if (runUnderRootTsx(import.meta.url)) {
     const missing = await app.fetch(new Request(origin + "export-event"), { DB: null }, ctx);
     assert.equal(missing.status, 503);
     assert.equal(await missing.text(), '{"error":"db_unavailable"}');
+    const throwingEnv = {};
+    Object.defineProperty(throwingEnv, "DB", {
+      get() { throw new Error("secret-D1-provider-detail"); },
+    });
+    const bindingFailure = await app.fetch(new Request(origin + "export-event"), throwingEnv, ctx);
+    assert.equal(bindingFailure.status, 503);
+    assert.equal(bindingFailure.headers.get("Cache-Control"), "no-store");
+    const failureBody = await bindingFailure.text();
+    assert.equal(failureBody, '{"error":"db_unavailable"}');
+    assert.doesNotMatch(failureBody, /secret-D1-provider-detail/);
+    assert.equal(d1.stats.writes, 0);
   });
   test("T07: Cache API HIT is gated and keeps status/ETag/refresh headers", async () => {
     reset();
