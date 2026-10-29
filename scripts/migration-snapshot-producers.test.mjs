@@ -402,7 +402,7 @@ test("MIG-0509 T01: D1 REST CLI reads only SELECTs and emits byte-identical snap
     assert.equal(init.method,"POST");
     assert.equal(init.headers.Authorization,"Bearer "+secret);
     const {sql,params}=JSON.parse(init.body);
-    assert.match(sql,/^\\s*(SELECT|WITH)\\b/i);
+    assert.match(sql,/^\s*(SELECT|WITH)\b/i);
     assert.doesNotMatch(sql,/static_artifacts|static_rebuild_queue/i);
     queries.push(sql);
     try {
