@@ -9,6 +9,7 @@ import type { StaticEventDetail } from "../../../../src/lib/publicData/staticEve
 import { buildSlotParts } from "../../../../src/lib/utils/slotGroupingCore.ts";
 import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
+import { buildAccentVars } from "../../../../src/lib/theme/accent.ts";
 import { slotLayoutOf } from "./eventDetail.ts";
 import type { LiveSlots } from "./liveSlots.ts";
 
@@ -88,6 +89,7 @@ export function buildEventSlotsModel(
   return {
     eventId: event.id,
     title: event.title,
+    accentStyle: event.accent_color?.trim() ? { ...buildAccentVars(event.accent_color, "dark") } as Record<string, string> : undefined,
     statusLabel: eventStatusLabel(status),
     statusTone: statusTone(status),
     entryBadge: accepting
