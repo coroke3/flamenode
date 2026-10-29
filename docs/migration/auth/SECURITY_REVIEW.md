@@ -42,3 +42,9 @@ Source baseline: `apps/api/src/auth/session.ts`, `apps/api/src/middleware/{write
 ## §2. Future Auth.js implementation and cutover (MIG-0804)
 
 Reserved for MIG-0804 after its own prerequisite and independent review. Nothing in §1 asserts that OAuth, callback, PKCE, account linking, or production Auth.js routing has been validated or cut over.
+
+### 2026-10-30 remediation verification status (PR #445 → #444)
+
+PR #445 supplies the scoped fail-closed fix to the three guards: throwing DB binding getter is mapped to fixed private 503 instead of being exposed as an unhandled exception. Its exact-head migration-contract and migration-workspaces CI run 40864651714 succeeded. The original finding above remains a valid **historical pre-fix observation**, not the current expected behavior after #445.
+
+PR #444 now targets the #445 branch as a stacked Draft, and its U03 regression asserts 503, `Cache-Control: private, no-store`, zero handler writes and non-disclosure of the provider sentinel. The prior `assert.rejects` reproducer was deleted to prevent testing for the vulnerability itself after a fix. This does **not** mean the security gate is approved: independent security review of the final integrated tree and owner authorization are still pending. Merge #445 first, retarget #444 to `main`, then run final-head CI and review before either DONE claim. No production cutover has been authorized.
