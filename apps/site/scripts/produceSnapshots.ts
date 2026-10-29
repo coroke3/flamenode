@@ -40,6 +40,7 @@ import {
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
 import { D1_HTTP_ENV, openD1HttpReader } from "./readPublicData.ts";
+import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -488,23 +489,24 @@ export interface SnapshotCliOptions {
 type SnapshotCliArgs = {
   out: string; generation: string;
   sqlite?: string; sqlDump?: string; d1Api: boolean; batched: boolean;
-  trendingFile?: string; now?: number;
+  trendingFile?: string; trendingR2: boolean; now?: number;
 };
 const CLI_USAGE = "expected exactly one of --sqlite FILE, --sql-dump FILE, --d1-api, plus --out DIR --generation ID";
 export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
   const values = new Map<string,string>();
-  let d1Api = false, batched = false;
+  let d1Api = false, batched = false, trendingR2 = false;
   const known = new Set(["--out","--generation","--sqlite","--sql-dump","--trending-file","--now"]);
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
-    if (key === "--d1-api" || key === "--batched") {
-      if (key === "--d1-api" ? d1Api : batched) throw new Error(CLI_USAGE);
-      if (key === "--d1-api") d1Api = true; else batched = true;
+    if (key === "--d1-api" || key === "--batched" || key === "--trending-r2") {
+      if ((key === "--d1-api" && d1Api) || (key === "--batched" && batched) || (key === "--trending-r2" && trendingR2)) throw new Error(CLI_USAGE);
+      if (key === "--d1-api") d1Api = true; else if(key === "--trending-r2") trendingR2 = true; else batched = true;
       continue;
     }
     if (!known.has(key) || values.has(key) || !argv[i+1] || argv[i+1].startsWith("--")) throw new Error(CLI_USAGE);
     values.set(key,argv[++i]);
   }
+  if (trendingR2 && values.has("--trending-file")) throw new Error(CLI_USAGE);
   const sqlite = values.get("--sqlite"), sqlDump = values.get("--sql-dump");
   const sourceCount = Number(d1Api)+Number(Boolean(sqlite))+Number(Boolean(sqlDump));
   if (sourceCount !== 1 || !values.get("--out") || !values.get("--generation")) throw new Error(CLI_USAGE);
@@ -513,7 +515,7 @@ export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
   if (now !== undefined && (!Number.isSafeInteger(now)||now<0)) throw new Error(CLI_USAGE);
   return {
     out:values.get("--out")!,generation:values.get("--generation")!,
-    sqlite,sqlDump,d1Api,batched:batched||d1Api,trendingFile:values.get("--trending-file"),now,
+    sqlite,sqlDump,d1Api,batched:batched||d1Api,trendingFile:values.get("--trending-file"),trendingR2,now,
   };
 }
 
@@ -529,13 +531,19 @@ export async function main(argv: string[], options: SnapshotCliOptions = {}): Pr
         maxStatements: DEFAULT_MAX_REMOTE_STATEMENTS,
       }).db
     : await openScratchDb({sqlite: args.sqlite,sqlDump: args.sqlDump});
+  const trending = args.trendingR2
+    ? await readR2Json({accountId:env.CLOUDFLARE_ACCOUNT_ID?.trim()??"",
+      bucket:env.FLAMENODE_R2_BUCKET?.trim()||DEFAULT_R2_BUILD_BUCKET,
+      key:"analytics/trending.json",token:env.FLAMENODE_R2_READ_TOKEN?.trim()??"",
+      fetchFn:options.fetchFn})
+    : args.trendingFile ? JSON.parse(fs.readFileSync(args.trendingFile,"utf8")) : undefined;
   const result = await produceSnapshots({
     db,
     mode:args.batched ? "batched" : "oracle",
     maxRemoteStatements:DEFAULT_MAX_REMOTE_STATEMENTS,
     generation:args.generation,
     nowSec:args.now,
-    trending:args.trendingFile ? JSON.parse(fs.readFileSync(args.trendingFile,"utf8")) : undefined,
+    trending:trending===null?undefined:trending,
   });
   const buildEnv = writeSnapshotDir(args.out, result);
   console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
