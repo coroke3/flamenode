@@ -179,6 +179,29 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(await result.text(), /auth_user_id/);
     await Promise.all(globalThis.__eventExport.pending);
   });
+  test("T08: matching cache metadata never bypasses private DTO validation (v5 and legacy)", async () => {
+    for (const [format, body, schemaVersion] of [
+      ["v5", '{"schema_version":5,"auth_user_id":"secret"}', 5],
+      ["legacy", '[{"auth_user_id":"secret"}]', 1],
+    ]) {
+      reset();
+      const key = "public-event-export:9:export-event:" + format + ":60";
+      const cacheRequest = new Request("https://flamenode.internal/public-json/" + encodeURIComponent(key));
+      await edgeCache.put(cacheRequest, new Response(JSON.stringify({
+        payload: {
+          body,
+          metadata: { marker: "public-export-validated-v1", format, schema_version: schemaVersion },
+        },
+        stored_at: 1700000200,
+      })));
+      const result = await hono("export-event?format=" + format + "&update=scheduled");
+      assert.equal(result.status, 200);
+      assert.equal(result.headers.get("X-FlameNode-Cache"), "MISS");
+      assert.doesNotMatch(await result.text(), /auth_user_id|secret/);
+      await Promise.all(globalThis.__eventExport.pending);
+      assert.equal(d1.stats.writes, 0);
+    }
+  });
   test("T05: fail closed on D1 error; GET performs no D1 writes", async () => {
     reset();
     const ok = await hono("export-event");
