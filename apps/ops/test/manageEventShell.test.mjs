@@ -42,10 +42,13 @@ test("MIG-0720 U01: CURRENT tab query and path precedence", () => {
 test("MIG-0720 U01: primary/sub-tabs preserve CURRENT selection and URL encoding", () => {
   const tabs = React.createElement(ManageEventTabs, { eventId, pendingCount: 3 });
   const pending = doc(tabs, `/manage/events/${encodedId}/videos?status=pending`);
-  assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/videos?status=pending`), ["対応待ち3", "提出状況"]);
+  assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/videos?status=pending`), ["対応待ち3"]);
   assert.match(pending.querySelector(".fn-console-event-tab-count").textContent, /3/);
   assert.equal(pending.querySelector(".fn-console-event-tabs a").getAttribute("href"), `/manage/events/${encodedId}`);
-  assert.ok(pending.querySelector(`a[href="/manage/events/${encodedId}/videos?status=all"]`));
+  assert.equal(pending.querySelector(".fn-console-event-subtabs"), null);
+  const all = doc(tabs, `/manage/events/${encodedId}/videos?status=all`);
+  assert.ok(all.querySelector(`a[href="/manage/events/${encodedId}/videos?status=all"]`));
+  assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/videos?status=all`), ["参加者・作品", "提出状況"]);
   assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/audience`), ["参加者・作品", "登録者プレビュー"]);
   assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/staff`), ["設定", "運営メンバー"]);
   assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}`), ["概要"]);
