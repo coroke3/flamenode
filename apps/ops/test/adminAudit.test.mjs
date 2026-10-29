@@ -263,7 +263,8 @@ test("MIG-0733 U02: detail page shows neighbor navigation, raw payload and gated
   assert.match(html,/href="\/admin\/audit\/aud-2"/);
   assert.match(html,/監査ログ aud-1/);
   assert.match(html,/変更履歴を読み込み中/);
-  assert.match(html,/RESTORE aud-1/);
+  assert.match(html,/変更履歴の読込完了後にリストア操作が利用できます/);
+  assert.doesNotMatch(html,/リストア実行/);
   assert.match(html,/同じ target_id を一覧表示/);
   const bad=renderToStaticMarkup(React.createElement(AuditDetailContent,{
     id:"absent",api,state:{status:"notFound"},
