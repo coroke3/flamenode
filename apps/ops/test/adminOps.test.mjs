@@ -2,12 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { JSDOM } from "jsdom";
-import { createRoot } from "react-dom/client";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import {createAdminCostGuardApi} from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
 import {createAdminNotificationsApi,notificationQuery} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
 import {CostGuardForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardForm.js";
+import {changedCostGuardKeys} from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 import {CostGuardOverrideForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardOverrideForm.js";
 import {CostGuardDisabledFeaturesForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardDisabledFeaturesForm.js";
 import {NotificationActionButton,NOTIFICATION_CONFIRM} from "../.test-dist/apps/ops/src/routes/admin/NotificationActionButton.js";
@@ -86,6 +87,7 @@ async function inDom(callback){
   const oldAct=globalThis.IS_REACT_ACT_ENVIRONMENT;
   for(const k of keys)Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:dom.window[k]});
   globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+  const {createRoot}=await import("react-dom/client");
   const root=createRoot(dom.window.document.getElementById("root"));
   try{await callback(dom,root);}finally{
     await React.act(async()=>root.unmount());
@@ -154,4 +156,11 @@ test("MIG-0734 U02 notifications four actions use D-17-4 paths, path id not repe
     "/api/admin/notifications/retry-failed",
   ]);
   assert.deepEqual(calls.map(v=>JSON.parse(v.init.body)),[{},{reason:"理由"},{},{}]);
+});
+
+test("MIG-0734 U01 audit history changed keys remains compatible with CURRENT",()=>{
+ assert.deepEqual(changedCostGuardKeys('{"mode":"normal","reason":"before"}','{"mode":"economy","reason":"after"}'),["mode","reason"]);
+ assert.deepEqual(changedCostGuardKeys('{"mode":"normal"}','{"mode":"normal"}'),[]);
+ assert.deepEqual(changedCostGuardKeys("not-json",'{"mode":"normal"}'),[]);
+ assert.deepEqual(changedCostGuardKeys(null,'{"mode":"normal"}'),["mode"]);
 });

@@ -1,5 +1,5 @@
 import * as React from "react";
-import {useSearchParams} from "react-router-dom";
+import {useSearchParams,Link} from "react-router-dom";
 import {createAdminNotificationsApi,notificationQuery,type NotificationFilters,type AdminNotificationsApi} from "../../api/adminNotifications.js";
 import {NotificationActionButton} from "./NotificationActionButton.js";
 import {NotificationCancelButton} from "./NotificationCancelButton.js";
@@ -36,7 +36,7 @@ export function AdminNotifications({api=defaultApi}:{api?:AdminNotificationsApi}
  return <section aria-label="通知配信状況">
   <h1>通知配信状況</h1><p>直近100件。失敗時は1/5/15分間隔で最大4回試行します。</p>
   <nav aria-label="ステータスフィルタ">{STATUSES.map(([key,label])=>
-   <a key={key} href={statusHref(key)} aria-current={filters.status===key?"page":undefined}>{label}</a>)}</nav>
+   <Link key={key} to={statusHref(key)} aria-current={filters.status===key?"page":undefined}>{label}</Link>)}</nav>
   <form method="get" onSubmit={e=>{
     e.preventDefault();
     const form=new FormData(e.currentTarget);const next=new URLSearchParams();
@@ -44,7 +44,7 @@ export function AdminNotifications({api=defaultApi}:{api?:AdminNotificationsApi}
     if(filters.status!=="all")next.set("status",filters.status);
     setParams(next);
   }}>
-   <label>カテゴリ <select name="cat" defaultValue={filters.cat} key={query}>{CATS.map(cat=><option key={cat} value={cat}>{cat}</option>)}</select></label>
+   <label>カテゴリ <select name="cat" defaultValue={filters.cat} key={query} onChange={e=>{const next={...filters,cat:e.currentTarget.value};setParams(notificationQuery(next));}}>{CATS.map(cat=><option key={cat} value={cat}>{cat}</option>)}</select></label>
    <label>種類 <input name="type" defaultValue={filters.type} placeholder="type 完全一致"/></label>
    <label>イベント <input name="event" defaultValue={filters.event} placeholder="event_id 完全一致"/></label>
    <label>本文 <input name="q" defaultValue={filters.q} maxLength={100} placeholder="通知本文を検索"/></label>
