@@ -177,14 +177,19 @@ test("U01 viewer patches retain public base and lose write ownership on auth deg
 test("U01 Active X changed event invalidates old identity before refetch resolves", async () => {
   const React = (await import("react")).default;
   const { JSDOM } = await import("jsdom");
-  const { createRoot } = await import("react-dom/client");
   const { useEventSlotsViewer } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
   const { ACTIVE_X_CHANGED_EVENT } = await import("../src/lib/client/activeXSwitchEvents.ts");
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/event/e/slots" });
-  const previousWindow = globalThis.window;
+  const domKeys = ["window", "document", "navigator", "HTMLElement", "Node"];
+  const previousDom = new Map(domKeys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of domKeys) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true, value: dom.window[key],
+    });
+  }
+  const { createRoot } = await import("react-dom/client");
   const previousFetch = globalThis.fetch;
   const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
-  globalThis.window = dom.window;
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const makeOverlay = (id) => ({
     loggedIn: true, authUnavailable: false, isBanned: false,
@@ -227,7 +232,10 @@ test("U01 Active X changed event invalidates old identity before refetch resolve
     assert.equal(snapshot.slots[0].x_user_id, "new");
   } finally {
     await React.act(async () => root.unmount());
-    globalThis.window = previousWindow;
+    for (const [key, descriptor] of previousDom) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
     globalThis.fetch = previousFetch;
     globalThis.IS_REACT_ACT_ENVIRONMENT = previousAct;
     dom.window.close();
