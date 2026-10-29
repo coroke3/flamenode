@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { sanitizeNextPath } from "../../../../src/lib/utils/next.ts";
-import { guardRedirect } from "../lib/guardRedirect.ts";
+import { guardRedirect } from "../lib/safeApiRedirect.ts";
 import { acceptLatestTerms } from "../lib/terms.ts";
 
 const h = React.createElement;
