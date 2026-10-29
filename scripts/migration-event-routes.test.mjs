@@ -109,6 +109,8 @@ test("U01 query keys: value, empty and unknown for q / status / sort (CURRENT re
   assert.deepEqual(parseEventsQuery("?q=&status=&sort="), { q: "", status: "all", sort: "priority" });
   assert.deepEqual(parseEventsQuery("?status=zzz&sort=zzz&foo=1"), { q: "", status: "all", sort: "priority" });
   assert.deepEqual(parseEventsQuery(""), { q: "", status: "all", sort: "priority" });
+  // D-13-32: CURRENT throws on duplicate array query keys; TARGET consistently takes the first.
+  assert.deepEqual(parseEventsQuery("?q=a&q=b&status=open&status=ended"), { q: "a", status: "open", sort: "priority" });
   assert.deepEqual(parseEventsQuery("?status=ended&sort=new"), { q: "", status: "ended", sort: "new" });
   assert.deepEqual(parseEventsQuery("?status=upcoming&sort=start"), { q: "", status: "upcoming", sort: "start" });
   // CURRENT parse functions accept exactly these values
@@ -179,6 +181,7 @@ test("U01 /event built HTML: default view, GET form, anchors, no private event",
   const form = doc.querySelector("main form[role=search]");
   assert.equal(form.getAttribute("method"), "get");
   assert.equal(form.getAttribute("action"), "/event");
+  assert.match(read("packages/ui/src/screens/EventsIndexView.tsx"), /<ImeSafeGetForm role="search" method="get" action="\/event"/, "IME-safe form keeps native GET contract");
   assert.deepEqual([...form.querySelectorAll("[name]")].map((e) => e.getAttribute("name")), ["q", "status", "sort"]);
   assert.ok(doc.getElementById("event-group-autumn"), "group anchor for /groups/:slug redirects");
   const main = text(doc.querySelector("main"));
@@ -267,6 +270,14 @@ test("U02 detail body: CURRENT texts, links and no slot state in the static HTML
   assert.ok(hrefs.includes("/user/shingainen"), "public profile staff");
   assert.ok(!hrefs.includes("/user/stick_nori"));
   assert.ok(hrefs.includes("https://x.com/shingainen"));
+  // The active public event has CURRENT recruit CTA and accent; ended event has neither.
+  assert.match(doc.querySelector(".p-root").getAttribute("style"), /--event-accent:/);
+  assert.ok(doc.querySelector(".tp-rec[data-kind=entry]"));
+  assert.equal(doc.querySelector(".tp-rec .fn-btn--primary")?.getAttribute("href"), "/event/autumn-collab-2026/slots");
+  assert.ok(main.includes("募集締切まで"));
+  const pastDoc = load("event/past-event-2020/index.html");
+  assert.equal(pastDoc.querySelector(".p-root").getAttribute("style"), null);
+  assert.equal(pastDoc.querySelector(".tp-rec"), null);
   // slot state is not baked: counts are placeholders until the live read
   assert.ok(main.includes("– / 4"));
   assert.equal(doc.querySelectorAll('[role="meter"]').length, 0);
@@ -282,6 +293,12 @@ test("U02 model: status, entry action, day metric, slot parts follow CURRENT", (
   const open = buildEventDetailData(detail, NOW);
   assert.equal(open.statusLabel, "募集期間中");
   assert.equal(open.entryAction, "reserve");
+  assert.equal(open.recruit?.ctaLabel, "枠を確保する");
+  assert.equal(open.recruit?.slotTotal, null, "SSG must not include live slot totals");
+  assert.equal(open.recruit?.slotFilled, null, "SSG must not include live fill");
+  assert.ok(open.accentStyle?.["--event-accent"]);
+  const allFilled = { slots: detail.slots.map((slot) => ({ id: slot.id, status: "reserved" })) };
+  assert.equal(buildEventDetailData(detail, NOW, allFilled).recruit?.statusLabel, "満枠");
   assert.deepEqual(open.dayMetric, { label: "投稿期間まで", days: Math.ceil((detail.event.start_time - NOW) / 86400) });
   assert.deepEqual(open.slotParts.map((p) => [p.label, p.total, p.filled]), [["第1部", 2, null], ["第2部", 2, null]]);
   assert.equal(open.slotFilled, null);
@@ -293,9 +310,13 @@ test("U02 model: status, entry action, day metric, slot parts follow CURRENT", (
   // post period (entry closed, not started) -> submit
   const post = { ...detail, event: { ...detail.event, entry_end_time: NOW - 10 } };
   assert.equal(buildEventDetailData(post, NOW).entryAction, "submit");
+  assert.equal(buildEventDetailData(post, NOW).recruit?.ctaHref, "/entry");
+  assert.equal(buildEventDetailData(post, NOW).recruit?.ctaLabel, "作品を提出する");
   assert.equal(buildEventDetailData(post, NOW).statusLabel, "開始前");
   assert.equal(buildEventDetailData(detailOf("past-event-2020"), NOW).statusLabel, "終了済");
   assert.equal(buildEventDetailData(detailOf("past-event-2020"), NOW).entryAction, null);
+  assert.equal(buildEventDetailData(detailOf("past-event-2020"), NOW).recruit, null);
+  assert.equal(buildEventDetailData(detailOf("past-event-2020"), NOW).accentStyle, undefined);
   assert.deepEqual(getDayMetric(detailOf("past-event-2020").event, NOW), { label: "終了", days: 0 });
   assert.equal(formatEventRange(null, null), "-");
   assert.equal(buildEventDetailData(detail, NOW).videos.length, 2);
@@ -329,6 +350,7 @@ test("U03 slots built HTML: noindex, header, time grid with no slot state", { sk
   assert.equal(doc.querySelectorAll(".srow2 .sl").length, 4);
   assert.equal([...doc.querySelectorAll(".srow2 .sl")].filter((e) => !e.classList.contains("pending")).length, 0, "every slot is pending: no state baked");
   assert.equal(doc.querySelectorAll(".sl.taken, .sl.open").length, 0);
+  assert.match(doc.querySelector(".p-root").getAttribute("style"), /--event-accent:/);
   assert.equal(doc.querySelectorAll("main button").length, 0, "no do-nothing buttons: reservation belongs to MIG-0604/0606");
   assert.deepEqual([...doc.querySelectorAll(".plabel")].map(text), ["第1部", "第2部"]);
   assert.equal(doc.querySelectorAll(".pgap").length, 1);
@@ -339,6 +361,8 @@ test("U03 slots model: live fills names and counts; failed read keeps the grid a
   const detail = detailOf("autumn-collab-2026");
   const live = parseLiveSlots({ slots: [{ id: "s1", status: "reserved", display_name: "おたこ" }, { id: "s2", status: "available" }, { id: "s3", status: "submitted" }], truncated: false });
   const ready = buildEventSlotsModel(detail, NOW, "ready", live);
+  assert.ok(ready.accentStyle?.["--event-accent"]);
+  assert.equal(buildEventSlotsModel(detailOf("past-event-2020"), NOW, "loading", null).accentStyle, undefined);
   assert.deepEqual(ready.stats, { filled: 2, total: 4, ratio: 50 });
   const cells = ready.days.flatMap((d) => d.blocks).filter((b) => b.kind === "slot");
   assert.deepEqual(cells.map((c) => [c.id, c.state, c.name]), [["s1", "taken", "おたこ"], ["s2", "open", null], ["s3", "taken", null], ["s4", "unknown", null]]);
