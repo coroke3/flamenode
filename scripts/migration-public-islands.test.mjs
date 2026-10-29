@@ -106,7 +106,7 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
     return;
   }
   const home = new JSDOM(fs.readFileSync(topPath, "utf8")).window.document;
-  const form = home.querySelector('form[method="get"][action="/list"] input[name="q"]');
+  const form = home.querySelector('.tp-search-band form[method="get"][action="/list"] input[name="q"]');
   assert.ok(form, "real GET search input in static home");
   assert.equal(form.getAttribute("maxlength"), "100");
   assert.ok(form.closest("form").querySelector('button[type="submit"]'));
