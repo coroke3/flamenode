@@ -230,6 +230,25 @@ test("U01 Active X changed event invalidates old identity before refetch resolve
     });
     assert.equal(snapshot.overlay.viewerXId, "new");
     assert.equal(snapshot.slots[0].x_user_id, "new");
+    // When an older request ignores AbortSignal, its late response must not
+    // restore the previous viewer's ownership after a subsequent X switch.
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(requests.length, 4);
+    await React.act(async () => {
+      requests[3].resolve({ ok: true, json: async () => makeOverlay("latest") });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(snapshot.overlay.viewerXId, "latest");
+    await React.act(async () => {
+      requests[2].resolve({ ok: true, json: async () => makeOverlay("stale") });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(snapshot.overlay.viewerXId, "latest", "stale response must not restore ownership");
   } finally {
     await React.act(async () => root.unmount());
     for (const [key, descriptor] of previousDom) {
