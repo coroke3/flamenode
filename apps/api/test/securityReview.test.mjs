@@ -61,7 +61,7 @@ test("MIG-0807 T04: BAN, role and user removal take effect on the next request",
   user = { is_banned: 1, role: "admin" };
   const banned = await get();
   assert.equal(banned.status, 403);
-  assert.deepEqual(await banned.json(), { error: "Forbidden" });
+  assert.deepEqual(await banned.json(), { error: "Forbidden", message: "User is banned" });
   assert.equal(banned.headers.get("cache-control"), "private, no-store");
 
   user = { is_banned: 0, role: "user" };
