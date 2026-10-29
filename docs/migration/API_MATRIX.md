@@ -346,7 +346,7 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-095 | `rejectXIdMergeRevert` | `xid#buildXIdentityDecisionFields` | merge body untouched (task rule) | U02 |
 | SA-096 | `executeXIdMergeRequest` | `xid#validateXIdentityRequestShape`; merge plan `xid#buildXIdMergeBeforeState`, `#buildXIdMergeAfterState` | `merge.ts` body, `xIdMergeStateMatchesSql` CAS, `mergeBudget`, `mergeAudits` | U02 |
 | SA-097 | `approveXIdMergeRevert` | `xid#isRevertDeadlineOpen`, `#validateXIdentityRequestShape`; same merge plan as SA-096 | revert body untouched (task rule) | U02 |
-| SA-098 | `setActiveXId` | `xid#normalizeXId` | approved-link read + user CAS | U04 |
+| SA-098 | `setActiveXId` → Hono `POST /api/xid/active` (MIG-0636 U02, PR#475 CI/review pending) | `xid#normalizeXId`; `SetActiveXBodySchema` | approved linked X + user CAS + strict UPDATE audit; HTTP origin/session/CostGuard, 64KiB G21 | U04 (TARGET IN_PROGRESS; CURRENT retained) |
 | SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | U04 |
 | SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | U04 |
 | SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | U04 |
@@ -355,6 +355,10 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
 | SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
+
+### MIG-0636 G21 — X identity request-byte guard (PR #475)
+
+SA-098..104: 64 KiB (65,536 bytes), SA-105: 8 MiB (8,388,608 bytes). Hono checks declared Content-Length (when present) and bytes actually consumed, returns 413 for oversized input, 400 for malformed Content-Length, and never treats missing or forged Content-Length as authorization to skip the body check. G21 is not production-cutover approval; SA-099..101 are owned by MIG-0659 and remaining MIG-0636 handlers still pending.
 
 ## MIG-0611 Hono Personal read APIs (Phase 6)
 
