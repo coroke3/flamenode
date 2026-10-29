@@ -58,6 +58,7 @@
     "./visibility/xUserTransition": "./src/visibility/xUserTransition.ts",
     "./moderation/openCases": "./src/moderation/openCases.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts",
+    "./xid/pendingInsert": "./src/xid/pendingInsert.ts",
     "./xid/merge": "./src/xid/merge.ts",
     "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
     "./xid/mergeCore": "./src/xid/mergeCore.ts",
