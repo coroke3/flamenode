@@ -1,0 +1,80 @@
+name: MIG-0502 one-shot visual evidence
+
+on:
+  pull_request:
+    types: [synchronize, opened, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    if: github.event.pull_request.number == 454
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and build static fixture site
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build --workspace=@flamenode/ui
+          npm run build --workspace=@flamenode/site
+      - name: Install browser for visual regression
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Capture 390px and 1440px views, verify JS/errors and layout
+        run: |
+          python3 -m http.server 4329 --bind 127.0.0.1 --directory apps/site/dist > /tmp/mig-0502-http.log 2>&1 &
+          echo $! > /tmp/mig-0502-http.pid
+          sleep 2
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({ headless: true });
+          const routes = ['event','event/autumn-collab-2026','event/autumn-collab-2026/slots','event/autumn-collab-2026/release'];
+          const viewports = [{ width: 390, height: 844 },{ width: 1440, height: 900 }];
+          const summary = [];
+          fs.mkdirSync('screenshots-mig-0502', {recursive:true});
+          let failed = false;
+          for (const route of routes) for (const viewport of viewports) {
+            const page = await browser.newPage({viewport, colorScheme:'dark'});
+            const errors = [];
+            page.on('pageerror', error => errors.push('JS: '+error.message));
+            page.on('response', response => {
+              if (response.status() >= 400 && !response.url().includes('/api/live/'))
+                errors.push('HTTP '+response.status()+' '+response.url());
+            });
+            const url = 'http://127.0.0.1:4329/'+route+'/';
+            const response = await page.goto(url,{waitUntil:'networkidle'});
+            await page.waitForTimeout(800);
+            const name = route.replaceAll('/','_')+'.'+viewport.width+'.png';
+            await page.screenshot({path:'screenshots-mig-0502/'+name,fullPage:true});
+            const layout = await page.evaluate(() => ({
+              title: document.title,
+              viewportWidth: window.innerWidth,
+              docWidth: document.documentElement.scrollWidth,
+              h1: document.querySelector('h1')?.textContent?.trim() ?? null,
+              images: document.querySelectorAll('img').length
+            }));
+            const overflow = layout.docWidth > layout.viewportWidth + 3;
+            const good = response?.status()===200 && !overflow && errors.length===0;
+            if (!good) failed = true;
+            summary.push({route,width:viewport.width,good,overflow,errors,...layout});
+            await page.close();
+          }
+          await browser.close();
+          fs.writeFileSync('screenshots-mig-0502/report.json',JSON.stringify(summary,null,2));
+          console.log(JSON.stringify(summary,null,2));
+          if (failed) process.exitCode = 1;
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mig-0502-event-visual-evidence
+          path: screenshots-mig-0502/
+          if-no-files-found: warn
