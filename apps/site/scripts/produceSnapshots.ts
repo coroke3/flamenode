@@ -485,6 +485,7 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
 export interface SnapshotCliOptions {
   env?: Record<string, string | undefined>;
   fetchFn?: typeof fetch;
+  quiet?: boolean;
 }
 type SnapshotCliArgs = {
   out: string; generation: string;
@@ -519,7 +520,7 @@ export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
   };
 }
 
-export async function main(argv: string[], options: SnapshotCliOptions = {}): Promise<void> {
+export async function main(argv: string[], options: SnapshotCliOptions = {}): Promise<ProduceResult> {
   const args = parseSnapshotCliArgs(argv);
   const env = options.env ?? process.env;
   const db = args.d1Api
@@ -546,10 +547,13 @@ export async function main(argv: string[], options: SnapshotCliOptions = {}): Pr
     trending:trending===null?undefined:trending,
   });
   const buildEnv = writeSnapshotDir(args.out, result);
-  console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
-  if (result.report.trending === "missing") {
-    console.warn("[snapshots] trending was not produced (no --trending-file): the /trending and / builds fail closed until it is supplied");
+  if (!options.quiet) {
+    console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
+    if (result.report.trending === "missing") {
+      console.warn("[snapshots] trending was not produced: the /trending and / builds fail closed until it is supplied");
+    }
   }
+  return result;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
