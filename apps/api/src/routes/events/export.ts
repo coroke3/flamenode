@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppEnv } from "../../env.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { checkPublicApiRateLimit, publicJsonBodyResponse, publicJsonResponse } from "@flamenode/server-core/publicData/publicApi";
@@ -58,7 +58,7 @@ function decodePathSegment(value: string | undefined): string | null {
 function isPublicExportEvent(row: EventExportEventRow | null): boolean {
   return !!row && row.public_api_enabled === 1 && row.visibility_status === "public";
 }
-function cacheHost(c: { executionCtx: ExecutionContext }): PublicJsonCacheHost | null {
+function cacheHost(c: Context<AppEnv>): PublicJsonCacheHost | null {
   try {
     const cache = (caches as unknown as { default: Cache }).default;
     const ctx = c.executionCtx;
