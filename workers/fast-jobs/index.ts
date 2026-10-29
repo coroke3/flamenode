@@ -110,6 +110,15 @@ async function maybeResendNotificationWake(
   });
 }
 
+/** Missing producer binding is a deliberate zero-query no-op. */
+export async function runPageRenderRecoveryStage(
+  env: Pick<Env, "DB" | "PAGE_RENDER_QUEUE">,
+): Promise<{ processed?: number; skipped?: number }> {
+  if (!env.PAGE_RENDER_QUEUE) return { skipped: 1 };
+  const count = await recoverPendingPageRenders(env.DB, env.PAGE_RENDER_QUEUE);
+  return { processed: count, skipped: count === 0 ? 1 : 0 };
+}
+
 export async function runNotificationRecovery(
   env: Env,
   execution: CronRunContext,
@@ -226,13 +235,8 @@ export async function runNotificationRecovery(
               "fast-jobs",
               "page-render-recovery",
               async () => {
-                if (!budgetEnv.PAGE_RENDER_QUEUE) return { skipped: 1 };
                 signal?.throwIfAborted();
-                const count = await recoverPendingPageRenders(
-                  budgetEnv.DB,
-                  budgetEnv.PAGE_RENDER_QUEUE,
-                );
-                return { processed: count, skipped: count === 0 ? 1 : 0 };
+                return runPageRenderRecoveryStage(budgetEnv);
               },
               { commitSha: budgetEnv.BUILD_COMMIT_SHA },
             );
