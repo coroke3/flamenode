@@ -327,7 +327,7 @@ test("D1/KV/DELETE budget: per message at most three SQL, one KV, one R2 DELETE"
   h.env.VISIBILITY_KV = { get: async () => { kv++; return null; } };
   await h.consume(doorbell("event", "ev-private"));
   assert.ok(log.length <= 3, `D1 statements ${log.length}`);
-  assert.ok(log.every((sql) => /LIMIT 1|WHERE entity = \\? AND entity_id = \\? AND request_version = \\?/.test(sql)), log.join("\n"));
+  assert.ok(log.every((sql) => /LIMIT 1|WHERE entity = \? AND entity_id = \? AND request_version = \?/.test(sql)), log.join("\n"));
   assert.equal(kv, 1);
   assert.deepEqual(h.ops, [["delete", "event/ev-private/index.html"]]);
 });
