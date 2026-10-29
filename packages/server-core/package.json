@@ -59,6 +59,7 @@
     "./moderation/openCases": "./src/moderation/openCases.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts",
     "./publicCache/eventExportKeys": "./src/publicCache/eventExportKeys.ts",
+    "./eventExport/payload": "./src/eventExport/payload.ts",
     "./xid/merge": "./src/xid/merge.ts",
     "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
     "./xid/mergeCore": "./src/xid/mergeCore.ts",
