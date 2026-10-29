@@ -26,6 +26,7 @@
     "./audit/settings": "./src/audit/settings.ts",
     "./audit/snapshot": "./src/audit/snapshot.ts",
     "./audit/types": "./src/audit/types.ts",
+    "./xid/pendingInsert": "./src/xid/pendingInsert.ts",
     "./queues/featureFlags": "./src/queues/featureFlags.ts",
     "./queues/sendQueueWakeBestEffort": "./src/queues/sendQueueWakeBestEffort.ts",
     "./queues/wakeBudget": "./src/queues/wakeBudget.ts",
