@@ -120,9 +120,11 @@ function AuditDetailBody({id,detail,api}:{
         :<AuditDiffDetail before={payload.value.before} after={payload.value.after}
           inverse={payload.value.inverse} changedKeys={changedKeys}/>}
     </section>
-    <AuditRestoreForm auditId={row.id} restoreStatus={row.restore_status}
-      unavailableMessage={row.restore_unavailable_message}
-      reasonCode={row.restore_unavailable_reason_code} api={api}/>
+    {row.restore_status!=="restorable" || payload.status==="ok"
+      ? <AuditRestoreForm auditId={row.id} restoreStatus={row.restore_status}
+          unavailableMessage={row.restore_unavailable_message}
+          reasonCode={row.restore_unavailable_reason_code} api={api}/>
+      : <p role="status">変更履歴の読込完了後にリストア操作が利用できます。</p>}
   </>;
 }
 export function AuditDiffDetail({before,after,inverse,changedKeys}:{
