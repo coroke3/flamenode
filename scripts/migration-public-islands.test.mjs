@@ -30,7 +30,7 @@ test("T01: CURRENT q/sort/event/view/page keys normalize and URL deep links roun
   assert.equal(listQueryFromSearch(listHref(q).slice(5)).page, 2);
   assert.equal(isDefaultListQuery(listQueryFromSearch("")), true);
   assert.equal(isDefaultListQuery(q), false);
-  assert.equal(listQueryFromSearch("?page=9999999999999999999").page, 1);
+  assert.equal(listQueryFromSearch("?page=9999999999999999999").page, Math.ceil(5000 / 24));
   assert.equal(listQueryFromSearch("?page=9999").page, Math.ceil(5000 / 24));
   assert.equal(listQueryFromSearch("?sort=unknown&view=other").sort, "new");
   assert.equal(listQueryFromSearch("?sort=unknown&view=other").view, "grid");
@@ -60,8 +60,7 @@ test("T03: malformed or nonpublic DTO cannot replace static default fallback", (
     { ...okPage(query), limit: 48 },
     { ...okPage(query), total: -1 },
     { ...okPage(query), items: Array.from({ length: 25 }, (_, i) => dto(String(i))) },
-    { items: [], total: 0, page: 1, limit: 24, "extra": "ok" },
-  ].slice(0, -1)) {
+  ]) {
     assert.equal(decodePublicList(invalid, query), null);
   }
   assert.equal(LIST_UNAVAILABLE_MESSAGE, "作品一覧を一時的に表示できません。");
