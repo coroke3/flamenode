@@ -27,6 +27,7 @@ if (runUnderRootTsx(import.meta.url)) {
   const { atomicD1, chapterApp, seedChapterWorld, SITE, SESSION_USER } = await import("./support/chapterSeed.mjs");
   const { Hono } = await import("hono");
   const { createVideosRoutes } = await import("../src/routes/videos/index.ts");
+  const { VIDEO_SNAPSHOT_COLUMNS } = await import("../src/routes/videos/interaction.ts");
   const { toggleVideoInteraction } = await import("../../../src/lib/actions/video/interaction.ts");
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import("../../../packages/server-core/src/queues/wakeBudget.ts");
   const { getTableColumns } = await import("drizzle-orm");
@@ -36,6 +37,9 @@ if (runUnderRootTsx(import.meta.url)) {
   function world(options) {
     const sqlite = createSqlite();
     seedChapterWorld(sqlite);
+    // SQLite unixepoch() defaults drift between the two freshly built worlds.
+    // A fixed baseline is necessary for byte-exact CURRENT / Hono audit parity.
+    sqlite.prepare("UPDATE videos SET created_at = 100, updated_at = 100").run();
     return { sqlite, d1: atomicD1(sqlite, options) };
   }
   const freeze = () => {
@@ -205,7 +209,8 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoInteractionResultSchema.safeParse({ ok: true, active: false, videoId: "v_pub" }).success, true);
     const w = world();
     const dbRow = w.sqlite.prepare("SELECT * FROM videos WHERE id = ?").get("v_pub");
-    assert.deepEqual(Object.keys(dbRow), Object.keys(getTableColumns(schema.videos)), "SELECT v.* equals CURRENT Drizzle snapshot fields");
+    assert.deepEqual([...VIDEO_SNAPSHOT_COLUMNS], Object.keys(getTableColumns(schema.videos)), "snapshot order is CURRENT Drizzle object order");
+    assert.deepEqual(Object.keys(dbRow).sort(), [...VIDEO_SNAPSHOT_COLUMNS].sort(), "all physical SQLite columns are captured");
   });
 } else {
   test("videoInteraction parity (tsx child process)", () => {});
