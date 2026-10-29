@@ -12,17 +12,31 @@ export async function acceptLatestTerms(
   next: string,
   fetcher: typeof fetch = fetch,
 ): Promise<TermsAcceptResponse> {
+  const safeNext = sanitizeNextPath(next);
   const response = await fetcher("/api/personal/terms/accept", {
     method: "POST",
     credentials: "same-origin",
     cache: "no-store",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ next: sanitizeNextPath(next) }),
+    body: JSON.stringify({ next: safeNext }),
   });
 
   // A non-2xx response may intentionally carry CURRENT's /entry or /rules redirect
   // as JSON. Parse it before looking at the HTTP status, but reject malformed replies.
   const body: unknown = await response.json();
+  // MIG-0641's route factory authenticates *before* the handler. Middleware
+  // failures are {error: code}, not the handler's {ok, next} schema.
+  // CURRENT redirects anonymous users to /entry and unavailable sessions to
+  // /rules?error=database_unavailable. Keep those same-origin destinations.
+  if (typeof body === "object" && body !== null && !Array.isArray(body)) {
+    const middlewareError = (body as { error?: unknown }).error;
+    if (response.status === 401 && middlewareError === "unauthenticated") {
+      return { ok: false, next: `/entry?next=${encodeURIComponent(safeNext)}` };
+    }
+    if (response.status === 503 && middlewareError === "database_unavailable") {
+      return { ok: false, next: `/rules?next=${encodeURIComponent(safeNext)}&error=database_unavailable` };
+    }
+  }
   if (typeof body !== "object" || body === null || Array.isArray(body) ||
       typeof (body as { ok?: unknown }).ok !== "boolean") {
     throw new Error("Invalid terms response");
