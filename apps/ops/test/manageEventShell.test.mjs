@@ -42,7 +42,7 @@ test("MIG-0720 U01: CURRENT tab query and path precedence", () => {
 test("MIG-0720 U01: primary/sub-tabs preserve CURRENT selection and URL encoding", () => {
   const tabs = React.createElement(ManageEventTabs, { eventId, pendingCount: 3 });
   const pending = doc(tabs, `/manage/events/${encodedId}/videos?status=pending`);
-  assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/videos?status=pending`), ["対応待ち", "提出状況"]);
+  assert.deepEqual(activeLinks(tabs, `/manage/events/${encodedId}/videos?status=pending`), ["対応待ち3", "提出状況"]);
   assert.match(pending.querySelector(".fn-console-event-tab-count").textContent, /3/);
   assert.equal(pending.querySelector(".fn-console-event-tabs a").getAttribute("href"), `/manage/events/${encodedId}`);
   assert.ok(pending.querySelector(`a[href="/manage/events/${encodedId}/videos?status=all"]`));
