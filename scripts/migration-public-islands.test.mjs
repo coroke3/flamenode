@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
+import { act } from "react";
+import { mountListFilters } from "../apps/site/src/components/ListFilterIsland.ts";
 import {
   LIST_EVENT_UNAVAILABLE_MESSAGE, LIST_NO_RESULTS_MESSAGE, LIST_SHORT_SEARCH_MESSAGE,
   LIST_UNAVAILABLE_MESSAGE, decodePublicList, isDefaultListQuery,
@@ -114,4 +116,86 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
   assert.ok(listing.querySelector("#list-static-fallback main"));
   assert.equal(listing.querySelector("#list-static-fallback button"), null);
   assert.equal(listing.querySelector("#list-filter-mount button"), null);
+});
+
+
+test("T03/T04: mounted Island handles 503 without hiding the static list or exposing a false empty result", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><div id="list-filter-mount"></div><div id="list-static-fallback"><p>STATIC-DEFAULT</p></div>',
+    { url: "https://flamenode.net/list?q=abcd&event=ev1&view=index" },
+  );
+  const old = {
+    window: globalThis.window, document: globalThis.document,
+    HTMLElement: globalThis.HTMLElement, Node: globalThis.Node,
+    fetch: globalThis.fetch, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  };
+  let requested = "";
+  try {
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    globalThis.Node = dom.window.Node;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    globalThis.fetch = async (url, init) => {
+      requested = String(url);
+      assert.equal(init.credentials, "same-origin");
+      return new Response('{"error":"maintenance"}', {
+        status: 503, headers: { "Content-Type": "application/json" },
+      });
+    };
+    await act(async () => { mountListFilters(); });
+    assert.equal(requested, "/api/videos?q=abcd&event=ev1&limit=24");
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById("list-static-fallback").hidden, false, "503 must preserve static content");
+    assert.match(doc.getElementById("list-static-fallback").textContent, /STATIC-DEFAULT/);
+    assert.match(doc.getElementById("list-filter-mount").querySelector('[role="alert"]').textContent,
+      /このイベントの作品一覧を一時的に表示できません。/);
+    assert.equal(doc.getElementById("list-filter-mount").querySelector("main"), null,
+      "503 must not render the wrong event results as an empty list");
+    assert.equal(doc.querySelector('.lv-view-options a[aria-current="page"]').textContent, "一覧表示");
+    assert.equal(doc.querySelector('input[name="event"]').value, "ev1");
+  } finally {
+    globalThis.window = old.window;
+    globalThis.document = old.document;
+    globalThis.HTMLElement = old.HTMLElement;
+    globalThis.Node = old.Node;
+    globalThis.fetch = old.fetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = old.act;
+    dom.window.close();
+  }
+});
+
+test("T01: an accepted RH-032 page replaces the static default and renders the selected mode", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><div id="list-filter-mount"></div><div id="list-static-fallback">STATIC-DEFAULT</div>',
+    { url: "https://flamenode.net/list?q=abcd&view=compact" },
+  );
+  const old = {
+    window: globalThis.window, document: globalThis.document,
+    HTMLElement: globalThis.HTMLElement, Node: globalThis.Node,
+    fetch: globalThis.fetch, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  };
+  try {
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    globalThis.Node = dom.window.Node;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    globalThis.fetch = async () => new Response(JSON.stringify(okPage(listQueryFromSearch("?q=abcd&view=compact"))), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+    await act(async () => { mountListFilters(); });
+    const doc = dom.window.document;
+    assert.equal(doc.getElementById("list-static-fallback").hidden, true);
+    assert.match(doc.getElementById("list-filter-mount").textContent, /公開作品/);
+    assert.ok(doc.querySelector(".lv-grid.lv-compact"), "compact mode follows the query after the API load");
+  } finally {
+    globalThis.window = old.window;
+    globalThis.document = old.document;
+    globalThis.HTMLElement = old.HTMLElement;
+    globalThis.Node = old.Node;
+    globalThis.fetch = old.fetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = old.act;
+    dom.window.close();
+  }
 });
