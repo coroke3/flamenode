@@ -187,7 +187,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const bytes = Buffer.byteLength(body);
     assert.equal(result.status, 200);
     assert.equal(JSON.parse(body).videos.length, 500);
-    assert.equal(JSON.parse(body).truncated, true);
+    assert.equal(JSON.parse(body).meta.truncated, true);
     assert.equal(d1.stats.writes, 0);
     console.log(`MIG-0632 upper-bound: payload_bytes=${bytes}, wall_ms=${cpuWallMs.toFixed(2)} (wall-clock, NOT authoritative CPU)`);
     assert.ok(bytes > 0);
