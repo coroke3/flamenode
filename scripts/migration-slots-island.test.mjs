@@ -233,3 +233,20 @@ test("U01 Active X changed event invalidates old identity before refetch resolve
     dom.window.close();
   }
 });
+
+test("U01 SSR / JS-disabled public page contains only a safe notice, never reservation controls", async () => {
+  const React = (await import("react")).default;
+  const { renderToString } = await import("react-dom/server");
+  const { EventSlotsViewerIsland } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const html = renderToString(React.createElement(EventSlotsViewerIsland, {
+    eventId: "e",
+    baseSlots: [{ id: "s" }],
+    accepting: false,
+    eventStatus: "ended",
+    children: (viewer) => React.createElement("span", null,
+      viewer.canTakeSlot ? "reserve" : "display-only"),
+  }));
+  assert.match(html, /終了済みのため新規確保はできません/);
+  assert.match(html, /display-only/);
+  assert.doesNotMatch(html, /<button|reserve|viewerXId/i);
+});
