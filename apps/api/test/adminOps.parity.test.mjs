@@ -227,14 +227,17 @@ test("MIG-0637 user CostGuard feature flag denies exactly one operation",async()
   assert.equal(allowed.status,200);
 });
 
-test("MIG-0637 U03: emailVerified timestamp_ms matches CURRENT Date audit and CAS",async()=>{
+test("MIG-0637 U03: Date timestamp_ms CAS and CURRENT audit sanitizer parity",async()=>{
   const x=setup();
   const timestamp=1700000000000;
   x.sqlite.prepare('UPDATE "user" SET emailVerified=? WHERE id=?').run(timestamp,"target-1");
   const result=await x.request("/users/target-1/role",{role:"moderator"});
   assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
   const audit=x.sqlite.prepare("SELECT before_json,after_json FROM audit_logs").get();
-  assert.equal(JSON.parse(audit.before_json).emailVerified,new Date(timestamp).toISOString());
-  assert.equal(JSON.parse(audit.after_json).emailVerified,new Date(timestamp).toISOString());
+  // CURRENT drizzle returns a Date. sanitizeForAudit recursively treats Date
+  // as a plain object, so both snapshots contain {}, not an ISO string.
+  assert.deepEqual(JSON.parse(audit.before_json).emailVerified,{});
+  assert.deepEqual(JSON.parse(audit.after_json).emailVerified,{});
+  assert.equal(x.sqlite.prepare('SELECT emailVerified FROM "user" WHERE id=?').get("target-1").emailVerified,timestamp);
   assert.equal(x.stats.batches,1);
 });
