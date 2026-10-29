@@ -39,7 +39,35 @@ if (runUnderRootTsx(import.meta.url)) {
   const { resetPublicJsonIsolateCacheForTests } = await import("../../../src/lib/publicData/publicCacheIsolate.ts");
 
   const sqlite = createSqlite();
-  const d1 = createD1(sqlite);
+  // Real Cloudflare D1 implements .raw() for Drizzle's typed select() reads.
+  // Keep the test's in-memory D1 faithful without mutating the shared harness.
+  const baseD1 = createD1(sqlite);
+  const d1 = {
+    ...baseD1,
+    prepare(query) {
+      const original = baseD1.prepare(query);
+      return {
+        ...original,
+        bind(...params) {
+          const bound = original.bind(...params);
+          return {
+            ...bound,
+            async raw() {
+              baseD1.stats.statements += 1;
+              baseD1.stats.maxBinds = Math.max(baseD1.stats.maxBinds, params.length);
+              const prepared = sqlite.prepare(query);
+              prepared.setReturnArrays(true);
+              try {
+                return prepared.all(...params).map((row) => [...row]);
+              } finally {
+                prepared.setReturnArrays(false);
+              }
+            },
+          };
+        },
+      };
+    },
+  };
   const proxyDb = drizzle(async (query, values, method) => {
     if (globalThis.__eventExport.dbError) throw new Error("database_error");
     const rows = sqlite.prepare(query).all(...values);
