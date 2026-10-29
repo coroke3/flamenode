@@ -100,6 +100,15 @@ test("SA-098 denies a canonical / alias collision before any mutation", async ()
   assert.equal(stats.batches, 0);
 });
 
+test("SA-098 denies an alias whose canonical X approval status is null", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare("UPDATE x_users SET approval_status = NULL WHERE id = 'x-one'").run();
+  sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x-one','old')").run();
+  const response = await request({ x_user_id: "old" });
+  assert.equal(response.status, 403);
+  assert.equal(stats.batches, 0);
+});
+
 test("SA-098 denies an ambiguous alias with different canonical targets", async () => {
   const { sqlite, request, stats } = setup();
   sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-two','Other','approved')").run();
