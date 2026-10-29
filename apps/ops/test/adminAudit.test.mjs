@@ -133,7 +133,8 @@ test("MIG-0733 U01: no payload GET before clicking the diff; close aborts in-fli
   const dom=new JSDOM("<!doctype html><html><body></body></html>",{url:"https://flamenode.test/admin/audit"});
   const previous={};
   for(const k of ["window","document","navigator","HTMLElement","Node","MouseEvent"]){
-    previous[k]=globalThis[k];globalThis[k]=dom.window[k];
+    previous[k]=Object.getOwnPropertyDescriptor(globalThis,k);
+    Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:dom.window[k]});
   }
   globalThis.IS_REACT_ACT_ENVIRONMENT=true;
   const target=document.createElement("div");document.body.append(target);
@@ -157,7 +158,7 @@ test("MIG-0733 U01: no payload GET before clicking the diff; close aborts in-fli
   }finally{
     await React.act(async()=>root.unmount());target.remove();
     for(const k of Object.keys(previous)){
-      if(previous[k]===undefined)delete globalThis[k];else globalThis[k]=previous[k];
+      if(previous[k]===undefined)delete globalThis[k];else Object.defineProperty(globalThis,k,previous[k]);
     }
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
     dom.window.close();
