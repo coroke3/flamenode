@@ -23,7 +23,7 @@ export function CostGuardDisabledFeaturesForm({settings,api,onSuccess}:{settings
     {initial.malformed?<p role="alert">現在の無効化機能設定が不正なため、安全のため書込み機能は停止中です。</p>:null}
     <fieldset disabled={busy}><legend>無効化する機能（空欄で全て有効）</legend>
       {WRITE_FEATURE_KEYS.map(feature=><label key={feature}><input type="checkbox" checked={features.includes(feature)}
-      onChange={e=>setFeatures(v=>e.currentTarget.checked?[...v,feature]:v.filter(k=>k!==feature))}/>{feature}</label>)}
+      onChange={e=>{const checked=e.currentTarget.checked;setFeatures(v=>checked?[...v,feature]:v.filter(k=>k!==feature));}}/>{feature}</label>)}
     </fieldset>
     <label>変更理由 <input maxLength={500} value={reason} disabled={busy} onChange={e=>setReason(e.currentTarget.value)}/></label>
     <label>確認文字列 <input value={confirm} disabled={busy} onChange={e=>setConfirm(e.currentTarget.value)} placeholder="APPLY"/></label>

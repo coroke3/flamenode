@@ -22,7 +22,7 @@ export function CostGuardOverrideForm({settings,api,onSuccess}:{settings:AdminCo
     <p>状態: {active?"有効":"無効"} {settings.exceptionFeaturesJson??""}</p>
     <fieldset disabled={busy}><legend>対象機能（最大8件）</legend>
       {WRITE_FEATURE_KEYS.map(feature=><label key={feature}>
-        <input type="checkbox" checked={features.includes(feature)} onChange={e=>setFeatures(current=>e.currentTarget.checked?[...current,feature].slice(0,8):current.filter(v=>v!==feature))} />{feature}
+        <input type="checkbox" checked={features.includes(feature)} onChange={e=>{const checked=e.currentTarget.checked;setFeatures(current=>checked?[...current,feature].slice(0,8):current.filter(v=>v!==feature));}} />{feature}
       </label>)}
     </fieldset>
     <label>理由 <input maxLength={500} disabled={busy} value={reason} onChange={e=>setReason(e.currentTarget.value)} /></label>

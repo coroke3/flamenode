@@ -39,7 +39,7 @@ test("MIG-0734 T01 U01 cost writes preserve 5 exact D-17-4 paths and JSON keys",
     {is_maintenance_mode:"1",reason:"保守"},
     {reason:"緊急",confirm:"OVERRIDE",features:["edit_video"]},
     {reason:"解除",confirm:"CLEAR"},
-    {reason:"変更",confirm:"APPLY",features:["edit_video"],expected_disabled_features_json:'"["like_or_bookmark"]"'},
+    {reason:"変更",confirm:"APPLY",features:["edit_video"],expected_disabled_features_json:JSON.stringify('["like_or_bookmark"]')},
   ]);
   for(const {init} of calls){
     assert.equal(init.credentials,"same-origin");
@@ -65,7 +65,7 @@ test("MIG-0734 cost feature allowlist remains byte-identical to CURRENT core",()
   const expected=[...span[1].matchAll(/"([^"]+)"/g)].map(x=>x[1]);
   assert.deepEqual(WRITE_FEATURE_KEYS,expected);
   assert.deepEqual(parseCostFeatures('["edit_video","edit_video"]'),{features:["edit_video"],malformed:false});
-  assert.equal(parseCostFeatures('["unrecognized"]',{malformed:true}).malformed,true);
+  assert.equal(parseCostFeatures('["unrecognized"]').malformed,true);
 });
 
 test("MIG-0734 U01 server markup keeps OVERRIDE/CLEAR/APPLY disabled until token",()=>{
