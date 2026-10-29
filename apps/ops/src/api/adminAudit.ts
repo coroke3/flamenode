@@ -1,3 +1,43 @@
+// D-16-1 provisional: replace with @flamenode/contracts at merge (restore API MIG-0662).
+import type {
+  AdminAuditDetailResponse, AdminAuditRestoreResponse, AdminAuditSettingsResponse,
+  AuditLogDryRunResult, UpdateAuditLogSettingsResult,
+} from "@flamenode/contracts";
+import {
+  AdminAuditDetailResponseSchema, AdminAuditRestoreResponseSchema, AdminAuditSettingsResponseSchema,
+  AuditDryRunSchema, AuditSettingsPatchSchema,
+} from "@flamenode/contracts";
+import { send, type OpsWriteResult } from "./write.js";
+
+export interface RestoreAuditResult {
+  ok: boolean;
+  message?: string;
+  restore_run_id?: string;
+  diff?: { current: Record<string,unknown> | null; target: Record<string,unknown> | null; conflicts: string[] };
+}
+export interface AuditMutations {
+  detail(id: string, signal?: AbortSignal): Promise<OpsResult<AdminAuditDetailResponse>>;
+  runs(signal?: AbortSignal): Promise<OpsResult<AdminAuditRestoreResponse>>;
+  settings(signal?: AbortSignal): Promise<OpsResult<AdminAuditSettingsResponse>>;
+  dryRun(auditId: string, reason: string): Promise<OpsWriteResult<AuditLogDryRunResult>>;
+  restore(auditId: string, reason: string, confirm: string, force: boolean): Promise<OpsWriteResult<RestoreAuditResult>>;
+  saveSettings(patch: Record<string, number>): Promise<OpsWriteResult<UpdateAuditLogSettingsResult>>;
+}
+function auditMutationResult<T extends {ok:boolean}>(result: OpsWriteResult<T>): OpsWriteResult<T> {
+  if (result.status !== "ok") return result;
+  if (typeof result.data.ok !== "boolean" ||
+      (result.data.message !== undefined && typeof result.data.message !== "string")) {
+    return {status:"unavailable"};
+  }
+  return result;
+}
+async function getValidated<T>(fetchFn: OpsFetch, path: string, schema: {safeParse(v: unknown): {success:boolean;data?:T}}, signal?: AbortSignal): Promise<OpsResult<T>> {
+  const read = await getJson<unknown>(fetchFn,path,signal);
+  if (read.status !== "ok") return read;
+  const parsed = schema.safeParse(read.data);
+  return parsed.success && parsed.data !== undefined
+    ? {status:"ok",data:parsed.data} : {status:"unavailable"};
+}
 import {
   AdminAuditListResponseSchema,
   AdminAuditPayloadChunkResponseSchema,
@@ -7,7 +47,7 @@ import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 import { auditListApiPath, type AuditListQuery } from "../lib/auditListQuery.js";
 
 export type AuditPayloadField = "before" | "after" | "inverse";
-export type AuditAuditApi = {
+export type AuditAuditApi = AuditMutations & {
   list: (query: AuditListQuery, signal?: AbortSignal) => Promise<OpsResult<AdminAuditListResponse>>;
   payload: (id: string, field: AuditPayloadField, signal?: AbortSignal) => Promise<OpsResult<string | null>>;
 };
@@ -16,6 +56,36 @@ const MAX_PAYLOAD_CHUNKS = 100;
 
 export function createAdminAuditApi(fetchFn: OpsFetch = (input, init) => fetch(input, init)): AuditAuditApi {
   return {
+    detail(id,signal) {
+      return getValidated(fetchFn,"/api/admin-read/audit/" + encodeURIComponent(id), AdminAuditDetailResponseSchema, signal);
+    },
+    runs(signal) {
+      return getValidated(fetchFn,"/api/admin-read/audit/restore",AdminAuditRestoreResponseSchema,signal);
+    },
+    settings(signal) {
+      return getValidated(fetchFn,"/api/admin-read/audit-settings",AdminAuditSettingsResponseSchema,signal);
+    },
+    async dryRun(auditId,reason) {
+      const body = AuditDryRunSchema.safeParse({audit_id:auditId,reason});
+      if (!body.success) return {status:"ok",data:{ok:false,message:"理由を入力してください。"}};
+      return auditMutationResult(await send<AuditLogDryRunResult>(fetchFn,"POST","/api/admin/audit/dry-run",body.data));
+    },
+    async restore(auditId,reason,confirm,force) {
+      // Client-side guard supplements (never replaces) server-side restore confirmation.
+      if (!reason.trim() || reason.trim().length>500 || confirm !== "RESTORE "+auditId || !auditId.trim()) {
+        return {status:"ok",data:{ok:false,message:"確認テキストと理由を確認してください。"}};
+      }
+      return auditMutationResult(await send<RestoreAuditResult>(fetchFn,"POST","/api/admin/audit/restore",{
+        audit_id:auditId,reason,confirm_text:confirm,force_overwrite:force?"1":"0",
+      }));
+    },
+    async saveSettings(patch) {
+      const data=AuditSettingsPatchSchema.safeParse(patch);
+      if (!data.success || Object.keys(data.data).length!==5) {
+        return {status:"ok",data:{ok:false,message:"入力エラー"}};
+      }
+      return auditMutationResult(await send<UpdateAuditLogSettingsResult>(fetchFn,"POST","/api/admin/audit/settings",data.data));
+    },
     async list(query, signal) {
       const result = await getJson<unknown>(fetchFn, auditListApiPath(query), signal);
       if (result.status !== "ok") return result;
