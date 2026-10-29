@@ -154,49 +154,71 @@ test("MIG-0807: onlyMutating skips GET/HEAD/OPTIONS without consulting write gua
   assert.equal(handlerCalls, 2, "GET and synthesized HEAD are handled without a mutation");
 });
 
-test("MIG-0807 U03 finding: a throwing D1 binding getter escapes shared guards", async () => {
-  // Reproducer only: this test intentionally pins a KNOWN defect so the
-  // review cannot claim that these handlers convert *every* DB exception to
-  // the required private 503. Code repair belongs to a separate MIG task.
+test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail-closed responses", async () => {
+  // This audit follows #445: the former pre-fix assert.rejects contract was unsafe
+  // after the repair and must never be silently accepted as a passing security gate.
   const secret = "SYNCHRONOUS_DB_BINDING_ERROR";
-  const env = Object.defineProperty({}, "DB", {
-    get() { throw new Error(secret); },
-  });
-  const context = {
-    env,
-    req: {
-      url: "https://flamenode.example/protected",
-      header(name) {
-        if (name.toLowerCase() === "cookie") {
-          return "__Secure-authjs.session-token=valid-token";
-        }
-        if (name.toLowerCase() === "origin") {
-          return "https://flamenode.example";
-        }
-        return undefined;
-      },
-    },
-    set() {},
-    get() { return null; },
-    header() {},
+  const site = "https://flamenode.example";
+  const guardOptions = {
+    loadSiteUrl: () => site,
+    allowLocalPreview: () => false,
   };
-  let downstream = 0;
-  const next = async () => { downstream += 1; };
-  await assert.rejects(() => sessionMiddleware()(context, next), {
-    message: secret,
-  }, "sessionMiddleware DB getter is outside its resolution catch");
-  await assert.rejects(
-    () => writeGuardMiddleware({
-      loadSiteUrl: () => "https://flamenode.example",
-      allowLocalPreview: () => false,
-    })(context, next),
-    { message: secret },
-    "writeGuardMiddleware DB getter is outside its fail-closed result mapping",
-  );
-  await assert.rejects(
-    () => costGuardMiddleware("manage_event_update")(context, next),
-    { message: secret },
-    "costGuardMiddleware DB getter is outside CostGuard's fail-closed handler",
-  );
-  assert.equal(downstream, 0, "no mutation is permitted after the DB binding failure");
+  function throwingEnv() {
+    let reads = 0;
+    const env = Object.defineProperty({}, "DB", {
+      get() { reads += 1; throw new Error(secret); },
+    });
+    return { env, reads: () => reads };
+  }
+  const runs = [
+    {
+      name: "session",
+      makeApp() {
+        const app = new Hono();
+        app.use("/protected", sessionMiddleware());
+        app.use("/protected", requireAuth());
+        app.get("/protected", (c) => c.json({ mutated: true }));
+        return app;
+      },
+      request: { headers: { Cookie: "__Secure-authjs.session-token=valid-token" } },
+      reason: "database_unavailable",
+    },
+    {
+      name: "writeGuard",
+      makeApp() {
+        const app = new Hono();
+        app.use("/protected", async (c, next) => {
+          c.set("user", { id: "admin-1", role: "admin", is_banned: 0 });
+          c.set("sessionState", "user");
+          await next();
+        });
+        app.use("/protected", writeGuardMiddleware(guardOptions));
+        app.post("/protected", (c) => c.json({ mutated: true }));
+        return app;
+      },
+      request: { method: "POST", headers: { Origin: site } },
+      reason: "db_unavailable",
+    },
+    {
+      name: "costGuard",
+      makeApp() {
+        const app = new Hono();
+        app.use("/protected", costGuardMiddleware("manage_event_update"));
+        app.post("/protected", (c) => c.json({ mutated: true }));
+        return app;
+      },
+      request: { method: "POST" },
+      reason: "cost_guard_blocked",
+    },
+  ];
+  for (const entry of runs) {
+    const { env, reads } = throwingEnv();
+    const response = await entry.makeApp().request(site + "/protected", entry.request, env);
+    assert.equal(response.status, 503, entry.name);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", entry.name);
+    const body = await response.text();
+    assert.doesNotMatch(body, /SYNCHRONOUS_DB_BINDING_ERROR|mutated/, entry.name);
+    assert.equal(JSON.parse(body).reason ?? JSON.parse(body).error, entry.reason, entry.name);
+    assert.equal(reads(), 1, entry.name + " binding getter must be read once");
+  }
 });
