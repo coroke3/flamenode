@@ -27,7 +27,7 @@ export function parseAuditListQuery(search: string | URLSearchParams): AuditList
     view: view === "cards" || view === "timeline" ? view : "table",
     table: get("table"),
     operation: OPERATIONS.has(operation) ? operation : "",
-    actor: get("actor") || get("operator"),
+    actor: query.has("actor") ? get("actor") : get("operator"),
     record: get("record"),
     restore_status: RESTORE_STATUSES.has(status) ? status : "",
     since: get("since"),
