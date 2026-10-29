@@ -24,7 +24,9 @@ if (runUnderRootTsx(import.meta.url)) {
   });
 
   const { drizzle } = await import("drizzle-orm/d1");
-  const { atomicD1, chapterApp, seedChapterWorld, SITE } = await import("./support/chapterSeed.mjs");
+  const { atomicD1, chapterApp, seedChapterWorld, SITE, SESSION_USER } = await import("./support/chapterSeed.mjs");
+  const { Hono } = await import("hono");
+  const { createVideosRoutes } = await import("../src/routes/videos/index.ts");
   const { toggleVideoInteraction } = await import("../../../src/lib/actions/video/interaction.ts");
   const { QUEUE_BINDING_NAMES, QUEUE_FEATURE_FLAG_NAMES } = await import("../../../packages/server-core/src/queues/wakeBudget.ts");
   const { getTableColumns } = await import("drizzle-orm");
@@ -146,10 +148,18 @@ if (runUnderRootTsx(import.meta.url)) {
     );
     assert.equal(crossOrigin.status, 403);
     assert.equal(worldAuth.d1.stats.batches, 0);
-    worldAuth.sqlite.prepare("UPDATE user SET is_banned = 1 WHERE id = 'u_owner'").run();
-    const banned = await chapterApp(worldAuth.d1, "u_owner")(
-      "POST", "/api/videos/v_pub/interaction", { kind: "like" },
-    );
+    const blockedApp = new Hono();
+    blockedApp.route("/api/videos", createVideosRoutes({
+      session: async (c, next) => {
+        c.set("user", { ...SESSION_USER("u_owner"), is_banned: 1 });
+        c.set("sessionState", "user");
+        await next();
+      },
+    }));
+    const banned = await blockedApp.request("https://app.flamenode.example/api/videos/v_pub/interaction", {
+      method: "POST", headers: { Origin: SITE, "content-type": "application/json" },
+      body: JSON.stringify({ kind: "like" }),
+    }, { DB: worldAuth.d1, NEXT_PUBLIC_SITE_URL: SITE });
     assert.equal(banned.status, 403);
     assert.equal(worldAuth.d1.stats.batches, 0);
 
@@ -193,7 +203,9 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoInteractionBodySchema.safeParse({ kind: "like" }).success, true);
     assert.equal(VideoInteractionBodySchema.safeParse({ kind: "BAD" }).success, false);
     assert.equal(VideoInteractionResultSchema.safeParse({ ok: true, active: false, videoId: "v_pub" }).success, true);
-    assert.deepEqual(Object.keys(getTableColumns(schema.videos)), Object.keys(state(world()).videos[0]).length === 0 ? [] : Object.keys(getTableColumns(schema.videos)));
+    const w = world();
+    const dbRow = w.sqlite.prepare("SELECT * FROM videos WHERE id = ?").get("v_pub");
+    assert.deepEqual(Object.keys(dbRow), Object.keys(getTableColumns(schema.videos)), "SELECT v.* equals CURRENT Drizzle snapshot fields");
   });
 } else {
   test("videoInteraction parity (tsx child process)", () => {});
