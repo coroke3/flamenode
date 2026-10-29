@@ -1166,7 +1166,7 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
 | `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
 | `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
-| `src/components/admin/DiagnosticStatusResults.tsx` | HELPER | health/security client status filter, WARN banner, retry | MIG-0736 | apps/ops/src/routes/admin/DiagnosticStatusResults.tsx#DiagnosticStatusResults (unmounted) | IN_PROGRESS | PR#463 SHA=ae9a80187ea687ee970221cd5f271995187c0939 (U01 UI parity) |
+| `src/components/admin/DiagnosticStatusResults.tsx` | HELPER | MIG-0736 | apps/ops/src/routes/admin/DiagnosticStatusResults.tsx#DiagnosticStatusResults (unmounted; PR#463 U01) | IN_PROGRESS |
 | `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
 | `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
 | `src/components/forms/**` | HELPER | MIG-0702 | form components to @flamenode/ui + apps/app | NOT_STARTED |
