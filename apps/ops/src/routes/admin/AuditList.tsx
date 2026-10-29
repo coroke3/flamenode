@@ -167,7 +167,7 @@ function AuditSummary({ row, api }: { row: AuditRow; api: AuditAuditApi }): Reac
 }
 export function AuditDiff({ row, api }: { row: AuditRow; api: AuditAuditApi }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
-  const [state, setState] = React.useState<{status:"loading" | "unavailable"} |
+  const [state, setState] = React.useState<{status:"loading"} | {status:"unavailable"} |
     {status:"ok"; before: string|null; after: string|null}>({status:"loading"});
   React.useEffect(() => {
     if (!open) return;
