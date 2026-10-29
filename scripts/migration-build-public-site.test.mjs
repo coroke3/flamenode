@@ -39,7 +39,7 @@ test("MIG-0509 U02: stream budget enforces 2MiB without trusting content-length"
   await assert.rejects(readR2Json({...opts,fetchFn:async()=>new Response(tooLarge,{status:200})}),/byte budget/);
   const headerResponse=()=>new Response("{}",{status:200,headers:{"content-length":String(MAX_R2_JSON_BYTES+1)}});
   await assert.rejects(readR2Json({...opts,fetchFn:async()=>headerResponse()}),/byte budget/);
-  assert.throws(()=>readR2Json({accountId:"bad",bucket:opts.bucket,key:opts.key,token:opts.token}),/R2 read requires/);
+  await assert.rejects(readR2Json({accountId:"bad",bucket:opts.bucket,key:opts.key,token:opts.token}),/R2 read requires/);
 });
 
 test("MIG-0509 U02/U03: CLI mutually excludes trending-file and --trending-r2",()=>{
