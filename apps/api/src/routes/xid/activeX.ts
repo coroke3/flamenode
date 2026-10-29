@@ -36,17 +36,55 @@ async function loadSelectedIdentity(
   authUserId: string,
   requestedXId: string,
 ): Promise<{ user: Record<string, unknown>; linkedApproval: string | null } | null> {
+  // Identical fail-closed alias/direct collision policy to
+  // @flamenode/domain/xid#decideCanonicalXUserResolution, in one D1 read.
   const row = await db.prepare(`
+    WITH
+    direct_matches AS (
+      SELECT lower(trim(ltrim(trim(id), '@'))) AS normalized_id,
+             approval_status
+      FROM x_users
+      WHERE lower(trim(ltrim(trim(id), '@'))) = ?
+    ),
+    alias_matches AS (
+      SELECT lower(trim(ltrim(trim(target.id), '@'))) AS target_id,
+             target.approval_status AS target_status
+      FROM x_user_aliases a
+      LEFT JOIN x_users target
+        ON lower(trim(ltrim(trim(target.id), '@'))) =
+           lower(trim(ltrim(trim(a.x_user_id), '@')))
+      WHERE lower(trim(ltrim(trim(a.alias_x_id), '@'))) = ?
+    ),
+    facts AS (
+      SELECT
+        (SELECT COUNT(*) FROM direct_matches) AS direct_count,
+        (SELECT normalized_id FROM direct_matches LIMIT 1) AS direct_id,
+        (SELECT approval_status FROM direct_matches LIMIT 1) AS direct_status,
+        (SELECT COUNT(*) FROM alias_matches) AS alias_count,
+        (SELECT COUNT(DISTINCT target_id) FROM alias_matches) AS alias_target_count,
+        (SELECT COUNT(*) FROM alias_matches WHERE target_id IS NULL OR
+          target_status NOT IN ('pending','approved','imported')) AS invalid_alias_count,
+        (SELECT target_id FROM alias_matches LIMIT 1) AS alias_target_id
+    ),
+    resolved AS (
+      SELECT CASE
+        WHEN direct_count > 1 THEN NULL
+        WHEN alias_count > 0 THEN CASE
+          WHEN invalid_alias_count > 0 OR alias_target_count <> 1
+            OR (direct_count = 1 AND direct_status IN ('pending','approved','imported')
+                AND direct_id <> alias_target_id)
+          THEN NULL ELSE alias_target_id END
+        WHEN direct_count = 1 AND direct_status IN ('pending','approved','imported')
+        THEN direct_id ELSE NULL
+      END AS canonical_id
+      FROM facts
+    )
     SELECT u.*,
-      (SELECT x.approval_status
-       FROM x_user_account_links l
+      (SELECT x.approval_status FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
+       CROSS JOIN resolved r
        WHERE l.auth_user_id = u.id
-         AND (l.x_user_id = ?
-              OR EXISTS (
-                SELECT 1 FROM x_user_aliases aliases
-                WHERE aliases.alias_x_id = ? AND aliases.x_user_id = l.x_user_id
-              ))
+         AND lower(trim(ltrim(trim(l.x_user_id), '@'))) = r.canonical_id
        LIMIT 1) AS linked_approval_status
     FROM "user" u WHERE u.id = ? LIMIT 1
   `).bind(requestedXId, requestedXId, authUserId).first<RawUserRow>();
