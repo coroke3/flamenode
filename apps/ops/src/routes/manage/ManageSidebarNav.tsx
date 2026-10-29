@@ -4,6 +4,7 @@ import type { ManageNavigationEvent } from "@flamenode/contracts";
 import { OpsLink as Link } from "../../components/shared/OpsLink.js";
 import { Icon } from "../../components/shared/Icon.js";
 import { safeDecodeURIComponent } from "../../components/shared/url.js";
+import { computeEventStatus } from "@flamenode/domain/event/status";
 
 export function isManageHrefActive(href: string, pathname: string): boolean {
   return href === "/manage" ? pathname === href : pathname === href || pathname.startsWith(href + "/");
@@ -13,10 +14,10 @@ export function filterManageEvents(events: readonly ManageNavigationEvent[], que
   return q ? events.filter(ev => (ev.id + " " + ev.title).toLocaleLowerCase("ja").includes(q)) : [...events];
 }
 export function classifyManageEvent(ev: ManageNavigationEvent, now = Math.floor(Date.now() / 1000)): "active" | "scheduled" | "ended" {
-  // Presentation only. The backend remains the authority for current event/entry permissions.
-  if (ev.end_time !== null && ev.end_time < now) return "ended";
-  if (ev.start_time !== null && ev.start_time > now) return "scheduled";
-  return "active";
+  const status = computeEventStatus(ev, now);
+  if (status === "active" || status === "published") return "active";
+  if (status === "scheduled") return "scheduled";
+  return "ended";
 }
 export function ManageSidebarNav({ events, showXLinkRequests, warnActiveX, activeX }: {
   events: ManageNavigationEvent[]; showXLinkRequests: boolean; warnActiveX: boolean; activeX: string | null;
