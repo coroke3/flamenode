@@ -58,8 +58,9 @@ async function writeCostGuard(c:Context<AppEnv>,before:SettingsRow,patch:Patch,r
         before:{...before},after,actor_user_id:actor,reason,context,retention_class:"long_audit",strict:true}],
     });
     return c.json<AdminOpsResult>({ok:true},200);
-  }catch(error){
-    console.error("[MIG-0637] cost guard atomic mutation failed",error);
+  }catch{
+    // Provider/SQLite exception text may contain SQL or secret-bearing context.
+    console.error("[MIG-0637] cost guard atomic mutation failed");
     return fail(c,409,COST_GUARD_CONFLICT_MESSAGE);
   }
 }
