@@ -61,6 +61,7 @@
     "./publicCache/eventExportKeys": "./src/publicCache/eventExportKeys.ts",
     "./eventExport/payload": "./src/eventExport/payload.ts",
     "./eventExport/data": "./src/eventExport/data.ts",
+    "./publicCache/readWrite": "./src/publicCache/readWrite.ts",
     "./xid/merge": "./src/xid/merge.ts",
     "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
     "./xid/mergeCore": "./src/xid/mergeCore.ts",
