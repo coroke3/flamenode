@@ -89,6 +89,6 @@ test("workerd V8 sampling ignores idle and counts actual busy-sample resolution"
     nodes:[{id:1,callFrame:{functionName:"worker"}},{id:2,callFrame:{functionName:"(idle)"}}],
     samples:[1,2,1],timeDeltas:[100,300,700],
   },0.1);
-  assert.equal(cpuMs,0.8);
+  assert.ok(Math.abs(cpuMs-0.8) < 1e-9);
   assert.equal(resolutionMs,0.7);
 });
