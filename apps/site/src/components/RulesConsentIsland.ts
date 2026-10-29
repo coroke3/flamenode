@@ -83,8 +83,8 @@ export function RulesConsentIsland(): React.ReactElement {
         next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""),
       h("form", { className: "fn-panel-actions", onSubmit: submit },
         h("input", { type: "hidden", name: "next", value: next }),
-        h("button", { type: "submit", disabled: pending, "aria-busy": pending, className: "btn btn-primary" },
-          pending ? "同意を保存中…" : "同意する"))),
+        h("button", { type: "submit", disabled: pending, "aria-busy": pending, className: "fn-btn fn-btn-primary" },
+          pending ? "同意状態を保存中…" : "利用規約に同意して戻る"))),
   );
 }
 
