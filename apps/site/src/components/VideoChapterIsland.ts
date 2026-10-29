@@ -1,5 +1,6 @@
 import * as React from "react";
 import { validateChapterTime } from "../../../../packages/domain/src/video/chapterTime.ts";
+import { subscribePlayerTime } from "../../../../src/components/video/playerBridge.ts";
 import {
   ACTIVE_X_BEFORE_SWITCH_EVENT,
   ACTIVE_X_CHANGED_EVENT,
@@ -63,6 +64,8 @@ export function VideoChapterIsland({
   const [note, setNote] = React.useState("");
   const [visibility, setVisibility] = React.useState<"public" | "private">("public");
   const [bulkCsv, setBulkCsv] = React.useState("");
+  const [playerSeconds, setPlayerSeconds] = React.useState<number | null>(null);
+  React.useEffect(() => subscribePlayerTime((seconds) => setPlayerSeconds(seconds)), []);
   const [busy, setBusy] = React.useState(false);
   const [message, setMessage] = React.useState("");
   const [error, setError] = React.useState("");
@@ -194,6 +197,14 @@ export function VideoChapterIsland({
         type: "text", value: time, maxLength: 32, required: true,
         placeholder: "mm:ss", disabled: busy, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setTime(e.target.value),
       })),
+      h("button", {
+        type: "button", className: "fn-btn fn-btn-ghost fn-btn-sm",
+        disabled: busy || playerSeconds === null,
+        onClick: () => { if (playerSeconds !== null) {
+          const total = Math.floor(playerSeconds);
+          setTime(`${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`);
+        } },
+      }, "現在位置"),
       h("label", null, "タイトル", h("input", {
         type: "text", value: label, maxLength: 120, required: true,
         disabled: busy, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setLabel(e.target.value),
