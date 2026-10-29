@@ -449,6 +449,9 @@ export function writeSnapshotDir(outDir: string, result: ProduceResult): Record<
 async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promise<D1Like> {
   const { DatabaseSync } = await import("node:sqlite");
   const scratch = new DatabaseSync(":memory:");
+  // Copy SQLite tables in schema order before enabling FK checks; SQLite's sqlite_master order
+  // is not a topological dependency order. The source snapshot is read-only throughout.
+  scratch.exec("PRAGMA foreign_keys = OFF");
   if (args.sqlite) {
     // Copy through the backup-free route: attach read-only and copy tables is overkill; load the file bytes.
     const source = new DatabaseSync(args.sqlite, { readOnly: true });
@@ -468,6 +471,9 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   } else {
     throw new Error("--sqlite FILE or --sql-dump FILE is required (no Cloudflare access from this producer)");
   }
+  const broken = scratch.prepare("PRAGMA foreign_key_check").all();
+  if (broken.length) throw new Error("Local SQLite snapshot has broken foreign keys");
+  scratch.exec("PRAGMA foreign_keys = ON");
   return {
     prepare(sql: string) {
       let params: unknown[] = [];
