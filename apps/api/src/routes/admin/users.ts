@@ -52,6 +52,11 @@ async function loadUser(c:Context<AppEnv>,id:string,includePending:boolean):
   const row=await c.env.DB.prepare(query).bind(id).first<UserRow&{_pending_count?:number}>();
   if(!row)return {target:null,pendingCount:0};
   const {_pending_count,...target}=row;
+  // CURRENT drizzle timestamp_ms snapshots this field as a Date.
+  // expectedRowCondition converts Date back to milliseconds for full-row CAS.
+  if (typeof target.emailVerified === "number") {
+    target.emailVerified = new Date(target.emailVerified);
+  }
   return {target,pendingCount:Number(_pending_count??0)};
 }
 export async function mutateUserWithAudit(

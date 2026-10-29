@@ -26,6 +26,7 @@ function setup({user=ADMIN,settings="normal",onFirst,mirror=true}={}){
   sqlite.exec(`
     ALTER TABLE "user" ADD COLUMN can_create_events INTEGER DEFAULT 0;
     ALTER TABLE "user" ADD COLUMN is_notification_enabled INTEGER DEFAULT 1;
+    ALTER TABLE "user" ADD COLUMN emailVerified INTEGER;
     CREATE TABLE notification_outbox (
       id TEXT PRIMARY KEY,recipient_user_id TEXT,status TEXT,processing_started_at INTEGER,
       lease_token TEXT,lease_expires_at INTEGER,next_attempt_at INTEGER,last_error TEXT,processed_at INTEGER
@@ -59,6 +60,8 @@ test("MIG-0637 contracts define FormData keys used by both clients",()=>{
   assert.equal(CostGuardModeBodySchema.safeParse({mode:"economy",reason:"x"}).success,true);
   assert.equal(AdminUserRoleBodySchema.safeParse({role:"moderator"}).success,true);
   assert.equal(CostGuardModeBodySchema.safeParse({mode:"economy"}).success,false);
+  assert.equal(CostGuardModeBodySchema.safeParse({reason:"x"}).success,false);
+  assert.equal(AdminUserRoleBodySchema.safeParse({}).success,false);
 });
 test("MIG-0637 T02: other origin stops all ten mutations before D1 reads",async()=>{
   for(const [path,body] of routes){
@@ -222,4 +225,16 @@ test("MIG-0637 user CostGuard feature flag denies exactly one operation",async()
   assert.equal((await denied.json()).reason,"cost_guard_blocked");
   const allowed=await x.request("/users/target-1/can-create-events",{can_create_events:"1"});
   assert.equal(allowed.status,200);
+});
+
+test("MIG-0637 U03: emailVerified timestamp_ms matches CURRENT Date audit and CAS",async()=>{
+  const x=setup();
+  const timestamp=1700000000000;
+  x.sqlite.prepare('UPDATE "user" SET emailVerified=? WHERE id=?').run(timestamp,"target-1");
+  const result=await x.request("/users/target-1/role",{role:"moderator"});
+  assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
+  const audit=x.sqlite.prepare("SELECT before_json,after_json FROM audit_logs").get();
+  assert.equal(JSON.parse(audit.before_json).emailVerified,new Date(timestamp).toISOString());
+  assert.equal(JSON.parse(audit.after_json).emailVerified,new Date(timestamp).toISOString());
+  assert.equal(x.stats.batches,1);
 });

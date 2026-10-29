@@ -8,15 +8,19 @@ export const AdminOpsResultSchema = z.object({
   pendingPublicReflection: z.boolean().optional(),
 });
 export type AdminOpsResult = z.infer<typeof AdminOpsResultSchema>;
-export const CostGuardModeBodySchema = z.object({ mode: z.unknown(), reason: z.unknown() });
-export const CostGuardMaintenanceBodySchema = z.object({ is_maintenance_mode: z.unknown(), reason: z.unknown() });
-export const CostGuardOverrideBodySchema = z.object({ reason: z.unknown(), confirm: z.unknown(), features: z.array(z.unknown()) });
+/** Zod unknown() accepts absent properties. Require legacy FormData keys,
+ * while preserving the domain validators' original error messages. */
+const present = z.unknown().refine((value) => value !== undefined);
+
+export const CostGuardModeBodySchema = z.object({ mode: present, reason: present });
+export const CostGuardMaintenanceBodySchema = z.object({ is_maintenance_mode: present, reason: present });
+export const CostGuardOverrideBodySchema = z.object({ reason: present, confirm: present, features: z.array(z.unknown()) });
 export const CostGuardDisabledBodySchema = CostGuardOverrideBodySchema.extend({
-  expected_disabled_features_json: z.unknown(),
+  expected_disabled_features_json: present,
 });
-export const CostGuardClearBodySchema = z.object({ reason: z.unknown(), confirm: z.unknown() });
-export const AdminUserRoleBodySchema = z.object({ role: z.unknown() });
-export const AdminUserBanBodySchema = z.object({ is_banned: z.unknown(), reason: z.unknown().optional() });
-export const AdminUserNotificationsBodySchema = z.object({ is_notification_enabled: z.unknown() });
-export const AdminUserEventCreateBodySchema = z.object({ can_create_events: z.unknown() });
+export const CostGuardClearBodySchema = z.object({ reason: present, confirm: present });
+export const AdminUserRoleBodySchema = z.object({ role: present });
+export const AdminUserBanBodySchema = z.object({ is_banned: present, reason: present.optional() });
+export const AdminUserNotificationsBodySchema = z.object({ is_notification_enabled: present });
+export const AdminUserEventCreateBodySchema = z.object({ can_create_events: present });
 export const AdminXIconRefreshBodySchema = z.object({}).strict();
