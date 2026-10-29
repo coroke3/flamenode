@@ -1,12 +1,14 @@
 import React from "react";
 import { formatChapterTime } from "../../../../packages/domain/src/video/chapterTime.ts";
 import { seekToTime } from "../../../../src/components/video/playerBridge.ts";
+import { acquireBodyScrollLock } from "../../../../packages/ui/src/layout/bodyScrollLock.ts";
 import type { VideoViewerOverlayDto } from "../../../../packages/contracts/src/videoViewerOverlay.ts";
 import { VideoChapterIsland, type EditableChapter } from "./VideoChapterIsland.ts";
 
 const h = React.createElement;
 const AUTO_NEXT_KEY = "fn-playlist-autonext";
 const ORDER_KEY_PREFIX = "fn-playlist-order:";
+const HISTORY_STATE_KEY = "fn-video-utility-dock";
 
 export interface PublicVideoChapter {
   id: string;
@@ -99,16 +101,61 @@ export function VideoUtilityDockIsland({
   const [order, setOrder] = React.useState<string[]>([]);
   const [ready, setReady] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
+  const historyOwned = React.useRef(false);
+  const pendingHref = React.useRef<string | null>(null);
+  const previousTrigger = React.useRef<HTMLButtonElement | null>(null);
+  const closeButton = React.useRef<HTMLButtonElement | null>(null);
+  const closePanel = React.useCallback(() => {
+    setPanel(null);
+    if (historyOwned.current) {
+      historyOwned.current = false;
+      const state = window.history.state as Record<string, unknown> | null;
+      if (state?.[HISTORY_STATE_KEY]) window.history.back();
+    }
+    window.requestAnimationFrame?.(() => previousTrigger.current?.focus());
+  }, []);
 
   React.useEffect(() => { setMounted(true); }, []);
   React.useEffect(() => {
+    if (!mounted) return;
+    const onPopState = () => {
+      historyOwned.current = false;
+      setPanel(null);
+      const destination = pendingHref.current;
+      pendingHref.current = null;
+      if (destination) window.location.assign(destination);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [mounted]);
+  React.useEffect(() => {
+    if (!mounted || !isMobile || panel === null || historyOwned.current) return;
+    const previous = window.history.state;
+    const state = previous && typeof previous === "object"
+      ? { ...(previous as Record<string, unknown>) } : {};
+    window.history.pushState({ ...state, [HISTORY_STATE_KEY]: true }, "");
+    historyOwned.current = true;
+  }, [mounted, isMobile, panel]);
+  React.useEffect(() => {
+    if (!mounted || !isMobile || panel === null) return;
+    const release = acquireBodyScrollLock();
+    const frame = window.requestAnimationFrame?.(() => closeButton.current?.focus());
+    return () => {
+      release();
+      if (frame !== undefined) window.cancelAnimationFrame?.(frame);
+    };
+  }, [mounted, isMobile, panel]);
+  React.useEffect(() => {
     const media = window.matchMedia?.("(max-width: 900px)");
     if (!media) return;
-    const update = () => setIsMobile(media.matches);
+    const update = () => {
+      setIsMobile(media.matches);
+      if (!media.matches && historyOwned.current) closePanel();
+    };
     update();
     media.addEventListener?.("change", update);
     return () => media.removeEventListener?.("change", update);
-  }, []);
+  }, [closePanel]);
   React.useEffect(() => {
     if (!mounted) return;
     setPlaylist(resolvePlaylistQuery(window.location.search));
@@ -160,30 +207,50 @@ export function VideoUtilityDockIsland({
   }, [mounted, autoNext, next, currentId, items, index, playlist]);
   React.useEffect(() => {
     if (!mounted || !panel) return;
-    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setPanel(null); };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closePanel(); };
     window.addEventListener("keydown", onEscape);
     return () => window.removeEventListener("keydown", onEscape);
-  }, [mounted, panel]);
+  }, [mounted, panel, closePanel]);
 
   // Never put viewer-specific playlist data, author names, or write controls in SSG HTML.
   if (!mounted) return null;
   const postPolicy = chapterPostPolicy(overlay, loading, window.location.pathname + window.location.search);
   const canPost = postPolicy.canPost;
   const href = (item: NonNullable<typeof next>) => playlistItemHref(item, playlist);
-  return h("aside", { className: "fn-video-utility-dock", "aria-label": "動画補助機能" },
+  const onNavigation = (event: React.MouseEvent<HTMLElement>) => {
+    if (!isMobile || panel === null || !historyOwned.current ||
+        event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    const el = event.target;
+    if (!(el instanceof Element)) return;
+    const a = el.closest("a[href]") as HTMLAnchorElement | null;
+    if (!a || a.target === "_blank" || a.hasAttribute("download")) return;
+    event.preventDefault();
+    pendingHref.current = a.href;
+    closePanel();
+  };
+  return h("aside", {
+    className: "fn-video-utility-dock", "aria-label": "動画補助機能",
+    onClickCapture: onNavigation,
+  },
     h("nav", { role: "group", "aria-label": "動画補助メニュー" },
       h("button", {
         type: "button", "aria-expanded": panel === "playlist",
         "aria-controls": "video-utility-playlist", disabled: items.length === 0,
-        onClick: () => setPanel(panel === "playlist" ? null : "playlist"),
+        onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+          previousTrigger.current = event.currentTarget;
+          if (panel === "playlist") closePanel(); else setPanel("playlist");
+        },
       }, `再生リスト (${items.length})`),
       h("button", {
         type: "button", "aria-expanded": panel === "chapters",
         "aria-controls": "video-utility-chapters",
-        onClick: () => setPanel(panel === "chapters" ? null : "chapters"),
+        onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+          previousTrigger.current = event.currentTarget;
+          if (panel === "chapters") closePanel(); else setPanel("chapters");
+        },
       }, `チャプター (${chapters.length})`),
     ),
-    panel !== null ? h("button", { type: "button", onClick: () => setPanel(null), "aria-label": "パネルを閉じる" }, "閉じる") : null,
+    panel !== null ? h("button", { ref: closeButton, type: "button", onClick: closePanel, "aria-label": "パネルを閉じる" }, "閉じる") : null,
     h("section", { id: "video-utility-playlist", hidden: isMobile && panel !== "playlist", "aria-label": "再生リスト" },
       items.length > 0 ? h(React.Fragment, null,
         h("h3", null, overlay.playlistLabel || "再生リスト"),
