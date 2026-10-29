@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { buildSharedCss, MODULES } from "../scripts/portCssModule.mjs";
+import { buildSharedCss, buildManageCss, MODULES } from "../scripts/portCssModule.mjs";
 
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root));
@@ -40,15 +40,18 @@ test("MIG-0707 U05c: global CSS loads in CURRENT order before Ops React", async 
     "./styles/current/mobile-hardening.css",
     "./styles/fonts.css",
     "./styles/shared.css",
+    "./styles/manage-shell.css",
   ]);
 });
 
 test("MIG-0707 U05c: shared CSS remains generated from CURRENT modules", async () => {
   const built = (await read("apps/ops/src/styles/shared.css")).toString("utf8");
   assert.equal(built, buildSharedCss(), "regenerate with node apps/ops/scripts/portCssModule.mjs");
-  assert.equal(MODULES.length, 3);
+  assert.equal(MODULES.length, 5);
   assert.match(built, /\.empty-tone-warning \.empty-icon/);
   assert.match(built, /\.confirm-dialog/);
   assert.match(built, /\.sectabs-tabs/);
   assert.doesNotMatch(built, /:global\(/, "CSS modules must not leak :global tokens");
+  const manage = (await read("apps/ops/src/styles/manage-shell.css")).toString("utf8");
+  assert.equal(manage, buildManageCss());
 });

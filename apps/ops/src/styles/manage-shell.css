@@ -1,0 +1,125 @@
+/* Generated from CURRENT src/components/admin/AdminSidebarNav.module.css; prefix=adminnav. */
+.adminnav-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.adminnav-navGroup {
+  display: grid;
+  gap: 4px;
+}
+
+.adminnav-navGroupTitle {
+  margin: 0 0 4px;
+  padding: 0 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.adminnav-navLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.15s ease;
+}
+
+.adminnav-navLink:hover {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--accent-primary-soft) 66%, transparent);
+  transform: translateX(2px);
+}
+
+.adminnav-navLink:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.adminnav-navLinkActive {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 20%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary-soft) 72%, var(--bg-surface));
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+.adminnav-navLink svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.adminnav-navLinkActive svg {
+  color: var(--accent-primary-strong);
+}
+
+@media (max-width: 760px) {
+  .adminnav-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+
+  .adminnav-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .adminnav-navGroup {
+    display: contents;
+  }
+
+  .adminnav-navGroupTitle {
+    display: none;
+  }
+
+  .adminnav-navLink {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adminnav-navLink {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .adminnav-navLink:hover {
+    transform: none;
+  }
+}
+
+/* Generated from CURRENT src/components/layout/CostGuardBanner.module.css; prefix=costguard. */
+.costguard-banner {
+  border-bottom: 1px solid;
+  font-size: 12px;
+}
+
+.costguard-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.costguard-reason {
+  font-style: normal;
+}
