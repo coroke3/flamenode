@@ -72,6 +72,12 @@ function build(videos, over = {}) {
     fs.writeFileSync(path.join(dir, key), JSON.stringify(envelope(key, p, o)));
     keys.push(key);
   }
+  for (const [eventId, eventPayload] of over.events ?? []) {
+    const eventKey = `snapshot/event-detail/${eventId}.json`;
+    fs.mkdirSync(path.dirname(path.join(dir, eventKey)), { recursive: true });
+    fs.writeFileSync(path.join(dir, eventKey), JSON.stringify(envelope(eventKey, eventPayload)));
+    keys.push(eventKey);
+  }
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: keys, blockedKeys: over.blocked ?? [] }));
   const env = { ...process.env, FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
   try {
@@ -182,4 +188,82 @@ test("snapshot env: a partly set env fails the build instead of falling back to 
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
+});
+
+const playlistEvent = (visibility = "public", playlistId = "PLabcdefghijklmnop", id = "ev1") => ({
+  event: { id, visibility_status: visibility, youtube_playlist_id: playlistId },
+});
+const playlistLinks = (r) => [...dom(r, "AAAAAAAAA01/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')]
+  .map((a) => a.getAttribute("href"));
+
+test("T08: future scheduled public primary event exposes the verified playlist; past video does not", { skip: skipUi }, () => {
+  for (const [scheduledTime, expected] of [
+    [NOW + 7 * D, ["https://www.youtube.com/playlist?list=PLabcdefghijklmnop"]],
+    [NOW - 7 * D, []],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: scheduledTime } })]], {
+      events: [["ev1", playlistEvent()]],
+    });
+    try {
+      assert.equal(r.error, null, r.error ?? "");
+      assert.deepEqual(playlistLinks(r), expected);
+      assert.deepEqual(
+        [...dom(r, "vid1/index.html").querySelectorAll('main a[href^="https://www.youtube.com/playlist?list="]')].map((a) => a.getAttribute("href")),
+        expected,
+        "canonical and internal-id alias display the same playlist",
+      );
+      assert.equal(page.includes("loadPublicEventYoutubePlaylistIdR2Only"), true, "CURRENT uses verified event-base R2 reader");
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: missing, non-public, mismatched and invalid event playlist never leaks a link", { skip: skipUi }, () => {
+  for (const [label, events] of [
+    ["missing", []],
+    ["non-public", [["ev1", playlistEvent("private")]]],
+    ["wrong event ID", [["ev1", playlistEvent("public", "PLabcdefghijklmnop", "another")]]],
+    ["invalid playlist ID", [["ev1", playlistEvent("public", "INVALID!")]]],
+  ]) {
+    const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], { events });
+    try {
+      assert.equal(r.error, null, `${label}: ${r.error ?? ""}`);
+      assert.deepEqual(playlistLinks(r), [], label);
+    } finally {
+      clean(r);
+    }
+  }
+});
+
+test("T09: a manifest-allowed but digest-tampered event snapshot fails closed", { skip: skipUi }, () => {
+  const r = build([["vid1", payload({ video: { scheduled_time: NOW + 7 * D } })]], {
+    events: [["ev1", playlistEvent()]],
+    // Tampering is modeled by overwriting an already verified event object in its own snapshot.
+  });
+  try {
+    assert.equal(r.error, null, r.error ?? "");
+    const eventKey = "snapshot/event-detail/ev1.json";
+    const file = path.join(r.dir, eventKey);
+    const envelopeData = JSON.parse(fs.readFileSync(file, "utf-8"));
+    envelopeData.payload.event.youtube_playlist_id = "DIFFERENT_PLAYLIST_ID";
+    fs.writeFileSync(file, JSON.stringify(envelopeData));
+    // A fresh build with the tampered envelope must reject the snapshot rather than expose stale data.
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-vid-tamper-"));
+    try {
+      let error = null;
+      try {
+        execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], {
+          cwd: path.resolve("apps/site"),
+          env: {
+            ...process.env, FLAMENODE_SNAPSHOT_DIR: r.dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(r.dir, "manifest.json"),
+            FLAMENODE_SNAPSHOT_GENERATION: "g1",
+          },
+          stdio: "pipe",
+        });
+      } catch (e) { error = `${e.stdout ?? ""}${e.stderr ?? ""}`; }
+      assert.notEqual(error, null);
+      assert.match(error, /digest|hash|checksum|sha256|snapshot/i);
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  } finally { clean(r); }
 });
