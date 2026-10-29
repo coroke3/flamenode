@@ -253,3 +253,27 @@ test("U03 play seek event dispatch retains the same CURRENT bridge event contrac
     dom.window.close();
   }
 });
+
+test("U03 chapter post guards show actionable login/terms/approved-X destinations", async () => {
+  const { chapterPostPolicy } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const okay = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false, activeXId: "owner",
+    viewerXApproved: true, likeActive: false, bookmarkActive: false,
+    privateChapters: [], playlistLabel: "", playlistItems: [],
+  };
+  assert.equal(chapterPostPolicy(okay, false, "/v").canPost, true);
+  const pending = chapterPostPolicy(okay, true, "/v");
+  assert.equal(pending.canPost, false);
+  assert.equal(pending.href, null);
+  const offline = chapterPostPolicy({ ...okay, authUnavailable: true }, false, "/v");
+  assert.equal(offline.href, null);
+  const loggedOut = chapterPostPolicy({ ...okay, loggedIn: false }, false, "/v?playlist=p");
+  assert.equal(loggedOut.href, "/entry?next=%2Fv%3Fplaylist%3Dp");
+  const tos = chapterPostPolicy({ ...okay, termsReacceptRequired: true }, false, "/v");
+  assert.equal(tos.href, "/rules?next=%2Fv");
+  const banned = chapterPostPolicy({ ...okay, isBanned: true }, false, "/v");
+  assert.equal(banned.href, null);
+  assert.equal(chapterPostPolicy({ ...okay, viewerXApproved: false }, false, "/v").href,
+    "/dashboard/settings?next=%2Fv");
+});
