@@ -1127,6 +1127,9 @@
 | `apps/ops/test/shared.test.mjs` | TEST | MIG-0707 U05c: port CURRENT shared code/CSS with tests; not production-mounted | MIG-0707 | SAME (U05c pending CI and independent parity review) | IN_PROGRESS | PR#428 SHA=00b387c5b49a4392db9d736c12838ebe3f73d15f TEST=CI-pending (Ops workspace build/test, T06/T07) |
 | `apps/ops/test/shared-more.test.mjs` | TEST | MIG-0707 U05c: port CURRENT shared code/CSS with tests; not production-mounted | MIG-0707 | SAME (U05c pending CI and independent parity review) | IN_PROGRESS | PR#428 SHA=732fc30ab523b8322a80a210a08f96ecd97a63b5 TEST=CI-pending (Ops workspace build/test, T06/T07) |
 
+| `apps/api/src/middleware/bodyLimit.ts` | HELPER | MIG-0636 U01 G21: SA-098..105 per-action Hono request byte limit (not mounted) | MIG-0636 | SAME (limitXIdActionBody + exact limits for XID routes, U02/U05/U06 pending) | IN_PROGRESS | PR#475 SHA=01dfcae834cf19bda92190bc6f338d6605a628ea TEST=CI-pending (apps/api/test/bodyLimit.test.mjs; no runtime routes mounted) |
+| `apps/api/test/bodyLimit.test.mjs` | TEST | MIG-0636 U01 G21: 64KiB/8MiB boundaries, forged/malformed Content-Length, body reuse | MIG-0636 | SAME (nine regression cases; CI pending) | IN_PROGRESS | PR#475 SHA=21d4cea90f261bc425abb3ec016f2298c4570848 TEST=CI-pending (npm run test --workspace=@flamenode/api) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
