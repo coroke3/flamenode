@@ -4,7 +4,6 @@ import fs from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { act } from "react";
-import { mountListFilters } from "../apps/site/src/components/ListFilterIsland.ts";
 import {
   LIST_EVENT_UNAVAILABLE_MESSAGE, LIST_NO_RESULTS_MESSAGE, LIST_SHORT_SEARCH_MESSAGE,
   LIST_UNAVAILABLE_MESSAGE, decodePublicList, isDefaultListQuery,
@@ -119,7 +118,12 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
 });
 
 
-test("T03/T04: mounted Island handles 503 without hiding the static list or exposing a false empty result", async () => {
+const skipHydratedUi = !fs.existsSync("packages/ui/dist/index.js")
+  ? (process.env.REQUIRE_BUILT ? false : "build @flamenode/ui to test hydration")
+  : false;
+
+test("T03/T04: mounted Island handles 503 without hiding the static list or exposing a false empty result", { skip: skipHydratedUi }, async () => {
+  const { mountListFilters } = await import("../apps/site/src/components/ListFilterIsland.ts");
   const dom = new JSDOM(
     '<!doctype html><div id="list-filter-mount"></div><div id="list-static-fallback"><p>STATIC-DEFAULT</p></div>',
     { url: "https://flamenode.net/list?q=abcd&event=ev1&view=index" },
@@ -165,7 +169,8 @@ test("T03/T04: mounted Island handles 503 without hiding the static list or expo
   }
 });
 
-test("T01: an accepted RH-032 page replaces the static default and renders the selected mode", async () => {
+test("T01: an accepted RH-032 page replaces the static default and renders the selected mode", { skip: skipHydratedUi }, async () => {
+  const { mountListFilters } = await import("../apps/site/src/components/ListFilterIsland.ts");
   const dom = new JSDOM(
     '<!doctype html><div id="list-filter-mount"></div><div id="list-static-fallback">STATIC-DEFAULT</div>',
     { url: "https://flamenode.net/list?q=abcd&view=compact" },
