@@ -1,4 +1,9 @@
 import test from "node:test";
+import { AuditDetailContent, AuditDiffDetail } from "../.test-dist/apps/ops/src/routes/admin/AuditDetail.js";
+import { AuditRestoreForm } from "../.test-dist/apps/ops/src/routes/admin/AuditRestoreForm.js";
+import { AuditRestoreRunsContent } from "../.test-dist/apps/ops/src/routes/admin/AuditRestoreRuns.js";
+import { AuditSettingsContent, AuditSettingsForm, retentionShortened, validAuditSettings } from "../.test-dist/apps/ops/src/routes/admin/AuditSettings.js";
+
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -163,4 +168,146 @@ test("MIG-0733 U01: no payload GET before clicking the diff; close aborts in-fli
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
     dom.window.close();
   }
+});
+
+const settingsFixture={
+  normal_retention_days:30,restorable_retention_days:90,long_audit_retention_days:365,
+  max_payload_bytes:120000,compact_after_days:7,
+};
+const detailFixture=(()=>{
+  const {payload,...base}=row({restore_status:"restorable"});
+  return {row:base,payload,prev:{id:"aud-0",created_at:1735603200},
+    next:{id:"aud-2",created_at:1735776000}};
+})();
+test("MIG-0733 U02/U03: detail, restore run and audit settings endpoints use validated read contracts",async()=>{
+  const calls=[];
+  const api=createAdminAuditApi(async (url,init)=>{
+    calls.push({url,init});
+    const body=url==="/api/admin-read/audit/aud-1"?detailFixture
+      :url==="/api/admin-read/audit/restore"?{runs:[{id:"run1",audit_log_id:"aud-1",
+        status:"success",executed_at:1735776000,executed_by_user_id:"admin",reason:"repair",
+        error_message:null,log:{table_name:"videos",target_id:"v1"}}]}
+      :url==="/api/admin-read/audit-settings"?{settings:settingsFixture}:null;
+    return new Response(JSON.stringify(body),{status:200});
+  });
+  assert.equal((await api.detail("aud-1")).status,"ok");
+  assert.equal((await api.runs()).status,"ok");
+  assert.equal((await api.settings()).status,"ok");
+  assert.deepEqual(calls.map(x=>x.url),[
+    "/api/admin-read/audit/aud-1","/api/admin-read/audit/restore",
+    "/api/admin-read/audit-settings"]);
+  assert.ok(calls.every(x=>x.init.cache==="no-store"&&x.init.credentials==="same-origin"));
+  const invalid=createAdminAuditApi(async()=>new Response(JSON.stringify({rows:[]}),{status:200}));
+  assert.equal((await invalid.detail("a")).status,"unavailable");
+  assert.equal((await invalid.settings()).status,"unavailable");
+});
+
+test("MIG-0733 T04: restore confirmation mismatch never sends a request; exact JSON key parity",async()=>{
+  let count=0, last;
+  const api=createAdminAuditApi(async(url,init)=>{
+    count++;last={url,init};
+    return new Response(JSON.stringify({ok:true,restore_run_id:"run1"}),{status:200});
+  });
+  for(const wrong of ["", "RESTORE other", "RESTORE aud-1 "]) {
+    const result=await api.restore("aud-1","fix",wrong,false);
+    assert.equal(result.status,"ok");assert.equal(result.data.ok,false);
+  }
+  assert.equal((await api.restore("aud-1"," ","RESTORE aud-1",false)).data.ok,false);
+  assert.equal(count,0);
+  const result=await api.restore("aud-1","fix","RESTORE aud-1",true);
+  assert.equal(result.status,"ok");assert.equal(result.data.restore_run_id,"run1");
+  assert.equal(count,1);assert.equal(last.url,"/api/admin/audit/restore");
+  assert.deepEqual(JSON.parse(last.init.body),{
+    audit_id:"aud-1",reason:"fix",confirm_text:"RESTORE aud-1",force_overwrite:"1",
+  });
+  assert.equal(last.init.credentials,"same-origin");
+});
+
+test("MIG-0733 U02: dry run body retains exact action field keys and rejects blank reason",async()=>{
+  const requests=[];
+  const api=createAdminAuditApi(async(url,init)=>{
+    requests.push({url,body:JSON.parse(init.body)});
+    return new Response(JSON.stringify({ok:true,diff:{current:null,target:null,conflicts:["title"]}}),{status:200});
+  });
+  assert.equal((await api.dryRun("a"," ")).data.ok,false);
+  assert.equal(requests.length,0);
+  const result=await api.dryRun("a","reason");
+  assert.equal(result.status,"ok");assert.equal(result.data.diff.conflicts[0],"title");
+  assert.deepEqual(requests,[{url:"/api/admin/audit/dry-run",body:{audit_id:"a",reason:"reason"}}]);
+});
+
+test("MIG-0733 T05: non-restorable log never renders restore inputs or action",()=>{
+  const api=createAdminAuditApi(async()=>{throw Error("unexpected fetch")});
+  const base={auditId:"aud-1",api,unavailableMessage:null,reasonCode:null};
+  const blocked=renderToStaticMarkup(React.createElement(AuditRestoreForm,{
+    ...base,restoreStatus:"blocked",
+  }));
+  assert.match(blocked,/このログは復元できません/);
+  assert.doesNotMatch(blocked,/確認テキスト:/);
+  assert.doesNotMatch(blocked,/競合チェック実行/);
+  const allowed=renderToStaticMarkup(React.createElement(AuditRestoreForm,{
+    ...base,restoreStatus:"restorable",
+  }));
+  assert.match(allowed,/RESTORE aud-1/);
+  assert.match(allowed,/disabled=""/);
+  assert.match(allowed,/YouTube \/ Discord/);
+});
+
+test("MIG-0733 U02: detail page shows neighbor navigation, raw payload and gated restore state",()=>{
+  const api=createAdminAuditApi(async()=>{throw Error("unexpected fetch")});
+  const html=renderToStaticMarkup(React.createElement(AuditDetailContent,{
+    id:"aud-1",api,state:{status:"ok",data:detailFixture},
+  }));
+  assert.match(html,/href="\/admin\/audit\/aud-0"/);
+  assert.match(html,/href="\/admin\/audit\/aud-2"/);
+  assert.match(html,/監査ログ aud-1/);
+  assert.match(html,/変更履歴を読み込み中/);
+  assert.match(html,/RESTORE aud-1/);
+  assert.match(html,/同じ target_id を一覧表示/);
+  const bad=renderToStaticMarkup(React.createElement(AuditDetailContent,{
+    id:"absent",api,state:{status:"notFound"},
+  }));
+  assert.match(bad,/監査ログが見つかりません/);
+  const diff=renderToStaticMarkup(React.createElement(AuditDiffDetail,{
+    before:'{"a":1}',after:'{"a":2}',inverse:"{}",changedKeys:["a"],
+  }));
+  assert.match(diff,/before/);assert.match(diff,/inverse_patch_json/);
+});
+
+test("MIG-0733 U03: 50-run history shows status, audit target and error, empty state",()=>{
+  const source={status:"ok",data:{runs:[{id:"r1",audit_log_id:"a1",status:"failed",
+    executed_at:1735689600,executed_by_user_id:"u1",reason:"reason",error_message:"conflict",
+    log:{table_name:"events",target_id:"e1"}}]}};
+  const html=renderToStaticMarkup(React.createElement(AuditRestoreRunsContent,{state:source}));
+  assert.match(html,/復元履歴/);assert.match(html,/href="\/admin\/audit\/a1"/);
+  assert.match(html,/conflict/);assert.match(html,/events/);
+  const empty=renderToStaticMarkup(React.createElement(AuditRestoreRunsContent,{
+    state:{status:"ok",data:{runs:[]}},
+  }));
+  assert.match(empty,/復元履歴はまだありません/);
+});
+
+test("MIG-0733 T06: shortening retention warns and saving requires five bounded integers",async()=>{
+  const initial=settingsFixture;
+  assert.equal(retentionShortened(initial,{...initial,normal_retention_days:7}),true);
+  assert.equal(retentionShortened(initial,{...initial,max_payload_bytes:1000}),false);
+  assert.equal(validAuditSettings(initial),true);
+  assert.equal(validAuditSettings({...initial,max_payload_bytes:1}),false);
+  assert.equal(validAuditSettings({...initial,normal_retention_days:0.5}),false);
+  const api=createAdminAuditApi(async(url,init)=>{
+    assert.equal(url,"/api/admin/audit/settings");
+    assert.deepEqual(JSON.parse(init.body),initial);
+    return new Response(JSON.stringify({ok:true}),{status:200});
+  });
+  assert.equal((await api.saveSettings(initial)).status,"ok");
+  const html=renderToStaticMarkup(React.createElement(AuditSettingsContent,{
+    state:{status:"ok",data:{settings:initial}},api,refresh:()=>{},
+  }));
+  assert.match(html,/normal_retention_days/);
+  assert.match(html,/compact_after_days/);
+  const form=renderToStaticMarkup(React.createElement(AuditSettingsForm,{
+    initial,api,onSaved:()=>{},
+  }));
+  assert.match(form,/設定を保存/);
+  assert.doesNotMatch(form,/保持日数を短くすると/);
 });
