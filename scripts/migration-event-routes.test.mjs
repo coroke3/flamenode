@@ -36,7 +36,7 @@ const h = React.createElement;
 
 const { loadEventBuildData, buildEventDataFromPayloads } = await import("../apps/site/src/lib/eventData.ts");
 const { parseEventsQuery, buildEventsIndexModel } = await import("../apps/site/src/lib/eventIndex.ts");
-const { buildEventDetailData, buildEventJsonLd, getDayMetric, formatEventRange } = await import("../apps/site/src/lib/eventDetail.ts");
+const { buildEventDetailData, buildEventJsonLd, eventIslandDetail, getDayMetric, formatEventRange } = await import("../apps/site/src/lib/eventDetail.ts");
 // Test-only reference for CURRENT EventRecruitCard projection; never imported into the browser Island.
 const { toRecruit: topRecruitReference } = await import("../apps/site/src/lib/topData.ts");
 const { buildEventSlotsModel } = await import("../apps/site/src/lib/eventSlots.ts");
@@ -262,6 +262,10 @@ test("U02 detail body: CURRENT texts, links and no slot state in the static HTML
   const main = text(doc.querySelector("main"));
   for (const t of ["枠を確保する", "YouTube再生リスト", "ガイドライン", "イベント概要", "上映枠", "投稿", "日程", "運営", "募集期間", "投稿期間", "【文字PV】スチールワンダー", "模範囚"]) assert.ok(main.includes(t), t);
   assert.ok(!main.includes("非公開の作品"));
+  // Astro serializes client:load props in its HTML: layout-only, not just hidden from visible text.
+  const islandProps = [...doc.querySelectorAll("astro-island")].find((el) => el.getAttribute("component-url")?.includes("EventDetailIsland"))?.getAttribute("props");
+  assert.ok(islandProps, "detail Island serialized props must exist");
+  for (const secret of ["slotSummary", "reserved", "submitted"]) assert.ok(!islandProps.includes(secret), `${secret} leaked into static detail Island props`);
   const hrefs = [...doc.querySelectorAll("main a")].map((a) => a.getAttribute("href"));
   assert.ok(hrefs.includes("/event/autumn-collab-2026/slots"));
   assert.ok(hrefs.includes("/rules"));
@@ -292,7 +296,12 @@ test("U02 detail body: CURRENT texts, links and no slot state in the static HTML
 
 test("U02 model: status, entry action, day metric, slot parts follow CURRENT", () => {
   const detail = detailOf("autumn-collab-2026");
-  const open = buildEventDetailData(detail, NOW);
+  assert.equal(detail.slots[0].status, "reserved", "source fixture has a reservation state to protect");
+  const safeDetail = eventIslandDetail(detail);
+  assert.equal("slotSummary" in safeDetail, false);
+  assert.deepEqual(safeDetail.slots[0], { id: "s1", start_time: detail.slots[0].start_time, sort_order: 0 });
+  assert.equal("status" in safeDetail.slots[0], false);
+  const open = buildEventDetailData(safeDetail, NOW);
   assert.equal(open.statusLabel, "募集期間中");
   assert.equal(open.entryAction, "reserve");
   assert.equal(open.recruit?.ctaLabel, "枠を確保する");
@@ -358,6 +367,9 @@ test("U03 slots built HTML: noindex, header, time grid with no slot state", { sk
   assert.equal(doc.querySelectorAll(".srow2 .sl").length, 4);
   assert.equal([...doc.querySelectorAll(".srow2 .sl")].filter((e) => !e.classList.contains("pending")).length, 0, "every slot is pending: no state baked");
   assert.equal(doc.querySelectorAll(".sl.taken, .sl.open").length, 0);
+  const islandProps = [...doc.querySelectorAll("astro-island")].find((el) => el.getAttribute("component-url")?.includes("EventSlotsIsland"))?.getAttribute("props");
+  assert.ok(islandProps, "slots Island serialized props must exist");
+  for (const secret of ["slotSummary", "reserved", "submitted"]) assert.ok(!islandProps.includes(secret), `${secret} leaked into static slots Island props`);
   assert.match(doc.querySelector(".p-root").getAttribute("style"), /--event-accent:/);
   assert.equal(doc.querySelectorAll("main button").length, 0, "no do-nothing buttons: reservation belongs to MIG-0604/0606");
   assert.deepEqual([...doc.querySelectorAll(".plabel")].map(text), ["第1部", "第2部"]);
