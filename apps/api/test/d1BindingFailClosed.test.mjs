@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
+import { app as mountedApi } from "../src/app.ts";
 
 import { requireAuth, sessionMiddleware } from "../src/auth/session.ts";
 import { costGuardMiddleware } from "../src/middleware/costGuard.ts";
@@ -148,4 +149,56 @@ test("SEC-0807-01: CostGuard DB getter failure returns private 503 without mutat
   assert.equal(accesses(), 1);
   assert.equal(mutations, 0);
   assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
+});
+
+test("SEC-0807-01: real mounted write routes fail closed before parsing input", async (t) => {
+  // Exercise the production app/router composition, not only isolated guards.
+  // A malformed body is intentional: it must never reach a write handler.
+  for (const path of [
+    "/api/admin/announcements",
+    "/api/videos/video-1/chapters",
+  ]) {
+    await t.test(path, async () => {
+      const { env, accesses } = throwingBinding();
+      env.NEXT_PUBLIC_SITE_URL = SITE;
+      const response = await mountedApi.request(`${SITE}${path}`, {
+        method: "POST",
+        headers: {
+          Origin: SITE,
+          Cookie: "__Secure-authjs.session-token=test-token",
+          "Content-Type": "application/json",
+        },
+        body: "{invalid-json",
+      }, env);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get("cache-control"), PRIVATE);
+      const body = await response.text();
+      assert.match(body, /database_unavailable/);
+      assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
+      assert.equal(accesses(), 1, "session must fail before handler/DB mutation");
+    });
+  }
+});
+
+test("SEC-0807-01: real mounted origin denial never touches a throwing D1 binding", async (t) => {
+  for (const path of [
+    "/api/admin/announcements",
+    "/api/videos/video-1/chapters",
+  ]) {
+    await t.test(path, async () => {
+      const { env, accesses } = throwingBinding();
+      env.NEXT_PUBLIC_SITE_URL = SITE;
+      const response = await mountedApi.request(`${SITE}${path}`, {
+        method: "POST",
+        headers: {
+          Origin: "https://evil.example",
+          Cookie: "__Secure-authjs.session-token=test-token",
+        },
+      }, env);
+      assert.equal(response.status, 403);
+      assert.equal(response.headers.get("cache-control"), PRIVATE);
+      assert.equal((await response.json()).reason, "invalid_origin");
+      assert.equal(accesses(), 0, "origin denial precedes session lookup");
+    });
+  }
 });
