@@ -146,3 +146,74 @@ test("CURRENT chapter time validation does not round an invalid time down to zer
   assert.equal(validateChapterTime("-4").ok, false);
   assert.deepEqual(validateChapterTime("1:05"), { ok: true, seconds: 65 });
 });
+
+test("U03 playlist query uses first value only, trims it and retains it on navigation", async () => {
+  const { resolvePlaylistQuery, playlistItemHref } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  assert.equal(resolvePlaylistQuery("?playlist=first&playlist=second"), "first");
+  assert.equal(resolvePlaylistQuery("?playlist=%20event-1%20"), "event-1");
+  assert.equal(resolvePlaylistQuery("?other=1"), "");
+  assert.equal(resolvePlaylistQuery("?playlist=" + "x".repeat(200)).length, 128);
+  assert.equal(playlistItemHref({ id: "vid", youtube_video_id: "abc-123" }, "event-1"),
+    "/abc-123?playlist=event-1");
+  assert.equal(playlistItemHref({ id: "vid", youtube_video_id: null }, ""),
+    "/vid");
+  assert.equal(playlistItemHref({ id: "video / ?" }, "event&1"), "/video%20%2F%20%3F?playlist=event%261");
+});
+
+test("U03 Hono viewer overlay gates chapter writes on auth, X approval, terms and network state", async () => {
+  const { canPostVideoChapter } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const data = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false, activeXId: "x",
+    likeActive: false, bookmarkActive: false, viewerXApproved: true,
+    privateChapters: [], playlistLabel: "再生リスト", playlistItems: [],
+  };
+  assert.equal(canPostVideoChapter(data, false), true);
+  assert.equal(canPostVideoChapter(data, true), false);
+  for (const patch of [
+    { loggedIn: false }, { authUnavailable: true }, { isBanned: true },
+    { isTosAccepted: false }, { termsReacceptRequired: true },
+    { activeXId: null }, { viewerXApproved: false },
+  ]) {
+    assert.equal(canPostVideoChapter({ ...data, ...patch }, false), false);
+  }
+});
+
+test("U03 private chapter merge preserves public SSR chapters and prevents duplicate ids", async () => {
+  const { chapterRowsForViewer } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const overlay = {
+    privateChapters: [
+      { id: "private", chapter_time: 15, chapter_label: "private", author_name: "owner",
+        visibility: "private", note: null, author_icon: null },
+      { id: "public", chapter_time: 90, chapter_label: "duplicate", author_name: "owner",
+        visibility: "private", note: null, author_icon: null },
+    ],
+  };
+  const rows = chapterRowsForViewer([
+    { id: "public", timeLabel: "1:30", label: "public" },
+    { id: "first", timeLabel: "0:05", label: "first" },
+  ], overlay);
+  assert.deepEqual(rows.map((r) => r.id), ["first", "private", "public"]);
+  assert.equal(rows[2].label, "public");
+});
+
+test("U03 private playlist and chapters are excluded entirely from JS-disabled HTML", async () => {
+  const { VideoUtilityDockIsland } =
+    await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const html = renderToString(React.createElement(VideoUtilityDockIsland, {
+    videoId: "v", currentId: "v", publicChapters: [{ id: "pub", timeLabel: "0:03", label: "public" }],
+    loading: false, overlay: {
+      loggedIn: true, authUnavailable: false, isBanned: false, isTosAccepted: true,
+      termsReacceptRequired: false, activeXId: "x", likeActive: false,
+      bookmarkActive: false, viewerXApproved: true,
+      privateChapters: [{ id: "priv", chapter_time: 5, chapter_label: "SECRET",
+        author_name: "PRIVATE", author_icon: null, note: null, visibility: "private" }],
+      playlistLabel: "PRIVATE PLAYLIST", playlistItems: [{ id: "vv", title: "SECRET TITLE",
+        youtube_video_id: null, display_name: "PRIVATE" }],
+    },
+  }));
+  assert.equal(html, "");
+});
