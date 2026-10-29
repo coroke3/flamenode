@@ -1,5 +1,6 @@
 import React from "react";
 import { formatChapterTime } from "../../../../packages/domain/src/video/chapterTime.ts";
+import { seekToTime } from "../../../../src/components/video/playerBridge.ts";
 import type { VideoViewerOverlayDto } from "../../../../packages/contracts/src/videoViewerOverlay.ts";
 import { VideoChapterIsland, type EditableChapter } from "./VideoChapterIsland.ts";
 
@@ -73,8 +74,17 @@ export function VideoUtilityDockIsland({
   const [autoNext, setAutoNext] = React.useState(false);
   const [order, setOrder] = React.useState<string[]>([]);
   const [ready, setReady] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(false);
 
   React.useEffect(() => { setMounted(true); }, []);
+  React.useEffect(() => {
+    const media = window.matchMedia?.("(max-width: 900px)");
+    if (!media) return;
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
   React.useEffect(() => {
     if (!mounted) return;
     setPlaylist(resolvePlaylistQuery(window.location.search));
@@ -102,7 +112,7 @@ export function VideoUtilityDockIsland({
 
   const items = React.useMemo(() => {
     const unique = uniquePlaylistItems(overlay.playlistItems);
-    const byId = new Map(unique.map((item) => [item.id, item]));
+    const byId = new Map<string, (typeof unique)[number]>(unique.map((item) => [item.id, item] as const));
     const ordered = order.map((id) => byId.get(id)).filter((i): i is NonNullable<typeof i> => Boolean(i));
     const used = new Set(ordered.map((item) => item.id));
     return [...ordered, ...unique.filter((item) => !used.has(item.id))];
@@ -149,7 +159,7 @@ export function VideoUtilityDockIsland({
       }, `チャプター (${chapters.length})`),
     ),
     panel !== null ? h("button", { type: "button", onClick: () => setPanel(null), "aria-label": "パネルを閉じる" }, "閉じる") : null,
-    h("section", { id: "video-utility-playlist", hidden: panel === "chapters", "aria-label": "再生リスト" },
+    h("section", { id: "video-utility-playlist", hidden: isMobile && panel !== "playlist", "aria-label": "再生リスト" },
       items.length > 0 ? h(React.Fragment, null,
         h("h3", null, overlay.playlistLabel || "再生リスト"),
         h("p", null, index >= 0 ? `${index + 1} / ${items.length}` : `${items.length} 本`),
@@ -174,12 +184,16 @@ export function VideoUtilityDockIsland({
         )),
       ) : null,
     ),
-    h("section", { id: "video-utility-chapters", hidden: panel === "playlist", "aria-label": "チャプター・コメント" },
+    h("section", { id: "video-utility-chapters", hidden: isMobile && panel !== "chapters", "aria-label": "チャプター・コメント" },
       h("h3", null, "チャプター・コメント"),
       chapters.length === 0 ? h("p", null, "チャプターはまだありません。") :
         h("ol", null, ...chapters.map((chapter) =>
-          h("li", { key: chapter.id }, h("span", null, chapter.timeLabel), " ", chapter.label,
-            chapter.authorName ? ` · ${chapter.authorName}` : ""),
+          h("li", { key: chapter.id },
+            h("button", { type: "button", "aria-label": `${chapter.timeLabel}に移動`, onClick: () => {
+              const seconds = chapter.timeLabel.split(":").map(Number).reduce((v, n) => v * 60 + n, 0);
+              seekToTime(seconds);
+            } }, chapter.timeLabel),
+            " ", chapter.label, chapter.authorName ? ` · ${chapter.authorName}` : ""),
         )),
       h(VideoChapterIsland, {
         videoId, activeXId: overlay.activeXId, canPost,
