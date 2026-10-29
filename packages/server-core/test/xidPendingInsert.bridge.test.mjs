@@ -5,7 +5,7 @@ import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import {
   buildPendingXIdRequestInsert as coreInsert,
   buildPendingXIdMergeRevertInsert as coreRevert,
-} from "../src/index.ts";
+} from "../src/xid/pendingInsert.ts";
 import {
   buildPendingXIdRequestInsert as legacyInsert,
   buildPendingXIdMergeRevertInsert as legacyRevert,
