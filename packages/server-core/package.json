@@ -94,7 +94,6 @@
   "dependencies": {
     "@flamenode/db": "*",
     "@flamenode/domain": "*",
-    "@flamenode/domain": "*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
