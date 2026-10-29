@@ -88,8 +88,8 @@ function FilterSelect({ name, value, options }: {
 function AuditFilterForm({ query }: { query: AuditListQuery }): React.ReactElement {
   return <form method="get" action="/admin/audit" className="fn-panel fn-audit-filters"
     style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-    <FilterSelect name="table" value={query.table} options={TABLES.map(x => [x,x])} />
-    <FilterSelect name="operation" value={query.operation} options={OPERATIONS.map(x => [x,x])} />
+    <FilterSelect name="table" value={query.table} options={TABLES.map(x => [x,x] as [string,string])} />
+    <FilterSelect name="operation" value={query.operation} options={OPERATIONS.map(x => [x,x] as [string,string])} />
     <FilterSelect name="restore_status" value={query.restore_status} options={STATUSES} />
     <label>実行者 user_id<input className="fn-input" name="actor" defaultValue={query.actor} placeholder="user_id 完全一致"/></label>
     <label>対象レコード ID<input className="fn-input" name="record" defaultValue={query.record} placeholder="target_id 完全一致"/></label>
@@ -159,11 +159,11 @@ function AuditSummary({ row, api }: { row: AuditRow; api: AuditAuditApi }): Reac
   const keys = parseChangedKeys(row.changed_keys_json);
   if (row.operation === "CREATE") return <span>新規作成</span>;
   if (row.operation === "DELETE") return <span>削除</span>;
-  return <span>{row.operation === "UPDATE" ? keys.length + " キー変更" : row.operation}
+  return <div>{row.operation === "UPDATE" ? keys.length + " キー変更" : row.operation}
     {keys.length > 0 && <code> {keys.slice(0,6).join(", ")}{keys.length>6 ? " ほか " + (keys.length-6) + " 件" : ""}</code>}
     {row.payload.before !== null || row.payload.after !== null
       ? <AuditDiff row={row} api={api} /> : null}
-  </span>;
+  </div>;
 }
 export function AuditDiff({ row, api }: { row: AuditRow; api: AuditAuditApi }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
