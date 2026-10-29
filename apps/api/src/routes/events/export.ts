@@ -1,7 +1,6 @@
 import { Hono } from "hono";
-import { drizzle } from "drizzle-orm/d1";
-import * as schema from "@flamenode/db/schema";
 import type { AppEnv } from "../../env.ts";
+import { dbMiddleware } from "../../middleware/db.ts";
 import { checkPublicApiRateLimit, publicJsonBodyResponse, publicJsonResponse } from "@flamenode/server-core/publicData/publicApi";
 import { assertNoForbiddenKeys } from "@flamenode/server-core/publicData/publicDto";
 import { loadEventExportEvent, loadEventExportSnapshot, type EventExportEventRow } from "@flamenode/server-core/eventExport/data";
@@ -14,6 +13,11 @@ import {
 import { isolateMicroCacheGet, isolateMicroCacheSet } from "../live/microCache.ts";
 
 export const eventExportRoutes = new Hono<AppEnv>();
+// No session guard on public GET; the shared host constructs the injected DB handle.
+eventExportRoutes.use("*", async (c, next) => {
+  if (!c.env.DB) return next();
+  return dbMiddleware(c, next);
+});
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 const EVENT_EXPORT_CACHE_METADATA_MARKER = "public-export-validated-v1";
 type EventExportCacheMetadata = {
@@ -134,7 +138,7 @@ eventExportRoutes.get("/:id", async (c) => {
     }, "no-store", 400);
   }
   if (!c.env.DB) return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
-  const db = drizzle(c.env.DB, { schema });
+  const db = c.get("db");
   const key = eventExportPayloadCacheKey(eventId, format, refreshMinutes);
   const usePayloadCache = updateMode === "scheduled";
   const host = usePayloadCache ? cacheHost(c) : null;
