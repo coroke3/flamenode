@@ -17,7 +17,7 @@ import { extractYoutubeId, youtubeThumbUrl } from "../../../../src/lib/youtube/i
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
-import { eventDetailKey, loadEventPayloadSnapshot, loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
+import { SnapshotBuildError, eventDetailKey, loadEventPayloadSnapshot, loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import { loadPublicXIconMapForBuild, projectVideoMemberPresentation } from "./publicIconMap.ts";
 import { hasProjectedPublicProfile, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
@@ -200,8 +200,14 @@ export async function loadVideoPagesForBuild(
         const manifest = access.options.manifest!;
         // A missing or explicitly blocked event is an optional absent link, not a build failure.
         if (manifest.allowedKeys.includes(eventKey) && !manifest.blockedKeys.includes(eventKey)) {
-          // If an allowed snapshot is tampered with, the verified loader fails the build.
-          eventPayload = await loadEventPayloadSnapshot(access.source, eventKey, access.options);
+          try {
+            // Digest/generation/shape errors still fail the build; absent or withdrawn events hide the link.
+            eventPayload = await loadEventPayloadSnapshot(access.source, eventKey, access.options);
+          } catch (error) {
+            if (!(error instanceof SnapshotBuildError && (error.code === "SNAPSHOT_MISSING" || error.code === "NOT_PUBLIC"))) {
+              throw error;
+            }
+          }
         }
       }
       playlistIds.set(eventId, publicEventPlaylistId(eventPayload, eventId));
