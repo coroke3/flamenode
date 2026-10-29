@@ -1,4 +1,5 @@
 import test from "node:test";
+import { auditTargetLinks, AuditTargetLink } from "../.test-dist/apps/ops/src/routes/admin/AuditTargetLink.js";
 import { parseAuditChanges, AuditDiffGrid } from "../.test-dist/apps/ops/src/routes/admin/AuditDiffGrid.js";
 import { AuditDetailContent, AuditDiffDetail } from "../.test-dist/apps/ops/src/routes/admin/AuditDetail.js";
 import { AuditRestoreForm } from "../.test-dist/apps/ops/src/routes/admin/AuditRestoreForm.js";
@@ -326,4 +327,19 @@ test("MIG-0733: diff displays field labels, added/removed/changed and malformed 
   }));
   assert.match(html,/作品タイトル/);assert.match(html,/変更/);
   assert.match(html,/old/);assert.match(html,/new/);
+});
+
+test("MIG-0733: CURRENT target links preserve admin/public routes and unknown table fallback",()=>{
+  assert.deepEqual(auditTargetLinks("events","a/b"),{
+    adminHref:"/manage/events/a%2Fb/edit",publicHref:"/event/a%2Fb",
+  });
+  assert.deepEqual(auditTargetLinks("x_users","@x"),{
+    adminHref:"/admin/users?view=xid&q=%40x",publicHref:"/user/%40x",
+  });
+  assert.deepEqual(auditTargetLinks("unknown","abc"),{});
+  const unknown=renderToStaticMarkup(React.createElement(AuditTargetLink,{
+    tableName:"unknown",recordId:"abc",
+  }));
+  assert.match(unknown,/abc/);
+  assert.doesNotMatch(unknown,/href=/);
 });
