@@ -74,6 +74,39 @@ test("MIG-0661 T02: KV read errors do not fail the public endpoint or reach D1",
   assert.equal(d1.count, 0);
 });
 
+test("MIG-0661 T07: throwing KV binding getter fails soft without D1 or leaked error", async () => {
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 };
+  let getters = 0;
+  const env = {
+    DB: unavailableD1(d1),
+    get KV() {
+      getters += 1;
+      throw new Error("private KV binding error must never leak");
+    },
+  };
+  assert.deepEqual(await requestWith(env), { mode: "normal", reason: null });
+  assert.equal(getters, 1, "one KV getter attempt, no retry or extra reads");
+  assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T07: forced static-only survives throwing KV getter for optional reason", async () => {
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 };
+  let getters = 0;
+  const env = {
+    DB: unavailableD1(d1),
+    FORCE_STATIC_ONLY: "1",
+    get KV() {
+      getters += 1;
+      throw new Error("private KV binding error must never leak");
+    },
+  };
+  assert.deepEqual(await requestWith(env), { mode: "static_only", reason: null });
+  assert.equal(getters, 1);
+  assert.equal(d1.count, 0);
+});
+
 test("MIG-0661 T02: invalid mirror reason is null while its mode remains valid", async () => {
   resetOperationModeCachesForTests();
   const d1 = { count: 0 }, kv = { count: 0 };
