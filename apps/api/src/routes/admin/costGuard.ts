@@ -81,7 +81,14 @@ async function readBody(c:Context<AppEnv>,schema:{safeParse:(value:unknown)=>{su
   if(!parsed.success)return {ok:false as const,response:fail(c,400,"入力エラー")};
   return {ok:true as const,data:raw.value};
 }
+// Never let a failed preflight D1 read or a late binding getter throw into
+// Hono's default error handler. Keep the provider error out of logs/responses.
+const failClosedPreflight = (_error: Error, c: Context<AppEnv>) => {
+  c.header("Cache-Control", "private, no-store");
+  return c.json<AdminOpsResult>({ ok: false, message: "管理操作を処理できませんでした。再度お試しください。" }, 503);
+};
 export const costGuardAdminRoutes=new Hono<AppEnv>();
+costGuardAdminRoutes.onError(failClosedPreflight);
 
 // SA-016: setCostGuardMode
 costGuardAdminRoutes.post("/mode",async c=>{
