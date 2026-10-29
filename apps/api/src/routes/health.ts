@@ -21,7 +21,16 @@ export const healthRoutes = new Hono<AppEnv>();
 
 // RH-018: GET /api/health — exposes only the validated deployment commit.
 healthRoutes.get("/", (c) => {
-  const commit = stringBinding(c.env, "BUILD_COMMIT_SHA")?.trim() ?? "";
+  let commit: string;
+  try {
+    commit = stringBinding(c.env, "BUILD_COMMIT_SHA")?.trim() ?? "";
+  } catch {
+    // Cloudflare environment getters can throw synchronously. Never expose provider details.
+    return Response.json(
+      { ok: false, service: "flamenode-web", runtime: "cloudflare-worker" },
+      { status: 503, headers: NO_STORE },
+    );
+  }
   if (!COMMIT_PATTERN.test(commit)) {
     return Response.json(
       { ok: false, service: "flamenode-web", runtime: "cloudflare-worker" },
@@ -42,22 +51,25 @@ healthRoutes.get("/", (c) => {
 // RH-017: same token gate and read-only D1/KV/R2/Queue/visibility diagnostics as CURRENT.
 // Missing required bindings fail closed; the production Worker Route is not changed.
 healthRoutes.get("/deep", async (c) => {
-  const unauthorized = authorizeDeepHealth(
-    c.req.raw,
-    stringBinding(c.env, "WORKER_ADMIN_TOKEN"),
-  );
+  // Authorization must finish before reading any diagnostic bindings.
+  let configuredToken: string | undefined;
+  try {
+    configuredToken = stringBinding(c.env, "WORKER_ADMIN_TOKEN");
+  } catch {
+    return buildDeepHealthFailureResponse(undefined);
+  }
+  const unauthorized = authorizeDeepHealth(c.req.raw, configuredToken);
   if (unauthorized) return unauthorized;
 
-  const { DB, KV, BUCKET } = c.env;
-  if (!DB || !KV || !BUCKET) {
-    // No silent success if the runtime lacks a mandatory read-only diagnostic binding.
-    return Response.json(
-      { ok: false, service: "flamenode-web" },
-      { status: 503, headers: NO_STORE },
-    );
-  }
-
   try {
+    const { DB, KV, BUCKET } = c.env;
+    if (!DB || !KV || !BUCKET) {
+      // No silent success if the runtime lacks a mandatory read-only diagnostic binding.
+      return Response.json(
+        { ok: false, service: "flamenode-web" },
+        { status: 503, headers: NO_STORE },
+      );
+    }
     const result = await runDeepHealthChecks({ ...c.env, DB, KV, BUCKET });
     return Response.json(result, {
       status: result.status === "degraded" ? 200 : result.ok ? 200 : 503,
