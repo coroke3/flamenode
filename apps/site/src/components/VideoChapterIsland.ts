@@ -53,13 +53,25 @@ export function formatChapterDraftTime(seconds: number): string {
     : `${minutes}:${secs}`;
 }
 
+export interface VideoChapterDraftBaseline {
+  time: string;
+  label: string;
+  note: string;
+  csv: string;
+}
+
+/** Compare against the prefilled player/editor values, not empty strings. */
 export function videoChapterDraftIsDirty(
   time: string,
   label: string,
   note: string,
   csv: string,
+  baseline: VideoChapterDraftBaseline = { time: "", label: "", note: "", csv: "" },
 ): boolean {
-  return Boolean(time.trim() || label.trim() || note.trim() || csv.trim());
+  return time.trim() !== baseline.time.trim() ||
+    label.trim() !== baseline.label.trim() ||
+    note.trim() !== baseline.note.trim() ||
+    csv.trim() !== baseline.csv.trim();
 }
 
 export function VideoChapterIsland({
@@ -91,13 +103,14 @@ export function VideoChapterIsland({
   const pending = React.useRef(false);
   const epoch = React.useRef(0);
   const draftRef = React.useRef({ time, label, note, bulkCsv });
+  const draftBaseline = React.useRef<VideoChapterDraftBaseline>({ time: "", label: "", note: "", csv: "" });
   draftRef.current = { time, label, note, bulkCsv };
 
   React.useEffect(() => { setMounted(true); }, []);
   React.useEffect(() => {
     const before = (event: Event) => {
       const d = draftRef.current;
-      if (!videoChapterDraftIsDirty(d.time, d.label, d.note, d.bulkCsv)) return;
+      if (!videoChapterDraftIsDirty(d.time, d.label, d.note, d.bulkCsv, draftBaseline.current)) return;
       if (!window.confirm("入力中のチャプター情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？")) {
         event.preventDefault();
       }
@@ -108,6 +121,7 @@ export function VideoChapterIsland({
       pending.current = false;
       setBusy(false);
       setTime(""); setLabel(""); setNote(""); setBulkCsv("");
+      draftBaseline.current = { time: "", label: "", note: "", csv: "" };
       setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
     };
     window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, before);
@@ -154,6 +168,7 @@ export function VideoChapterIsland({
       if (!end(generation)) return;
       if (!result.ok) { setError(result.message ?? "投稿に失敗しました。"); return; }
       setTime(""); setLabel(""); setNote(""); setEditingId(null); setComposerOpen(false);
+      draftBaseline.current = { time: "", label: "", note: "", csv: "" };
       setMessage(result.pendingPublicReflection
         ? "保存しました。公開ページへの反映には時間がかかる場合があります。"
         : "保存しました。");
@@ -211,7 +226,9 @@ export function VideoChapterIsland({
     !composerOpen ? h("button", {
       type: "button", disabled: busy,
       onClick: () => {
-        setTime(formatChapterDraftTime(playerSeconds ?? 0));
+        const initialTime = formatChapterDraftTime(playerSeconds ?? 0);
+        draftBaseline.current = { time: initialTime, label: "", note: "", csv: "" };
+        setTime(initialTime);
         setLabel(""); setNote(""); setEditingId(null);
         setError(""); setComposerOpen(true);
       },
@@ -248,6 +265,7 @@ export function VideoChapterIsland({
         onClick: () => {
           setComposerOpen(false); setEditingId(null);
           setTime(""); setLabel(""); setNote(""); setError("");
+          draftBaseline.current = { time: "", label: "", note: "", csv: "" };
         },
       }, "キャンセル"),
     ) : null,
@@ -258,6 +276,7 @@ export function VideoChapterIsland({
           type: "button", disabled: busy,
           onClick: () => {
             setEditingId(chapter.id);
+            draftBaseline.current = { time: chapter.chapter_time, label: chapter.chapter_label, note: chapter.note ?? "", csv: "" };
             setComposerOpen(true);
             setTime(chapter.chapter_time);
             setLabel(chapter.chapter_label);
