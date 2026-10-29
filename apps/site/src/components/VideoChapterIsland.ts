@@ -85,6 +85,8 @@ export function VideoChapterIsland({
     const changed = () => {
       // In-flight successful writes are never displayed as the new viewer's result.
       epoch.current += 1;
+      pending.current = false;
+      setBusy(false);
       setTime(""); setLabel(""); setNote(""); setBulkCsv("");
       setEditingId(null); setMessage(""); setError(""); setBulkErrors([]);
     };
@@ -106,9 +108,10 @@ export function VideoChapterIsland({
     return epoch.current;
   };
   const end = (generation: number) => {
+    if (generation !== epoch.current) return false;
     pending.current = false;
     setBusy(false);
-    return generation === epoch.current;
+    return true;
   };
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
