@@ -1140,7 +1140,6 @@
 | `apps/ops/src/styles/manage-shell.css` | TARGET_SKELETON | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 | `apps/ops/wrangler.toml` | CONFIG | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 | `apps/ops/test/manageShell.test.mjs` | TEST | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
-| `.github/workflows/migration-docs-check.yml` | CONFIG | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 | `docs/migration/work-items/MIG-0719.md` | TARGET_SKELETON | MIG-0719 Ops Manage target (non-production) | MIG-0719 | SAME (MIG-0719; still REVIEW/CI pending) | IN_PROGRESS | PR#458 SHA=617f242f2ec6ed7c7fd19e120c8fb8185d52571a TEST=CI-pending |
 
 ## Future files requiring source/target registration
