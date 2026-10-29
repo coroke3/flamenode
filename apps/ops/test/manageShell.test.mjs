@@ -95,8 +95,8 @@ test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/
   const { resolve } = await import("node:path");
   const config = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   assert.equal(assertOpsStaticConfig(config), true);
-  assert.throws(() => assertOpsStaticConfig(config + '\\nroute = "example.invalid/*"'), /Unapproved/);
-  assert.throws(() => assertOpsStaticConfig(config + '\\n[[d1_databases]]'), /only one assets table/);
+  assert.throws(() => assertOpsStaticConfig(config + '\nroute = "example.invalid/*"'), /Unapproved/);
+  assert.throws(() => assertOpsStaticConfig(config + '\n[[d1_databases]]'), /only one assets table/);
   assert.throws(() => assertOpsStaticConfig(config.replace("workers_dev = false", "workers_dev = true")), /Unsafe/);
   const args = opsDryRunArgs(resolve("/tmp/ops-review-only"));
   assert.ok(args.includes("--dry-run"));

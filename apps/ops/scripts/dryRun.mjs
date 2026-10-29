@@ -70,10 +70,9 @@ function main(args) {
   if (!built.isFile() || built.isSymbolicLink() || built.size === 0) throw new Error("Ops SPA static build missing");
   const tmp = mkdtempSync(path.join(os.tmpdir(), "flamenode-ops-dry-run-"));
   try {
-    const profile = path.join(tmp, "isolated-profile");
     const result = spawnSync(process.execPath, opsDryRunArgs(path.join(tmp, "wrangler-out")), {
       cwd: ROOT, shell: false, stdio: "inherit", timeout: 240_000,
-      env: offlineWranglerEnv(process.env, profile),
+      env: offlineWranglerEnv(process.env, tmp),
     });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error("Ops offline Wrangler dry-run failed: " + result.status);
