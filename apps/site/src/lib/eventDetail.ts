@@ -4,7 +4,7 @@
  * build and the browser Island produce the same model. Slot state (filled counts, names) is never an input
  * of the static HTML: it comes only from `live` (RH-020), which the Island fetches in the browser.
  */
-import type { EventDetailData, EventSlotPart } from "@flamenode/ui";
+import type { EventDetailData, EventSlotPart, TopRecruit } from "@flamenode/ui";
 import type { StaticEventDetail, StaticEventSlot } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
 import { buildSlotParts } from "../../../../src/lib/utils/slotGroupingCore.ts";
 import {
@@ -18,9 +18,74 @@ import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { absoluteUrl, compactText } from "./pageHead.ts";
 import { buildAccentVars } from "../../../../src/lib/theme/accent.ts";
-import { toRecruit } from "./topData.ts";
+import { formatRemainingTimeMetric } from "../../../../src/lib/utils/remainingTime.ts";
 
 export const EVENT_VIDEO_DISPLAY_LIMIT = 8;
+
+/**
+ * Browser-safe CURRENT recruit model. MIG-0506 topData.ts is build-only and
+ * imports node:crypto/fs transitively: do not use it inside the hydrated Island.
+ */
+const recruitDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+function recruitRange(start: number | null, end: number | null): string {
+  return (start != null ? recruitDate.format(new Date(start * 1000)) : "-") + " — " +
+    (end != null ? recruitDate.format(new Date(end * 1000)) : "-");
+}
+
+function detailRecruit(
+  event: StaticEventDetail["event"],
+  now: number,
+  status: ReturnType<typeof computeEventStatus>,
+  accepting: boolean,
+  inPostPeriod: boolean,
+  total: number,
+  filled: number | null,
+  hasLive: boolean,
+): TopRecruit | null {
+  if (status === "ended" || status === "private") return null;
+  const available = hasLive ? total - (filled ?? 0) : null;
+  const state = accepting
+    ? available === 0 ? "full" : "accepting"
+    : status === "active" ? "ongoing"
+    : event.entry_end_time != null && now >= event.entry_end_time && (event.start_time ?? event.end_time)
+      ? (((event.start_time ?? event.end_time) ?? 0) - now) / 86400 <= 3 ? "soon" : "after_entry"
+      : "before_entry";
+  const kind: TopRecruit["kind"] =
+    state === "accepting" || state === "full" ? "entry" :
+    state === "before_entry" ? "pre" : "submit";
+  const statusLabel = {
+    before_entry: "募集開始前", accepting: "募集期間中", full: "満枠",
+    ongoing: "開催中", soon: "近日公開", after_entry: "公開前作品受付中",
+  }[state];
+  const post = recruitRange(event.start_time, event.end_time);
+  const entry = recruitRange(event.entry_start_time, event.entry_end_time);
+  const countdown = state === "before_entry" && event.entry_start_time != null && event.entry_start_time > now
+    ? { heading: "募集開始まで", seconds: event.entry_start_time - now, range: entry }
+    : (state === "accepting" || state === "full") && event.entry_end_time != null && event.entry_end_time > now
+      ? { heading: "募集締切まで", seconds: event.entry_end_time - now, range: entry }
+      : event.start_time != null && event.start_time > now
+        ? { heading: "投稿期間まで", seconds: event.start_time - now, range: post }
+        : event.end_time != null && event.end_time > now
+          ? { heading: "投稿期間終了まで", seconds: event.end_time - now, range: post }
+          : { heading: "終了済み", seconds: null, range: post };
+  const metric = formatRemainingTimeMetric(countdown.seconds);
+  return {
+    id: event.id,
+    title: event.title,
+    statusLabel,
+    kind,
+    imageUrl: cachedGoogleImageUrl(event.img_url),
+    countdownHeading: countdown.heading,
+    countdownRange: countdown.range,
+    countdownValue: metric?.value ?? null,
+    countdownUnit: metric?.unit ?? null,
+    slotFilled: hasLive ? filled : null,
+    slotTotal: hasLive ? total : null,
+    ctaHref: inPostPeriod ? "/entry" : total > 0 ? "/event/" + event.id + "/slots" : "/event/" + event.id,
+    ctaLabel: inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : total > 0 ? "枠表へ" : "詳細ページへ",
+  };
+}
+
 
 /** RH-020 `GET /api/live/events/{id}/slots` rows (the part this page reads). */
 export type LiveSlotStatus = Readonly<{ slots: readonly { id: string; status: string }[] }>;
@@ -103,11 +168,7 @@ export function buildEventDetailData(
   const playlistId = extractYoutubePlaylistId(event.youtube_playlist_id ?? "");
   const showPublicationTime = status === "scheduled" || status === "active";
   // The static snapshot contains layout only. RH-020 is the sole source of availability after hydration.
-  const recruit = status === "ended" ? null : {
-    ...toRecruit(event, live ? { available: layout.length - (slotFilled ?? 0), total: layout.length } : undefined, now),
-    ctaHref: inPostPeriod ? "/entry" : layout.length > 0 ? `/event/${event.id}/slots` : `/event/${event.id}`,
-    ctaLabel: inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : layout.length > 0 ? "枠表へ" : "詳細ページへ",
-  };
+  const recruit = detailRecruit(event, now, status, accepting, inPostPeriod, layout.length, slotFilled, live !== null);
   return {
     id: event.id,
     title: event.title,
