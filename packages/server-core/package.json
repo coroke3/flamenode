@@ -10,6 +10,7 @@
     "./id": "./src/id.ts",
     "./sql": "./src/sql.ts",
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
+    "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
     "./audit/adapters": "./src/audit/adapters.ts",
     "./audit/capability": "./src/audit/capability.ts",
@@ -92,6 +93,7 @@
   },
   "dependencies": {
     "@flamenode/db": "*",
+    "@flamenode/domain": "*",
     "@flamenode/domain": "*",
     "drizzle-orm": "^0.45.2"
   },
