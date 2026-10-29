@@ -33,6 +33,9 @@ export interface VideoChapterIslandProps {
   canPost: boolean;
   canBulk?: boolean;
   settingsHref?: string;
+  disabledReason?: string;
+  disabledHref?: string | null;
+  disabledLinkLabel?: string;
   chapters?: readonly EditableChapter[];
   onChanged?: () => void;
 }
@@ -55,6 +58,9 @@ export function VideoChapterIsland({
   canPost,
   canBulk = false,
   settingsHref = "/dashboard/settings",
+  disabledReason,
+  disabledHref,
+  disabledLinkLabel,
   chapters = [],
   onChanged,
 }: VideoChapterIslandProps): React.ReactElement | null {
@@ -184,9 +190,10 @@ export function VideoChapterIsland({
   // Neither pre-rendered HTML nor a signed-out visitor can submit a chapter.
   if (!mounted) return null;
   if (!ready) {
+    const href = disabledHref === undefined ? settingsHref : disabledHref;
     return h("section", { "aria-label": "チャプター投稿" },
-      h("p", null, "承認済み X ID を選択するとチャプターを投稿できます。"),
-      h("a", { href: settingsHref }, "X ID設定へ"));
+      h("p", null, disabledReason ?? "承認済み X ID を選択するとチャプターを投稿できます。"),
+      href ? h("a", { href }, disabledLinkLabel ?? "X ID設定へ") : null);
   }
   return h("section", { "aria-label": "チャプター投稿" },
     h("h3", null, "チャプターコメント投稿"),
