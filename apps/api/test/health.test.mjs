@@ -50,6 +50,55 @@ test("GET /api/health returns 503 when BUILD_COMMIT_SHA is missing or invalid", 
   });
 });
 
+test("RH-018: throwing BUILD_COMMIT_SHA getter yields fixed 503 with no provider leakage", async () => {
+  const env = Object.defineProperty({}, "BUILD_COMMIT_SHA", {
+    get() { throw new Error("private-health-commit-provider"); },
+  });
+  const response = await app.request("/api/health", { method: "GET" }, env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), {
+    ok: false, service: "flamenode-web", runtime: "cloudflare-worker",
+  });
+  assert.doesNotMatch(body, /private-health-commit-provider/);
+});
+
+test("RH-017: throwing token or D1/KV/R2 getter yields fixed 503 without leaking secrets", async () => {
+  const secret = "PRIVATE_BINDING_PROVIDER_ERROR";
+  const tokenEnv = Object.defineProperty({}, "WORKER_ADMIN_TOKEN", {
+    get() { throw new Error(secret); },
+  });
+  const tokenResponse = await app.request("/api/health/deep", {
+    method: "GET", headers: { Authorization: "Bearer health-api-fixture-token" },
+  }, tokenEnv);
+  assert.equal(tokenResponse.status, 503);
+  assert.equal(tokenResponse.headers.get("Cache-Control"), "no-store");
+  assert.deepEqual(await tokenResponse.json(), { ok: false, service: "flamenode-web" });
+  for (const key of ["DB", "KV", "BUCKET"]) {
+    let reads = 0;
+    const env = Object.defineProperty({
+      WORKER_ADMIN_TOKEN: "health-api-fixture-token",
+    }, key, {
+      get() { reads++; throw new Error(secret); },
+    });
+    const req = { method: "GET", headers: { Authorization: "Bearer health-api-fixture-token" } };
+    const result = await app.request("/api/health/deep", req, env);
+    assert.equal(result.status, 503, key);
+    assert.equal(result.headers.get("Cache-Control"), "no-store", key);
+    const body = await result.text();
+    assert.deepEqual(JSON.parse(body), { ok: false, service: "flamenode-web" }, key);
+    assert.doesNotMatch(body, /PRIVATE_BINDING_PROVIDER_ERROR/, key);
+    assert.equal(reads, 1, key);
+    reads = 0;
+    const denied = await app.request("/api/health/deep", {
+      method: "GET", headers: { Authorization: "Bearer wrong" },
+    }, env);
+    assert.equal(denied.status, 401, key);
+    assert.equal(reads, 0, key + " must not be read before authorization");
+  }
+});
+
 test("GET /health (no /api prefix) is not routed: URL set matches CURRENT", async () => {
   const res = await app.request("/health", { method: "GET" }, { BUILD_COMMIT_SHA: "b".repeat(40) });
   assert.equal(res.status, 404);
