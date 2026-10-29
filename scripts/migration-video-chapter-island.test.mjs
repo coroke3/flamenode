@@ -338,3 +338,54 @@ test("U03 mobile drawer uses synthetic Back history, Escape and shared body-scro
     dom.window.close();
   }
 });
+
+test("U03 switching ?playlist= never overwrites another playlist's persisted order", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.net/a?playlist=A",
+  });
+  dom.window.matchMedia = () => ({
+    matches: false, addEventListener() {}, removeEventListener() {},
+  });
+  dom.window.localStorage.setItem("fn-playlist-order:A", JSON.stringify(["a2", "a1"]));
+  dom.window.localStorage.setItem("fn-playlist-order:B", JSON.stringify(["b2", "b1"]));
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent", "localStorage"];
+  const prior = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) {
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value: dom.window[key] });
+  }
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const base = {
+    loggedIn: false, authUnavailable: false, isBanned: false, isTosAccepted: false,
+    termsReacceptRequired: false, activeXId: null, likeActive: false,
+    bookmarkActive: false, viewerXApproved: false, privateChapters: [], playlistLabel: "Queue",
+  };
+  const make = (prefix) => React.createElement(VideoUtilityDockIsland, {
+    videoId: "video-" + prefix, currentId: prefix.toLowerCase() + "1", publicChapters: [],
+    loading: false, overlay: { ...base, playlistItems: [1,2].map(n => ({
+      id: prefix.toLowerCase() + n, title: prefix + n, youtube_video_id: null, display_name: "Creator",
+    })) },
+  });
+  try {
+    await React.act(async () => root.render(make("A")));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem("fn-playlist-order:A")), ["a2", "a1"]);
+    dom.window.history.replaceState(null, "", "/b?playlist=B");
+    await React.act(async () => root.render(make("B")));
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem("fn-playlist-order:A")), ["a2", "a1"]);
+    assert.deepEqual(JSON.parse(dom.window.localStorage.getItem("fn-playlist-order:B")), ["b2", "b1"]);
+    const links = [...dom.window.document.querySelectorAll("#video-utility-playlist ol a")];
+    assert.equal(links[0]?.textContent, "B2");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of prior) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+    dom.window.close();
+  }
+});
