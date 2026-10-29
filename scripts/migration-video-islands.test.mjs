@@ -122,11 +122,7 @@ test("T01/T03: optimistic count, server correction and rapid double click use on
     const button = doc.querySelector('button[aria-label="いいね"]');
     assert.ok(button, "live like button exists");
     assert.equal(button.disabled, false, "no X ID required");
-    await act(async () => {
-      button.click();
-      button.click();
-      await Promise.resolve();
-    });
+    act(() => { button.click(); button.click(); });
     assert.equal(writes, 1);
     assert.match(doc.querySelector('button[aria-label="いいね済"]').textContent, /5/);
     await act(async () => { resolveWrite(json({ ok: true, active: false, videoId: "vid" })); });
