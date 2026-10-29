@@ -143,21 +143,33 @@ test("syncGa4Trending fails closed on D1 source failure", async () => {
   assert.equal(writes, 0);
 });
 
-test("MIG-0517 T03: zero D1 rows skips GA4 and preserves R2 result", async () => {
+test("MIG-0517 T03: zero public D1 rows publish an empty R2 ranking without GA4", async () => {
   const db = recentDb([]);
   let writes = 0;
+  let published = null;
   const env = enabledGa4Env({
     DB: db,
-    R2: { get() { throw Error("unexpected R2 read"); }, put() { writes += 1; } },
+    R2: {
+      get() { throw Error("unexpected R2 read"); },
+      put(key, body) {
+        assert.equal(key, GA4_TRENDING_OUTPUT_KEY);
+        writes += 1;
+        published = JSON.parse(String(body));
+      },
+    },
   });
   const oldFetch = globalThis.fetch;
   globalThis.fetch = () => { throw Error("unexpected GA4 request"); };
   try {
     const result = await syncGa4Trending(env);
-    assert.deepEqual([result.processed, result.failed, result.skipped], [0, 0, 1]);
+    assert.deepEqual([result.processed, result.failed, result.skipped], [0, 0, 0]);
     assert.equal(result.external_api_calls, 0);
     assert.equal(db.reads, 1);
-    assert.equal(writes, 0);
+    assert.equal(writes, 1);
+    assert.deepEqual(published.items, []);
+    assert.equal(published.schema_version, 1);
+    assert.ok(Number.isFinite(published.generated_at));
+    assert.equal(published.source, "ga4");
   } finally { globalThis.fetch = oldFetch; }
 });
 
@@ -321,7 +333,7 @@ test("syncGa4Trending preserves existing trending when GA returns empty periods"
       views_7d: { start_date: "2026-07-25", end_date: "2026-07-31" },
       views_30d: { start_date: "2026-07-02", end_date: "2026-07-31" },
     },
-    items: [{ id: "video-a", rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
+    items: [{ id: "video-a", title: "A", rank: 1, views_2d: 10, views_5d: 20, views_7d: 30, views_30d: 40 }],
   });
   const env = {
     DB: recentDb(),
@@ -575,7 +587,7 @@ test("MIG-0517: GA4 orphan rows do not erase existing public rankings", async ()
   const prior = JSON.stringify({
     schema_version: 1,
     generated_at: 1_700_000_000,
-    items: [{ id: "video-a", rank: 1, views_30d: 2 }],
+    items: [{ id: "video-a", title: "A", rank: 1, views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 }],
   });
   const token = JSON.stringify({
     access_token: "cached-token",
@@ -865,7 +877,7 @@ test("MIG-0517: oversized existing R2 body cannot bypass cap via absent or wrong
 });
 
 
-test("MIG-0517: invalid old R2 schema cannot block usable empty refresh", async () => {
+test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empty refresh", async () => {
   const token = JSON.stringify({ access_token: "cached-token", expires_at: Math.floor(Date.now() / 1000) + 3600 });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -877,12 +889,19 @@ test("MIG-0517: invalid old R2 schema cannot block usable empty refresh", async 
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
-    for (const metadata of [
-      { schema_version: 99, generated_at: 1_700_000_000 },
-      { schema_version: 1 },
-      { schema_version: 1, generated_at: "not-a-time" },
+    const validItem = {
+      id: "video-a", title: "A", status: "public", rank: 1,
+      views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+    };
+    for (const previous of [
+      { schema_version: 99, generated_at: 1_700_000_000, items: [validItem] },
+      { schema_version: 1, items: [validItem] },
+      { schema_version: 1, generated_at: "not-a-time", items: [validItem] },
+      { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, title: undefined }] },
+      { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, views_2d: undefined }] },
+      { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, video_id: "different-id" }] },
     ]) {
-      const prior = JSON.stringify({ ...metadata, items: [{ id: "video-a", rank: 1, views_30d: 2 }] });
+      const prior = JSON.stringify(previous);
       let reads = 0;
       let puts = 0;
       let output = null;
