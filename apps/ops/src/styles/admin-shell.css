@@ -1,0 +1,106 @@
+/* MIG-0726 U01: CURRENT AdminSidebarNav.module.css selectors mapped to global scoped names. */
+.admin-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.admin-nav-group {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-nav-group-title {
+  margin: 0 0 4px;
+  padding: 0 9px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, transform 0.15s ease;
+}
+
+.admin-nav-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border-subtle);
+  background: color-mix(in srgb, var(--accent-primary-soft) 66%, transparent);
+  transform: translateX(2px);
+}
+
+.admin-nav-link:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.admin-nav-link-active {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent-primary) 20%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary-soft) 72%, var(--bg-surface));
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+.admin-nav-link svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.admin-nav-link-active svg {
+  color: var(--accent-primary-strong);
+}
+
+@media (max-width: 760px) {
+  .admin-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+  }
+
+  .admin-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .admin-nav-group {
+    display: contents;
+  }
+
+  .admin-nav-group-title {
+    display: none;
+  }
+
+  .admin-nav-link {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-nav-link {
+    transition: none;
+    transform: none;
+  }
+}
+
+@media (hover: none) {
+  .admin-nav-link:hover {
+    transform: none;
+  }
+}
