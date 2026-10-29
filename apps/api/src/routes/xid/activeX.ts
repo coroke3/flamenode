@@ -82,7 +82,7 @@ async function loadSelectedIdentity(
         (SELECT COUNT(*) FROM alias_matches) AS alias_count,
         (SELECT COUNT(DISTINCT target_id) FROM alias_matches) AS alias_target_count,
         (SELECT COUNT(*) FROM alias_matches WHERE target_id IS NULL OR
-          target_status NOT IN ('pending','approved','imported')) AS invalid_alias_count,
+          (target_status IS NULL OR target_status NOT IN ('pending','approved','imported'))) AS invalid_alias_count,
         (SELECT target_id FROM alias_matches LIMIT 1) AS alias_target_id
     ),
     resolved AS (
