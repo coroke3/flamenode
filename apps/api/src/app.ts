@@ -12,6 +12,7 @@ import { adminEventRoutes } from "./routes/events/index.ts";
 import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
 import { publicListRoutes } from "./routes/events/publicList.ts";
 import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
+import { eventExportRoutes } from "./routes/events/export.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
@@ -41,6 +42,8 @@ app.route("/api/events", slotViewerOverlayRoutes);
 app.route("/api/events", publicListRoutes);
 // MIG-0631 (RH-012): GET /api/event-endpoints/:id/release
 app.route("/api/event-endpoints", publicReleaseRoutes);
+// MIG-0632 RH-013: public event export, authorization checked fresh before every cache HIT.
+app.route("/api/event-endpoints", eventExportRoutes);
 app.route("/api/videos", videosRoutes);
 // MIG-0605 U01 (RH-001): GET /api/account/summary
 app.route("/api/account/summary", accountSummaryRoutes);
