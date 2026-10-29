@@ -4,7 +4,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { sanitizeNextPath } from "../src/lib/utils/next.ts";
-import { guardRedirect } from "../apps/site/src/lib/guardRedirect.ts";
+import { guardRedirect } from "../apps/site/src/lib/safeApiRedirect.ts";
 import { acceptLatestTerms } from "../apps/site/src/lib/terms.ts";
 import { RULES_COMMIT_ERROR, RULES_GENERIC_ERROR, RULES_RETRY_MESSAGE, rulesErrorMessage, submitRulesConsent } from "../apps/site/src/components/RulesConsentIsland.ts";
 
