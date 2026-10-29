@@ -78,7 +78,7 @@ export function RulesConsentIsland(): React.ReactElement {
     h("section", { className: "fn-surface-panel", "aria-labelledby": "rules-consent-title" },
       h("h2", { id: "rules-consent-title", className: "fn-panel-title" }, "利用規約への同意"),
       h("p", { className: "fn-panel-lead" },
-        "いいね・セーブには利用規約への同意と承認済みの活動名義が必要です。イベント枠の確保には",
+        "いいね・セーブにはログインと利用規約への同意が必要です。承認済みの活動名義は不要です。イベント枠の確保には",
         " X ID の申請が、作品投稿にも承認済みの活動名義が必要です。",
         next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""),
       h("form", { className: "fn-panel-actions", onSubmit: submit },
