@@ -42,6 +42,16 @@ export interface VideoChapterIslandProps {
 
 const h = React.createElement;
 const NETWORK_ERROR = "通信エラーが発生しました。状態を再取得してもう一度お試しください。";
+/** CURRENT ChapterComposer: preserve hh:mm:ss for videos longer than an hour. */
+export function formatChapterDraftTime(seconds: number): string {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = String(total % 60).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}`
+    : `${minutes}:${secs}`;
+}
 
 export function videoChapterDraftIsDirty(
   time: string,
@@ -66,6 +76,7 @@ export function VideoChapterIsland({
 }: VideoChapterIslandProps): React.ReactElement | null {
   const [mounted, setMounted] = React.useState(false);
   const [time, setTime] = React.useState("");
+  const [composerOpen, setComposerOpen] = React.useState(false);
   const [label, setLabel] = React.useState("");
   const [note, setNote] = React.useState("");
   const [visibility, setVisibility] = React.useState<"public" | "private">("public");
@@ -97,7 +108,7 @@ export function VideoChapterIsland({
       pending.current = false;
       setBusy(false);
       setTime(""); setLabel(""); setNote(""); setBulkCsv("");
-      setEditingId(null); setMessage(""); setError(""); setBulkErrors([]);
+      setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
     };
     window.addEventListener(ACTIVE_X_BEFORE_SWITCH_EVENT, before);
     window.addEventListener(ACTIVE_X_CHANGED_EVENT, changed);
@@ -142,7 +153,7 @@ export function VideoChapterIsland({
         : await createChapter(videoId, { ...body, active_x_snapshot: activeXId!.trim() });
       if (!end(generation)) return;
       if (!result.ok) { setError(result.message ?? "投稿に失敗しました。"); return; }
-      setTime(""); setLabel(""); setNote(""); setEditingId(null);
+      setTime(""); setLabel(""); setNote(""); setEditingId(null); setComposerOpen(false);
       setMessage(result.pendingPublicReflection
         ? "保存しました。公開ページへの反映には時間がかかる場合があります。"
         : "保存しました。");
@@ -197,9 +208,17 @@ export function VideoChapterIsland({
   }
   return h("section", { "aria-label": "チャプター投稿" },
     h("h3", null, "チャプターコメント投稿"),
+    !composerOpen ? h("button", {
+      type: "button", disabled: busy,
+      onClick: () => {
+        setTime(formatChapterDraftTime(playerSeconds ?? 0));
+        setLabel(""); setNote(""); setEditingId(null);
+        setError(""); setComposerOpen(true);
+      },
+    }, "現在位置にコメントする") : null,
     error ? h("p", { role: "alert" }, error) : null,
     message ? h("p", { role: "status" }, message) : null,
-    h("form", { onSubmit },
+    composerOpen ? h("form", { onSubmit },
       h("label", null, "時刻", h("input", {
         type: "text", value: time, maxLength: 32, required: true,
         placeholder: "mm:ss", disabled: busy, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setTime(e.target.value),
@@ -208,8 +227,7 @@ export function VideoChapterIsland({
         type: "button", className: "fn-btn fn-btn-ghost fn-btn-sm",
         disabled: busy || playerSeconds === null,
         onClick: () => { if (playerSeconds !== null) {
-          const total = Math.floor(playerSeconds);
-          setTime(`${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`);
+          setTime(formatChapterDraftTime(playerSeconds));
         } },
       }, "現在位置"),
       h("label", null, "タイトル", h("input", {
@@ -225,11 +243,14 @@ export function VideoChapterIsland({
         onChange: (e: React.ChangeEvent<HTMLInputElement>) => setVisibility(e.target.checked ? "public" : "private"),
       }), "公開"),
       h("button", { type: "submit", disabled: busy }, busy ? "送信中…" : editingId ? "更新" : "投稿"),
-      editingId ? h("button", {
+      h("button", {
         type: "button", disabled: busy,
-        onClick: () => { setEditingId(null); setTime(""); setLabel(""); setNote(""); },
-      }, "キャンセル") : null,
-    ),
+        onClick: () => {
+          setComposerOpen(false); setEditingId(null);
+          setTime(""); setLabel(""); setNote(""); setError("");
+        },
+      }, "キャンセル"),
+    ) : null,
     chapters.filter((chapter) => chapter.canManage).map((chapter) =>
       h("div", { key: chapter.id },
         h("span", null, chapter.chapter_label),
@@ -237,6 +258,7 @@ export function VideoChapterIsland({
           type: "button", disabled: busy,
           onClick: () => {
             setEditingId(chapter.id);
+            setComposerOpen(true);
             setTime(chapter.chapter_time);
             setLabel(chapter.chapter_label);
             setNote(chapter.note ?? "");
