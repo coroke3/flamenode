@@ -2,7 +2,7 @@
 /**
  * `/list` (MIG-0505 / Recipe R-PAGE / Runtime S0): the default view (page 1, newest first, tiles) as static HTML.
  * Query-bearing URLs (`?q`, `sort`, `page`, `event`, `view`) are served by the same file and need the
- * ListFilterIsland of MIG-0507; the key table is in `lib/listQuery.ts`. No request-time data.
+ * ListFilterIsland of MIG-0510; the key table is in `lib/listQuery.ts`. SSG never reads request-time data.
  */
 import { ListView } from "@flamenode/ui";
 import PublicLayout from "../layouts/PublicLayout.astro";
@@ -23,5 +23,29 @@ const videos = (list?.videos ?? []).map(toListVideo);
 const emptyMessage = "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
 ---
 <PublicLayout head={head} currentPath="/list">
-  <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} />
+  <div id="list-filter-mount"></div>
+  <div id="list-static-fallback">
+    <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} />
+  </div>
 </PublicLayout>
+
+<script>
+  import { mountListFilters } from "../components/ListFilterIsland.ts";
+  mountListFilters();
+</script>
+<style is:global>
+  #list-filter-mount:not(:empty) { max-width: 1120px; margin: 0 auto; padding: 24px clamp(16px,4vw,40px) 0; }
+  .lv-filter-panel { padding: 16px 0; }
+  .lv-filter-panel summary { cursor: pointer; font-weight: 600; }
+  .lv-filter-form { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; }
+  .lv-filter-form .fn-list-search { flex: 1 1 210px; min-width: 0; }
+  .lv-filter-form input[type=search] { width: 100%; max-width: 520px; }
+  .lv-sort-label { display: inline-flex; align-items: center; gap: 8px; }
+  .lv-view-options,.lv-active-filters,.lv-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .lv-view-options a[aria-current=page],.lv-pagination a[aria-current=page] { text-decoration: underline; font-weight: 700; }
+  .lv-active-filters { margin-top: 16px; }
+  .lv-filter-chip { padding: 4px 10px; background: var(--surface-subtle); }
+  .lv-island-status { padding-top: 24px; color: var(--ink-muted); }
+  .lv-pagination { padding: 16px 0 64px; justify-content: center; }
+  #list-static-fallback[hidden] { display: none; }
+</style>
