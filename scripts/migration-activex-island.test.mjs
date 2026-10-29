@@ -92,8 +92,8 @@ test("T03: header injects the client and JS-off account markup has no inactive s
   // Root test:unit runs before @flamenode/ui is built, so verify SiteHeader's
   // wiring at source level and SSR render only the already build-independent AccountSlot.
   const header = readFileSync(new URL("../apps/site/src/components/SiteHeader.ts", import.meta.url), "utf8");
-  assert.match(header, /import \\{ switchActiveX \\} from "\.\.\/lib\/activeX\.ts"/);
-  assert.match(header, /React\.createElement\(AccountSlot, \\{ currentPath, switchActiveX \\}\)/);
+  assert.ok(header.includes('import { switchActiveX } from "../lib/activeX.ts";'));
+  assert.ok(header.includes('React.createElement(AccountSlot, { currentPath, switchActiveX })'));
   assert.match(header, /ACTIVE_X_CHANGED_EVENT/);
 
   const state = {
