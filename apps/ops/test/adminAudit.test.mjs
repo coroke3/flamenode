@@ -1,4 +1,5 @@
 import test from "node:test";
+import { parseAuditChanges, AuditDiffGrid } from "../.test-dist/apps/ops/src/routes/admin/AuditDiffGrid.js";
 import { AuditDetailContent, AuditDiffDetail } from "../.test-dist/apps/ops/src/routes/admin/AuditDetail.js";
 import { AuditRestoreForm } from "../.test-dist/apps/ops/src/routes/admin/AuditRestoreForm.js";
 import { AuditRestoreRunsContent } from "../.test-dist/apps/ops/src/routes/admin/AuditRestoreRuns.js";
@@ -310,4 +311,18 @@ test("MIG-0733 T06: shortening retention warns and saving requires five bounded 
   }));
   assert.match(form,/設定を保存/);
   assert.doesNotMatch(form,/保持日数を短くすると/);
+});
+
+test("MIG-0733: diff displays field labels, added/removed/changed and malformed JSON",()=>{
+  const compared=parseAuditChanges('{"title":"old","role":"admin","deleted":1}', '{"title":"new","role":"admin","created":2}');
+  assert.equal(compared.valid,true);
+  assert.deepEqual(compared.changes.map(x=>[x.key,x.kind]),[
+    ["created","added"],["deleted","removed"],["title","changed"]]);
+  assert.equal(compared.changes.at(-1).label,"作品タイトル");
+  assert.equal(parseAuditChanges("{bad}","{}").valid,false);
+  const html=renderToStaticMarkup(React.createElement(AuditDiffGrid,{
+    before:'{"title":"old"}',after:'{"title":"new"}',
+  }));
+  assert.match(html,/作品タイトル/);assert.match(html,/変更/);
+  assert.match(html,/old/);assert.match(html,/new/);
 });
