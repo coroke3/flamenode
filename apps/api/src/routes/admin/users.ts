@@ -79,8 +79,9 @@ export async function mutateUserWithAudit(
         retention_class:retention,context,reason,strict:true}],
     });
     return c.json<AdminOpsResult>({ok:true},200);
-  }catch(e){
-    console.error("[MIG-0637] user admin atomic mutation failed",e);
+  }catch{
+    // Do not log provider exception details from D1 or the audit batch.
+    console.error("[MIG-0637] user admin atomic mutation failed");
     return fail(c,409,ATOMIC_FAILURE);
   }
 }
