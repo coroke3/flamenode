@@ -1,5 +1,5 @@
 import React from "react";
-import { useVideoViewerOverlay } from "../lib/viewerOverlay.ts";
+import { useVideoViewerOverlay, notifyVideoViewerOverlayChanged } from "../lib/viewerOverlay.ts";
 import { VideoUtilityDockIsland, type PublicVideoChapter } from "./VideoUtilityDockIsland.ts";
 
 /** MIG-0518 U01: share MIG-0513's RH-031 cache/invalidations and query key. */
@@ -12,14 +12,14 @@ export function VideoUtilityDockConnected({
   currentId: string;
   publicChapters: readonly PublicVideoChapter[];
 }): React.ReactElement {
-  const { overlay, loading, refresh } = useVideoViewerOverlay(videoId);
+  const { overlay, loading } = useVideoViewerOverlay(videoId);
   return React.createElement(VideoUtilityDockIsland, {
     videoId,
     currentId,
     publicChapters,
     overlay,
     loading,
-    onRefresh: refresh,
+    onRefresh: () => notifyVideoViewerOverlayChanged(videoId),
   });
 }
 export default VideoUtilityDockConnected;
