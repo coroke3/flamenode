@@ -27,6 +27,7 @@ export function createAdminAuditApi(fetchFn: OpsFetch = (input, init) => fetch(i
       let offset = 0;
       let total: number | null = null;
       let body = "";
+      let receivedChars = 0; // D1 length/substr counts Unicode code points, not JS UTF-16 units.
       for (let n = 0; n < MAX_PAYLOAD_CHUNKS; n++) {
         if (signal?.aborted) return { status: "unavailable" };
         const result = await getJson<unknown>(fetchFn, path + "?offset=" + offset, signal);
@@ -39,14 +40,15 @@ export function createAdminAuditApi(fetchFn: OpsFetch = (input, init) => fetch(i
         if (chunk.field !== field || chunk.offset !== offset ||
             chunk.total > MAX_PAYLOAD_CHARS || chunk.total < 0 ||
             (total !== null && total !== chunk.total) ||
-            chunk.chunk.length > 12_000) return { status: "unavailable" };
+            Array.from(chunk.chunk).length > 12_000) return { status: "unavailable" };
         total = chunk.total;
         body += chunk.chunk;
-        if (body.length > total) return { status: "unavailable" };
+        receivedChars += Array.from(chunk.chunk).length;
+        if (receivedChars > total) return { status: "unavailable" };
         if (chunk.nextOffset === null) {
-          return body.length === total ? { status: "ok", data: body } : { status: "unavailable" };
+          return receivedChars === total ? { status: "ok", data: body } : { status: "unavailable" };
         }
-        if (chunk.nextOffset <= offset || chunk.nextOffset !== body.length || !chunk.chunk.length) {
+        if (chunk.nextOffset <= offset || chunk.nextOffset !== receivedChars || !chunk.chunk.length) {
           return { status: "unavailable" };
         }
         offset = chunk.nextOffset;
