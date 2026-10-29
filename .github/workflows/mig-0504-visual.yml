@@ -1,10 +1,7 @@
 name: MIG-0504 user route visual smoke
+# Repository cloudflare-ci policy forbids new automatic push/pull_request/schedule workflows.
+# Run this visual evidence workflow explicitly from GitHub Actions when needed.
 on:
-  pull_request:
-    paths:
-      - "scripts/migration-user-routes.visual.mjs"
-      - "scripts/migration-user-routes.test.mjs"
-      - ".github/workflows/mig-0504-visual.yml"
   workflow_dispatch:
 
 permissions:
