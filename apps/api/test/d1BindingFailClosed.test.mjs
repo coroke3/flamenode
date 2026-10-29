@@ -5,6 +5,7 @@ import { app as mountedApi } from "../src/app.ts";
 
 import { requireAuth, sessionMiddleware } from "../src/auth/session.ts";
 import { costGuardMiddleware } from "../src/middleware/costGuard.ts";
+import { dbMiddleware } from "../src/middleware/db.ts";
 import { writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 
 const SITE = "https://app.flamenode.example";
@@ -233,4 +234,50 @@ test("SEC-0807-01: real mounted origin denial never touches a throwing D1 bindin
       assert.equal(accesses(), 0, "origin denial precedes session lookup");
     });
   }
+});
+
+test("SEC-0807-01: dbMiddleware denies a second-access D1 getter failure", async () => {
+  let reads = 0;
+  let handlerCalls = 0;
+  const env = Object.defineProperty({}, "DB", {
+    get() {
+      reads += 1;
+      if (reads === 2) throw new Error(SENTINEL);
+      return {};
+    },
+  });
+  const app = new Hono();
+  // Simulate an earlier guard successfully acquiring the DB binding.
+  app.use("/write", async (c, next) => {
+    assert.ok(c.env.DB);
+    await next();
+  });
+  app.use("/write", dbMiddleware);
+  app.post("/write", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+  const response = await app.request(`${SITE}/write`, { method: "POST" }, env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), PRIVATE);
+  const body = await response.text();
+  assert.equal(JSON.parse(body).reason, "db_unavailable");
+  assert.doesNotMatch(body, /PROVIDER_SECRET_FROM_DB_GETTER/);
+  assert.equal(reads, 2);
+  assert.equal(handlerCalls, 0, "later DB binding failure must prevent mutation");
+});
+
+test("SEC-0807-01: dbMiddleware denies a missing D1 binding", async () => {
+  let handlerCalls = 0;
+  const app = new Hono();
+  app.use("/write", dbMiddleware);
+  app.post("/write", (c) => {
+    handlerCalls += 1;
+    return c.json({ ok: true });
+  });
+  const response = await app.request(`${SITE}/write`, { method: "POST" }, {});
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), PRIVATE);
+  assert.equal((await response.json()).reason, "db_unavailable");
+  assert.equal(handlerCalls, 0);
 });
