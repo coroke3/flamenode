@@ -496,3 +496,12 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 | `GET /api/manage/navigation` | `src/components/layout/ConsoleSidebar.tsx` の active/staff X 警告、`GET /api/manage` の同値 | `apps/api/src/routes/manage/navigation.ts` + `packages/contracts/src/manage/shared.ts` | `activeXUserId: string \| null`（承認済み linked X で解決、admin は null）、`manageStaffXUserIds: string[]`（運営スタッフ X、admin は空配列）。`shouldWarnManageActiveXMismatch` が描画側で同じ判定に使用できる | `access`, `events`, `truncated` の値は不変。非 admin は `loadManageData(..., { linked: true })` の同じ1 SQL 文で linked X を最大100件取得し、session を含め3 D1 statement以下、応答64KiB以下。GET専用、`private, no-store`、D1書込0 | MIG-0663 PR#423 REVIEW |
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
+
+
+## MIG-0632 RH-013 public event export (migration in progress)
+
+| ID | CURRENT | TARGET | Auth and cache safety | Work status |
+| --- | --- | --- | --- | --- |
+| RH-013 | GET `/api/event-endpoints/[id]`, format v5/new/default or legacy/old/v1; realtime/scheduled; refresh 15/60/360/1440 | Planned `apps/api/src/routes/events/export.ts`; pure payload now `@flamenode/server-core/eventExport/payload`, cache identity now `@flamenode/server-core/publicCache/eventExportKeys` | Cache HIT **must** follow per-request D1 public+public_api_enabled gate; unknown/stale cache must be validated with forbidden-key check or evicted; 404 on private; 503 on failed data/leak gate; scheduled Cache API, realtime isolate micro-cache; CORS and X-FlameNode-* headers unchanged | IN_PROGRESS (PR#457; core/bridge only, route and CPU pending) |
+
+D-12: response size 64KiB and warmed CPU 7ms must be measured with the 500-video/100-members upper-bound fixture before completing MIG-0632; over-budget behavior is an explicit recorded exception, not a waived gate. No traffic cutover or route mapping is approved.
