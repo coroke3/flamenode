@@ -5,11 +5,8 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
-import { dbMiddleware } from "../../middleware/db.ts";
-import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import {
   originGuardMiddleware,
-  writeGuardMiddleware,
 } from "../../middleware/writeOrigin.ts";
 import { activeXRoutes } from "./activeX.ts";
 
@@ -27,10 +24,9 @@ export function createXidRoutes(
   });
   xid.use("*", (c, next) => originGuardMiddleware(originOptions(c))(c, next));
   xid.use("*", options.session ?? sessionMiddleware());
-  xid.use("*", (c, next) =>
-    writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next));
-  xid.use("*", costGuardMiddleware("xid_links"));
-  xid.use("*", dbMiddleware);
+  // SA-098 shares its one D1 read between TOS, user CAS snapshot and
+  // selected linked-X access. Its route performs the remaining identity,
+  // CostGuard, strict audit, and Drizzle checks in CURRENT order.
   xid.route("/active", activeXRoutes);
   return xid;
 }
