@@ -1,5 +1,6 @@
 // MIG-0518 U02: independent Hono SA-012..015 contract and write-control tests.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import React from "react";
 import { renderToString } from "react-dom/server";
@@ -218,7 +219,11 @@ test("U03 private playlist and chapters are excluded entirely from JS-disabled H
   assert.equal(html, "");
 });
 
-test("U01/U03 VideoPageIsland keeps static public chapters without client JavaScript", async () => {
+const skipVideoPageRender = fs.existsSync("packages/ui/dist/index.js")
+  ? false
+  : process.env.REQUIRE_BUILT ? false : "requires built @flamenode/ui";
+
+test("U01/U03 VideoPageIsland keeps static public chapters without client JavaScript", { skip: skipVideoPageRender }, async () => {
   const { VideoPageIsland } = await import("../apps/site/src/components/VideoPageIsland.ts");
   const video = {
     id: "video", title: "Video", creator: { name: "Creator" }, hasYoutube: false,
