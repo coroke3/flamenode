@@ -22,6 +22,23 @@ import { formatRemainingTimeMetric } from "../../../../src/lib/utils/remainingTi
 
 export const EVENT_VIDEO_DISPLAY_LIMIT = 8;
 
+/** Only public display fields cross the Astro Island serialization boundary.
+ * The source snapshot's per-slot reservation status and slotSummary must never
+ * be embedded into static HTML (not even as otherwise unused React props).
+ */
+export type EventIslandDetail = Omit<StaticEventDetail, "slotSummary" | "slots"> & {
+  slots: readonly SlotLayoutRow[];
+};
+
+export function eventIslandDetail(detail: StaticEventDetail): EventIslandDetail {
+  const { slotSummary: _privateSummary, slots, ...publicFields } = detail;
+  return {
+    ...publicFields,
+    slots: slots.map(({ id, start_time, sort_order }) => ({ id, start_time, sort_order })),
+  };
+}
+
+
 /**
  * Browser-safe CURRENT recruit model. MIG-0506 topData.ts is build-only and
  * imports node:crypto/fs transitively: do not use it inside the hydrated Island.
@@ -118,7 +135,7 @@ export function getDayMetric(
 
 /** Time layout of the slots (ids, time, order): structure only, no status. */
 export type SlotLayoutRow = Readonly<{ id: string; start_time: number | null; sort_order: number | null }>;
-export function slotLayoutOf(detail: StaticEventDetail): SlotLayoutRow[] {
+export function slotLayoutOf(detail: EventIslandDetail): SlotLayoutRow[] {
   return detail.slots.map((s: StaticEventSlot) => ({ id: s.id, start_time: s.start_time, sort_order: s.sort_order }));
 }
 
@@ -144,7 +161,7 @@ export function slotPartsOf(
 }
 
 export function buildEventDetailData(
-  detail: StaticEventDetail,
+  detail: EventIslandDetail,
   now: number,
   live: LiveSlotStatus | null = null,
 ): EventDetailData {
