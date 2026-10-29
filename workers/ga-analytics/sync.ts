@@ -15,6 +15,7 @@ import {
 } from "./dataApi.ts";
 import type { Ga4DataApiEnv } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
+import { normalizeStaticTrending } from "../../src/lib/publicData/staticTrendingCore.ts";
 import { loadRecentListFromD1 } from "./recentFromD1.ts";
 import type { RecentListPayload, TrendingItem } from "./ranking.ts";
 
@@ -189,13 +190,15 @@ async function loadExistingTrendingItemCount(
   if (isOversizedUtf8Text(text, GA4_TRENDING_MAX_OBJECT_BYTES)) return 0;
   try {
     const payload = JSON.parse(text) as TrendingOutputPayload;
-    // The public reader rejects a missing/unknown schema version or a
-    // nonnumeric generation time. Do not preserve an artifact it cannot load.
+    // Retain only artifacts where the public reader can render every item.
+    // ID/status alone are insufficient: title, view windows, rank and video_id
+    // also affect the public reader's acceptance of each row.
+    const normalized = normalizeStaticTrending(payload);
     if (
-      payload?.schema_version !== TRENDING_SCHEMA_VERSION ||
-      !Number.isFinite(Number(payload.generated_at)) ||
+      !normalized ||
       !Array.isArray(payload.items) ||
-      payload.items.length === 0
+      payload.items.length === 0 ||
+      normalized.items.length !== payload.items.length
     ) return 0;
     // A last-success ranking may outlive a video's public visibility. Only
     // preserve the artifact if ALL its IDs are still in the current D1
@@ -208,11 +211,9 @@ async function loadExistingTrendingItemCount(
         publicIds.add(item.id.trim());
       }
     }
-    return payload.items.every(
-      (item) => item && typeof item === "object" &&
-        typeof item.id === "string" && publicIds.has(item.id.trim()) &&
-        (item.status === undefined || item.status === "public"),
-    ) ? payload.items.length : 0;
+    return normalized.items.every((item) => publicIds.has(item.id))
+      ? normalized.items.length
+      : 0;
   } catch {
     return 0;
   }
@@ -276,19 +277,33 @@ export async function syncGa4Trending(
 
   try {
     const recent = await loadRecentListPayload(env, signal);
-    // No public videos: do not spend GA4 quota or overwrite the last R2
-    // success with an empty ranking. D1 remains read-only.
-    if (!recent.items || !Array.isArray(recent.items) || recent.items.length === 0) {
+    // A successful D1 read with zero public videos invalidates every former
+    // public ranking. Avoid a GA4 call, but publish an empty valid artifact so
+    // removed/private video IDs cannot persist in R2.
+    if (!Array.isArray(recent.items)) throw new Error("ga4_recent_d1_invalid_result");
+    if (recent.items.length === 0) {
+      const generatedAt = Math.floor(Date.now() / 1000);
+      await putTrendingPayload(env, {
+        schema_version: TRENDING_SCHEMA_VERSION,
+        generated_at: generatedAt,
+        source: "ga4",
+        ranking_rule: [...TRENDING_RANKING_RULE],
+        windows: buildTrendingWindows(new Date(generatedAt * 1000)),
+        items: [],
+      }, signal);
       logGa4TrendingEvent({
         service: "flamenode-sync-jobs",
         worker: "sync-jobs",
         job: "ga4-trending-sync",
         enabled: true,
-        result: "skipped",
+        result: "ok",
         reason: "no_public_videos",
-        r2_written: false,
+        generated_at: generatedAt,
+        ranked_videos: 0,
+        r2_written: true,
+        external_api_calls: 0,
       });
-      return emptyResult({ processed: 0, failed: 0, skipped: 1 });
+      return emptyResult({ processed: 0, failed: 0, skipped: 0 });
     }
     const { periods, quota } = await fetchVideoViewPeriods(
       env,
