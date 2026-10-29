@@ -99,6 +99,8 @@ export function VideoUtilityDockIsland({
   const [panel, setPanel] = React.useState<"playlist" | "chapters" | null>(null);
   const [autoNext, setAutoNext] = React.useState(false);
   const [order, setOrder] = React.useState<string[]>([]);
+  // Order is scoped to the query-key; a previous playlist must never overwrite the next one.
+  const [orderPlaylist, setOrderPlaylist] = React.useState<string | null>(null);
   const [ready, setReady] = React.useState(false);
   const [isMobile, setIsMobile] = React.useState(false);
   const historyOwned = React.useRef(false);
@@ -170,6 +172,7 @@ export function VideoUtilityDockIsland({
       const data = playlist ? JSON.parse(localStorage.getItem(ORDER_KEY_PREFIX + playlist) ?? "[]") as unknown : [];
       setOrder(Array.isArray(data) ? data.filter((x): x is string => typeof x === "string") : []);
     } catch { setOrder([]); }
+    setOrderPlaylist(playlist);
     setReady(true);
   }, [mounted, playlist]);
   React.useEffect(() => {
@@ -177,17 +180,18 @@ export function VideoUtilityDockIsland({
     try { localStorage.setItem(AUTO_NEXT_KEY, autoNext ? "1" : "0"); } catch { /* disabled */ }
   }, [autoNext, ready]);
   React.useEffect(() => {
-    if (!ready || !playlist) return;
+    if (!ready || !playlist || orderPlaylist !== playlist) return;
     try { localStorage.setItem(ORDER_KEY_PREFIX + playlist, JSON.stringify(order)); } catch { /* disabled */ }
-  }, [order, ready, playlist]);
+  }, [order, orderPlaylist, ready, playlist]);
 
   const items = React.useMemo(() => {
     const unique = uniquePlaylistItems(overlay.playlistItems);
     const byId = new Map<string, (typeof unique)[number]>(unique.map((item) => [item.id, item] as const));
-    const ordered = order.map((id) => byId.get(id)).filter((i): i is NonNullable<typeof i> => Boolean(i));
+    const relevantOrder = orderPlaylist === playlist ? order : [];
+    const ordered = relevantOrder.map((id) => byId.get(id)).filter((i): i is NonNullable<typeof i> => Boolean(i));
     const used = new Set(ordered.map((item) => item.id));
     return [...ordered, ...unique.filter((item) => !used.has(item.id))];
-  }, [overlay.playlistItems, order]);
+  }, [overlay.playlistItems, order, orderPlaylist, playlist]);
   const index = items.findIndex((item) => currentId === item.id || currentId === item.youtube_video_id);
   const previous = index > 0 ? items[index - 1] : null;
   const next = index >= 0 && index + 1 < items.length ? items[index + 1] : null;
@@ -258,7 +262,7 @@ export function VideoUtilityDockIsland({
         previous ? h("a", { href: href(previous) }, "前へ") : null,
         next ? h("a", { href: href(next) }, "次へ") : null,
         h("label", null, h("input", { type: "checkbox", checked: autoNext, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setAutoNext(e.target.checked) }), "次の動画を自動再生"),
-        h("button", { type: "button", disabled: order.length === 0, onClick: () => setOrder([]) }, "並び順を初期化"),
+        h("button", { type: "button", disabled: orderPlaylist !== playlist || order.length === 0, onClick: () => setOrder([]) }, "並び順を初期化"),
         h("ol", null, ...items.map((item, pos) =>
           h("li", { key: item.id },
             h("a", { href: href(item), "aria-current": pos === index ? "page" : undefined }, item.title),
