@@ -390,6 +390,15 @@ test("U03 switching ?playlist= never overwrites another playlist's persisted ord
   }
 });
 
+test("U02 dirty guard compares against editor/player prefill instead of false prompting", async () => {
+  const { videoChapterDraftIsDirty } = await import("../apps/site/src/components/VideoChapterIsland.ts");
+  const baseline = { time: "1:01:02", label: "サビ", note: "補足", csv: "" };
+  assert.equal(videoChapterDraftIsDirty("1:01:02", "サビ", "補足", "", baseline), false);
+  assert.equal(videoChapterDraftIsDirty("1:01:03", "サビ", "補足", "", baseline), true);
+  assert.equal(videoChapterDraftIsDirty("1:01:02", "変更", "補足", "", baseline), true);
+  assert.equal(videoChapterDraftIsDirty("1:01:02", "サビ", "補足", "csv", baseline), true);
+});
+
 test("U02 CURRENT time formatting supports hh:mm:ss, invalid and end-of-hour boundaries", async () => {
   const { formatChapterDraftTime } = await import("../apps/site/src/components/VideoChapterIsland.ts");
   assert.equal(formatChapterDraftTime(0), "0:00");
@@ -428,6 +437,14 @@ test("U02 composer opens only on action, prefills the current player time and ca
       [...doc.querySelectorAll("button")].find((button) => button.textContent === "現在位置にコメントする").click();
     });
     assert.equal(doc.querySelector("form input[placeholder='mm:ss']").value, "1:01:02");
+    let prompts = 0;
+    dom.window.confirm = () => { prompts += 1; return false; };
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent("flamenode:before-active-x-switch", {
+        cancelable: true, detail: { fromXId: "approved", toXId: "another" },
+      }));
+    });
+    assert.equal(prompts, 0, "An untouched player-time prefill is not a dirty draft");
     await React.act(async () => {
       [...doc.querySelectorAll("button")].find((button) => button.textContent === "キャンセル").click();
     });
