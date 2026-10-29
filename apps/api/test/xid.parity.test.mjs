@@ -120,6 +120,40 @@ test("SA-098 does not require an admin role, but requires a live session", async
   assert.equal(noAuth.stats.batches, 0);
 });
 
+test("SA-098 denies missing TOS and major-terms reaccept without a mutation", async () => {
+  {
+    const { sqlite, request, stats } = setup();
+    sqlite.prepare('UPDATE "user" SET is_tos_accepted = 0 WHERE id = ?').run(USER.id);
+    const response = await request();
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).reason, "tos_required");
+    assert.equal(stats.batches, 0);
+  }
+  {
+    const { sqlite, request, stats } = setup();
+    sqlite.prepare("INSERT INTO terms_versions (id, severity, published_at, updated_at) VALUES ('major-v2', 'major', 1000, 1000)").run();
+    const response = await request();
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).reason, "tos_reaccept_required");
+    assert.equal(stats.batches, 0);
+  }
+});
+
+test("SA-098 strict audit uses the preloaded CURRENT actor snapshot", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare('UPDATE "user" SET discord_id = ?, name = ?, image = ? WHERE id = ?')
+    .run("d-test", "Session Name", "https://img.example/u.png", USER.id);
+  const response = await request();
+  assert.equal(response.status, 200);
+  const row = sqlite.prepare("SELECT actor_snapshot_json FROM audit_logs").get();
+  const actor = JSON.parse(row.actor_snapshot_json);
+  assert.equal(actor.discord_id, "d-test");
+  assert.equal(actor.discord_name, "Session Name");
+  assert.equal(actor.x_user_id, null);
+  assert.equal(actor.icon_url, "https://img.example/u.png");
+  assert.ok(stats.reads <= 3, `D1 pre-reads: ${stats.reads}`);
+});
+
 test("SA-098 cross-origin write fails before any database access", async () => {
   const { stats, request } = setup();
   const response = await request({ x_user_id: "x-one" }, "https://evil.example");
