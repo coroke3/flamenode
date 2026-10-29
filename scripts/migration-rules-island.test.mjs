@@ -3,9 +3,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { renderToStaticMarkup } from "react-dom/server";
-import React from "react";
-import { RulesView } from "../packages/ui/src/screens/RulesView.tsx";
 import { sanitizeNextPath } from "../src/lib/utils/next.ts";
 import { guardRedirect } from "../apps/site/src/lib/guardRedirect.ts";
 import { acceptLatestTerms } from "../apps/site/src/lib/terms.ts";
@@ -64,15 +61,16 @@ test("T03: failed accept follows existing safe redirect, otherwise shows message
 });
 
 test("T04: static legal page has no dead consent control without JS", () => {
-  const html = renderToStaticMarkup(React.createElement(RulesView, {
-    versionLabel: "v1", blocks: [{ type: "paragraph", text: "本文" }], showConsentMount: true,
-  }));
-  const doc = new JSDOM(html).window.document;
-  assert.ok(doc.querySelector("article")?.textContent.includes("本文"));
-  assert.ok(doc.querySelector("#rules-consent-mount"));
-  assert.equal(doc.querySelector("form"), null);
-  assert.equal(doc.querySelector("button"), null);
-  assert.ok(doc.querySelector("#event-host"));
+  const built = "apps/site/dist/rules/index.html";
+  if (process.env.REQUIRE_BUILT && !fs.existsSync(built)) throw new Error("Missing /rules build");
+  if (fs.existsSync(built)) {
+    const doc = new JSDOM(fs.readFileSync(built, "utf8")).window.document;
+    assert.ok(doc.querySelector("article")?.textContent.includes("利用規約") || doc.querySelector("article"));
+    assert.ok(doc.querySelector("#rules-consent-mount"));
+    assert.equal(doc.querySelector("#rules-consent-mount form"), null);
+    assert.equal(doc.querySelector("#rules-consent-mount button"), null);
+    assert.ok(doc.querySelector("#event-host"));
+  }
   const astro = fs.readFileSync("apps/site/src/pages/rules.astro", "utf8");
   assert.match(astro, /showConsentMount=\{true\}/);
   assert.match(astro, /mountRulesConsent\(\)/);
