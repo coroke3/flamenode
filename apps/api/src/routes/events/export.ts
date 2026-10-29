@@ -15,8 +15,16 @@ import { isolateMicroCacheGet, isolateMicroCacheSet } from "../live/microCache.t
 export const eventExportRoutes = new Hono<AppEnv>();
 // No session guard on public GET; the shared host constructs the injected DB handle.
 eventExportRoutes.use("*", async (c, next) => {
-  if (!c.env.DB) return next();
-  return dbMiddleware(c, next);
+  try {
+    // The DB getter may throw synchronously when the Cloudflare binding is unavailable.
+    // Never let that exception escape to Hono's default 500 response.
+    if (!c.env.DB) {
+      return publicJsonResponse(c.req.raw, { error: "db_unavailable" }, "no-store", 503);
+    }
+    await dbMiddleware(c, next);
+  } catch {
+    return publicJsonResponse(c.req.raw, { error: "db_unavailable" }, "no-store", 503);
+  }
 });
 const NOT_FOUND_CACHE_CONTROL = "public, max-age=60";
 const EVENT_EXPORT_CACHE_METADATA_MARKER = "public-export-validated-v1";
@@ -141,7 +149,7 @@ eventExportRoutes.get("/:id", async (c) => {
       allowed: { format: ["v5", "legacy"], update: ["realtime", "scheduled"], refresh: EVENT_EXPORT_REFRESH_MINUTES },
     }, "no-store", 400);
   }
-  if (!c.env.DB) return publicJsonResponse(req, { error: "db_unavailable" }, "no-store", 503);
+  // The middleware has already resolved the DB binding; do not touch it again here.
   const db = c.get("db");
   const key = eventExportPayloadCacheKey(eventId, format, refreshMinutes);
   const usePayloadCache = updateMode === "scheduled";
