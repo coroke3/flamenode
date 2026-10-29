@@ -103,6 +103,7 @@ test("SEC-0807-01: Origin and identity denials happen before DB binding access",
     { origin: "https://evil.example", user: ADMIN, sessionState: "user", status: 403, reason: "invalid_origin" },
     { origin: SITE, user: null, sessionState: "none", status: 401, reason: "unauthenticated" },
     { origin: SITE, user: null, sessionState: "unavailable", status: 503, reason: "database_unavailable" },
+    { origin: SITE, user: ADMIN, sessionState: "unavailable", status: 503, reason: "database_unavailable" },
   ]) {
     const { env, accesses } = throwingBinding();
     let mutations = 0;
@@ -126,6 +127,38 @@ test("SEC-0807-01: Origin and identity denials happen before DB binding access",
     assert.equal(accesses(), 0, reason);
     assert.equal(mutations, 0, reason);
   }
+});
+
+test("SEC-0807-01: unavailable Origin configuration denies before throwing D1 binding", async () => {
+  const { env, accesses } = throwingBinding();
+  let mutations = 0;
+  const app = new Hono();
+  app.use("/write", async (c, next) => {
+    c.set("user", ADMIN);
+    c.set("sessionState", "user");
+    await next();
+  });
+  app.use("/write", writeGuardMiddleware({
+    loadSiteUrl: () => { throw new Error(SENTINEL); },
+    allowLocalPreview: () => false,
+  }));
+  app.post("/write", (c) => {
+    mutations += 1;
+    return c.json({ ok: true });
+  });
+  const response = await app.request(`${SITE}/write`, {
+    method: "POST",
+    headers: { Origin: SITE },
+  }, env);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    reason: "origin_verification_unavailable",
+    message: "Origin を検証できません。",
+  });
+  assert.equal(response.headers.get("cache-control"), PRIVATE);
+  assert.equal(accesses(), 0, "Origin failure must not consult DB getter");
+  assert.equal(mutations, 0);
 });
 
 test("SEC-0807-01: CostGuard DB getter failure returns private 503 without mutation", async () => {
