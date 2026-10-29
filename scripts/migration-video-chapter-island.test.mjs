@@ -282,3 +282,59 @@ test("U03 chapter post guards show actionable login/terms/approved-X destination
   assert.equal(chapterPostPolicy({ ...okay, viewerXApproved: false }, false, "/v").href,
     "/dashboard/settings?next=%2Fv");
 });
+
+test("U03 mobile drawer uses synthetic Back history, Escape and shared body-scroll lock", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { VideoUtilityDockIsland } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.net/AAAAAAAAAAA?playlist=p",
+  });
+  dom.window.matchMedia = () => ({
+    matches: true, addEventListener() {}, removeEventListener() {},
+  });
+  dom.window.scrollTo = () => {};
+  dom.window.requestAnimationFrame = (cb) => dom.window.setTimeout(cb, 0);
+  dom.window.cancelAnimationFrame = (id) => dom.window.clearTimeout(id);
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent"];
+  const prior = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const oldAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true, value: dom.window[key],
+    });
+  }
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const overlay = {
+    loggedIn: false, authUnavailable: false, isBanned: false,
+    isTosAccepted: false, termsReacceptRequired: false, activeXId: null,
+    likeActive: false, bookmarkActive: false, viewerXApproved: false,
+    privateChapters: [], playlistLabel: "再生リスト",
+    playlistItems: [{ id: "vid", title: "Title", youtube_video_id: null, display_name: "Creator" }],
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(VideoUtilityDockIsland, {
+      videoId: "vid", currentId: "vid", publicChapters: [],
+      overlay, loading: false,
+    })));
+    await React.act(async () => {
+      dom.window.document.querySelector('[aria-controls="video-utility-playlist"]').click();
+    });
+    assert.equal(dom.window.history.state["fn-video-utility-dock"], true);
+    assert.equal(dom.window.document.body.style.position, "fixed");
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    assert.equal(dom.window.document.querySelector('[aria-controls="video-utility-playlist"]').getAttribute("aria-expanded"), "false");
+    assert.notEqual(dom.window.document.body.style.position, "fixed");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of prior) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = oldAct;
+    dom.window.close();
+  }
+});
