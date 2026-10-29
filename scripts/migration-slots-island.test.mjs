@@ -147,6 +147,41 @@ test("U01 timeout/abort fail closed without a stale viewer", async () => {
   assert.equal(cancelled.authUnavailable, true);
 });
 
+test("U01 abort wins even when a fetch implementation ignores AbortSignal", async () => {
+  const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const privileged = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: true, viewerXId: "old", viewerXIdNotice: null,
+    slots: [{ id: "s", viewer_relation: "active", is_owned_by_viewer: true }],
+  };
+  // Promise resolves after timeout without observing the signal: fail closed.
+  const lateResponse = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    return { ok: true, json: async () => privileged };
+  };
+  const late = await fetchSlotViewerOverlay("e", undefined, lateResponse, 2);
+  assert.equal(late.authUnavailable, true);
+  assert.equal(late.canReserveSlot, false);
+  assert.deepEqual(late.slots, []);
+
+  // Also reject when only the body parsing completes after the deadline.
+  const slowJson = async () => ({ ok: true, json: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    return privileged;
+  } });
+  const body = await fetchSlotViewerOverlay("e", undefined, slowJson, 2);
+  assert.equal(body.authUnavailable, true);
+  assert.equal(body.operatorOverrideAllowed, false);
+
+  // Caller cancellation with a fetch that ignores its signal is also safe.
+  const controller = new AbortController();
+  const pending = fetchSlotViewerOverlay("e", controller.signal, lateResponse, 100);
+  controller.abort();
+  const cancelled = await pending;
+  assert.equal(cancelled.canReserveSlot, false);
+});
+
 test("U01 viewer patches retain public base and lose write ownership on auth degradation", async () => {
   const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
     await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
