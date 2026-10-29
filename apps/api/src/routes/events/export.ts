@@ -99,8 +99,12 @@ async function readCachedPayload(
   if (ageSeconds < 0 || ageSeconds >= ttlSeconds) return null;
   const { body, metadata } = envelope.payload;
   if (!body) return null;
-  if (isTrustedCacheMetadata(metadata, format)) return body;
   try {
+    // Metadata is only a cache hint. Never trust it in place of body validation.
+    // Legacy entries without metadata remain readable after full DTO validation.
+    if (metadata != null && !isTrustedCacheMetadata(metadata, format)) {
+      throw new Error("stale_cache_metadata");
+    }
     const parsed = JSON.parse(body) as unknown;
     if (format === "legacy") {
       if (!Array.isArray(parsed)) throw new Error("stale_legacy_schema");
