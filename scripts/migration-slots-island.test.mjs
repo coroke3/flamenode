@@ -95,3 +95,141 @@ test("U02 malformed JSON, missing boolean ok and inconsistent HTTP status fail c
   const throwingFetcher = async () => { throw new SyntaxError("not JSON"); };
   await assert.rejects(extendSlot("e", "s", { direction: "forward" }, throwingFetcher), SyntaxError);
 });
+
+test("U01 RH-014 invalid privilege flags and malformed JSON fail closed", async () => {
+  const { parseSlotViewerOverlay, unavailableSlotViewerOverlay, fetchSlotViewerOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const valid = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "x", viewerXIdNotice: null,
+    slots: [{ id: "s", display_name: "名前", is_owned_by_viewer: true,
+      viewer_relation: "active", group_key: "private-1" }],
+  };
+  assert.equal(parseSlotViewerOverlay(valid)?.canReserveSlot, true);
+  for (const invalid of [null, [], {}, { ...valid, loggedIn: "true" },
+    { ...valid, canReserveSlot: 1 }, { ...valid, slots: "wrong" }]) {
+    assert.equal(parseSlotViewerOverlay(invalid), null);
+  }
+  const invalid = server(200, { ...valid, loggedIn: "true" });
+  assert.deepEqual(await fetchSlotViewerOverlay("event", undefined, invalid.fetcher), unavailableSlotViewerOverlay());
+  assert.equal(invalid.calls[0].url, "/api/events/event/slots/viewer-overlay");
+  assert.equal(invalid.calls[0].init.cache, "no-store");
+  assert.equal(invalid.calls[0].init.credentials, "same-origin");
+  assert.equal(invalid.calls[0].init.headers.Accept, "application/json");
+});
+
+test("U01 viewer overlay RH-014 503/404/network error never grants ownership", async () => {
+  const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  for (const status of [404, 503]) {
+    const srv = server(status, { loggedIn: true, canReserveSlot: true });
+    const result = await fetchSlotViewerOverlay("e", undefined, srv.fetcher);
+    assert.equal(result.authUnavailable, true);
+    assert.equal(result.canReserveSlot, false);
+    assert.deepEqual(result.slots, []);
+  }
+  const result = await fetchSlotViewerOverlay("e", undefined, async () => { throw new Error("network"); });
+  assert.equal(result.authUnavailable, true);
+});
+
+test("U01 timeout/abort fail closed without a stale viewer", async () => {
+  const { fetchSlotViewerOverlay } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const slow = (_, init) => new Promise((_, reject) => {
+    init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
+  const timed = await fetchSlotViewerOverlay("e", undefined, slow, 10);
+  assert.equal(timed.authUnavailable, true);
+  const controller = new AbortController();
+  controller.abort();
+  const cancelled = await fetchSlotViewerOverlay("e", controller.signal, async () => {
+    throw new Error("should not fetch on an already-aborted signal");
+  });
+  assert.equal(cancelled.authUnavailable, true);
+});
+
+test("U01 viewer patches retain public base and lose write ownership on auth degradation", async () => {
+  const { parseSlotViewerOverlay, mergeViewerSlotOverlay } =
+    await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const overlay = parseSlotViewerOverlay({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: "active", viewerXIdNotice: null,
+    slots: [
+      { id: "a", display_name: "me", group_key: "own-group", x_user_id: "active",
+        is_owned_by_viewer: true, viewer_relation: "active" },
+      { id: "NOT_IN_PUBLIC_BASE", is_owned_by_viewer: true, viewer_relation: "active" },
+      { id: "b", viewer_relation: "bad", is_owned_by_viewer: true },
+    ],
+  });
+  assert.ok(overlay);
+  assert.equal(overlay.slots.length, 2, "invalid slot patch filtered");
+  const base = [{ id: "a", display_name: "public", group_key: "public-group" }, { id: "b" }];
+  const merged = mergeViewerSlotOverlay(base, overlay, true);
+  assert.equal(merged.length, 2, "no private-only rows are added");
+  assert.equal(merged[0].display_name, "me");
+  assert.equal(merged[0].group_key, "public-group", "CURRENT public_name group is authoritative");
+  assert.equal(merged[0].is_owned_by_viewer, true);
+  assert.equal(merged[1].is_owned_by_viewer, false);
+  const locked = mergeViewerSlotOverlay(base, overlay, false);
+  assert.equal(locked[0].is_owned_by_viewer, false);
+});
+
+test("U01 Active X changed event invalidates old identity before refetch resolves", async () => {
+  const React = (await import("react")).default;
+  const { JSDOM } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const { useEventSlotsViewer } = await import("../apps/site/src/components/EventSlotsViewerIsland.ts");
+  const { ACTIVE_X_CHANGED_EVENT } = await import("../src/lib/client/activeXSwitchEvents.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/event/e/slots" });
+  const previousWindow = globalThis.window;
+  const previousFetch = globalThis.fetch;
+  const previousAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = dom.window;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const makeOverlay = (id) => ({
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    needsTermsAcceptance: false, canReserveSlot: true, canPost: true,
+    operatorOverrideAllowed: false, viewerXId: id, viewerXIdNotice: null,
+    slots: [{ id: "s", viewer_relation: "active", is_owned_by_viewer: true, x_user_id: id }],
+  });
+  const requests = [];
+  globalThis.fetch = async (_url, init) => new Promise((resolve) => {
+    requests.push({ resolve, signal: init.signal });
+  });
+  const baseSlots = [{ id: "s" }];
+  let snapshot;
+  const Harness = () => {
+    snapshot = useEventSlotsViewer("e", baseSlots, true);
+    return React.createElement("div");
+  };
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await React.act(async () => root.render(React.createElement(Harness)));
+    assert.equal(requests.length, 1);
+    await React.act(async () => {
+      requests[0].resolve({ ok: true, json: async () => makeOverlay("old") });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(snapshot.canTakeSlot, true);
+    assert.equal(snapshot.slots[0].is_owned_by_viewer, true);
+    await React.act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event(ACTIVE_X_CHANGED_EVENT));
+    });
+    assert.equal(requests.length, 2);
+    assert.equal(snapshot.loading, true);
+    assert.equal(snapshot.canTakeSlot, false);
+    assert.equal(snapshot.slots[0].is_owned_by_viewer, false);
+    await React.act(async () => {
+      requests[1].resolve({ ok: true, json: async () => makeOverlay("new") });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(snapshot.overlay.viewerXId, "new");
+    assert.equal(snapshot.slots[0].x_user_id, "new");
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.window = previousWindow;
+    globalThis.fetch = previousFetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previousAct;
+    dom.window.close();
+  }
+});
