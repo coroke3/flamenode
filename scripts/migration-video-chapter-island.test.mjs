@@ -389,3 +389,57 @@ test("U03 switching ?playlist= never overwrites another playlist's persisted ord
     dom.window.close();
   }
 });
+
+test("U02 CURRENT time formatting supports hh:mm:ss, invalid and end-of-hour boundaries", async () => {
+  const { formatChapterDraftTime } = await import("../apps/site/src/components/VideoChapterIsland.ts");
+  assert.equal(formatChapterDraftTime(0), "0:00");
+  assert.equal(formatChapterDraftTime(65.9), "1:05");
+  assert.equal(formatChapterDraftTime(3599), "59:59");
+  assert.equal(formatChapterDraftTime(3600), "1:00:00");
+  assert.equal(formatChapterDraftTime(3662.8), "1:01:02");
+  assert.equal(formatChapterDraftTime(-2), "0:00");
+  assert.equal(formatChapterDraftTime(Number.NaN), "0:00");
+});
+
+test("U02 composer opens only on action, prefills the current player time and can cancel", async () => {
+  const { JSDOM } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const { VideoChapterIsland } = await import("../apps/site/src/components/VideoChapterIsland.ts");
+  const { publishPlayerTime } = await import("../src/components/video/playerBridge.ts");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.net/abc",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent"];
+  const original = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const oldAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true,
+    })));
+    const doc = dom.window.document;
+    assert.equal(doc.querySelector("form"), null);
+    await React.act(async () => publishPlayerTime(3662.8));
+    await React.act(async () => {
+      [...doc.querySelectorAll("button")].find((button) => button.textContent === "現在位置にコメントする").click();
+    });
+    assert.equal(doc.querySelector("form input[placeholder='mm:ss']").value, "1:01:02");
+    await React.act(async () => {
+      [...doc.querySelectorAll("button")].find((button) => button.textContent === "キャンセル").click();
+    });
+    assert.equal(doc.querySelector("form"), null);
+    assert.ok([...doc.querySelectorAll("button")].some((button) => button.textContent === "現在位置にコメントする"));
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of original) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = oldAct;
+    dom.window.close();
+  }
+});
