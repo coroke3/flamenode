@@ -26,7 +26,7 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 | `videos/random-pool.v1.json` | workers/json-generator/rebuild.ts (random_video_pool target) | src/lib/publicData/staticSharedInputsLoader.ts; src/lib/health/artifactSlo.ts:165 | Build random pool; retire old reader after cutover | MIG-0509 / MIG-0907 |
 | `visibility/blocked-entities.v1.json` | packages/server-core/src/visibility/manifestR2.ts (state writer) | src/lib/health/deepHealth.ts:299; packages/server-core/src/visibility/manifestR2.ts | RETAIN: visibility revocation manifest used beyond migration | MIG-0614 / MIG-0615 |
 | `events/<id>.json` | workers/json-generator/rebuild.ts (event detail producer) | src/lib/publicData/loader.ts:1006 | Replace with build event snapshot | MIG-0509 / MIG-0627 |
-| `events/<id>/base.v1.json` | workers/json-generator/rebuild.ts:1990 | app/api/public/events/[id]/staff/route.ts:177; apps/api/src/routes/events (RH-028) | Build event base; retain while Hono reader requires artifact | MIG-0509 / MIG-0627 |
+| `events/<id>/base.v1.json` | workers/json-generator/rebuild.ts:1990 | app/api/public/events/[id]/staff/route.ts:177; apps/api/src/routes/public/eventStaff.ts (RH-028) | Build event base; retain while Hono reader requires artifact | MIG-0509 / MIG-0627 |
 | `events/<id>/slots.v1.json` | workers/json-generator/rebuild.ts:1994 | CURRENT event slots public readers | Build slot list; preserve public visibility filtering | MIG-0509 / MIG-0627 |
 | `events/<id>/release.v1.json` | workers/json-generator/rebuild.ts (event release producer) | src/lib/publicData/loader.ts:1048; apps/api/src/routes/events/publicRelease.ts | Build release snapshot; retain Hono static_only fallback until replacement | MIG-0509 / MIG-0627 |
 | `events/<id>/playlist.v1.json` | workers/json-generator/optimizedRebuild.ts (event_playlist target) | src/lib/db/videoDetailQueries.ts:644; apps/api/src/routes/videos/viewerOverlay.ts | Replace or retain playlist snapshot per consumer audit | MIG-0627 / MIG-0907 |
@@ -105,6 +105,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `src/lib/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Health/readiness probe; preserve coverage during migration |
 | `src/lib/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `app/api/public/events/[id]/staff/route.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `apps/api/src/routes/public/eventStaff.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Hono RH-028 public event staff R2 reader; MIG-0647, same key retained |
 | `src/lib/db/videoDetailQueries.ts` | `bucket.get(eventPlaylistObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `packages/server-core/src/visibility/manifestR2.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
 | `packages/server-core/src/visibility/manifestR2.ts` | `bucket.put(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |

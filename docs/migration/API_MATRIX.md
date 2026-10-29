@@ -496,3 +496,12 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 | `GET /api/manage/navigation` | `src/components/layout/ConsoleSidebar.tsx` の active/staff X 警告、`GET /api/manage` の同値 | `apps/api/src/routes/manage/navigation.ts` + `packages/contracts/src/manage/shared.ts` | `activeXUserId: string \| null`（承認済み linked X で解決、admin は null）、`manageStaffXUserIds: string[]`（運営スタッフ X、admin は空配列）。`shouldWarnManageActiveXMismatch` が描画側で同じ判定に使用できる | `access`, `events`, `truncated` の値は不変。非 admin は `loadManageData(..., { linked: true })` の同じ1 SQL 文で linked X を最大100件取得し、session を含め3 D1 statement以下、応答64KiB以下。GET専用、`private, no-store`、D1書込0 | MIG-0663 PR#423 REVIEW |
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
+
+## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
+
+| RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
+| --- | --- | --- | --- | --- |
+| RH-027 | `OPTIONS /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | PVSF 2 origin のみ許可。GET/HEAD、If-None-Match 以外の preflight は 403。Vary / Expose-Headers / no-store CDN は CURRENT 同値 | MIGRATION_IN_PROGRESS |
+| RH-028 | `GET /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | 60/min isolate rate guard、R2 event-base 2MiB、visibility manifest の必須 ETag 前後照合、blocked event 404、blocked X staff 除去、DTO allowlist、非公開/欠損 503 | MIGRATION_IN_PROGRESS |
+
+DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
