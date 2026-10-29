@@ -292,3 +292,41 @@ test("MIG-0637: failed D1 audit batches never log provider secrets or persist pa
     assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id=?").get("twitter1").icon_url,"old.png",path);
   }
 });
+
+test("MIG-0637: all 10 admin endpoints fail closed on provider-sensitive preflight D1 errors",async()=>{
+  const secret="PROVIDER_SECRET_FROM_PREFLIGHT_D1_MUST_NOT_LEAK";
+  for (const [path,body] of routes) {
+    const x=setup();
+    const prepare=x.db.prepare.bind(x.db);
+    let failed=0;
+    x.db.prepare=(statement)=>{
+      const query=String(statement);
+      if (query.includes("SELECT * FROM system_settings WHERE id = ? LIMIT 1") ||
+          query.includes('FROM "user" WHERE id = ? LIMIT 1') ||
+          query.includes('FROM "user" u WHERE u.id = ? LIMIT 1') ||
+          query.includes("FROM x_users x WHERE x.id=? LIMIT 1")) {
+        failed++;
+        throw new Error(secret);
+      }
+      return prepare(statement);
+    };
+    const logs=[];
+    const originalError=console.error;
+    console.error=(...args)=>logs.push(args.map(String).join(" "));
+    let res;
+    try { res=await x.request(path,body); }
+    finally { console.error=originalError; }
+    assert.equal(failed,1,path+" must exercise a preflight read failure");
+    assert.equal(res.status,503,path);
+    assert.equal(res.headers.get("cache-control"),"private, no-store",path);
+    const response=await res.text();
+    assert.doesNotMatch(response,/PROVIDER_SECRET_FROM_PREFLIGHT_D1/,path);
+    assert.doesNotMatch(logs.join("\\n"),/PROVIDER_SECRET_FROM_PREFLIGHT_D1/,path);
+    assert.equal(x.counts().audit,0,path);
+    assert.equal(x.counts().rebuild,0,path);
+    assert.equal(x.kvPuts.length,0,path);
+    assert.equal(x.sqlite.prepare("SELECT operation_mode FROM system_settings").get().operation_mode,"normal",path);
+    assert.equal(x.sqlite.prepare('SELECT role FROM "user" WHERE id=?').get("target-1").role,"user",path);
+    assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id=?").get("twitter1").icon_url,"old.png",path);
+  }
+});
