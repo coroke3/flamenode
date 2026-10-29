@@ -114,7 +114,8 @@ test("MIG-0504 mobile profile back navigation stays clear of the fixed 52px head
   const back = doc.querySelector('main.cr-wrap > a[href="/user"]');
   assert.ok(back, "the profile needs a mock-compatible back-to-creators link");
   assert.match(text(back), /クリエイター一覧/);
-  // Astro may bundle global CSS into an external asset; read the route source for the scoped rule.\n  const styles = fs.readFileSync("apps/site/src/pages/user/[id]/index.astro", "utf8");
+  // Astro may bundle global CSS into an external asset; read the route source for the scoped rule.
+  const styles = fs.readFileSync("apps/site/src/pages/user/[id]/index.astro", "utf8");
   assert.match(styles, /@media\s*\(max-width:\s*640px\)/,
     "a mobile-specific fixed-header offset must be in generated HTML");
   assert.match(styles, /\.p-root\s+\.cr-wrap\s*\{\s*padding-top:\s*calc\(52px\s*\+\s*24px\)\s*!important;/,
