@@ -8,6 +8,7 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
+import { buildPublicSite, runBuildCommand } from "../apps/site/scripts/buildPublicSite.ts";
 import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
@@ -438,6 +439,45 @@ test("MIG-0509: CLI source and option validation fails before touching network",
   ];
   for(const flags of invalid)assert.throws(()=>parseSnapshotCliArgs(flags),/expected exactly one/);
   assert.equal(parseSnapshotCliArgs(["--d1-api","--out","a","--generation","b"]).batched,true);
+});
+
+test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages in CI",async()=>{
+  const sqlite=migrated();seed(sqlite);
+  const fixtureDir=fs.mkdtempSync(path.join(os.tmpdir(),"mig0509-build-"));
+  const sqlitePath=path.join(fixtureDir,"seed.sqlite");
+  sqlite.exec("VACUUM INTO '"+sqlitePath.replaceAll("'","''")+"'");
+  const trendingFile=path.join(fixtureDir,"trending.json");
+  fs.writeFileSync(trendingFile,JSON.stringify(TRENDING));
+  const commands=[];
+  const isFull=process.env.REQUIRE_BUILT==="1";
+  const runner=async command=>{
+    commands.push(command);
+    assert.equal(command.env.FLAMENODE_D1_READ_TOKEN,undefined);
+    assert.equal(command.env.FLAMENODE_R2_READ_TOKEN,undefined);
+    assert.ok(fs.existsSync(command.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE));
+    if(isFull)await runBuildCommand(command);
+  };
+  const oldLog=console.log;
+  let report;
+  try{
+    console.log=()=>undefined;
+    report=await buildPublicSite(["--sqlite",sqlitePath,"--trending-file",trendingFile,
+      "--now",String(NOW),"--generation","gen-1"],{
+        env:{...process.env,FLAMENODE_D1_READ_TOKEN:"do-not-pass-to-astro",
+          FLAMENODE_R2_READ_TOKEN:"do-not-pass-to-astro"},
+        run:runner,
+      });
+  }finally{console.log=oldLog;}
+  assert.equal(commands.length,2);
+  assert.ok(report.keys>0);
+  assert.ok(report.d1Statements<=200,"snapshot reader query count");
+  assert.ok(fs.existsSync(path.join(report.snapshotDir,"manifest.json")));
+  if(isFull){
+    const html=fs.readFileSync(path.resolve("apps/site/dist/user/creator_a/index.html"),"utf8");
+    assert.match(html,/Creator A/);
+    assert.equal(fs.existsSync(path.resolve("apps/site/dist/user/banned_c/index.html")),false);
+    assert.match(fs.readFileSync(path.resolve("apps/site/dist/event/public-event/index.html"),"utf8"),/Public Event/);
+  }
 });
 
 test("event and video kinds: produced, accepted by the MIG-0502 / MIG-0507 loaders, private ones absent and fenced", async () => {
