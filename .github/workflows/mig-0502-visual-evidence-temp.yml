@@ -46,7 +46,7 @@ jobs:
             const errors = [];
             page.on('pageerror', error => errors.push('JS: '+error.message));
             page.on('response', response => {
-              if (response.status() >= 400 && !response.url().includes('/api/live/'))
+              if (response.status() >= 400 && !['/api/live/', '/api/account/summary?view=presence', '/api/youtube-thumbnail/'].some(expected => response.url().includes(expected)))
                 errors.push('HTTP '+response.status()+' '+response.url());
             });
             const url = 'http://127.0.0.1:4329/'+route+'/';
@@ -62,6 +62,7 @@ jobs:
               images: document.querySelectorAll('img').length
             }));
             const overflow = layout.docWidth > layout.viewportWidth + 3;
+            // These three API families run only behind the production gateway and are absent in static http.server fixtures.
             const good = response?.status()===200 && !overflow && errors.length===0;
             if (!good) failed = true;
             summary.push({route,width:viewport.width,good,overflow,errors,...layout});
