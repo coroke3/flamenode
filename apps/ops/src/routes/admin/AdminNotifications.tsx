@@ -66,8 +66,9 @@ export function AdminNotifications({api=defaultApi}:{api?:AdminNotificationsApi}
       <td>{new Date(row.created_at*1000).toLocaleString("ja-JP")}</td>
       <td><NotificationPayloadButton payload={row.payload_json}/>
        {(row.status==="failed"||row.status==="dead_letter")?<NotificationActionButton kind="retry" id={row.id} api={api} onSuccess={reload}/>:null}
-       <NotificationActionButton kind="force-resend" id={row.id} api={api} onSuccess={reload}/>
-       {(row.status==="pending"||row.status==="processing")?<NotificationCancelButton id={row.id} api={api} onSuccess={reload}/>:null}
+       <Link to={"/admin/audit?table=notification_outbox&record="+encodeURIComponent(row.id)} title="この通知の監査ログ">監査</Link>
+       {(row.status==="sent"||row.status==="failed"||row.status==="dead_letter")?<NotificationActionButton kind="force-resend" id={row.id} api={api} onSuccess={reload}/>:null}
+       {(row.status==="pending"||row.status==="processing"||row.status==="failed"||row.status==="dead_letter")?<NotificationCancelButton id={row.id} api={api} onSuccess={reload}/>:null}
       </td>
      </tr>)}</tbody>
     </table>
