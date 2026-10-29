@@ -1,7 +1,7 @@
 /** MIG-0510: pure /list URL, RH-032 public response and view projection. No React or browser globals. */
 import { LIST_PAGE_SIZE, normalizeListQuery, type ListQuery, type ListQueryInput } from "./listQuery.ts";
 import { toListVideo } from "./videoCards.ts";
-import type { PublicVideoDto } from "@flamenode/server-core/publicData/publicDto";
+import type { PublicVideoDto } from "../../../../packages/server-core/src/publicData/publicDto.ts";
 import type { ListVideo } from "@flamenode/ui";
 
 export const LIST_REFLECTING_MESSAGE = "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
