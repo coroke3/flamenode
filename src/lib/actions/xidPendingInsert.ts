@@ -4,4 +4,4 @@ export {
   buildPendingXIdRequestInsert,
   buildPendingXIdMergeRevertInsert,
   type PendingXIdRequestRow,
-} from "@flamenode/server-core";
+} from "@flamenode/server-core/xid/pendingInsert";
