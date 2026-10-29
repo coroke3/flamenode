@@ -78,6 +78,26 @@ test("SA-098 refuses an unlinked X ID and an unapproved X ID", async () => {
   }
 });
 
+test("SA-098 denies a canonical / alias collision before any mutation", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-two','Other','approved')").run();
+  sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x-two', 'x-one')").run();
+  const response = await request({ x_user_id: "x-one" });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).message, "この X ID は現在のアカウントに紐づいていません。");
+  assert.equal(stats.batches, 0);
+});
+
+test("SA-098 denies an ambiguous alias with different canonical targets", async () => {
+  const { sqlite, request, stats } = setup();
+  sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-two','Other','approved')").run();
+  sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x-one','old')").run();
+  sqlite.prepare("INSERT INTO x_user_aliases (x_user_id, alias_x_id) VALUES ('x-two','old')").run();
+  const response = await request({ x_user_id: "old" });
+  assert.equal(response.status, 403);
+  assert.equal(stats.batches, 0);
+});
+
 test("SA-098 does not require an admin role, but requires a live session", async () => {
   const valid = setup({ role: "user" });
   assert.equal((await valid.request()).status, 200);
