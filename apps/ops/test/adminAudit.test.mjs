@@ -75,6 +75,23 @@ test("MIG-0733 T03: 30,000 char payload is reconstructed using exactly three bou
   assert.match(urls[2],/offset=24000/);
 });
 
+test("MIG-0733 U01: SQLite code-point offsets preserve emoji across chunks", async () => {
+  const characters = Array.from("😀".repeat(12005) + "末尾");
+  const offsets=[];
+  const api=createAdminAuditApi(async url=>{
+    const offset=Number(new URL(url,"https://test.invalid").searchParams.get("offset"));
+    offsets.push(offset);
+    const piece=characters.slice(offset,offset+12000).join("");
+    const next=offset+Array.from(piece).length;
+    return new Response(JSON.stringify({field:"after",offset,total:characters.length,chunk:piece,
+      nextOffset:next<characters.length?next:null}),{status:200});
+  });
+  const value=await api.payload("a","after");
+  assert.equal(value.status,"ok");
+  assert.equal(value.data,characters.join(""));
+  assert.deepEqual(offsets,[0,12000]);
+});
+
 test("MIG-0733 U01: null, repeated nextOffset and abort fail closed", async()=>{
   const noValue=await createAdminAuditApi(async()=>new Response(null,{status:404})).payload("a","after");
   assert.deepEqual(noValue,{status:"ok",data:null});
