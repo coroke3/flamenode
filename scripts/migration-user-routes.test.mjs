@@ -259,6 +259,52 @@ test("T05 (G03) /user/:id query keys: worksPage and collabPage slice like CURREN
   assert.equal(clampPaging({ page: "", pageSize: 8, defaultPageSize: 8, maxPageSize: 8 }).page, 1);
 });
 
+test("T03: unknown and merged X IDs are 404 in CURRENT, not legacy redirects", { skip }, () => {
+  // The static artifact contract matches CURRENT: unknown/non-published X IDs have no emitted page.
+  // CURRENT UserProfilePage calls notFound() on the missing-profile path and never redirects an old ID.
+  assert.ok(currentProfileSource.includes("normalizeXId((await params).id)"));
+  assert.ok(currentProfileSource.includes("if (shouldPublicPageNotFound(staticLoaded.state))"));
+  assert.ok(currentProfileSource.includes("notFound();"));
+  for (const id of ["missing_user", "merged_old_id", "suspended_user"]) {
+    assert.equal(fs.existsSync(path.join(DIST, "user", id, "index.html")), false, id);
+    assert.equal(fs.existsSync(path.join(DIST, "user", id, "portfolio", "index.html")), false, id);
+  }
+  // Mixed case and @ prefixes are a gateway concern, covered by
+  // scripts/migration-gateway.test.mjs ("user slugs follow CURRENT normalizeXId").
+});
+
+test("G-size: profile Island props stay under 256 KiB at 15+15 display pages", () => {
+  const card = (i) => ({
+    id: "w" + i,
+    title: "あ".repeat(100),
+    youtube_video_id: "AAAAAAAAAAA",
+    display_name: "い".repeat(30),
+  });
+  const section = {
+    total: 120, pageSize: 24,
+    items: Array.from({ length: 24 }, (_, i) => card(i)),
+  };
+  const extra = new Map(Array.from({ length: 4 }, (_, index) => {
+    const page = index + 2;
+    return [page, {
+      page, total: 120, pageSize: 24, generatedAt: null,
+      items: Array.from({ length: 24 }, (_, i) => card((page - 1) * 24 + i)),
+    }];
+  }));
+  const works = views.buildSectionPages(section, extra, 8, 24);
+  const collabs = views.buildSectionPages(section, extra, 8, 24);
+  for (const [name, value] of [["works", works], ["collabs", collabs]]) {
+    assert.equal(value.pages.length, 15, name + " must expose all 15 display pages");
+    value.pages.forEach((page, index) => {
+      assert.ok(Array.isArray(page), name + " page " + (index + 1) + " is missing");
+      assert.equal(page.length, 8, name + " page " + (index + 1));
+    });
+  }
+  const bytes = Buffer.byteLength(JSON.stringify({ works, collabs }), "utf8");
+  console.log("MIG-0504 G-size 15+15 display pages: " + bytes + "/262144 bytes");
+  assert.ok(bytes <= 262144, "serialized profile Island sections exceed the 256 KiB cap: " + bytes);
+});
+
 async function mountIsland(url, element) {
   dom.window.history.pushState({}, "", url);
   document.body.innerHTML = "";
