@@ -46,12 +46,18 @@ try {
           mainWidth: document.querySelector("main")?.getBoundingClientRect().width ?? 0,
           title: document.title,
           h1: document.querySelector("h1")?.textContent?.trim() ?? "",
+          headerBottom: document.querySelector(".hd2")?.getBoundingClientRect().bottom ?? null,
+          headingTop: document.querySelector("main h1")?.getBoundingClientRect().top ?? null,
         }));
         const screenshot = path.join(destination, route.name + "." + viewport.name + ".png");
         await page.screenshot({ path: screenshot, fullPage: true });
         assert.ok((await stat(screenshot)).size > 1000, "empty screenshot: " + screenshot);
         assert.ok(shape.title && shape.h1, "missing title/h1: " + route.url);
         assert.ok(shape.mainWidth > 0, "collapsed main: " + route.url);
+        if (shape.headerBottom !== null && shape.headingTop !== null && shape.headingTop < shape.headerBottom - 2) {
+          failures += 1;
+          console.error("MIG-0504 U03 heading covered by header: " + JSON.stringify({route:route.url,viewport:viewport.name,...shape}));
+        }
         if (shape.docWidth > shape.viewportWidth + 2) {
           failures += 1;
           console.error("MIG-0504 U03 horizontal overflow: " + JSON.stringify({route:route.url,viewport:viewport.name,...shape}));
