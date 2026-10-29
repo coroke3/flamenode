@@ -43,10 +43,48 @@ function isUniqueConflict(error: unknown): boolean {
   return /UNIQUE constraint failed/i.test(message) && /video_interactions_auth/i.test(message);
 }
 
-/** SELECT v.* has the same columns/values as CURRENT Drizzle select().from(videos). */
+/**
+ * Keep CURRENT Drizzle's logical column order when serializing strict audit
+ * before/after JSON. SQLite migrations can append columns physically at the end,
+ * so SELECT v.* changes audit bytes even when the row values are identical.
+ */
+export const VIDEO_SNAPSHOT_COLUMNS = [
+  "id",
+  "primary_event_id",
+  "creator_x_user_id",
+  "submitted_by_user_id",
+  "collaboration_type",
+  "part",
+  "source_type",
+  "creator_display_name",
+  "creator_display_name_yomi",
+  "creator_icon_url",
+  "creator_youtube_channel_url",
+  "creator_profile_text",
+  "creator_other_social_links",
+  "title",
+  "music",
+  "credit",
+  "music_reference_url",
+  "closing_comment",
+  "youtube_video_id",
+  "intro_comment",
+  "highlights",
+  "production_story",
+  "visibility_status",
+  "scheduling_type",
+  "scheduled_time",
+  "app_like_count",
+  "score",
+  "score_updated_at",
+  "created_at",
+  "updated_at",
+] as const;
+
+
 async function loadSnapshot(db: D1Database, videoId: string, userId: string, kind: "like" | "bookmark"): Promise<Snapshot | null> {
   const row = await db.prepare(`
-    SELECT v.*, (
+    SELECT ${VIDEO_SNAPSHOT_COLUMNS.map((column) => `v."${column}" AS "${column}"`).join(", ")}, (
       SELECT i.created_at FROM video_interactions_auth i
       WHERE i.auth_user_id = ? AND i.video_id = v.id AND i.interaction_type = ?
       LIMIT 1
