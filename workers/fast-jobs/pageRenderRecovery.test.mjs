@@ -34,7 +34,7 @@ test("MIG-0411 T07: pending rows send doorbells in order with one bounded D1 SEL
   assert.deepEqual(result, { processed: 3, skipped: 0 });
   assert.equal(sql.length, 1);
   assert.match(sql[0], /request_version > rendered_version/);
-  assert.match(sql[0], /ORDER BY requested_at ASC LIMIT \\?/);
+  assert.match(sql[0], /ORDER BY requested_at ASC LIMIT \?/);
   assert.deepEqual(queue, [
     { type: "render-page", kind: "event", id: "e1" },
     { type: "render-page", kind: "video", id: "v1" },
