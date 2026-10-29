@@ -180,8 +180,9 @@ adminXUsersRoutes.post("/:xUserId/icon-refresh",async c=>{
         reason:"作品の最新アイコンから再計算",strict:true}],
     });
     return c.json<AdminOpsResult>({ok:true,...(queue.statements.length>0?{pendingPublicReflection:true}:{})},200);
-  }catch(e){
-    console.error("[MIG-0637] x icon refresh atomic mutation failed",e);
+  }catch{
+    // Keep D1/audit provider exception messages out of operational logs.
+    console.error("[MIG-0637] x icon refresh atomic mutation failed");
     return fail(c,409,ATOMIC_FAILURE);
   }
 });
