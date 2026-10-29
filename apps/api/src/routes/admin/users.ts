@@ -14,7 +14,7 @@ import {
 import { normalizeXId } from "@flamenode/domain/xid";
 import {
   AdminUserRoleBodySchema, AdminUserBanBodySchema, AdminUserNotificationsBodySchema,
-  AdminUserEventCreateBodySchema, type AdminOpsResult,
+  AdminUserEventCreateBodySchema, AdminXIconRefreshBodySchema, type AdminOpsResult,
 } from "@flamenode/contracts";
 import { sql } from "@flamenode/server-core/sql";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
@@ -141,6 +141,8 @@ adminUsersRoutes.post("/:userId/can-create-events",async c=>{
 // SA-081: use the latest individual/collab submitted creator icon, enqueue 2
 // static rebuild targets in the same D1 batch; never call Queue.send().
 adminXUsersRoutes.post("/:xUserId/icon-refresh",async c=>{
+  // Apply the same 64KiB JSON cap to SA-081 as every other admin write.
+  const req=await readBody(c,AdminXIconRefreshBodySchema);if(!req.ok)return req.res;
   const xUserId=normalizeXId(c.req.param("xUserId"));
   if(!xUserId)return fail(c,400,"x_user_id が必要です。");
   const found=await c.env.DB.prepare(`SELECT x.*,

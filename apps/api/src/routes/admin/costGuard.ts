@@ -21,6 +21,7 @@ import {
 import { sql } from "@flamenode/server-core/sql";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
+import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "./body.ts";
 
 const SETTINGS_KEY = "default";
@@ -49,7 +50,10 @@ async function writeCostGuard(c:Context<AppEnv>,before:SettingsRow,patch:Patch,r
       mutationStatements:[c.get("db").run(sql`UPDATE system_settings SET ${patchSql(patch)}
         WHERE id = ${SETTINGS_KEY} AND ${expectedRowCondition({expectedCurrent:{...before}})}`)],
       expectedMutationChanges:[1],
-      preloaded:auditPreloaded(c),
+      // CostGuard controls intentionally bypass costGuardMiddleware. Reuse the
+      // settings row already loaded above; a second audit settings SELECT
+      // would exceed ZERO_1102 S3 (session + TOS + settings = 3 reads).
+      preloaded:{...auditPreloaded(c),settings:mapAuditSettings(before as SettingsRow & AuditSettingsRow)},
       audits:[{table_name:"system_settings",target_id:SETTINGS_KEY,operation:"UPDATE",
         before:{...before},after,actor_user_id:actor,reason,context,retention_class:"long_audit",strict:true}],
     });

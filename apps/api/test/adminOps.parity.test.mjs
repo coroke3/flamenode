@@ -110,6 +110,7 @@ test("MIG-0637 U02 SA-016: mode is atomic, strict audit, KV after commit",async(
   assert.deepEqual(x.kvPuts.map(v=>v[0]),["operation_mode:mirror"]);
   assert.equal(JSON.parse(x.kvPuts[0][1]).mode,"economy");
   assert.equal(x.stats.batches,1);
+  assert.equal(x.stats.reads,2,"CostGuard control must reuse the settings read for audit (TOS + settings = 2)");
 });
 test("MIG-0637 U02 SA-017: maintenance ON and OFF restore normal mode",async()=>{
   const x=setup();
@@ -240,4 +241,15 @@ test("MIG-0637 U03: Date timestamp_ms CAS and CURRENT audit sanitizer parity",as
   assert.deepEqual(JSON.parse(audit.after_json).emailVerified,{});
   assert.equal(x.sqlite.prepare('SELECT emailVerified FROM "user" WHERE id=?').get("target-1").emailVerified,timestamp);
   assert.equal(x.stats.batches,1);
+});
+
+test("MIG-0637 SA-081: invalid or oversized JSON is rejected before x-user reads",async()=>{
+  const x=setup();
+  const oversized={irrelevant:"x".repeat(65537)};
+  const res=await x.request("/x-users/twitter1/icon-refresh",oversized);
+  assert.equal(res.status,413);
+  assert.equal(x.counts().audit,0);
+  const invalid=await x.request("/x-users/twitter1/icon-refresh",{unrecognized:true});
+  assert.equal(invalid.status,400);
+  assert.equal(x.counts().rebuild,0);
 });
