@@ -17,6 +17,8 @@ import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts"
 import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { absoluteUrl, compactText } from "./pageHead.ts";
+import { buildAccentVars } from "../../../../src/lib/theme/accent.ts";
+import { toRecruit } from "./topData.ts";
 
 export const EVENT_VIDEO_DISPLAY_LIMIT = 8;
 
@@ -100,6 +102,12 @@ export function buildEventDetailData(
     : null;
   const playlistId = extractYoutubePlaylistId(event.youtube_playlist_id ?? "");
   const showPublicationTime = status === "scheduled" || status === "active";
+  // The static snapshot contains layout only. RH-020 is the sole source of availability after hydration.
+  const recruit = status === "ended" ? null : {
+    ...toRecruit(event, live ? { available: layout.length - (slotFilled ?? 0), total: layout.length } : undefined, now),
+    ctaHref: inPostPeriod ? "/entry" : layout.length > 0 ? `/event/${event.id}/slots` : `/event/${event.id}`,
+    ctaLabel: inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : layout.length > 0 ? "枠表へ" : "詳細ページへ",
+  };
   return {
     id: event.id,
     title: event.title,
@@ -111,6 +119,8 @@ export function buildEventDetailData(
     statusTone: accepting ? "public" : status === "scheduled" ? "warning" : status === "ended" ? "draft" : "live",
     periodLabel: null,
     entryAction: accepting ? "reserve" : inPostPeriod ? "submit" : null,
+    accentStyle: event.accent_color?.trim() ? { ...buildAccentVars(event.accent_color, "dark") } as Record<string, string> : undefined,
+    recruit,
     playlistUrl: playlistId ? `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}` : null,
     videoTotal: detail.videoTotal,
     creatorTotal: detail.creatorCount,
