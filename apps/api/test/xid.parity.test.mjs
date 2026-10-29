@@ -10,9 +10,10 @@ const USER = {
   role: "user", is_banned: 0, active_x_user_id: null,
 };
 
-function setup({ authenticated = true, role = "user", approved = true, linked = true } = {}) {
+function setup({ authenticated = true, role = "user", approved = true, linked = true, banned = false } = {}) {
   const { db, sqlite, stats } = createAdminD1();
   seedBase(sqlite, { role });
+  if (banned) sqlite.prepare('UPDATE "user" SET is_banned = 1 WHERE id = ?').run(USER.id);
   sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
   sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES (?, ?, ?)")
     .run("x-one", "Creator", approved ? "approved" : "pending");
@@ -23,7 +24,7 @@ function setup({ authenticated = true, role = "user", approved = true, linked = 
   const hono = new Hono();
   hono.route("/api/xid", createXidRoutes({
     session: async (c, next) => {
-      c.set("user", authenticated ? { ...USER, role } : null);
+      c.set("user", authenticated ? { ...USER, role, is_banned: banned ? 1 : 0 } : null);
       c.set("sessionState", authenticated ? "user" : "none");
       await next();
     },
@@ -98,14 +99,14 @@ test("SA-098 cross-origin write fails before any database access", async () => {
 
 test("SA-098 banned or CostGuard-disabled identity cannot write", async () => {
   for (const banned of [true, false]) {
-    const { sqlite, request, stats } = setup();
-    if (banned) sqlite.prepare('UPDATE "user" SET is_banned = 1 WHERE id = ?').run(USER.id);
-    else sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
-    // For a banned user, session also reflects the live ban; use the normal
-    // user setup only for CostGuard. The direct guard must never bypass DB.
+    const { sqlite, request, stats } = setup({ banned });
+    if (!banned) {
+      sqlite.prepare("UPDATE system_settings SET operation_mode = 'maintenance' WHERE id = 'default'").run();
+    }
     const response = await request();
-    assert.equal(response.status, banned ? 200 : 503);
-    assert.equal(stats.batches, banned ? 1 : 0);
+    assert.equal(response.status, banned ? 403 : 503);
+    assert.equal(stats.batches, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   }
 });
 
