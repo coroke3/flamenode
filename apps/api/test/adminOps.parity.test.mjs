@@ -253,3 +253,10 @@ test("MIG-0637 SA-081: invalid or oversized JSON is rejected before x-user reads
   assert.equal(invalid.status,400);
   assert.equal(x.counts().rebuild,0);
 });
+
+test("MIG-0637 SA-081: no request body is valid for path-only icon refresh",async()=>{
+  const x=setup();
+  const res=await x.request("/x-users/twitter1/icon-refresh",undefined);
+  assert.equal(res.status,200,JSON.stringify(await res.clone().json()));
+  assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='twitter1'").get().icon_url,"new.png");
+});

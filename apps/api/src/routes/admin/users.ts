@@ -142,7 +142,11 @@ adminUsersRoutes.post("/:userId/can-create-events",async c=>{
 // static rebuild targets in the same D1 batch; never call Queue.send().
 adminXUsersRoutes.post("/:xUserId/icon-refresh",async c=>{
   // Apply the same 64KiB JSON cap to SA-081 as every other admin write.
-  const req=await readBody(c,AdminXIconRefreshBodySchema);if(!req.ok)return req.res;
+  // The xUserId lives in the path; an empty body is valid (D-17-4).
+  // If JSON is sent, still enforce the common 64KiB cap and strict {} shape.
+  if (c.req.raw.body !== null) {
+    const req=await readBody(c,AdminXIconRefreshBodySchema);if(!req.ok)return req.res;
+  }
   const xUserId=normalizeXId(c.req.param("xUserId"));
   if(!xUserId)return fail(c,400,"x_user_id が必要です。");
   const found=await c.env.DB.prepare(`SELECT x.*,
