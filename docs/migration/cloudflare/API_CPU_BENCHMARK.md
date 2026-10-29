@@ -181,3 +181,21 @@ None of these is attributed to a code defect yet. Do not rewrite endpoints from 
 2. Run on a quiet host (or repeat runs and report the lowest stable max), keep the BASELINE row beside every table, and record owner MIG and reason for any method over budget.
 3. Fill `API_MATRIX.md` per-method CPU max only from a run whose BASELINE noise floor is well below the budget.
 4. Unmeasurable locally and still open: real D1 binding cost, Cache API production cost, workerd's real per-request CPU accounting. Production Workers Observability (MIG-0902) is the only source for those and needs separate approval.
+
+## 9. MIG-0639 U01: Linux-local live event upper-bound scenarios (2026-10-29)
+
+Status: **SCENARIO IMPLEMENTED; LIVE MEASUREMENTS NOT YET RUN**. This section records test design, not observed CPU or any production value.
+
+| Method | normal | limit | invalid | Source |
+| --- | --- | --- | --- | --- |
+| RH-020 GET /api/live/events/:id/slots | 1 visible slot | **6,000** available slots (D-12 MAX_LIVE_SLOTS) | 129-character event id → 400 | `apps/api/src/routes/live/events.ts#getLiveEventSlots` |
+| RH-021 GET /api/live/events/:id/submissions | 1 public video linked to event | **50** public videos, linked to the event | 129-character event id → 400 | `apps/api/src/routes/live/events.ts#getLiveEventSubmissions` |
+| RH-022 GET /api/live/events/:id/summary | 1 available slot | **6,000** available slots | 129-character event id → 400 | `apps/api/src/routes/live/events.ts#getLiveEventSummary` |
+
+All fixtures use a locally seeded public event, synthetic IDs and `node:sqlite` migrations. The 6,000-row fixture is inserted by one bounded recursive CTE and not 6,000 individual D1 statements. The event ID varies for every sample; otherwise the 15-second isolate micro-cache would make an uncached limit scan appear cheaper. The existing `BASELINE` scenario remains in the same benchmark plan.
+
+Required completion before any budget verdict: run `node scripts/benchmark-api-cpu.mjs --mode wrangler` on Linux with **at least 50 normal, 50 limit, 50 invalid and 50 cold samples** for each measured method; record OS/kernel, CPU, Node and Wrangler versions, all p50/p95/p99/max, expected-status mismatches and D1 statement counts. The harness is LOCAL ONLY (workerd + local D1) and is not production observability.
+
+**STOP condition:** If same-run BASELINE warm max ≥ 4ms, classify S2 7ms judgment **INCONCLUSIVE** and stop without using the numbers as a D-12 paging verdict. No paging/additive endpoint change is authorized here. Other Hono methods including RH-012 500-video × 100-member and RH-014 own-slots-100 remain U01/U02 follow-up; do not imply that the three scenarios cover the full U01 method inventory.
+
+Rollback: revert PR #456. No worker, D1/R2/Queue, route, secret, or Cloudflare configuration change.
