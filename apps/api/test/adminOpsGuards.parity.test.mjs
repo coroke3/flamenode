@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
@@ -109,4 +110,34 @@ test("MIG-0643 S3: sibling static routes cannot double-charge backfill CostGuard
     "real admin writeGuard (1) + exactly one CostGuard (1) + bounded backfill count/page (1)");
   assert.equal(s.stats.batches, 0, "empty backfill writes no queue");
   assert.equal(s.auditCount(), 0);
+});
+
+test("MIG-0643 T04: CURRENT queue wake is deliberately zero in Hono for migrated admin mutations", () => {
+  // The CURRENT actions emit an immediate *best-effort* Queue wake after a
+  // committed D1 batch. D-0603-1 / D-13-41 deliberately defer wake to Cron
+  // in the Hono API. Keep this exception executable, not only documented.
+  const read = (relative) => readFileSync(new URL(relative, import.meta.url), "utf8");
+  const currentRebuild = read("../../../src/lib/actions/static-rebuild-admin.ts");
+  const currentYoutube = read("../../../src/lib/actions/youtube-sync-admin.ts");
+  const honoRebuild = read("../src/routes/admin/staticRebuild.ts");
+  const honoBackfill = read("../src/routes/admin/staticBackfill.ts");
+  const honoYoutube = read("../src/routes/admin/youtubeSync.ts");
+  const bindings = read("../src/env.ts");
+
+  assert.match(currentRebuild, /staticRebuildWakeSource:\s*["']admin["']/,
+    "CURRENT static backfill/manual/shared enqueue has a post-commit Queue wake");
+  assert.match(currentYoutube, /await sendYoutubeSyncPendingWakeBestEffort\(["']admin["']/,
+    "CURRENT resync sends an immediate best-effort wake after the audit commit");
+  for (const [route, source] of [
+    ["SA-069 backfill", honoBackfill],
+    ["SA-070–073 rebuild/retry", honoRebuild],
+    ["SA-106 Youtube resync", honoYoutube],
+  ]) {
+    assert.doesNotMatch(source, /staticRebuildWakeSource\s*:|sendYoutubeSyncPendingWakeBestEffort\s*\(/,
+      route + ": target must persist atomic D1 state without immediate wake");
+  }
+  const envFields = bindings.split("export type Bindings = {")[1]?.split("};")[0];
+  assert.ok(envFields, "the actual Hono worker Bindings type must be available");
+  assert.doesNotMatch(envFields, /^\s*(?:\w*QUEUE\w*|\w*Queue\w*)\??\s*:/m,
+    "Hono migration must not introduce an unapproved Queue binding");
 });
