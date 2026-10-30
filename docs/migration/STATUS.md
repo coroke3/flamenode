@@ -17,7 +17,7 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 ## Overall
 
 ```text
-Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
+Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
 Current Task: MIG-0707
 Current Owner: chatgpt
 Task State: DONE
@@ -109,9 +109,9 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 1 | Repository boundaries | DONE | PASSED |
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
-| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 READY for its code remainder (#326 merged, migration 0066 applied to production; Queue creation / gateway bindings are owner steps)) | PASSED (owner approval 2026-10-23, with deferrals) |
+| 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
 | 5 | Public migration | PARTIALLY_READY (2026-10-28: MIG-0503 / 0512 DONE; MIG-0501, 0502, 0504..0507, 0509..0511, 0513..0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (2026-10-28: 28 DONE — MIG-0601 / 0602 / 0608 / 0611..0625 / 0629..0631 / 0633..0635 / 0649 / 0658 / 0663 / 0664; 30 READY; MIG-0604 / 0606 / 0607 / 0610 / 0627 / 0662 BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-10-30: 34 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0658 / MIG-0663 / MIG-0664; 24 READY; MIG-0604 / MIG-0606 / MIG-0610 / MIG-0627 / MIG-0662 / MIG-0607 BLOCKED. MIG-0646 RH-023..025 in PR#451; production cutover not authorized) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701, MIG-0707 DONE; MIG-0708..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 DONE / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
@@ -273,7 +273,7 @@ Validation:
 | MIG-0406 | CPU/build benchmark | DONE | MIG-0405 |
 | MIG-0409 | build-time public data from D1 + build-minute budget (D-09) | DONE | MIG-0404 |
 | MIG-0410 | deploy-hook build scheduler Cron (B, D-09) | BLOCKED | MIG-0409 |
-| MIG-0411 | per-page R2 HTML regeneration via Queue (ISR equivalent, D-09) | READY | MIG-0405, MIG-0409 |
+| MIG-0411 | per-page R2 HTML regeneration via Queue (ISR equivalent, D-09) | BLOCKED | MIG-0405, MIG-0409 |
 | MIG-0407 | Phase 4 Gate: performance + visual evidence | DONE | MIG-0403, MIG-0406 |
 
 ## Phase 5 — Public migration
@@ -297,7 +297,7 @@ Validation:
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
 | MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | READY | MIG-0407 |
 | MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | READY | MIG-0409 |
-| MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | READY | MIG-0409 |
+| MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | DONE | MIG-0409 |
 | MIG-0518 | `/[id]` chapter composer + comments + `?playlist=` dock Islands, viewer-overlay client | READY | MIG-0407, MIG-0634 |
 | MIG-0519 | `/rules` consent form Island on the SA-075 API (MIG-0515 U01, merge gate MIG-0641, D-16) | READY | MIG-0407 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0501..MIG-0507, MIG-0509..MIG-0519, MIG-0621, MIG-0607 |
@@ -347,18 +347,18 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0634 | public video list + viewer overlay read APIs (RH-031, RH-032) | DONE | MIG-0602, MIG-0614, MIG-0631 |
 | MIG-0635 | Admin read APIs part C (videos/[id], members, users/[id]/edit) | DONE | MIG-0624, MIG-0625 |
 | MIG-0636 | Personal X / Active X APIs (SA-098..105) | READY | MIG-0602 |
-| MIG-0637 | admin ops writes A: cost guard + user admin (SA-016..020, SA-077..081) | READY | MIG-0602 |
+| MIG-0637 | admin ops writes A: cost guard + user admin (SA-016..020, SA-077..081) | DONE | MIG-0602 |
 | MIG-0638 | admin spreadsheet writes / import (RH-004..008) | READY | MIG-0602, MIG-0631 |
 | MIG-0639 | API CPU benchmark part A: endpoints already on main, Linux host (D-12 / MIG-0631 T17 verdicts) | READY | MIG-0602, MIG-0611, MIG-0617, MIG-0623, MIG-0624, MIG-0625, MIG-0630, MIG-0631 |
-| MIG-0640 | like / bookmark API (SA-087) | READY | MIG-0602 |
+| MIG-0640 | like / bookmark API (SA-087) | DONE | MIG-0602 |
 | MIG-0641 | terms acceptance + onboarding APIs (SA-074..076, onboarding complete) | READY | MIG-0602 |
 | MIG-0642 | admin ops writes B: terms versions, editable fields, notifications (SA-045..049, SA-051..055) | READY | MIG-0602 |
 | MIG-0643 | admin ops writes C: static rebuild admin, YouTube resync, visibility repair (SA-050, SA-069..073, SA-106) | READY | MIG-0602 |
 | MIG-0644 | admin X merge APIs (SA-092..097, SA-110) | READY | MIG-0602, MIG-0618 |
 | MIG-0645 | legacy import Route Handler (RH-002) | READY | MIG-0602, MIG-0631 |
-| MIG-0646 | media Route Handlers (RH-023..025) | READY | MIG-0602, MIG-0631 |
-| MIG-0647 | public event staff Route Handler (RH-027, RH-028) | READY | MIG-0602, MIG-0631 |
-| MIG-0648 | X-user search Route Handler (RH-019) | READY | MIG-0602, MIG-0631 |
+| MIG-0646 | media Route Handlers (RH-023..025) | DONE | MIG-0602, MIG-0631 |
+| MIG-0647 | public event staff Route Handler (RH-027, RH-028) | DONE | MIG-0602, MIG-0631 |
+| MIG-0648 | X-user search Route Handler (RH-019) | DONE | MIG-0602, MIG-0631 |
 | MIG-0649 | R2 artifact consumer inventory + CI checker (MIG-0627 U01) | DONE | — |
 | MIG-0650 | video collaborators / members APIs (SA-082..085) | READY | MIG-0602, MIG-0633 |
 | MIG-0651 | video submit / update APIs (SA-086, SA-088, SA-089) | READY | MIG-0602, MIG-0633 |

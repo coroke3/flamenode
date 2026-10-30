@@ -28,7 +28,7 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | `events/index.json` (event list + group sections) | 30 s (`app/(public)/event/page.tsx:8`); R2 object `max-age=300` (`workers/json-generator/rebuild.ts` `rebuildEventsIndex`) | event / group / public staff edit, visibility change | **build** (`apps/site/scripts/readPublicData.ts`, this PR) | MIG-0409 → MIG-0509 |
 | Home `top.json` sections | 120 s (`app/(public)/page.tsx:53`) | video publish, featured edit, stats | build (sections faster than the build interval → API) | MIG-0509 / MIG-06xx |
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
-| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
+| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | GA4 input: D1 bounded public snapshot, 1 SELECT / no R2 list read (MIG-0517 PR #442; code review/CI pending) | MIG-0409 U06 → MIG-0517 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | Queue → R2 HTML, **server-rendered like the build's static page** (MIG-0403 mapping, empty lists; warm max ≈ 1.2 ms local Node wall). **Re-measure when MIG-0502 / MIG-0507 add lists** (upper-bound with lists: 25–49 ms) | MIG-0411 |
 | User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
@@ -330,15 +330,14 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
 | Consumer page render (D-11: the consumer does not render; R2 PUT = 0). The doorbell / recovery rows above are unchanged; `rebuild-page` for an excluded kind is finished at once (`excluded_kind`) | — | 3 operations per message, as before | — |
-| Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
+| Gateway `rebuild-page` when detail HTML is absent from both Static Assets and R2 | Not measured (visitor/miss dependent) | 3 operations/message | Requires measurement before Queue activation |
 
-With realistic update rates (far below one update per entity per day) the first two rows stay
-well inside 50 %. The third row used to be the risk: a generation mismatch answered 503. Decided
-2026-10-23 (F-02): the gateway accepts R2 HTML on identity (`kind`/`id`/`key`); generation is
-diagnostic, so a stale page is served and one deduplicated rebuild is requested. Visitors no
-longer see 503 after each build. The rebuild requests themselves can still reach
-1,460 × builds/day (≈ 35,000 messages/day) if every build changes the generation and every
-visited page asks once; keeping the route generation across data-only builds (MIG-0509) remains
-the way to bring that down. Unpublish and slug changes stay fenced by KV `deny:`, the consumer's
-R2 delete, and the route key.
+The bounded producer scenarios above total at most 1,460 update doorbells plus 120
+recovery messages/day (1,580 × 3 = 4,740 operations, 47.4% of 10,000/day).
+This conditional estimate leaves only 86 gateway messages/day before reaching
+the 50%-of-free-tier target (5,000 operations/day). Real gateway misses have
+**not been measured**. Under D-11 the consumer never renders or PUTs HTML;
+a missing page remains 503 until a build publishes it. Stale-generation HTML
+is served by identity and may still request a deduplicated rebuild while old
+R2 objects exist. Activation requires verifying gateway volume against the budget.
 

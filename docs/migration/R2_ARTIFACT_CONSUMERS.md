@@ -6,7 +6,7 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 
 | Artifact key | Producer (source:line or target) | Consumer (source:line or family) | Target / retention | Owner MIG |
 | --- | --- | --- | --- | --- |
-| `list/recent.json` | workers/json-generator/rebuild.ts:1142 | src/lib/publicData/loader.ts:1113; src/lib/publicData/sitemapSources.ts:42; workers/ga-analytics/sync.ts:142 | Build snapshot: video recent / migrate GA4 input in MIG-0517 | MIG-0509 / MIG-0517 |
+| `list/recent.json` | workers/json-generator/rebuild.ts:1142 | src/lib/publicData/loader.ts:1113; src/lib/publicData/sitemapSources.ts:42 | Build snapshot: video recent / GA4 input moved to bounded D1 read in MIG-0517 | MIG-0509 / MIG-0517 (R2 reader removed in #442) |
 | `list/popular.json` | workers/json-generator/rebuild.ts:1164 | src/lib/publicData/loader.ts:1155; src/lib/health/artifactSlo.ts:118 | Build snapshot popular list; remove runtime R2 dependence | MIG-0509 / MIG-0627 |
 | `events/index.json` | workers/json-generator/rebuild.ts (events_index target) | src/lib/publicData/loader.ts:1064; src/lib/publicData/sitemapSources.ts:48 | Build event index; Hono static_only preserves until replacement | MIG-0509 / MIG-0627 |
 | `users/index.json` | workers/json-generator/rebuild.ts (users_index target) | src/lib/publicData/loader.ts:1780; src/lib/publicData/sitemapSources.ts:54 | Build user index / sitemap / public search | MIG-0509 / MIG-0627 |
@@ -26,7 +26,7 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 | `videos/random-pool.v1.json` | workers/json-generator/rebuild.ts (random_video_pool target) | src/lib/publicData/staticSharedInputsLoader.ts; apps/api/src/routes/admin/staticBackfill.ts (MIG-0643, metadata-only R2.head + D1 tracked hash, UNMOUNTED); src/lib/health/artifactSlo.ts:165 | Build random pool; retire old reader after cutover | MIG-0509 / MIG-0907 |
 | `visibility/blocked-entities.v1.json` | packages/server-core/src/visibility/manifestR2.ts (state writer) | src/lib/health/deepHealth.ts:299; packages/server-core/src/visibility/manifestR2.ts | RETAIN: visibility revocation manifest used beyond migration | MIG-0614 / MIG-0615 |
 | `events/<id>.json` | workers/json-generator/rebuild.ts (event detail producer) | src/lib/publicData/loader.ts:1006 | Replace with build event snapshot | MIG-0509 / MIG-0627 |
-| `events/<id>/base.v1.json` | workers/json-generator/rebuild.ts:1990 | app/api/public/events/[id]/staff/route.ts:177; apps/api/src/routes/events (RH-028) | Build event base; retain while Hono reader requires artifact | MIG-0509 / MIG-0627 |
+| `events/<id>/base.v1.json` | workers/json-generator/rebuild.ts:1990 | app/api/public/events/[id]/staff/route.ts:177; apps/api/src/routes/public/eventStaff.ts (RH-028) | Build event base; retain while Hono reader requires artifact | MIG-0509 / MIG-0627 |
 | `events/<id>/slots.v1.json` | workers/json-generator/rebuild.ts:1994 | CURRENT event slots public readers | Build slot list; preserve public visibility filtering | MIG-0509 / MIG-0627 |
 | `events/<id>/release.v1.json` | workers/json-generator/rebuild.ts (event release producer) | src/lib/publicData/loader.ts:1048; apps/api/src/routes/events/publicRelease.ts | Build release snapshot; retain Hono static_only fallback until replacement | MIG-0509 / MIG-0627 |
 | `events/<id>/playlist.v1.json` | workers/json-generator/optimizedRebuild.ts (event_playlist target) | src/lib/db/videoDetailQueries.ts:644; apps/api/src/routes/videos/viewerOverlay.ts | Replace or retain playlist snapshot per consumer audit | MIG-0627 / MIG-0907 |
@@ -64,8 +64,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | Source path | Method and argument expression | Call sites (exact) | Disposition / reason |
 | --- | --- | ---: | --- |
 | `apps/site/src/gateway/r2Html.ts` | `bucket.get(r2HtmlKey(decision.key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
-| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
-| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.put(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
+| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | D-11 DELETE-only on unpublish/revocation; never renders or PUTs HTML |
 | `workers/json-generator/rebuild.ts` | `bucket.delete(pendingPostingArtifacts.map)` | 2 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/rebuild.ts` | `bucket.get(staticVideoSearchPostingManifestObjectKey(""))` | 1 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/videoMaterializedSource.ts` | `bucket.put(sourceKey)` | 2 | Generator/producer key; MIG-0907 review required |
@@ -100,11 +99,15 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `app/api/public/about-stats/route.ts` | `bucket.get(TOP_STATS_OBJECT_KEY)` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `apps/api/src/lib/publicSnapshot.ts` | `bucket.get(key)` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `src/lib/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `apps/api/src/routes/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | MIG-0646 Hono RH-023; same validated public-media key + D1 ACL as CURRENT. Uploaded icon, RETAIN |
+| `apps/api/src/routes/media/manageXIcon.ts` | `bucket.get(key)` | 1 | MIG-0646 Hono RH-024; HMAC/TTL verified before R2, signed uploaded X icon, RETAIN |
+| `apps/api/src/routes/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | MIG-0646 Hono RH-025; D1 slot ACL and optional Auth.js viewer before R2, uploaded icon, RETAIN |
 | `src/lib/media/manageXIcon.ts` | `bucket.get(key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/health/artifactSlo.ts` | `bucket.get(probe.key)` | 1 | Health/readiness probe; preserve coverage during migration |
 | `src/lib/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Health/readiness probe; preserve coverage during migration |
 | `src/lib/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `app/api/public/events/[id]/staff/route.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
+| `apps/api/src/routes/public/eventStaff.ts` | `bucket.get(eventBaseObjectKey(eventId))` | 1 | Hono RH-028 public event staff R2 reader; MIG-0647, same key retained |
 | `src/lib/db/videoDetailQueries.ts` | `bucket.get(eventPlaylistObjectKey(eventId))` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `packages/server-core/src/visibility/manifestR2.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
 | `packages/server-core/src/visibility/manifestR2.ts` | `bucket.put(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Visibility revocation state; RETAIN |
@@ -127,6 +130,9 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(memberSuggestionsIndexObjectKey(manifestResult.generation))` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `src/lib/video/memberSuggestionsV2Loader.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `packages/server-core/src/memberSuggestion/loader.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | MIG-0648 RH-019 target reader; canonical manifest commit point per request, keep CURRENT until gated cutover |
+| `packages/server-core/src/memberSuggestion/loader.ts` | `readBoundedR2Json(memberSuggestionsIndexObjectKey(manifestResult.generation))` | 1 | MIG-0648 RH-019 V1 fallback index; bounded read, generation validation, keep CURRENT until gated cutover |
+| `packages/server-core/src/memberSuggestion/v2Loader.ts` | `readBoundedR2Json(key)` | 1 | MIG-0648 RH-019 V2 posting reader; generation-specific R2 page/manifest, no D1 fallback; staged and not mounted |
 | `apps/api/src/lib/publicSnapshot.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `workers/json-generator/memberSuggestionsArtifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
