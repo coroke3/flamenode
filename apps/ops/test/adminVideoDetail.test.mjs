@@ -182,6 +182,28 @@ test("MIG-0729 T04: moderator case keys, HTTP denial, malformed and 500 success-
   assert.equal((await badFlag(fd)).ok, false, "malformed reflection flag must not be treated as success");
 });
 
+test("MIG-0729 U02: 400/422 validation must not refresh; 409/5xx conflicts do", async () => {
+  const fd = new FormData();
+  fd.set("video_id", "video-1");
+  fd.set("status", "private");
+  for (const [httpStatus, body, expectRetryable] of [
+    [400, { ok: false, message: "invalid", retryable: false }, false],
+    [422, { ok: false, message: "invalid" }, false],
+    [409, { ok: false, message: "conflict", retryable: false }, true],
+    [500, { ok: false, message: "unavailable" }, true],
+    [400, { ok: false, message: "recheck", retryable: true }, true],
+  ]) {
+    const action = createAdminVideoStatusActions(async () => json(httpStatus, body)).setStatus;
+    const result = await action(fd);
+    assert.equal(result.ok, false, String(httpStatus));
+    assert.equal(result.retryable === true, expectRetryable, String(httpStatus));
+    assert.equal(result.message, body.message);
+  }
+  const spoofedSuccess = createAdminVideoStatusActions(async () => json(400, { ok: true, message: "invalid" }));
+  assert.equal((await spoofedSuccess.setStatus(fd)).ok, false,
+    "HTTP validation failure must never become success even if JSON says ok:true");
+});
+
 test("MIG-0729 U02: nextHref must stay within one admin video detail", () => {
   for (const link of ["/admin/videos/next", "/admin/videos/next?event=e1"]) {
     assert.equal(safeAdminNextHref(link), true, link);
