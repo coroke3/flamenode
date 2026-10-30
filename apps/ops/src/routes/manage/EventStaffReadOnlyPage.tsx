@@ -43,18 +43,30 @@ export function EventStaffReadOnlyView({ eventId, data }: {
   </div>;
 }
 
+/** A previous event/fetch identity must never become visible before useEffect clears it. */
+export interface StaffReadSnapshot {
+  eventId: string;
+  fetchFn?: OpsFetch;
+  result: OpsResult<ManageStaffResponse>;
+}
+export function currentStaffResult(eventId: string, fetchFn: OpsFetch | undefined, snapshot: StaffReadSnapshot | null): OpsResult<ManageStaffResponse> | null {
+  return snapshot?.eventId === eventId && snapshot.fetchFn === fetchFn ? snapshot.result : null;
+}
+
 export function EventStaffReadOnlyPage({ eventId, fetchFn }: {
   eventId: string; fetchFn?: OpsFetch;
 }): React.ReactElement {
-  const [result, setResult] = React.useState<OpsResult<ManageStaffResponse> | null>(null);
+  const [snapshot, setSnapshot] = React.useState<StaffReadSnapshot | null>(null);
   React.useEffect(() => {
     const controller = new AbortController();
-    setResult(null); // Deny cross-event and cross-account cached display while fetching.
-    void readManageStaff(eventId, fetchFn, controller.signal).then(next => {
-      if (!controller.signal.aborted) setResult(next);
+    setSnapshot(null);
+    void readManageStaff(eventId, fetchFn, controller.signal).then(result => {
+      if (!controller.signal.aborted) setSnapshot({ eventId, fetchFn, result });
     });
     return () => controller.abort();
   }, [eventId, fetchFn]);
+  // React passive effects run after paint. Guard synchronously during render as well.
+  const result = currentStaffResult(eventId, fetchFn, snapshot);
   if (result === null) return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <p role="alert">イベントまたは運営権限が見つかりません。</p>;
   if (result.status !== "ok") return <p role="alert">運営メンバーを取得できませんでした。再ログインまたは再読み込みしてください。</p>;
