@@ -263,7 +263,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
         <a href={`/admin/audit?table=videos&record=${slug}`}>監査ログ</a>
       </nav>
       {data.truncated ? <p role="status">一部の項目は件数上限により省略されています。</p> : null}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(260px, 1fr)", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 20 }}>
         <InfoPanel data={data} />
         <aside>
           <StatusControls data={data} eventId={eventId} onRefresh={refresh} actions={actions} />
