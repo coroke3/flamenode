@@ -123,8 +123,9 @@ staticRebuildAdminRoutes.post("/queue/:queueId/retry", async (c) => {
   if (!id || id.length > 128) return failure(c, 400, "対象キューIDが不正です。");
   try {
     return await retryRows(c, await loadFailedRows(c.env.DB, id));
-  } catch (error) {
-    console.error("[static-rebuild-admin] retry failed", error);
+  } catch {
+    // D1/SQLite provider exceptions must never appear in application logs.
+    console.error("[static-rebuild-admin] retry failed (D1/audit unavailable)");
     return failure(c, 500, FAILURE);
   }
 });
@@ -133,8 +134,9 @@ staticRebuildAdminRoutes.post("/queue/:queueId/retry", async (c) => {
 staticRebuildAdminRoutes.post("/retry-failed", async (c) => {
   try {
     return await retryRows(c, await loadFailedRows(c.env.DB));
-  } catch (error) {
-    console.error("[static-rebuild-admin] retry all failed", error);
+  } catch {
+    // D1/SQLite provider exceptions must never appear in application logs.
+    console.error("[static-rebuild-admin] retry all failed (D1/audit unavailable)");
     return failure(c, 500, FAILURE);
   }
 });
@@ -167,8 +169,9 @@ async function enqueue(
       // D-0603-1: no immediate Queue binding in target API.
     });
     return result(c, { queued: batch.acceptedTargetCount });
-  } catch (error) {
-    console.error("[static-rebuild-admin] enqueue failed", error);
+  } catch {
+    // D1/SQLite provider exceptions must never appear in application logs.
+    console.error("[static-rebuild-admin] enqueue failed (D1/audit unavailable)");
     return failure(c, 500, FAILURE);
   }
 }
