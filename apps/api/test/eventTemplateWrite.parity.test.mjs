@@ -59,7 +59,7 @@ const rowCount = (sqlite, table) => sqlite.prepare(`SELECT COUNT(*) n FROM ${tab
 
 test("SA-035 creates template snapshot and strict CREATE audit atomically", async () => {
   const s = setup();
-  s.sqlite.prepare("INSERT INTO event_custom_questions VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+  s.sqlite.prepare("INSERT INTO event_custom_questions (event_id, question_key, label, description, type, required, options_json, placeholder, max_length, sort_order, is_active, visibility) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
     .run("ev-1", "stage_permission", "Stage permission", "description", "textarea", 1, null, "hint", 1000, 1, 1, "review");
   const response = await s.post();
   assert.equal(response.status, 200);
