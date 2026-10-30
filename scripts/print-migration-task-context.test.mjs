@@ -46,7 +46,7 @@ test("next-task advisory prioritizes performance without requiring D-08 for nonv
  assert.equal(next.selected,"MIG-0401");
  assert.deepEqual(next.candidates,["MIG-0401","MIG-0301"]);
 });
-import { parseOwnedTasks } from "./print-migration-task-context.mjs";
+import { parseOwnedTasks,parseOpenPrSnapshot } from "./print-migration-task-context.mjs";
 
 test("next-task advisory skips READY tasks already owned by an open PR",()=>{
  const status=[
@@ -69,6 +69,19 @@ test("duplicate open PRs for one MIG are rejected before task selection",()=>{
  ];
  assert.throws(()=>parseOwnedTasks(prs),/Duplicate open PR ownership for MIG-0723: PR#481 and PR#488/);
  assert.deepEqual([...parseOwnedTasks([{number:481,headRefName:"migration/mig-0723-staff-view"},{number:489,headRefName:"chore/migration-docs"}])],[["MIG-0723",481]]);
+});
+
+test("100-open-PR owner snapshot fails closed instead of losing the next page",()=>{
+ const prs=Array.from({length:100},(_,index)=>({
+  number:index+1,
+  headRefName:"migration/mig-"+String(index+1).padStart(4,"0")+"-owner",
+ }));
+ const partial=parseOpenPrSnapshot(prs.slice(0,99));
+ assert.equal(partial.size,99);
+ assert.throws(()=>parseOpenPrSnapshot(prs),/reached the 100-PR fetch limit/);
+ assert.throws(()=>parseOpenPrSnapshot(prs,50),/reached the 50-PR fetch limit/);
+ assert.throws(()=>parseOpenPrSnapshot({},100),/Invalid open PR owner snapshot/);
+ assert.deepEqual([...parseOpenPrSnapshot([])],[]);
 });
 
 test("next-task advisory stops on unmerged dependencies",()=>{
