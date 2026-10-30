@@ -207,7 +207,7 @@ export async function evaluateAdminWriteGuard(options: {
  *     No published major terms -> 0 (mirrors termsReacceptRequiredValue).
  * Returns null when the user row is missing (deleted while session lives).
  */
-async function loadTosState(
+export async function loadTosState(
   db: D1DatabaseLike,
   userId: string,
   activeX: WriteActiveXOptions | undefined = undefined,
