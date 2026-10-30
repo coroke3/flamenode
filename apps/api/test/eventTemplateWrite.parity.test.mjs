@@ -27,16 +27,6 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", seedEvent = 
       source_event_id TEXT, settings_json TEXT NOT NULL,
       created_by_user_id TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
-    CREATE TABLE events (
-      id TEXT PRIMARY KEY, event_type TEXT, explanation TEXT, youtube_description_template TEXT,
-      required_video_fields_json TEXT, icon_url TEXT, img_url TEXT, accent_color TEXT,
-      allow_user_video_event_links INTEGER NOT NULL, allow_unslotted_posts INTEGER NOT NULL,
-      allow_user_video_edits INTEGER NOT NULL, user_video_edit_permission_keys_json TEXT,
-      max_slots_per_video INTEGER NOT NULL, max_slot_reservation_groups_per_xid INTEGER,
-      slot_interval_minutes INTEGER, slot_part_gap_minutes INTEGER, slot_type TEXT,
-      slot_visibility_mode TEXT, parts_json TEXT, review_settings TEXT,
-      editable_fields TEXT, repeat_rules TEXT
-    );
     CREATE TABLE event_custom_questions (
       event_id TEXT NOT NULL, question_key TEXT NOT NULL, label TEXT NOT NULL,
       description TEXT, type TEXT NOT NULL, required INTEGER NOT NULL,
