@@ -64,6 +64,36 @@ test("MIG-0707 U05b: initial load, silent same-key refresh, keep last good data 
   }
 });
 
+test("MIG-0707 U05b: same-key 401/403/404/501 revokes previously visible private data", async () => {
+  for (const status of ["anonymous", "forbidden", "notFound", "unsupported"]) {
+    const ui = setup();
+    try {
+      await ui.render("private-event");
+      await React.act(async () => {
+        ui.requests[0].resolve({ status: "ok", data: { id: "secret" } });
+      });
+      assert.equal(ui.target.textContent, "ok:secret");
+
+      await ui.render("private-event", 1);
+      assert.equal(ui.target.textContent, "ok:secret", "refresh starts silently");
+      await React.act(async () => {
+        ui.requests[1].resolve({ status });
+      });
+      assert.equal(ui.target.textContent, status,
+        status + " must clear cached private content after an explicit HTTP denial");
+
+      await ui.render("private-event", 2);
+      await React.act(async () => {
+        ui.requests[2].resolve({ status: "unavailable" });
+      });
+      assert.equal(ui.target.textContent, status,
+        "transient failure cannot revive previously revoked private content");
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
+
 test("MIG-0707 U05b: changed key resets loading and aborts obsolete requests", async () => {
   const ui = setup();
   try {

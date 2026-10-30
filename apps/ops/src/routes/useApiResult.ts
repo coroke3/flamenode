@@ -30,7 +30,10 @@ export function useApiResult<T>(
     void (async () => {
       try {
         const result = await loadRef.current(controller.signal);
-        if (!controller.signal.aborted && (!silent || result.status === "ok")) {
+        // Only transport/unavailability errors may retain the last successful data.
+        // A same-key refresh can lose authentication, permissions, or the resource itself.
+        // Never keep private data mounted after an explicit non-transient server response.
+        if (!controller.signal.aborted && (!silent || result.status !== "unavailable")) {
           setState(result);
         }
       } catch {
