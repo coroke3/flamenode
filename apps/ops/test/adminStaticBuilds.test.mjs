@@ -130,7 +130,7 @@ test("MIG-0735 T04 UI: real rendered sync filters preserve CURRENT embed-disable
   assert.ok(availability, "availability filter must be rendered");
   assert.ok(visibility, "visibility filter must be rendered");
   assert.match(availability, /value="embed_disabled"/);
-  assert.deepEqual([...visibility.matchAll(/<option value="([^"]+)"/g)].map(m=>m[1]),
+  assert.deepEqual([...visibility.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),
     ["","review","public","private","closed"]);
   assert.match(html, /name="failed"/);
   assert.match(html, /name="stale"/);
