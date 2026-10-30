@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(new URL("./createFreeVideo.ts", import.meta.url), "utf8");
+const fanout = await readFile(new URL("../../../../packages/server-core/src/video/freeVideoRebuildTargets.ts", import.meta.url), "utf8");
 
 test("createFreeVideo は writeGuard 通過後・解析/R2前に active_x_snapshot を検証する", () => {
   const fnStart = source.indexOf("export async function createFreeVideo");
@@ -19,19 +20,20 @@ test("createFreeVideo は writeGuard 通過後・解析/R2前に active_x_snapsh
   assert.match(fnBody, /active_x_snapshot/);
 });
 
-test("createFreeVideo は video_create で top section visibility targets を enqueue する", () => {
-  assert.match(source, /topVideoVisibilityTargets\("video_create"\)/);
-  const queueBlock = source.match(/const queueTargets = \[[\s\S]*?\];/)?.[0];
-  assert.ok(queueBlock);
-  assert.match(queueBlock, /\.\.\.topVideoVisibilityTargets\("video_create"\)/);
+test("createFreeVideo は共有fanoutで top section visibility targets を同じD1 batchへenqueueする", () => {
+  assert.match(source, /import \{ buildFreeVideoRebuildTargets \} from "@flamenode\/server-core\/video\/freeVideoRebuildTargets"/);
+  assert.match(source, /const queueTargets = buildFreeVideoRebuildTargets\(\{[\s\S]*?activeXId: activeX,[\s\S]*?eventId,[\s\S]*?\}\)/);
+  assert.match(source, /buildStaticRebuildQueueBatch\(db, queueTargets\)/);
+  assert.match(fanout, /\.\.\.topVideoVisibilityTargets\("video_create"\)/);
 });
 
-test("イベント付きfree投稿はevent baseとslotsを同じqueue batchへ入れる", () => {
-  const queueBlock = source.match(/const queueTargets = \[[\s\S]*?\];/)?.[0];
-  assert.ok(queueBlock);
-  const eventBranch = queueBlock.match(/\.\.\.\(eventId[\s\S]*?\]/)?.[0] ?? "";
+test("イベント付きfree投稿は共有fanout経由でevent base・slots・releaseを同じqueue batchへ入れる", () => {
+  assert.match(source, /const queueTargets = buildFreeVideoRebuildTargets\(/);
+  assert.match(source, /buildStaticRebuildQueueBatch\(db, queueTargets\)/);
+  const eventBranch = fanout.match(/\.\.\.\(eventId[\s\S]*?: \[\]/)?.[0] ?? "";
   assert.match(eventBranch, /targetType: "event_base"/);
   assert.match(eventBranch, /targetType: "event_slots"/);
+  assert.match(eventBranch, /targetType: "event_release"/);
 });
 
 test("createFreeVideo は作品登録の運営チャンネル通知を event target で積む", async () => {
