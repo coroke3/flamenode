@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { app } from "../src/app.ts";
 import { CostGuardBannerResponseSchema } from "@flamenode/contracts";
-import { resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
+import { readOperationModeKvMirror, resetOperationModeCachesForTests, resolvePublicOperationMode } from "../src/routes/live/operationMode.ts";
 import { cookie, createD1, createSqlite } from "./support/personalHarness.mjs";
 import { seed as seedAdminRead } from "./support/adminReadSeed.mjs";
 
@@ -164,6 +164,57 @@ test("MIG-0661 T02: forced static-only mode still reads at most one mirror", asy
   assert.deepEqual(await requestWith(env), { mode: "static_only", reason: "operator note" });
   assert.equal(kv.count, 1);
   assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T08: simultaneous cold reads share one KV request and cache the result", async () => {
+  resetOperationModeCachesForTests();
+  const d1 = { count: 0 }, reads = { count: 0 };
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const raw = JSON.stringify({ mode: "read_only", updated_at: 1, reason: "one snapshot" });
+  const kv = { get: async (key, options) => {
+    reads.count += 1;
+    assert.equal(key, "operation_mode:mirror");
+    assert.deepEqual(options, { cacheTtl: 30 });
+    await gate;
+    return raw;
+  } };
+  const first = readOperationModeKvMirror(kv);
+  const second = readOperationModeKvMirror(kv);
+  try {
+    assert.equal(reads.count, 1, "concurrent misses must not duplicate the KV GET");
+  } finally {
+    release();
+  }
+  assert.deepEqual(await first, { mode: "read_only", updated_at: 1, reason: "one snapshot" });
+  assert.deepEqual(await second, { mode: "read_only", updated_at: 1, reason: "one snapshot" });
+  assert.deepEqual(await requestWith({ DB: unavailableD1(d1), KV: kv }),
+    { mode: "read_only", reason: "one snapshot" });
+  assert.equal(reads.count, 1, "subsequent banner reads use the populated cache");
+  assert.equal(d1.count, 0);
+});
+
+test("MIG-0661 T08: concurrent KV errors share a failure and retain short error cache", async () => {
+  resetOperationModeCachesForTests();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let reads = 0;
+  const kv = { get: async () => {
+    reads += 1;
+    await gate;
+    throw new Error("private KV driver failure");
+  } };
+  const first = readOperationModeKvMirror(kv);
+  const second = readOperationModeKvMirror(kv);
+  try {
+    assert.equal(reads, 1, "a failing KV read must also be single-flight");
+  } finally {
+    release();
+  }
+  assert.equal(await first, null);
+  assert.equal(await second, null);
+  assert.equal(await readOperationModeKvMirror(kv), null);
+  assert.equal(reads, 1, "cached error must not cause an immediate retry");
 });
 
 test("MIG-0661 T03: admin banner mirrors CURRENT D1 mode/reason with a single bounded read", async () => {
