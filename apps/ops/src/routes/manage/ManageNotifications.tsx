@@ -5,6 +5,7 @@ import type { OpsFetch } from "../../api/read.js";
 import { readManageNotifications } from "../../api/manageNotifications.js";
 import { EmptyState } from "../../components/shared/EmptyState.js";
 import { NotFoundView } from "../NotFoundView.js";
+import { AUTH_UNAVAILABLE } from "../guard.js";
 import { useApiResult } from "../useApiResult.js";
 
 const DEFAULT_FETCH: OpsFetch = (path, init) => fetch(path, init);
@@ -433,6 +434,18 @@ export function ManageNotificationsBody({ data, search, change }: {
 }
 
 /**
+ * Explicit missing Manage permission differs from an unknown 403 reason.
+ * Mirrors MIG-0719 ManageDashboard semantics, but restores this page on login.
+ * Never follow an untrusted body.redirect from the API.
+ */
+export function manageNotificationsRedirect(status: string, reason?: string): string | null {
+  if (status === "anonymous") return "/entry?next=%2Fmanage%2Fnotifications";
+  if (status === "forbidden" && reason === "manage_access_required") return "/dashboard";
+  if (status === "forbidden") return AUTH_UNAVAILABLE;
+  return null;
+}
+
+/**
  * Retains CURRENT query/deep-link/back-forward semantics.
  * The existing OpsGate still guards the route; the API enforces event ownership.
  */
@@ -442,13 +455,15 @@ function ManageNotificationsForQuery({ fetchFn, search, setSearch }: {
   setSearch: ReturnType<typeof useSearchParams>[1];
 }): React.ReactElement {
   const result = useApiResult((signal) => readManageNotifications(fetchFn, search, signal), search.toString());
+  const redirect = manageNotificationsRedirect(
+    result.status,
+    result.status === "forbidden" ? result.reason : undefined,
+  );
   React.useEffect(() => {
-    // CURRENT session guard and manage layout redirect on lost access.
-    // Use fixed local targets; never navigate to untrusted API redirect strings.
-    if (result.status === "anonymous") window.location.assign("/entry");
-    if (result.status === "forbidden") window.location.assign("/dashboard");
-  }, [result.status]);
-  if (result.status === "loading") return <div role="status" aria-busy="true">読み込み中...</div>;
+    // Navigate only to fixed same-origin paths; the API cannot inject a URL.
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+  if (result.status === "loading" || redirect) return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <NotFoundView />;
   if (result.status === "anonymous") return <div role="alert">セッションが切れました。<a href="/entry">ログイン</a></div>;
   if (result.status === "forbidden") return <div role="alert">この画面へのアクセス権限がありません。<a href="/dashboard">ダッシュボードへ</a></div>;

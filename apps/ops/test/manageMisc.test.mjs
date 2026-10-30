@@ -7,7 +7,7 @@ import {
   notificationCenterPath, readManageNotifications,
 } from "../.test-dist/apps/ops/src/api/manageNotifications.js";
 import {
-  ManageNotificationsBody,
+  ManageNotificationsBody, manageNotificationsRedirect,
 } from "../.test-dist/apps/ops/src/routes/manage/ManageNotifications.js";
 
 const fixture = {
@@ -216,4 +216,17 @@ test("MIG-0725 U02: CURRENT Active X mismatch notice is warning-only and never g
   const escaped = render({ ...fixture, activeXUserId: '<img src=x onerror=alert(1)>', manageStaffXUserIds: ["staff-x"] });
   assert.doesNotMatch(escaped, /<img/, "untrusted X ID must render as escaped text");
   assert.match(escaped, /&lt;img/);
+});
+
+
+test("MIG-0725 U02: distinguish explicit access revocation from unknown 403 and preserve login next", () => {
+  assert.equal(manageNotificationsRedirect("anonymous"), "/entry?next=%2Fmanage%2Fnotifications");
+  assert.equal(manageNotificationsRedirect("forbidden", "manage_access_required"), "/dashboard");
+  for (const reason of [undefined, "session_invalid", "auth_temporarily_unavailable", "terms_reaccept_required", "constructor"]) {
+    assert.equal(manageNotificationsRedirect("forbidden", reason),
+      "/entry?error=auth_temporarily_unavailable", "ambiguous forbidden reason fails closed: " + reason);
+  }
+  for (const status of ["ok", "loading", "notFound", "unavailable", "unsupported"]) {
+    assert.equal(manageNotificationsRedirect(status), null, status + " does not force an incorrect permission redirect");
+  }
 });
