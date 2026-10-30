@@ -17,7 +17,7 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 ## Overall
 
 ```text
-Current Phase: 2–4 parallel tracks (Phase 2 design system / Phase 3 domain / Phase 4 performance PoC)
+Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
 Current Task: MIG-0707
 Current Owner: chatgpt
 Task State: DONE
