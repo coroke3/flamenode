@@ -72,6 +72,12 @@ test("MIG-0643 SA-069: 13 events -> 12 low-priority queue rows, one D1 batch, KV
   assert.equal(s.stats.reads, 2, "CostGuard + one bounded count/page query");
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
+  const firstAudit = JSON.parse(s.audit()[0].after_json);
+  assert.equal(firstAudit.kind, "event_crew");
+  assert.equal(firstAudit.scanned, 12);
+  assert.equal(firstAudit.accepted_targets, 12,
+    "CURRENT writes queue.acceptedTargetCount to strict audit after_json");
+  assert.equal(firstAudit.next_cursor, "ev-11");
   assert.equal(s.saved().runs.event_crew.scanned, 12);
   const second = await s.request({ kind: "event_crew" });
   assert.equal(second.status, 200);
