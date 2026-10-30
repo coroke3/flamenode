@@ -86,3 +86,34 @@ test("fresh squash clone can verify the prior source commit through its preserve
   if(path.resolve(temp).startsWith(path.resolve(prefix)))fs.rmSync(temp,{recursive:true,force:true});
  }
 });
+
+
+test("unavailable recorded source SHA remains rejected after PR history fetch", () => {
+ const prefix=path.join(os.tmpdir(),"flamenode-workitem-unavailable-");
+ const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
+ const git=(cwd,...args)=>execFileSync("git",["-c","commit.gpgsign=false","-c","core.hooksPath="+path.join(temp,"no-hooks"),...args],{cwd,encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
+ try {
+  fs.mkdirSync(builder);
+  git(builder,"init","-b","main");
+  git(builder,"config","user.name","Fixture");
+  git(builder,"config","user.email","fixture@example.invalid");
+  fs.writeFileSync(path.join(builder,"base.txt"),"base");
+  git(builder,"add","base.txt");git(builder,"commit","-m","only valid source");
+  git(builder,"update-ref","refs/pull/123/head",git(builder,"rev-parse","HEAD"));
+  git(temp,"init","--bare",remote);
+  git(builder,"remote","add","origin",remote);
+  git(builder,"push","origin","main","refs/pull/123/head");
+  git(temp,"clone","--no-local","--single-branch","--branch","main",remote,clone);
+  const absent="f".repeat(40);
+  const entries={"MIG-0301.md":active.replace("a".repeat(40),absent)};
+  assert.equal(gitCommitExists(clone,absent),false);
+  // The PR ref fetch succeeds, but the exact recorded SHA is not reachable.
+  // Fallback fetch may fail; the final checker must never accept another tip.
+  assert.deepEqual(fetchMissingSourceHistory(clone,entries),["123"]);
+  assert.equal(gitCommitExists(clone,absent),false);
+  assert.match(
+   validateWorkItems({statusText:status,entries,commitExists:value=>gitCommitExists(clone,value)}).join("\n"),
+   /source SHA is not an available Git commit/,
+  );
+ }finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
