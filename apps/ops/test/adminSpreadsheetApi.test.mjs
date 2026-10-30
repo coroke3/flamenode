@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   loadSpreadsheetCatalog,
   loadSpreadsheetPage,
+  loadSpreadsheetExport,
 } from "../.test-dist/apps/ops/src/api/adminSpreadsheet.js";
 
 const table = { table: "videos", label: "動画", group: "コンテンツ", mode: "readonly" };
@@ -105,4 +106,75 @@ test("MIG-0737 U01: fetch failure, invalid JSON and aborted responses fail close
     return json(200, catalog);
   }, false, controller.signal), { status: "unavailable" });
   assert.equal(signal, controller.signal);
+});
+
+test("MIG-0737 U01 RH-007 export retains CURRENT path, safety headers and partial signal", async () => {
+  const calls = [];
+  const fetchFn = async (path, init) => {
+    calls.push({ path, init });
+    const tsv = path.includes("format=tsv");
+    return new Response(tsv ? "id\\tname\\n1\\ttest" : "id,name\\n1,test", {
+      status: 200,
+      headers: {
+        "content-type": tsv ? "text/tab-separated-values; charset=utf-8" : "text/csv; charset=utf-8",
+        "X-Spreadsheet-Truncated": tsv ? "1" : "0",
+      },
+    });
+  };
+  const csv = await loadSpreadsheetExport(fetchFn, "video/a & b", "csv");
+  assert.equal(csv.status, "ok");
+  assert.equal(csv.data.truncated, false);
+  assert.equal(await csv.data.blob.text(), "id,name\\n1,test");
+  const tsv = await loadSpreadsheetExport(fetchFn, "videos", "tsv");
+  assert.equal(tsv.status, "ok");
+  assert.equal(tsv.data.truncated, true);
+  assert.equal(await tsv.data.blob.text(), "id\\tname\\n1\\ttest");
+  assert.deepEqual(calls.map(x => x.path), [
+    "/api/admin/spreadsheet/export?table=video%2Fa%20%26%20b&format=csv&header=1",
+    "/api/admin/spreadsheet/export?table=videos&format=tsv&header=1",
+  ]);
+  for (const { init } of calls) {
+    assert.equal(init.method, "GET");
+    assert.equal(init.credentials, "same-origin");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.body, undefined);
+  }
+});
+
+test("MIG-0737 U01 RH-007 export never turns JSON or HTML into an attachment", async () => {
+  for (const response of [
+    json(200, { error: "secret" }),
+    new Response("<html>private</html>", { status: 200, headers: { "content-type": "text/html" } }),
+    new Response("fake export", { status: 200, headers: { "content-type": "application/octet-stream" } }),
+    new Response("bad", { status: 500 }),
+  ]) {
+    assert.deepEqual(await loadSpreadsheetExport(async () => response.clone(), "videos", "csv"),
+      { status: "unavailable" });
+  }
+});
+
+test("MIG-0737 U01 RH-007 preserves explicit disabled 404 and denies nonadmins", async () => {
+  const responses = [
+    [404, { error: "spreadsheet_disabled" }, { status: "disabled" }],
+    [404, { error: "unknown_table" }, { status: "notFound" }],
+    [401, { error: "unauthorized" }, { status: "anonymous" }],
+    [403, { reason: "admin_required" }, { status: "forbidden" }],
+    [501, { error: "unsupported" }, { status: "unsupported" }],
+  ];
+  for (const [status, payload, expected] of responses) {
+    assert.deepEqual(await loadSpreadsheetExport(async () => json(status, payload), "videos", "csv"), expected);
+  }
+});
+
+test("MIG-0737 U01 RH-007 abort or offline fails closed", async () => {
+  assert.deepEqual(await loadSpreadsheetExport(async () => { throw Error("offline"); }, "videos", "csv"),
+    { status: "unavailable" });
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  assert.deepEqual(await loadSpreadsheetExport(async () => { calls++; return json(200, {}); },
+    "videos", "csv", controller.signal), { status: "unavailable" });
+  assert.equal(calls, 0);
+  assert.deepEqual(await loadSpreadsheetExport(async () =>
+    new Response("test", { headers: { "content-type": "text/csv" } }), "", "csv"), { status: "unavailable" });
 });
