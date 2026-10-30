@@ -7,7 +7,7 @@
  * sync-jobs cron drains pending D1 rows. No remote Queue binding used here.
  */
 import { Hono } from "hono";
-import { AdminYoutubeResyncVideoIdSchema, type AdminYoutubeResyncResult } from "@flamenode/contracts";
+import { AdminYoutubeResyncVideoIdSchema, type AdminYoutubeResyncResult } from "@flamenode/contracts/admin/staticRebuildOps";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { sql } from "@flamenode/server-core/sql";
