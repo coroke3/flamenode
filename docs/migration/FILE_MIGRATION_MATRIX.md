@@ -1213,6 +1213,9 @@
 | `apps/ops/src/routes/manage/EventVideoDetail.tsx` | TARGET_SKELETON | MIG-0724 U03 video review detail, permission display, U04 unmounted | MIG-0724 | SAME (EventVideoDetail and EventVideoDetailContent, status injected after U04) | IN_PROGRESS | PR#501 SHA=9413beb2f27a7974f7c5756fe7d507150b45dda2 (U03 read-only detail) |
 | `apps/ops/test/manageVideoDetail.test.mjs` | TEST | MIG-0724 U03 schema/403/404/UI/nextHref contract regressions | MIG-0724 | SAME (read and render parity coverage) | IN_PROGRESS | PR#501 SHA=a98a4ca6fa751717f4a0da0e6c42d40da39bdd6d (U03 tests, CI pending) |
 
+| `apps/ops/src/api/manageVideoStatus.ts` | HELPER | MIG-0724 U04 provisional D-16-1 POST /api/manage/events/:eventId/videos/:videoId/status | MIG-0724 | SAME (not wired; replacing with canonical MIG-0603 type is merge gate) | IN_PROGRESS | PR#501 SHA=5fa1fcd62e692efba2e580b2ca403e76bd7c19f0 (unmounted provisional status client) |
+| `apps/ops/test/manageVideoStatus.test.mjs` | TEST | MIG-0724 U04 status client request/errors/no automatic retries | MIG-0724 | SAME (U04 provisional client tests) | IN_PROGRESS | PR#501 SHA=95417ffc5acb1dcc745c6a01079fe98c5084e763 (U04 tests, CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
