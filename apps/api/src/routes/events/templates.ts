@@ -78,24 +78,35 @@ eventTemplateRoutes.post("/", async (c) => {
   const db = c.get("db");
   const userId = c.get("user")!.id;
   try {
-    const event = await c.env.DB.prepare("SELECT * FROM events WHERE id = ? LIMIT 1")
-      .bind(input.event_id)
-      .first<EventRow & { id: string }>();
+    // S3: user/terms + CostGuard + this one SELECT (questions as correlated JSON).
+    // A separate question read would exceed the three-read D1 budget.
+    const event = await c.env.DB.prepare(`
+      SELECT e.*,
+        (SELECT json_group_array(json_object(
+          'question_key', q.question_key, 'label', q.label,
+          'description', q.description, 'type', q.type, 'required', q.required,
+          'options_json', q.options_json, 'placeholder', q.placeholder,
+          'max_length', q.max_length, 'sort_order', q.sort_order,
+          'is_active', q.is_active, 'visibility', q.visibility
+        )) FROM (
+          SELECT question_key, label, description, type, required, options_json,
+                 placeholder, max_length, sort_order, is_active, visibility
+          FROM event_custom_questions WHERE event_id = e.id
+          ORDER BY sort_order ASC, question_key ASC
+          LIMIT 101
+        ) q) AS questions_json
+      FROM events e WHERE e.id = ? LIMIT 1
+    `).bind(input.event_id).first<EventRow & { id: string; questions_json: string | null }>();
     if (!event) {
       return c.json({ ok: false, message: "イベントが見つかりません。" }, 404);
     }
-    const questions = await c.env.DB.prepare(`
-      SELECT question_key, label, description, type, required, options_json,
-             placeholder, max_length, sort_order, is_active, visibility
-      FROM event_custom_questions WHERE event_id = ?
-      ORDER BY sort_order ASC, question_key ASC
-      LIMIT 101
-    `).bind(event.id).all<EventTemplateQuestionRow>();
-    if (questions.results.length > 100) {
+    const questionData: unknown = JSON.parse(event.questions_json ?? "[]");
+    if (!Array.isArray(questionData) || questionData.length > 100) {
       // Do not silently serialize an incomplete template.
       return c.json({ ok: false, message: EVENT_TEMPLATE_FAILURE_MESSAGE }, 409);
     }
-    const stageQuestions = [...questions.results]
+    const questions = questionData as EventTemplateQuestionRow[];
+    const stageQuestions = [...questions]
       .filter((q) => q.question_key === "stage_permission" || q.question_key.startsWith("stage_permission_"))
       .sort((a, b) => a.sort_order - b.sort_order);
     const formSettingsJson = stageQuestions.length === 0 ? null : JSON.stringify({
@@ -114,7 +125,7 @@ eventTemplateRoutes.post("/", async (c) => {
       name: input.name,
       description: input.description ?? null,
       source_event_id: event.id,
-      settings_json: JSON.stringify(snapshotFromEvent(event, questions.results, formSettingsJson)),
+      settings_json: JSON.stringify(snapshotFromEvent(event, questions, formSettingsJson)),
       created_by_user_id: userId,
       created_at: now,
       updated_at: now,
