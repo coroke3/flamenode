@@ -48,6 +48,17 @@ test("next-task advisory prioritizes performance without requiring D-08 for nonv
 });
 import { parseOwnedTasks,parseOpenPrSnapshot } from "./print-migration-task-context.mjs";
 
+test("migration:next rejects duplicate MIG task IDs regardless of row order",()=>{
+ const site="| MIG-0105 | site | DONE | — |";
+ const blocked="| MIG-0105 | site | BLOCKED | — |";
+ const perf="| MIG-0401 | perf | READY | MIG-0105 |";
+ for(const status of [site+"\n"+blocked+"\n"+perf,blocked+"\n"+site+"\n"+perf,site+"\n"+site+"\n"+perf]){
+   assert.throws(()=>pickNextTask(status,""),/Duplicate task ID in migration:next: MIG-0105/);
+ }
+ assert.equal(pickNextTask(blocked+"\n"+perf,"").selected,null);
+ assert.equal(pickNextTask(site+"\n"+perf,"").selected,"MIG-0401");
+});
+
 test("migration:next rejects duplicate Decision IDs before picking a READY task",()=>{
  const status=[
   "| Task | Purpose | State | Dependencies |",
