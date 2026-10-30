@@ -9,6 +9,11 @@ import { isOperationMode, type OperationMode } from "@flamenode/domain/admin";
 
 export const OPERATION_MODE_KV_KEY = "operation_mode:mirror";
 export const ISOLATE_MODE_TTL_MS = 30_000;
+/** Preserve CURRENT mode semantics even when a legacy KV reason is large.
+ * Rejecting the entire JSON by length can silently turn maintenance/static_only
+ * into normal. The banner bounds the reason separately before serialization.
+ * Normal writes already limit reason length; oversized legacy mirrors are rare.
+ */
 const KV_CACHE_TTL_MS = 30_000;
 const KV_ERROR_CACHE_TTL_MS = 5_000;
 
@@ -22,14 +27,19 @@ let isolateMode: { mode: OperationMode | null; expiresAt: number } = {
   mode: null,
   expiresAt: 0,
 };
-let kvCache: { mode: OperationMode | null; expiresAt: number } = {
-  mode: null,
+// Preserve the parsed reason alongside the mode. CURRENT caches the entire
+// mirror for 30 seconds, so the public banner must not bypass it with a
+// separate KV.get on every request.
+let kvCache: { mirror: ParsedOperationModeKvMirror | null; expiresAt: number } = {
+  mirror: null,
   expiresAt: 0,
 };
+let kvMirrorInFlight: Promise<ParsedOperationModeKvMirror | null> | null = null;
 
 export function resetOperationModeCachesForTests(): void {
   isolateMode = { mode: null, expiresAt: 0 };
-  kvCache = { mode: null, expiresAt: 0 };
+  kvCache = { mirror: null, expiresAt: 0 };
+  kvMirrorInFlight = null;
 }
 
 /** FORCE_STATIC_ONLY env: 1 / true / yes (case-insensitive). */
@@ -39,38 +49,90 @@ export function isForceStaticOnlyEnv(raw: string | undefined): boolean {
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
-function parseKvMirrorMode(raw: string | null): OperationMode | null {
+export type ParsedOperationModeKvMirror = {
+  mode: OperationMode;
+  updated_at: number;
+  reason?: string | null;
+};
+
+/** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
+export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { mode?: unknown; updated_at?: unknown };
+    const parsed = JSON.parse(raw) as {
+      mode?: unknown;
+      updated_at?: unknown;
+      reason?: unknown;
+    };
     if (!isOperationMode(parsed.mode)) return null;
     if (typeof parsed.updated_at !== "number" || !Number.isFinite(parsed.updated_at)) {
       return null;
     }
-    return parsed.mode;
+    return {
+      mode: parsed.mode,
+      updated_at: parsed.updated_at,
+      reason:
+        typeof parsed.reason === "string" || parsed.reason === null
+          ? parsed.reason
+          : undefined,
+    };
   } catch {
     return null;
   }
 }
 
-async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
+/**
+ * Return a bounded-stale mirror for both the live mode resolver and public
+ * banner. A single cache avoids two KV reads on a cold banner request and an
+ * additional KV read on every warm request. Errors cache for just 5 seconds.
+ */
+export async function readOperationModeKvMirror(
+  kv: KVNamespace | undefined,
+): Promise<ParsedOperationModeKvMirror | null> {
   const now = Date.now();
-  if (now < kvCache.expiresAt) return kvCache.mode;
+  if (now < kvCache.expiresAt) return kvCache.mirror;
+  // Share a cold KV lookup across requests in the same isolate. Otherwise
+  // concurrent banners can each read KV before either populates the cache.
+  if (kvMirrorInFlight) return kvMirrorInFlight;
   if (!kv) {
-    kvCache = { mode: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
+    kvCache = { mirror: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
     return null;
   }
+  const pending = (async (): Promise<ParsedOperationModeKvMirror | null> => {
+    try {
+      const raw = await kv.get(OPERATION_MODE_KV_KEY, {
+        cacheTtl: KV_CACHE_TTL_MS / 1000,
+      });
+      const mirror = typeof raw === "string" ? parseKvMirror(raw) : null;
+      kvCache = { mirror, expiresAt: Date.now() + KV_CACHE_TTL_MS };
+      return mirror;
+    } catch {
+      kvCache = { mirror: null, expiresAt: Date.now() + KV_ERROR_CACHE_TTL_MS };
+      return null;
+    }
+  })();
+  kvMirrorInFlight = pending;
   try {
-    const raw = await kv.get(OPERATION_MODE_KV_KEY, {
-      cacheTtl: KV_CACHE_TTL_MS / 1000,
-    });
-    const mode = typeof raw === "string" ? parseKvMirrorMode(raw) : null;
-    kvCache = { mode, expiresAt: now + KV_CACHE_TTL_MS };
-    return mode;
-  } catch {
-    kvCache = { mode: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
-    return null;
+    return await pending;
+  } finally {
+    if (kvMirrorInFlight === pending) kvMirrorInFlight = null;
   }
+}
+
+/** Treat a throwing KV binding accessor like an unavailable KV read.
+ * The public mode/banner must never expose binding acquisition exceptions or
+ * fall through to D1 solely because a property getter throws.
+ */
+export function getOperationModeKvBinding(env: OperationModeEnv): KVNamespace | undefined {
+  try {
+    return env.KV;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readKvMode(kv: KVNamespace | undefined): Promise<OperationMode | null> {
+  return (await readOperationModeKvMirror(kv))?.mode ?? null;
 }
 
 async function readD1Mode(db: D1Database): Promise<OperationMode | null> {
@@ -98,7 +160,7 @@ export async function resolvePublicOperationMode(
 ): Promise<OperationMode> {
   if (isForceStaticOnlyEnv(env.FORCE_STATIC_ONLY)) return remember("static_only");
   if (isolateMode.mode && Date.now() < isolateMode.expiresAt) return isolateMode.mode;
-  const fromKv = await readKvMode(env.KV);
+  const fromKv = await readKvMode(getOperationModeKvBinding(env));
   if (fromKv) return remember(fromKv);
   if (options.allowD1 && env.DB) {
     const fromD1 = await readD1Mode(env.DB);

@@ -18,6 +18,7 @@ import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
 import { mediaRoutes } from "./routes/media/mediaRoutes.ts";
 import { xUsersSearchRoutes } from "./routes/internal/xUsersSearch.ts";
+import { operationModeBannerRoutes } from "./routes/operationModeBanner.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
 
@@ -25,6 +26,8 @@ export const app = new Hono<AppEnv>();
 
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
+// MIG-0661: public read-only banner, no D1/session.
+app.route("/api/operation-mode/banner", operationModeBannerRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
 // MIG-0647 (RH-027/028): public staff allowlist with manifest double-read fence.
 app.route("/api/public/events", publicEventStaffRoutes);

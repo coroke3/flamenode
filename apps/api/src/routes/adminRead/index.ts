@@ -8,6 +8,7 @@ import { adminEventsRoutes } from "./events.ts";
 import { adminAuditRoutes } from "./audit.ts";
 import { adminOpsRoutes } from "./ops.ts";
 import { adminSettingsRoutes } from "./settings.ts";
+import { adminCostGuardBannerRoutes } from "./costGuardBanner.ts";
 import { adminModerationRoutes } from "./moderation.ts";
 import { adminUsersRoutes } from "./users.ts";
 import { adminXIdMergesRoutes } from "./xIdMerges.ts";
@@ -40,6 +41,8 @@ adminReadRoutes.use("*", async (c, next) => {
   await next();
 });
 
+// MIG-0661 U02: admin-only CostGuardBanner snapshot, one D1 row read after the session gate.
+adminReadRoutes.route("/cost-guard-banner", adminCostGuardBannerRoutes);
 adminReadRoutes.route("/users", adminUserEditRoutes);
 adminReadRoutes.route("/users", adminUsersRoutes);
 adminReadRoutes.route("/videos", adminVideosRoutes);

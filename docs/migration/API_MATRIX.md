@@ -548,3 +548,14 @@ T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuse
 | RH-028 | `GET /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | 60/min isolate rate guard、R2 event-base 2MiB、visibility manifest の必須 ETag 前後照合、blocked event 404、blocked X staff 除去、DTO allowlist、非公開/欠損 503 | MIGRATION_IN_PROGRESS |
 
 DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
+
+## MIG-0661 — CostGuardBanner read DTO endpoints (U01–U03 code implemented; CI/review pending)
+
+| Endpoint | CURRENT source | Hono target | Guard and data read | State |
+| --- | --- | --- | --- | --- |
+| `GET /api/operation-mode/banner` | `src/lib/operationMode/publicMode.ts#resolveCostGuardBannerSnapshot`, `src/lib/operationMode/kvMirrorCore.ts` | `apps/api/src/routes/operationModeBanner.ts` | public, no session; `resolvePublicOperationMode({allowD1:false})` + KV mirror reason; D1 statements = 0; `Cache-Control: no-store` | MIG-0661 U01 IN_PROGRESS, PR#419 SHA=dfbf250bb7ec6aea3fe60c4185239a157d057138 (shared 30s KV mirror cache, exact-head CI running) |
+| `GET /api/admin-read/cost-guard-banner` | `src/components/layout/CostGuardBanner.tsx` admin source | `apps/api/src/routes/adminRead/costGuardBanner.ts` (implemented in PR#419) | existing admin read session/admin guard + 1 D1 SELECT; missing/failed row => normal; private no-store | MIG-0661 U02 IN_PROGRESS; tests T03/T04 added, CI pending |
+
+U03 contract: both Hono handlers validate successful and fallback JSON via `@flamenode/contracts#CostGuardBannerResponseSchema` (`packages/contracts/src/costGuardBanner.ts`) before serialization. `mode` is the five-value OperationMode vocabulary; `reason` is string or null. Regression checks are in `apps/api/test/costGuardBanner.test.mjs` T05. PR#419 source Head 66af40edddc45cb0b5cf46ea0d513cf3e33a2cd1 is the prior green U02 checkpoint; U03 CI is pending.
+
+U01–U03 budget/parity note (MIG-0661): public/admin banner reasons longer than 2,048 code units return `null` while retaining the operation mode. Valid oversized KV JSON is still parsed to retain CURRENT maintenance/read_only/static_only/economy semantics; this exceeds ZERO_1102's 64 KiB per-request JSON.parse guard and remains a BLOCKED P2 decision/measurement gate. T06 exercises 70 KiB mirror parity; T08 adds cold-KV concurrent single-flight/error-cache regressions. No S2 CPU budget approval or production cutover is claimed.
