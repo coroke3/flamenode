@@ -87,3 +87,32 @@ test("U03b shared avatar uses Google Drive cache and a text fallback for invalid
   assert.equal(invalidDoc.querySelectorAll("img.x-link-request-avatar").length, 0);
   assert.match(invalidDoc.querySelector(".x-link-request-avatar-fallback")?.textContent ?? "", /A/);
 });
+
+
+test("U03b rejects backslash network-path URLs and malformed HTTPS for both X and Discord images", () => {
+  for (const dangerous of [
+    "/\\evil.invalid/avatar.png",
+    "/\\\\evil.invalid/avatar.png",
+    "https:\\evil.invalid/avatar.png",
+    "https://",
+    "https://user:secret@evil.invalid/a",
+    "/safe\\path",
+    "https://example.com/a\\b",
+    "\nhttps://example.com/a",
+  ]) {
+    const html = render(h(ManageXLinkRequestsBody, { data: { rows: [{
+      ...row, requested_icon_url: dangerous, discord_image: dangerous,
+    }] } }));
+    const doc = new JSDOM(html).window.document;
+    assert.equal(doc.querySelectorAll("img.x-link-request-avatar").length, 0, dangerous);
+    assert.equal(doc.querySelectorAll("td:nth-child(4) img").length, 0, dangerous);
+    assert.ok(doc.querySelector(".x-link-request-avatar-fallback"), dangerous);
+  }
+  const safe = render(h(ManageXLinkRequestsBody, { data: { rows: [{
+    ...row, requested_icon_url: "/api/manage-x-icons/signed?a=1",
+    discord_image: "https://cdn.example/avatar.webp",
+  }] } }));
+  const doc = new JSDOM(safe).window.document;
+  assert.ok(doc.querySelector('img.x-link-request-avatar[src="/api/manage-x-icons/signed?a=1"]'));
+  assert.ok(doc.querySelector('td:nth-child(4) img[src="https://cdn.example/avatar.webp"]'));
+});
