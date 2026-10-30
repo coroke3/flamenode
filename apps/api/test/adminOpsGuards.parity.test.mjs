@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
-import { originGuardMiddleware, writeGuardMiddleware, onlyMutating } from "../src/middleware/writeOrigin.ts";
-import { dbMiddleware } from "../src/middleware/db.ts";
+import { createAdminRoutes } from "../src/routes/admin/index.ts";
 import { staticRebuildAdminRoutes } from "../src/routes/admin/staticRebuild.ts";
 import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts";
 import { visibilityRepairAdminRoutes } from "../src/routes/admin/visibilityRepair.ts";
@@ -27,15 +26,15 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
   const fake = createAdminD1();
   seedBase(fake.sqlite, { settings: mode });
   const app = new Hono();
-  const originOptions = { loadSiteUrl: () => SITE, allowLocalPreview: () => false };
-  app.use("*", onlyMutating(originGuardMiddleware(originOptions)));
-  app.use("*", async (c, next) => {
-    c.set("user", user);
-    c.set("sessionState", user ? "user" : "none");
-    await next();
-  });
-  app.use("*", onlyMutating(writeGuardMiddleware(originOptions)));
-  app.use("*", onlyMutating(dbMiddleware));
+  // The REAL admin parent router must apply the middleware chain to every
+  // subsequently mounted feature route. This is the same ordering as app.ts.
+  app.route("/api/admin", createAdminRoutes({
+    session: async (c, next) => {
+      c.set("user", user);
+      c.set("sessionState", user ? "user" : "none");
+      await next();
+    },
+  }));
   app.route("/api/admin/static-builds", staticRebuildAdminRoutes);
   app.route("/api/admin/static-builds/backfill", staticBackfillAdminRoutes);
   app.route("/api/admin/visibility-repair", visibilityRepairAdminRoutes);
@@ -49,7 +48,7 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
   return { ...fake, request, auditCount };
 }
 
-test("MIG-0643 T02: all seven route paths exist in isolated protected test stack", async () => {
+test("MIG-0643 T02: actual createAdminRoutes parent applies origin guard to all seven future mounts", async () => {
   const s = setup();
   for (const item of CASES) {
     const res = await s.request(item, "https://not-our-site.example");
