@@ -88,7 +88,18 @@ test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Op
     events: [{ id: "event-1", title: "Event" }],
     reviewSummaries: "included", degraded: false,
   };
-  const fetchFn = async path => json(200, path.startsWith("/api/admin-read/videos/video-1") ? detail : rows);
+  const mutations = [];
+  const fetchFn = async (path, init) => {
+    if (init?.method === "POST") {
+      mutations.push({ path, body: JSON.parse(init.body) });
+      return json(200, { ok: true, nextHref: "/admin/videos/video-2?event=event-1" });
+    }
+    if (path.startsWith("/api/admin-read/videos/video-1")) return json(200, detail);
+    if (path.startsWith("/api/admin-read/videos/video-2")) {
+      return json(200, { ...detail, video: { ...detail.video, id: "video-2" } });
+    }
+    return json(200, rows);
+  };
   function LocationProbe() {
     const location = useLocation();
     return React.createElement("output", { id: "route-location" }, location.pathname + location.search);
@@ -121,6 +132,18 @@ test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Op
     await click("詳細");
     assert.equal(route(), "/admin/videos/video-1?event=event-1",
       "an Ops-internal detail link must not force a document reload");
+    const next = [...dom.window.document.querySelectorAll("button")]
+      .find(node => node.textContent.trim() === "承認して次へ");
+    assert.ok(next, "CURRENT next-approval button must be present");
+    await React.act(async () => {
+      next.dispatchEvent(new dom.window.MouseEvent("click",
+        { bubbles: true, cancelable: true, button: 0 }));
+    });
+    assert.equal(mutations.length, 1, "one approval request only");
+    assert.equal(mutations[0].path, "/api/admin/videos/video-1/status");
+    assert.equal(mutations[0].body.and_next, "1");
+    assert.equal(route(), "/admin/videos/video-2?event=event-1",
+      "approved nextHref must navigate in Ops Router without document reload");
     await click("作品一覧へ");
     assert.equal(route(), "/admin/videos?status=review&event=event-1");
     await click("前へ");

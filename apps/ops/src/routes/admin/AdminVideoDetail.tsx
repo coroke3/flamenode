@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { AdminVideoDetailResponse } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
 import {
@@ -103,11 +103,12 @@ function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactEle
 }
 
 export function StatusControls({
-  data, eventId, onRefresh, actions,
+  data, eventId, onRefresh, onNext, actions,
 }: {
   data: AdminVideoDetailResponse;
   eventId: string | null;
   onRefresh: () => void;
+  onNext: (href: string) => void;
   actions: ReturnType<typeof createAdminVideoStatusActions>;
 }): React.ReactElement {
   const v = data.video;
@@ -140,7 +141,9 @@ export function StatusControls({
         });
         setReason("");
         if (result.nextHref) {
-          window.location.assign(result.nextHref);
+          // Admin approval nextHref is allowlisted at the API boundary; preserve
+          // the Ops SPA rather than sending a document request to legacy Next.
+          onNext(result.nextHref);
         } else onRefresh();
       } else {
         setMessage({ ok: false, text: result.message ?? "更新に失敗しました。" });
@@ -255,6 +258,7 @@ function ModerationCases({ data, create, onRefresh }: {
 export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }): React.ReactElement {
   const { id = "" } = useParams<{ id: string }>();
   const { search } = useLocation();
+  const navigate = useNavigate();
   const eventId = React.useMemo(() => new URLSearchParams(search).get("event") || null, [search]);
   const [refreshKey, setRefreshKey] = React.useState(0);
   const refresh = React.useCallback(() => setRefreshKey(x => x + 1), []);
@@ -292,7 +296,8 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 20 }}>
         <InfoPanel data={data} />
         <aside>
-          <StatusControls data={data} eventId={eventId} onRefresh={refresh} actions={actions} />
+          <StatusControls data={data} eventId={eventId} onRefresh={refresh}
+            onNext={href => { void navigate(href); }} actions={actions} />
           <nav aria-label="作品の関連画面" className="fn-panel-actions">
             <a href={`/${publicSlug}`} target="_blank" rel="noopener noreferrer">公開ページ</a>
             <a href={`/dashboard/edit/${slug}?privileged=admin`}>編集画面</a>
