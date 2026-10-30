@@ -38,7 +38,8 @@ function setup({ mutateBeforeBatch } = {}) {
   app.use("*", async (c, next) => {
     c.set("user", ADMIN);
     c.set("db", drizzle(d1, { schema }));
-    c.set("actorSnapshotJsonById", {});
+    // In production writeGuard preloads the actor snapshot in the same user read.
+    c.set("actorSnapshotJsonById", { "admin-1": "{}" });
     await next();
   });
   app.route("/api/admin/youtube-sync", youtubeSyncAdminRoutes);
