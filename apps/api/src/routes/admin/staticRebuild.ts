@@ -1,5 +1,6 @@
 /**
- * MIG-0643 U02 (SA-070..073). NOT MOUNTED: PR #472 owns the parent admin router.
+ * MIG-0643 U02 (SA-070..073): mounted under the parent /api/admin router
+ * on the migration PR branch only; not deployed to production.
  * Parent guarantees origin, session, admin role and Drizzle instance. This
  * module adds the feature-specific CostGuard and a bounded D1 preflight read.
  *

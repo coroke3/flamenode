@@ -1,10 +1,10 @@
 /**
  * MIG-0643 U04, SA-106: queueYoutubeMetadataResync.
- * An isolated route, NOT mounted until MIG-0637 PR #472 releases
- * apps/api/src/routes/admin/index.ts and the remaining MIG-0643 units finish.
- * Parent admin router provides origin -> session -> writeGuard -> db.
- * CURRENT's best-effort immediate wake is intentionally zero in Hono (D-13-41);
- * sync-jobs cron drains pending D1 rows. No remote Queue binding used here.
+ * Mounted on the migration PR branch under /api/admin's
+ * origin -> session -> writeGuard -> db chain, not production traffic.
+ * CURRENT's best-effort immediate wake is intentionally zero in Hono
+ * (D-13-41); sync-jobs cron drains pending D1 rows.
+ * No remote Queue binding used here.
  */
 import { Hono } from "hono";
 import { AdminYoutubeResyncVideoIdSchema, type AdminYoutubeResyncResult } from "@flamenode/contracts/admin/staticRebuildOps";

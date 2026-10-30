@@ -1,8 +1,8 @@
 /**
  * MIG-0643 U03 SA-050: strict D1-fence + R2-token visibility repair.
- * NOT MOUNTED: admin router currently owned by PR #472.
- * The only R2 operations in this module are against c.env.BUCKET; tests use
- * an in-memory fake bucket. This PR never executes against production R2.
+ * Mounted beneath the parent admin guards on the migration PR branch only.
+ * The only R2 operations here target c.env.BUCKET; tests use an in-memory
+ * fake bucket. No production deployment or remote R2 writes in this PR.
  */
 import { Hono } from "hono";
 import { normalizeXId } from "@flamenode/domain/xid";

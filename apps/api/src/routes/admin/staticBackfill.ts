@@ -1,8 +1,9 @@
 /**
- * MIG-0643 U02 SA-069: bounded static JSON backfill, UNMOUNTED.
- * Parent /api/admin origin + session + writeGuard is owned by PR #472.
+ * MIG-0643 U02 SA-069: bounded static JSON backfill.
+ * Mounted under the parent /api/admin origin, session and write guards on
+ * this migration branch. No production cutover or remote D1/R2/Queue calls.
  * One D1 count+page query and one atomic queue/audit batch per request; KV
- * state is best-effort as in CURRENT; no production R2 writes or Queue sends.
+ * state is best-effort as in CURRENT; no immediate Queue sends.
  */
 import { Hono } from "hono";
 import { AdminStaticBackfillBodySchema } from "@flamenode/contracts/admin/staticRebuildOps";
