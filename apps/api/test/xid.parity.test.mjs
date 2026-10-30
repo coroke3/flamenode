@@ -199,3 +199,85 @@ test("SA-098 returns 413 for oversized actual JSON bytes", async () => {
   assert.equal(response.status, 413);
   assert.equal(stats.batches, 0);
 });
+
+test("SA-098 unmatched XID methods do not trigger write Origin/session/DB guards", async () => {
+  let sessionCalls = 0;
+  let dbReads = 0;
+  const app = new Hono();
+  app.route("/api/xid", createXidRoutes({
+    session: async (_c, next) => { sessionCalls += 1; await next(); },
+  }));
+  const env = Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+    get() {
+      dbReads += 1;
+      throw new Error("SECRET_D1_PROVIDER_MESSAGE");
+    },
+  });
+  for (const [method, path] of [
+    ["GET", "/api/xid/active"],
+    ["HEAD", "/api/xid/active"],
+    ["OPTIONS", "/api/xid/active"],
+    ["GET", "/api/xid/not-found"],
+    ["POST", "/api/xid/not-found"],
+  ]) {
+    const response = await app.request(`${SITE}${path}`, {
+      method, headers: { Cookie: "__Secure-authjs.session-token=present" },
+    }, env);
+    assert.notEqual(response.status, 403, `${method} ${path} must not be treated as a write`);
+    assert.notEqual(response.status, 503, `${method} ${path} must not consult the DB`);
+  }
+  assert.equal(sessionCalls, 0);
+  assert.equal(dbReads, 0);
+});
+
+test("SA-098 throwing D1 binding fails closed with private 503 and no provider leak", async () => {
+  let dbReads = 0;
+  const app = new Hono();
+  app.route("/api/xid", createXidRoutes({
+    session: async (c, next) => {
+      c.set("user", { ...USER });
+      c.set("sessionState", "user");
+      await next();
+    },
+  }));
+  const env = Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+    get() {
+      dbReads += 1;
+      throw new Error("SECRET_D1_PROVIDER_MESSAGE");
+    },
+  });
+  const response = await app.request(`${SITE}/api/xid/active`, {
+    method: "POST",
+    headers: { Origin: SITE, "Content-Type": "application/json" },
+    body: JSON.stringify({ x_user_id: "x-one" }),
+  }, env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const body = await response.text();
+  assert.equal(JSON.parse(body).reason, "db_unavailable");
+  assert.doesNotMatch(body, /SECRET_D1_PROVIDER_MESSAGE/);
+  assert.equal(dbReads, 1);
+});
+
+test("SA-098 slash-variant cross-origin POST cannot bypass the write guard", async () => {
+  const { db, sqlite } = createAdminD1();
+  seedBase(sqlite, { role: "user" });
+  let sessionCalls = 0;
+  const app = new Hono();
+  app.route("/api/xid", createXidRoutes({
+    session: async (c, next) => {
+      sessionCalls += 1;
+      c.set("user", { ...USER });
+      c.set("sessionState", "user");
+      await next();
+    },
+  }));
+  const response = await app.request(`${SITE}/api/xid/active/`, {
+    method: "POST",
+    headers: { Origin: "https://evil.example", "Content-Type": "application/json" },
+    body: JSON.stringify({ x_user_id: "x-one" }),
+  }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+  assert.notEqual(response.status, 200);
+  assert.ok([403, 404, 405].includes(response.status));
+  assert.equal(sessionCalls, 0, "Origin rejection must precede session lookup");
+});
