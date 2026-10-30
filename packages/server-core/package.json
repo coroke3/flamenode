@@ -12,6 +12,7 @@
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
     "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
+    "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
     "./memberSuggestion/rank": "./src/memberSuggestion/rank.ts",
     "./memberSuggestion/search": "./src/memberSuggestion/search.ts",
