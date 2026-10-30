@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { isCanonicalXId, normalizeXId } from "@flamenode/domain/xid";
 import type { AppEnv } from "../../env.ts";
 import { cancelR2BodyBestEffort } from "@flamenode/server-core/r2Body";
 import {
@@ -19,6 +20,52 @@ import {
 } from "@flamenode/server-core/publicData/artifactVisibility";
 import { isEntityBlockedInManifest } from "@flamenode/server-core/visibility/manifestCore";
 import { readVisibilityManifestObject } from "@flamenode/server-core/visibility/manifestR2";
+
+/**
+ * Normalize X references exactly as the public DTO does before applying the
+ * visibility manifest. The shared artifact filter historically compares raw
+ * "@Handle" with canonical "handle"; this route must not expose that alias.
+ * Invalid supplied identifiers fail closed instead of leaking display fields.
+ */
+function fenceCanonicalStaffReferences(
+  input: unknown,
+  blockedUserIds: ReadonlySet<string> | undefined,
+): { value: unknown; removed: boolean; invalid: boolean } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { value: input, removed: false, invalid: false };
+  }
+  const record = input as Record<string, unknown>;
+  if (!Array.isArray(record.public_staff)) {
+    return { value: input, removed: false, invalid: false };
+  }
+  let removed = false;
+  let invalid = false;
+  const staff = record.public_staff.filter((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return true;
+    const row = entry as Record<string, unknown>;
+    const raw = row.x_user_id ?? row.x_id;
+    if (raw == null || raw === "") return true; // staff without an X account is valid
+    if (typeof raw !== "string") {
+      invalid = true;
+      return false;
+    }
+    const canonical = normalizeXId(raw);
+    if (!isCanonicalXId(canonical)) {
+      invalid = true;
+      return false;
+    }
+    if (blockedUserIds?.has(canonical)) {
+      removed = true;
+      return false;
+    }
+    return true;
+  });
+  return {
+    value: removed ? { ...record, public_staff: staff } : input,
+    removed,
+    invalid,
+  };
+}
 
 /** CURRENT RH-027/028: no DB read, no Cache API, no trust in stale R2 without a committed fence. */
 export const publicEventStaffRoutes = new Hono<AppEnv>();
@@ -135,15 +182,16 @@ publicEventStaffRoutes.get("/:id/staff", async (c) => {
     return unavailable(request, "public_data_unavailable");
   }
 
-  const payload = normalizePublicEventStaffArtifact(
-    filterPublicArtifactPayload(
-      "event",
-      artifact,
-      buildPublicArtifactVisibilityContext(before.manifest),
-    ),
-    eventId,
-  );
+  const context = buildPublicArtifactVisibilityContext(before.manifest);
+  const prefiltered = filterPublicArtifactPayload("event", artifact, context);
+  const staffFence = fenceCanonicalStaffReferences(prefiltered, context?.blockedUserIds);
+  if (staffFence.invalid) return unavailable(request, "public_data_unavailable");
+  const payload = normalizePublicEventStaffArtifact(staffFence.value, eventId);
   if (!payload) return unavailable(request, "public_data_unavailable");
+  const sourceStaff = artifact && typeof artifact === "object" && !Array.isArray(artifact)
+    ? (artifact as Record<string, unknown>).public_staff : null;
+  const redactedStaff = staffFence.removed ||
+    (Array.isArray(sourceStaff) && payload.staff.length < sourceStaff.length);
 
   let after: Awaited<ReturnType<typeof readStrictManifest>>;
   try {
@@ -164,5 +212,10 @@ publicEventStaffRoutes.get("/:id/staff", async (c) => {
     return unavailable(request, "public_payload_unavailable");
   }
   // CURRENT calls publicJsonResponse, so a matching request ETag can return 304.
-  return withCors(request, await publicJsonResponse(request, payload, SUCCESS_CACHE_CONTROL));
+  // A conditional wildcard (If-None-Match: *) must never reuse a previously
+  // cached body containing an X identity that was just visibility-redacted.
+  const responseRequest = redactedStaff ? new Request(request.url) : request;
+  return withCors(request, await publicJsonResponse(
+    responseRequest, payload, redactedStaff ? "no-store" : SUCCESS_CACHE_CONTROL,
+  ));
 });
