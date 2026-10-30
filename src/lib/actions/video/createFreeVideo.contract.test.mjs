@@ -62,12 +62,12 @@ test("createFreeVideo は eventIds 決定後・保存前にイベント必須項
   const eventIdsIndex = fnBody.indexOf("const eventIds = eventId ? [eventId] : []");
   const missingRequiredIndex = fnBody.indexOf("firstMissingRequiredVideoField");
   const generateIdIndex = fnBody.indexOf('generateId("v")');
-  const insertIndex = fnBody.indexOf("db.insert(videos)");
+  const insertIndex = fnBody.indexOf("buildFreeVideoInsertPlan(db, videoAfter, userId)");
 
   assert.ok(eventIdsIndex >= 0);
   assert.ok(missingRequiredIndex > eventIdsIndex, "必須項目検証は eventIds 決定の後");
   assert.ok(generateIdIndex > missingRequiredIndex, "generateId は必須項目検証の後");
-  assert.ok(insertIndex > missingRequiredIndex, "insert は必須項目検証の後");
+  assert.ok(insertIndex > missingRequiredIndex, "atomic insert plan は必須項目検証の後");
   assert.match(
     fnBody.slice(missingRequiredIndex, missingRequiredIndex + 300),
     /loadUnionRequiredVideoFields\(db, eventIds\)/,

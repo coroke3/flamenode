@@ -14,6 +14,7 @@ import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templat
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
 import { buildFreeVideoRebuildTargets } from "@flamenode/server-core/video/freeVideoRebuildTargets";
 import { buildFreeVideoRow } from "@flamenode/server-core/video/freeVideoRow";
+import { buildFreeVideoInsertPlan } from "@flamenode/server-core/video/freeVideoInsertPlan";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -201,19 +202,10 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       buildUnslottedEventEligibilityAssertionPlan(db, eventId, now),
     );
 
-    plan.statements.push(db.insert(videos).values(videoAfter));
-    plan.expectedChanges.push(1);
-    plan.audits.push({
-      table_name: "videos",
-      target_id: videoId,
-      operation: "CREATE",
-      before: null,
-      after: { ...videoAfter },
-      actor_user_id: userId,
-      context: "video-save:create-free",
-      retention_class: "normal",
-      strict: true,
-    });
+    appendVideoAtomicWritePlan(
+      plan,
+      buildFreeVideoInsertPlan(db, videoAfter, userId),
+    );
 
     appendVideoAtomicWritePlan(
       plan,

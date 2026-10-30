@@ -105,7 +105,8 @@
     "./video/unslottedEventPlans": "./src/video/unslottedEventPlans.ts",
     "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts",
     "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts",
-    "./video/freeVideoRow": "./src/video/freeVideoRow.ts"
+    "./video/freeVideoRow": "./src/video/freeVideoRow.ts",
+    "./video/freeVideoInsertPlan": "./src/video/freeVideoInsertPlan.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
