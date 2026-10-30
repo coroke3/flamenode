@@ -108,7 +108,11 @@ async function queueProjection(c: import("hono").Context<AppEnv>, ctx: StaffCont
     { targetType: "events_index", targetId: "global", reason, priority: "low", requestedByUserId: ctx.user.id },
     { targetType: "member_suggestions", targetId: "global", reason, priority: "low" },
     ...(includeUsers ? [{ targetType: "users_index" as const, targetId: "global", reason, priority: "low" as const, requestedByUserId: ctx.user.id }] : []),
-  ], { wakeSource: "web" }, async () => null);
+  ], { wakeSource: "web" }, async () => ({
+    readEnv: () => null,
+    readWaitUntil: () => null,
+    readKv: () => null,
+  }));
 }
 
 /** Shared POST / and PUT /:staffId; a PUT can never silently create a missing row. */
