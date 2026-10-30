@@ -6,6 +6,9 @@
 
 ## §1. Existing Hono session and write-guard security (MIG-0807)
 
+**Current integration checkpoint (2026-10-30):** The SEC-0807-01 fix was independently integrated as merged PR #445 into `main` (squash `ee6a6dce98961ede46dda33470eebc05f4c14496`). PR #444 now targets `main`; its latest source tests assert fixed **503 / private, no-store / no provider error disclosure / no writes** rather than the original throwing-getter behavior. The STOP/finding details below are preserved as **historical pre-fix audit evidence**, not as a claim that the defect remains in current `main`. **Present verdict: remediation merged; final independent security review and integration CI are still required before MIG-0807 is DONE or merge-authorized.** See task checkpoint `docs/migration/work-items/MIG-0807.md`.
+
+
 Source baseline: `apps/api/src/auth/session.ts`, `apps/api/src/middleware/{writeOrigin,adminReadGuard,costGuard}.ts`, `apps/api/src/routes/admin/index.ts`. Legacy behavioral comparison: `src/lib/auth/routeGuard.ts`, `src/lib/auth/origin.ts` and current `writeGuard`. Work Order: `docs/migration/PHASE_8_9_SPEC.md` MIG-0807; decision D-16-14. No independent review has yet approved this checkpoint.
 
 | Check | Code boundary | Reproduction / existing contract test | Audit assessment |
