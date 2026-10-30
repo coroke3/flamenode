@@ -8,7 +8,7 @@ export async function readManageStaff(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
   signal?: AbortSignal,
 ): Promise<OpsResult<ManageStaffResponse>> {
-  if (!eventId || eventId.trim() !== eventId || eventId.includes("/")) {
+  if (!eventId || eventId === "." || eventId === "..") {
     return { status: "unavailable" };
   }
   const response = await getJson<unknown>(
