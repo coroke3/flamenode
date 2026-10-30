@@ -124,7 +124,12 @@ async function queueBackfill(
       preloaded: auditPreloaded(c),
       audits: [{
         table_name: "static_rebuild_queue", target_id: targetId,
-        operation: "CREATE", after,
+        // Match CURRENT enqueueBackfillRows: the audit records the number
+        // of targets accepted by the queue builder, not the input page size.
+        operation: "CREATE",
+        after: "accepted_targets" in after
+          ? { ...after, accepted_targets: batch.acceptedTargetCount }
+          : after,
         actor_user_id: c.get("user")!.id,
         context: "admin_static_backfill", reason, retention_class: "normal", strict: true,
       }],
