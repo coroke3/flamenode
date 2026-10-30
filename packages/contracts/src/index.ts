@@ -10,4 +10,5 @@ export * from "./manage/index.ts";
 export * from "./admin/index.ts";
 export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
+export * from "./videoInteraction.ts";
 export * from "./xid.ts";
