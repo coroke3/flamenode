@@ -25,6 +25,7 @@ import { auditAdminRoutes } from "./audit.ts";
 import { listEventTemplatesForAdminApi } from "../events/templates.ts";
 import { costGuardAdminRoutes } from "./costGuard.ts";
 import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
+import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -58,5 +59,7 @@ export function createAdminRoutes(
   admin.route("/cost-guard", costGuardAdminRoutes);
   admin.route("/users", adminUsersRoutes);
   admin.route("/x-users", adminXUsersRoutes);
+  // MIG-0643 SA-050/069..073/106: all handlers inherit the parent auth/write guards.
+  mountMig0643AdminRoutes(admin);
   return admin;
 }
