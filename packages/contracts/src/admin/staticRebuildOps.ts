@@ -8,3 +8,25 @@ export const AdminYoutubeResyncResultSchema = z.object({
   already_pending: z.boolean().optional(),
 });
 export type AdminYoutubeResyncResult = z.infer<typeof AdminYoutubeResyncResultSchema>;
+
+/** MIG-0643 U02: CURRENT SA-071 target type set, exact IDs and reason bounds. */
+export const AdminStaticRebuildBodySchema = z.object({
+  target_type: z.enum([
+    "top", "top_recommended", "top_latest", "top_nostalgic",
+    "top_events", "top_announcements", "top_stats", "top_slot_stats",
+    "events_index", "event_base", "event_slots", "event_release",
+    "event", "video", "user", "users_index", "list_recent",
+    "list_popular", "search_index", "recommend_core", "recommend",
+    "rules", "youtube_related_blocklist", "random_video_pool", "member_suggestions",
+  ]),
+  target_id: z.string().trim().min(1).max(128),
+  reason: z.string().trim().min(1).max(500).default("manual_rebuild"),
+});
+
+export const AdminStaticRebuildResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().optional(),
+  queued: z.number().int().nonnegative().optional(),
+  retried: z.number().int().nonnegative().optional(),
+});
+export type AdminStaticRebuildResult = z.infer<typeof AdminStaticRebuildResultSchema>;
