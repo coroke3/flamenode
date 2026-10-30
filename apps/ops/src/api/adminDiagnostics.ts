@@ -1,8 +1,10 @@
 /** MIG-0736 U01: validated, read-only Admin diagnostics adapter. Role checks live in Hono/OpsGate. */
 import {
   AdminHealthResponseSchema,
+  AdminWorkersResponseSchema,
   AdminSecurityResponseSchema,
   type AdminHealthResponse,
+  type AdminWorkersResponse,
   type AdminSecurityResponse,
 } from "@flamenode/contracts";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
@@ -53,4 +55,12 @@ export function getAdminSecurity(
     AdminSecurityResponseSchema,
     signal,
   );
+}
+
+/** U02a: expose the existing bounded worker-monitor snapshot without client-side auth decisions. */
+export function getAdminWorkers(
+  fetchFn: OpsFetch,
+  signal?: AbortSignal,
+): Promise<OpsResult<AdminWorkersResponse>> {
+  return validatedRead(fetchFn, "/api/admin-read/ops/workers", AdminWorkersResponseSchema, signal);
 }
