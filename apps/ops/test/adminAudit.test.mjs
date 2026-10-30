@@ -13,7 +13,7 @@ import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
 import { parseAuditListQuery, auditListApiPath, auditViewHref } from "../.test-dist/apps/ops/src/lib/auditListQuery.js";
 import { createAdminAuditApi } from "../.test-dist/apps/ops/src/api/adminAudit.js";
-import { AuditListContent, parseChangedKeys } from "../.test-dist/apps/ops/src/routes/admin/AuditList.js";
+import { AuditListContent, parseChangedKeys, parseAuditActorSnapshot } from "../.test-dist/apps/ops/src/routes/admin/AuditList.js";
 
 const row = (overrides={}) => ({
   id:"aud-1",table_name:"videos",target_id:"v1",operation:"UPDATE",
@@ -342,4 +342,54 @@ test("MIG-0733: CURRENT target links preserve admin/public routes and unknown ta
   }));
   assert.match(unknown,/abc/);
   assert.doesNotMatch(unknown,/href=/);
+});
+
+test("MIG-0733: immutable audit-time identity across all three list views", () => {
+  const api = {list:async()=>({status:"unavailable"}), payload:async()=>({status:"unavailable"})};
+  const historic = {
+    ...sample,
+    rows: [row({
+      actor_snapshot_json: JSON.stringify({
+        discord_name:"PAST_DISCORD", x_name:"PAST_X_NAME", x_user_id:"PAST_X_ID",
+      }),
+      actor_x_user_id:"PAST_X_ID",
+    })],
+    operators:[{id:"op1",name:"LIVE_DISCORD",x_name:"LIVE_X_NAME",active_x_user_id:"LIVE_X_ID"}],
+  };
+  for (const view of ["table","timeline","cards"]) {
+    const html = renderToStaticMarkup(React.createElement(AuditListContent, {
+      query:parseAuditListQuery("?view="+view),
+      state:{status:"ok",data:historic},api,
+    }));
+    assert.match(html,/PAST_X_NAME/);
+    assert.match(html,/@PAST_X_ID/);
+    assert.doesNotMatch(html,/LIVE_DISCORD|LIVE_X_NAME|LIVE_X_ID/);
+  }
+});
+
+test("MIG-0733: deleted operator, malformed snapshot and recorded X ID fallback", () => {
+  assert.deepEqual(parseAuditActorSnapshot('{"discord_name":"Past","x_user_id":"x1","x_name":"X Past"}'),
+    {discord_name:"Past",x_user_id:"x1",x_name:"X Past"});
+  for (const malformed of ["{invalid","[]","42",'{"x_name":{"bad":true}}']) {
+    const snapshot = parseAuditActorSnapshot(malformed);
+    if (malformed.includes("bad")) assert.equal(snapshot?.x_name,null);
+    else assert.equal(snapshot,null);
+  }
+  const api = {list:async()=>({status:"unavailable"}),payload:async()=>({status:"unavailable"})};
+  const renderRow = (source,operators) => renderToStaticMarkup(React.createElement(AuditListContent, {
+    query:parseAuditListQuery(""),
+    state:{status:"ok",data:{...sample,rows:[row(source)],operators}},api,
+  }));
+  const deleted = renderRow({
+    actor_snapshot_json:JSON.stringify({discord_name:"DELETED_DISCORD",x_name:null,x_user_id:"historical"}),
+    actor_x_user_id:"historical",
+  },[]);
+  assert.match(deleted,/DELETED_DISCORD/);
+  assert.match(deleted,/@historical/);
+  const malformed = renderRow({actor_snapshot_json:"{bad",actor_x_user_id:"recorded"},[
+    {id:"op1",name:"LIVE_NAME",x_name:null,active_x_user_id:"new"},
+  ]);
+  assert.match(malformed,/LIVE_NAME/);
+  assert.match(malformed,/@recorded/);
+  assert.doesNotMatch(malformed,/@new/);
 });
