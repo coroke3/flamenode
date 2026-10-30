@@ -59,7 +59,9 @@ async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean>
         ? await bucket.get("youtube/related-blocklist.v1.json")
         : await bucket.get("videos/random-pool.v1.json");
       if (!obj) return false;
-      if (!Number.isFinite(obj.size) || obj.size > maxBytes) {
+      // Align R2 size bounds with server-core/readBoundedR2Json: a
+      // negative, fractional or unsafe integer size is not a trusted length.
+      if (!Number.isSafeInteger(obj.size) || obj.size < 0 || obj.size > maxBytes) {
         await obj.body?.cancel().catch(() => undefined);
         return false;
       }
