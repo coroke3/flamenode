@@ -4,7 +4,7 @@
  * The authoritative owner/self/CAS/audit rules remain in server-core.
  * No production route switch, remote database or Next.js action changes.
  */
-import { Hono } from "hono";
+import type { Hono } from "hono";
 import {
   EventStaffDeleteBodySchema,
   EventStaffUpsertBodySchema,
@@ -46,8 +46,6 @@ function deny(c: import("hono").Context<AppEnv>, message: string, status: 400 | 
   return c.json({ ok: false, message }, status);
 }
 
-export const staffWriteRoutes = new Hono<AppEnv>();
-staffWriteRoutes.use("*", costGuardMiddleware("manage_event_staff"));
 
 async function permitted(c: import("hono").Context<AppEnv>): Promise<StaffContext | Response> {
   const user = c.get("user");
@@ -200,14 +198,20 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
   }
 }
 
-staffWriteRoutes.post("/", (c) => upsert(c, null));
-staffWriteRoutes.put("/:staffId", (c) => {
+export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
+  // Register directly on the parent: its Origin/session/writeGuard/DB stack
+  // must wrap these exact canonical paths, not an unmatched nested subrouter.
+  const base = "/events/:id/staff";
+  app.use(base, costGuardMiddleware("manage_event_staff"));
+  app.use(`${base}/:staffId`, costGuardMiddleware("manage_event_staff"));
+  app.post(base, (c) => upsert(c, null));
+  app.put(`${base}/:staffId`, (c) => {
   const id = c.req.param("staffId") ?? "";
   if (!VALID_STAFF_ID.test(id)) return deny(c, "スタッフIDが不正です。", 400);
   return upsert(c, id);
 });
 
-staffWriteRoutes.delete("/:staffId", async (c) => {
+app.delete(`${base}/:staffId`, async (c) => {
   c.header("Cache-Control", NO_STORE);
   const staffId = c.req.param("staffId") ?? "";
   if (!VALID_STAFF_ID.test(staffId)) return deny(c, "スタッフIDが不正です。", 400);
@@ -237,3 +241,4 @@ staffWriteRoutes.delete("/:staffId", async (c) => {
     return deny(c, GENERIC_FAILURE, 503);
   }
 });
+}
