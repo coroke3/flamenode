@@ -163,6 +163,11 @@ export const AdminVideosResponseSchema = z.object({
   paging: AdminPagingSchema,
   videos: z.array(AdminVideoRowSchema),
   events: z.array(z.object({ id: z.string(), title: z.string() })),
+  /** FIX #507: optional for existing clients; API always sends this for 100-row event-option pages. */
+  eventOptionsPaging: z.object({
+    offset: z.union([z.literal(0), z.literal(100)]),
+    hasMore: z.boolean(),
+  }).optional(),
   /**
    * The review group per-row stage-permission / unanswered counts (CURRENT fetchVideoReviewSummaries) are not
    * reproduced yet; the SPA shows a dash and 0 until the follow-up lands (MIG-0625 handoff).
