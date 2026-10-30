@@ -19,5 +19,6 @@ export async function readManageStaff(
   if (response.status !== "ok") return response;
   // A zod failure must not render untrusted or partial member data.
   const parsed = ManageStaffResponseSchema.safeParse(response.data);
-  return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+  return parsed.success && parsed.data.event.id === eventId
+    ? { status: "ok", data: parsed.data } : { status: "unavailable" };
 }
