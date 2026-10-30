@@ -97,22 +97,27 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
       .bind(...params, ...(review?.params ?? []), ...params, pageSize, offset);
     const eventsStatement = db
       .prepare(
-        `SELECT id, title, COUNT(*) OVER () AS total_available
+        `SELECT id, title,
+            EXISTS(
+              SELECT 1 FROM events WHERE visibility_status = 'public'
+              LIMIT 1 OFFSET ?
+            ) AS has_more
            FROM events WHERE visibility_status = 'public'
            ORDER BY start_time DESC, id DESC LIMIT ? OFFSET ?`,
       )
-      .bind(ADMIN_EVENT_OPTIONS_LIMIT, eventOffset);
+      // Bounded lookahead checks at most 201 public rows rather than COUNT(*)
+      // scanning the full table. D1 statements stay at S2=2 (+session=3).
+      .bind(eventOffset + ADMIN_EVENT_OPTIONS_LIMIT, ADMIN_EVENT_OPTIONS_LIMIT, eventOffset);
     const [pageRow, eventRows] = await Promise.all([
       pageStatement.first<{ total: number; rows: string | null }>(),
-      eventsStatement.all<{ id: string; title: string; total_available: number }>(),
+      eventsStatement.all<{ id: string; title: string; has_more: number }>(),
     ]);
     videos = parseJsonColumn<(AdminVideoRow & Partial<ReviewSummaryRow>)[]>(pageRow?.rows, []);
     total = Number(pageRow?.total ?? 0);
     events = eventRows.results.map(({ id, title }) => ({ id, title }));
-    // Window COUNT uses the same statement as the bounded events slice.
-    // Exactly 100 rows may be the end, or may have another page: never guess.
-    eventOptionsHasMore = Number(eventRows.results[0]?.total_available ?? 0) >
-      eventOffset + events.length;
+    // Exactly 100 rows may be the end or may have another page.
+    // The uncorrelated EXISTS lookahead is bound to offset+100; no full COUNT.
+    eventOptionsHasMore = eventRows.results[0]?.has_more === 1;
   } catch {
     console.error("[adminRead:videos] READ_FAILED");
     degraded = true;
