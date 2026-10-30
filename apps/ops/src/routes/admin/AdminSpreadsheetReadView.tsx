@@ -4,7 +4,6 @@ import type { OpsFetch } from "../../api/read.js";
 import {
   loadSpreadsheetCatalog,
   loadSpreadsheetPage,
-  type SpreadsheetReadResult,
 } from "../../api/adminSpreadsheet.js";
 import { AdminSpreadsheetDisabled } from "./AdminSpreadsheetDisabled.js";
 
