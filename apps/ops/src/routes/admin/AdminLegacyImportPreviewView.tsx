@@ -32,7 +32,7 @@ export function AdminLegacyImportPreviewView({
   const active = React.useRef(false);
   const activeFetch = React.useRef(fetchFn);
   activeFetch.current = fetchFn;
-  const [source, setSource] = React.useState<OpsFetch>(fetchFn);
+  const [source, setSource] = React.useState<OpsFetch>(() => fetchFn);
 
   // Do not render a preview or apply control from a prior transport / session,
   // including during the render before the effect clears the old state.
@@ -58,7 +58,8 @@ export function AdminLegacyImportPreviewView({
   React.useEffect(() => {
     reset();
     setFiles([]);
-    setSource(fetchFn);
+    // React treats function values as updaters; wrap the fetch transport in a thunk.
+    setSource(() => fetchFn);
     return () => {
       generation.current += 1;
       controller.current?.abort();
