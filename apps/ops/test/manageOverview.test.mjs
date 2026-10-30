@@ -113,10 +113,10 @@ test("U02a: SSR renders only validated overview projection with safe links", () 
   const root = React.createElement(MemoryRouter, { initialEntries: ["/manage/events/ev-1?notif=all"] },
     React.createElement(ManageEventOverviewContent, { data }));
   const doc = new JSDOM(renderToStaticMarkup(root)).window.document;
-  assert.match(doc.textContent, /テストイベント/);
-  assert.match(doc.textContent, /公開作品/);
-  assert.match(doc.textContent, /未審査作品/);
-  assert.match(doc.textContent, /Active X ID と運営権限/);
+  assert.match(doc.body.textContent, /テストイベント/);
+  assert.match(doc.body.textContent, /公開作品/);
+  assert.match(doc.body.textContent, /未審査作品/);
+  assert.match(doc.body.textContent, /Active X ID と運営権限/);
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1/videos/video-1"]'));
   assert.ok(doc.querySelector('a[href="/manage/events/ev-1?notif=x_id"]'));
   assert.equal(doc.querySelector('a[href="/manage/events/ev-1"]')?.getAttribute("aria-current"), "page");
@@ -135,7 +135,7 @@ test("U02a: notification schema fallback is explicit and not misrepresented as e
   const root = React.createElement(MemoryRouter, {},
     React.createElement(ManageEventOverviewContent, { data }));
   const doc = new JSDOM(renderToStaticMarkup(root)).window.document;
-  assert.match(doc.textContent, /通知データを取得できません/);
+  assert.match(doc.body.textContent, /通知データを取得できません/);
   assert.equal(doc.querySelector('nav[aria-label="通知種別"]'), null);
-  assert.match(doc.textContent, /公開作品/);
+  assert.match(doc.body.textContent, /公開作品/);
 });
