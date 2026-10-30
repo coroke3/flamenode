@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const [integrityChecks, healthChecks] = await Promise.all([
-  readFile(new URL("./integrityChecks.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/admin/integrityChecks.ts", import.meta.url), "utf8"),
   readFile(new URL("./healthChecks.ts", import.meta.url), "utf8"),
 ]);
 
