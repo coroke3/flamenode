@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { AdminVideoRow } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
 import {
@@ -7,6 +7,7 @@ import {
   adminVideoPageNumbers,
   adminVideoRelativeLabel,
   buildAdminVideoHref,
+  adminVideoFilterHref,
   loadAdminVideos,
   parseAdminVideoFilters,
 } from "../../api/adminVideos.js";
@@ -95,6 +96,13 @@ export function AdminVideoManagementTabs({ q = "", status = "", event = "" }: {
  */
 export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }): React.ReactElement {
   const location = useLocation();
+  const navigate = useNavigate();
+  const submitFilters = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    // Keep the Ops SPA mounted. A normal document GET can fall through to the
+    // legacy Next ingress before the migration route cutover.
+    void navigate(adminVideoFilterHref(new FormData(event.currentTarget)));
+  };
   const filters = React.useMemo(() => parseAdminVideoFilters(location.search), [location.search]);
   const load = React.useCallback(
     (signal: AbortSignal) => loadAdminVideos(fetchFn, location.search, signal),
@@ -129,7 +137,7 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
         <p>作品の状態確認、監査ログ、参加者設定を行います。</p>
       </header>
       <AdminVideoManagementTabs q={q} status={status} event={event} />
-      <form method="get" action="/admin/videos" className="fn-console-filter-form" role="search">
+      <form method="get" action="/admin/videos" onSubmit={submitFilters} className="fn-console-filter-form" role="search">
         {status ? <input type="hidden" name="status" value={status} /> : null}
         <input name="q" type="search" className="fn-input" aria-label="作品を検索"
           defaultValue={filters.q} key={`q:${filters.q}`} placeholder="タイトル / 作者 / X ID" />

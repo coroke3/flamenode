@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseAdminVideoFilters,
   buildAdminVideoHref,
+  adminVideoFilterHref,
   adminVideoTotalPages,
   adminVideoPageNumbers,
   adminVideoRelativeLabel,
@@ -61,6 +62,22 @@ test("MIG-0729 T05: page 3 preserves CURRENT q/status/event query and link order
   assert.deepEqual(adminVideoPageNumbers(8, 12), [1, "…", 6, 7, 8, 9, 10, "…", 12]);
   assert.deepEqual(adminVideoPageNumbers(12, 12), [1, "…", 10, 11, 12]);
 
+});
+
+test("MIG-0729 U01: Ops SPA GET form navigation updates q/event/status and drops old page", () => {
+  const form = new FormData();
+  form.set("q", "a & b");
+  form.set("status", "review");
+  form.set("event", "event/1");
+  form.set("page", "9"); // stale page must not survive a new filter
+  assert.equal(adminVideoFilterHref(form),
+    "/admin/videos?q=a+%26+b&status=review&event=event%2F1");
+  form.set("status", "invalid");
+  assert.equal(adminVideoFilterHref(form),
+    "/admin/videos?q=a+%26+b&event=event%2F1");
+  form.set("q", "");
+  form.set("event", "");
+  assert.equal(adminVideoFilterHref(form), "/admin/videos");
 });
 
 test("MIG-0729 U01: CURRENT relative labels accept Unix epoch, future and interval boundaries", () => {

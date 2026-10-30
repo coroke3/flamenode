@@ -45,6 +45,17 @@ export function buildAdminVideoHref(
   return query ? `/admin/videos?${query}` : "/admin/videos";
 }
 
+/** React Router GET form navigation: only q/status/event survive a filter change; page resets to 1. */
+export function adminVideoFilterHref(fields: Pick<FormData, "get">): string {
+  const value = (key: string) => String(fields.get(key) ?? "");
+  const status = value("status");
+  return buildAdminVideoHref({
+    q: value("q"),
+    status: FILTERS.has(status) ? status : "",
+    event: value("event"),
+  });
+}
+
 export function adminVideoTotalPages(paging: AdminVideosResponse["paging"]): number {
   if (!Number.isSafeInteger(paging.total) || paging.total <= 0) return 1;
   if (!Number.isSafeInteger(paging.pageSize) || paging.pageSize <= 0) return 1;
