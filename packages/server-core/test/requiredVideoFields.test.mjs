@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { and, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { events } from "@flamenode/db/schema";
 import {

@@ -1,7 +1,7 @@
 /**
  * Legacy compatibility bridge. Canonical definitions live in
  * @flamenode/domain/video (packages/domain/src/video/requiredFields.ts);
- * loadUnionRequiredVideoFields stays here because it reads D1.
+ * the D1 loader has now moved to server-core for MIG-0651 while Next keeps this bridge.
  */
 export {
   ALWAYS_REQUIRED_VIDEO_FIELDS,
