@@ -1,6 +1,7 @@
 import React from "react";
 import { Image, Link } from "../adapters/index.js";
 import { cx } from "../cx.js";
+import { ImeSafeGetForm } from "../forms/ImeSafeGetForm.js";
 import { ScreenIcon } from "./parts.js";
 
 /*
@@ -8,7 +9,7 @@ import { ScreenIcon } from "./parts.js";
  * (classes `ev-srch`, `seg`, `field-i`, `sel-i`, `sec`, `grid-v3`, `ev-visual`, styles in `styles/events.css`).
  * Texts, filter keys and section rules follow CURRENT `app/(public)/event/EventIndexView.tsx`; the caller
  * (`apps/site/src/lib/eventIndex.ts`) computes the model, so the build and the browser Island share it.
- * The search form is a plain GET form: `/event?q=&status=&sort=` is served by the same static page and the
+ * The search form is an IME-safe GET form: `/event?q=&status=&sort=` is served by the same static page and the
  * Island reads the query, so reload and back/forward behave as the URL says.
  */
 
@@ -118,7 +119,7 @@ export function EventsIndexView({ model, className }: EventsIndexViewProps): Rea
         <h1 className="t-display">イベントを探す</h1>
         <p className="muted ev-lead">{model.total} events</p>
 
-        <form role="search" method="get" action="/event" className="wrap-row ev-srch">
+        <ImeSafeGetForm role="search" method="get" action="/event" className="wrap-row ev-srch">
           <nav className="seg" aria-label="イベントの状態">
             {model.chips.map((chip) => (
               <a key={chip.value} href={chip.href} aria-current={chip.active ? "page" : undefined}>
@@ -166,7 +167,7 @@ export function EventsIndexView({ model, className }: EventsIndexViewProps): Rea
               リセット
             </Link>
           ) : null}
-        </form>
+        </ImeSafeGetForm>
 
         {model.emptyMessage ? (
           <div className="ev-empty">
