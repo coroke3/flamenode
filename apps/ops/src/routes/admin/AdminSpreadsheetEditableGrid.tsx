@@ -57,18 +57,19 @@ export function AdminSpreadsheetEditableGrid({
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [history, setHistory] = React.useState<History>({ key: "", undo: [], redo: [] });
-  const historyRef = React.useRef(history);
-  historyRef.current = history;
   const inFlight = React.useRef<AbortController | null>(null);
   const contextRef = React.useRef({ fetchFn, table: def.table, page, allowMutations });
   contextRef.current = { fetchFn, table: def.table, page, allowMutations };
   const previousContext = React.useRef(contextRef.current);
   const [contextVersion, setContextVersion] = React.useState(0);
   const key = def.table + ":" + page + ":" + contextVersion;
+  const previous = previousContext.current;
+  const identityChanged = previous.fetchFn !== fetchFn || previous.table !== def.table ||
+    previous.page !== page || previous.allowMutations !== allowMutations;
   const editable = allowMutations && def.mode === "editable";
-  const canMutate = editable && !busy && inFlight.current == null;
-  const safeHistory = history.key === key ? history : { key, undo: [], redo: [] };
-  const currentSelection = selection?.key === key ? selection : null;
+  const canMutate = editable && !identityChanged && !busy && inFlight.current == null;
+  const safeHistory = !identityChanged && history.key === key ? history : { key, undo: [], redo: [] };
+  const currentSelection = !identityChanged && selection?.key === key ? selection : null;
   const insertColumns = columns.filter(c => !c.generated && (c.pk > 0 || c.editable));
 
   React.useEffect(() => {
@@ -216,7 +217,7 @@ export function AdminSpreadsheetEditableGrid({
         <button type="button" disabled={!canMutate || primaryKeys.length === 0}
           onClick={() => { setInsertOpen(v => !v); setNotice(null); }}>行を追加</button>
       </div>
-      {insertOpen && editable ? (
+      {insertOpen && editable && !identityChanged ? (
         <div aria-label="新規行フォーム">
           {insertColumns.map(c => (
             <label key={c.name}>{c.name}
