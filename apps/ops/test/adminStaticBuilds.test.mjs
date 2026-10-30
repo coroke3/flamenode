@@ -12,6 +12,7 @@ test("MIG-0735 T01: backfill posts bounded JSON to same-origin admin path", asyn
     { kind: "video_v2", cursor: "A", mode: "continue" },
     async (path, init) => { got = {path,init}; return response(200, {
       backfill_kind: "video_v2", backfill_done: "0", backfill_cursor: "B",
+      backfill_scanned: "1", backfill_enqueued: "1", backfill_state_persisted: "1",
     }); });
   assert.equal(result.status, "outcome");
   assert.equal(got.path, "/api/admin/static-builds/backfill");
@@ -19,7 +20,7 @@ test("MIG-0735 T01: backfill posts bounded JSON to same-origin admin path", asyn
   assert.equal(got.init.credentials, "same-origin");
   assert.equal(got.init.cache, "no-store");
   assert.deepEqual(JSON.parse(got.init.body), { kind: "video_v2", cursor: "A", mode: "continue" });
-  assert.equal(mutationResultQuery(result.data), "backfill_kind=video_v2&backfill_cursor=B&backfill_done=0");
+  assert.equal(mutationResultQuery(result.data), "backfill_kind=video_v2&backfill_cursor=B&backfill_scanned=1&backfill_enqueued=1&backfill_done=0&backfill_state_persisted=1");
 });
 
 test("MIG-0735 T03: visibility repair only writes allowed query keys", () => {
