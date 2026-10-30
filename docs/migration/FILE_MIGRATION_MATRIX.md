@@ -1193,7 +1193,7 @@
 | `apps/app/src/routes/dashboard/settings/XIdPanelActions.tsx` | HELPER | MIG-0708 U03 X ID Active/profile/icon/delete isolated settings controls (not mounted) | MIG-0708 | SAME (unmounted U03 module; MIG-0636 merge gate) | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
 | `apps/app/test/xidPanelActions.test.mjs` | TEST | MIG-0708 U03 T01..T05 interaction, duplicate-submit, role, upload and confirmation guards | MIG-0708 | SAME | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
 
-| `apps/app/src/styles/xid-settings.css` | STYLE | MIG-0708 U03 CURRENT XIdSettingsClient module migrated via xids portCssModule | MIG-0708 | SAME (unmounted CSS until Settings integration) | IN_PROGRESS | PR#486 SHA=8bf882a210a9fb9431e3ff0f5e9e66cc3e06e5da TEST=apps/app/test/styles.test.mjs generated parity CI=PENDING |
+| `apps/app/src/styles/xid-settings.css` | CONFIG | MIG-0708 U03 CURRENT XIdSettingsClient module migrated via xids portCssModule | MIG-0708 | SAME (unmounted CSS until Settings integration) | IN_PROGRESS | PR#486 SHA=8bf882a210a9fb9431e3ff0f5e9e66cc3e06e5da TEST=apps/app/test/styles.test.mjs generated parity CI=PENDING |
 
 ## Future files requiring source/target registration
 
