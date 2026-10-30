@@ -226,25 +226,22 @@ eventTemplateRoutes.delete("/:id", async (c) => {
 export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
   const user = c.get("user");
-  // Identity/session denials must not consult a potentially throwing D1 binding.
-  // CURRENT SA-037 resolves a denied write guard to an empty list.
+  // Identity/session denials must not access the DB binding.
+  // CURRENT SA-037 returns [] when requireAdminWrite denies.
   if (!user || c.get("sessionState") === "unavailable") return c.json([]);
   try {
     const rawDb = c.env.DB;
     const guard = await evaluateAdminWriteGuard({
-    user,
-    hasDb: Boolean(rawDb),
-    originOk: true, // GET is safe, no CSRF Origin requirement.
-    requiredRole: "admin",
-    sessionUnavailable: c.get("sessionState") === "unavailable",
-    loadTosState: user && rawDb
-      ? async () => loadTosState(rawDb, user.id)
-      : undefined,
-  });
-  if (!guard.ok) return c.json([]);
-  const cost = await evaluateCostGuardWithSettings(rawDb, "admin_event_templates");
-  if (cost.denied) return c.json([]);
-  try {
+      user,
+      hasDb: Boolean(rawDb),
+      originOk: true, // GET is safe, no CSRF Origin requirement.
+      requiredRole: "admin",
+      sessionUnavailable: c.get("sessionState") === "unavailable",
+      loadTosState: rawDb ? async () => loadTosState(rawDb, user.id) : undefined,
+    });
+    if (!guard.ok) return c.json([]);
+    const cost = await evaluateCostGuardWithSettings(rawDb, "admin_event_templates");
+    if (cost.denied) return c.json([]);
     const { results } = await rawDb
       .prepare("SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC")
       .bind()
@@ -252,8 +249,8 @@ export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise
     // CURRENT does not page/truncate template results; preserve order and shape.
     return c.json(results);
   } catch {
-    // The DB binding getter, ToS/CostGuard reads, and final list read can all
-    // fail; never leak provider errors or return a false-success empty list.
+    // A throwing DB getter, ToS/CostGuard or list read must return a stable,
+    // private 503; never log or serialize a provider exception.
     console.error("[event-template-admin] LIST_FAILED");
     return c.json({ error: "unavailable" }, 503);
   }
