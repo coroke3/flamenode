@@ -8,12 +8,21 @@ export async function readManageStaff(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
   signal?: AbortSignal,
 ): Promise<OpsResult<ManageStaffResponse>> {
-  if (!eventId || eventId === "." || eventId === "..") {
+  if (!eventId || eventId === "." || eventId === ".." || eventId.includes("\\0")) {
+    return { status: "unavailable" };
+  }
+  // encodeURIComponent throws URIError on lone UTF-16 surrogates. A malformed
+  // route parameter must not reject the read promise and strand the UI in
+  // loading state; fail closed before any network request is made.
+  let encodedId: string;
+  try {
+    encodedId = encodeURIComponent(eventId);
+  } catch {
     return { status: "unavailable" };
   }
   const response = await getJson<unknown>(
     fetchFn,
-    "/api/manage/events/" + encodeURIComponent(eventId) + "/staff",
+    "/api/manage/events/" + encodedId + "/staff",
     signal,
   );
   if (response.status !== "ok") return response;
