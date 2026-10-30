@@ -2,6 +2,9 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { SettingsResponse, SettingsXId, XApprovalStatus, XIdentityRequestRow } from "@flamenode/contracts";
 import type { PersonalApi } from "../../api/personal.js";
+import type { XidRequestsApi } from "../../api/xidRequests.js";
+import { XIdLinkForm, XIdMergeForm } from "./settings/XIdRequestForms.js";
+import { XIdRequestActions } from "./settings/XIdRequestActions.js";
 import { ResultView, useApiResult } from "../guard.js";
 import { onboardingHref, onboardingRulesHref, settingsGateNext, settingsNext } from "../next.js";
 import { AppLink, ExternalRedirect, useDocumentTitle } from "../ui/AppLink.js";
@@ -36,16 +39,18 @@ function sortXIds(xIds: readonly SettingsXId[], activeXUserId: string | null): S
 export function Settings({ api }: { api: PersonalApi }): React.ReactElement {
   useDocumentTitle("設定");
   const [params] = useSearchParams();
+  const [refreshKey, setRefreshKey] = React.useState(0);
   const tab = params.get("tab");
   const x = params.get("x");
   const onboarding = params.get("onboarding");
-  const state = useApiResult(api, `settings?tab=${tab ?? ""}&x=${x ?? ""}&onboarding=${onboarding ?? ""}`, (a, signal) =>
+  const state = useApiResult(api, `settings?tab=${tab ?? ""}&x=${x ?? ""}&onboarding=${onboarding ?? ""}&refresh=${refreshKey}`, (a, signal) =>
     a.getSettings({ tab, x, onboarding }, signal),
   );
   return (
     <ResultView state={state} next={settingsGateNext(params.get("next"))}>
       {(data) => (
-        <SettingsView data={data} tab={tab} x={x} isOnboarding={onboarding === "1"} next={settingsNext(params.get("next"))} />
+        <SettingsView data={data} tab={tab} x={x} isOnboarding={onboarding === "1"} next={settingsNext(params.get("next"))}
+          requestApi={api.xidRequests} onRefresh={() => setRefreshKey((key) => key + 1)} />
       )}
     </ResultView>
   );
@@ -57,12 +62,16 @@ export function SettingsView({
   x: requestedXRaw,
   isOnboarding,
   next,
+  requestApi,
+  onRefresh,
 }: {
   data: SettingsResponse;
   tab: string | null;
   x: string | null;
   isOnboarding: boolean;
   next: string | null;
+  requestApi?: XidRequestsApi;
+  onRefresh?: () => void;
 }): React.ReactElement {
   const { user, xIds, requestHistory } = data;
 
@@ -251,7 +260,7 @@ export function SettingsView({
               申請中・承認・却下・取り下げを含む全状態を、新しいものから最大50件確認できます。
             </p>
           </div>
-          <RequestHistoryList rows={requestHistory} />
+          <RequestHistoryList rows={requestHistory} requestApi={requestApi} onRefresh={onRefresh} />
         </section>
       ) : null}
 
@@ -266,7 +275,7 @@ export function SettingsView({
               @ を除いたユーザー名を入力して申請してください。初回・2件目以降とも同じ手順で、運営承認後に反映されます。
             </p>
           </div>
-          {/* MIG-0702: XIdLinkForm (X ID link request) */}
+          {requestApi && onRefresh ? <XIdLinkForm api={requestApi} onRefresh={onRefresh} compact onSuccessRedirect={isOnboarding ? next : null} /> : null}
           {isOnboarding && requestHistory.length > 0 ? (
             <div className="settings-addBox">
               <h3 className="settings-cardTitle">申請履歴</h3>
@@ -274,7 +283,10 @@ export function SettingsView({
               <RequestHistoryList rows={requestHistory} />
             </div>
           ) : null}
-          {/* MIG-0702: XIdMergeForm (shown when two or more X IDs are approved) */}
+          {requestApi && onRefresh ? (
+            <XIdMergeForm api={requestApi} onRefresh={onRefresh}
+              linkedXIds={sortedXIds.filter((row) => row.approval_status === "approved").map((row) => ({ id: row.id, label: row.x_name || `@${row.id}` }))} />
+          ) : null}
         </section>
       ) : null}
 
@@ -515,8 +527,8 @@ function requestStatusClass(status: XIdentityRequestRow["status"]): string {
   return "fn-badge fn-badge-accent";
 }
 
-/** CURRENT XIdentityRequestHistoryList without the MIG-0702 withdraw / revert buttons. */
-function RequestHistoryList({ rows }: { rows: readonly XIdentityRequestRow[] }): React.ReactElement | null {
+/** CURRENT XIdentityRequestHistoryList plus MIG-0709 actions (API remains authoritative). */
+function RequestHistoryList({ rows, requestApi, onRefresh }: { rows: readonly XIdentityRequestRow[]; requestApi?: XidRequestsApi; onRefresh?: () => void }): React.ReactElement | null {
   if (rows.length === 0) return null;
 
   const now = Math.floor(Date.now() / 1000);
@@ -583,7 +595,7 @@ function RequestHistoryList({ rows }: { rows: readonly XIdentityRequestRow[] }):
                   <span className={requestStatusClass(row.status)}>{REQUEST_STATUS_LABELS[row.status]}</span>
                 </div>
               </div>
-              {/* MIG-0702: "取り下げる" (pending) / "統合を取り消す申請" (canRequestRevert) buttons */}
+              {requestApi && onRefresh ? <XIdRequestActions row={row} blockedRevert={revertBlocked} api={requestApi} onRefresh={onRefresh} /> : null}
             </li>
           );
         })}
