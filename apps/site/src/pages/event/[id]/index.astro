@@ -9,7 +9,7 @@ import PublicLayout from "../../../layouts/PublicLayout.astro";
 import { EventDetailIsland } from "../../../components/EventDetailIsland.ts";
 import { getEventBuildData } from "../../../lib/eventData.ts";
 import { loadPublicXIconMapForBuild, projectEventDetailIcons } from "../../../lib/publicIconMap.ts";
-import { buildEventJsonLd } from "../../../lib/eventDetail.ts";
+import { buildEventJsonLd, eventIslandDetail } from "../../../lib/eventDetail.ts";
 import { buildPageHead, serializeJsonLd } from "../../../lib/pageHead.ts";
 import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
 
@@ -27,6 +27,7 @@ interface Props {
 
 const { detail } = Astro.props;
 const { event } = detail;
+const islandDetail = eventIslandDetail(detail);
 const head = buildPageHead({
   path: `/event/${event.id}`,
   title: event.title,
@@ -37,5 +38,5 @@ const builtAt = Math.floor(Date.now() / 1000);
 ---
 <PublicLayout head={head} currentPath="/event">
   <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(buildEventJsonLd(event))}></script>
-  <EventDetailIsland client:load detail={detail} builtAt={builtAt} />
+  <EventDetailIsland client:load detail={islandDetail} builtAt={builtAt} />
 </PublicLayout>
