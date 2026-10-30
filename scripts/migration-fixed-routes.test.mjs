@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { RESERVED_ROOT_SLUGS } from "../apps/site/src/lib/routeMap.ts";
-import { buildPageHead, compactText } from "../apps/site/src/lib/pageHead.ts";
+import { buildPageHead, compactText, siteOrigin } from "../apps/site/src/lib/pageHead.ts";
 import { loadRulesForBuild, rulesSourceFromEnv, RulesBuildError } from "../apps/site/src/lib/rulesLoader.ts";
 import { parseLegalMarkdown } from "../src/lib/terms/legalMarkdown.ts";
 import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "../src/lib/terms/defaultTerms.ts";
@@ -69,6 +69,66 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.ok(compactText("x".repeat(200)).endsWith("..."));
   assert.equal(compactText(""), "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。");
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
+});
+
+test("pageHead: canonical and OGP URLs normalize relative paths like CURRENT absoluteUrl", () => {
+  for (const [route, expected] of [
+    ["about", "https://flamenode.net/about"],
+    ["/about", "https://flamenode.net/about"],
+    ["rules?version=1", "https://flamenode.net/rules?version=1"],
+    ["/about#mission", "https://flamenode.net/about#mission"],
+  ]) {
+    const head = buildPageHead({ path: route, title: "Page" });
+    assert.equal(head.canonical, expected, route);
+    assert.ok(head.canonical.startsWith("https://flamenode.net/"), route);
+  }
+});
+
+test("pageHead: CURRENT readableTitle rejects broken or empty headings and preserves OG alt", () => {
+  const cases = [
+    { path: "/about", fallback: "FlameNodeについて" },
+    { path: "/rules", fallback: "利用規約" },
+    { path: "/maintenance", fallback: "FlameNode" },
+  ];
+  for (const { path, fallback } of cases) {
+    for (const title of [" ", "Broken\uFFFD title", "bad\u0001title"]) {
+      const head = buildPageHead({ path, title, image: "/brand/flamenode-social-card.png" });
+      assert.equal(head.title, `${fallback} | FlameNode`, path);
+      assert.equal(head.ogTitle, fallback, path);
+      assert.equal(head.ogImageAlt, fallback, path);
+    }
+  }
+  const valid = buildPageHead({ path: "/about", title: " 正常なタイトル " });
+  assert.equal(valid.title, "正常なタイトル | FlameNode");
+  assert.equal(valid.ogTitle, "正常なタイトル");
+});
+
+test("pageHead: CURRENT rejects mojibake or control characters in description metadata", () => {
+  const fallback = "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。";
+  for (const value of ["broken\\uFFFD text", "bad\\u0001content"]) {
+    const bad = value.replace("\\uFFFD", "\uFFFD").replace("\\u0001", "\u0001");
+    assert.equal(compactText(bad), fallback);
+    assert.equal(buildPageHead({ path: "/about", title: "A", description: bad }).description, fallback);
+  }
+  assert.equal(compactText("   正常な 説明文  "), "正常な 説明文");
+});
+
+test("pageHead: only HTTP(S) site origins may be emitted into canonical and structured data", () => {
+  const fallback = "https://flamenode.net";
+  const maliciousOrInvalid = [
+    "data:text/html,hello",
+    "javascript:alert(1)",
+    "file:///tmp/site",
+    "mailto:admin@example.com",
+    "ftp://example.com/site",
+    "not a URL",
+  ];
+  for (const raw of maliciousOrInvalid) {
+    assert.equal(siteOrigin({ PUBLIC_SITE_URL: raw }), fallback, raw);
+  }
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "https://flamenode.net/a?x=1" }), fallback);
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "http://localhost:4321/about" }), "http://localhost:4321");
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "" }), fallback);
 });
 
 test("about T01: every CURRENT text is in the built HTML without JS (static body)", { skip }, () => {

@@ -1,3 +1,5 @@
+import { looksLikeMojibake } from "../../../../src/lib/utils/mojibake.ts";
+
 /**
  * Head metadata for fixed public pages (MIG-0501). Mirrors CURRENT `buildPageMetadata` (`src/lib/seo.ts`):
  * title `"<title> | FlameNode"`, canonical, Open Graph and Twitter card with the brand social image.
@@ -9,7 +11,11 @@ const BRAND_SOCIAL_IMAGE_PATH = "/brand/flamenode-social-card.png";
 
 export function siteOrigin(env: Record<string, string | undefined> = process.env): string {
   try {
-    return new URL(env.PUBLIC_SITE_URL?.trim() || FALLBACK_SITE_ORIGIN).origin;
+    const url = new URL(env.PUBLIC_SITE_URL?.trim() || FALLBACK_SITE_ORIGIN);
+    // Opaque URL schemes (file:, data:, javascript:, mailto:) have origin "null".
+    // Never emit broken canonical/OGP/JSON-LD URLs such as "null/about".
+    if (url.protocol !== "https:" && url.protocol !== "http:") return FALLBACK_SITE_ORIGIN;
+    return url.origin;
   } catch {
     return FALLBACK_SITE_ORIGIN;
   }
@@ -18,7 +24,7 @@ export function siteOrigin(env: Record<string, string | undefined> = process.env
 /** CURRENT `compactText`: collapse whitespace, cap at `max`, fall back to the site description. */
 export function compactText(value: string | null | undefined, max = 160): string {
   const compacted = (value ?? "").replace(/\s+/g, " ").trim();
-  if (!compacted) return DEFAULT_SITE_DESCRIPTION;
+  if (!compacted || looksLikeMojibake(compacted)) return DEFAULT_SITE_DESCRIPTION;
   if (compacted.length <= max) return compacted;
   return `${compacted.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
 }
@@ -74,7 +80,9 @@ export function serializeJsonLd(value: unknown): string {
 /** CURRENT `(public)/layout.tsx`: the GA4 tag exists only when the measurement id is configured. */
 export function gaMeasurementId(env: Record<string, string | undefined> = process.env): string | null {
   const id = (env.PUBLIC_GA_MEASUREMENT_ID ?? env.NEXT_PUBLIC_GA_MEASUREMENT_ID)?.trim();
-  return id ? id : null;
+  // The id is embedded inside a JS string literal and used as a query parameter.
+  // Reject quotes, slashes, markup and controls rather than generating broken HTML.
+  return id && /^[A-Za-z0-9_-]{3,64}$/.test(id) ? id : null;
 }
 
 /** Same init script and loader URL as `@next/third-parties` `GoogleAnalytics` (default dataLayer). */
@@ -112,6 +120,18 @@ export function absoluteUrl(path: string, origin: string = siteOrigin()): string
   }
 }
 
+const PAGE_TITLE_FALLBACKS: Readonly<Record<string, string>> = {
+  "/": SITE_NAME,
+  "/about": "FlameNodeについて",
+  "/rules": "利用規約",
+};
+
+/** CURRENT readableTitle: reject empty/mojibake titles, retain fixed-route fallbacks. */
+function readableTitle(value: string, path: string): string {
+  const title = value.trim();
+  return title && !looksLikeMojibake(title) ? title : (PAGE_TITLE_FALLBACKS[path] ?? SITE_NAME);
+}
+
 export function buildPageHead(input: {
   path: string;
   title: string;
@@ -122,12 +142,15 @@ export function buildPageHead(input: {
   ogType?: "website" | "video.other" | "profile";
 }): PageHead {
   const origin = siteOrigin();
+  const title = readableTitle(input.title, input.path);
   const base = {
     noindex: input.noIndex === true,
-    title: `${input.title} | ${SITE_NAME}`,
+    title: `${title} | ${SITE_NAME}`,
     description: compactText(input.description),
-    canonical: `${origin}${input.path}`,
-    ogTitle: input.title,
+    // CURRENT buildPageMetadata uses absoluteUrl(path), including relative paths.
+    // String concatenation produced invalid URLs such as https://flamenode.netabout.
+    canonical: absoluteUrl(input.path, origin),
+    ogTitle: title,
     ogType: input.ogType ?? "website",
   } as const;
   if (input.image) {
@@ -137,7 +160,7 @@ export function buildPageHead(input: {
       ogImageWidth: null,
       ogImageHeight: null,
       ogImageType: null,
-      ogImageAlt: input.title,
+      ogImageAlt: title,
     };
   }
   return {
