@@ -32,6 +32,8 @@ test("U03b pending queue retains CURRENT fields and never shows unverified mutat
   assert.ok(doc.querySelector('a[href="/user/alice"]'));
   assert.ok(doc.querySelector('a[href="/manage"]'));
   assert.equal(doc.querySelectorAll("tbody tr").length, 1);
+  assert.ok(doc.querySelector('img.x-link-request-avatar[src="https://static.example/avatar.png"]'));
+  assert.ok(doc.querySelector(".x-link-request-avatar"));
   assert.equal(doc.querySelectorAll("button").length, 0);
   assert.doesNotMatch(html, /理由を添えて却下|処理しました/);
 });
@@ -69,4 +71,19 @@ test("U03b unsafe icon URL, hostile text and invalid Unix range cannot inject HT
   assert.match(html, /constructor/);
   assert.ok(doc.querySelector("tbody")?.textContent.includes("—"));
   assert.ok(doc.querySelector('a[href^="https://x.com/"]'));
+});
+
+test("U03b shared avatar uses Google Drive cache and a text fallback for invalid icons", () => {
+  const valid = render(h(ManageXLinkRequestsBody, { data: { rows: [{
+    ...row, requested_icon_url: "https://drive.google.com/file/d/abcDEF012/view",
+  }] } }));
+  const validDoc = new JSDOM(valid).window.document;
+  assert.ok(validDoc.querySelector('img.x-link-request-avatar[src="/api/google-drive-image/abcDEF012"]'));
+
+  const invalid = render(h(ManageXLinkRequestsBody, { data: { rows: [{
+    ...row, requested_icon_url: "javascript:alert(1)", requested_x_name: null,
+  }] } }));
+  const invalidDoc = new JSDOM(invalid).window.document;
+  assert.equal(invalidDoc.querySelectorAll("img.x-link-request-avatar").length, 0);
+  assert.match(invalidDoc.querySelector(".x-link-request-avatar-fallback")?.textContent ?? "", /A/);
 });
