@@ -346,6 +346,33 @@ test("MIG-0641 U01f: snapshot fallback and no-consent return, without publishing
   } finally { sqlite.close(); }
 });
 
+test("MIG-0641 U01f: snapshot rejects out-of-range timestamps before strict audit", async () => {
+  const { loadTermsSnapshot } = await import("../src/routes/personal/termsSnapshot.ts");
+  const read = emailVerified => {
+    let queries = 0;
+    const db = { prepare: () => {
+      queries += 1;
+      return { bind: () => ({ first: async () => ({
+        id: "u1", emailVerified, is_tos_accepted: 0, accepted_terms_version_id: null,
+        terms_reaccept_required: 0, __terms_version_id: "v1", __existing_consent_id: null,
+      }) }) };
+    } };
+    return { db, count: () => queries };
+  };
+  for (const value of [Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER, 8.64e15 + 1, Infinity, NaN, "not-a-number"]) {
+    const { db, count } = read(value);
+    await assert.rejects(loadTermsSnapshot(db, "u1"), /invalid_terms_timestamp/,
+      "must reject an invalid audit Date: " + String(value));
+    assert.equal(count(), 1, "invalid date rejection never triggers extra D1 reads");
+  }
+  for (const value of [0, 1760000000000, -8.64e15, 8.64e15]) {
+    const { db, count } = read(value);
+    const snapshot = await loadTermsSnapshot(db, "u1");
+    assert.equal(snapshot.userBefore.emailVerified.getTime(), value);
+    assert.equal(count(), 1);
+  }
+});
+
 test("MIG-0641 U01g: orchestrated fresh consent creates one plan and returns accepted", async () => {
   const { commitLatestTermsForUser } = await import("../src/routes/personal/termsCommit.ts");
   let reads = 0, commits = 0, ids = 0, clock = 0;

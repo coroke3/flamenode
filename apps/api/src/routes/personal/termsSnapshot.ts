@@ -63,8 +63,11 @@ export async function loadTermsSnapshot(
   let userBefore: TermsUserSnapshot = user;
   if (user.emailVerified !== null && user.emailVerified !== undefined) {
     if (!Number.isFinite(user.emailVerified)) throw new Error("invalid_terms_timestamp");
-    // A fresh audit snapshot allows Date while the raw D1 row remains numeric.
-    userBefore = { ...user, emailVerified: new Date(user.emailVerified) };
+    // Number.isFinite alone accepts out-of-range timestamps. Reject invalid
+    // Date objects before passing them to strict audit serialization.
+    const verifiedAt = new Date(user.emailVerified);
+    if (!Number.isFinite(verifiedAt.getTime())) throw new Error("invalid_terms_timestamp");
+    userBefore = { ...user, emailVerified: verifiedAt };
   }
   return {
     userBefore,
