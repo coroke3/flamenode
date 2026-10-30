@@ -16,6 +16,7 @@ import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
+import { mediaRoutes } from "./routes/media/mediaRoutes.ts";
 import { xUsersSearchRoutes } from "./routes/internal/xUsersSearch.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
@@ -51,5 +52,7 @@ app.route("/api/account/summary", accountSummaryRoutes);
 // MIG-0605 U03 (part): RH-016, RH-033
 app.route("/api/google-drive-image", googleDriveImageRoutes);
 app.route("/api/youtube-thumbnail", youtubeThumbnailRoutes);
+// MIG-0646: ordered RH-023..025 GET dispatch (signed/private routes before wildcard).
+app.route("/api/media", mediaRoutes);
 // MIG-0648 RH-019: authenticated R2-only member suggestions, no candidate D1 fallback.
 app.route("/api/internal/x-users/search", xUsersSearchRoutes);

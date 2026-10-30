@@ -507,6 +507,16 @@ Code landing only: Worker traffic still uses CURRENT Next handler until an autho
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
 
+### MIG-0646 — Hono media routes (RH-023..025; PR #451)
+
+| CURRENT RH | TARGET route | Authorization / caching | Failure parity | Owner |
+| --- | --- | --- | --- | --- |
+| RH-023 `GET app/api/media/[...key]` | `GET /api/media/*` | cache HIT before bindings; on MISS public artifact/entity D1 ACL, allowlisted namespace/MIME, <=5MiB R2, public Cache-Control, ETag/304 | invalid/hidden 404, DB/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/publicMedia.ts` |
+| RH-024 `GET app/api/media/manage-x-icon/[...key]` | `GET /api/media/manage-x-icon/*` | HMAC-SHA256/5min TTL using AUTH_SECRET, R2 only, private max-age, 304 | tamper/expired/missing secret/unsafe R2 -> **404** (CURRENT; task card T02's 403 is incorrect) | `apps/api/src/routes/media/manageXIcon.ts` |
+| RH-025 `GET app/api/media/slot-submission-icon/[slotId]` | `GET /api/media/slot-submission-icon/:slotId` | D1 submitted/public probe before conditional Auth.js lookup; public_name shared cache, private owner-only/no-store | missing/unauthorized 404, D1/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/slotSubmissionIcon.ts` |
+
+These routes are Hono code only. CURRENT Next handlers remain intact until separate traffic cutover. CI regression: `apps/api/test/mediaRoutes.parity.test.mjs`. No remote D1/R2/secret/route writes.
+
 ## MIG-0637 — Hono Admin Ops mutation mapping (D-17-4)
 
 Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All routes use the existing `/api/admin` origin → session → admin/TOS/BAN guard and a strict audit batch. CostGuard control paths intentionally **skip ordinary costGuardMiddleware**, matching CURRENT `requireCostGuardControlAdmin`, so an administrator can exit maintenance; user-admin paths each use the feature's CostGuard middleware. Write bodies retain CURRENT FormData keys; IDs in the path are authoritative. Static rebuild rows are committed but wake count is 0 (D-0603-1), and `system_settings` mode is mirrored to KV **only after** the D1 commit.

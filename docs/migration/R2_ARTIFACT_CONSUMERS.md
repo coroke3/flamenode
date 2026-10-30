@@ -99,6 +99,9 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `app/api/public/about-stats/route.ts` | `bucket.get(TOP_STATS_OBJECT_KEY)` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `apps/api/src/lib/publicSnapshot.ts` | `bucket.get(key)` | 1 | Read-only public/API consumer; MIG-0627 review required |
 | `src/lib/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
+| `apps/api/src/routes/media/publicMedia.ts` | `bucket.get(rawKey)` | 1 | MIG-0646 Hono RH-023; same validated public-media key + D1 ACL as CURRENT. Uploaded icon, RETAIN |
+| `apps/api/src/routes/media/manageXIcon.ts` | `bucket.get(key)` | 1 | MIG-0646 Hono RH-024; HMAC/TTL verified before R2, signed uploaded X icon, RETAIN |
+| `apps/api/src/routes/media/slotSubmissionIcon.ts` | `bucket.get(r2Key)` | 1 | MIG-0646 Hono RH-025; D1 slot ACL and optional Auth.js viewer before R2, uploaded icon, RETAIN |
 | `src/lib/media/manageXIcon.ts` | `bucket.get(key)` | 1 | Persistent uploaded media or preview object; RETAIN until separately reviewed |
 | `src/lib/health/artifactSlo.ts` | `bucket.get(probe.key)` | 1 | Health/readiness probe; preserve coverage during migration |
 | `src/lib/health/deepHealth.ts` | `bucket.get(PUBLIC_VISIBILITY_BLOCKED_ENTITIES_OBJECT_KEY)` | 1 | Health/readiness probe; preserve coverage during migration |
