@@ -97,6 +97,32 @@ test("duplicate open PRs for one MIG are rejected before task selection",()=>{
  assert.deepEqual([...parseOwnedTasks([{number:481,headRefName:"migration/mig-0723-staff-view"},{number:489,headRefName:"chore/migration-docs"}])],[["MIG-0723",481]]);
 });
 
+
+test("incomplete open PR records fail closed instead of silently releasing MIG ownership",()=>{
+ const malformed=[
+  null,
+  "unexpected",
+  {number:1},
+  {number:2,headRefName:null},
+  {number:3,headRefName:""},
+  {number:4,headRefName:"   "},
+  {number:null,headRefName:"migration/mig-0651-submit"},
+  {headRefName:"migration/mig-0651-submit"},
+  Object.assign(Object.create({headRefName:"migration/mig-0651-submit"}),{number:9}),
+ ];
+ for(const record of malformed){
+  assert.throws(()=>parseOwnedTasks([record]),/Invalid open PR record at index 0/);
+  assert.throws(()=>parseOpenPrSnapshot([record]),/Invalid open PR record at index 0/);
+ }
+ assert.throws(()=>parseOwnedTasks(null),/Invalid open PR owner snapshot/);
+ const valid=[
+  {number:481,headRefName:"migration/mig-0723-staff-view"},
+  {number:482,headRefName:"fix/standalone"},
+  {number:"?(migration/mig-0651-submit)",headRefName:"migration/mig-0651-submit"},
+ ];
+ assert.deepEqual([...parseOwnedTasks(valid)],[["MIG-0723",481],["MIG-0651","?(migration/mig-0651-submit)"]]);
+});
+
 test("100-open-PR owner snapshot fails closed instead of losing the next page",()=>{
  const prs=Array.from({length:100},(_,index)=>({
   number:index+1,
