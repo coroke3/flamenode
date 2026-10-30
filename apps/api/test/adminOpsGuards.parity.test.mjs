@@ -28,17 +28,21 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
   const app = new Hono();
   // The REAL admin parent router must apply the middleware chain to every
   // subsequently mounted feature route. This is the same ordering as app.ts.
-  app.route("/api/admin", createAdminRoutes({
+  const admin = createAdminRoutes({
     session: async (c, next) => {
       c.set("user", user);
       c.set("sessionState", user ? "user" : "none");
       await next();
     },
-  }));
-  app.route("/api/admin/static-builds", staticRebuildAdminRoutes);
-  app.route("/api/admin/static-builds/backfill", staticBackfillAdminRoutes);
-  app.route("/api/admin/visibility-repair", visibilityRepairAdminRoutes);
-  app.route("/api/admin/youtube-sync", youtubeSyncAdminRoutes);
+  });
+  // IMPORTANT: child route modules must be registered ON the protected admin
+  // Hono instance BEFORE that instance is mounted. Mounting sibling routes
+  // directly on app bypasses createAdminRoutes()'s private middleware stack.
+  admin.route("/static-builds", staticRebuildAdminRoutes);
+  admin.route("/static-builds/backfill", staticBackfillAdminRoutes);
+  admin.route("/visibility-repair", visibilityRepairAdminRoutes);
+  admin.route("/youtube-sync", youtubeSyncAdminRoutes);
+  app.route("/api/admin", admin);
   const request = (item, origin = SITE) => app.request(item.path, {
     method: "POST",
     headers: { Origin: origin, "Content-Type": "application/json" },
