@@ -79,20 +79,47 @@ export async function loadAdminVideos(
   const parsed = AdminVideosResponseSchema.safeParse(result.data);
   if (!parsed.success) return { status: "unavailable" };
   const data = parsed.data;
-  // Privileged lists must belong to the current search key, just like the
-  // detail read checks the requested video ID. A stale/misrouted 200 DTO
-  // must never render a different event's private rows or pagination.
-  if (data.q !== filters.q || data.status !== filters.status ||
-      data.event !== filters.event || data.paging.page !== filters.page ||
-      data.paging.pageSize !== ADMIN_VIDEO_PAGE_SIZE ||
-      !Number.isSafeInteger(data.paging.total) || data.paging.total < 0 ||
-      data.videos.length > ADMIN_VIDEO_PAGE_SIZE ||
-      data.videos.length > data.paging.total ||
-      new Set(data.videos.map(video => video.id)).size !== data.videos.length) {
+  // Privileged lists must belong to the exact search scope. The event offset
+  // changes only option rows, NEVER the private video result or its paging.
+  const validScope = (value: AdminVideosResponse): boolean =>
+    value.q === filters.q && value.status === filters.status &&
+    value.event === filters.event && value.paging.page === filters.page &&
+    value.paging.pageSize === ADMIN_VIDEO_PAGE_SIZE &&
+    Number.isSafeInteger(value.paging.total) && value.paging.total >= 0 &&
+    value.videos.length <= ADMIN_VIDEO_PAGE_SIZE &&
+    value.videos.length <= value.paging.total &&
+    new Set(value.videos.map(video => video.id)).size === value.videos.length;
+  if (!validScope(data) || data.events.length > 100) {
     return { status: "unavailable" };
   }
-  return { status: "ok", data };
 
+  // FIX-507 (PR #509) adds an offset that applies ONLY to event options.
+  // The CURRENT selector supports 200 options; at most two bounded API calls.
+  // An older API silently ignores offset and repeats page one: detect that
+  // contract mismatch and fail closed instead of showing a partial selector.
+  if (!data.degraded && data.events.length === 100) {
+    const next = await getJson<unknown>(
+      fetchFn,
+      `/api/admin-read/videos${href.slice("/admin/videos".length)}&offset=100`,
+      signal,
+    );
+    if (next.status !== "ok") return next;
+    const second = AdminVideosResponseSchema.safeParse(next.data);
+    if (!second.success || !validScope(second.data) || second.data.degraded ||
+        second.data.events.length > 100 ||
+        JSON.stringify(second.data.videos) !== JSON.stringify(data.videos) ||
+        JSON.stringify(second.data.paging) !== JSON.stringify(data.paging) ||
+        second.data.reviewSummaries !== data.reviewSummaries) {
+      return { status: "unavailable" };
+    }
+    const events = [...data.events, ...second.data.events];
+    if (new Set(events.map(e => e.id)).size !== events.length) {
+      return { status: "unavailable" };
+    }
+    return { status: "ok", data: { ...data, events } };
+  }
+
+  return { status: "ok", data };
 }
 
 /** CURRENT Pagination: current +/- 2, first/last page and compact ellipses. */
