@@ -61,7 +61,10 @@
 | `app/(admin)/admin/users/page.tsx` | PAGE | /admin/users (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/users; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/videos/[id]/members/page.tsx` | PAGE | /admin/videos/[id]/members (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/videos/[id]/members; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/videos/[id]/page.tsx` | PAGE | /admin/videos/[id] (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/videos/[id]; exact component TBD) | NOT_STARTED | — |
-| `app/(admin)/admin/videos/page.tsx` | PAGE | /admin/videos (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/videos; exact component TBD) | NOT_STARTED | — |
+| `app/(admin)/admin/videos/page.tsx` | PAGE | /admin/videos (VISUAL_SCREEN) | MIG-0705 | `apps/ops/src/routes/admin/AdminVideos.tsx` (MIG-0729 U01 GET list, not mounted; U02/U03 pending) | IN_PROGRESS | PR#506 TEST=apps/ops/test/adminVideos.test.mjs (CI pending; GET filters, page 3, forbidden, malformed DTO) |
+| `apps/ops/src/api/adminVideos.ts` | HELPER | MIG-0729 U01 GET /api/admin-read/videos; q/status/event/page | MIG-0729 | SAME (new file, unmounted consumer) | IN_PROGRESS | PR#506 TEST=apps/ops/test/adminVideos.test.mjs (CI pending; DTO, abort, same-origin, page links) |
+| `apps/ops/src/routes/admin/AdminVideos.tsx` | PAGE | /admin/videos (Ops, UNMOUNTED until MIG-0726) | MIG-0729 | SAME (new file, U01 read-only; U02 write controls pending) | IN_PROGRESS | PR#506 TEST=apps/ops/test/adminVideos.test.mjs (CI pending; API/filter/paging only, browser review outstanding) |
+| `apps/ops/test/adminVideos.test.mjs` | TEST | MIG-0729 U01 five transport/filter/page regressions | MIG-0729 | SAME (new test file) | IN_PROGRESS | PR#506 TEST=npm run test --workspace=@flamenode/ops (CI pending) |
 | `app/(admin)/admin/workers/page.tsx` | PAGE | /admin/workers (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/workers; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/x-id-merges/page.tsx` | PAGE | /admin/x-id-merges (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/x-id-merges; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/x-link-requests/page.tsx` | PAGE | /admin/x-link-requests (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/x-link-requests; exact component TBD) | NOT_STARTED | — |
