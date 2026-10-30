@@ -3,8 +3,12 @@ export type UnslottedEventSyncErrorCode =
   | "unslotted_event_not_allowed";
 
 export class UnslottedEventSyncError extends Error {
-  constructor(readonly code: UnslottedEventSyncErrorCode) {
+  // Node 22 --experimental-strip-types cannot execute TS parameter properties.
+  readonly code: UnslottedEventSyncErrorCode;
+
+  constructor(code: UnslottedEventSyncErrorCode) {
     super(code);
+    this.code = code;
     this.name = "UnslottedEventSyncError";
   }
 }
