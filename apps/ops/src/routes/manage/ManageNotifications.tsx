@@ -336,6 +336,23 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
   );
 }
 
+/** CURRENT warning-only projection. Never use Active X as the Ops authorization gate. */
+function ActiveXNotice({ activeXUserId, manageStaffXUserIds }: Pick<
+  ManageNotificationCenterResponse, "activeXUserId" | "manageStaffXUserIds"
+>): React.ReactElement | null {
+  const activeX = activeXUserId?.trim() || null;
+  if (!activeX || manageStaffXUserIds.length === 0 || manageStaffXUserIds.includes(activeX)) return null;
+  return (
+    <div role="status" className="manage-active-x-notice">
+      <strong>Active X ID と運営権限の X ID が一致していません</strong>
+      <p>
+        運営画面への入場・審査は承認済み X ID 全体で判定されます（現在の Active X: @{activeX}）。
+        投稿や枠確保の主体を変える場合は <a href="/dashboard/settings">設定</a> で Active X を切り替えてください。
+      </p>
+    </div>
+  );
+}
+
 /** U02 presentation: the Hono response has already passed schema validation. */
 export function ManageNotificationsBody({ data, search, change }: {
   data: ManageNotificationCenterResponse;
@@ -346,6 +363,7 @@ export function ManageNotificationsBody({ data, search, change }: {
   const notifValue = search.get("notif") ?? "";
   return (
     <div className="manage-notifications">
+      <ActiveXNotice activeXUserId={data.activeXUserId} manageStaffXUserIds={data.manageStaffXUserIds} />
       <header className="fn-page-head">
         <a href="/manage">イベント運営トップへ</a>
         <h1 className="fn-page-title">通知センター</h1>

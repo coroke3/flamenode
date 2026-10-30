@@ -191,3 +191,29 @@ test("MIG-0725 U02: CURRENT notification failure guidance and translated error p
   const sent = render({ ...fixture, notifications: [row("sent", null)] });
   assert.doesNotMatch(sent, /notification-failure-guidance/, "successful delivery has no failure guidance");
 });
+
+
+test("MIG-0725 U02: CURRENT Active X mismatch notice is warning-only and never gates content", () => {
+  const data = { ...fixture, activeXUserId: "not-staff", manageStaffXUserIds: ["staff-x"] };
+  const notice = render(data);
+  assert.match(notice, /Active X ID と運営権限の X ID が一致していません/);
+  assert.match(notice, /現在の Active X: @not-staff/);
+  assert.match(notice, /href="\/dashboard\/settings"/);
+  assert.match(notice, /通知センター/, "a mismatch must not block access to notification content");
+
+  for (const [activeXUserId, staff] of [
+    ["staff-x", ["staff-x"]],
+    [null, ["staff-x"]],
+    ["  ", ["staff-x"]],
+    ["not-staff", []],
+  ]) {
+    const html = render({ ...fixture, activeXUserId, manageStaffXUserIds: staff });
+    assert.doesNotMatch(html, /manage-active-x-notice/, "CURRENT displays no notice in this case");
+    assert.match(html, /通知センター/, "no authorization decision depends on Active X");
+  }
+  const trimmed = render({ ...fixture, activeXUserId: " staff-x ", manageStaffXUserIds: ["staff-x"] });
+  assert.doesNotMatch(trimmed, /manage-active-x-notice/, "CURRENT trims Active X before comparison");
+  const escaped = render({ ...fixture, activeXUserId: '<img src=x onerror=alert(1)>', manageStaffXUserIds: ["staff-x"] });
+  assert.doesNotMatch(escaped, /<img/, "untrusted X ID must render as escaped text");
+  assert.match(escaped, /&lt;img/);
+});
