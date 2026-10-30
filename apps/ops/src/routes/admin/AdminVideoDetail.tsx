@@ -17,11 +17,34 @@ import {
 import { useApiResult } from "../useApiResult.js";
 import { CreateModerationCaseForm } from "./CreateModerationCaseForm.js";
 import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
+import { AdminResourceTabs } from "../../components/shared/AdminResourceTabs.js";
 
 const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
 const VOID_CATEGORIES = ["x_id_invalid", "duplicate", "withdrawn_by_creator", "operator_decision", "expired"] as const;
 
+
+/** CURRENT AdminVideoTabs: preserve cross-SPA links, icons and active detail state. */
+export function AdminVideoTabs({ videoId, youtubeVideoId, active = "detail" }: {
+  videoId: string;
+  youtubeVideoId?: string | null;
+  active?: "detail" | "members" | "edit" | "permissions" | "public" | "audit";
+}): React.ReactElement {
+  const id = encodeURIComponent(videoId);
+  const publicId = encodeURIComponent(youtubeVideoId?.trim() || videoId);
+  return <AdminResourceTabs
+    active={active}
+    ariaLabel="作品管理メニュー"
+    tabs={[
+      { key: "detail", href: `/admin/videos/${id}`, label: "管理詳細", icon: "info" },
+      { key: "members", href: `/admin/videos/${id}/members`, label: "メンバー", icon: "users" },
+      { key: "edit", href: `/dashboard/edit/${id}?privileged=admin`, label: "内容編集", icon: "edit" },
+      { key: "permissions", href: `/dashboard/edit/${id}/permissions?privileged=admin`, label: "編集権限", icon: "settings" },
+      { key: "public", href: `/${publicId}`, label: "公開ページ", icon: "external" },
+      { key: "audit", href: `/admin/audit?table=videos&record=${id}`, label: "監査ログ", icon: "clock" },
+    ]}
+  />;
+}
 
 function Field({ name, value }: { name: string; value: React.ReactNode }): React.ReactElement {
   return <><dt className="fn-muted">{name}</dt><dd style={{ whiteSpace: "pre-wrap" }}>{value ?? "—"}</dd></>;
@@ -263,14 +286,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
         <h1>{video.title}</h1>
         <p>作者: {video.creator_name}{video.creator_x_user_id ? ` (@${video.creator_x_user_id})` : ""}</p>
       </header>
-      <nav aria-label="作品管理メニュー" className="fn-panel-actions">
-        <a href={`/admin/videos/${slug}`} aria-current="page">管理詳細</a>
-        <a href={`/admin/videos/${slug}/members`}>メンバー</a>
-        <a href={`/dashboard/edit/${slug}?privileged=admin`}>内容編集</a>
-        <a href={`/dashboard/edit/${slug}/permissions?privileged=admin`}>編集権限</a>
-        <a href={`/${publicSlug}`}>公開ページ</a>
-        <a href={`/admin/audit?table=videos&record=${slug}`}>監査ログ</a>
-      </nav>
+      <AdminVideoTabs videoId={video.id} youtubeVideoId={video.youtube_video_id} active="detail" />
       {data.truncated ? <p role="status">一部の項目は件数上限により省略されています。</p> : null}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))", gap: 20 }}>
         <InfoPanel data={data} />
