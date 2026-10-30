@@ -57,8 +57,9 @@ youtubeSyncAdminRoutes.post("/videos/:videoId/resync", async (c) => {
       LEFT JOIN video_youtube_metadata AS m ON m.video_id = v.id
       WHERE v.id = ? LIMIT 1
     `).bind(videoId).first<JoinedRow>();
-  } catch (error) {
-    console.error("[youtube-sync-admin] preflight failed", error);
+  } catch {
+    // Provider failures can embed SQL/private bindings; never log their payload.
+    console.error("[youtube-sync-admin] preflight failed (D1 unavailable)");
     const body: AdminYoutubeResyncResult = { ok: false, message: FAILURE };
     return c.json(body, 500);
   }
@@ -130,7 +131,8 @@ youtubeSyncAdminRoutes.post("/videos/:videoId/resync", async (c) => {
       }],
     });
   } catch (error) {
-    console.error("[youtube-sync-admin] atomic mutation failed", error);
+    // Keep exception details out of logs; inspect only the local conflict category.
+    console.error("[youtube-sync-admin] atomic mutation failed (D1/audit unavailable)");
     const body: AdminYoutubeResyncResult = { ok: false, message: FAILURE };
     return c.json(body, error instanceof Error && /malformed JSON/i.test(error.message) ? 409 : 500);
   }
