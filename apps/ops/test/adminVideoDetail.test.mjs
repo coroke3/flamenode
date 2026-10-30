@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   adminVideoDetailPath,
   adminVideoBackHref,
+  formatAdminVideoUnix,
   selectOpenVoidCaseId,
   loadAdminVideoDetail,
 } from "../.test-dist/apps/ops/src/api/adminVideoDetail.js";
@@ -31,6 +32,12 @@ const detail = {
 };
 const json = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
+});
+
+test("MIG-0729: Unix dates use explicit Asia/Tokyo time zone", () => {
+  assert.match(formatAdminVideoUnix(0), /1970.*01.*01.*09:00/);
+  assert.equal(formatAdminVideoUnix(null), "-");
+  assert.equal(formatAdminVideoUnix(Number.NaN), "-");
 });
 
 test("MIG-0729 U02: admin read retains event context, no-store and exact video identity", async () => {
