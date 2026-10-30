@@ -78,7 +78,7 @@ function InfoPanel({ data }: { data: AdminVideoDetailResponse }): React.ReactEle
   );
 }
 
-function StatusControls({
+export function StatusControls({
   data, eventId, onRefresh, actions,
 }: {
   data: AdminVideoDetailResponse;
@@ -95,7 +95,10 @@ function StatusControls({
   const [message, setMessage] = React.useState<{ ok: boolean; text: string; pendingPublicReflection?: boolean } | null>(null);
   const openCase = selectOpenVoidCaseId(data.moderationCases);
 
-  React.useEffect(() => { setSelected(v.visibility_status); setMessage(null); }, [v.id, v.visibility_status]);
+  // A successful mutation refreshes the same video with a new status. Keep its
+  // success / delayed-public-reflection notice visible across that refresh.
+  React.useEffect(() => { setSelected(v.visibility_status); }, [v.id, v.visibility_status]);
+  React.useEffect(() => { setMessage(null); }, [v.id]);
   async function run(action: AdminVideoMutation, form: FormData): Promise<void> {
     if (inFlight.current) return;
     inFlight.current = true;
