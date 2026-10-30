@@ -11,14 +11,15 @@ import {
   parseAdminVideoFilters,
 } from "../../api/adminVideos.js";
 import { useApiResult } from "../useApiResult.js";
+import { AdminResourceTabs } from "../../components/shared/AdminResourceTabs.js";
 
 const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const VIDEO_GROUPS = [
-  { status: "", label: "すべて" },
-  { status: "review", label: "審査待ち" },
-  { status: "public", label: "公開" },
-  { status: "private", label: "非公開" },
-  { status: "closed", label: "無効" },
+  { status: "", label: "すべて", icon: "list" },
+  { status: "review", label: "審査待ち", icon: "check" },
+  { status: "public", label: "公開", icon: "external" },
+  { status: "private", label: "非公開", icon: "pause" },
+  { status: "closed", label: "無効", icon: "warning" },
 ] as const;
 const VISIBILITY_LABELS: Record<string, string> = {
   pending: "審査待ち",
@@ -66,6 +67,27 @@ function VideoRow({ video, event, isReview }: {
   );
 }
 
+/** CURRENT AdminVideoManagementTabs: group icons, active status and URL-safe filters. */
+export function AdminVideoManagementTabs({ q = "", status = "", event = "" }: {
+  q?: string;
+  status?: string;
+  event?: string;
+}): React.ReactElement {
+  const active = status === "pending" ? "review"
+    : status === "voided" ? "closed" : status || "all";
+  const tabs = [
+    ...VIDEO_GROUPS.map(group => ({
+      key: group.status || "all",
+      href: buildAdminVideoHref({ q, status: group.status, event }),
+      label: group.label,
+      icon: group.icon,
+    })),
+    { key: "youtube-sync", href: "/admin/youtube-sync", label: "メタデータ同期", icon: "refresh" as const },
+    { key: "youtube-playlists", href: "/admin/youtube-sync/playlists", label: "再生リスト同期", icon: "list" as const },
+  ];
+  return <AdminResourceTabs tabs={tabs} active={active} ariaLabel="作品管理メニュー" />;
+}
+
 /**
  * MIG-0729 U01 (unmounted until MIG-0726): GET-only admin video list.
  * U02 adds the CURRENT review/approve actions after the shared video review owner releases them.
@@ -99,7 +121,6 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
   const { q, status, event } = result.data;
   const totalPages = adminVideoTotalPages(paging);
   const isReview = status === "review" || status === "pending";
-  const activeGroup = status === "pending" ? "review" : status === "voided" ? "closed" : status;
 
   return (
     <section className="fn-public-container fn-page" aria-label="作品管理">
@@ -107,16 +128,7 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
         <h1>作品管理</h1>
         <p>作品の状態確認、監査ログ、参加者設定を行います。</p>
       </header>
-      <nav aria-label="作品管理メニュー" className="fn-panel-actions">
-        {VIDEO_GROUPS.map(({ status: tabStatus, label }) => (
-          <a key={tabStatus} href={buildAdminVideoHref({ q, status: tabStatus, event })}
-            aria-current={tabStatus === activeGroup ? "page" : undefined}>
-            {label}
-          </a>
-        ))}
-        <a href="/admin/youtube-sync">メタデータ同期</a>
-        <a href="/admin/youtube-sync/playlists">再生リスト同期</a>
-      </nav>
+      <AdminVideoManagementTabs q={q} status={status} event={event} />
       <form method="get" action="/admin/videos" className="fn-console-filter-form" role="search">
         {status ? <input type="hidden" name="status" value={status} /> : null}
         <input name="q" type="search" className="fn-input" aria-label="作品を検索"
