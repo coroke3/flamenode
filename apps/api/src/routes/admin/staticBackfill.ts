@@ -54,18 +54,22 @@ async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean>
   // backfill. Only the later D1 queue failure should mark the run failed.
   try {
     for (const [key, maxBytes] of SHARED_INPUTS) {
-    // Key literals are part of the audited MIG-0649 R2 consumer registry.
-    const obj = key === "youtube/related-blocklist.v1.json"
-      ? await bucket.get("youtube/related-blocklist.v1.json")
-      : await bucket.get("videos/random-pool.v1.json");
-    if (!obj) return false;
-    if (!Number.isFinite(obj.size) || obj.size > maxBytes) {
-      await obj.body?.cancel().catch(() => undefined);
-      return false;
-    }
-    const text = await obj.text();
-    if (new TextEncoder().encode(text).byteLength > maxBytes) return false;
-    try { values.push(JSON.parse(text)); } catch { return false; }
+      // Key literals are part of the audited MIG-0649 R2 consumer registry.
+      const obj = key === "youtube/related-blocklist.v1.json"
+        ? await bucket.get("youtube/related-blocklist.v1.json")
+        : await bucket.get("videos/random-pool.v1.json");
+      if (!obj) return false;
+      if (!Number.isFinite(obj.size) || obj.size > maxBytes) {
+        await obj.body?.cancel().catch(() => undefined);
+        return false;
+      }
+      const text = await obj.text();
+      if (new TextEncoder().encode(text).byteLength > maxBytes) return false;
+      try {
+        values.push(JSON.parse(text));
+      } catch {
+        return false;
+      }
     }
   } catch {
     return false;
