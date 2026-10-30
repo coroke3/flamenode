@@ -122,7 +122,8 @@ test("MIG-0643 SA-069: video backfill without shared inputs queues two rebuild t
   assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
-  assert.equal(s.bucket.heads, 1);
+  // Missing D1 producer proof short-circuits before any R2 HEAD call.
+  assert.equal(s.bucket.heads, 0);
   assert.equal(s.bucket.gets, 0);
 });
 
