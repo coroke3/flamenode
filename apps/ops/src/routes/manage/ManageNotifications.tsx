@@ -22,6 +22,32 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "失敗", dead_letter: "最終失敗", cancelled: "キャンセル",
 };
 const TERMINAL_FAILURES = new Set(["failed", "dead_letter"]);
+const TYPE_LABELS: Record<string, string> = {
+  video_submitted: "作品を受け付けました",
+  video_approved: "作品が公開されました",
+  video_voided: "作品について確認があります",
+  video_pending: "作品が審査待ちになりました",
+  video_private: "作品の公開範囲が変更されました",
+  video_status_changed: "作品の状態が変更されました",
+  video_edit_permission_granted: "編集権限が付与されました",
+  slot_video_submitted: "枠投稿を受け付けました",
+  slot_deadline_reminder: "投稿締切が近づいています",
+  slot_force_released: "枠が解放されました",
+  slot_submission_released: "枠の作品提出が解除されました",
+  slot_voided: "枠が無効になりました",
+  x_id_approved: "X ID が承認されました",
+  x_id_rejected: "X ID が却下されました",
+  x_id_alias_approved: "X ID エイリアスが承認されました",
+  chapter_comment_added: "チャプターコメントが追加されました",
+  moderation_created: "モデレーション案件が作成されました",
+  announcement_broadcast: "お知らせ配信",
+  terms_reaccept_required: "利用規約の再同意が必要です",
+  welcome_account: "アカウント作成のお知らせ",
+  discord_webhook: "運営チャンネル（Webhook）",
+  ops_youtube_playlist_sync_failed: "YouTube再生リスト同期の失敗",
+  ops_youtube_playlist_sync_recovered: "YouTube再生リスト同期の復旧",
+  ops_youtube_quota_deferred: "YouTube再生リスト同期のquota延期",
+};
 
 /** A payload can contain user-generated content. Never render it as HTML. */
 function previewPayload(payloadJson: string): string | null {
@@ -55,7 +81,7 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
           {STATUS_LABELS[status] ?? (status || "不明")}
         </span>{" "}
         <span className="fn-badge fn-badge-soft">{category}</span>{" "}
-        <strong>{row.type.replaceAll("_", " ")}</strong>
+        <strong>{TYPE_LABELS[row.type] ?? row.type.replaceAll("_", " ")}</strong>
       </div>
       <div className="fn-td-muted">宛先: {destination}{recipient?.notificationsEnabled === false ? "（通知OFF）" : ""}</div>
       {preview ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</div> : null}
@@ -154,6 +180,12 @@ function ManageNotificationsForQuery({ fetchFn, search, setSearch }: {
   setSearch: ReturnType<typeof useSearchParams>[1];
 }): React.ReactElement {
   const result = useApiResult((signal) => readManageNotifications(fetchFn, search, signal), search.toString());
+  React.useEffect(() => {
+    // CURRENT session guard and manage layout redirect on lost access.
+    // Use fixed local targets; never navigate to untrusted API redirect strings.
+    if (result.status === "anonymous") window.location.assign("/entry");
+    if (result.status === "forbidden") window.location.assign("/dashboard");
+  }, [result.status]);
   if (result.status === "loading") return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <NotFoundView />;
   if (result.status === "anonymous") return <div role="alert">セッションが切れました。<a href="/entry">ログイン</a></div>;
