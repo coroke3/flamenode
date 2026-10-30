@@ -158,3 +158,29 @@ test("MIG-0723: two submits before a render issue only one privileged write", as
     assert.match(ui.target.textContent, /追加しました/);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0723: changing events during a write clears stale busy and ignores old completion", async () => {
+  let complete;
+  const pendingReply = new Promise(resolve => { complete = resolve; });
+  const ui = fixture({ reply: pendingReply });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-head button");
+    const form = ui.target.querySelector(".manage-staff-add-form");
+    form.elements.namedItem("display_name").value = "Bob";
+    form.elements.namedItem("x_user_id").value = "bob_1";
+    form.elements.namedItem("reason").value = "追加";
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(ui.calls.length, 1);
+    assert.equal(ui.target.querySelector(".manage-staff-list-head button").disabled, true);
+    await ui.view({ eventId: "ev 2", members: [member({ id: "staff-2", x_user_id: "other" })] });
+    assert.equal(ui.target.querySelector(".manage-staff-list-head button").disabled, false);
+    assert.equal(ui.target.querySelector(".manage-staff-add-form"), null);
+    await React.act(async () => { complete(json(200, { ok: true, message: "旧イベント保存" })); });
+    assert.equal(ui.target.textContent.includes("旧イベント保存"), false);
+    assert.deepEqual(ui.refresh, []);
+    assert.equal(ui.calls.length, 1);
+  } finally { await ui.cleanup(); }
+});
