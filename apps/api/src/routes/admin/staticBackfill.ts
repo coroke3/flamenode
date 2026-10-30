@@ -217,14 +217,17 @@ staticBackfillAdminRoutes.post("/", async (c) => {
       total, scanned: baseScanned + batch.length, enqueued: baseEnqueued + accepted,
       last_error: null, last_run_at: now,
     }, batch.length, accepted);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch {
+    // D1/provider exceptions may contain query text, identifiers or credentials.
+    // Never persist their raw messages to KV or reflect them through an API.
+    // A fixed diagnostic preserves the CURRENT failed-state/retry contract.
+    const message = "バックフィル処理に失敗しました。状態を確認して再試行してください。";
     const failed: StaticBackfillRunState = {
-      ...previous, status: "failed", last_error: message.slice(0, 1000), last_run_at: now,
+      ...previous, status: "failed", last_error: message, last_run_at: now,
     };
     const persisted = await writeBackfillState(c.env.KV, withStaticBackfillRun(state, kind, failed, now));
     return c.json({
-      backfill_kind: kind, backfill_error: message.slice(0, 240),
+      backfill_kind: kind, backfill_error: message,
       backfill_state_persisted: persisted ? "1" : "0",
     }, 500);
   }
