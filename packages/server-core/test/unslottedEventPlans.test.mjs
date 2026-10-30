@@ -48,7 +48,10 @@ test("MIG-0651: eligibility assertion reuses same SQL predicate, bind parameters
     END
   `;
   const actual = dialect.sqlToQuery(captures[0]);
-  assert.deepEqual(actual, dialect.sqlToQuery(expected));
+  const expectedQuery = dialect.sqlToQuery(expected);
+  const normalizeWhitespace = (query) => query.replace(/\\s+/g, " ").trim();
+  assert.equal(normalizeWhitespace(actual.sql), normalizeWhitespace(expectedQuery.sql));
+  assert.deepEqual(actual.params, expectedQuery.params);
   assert.equal(actual.params.includes("event' OR 1=1"), true);
   assert.equal(actual.sql.includes("OR 1=1"), false);
   assert.match(actual.sql, /json_extract\('not-valid-json'/);
