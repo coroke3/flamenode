@@ -58,15 +58,17 @@ export function EventStaffManager({
   const [addOpen, setAddOpen] = React.useState(false);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
-  const activeIdRef = React.useRef({ eventId, fetchFn });
+  const activeIdRef = React.useRef({ eventId, fetchFn, canManageMembers, isSiteAdmin });
   const serialRef = React.useRef(0);
   // Prevent a request from one event/account context updating another event UI
   // during the render before React's passive effect cleanup.
-  if (activeIdRef.current.eventId !== eventId || activeIdRef.current.fetchFn !== fetchFn) {
-    activeIdRef.current = { eventId, fetchFn };
+  if (activeIdRef.current.eventId !== eventId || activeIdRef.current.fetchFn !== fetchFn ||
+      activeIdRef.current.canManageMembers !== canManageMembers ||
+      activeIdRef.current.isSiteAdmin !== isSiteAdmin) {
+    activeIdRef.current = { eventId, fetchFn, canManageMembers, isSiteAdmin };
     serialRef.current += 1;
   }
-  React.useEffect(() => () => { serialRef.current += 1; }, [eventId, fetchFn]);
+  React.useEffect(() => () => { serialRef.current += 1; }, [eventId, fetchFn, canManageMembers, isSiteAdmin]);
 
   const run = async (operation: () => Promise<{
     status: "ok" | "anonymous" | "unavailable";
@@ -127,10 +129,10 @@ export function EventStaffManager({
       "イベントスタッフ " + (member.x_user_id ?? member.id) + " を削除", confirmText));
   };
 
-  const presetSelect = (defaultValue: string | null) =>
+  const presetSelect = (defaultValue: string | null, lockOwner = false) =>
     <select className="fn-select" name="permission_preset"
       defaultValue={permittedPresets.some(([k]) => k === defaultValue) ? defaultValue! : "public_staff"}>
-      {permittedPresets.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      {permittedPresets.map(([value, label]) => <option key={value} value={value} disabled={lockOwner && value !== "owner"}>{label}</option>)}
     </select>;
 
   return <section aria-label="運営メンバー編集" className="manage-permission-panel">
@@ -178,7 +180,7 @@ export function EventStaffManager({
                   maxLength={80} required disabled={busy || member.x_user_id === null}/>
               </label>
               <label className="fn-label">担当プリセット
-                {presetSelect(member.permission_preset)}
+                {presetSelect(member.permission_preset, isLastOwner)}
               </label>
               <label className="fn-label">公開状態
                 <select name="is_public" className="fn-select" defaultValue={String(member.is_public ?? 0)} disabled={busy}>
