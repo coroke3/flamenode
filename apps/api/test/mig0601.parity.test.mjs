@@ -78,14 +78,14 @@ test("T02 RH-017: deep health token missing/invalid matches CURRENT rejection", 
   }
 });
 
-test("RH-017: authorized deep health fails closed with CURRENT's failure response and reads no binding", async () => {
+test("RH-017: authorized deep health probes D1 and fails closed on a read error with CURRENT redacted failure body", async () => {
   const token = "secret-admin-token-12345";
   const touched = [];
   const binding = (name) =>
     new Proxy({}, {
       get(_target, key) {
         touched.push(`${name}.${String(key)}`);
-        throw new Error(`${name} must not be read`);
+        throw new Error("private synthetic probe failure");
       },
     });
   const res = await app.request(
@@ -99,12 +99,12 @@ test("RH-017: authorized deep health fails closed with CURRENT's failure respons
       BUCKET: binding("BUCKET"),
     },
   );
-  // Same body/status/header as CURRENT app/api/health/deep/route.ts when
-  // runDeepHealthChecks cannot vouch for the deployment (catch -> 503).
+  // After the authorization gate the D1 schema probe must run first. A probe
+  // failure stays private; no KV/R2 reads occur after D1 throws (CURRENT parity).
   assert.equal(res.status, 503);
   assert.equal(res.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(await res.json(), { ok: false, service: "flamenode-web" });
-  assert.deepEqual(touched, []);
+  assert.deepEqual(touched, ["DB.prepare"]);
 });
 
 // ---- RH-026 / T03 ----------------------------------------------------------
