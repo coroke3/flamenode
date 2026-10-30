@@ -280,7 +280,7 @@ export function SettingsView({
             <div className="settings-addBox">
               <h3 className="settings-cardTitle">申請履歴</h3>
               <p className="settings-cardDesc">申請済みのX IDと現在の状態を確認できます。</p>
-              <RequestHistoryList rows={requestHistory} />
+              <RequestHistoryList rows={requestHistory} requestApi={requestApi} onRefresh={onRefresh} />
             </div>
           ) : null}
           {requestApi && onRefresh ? (
