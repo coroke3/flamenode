@@ -62,6 +62,7 @@ test("MIG-0701 U04 T08: every Personal route class has a CSS definition", async 
   const css = (await Promise.all([
     ...names.map((n) => read("apps/app/src/styles/current/" + n + ".css")),
     ...MODULES.map(([, , to]) => read(to)),
+    read("apps/app/src/styles/xid-requests.css"),
   ])).join("\n");
   const defined = new Set([...css.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map((m) => m[1]));
   const exceptions = new Set([
