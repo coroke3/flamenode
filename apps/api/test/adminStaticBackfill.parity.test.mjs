@@ -357,3 +357,40 @@ test("MIG-0643 SA-069: throwing R2 binding getter schedules shared-input repair,
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
 });
+
+test("MIG-0643 S3: oversized valid KV state fails soft before JSON.parse (ASCII and UTF-8)", async () => {
+  // The producer writes only three bounded run records. Do not parse arbitrarily
+  // large legacy/corrupt state in an 8ms-budget mutation request.
+  for (const padding of ["x".repeat(70 * 1024), "漢".repeat(24000)]) {
+    const s = setup();
+    seedEvent(s.sqlite, { id: "ev-kv-cap" });
+    s.state.raw = JSON.stringify({
+      schema_version: 1,
+      updated_at: 1,
+      runs: {
+        event_crew: {
+          cursor: "zz-after-all-events", phase: "items", status: "running",
+          total: 99, scanned: 98, enqueued: 98,
+          last_error: null, last_run_at: 1,
+        },
+      },
+      ignored_padding: padding,
+    });
+    assert.ok(new TextEncoder().encode(s.state.raw).byteLength > 64 * 1024);
+    const response = await s.request({ kind: "event_crew" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      backfill_kind: "event_crew", backfill_scanned: "1", backfill_enqueued: "1",
+      backfill_done: "1", backfill_state_persisted: "1",
+    });
+    assert.equal(s.state.reads, 1);
+    assert.equal(s.state.writes, 1);
+    assert.equal(s.rows().length, 1, "oversized cursor must not skip the first queued event");
+    assert.equal(s.rows()[0].target_id, "ev-kv-cap");
+    assert.equal(s.saved().runs.event_crew.scanned, 1);
+    assert.equal(s.saved().runs.event_crew.cursor, null);
+    assert.equal(s.stats.batches, 1, "queue and strict audit remain atomic");
+    assert.equal(s.audit().length, 1);
+    s.sqlite.close();
+  }
+});
