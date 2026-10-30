@@ -5,6 +5,7 @@ import type { OpsFetch } from "../../api/read.js";
 import {
   adminVideoTotalPages,
   adminVideoPageNumbers,
+  adminVideoRelativeLabel,
   buildAdminVideoHref,
   loadAdminVideos,
   parseAdminVideoFilters,
@@ -32,18 +33,6 @@ function detailHref(videoId: string, event: string): string {
   const path = `/admin/videos/${encodeURIComponent(videoId)}`;
   return event ? `${path}?event=${encodeURIComponent(event)}` : path;
 }
-/** CURRENT src/lib/utils/format.ts#formatRelative, unix seconds. */
-function createdLabel(timestamp: number): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
-  const diff = Date.now() / 1000 - timestamp;
-  if (diff < 60) return "今";
-  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
-  if (diff < 2592000) return `${Math.floor(diff / 86400)}日前`;
-  if (diff < 31536000) return `${Math.floor(diff / 2592000)}か月前`;
-  return `${Math.floor(diff / 31536000)}年前`;
-}
-
 function VideoRow({ video, event, isReview }: {
   video: AdminVideoRow;
   event: string;
@@ -67,7 +56,7 @@ function VideoRow({ video, event, isReview }: {
         ) : null}
       </td>
       <td>{visibilityLabel(video.status)}</td>
-      <td>{createdLabel(video.created_at)}</td>
+      <td>{adminVideoRelativeLabel(video.created_at)}</td>
       <td>
         <a className="fn-btn fn-btn-ghost fn-btn-sm" href={detailHref(video.id, event)}>詳細</a>{" "}
         <a className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/videos/${encodeURIComponent(video.id)}/members`}>参加者</a>{" "}
