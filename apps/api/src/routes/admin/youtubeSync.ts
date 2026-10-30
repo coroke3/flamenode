@@ -6,12 +6,11 @@
  * CURRENT's best-effort immediate wake is intentionally zero in Hono (D-13-41);
  * sync-jobs cron drains pending D1 rows. No remote Queue binding used here.
  */
-import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
-import { videos, videoYoutubeMetadata } from "@flamenode/db/schema";
 import { AdminYoutubeResyncVideoIdSchema, type AdminYoutubeResyncResult } from "@flamenode/contracts";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
+import { sql } from "@flamenode/server-core/sql";
 import type { AppEnv } from "../../env.ts";
 import { auditPreloaded } from "./body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
@@ -33,33 +32,60 @@ youtubeSyncAdminRoutes.post("/videos/:videoId/resync", async (c) => {
   const videoId = parsed.data;
   const db = c.get("db");
 
-  // One combined read replaces the two CURRENT selects, preserving
-  // the full metadata row (including its column order) for audit parity.
-  // Together with writeGuard + CostGuard this stays within S3's three reads.
-  let joined: Array<{ video: typeof videos.$inferSelect; metadata: typeof videoYoutubeMetadata.$inferSelect | null }>;
+  // A single bounded left join avoids a second D1 preflight read (S3).
+  // This explicit SELECT column order mirrors Drizzle's CURRENT .select()
+  // over videoYoutubeMetadata, used for audit before/after JSON parity.
+  type MetadataRow = {
+    video_id: string | null;
+    youtube_privacy_status: string | null;
+    youtube_availability_status: string | null;
+    duration_seconds: number | null;
+    view_count: number | null;
+    synced_at: number | null;
+    sync_status: "pending" | "synced" | "failed" | null;
+    sync_error: string | null;
+    updated_at: number | null;
+  };
+  type JoinedRow = MetadataRow & { found_video_id: string };
+  let joined: JoinedRow | null;
   try {
-    joined = await db.select({ video: videos, metadata: videoYoutubeMetadata })
-      .from(videos)
-      .leftJoin(videoYoutubeMetadata, eq(videoYoutubeMetadata.video_id, videos.id))
-      .where(eq(videos.id, videoId))
-      .limit(1);
+    joined = await c.env.DB.prepare(`
+      SELECT v.id AS found_video_id, m.video_id, m.youtube_privacy_status,
+             m.youtube_availability_status, m.duration_seconds, m.view_count,
+             m.synced_at, m.sync_status, m.sync_error, m.updated_at
+      FROM videos AS v
+      LEFT JOIN video_youtube_metadata AS m ON m.video_id = v.id
+      WHERE v.id = ? LIMIT 1
+    `).bind(videoId).first<JoinedRow>();
   } catch (error) {
     console.error("[youtube-sync-admin] preflight failed", error);
     const body: AdminYoutubeResyncResult = { ok: false, message: FAILURE };
     return c.json(body, 500);
   }
-  if (!joined[0]) {
+  if (!joined) {
     const body: AdminYoutubeResyncResult = { ok: false, message: "作品が見つかりません。" };
     return c.json(body, 404);
   }
-  const before = joined[0].metadata;
+  const before = joined.video_id
+    ? {
+        video_id: joined.video_id,
+        youtube_privacy_status: joined.youtube_privacy_status,
+        youtube_availability_status: joined.youtube_availability_status,
+        duration_seconds: joined.duration_seconds,
+        view_count: joined.view_count!,
+        synced_at: joined.synced_at,
+        sync_status: joined.sync_status!,
+        sync_error: joined.sync_error,
+        updated_at: joined.updated_at!,
+      }
+    : null;
   if (before?.sync_status === "pending") {
     const body: AdminYoutubeResyncResult = { ok: true, already_pending: true };
     return c.json(body, 200);
   }
 
   const now = Math.max(Math.floor(Date.now() / 1000), (before?.updated_at ?? 0) + 1);
-  const after: typeof videoYoutubeMetadata.$inferSelect = before
+  const after = before
     ? { ...before, sync_status: "pending", sync_error: null, synced_at: null, updated_at: now }
     : {
         video_id: videoId,
@@ -73,13 +99,17 @@ youtubeSyncAdminRoutes.post("/videos/:videoId/resync", async (c) => {
         updated_at: now,
       };
   const statement = before
-    ? db.update(videoYoutubeMetadata)
-        .set({ sync_status: "pending", sync_error: null, synced_at: null, updated_at: now })
-        .where(and(
-          eq(videoYoutubeMetadata.video_id, videoId),
-          expectedRowCondition({ expectedCurrent: { ...before } }),
-        )!)
-    : db.insert(videoYoutubeMetadata).values(after);
+    ? db.run(sql`
+        UPDATE video_youtube_metadata
+        SET sync_status = ${"pending"}, sync_error = NULL, synced_at = NULL, updated_at = ${now}
+        WHERE video_id = ${videoId} AND (${expectedRowCondition({ expectedCurrent: { ...before } })})
+      `)
+    : db.run(sql`
+        INSERT INTO video_youtube_metadata (
+          video_id, youtube_privacy_status, youtube_availability_status,
+          duration_seconds, view_count, synced_at, sync_status, sync_error, updated_at
+        ) VALUES (${videoId}, NULL, NULL, NULL, ${0}, NULL, ${"pending"}, NULL, ${now})
+      `);
 
   try {
     await mutateWithAudit(db, {
