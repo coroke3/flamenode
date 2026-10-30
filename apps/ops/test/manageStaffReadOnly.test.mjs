@@ -36,7 +36,7 @@ test("MIG-0723 U01a: exact GET, URL-encoding, no-store, credentials and signal",
   const signal = new AbortController().signal;
   const result = await readManageStaff("ev 1", async (path, init) => {
     called = { path, init };
-    return json(200, staff());
+    return json(200, staff({ event: { id: "ev 1", title: "Test Event", accent_color: null } }));
   }, signal);
   assert.equal(result.status, "ok");
   assert.equal(called.path, "/api/manage/events/ev%201/staff");
@@ -59,6 +59,8 @@ test("MIG-0723 U01a: auth, IDOR 404, 503, network errors and malformed payload f
   assert.deepEqual(await readManageStaff("ev1", async () => json(200, staff({ members: [{}] }))),
     { status: "unavailable" });
   assert.deepEqual(await readManageStaff("ev1", async () => json(200, { members: [] })),
+    { status: "unavailable" });
+  assert.deepEqual(await readManageStaff("ev1", async () => json(200, staff({ event: { id: "other", title: "Other", accent_color: null } }))),
     { status: "unavailable" });
   assert.deepEqual(await readManageStaff("ev1", async () => { throw Error("offline"); }),
     { status: "unavailable" });
