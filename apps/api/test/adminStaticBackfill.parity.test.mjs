@@ -73,6 +73,19 @@ function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist:
   return { ...d1, request, state, bucket, rows, audit, saved };
 }
 
+test("MIG-0643 SA-069: successful and invalid admin backfill responses never cache private cursors", async () => {
+  const s = setup();
+  seedEvent(s.sqlite, { id: "ev-private" });
+  const ok = await s.request({ kind: "event_crew" });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.headers.get("cache-control"), "private, no-store");
+  const invalid = await s.request({ kind: "event_crew", cursor: "x".repeat(129) });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.headers.get("cache-control"), "private, no-store");
+  assert.equal(s.rows().length, 1);
+  s.sqlite.close();
+});
+
 test("MIG-0643 SA-069: invalid kind/cursor and 64KiB cap fail before mutation", async () => {
   const s = setup();
   for (const data of [{ kind: "not-a-kind" }, { kind: "event_crew", cursor: "x".repeat(129) }]) {
