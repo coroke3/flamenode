@@ -22,7 +22,9 @@ const fullDate = new Intl.DateTimeFormat("ja-JP", {
   hour: "2-digit", minute: "2-digit",
 });
 function formatUnix(value: number | null): string {
-  return value == null || !Number.isFinite(value) ? "-" : fullDate.format(new Date(value * 1000));
+  if (value == null || !Number.isFinite(value)) return "-";
+  const date = new Date(value * 1000);
+  return Number.isNaN(date.getTime()) ? "-" : fullDate.format(date);
 }
 function formatRelative(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return "";
