@@ -34,7 +34,25 @@ export function fetchMissingSourceHistory(root, entries) {
     const head = body.match(/^Head:\s*([0-9a-f]{40})\s*$/m)?.[1];
     const pr = body.match(/^PR:\s*#(\d+)\s*$/m)?.[1];
     if (!head || !pr || gitCommitExists(root, head) || fetched.has(pr)) continue;
-    execFileSync("git", ["fetch", "--no-tags", "origin", "refs/pull/" + pr + "/head"], { cwd: root, stdio: "ignore" });
+    // A squash-merged PR may have moved/rewritten its refs/pull/N/head after
+    // the recorded checkpoint. Fetching its current ref alone then leaves the
+    // historic Head SHA unavailable despite GitHub still serving that commit.
+    // Fetch the exact, strictly validated 40-hex SHA as a fallback. Never
+    // substitute the PR's new tip: validateWorkItems still checks the ORIGINAL
+    // recorded commit object with git cat-file -e SHA^{commit}.
+    try {
+      execFileSync("git", ["fetch", "--no-tags", "origin", "refs/pull/" + pr + "/head"], { cwd: root, stdio: "ignore" });
+    } catch {
+      // A deleted PR ref is not evidence that the recorded commit is invalid.
+      // The exact-SHA attempt and the final commitExists gate decide validity.
+    }
+    if (!gitCommitExists(root, head)) {
+      try {
+        execFileSync("git", ["fetch", "--no-tags", "origin", head], { cwd: root, stdio: "ignore" });
+      } catch {
+        // Fail closed through validateWorkItems: no fabricated or substituted SHA.
+      }
+    }
     fetched.add(pr);
   }
   return [...fetched];
