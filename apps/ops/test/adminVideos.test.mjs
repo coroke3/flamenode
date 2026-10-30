@@ -4,6 +4,7 @@ import {
   parseAdminVideoFilters,
   buildAdminVideoHref,
   adminVideoTotalPages,
+  adminVideoPageNumbers,
   loadAdminVideos,
 } from "../.test-dist/apps/ops/src/api/adminVideos.js";
 
@@ -49,6 +50,10 @@ test("MIG-0729 T05: page 3 preserves CURRENT q/status/event query and link order
     "/admin/videos?q=a+%26+b&status=public&event=event%2F1");
   assert.equal(adminVideoTotalPages(fixture.paging), 3);
   assert.equal(adminVideoTotalPages({ page: 1, pageSize: 50, total: 0 }), 1);
+  assert.deepEqual(adminVideoPageNumbers(3, 12), [1, 2, 3, 4, 5, "…", 12]);
+  assert.deepEqual(adminVideoPageNumbers(8, 12), [1, "…", 6, 7, 8, 9, 10, "…", 12]);
+  assert.deepEqual(adminVideoPageNumbers(12, 12), [1, "…", 10, 11, 12]);
+
 });
 
 test("MIG-0729 U01: GET uses same-origin/no-store, exact page filters and abort signal", async () => {
