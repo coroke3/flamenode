@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createRoot } from "react-dom/client";
+// React DOM must be initialized only after jsdom globals exist: input/change detection is captured at import time.
 import { JSDOM } from "jsdom";
 import { AdminSpreadsheetImportPreview } from "../.test-dist/apps/ops/src/routes/admin/AdminSpreadsheetImportPreview.js";
 
@@ -13,6 +13,7 @@ for (const key of ["window", "document", "navigator", "HTMLElement", "Node"]) {
   Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const { createRoot } = await import("react-dom/client");
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const preview = {
