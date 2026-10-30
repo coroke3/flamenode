@@ -245,3 +245,36 @@ test("MIG-0737 U01: CSV clipboard copy supports primary API and denied-grant fal
     document.execCommand = oldExec;
   }
 });
+
+test("MIG-0737 U01: previous-page navigation hides stale rows until the new response", async () => {
+  let blockPrevious = false;
+  let resolvePrevious;
+  const fetchFn = async (path) => {
+    if (path.includes("/tables")) return json(200, catalog);
+    if (!path.includes("/data")) throw Error("unexpected export request");
+    const requestedPage = Number(new URL("https://flamenode.test" + path).searchParams.get("page"));
+    if (blockPrevious && requestedPage === 1) {
+      return new Promise((resolve) => { resolvePrevious = resolve; });
+    }
+    return json(200, page("videos", requestedPage, requestedPage === 1));
+  };
+  const ui = await mount(fetchFn, "videos");
+  try {
+    const next = [...ui.host.querySelectorAll("button")].find(b => b.textContent === "次へ");
+    await React.act(async () => next.click());
+    await flush();
+    assert.match(ui.host.textContent, /page two/);
+    blockPrevious = true;
+    const prev = [...ui.host.querySelectorAll("button")].find(b => b.textContent === "前へ");
+    await React.act(async () => prev.click());
+    assert.ok(resolvePrevious, "new page was requested");
+    assert.doesNotMatch(ui.host.textContent, /page two/);
+    assert.match(ui.host.textContent, /読み込み中/);
+    await React.act(async () => resolvePrevious(json(200, page("videos", 1, true))));
+    await flush();
+    assert.match(ui.host.textContent, /<unsafe>/);
+    assert.doesNotMatch(ui.host.textContent, /page two/);
+  } finally {
+    await ui.cleanup();
+  }
+});
