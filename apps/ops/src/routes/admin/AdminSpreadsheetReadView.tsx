@@ -156,7 +156,7 @@ export function AdminSpreadsheetReadView({
     return <p role="status">{catalog.status === "loading" ? "テーブルを読み込み中…" : failureMessage(catalog.status)}</p>;
   }
   const active = catalog.tables.find((t) => t.table === selectedTable);
-  const data = rows.status === "ready" && rows.data.def.table === selectedTable ? rows.data : null;
+  const data = rows.status === "ready" && rows.data.def.table === selectedTable && rows.data.page === page ? rows.data : null;
   return (
     <section aria-labelledby="ops-spreadsheet-title">
       <h1 id="ops-spreadsheet-title">DB スプレッドシート</h1>
@@ -198,7 +198,7 @@ export function AdminSpreadsheetReadView({
               </div>
               {data.rows.length === 0 ? <p>データがありません。</p> : null}
               <div>
-                <button type="button" disabled={page <= 1} onClick={() => setPage((n) => Math.max(1, n - 1))}>前へ</button>
+                <button type="button" disabled={page <= 1} onClick={() => { setRows({ status: "loading" }); setPage((n) => Math.max(1, n - 1)); }}>前へ</button>
                 <button type="button" disabled={!data.hasMore} onClick={() => { setRows({ status: "loading" }); setPage((n) => n + 1); }}>次へ</button>
               </div>
             </>
