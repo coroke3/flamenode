@@ -22,6 +22,9 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
 import { auditAdminRoutes } from "./audit.ts";
+import { costGuardAdminRoutes } from "./costGuard.ts";
+import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
+import { mountMig0643AdminRoutes } from "./mig0643.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -49,5 +52,10 @@ export function createAdminRoutes(
   admin.route("/announcements", announcementRoutes);
   admin.route("/api-endpoints", apiEndpointRoutes);
   admin.route("/audit", auditAdminRoutes);
+  admin.route("/cost-guard", costGuardAdminRoutes);
+  admin.route("/users", adminUsersRoutes);
+  admin.route("/x-users", adminXUsersRoutes);
+  // MIG-0643 SA-050/069..073/106: all handlers inherit the parent auth/write guards.
+  mountMig0643AdminRoutes(admin);
   return admin;
 }
