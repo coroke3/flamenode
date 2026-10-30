@@ -43,7 +43,7 @@ export function AdminSpreadsheetReadView({
 
   React.useEffect(() => () => exportRef.current?.abort(), [selectedTable]);
 
-  async function downloadExport(format: "csv" | "tsv"): Promise<void> {
+  async function exportDelimited(format: "csv" | "tsv", destination: "download" | "copy"): Promise<void> {
     if (!selectedTable || exportRef.current) return;
     const controller = new AbortController();
     exportRef.current = controller;
@@ -58,6 +58,39 @@ export function AdminSpreadsheetReadView({
       }
       if (result.status !== "ok") {
         setExportMessage(failureMessage(result.status));
+        return;
+      }
+      if (destination === "copy") {
+        const body = await result.data.blob.text();
+        if (controller.signal.aborted) return;
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(body);
+          copied = true;
+        } catch {
+          // Matches CURRENT's fallback for browsers without Clipboard API grants.
+          const textarea = document.createElement("textarea");
+          textarea.value = body;
+          textarea.readOnly = true;
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.append(textarea);
+          try {
+            textarea.select();
+            copied = document.execCommand("copy");
+          } catch {
+            copied = false;
+          } finally {
+            textarea.remove();
+          }
+        }
+        if (!copied) {
+          setExportMessage("クリップボードへのコピーに失敗しました。");
+          return;
+        }
+        setExportMessage(result.data.truncated
+          ? "クリップボードにコピーしました（件数上限で一部のみ）"
+          : "クリップボードにコピーしました。");
         return;
       }
       // No remote filename is trusted: the table ID is sanitized before download.
@@ -140,8 +173,9 @@ export function AdminSpreadsheetReadView({
         <div aria-live="polite">
           <h2>{active.label}</h2>
           <div role="toolbar" aria-label="CSV / TSV エクスポート">
-            <button type="button" disabled={exportBusy} onClick={() => void downloadExport("csv")}>CSV ダウンロード</button>
-            <button type="button" disabled={exportBusy} onClick={() => void downloadExport("tsv")}>TSV ダウンロード</button>
+            <button type="button" disabled={exportBusy} onClick={() => void exportDelimited("csv", "download")}>CSV ダウンロード</button>
+            <button type="button" disabled={exportBusy} onClick={() => void exportDelimited("tsv", "download")}>TSV ダウンロード</button>
+            <button type="button" disabled={exportBusy} onClick={() => void exportDelimited("csv", "copy")}>コピー (CSV)</button>
           </div>
           {exportMessage ? <p role="status">{exportMessage}</p> : null}
           {data ? (
