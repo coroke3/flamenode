@@ -7,7 +7,7 @@ import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import { STATIC_BACKFILL_KV_KEY } from "@flamenode/domain/admin";
 
-function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist: 100, pool: 100 } } = {}) {
+function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist: 100, pool: 100 }, r2BadSize = null, r2BadJson = null } = {}) {
   const d1 = createAdminD1();
   seedBase(d1.sqlite);
   d1.sqlite.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT);");
@@ -16,15 +16,21 @@ function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist:
     async get(key) { assert.equal(key, STATIC_BACKFILL_KV_KEY); state.reads++; return state.raw; },
     async put(key, value) { assert.equal(key, STATIC_BACKFILL_KV_KEY); state.writes++; state.raw = value; },
   };
-  const bucket = { gets: 0, async get(key) {
+  const bucket = { gets: 0, cancels: 0, async get(key) {
     this.gets++;
     if (r2Throws) throw new Error("simulated R2 unavailable");
     if (!r2Ready) return null;
-    const value = key.includes("blocklist")
+    const kind = key.includes("blocklist") ? "blocklist" : "pool";
+    const value = kind === "blocklist"
       ? { schema_version: 1, generated_at: r2GeneratedAt.blocklist, blocked: {} }
       : { schema_version: 1, generated_at: r2GeneratedAt.pool, generation_key: "ok", items: [] };
-    const payload = JSON.stringify(value);
-    return { size: payload.length, text: async () => payload };
+    const payload = r2BadJson === kind ? "{malformed-json" : JSON.stringify(value);
+    const size = r2BadSize?.kind === kind ? r2BadSize.size : payload.length;
+    return {
+      size,
+      body: { cancel: async () => { this.cancels++; } },
+      text: async () => payload,
+    };
   } };
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -172,6 +178,48 @@ test("MIG-0643 SA-069: non-finite R2 generated_at fails closed like CURRENT norm
       ["random_video_pool", "youtube_related_blocklist"],
     );
     assert.equal(s.rows().some(row => row.target_type === "video"), false);
+    assert.equal(s.stats.batches, 1);
+    assert.equal(s.audit().length, 1);
+  }
+});
+
+test("MIG-0643 SA-069: unsafe/oversized R2 object metadata never advances video backfill", async () => {
+  const inputs = [
+    { kind: "blocklist", size: 2 * 1024 * 1024 + 1 },
+    { kind: "pool", size: 8 * 1024 * 1024 + 1 },
+    { kind: "blocklist", size: -1 },
+    { kind: "pool", size: 0.5 },
+    { kind: "pool", size: Number.MAX_SAFE_INTEGER + 1 },
+  ];
+  for (const r2BadSize of inputs) {
+    const s = setup({ r2Ready: true, r2BadSize });
+    s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+    const response = await s.request({ kind: "video_v2" });
+    assert.equal(response.status, 200, JSON.stringify(r2BadSize));
+    assert.equal((await response.json()).backfill_done, "0");
+    assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
+    assert.deepEqual(
+      s.rows().map(row => row.target_type).sort(),
+      ["random_video_pool", "youtube_related_blocklist"],
+    );
+    assert.equal(s.bucket.cancels, 1, "discarded object body must be cancelled");
+    assert.equal(s.stats.batches, 1);
+    assert.equal(s.audit().length, 1);
+  }
+});
+
+test("MIG-0643 SA-069: malformed shared JSON fails closed and schedules both rebuilds", async () => {
+  for (const r2BadJson of ["blocklist", "pool"]) {
+    const s = setup({ r2Ready: true, r2BadJson });
+    s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+    const res = await s.request({ kind: "video_v2" });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).backfill_done, "0");
+    assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
+    assert.deepEqual(
+      s.rows().map(row => row.target_type).sort(),
+      ["random_video_pool", "youtube_related_blocklist"],
+    );
     assert.equal(s.stats.batches, 1);
     assert.equal(s.audit().length, 1);
   }
