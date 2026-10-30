@@ -10,7 +10,7 @@ const [route, eventAction, cache, eventExportData, videoVisibilityTransition] =
   ),
   readFile(new URL("../actions/event-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventExportCache.ts", import.meta.url), "utf8"),
-  readFile(new URL("./eventExportData.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/eventExport/data.ts", import.meta.url), "utf8"),
   readFile(
     // MIG-0615: the planner lives in packages/server-core.
     new URL("../../../packages/server-core/src/visibility/videoTransition.ts", import.meta.url),

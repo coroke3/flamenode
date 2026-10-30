@@ -1,38 +1,22 @@
 import "server-only";
 
 import { deletePublicJsonCaches } from "@/lib/publicData/publicCache";
+import {
+  EVENT_EXPORT_REFRESH_MINUTES,
+  eventExportPayloadCacheKey,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
 
-// Payload shape changed to include custom answers in both formats.
-// Bump whenever the payload or snapshot selection changes so an older Cache API
-// entry cannot keep serving a response built without custom answer values.
-const EVENT_EXPORT_CACHE_VERSION = 9;
-export const EVENT_EXPORT_REFRESH_MINUTES = [15, 60, 360, 1440] as const;
-
-export type EventExportCacheFormat = "v5" | "legacy";
-export type EventExportRefreshMinutes =
-  (typeof EVENT_EXPORT_REFRESH_MINUTES)[number];
-
-export function isEventExportRefreshMinutes(
-  value: number,
-): value is EventExportRefreshMinutes {
-  return EVENT_EXPORT_REFRESH_MINUTES.includes(
-    value as EventExportRefreshMinutes,
-  );
-}
-
-export function eventExportPayloadCacheKey(
-  eventId: string,
-  format: EventExportCacheFormat,
-  refreshMinutes: EventExportRefreshMinutes,
-): string {
-  return [
-    "public-event-export",
-    EVENT_EXPORT_CACHE_VERSION,
-    encodeURIComponent(eventId),
-    format,
-    refreshMinutes,
-  ].join(":");
-}
+// Compatibility bridge (MIG-0632 U02a, D-14-2): keep legacy exports and
+// invalidation side-effects, but share pure cache identity with the Hono port.
+export {
+  EVENT_EXPORT_REFRESH_MINUTES,
+  eventExportPayloadCacheKey,
+  isEventExportRefreshMinutes,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
+export type {
+  EventExportCacheFormat,
+  EventExportRefreshMinutes,
+} from "@flamenode/server-core/publicCache/eventExportKeys";
 
 /**
  * scheduled snapshot は colo ごとの Cache API にだけ保存する（KV の書込/削除は使わない）。
