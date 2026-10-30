@@ -47,7 +47,7 @@ test("production deploy契約はplaylist同期に必要なsecret名をfail-close
 });
 
 test("production schema契約はplaylist同期テーブルとYouTube quota正本を要求する", async () => {
-  const schemaContract = await readFromRoot("src/lib/health/schemaContract.ts");
+  const schemaContract = await readFromRoot("packages/server-core/src/health/schemaContract.ts");
   for (const table of REQUIRED_PLAYLIST_TABLES) {
     assert.match(schemaContract, new RegExp(`"${table}"`), table);
   }
