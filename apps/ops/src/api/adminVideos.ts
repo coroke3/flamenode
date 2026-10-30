@@ -85,3 +85,18 @@ export function adminVideoPageNumbers(current: number, total: number): (number |
   }
   return pages;
 }
+
+/**
+ * CURRENT src/lib/utils/format.ts#formatRelative parity: 0 and future Unix
+ * seconds are valid timestamps. Caller supplies the same rendering clock.
+ */
+export function adminVideoRelativeLabel(unixSec: number, nowUnixSec = Date.now() / 1000): string {
+  if (!Number.isFinite(unixSec)) return "";
+  const diff = nowUnixSec - unixSec;
+  if (diff < 60) return "今";
+  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
+  if (diff < 2592000) return `${Math.floor(diff / 86400)}日前`;
+  if (diff < 31536000) return `${Math.floor(diff / 2592000)}か月前`;
+  return `${Math.floor(diff / 31536000)}年前`;
+}
