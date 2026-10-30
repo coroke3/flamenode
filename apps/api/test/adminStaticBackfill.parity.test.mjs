@@ -7,7 +7,7 @@ import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import { STATIC_BACKFILL_KV_KEY } from "@flamenode/domain/admin";
 
-function setup({ r2Ready = false } = {}) {
+function setup({ r2Ready = false, r2Throws = false } = {}) {
   const d1 = createAdminD1();
   seedBase(d1.sqlite);
   d1.sqlite.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT);");
@@ -18,6 +18,7 @@ function setup({ r2Ready = false } = {}) {
   };
   const bucket = { gets: 0, async get(key) {
     this.gets++;
+    if (r2Throws) throw new Error("simulated R2 unavailable");
     if (!r2Ready) return null;
     const value = key.includes("blocklist")
       ? { schema_version: 1, generated_at: 100, blocked: {} }
@@ -129,4 +130,20 @@ test("MIG-0643 SA-069: restart resets cursor and counters", async () => {
   assert.equal(res.status, 200);
   assert.equal((await res.json()).backfill_scanned, "1");
   assert.equal(s.saved().runs.event_crew.scanned, 1);
+});
+
+test("MIG-0643 SA-069: R2 read error schedules shared-input repair instead of failing KV run", async () => {
+  const s = setup({ r2Throws: true });
+  s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+  const res = await s.request({ kind: "video_v2" });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).backfill_done, "0");
+  assert.equal(s.saved().runs.video_v2.status, "running");
+  assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
+  assert.deepEqual(
+    s.rows().map(x => x.target_type).sort(),
+    ["random_video_pool", "youtube_related_blocklist"],
+  );
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
 });
