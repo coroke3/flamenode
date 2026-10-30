@@ -8,7 +8,8 @@ import path from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
-import { produceSnapshots, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import { buildPublicSite, runBuildCommand } from "../apps/site/scripts/buildPublicSite.ts";
+import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
   loadListingPayload,
@@ -388,6 +389,101 @@ test("C' parity: batched read-only producer output is byte-identical to the CURR
     assert.deepEqual(batched.manifest, oracle.result.manifest);
     assert.equal(log.some((sql) => /static_artifacts|static_rebuild_queue/.test(sql)), false, "tracking statements stay local");
     assert.ok(batched.report.d1Statements <= 200, `statements ${batched.report.d1Statements}`);
+  }
+});
+
+test("MIG-0509 T01: D1 REST CLI reads only SELECTs and emits byte-identical snapshots with 200 statement budget", async () => {
+  const sqlite=migrated(); seed(sqlite);
+  const out=fs.mkdtempSync(path.join(os.tmpdir(),"mig0509-d1-api-"));
+  const trendingFile=path.join(out,"trending.json");fs.writeFileSync(trendingFile,JSON.stringify(TRENDING));
+  const secret="fixture-secret-never-log";
+  const queries=[];
+  const fetchFn=async (_url,init)=>{
+    assert.equal(init.method,"POST");
+    assert.equal(init.headers.Authorization,"Bearer "+secret);
+    const {sql,params}=JSON.parse(init.body);
+    assert.match(sql,/^\s*(SELECT|WITH)\b/i);
+    assert.doesNotMatch(sql,/static_artifacts|static_rebuild_queue/i);
+    queries.push(sql);
+    try {
+      return new Response(JSON.stringify({success:true,result:[{success:true,results:sqlite.prepare(sql).all(...params)}]}),{status:200});
+    } catch {
+      return new Response(JSON.stringify({success:false,errors:[{code:17}]}),{status:400});
+    }
+  };
+  const logs=[];const warn=console.warn, log=console.log;
+  console.log=(...args)=>logs.push(args.join(" "));console.warn=(...args)=>logs.push(args.join(" "));
+  try {
+    await snapshotMain(["--d1-api","--out",out,"--generation","gen-1","--now",String(NOW),
+      "--trending-file",trendingFile],{env:{
+      CLOUDFLARE_ACCOUNT_ID:"a".repeat(32),
+      FLAMENODE_D1_DATABASE_ID:"b".repeat(32),
+      FLAMENODE_D1_READ_TOKEN:secret,
+    },fetchFn});
+  } finally {console.log=log;console.warn=warn;}
+  assert.ok(queries.length>0&&queries.length<=200,"read-only D1 budget exceeded");
+  assert.equal(logs.join("\\n").includes(secret),false,"token leaked into logs");
+  const baseline=await produceSnapshots({db:readOnly(sqlite,[]),mode:"batched",generation:"gen-1",nowSec:NOW,trending:TRENDING});
+  for (const item of baseline.snapshots) assert.equal(fs.readFileSync(path.join(out,item.key),"utf8"),item.json,item.key);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out,"manifest.json"),"utf8")),baseline.manifest);
+  assert.ok(!queries.some(sql=>/INSERT|UPDATE|DELETE/.test(sql)), "no writes reach remote D1");
+});
+
+test("MIG-0509: CLI source and option validation fails before touching network",()=>{
+  const invalid=[
+    ["--d1-api","--sqlite","x","--out","z","--generation","g"],
+    ["--sqlite","x","--sql-dump","y","--out","z","--generation","g"],
+    ["--d1-api","--d1-api","--out","z","--generation","g"],
+    ["--d1-api","--out","z","--generation","g","--now","NaN"],
+    ["--sqlite","x","--out","z","--generation","g","--unsupported","1"],
+  ];
+  for(const flags of invalid)assert.throws(()=>parseSnapshotCliArgs(flags),/expected exactly one/);
+  assert.equal(parseSnapshotCliArgs(["--d1-api","--out","a","--generation","b"]).batched,true);
+});
+
+test("MIG-0509 U03: build:public uses isolated snapshot paths and yields pages in CI",async()=>{
+  const sqlite=migrated();seed(sqlite);
+  const fixtureDir=fs.mkdtempSync(path.join(os.tmpdir(),"mig0509-build-"));
+  const sqlitePath=path.join(fixtureDir,"seed.sqlite");
+  sqlite.exec("VACUUM INTO '"+sqlitePath.replaceAll("'","''")+"'");
+  const trendingFile=path.join(fixtureDir,"trending.json");
+  fs.writeFileSync(trendingFile,JSON.stringify(TRENDING));
+  // Snapshot E2E must not overwrite the shared default dist read by later parity tests.
+  const siteOutput=path.join(fixtureDir,"site-output");
+  const commands=[];
+  const isFull=process.env.REQUIRE_BUILT==="1";
+  const runner=async command=>{
+    commands.push(command);
+    assert.equal(command.env.FLAMENODE_D1_READ_TOKEN,undefined);
+    assert.equal(command.env.FLAMENODE_R2_READ_TOKEN,undefined);
+    assert.ok(fs.existsSync(command.env.FLAMENODE_SNAPSHOT_MANIFEST_FILE));
+    if(isFull){
+      const isolatedArgs=command.args[0]==="run"
+        ? [...command.args,"--","--outDir",siteOutput]
+        : [...command.args,siteOutput];
+      await runBuildCommand({...command,args:isolatedArgs});
+    }
+  };
+  const oldLog=console.log;
+  let report;
+  try{
+    console.log=()=>undefined;
+    report=await buildPublicSite(["--sqlite",sqlitePath,"--batched","--trending-file",trendingFile,
+      "--now",String(NOW),"--generation","gen-1"],{
+        env:{...process.env,FLAMENODE_D1_READ_TOKEN:"do-not-pass-to-astro",
+          FLAMENODE_R2_READ_TOKEN:"do-not-pass-to-astro"},
+        run:runner,
+      });
+  }finally{console.log=oldLog;}
+  assert.equal(commands.length,2);
+  assert.ok(report.keys>0);
+  assert.ok(report.d1Statements<=200,"snapshot reader query count");
+  assert.ok(fs.existsSync(path.join(report.snapshotDir,"manifest.json")));
+  if(isFull){
+    const html=fs.readFileSync(path.join(siteOutput,"user/creator_a/index.html"),"utf8");
+    assert.match(html,/Creator A/);
+    assert.equal(fs.existsSync(path.join(siteOutput,"user/banned_c/index.html")),false);
+    assert.match(fs.readFileSync(path.join(siteOutput,"event/public-event/index.html"),"utf8"),/Public Event/);
   }
 });
 

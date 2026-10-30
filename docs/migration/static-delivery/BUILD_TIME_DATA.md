@@ -253,6 +253,15 @@ The auth/missing-Queue/invalid-count regression test is run by the migration CI
 (`apps/site/scripts/queue-cpu-probe/worker.test.mjs`). This fixes the previously
 public CPU amplification endpoint; it does **not** prove any workerd CPU limit.
 
+## MIG-0509 U03: reproducible local build entry (no production change)
+
+`npm run build:public --workspace=@flamenode/site -- --sqlite <seed.sqlite> --trending-file <trending.json> --now <unix-seconds> --generation <id>`
+
+- Runs the existing CURRENT-parity producers with local SQLite fixtures and writes all public snapshot kinds and a manifest in a temporary directory.
+- Exposes `FLAMENODE_SNAPSHOT_DIR`, `FLAMENODE_SNAPSHOT_MANIFEST_FILE` and `FLAMENODE_SNAPSHOT_GENERATION` only to the Astro and static build-budget child processes, then verifies the output. D1/R2 read tokens are removed from these child processes' environments.
+- Reports the number of snapshot keys, bytes, D1 SELECT statements and build elapsed milliseconds as a JSON line. This is a **local/CI result**, not Workers Builds or production timing. Absent trending is a hard build failure.
+- The work item `MIG-0509.md` keeps live-build measurements separate from local simulation. File-count/budget checks cannot substitute for production data.
+
 ## 5. How the build reads D1
 
 | Option | What | Status |
@@ -293,6 +302,38 @@ by `LIMIT` / window limits from the `MAX_` constants (which equal CURRENT's), fa
 `EVENTS_INDEX_MAX_ROWS` (CURRENT silently keeps the newest 200), and writes key-sorted JSON.
 It never runs inside a Worker request. Choosing A or B, and creating the token or credential,
 is pending user approval.
+
+### MIG-0509 U01/U02/U04: target Workers Builds integration — instructions only
+
+**Not authorized/executed by this PR**: create any token, connect a Workers Builds project, query production D1 or R2, deploy a Worker, change production Route/secret, or run five live builds. Every such step requires the owner's explicit approval before execution. The current `flamenode-web` and its authentication routes remain the rollback path.
+
+When separately approved, configure Workers Builds with:
+
+```bash
+npm run build:public --workspace=@flamenode/site -- --d1-api --trending-r2 --generation "$WORKERS_CI_COMMIT_SHA"
+```
+
+The build must have the already-approved dependencies built first (including `@flamenode/ui`), and uses read-only D1 API (`openD1HttpReader`, maximum 200 SELECT requests per build). `--d1-api`, `--sql-dump` and `--sqlite` are mutually exclusive; `--trending-r2` and `--trending-file` are mutually exclusive.
+
+| Build variable | Use / required privilege |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Only the FlameNode account; 32-hex ID, not a token |
+| `FLAMENODE_D1_DATABASE_ID` | Existing D1 database ID; do not change it |
+| `FLAMENODE_D1_READ_TOKEN` | Dedicated account-scoped D1 Read token; the code sends SELECT only. Never commit or echo |
+| `FLAMENODE_R2_READ_TOKEN` | Dedicated account-scoped R2 Read token (no write permission), reads only `analytics/trending.json` |
+| `FLAMENODE_R2_BUCKET` | Optional; existing `flamenode-storage` by default, from current `wrangler.toml` |
+| `WORKERS_CI_COMMIT_SHA` | Stable build generation; required on the remote path unless `--generation` supplied |
+
+The R2 read uses `GET /client/v4/accounts/<account>/r2/buckets/<bucket>/objects/analytics/trending.json`, a 15-second timeout and 2 MiB limit. 404 causes the build to fail closed because trending is required; 401 and malformed JSON fail without displaying the credential. It does not perform `PUT` or any R2 Class A write.
+
+Owner-only checkpoint, after explicit permission:
+1. Confirm production D1 migration `0065` is applied using an approved read-only check. Do **not** widen the token to D1 Edit if the `/query` endpoint rejects Read.
+2. Prepare the dedicated read-only tokens in a trusted environment; verify `SELECT 1` through the D1 REST path, and a read of the analytics key. Any credential scope error is a STOP and requires an updated decision.
+3. Create/configure a **nonproduction** Workers Builds project with no Route or deployment (explicit separate approval), install dependencies and perform 5 builds without changing production. Record per-run elapsed time, D1 statement count, file count, max individual snapshot size, total bytes and Class A usage.
+4. Recompute the `MAX_DATA_BUILDS_PER_DAY` and `MIN_BUILD_INTERVAL_MS` constants against the actual 80% Workers Builds Free-plan budget; stop if one build is ≥4 minutes or exceeds the approved constraints. This is an owner/lead review, not automatic CI completion.
+5. Only after reviewed results and separate production approval may anyone consider a build project or Route cutover; this PR does not request or execute that change.
+
+**Current validation state:** PR #469 is local code/tests only until its latest-head GitHub Actions passes. The 5 Workers Builds measurements, production 0065 check and credential setup remain unperformed. No claim of MIG-0509 `DONE` is made here.
 
 ## 6. Sizing from the production counts (one read-only count, 2026-10-18)
 
