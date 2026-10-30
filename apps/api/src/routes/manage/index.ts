@@ -6,6 +6,9 @@ import { manageAudienceRoutes } from "./audience.ts";
 import { manageEventEditRoutes } from "./eventEdit.ts";
 import { manageNavigationRoutes } from "./navigation.ts";
 import { managePlaylistRoutes } from "./playlist.ts";
+import { playlistWriteRoutes } from "./playlistWrite.ts";
+import { dbMiddleware } from "../../middleware/db.ts";
+import { originGuardMiddleware, onlyMutating, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { manageVideoDetailRoutes } from "./videoDetail.ts";
 import { manageVideosRoutes } from "./videos.ts";
 import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
@@ -27,8 +30,24 @@ manageRoutes.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", NO_STORE);
 });
+// MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
+const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
+const originOptions = (c: import("hono").Context<AppEnv>) => ({
+  loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
+  allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
+});
+for (const path of playlistWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
+}
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
+// The existing read-only /manage API remains unchanged. Only these mutating
+// playlist paths use the CURRENT writeGuard(identity/TOS) -> DB adapter.
+for (const path of playlistWritePaths) {
+  manageRoutes.use(path, onlyMutating((c, next) =>
+    writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
+  manageRoutes.use(path, onlyMutating(dbMiddleware));
+}
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
@@ -37,6 +56,7 @@ manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
 manageRoutes.route("/events/:id/videos", manageVideosRoutes);
 manageRoutes.route("/events/:id/youtube-playlist", managePlaylistRoutes);
+manageRoutes.route("/events/:id/youtube-playlist", playlistWriteRoutes);
 manageRoutes.route("/events/:id/audience", manageAudienceRoutes);
 manageRoutes.route("/events/:id", manageOverviewRoutes);
 manageRoutes.route("/notifications", manageNotificationCenterRoutes);
