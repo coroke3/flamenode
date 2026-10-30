@@ -54,7 +54,7 @@ test("SA-098 switches an approved linked X ID, atomically with a user UPDATE aud
   assert.equal(JSON.parse(audit.before_json).active_x_user_id, null);
   assert.equal(JSON.parse(audit.after_json).active_x_user_id, "x-one");
   assert.equal(stats.batches, 1);
-  assert.ok(stats.reads <= 3, `D1 S3 budget: ${stats.reads}`);
+  assert.ok(stats.reads <= 2, `D1 S3 budget: ${stats.reads}`);
 });
 
 test("SA-098 already-selected identity is idempotent without a second audit", async () => {
@@ -160,7 +160,7 @@ test("SA-098 strict audit uses the preloaded CURRENT actor snapshot", async () =
   assert.equal(actor.discord_name, "Session Name");
   assert.equal(actor.x_user_id, null);
   assert.equal(actor.icon_url, "https://img.example/u.png");
-  assert.ok(stats.reads <= 3, `D1 pre-reads: ${stats.reads}`);
+  assert.ok(stats.reads <= 2, `D1 pre-reads: ${stats.reads}`);
 });
 
 test("SA-098 cross-origin write fails before any database access", async () => {
@@ -280,4 +280,54 @@ test("SA-098 slash-variant cross-origin POST cannot bypass the write guard", asy
   assert.notEqual(response.status, 200);
   assert.ok([403, 404, 405].includes(response.status));
   assert.equal(sessionCalls, 0, "Origin rejection must precede session lookup");
+});
+
+test("SA-098 real Auth.js session is included in the S3 budget (3 pre-reads + 1 batch)", async () => {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite, { role: "user" });
+  sqlite.exec("CREATE TABLE x_user_aliases (x_user_id TEXT, alias_x_id TEXT)");
+  sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, expires INTEGER)');
+  sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", expires) VALUES (?, ?, ?)')
+    .run("valid-session-token", USER.id, Date.now() + 3600_000);
+  sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('x-one', 'Creator', 'approved')").run();
+  sqlite.prepare("INSERT INTO x_user_account_links (auth_user_id, x_user_id) VALUES (?, ?)").run(USER.id, "x-one");
+
+  const app = new Hono();
+  // Do not inject a fake session: count resolveSessionUser's real D1 lookup.
+  app.route("/api/xid", createXidRoutes());
+  const res = await app.request(`${SITE}/api/xid/active`, {
+    method: "POST",
+    headers: {
+      Origin: SITE, Cookie: "__Secure-authjs.session-token=valid-session-token",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ x_user_id: "x-one" }),
+  }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+  assert.equal(stats.reads, 3, "session + combined identity/settings + strict actor-X audit");
+  assert.equal(stats.batches, 1);
+  assert.equal(sqlite.prepare('SELECT active_x_user_id FROM "user" WHERE id = ?')
+    .get(USER.id).active_x_user_id, "x-one");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM audit_logs").get().count, 1);
+});
+
+test("SA-098 missing or malformed CostGuard settings deny before mutation, without extra D1 reads", async () => {
+  for (const reason of ["missing","maintenance","disabled","invalid_disabled"]) {
+    const { sqlite, stats, request } = setup();
+    if (reason === "missing") sqlite.exec("DELETE FROM system_settings");
+    if (reason === "maintenance")
+      sqlite.exec("UPDATE system_settings SET operation_mode = 'maintenance'");
+    if (reason === "disabled")
+      sqlite.prepare("UPDATE system_settings SET disabled_features_json = ?").run('["xid_links"]');
+    if (reason === "invalid_disabled")
+      sqlite.prepare("UPDATE system_settings SET disabled_features_json = ?").run("{invalid");
+    const response = await request();
+    assert.equal(response.status, 503, reason);
+    assert.equal((await response.json()).reason,
+      reason === "missing" || reason === "maintenance" ? "maintenance_mode" : "cost_guard_blocked");
+    assert.equal(stats.reads, 1, "single identity/settings query; no strict audit on denied write");
+    assert.equal(stats.batches, 0);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM audit_logs").get().count, 0);
+  }
 });
