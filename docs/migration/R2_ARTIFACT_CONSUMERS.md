@@ -64,8 +64,7 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | Source path | Method and argument expression | Call sites (exact) | Disposition / reason |
 | --- | --- | ---: | --- |
 | `apps/site/src/gateway/r2Html.ts` | `bucket.get(r2HtmlKey(decision.key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
-| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
-| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.put(r2HtmlKey(key))` | 1 | Public HTML build/render key; migrate only with gateway cutover |
+| `apps/site/src/gateway/pageRenderQueue.ts` | `bucket.delete(r2HtmlKey(key))` | 1 | D-11 DELETE-only on unpublish/revocation; never renders or PUTs HTML |
 | `workers/json-generator/rebuild.ts` | `bucket.delete(pendingPostingArtifacts.map)` | 2 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/rebuild.ts` | `bucket.get(staticVideoSearchPostingManifestObjectKey(""))` | 1 | Generator/producer key; MIG-0907 review required |
 | `workers/json-generator/videoMaterializedSource.ts` | `bucket.put(sourceKey)` | 2 | Generator/producer key; MIG-0907 review required |
