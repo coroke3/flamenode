@@ -14,5 +14,15 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./admin/staticRebuildOps": {
+      "types": "./dist/admin/staticRebuildOps.d.ts",
+      "default": "./dist/admin/staticRebuildOps.js"
+    }
   }
 }
