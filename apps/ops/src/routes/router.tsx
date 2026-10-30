@@ -2,6 +2,7 @@ import * as React from "react";
 import { Route, Routes } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { AuthErrorView, OpsGate } from "./guard.js";
+import { ManageNotifications } from "./manage/ManageNotifications.js";
 
 /** MIG-0707 U02: placeholder only. No protected screen data is served until its own MIG is reviewed. */
 function UnmigratedView(): React.ReactElement {
@@ -19,6 +20,7 @@ export class OpsRouteErrorBoundary extends React.Component<
 }
 export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
   const manage = <OpsGate surface="manage" api={api}><UnmigratedView /></OpsGate>;
+  const notifications = <OpsGate surface="manage" api={api}><ManageNotifications /></OpsGate>;
   const admin = <OpsGate surface="admin" api={api}><UnmigratedView /></OpsGate>;
   return (
     <div data-fn-surface="ops" className="fn-app">
@@ -26,6 +28,7 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
         <OpsRouteErrorBoundary>
           <Routes>
             <Route path="/manage" element={manage} />
+            <Route path="/manage/notifications" element={notifications} />
             <Route path="/manage/*" element={manage} />
             <Route path="/admin" element={admin} />
             <Route path="/admin/*" element={admin} />
