@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { JSDOM } from "jsdom";
 import {
   adminVideoDetailPath,
   adminVideoBackHref,
@@ -15,6 +17,7 @@ import {
   safeAdminNextHref,
 } from "../.test-dist/apps/ops/src/api/adminVideoStatus.js";
 import { CreateModerationCaseForm } from "../.test-dist/apps/ops/src/routes/admin/CreateModerationCaseForm.js";
+import { StatusControls } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
 import { SaveSuccessNotice } from "../.test-dist/apps/ops/src/components/shared/SaveSuccessNotice.js";
 
 const detail = {
@@ -176,6 +179,59 @@ test("MIG-0729 U02: status and case save notices retain CURRENT pending-public-r
     pendingPublicReflection: false,
   }));
   assert.doesNotMatch(settled, /静的データの再生成/);
+});
+
+test("MIG-0729 U02: pending public reflection remains visible after successful same-video refresh", async () => {
+  const oldWindow = globalThis.window;
+  const oldDocument = globalThis.document;
+  const oldActEnv = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  const dom = new JSDOM("<!doctype html><div id=\"root\"></div>", { url: "https://flamenode.invalid" });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  let refreshed = 0;
+  const actions = {
+    approve: async () => ({ ok: true, message: "承認しました。", pendingPublicReflection: true }),
+    approveAndNext: async () => ({ ok: true }),
+    setStatus: async () => ({ ok: true }),
+  };
+  const props = { data: detail, eventId: null, onRefresh: () => { refreshed++; }, actions };
+  try {
+    await React.act(async () => { root.render(React.createElement(StatusControls, props)); });
+    const button = [...dom.window.document.querySelectorAll("button")].find(
+      b => b.textContent.trim() === "承認",
+    );
+    assert.ok(button, "CURRENT approval button must exist");
+    await React.act(async () => {
+      button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(refreshed, 1);
+    const notice = "公開ページへの反映は、静的データの再生成が完了するまで";
+    assert.ok(dom.window.document.body.textContent.includes(notice));
+    // Refresh changes the status, not the video identity: the success notice must persist.
+    await React.act(async () => {
+      root.render(React.createElement(StatusControls, {
+        ...props, data: { ...detail, video: { ...detail.video, visibility_status: "public" } },
+      }));
+    });
+    assert.ok(dom.window.document.body.textContent.includes(notice),
+      "status sync must not clear a just-saved public reflection notice");
+    // Navigation to another video must not retain the previous video's private result.
+    await React.act(async () => {
+      root.render(React.createElement(StatusControls, {
+        ...props, data: { ...detail, video: { ...detail.video, id: "video-2", visibility_status: "pending" } },
+      }));
+    });
+    assert.ok(!dom.window.document.body.textContent.includes(notice));
+  } finally {
+    await React.act(async () => { root.unmount(); });
+    dom.window.close();
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldActEnv === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = oldActEnv;
+  }
 });
 
 test("MIG-0729 U02: moderation form matches CURRENT visible field names", () => {
