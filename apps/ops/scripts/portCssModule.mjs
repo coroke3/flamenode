@@ -11,10 +11,12 @@ export const MODULES = [
 const root = new URL("../../../", import.meta.url);
 
 export function buildSharedCss() {
-  return MODULES.map(([prefix, from]) => {
+  const generated = MODULES.map(([prefix, from]) => {
     const source = fs.readFileSync(new URL(from, root), "utf8");
     return `/* Generated from CURRENT ${from}; prefix=${prefix}. */\n${portCssModule(source, prefix).trimEnd()}`;
   }).join("\n\n") + "\n";
+  // Keep generated CSS byte-stable while bundling the hand-written review stylesheet.
+  return "/* MIG-0724: Ops shared CSS loads video-review styling without Node.js ESM CSS imports. */\n@import \"./video-review.css\";\n\n" + generated;
 }
 
 if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").href) {
