@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { getAdminHealth, getAdminSecurity, getAdminWorkers } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
 import { AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
 import { AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
+import { AdminWorkersView } from "../.test-dist/apps/ops/src/routes/admin/AdminWorkers.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter } from "../.test-dist/apps/ops/src/routes/admin/DiagnosticStatusResults.js";
 
 const h = (type, props, ...children) => React.createElement(type, props, ...children);
@@ -130,4 +131,55 @@ test("U02a workers rejects partial/error-leaking snapshots and keeps 401/403/404
     { status: "forbidden", redirect: "/dashboard" });
   assert.deepEqual(await getAdminWorkers(async () => response(404, {})), { status: "notFound" });
   assert.deepEqual(await getAdminWorkers(async () => response(501, {})), { status: "unsupported" });
+});
+
+
+test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and wake failure details", () => {
+  const emptyQueue = { pending: 1, processing: 0, failed: 2, deadLetter: 3, stuck: 0, oldestPendingAt: 1_700_000_000 };
+  const snapshot = {
+    generatedAt: 1_700_000_000,
+    operationMode: "normal", overallLevel: "critical", overallMessage: "通知が滞留しています",
+    jobs: [{ jobName: "sync", label: "YouTube同期", cadenceSeconds: 60, detailHref: "/admin/youtube-sync",
+      level: "critical", message: "ジョブ失敗", leaseExpiresAt: null, lastStartedAt: null,
+      lastSucceededAt: null, lastFailedAt: null, lastErrorCode: "sync_failed", nextExpectedAt: null }],
+    notifications: emptyQueue, staticRebuilds: { ...emptyQueue, pending: 0, failed: 0, deadLetter: 0 },
+    youtube: { eligible: 1, pending: 2, stale: 0, failed: 4, oldestPendingAt: null },
+    scores: { eligible: 1, stale: 0, oldestUpdatedAt: null },
+    artifacts: [{ targetType: "top", generatedAt: null }],
+    pipelines: [{ id: "youtube", label: "YouTube", level: "warn", backlog: 4,
+      capacityPerDay: 100, estimatedDrainMinutes: 70, note: "stale", detailHref: "/admin/youtube-sync" }],
+    queueWakeFailures: { notification_available: { at: 1_700_000_000, reason: "wake_failed" }, static_rebuild_available: null },
+  };
+  const html = render(h(AdminWorkersView, {
+    data: { status: "ok", data: { snapshot, error: null } }, onRefresh: () => {},
+  }), "/admin/workers");
+  const dom = new JSDOM(html).window.document;
+  assert.match(html, /通知が滞留しています/);
+  assert.match(html, /Queue wake 最終失敗/);
+  assert.match(html, /wake_failed/);
+  assert.match(html, /Cron実行状態/);
+  assert.match(html, /キュー状態/);
+  assert.match(html, /処理能力と滞留/);
+  assert.match(html, /グローバル静的JSONの最終生成/);
+  assert.match(html, /sync_failed/);
+  assert.match(html, /operation_mode/);
+  assert.match(html, /Cloudflare Dashboard/);
+  assert.equal(dom.querySelectorAll("table").length, 3);
+  assert.equal(dom.querySelectorAll('button[type="button"]').length, 1);
+  assert.ok(dom.querySelector('a[href="/admin/health"]'));
+});
+
+test("U02b Worker dashboard does not expose stale snapshot on denied, failed or empty read", () => {
+  for (const data of [
+    { status: "loading" }, { status: "anonymous" }, { status: "forbidden" },
+    { status: "notFound" }, { status: "unavailable" }, { status: "unsupported" },
+    { status: "ok", data: { snapshot: null, error: null } },
+    { status: "ok", data: { snapshot: null, error: "query_failed" } },
+  ]) {
+    const html = render(h(AdminWorkersView, { data, onRefresh: () => {} }), "/admin/workers");
+    assert.doesNotMatch(html, /Queue wake 最終失敗|Cron実行状態|グローバル静的JSONの最終生成/);
+    assert.doesNotMatch(html, /query_failed/);
+  }
+  const denied = render(h(AdminWorkersView, { data: { status: "forbidden" }, onRefresh: () => {} }), "/admin/workers");
+  assert.match(denied, /閲覧権限がありません/);
 });
