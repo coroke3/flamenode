@@ -163,6 +163,7 @@ test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail
     loadSiteUrl: () => site,
     allowLocalPreview: () => false,
   };
+  let handlerCalls = 0;
   function throwingEnv() {
     let reads = 0;
     const env = Object.defineProperty({}, "DB", {
@@ -177,7 +178,7 @@ test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail
         const app = new Hono();
         app.use("/protected", sessionMiddleware());
         app.use("/protected", requireAuth());
-        app.get("/protected", (c) => c.json({ mutated: true }));
+        app.get("/protected", (c) => { handlerCalls += 1; return c.json({ mutated: true }); });
         return app;
       },
       request: { headers: { Cookie: "__Secure-authjs.session-token=valid-token" } },
@@ -193,7 +194,7 @@ test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail
           await next();
         });
         app.use("/protected", writeGuardMiddleware(guardOptions));
-        app.post("/protected", (c) => c.json({ mutated: true }));
+        app.post("/protected", (c) => { handlerCalls += 1; return c.json({ mutated: true }); });
         return app;
       },
       request: { method: "POST", headers: { Origin: site } },
@@ -204,7 +205,7 @@ test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail
       makeApp() {
         const app = new Hono();
         app.use("/protected", costGuardMiddleware("manage_event_update"));
-        app.post("/protected", (c) => c.json({ mutated: true }));
+        app.post("/protected", (c) => { handlerCalls += 1; return c.json({ mutated: true }); });
         return app;
       },
       request: { method: "POST" },
@@ -213,7 +214,25 @@ test("MIG-0807 U03: SEC-0807-01 fix converts throwing D1 getters to private fail
   ];
   for (const entry of runs) {
     const { env, reads } = throwingEnv();
-    const response = await entry.makeApp().request(site + "/protected", entry.request, env);
+    handlerCalls = 0;
+    const logs = [];
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    const originalLog = console.log;
+    const capture = (...args) => logs.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : String(a))).join(" "));
+    console.error = capture;
+    console.warn = capture;
+    console.log = capture;
+    let response;
+    try {
+      response = await entry.makeApp().request(site + "/protected", entry.request, env);
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+      console.log = originalLog;
+    }
+    assert.equal(handlerCalls, 0, entry.name + " handler must not run");
+    assert.ok(!logs.some((line) => line.includes(secret)), entry.name + " must not log provider error");
     assert.equal(response.status, 503, entry.name);
     assert.equal(response.headers.get("cache-control"), "private, no-store", entry.name);
     const body = await response.text();
