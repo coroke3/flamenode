@@ -82,7 +82,7 @@ test("SA-035 creates template snapshot and strict CREATE audit atomically", asyn
   assert.equal(audit[0].target_id, stored.id);
   assert.equal(audit[0].operation, "CREATE");
   assert.equal(audit[0].reason, "イベントテンプレートを保存");
-  assert.deepEqual(JSON.parse(audit[0].after_json), stored);
+  assert.deepEqual(JSON.parse(audit[0].after_json), { ...stored });
   assert.ok(s.stats.reads <= 3, `S3 D1 budget exceeded: ${s.stats.reads} reads`);
   assert.equal(s.stats.batches, 1);
 });
