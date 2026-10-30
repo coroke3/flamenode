@@ -48,6 +48,21 @@ test("next-task advisory prioritizes performance without requiring D-08 for nonv
 });
 import { parseOwnedTasks,parseOpenPrSnapshot } from "./print-migration-task-context.mjs";
 
+test("migration:next rejects duplicate Decision IDs before picking a READY task",()=>{
+ const status=[
+  "| Task | Purpose | State | Dependencies |",
+  "| --- | --- | --- | --- |",
+  "| MIG-0201 | visual | READY | - |",
+ ].join("\n");
+ const open="| D-08 | HTML | OPEN | user |";
+ const decided="| D-08 | HTML | DECIDED | user |";
+ assert.throws(()=>pickNextTask(status,open+"\n"+decided),/Duplicate Decision ID in migration:next: D-08/);
+ assert.throws(()=>pickNextTask(status,decided+"\n"+open),/Duplicate Decision ID in migration:next: D-08/);
+ assert.throws(()=>pickNextTask(status,decided+"\n"+decided),/Duplicate Decision ID in migration:next: D-08/);
+ assert.equal(pickNextTask(status,open).selected,null);
+ assert.equal(pickNextTask(status,decided).selected,"MIG-0201");
+});
+
 test("next-task advisory skips READY tasks already owned by an open PR",()=>{
  const status=[
   "| MIG-0105 | site | DONE | — |",
