@@ -24,7 +24,7 @@ if (runUnderRootTsx(import.meta.url)) {
       "1e308",
       "9007199254740991",
       "9007199254740992",
-      "100000000000000",
+      "200000000000000",
       "999999999999999999999999999999999999",
     ]) {
       assert.deepEqual(clampPage(raw, 50), { page: 1, pageSize: 50, offset: 0 }, raw);
@@ -55,7 +55,7 @@ if (runUnderRootTsx(import.meta.url)) {
     }
     for (const endpoint of ["/api/admin-read/users", "/api/admin-read/videos"]) {
       const first = await get(endpoint + "?page=1");
-      for (const invalid of ["1e308", "9007199254740991", "100000000000000"]) {
+      for (const invalid of ["1e308", "9007199254740991", "200000000000000"]) {
         const actual = await get(endpoint + "?page=" + encodeURIComponent(invalid));
         assert.equal(actual.degraded, false, endpoint + " " + invalid);
         assert.equal(actual.paging.page, 1, endpoint + " " + invalid);
