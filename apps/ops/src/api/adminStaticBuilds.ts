@@ -16,7 +16,7 @@ import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 type Parser<T> = { parse(input: unknown): T };
 type WritePayload = Record<string, string>;
 export type AdminMutationResult =
-  | { status: "ok"; data: Record<string, unknown> }
+  | { status: "ok" | "outcome"; data: Record<string, unknown> }
   | { status: "anonymous" | "forbidden" | "unavailable" };
 
 export async function getAdminOps<T>(
@@ -55,13 +55,31 @@ export async function postAdminOp(
     });
     if (response.status === 401) return { status: "anonymous" };
     if (response.status === 403) return { status: "forbidden" };
-    if (response.status < 200 || response.status >= 300) return { status: "unavailable" };
+    // The two redirect-equivalent actions return explicit outcome fields, including
+    // CURRENT-compatible failure outcomes on 400/413/500. Preserve those in the URL.
+    if (![200, 400, 413, 500].includes(response.status)) return { status: "unavailable" };
     const data: unknown = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) return { status: "unavailable" };
     const record = data as Record<string, unknown>;
-    if (record.ok === false) return { status: "unavailable" };
-    // Mutation outcomes include SA-069/050 query-field responses, which have no ok flag.
-    if (record.ok !== undefined && record.ok !== true) return { status: "unavailable" };
+    if (path === "visibility-repair" &&
+        typeof record.visibility_repair === "string" &&
+        ["repaired", "d1_fence_present", "manifest_token_not_found", "invalid_input", "forbidden", "failed"].includes(record.visibility_repair) &&
+        (response.status === 200 || (response.status === 400 || response.status === 413)
+          && record.visibility_repair === "invalid_input" ||
+          response.status === 500 && record.visibility_repair === "failed")) {
+      return { status: "outcome", data: record };
+    }
+    if (path === "static-builds/backfill" &&
+        ["video_v2", "user_profile", "event_crew"].includes(String(record.backfill_kind ?? "")) &&
+        (response.status === 200 && ["0", "1"].includes(String(record.backfill_done ?? "")) &&
+          typeof record.backfill_scanned === "string" && typeof record.backfill_enqueued === "string" &&
+          ["0", "1"].includes(String(record.backfill_state_persisted ?? "")) ||
+         response.status === 500 && typeof record.backfill_error === "string" &&
+          ["0", "1"].includes(String(record.backfill_state_persisted ?? "")))) {
+      return { status: "outcome", data: record };
+    }
+    // All remaining operations use MIG-0643's discriminated {ok:true} result.
+    if (response.status !== 200 || record.ok !== true) return { status: "unavailable" };
     return { status: "ok", data: record };
   } catch {
     return { status: "unavailable" };

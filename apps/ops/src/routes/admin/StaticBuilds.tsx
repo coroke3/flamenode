@@ -29,13 +29,14 @@ export function StaticBuilds(): React.ReactElement {
     setLoadError(null);
     try {
       const result = await postAdminOp(path, payload);
-      if (result.status !== "ok") {
+      if (result.status !== "ok" && result.status !== "outcome") {
         setLoadError(result.status === "anonymous" ? "再ログインが必要です。" : "操作できませんでした。更新後に状態を確認してください。");
         return;
       }
       if (carryQuery) {
         const query = mutationResultQuery(result.data);
         window.history.replaceState(null, "", window.location.pathname + (query ? "?" + query : ""));
+        if (typeof result.data.backfill_error === "string") setLoadError("バックフィルの実行に失敗しました。進捗を確認してください。");
       }
       setRefreshId(id => id + 1);
     } finally {
@@ -45,6 +46,14 @@ export function StaticBuilds(): React.ReactElement {
   const query = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
   const backfillKind = query.get("backfill_kind");
   const visibility = query.get("visibility_repair");
+  const visibilityMessages: Record<string, string> = {
+    repaired: "R2 manifest のdangling fence候補を解除しました。",
+    d1_fence_present: "D1 に現行 fence があるため解除しませんでした。",
+    manifest_token_not_found: "R2 manifest に一致する token がないため変更しませんでした。",
+    invalid_input: "修復対象の入力が不正です。",
+    forbidden: "この修復操作を実行する権限がありません。",
+    failed: "修復操作に失敗しました。ログとdeep healthを確認してください。",
+  };
   const stateFailed = query.get("backfill_state_persisted") === "0";
   return <div className="fn-public-container fn-page">
     <header className="fn-page-head"><h1>静的JSON再生成</h1>
@@ -89,7 +98,7 @@ export function StaticBuilds(): React.ReactElement {
       <section className="fn-card" style={{ padding: 16 }}>
         <h2>Visibility fence の手動修復</h2>
         <p>必ずD1に同じfenceが無いことを確認してから使用してください。tokenが変わった場合は解除しません。</p>
-        {visibility && <p role="status">結果: {visibility}</p>}
+        {visibility && <p role="status">{visibilityMessages[visibility] ?? visibilityMessages.failed}</p>}
         <form className="fn-form-grid" onSubmit={event => {
           event.preventDefault();
           const form = new FormData(event.currentTarget);
