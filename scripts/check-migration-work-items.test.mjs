@@ -37,6 +37,31 @@ test("available source commit is accepted without claiming it is the tested head
  assert.deepEqual(errors,[]);
 });
 
+test("rewritten PR tip still verifies the exact old source SHA, never the replacement tip",()=>{
+ const prefix=path.join(os.tmpdir(),"flamenode-workitem-rewritten-");
+ const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
+ const git=(cwd,...args)=>execFileSync("git",["-c","commit.gpgsign=false","-c","core.hooksPath="+path.join(temp,"no-hooks"),...args],{cwd,encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
+ try {
+  fs.mkdirSync(builder);
+  git(builder,"init","-b","main"); git(builder,"config","user.name","Fixture"); git(builder,"config","user.email","fixture@example.invalid");
+  fs.writeFileSync(path.join(builder,"source.txt"),"base");git(builder,"add","source.txt");git(builder,"commit","-m","base");
+  git(builder,"checkout","-b","task-original"); fs.appendFileSync(path.join(builder,"source.txt"),"\\nfirst source");
+  git(builder,"add","source.txt");git(builder,"commit","-m","original task checkpoint");const original=git(builder,"rev-parse","HEAD");
+  git(builder,"checkout","main");fs.writeFileSync(path.join(builder,"source.txt"),"rewritten implementation");
+  git(builder,"add","source.txt");git(builder,"commit","-m","new unrelated PR tip");const newTip=git(builder,"rev-parse","HEAD");
+  git(builder,"update-ref","refs/pull/123/head",newTip);
+  git(temp,"init","--bare",remote);git(builder,"remote","add","origin",remote);
+  git(builder,"push","origin","main","task-original","refs/pull/123/head");
+  git(temp,"clone","--no-local","--single-branch","--branch","main",remote,clone);
+  assert.equal(gitCommitExists(clone,original),false,"source is absent even with a valid current PR tip");
+  const entries={"MIG-0301.md":active.replace("a".repeat(40),original)};
+  assert.deepEqual(fetchMissingSourceHistory(clone,entries),["123"]);
+  assert.equal(gitCommitExists(clone,original),true,"exact source object fetched from origin by SHA");
+  assert.notEqual(original,newTip,"must never substitute the updated PR head");
+  assert.deepEqual(validateWorkItems({statusText:status,entries,commitExists:value=>gitCommitExists(clone,value)}),[]);
+ }finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
+
 test("fresh squash clone can verify the prior source commit through its preserved PR ref",()=>{
  const prefix=path.join(os.tmpdir(),"flamenode-workitem-");
  const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
