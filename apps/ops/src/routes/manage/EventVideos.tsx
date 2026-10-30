@@ -1,4 +1,5 @@
 /** MIG-0724 U02: read-only Ops Manage video queue. Route mounting and action API remain U03/U04. */
+import "../../styles/video-review.css";
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ManageVideosResponse } from "@flamenode/contracts";

@@ -1,6 +1,7 @@
 /** MIG-0724 U03: guarded-by-parent Manage video detail and presentation.
  * Mutations are explicitly injected by U04 after MIG-0603 contract verification.
  */
+import "../../styles/video-review.css";
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import type { ManageVideoDetailResponse } from "@flamenode/contracts";

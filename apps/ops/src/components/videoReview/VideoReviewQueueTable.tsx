@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
+import { OpsLink as Link } from "../shared/OpsLink.js";
 import { FnTable } from "../shared/FnTable.js";
 import { VideoReviewQuickApproveButton } from "./VideoReviewQuickApproveButton.js";
 import {
@@ -83,12 +83,12 @@ export function VideoReviewQueueTable({
             </td>
             <td className="manage-queue-col-actions">
               <div className={`approval-queue-actions${isManage ? " fn-console-row-actions manage-queue-actions" : ""}`}>
-                {canApprove ? <Link to={reviewHref(v.id)} className="fn-btn fn-btn-primary fn-btn-sm">審査</Link> : null}
+                {canApprove ? <Link href={reviewHref(v.id)} className="fn-btn fn-btn-primary fn-btn-sm">審査</Link> : null}
                 {canApprove && v.visibility_status === "pending" && showQuickApprove && quickApproveAction
                   ? <VideoReviewQuickApproveButton videoId={v.id} action={quickApproveAction}
                       hiddenFields={quickApproveHiddenFields} onRefresh={onRefresh} />
                   : null}
-                <Link to={contentHref(v.id)} className="fn-btn fn-btn-ghost fn-btn-sm">内容確認</Link>
+                <Link href={contentHref(v.id)} className="fn-btn fn-btn-ghost fn-btn-sm">内容確認</Link>
                 {extraActions ? extraActions(v.id) : null}
               </div>
             </td>

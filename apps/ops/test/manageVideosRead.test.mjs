@@ -99,6 +99,7 @@ test("MIG-0724 U02 T05: deny approve UI when staff lacks video.status; no previo
   const denied = render({ status: "ok", data: page(0, [row("v1")], { canApproveVideoStatus: false }) });
   assert.equal(denied.querySelectorAll('a[href*="/videos/v1"]').length, 0);
   assert.equal(denied.querySelectorAll("button").length, 0);
+  assert.ok(denied.querySelector('a[href="/dashboard/edit/v1?privileged=event"]'), "non-Ops dashboard edit link must remain a document link");
   assert.match(denied.body.textContent, /作品・審査/);
   const staleEvent = render({ status: "ok", data: page(0, [row("secret")]) }, "review", "event/2");
   assert.doesNotMatch(staleEvent.body.textContent, /secret/);
