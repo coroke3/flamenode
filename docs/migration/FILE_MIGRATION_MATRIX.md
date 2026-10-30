@@ -1136,6 +1136,7 @@
 | `apps/api/test/adminVisibilityRepair.parity.test.mjs` | TEST | SA-050 R2 fake bucket, active fence and conflicting token | MIG-0643 | R2 CAS and fail-closed regression | IN_PROGRESS | PR#480 SHA=6fe4e10ce0cba375d014aac64e78692f0cefae9b TEST=node --test apps/api/test/adminVisibilityRepair.parity.test.mjs (CI pending) |
 | `apps/api/src/routes/admin/staticBackfill.ts` | HELPER | SA-069 bounded static backfill, UNMOUNTED | MIG-0643 | KV state + capped R2 shared-input checks and 12-row queue | IN_PROGRESS | PR#480 SHA=6fe4e10ce0cba375d014aac64e78692f0cefae9b TEST=apps/api/test/adminStaticBackfill.parity.test.mjs (CI pending) |
 | `apps/api/test/adminStaticBackfill.parity.test.mjs` | TEST | SA-069 bounded KV/R2/queue golden regression | MIG-0643 | 12-row cursor+retry using fake Cloudflare bindings | IN_PROGRESS | PR#480 SHA=6fe4e10ce0cba375d014aac64e78692f0cefae9b TEST=node --test apps/api/test/adminStaticBackfill.parity.test.mjs (CI pending) |
+| `apps/api/test/adminOpsGuards.parity.test.mjs` | TEST | SA-050/069..073/106 T02 cross-origin, session/admin/BAN/CostGuard gate (isolated unmounted test router) | MIG-0643 | Parent middleware chain parity; all seven HTTP paths blocked before writes | IN_PROGRESS | PR#480 SHA=f848c1db4f080b56c46b5e9a6b63f27548b16d9d TEST=node --test apps/api/test/adminOpsGuards.parity.test.mjs (CI pending) |
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
