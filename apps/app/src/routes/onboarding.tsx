@@ -2,6 +2,8 @@ import * as React from "react";
 import { useSearchParams } from "react-router-dom";
 import type { OnboardingResponse } from "@flamenode/contracts";
 import type { PersonalApi } from "../api/personal.js";
+import type { XidRequestsApi } from "../api/xidRequests.js";
+import { OnboardingXIdForm } from "./onboardingXIdForm.js";
 import { ResultView, useApiResult } from "./guard.js";
 import { onboardingHref, sanitizeOnboardingNext } from "./next.js";
 import { AppLink, useDocumentTitle } from "./ui/AppLink.js";
@@ -35,12 +37,14 @@ function renderMarkdown(markdown: string): React.ReactNode[] {
 export function Onboarding({ api }: { api: PersonalApi }): React.ReactElement {
   useDocumentTitle("初期設定");
   const [params] = useSearchParams();
+  const [refreshKey, setRefreshKey] = React.useState(0);
   const next = sanitizeOnboardingNext(params.get("next"), "/dashboard");
   const selfHref = onboardingHref(next);
-  const state = useApiResult(api, "onboarding", (a, signal) => a.getOnboarding(signal));
+  const state = useApiResult(api, `onboarding:${refreshKey}`, (a, signal) => a.getOnboarding(signal));
   return (
     <ResultView state={state} next={selfHref}>
-      {(data) => <OnboardingView data={data} next={next} started={params.get("start") === "1"} />}
+      {(data) => <OnboardingView data={data} next={next} started={params.get("start") === "1"} requestApi={api.xidRequests}
+        onRefresh={() => setRefreshKey((key) => key + 1)} />}
     </ResultView>
   );
 }
@@ -49,10 +53,14 @@ export function OnboardingView({
   data,
   next,
   started,
+  requestApi,
+  onRefresh,
 }: {
   data: OnboardingResponse;
   next: string;
   started: boolean;
+  requestApi?: XidRequestsApi;
+  onRefresh?: () => void;
 }): React.ReactElement {
   const { state, rules } = data;
   const selfHref = onboardingHref(next);
@@ -193,7 +201,7 @@ export function OnboardingView({
             指定されたアカウントを確認できませんでした。同じ X ID
             で再申請するか、別の X ID を入力してください。
           </p>
-          {/* MIG-0702: OnboardingXIdForm (initialValue = requestedXId) */}
+          {requestApi && onRefresh ? <OnboardingXIdForm api={requestApi} onRefresh={onRefresh} initialValue={state.requestedXId ?? ""} /> : null}
           <div className="onb-stepActions">
             <AppLink href={next} className="fn-btn fn-btn-primary">
               元の操作へ戻る
@@ -256,7 +264,7 @@ export function OnboardingView({
         <p className="onb-stepBody">
           運営による確認後、作品投稿が可能になります。枠の確保は利用規約同意後から利用できます。
         </p>
-        {/* MIG-0702: OnboardingXIdForm */}
+        {requestApi && onRefresh ? <OnboardingXIdForm api={requestApi} onRefresh={onRefresh} /> : null}
         {state.canReserveSlot ? (
           <div className="onb-stepActions">
             <AppLink href={reserveOnlyHref} className="fn-btn fn-btn-ghost">
