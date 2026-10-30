@@ -1,11 +1,11 @@
-// MIG-0736 U01: Hono DTO boundary, CURRENT status filter and explicit security run.
+// MIG-0736 U01/U02a: Hono DTO boundary, diagnostic filters, explicit security and worker monitoring reads.
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
-import { getAdminHealth, getAdminSecurity } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
+import { getAdminHealth, getAdminSecurity, getAdminWorkers } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
 import { AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
 import { AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter } from "../.test-dist/apps/ops/src/routes/admin/DiagnosticStatusResults.js";
@@ -97,4 +97,37 @@ test("U01 security first view shows run prompt without result table", () => {
   const running = render(h(AdminSecurityView, { data: { status: "ok", data: { status: "all", ran: true, results, error: null } }, shouldRun: true, initialFilter: "warn", onRefresh: () => {} }), "/admin/security?run=1");
   assert.match(running, /セキュリティ WARN 1 件/);
   assert.match(running, /注意/);
+});
+
+
+test("U02a worker monitoring fetches one guarded no-store snapshot with cancellation signal", async () => {
+  const calls = [];
+  const controller = new AbortController();
+  const fetchFn = async (path, init) => {
+    calls.push({ path, init });
+    return response(200, { snapshot: null, error: null });
+  };
+  assert.deepEqual(await getAdminWorkers(fetchFn, controller.signal), {
+    status: "ok", data: { snapshot: null, error: null },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, "/api/admin-read/ops/workers");
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(calls[0].init.credentials, "same-origin");
+  assert.equal(calls[0].init.cache, "no-store");
+  assert.equal(calls[0].init.signal, controller.signal);
+});
+
+test("U02a workers rejects partial/error-leaking snapshots and keeps 401/403/404/501 fail-closed", async () => {
+  assert.deepEqual(await getAdminWorkers(async () => response(200, {
+    snapshot: { operationMode: "normal" }, error: null,
+  })), { status: "unavailable" });
+  assert.deepEqual(await getAdminWorkers(async () => response(200, {
+    snapshot: null, error: "database password: secret",
+  })), { status: "unavailable" });
+  assert.deepEqual(await getAdminWorkers(async () => response(401, {})), { status: "anonymous" });
+  assert.deepEqual(await getAdminWorkers(async () => response(403, { redirect: "/dashboard" })),
+    { status: "forbidden", redirect: "/dashboard" });
+  assert.deepEqual(await getAdminWorkers(async () => response(404, {})), { status: "notFound" });
+  assert.deepEqual(await getAdminWorkers(async () => response(501, {})), { status: "unsupported" });
 });
