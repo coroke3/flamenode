@@ -18,7 +18,8 @@ import { manageStaffRoutes } from "./staff.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`; nothing here writes to D1, R2, KV or cookies.
+// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist PUT/POST only)
+// go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
 // notFound() -> 404.
