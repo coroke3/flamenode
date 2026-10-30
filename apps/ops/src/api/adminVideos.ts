@@ -77,7 +77,22 @@ export async function loadAdminVideos(
   );
   if (result.status !== "ok") return result;
   const parsed = AdminVideosResponseSchema.safeParse(result.data);
-  return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+  if (!parsed.success) return { status: "unavailable" };
+  const data = parsed.data;
+  // Privileged lists must belong to the current search key, just like the
+  // detail read checks the requested video ID. A stale/misrouted 200 DTO
+  // must never render a different event's private rows or pagination.
+  if (data.q !== filters.q || data.status !== filters.status ||
+      data.event !== filters.event || data.paging.page !== filters.page ||
+      data.paging.pageSize !== ADMIN_VIDEO_PAGE_SIZE ||
+      !Number.isSafeInteger(data.paging.total) || data.paging.total < 0 ||
+      data.videos.length > ADMIN_VIDEO_PAGE_SIZE ||
+      data.videos.length > data.paging.total ||
+      new Set(data.videos.map(video => video.id)).size !== data.videos.length) {
+    return { status: "unavailable" };
+  }
+  return { status: "ok", data };
+
 }
 
 /** CURRENT Pagination: current +/- 2, first/last page and compact ellipses. */

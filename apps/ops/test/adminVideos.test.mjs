@@ -106,6 +106,34 @@ test("MIG-0729 U01: GET uses same-origin/no-store, exact page filters and abort 
   assert.equal(request.init.signal, controller.signal);
 });
 
+test("MIG-0729 U01: private list must match exact request scope and bounded paging", async () => {
+  const search = "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3";
+  const read = body => loadAdminVideos(async () => json(body), search);
+  assert.deepEqual(await read(fixture), { status: "ok", data: fixture });
+  for (const mismatch of [
+    { q: "other" }, { status: "public" }, { event: "event-2" },
+    { paging: { ...fixture.paging, page: 2 } },
+    { paging: { ...fixture.paging, pageSize: 100 } },
+    { paging: { ...fixture.paging, total: -1 } },
+    { paging: { ...fixture.paging, total: 1.5 } },
+    { paging: { ...fixture.paging, total: 0 } },
+    { videos: [fixture.videos[0], fixture.videos[0]] },
+    { videos: Array.from({ length: 51 }, (_, i) => ({
+      ...fixture.videos[0], id: `video-${i}`,
+    })) },
+  ]) {
+    const response = await read({ ...fixture, ...mismatch });
+    assert.deepEqual(response, { status: "unavailable" },
+      `unexpected scoped/bounded DTO: ${JSON.stringify(mismatch).slice(0, 140)}`);
+  }
+  // An actual backend read failure returns a same-key degraded empty list.
+  const degraded = {
+    ...fixture, paging: { page: 3, pageSize: 50, total: 0 },
+    videos: [], events: [], degraded: true,
+  };
+  assert.deepEqual(await read(degraded), { status: "ok", data: degraded });
+});
+
 test("MIG-0729 U01: invalid private response fails closed, including malformed paging", async () => {
   assert.deepEqual(await loadAdminVideos(async () => json({ ...fixture, videos: "not-an-array" }), ""),
     { status: "unavailable" });
