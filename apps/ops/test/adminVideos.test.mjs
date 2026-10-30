@@ -5,6 +5,7 @@ import {
   buildAdminVideoHref,
   adminVideoTotalPages,
   adminVideoPageNumbers,
+  adminVideoRelativeLabel,
   loadAdminVideos,
 } from "../.test-dist/apps/ops/src/api/adminVideos.js";
 
@@ -60,6 +61,17 @@ test("MIG-0729 T05: page 3 preserves CURRENT q/status/event query and link order
   assert.deepEqual(adminVideoPageNumbers(8, 12), [1, "…", 6, 7, 8, 9, 10, "…", 12]);
   assert.deepEqual(adminVideoPageNumbers(12, 12), [1, "…", 10, 11, 12]);
 
+});
+
+test("MIG-0729 U01: CURRENT relative labels accept Unix epoch, future and interval boundaries", () => {
+  assert.equal(adminVideoRelativeLabel(0, 120), "2分前");
+  assert.equal(adminVideoRelativeLabel(40, 90), "今");
+  assert.equal(adminVideoRelativeLabel(150, 90), "今");
+  assert.equal(adminVideoRelativeLabel(0, 3600), "1時間前");
+  assert.equal(adminVideoRelativeLabel(0, 86400), "1日前");
+  assert.equal(adminVideoRelativeLabel(0, 2592000), "1か月前");
+  assert.equal(adminVideoRelativeLabel(0, 31536000), "1年前");
+  assert.equal(adminVideoRelativeLabel(Number.NaN, 100), "");
 });
 
 test("MIG-0729 U01: GET uses same-origin/no-store, exact page filters and abort signal", async () => {
