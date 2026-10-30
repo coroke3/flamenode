@@ -82,8 +82,10 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
-| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
+| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
+
+MIG-0651 U01 (#479): The existing UNIQUE-error classifier is now exported via `@flamenode/server-core/video/youtubeDuplicate` and re-exported by the Next legacy module. Target `POST /api/videos/free`, `POST /api/slots/:slotId/video`, and `PATCH /api/videos/:videoId` are **NOT MOUNTED**; multipart 8 MiB enforcement, auth, D1 atomic audit/Queue parity and HTTP regression tests remain U02–U04. This line does not certify API parity.
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
 
@@ -445,15 +447,15 @@ Code landing only; the CURRENT Next handlers/actions stay. CPU not measured (MIG
 | ID | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | State |
 | --- | --- | --- | --- | --- | --- |
 | RH-020..022 | `GET /api/live/events/[id]/{slots,submissions,summary}` | `apps/api/src/routes/live/events.ts` | public | id 1..128 else 400; DB missing 503; `live_api_enabled` per request (FORCE_STATIC_ONLY > isolate 30s > KV mirror > D1 > normal); 15s isolate micro-cache after the gate, success only; success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`, errors JSON `no-store`; public events only; non `public_name` hides video_id/display_name; slots limit 6000, submissions 50; D1 <= 2 reads | IN_PROGRESS |
-| SA-035 | `saveEventAsTemplate` | `POST /api/admin/event-templates` (`apps/api/src/routes/events/templates.ts`) | admin (session → writeGuard → CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` input + snapshot, same D1 batch atomic CREATE + strict audit, 64KiB request cap, 404 missing event, deny origin/non-admin, no Next revalidatePath; U02 partial, tests pending. SA-037 GET is tracked separately below. | IN_PROGRESS (MIG-0655 PR#476) |
-| SA-037 | `listEventTemplatesForAdmin` | `GET /api/admin/event-templates` (`apps/api/src/routes/admin/index.ts` scoped GET -> `events/templates.ts`) | session -> `evaluateAdminWriteGuard` (admin, banned, TOS/reaccept, no Origin on safe GET) -> CostGuard `admin_event_templates` | Exact-path route precedes default adminReadGuard without broadening other GETs. Denied identity/TOS/CostGuard returns `200 []` as CURRENT; accepted admin returns untruncated DTO sorted updated_at DESC; D1 errors return private 503. SQLite tests cover denial, list, unrelated GET isolation, D1 failure; final CI pending. | IN_PROGRESS (MIG-0655 PR#476) |
 | SA-036 | `deleteEventTemplate` | `DELETE /api/admin/event-templates/:id` (`apps/api/src/routes/events/templates.ts`) | admin (session -> writeGuard -> CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` validation; single D1 batch: CAS DELETE on every preflight scalar column + changes() assertion + strict audit (context `admin_event_templates`, reason as CURRENT, restore none); 400 / 404 / 409 / 500; `private, no-store` | IN_PROGRESS |
 | RH-014 | `GET /api/events/[id]/slots/viewer-overlay` | `apps/api/src/routes/events/viewerOverlay.ts` (`GET /api/events/:id/slots/viewer-overlay`; DTO `packages/contracts/src/eventSlotViewerOverlay.ts`) | public route, per-viewer DTO (session optional; anonymous / unavailable-auth / banned get the CURRENT fixed shapes) | id trimmed and cut to 128 chars (blank 400); public events only (404 `event_not_found`); every response `private, no-store, no-cache, must-revalidate` + `Pragma: no-cache` + `Expires: 0`, 503 adds `Retry-After: 3`; D1 = session + event/own-slots (1) + terms/linked X/pending requests (1), anonymous 1; own slots LIMIT 100 and JSON <= 64 KiB else fail-closed `authUnavailable` shape (S2 delta); FIX-0604-1: `operatorOverrideAllowed` checks public visibility + event/entry window + current terms + admin or approved linked event staff `event.slots` permission (staff 100 rows / 64 KiB fail closed inside viewer statement); Next/Hono parity tests; parity vs the real CURRENT handler in `apps/api/test/events.viewerOverlay.parity.test.mjs` | IN_PROGRESS |
 | RH-012, RH-015 | see MIG-0631 section below | public | - | implemented in MIG-0631 (RH-015 GET /api/events, RH-012 GET /api/event-endpoints/:id/release) | IN_PROGRESS |
-| SA-038 | `saveEventYoutubePlaylistSettings` | `PUT /api/manage/events/:eventId/youtube-playlist` (`apps/api/src/routes/manage/playlistWrite.ts`) | same-origin, authenticated any role/TOS, CostGuard `manage_event_update`, admin or approved event.publish staff | CURRENT ID/URL/mode/interval parser; one bounded snapshot/permission D1 read, lease-safe settings UPSERT and conditional playlist-item reset plus static rebuild queue in one audited batch; no immediate sync wake (D-15-6). HTTP/old-Action parity/security review and final-head CI pending. | IN_PROGRESS (MIG-0655 PR#476) |
-| SA-039 | `queueEventYoutubePlaylistSync` | `POST /api/manage/events/:eventId/youtube-playlist/sync` (`apps/api/src/routes/manage/playlistWrite.ts`) | Origin -> Auth.js session -> writeGuard identity/TOS (any role) -> `manage_event_update` CostGuard -> approved linked `event.publish` or admin | bounded staff permission+sync read, active lease fence in same UPDATE, strict atomic audit and rollback, no Queue wake (`DOCUMENTED DIFFERENCE D-15-6`, Cron fallback); source tests `eventPlaylistWrite.parity.test.mjs`, final-head CI and independent parity review pending | IN_PROGRESS (MIG-0655 PR#476) |
 | SA-021..034, SA-056..068 | see `work-items/MIG-0604.md` Blockers | none | - | not implemented. The blockers (MIG-0633 core, `writeGuardMiddleware` `requiredRole`, MIG-0617 core audit) are resolved; split by D-15-4 into MIG-0652 (SA-021..024), 0653 (SA-025..030), 0654 (SA-031..034), 0655 (SA-035/037..039), 0656 (SA-056..064), 0657 (SA-065..068) | READY (child tasks) |
 
+| SA-035 | `saveEventAsTemplate` | `POST /api/admin/event-templates` (`apps/api/src/routes/events/templates.ts`) | admin (session → writeGuard → CostGuard `admin_event_templates`) | `@flamenode/domain/eventTemplates` input + snapshot, same D1 batch atomic CREATE + strict audit, 64KiB request cap, 404 missing event, deny origin/non-admin, no Next revalidatePath; U02 partial, tests pending. SA-037 GET is tracked separately below. | IN_PROGRESS (MIG-0655 PR#476) |
+| SA-037 | `listEventTemplatesForAdmin` | `GET /api/admin/event-templates` (`apps/api/src/routes/admin/index.ts` scoped GET -> `events/templates.ts`) | session -> `evaluateAdminWriteGuard` (admin, banned, TOS/reaccept, no Origin on safe GET) -> CostGuard `admin_event_templates` | Exact-path route precedes default adminReadGuard without broadening other GETs. Denied identity/TOS/CostGuard returns `200 []` as CURRENT; accepted admin returns untruncated DTO sorted updated_at DESC; D1 errors return private 503. SQLite tests cover denial, list, unrelated GET isolation, D1 failure; final CI pending. | IN_PROGRESS (MIG-0655 PR#476) |
+| SA-038 | `saveEventYoutubePlaylistSettings` | `PUT /api/manage/events/:eventId/youtube-playlist` (`apps/api/src/routes/manage/playlistWrite.ts`) | same-origin, authenticated any role/TOS, CostGuard `manage_event_update`, admin or approved event.publish staff | CURRENT ID/URL/mode/interval parser; one bounded snapshot/permission D1 read, lease-safe settings UPSERT and conditional playlist-item reset plus static rebuild queue in one audited batch; no immediate sync wake (D-15-6). HTTP/old-Action parity/security review and final-head CI pending. | IN_PROGRESS (MIG-0655 PR#476) |
+| SA-039 | `queueEventYoutubePlaylistSync` | `POST /api/manage/events/:eventId/youtube-playlist/sync` (`apps/api/src/routes/manage/playlistWrite.ts`) | Origin -> Auth.js session -> writeGuard identity/TOS (any role) -> `manage_event_update` CostGuard -> approved linked `event.publish` or admin | bounded staff permission+sync read, active lease fence in same UPDATE, strict atomic audit and rollback, no Queue wake (`DOCUMENTED DIFFERENCE D-15-6`, Cron fallback); source tests `eventPlaylistWrite.parity.test.mjs`, final-head CI and independent parity review pending | IN_PROGRESS (MIG-0655 PR#476) |
 ## MIG-0631 Hono public event list / release APIs (Phase 6, RH-015, RH-012)
 
 Code landing only; no Worker Route / traffic change; CURRENT Next handlers stay. Parity: `apps/api/test/eventsPublic.parity.test.mjs` runs the Hono route and CURRENT implementation against the same SQLite/R2 double (18/18 PASS). CPU: not measured (MIG-0606).
@@ -485,6 +487,14 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 
 
 
+## MIG-0648 — RH-019 authenticated X-user member suggestion search (Phase 6)
+
+| RH | CURRENT | Hono target | Permission | Data bound and fallback | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-019 | `GET /api/internal/x-users/search` (`app/api/internal/x-users/search/route.ts`) | `apps/api/src/routes/internal/xUsersSearch.ts`, mounted via `apps/api/src/app.ts`; `@flamenode/server-core/memberSuggestion/{search,loader,v2Loader,core}` | Auth.js cookie session: 401 unauthorized, 403 account_disabled, 503 database_unavailable; private/no-store/no-cache, Retry-After 3 for artifact 503 | D1 <= 1 SELECT for session, D1 candidate reads/writes = 0; q length <= 64, limit 1..50, offset 0..5000; 2-char V2 posting lookup bounded to <=8 pages and <=1536 candidates; V2 generation must match canonical V1; >=3-char uncertain page and bad/missing V2 fall back to V1 R2 index; never return partial ranking; malformed or missing R2 returns fixed 503. Golden Next-vs-Hono HTTP parity in `apps/api/test/xUsersSearch.parity.test.mjs`. | IN_PROGRESS: MIG-0648 PR#440 U03 route mount/source exports implemented; latest code CI and independent review required before merge; no production cutover |
+
+Code landing only: Worker traffic still uses CURRENT Next handler until an authorized cutover. No remote D1 migration, R2 rewrite or Cloudflare Route change. The server-core root package entry stays type-only; dedicated package subpaths export the read-only functions. U03 surgical integration was placed away from live PR#419 (app.ts near top, API_MATRIX appendix), #437/#438 (package export tail), with post-merge reconciliation of all three open PRs required before merge.
+
 ## MIG-0664 — RH-001 degraded 原因の区別（D-17-14）
 
 | RH | Endpoint | TARGET | Existing contract maintained | Additive response field | State |
@@ -500,3 +510,31 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 | `GET /api/manage/navigation` | `src/components/layout/ConsoleSidebar.tsx` の active/staff X 警告、`GET /api/manage` の同値 | `apps/api/src/routes/manage/navigation.ts` + `packages/contracts/src/manage/shared.ts` | `activeXUserId: string \| null`（承認済み linked X で解決、admin は null）、`manageStaffXUserIds: string[]`（運営スタッフ X、admin は空配列）。`shouldWarnManageActiveXMismatch` が描画側で同じ判定に使用できる | `access`, `events`, `truncated` の値は不変。非 admin は `loadManageData(..., { linked: true })` の同じ1 SQL 文で linked X を最大100件取得し、session を含め3 D1 statement以下、応答64KiB以下。GET専用、`private, no-store`、D1書込0 | MIG-0663 PR#423 REVIEW |
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
+
+## MIG-0637 — Hono Admin Ops mutation mapping (D-17-4)
+
+Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All routes use the existing `/api/admin` origin → session → admin/TOS/BAN guard and a strict audit batch. CostGuard control paths intentionally **skip ordinary costGuardMiddleware**, matching CURRENT `requireCostGuardControlAdmin`, so an administrator can exit maintenance; user-admin paths each use the feature's CostGuard middleware. Write bodies retain CURRENT FormData keys; IDs in the path are authoritative. Static rebuild rows are committed but wake count is 0 (D-0603-1), and `system_settings` mode is mirrored to KV **only after** the D1 commit.
+
+| SA | Hono method + path | CURRENT parity and response |
+| --- | --- | --- |
+| SA-016 | POST `/api/admin/cost-guard/mode` | mode/reason → full-row CAS + strict audit `cost_guard_mode`; post-commit KV mirror |
+| SA-017 | POST `/api/admin/cost-guard/maintenance` | `is_maintenance_mode`/reason; bypass mode restriction to restore normal; post-commit KV |
+| SA-018 | POST `/api/admin/cost-guard/override` | OVERRIDE token, <=8 allowlisted features, 15m TTL, audit; no KV |
+| SA-019 | POST `/api/admin/cost-guard/disabled-features` | APPLY token, 100 feature max, order normalized, exact JSON-encoded CAS; no KV |
+| SA-020 | POST `/api/admin/cost-guard/override/clear` | CLEAR token, null exception, audit; no KV |
+| SA-077 | POST `/api/admin/users/:userId/role` | role edit; no self-downgrade; strict audit |
+| SA-078 | POST `/api/admin/users/:userId/banned` | BAN requires reason, self-BAN forbidden; strict audit |
+| SA-079 | POST `/api/admin/users/:userId/notifications` | disabling cancels all pending outbox rows in same atomic batch, preserving already-sent rows |
+| SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
+| SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
+
+T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
+
+## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
+
+| RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
+| --- | --- | --- | --- | --- |
+| RH-027 | `OPTIONS /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | PVSF 2 origin のみ許可。GET/HEAD、If-None-Match 以外の preflight は 403。Vary / Expose-Headers / no-store CDN は CURRENT 同値 | MIGRATION_IN_PROGRESS |
+| RH-028 | `GET /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | 60/min isolate rate guard、R2 event-base 2MiB、visibility manifest の必須 ETag 前後照合、blocked event 404、blocked X staff 除去、DTO allowlist、非公開/欠損 503 | MIGRATION_IN_PROGRESS |
+
+DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
