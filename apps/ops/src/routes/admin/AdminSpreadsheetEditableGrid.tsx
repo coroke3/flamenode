@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { AdminSpreadsheetPageResponse } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
+import { copySpreadsheetSelection, moveSpreadsheetFocus, type GridCell } from "./spreadsheetGridKeyboard.js";
 import {
   patchSpreadsheetCell,
   insertSpreadsheetRow,
@@ -52,6 +53,8 @@ export function AdminSpreadsheetEditableGrid({
 }): React.ReactElement {
   const { def, rows, columns, primaryKeys, page } = data;
   const [selection, setSelection] = React.useState<CellSelection | null>(null);
+  const [anchorCell, setAnchorCell] = React.useState<GridCell>({ row: 0, col: 0 });
+  const [focusedCell, setFocusedCell] = React.useState<GridCell>({ row: 0, col: 0 });
   const [insertOpen, setInsertOpen] = React.useState(false);
   const [insertDraft, setInsertDraft] = React.useState<Record<string, string>>({});
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -82,6 +85,8 @@ export function AdminSpreadsheetEditableGrid({
       setContextVersion(v => v + 1);
       setHistory({ key: "", undo: [], redo: [] });
       setSelection(null);
+      setAnchorCell({ row: 0, col: 0 });
+      setFocusedCell({ row: 0, col: 0 });
       setInsertOpen(false);
       setInsertDraft({});
       setBusy(false);
@@ -171,6 +176,59 @@ export function AdminSpreadsheetEditableGrid({
     });
   }
 
+  async function copyRange(): Promise<void> {
+    if (identityChanged || rows.length === 0 || columns.length === 0) return;
+    const text = copySpreadsheetSelection(rows, columns, anchorCell, focusedCell);
+    if (!text) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(text);
+      if (isCurrent()) setNotice("選択範囲をコピーしました。");
+    } catch {
+      if (isCurrent()) setNotice("クリップボードへのコピーが許可されていません。");
+    }
+  }
+
+  function handleGridKey(
+    event: React.KeyboardEvent<HTMLTableCellElement>,
+    rowIndex: number,
+    colIndex: number,
+  ): void {
+    // Inputs/buttons own their own shortcuts and text-selection semantics.
+    if (event.target !== event.currentTarget) return;
+    const shortcut = event.ctrlKey || event.metaKey;
+    if (shortcut && !event.altKey && event.key.toLowerCase() === "c") {
+      event.preventDefault();
+      void copyRange();
+      return;
+    }
+    if (shortcut && !event.altKey && event.key.toLowerCase() === "z" && canMutate) {
+      event.preventDefault();
+      void replay(event.shiftKey ? "redo" : "undo");
+      return;
+    }
+    if (event.key === "Enter" && canMutate && !event.ctrlKey && !event.metaKey) {
+      const column = columns[colIndex];
+      const row = rows[rowIndex];
+      if (column && row && column.editable && column.pk === 0 && !column.generated &&
+          primaryKey(row, primaryKeys) !== null) {
+        event.preventDefault();
+        setSelection({ rowIndex, column: column.name, value: cellValue(row[column.name]), key });
+      }
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const moved = moveSpreadsheetFocus({ row: rowIndex, col: colIndex }, event.key, rows.length, columns.length);
+    if (moved.row === rowIndex && moved.col === colIndex) return;
+    event.preventDefault();
+    if (!event.shiftKey) setAnchorCell(moved);
+    setFocusedCell(moved);
+    // The target cell already exists; focus before React's next render.
+    const target = event.currentTarget.closest("table")
+      ?.querySelector<HTMLTableCellElement>(`[data-grid-cell="${moved.row}:${moved.col}"]`);
+    target?.focus();
+  }
+
   async function addRow(): Promise<void> {
     if (!canMutate || !insertOpen) return;
     const row: Record<string, string> = {};
@@ -228,6 +286,7 @@ export function AdminSpreadsheetEditableGrid({
           <button type="button" disabled={!canMutate} onClick={() => void addRow()}>追加を保存</button>
         </div>
       ) : null}
+      <p>矢印キーで移動、Shift＋矢印で範囲選択、Ctrl/Cmd＋CでTSVコピー、Enterで編集できます。</p>
       <div style={{ overflowX: "auto" }}>
         <table>
           <thead><tr>{columns.map(c => <th key={c.name} scope="col">{c.name}</th>)}<th scope="col">操作</th></tr></thead>
@@ -239,7 +298,19 @@ export function AdminSpreadsheetEditableGrid({
                   primaryKey(row, primaryKeys) !== null;
                 const editing = currentSelection?.rowIndex === ri && currentSelection?.column === c.name;
                 return (
-                  <td key={c.name}>{editing ? (
+                  <td key={c.name} data-grid-cell={`${ri}:${columns.indexOf(c)}`}
+                    tabIndex={focusedCell.row === ri && focusedCell.col === columns.indexOf(c) ? 0 : -1}
+                    aria-selected={!identityChanged && ri >= Math.min(anchorCell.row, focusedCell.row) &&
+                      ri <= Math.max(anchorCell.row, focusedCell.row) &&
+                      columns.indexOf(c) >= Math.min(anchorCell.col, focusedCell.col) &&
+                      columns.indexOf(c) <= Math.max(anchorCell.col, focusedCell.col)}
+                    onClick={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      const pos = { row: ri, col: columns.indexOf(c) };
+                      setAnchorCell(pos);
+                      setFocusedCell(pos);
+                    }}
+                    onKeyDown={(event) => handleGridKey(event, ri, columns.indexOf(c))}>{editing ? (
                     <label>{c.name} を編集
                       <input type="text" disabled={!canMutate} value={currentSelection?.value ?? ""}
                         onChange={e => setSelection({ rowIndex: ri, column: c.name, value: e.target.value, key })} />
