@@ -8,7 +8,7 @@ export async function readManageStaff(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
   signal?: AbortSignal,
 ): Promise<OpsResult<ManageStaffResponse>> {
-  if (!eventId || eventId === "." || eventId === ".." || eventId.includes("\\0")) {
+  if (!eventId || eventId === "." || eventId === ".." || eventId.includes("\0")) {
     return { status: "unavailable" };
   }
   // encodeURIComponent throws URIError on lone UTF-16 surrogates. A malformed
