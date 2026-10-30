@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
+import { readFileSync } from "node:fs";
 import { and, eq, ne } from "drizzle-orm";
 import { videos } from "@flamenode/db/schema";
 import { checkYoutubeVideoDuplicate, isYoutubeIdUniqueConstraintError as fromCore } from "@flamenode/server-core/video/youtubeDuplicate";
-import { checkYoutubeVideoDuplicate as fromLegacySlotPart } from "../../../src/lib/video/slotPart.ts";
 import { isYoutubeIdUniqueConstraintError as fromNextBridge } from "../../../src/lib/video/youtubeDuplicate.ts";
 
 test("MIG-0651: the Next Server Action bridge resolves the same canonical implementation", () => {
@@ -44,7 +44,8 @@ test("MIG-0651: an index name alone does not imply a unique-constraint failure",
 const dialect = new SQLiteSyncDialect();
 
 test("MIG-0651: the CURRENT video-duplicate database helper retains exact canonical identity", () => {
-  assert.strictEqual(fromLegacySlotPart, checkYoutubeVideoDuplicate);
+  const legacySource = readFileSync(new URL("../../../src/lib/video/slotPart.ts", import.meta.url), "utf8");
+  assert.match(legacySource, /export \\{ checkYoutubeVideoDuplicate \\} from "@flamenode\\/server-core\\/video\\/youtubeDuplicate"/);
 });
 
 test("MIG-0651: duplicate lookup retains voided exclusion, optional self exclusion, 1-row cap and SQL parameters", async () => {
