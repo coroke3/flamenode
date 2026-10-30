@@ -125,7 +125,7 @@ test("MIG-0643 U02 SA-070: failed row CAS retry resets only exact CURRENT patch 
   assert.equal(s.stats.batches, 1);
   assert.equal(s.stats.reads, 2);
   const audit = s.audits()[0];
-  assert.deepEqual(JSON.parse(audit.before_json), before);
+  assert.deepEqual(JSON.parse(audit.before_json), { ...before, lease_token: "[REDACTED]" });
   assert.deepEqual(JSON.parse(audit.after_json), after);
 });
 
