@@ -17,7 +17,7 @@ const defaultArgs = {
   now,
 };
 
-test("MIG-0651 U02: free videos row matches CURRENT complete 29-column default snapshot", () => {
+test("MIG-0651 U02: free videos row matches CURRENT complete 30-column default snapshot", () => {
   const row = buildFreeVideoRow(defaultArgs);
   assert.deepEqual(row, {
     id: "v-123",
@@ -51,7 +51,7 @@ test("MIG-0651 U02: free videos row matches CURRENT complete 29-column default s
     created_at: now,
     updated_at: now,
   });
-  assert.equal(Object.keys(row).length, 29);
+  assert.equal(Object.keys(row).length, 30);
 });
 test("MIG-0651 U02: linked collaboration row retains all source fields and normalized values", () => {
   const row = buildFreeVideoRow({

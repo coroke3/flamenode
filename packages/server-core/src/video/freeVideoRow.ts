@@ -38,7 +38,7 @@ export function buildFreeVideoRow(args: {
     creatorYoutubeChannelUrl, creatorOtherSocialLinks, youtubeId,
     scheduledTime, now,
   } = args;
-    return {
+  return {
     id: videoId,
     primary_event_id: eventId,
     creator_x_user_id: activeX,
