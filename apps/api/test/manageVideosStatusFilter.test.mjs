@@ -73,8 +73,9 @@ if (runUnderRootTsx(import.meta.url)) {
   test("MIG-0624: invalid keys never bypass event-scoped access control", async () => {
     for (const filter of [undefined, "constructor", "__proto__", "pending"]) {
       const denied = await get(filter, "tok-plain");
-      assert.equal(denied.status, 404);
-      assert.equal(denied.body.error, "Not Found");
+      assert.equal(denied.status, 403);
+      assert.equal(denied.body.error, "Forbidden");
+      assert.equal(denied.body.reason, "manage_access_required");
     }
   });
 }
