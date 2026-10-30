@@ -164,3 +164,30 @@ test("MIG-0725 U02: CURRENT category, severity and delivery badges remain distin
   assert.match(render({ ...fixture, notifications: [makeRow("video_approved")] }), /fn-badge-accent/, "sent status");
   assert.match(render({ ...fixture, notifications: [makeRow("video_approved", "processing")] }), /fn-badge-warning/, "processing status");
 });
+
+test("MIG-0725 U02: CURRENT notification failure guidance and translated error parity", () => {
+  const row = (status, last_error, type = "video_submitted") => ({
+    id: status, type, status, payload_json: "{}",
+    attempt_count: 3, last_error, dedupe_key: null,
+    recipient_user_id: null, event_id: null, created_at: 1700000000, recipient: null,
+  });
+  for (const [status, lastError, summary] of [
+    ["dead_letter", "discord_recipient_missing", "有効なDiscord宛先を解決できませんでした。"],
+    ["failed", "forum_webhook_unconfigured:account", "Forum 配信用 Discord Webhook URL が未設定です。"],
+    ["processing", null, "送信処理中です。配送リースは5分で失効します。"],
+    ["cancelled", "notification disabled", "宛先の通知設定がOFFになったため、配送前に停止しました。"],
+  ]) {
+    const html = render({ ...fixture, notifications: [row(status, lastError)] });
+    assert.ok(html.includes(summary), status + " guidance matches CURRENT");
+    assert.match(html, /notification-failure-guidance/, "guidance visible for " + status);
+    assert.match(html, /<li>/, "actionable next steps present for " + status);
+  }
+  const missing = render({ ...fixture, notifications: [row("dead_letter", "discord_recipient_missing")] });
+  assert.match(missing, /宛先ユーザーの Discord ID が未連携のため、DM を配送できません。/);
+  const forum = render({ ...fixture, notifications: [row("failed", "forum_webhook_unconfigured:account")] });
+  assert.match(forum, /DISCORD_WEBHOOK_URL_FORUM_ACCOUNT/);
+  const pending = render({ ...fixture, notifications: [row("pending", null)] });
+  assert.doesNotMatch(pending, /notification-failure-guidance/, "CURRENT does not show pending guidance in summary");
+  const sent = render({ ...fixture, notifications: [row("sent", null)] });
+  assert.doesNotMatch(sent, /notification-failure-guidance/, "successful delivery has no failure guidance");
+});

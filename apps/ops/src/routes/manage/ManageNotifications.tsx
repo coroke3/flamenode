@@ -55,6 +55,197 @@ const TYPE_LABELS: Record<string, string> = {
   ops_youtube_quota_deferred: "YouTube再生リスト同期のquota延期",
 };
 
+/** MIG-0725 U02: pure CURRENT notification error guidance until MIG-0719 shared UI merges. */
+interface NotificationFailureGuidance {
+  summary: string;
+  nextSteps: string[];
+}
+
+/** 運営者向け: 失敗・滞留・運用キャンセル時の次アクション。 */
+function getNotificationFailureGuidance(input: {
+  status: string | null | undefined;
+  lastError: string | null | undefined;
+  attemptCount: number | null | undefined;
+}): NotificationFailureGuidance | null {
+  const status = input.status ?? "";
+  const err = (input.lastError ?? "").toLowerCase();
+  const attempts = input.attemptCount ?? 0;
+
+  if (status === "pending") {
+    return {
+      summary: "次の dispatcher 実行を待っています。",
+      nextSteps: [
+        "Queue wake で即時起動する。未処理なら毎時0分の fast-jobs Recovery Cron を待つ",
+        "長時間 pending の場合は Worker cron と D1 接続を確認する",
+      ],
+    };
+  }
+
+  if (status === "processing") {
+    return {
+      summary: "送信処理中です。配送リースは5分で失効します。",
+      nextSteps: [
+        "配送リース（5分）超過後は毎時0分の fast-jobs Recovery Cron で自動回収される",
+        "1時間以上 processing のままなら Worker と D1 を確認する",
+      ],
+    };
+  }
+
+  if (status === "cancelled") {
+    if (err.includes("notification disabled")) {
+      return {
+        summary: "宛先の通知設定がOFFになったため、配送前に停止しました。",
+        nextSteps: ["再送が必要な場合だけ通知設定を確認して強制再送する"],
+      };
+    }
+    return {
+      summary: "手動または運用ルールでキャンセル済みです。",
+      nextSteps: ["再送が必要なら管理者画面から強制再送する"],
+    };
+  }
+
+  if (!TERMINAL_FAILURES.has(status)) return null;
+
+  if (err.includes("delivery lease expired") || err.includes("processing timeout")) {
+    return {
+      summary: "送信処理のリースが期限切れになりました。",
+      nextSteps: [
+        "Worker の実行履歴とD1接続を確認する",
+        "原因解消後に通知を再試行する",
+      ],
+    };
+  }
+
+  if (err.includes("forum_webhook_unconfigured")) {
+    const raw = input.lastError ?? "";
+    const targetMatch = raw.match(
+      /forum_webhook_unconfigured:(account|event|system)/i,
+    );
+    const forumSecretByTarget: Record<string, string> = {
+      account: "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+      event: "DISCORD_WEBHOOK_URL_FORUM_EVENT",
+      system: "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    };
+    const targetKey = targetMatch?.[1]?.toLowerCase();
+    const forumSecret = targetKey ? forumSecretByTarget[targetKey] : null;
+    return {
+      summary: "Forum 配信用 Discord Webhook URL が未設定です。",
+      nextSteps: [
+        forumSecret
+          ? `${forumSecret} を確認する`
+          : "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM を確認する",
+        "legacy の DISCORD_WEBHOOK_URL は webhook_target 無しの旧通知行のみに適用される",
+        "設定修正後に失敗通知を再試行する",
+      ],
+    };
+  }
+
+  if (err.includes("webhook_unconfigured")) {
+    return {
+      summary: "Discord Webhook URL が未設定です。",
+      nextSteps: [
+        "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT / DISCORD_WEBHOOK_URL_FORUM_EVENT / DISCORD_WEBHOOK_URL_FORUM_SYSTEM、または移行用 legacy DISCORD_WEBHOOK_URL を確認する",
+        "設定修正後に失敗通知を再試行する",
+      ],
+    };
+  }
+
+  if (
+    err.includes("bot_token_unconfigured") ||
+    err.includes("401") ||
+    err.includes("unauthorized")
+  ) {
+    return {
+      summary: "Discord Bot の認証設定に問題があります。",
+      nextSteps: [
+        "DISCORD_BOT_TOKEN を確認する",
+        "設定修正後に失敗通知を再試行する",
+      ],
+    };
+  }
+
+  if (err.includes("403") || err.includes("cannot send")) {
+    return {
+      summary: "宛先がBotのDMを受け取れない可能性があります。",
+      nextSteps: [
+        "宛先がBotとサーバーを共有し、DMを許可しているか確認する",
+        "必要ならサイト内または運営Discordで別途連絡する",
+      ],
+    };
+  }
+
+  if (err.includes("recipient_missing") || err.includes("404")) {
+    return {
+      summary: "有効なDiscord宛先を解決できませんでした。",
+      nextSteps: [
+        "ユーザーのDiscord連携状態を確認する",
+        "連携解除済みなら再送せずキャンセルする",
+      ],
+    };
+  }
+
+  if (
+    err.includes("rate") ||
+    err.includes("429") ||
+    err.includes("cooldown")
+  ) {
+    return {
+      summary: "Discordのレート制限に達した可能性があります。",
+      nextSteps: [
+        "Discord指定の待機時間を空ける",
+        "短時間に通知が集中していないか確認する",
+      ],
+    };
+  }
+
+  if (
+    err.includes("timeout") ||
+    err.includes("network") ||
+    err.includes("request_budget")
+  ) {
+    return {
+      summary: "Discord通信または無料枠内の実行予算で失敗しました。",
+      nextSteps: [
+        "一時障害なら時間を空けて再試行する",
+        "繰り返す場合はWorkerログと外部通信件数を確認する",
+      ],
+    };
+  }
+
+  return {
+    summary: `配送を完了できませんでした（試行 ${attempts} 回）。`,
+    nextSteps: [
+      "payloadと宛先のDiscord連携状態を確認する",
+      "原因解消後に再試行する",
+      "繰り返す場合はDiscord側の応答とWorkerログを確認する",
+    ],
+  };
+}
+
+
+/** 運営画面向け: last_error を日本語要約へ変換する。 */
+function translateNotificationError(
+  lastError: string | null | undefined,
+): string | null {
+  const err = (lastError ?? "").trim();
+  if (!err) return null;
+  const lower = err.toLowerCase();
+  if (lower.includes("discord_channel_webhook_unconfigured")) {
+    return "運営チャンネル用 Webhook URL (DISCORD_WEBHOOK_URL) が未設定です。";
+  }
+  if (lower.includes("discord_dm_bot_token_unconfigured")) {
+    return "利用者 DM 用 Bot Token (DISCORD_BOT_TOKEN) が未設定です。";
+  }
+  if (lower.includes("discord_recipient_missing")) {
+    return "宛先ユーザーの Discord ID が未連携のため、DM を配送できません。";
+  }
+  if (lower.includes("discord_payload_invalid")) {
+    return "通知 payload が Discord API 形式として不正です。";
+  }
+  return err;
+}
+
+
 /** A payload can contain user-generated content. Never render it as HTML. */
 function previewPayload(payloadJson: string): string | null {
   try {
@@ -114,6 +305,11 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
     ? recipient.discordId ? recipient.userName + " (" + recipient.discordId + ")" : recipient.userName
     : recipient?.discordId ?? row.recipient_user_id ?? "運営チャンネル";
   const preview = previewPayload(row.payload_json);
+  const guidance = getNotificationFailureGuidance({
+    status: row.status, lastError: row.last_error, attemptCount: row.attempt_count,
+  });
+  const showGuidance = guidance !== null &&
+    (TERMINAL_FAILURES.has(status) || status === "processing" || status === "cancelled");
   return (
     <div className="manage-notification-summary">
       <div>
@@ -125,8 +321,16 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
       </div>
       <div className="fn-td-muted">宛先: {destination}{recipient?.notificationsEnabled === false ? "（通知OFF）" : ""}</div>
       {preview ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</div> : null}
+      {showGuidance && guidance ? (
+        <div className="fn-surface-panel" role="status" data-testid="notification-failure-guidance">
+          <strong>{guidance.summary}</strong>
+          <ul>{guidance.nextSteps.map((step) => <li key={step}>{step}</li>)}</ul>
+        </div>
+      ) : null}
       {(TERMINAL_FAILURES.has(status) || status === "cancelled") && row.last_error ? (
-        <div className="fn-td-muted" style={{ overflowWrap: "anywhere" }}>{row.last_error}</div>
+        <div className="fn-td-muted" style={{ overflowWrap: "anywhere" }}>
+          {translateNotificationError(row.last_error) ?? row.last_error}
+        </div>
       ) : null}
     </div>
   );
