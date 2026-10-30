@@ -1,4 +1,5 @@
 import * as React from "react";
+import "../../../styles/xid-requests.css";
 import { useNavigate } from "react-router-dom";
 import { parseXIdentityInput } from "@flamenode/domain/xid";
 import type { XidRequestsApi } from "../../../api/xidRequests.js";
