@@ -100,7 +100,7 @@ export async function loadAdminVideos(
   if (!data.degraded && data.events.length === 100) {
     const next = await getJson<unknown>(
       fetchFn,
-      `/api/admin-read/videos${href.slice("/admin/videos".length)}&offset=100`,
+      `/api/admin-read/videos${href.slice("/admin/videos".length) || "?"}${href.includes("?") ? "&" : ""}offset=100`,
       signal,
     );
     if (next.status !== "ok") return next;
