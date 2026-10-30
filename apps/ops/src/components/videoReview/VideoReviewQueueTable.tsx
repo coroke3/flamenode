@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
+import { FnTable } from "../shared/FnTable.js";
 import { VideoReviewQuickApproveButton } from "./VideoReviewQuickApproveButton.js";
 import {
   formatRelative, formatUnix, videoVisibilityBadgeClass, videoVisibilityLabel, youtubeThumbUrl,
@@ -41,10 +42,9 @@ export function VideoReviewQueueTable({
   const isManage = variant === "manage";
   const showQuickApprove = canApprove && quickApproveAction &&
     rows.some(v => v.visibility_status === "pending");
-  const tableClass = ["fn-table", "approval-queue-table", "approval-queue-table-video",
+  const tableClass = ["approval-queue-table", "approval-queue-table-video",
     isManage ? "manage-video-queue" : ""].filter(Boolean).join(" ");
-  return <div className="video-review-table-scroll">
-    <table className={tableClass}>
+  return <FnTable className={tableClass}>
       <thead><tr>
         <th>サムネイル</th><th>タイトル</th><th>作者</th><th>公開状態</th>
         <th>登録日時</th><th>YouTube</th><th>ステージ許可</th><th>必須未回答</th><th></th>
@@ -98,6 +98,5 @@ export function VideoReviewQueueTable({
           <p className="fn-empty-message approval-queue-empty">条件に合う作品がありません。</p>
         </td></tr> : null}
       </tbody>
-    </table>
-  </div>;
+  </FnTable>;
 }
