@@ -4,6 +4,7 @@ import type { ManageXLinkRequest, ManageXLinkRequestsResponse } from "@flamenode
 import type { OpsFetch, OpsResult } from "../../api/read.js";
 import { readManageXLinkRequests } from "../../api/xidLinkRequests.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
+import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
 import { FnTable } from "../../components/shared/FnTable.js";
 import { NotFoundView } from "../NotFoundView.js";
 import { AUTH_UNAVAILABLE } from "../guard.js";
@@ -34,10 +35,11 @@ function XIdPreview({ id, name, icon, compact = false }: {
   const normalized = id.replace(/^@/, "");
   const safeIcon = safeIconUrl(icon ?? null);
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-    {safeIcon
-      ? <img src={safeIcon} alt="" width={compact ? 24 : 36} height={compact ? 24 : 36}
-          referrerPolicy="no-referrer" style={{ borderRadius: "50%", objectFit: "cover" }} />
-      : <span aria-hidden="true" className="fn-badge fn-badge-soft">X</span>}
+    <ManageXIcon
+      iconUrl={safeIcon} label={name ?? normalized} size={compact ? 24 : 36}
+      className="x-link-request-avatar" fallbackClassName="x-link-request-avatar-fallback"
+      style={{ border: "1px solid var(--border-subtle)", background: "var(--bg-elevated)", flexShrink: 0 }}
+    />
     <span>
       <strong>{name ? name + " " : ""}@{normalized}</strong>
       <span style={{ display: "flex", gap: 8, fontSize: 11 }}>
