@@ -330,7 +330,7 @@ adminOpsRoutes.get("/integrity", (c) => {
 
 adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
   const id = c.req.param("checkId");
-  if (!INTEGRITY_CHECK_IDS.some((checkId) => checkId === id)) {
+  if (!id || !INTEGRITY_CHECK_IDS.some((checkId) => checkId === id)) {
     return c.json({ error: "not_found" }, 404);
   }
   const result = await runIntegrityCheckById(c.get("db"), id);
