@@ -172,7 +172,7 @@
 | `apps/app/src/styles/onboarding.css` | CONFIG | MIG-0701 prefixed CURRENT CSS module onboarding | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=6f14b5f02177b1e3d445f2663ed2ec6dfc26d679 TEST=apps/app/test/styles.test.mjs T07-T08 |
 | `apps/app/src/styles/settings.css` | CONFIG | MIG-0701 prefixed CURRENT CSS module settings | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=6f14b5f02177b1e3d445f2663ed2ec6dfc26d679 TEST=apps/app/test/styles.test.mjs T07-T08 ; PR#424 SHA=3178a8179c847c679e34ec2172a3ad09269cc605 TEST=apps/app/test/styles.test.mjs settings mobile global selector |
 | `apps/app/src/styles/video-card.css` | CONFIG | MIG-0701 prefixed CURRENT CSS module video-card | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=6f14b5f02177b1e3d445f2663ed2ec6dfc26d679 TEST=apps/app/test/styles.test.mjs T07-T08 |
-| `apps/app/scripts/portCssModule.mjs` | HELPER | Deterministic CURRENT CSS module converter | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=6f14b5f02177b1e3d445f2663ed2ec6dfc26d679 TEST=apps/app/test/styles.test.mjs T07 |
+| `apps/app/scripts/portCssModule.mjs` | HELPER | Deterministic CURRENT CSS module converter | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=6f14b5f02177b1e3d445f2663ed2ec6dfc26d679 TEST=apps/app/test/styles.test.mjs T07; MIG-0708 PR#486 SHA=8bf882a210a9fb9431e3ff0f5e9e66cc3e06e5da TEST=apps/app/test/styles.test.mjs U03 CSS generator registration CI=PENDING |
 | `apps/app/src/styles/fonts.css` | CONFIG | FlameNode Sans local @font-face import | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=a7499c6e313881000f96cb9f2dba02b42a25aeff TEST=apps/app/test/styles.test.mjs T07 |
 | `apps/app/test/styles.test.mjs` | TEST | MIG-0701 U04 CSS/font drift and class coverage regressions | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=733b687b89d097b25fc22f4cf6148be0a286171a TEST=npm run test --workspace=@flamenode/app ; PR#424 SHA=6b6185fa6b351b1376abdab098f6a30df65c282a TEST=apps/app/test/styles.test.mjs mobile global fn-btn regression ; PR#424 SHA=f998f5ad1e03ce156001ebcb02f0a76fec27e9ba TEST=apps/app/test/styles.test.mjs settings mobile global selector |
 | `apps/app/test/document.test.mjs` | TEST | MIG-0701 U05 Personal root shell/cache regressions | MIG-0701 | SAME (new migration file) | IN_PROGRESS | PR#422 SHA=9a22f76f47375c5fcef4a792c614be2ba42e3620 TEST=npm run test --workspace=@flamenode/app |
@@ -1192,6 +1192,8 @@
 
 | `apps/app/src/routes/dashboard/settings/XIdPanelActions.tsx` | HELPER | MIG-0708 U03 X ID Active/profile/icon/delete isolated settings controls (not mounted) | MIG-0708 | SAME (unmounted U03 module; MIG-0636 merge gate) | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
 | `apps/app/test/xidPanelActions.test.mjs` | TEST | MIG-0708 U03 T01..T05 interaction, duplicate-submit, role, upload and confirmation guards | MIG-0708 | SAME | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
+
+| `apps/app/src/styles/xid-settings.css` | STYLE | MIG-0708 U03 CURRENT XIdSettingsClient module migrated via xids portCssModule | MIG-0708 | SAME (unmounted CSS until Settings integration) | IN_PROGRESS | PR#486 SHA=8bf882a210a9fb9431e3ff0f5e9e66cc3e06e5da TEST=apps/app/test/styles.test.mjs generated parity CI=PENDING |
 
 ## Future files requiring source/target registration
 
