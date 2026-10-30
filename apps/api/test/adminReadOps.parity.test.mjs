@@ -1084,15 +1084,39 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
-  test("T02 integrity: idle state like CURRENT (no query); run=1 is the recorded STOP (501)", async () => {
+  test("T02 integrity: idle catalog and run=1 are read-only; per-check results match full CURRENT helper", async () => {
+    const { runIntegrityChecks, INTEGRITY_CHECK_IDS } = await import(
+      "@flamenode/server-core/admin/integrityChecks"
+    );
     const idle = await get("/ops/integrity");
-    assert.deepEqual(idle.body, { ran: false, results: [] });
-    assert.equal(idle.stats.statements, 1, "no page query without run=1");
-    const run = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
-    assert.equal(run.status, 501);
-    assert.equal(run.headers.get("cache-control"), "private, no-store");
-    assert.equal(run.stats.statements, 1);
+    assert.deepEqual(idle.body, { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] });
+    assert.equal(idle.stats.statements, 1, "catalog must only read the session");
+    assert.equal(new Set(INTEGRITY_CHECK_IDS).size, INTEGRITY_CHECK_IDS.length, "unique allowlisted check IDs");
+    const requested = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
+    assert.deepEqual(requested.body, idle.body);
+    assert.equal(requested.headers.get("cache-control"), "private, no-store");
+    assert.equal(requested.stats.statements, 1);
     assert.equal((await call("/api/admin-read/ops/integrity", "tok-alice")).status, 403);
+
+    // The same read-only CURRENT business logic is still used by Next via its compatibility bridge.
+    // Run it once as the reference and make every Hono per-ID request execute only its selected check.
+    const expected = await runIntegrityChecks(refDb);
+    for (const id of INTEGRITY_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/integrity/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id);
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      assert.deepEqual(canon(result.body), canon({
+        ran: true,
+        results: expected.filter((check) => check.id === id),
+      }), id);
+      assert.ok(result.stats.statements <= 2, id + ": session + at most one check query");
+    }
+    const missing = await call("/api/admin-read/ops/integrity/unknown_check", ADMIN);
+    assert.equal(missing.status, 404);
+    assert.equal(missing.stats.statements, 1, "unknown check must not query the DB");
+    const denied = await call("/api/admin-read/ops/integrity/videos_primary_event_missing_event", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1, "denial occurs before the check");
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {
