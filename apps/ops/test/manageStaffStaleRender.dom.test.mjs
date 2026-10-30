@@ -123,3 +123,16 @@ test("MIG-0723 injected fetch identity change invalidates old authorized members
     await ui.cleanup();
   }
 });
+
+
+test("MIG-0723 invalid UTF-16 event ID renders a failure, not endless loading", async () => {
+  const ui = setup();
+  try {
+    await ui.render("\uD800");
+    assert.equal(ui.requests.length, 0, "malformed ID must never reach API");
+    assert.doesNotMatch(ui.target.textContent, /読み込み中/);
+    assert.match(ui.target.textContent, /取得できませんでした/);
+  } finally {
+    await ui.cleanup();
+  }
+});
