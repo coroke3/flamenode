@@ -30,6 +30,9 @@ function AccessRedirect({ target }: { target: string }): React.ReactElement {
 
 /** Only local links to the same event's video queue can be honored after an approval. */
 export function safeReviewNextHref(eventId: string, href: string): string | null {
+  // CURRENT resolveApproveAndNextHref returns the queue when no more pending videos exist.
+  const queueHref = `/manage/events/${encodeURIComponent(eventId)}/videos?status=review`;
+  if (href === queueHref) return queueHref;
   const prefix = `/manage/events/${encodeURIComponent(eventId)}/videos/`;
   if (!href.startsWith(prefix) || href.includes("\\") || href.includes("//")) return null;
   try {

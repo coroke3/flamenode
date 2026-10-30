@@ -112,6 +112,16 @@ test("MIG-0724 U03: stale content or read error never leaks private video", () =
 });
 test("MIG-0724 U03: approve-next href remains limited to the same event queue", () => {
   assert.equal(safeReviewNextHref("event/1", "/manage/events/event%2F1/videos/next?status=pending"), "/manage/events/event%2F1/videos/next?status=pending");
+  // When the last pending video is approved, CURRENT navigates back to the queue.
+  assert.equal(
+    safeReviewNextHref("event/1", "/manage/events/event%2F1/videos?status=review"),
+    "/manage/events/event%2F1/videos?status=review",
+  );
+  for (const unsafeQueue of [
+    "/manage/events/event%2F1/videos?status=public",
+    "/manage/events/event%2F1/videos?status=review&redirect=https://attacker.test",
+    "/manage/events/other/videos?status=review",
+  ]) assert.equal(safeReviewNextHref("event/1", unsafeQueue), null, unsafeQueue);
   for (const unsafe of [
     "https://attacker.test", "//attacker.test", "/admin/videos/2", "/manage/events/other/videos/next",
     "/manage/events/event%2F1/videos/", "/manage/events/event%2F1/videos//escape",
