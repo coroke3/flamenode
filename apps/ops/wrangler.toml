@@ -1,0 +1,12 @@
+# MIG-0719 U05 — Ops SPA static-only template. Deployment requires human approval.
+name = "flamenode-ops"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+workers_dev = false
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = false
+
+# No Route, custom domain, D1, KV, R2, Queue or secret binding.
