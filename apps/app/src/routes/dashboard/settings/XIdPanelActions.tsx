@@ -244,7 +244,7 @@ export function DeleteXIdForm({
           <p>この X ID @{xUserId} とDiscordアカウントの紐付けを解除します。X ID自体・作品・履歴は削除されません。</p>
           <label>確認のため「{expected}」と入力してください。
             <input className="xids-input" value={confirmation} disabled={pending}
-              onChange={e => setConfirmation(e.target.value)} />
+              onInput={e => setConfirmation(e.currentTarget.value)} />
           </label>
           <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
             disabled={pending} onClick={() => { setOpen(false); setConfirmation(""); }}>キャンセル</button>
