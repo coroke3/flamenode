@@ -108,6 +108,18 @@ export function parseOwnedTasks(prs){
   }
   return owned;
 }
+// The gh CLI only returns the first N open PRs. At the configured limit,
+// ownership is NOT exhaustive: the next page could own the selected task.
+// Stop instead of silently treating an incomplete set as a live lock registry.
+export function parseOpenPrSnapshot(prs,limit=100){
+  if(!Array.isArray(prs)||!Number.isSafeInteger(limit)||limit<1){
+    throw new Error("Invalid open PR owner snapshot or page limit");
+  }
+  if(prs.length>=limit){
+    throw new Error("Open PR list reached the "+limit+"-PR fetch limit; ownership may be incomplete. Paginate all open PRs or stop");
+  }
+  return parseOwnedTasks(prs);
+}
 export function readOpenPrOwners(root=ROOT){
   let prs;
   try{
@@ -115,7 +127,7 @@ export function readOpenPrOwners(root=ROOT){
     prs=JSON.parse(out);
   }catch{return {owned:new Map(),live:false};}
   // A real owner collision must surface as an error, not masquerade as an unavailable gh CLI.
-  return {owned:parseOwnedTasks(prs),live:true};
+  return {owned:parseOpenPrSnapshot(prs),live:true};
 }
 
 // Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
