@@ -34,7 +34,25 @@ export function fetchMissingSourceHistory(root, entries) {
     const head = body.match(/^Head:\s*([0-9a-f]{40})\s*$/m)?.[1];
     const pr = body.match(/^PR:\s*#(\d+)\s*$/m)?.[1];
     if (!head || !pr || gitCommitExists(root, head) || fetched.has(pr)) continue;
-    execFileSync("git", ["fetch", "--no-tags", "origin", "refs/pull/" + pr + "/head"], { cwd: root, stdio: "ignore" });
+    // A squash-merged PR may have moved/rewritten its refs/pull/N/head after
+    // the recorded checkpoint. Fetching its current ref alone then leaves the
+    // historic Head SHA unavailable despite GitHub still serving that commit.
+    // Fetch the exact, strictly validated 40-hex SHA as a fallback. Never
+    // substitute the PR's new tip: validateWorkItems still checks the ORIGINAL
+    // recorded commit object with git cat-file -e SHA^{commit}.
+    try {
+      execFileSync("git", ["fetch", "--no-tags", "origin", "refs/pull/" + pr + "/head"], { cwd: root, stdio: "ignore" });
+    } catch {
+      // A deleted PR ref is not evidence that the recorded commit is invalid.
+      // The exact-SHA attempt and the final commitExists gate decide validity.
+    }
+    if (!gitCommitExists(root, head)) {
+      try {
+        execFileSync("git", ["fetch", "--no-tags", "origin", head], { cwd: root, stdio: "ignore" });
+      } catch {
+        // Fail closed through validateWorkItems: no fabricated or substituted SHA.
+      }
+    }
     fetched.add(pr);
   }
   return [...fetched];
@@ -79,15 +97,28 @@ export function validateWorkItems({statusText,entries,commitExists}) {
   return errors;
 }
 
+// Missing historical commits are an independent precondition from ownership errors.
+// Always attempt explicit history retrieval when requested; do not create dozens of
+// misleading missing-SHA diagnostics merely because another structural check failed.
+// Structural errors remain fatal after fetching: this is never a fail-open path.
+export function validateWithHistory({statusText,entries,commitExists,fetchHistory}) {
+  const errors=validateWorkItems({statusText,entries});
+  if(fetchHistory) {
+    try { fetchHistory(); }
+    catch { errors.push("could not fetch required PR history from origin; verify repository access and recorded PR numbers"); }
+  }
+  errors.push(...validateWorkItems({statusText,entries,commitExists}).filter(error=>!errors.includes(error)));
+  return errors;
+}
+
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
   const statusText=fs.readFileSync(path.join(root,"docs/migration/STATUS.md"),"utf8"),entries=readWorkItems(root);
-  const errors=validateWorkItems({statusText,entries});
-  if(!errors.length && process.argv.includes("--fetch-pr-history")) {
-    try { fetchMissingSourceHistory(root,entries); }
-    catch { errors.push("could not fetch required PR history from origin; verify repository access and recorded PR numbers"); }
-  }
-  errors.push(...validateWorkItems({statusText,entries,commitExists: value => gitCommitExists(root,value)}).filter(error=>!errors.includes(error)));
+  const errors=validateWithHistory({
+    statusText, entries,
+    commitExists: value => gitCommitExists(root,value),
+    fetchHistory: process.argv.includes("--fetch-pr-history") ? () => fetchMissingSourceHistory(root,entries) : undefined,
+  });
   if(errors.length){errors.forEach(x=>console.error("[migration:work-items] "+x));process.exitCode=1;}
   else{
     console.log("[migration:work-items] OK: "+Object.keys(entries).length+" checkpoints");
