@@ -81,6 +81,18 @@ test("MIG-0722 U02a: safe read-only slot table renders CURRENT holder fields, st
   for (const status of ["constructor", "__proto__", "unknown"]) assert.equal(slotStatusLabel(status), "不明");
   assert.equal(slotStatusLabel("reserved"), "確保済");
   assert.equal(slotTimeLabel(slot("a", { slot_label: "No. 1" })), "No. 1");
+  for (const seconds of [1e20, -1e20, Infinity, -Infinity, NaN]) {
+    // Malformed API date values must not throw RangeError during render.
+    assert.equal(slotTimeLabel(slot("bad", {
+      start_time: seconds, slot_label: "不明な日時",
+    })), "不明な日時");
+    const fallback = render(React.createElement(SlotList, {
+      eventId: "ev id", slots: [slot("bad", { start_time: seconds })],
+      partGapMinutes: 15, parts: [],
+    }));
+    assert.match(fallback, /—/);
+    assert.doesNotMatch(fallback, /Invalid time value/);
+  }
 });
 
 test("MIG-0722 U02a: filter nav, counts, encoded URLs, 500 cap and XSS-safe title", () => {
