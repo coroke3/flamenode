@@ -12,3 +12,5 @@ export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
 export * from "./videoInteraction.ts";
 export * from "./eventPlaylistWrite.ts";
+
+export * from "./terms.ts"; // MIG-0641: Personal write contract
