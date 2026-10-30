@@ -88,9 +88,11 @@
     "./publicData/searchIndexCore": "./src/publicData/searchIndexCore.ts",
     "./publicData/eventListCore": "./src/publicData/eventListCore.ts",
     "./publicData/eventDetailCore": "./src/publicData/eventDetailCore.ts",
+    "./publicData/publicEventStaff": "./src/publicData/publicEventStaff.ts",
     "./publicData/videoDetailCore": "./src/publicData/videoDetailCore.ts",
     "./publicData/eventPlaylistCore": "./src/publicData/eventPlaylistCore.ts",
-    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts"
+    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts",
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

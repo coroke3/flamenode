@@ -82,8 +82,10 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
-| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
+| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
+
+MIG-0651 U01 (#479): The existing UNIQUE-error classifier is now exported via `@flamenode/server-core/video/youtubeDuplicate` and re-exported by the Next legacy module. Target `POST /api/videos/free`, `POST /api/slots/:slotId/video`, and `PATCH /api/videos/:videoId` are **NOT MOUNTED**; multipart 8 MiB enforcement, auth, D1 atomic audit/Queue parity and HTTP regression tests remain U02–U04. This line does not certify API parity.
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
 
@@ -514,3 +516,31 @@ Code landing only: Worker traffic still uses CURRENT Next handler until an autho
 | RH-025 `GET app/api/media/slot-submission-icon/[slotId]` | `GET /api/media/slot-submission-icon/:slotId` | D1 submitted/public probe before conditional Auth.js lookup; public_name shared cache, private owner-only/no-store | missing/unauthorized 404, D1/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/slotSubmissionIcon.ts` |
 
 These routes are Hono code only. CURRENT Next handlers remain intact until separate traffic cutover. CI regression: `apps/api/test/mediaRoutes.parity.test.mjs`. No remote D1/R2/secret/route writes.
+
+## MIG-0637 — Hono Admin Ops mutation mapping (D-17-4)
+
+Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All routes use the existing `/api/admin` origin → session → admin/TOS/BAN guard and a strict audit batch. CostGuard control paths intentionally **skip ordinary costGuardMiddleware**, matching CURRENT `requireCostGuardControlAdmin`, so an administrator can exit maintenance; user-admin paths each use the feature's CostGuard middleware. Write bodies retain CURRENT FormData keys; IDs in the path are authoritative. Static rebuild rows are committed but wake count is 0 (D-0603-1), and `system_settings` mode is mirrored to KV **only after** the D1 commit.
+
+| SA | Hono method + path | CURRENT parity and response |
+| --- | --- | --- |
+| SA-016 | POST `/api/admin/cost-guard/mode` | mode/reason → full-row CAS + strict audit `cost_guard_mode`; post-commit KV mirror |
+| SA-017 | POST `/api/admin/cost-guard/maintenance` | `is_maintenance_mode`/reason; bypass mode restriction to restore normal; post-commit KV |
+| SA-018 | POST `/api/admin/cost-guard/override` | OVERRIDE token, <=8 allowlisted features, 15m TTL, audit; no KV |
+| SA-019 | POST `/api/admin/cost-guard/disabled-features` | APPLY token, 100 feature max, order normalized, exact JSON-encoded CAS; no KV |
+| SA-020 | POST `/api/admin/cost-guard/override/clear` | CLEAR token, null exception, audit; no KV |
+| SA-077 | POST `/api/admin/users/:userId/role` | role edit; no self-downgrade; strict audit |
+| SA-078 | POST `/api/admin/users/:userId/banned` | BAN requires reason, self-BAN forbidden; strict audit |
+| SA-079 | POST `/api/admin/users/:userId/notifications` | disabling cancels all pending outbox rows in same atomic batch, preserving already-sent rows |
+| SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
+| SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
+
+T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
+
+## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
+
+| RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
+| --- | --- | --- | --- | --- |
+| RH-027 | `OPTIONS /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | PVSF 2 origin のみ許可。GET/HEAD、If-None-Match 以外の preflight は 403。Vary / Expose-Headers / no-store CDN は CURRENT 同値 | MIGRATION_IN_PROGRESS |
+| RH-028 | `GET /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | 60/min isolate rate guard、R2 event-base 2MiB、visibility manifest の必須 ETag 前後照合、blocked event 404、blocked X staff 除去、DTO allowlist、非公開/欠損 503 | MIGRATION_IN_PROGRESS |
+
+DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
