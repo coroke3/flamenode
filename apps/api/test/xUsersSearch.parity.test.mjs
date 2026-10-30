@@ -404,7 +404,10 @@ if (runUnderRootTsx(import.meta.url)) {
     ]) {
       assert.ok(!logText.includes(secret), "private provider exception details must never be logged");
     }
-    assert.match(logText, /SESSION_RESOLUTION_UNAVAILABLE/);
+    // SEC-0807-01 (#445) now intercepts a throwing DB getter in the
+    // shared session guard before the internal search route runs. Keep
+    // the fixed, non-sensitive shared marker as the diagnostic contract.
+    assert.match(logText, /\[auth:session\] D1_BINDING_FAILED/);
     assert.match(logText, /R2_BINDING_UNAVAILABLE/);
     assert.match(logText, /SUGGESTIONS_LOOKUP_FAILED/);
   });
