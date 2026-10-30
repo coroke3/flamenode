@@ -61,8 +61,17 @@ async function post(
       return { ok: false, message: "管理者APIを利用できません。" };
     const parsed = resultFromResponse(await res.json());
     if (!parsed) return { ok: false, message: "管理者APIの応答が不正です。", retryable: true };
-    if (res.status >= 500 || res.status < 200 || res.status >= 300)
-      return { ok: false, message: parsed.message ?? "作品状態を再取得してください。", retryable: true };
+    if (res.status < 200 || res.status >= 300) {
+      // A 400/422 validation failure is not an uncertain write and must not
+      // trigger an unnecessary refetch. Conflicts and server errors must
+      // refresh authoritative state before any manual retry.
+      const refresh = res.status === 409 || res.status >= 500 || parsed.retryable === true;
+      return {
+        ok: false,
+        message: parsed.message ?? "作品状態を再取得してください。",
+        ...(refresh ? { retryable: true } : {}),
+      };
+    }
     return parsed;
   } catch {
     // No automatic replay after an uncertain write: the mutation may already be committed.
