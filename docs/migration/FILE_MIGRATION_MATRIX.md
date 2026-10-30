@@ -1187,6 +1187,9 @@
 | `packages/domain/test/videoEventIds.test.mjs` | TEST | SA-088 / SA-089 and legacy part parser | MIG-0651 | Domain canonical parser and legacy bridge regression | IN_PROGRESS | PR#479 SHA=73720838b47556b8c2e42273191e87379a825d91 TEST=npm run test --workspace=@flamenode/domain (CI pending) |
 | `src/lib/video/slotPart.ts` | HELPER | SA-086 / SA-088 / SA-089 lookup and event part resolution | MIG-0651 | Original event part resolver retained; duplicate lookup re-exported via server-core | IN_PROGRESS | PR#479 SHA=73720838b47556b8c2e42273191e87379a825d91 TEST=packages/server-core/test/youtubeDuplicate.test.mjs (CI pending) |
 
+| `apps/app/src/api/xidProfile.ts` | HELPER | MIG-0708 U02 SA-098/102–105 Personal X ID profile actions | MIG-0708 | Provisional adapter; unmounted until MIG-0636 / shared write.ts contract gate | IN_PROGRESS | PR#486 SHA=1d71280f1f811ffe80589e844e5d453241f7dd02 TEST=apps/app/test/xidProfile.test.mjs CI=PENDING |
+| `apps/app/test/xidProfile.test.mjs` | TEST | MIG-0708 U02 method, encoding, same-origin, multipart and fail-closed parity | MIG-0708 | Same new test file | IN_PROGRESS | PR#486 SHA=1d71280f1f811ffe80589e844e5d453241f7dd02 TEST=apps/app/test/xidProfile.test.mjs CI=PENDING |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
