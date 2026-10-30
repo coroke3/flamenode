@@ -224,3 +224,33 @@ test("MIG-0643 SA-069: malformed shared JSON fails closed and schedules both reb
     assert.equal(s.audit().length, 1);
   }
 });
+
+test("MIG-0643 SA-069: D1 provider failures never leak through API or persisted KV state", async () => {
+  const s = setup();
+  seedEvent(s.sqlite, { id: "ev-1" });
+  const sentinel = "PRIVATE_DB_PROVIDER_CREDENTIAL_NEVER_EXPOSE";
+  const originalPrepare = s.db.prepare.bind(s.db);
+  let failedReads = 0;
+  s.db.prepare = (query) => {
+    if (String(query).includes("json_group_array(id)")) {
+      failedReads += 1;
+      throw new Error(sentinel);
+    }
+    return originalPrepare(query);
+  };
+  const response = await s.request({ kind: "event_crew" });
+  assert.equal(response.status, 500);
+  const body = await response.text();
+  assert.doesNotMatch(body, /PRIVATE_DB_PROVIDER_CREDENTIAL_NEVER_EXPOSE/);
+  const parsed = JSON.parse(body);
+  assert.equal(parsed.backfill_kind, "event_crew");
+  assert.equal(parsed.backfill_state_persisted, "1");
+  assert.match(parsed.backfill_error, /再試行/);
+  assert.equal(failedReads, 1);
+  const kv = JSON.stringify(s.saved());
+  assert.doesNotMatch(kv, /PRIVATE_DB_PROVIDER_CREDENTIAL_NEVER_EXPOSE/);
+  assert.equal(s.saved().runs.event_crew.status, "failed");
+  assert.equal(s.saved().runs.event_crew.last_error, parsed.backfill_error);
+  assert.equal(s.stats.batches, 0);
+  assert.equal(s.audit().length, 0);
+});
