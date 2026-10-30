@@ -34,6 +34,7 @@ export function AdminSpreadsheetReadView({
   initialTable?: string;
 }): React.ReactElement {
   const [catalog, setCatalog] = React.useState<CatalogState>({ status: "loading" });
+  const [catalogOrigin, setCatalogOrigin] = React.useState<{ fetchFn: OpsFetch; initialTable?: string } | null>(null);
   const [selectedTable, setSelectedTable] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [rows, setRows] = React.useState<PageState>({ status: "loading" });
@@ -122,11 +123,13 @@ export function AdminSpreadsheetReadView({
 
   React.useEffect(() => {
     const controller = new AbortController();
+    setCatalogOrigin(null);
     setCatalog({ status: "loading" });
     // Identity/transport changes must never keep rows from an earlier session visible.
     setRows({ status: "loading" });
     void loadSpreadsheetCatalog(fetchFn, false, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      setCatalogOrigin({ fetchFn, initialTable });
       if (result.status !== "ok") {
         setCatalog({ status: result.status });
         return;
@@ -153,6 +156,11 @@ export function AdminSpreadsheetReadView({
     return () => controller.abort();
   }, [fetchFn, catalog.status, selectedTable, page]);
 
+  // Render-time origin verification prevents even a transient old-session paint
+  // before the effect can clear state on a changed fetch function or URL selection.
+  if (!catalogOrigin || catalogOrigin.fetchFn !== fetchFn || catalogOrigin.initialTable !== initialTable) {
+    return <p role="status">テーブルを読み込み中…</p>;
+  }
   if (catalog.status === "disabled" || rows.status === "disabled") return <AdminSpreadsheetDisabled />;
   if (catalog.status !== "ready") {
     return <p role="status">{catalog.status === "loading" ? "テーブルを読み込み中…" : failureMessage(catalog.status)}</p>;
