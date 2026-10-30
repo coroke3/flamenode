@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -18,8 +18,8 @@ import {
   safeAdminNextHref,
 } from "../.test-dist/apps/ops/src/api/adminVideoStatus.js";
 import { CreateModerationCaseForm } from "../.test-dist/apps/ops/src/routes/admin/CreateModerationCaseForm.js";
-import { StatusControls, AdminVideoTabs } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
-import { AdminVideoManagementTabs } from "../.test-dist/apps/ops/src/routes/admin/AdminVideos.js";
+import { StatusControls, AdminVideoTabs, AdminVideoDetail } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
+import { AdminVideoManagementTabs, AdminVideos } from "../.test-dist/apps/ops/src/routes/admin/AdminVideos.js";
 import { SaveSuccessNotice } from "../.test-dist/apps/ops/src/components/shared/SaveSuccessNotice.js";
 
 const detail = {
@@ -67,6 +67,74 @@ test("MIG-0729 U01/U02: CURRENT tab labels, icons, active state, filter and cros
   assert.ok(detailNav.querySelector('a[href="/dashboard/edit/video%2F1/permissions?privileged=admin"]'));
   assert.ok(detailNav.querySelector('a[href="/AbcD1234567"]'));
   assert.ok(detailNav.querySelector('a[href="/admin/audit?table=videos&record=video%2F1"]'));
+});
+
+test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Ops SPA", async () => {
+  const oldWindow = globalThis.window;
+  const oldDocument = globalThis.document;
+  const oldActEnv = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://flamenode.invalid" });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const rows = {
+    q: "作者", status: "review", event: "event-1",
+    paging: { page: 2, pageSize: 50, total: 101 },
+    videos: [{ id: "video-1", title: "Test", source_type: "youtube",
+      youtube_video_id: null, display_name: "Creator", status: "pending",
+      created_at: 1_700_000_000,
+      review: { stage_permission_summary: "pending", required_unanswered_count: 2 } }],
+    events: [{ id: "event-1", title: "Event" }],
+    reviewSummaries: "included", degraded: false,
+  };
+  const fetchFn = async path => json(200, path.startsWith("/api/admin-read/videos/video-1") ? detail : rows);
+  function LocationProbe() {
+    const location = useLocation();
+    return React.createElement("output", { id: "route-location" }, location.pathname + location.search);
+  }
+  const route = () => dom.window.document.getElementById("route-location").textContent;
+  const click = async (label) => {
+    const link = [...dom.window.document.querySelectorAll("a")]
+      .find(node => node.textContent.trim() === label);
+    assert.ok(link, `Expected internal link: ${label}`);
+    await React.act(async () => {
+      link.dispatchEvent(new dom.window.MouseEvent("click",
+        { bubbles: true, cancelable: true, button: 0 }));
+    });
+  };
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, {
+        initialEntries: ["/admin/videos?status=review&event=event-1&page=2"],
+      },
+        React.createElement(LocationProbe),
+        React.createElement(Routes, null,
+          React.createElement(Route, { path: "/admin/videos",
+            element: React.createElement(AdminVideos, { fetchFn }) }),
+          React.createElement(Route, { path: "/admin/videos/:id",
+            element: React.createElement(AdminVideoDetail, { fetchFn }) }),
+        ),
+      ));
+    });
+    assert.equal(route(), "/admin/videos?status=review&event=event-1&page=2");
+    await click("詳細");
+    assert.equal(route(), "/admin/videos/video-1?event=event-1",
+      "an Ops-internal detail link must not force a document reload");
+    await click("作品一覧へ");
+    assert.equal(route(), "/admin/videos?status=review&event=event-1");
+    await click("前へ");
+    assert.equal(route(), "/admin/videos?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=1");
+    await click("解除");
+    assert.equal(route(), "/admin/videos");
+  } finally {
+    await React.act(async () => { root.unmount(); });
+    dom.window.close();
+    if (oldWindow === undefined) delete globalThis.window; else globalThis.window = oldWindow;
+    if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
+    if (oldActEnv === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = oldActEnv;
+  }
 });
 
 test("MIG-0729: Unix dates use explicit Asia/Tokyo time zone", () => {

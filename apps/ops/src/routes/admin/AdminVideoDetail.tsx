@@ -18,6 +18,7 @@ import { useApiResult } from "../useApiResult.js";
 import { CreateModerationCaseForm } from "./CreateModerationCaseForm.js";
 import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
 import { AdminResourceTabs } from "../../components/shared/AdminResourceTabs.js";
+import { OpsLink } from "../../components/shared/OpsLink.js";
 
 const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
@@ -282,7 +283,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
   return (
     <section className="fn-public-container fn-page">
       <header className="fn-page-head">
-        <a href={adminVideoBackHref(eventId)}>作品一覧へ</a>
+        <OpsLink href={adminVideoBackHref(eventId)}>作品一覧へ</OpsLink>
         <h1>{video.title}</h1>
         <p>作者: {video.creator_name}{video.creator_x_user_id ? ` (@${video.creator_x_user_id})` : ""}</p>
       </header>
@@ -295,7 +296,7 @@ export function AdminVideoDetail({ fetchFn = browserFetch }: { fetchFn?: OpsFetc
           <nav aria-label="作品の関連画面" className="fn-panel-actions">
             <a href={`/${publicSlug}`} target="_blank" rel="noopener noreferrer">公開ページ</a>
             <a href={`/dashboard/edit/${slug}?privileged=admin`}>編集画面</a>
-            <a href={`/admin/videos/${slug}/members`}>参加者設定</a>
+            <OpsLink href={`/admin/videos/${slug}/members`}>参加者設定</OpsLink>
           </nav>
         </aside>
       </div>

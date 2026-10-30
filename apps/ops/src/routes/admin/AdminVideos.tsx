@@ -13,6 +13,7 @@ import {
 } from "../../api/adminVideos.js";
 import { useApiResult } from "../useApiResult.js";
 import { AdminResourceTabs } from "../../components/shared/AdminResourceTabs.js";
+import { OpsLink } from "../../components/shared/OpsLink.js";
 
 const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const VIDEO_GROUPS = [
@@ -60,9 +61,9 @@ function VideoRow({ video, event, isReview }: {
       <td>{visibilityLabel(video.status)}</td>
       <td>{adminVideoRelativeLabel(video.created_at)}</td>
       <td>
-        <a className="fn-btn fn-btn-ghost fn-btn-sm" href={detailHref(video.id, event)}>詳細</a>{" "}
-        <a className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/videos/${encodeURIComponent(video.id)}/members`}>参加者</a>{" "}
-        <a className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`}>監査</a>
+        <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={detailHref(video.id, event)}>詳細</OpsLink>{" "}
+        <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/videos/${encodeURIComponent(video.id)}/members`}>参加者</OpsLink>{" "}
+        <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" href={`/admin/audit?table=videos&record=${encodeURIComponent(video.id)}`}>監査</OpsLink>
       </td>
     </tr>
   );
@@ -149,7 +150,7 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
           {event && !events.some((ev) => ev.id === event) ? <option value={event}>{event}</option> : null}
         </select>
         <button type="submit" className="fn-btn">検索</button>
-        {(q || status || event) ? <a className="fn-btn fn-btn-ghost" href="/admin/videos">解除</a> : null}
+        {(q || status || event) ? <OpsLink className="fn-btn fn-btn-ghost" href="/admin/videos">解除</OpsLink> : null}
       </form>
       <div style={{ maxWidth: "100%", overflowX: "auto", marginTop: 18 }} aria-label="作品一覧スクロール領域">
         <table className="fn-table">
@@ -169,19 +170,19 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
             {" / 全 "}{paging.total} 件 ({paging.page} / {totalPages} ページ)
           </span>
           {paging.page > 1 ? (
-            <a className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="前のページ"
-              href={buildAdminVideoHref({ q, status, event }, paging.page - 1)}>前へ</a>
+            <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="前のページ"
+              href={buildAdminVideoHref({ q, status, event }, paging.page - 1)}>前へ</OpsLink>
           ) : <span aria-disabled="true">前へ</span>}
           {adminVideoPageNumbers(paging.page, totalPages).map((page, index) =>
             page === "…" ? <span key={`gap-${index}`}>…</span> : (
-              <a key={page} className={page === paging.page ? "fn-btn fn-btn-primary fn-btn-sm" : "fn-btn fn-btn-ghost fn-btn-sm"}
+              <OpsLink key={page} className={page === paging.page ? "fn-btn fn-btn-primary fn-btn-sm" : "fn-btn fn-btn-ghost fn-btn-sm"}
                 aria-current={page === paging.page ? "page" : undefined}
-                href={buildAdminVideoHref({ q, status, event }, page)}>{page}</a>
+                href={buildAdminVideoHref({ q, status, event }, page)}>{page}</OpsLink>
             ),
           )}
           {paging.page < totalPages ? (
-            <a className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="次のページ"
-              href={buildAdminVideoHref({ q, status, event }, paging.page + 1)}>次へ</a>
+            <OpsLink className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="次のページ"
+              href={buildAdminVideoHref({ q, status, event }, paging.page + 1)}>次へ</OpsLink>
           ) : <span aria-disabled="true">次へ</span>}
         </nav>
       ) : null}
