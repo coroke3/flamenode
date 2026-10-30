@@ -99,15 +99,23 @@ export function parseOwnedTasks(prs){
   const owned=new Map();
   for(const pr of prs){
     const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName||"");
-    if(match)owned.set("MIG-"+match[1],pr.number);
+    if(!match)continue;
+    const id="MIG-"+match[1];
+    if(owned.has(id)){
+      throw new Error("Duplicate open PR ownership for "+id+": PR#"+owned.get(id)+" and PR#"+pr.number+"; reconcile the owners before selecting another task");
+    }
+    owned.set(id,pr.number);
   }
   return owned;
 }
 export function readOpenPrOwners(root=ROOT){
+  let prs;
   try{
     const out=execFileSync("gh",["pr","list","--state","open","--limit","100","--json","number,headRefName"],{cwd:root,encoding:"utf8",timeout:15000,stdio:["ignore","pipe","ignore"]});
-    return {owned:parseOwnedTasks(JSON.parse(out)),live:true};
+    prs=JSON.parse(out);
   }catch{return {owned:new Map(),live:false};}
+  // A real owner collision must surface as an error, not masquerade as an unavailable gh CLI.
+  return {owned:parseOwnedTasks(prs),live:true};
 }
 
 // Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
