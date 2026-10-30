@@ -1081,7 +1081,11 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
       assert.equal(result.headers.get("cache-control"), "private, no-store", id);
       assert.equal(result.stats.writes, 0, id);
-      assert.ok(result.stats.statements <= 3, id + ": session + at most 2 CURRENT queries");
+      // CURRENT audit retention reads settings + a COUNT + a sample (3 D1 reads),
+      // in addition to the shared session lookup. Other checks use at most 2.
+      const maximumStatements = id === "audit_logs_retention_candidates" ? 4 : 3;
+      assert.ok(result.stats.statements <= maximumStatements,
+        id + ": session + CURRENT's per-check D1 reads (max " + maximumStatements + ")");
     }
     const unknown = await call("/api/admin-read/ops/health/checks/unknown_check", ADMIN);
     assert.equal(unknown.status, 404);
