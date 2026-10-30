@@ -189,6 +189,19 @@ export function TopView({ stats, primary, recruits, moreRecruitCount, announceme
           </section>
         ) : null}
 
+        <section className="wrap sec tp-search-band" aria-label="作品を検索">
+          <h2 className="t-h2">作品を探す</h2>
+          <form method="get" action="/list" role="search" className="fn-list-toolbar">
+            <label className="fn-list-search">
+              <span className="fn-sr-only">検索キーワード</span>
+              <input type="search" name="q" placeholder="作品名・クリエイターを検索" maxLength={100} autoComplete="off" />
+            </label>
+            <button type="submit" className="fn-btn fn-btn--primary">
+              <ScreenIcon name="search" /> 検索
+            </button>
+          </form>
+        </section>
+
         {shelves.map((shelf) => (
           <section key={shelf.id} className="sec tp-sec" aria-labelledby={`sec-${shelf.id}`}>
             <div className="wrap">
