@@ -105,7 +105,17 @@ async function retryRows(c: import("hono").Context<AppEnv>, rows: QueueRow[]): P
 }
 
 export const staticRebuildAdminRoutes = new Hono<AppEnv>();
-staticRebuildAdminRoutes.use("*", onlyMutating(costGuardMiddleware("admin_static_rebuild")));
+// The static backfill module is mounted as a sibling at /static-builds/backfill.
+// A wildcard CostGuard here also matches that sibling, doubling preflight D1
+// reads on backfill requests. Scope guard to the four owned SA-070..073 paths.
+for (const path of [
+  "/queue/:queueId/retry",
+  "/retry-failed",
+  "/rebuild",
+  "/shared-inputs/rebuild",
+]) {
+  staticRebuildAdminRoutes.use(path, onlyMutating(costGuardMiddleware("admin_static_rebuild")));
+}
 
 // SA-070
 staticRebuildAdminRoutes.post("/queue/:queueId/retry", async (c) => {
