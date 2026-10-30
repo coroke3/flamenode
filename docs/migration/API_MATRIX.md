@@ -507,6 +507,25 @@ Code landing only: Worker traffic still uses CURRENT Next handler until an autho
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
 
+## MIG-0637 — Hono Admin Ops mutation mapping (D-17-4)
+
+Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All routes use the existing `/api/admin` origin → session → admin/TOS/BAN guard and a strict audit batch. CostGuard control paths intentionally **skip ordinary costGuardMiddleware**, matching CURRENT `requireCostGuardControlAdmin`, so an administrator can exit maintenance; user-admin paths each use the feature's CostGuard middleware. Write bodies retain CURRENT FormData keys; IDs in the path are authoritative. Static rebuild rows are committed but wake count is 0 (D-0603-1), and `system_settings` mode is mirrored to KV **only after** the D1 commit.
+
+| SA | Hono method + path | CURRENT parity and response |
+| --- | --- | --- |
+| SA-016 | POST `/api/admin/cost-guard/mode` | mode/reason → full-row CAS + strict audit `cost_guard_mode`; post-commit KV mirror |
+| SA-017 | POST `/api/admin/cost-guard/maintenance` | `is_maintenance_mode`/reason; bypass mode restriction to restore normal; post-commit KV |
+| SA-018 | POST `/api/admin/cost-guard/override` | OVERRIDE token, <=8 allowlisted features, 15m TTL, audit; no KV |
+| SA-019 | POST `/api/admin/cost-guard/disabled-features` | APPLY token, 100 feature max, order normalized, exact JSON-encoded CAS; no KV |
+| SA-020 | POST `/api/admin/cost-guard/override/clear` | CLEAR token, null exception, audit; no KV |
+| SA-077 | POST `/api/admin/users/:userId/role` | role edit; no self-downgrade; strict audit |
+| SA-078 | POST `/api/admin/users/:userId/banned` | BAN requires reason, self-BAN forbidden; strict audit |
+| SA-079 | POST `/api/admin/users/:userId/notifications` | disabling cancels all pending outbox rows in same atomic batch, preserving already-sent rows |
+| SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
+| SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
+
+T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
+
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
 | RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
