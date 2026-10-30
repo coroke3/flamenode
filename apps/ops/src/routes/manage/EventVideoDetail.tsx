@@ -36,7 +36,9 @@ export function safeReviewNextHref(eventId: string, href: string): string | null
     const url = new URL(href, "https://flamenode.invalid");
     if (url.origin !== "https://flamenode.invalid") return null;
     const segment = url.pathname.slice(prefix.length);
-    if (!segment || segment.includes("/") || !decodeURIComponent(segment)) return null;
+    const decoded = decodeURIComponent(segment);
+    if (!segment || segment.includes("/") || !decoded || decoded.includes("/") ||
+        decoded.includes("\\\\") || decoded === "." || decoded === "..") return null;
     return url.pathname + url.search + url.hash;
   } catch { return null; }
 }
