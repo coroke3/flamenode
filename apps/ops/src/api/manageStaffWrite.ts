@@ -61,6 +61,32 @@ function basePath(eventId: string): string | null {
 const UNAVAILABLE: Outcome = { status: "unavailable" };
 
 /**
+ * Shared send() maps a JSON {ok:boolean} before inspecting HTTP status.
+ * Never accept an attacker-controlled / proxied {ok:true} on 401/403/5xx
+ * as a successful privileged staff mutation. Preserve 400/409/422
+ * {ok:false,message} so CURRENT can display conflict/validation details.
+ */
+async function sendStaff(
+  fetchFn: OpsFetch,
+  method: "POST" | "PUT" | "DELETE",
+  path: string,
+  body: object,
+): Promise<Outcome> {
+  let httpStatus: number | null = null;
+  const result = await send<StaffMutationResult>(async (url, init) => {
+    const response = await fetchFn(url, init);
+    httpStatus = response.status;
+    return response;
+  }, method, path, body);
+  if (httpStatus === 401) return { status: "anonymous" };
+  if (httpStatus === null) return UNAVAILABLE;
+  if (httpStatus >= 200 && httpStatus < 300) return result;
+  if ([400, 409, 422].includes(httpStatus) &&
+      result.status === "ok" && result.data.ok === false) return result;
+  return UNAVAILABLE;
+}
+
+/**
  * This is a provisional transport adapter only; the Hono API remains the sole
  * authority for permission, self-change and last-owner CAS validation.
  * No mutation route is mounted in MIG-0723 U02.
@@ -70,17 +96,17 @@ export function createManageStaffWriteClient(fetchFn: OpsFetch = (path, init) =>
     create(eventId: string, input: StaffUpsertInput): Promise<Outcome> {
       const path = basePath(eventId);
       if (!path || !input.reason.trim()) return Promise.resolve(UNAVAILABLE);
-      return send<StaffMutationResult>(fetchFn, "POST", path + "/staff", input);
+      return sendStaff(fetchFn, "POST", path + "/staff", input);
     },
     update(eventId: string, staffId: string, input: StaffUpsertInput): Promise<Outcome> {
       const path = basePath(eventId), staff = segment(staffId);
       if (!path || !staff || !input.reason.trim()) return Promise.resolve(UNAVAILABLE);
-      return send<StaffMutationResult>(fetchFn, "PUT", path + "/staff/" + staff, input);
+      return sendStaff(fetchFn, "PUT", path + "/staff/" + staff, input);
     },
     remove(eventId: string, staffId: string, reason: string, confirmText: string): Promise<Outcome> {
       const path = basePath(eventId), staff = segment(staffId);
       if (!path || !staff || !reason.trim()) return Promise.resolve(UNAVAILABLE);
-      return send<StaffMutationResult>(fetchFn, "DELETE", path + "/staff/" + staff, {
+      return sendStaff(fetchFn, "DELETE", path + "/staff/" + staff, {
         reason, confirm_text: confirmText,
       });
     },
@@ -90,13 +116,13 @@ export function createManageStaffWriteClient(fetchFn: OpsFetch = (path, init) =>
       // validates every row, permissions and atomicity independently.
       if (!path || !reason.trim() || rows.some(row => row.errors.length > 0))
         return Promise.resolve(UNAVAILABLE);
-      return send<StaffMutationResult>(fetchFn, "POST", path + "/staff/csv", { reason, rows: [...rows] });
+      return sendStaff(fetchFn, "POST", path + "/staff/csv", { reason, rows: [...rows] });
     },
     transferOwnership(eventId: string, input: StaffTransferInput): Promise<Outcome> {
       const path = basePath(eventId);
       if (!path || !segment(input.from_staff_id) || !segment(input.to_staff_id) ||
           !input.reason.trim() || !input.confirm_text.trim()) return Promise.resolve(UNAVAILABLE);
-      return send<StaffMutationResult>(fetchFn, "POST", path + "/owner-transfer", input);
+      return sendStaff(fetchFn, "POST", path + "/owner-transfer", input);
     },
   };
 }
