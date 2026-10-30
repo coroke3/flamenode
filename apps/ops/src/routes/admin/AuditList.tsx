@@ -147,9 +147,45 @@ function AuditTarget({ row }: { row: AuditRow }): React.ReactElement {
   return <span><strong>{row.table_name}</strong> <AuditTargetLink tableName={row.table_name}
     recordId={row.target_id}/></span>;
 }
+type AuditActorSnapshot = {
+  discord_name: string | null;
+  x_user_id: string | null;
+  x_name: string | null;
+};
+
+/** Prefer the immutable audit-time identity over today's mutable operator join. */
+export function parseAuditActorSnapshot(raw: string | null): AuditActorSnapshot | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const asText = (field: string): string | null =>
+      typeof record[field] === "string" ? record[field] as string : null;
+    return {
+      discord_name: asText("discord_name"),
+      x_user_id: asText("x_user_id"),
+      x_name: asText("x_name"),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function ActorLabel({ row, operators }: { row: AuditRow; operators: Map<string,Operator> }): React.ReactElement {
+  const snapshot = parseAuditActorSnapshot(row.actor_snapshot_json);
   const operator = operators.get(row.actor_user_id);
-  return <span title={row.actor_user_id}>{operator?.x_name || operator?.name || row.actor_user_id}</span>;
+  const displayName = snapshot?.discord_name ?? operator?.name ?? row.actor_user_id;
+  const xId = snapshot?.x_user_id ?? row.actor_x_user_id ?? operator?.active_x_user_id ?? null;
+  const xName = snapshot?.x_name ?? operator?.x_name ?? null;
+  return <span title={row.actor_user_id} style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+    <span style={{ display: "grid", lineHeight: 1.15, minWidth: 0 }}>
+      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {xName ?? displayName}
+      </strong>
+      {xId ? <small className="fn-muted fn-text-xs">@{xId}</small> : null}
+    </span>
+  </span>;
 }
 function AuditSummary({ row, api }: { row: AuditRow; api: AuditAuditApi }): React.ReactElement {
   const keys = parseChangedKeys(row.changed_keys_json);
