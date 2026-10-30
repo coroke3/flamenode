@@ -1,0 +1,752 @@
+import { and, desc, eq, gte, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import type { ServerCoreDb as AnyDb } from "../db.ts";
+import { events as eventsTable, auditLogs as auditLogsTable, notificationOutbox as notificationOutboxTable, slots as slotsTable, systemSettings, videoEvents as videoEventsTable, videoInteractions as videoInteractionsTable, videoModerationCases as videoModerationCasesTable, videoYoutubeMetadata as videoYoutubeMetadataTable, videos as videosTable, xIdentityRequests as xIdentityRequestsTable } from "@flamenode/db/schema";
+
+export type HealthCheckResult = {
+  id: string;
+  label: string;
+  status: "ok" | "warn" | "info";
+  count: number;
+  samples: string[];
+  note?: string;
+};
+
+
+/** system_settings が default 1 行であるか */
+async function checkSystemSettingsSingleRow(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const rows = await db
+    .select({ c: sql<number>`COUNT(*)` })
+    .from(systemSettings);
+  const count = Number(rows[0]?.c ?? 0);
+  return {
+    id: "system_settings_single_row",
+    label: "system_settings グローバル 1 行性",
+    status: count === 1 ? "ok" : "warn",
+    count,
+    samples: [],
+  };
+}
+
+/** videos.primary_event_id が video_events に対応行を持つか */
+async function checkPrimaryEventSync(db: AnyDb): Promise<HealthCheckResult> {
+  // primary_event_id が設定されているが video_events に存在しない
+  // count は実数を返したいので COUNT(*) と LIMIT サンプルを分離する。
+  const where = and(
+    isNotNull(videosTable.primary_event_id),
+    isNull(videoEventsTable.video_id),
+  );
+  const join = and(
+    eq(videoEventsTable.video_id, videosTable.id),
+    eq(videoEventsTable.event_id, videosTable.primary_event_id!),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .leftJoin(videoEventsTable, join)
+      .where(where),
+    db
+      .select({ id: videosTable.id })
+      .from(videosTable)
+      .leftJoin(videoEventsTable, join)
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "primary_event_sync",
+    label: "primary_event_id / video_events 同期",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+  };
+}
+
+/** video_events の event_id が events に存在するか */
+async function checkOrphanEventRef(db: AnyDb): Promise<HealthCheckResult> {
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoEventsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, videoEventsTable.event_id))
+      .where(isNull(eventsTable.id)),
+    db
+      .select({ video_id: videoEventsTable.video_id })
+      .from(videoEventsTable)
+      .leftJoin(eventsTable, eq(eventsTable.id, videoEventsTable.event_id))
+      .where(isNull(eventsTable.id))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "orphan_event_ref",
+    label: "video_events.event_id 参照整合性",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.video_id),
+  };
+}
+
+/** video_events の video_id が videos に存在するか */
+async function checkOrphanVideoRef(db: AnyDb): Promise<HealthCheckResult> {
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videoEventsTable)
+      .leftJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
+      .where(isNull(videosTable.id)),
+    db
+      .select({ video_id: videoEventsTable.video_id })
+      .from(videoEventsTable)
+      .leftJoin(videosTable, eq(videosTable.id, videoEventsTable.video_id))
+      .where(isNull(videosTable.id))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "orphan_video_ref",
+    label: "video_events.video_id 参照整合性",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.video_id),
+  };
+}
+
+/** available slot に video_id がある */
+async function checkAvailableSlotWithVideo(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = and(
+    eq(slotsTable.status, "available"),
+    isNotNull(slotsTable.video_id),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(slotsTable).where(where),
+    db.select({ id: slotsTable.id }).from(slotsTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "available_slot_with_video",
+    label: "available 枠に video_id あり",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+  };
+}
+
+/** submitted slot に video_id がない */
+async function checkSubmittedSlotWithoutVideo(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = and(
+    eq(slotsTable.status, "submitted"),
+    isNull(slotsTable.video_id),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(slotsTable).where(where),
+    db.select({ id: slotsTable.id }).from(slotsTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "submitted_slot_without_video",
+    label: "submitted 枠に video_id なし",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+  };
+}
+
+/** reservation_group_id 内に別ユーザー混在 */
+async function checkReservationGroupUserMix(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  // 同一 reservation_group_id に内部ユーザーまたは X ID が複数いるグループ。
+  // count は混在グループの実数を返したいので、ノーリミットの中間結果から長さを取る。
+  // (groupBy + HAVING を COUNT(*) でラップするには subquery が必要だが、混在は実運用で
+  //  数十件以下に収まる想定のため、サンプル取得とは分けても合算でも変わらない。)
+  const rows = await db
+    .select({ reservation_group_id: slotsTable.reservation_group_id })
+    .from(slotsTable)
+    .where(isNotNull(slotsTable.reservation_group_id))
+    .groupBy(slotsTable.reservation_group_id)
+    .having(sql`
+      COUNT(DISTINCT ${slotsTable.reserved_by_user_id}) > 1
+      OR COUNT(DISTINCT ${slotsTable.x_user_id}) > 1
+    `);
+  const count = rows.length;
+  return {
+    id: "reservation_group_user_mix",
+    label: "reservation_group_id 内に別ユーザー混在",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: rows
+      .slice(0, 5)
+      .map((r) => r.reservation_group_id ?? "(null)"),
+  };
+}
+
+/** public 動画のうち YouTube URL 未設定の件数（情報表示用） */
+async function checkPublicVideoWithoutYoutubeId(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = and(
+    eq(videosTable.visibility_status, "public"),
+    or(
+      isNull(videosTable.youtube_video_id),
+      eq(videosTable.youtube_video_id, ""),
+    ),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "public_video_without_youtube_id",
+    label: "public 動画（YouTube URL未設定）",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "YouTube未設定でも作品情報は公開できます。必要に応じて後からURLを追加してください。"
+        : undefined,
+  };
+}
+
+/** voided 動画が非削除・非非表示 */
+async function checkVoidedVideoVisible(db: AnyDb): Promise<HealthCheckResult> {
+  const where = eq(videosTable.visibility_status, "voided");
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "voided_video_visible",
+    label: "voided videos (visibility_status=voided)",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      "visibility_status=voided の動画です。公開導線から除外されているか確認してください。",
+  };
+}
+
+/** Detect same-start slots that are not part of the same reservation group. */
+async function checkSlotDuplicateStartTime(db: AnyDb): Promise<HealthCheckResult> {
+  // Keep the existing semantics (NULL groups are distinct, while two
+  // non-NULL rows in the same reservation group are one continuous slot),
+  // but let SQLite/D1 compare pairs instead of loading every slot into JS.
+  // `s1.id < s2.id` makes each unordered pair count once.
+  const pairWhere = sql`
+    s1.start_time IS NOT NULL
+    AND s2.start_time = s1.start_time
+    AND s2.event_id = s1.event_id
+    AND s1.id < s2.id
+    AND (
+      s1.reservation_group_id IS NULL
+      OR s2.reservation_group_id IS NULL
+      OR s1.reservation_group_id <> s2.reservation_group_id
+    )
+  `;
+  const pairFrom = sql`slots AS s1, slots AS s2`;
+  const sampleRows = await db
+    .select({
+      left_id: sql<string>`s1.id`,
+      right_id: sql<string>`s2.id`,
+      total_count: sql<number>`COUNT(*) OVER()`,
+    })
+    .from(pairFrom)
+    .where(pairWhere)
+    .orderBy(sql`s1.event_id, s1.start_time, s1.id, s2.id`)
+    .limit(5);
+  const duplicateCount = Number(sampleRows[0]?.total_count ?? 0);
+  const duplicateSamples = sampleRows.map(
+    (row) => `${row.left_id} / ${row.right_id}`,
+  );
+
+  return {
+    id: "slot_duplicate_start_time",
+    label: "同一開始時刻の別枠",
+    status: duplicateCount === 0 ? "ok" : "warn",
+    count: duplicateCount,
+    samples: duplicateSamples,
+    note:
+      duplicateCount > 0
+        ? "同一 event 内に同じ開始時刻で、reservation_group_id が異なる枠ペアがあります。"
+        : undefined,
+  };
+}
+
+/** like_count 実数差分チェック */
+const LIKE_COUNT_DRIFT_ABS = 5;
+const LIKE_COUNT_DRIFT_RATIO = 0.05;
+
+async function loadVideosWithStoredLikes(
+  db: AnyDb,
+): Promise<{ id: string; like_count: number }[]> {
+  const rows = await db
+    .select({
+      id: videosTable.id,
+      like_count: videosTable.app_like_count,
+    })
+    .from(videosTable)
+    .where(gte(videosTable.app_like_count, 1));
+  return rows.map((r) => ({ id: r.id, like_count: r.like_count ?? 0 }));
+}
+
+async function checkLikeCountDrift(db: AnyDb): Promise<HealthCheckResult> {
+  const videoRows = await loadVideosWithStoredLikes(db);
+
+  if (videoRows.length === 0) {
+    return {
+      id: "like_count_drift",
+      label: "like_count 実数差分 (閾値 max(±5, ±5%))",
+      status: "ok",
+      count: 0,
+      samples: [],
+    };
+  }
+
+  // video_interactions から like 件数を group by video_id で取得
+  const interactionRows = await db
+    .select({
+      video_id: videoInteractionsTable.video_id,
+      cnt: sql<number>`COUNT(*)`,
+    })
+    .from(videoInteractionsTable)
+    .where(eq(videoInteractionsTable.interaction_type, "like"))
+    .groupBy(videoInteractionsTable.video_id);
+
+  // JS 側で video_id -> count のマップを作成
+  const interactionMap = new Map<string, number>();
+  for (const r of interactionRows) {
+    interactionMap.set(r.video_id, Number(r.cnt));
+  }
+
+  const driftSamples: string[] = [];
+  let driftCount = 0;
+
+  for (const video of videoRows) {
+    const actual = interactionMap.get(video.id) ?? 0;
+    const stored = video.like_count ?? 0;
+    const absThreshold = LIKE_COUNT_DRIFT_ABS;
+    const ratioThreshold = Math.ceil(actual * LIKE_COUNT_DRIFT_RATIO);
+    const threshold = Math.max(absThreshold, ratioThreshold);
+    const diff = Math.abs(stored - actual);
+    if (diff >= threshold) {
+      driftCount++;
+      if (driftSamples.length < 5) {
+        const triggeredBy =
+          ratioThreshold >= absThreshold ? `ratio(${ratioThreshold})` : `abs(${absThreshold})`;
+        driftSamples.push(
+          `video:${video.id} stored:${stored} actual:${actual} diff:${diff} threshold:${threshold} [${triggeredBy}]`,
+        );
+      }
+    }
+  }
+
+  return {
+    id: "like_count_drift",
+    label: "like_count 実数差分 (閾値 max(±5, ±5%))",
+    status: driftCount === 0 ? "ok" : "warn",
+    count: driftCount,
+    samples: driftSamples,
+    note:
+      driftCount > 0
+        ? "保存されているいいね数と video_interactions の実数が大きくズレている作品があります。"
+        : undefined,
+  };
+}
+
+/** videos statistic columns are canonical. */
+async function checkMissingVideoStats(
+  _db: AnyDb,
+): Promise<HealthCheckResult> {
+  return {
+    id: "video_statistics_columns",
+    label: "video statistics columns",
+    status: "ok",
+    count: 0,
+    samples: [],
+    note: "videos.score and videos.app_like_count are canonical.",
+  };
+}
+/** videos に対応する video_youtube_metadata が存在するか */
+async function checkMissingVideoYoutubeMetadata(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = isNull(videoYoutubeMetadataTable.video_id);
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(videosTable)
+      .leftJoin(
+        videoYoutubeMetadataTable,
+        eq(videoYoutubeMetadataTable.video_id, videosTable.id),
+      )
+      .where(where),
+    db
+      .select({ id: videosTable.id })
+      .from(videosTable)
+      .leftJoin(
+        videoYoutubeMetadataTable,
+        eq(videoYoutubeMetadataTable.video_id, videosTable.id),
+      )
+      .where(where)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "missing_video_youtube_metadata",
+    label: "video_youtube_metadata 派生行不足",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "YouTube 同期状態の初期行がない作品があります。ensureVideoDerivedRows 相当の処理で pending 行を作成してください。"
+        : undefined,
+  };
+}
+
+/** deprecated: outro_comment は clean schema から削除済み */
+async function checkVideosOutroComment(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const where = sql`0 = 1`;
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videosTable).where(where),
+    db.select({ id: videosTable.id }).from(videosTable).where(where).limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "videos_outro_comment_legacy",
+    label: "outro_comment 削除済み確認",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => r.id),
+    note:
+      count > 0
+        ? "outro_comment は closing_comment に統一済み。旧データは表示のみで、新規書き込みは行わない。"
+        : undefined,
+  };
+}
+
+/** marker_kind 列は 0044 で削除済み */
+async function checkChapterNonChapterMarker(
+  _db: AnyDb,
+): Promise<HealthCheckResult> {
+  return {
+    id: "chapter_non_chapter_marker",
+    label: "video_chapters.marker_kind (削除済み)",
+    status: "ok",
+    count: 0,
+    samples: [],
+  };
+}
+
+/** video_members.video_id が videos に存在するか (orphan) */
+async function checkOrphanVideoMember(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(sql`video_members AS vm`)
+      .where(sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`),
+    db
+      .select({ id: sql<string>`vm.id`, video_id: sql<string>`vm.video_id` })
+      .from(sql`video_members AS vm`)
+      .where(sql`NOT EXISTS (SELECT 1 FROM videos v WHERE v.id = vm.video_id)`)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "orphan_video_member",
+    label: "video_members.video_id に対応する videos が無い (orphan)",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `vm:${r.id} video:${r.video_id}`),
+    note: count > 0 ? "video 削除時に video_members を残しています。" : undefined,
+  };
+}
+
+/** notification_outbox の processing が固着していないか */
+async function checkNotificationProcessingStuck(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - 15 * 60;
+  const where = and(
+    eq(notificationOutboxTable.status, "processing"),
+    isNotNull(notificationOutboxTable.processing_started_at),
+    lt(notificationOutboxTable.processing_started_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(notificationOutboxTable).where(where),
+    db
+      .select({
+        id: notificationOutboxTable.id,
+        processing_started_at: notificationOutboxTable.processing_started_at,
+      })
+      .from(notificationOutboxTable)
+      .where(where)
+      .orderBy(notificationOutboxTable.processing_started_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "notification_processing_stuck",
+    label: "notification_outbox processing 固着",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows
+      .slice(0, 5)
+      .map((r) => `${r.id} (${r.processing_started_at ?? "?"})`),
+    note:
+      count > 0
+        ? "Worker が処理中のまま戻せていない通知です。再送制御または手動キャンセルを確認してください。"
+        : undefined,
+  };
+}
+
+/** notification_outbox の failed が多すぎないか */
+async function checkNotificationFailedVolume(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const [countRows, sampleRows] = await Promise.all([
+    db
+      .select({ c: sql<number>`COUNT(*)` })
+      .from(notificationOutboxTable)
+      .where(eq(notificationOutboxTable.status, "failed")),
+    db
+      .select({ id: notificationOutboxTable.id, type: notificationOutboxTable.type })
+      .from(notificationOutboxTable)
+      .where(eq(notificationOutboxTable.status, "failed"))
+      .orderBy(desc(notificationOutboxTable.created_at))
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "notification_failed_volume",
+    label: "notification_outbox failed 件数",
+    status: count >= 20 ? "warn" : count > 0 ? "info" : "ok",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} (${r.type})`),
+    note:
+      count > 0
+        ? "失敗通知は手動再送またはキャンセルし、古い failed は cleanup の TTL で削除します。"
+        : undefined,
+  };
+}
+
+/** open の video_moderation_cases が期限切れになっていないか */
+async function checkOpenModerationCasesOverdue(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const now = Math.floor(Date.now() / 1000);
+  const where = and(
+    eq(videoModerationCasesTable.status, "open"),
+    isNotNull(videoModerationCasesTable.due_at),
+    lt(videoModerationCasesTable.due_at, now),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(videoModerationCasesTable).where(where),
+    db
+      .select({
+        id: videoModerationCasesTable.id,
+        video_id: videoModerationCasesTable.video_id,
+        due_at: videoModerationCasesTable.due_at,
+      })
+      .from(videoModerationCasesTable)
+      .where(where)
+      .orderBy(videoModerationCasesTable.due_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "open_moderation_cases_overdue",
+    label: "未解決モデレーション期限切れ",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} video:${r.video_id}`),
+    note:
+      count > 0
+        ? "期限切れの open case です。/admin/moderation で解決・却下・キャンセルしてください。"
+        : undefined,
+  };
+}
+
+/** events.public_api_enabled is canonical for public API exposure. */
+async function checkActiveApiEndpointsOrphanEvent(
+  _db: AnyDb,
+): Promise<HealthCheckResult> {
+  return {
+    id: "public_api_event_flag",
+    label: "public API event flag",
+    status: "ok",
+    count: 0,
+    samples: [],
+    note: "events.public_api_enabled is canonical.",
+  };
+}
+/** x_identity_requests の merge pending が放置されていないか */
+async function checkXIdMergePendingStale(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const cutoff = Math.floor(Date.now() / 1000) - 7 * 86400;
+  const where = and(
+    eq(xIdentityRequestsTable.request_type, "merge"),
+    eq(xIdentityRequestsTable.status, "pending"),
+    lt(xIdentityRequestsTable.requested_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(xIdentityRequestsTable).where(where),
+    db
+      .select({
+        id: xIdentityRequestsTable.id,
+        from_x_user_id: xIdentityRequestsTable.source_x_user_id,
+        to_x_user_id: xIdentityRequestsTable.target_x_user_id,
+      })
+      .from(xIdentityRequestsTable)
+      .where(where)
+      .orderBy(xIdentityRequestsTable.requested_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "x_id_merge_pending_stale",
+    label: "X ID 統合申請 pending 放置",
+    status: count === 0 ? "ok" : "warn",
+    count,
+    samples: sampleRows
+      .slice(0, 5)
+      .map((r) => `${r.id} @${r.from_x_user_id} -> @${r.to_x_user_id}`),
+    note:
+      count > 0
+        ? "危険操作のため自動実行せず、影響範囲を確認して承認・却下してください。"
+        : undefined,
+  };
+}
+
+/** audit_logs の normal retention 対象件数 */
+async function checkAuditLogsRetentionCandidates(
+  db: AnyDb,
+): Promise<HealthCheckResult> {
+  const settings = await db.select().from(systemSettings).limit(1);
+  const days = Math.max(7, Number(settings[0]?.audit_normal_retention_days ?? 30) || 30);
+  const cutoff = Math.floor(Date.now() / 1000) - days * 86400;
+  const where = and(
+    or(isNull(auditLogsTable.retention_class), eq(auditLogsTable.retention_class, "normal")),
+    lt(auditLogsTable.created_at, cutoff),
+  );
+  const [countRows, sampleRows] = await Promise.all([
+    db.select({ c: sql<number>`COUNT(*)` }).from(auditLogsTable).where(where),
+    db
+      .select({
+        id: auditLogsTable.id,
+        table_name: auditLogsTable.table_name,
+        created_at: auditLogsTable.created_at,
+      })
+      .from(auditLogsTable)
+      .where(where)
+      .orderBy(auditLogsTable.created_at)
+      .limit(10),
+  ]);
+  const count = Number(countRows[0]?.c ?? 0);
+  return {
+    id: "audit_logs_retention_candidates",
+    label: "audit_logs normal retention 対象",
+    status: count === 0 ? "ok" : "info",
+    count,
+    samples: sampleRows.slice(0, 5).map((r) => `${r.id} ${r.table_name}`),
+    note:
+      count > 0
+        ? "normal 監査ログの削除候補です。cleanup Worker の retention 設定を確認してください。"
+        : undefined,
+  };
+}
+
+/** Explicit, non-user-controlled deep-health check catalog (CURRENT runHealthChecks order). */
+export const HEALTH_CHECK_IDS = [
+  "system_settings_single_row",
+  "primary_event_sync",
+  "orphan_event_ref",
+  "orphan_video_ref",
+  "available_slot_with_video",
+  "submitted_slot_without_video",
+  "reservation_group_user_mix",
+  "public_video_without_youtube_id",
+  "voided_video_visible",
+  "slot_duplicate_start_time",
+  "like_count_drift",
+  "video_statistics_columns",
+  "missing_video_youtube_metadata",
+  "videos_outro_comment_legacy",
+  "chapter_non_chapter_marker",
+  "orphan_video_member",
+  "notification_processing_stuck",
+  "notification_failed_volume",
+  "open_moderation_cases_overdue",
+  "public_api_event_flag",
+  "x_id_merge_pending_stale",
+  "audit_logs_retention_candidates",
+] as const;
+
+type HealthCheckId = (typeof HEALTH_CHECK_IDS)[number];
+const healthRunners: Record<HealthCheckId, (db: AnyDb) => Promise<HealthCheckResult>> = {
+  system_settings_single_row: checkSystemSettingsSingleRow,
+  primary_event_sync: checkPrimaryEventSync,
+  orphan_event_ref: checkOrphanEventRef,
+  orphan_video_ref: checkOrphanVideoRef,
+  available_slot_with_video: checkAvailableSlotWithVideo,
+  submitted_slot_without_video: checkSubmittedSlotWithoutVideo,
+  reservation_group_user_mix: checkReservationGroupUserMix,
+  public_video_without_youtube_id: checkPublicVideoWithoutYoutubeId,
+  voided_video_visible: checkVoidedVideoVisible,
+  slot_duplicate_start_time: checkSlotDuplicateStartTime,
+  like_count_drift: checkLikeCountDrift,
+  video_statistics_columns: checkMissingVideoStats,
+  missing_video_youtube_metadata: checkMissingVideoYoutubeMetadata,
+  videos_outro_comment_legacy: checkVideosOutroComment,
+  chapter_non_chapter_marker: checkChapterNonChapterMarker,
+  orphan_video_member: checkOrphanVideoMember,
+  notification_processing_stuck: checkNotificationProcessingStuck,
+  notification_failed_volume: checkNotificationFailedVolume,
+  open_moderation_cases_overdue: checkOpenModerationCasesOverdue,
+  public_api_event_flag: checkActiveApiEndpointsOrphanEvent,
+  x_id_merge_pending_stale: checkXIdMergePendingStale,
+  audit_logs_retention_candidates: checkAuditLogsRetentionCandidates,
+};
+
+/** Unknown IDs do no work. Each valid request executes only its selected CURRENT check. */
+export async function runHealthCheckById(db: AnyDb, id: string): Promise<HealthCheckResult | null> {
+  if (!Object.prototype.hasOwnProperty.call(healthRunners, id)) return null;
+  return healthRunners[id as HealthCheckId](db);
+}
+
+export async function runHealthChecks(db: AnyDb): Promise<HealthCheckResult[]> {
+  return Promise.all(HEALTH_CHECK_IDS.map((id) => healthRunners[id](db)));
+}
+
+/**
+ * 通常の管理画面表示で確認する、短時間で終わる運用チェックだけを実行する。
+ *
+ * 参照整合性の全件走査、like_count の全動画集計、slot のペア検査などは
+ * `runHealthChecks`（deep/run 明示時）へ残し、通常アクセスでD1を圧迫しない。
+ */
+export async function runOperationalHealthChecks(
+  db: AnyDb,
+): Promise<HealthCheckResult[]> {
+  return Promise.all([
+    checkSystemSettingsSingleRow(db),
+    checkNotificationProcessingStuck(db),
+    checkNotificationFailedVolume(db),
+    checkOpenModerationCasesOverdue(db),
+    checkXIdMergePendingStale(db),
+  ]);
+}

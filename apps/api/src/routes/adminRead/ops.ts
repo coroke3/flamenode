@@ -14,6 +14,7 @@ import type {
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
 import { INTEGRITY_CHECK_IDS, runIntegrityCheckById } from "@flamenode/server-core/admin/integrityChecks";
+import { HEALTH_CHECK_IDS, runHealthCheckById } from "@flamenode/server-core/admin/healthChecks";
 import { dbMiddleware } from "../../middleware/db.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import {
@@ -231,15 +232,13 @@ adminOpsRoutes.get("/notifications", async (c) => {
 // Default view = the 5 operational checks, as ONE UNION ALL statement (session + 1; CURRENT 9 queries). A failure
 // is CURRENT's page error (Promise.all rejects): error "query_failed", no results.
 //
-// STOP (recorded, not implemented): ?deep=1 / ?run=1 runs the 22-check runHealthChecks(), which scans whole tables
-// (like_count drift loads every video with stored likes into JS, orphan joins, slot pairs). That cannot meet S2
-// (<= 3 statements, bounded LIMIT, 7 ms) and is a background-job (B) / build-time report, not an API read.
-// The API answers 501 for deep runs; the SPA must not link to it until that job exists.
+// Deep requests only return the allowlisted check catalog, without running unbounded checks.
+// Each selected diagnostic is requested separately by /ops/health/checks/:checkId.
 adminOpsRoutes.get("/health", async (c) => {
   const statusQ = c.req.query("status");
   const status = statusQ === "warn" || statusQ === "info" || statusQ === "ok" ? statusQ : "all";
   if (c.req.query("deep") === "1" || c.req.query("run") === "1") {
-    return c.json({ error: "deep_unsupported" }, 501);
+    return c.json({ status, results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] } satisfies AdminHealthResponse);
   }
   const now = Math.floor(Date.now() / 1000);
   let results: AdminHealthResponse["results"] = [];
@@ -317,6 +316,16 @@ adminOpsRoutes.get("/health", async (c) => {
   }
   const body: AdminHealthResponse = { status, results, error };
   return c.json(body);
+});
+
+// MIG-0626 U06: One existing CURRENT health check per admin-only request; unknown IDs fail closed.
+adminOpsRoutes.get("/health/checks/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!id || !HEALTH_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const result = await runHealthCheckById(c.get("db"), id);
+  return c.json({ status: "all", results: result ? [result] : [], error: null } satisfies AdminHealthResponse);
 });
 
 // ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----

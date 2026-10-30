@@ -494,11 +494,12 @@ export const AdminDiagnosticResultSchema = z.object({
   samples: z.array(z.string()),
   note: z.string().optional(),
 });
-// Operational (default) health view only; the deep view is answered 501 by the API (see ops.ts).
+// Operational default view and an idle allowlisted catalog for bounded per-check deep diagnostics.
 export const AdminHealthResponseSchema = z.object({
   status: z.enum(["all", "warn", "info", "ok"]),
   results: z.array(AdminDiagnosticResultSchema),
   error: z.literal("query_failed").nullable(),
+  checkIds: z.array(z.string()).optional(),
 });
 export type AdminHealthResponse = z.infer<typeof AdminHealthResponseSchema>;
 

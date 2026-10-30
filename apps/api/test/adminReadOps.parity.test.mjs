@@ -1050,7 +1050,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
-  test("T02 health (operational view) equals CURRENT runOperationalHealthChecks; deep run is 501", async () => {
+  test("T02 health (operational view) equals CURRENT and deep diagnostics are allowlisted per check", async () => {
     const { runOperationalHealthChecks } = await import("../../../src/lib/admin/healthChecks.ts");
     ins("x_identity_requests", { id: "xs1", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "alice_x", target_x_user_id: "alice_y", requested_at: nowS - 9 * 86400, updated_at: nowS });
     ins("x_identity_requests", { id: "xs2", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "frank_x", target_x_user_id: "frank_y", requested_at: nowS - 8 * 86400, updated_at: nowS });
@@ -1066,11 +1066,29 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(byId.x_id_merge_pending_stale.count >= 2 && byId.open_moderation_cases_overdue.count >= 1);
     assert.equal((await get("/ops/health?status=info")).body.status, "info");
 
+    const { HEALTH_CHECK_IDS, runHealthChecks } = await import("@flamenode/server-core/admin/healthChecks");
     const deep = await call("/api/admin-read/ops/health?deep=1", ADMIN);
-    assert.equal(deep.status, 501);
+    assert.equal(deep.status, 200);
+    assert.deepEqual(deep.body, { status: "all", results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] });
     assert.equal(deep.headers.get("cache-control"), "private, no-store");
-    assert.equal(deep.stats.statements, 1, "no health query for a deep run");
-    assert.equal((await call("/api/admin-read/ops/health?run=1", ADMIN)).status, 501);
+    assert.equal(deep.stats.statements, 1, "catalog only performs the session lookup");
+    assert.deepEqual((await call("/api/admin-read/ops/health?run=1", ADMIN)).body, deep.body);
+    assert.equal(new Set(HEALTH_CHECK_IDS).size, 22);
+    const fullResults = await runHealthChecks(refDb);
+    for (const id of HEALTH_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/health/checks/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id + " " + result.text.slice(0, 200));
+      assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      assert.equal(result.stats.writes, 0, id);
+      assert.ok(result.stats.statements <= 3, id + ": session + at most 2 CURRENT queries");
+    }
+    const unknown = await call("/api/admin-read/ops/health/checks/unknown_check", ADMIN);
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.stats.statements, 1);
+    const denied = await call("/api/admin-read/ops/health/checks/like_count_drift", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1);
 
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;
