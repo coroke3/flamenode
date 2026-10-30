@@ -84,7 +84,7 @@ test("U02: DELETE is idempotent, non-owner can be removed, last operable owner s
   const del = await s.send("DELETE", "/"+row.id, { reason: "remove" });
   assert.equal(del.status, 200, await del.clone().text());
   assert.equal(s.row(row.id), undefined);
-  assert.equal(s.count("audit_logs"), 4, "create-X, create-staff, delete-staff, plus another X may not be created");
+  assert.equal(s.count("audit_logs"), 3, "pending X creation, staff creation, staff deletion");
   const repeat = await s.send("DELETE", "/"+row.id, { reason: "remove" });
   assert.equal(repeat.status, 200, await repeat.clone().text());
   assert.deepEqual(await repeat.json(), { ok: true });
