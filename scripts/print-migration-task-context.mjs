@@ -138,7 +138,13 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
   const decisions=new Map();
   for(const line of decisionText.split("\n")){
     const cells=line.split("|").map(x=>x.trim());
-    if(/^D-\d{2}$/.test(cells[1]||""))decisions.set(cells[1],cells[3]);
+    if(/^D-\d{2}$/.test(cells[1]||"")){
+      // The main migration gate validator also rejects duplicate Decision IDs.
+      // Do not permit a second row to overwrite OPEN with DECIDED in the
+      // task selector, even before that validator's PR has been merged.
+      if(decisions.has(cells[1]))throw new Error("Duplicate Decision ID in migration:next: "+cells[1]+"; reconcile the decision ledger before claiming a task");
+      decisions.set(cells[1],cells[3]);
+    }
   }
   const candidates=[];
   for(const [id,task] of tasks){
