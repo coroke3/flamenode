@@ -22,6 +22,12 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "失敗", dead_letter: "最終失敗", cancelled: "キャンセル",
 };
 const TERMINAL_FAILURES = new Set(["failed", "dead_letter"]);
+
+/** API and DB values are untrusted; inherited Object.prototype keys are not labels. */
+function ownLabel(labels: Record<string, string>, key: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(labels, key) ? labels[key] : undefined;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   video_submitted: "作品を受け付けました",
   video_approved: "作品が公開されました",
@@ -101,10 +107,10 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
     <div className="manage-notification-summary">
       <div>
         <span className={"fn-badge " + (TERMINAL_FAILURES.has(status) ? "fn-badge-danger" : status === "processing" ? "fn-badge-warning" : "fn-badge-soft")}>
-          {STATUS_LABELS[status] ?? (status || "不明")}
+          {ownLabel(STATUS_LABELS, status) ?? (status || "不明")}
         </span>{" "}
         <span className="fn-badge fn-badge-soft">{category}</span>{" "}
-        <strong>{TYPE_LABELS[row.type] ?? row.type.replaceAll("_", " ")}</strong>
+        <strong>{ownLabel(TYPE_LABELS, row.type) ?? row.type.replaceAll("_", " ")}</strong>
       </div>
       <div className="fn-td-muted">宛先: {destination}{recipient?.notificationsEnabled === false ? "（通知OFF）" : ""}</div>
       {preview ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{preview}</div> : null}
@@ -180,7 +186,7 @@ export function ManageNotificationsBody({ data, search, change }: {
                   </td>
                   <td>{row.event_id ? (
                     <a href={"/manage/events/" + encodeURIComponent(row.event_id)}>
-                      {data.eventTitles[row.event_id]?.slice(0, 24) ?? row.event_id.slice(0, 8) + "…"}
+                      {ownLabel(data.eventTitles, row.event_id)?.slice(0, 24) ?? row.event_id.slice(0, 8) + "…"}
                     </a>
                   ) : "—"}</td>
                 </tr>

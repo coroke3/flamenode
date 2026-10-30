@@ -116,3 +116,28 @@ test("MIG-0725 U02: CURRENT absolute/relative date parity and malformed timestam
   assert.doesNotMatch(invalid, /dateTime=/);
   assert.match(invalid, /—/);
 });
+
+
+test("MIG-0725 U02: inherited Object.prototype keys cannot crash notification or event titles", () => {
+  for (const inherited of ["constructor", "__proto__", "toString", "valueOf"]) {
+    const row = {
+      id: "n-inherited", type: inherited, status: inherited,
+      payload_json: "{}", attempt_count: 0, last_error: null, dedupe_key: null,
+      recipient_user_id: null, event_id: inherited, created_at: 1700000000,
+      recipient: null,
+    };
+    const html = render({ ...fixture, notifications: [row], eventTitles: {} });
+    assert.match(html, /fn-badge/, inherited);
+    assert.ok(html.includes(inherited), "raw unknown status/type must be readable: " + inherited);
+    assert.ok(html.includes('/manage/events/' + encodeURIComponent(inherited)), inherited);
+    assert.ok(html.includes(inherited.slice(0, 8) + "…"), "unknown event has short fallback");
+  }
+  const own = render({ ...fixture, notifications: [{
+    id: "n-owned", type: "video_submitted", status: "sent",
+    payload_json: "{}", attempt_count: 0, last_error: null, dedupe_key: null,
+    recipient_user_id: null, event_id: "constructor", created_at: 1700000000,
+    recipient: null,
+  }], eventTitles: { constructor: "実際のイベント名" } });
+  assert.match(own, /実際のイベント名/, "explicit own event titles remain usable");
+  assert.match(own, /送信済み/, "ordinary status label remains intact");
+});
