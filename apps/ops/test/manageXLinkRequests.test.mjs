@@ -1,7 +1,7 @@
 // MIG-0725 U03a. Read-only request queue contract; server denies unauthorized staff with 404.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readManageXLinkRequests } from "../.test-dist/apps/ops/src/api/xidLinkRequests.js";
+import { readManageXLinkRequests } from "../.test-dist/apps/ops/src/api/manageXLinkRequests.js";
 
 const response = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },

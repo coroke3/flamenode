@@ -2,7 +2,7 @@
 import * as React from "react";
 import type { ManageXLinkRequest, ManageXLinkRequestsResponse } from "@flamenode/contracts";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
-import { readManageXLinkRequests } from "../../api/xidLinkRequests.js";
+import { readManageXLinkRequests } from "../../api/manageXLinkRequests.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { ManageXIcon } from "../../components/shared/ManageXIcon.js";
 import { FnTable } from "../../components/shared/FnTable.js";
