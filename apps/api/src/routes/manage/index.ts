@@ -15,7 +15,7 @@ import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
 import { manageStaffRoutes } from "./staff.ts";
-import { staffWriteRoutes } from "./staffWrite.ts";
+import { registerStaffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
@@ -45,9 +45,10 @@ for (const path of guardedWritePaths) {
 }
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
-// The existing read-only /manage API remains unchanged. Only these mutating
-// playlist and staff paths use the CURRENT writeGuard(identity/TOS) -> DB adapter.
-for (const path of playlistWritePaths) {
+// The existing read-only /manage API remains unchanged. Every mutating
+// playlist AND staff path must receive writeGuard(identity/TOS) -> DB before
+// the handlers; onlyMutating keeps the GET staff endpoint read-only.
+for (const path of guardedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
   manageRoutes.use(path, onlyMutating(dbMiddleware));
@@ -55,7 +56,7 @@ for (const path of playlistWritePaths) {
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
-manageRoutes.route("/events/:id/staff", staffWriteRoutes);
+registerStaffWriteRoutes(manageRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
 manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
