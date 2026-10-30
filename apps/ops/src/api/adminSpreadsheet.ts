@@ -88,3 +88,54 @@ export function loadSpreadsheetPage(
     signal,
   );
 }
+
+/** MIG-0737 U01 RH-007: bounded CSV/TSV export. A JSON response must never be offered as a download. */
+export type SpreadsheetExportData = { blob: Blob; truncated: boolean };
+export type SpreadsheetExportResult = SpreadsheetReadResult<SpreadsheetExportData>;
+
+export async function loadSpreadsheetExport(
+  fetchFn: OpsFetch,
+  table: string,
+  format: "csv" | "tsv",
+  signal?: AbortSignal,
+): Promise<SpreadsheetExportResult> {
+  if (!table || signal?.aborted) return { status: "unavailable" };
+  try {
+    const response = await fetchFn(
+      `/api/admin/spreadsheet/export?table=${encodeURIComponent(table)}&format=${format}&header=1`,
+      {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { accept: format === "csv" ? "text/csv" : "text/tab-separated-values" },
+        signal,
+      },
+    );
+    if (signal?.aborted) return { status: "unavailable" };
+    if (response.status === 401) return { status: "anonymous" };
+    if (response.status === 403) return { status: "forbidden" };
+    if (response.status === 404) {
+      const raw: unknown = await response.json().catch(() => null);
+      if (signal?.aborted) return { status: "unavailable" };
+      return raw && typeof raw === "object" && !Array.isArray(raw) &&
+        "error" in raw && raw.error === "spreadsheet_disabled"
+        ? { status: "disabled" } : { status: "notFound" };
+    }
+    if (response.status === 501) return { status: "unsupported" };
+    if (response.status !== 200) return { status: "unavailable" };
+    const mime = response.headers.get("content-type")?.toLowerCase() ?? "";
+    const expected = format === "csv" ? "text/csv" : "text/tab-separated-values";
+    if (!mime.startsWith(expected) || mime.includes("application/json")) {
+      return { status: "unavailable" };
+    }
+    const blob = await response.blob();
+    if (signal?.aborted) return { status: "unavailable" };
+    // Hono's RH-007 caps the bytes/rows and reports partial files via this header.
+    return {
+      status: "ok",
+      data: { blob, truncated: response.headers.get("x-spreadsheet-truncated") === "1" },
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
