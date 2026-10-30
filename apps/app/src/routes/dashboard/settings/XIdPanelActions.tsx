@@ -52,12 +52,12 @@ export function SetActiveXButton({
     });
   };
   return (
-    <span className="settings-inlineActions">
+    <span className="xids-row">
       <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
         disabled={pending} aria-busy={pending} onClick={run}>
         {pending ? "設定中…" : "アクティブに設定"}
       </button>
-      {error ? <span className="settings-formError" role="alert">{error}</span> : null}
+      {error ? <span className="xids-msgErr" role="alert">{error}</span> : null}
     </span>
   );
 }
@@ -102,11 +102,11 @@ export function XIdIconPicker({
     ev.target.value = "";
   };
   return (
-    <div className="settings-form">
-      <p className="settings-compactLabel">アイコン候補（作品サムネから自動取得）</p>
-      <div className="settings-iconRow" role="group" aria-label="X IDアイコン">
+    <div className="xids-stack">
+      <p className="xids-compactLabel">アイコン候補（作品サムネから自動取得）</p>
+      <div className="xids-iconRow" role="group" aria-label="X IDアイコン">
         {candidates.map(url => (
-          <button key={url} type="button" className="settings-iconButton"
+          <button key={url} type="button" className="xids-iconButton"
             disabled={pending} aria-busy={pending} aria-pressed={url === selected}
             aria-label="候補アイコンを選択"
             onClick={() => update(() => api.setIcon(xUserId, url), "アイコンを更新しました。")}>
@@ -126,7 +126,7 @@ export function XIdIconPicker({
       {candidates.length === 0
         ? <p className="settings-accountNote">まだ候補がありません。画像をアップロードできます。</p> : null}
       {message ? <p role="status">{message}</p> : null}
-      {error ? <p className="settings-formError" role="alert">{error}</p> : null}
+      {error ? <p className="xids-msgErr" role="alert">{error}</p> : null}
     </div>
   );
 }
@@ -170,36 +170,36 @@ export function XIdCompactProfileForm({
     });
   };
   return (
-    <div className="settings-form">
+    <div className="xids-stack">
       <form onSubmit={onSubmit}>
-        <label className="settings-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
-          <input name="x_name" className="settings-input" maxLength={80} disabled={pending}
+        <label className="xids-compactLabel">表示名オーバーライド（空欄で @ハンドル表示）
+          <input name="x_name" className="xids-input" maxLength={80} disabled={pending}
             defaultValue={x.x_name} />
         </label>
-        <label className="settings-compactLabel">About / 自己紹介
-          <textarea name="profile_text" className="settings-textarea" rows={3} maxLength={2000}
+        <label className="xids-compactLabel">About / 自己紹介
+          <textarea name="profile_text" className="xids-textarea" rows={3} maxLength={2000}
             disabled={pending} defaultValue={x.profile_text ?? ""} />
         </label>
-        <label className="settings-compactLabel">Contact / 連絡先
-          <textarea name="portfolio_contact" className="settings-textarea" rows={2} maxLength={1200}
+        <label className="xids-compactLabel">Contact / 連絡先
+          <textarea name="portfolio_contact" className="xids-textarea" rows={2} maxLength={1200}
             disabled={pending} defaultValue={x.portfolio_contact ?? ""} />
         </label>
-        <label className="settings-compactLabel">YouTube チャンネル
-          <input name="youtube_channel_url" className="settings-input"
+        <label className="xids-compactLabel">YouTube チャンネル
+          <input name="youtube_channel_url" className="xids-input"
             disabled={pending} defaultValue={x.youtube_channel_url ?? ""} />
         </label>
-        <label className="settings-compactLabel">その他のSNSリンク（JSON）
-          <textarea name="other_social_links" className="settings-textarea"
+        <label className="xids-compactLabel">その他のSNSリンク（JSON）
+          <textarea name="other_social_links" className="xids-textarea"
             disabled={pending} defaultValue={x.other_social_links ?? ""} />
         </label>
-        <div className="settings-formActions">
+        <div className="xids-rowEnd">
           {onCancel ? <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
             disabled={pending} onClick={onCancel}>キャンセル</button> : null}
           <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm"
             disabled={pending} aria-busy={pending}>{pending ? "保存中…" : "保存"}</button>
         </div>
         {message ? <p role="status">{message}</p> : null}
-        {error ? <p role="alert" className="settings-formError">{error}</p> : null}
+        {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
       </form>
       <XIdIconPicker api={api} xUserId={x.id} currentIconUrl={x.icon_url}
         candidates={iconCandidates} onRefresh={onRefresh} />
@@ -234,16 +234,16 @@ export function DeleteXIdForm({
     });
   };
   return (
-    <div className="settings-inlineActions">
+    <div className="xids-row">
       <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
         disabled={pending} onClick={() => { setError(null); setOpen(true); }}>
         連携を解除
       </button>
       {open ? (
-        <section role="group" aria-label="X ID連携の解除確認" className="settings-form">
+        <section role="group" aria-label="X ID連携の解除確認" className="xids-stack">
           <p>この X ID @{xUserId} とDiscordアカウントの紐付けを解除します。X ID自体・作品・履歴は削除されません。</p>
           <label>確認のため「{expected}」と入力してください。
-            <input className="settings-input" value={confirmation} disabled={pending}
+            <input className="xids-input" value={confirmation} disabled={pending}
               onChange={e => setConfirmation(e.target.value)} />
           </label>
           <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
@@ -251,7 +251,7 @@ export function DeleteXIdForm({
           <button type="button" className="fn-btn fn-btn-primary fn-btn-sm"
             disabled={pending || confirmation !== expected} aria-busy={pending}
             onClick={onDelete}>{pending ? "解除中…" : "連携を削除する"}</button>
-          {error ? <p role="alert" className="settings-formError">{error}</p> : null}
+          {error ? <p role="alert" className="xids-msgErr">{error}</p> : null}
         </section>
       ) : null}
     </div>

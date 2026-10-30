@@ -9,12 +9,14 @@ const { SetActiveXButton, XIdCompactProfileForm, XIdIconPicker, DeleteXIdForm } 
 
 async function render(Component, props) {
   const container = dom.window.document.createElement("div");
+  // Attach to document so React 19 delegated form/input events fire as in a browser.
+  dom.window.document.body.appendChild(container);
   const root = createRoot(container);
   await act(async () => root.render(React.createElement(MemoryRouter, {},
     React.createElement(Component, props))));
   const click = async button => act(async () => button.click());
   const flush = async () => { await act(async () => { for (let k=0;k<5;k++) await Promise.resolve(); }); };
-  const dispose = () => act(async () => root.unmount());
+  const dispose = () => act(async () => { root.unmount(); container.remove(); });
   return { container, click, flush, dispose };
 }
 const buttonWith = (c, text) => [...c.querySelectorAll("button")].find(b => b.textContent.includes(text));
@@ -45,7 +47,7 @@ test("MIG-0708 U03 T03: profile reject preserves editable field and displays ser
   const calls=[],api={updateProfile:async(id,fields)=>{calls.push({id,fields});return {ok:false,message:"入力を確認してください。"};}};
   const x={id:"alpha",x_name:"Alpha",icon_url:null,profile_text:"About",portfolio_contact:null,youtube_channel_url:null,other_social_links:null};
   const m=await render(XIdCompactProfileForm,{api,x,iconCandidates:[],onRefresh:()=>{throw Error("unexpected refresh");}});
-  await m.click(buttonWith(m.container,"保存"));
+  await act(async () => m.container.querySelector("form").dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true})));
   await m.flush();
   assert.equal(calls.length,1);
   assert.equal(calls[0].id,"alpha");
