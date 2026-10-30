@@ -45,7 +45,7 @@ const dialect = new SQLiteSyncDialect();
 
 test("MIG-0651: the CURRENT video-duplicate database helper retains exact canonical identity", () => {
   const legacySource = readFileSync(new URL("../../../src/lib/video/slotPart.ts", import.meta.url), "utf8");
-  assert.match(legacySource, /export \\{ checkYoutubeVideoDuplicate \\} from "@flamenode\\/server-core\\/video\\/youtubeDuplicate"/);
+  assert.ok(legacySource.includes('export { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate"'));
 });
 
 test("MIG-0651: duplicate lookup retains voided exclusion, optional self exclusion, 1-row cap and SQL parameters", async () => {
