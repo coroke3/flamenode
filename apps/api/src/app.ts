@@ -5,6 +5,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
 import { manageRoutes } from "./routes/manage/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
+import { publicEventStaffRoutes } from "./routes/public/eventStaff.ts";
 import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 import { createAdminRoutes } from "./routes/admin/index.ts";
 import { liveEventRoutes } from "./routes/live/events.ts";
@@ -16,6 +17,8 @@ import { eventExportRoutes } from "./routes/events/export.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
+import { mediaRoutes } from "./routes/media/mediaRoutes.ts";
+import { xUsersSearchRoutes } from "./routes/internal/xUsersSearch.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
 
@@ -24,6 +27,8 @@ export const app = new Hono<AppEnv>();
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
+// MIG-0647 (RH-027/028): public staff allowlist with manifest double-read fence.
+app.route("/api/public/events", publicEventStaffRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 // MIG-0611: authenticated read-only Personal screens API (no CURRENT /api/* equivalent).
 app.route("/api/personal", personalRoutes);
@@ -50,3 +55,7 @@ app.route("/api/account/summary", accountSummaryRoutes);
 // MIG-0605 U03 (part): RH-016, RH-033
 app.route("/api/google-drive-image", googleDriveImageRoutes);
 app.route("/api/youtube-thumbnail", youtubeThumbnailRoutes);
+// MIG-0646: ordered RH-023..025 GET dispatch (signed/private routes before wildcard).
+app.route("/api/media", mediaRoutes);
+// MIG-0648 RH-019: authenticated R2-only member suggestions, no candidate D1 fallback.
+app.route("/api/internal/x-users/search", xUsersSearchRoutes);
