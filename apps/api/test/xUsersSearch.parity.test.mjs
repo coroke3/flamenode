@@ -404,7 +404,10 @@ if (runUnderRootTsx(import.meta.url)) {
     ]) {
       assert.ok(!logText.includes(secret), "private provider exception details must never be logged");
     }
-    assert.match(logText, /SESSION_RESOLUTION_UNAVAILABLE/);
+    // SEC-0807-01: a synchronous DB binding getter failure is diagnosed at
+    // the binding boundary, not the asynchronous session-query catch.
+    // Match the fixed, non-sensitive marker emitted by sessionMiddleware.
+    assert.match(logText, /^\[auth:session\] D1_BINDING_FAILED$/m);
     assert.match(logText, /R2_BINDING_UNAVAILABLE/);
     assert.match(logText, /SUGGESTIONS_LOOKUP_FAILED/);
   });
