@@ -49,7 +49,9 @@ const formatter = new Intl.DateTimeFormat("ja-JP", {
   hour: "2-digit", minute: "2-digit",
 });
 export function formatUnix(sec: number): string {
-  return Number.isFinite(sec) ? formatter.format(new Date(sec * 1000)) : "-";
+  if (!Number.isFinite(sec)) return "-";
+  const date = new Date(sec * 1000);
+  return Number.isNaN(date.getTime()) ? "-" : formatter.format(date);
 }
 export function formatRelative(sec: number, now = Date.now() / 1000): string {
   if (!Number.isFinite(sec)) return "";
