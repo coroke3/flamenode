@@ -195,3 +195,53 @@ test("MIG-0737 U01: export JSON response is not downloaded", async () => {
     URL.createObjectURL = oldCreate;
   }
 });
+
+test("MIG-0737 U01: CSV clipboard copy supports primary API and denied-grant fallback", async () => {
+  const oldClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  const oldExec = document.execCommand;
+  const copied = [];
+  let usedFallback = false;
+  const fetchFn = async (path, init) => {
+    assert.equal(init.method, "GET");
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) return json(200, page("videos", 1));
+    return new Response("id,name\\n1,value", { status: 200, headers: {
+      "content-type": "text/csv", "X-Spreadsheet-Truncated": "1",
+    } });
+  };
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async (body) => copied.push(body),
+  } });
+  const ui = await mount(fetchFn, "videos");
+  try {
+    const button = [...ui.host.querySelectorAll("button")].find(x => x.textContent === "コピー (CSV)");
+    assert.ok(button);
+    await React.act(async () => button.click());
+    await flush();
+    assert.deepEqual(copied, ["id,name\\n1,value"]);
+    assert.match(ui.host.textContent, /クリップボードにコピーしました（件数上限で一部のみ）/);
+
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+      writeText: async () => { throw Error("permission denied"); },
+    } });
+    document.execCommand = (command) => {
+      assert.equal(command, "copy");
+      usedFallback = true;
+      return true;
+    };
+    await React.act(async () => button.click());
+    await flush();
+    assert.equal(usedFallback, true);
+    assert.equal(ui.host.querySelectorAll("textarea").length, 0);
+
+    document.execCommand = () => false;
+    await React.act(async () => button.click());
+    await flush();
+    assert.match(ui.host.textContent, /クリップボードへのコピーに失敗しました/);
+  } finally {
+    await ui.cleanup();
+    if (oldClipboard) Object.defineProperty(navigator, "clipboard", oldClipboard);
+    else delete navigator.clipboard;
+    document.execCommand = oldExec;
+  }
+});
