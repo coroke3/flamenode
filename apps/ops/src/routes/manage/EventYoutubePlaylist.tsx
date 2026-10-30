@@ -44,7 +44,7 @@ function healthBadge(level: string): string {
     : level === "ok" ? "fn-badge-accent" : "fn-badge-soft";
 }
 function healthLabel(level: string): string {
-  return ({ critical: "要対応", warn: "注意", running: "実行中", ok: "正常" } as Record<string, string>)[level] ?? "未確認";
+  return safeLabel({ critical: "要対応", warn: "注意", running: "実行中", ok: "正常" }, level, "未確認");
 }
 function formatTime(unix: number | null | undefined): string {
   if (unix == null || !Number.isFinite(unix)) return "未実行";
