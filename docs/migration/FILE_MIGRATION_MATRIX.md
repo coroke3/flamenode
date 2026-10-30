@@ -1127,6 +1127,15 @@
 | `apps/ops/test/shared.test.mjs` | TEST | MIG-0707 U05c: port CURRENT shared code/CSS with tests; not production-mounted | MIG-0707 | SAME (U05c pending CI and independent parity review) | IN_PROGRESS | PR#428 SHA=00b387c5b49a4392db9d736c12838ebe3f73d15f TEST=CI-pending (Ops workspace build/test, T06/T07) |
 | `apps/ops/test/shared-more.test.mjs` | TEST | MIG-0707 U05c: port CURRENT shared code/CSS with tests; not production-mounted | MIG-0707 | SAME (U05c pending CI and independent parity review) | IN_PROGRESS | PR#428 SHA=732fc30ab523b8322a80a210a08f96ecd97a63b5 TEST=CI-pending (Ops workspace build/test, T06/T07) |
 
+| `src/components/settings/XIdSettingsClient.tsx` | CURRENT_COMPONENT | SA-099 link/merge; other settings actions still CURRENT | MIG-0709 | apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx (link/merge); CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `src/components/settings/XIdLinkedList.tsx` | CURRENT_COMPONENT | SA-100/101 cancel/revert | MIG-0709 | apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx; CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `app/(auth)/onboarding/OnboardingXIdForm.tsx` | CURRENT_COMPONENT | SA-099 onboarding link | MIG-0709 | apps/app/src/routes/onboardingXIdForm.tsx; CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `apps/app/src/api/xidRequests.ts` | TARGET_CLIENT | SA-099/100/101 provisional Hono request adapter | MIG-0709 | apps/app/src/api/personal.ts → Settings/Onboarding; formal contract MIG-0659 pending | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx` | TARGET_COMPONENT | settings X ID link and merge | MIG-0709 | apps/app/src/routes/dashboard/Settings.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx` | TARGET_COMPONENT | history cancel / revert | MIG-0709 | apps/app/src/routes/dashboard/Settings.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `apps/app/src/routes/onboardingXIdForm.tsx` | TARGET_COMPONENT | onboarding X ID link | MIG-0709 | apps/app/src/routes/onboarding.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+| `apps/app/test/xidRequests.test.mjs` | TARGET_TEST | SA-099/100/101 API and form regression | MIG-0709 | apps/app/src/api/xidRequests.ts and settings/onboarding components | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -1219,15 +1228,6 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
 | `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
-
-| `src/components/settings/XIdSettingsClient.tsx` | CURRENT_COMPONENT | SA-099 link/merge; other settings actions still CURRENT | MIG-0709 | apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx (link/merge); CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `src/components/settings/XIdLinkedList.tsx` | CURRENT_COMPONENT | SA-100/101 cancel/revert | MIG-0709 | apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx; CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `app/(auth)/onboarding/OnboardingXIdForm.tsx` | CURRENT_COMPONENT | SA-099 onboarding link | MIG-0709 | apps/app/src/routes/onboardingXIdForm.tsx; CURRENT Next compatibility retained | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `apps/app/src/api/xidRequests.ts` | TARGET_CLIENT | SA-099/100/101 provisional Hono request adapter | MIG-0709 | apps/app/src/api/personal.ts → Settings/Onboarding; formal contract MIG-0659 pending | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `apps/app/src/routes/dashboard/settings/XIdRequestForms.tsx` | TARGET_COMPONENT | settings X ID link and merge | MIG-0709 | apps/app/src/routes/dashboard/Settings.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `apps/app/src/routes/dashboard/settings/XIdRequestActions.tsx` | TARGET_COMPONENT | history cancel / revert | MIG-0709 | apps/app/src/routes/dashboard/Settings.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `apps/app/src/routes/onboardingXIdForm.tsx` | TARGET_COMPONENT | onboarding X ID link | MIG-0709 | apps/app/src/routes/onboarding.tsx | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
-| `apps/app/test/xidRequests.test.mjs` | TARGET_TEST | SA-099/100/101 API and form regression | MIG-0709 | apps/app/src/api/xidRequests.ts and settings/onboarding components | IN_PROGRESS | MIG-0709 PR#477 SHA=385b29e063892ff4d0a0c5575efc0b4d726f32aa TEST=CI-pending |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 
