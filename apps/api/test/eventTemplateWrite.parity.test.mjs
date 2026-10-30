@@ -187,3 +187,51 @@ test("SA-037 GET: storage error returns private fixed-code 503, never [] as a fa
   assert.deepEqual(await r.json(),{error:"unavailable"});
   assert.equal(r.headers.get("cache-control"),"private, no-store");
 });
+
+test("SA-037 GET: anonymous denial never accesses a throwing D1 binding", async () => {
+  let accesses = 0;
+  const env = Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+    get() {
+      accesses += 1;
+      throw new Error("PRIVATE_PROVIDER_DB_GETTER");
+    },
+  });
+  const app = new Hono();
+  app.route("/api/admin", createAdminRoutes({
+    session: async (c, next) => {
+      c.set("user", null);
+      c.set("sessionState", "none");
+      await next();
+    },
+  }));
+  const response = await app.request("/api/admin/event-templates", { method: "GET" }, env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), []);
+  assert.equal(accesses, 0);
+});
+
+test("SA-037 GET: authenticated DB getter failure is private fixed 503, not an uncaught provider error", async () => {
+  let accesses = 0;
+  const env = Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+    get() {
+      accesses += 1;
+      throw new Error("PRIVATE_PROVIDER_DB_GETTER");
+    },
+  });
+  const app = new Hono();
+  app.route("/api/admin", createAdminRoutes({
+    session: async (c, next) => {
+      c.set("user", ADMIN);
+      c.set("sessionState", "user");
+      await next();
+    },
+  }));
+  const response = await app.request("/api/admin/event-templates", { method: "GET" }, env);
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), { error: "unavailable" });
+  assert.doesNotMatch(body, /PRIVATE_PROVIDER_DB_GETTER/);
+  assert.equal(accesses, 1);
+});
