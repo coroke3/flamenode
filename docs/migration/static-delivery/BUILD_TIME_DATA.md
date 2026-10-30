@@ -95,6 +95,21 @@ check ever runs more often. Re-derive both when Workers Builds timing replaces t
 3. Put the 5 durations in this table, recompute `m`, the daily cap and the interval.
 4. Delete the project (Settings → Delete) and the branch.
 
+### Build request marker (MIG-0516; pending review, not deployed)
+
+A mutation-driven, non-empty `buildStaticRebuildQueueBatch` appends **one** D1 statement to its atomic batch, after the queue's bulk UPSERT chunks:
+
+```sql
+UPDATE public_build_state
+SET requested_at = MAX(requested_at, ?)
+WHERE id = 1;
+```
+
+The bound timestamp is **epoch milliseconds** (`Date.now()`), matching `workers/fast-jobs/publicBuildTrigger.ts`; the queue's existing `created_at` / `updated_at` remain epoch **seconds**. The expected row-change count includes one marker row; an absent `id=1` is a failed batch, not a silently lost build request. An empty enqueue makes **zero** statements and leaves `requested_at` unchanged. The extra D1 budget is **+1 statement per non-empty mutation batch**, regardless of queue item count; 101 items become two queue UPSERTs plus one mark.
+
+**Production merge gate:** `migrations/0065_public_build_state.sql` must have an owner-provided *read-only* applied-status record first; the agent must not run remote D1, deploy hooks, secrets, or Workers. A missing table would roll back the whole mutation batch. The mere existence of this code/PR is not deployment authorization.
+
+
 ## 3. New and unpublished pages (U04)
 
 ### 3.1 A page that has no R2 HTML yet

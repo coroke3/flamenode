@@ -230,9 +230,10 @@
     "outcome": {
       "returned": {
         "summary": {
-          "statementCount": 2,
+          "statementCount": 3,
           "expectedChanges": [
             100,
+            1,
             1
           ],
           "acceptedTargetCount": 101
@@ -260,6 +261,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000101\",\"target_type\":\"video\",\"target_id\":\"v100\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]
@@ -2124,6 +2131,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"video\",\"target_id\":\"v0\",\"reason\":\"video_update\",\"priority\":\"high\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000002\",\"target_type\":\"video\",\"target_id\":\"v1\",\"reason\":\"new\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"xuser\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3332,9 +3345,10 @@
       "returned": {
         "xUser": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              3
+              3,
+              1
             ],
             "acceptedTargetCount": 3
           },
@@ -3344,9 +3358,10 @@
         },
         "videoStatus": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              17
+              17,
+              1
             ],
             "acceptedTargetCount": 17
           },
@@ -3356,8 +3371,9 @@
         },
         "eventGroup": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
+              1,
               1
             ],
             "acceptedTargetCount": 1
@@ -3368,9 +3384,10 @@
         },
         "slot": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              3
+              3,
+              1
             ],
             "acceptedTargetCount": 3
           },
@@ -3380,9 +3397,10 @@
         },
         "event": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              10
+              10,
+              1
             ],
             "acceptedTargetCount": 10
           },
@@ -3392,9 +3410,10 @@
         },
         "pvsfEvent": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              10
+              10,
+              1
             ],
             "acceptedTargetCount": 10
           },
@@ -3404,8 +3423,9 @@
         },
         "announcement": {
           "summary": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
+              1,
               1
             ],
             "acceptedTargetCount": 1
@@ -3428,6 +3448,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000001\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"x_profile\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000002\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"x_profile\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"member_suggestions\",\"target_id\":\"global\",\"reason\":\"x_profile\",\"priority\":\"low\",\"requested_by_user_id\":null}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3443,6 +3469,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000019\",\"target_type\":\"event_base\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000020\",\"target_type\":\"event_release\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]
@@ -3460,6 +3492,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000021\",\"target_type\":\"events_index\",\"target_id\":\"global\",\"reason\":\"group\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3475,6 +3513,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000022\",\"target_type\":\"event_slots\",\"target_id\":\"evt-1\",\"reason\":\"slot\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000023\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"slot\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000024\",\"target_type\":\"top_slot_stats\",\"target_id\":\"global\",\"reason\":\"slot\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]
@@ -3492,6 +3536,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000025\",\"target_type\":\"event\",\"target_id\":\"evt-1\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000026\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000027\",\"target_type\":\"event_slots\",\"target_id\":\"evt-1\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000028\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000029\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000030\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000031\",\"target_type\":\"events_index\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000032\",\"target_type\":\"top_events\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000033\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000034\",\"target_type\":\"top_slot_stats\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3507,6 +3557,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000035\",\"target_type\":\"event_base\",\"target_id\":\"PVSFSummary\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000036\",\"target_type\":\"event_slots\",\"target_id\":\"PVSFSummary\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000037\",\"target_type\":\"event_release\",\"target_id\":\"PVSFSummary\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000038\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000039\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000040\",\"target_type\":\"events_index\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000041\",\"target_type\":\"top_events\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000042\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000043\",\"target_type\":\"top_slot_stats\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000044\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"event\",\"priority\":\"low\",\"requested_by_user_id\":null}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]
@@ -3524,6 +3580,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000045\",\"target_type\":\"top_announcements\",\"target_id\":\"global\",\"reason\":\"announce\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3539,6 +3601,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000046\",\"target_type\":\"video\",\"target_id\":\"vid-2\",\"reason\":\"video_create\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000047\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000048\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000049\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000050\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000051\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000052\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000053\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000054\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000055\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000056\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000057\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000058\",\"target_type\":\"member_suggestions\",\"target_id\":\"global\",\"reason\":\"video_create\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000059\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_create\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000060\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_create\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000061\",\"target_type\":\"event_base\",\"target_id\":\"evt-3\",\"reason\":\"video_create\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000062\",\"target_type\":\"event_release\",\"target_id\":\"evt-3\",\"reason\":\"video_create\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]
@@ -3570,6 +3638,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000064\",\"target_type\":\"video\",\"target_id\":\"vid-3\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000065\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"video_identity_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000066\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_identity_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000067\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000068\",\"target_type\":\"member_suggestions\",\"target_id\":\"global\",\"reason\":\"video_identity_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000069\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000070\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000071\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000072\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000073\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000074\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000075\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000076\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_card_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000077\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000078\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000079\",\"target_type\":\"event_base\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000080\",\"target_type\":\"event_release\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3600,6 +3674,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000082\",\"target_type\":\"video\",\"target_id\":\"vid-4\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -3629,6 +3709,12 @@
               1760000000,
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000084\",\"target_type\":\"user\",\"target_id\":\"x_actor\",\"reason\":\"x_icon\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000085\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"x_icon\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000086\",\"target_type\":\"member_suggestions\",\"target_id\":\"global\",\"reason\":\"x_icon\",\"priority\":\"low\",\"requested_by_user_id\":null}]"
+            ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
             ]
           }
         ]

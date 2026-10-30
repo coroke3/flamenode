@@ -130,11 +130,12 @@
     "outcome": {
       "returned": {
         "plan": {
-          "statementCount": 3,
+          "statementCount": 4,
           "expectedMutationChanges": [
             1,
             1,
-            17
+            17,
+            1
           ],
           "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": true,
@@ -219,9 +220,10 @@
             "expectedChanges": []
           },
           "queueBatch": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              17
+              17,
+              1
             ],
             "acceptedTargetCount": 17
           },
@@ -335,6 +337,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000002\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_base\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000018\",\"target_type\":\"event_release\",\"target_id\":\"evt-2\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -343,7 +351,8 @@
         "changes": [
           1,
           1,
-          17
+          17,
+          1
         ]
       }
     ],
@@ -514,11 +523,12 @@
     "outcome": {
       "returned": {
         "plan": {
-          "statementCount": 3,
+          "statementCount": 4,
           "expectedMutationChanges": [
             1,
             1,
-            13
+            13,
+            1
           ],
           "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": false,
@@ -605,9 +615,10 @@
             ]
           },
           "queueBatch": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              13
+              13,
+              1
             ],
             "acceptedTargetCount": 13
           },
@@ -714,6 +725,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -722,7 +739,8 @@
         "changes": [
           1,
           1,
-          13
+          13,
+          1
         ]
       }
     ],
@@ -861,11 +879,12 @@
     "outcome": {
       "returned": {
         "plan": {
-          "statementCount": 3,
+          "statementCount": 4,
           "expectedMutationChanges": [
             1,
             1,
-            15
+            15,
+            1
           ],
           "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
           "depublicizedFromPublic": true,
@@ -952,9 +971,10 @@
             ]
           },
           "queueBatch": {
-            "statementCount": 1,
+            "statementCount": 2,
             "expectedChanges": [
-              15
+              15,
+              1
             ],
             "acceptedTargetCount": 15
           },
@@ -1082,6 +1102,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000017\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -1090,7 +1116,8 @@
         "changes": [
           1,
           1,
-          15
+          15,
+          1
         ]
       }
     ],
@@ -1290,11 +1317,12 @@
   "video_plan_default_now_uses_max_of_clock_and_updated_at_plus_one": {
     "outcome": {
       "returned": {
-        "statementCount": 3,
+        "statementCount": 4,
         "expectedMutationChanges": [
           1,
           1,
-          15
+          15,
+          1
         ],
         "fenceToken": "vf_00000000-0000-4000-8000-000000000001",
         "depublicizedFromPublic": true,
@@ -1379,9 +1407,10 @@
           "expectedChanges": []
         },
         "queueBatch": {
-          "statementCount": 1,
+          "statementCount": 2,
           "expectedChanges": [
-            15
+            15,
+            1
           ],
           "acceptedTargetCount": 15
         },
@@ -1480,6 +1509,12 @@
               1760000000,
               "[{\"id\":\"srb_00000000-0000-4000-8000-000000000002\",\"target_type\":\"video\",\"target_id\":\"vid-1\",\"reason\":\"video_visibility_update\",\"priority\":\"high\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000003\",\"target_type\":\"youtube_related_blocklist\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000004\",\"target_type\":\"random_video_pool\",\"target_id\":\"global\",\"reason\":\"video_visibility_changed\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000005\",\"target_type\":\"list_recent\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000006\",\"target_type\":\"list_popular\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000007\",\"target_type\":\"search_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000008\",\"target_type\":\"user\",\"target_id\":\"x_creator\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000009\",\"target_type\":\"users_index\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":null},{\"id\":\"srb_00000000-0000-4000-8000-000000000010\",\"target_type\":\"top_recommended\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000011\",\"target_type\":\"top_latest\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000012\",\"target_type\":\"top_nostalgic\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000013\",\"target_type\":\"top_stats\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000014\",\"target_type\":\"recommend_core\",\"target_id\":\"global\",\"reason\":\"video_update\",\"priority\":\"low\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000015\",\"target_type\":\"event_base\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"},{\"id\":\"srb_00000000-0000-4000-8000-000000000016\",\"target_type\":\"event_release\",\"target_id\":\"evt-1\",\"reason\":\"video_update\",\"priority\":\"normal\",\"requested_by_user_id\":\"u-actor\"}]"
             ]
+          },
+          {
+            "sql": "\n      UPDATE public_build_state\n      SET requested_at = MAX(requested_at, ?)\n      WHERE id = 1\n    ",
+            "params": [
+              1760000000000
+            ]
           }
         ]
       },
@@ -1488,7 +1523,8 @@
         "changes": [
           1,
           1,
-          15
+          15,
+          1
         ]
       }
     ],

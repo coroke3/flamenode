@@ -223,10 +223,16 @@ if (!underTsx) {
     } finally {
       restore2();
     }
-    // batch = [INSERT announcement, changes() assertion, queue UPSERT, changes() assertion, audit INSERT, audit assertion]
-    assert.equal(batch.length, 6);
+    // MIG-0516 adds an atomic build-request UPDATE and strict changes() check
+    // immediately after the queue UPSERT/check; audit INSERT/check remain last.
+    // Keep the queue statement byte-for-byte equal to CURRENT.
+    assert.equal(batch.length, 8);
     assert.equal(norm(batch[2].sql), norm(expected.sql));
     assert.deepEqual(batch[2].params, expected.params);
+    assert.match(norm(batch[4].sql), /^UPDATE public_build_state SET requested_at = MAX\(requested_at, \?\) WHERE id = 1$/);
+    assert.deepEqual(batch[4].params, [NOW_MS]);
+    assert.equal(norm(batch[5].sql), norm(batch[3].sql));
+    assert.deepEqual(batch[5].params, [1]);
   });
 
   test("audit INSERT / assertion SQL the route sends equals CURRENT mutateWithAudit shape", async () => {
