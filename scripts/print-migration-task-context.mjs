@@ -134,6 +134,18 @@ export function readOpenPrOwners(root=ROOT){
 export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"]; // 0409/0410/0411 left the Gate dependencies by owner decision 2026-10-23
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
 export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
+  // CI's status-card validator rejects duplicate MIG IDs, but migration:next
+  // can run before CI. Do not allow Map.set(last-row-wins) in parseTaskRows
+  // to convert an IN_PROGRESS/BLOCKED dependency into a fake DONE/READY.
+  const observedTaskIds=new Set();
+  for(const line of statusText.split("\n")){
+    const cells=line.split("|").map(x=>x.trim());
+    if(cells.length<6||!/^MIG-\d{4}$/.test(cells[1]||""))continue;
+    if(observedTaskIds.has(cells[1])){
+      throw new Error("Duplicate task ID in migration:next: "+cells[1]+"; reconcile STATUS before claiming a task");
+    }
+    observedTaskIds.add(cells[1]);
+  }
   const tasks=parseTaskRows(statusText);
   const decisions=new Map();
   for(const line of decisionText.split("\n")){
