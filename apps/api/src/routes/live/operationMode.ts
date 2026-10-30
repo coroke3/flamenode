@@ -34,10 +34,12 @@ let kvCache: { mirror: ParsedOperationModeKvMirror | null; expiresAt: number } =
   mirror: null,
   expiresAt: 0,
 };
+let kvMirrorInFlight: Promise<ParsedOperationModeKvMirror | null> | null = null;
 
 export function resetOperationModeCachesForTests(): void {
   isolateMode = { mode: null, expiresAt: 0 };
   kvCache = { mirror: null, expiresAt: 0 };
+  kvMirrorInFlight = null;
 }
 
 /** FORCE_STATIC_ONLY env: 1 / true / yes (case-insensitive). */
@@ -89,20 +91,31 @@ export async function readOperationModeKvMirror(
 ): Promise<ParsedOperationModeKvMirror | null> {
   const now = Date.now();
   if (now < kvCache.expiresAt) return kvCache.mirror;
+  // Share a cold KV lookup across requests in the same isolate. Otherwise
+  // concurrent banners can each read KV before either populates the cache.
+  if (kvMirrorInFlight) return kvMirrorInFlight;
   if (!kv) {
     kvCache = { mirror: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
     return null;
   }
+  const pending = (async (): Promise<ParsedOperationModeKvMirror | null> => {
+    try {
+      const raw = await kv.get(OPERATION_MODE_KV_KEY, {
+        cacheTtl: KV_CACHE_TTL_MS / 1000,
+      });
+      const mirror = typeof raw === "string" ? parseKvMirror(raw) : null;
+      kvCache = { mirror, expiresAt: Date.now() + KV_CACHE_TTL_MS };
+      return mirror;
+    } catch {
+      kvCache = { mirror: null, expiresAt: Date.now() + KV_ERROR_CACHE_TTL_MS };
+      return null;
+    }
+  })();
+  kvMirrorInFlight = pending;
   try {
-    const raw = await kv.get(OPERATION_MODE_KV_KEY, {
-      cacheTtl: KV_CACHE_TTL_MS / 1000,
-    });
-    const mirror = typeof raw === "string" ? parseKvMirror(raw) : null;
-    kvCache = { mirror, expiresAt: now + KV_CACHE_TTL_MS };
-    return mirror;
-  } catch {
-    kvCache = { mirror: null, expiresAt: now + KV_ERROR_CACHE_TTL_MS };
-    return null;
+    return await pending;
+  } finally {
+    if (kvMirrorInFlight === pending) kvMirrorInFlight = null;
   }
 }
 
