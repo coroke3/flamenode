@@ -32,9 +32,15 @@ test("MIG-0729 U01: first query values, status normalization, overflow and page 
     q: "a", status: "review", event: "e1", page: 3,
   });
   assert.equal(parseAdminVideoFilters("?status=constructor&page=999999999999999999").status, "");
-  for (const page of ["", "0", "-1", "1e9", "Infinity", "1.4", "0003", "NaN"]) {
+  for (const page of ["", "0", "-1", "Infinity", "NaN", "999999999999999999"]) {
     assert.equal(parseAdminVideoFilters(`?page=${page}`).page, 1, page);
   }
+  for (const [raw, expected] of [["0003", 3], ["3.8", 3], ["1e2", 100], [" 2 ", 2]]) {
+    assert.equal(parseAdminVideoFilters(`?page=${encodeURIComponent(raw)}`).page, expected, raw);
+  }
+  // In the Hono read path a numeric page must also produce a safe SQLite OFFSET.
+  const unsafeOffsetPage = String(Math.floor(Number.MAX_SAFE_INTEGER / 50) + 2);
+  assert.equal(parseAdminVideoFilters(`?page=${unsafeOffsetPage}`).page, 1);
   assert.equal(parseAdminVideoFilters("?status=all").status, "");
   assert.equal(parseAdminVideoFilters("?status=pending").status, "pending");
 });
