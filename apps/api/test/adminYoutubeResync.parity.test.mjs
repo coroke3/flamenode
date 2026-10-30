@@ -220,3 +220,32 @@ test("MIG-0643 U04: protected Hono stack uses S3 <=3 pre-reads and one batch", a
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
 });
+
+test("MIG-0643 U04: secret-bearing D1 preflight and audit errors never enter logs", async () => {
+  const sentinel = "PRIVATE_PROVIDER_YOUTUBE_RESYNC_SECRET";
+  for (const stage of ["preflight", "batch"]) {
+    const s = setup();
+    if (stage === "preflight") {
+      const original = s.db.prepare.bind(s.db);
+      s.db.prepare = (query) => {
+        if (String(query).includes("LEFT JOIN video_youtube_metadata")) throw new Error(sentinel);
+        return original(query);
+      };
+    } else {
+      s.db.batch = async () => { throw new Error(sentinel); };
+    }
+    const logs = [];
+    const previous = console.error;
+    console.error = (...args) => logs.push(args.map(String).join(" "));
+    let response;
+    try { response = await s.request(); }
+    finally { console.error = previous; }
+    assert.equal(response.status, 500, stage);
+    const body = await response.text();
+    assert.doesNotMatch(body, /PRIVATE_PROVIDER_YOUTUBE_RESYNC_SECRET/, stage);
+    assert.doesNotMatch(logs.join("\n"), /PRIVATE_PROVIDER_YOUTUBE_RESYNC_SECRET/, stage);
+    assert.equal(logs.length, 1, stage);
+    assert.equal(s.metadata(), null, stage);
+    assert.equal(s.audit().length, 0, stage);
+  }
+});
