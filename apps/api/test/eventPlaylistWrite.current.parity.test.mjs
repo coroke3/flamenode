@@ -313,7 +313,7 @@ if (runUnderRootTsx(import.meta.url)) {
     });
   }
 
-  test("SA-038 HTTP statuses for the CURRENT outcomes (Hono-only, documented)", async () => {
+  test("DOCUMENTED DIFFERENCE MIG-0655-DD1: SA-038 HTTP statuses for the CURRENT redirect outcomes", async () => {
     const status = async (user, eventId, fields) =>
       (await both({ user, action: "saveEventYoutubePlaylistSettings", eventId, fields })).hono.status;
     assert.equal(await status("rev", "evA", { playlist_id: "PLnewPlaylist01", sync_mode: "mirror" }), 403);
@@ -334,7 +334,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assertSameState(curDb, honoDb, "lease");
   });
 
-  test("SA-038 admin on an unknown event: CURRENT fails at the FK, Hono 404 (documented difference)", async () => {
+  test("DOCUMENTED DIFFERENCE MIG-0655-DD2: SA-038 admin on an unknown event: CURRENT fails at the FK, Hono 404", async () => {
     const r = await both({ user: "admin", action: "saveEventYoutubePlaylistSettings", eventId: "noSuchEvent", fields: { playlist_id: "PLnewPlaylist01", sync_mode: "mirror" } });
     assert.equal(r.curJson.ok, false);
     assert.match(r.curJson.message, /設定を保存できませんでした/);
@@ -372,6 +372,31 @@ if (runUnderRootTsx(import.meta.url)) {
         }
       }
     }
+  });
+
+  test("DOCUMENTED DIFFERENCE D-15-6 / D-0603-1 (MIG-0655-DD7): Queue wakes CURRENT n vs Hono 0, same D1 rows", async () => {
+    const save = await both({ user: "admin", action: "saveEventYoutubePlaylistSettings", eventId: "evA", fields: { playlist_id: "PLnewPlaylist01", sync_mode: "mirror" } });
+    assert.deepStrictEqual(save.cur.playlistWakes, ["manage"], "CURRENT SA-038 playlist wake");
+    assert.ok(save.cur.staticWakeHostReads.length >= 1, "CURRENT SA-038 static rebuild wake attempt");
+    const sync = await both({ user: "admin", action: "queueEventYoutubePlaylistSync", eventId: "evA", fields: {} });
+    assert.deepStrictEqual(sync.cur.playlistWakes, ["manage"], "CURRENT SA-039 playlist wake");
+    // Hono has no Queue binding (apps/api): the D1 rows above are identical
+    // (asserted per case) and the Cron collects them.
+    for (const r of [save, sync]) {
+      assert.equal(r.hono.status, 200);
+      assertSameState(r.curDb, r.honoDb, "wake case");
+    }
+  });
+
+  test("DOCUMENTED DIFFERENCE MIG-0655-DD3: event id with invalid characters: CURRENT strips them, Hono 400 without writes", async () => {
+    const curDb = database();
+    const honoDb = database();
+    const cur = await runCurrent(curDb, "admin", "queueEventYoutubePlaylistSync", { event_id: "evA!" });
+    assert.deepStrictEqual(currentAsJson(cur.location), { ok: true, queued: true }, "CURRENT cleanEventId('evA!') = 'evA'");
+    const hono = await runHono(honoDb, "admin", "POST", "/api/manage/events/evA!/youtube-playlist/sync");
+    assert.equal(hono.status, 400);
+    assert.equal(hono.stats.batches, 0);
+    assert.equal(audits(honoDb).length, 0);
   });
 
   // ---------------- SA-039 manual sync ----------------
@@ -462,7 +487,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(r.stats.batches, 0);
   });
 
-  test("unexpected storage failure is 503 (not 409) and leaves state unchanged", async () => {
+  test("DOCUMENTED DIFFERENCE MIG-0655-DD8: unexpected storage failure is 503 (conflicts stay 409), state unchanged", async () => {
     const sqlite = database((s) => s.exec("DROP TABLE static_rebuild_queue"));
     const before = rows(sqlite, "event_youtube_playlist_sync");
     const r = await runHono(sqlite, "admin", "PUT", "/api/manage/events/evA/youtube-playlist", { playlist_id: "PLnewPlaylist01", sync_mode: "mirror" });

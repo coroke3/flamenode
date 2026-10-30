@@ -269,6 +269,22 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepStrictEqual(audits(honoDb), []);
   });
 
+  test("DOCUMENTED DIFFERENCE MIG-0655-DD5: >100 custom questions: CURRENT snapshots all, Hono 409 without writes (ZERO_1102 S2)", async () => {
+    const many = (sqlite) => {
+      for (let i = 0; i < 101; i += 1) question(sqlite, "evB", `k${String(i).padStart(3, "0")}`, { sort: i });
+    };
+    const curDb = database(many);
+    const honoDb = database(many);
+    const cur = await runCurrent(curDb, "admin", () => actions.saveEventAsTemplate(form({ event_id: "evB", name: "Many" })));
+    const hono = await runHono(honoDb, "admin", "POST", { event_id: "evB", name: "Many" });
+    assert.equal(cur.result.ok, true);
+    assert.equal(JSON.parse(templates(curDb)[0].settings_json).custom_question_definitions.length > 100, true);
+    assert.equal(hono.status, 409);
+    assert.deepStrictEqual(hono.body, { ok: false, message: "処理に失敗しました。再読み込みして、もう一度お試しください。" });
+    assert.deepStrictEqual(templates(honoDb), []);
+    assert.deepStrictEqual(audits(honoDb), []);
+  });
+
   test("snapshot drift guard: domain builder equals the pre-move CURRENT builder", () => {
     const sqlite = database();
     for (const id of ["evA", "evB", "evNull", "evPoint"]) {
