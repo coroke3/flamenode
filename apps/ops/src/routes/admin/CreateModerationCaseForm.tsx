@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { AdminVideoMutation } from "../../api/adminVideoStatus.js";
+import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
 
 /** MIG-0729 U02: CURRENT SA-043 form; held unmounted until MIG-0603. */
 export function CreateModerationCaseForm({
@@ -13,7 +14,7 @@ export function CreateModerationCaseForm({
   const inFlight = React.useRef(false);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [success, setSuccess] = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<{ message: string; pendingPublicReflection?: boolean } | null>(null);
   function submit(event: React.FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (inFlight.current) return;
@@ -32,7 +33,10 @@ export function CreateModerationCaseForm({
           if (result.retryable) onRefresh();
           return;
         }
-        setSuccess(result.message ?? "case を作成しました。");
+        setSuccess({
+          message: result.message ?? "case を作成しました。",
+          pendingPublicReflection: result.pendingPublicReflection === true,
+        });
         formRef.current?.reset();
         onRefresh();
       } catch {
@@ -80,7 +84,12 @@ export function CreateModerationCaseForm({
         </select>
       </label>
       {error ? <p role="alert" className="fn-badge fn-badge-danger">{error}</p> : null}
-      {success ? <p role="status" className="fn-badge">{success}</p> : null}
+      {success ? (
+        <SaveSuccessNotice
+          message={success.message}
+          pendingPublicReflection={success.pendingPublicReflection}
+        />
+      ) : null}
       <button className="fn-btn fn-btn-primary" type="submit" disabled={pending}
         aria-busy={pending} aria-label="モデレーションケースを作成">
         {pending ? "作成中..." : "ケースを作成"}
