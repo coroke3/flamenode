@@ -1136,6 +1136,8 @@
 | `apps/ops/src/routes/admin/YoutubeQuota.tsx` | TARGET_SKELETON | Ops daily quota read dashboard | MIG-0735 | SAME (not mounted until MIG-0726/#459 releases Ops router and MIG-0643/#480 mounts API) | IN_PROGRESS | PR#481 SHA=2cfa19fd0cf7d774acbb845e6942c60d62affd40 TEST=CI-pending (U01/U02; latest required checks not green) |
 
 
+| `apps/ops/test/adminStaticBuilds.test.mjs` | TEST | MIG-0735 U01 security denial, result query, backfill completion tests | MIG-0735 | SAME (new regression suite) | IN_PROGRESS | PR#481 SHA=2cfa19fd0cf7d774acbb845e6942c60d62affd40 TEST=CI-pending (new tests, final-head CI not yet green) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
