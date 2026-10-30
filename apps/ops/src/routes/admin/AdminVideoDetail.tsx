@@ -4,6 +4,7 @@ import type { AdminVideoDetailResponse } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
 import {
   adminVideoBackHref,
+  formatAdminVideoUnix,
   loadAdminVideoDetail,
   selectOpenVoidCaseId,
 } from "../../api/adminVideoDetail.js";
@@ -20,11 +21,7 @@ const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
 const VOID_CATEGORIES = ["x_id_invalid", "duplicate", "withdrawn_by_creator", "operator_decision", "expired"] as const;
 
-function formatTime(unixSec: number | null): string {
-  if (!unixSec || !Number.isFinite(unixSec)) return "—";
-  const date = new Date(unixSec * 1000);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString("ja-JP") : "—";
-}
+
 function Field({ name, value }: { name: string; value: React.ReactNode }): React.ReactElement {
   return <><dt className="fn-muted">{name}</dt><dd style={{ whiteSpace: "pre-wrap" }}>{value ?? "—"}</dd></>;
 }
@@ -145,7 +142,7 @@ function StatusControls({
   return (
     <section className="fn-card" aria-label="作品の状態変更">
       <h2>状態変更</h2>
-      <p>登録: {formatTime(v.created_at)}</p>
+      <p>登録: {formatAdminVideoUnix(v.created_at)}</p>
       {v.visibility_status === "pending" ? (
         <div className="fn-panel-actions">
           <button type="button" className="fn-btn fn-btn-primary" disabled={pending}
@@ -200,13 +197,13 @@ function ModerationCases({ data, create, onRefresh }: {
       <p>未解決 {data.openCaseCount} 件 / 直近 {data.moderationCases.length} 件</p>
       {data.moderationCases.length ? data.moderationCases.map(item => (
         <details key={item.id}>
-          <summary>{item.status} {item.case_type} {formatTime(item.created_at)}</summary>
+          <summary>{item.status} {item.case_type} {formatAdminVideoUnix(item.created_at)}</summary>
           <dl style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8 }}>
-            <Field name="期限" value={formatTime(item.due_at)} />
+            <Field name="期限" value={formatAdminVideoUnix(item.due_at)} />
             <Field name="関連X ID" value={item.related_x_user_id ? `@${item.related_x_user_id}` : "—"} />
             <Field name="公開理由" value={item.public_reason} />
             <Field name="内部メモ" value={item.private_note} />
-            <Field name="解決日時" value={formatTime(item.resolved_at)} />
+            <Field name="解決日時" value={formatAdminVideoUnix(item.resolved_at)} />
           </dl>
         </details>
       )) : <p>この作品のケースはまだありません。</p>}
