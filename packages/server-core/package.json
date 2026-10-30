@@ -100,7 +100,10 @@
     "./publicData/randomVideoPoolCore": "./src/publicData/randomVideoPoolCore.ts",
     "./publicData/staticRecommendCore": "./src/publicData/staticRecommendCore.ts",
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
-    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
+    "./admin/healthChecks": "./src/admin/healthChecks.ts",
+    "./admin/integrityChecks": "./src/admin/integrityChecks.ts",
+    "./admin/permissionIntegrityChecks": "./src/admin/permissionIntegrityChecks.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
