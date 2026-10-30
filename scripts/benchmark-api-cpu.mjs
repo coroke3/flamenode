@@ -191,6 +191,30 @@ export function buildScenarios(ctx) {
     sql: `INSERT INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES (?, 'bench event', 'event', 'public', 1000, 2000, 10, 20, 0)`,
     params: [id],
   });
+  // MIG-0639: seed bounded collections in one recursive SQL statement per table.
+  // Unique per-sample IDs prevent 15s isolate response caching from hiding the scan cost.
+  const liveEventId = (endpoint, i, tag) => `live-${endpoint}-${tag}-${i}`;
+  const numberedRows = (limit, sql, params) => ({
+    sql: `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ${limit}) ${sql}`,
+    params,
+  });
+  const liveSlotRows = (id, count) => numberedRows(
+    count,
+    "INSERT INTO slots (id, event_id, start_time, status) SELECT ? || '-slot-' || n, ?, n, 'available' FROM seq",
+    [id, id],
+  );
+  const liveVideoRows = (id, count) => [
+    numberedRows(count, "INSERT INTO videos (id, submitted_by_user_id, creator_display_name, title, visibility_status, updated_at) SELECT ? || '-v-' || n, 'bench-admin', 'Bench', 'Bench', 'public', 1000 + n FROM seq", [id]),
+    numberedRows(count, "INSERT INTO video_events (video_id, event_id) SELECT ? || '-v-' || n, ? FROM seq", [id, id]),
+  ];
+  const liveSpec = (endpoint, count, i, tag) => {
+    const id = liveEventId(endpoint, i, tag);
+    const rows = endpoint === "submissions" ? liveVideoRows(id, count) : [liveSlotRows(id, count)];
+    return { method: "GET", path: `/api/live/events/${id}/${endpoint}`, setup: [eventRow(id), ...rows], expect: [200] };
+  };
+  const invalidLive = (endpoint) => ({
+    method: "GET", path: `/api/live/events/${"e".repeat(129)}/${endpoint}`, expect: [400],
+  });
   const LONG_TITLE = "T".repeat(200);
   const LONG_BODY = "B".repeat(8000);
   const LONG_EVENT_ID = "e".repeat(128);
@@ -274,6 +298,30 @@ export function buildScenarios(ctx) {
           return { setup: [eventRow(id)], method: "PATCH", path: `/api/admin/api-endpoints/${id}`, headers: adminHeaders(), body: json({ public_api_enabled: "1" }), expect: [200] };
         },
         invalid: (i, tag) => ({ method: "PATCH", path: `/api/admin/api-endpoints/missing-${tag}-${i}`, headers: adminHeaders(), body: json({ public_api_enabled: "1" }), expect: [404] }),
+      },
+    },
+    {
+      id: "RH-020", title: "GET /api/live/events/:id/slots (6000-slot D-12 cap)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("slots", 1, i, tag),
+        limit: (i, tag) => liveSpec("slots", 6000, i, tag),
+        invalid: () => invalidLive("slots"),
+      },
+    },
+    {
+      id: "RH-021", title: "GET /api/live/events/:id/submissions (50 public videos)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("submissions", 1, i, tag),
+        limit: (i, tag) => liveSpec("submissions", 50, i, tag),
+        invalid: () => invalidLive("submissions"),
+      },
+    },
+    {
+      id: "RH-022", title: "GET /api/live/events/:id/summary (6000-slot counts)", runtimeClass: "S2",
+      kinds: {
+        normal: (i, tag) => liveSpec("summary", 1, i, tag),
+        limit: (i, tag) => liveSpec("summary", 6000, i, tag),
+        invalid: () => invalidLive("summary"),
       },
     },
     {

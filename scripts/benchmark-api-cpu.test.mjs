@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import {
   BUDGETS_MS, KINDS, MIN_SAMPLES, aggregate, buildScenarios, judge, parseArgs, percentile, renderMarkdown, summarize,
 } from "./benchmark-api-cpu.mjs";
@@ -91,7 +92,7 @@ test("scenarios cover the measurable endpoints, three request kinds each, with e
   const scenarios = buildScenarios({ adminToken: "t" });
   assert.deepEqual(
     scenarios.filter((s) => !s.baseline).map((s) => s.id),
-    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "S4"],
+    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "RH-020", "RH-021", "RH-022", "S4"],
   );
   for (const sc of scenarios) {
     assert.deepEqual(Object.keys(sc.kinds), ["normal", "limit", "invalid"], sc.id);
@@ -123,4 +124,65 @@ test("markdown rendering is stable and labels the verdict basis", () => {
   assert.equal(a, renderMarkdown(results, { digits: 2, label: "unit test" }));
   assert.match(a, /Budget verdict by max \(unit test\)/);
   assert.match(a, /\| X t \| S2 \| normal \| 50 \|/);
+});
+
+
+test("MIG-0639: RH-020/022 seed 6000 slots and prevent cached-event reuse", () => {
+  const byId = Object.fromEntries(buildScenarios({ adminToken: "t" }).map((s) => [s.id, s]));
+  for (const [id, suffix] of [["RH-020", "slots"], ["RH-022", "summary"]]) {
+    const scenario = byId[id];
+    assert.equal(scenario.runtimeClass, "S2");
+    const normal = scenario.kinds.normal(1, "k1");
+    const limit = scenario.kinds.limit(1, "k1");
+    assert.equal(limit.method, "GET");
+    assert.equal(limit.path, "/api/live/events/live-" + suffix + "-k1-1/" + suffix);
+    assert.notEqual(limit.path, scenario.kinds.limit(2, "k1").path);
+    assert.notEqual(limit.path, scenario.kinds.limit(1, "k2").path);
+    assert.ok(normal.setup[1].sql.includes("n < 1"), "normal fixture has one slot");
+    assert.ok(limit.setup[1].sql.includes("n < 6000"), "limit fixture has exactly 6000 slots");
+    assert.deepEqual(limit.setup[1].params, [limit.path.split("/")[4], limit.path.split("/")[4]]);
+    assert.deepEqual(limit.expect, [200]);
+    const invalid = scenario.kinds.invalid(0, "ki");
+    assert.equal(invalid.method, "GET");
+    assert.equal(invalid.expect[0], 400);
+    assert.equal(invalid.path.split("/")[4].length, 129);
+    assert.equal(invalid.setup, undefined, "invalid requests must not seed rows");
+  }
+});
+
+test("MIG-0639: RH-021 limit seeds 50 public videos and 50 event memberships", () => {
+  const s = buildScenarios({ adminToken: "t" }).find((x) => x.id === "RH-021");
+  const limit = s.kinds.limit(3, "tag");
+  assert.equal(limit.path, "/api/live/events/live-submissions-tag-3/submissions");
+  assert.equal(limit.setup.length, 3);
+  assert.match(limit.setup[1].sql, /n < 50/);
+  assert.match(limit.setup[1].sql, /INSERT INTO videos/);
+  assert.match(limit.setup[2].sql, /n < 50/);
+  assert.match(limit.setup[2].sql, /INSERT INTO video_events/);
+  assert.ok(limit.setup[1].sql.includes("'public'"), "fixture videos must be visible");
+  assert.deepEqual(limit.expect, [200]);
+  assert.equal(s.kinds.invalid(0, "t").expect[0], 400);
+});
+
+
+test("MIG-0639: boundary fixture SQL executes locally and seeds exact row counts", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE events(id TEXT PRIMARY KEY, title TEXT, event_type TEXT, visibility_status TEXT, start_time INTEGER, end_time INTEGER, created_at INTEGER, updated_at INTEGER, public_api_enabled INTEGER)");
+    db.exec("CREATE TABLE slots(id TEXT PRIMARY KEY, event_id TEXT, start_time INTEGER, status TEXT)");
+    db.exec("CREATE TABLE videos(id TEXT PRIMARY KEY, submitted_by_user_id TEXT, creator_display_name TEXT, title TEXT, visibility_status TEXT, updated_at INTEGER)");
+    db.exec("CREATE TABLE video_events(video_id TEXT, event_id TEXT)");
+    const scenarios = Object.fromEntries(buildScenarios({ adminToken: "t" }).map((x) => [x.id, x]));
+    for (const id of ["RH-020", "RH-021", "RH-022"]) {
+      const spec = scenarios[id].kinds.limit(0, "sqlite");
+      for (const step of spec.setup) db.prepare(step.sql).run(...step.params);
+    }
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM slots WHERE event_id = ?").get("live-slots-sqlite-0").n, 6000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM slots WHERE event_id = ?").get("live-summary-sqlite-0").n, 6000);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM videos").get().n, 50);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM video_events WHERE event_id = ?").get("live-submissions-sqlite-0").n, 50);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM videos WHERE visibility_status = 'public'").get().n, 50);
+  } finally {
+    db.close();
+  }
 });
