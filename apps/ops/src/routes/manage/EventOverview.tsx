@@ -65,7 +65,7 @@ export function ManageEventOverviewContent({ data }: {
             {data.notifications.length === 0
               ? <p>該当する通知はありません。</p>
               : <ul>{data.notifications.map(notification => (
-                <li key={notification.id}>{notification.title}</li>
+                <li key={notification.id}>{notification.type} ({notification.status ?? "未処理"})</li>
               ))}</ul>}
           </>
         )}
