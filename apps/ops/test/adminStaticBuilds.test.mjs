@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postAdminOp, mutationResultQuery, canContinueBackfill } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
+import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
 const response = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -70,4 +70,36 @@ test("MIG-0735: unexpected 200 body and fake 500 result fail closed", async () =
     async () => response(500, {visibility_repair:"repaired"}))).status, "unavailable");
   assert.equal((await postAdminOp("static-builds/backfill", {},
     async () => response(200, {backfill_kind:"video_v2"}))).status, "unavailable");
+});
+
+test("MIG-0735 T04: youtube-sync failed-only filter reaches the identical GET query", async () => {
+  const expected = {filters:{sync_status:"",privacy:"",availability:"",visibility:"",failed:true,stale:false,missing:false},hasMore:false,truncated:false,rows:[]};
+  let call;
+  const result = await readYoutubeSync("?failed=1",async (path,init) => {
+    call={path,init};return response(200,expected);
+  });
+  assert.deepEqual(result,{status:"ok",data:expected});
+  assert.equal(call.path,"/api/admin-read/ops/youtube-sync?failed=1");
+  assert.equal(call.init.method,"GET");
+  assert.equal(call.init.credentials,"same-origin");
+  assert.equal(call.init.cache,"no-store");
+});
+
+test("MIG-0735 T05: 101st playlist row is signaled by hasMore without fabricating a row", async () => {
+  const expected={filters:{enabled:"1",status:""},hasMore:true,rows:[]};
+  const result=await readYoutubePlaylists("?enabled=1",async (path) => {
+    assert.equal(path,"/api/admin-read/ops/youtube-playlists?enabled=1");
+    return response(200,expected);
+  });
+  assert.deepEqual(result,{status:"ok",data:expected});
+  assert.equal(result.data.hasMore,true);
+});
+
+test("MIG-0735: malformed read DTO and denied request never become success", async () => {
+  assert.deepEqual(await readYoutubeSync("", async () => response(200,{hasMore:true,rows:[]})),
+    {status:"unavailable"});
+  assert.deepEqual(await readYoutubeQuota(async () => response(401,{})),
+    {status:"anonymous"});
+  assert.deepEqual(await getAdminOps("static-builds",{parse(){throw Error("schema drift");}},
+    async () => response(200,{})),{status:"unavailable"});
 });
