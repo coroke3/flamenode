@@ -435,7 +435,7 @@ Code landing only: no Worker Route / traffic change; the CURRENT Next handlers s
 
 | RH | Method & CURRENT path | Target (Hono) | Permission | Invariants & Effects | CPU p50 / p95 (local Node) | State |
 | --- | --- | --- | --- | --- | --- | --- |
-| RH-017 | `GET /api/health/deep` | `apps/api/src/routes/health.ts` | Bearer token (`WORKER_ADMIN_TOKEN`) | token gate identical to CURRENT (503 unset / 401 missing, malformed or wrong; constant-time compare; no-store). Authorized requests fail closed with CURRENT's failure response `503 {ok:false, service}` and read no binding, because the check body (`src/lib/health/deepHealth.ts`: schema version + tables, artifact SLO, queue config, visibility manifest/fence join) is not ported. Do not route `/api/health/deep` to Hono until it is | 0.050ms / 0.130ms | BRIDGED (gate only) |
+| RH-017 | `GET /api/health/deep` | `apps/api/src/routes/health.ts` | Bearer token (`WORKER_ADMIN_TOKEN`) | Core `runDeepHealthChecks`を token 検証後に呼ぶ。CURRENT と同一の schema/tables・D1/KV/R2・artifact SLO・Queue 設定・visibility manifest/fence チェック、`Cache-Control: no-store`。token 未設定 503／不正 401、必要 binding 欠損 503、正常 200、degraded 200、検査例外 503 + 固定エラー body。MIG-0660 T01/T02/T04 の Hono テスト。実際の本番 Route は未切替 | 未計測（U02 CI / CPU evidence 待ち） | IN_PROGRESS（U02、PR#438） |
 | RH-018 | `GET /api/health` | `apps/api/src/routes/health.ts` | public | only a 40-hex `BUILD_COMMIT_SHA` (lower-cased); 503 without one; no other binding read; no-store | 0.055ms / 0.131ms | BRIDGED |
 | RH-026 | `GET /api/public/about-stats` | `apps/api/src/routes/publicAboutStats.ts` | public | 1 R2 GET `top/sections/stats.v1.json` (<= 64 KiB, body cancelled when oversized), `normalizeTopStatsSection` semantics, 3 public counters only, fixed Cache API key, 503 `{stats:null}` no-store on any failure; no D1 | 0.038ms / 0.095ms | BRIDGED |
 | RH-029 | `GET /api/software/suggestions` | `apps/api/src/routes/softwareSuggestions.ts` | public | isolate rate limit 60/min (key cap 2048), `q` <= 64 chars, limit 1..50 (0 / non-numeric -> 20), D1 <= 2 bounded reads, active-only DTO allowlist, SHA-256 ETag / 304, 503 `database_unavailable` | 0.228ms / 0.615ms | BRIDGED |
@@ -506,6 +506,35 @@ Code landing only: Worker traffic still uses CURRENT Next handler until an autho
 | `GET /api/manage/navigation` | `src/components/layout/ConsoleSidebar.tsx` の active/staff X 警告、`GET /api/manage` の同値 | `apps/api/src/routes/manage/navigation.ts` + `packages/contracts/src/manage/shared.ts` | `activeXUserId: string \| null`（承認済み linked X で解決、admin は null）、`manageStaffXUserIds: string[]`（運営スタッフ X、admin は空配列）。`shouldWarnManageActiveXMismatch` が描画側で同じ判定に使用できる | `access`, `events`, `truncated` の値は不変。非 admin は `loadManageData(..., { linked: true })` の同じ1 SQL 文で linked X を最大100件取得し、session を含め3 D1 statement以下、応答64KiB以下。GET専用、`private, no-store`、D1書込0 | MIG-0663 PR#423 REVIEW |
 
 回帰テスト: `apps/api/test/manage.parity.test.mjs`（MIG-0663 T01〜T06、CURRENT 警告と `/api/manage` 応答の値、旧 Active X のfallback、admin、未選択、既存3 field の同値、D1/response予算）。実装は migration branch に限り、本番 Route と DB schema を変更しない。
+
+### MIG-0646 — Hono media routes (RH-023..025; PR #451)
+
+| CURRENT RH | TARGET route | Authorization / caching | Failure parity | Owner |
+| --- | --- | --- | --- | --- |
+| RH-023 `GET app/api/media/[...key]` | `GET /api/media/*` | cache HIT before bindings; on MISS public artifact/entity D1 ACL, allowlisted namespace/MIME, <=5MiB R2, public Cache-Control, ETag/304 | invalid/hidden 404, DB/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/publicMedia.ts` |
+| RH-024 `GET app/api/media/manage-x-icon/[...key]` | `GET /api/media/manage-x-icon/*` | HMAC-SHA256/5min TTL using AUTH_SECRET, R2 only, private max-age, 304 | tamper/expired/missing secret/unsafe R2 -> **404** (CURRENT; task card T02's 403 is incorrect) | `apps/api/src/routes/media/manageXIcon.ts` |
+| RH-025 `GET app/api/media/slot-submission-icon/[slotId]` | `GET /api/media/slot-submission-icon/:slotId` | D1 submitted/public probe before conditional Auth.js lookup; public_name shared cache, private owner-only/no-store | missing/unauthorized 404, D1/R2 unavailable 503 + Retry-After 30 | `apps/api/src/routes/media/slotSubmissionIcon.ts` |
+
+These routes are Hono code only. CURRENT Next handlers remain intact until separate traffic cutover. CI regression: `apps/api/test/mediaRoutes.parity.test.mjs`. No remote D1/R2/secret/route writes.
+
+## MIG-0637 — Hono Admin Ops mutation mapping (D-17-4)
+
+Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All routes use the existing `/api/admin` origin → session → admin/TOS/BAN guard and a strict audit batch. CostGuard control paths intentionally **skip ordinary costGuardMiddleware**, matching CURRENT `requireCostGuardControlAdmin`, so an administrator can exit maintenance; user-admin paths each use the feature's CostGuard middleware. Write bodies retain CURRENT FormData keys; IDs in the path are authoritative. Static rebuild rows are committed but wake count is 0 (D-0603-1), and `system_settings` mode is mirrored to KV **only after** the D1 commit.
+
+| SA | Hono method + path | CURRENT parity and response |
+| --- | --- | --- |
+| SA-016 | POST `/api/admin/cost-guard/mode` | mode/reason → full-row CAS + strict audit `cost_guard_mode`; post-commit KV mirror |
+| SA-017 | POST `/api/admin/cost-guard/maintenance` | `is_maintenance_mode`/reason; bypass mode restriction to restore normal; post-commit KV |
+| SA-018 | POST `/api/admin/cost-guard/override` | OVERRIDE token, <=8 allowlisted features, 15m TTL, audit; no KV |
+| SA-019 | POST `/api/admin/cost-guard/disabled-features` | APPLY token, 100 feature max, order normalized, exact JSON-encoded CAS; no KV |
+| SA-020 | POST `/api/admin/cost-guard/override/clear` | CLEAR token, null exception, audit; no KV |
+| SA-077 | POST `/api/admin/users/:userId/role` | role edit; no self-downgrade; strict audit |
+| SA-078 | POST `/api/admin/users/:userId/banned` | BAN requires reason, self-BAN forbidden; strict audit |
+| SA-079 | POST `/api/admin/users/:userId/notifications` | disabling cancels all pending outbox rows in same atomic batch, preserving already-sent rows |
+| SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
+| SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
+
+T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
 
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
