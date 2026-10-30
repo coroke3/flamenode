@@ -193,8 +193,8 @@ test("MIG-0722 U01: short page inconsistent with first snapshot is unavailable",
   });
   assert.deepEqual(await listSlots("ev1", "all", fetchFn), { status: "unavailable" });
   assert.equal(requests.length, 5, "the incomplete final page must be rejected");
-  for (const [count, expected] of [[1, 0], [2, 1]]) {
-    const { fetchFn } = makePagedFetch(count, {
+  for (const expected of [1, 2]) {
+    const { fetchFn } = makePagedFetch(expected, {
       respond: () => json(200, page(0, [], {
         total: expected, counts: { available: expected },
       })),
