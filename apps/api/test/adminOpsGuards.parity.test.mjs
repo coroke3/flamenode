@@ -87,3 +87,20 @@ test("MIG-0643 T02: maintenance mode denies all seven ops before any mutation", 
   assert.equal(s.stats.batches, 0);
   assert.equal(s.auditCount(), 0);
 });
+
+test("MIG-0643 T01: actual parent guard permits audited manual rebuild", async () => {
+  const s = setup();
+  const res = await s.request(CASES.find((item) => item.name === "SA-071 manual enqueue"));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, queued: 1 });
+  assert.equal(s.stats.reads, 2, "writeGuard user + CostGuard settings, queue upsert zero reads");
+  assert.equal(s.stats.batches, 1, "queue UPSERT and strict audit share an atomic batch");
+  assert.equal(s.auditCount(), 1);
+  const queue = s.sqlite.prepare(
+    "SELECT target_type, target_id, status, priority FROM static_rebuild_queue",
+  ).get();
+  assert.equal(queue.target_type, "video");
+  assert.equal(queue.target_id, "v1");
+  assert.equal(queue.status, "pending");
+  assert.equal(queue.priority, "high");
+});
