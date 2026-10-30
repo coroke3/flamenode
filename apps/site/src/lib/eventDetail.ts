@@ -4,7 +4,7 @@
  * build and the browser Island produce the same model. Slot state (filled counts, names) is never an input
  * of the static HTML: it comes only from `live` (RH-020), which the Island fetches in the browser.
  */
-import type { EventDetailData, EventSlotPart } from "@flamenode/ui";
+import type { EventDetailData, EventSlotPart, TopRecruit } from "@flamenode/ui";
 import type { StaticEventDetail, StaticEventSlot } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
 import { buildSlotParts } from "../../../../src/lib/utils/slotGroupingCore.ts";
 import {
@@ -17,8 +17,98 @@ import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts"
 import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { extractYoutubePlaylistId } from "../../../../src/lib/youtube/playlist.ts";
 import { absoluteUrl, compactText } from "./pageHead.ts";
+import { buildAccentVars } from "../../../../src/lib/theme/accent.ts";
+import { formatRemainingTimeMetric } from "../../../../src/lib/utils/remainingTime.ts";
 
 export const EVENT_VIDEO_DISPLAY_LIMIT = 8;
+
+/** Only public display fields cross the Astro Island serialization boundary.
+ * The source snapshot's per-slot reservation status and slotSummary must never
+ * be embedded into static HTML (not even as otherwise unused React props).
+ */
+export type EventIslandDetail = Omit<StaticEventDetail, "slotSummary" | "slots"> & {
+  slots: readonly SlotLayoutRow[];
+};
+
+export function eventIslandDetail(detail: StaticEventDetail): EventIslandDetail {
+  const { slotSummary: _privateSummary, slots, ...publicFields } = detail;
+  return {
+    ...publicFields,
+    slots: slots.map(({ id, start_time, sort_order }) => ({ id, start_time, sort_order })),
+  };
+}
+
+
+/**
+ * Browser-safe copy of CURRENT `EventRecruitCard` resolveState / resolveCountdown / formatRange.
+ * MIG-0506 `topData.ts` (recruitState / recruitCountdown) is build-only: it imports `publicDataLoader.ts`
+ * (node:crypto, node:perf_hooks) and `snapshotEnv.ts` (node:fs, node:path), so the hydrated Island cannot import it,
+ * and the Work Order forbids changing topData.ts. `scripts/migration-event-routes.test.mjs` "T02 differential"
+ * renders the CURRENT component and compares every state, so this copy cannot drift silently.
+ */
+const recruitDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
+function recruitRange(start: number | null, end: number | null): string {
+  // CURRENT EventRecruitCard `formatRange`: no dates at all is a single "-".
+  if (start == null && end == null) return "-";
+  return (start != null ? recruitDate.format(new Date(start * 1000)) : "-") + " — " +
+    (end != null ? recruitDate.format(new Date(end * 1000)) : "-");
+}
+
+function detailRecruit(
+  event: StaticEventDetail["event"],
+  now: number,
+  status: ReturnType<typeof computeEventStatus>,
+  accepting: boolean,
+  inPostPeriod: boolean,
+  total: number,
+  filled: number | null,
+  hasLive: boolean,
+): TopRecruit | null {
+  if (status === "ended" || status === "private") return null;
+  const available = hasLive ? total - (filled ?? 0) : null;
+  const state = accepting
+    ? available === 0 ? "full" : "accepting"
+    : status === "active" ? "ongoing"
+    : event.entry_end_time != null && now >= event.entry_end_time && (event.start_time ?? event.end_time)
+      ? (((event.start_time ?? event.end_time) ?? 0) - now) / 86400 <= 3 ? "soon" : "after_entry"
+      : "before_entry";
+  const kind: TopRecruit["kind"] =
+    state === "accepting" || state === "full" ? "entry" :
+    state === "before_entry" ? "pre" : "submit";
+  const statusLabel = {
+    before_entry: "募集開始前", accepting: "募集期間中", full: "満枠",
+    ongoing: "開催中", soon: "近日公開", after_entry: "公開前作品受付中",
+  }[state];
+  const post = recruitRange(event.start_time, event.end_time);
+  const entry = recruitRange(event.entry_start_time, event.entry_end_time);
+  const countdown = state === "before_entry" && event.entry_start_time != null && event.entry_start_time > now
+    ? { heading: "募集開始まで", seconds: event.entry_start_time - now, range: entry }
+    : (state === "accepting" || state === "full") && event.entry_end_time != null && event.entry_end_time > now
+      ? { heading: "募集締切まで", seconds: event.entry_end_time - now, range: entry }
+      : event.start_time != null && event.start_time > now
+        ? { heading: "投稿期間まで", seconds: event.start_time - now, range: post }
+        : event.end_time != null && event.end_time > now
+          ? { heading: "投稿期間終了まで", seconds: event.end_time - now, range: post }
+          : { heading: "終了済み", seconds: null, range: post };
+  const metric = formatRemainingTimeMetric(countdown.seconds);
+  return {
+    id: event.id,
+    title: event.title,
+    statusLabel,
+    kind,
+    // CURRENT EventRecruitCard has no visual; the page hero already shows it (no second copy of the image).
+    imageUrl: null,
+    countdownHeading: countdown.heading,
+    countdownRange: countdown.range,
+    countdownValue: metric?.value ?? null,
+    countdownUnit: metric?.unit ?? null,
+    slotFilled: hasLive ? filled : null,
+    slotTotal: hasLive ? total : null,
+    ctaHref: inPostPeriod ? "/entry" : total > 0 ? "/event/" + event.id + "/slots" : "/event/" + event.id,
+    ctaLabel: inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : total > 0 ? "枠表へ" : "詳細ページへ",
+  };
+}
+
 
 /** RH-020 `GET /api/live/events/{id}/slots` rows (the part this page reads). */
 export type LiveSlotStatus = Readonly<{ slots: readonly { id: string; status: string }[] }>;
@@ -51,7 +141,7 @@ export function getDayMetric(
 
 /** Time layout of the slots (ids, time, order): structure only, no status. */
 export type SlotLayoutRow = Readonly<{ id: string; start_time: number | null; sort_order: number | null }>;
-export function slotLayoutOf(detail: StaticEventDetail): SlotLayoutRow[] {
+export function slotLayoutOf(detail: EventIslandDetail): SlotLayoutRow[] {
   return detail.slots.map((s: StaticEventSlot) => ({ id: s.id, start_time: s.start_time, sort_order: s.sort_order }));
 }
 
@@ -77,7 +167,7 @@ export function slotPartsOf(
 }
 
 export function buildEventDetailData(
-  detail: StaticEventDetail,
+  detail: EventIslandDetail,
   now: number,
   live: LiveSlotStatus | null = null,
 ): EventDetailData {
@@ -100,6 +190,8 @@ export function buildEventDetailData(
     : null;
   const playlistId = extractYoutubePlaylistId(event.youtube_playlist_id ?? "");
   const showPublicationTime = status === "scheduled" || status === "active";
+  // The static snapshot contains layout only. RH-020 is the sole source of availability after hydration.
+  const recruit = detailRecruit(event, now, status, accepting, inPostPeriod, layout.length, slotFilled, live !== null);
   return {
     id: event.id,
     title: event.title,
@@ -111,6 +203,8 @@ export function buildEventDetailData(
     statusTone: accepting ? "public" : status === "scheduled" ? "warning" : status === "ended" ? "draft" : "live",
     periodLabel: null,
     entryAction: accepting ? "reserve" : inPostPeriod ? "submit" : null,
+    accentStyle: event.accent_color?.trim() ? { ...buildAccentVars(event.accent_color, "dark") } as Record<string, string> : undefined,
+    recruit,
     playlistUrl: playlistId ? `https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}` : null,
     videoTotal: detail.videoTotal,
     creatorTotal: detail.creatorCount,

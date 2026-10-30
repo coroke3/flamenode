@@ -7,6 +7,8 @@
 
 MIG-0008で認証・identity・権限のCURRENT contractをcode/testsから固定する。Phase 8で認証基盤を置き換えるまで、production auth sourceはAuth.js + D1 adapterのまま維持する。
 
+Hono セッション・書き込みガードの追加セキュリティ監査（MIG-0807、非本番のcode/test監査）は [SECURITY_REVIEW.md §1](SECURITY_REVIEW.md#1-existing-hono-session-and-write-guard-security-mig-0807) を参照。Auth.js/OAuth切替の監査は同文書 §2（MIG-0804）で別途扱う。
+
 ## Trust hierarchy
 
 認可判定の信頼順序を以下で固定する。

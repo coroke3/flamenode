@@ -3,6 +3,7 @@ import { Image, Link } from "../adapters/index.js";
 import { Badge, type BadgeStatus } from "../components/Badge.js";
 import { EmptyState } from "../feedback/EmptyState.js";
 import { cx } from "../cx.js";
+import { RecruitCard, type TopRecruit } from "./TopView.js";
 import { Avatar, EXTERNAL, ScreenIcon, VideoCardLink, type ScreenVideoCard } from "./parts.js";
 
 /*
@@ -51,6 +52,10 @@ export interface EventDetailData {
   /** e.g. `2026.11.03 – 11.04`. */
   periodLabel?: string | null;
   entryAction: EventEntryAction;
+  /** CURRENT root event accent variables; absent for an event without an accent. */
+  accentStyle?: Readonly<Record<string, string>>;
+  /** CURRENT EventRecruitCard, omitted when the event has ended. */
+  recruit?: TopRecruit | null;
   playlistUrl?: string | null;
   videoTotal: number;
   creatorTotal: number;
@@ -105,7 +110,7 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
   const staff = event.staff ?? [];
 
   return (
-    <div className={cx("p-root fn-screen", className)}>
+    <div className={cx("p-root fn-screen", className)} style={event.accentStyle as React.CSSProperties | undefined}>
       {event.imageUrl ? <Image className="ed-visual" src={event.imageUrl} alt={`${event.title} メインビジュアル`} /> : null}
       <main className={cx("wrap", "ev-scope", !event.imageUrl && "ed-novisual")}>
         <header className="ed-head">
@@ -148,6 +153,12 @@ export function EventDetailView({ event, className }: EventDetailViewProps): Rea
           <Metric value={`${event.slotFilled ?? "–"} / ${event.slotTotal}`} label="埋まり枠" />
           {event.dayMetric ? <Metric value={`${event.dayMetric.days}日`} label={event.dayMetric.label} /> : null}
         </div>
+
+        {event.recruit ? (
+          <section className="sec ed-recruit" aria-label="イベント募集案内">
+            <RecruitCard event={event.recruit} primary />
+          </section>
+        ) : null}
 
         <div className="split sec ed-body">
           <div className="main stack">

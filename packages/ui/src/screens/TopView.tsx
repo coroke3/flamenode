@@ -83,6 +83,7 @@ export interface TopViewProps {
 const num = (n: number): string => new Intl.NumberFormat("ja-JP").format(n);
 
 function Recruit({ event, primary }: { event: TopRecruit; primary?: boolean }): React.ReactElement {
+  const hasSlotCounts = event.slotTotal != null && event.slotFilled != null;
   const pct =
     event.slotTotal != null && event.slotTotal > 0 && event.slotFilled != null
       ? Math.max(0, Math.min(100, Math.round((event.slotFilled / event.slotTotal) * 100)))
@@ -114,7 +115,7 @@ function Recruit({ event, primary }: { event: TopRecruit; primary?: boolean }): 
             埋まり枠 {event.slotFilled ?? "-"}
             {event.slotTotal != null ? `/${event.slotTotal}` : ""}
           </span>
-          <div className="bar" role="meter" aria-label={`埋まり枠 ${event.slotFilled ?? 0}/${event.slotTotal ?? 0}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+          <div className="bar" {...(hasSlotCounts ? { role: "meter", "aria-label": `埋まり枠 ${event.slotFilled}/${event.slotTotal}`, "aria-valuemin": 0, "aria-valuemax": 100, "aria-valuenow": pct } : { "aria-hidden": true })}>
             <i style={{ width: `${pct}%` }} />
           </div>
         </div>
@@ -127,6 +128,9 @@ function Recruit({ event, primary }: { event: TopRecruit; primary?: boolean }): 
     </article>
   );
 }
+
+// Reused by the public event detail Island without duplicating the recruit presentation.
+export { Recruit as RecruitCard };
 
 export function TopView({ stats, primary, recruits, moreRecruitCount, announcements, shelves, events, eventsEmptyMessage, className }: TopViewProps): React.ReactElement {
   return (
