@@ -69,7 +69,7 @@ test("MIG-0723 T01: cancelling remove prompt never sends any request", async () 
     await ui.view();
     await ui.click(".manage-staff-list-row");
     await ui.click(".manage-staff-editor button.fn-btn-danger");
-    await ui.click(".manage-staff-editor + button.fn-btn-danger");
+    await ui.click(".manage-staff-editor > button.fn-btn-danger");
     assert.deepEqual(ui.calls, []);
     assert.deepEqual(ui.refresh, []);
   } finally { await ui.cleanup(); }
@@ -81,7 +81,7 @@ test("MIG-0723 T02: last-owner HTTP409 preserves exact server reason", async () 
     await ui.view();
     await ui.click(".manage-staff-list-row");
     await ui.click(".manage-staff-editor button.fn-btn-danger");
-    await ui.click(".manage-staff-editor + button.fn-btn-danger");
+    await ui.click(".manage-staff-editor > button.fn-btn-danger");
     assert.equal(ui.calls.length, 1);
     assert.equal(ui.calls[0].url, "/api/manage/events/ev%201/staff/staff-1");
     assert.equal(ui.calls[0].init.method, "DELETE");
