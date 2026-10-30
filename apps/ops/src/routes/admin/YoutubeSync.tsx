@@ -45,7 +45,13 @@ export function YoutubeSync(): React.ReactElement {
     <AdminVideoManagementTabs />
     <form key={query} className="fn-console-filters" onSubmit={event => {
       event.preventDefault();
-      setParams(new URLSearchParams(new FormData(event.currentTarget) as unknown as string));
+      const form = new FormData(event.currentTarget);
+      const next = new URLSearchParams();
+      for (const key of ["sync_status", "privacy", "availability", "visibility", "failed", "stale", "missing"]) {
+        const value = form.get(key);
+        if (typeof value === "string" && value) next.set(key, value);
+      }
+      setParams(next);
     }}>
       {FILTERS.map(([name, label, options]) =>
         <label key={name} className="fn-console-filter-field">{label}

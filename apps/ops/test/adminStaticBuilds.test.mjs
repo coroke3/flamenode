@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postAdminOp, mutationResultQuery } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
+import { postAdminOp, mutationResultQuery, canContinueBackfill } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
 const response = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -38,4 +38,10 @@ test("MIG-0735: denied, failed, and invalid mutation responses fail closed", asy
   ]) {
     assert.equal((await postAdminOp("static-builds/rebuild", {}, async () => response(status, payload))).status, expected);
   }
+});
+
+test("MIG-0735 T02: a completed backfill disables continuation but restart is separate", () => {
+  assert.equal(canContinueBackfill("completed"), false);
+  assert.equal(canContinueBackfill("running"), true);
+  assert.equal(canContinueBackfill("failed"), true);
 });

@@ -80,3 +80,8 @@ export function mutationResultQuery(data: Record<string, unknown>): string {
   }
   return query.toString();
 }
+
+/** CURRENT completed runs cannot be continued, but can be explicitly restarted. */
+export function canContinueBackfill(status: string): boolean {
+  return status !== "completed";
+}

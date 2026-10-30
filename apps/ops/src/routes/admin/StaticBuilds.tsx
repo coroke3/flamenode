@@ -1,6 +1,6 @@
 import * as React from "react";
 import type { AdminStaticBuildsResponse } from "@flamenode/contracts";
-import { postAdminOp, readStaticBuilds, mutationResultQuery } from "../../api/adminStaticBuilds.js";
+import { postAdminOp, readStaticBuilds, mutationResultQuery, canContinueBackfill } from "../../api/adminStaticBuilds.js";
 import { StaticRebuildQueuePanel } from "./StaticRebuildQueuePanel.js";
 
 const KINDS = ["video_v2", "user_profile", "event_crew"] as const;
@@ -114,7 +114,7 @@ export function StaticBuilds(): React.ReactElement {
         {KINDS.map(kind => {
           const run = data.backfillState.runs[kind];
           const queue = data.backfillQueue[kind];
-          const completed = run.status === "completed";
+          const completed = !canContinueBackfill(run.status);
           return <article key={kind} style={{ padding: 12, border: "1px solid var(--border-subtle)" }}>
             <h3>{kind}</h3>
             <p>{run.status} / 対象 {run.total} / 走査 {run.scanned} / 投入 {run.enqueued} / 残り {Math.max(0, run.total - run.scanned)}</p>
