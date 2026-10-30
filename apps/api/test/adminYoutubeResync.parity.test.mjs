@@ -5,6 +5,8 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { AdminYoutubeResyncVideoIdSchema, AdminYoutubeResyncResultSchema } from "@flamenode/contracts";
 import { youtubeSyncAdminRoutes } from "../src/routes/admin/youtubeSync.ts";
+import { originGuardMiddleware, writeGuardMiddleware, onlyMutating } from "../src/middleware/writeOrigin.ts";
+import { dbMiddleware } from "../src/middleware/db.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const ADMIN = { id: "admin-1", name: "Admin", role: "admin", is_banned: 0 };
@@ -152,4 +154,68 @@ test("MIG-0643 U04: concurrent CAS conflict rolls back audit and mutation", asyn
   assert.equal((await response.json()).ok, false);
   assert.equal(s.metadata().sync_error, "raced");
   assert.equal(s.audit().length, 0);
+});
+
+const SITE = "https://app.flamenode.example";
+
+function protectedSetup({ user = ADMIN } = {}) {
+  const fixture = setup();
+  const app = new Hono();
+  const originOptions = { loadSiteUrl: () => SITE, allowLocalPreview: () => false };
+  app.use("*", onlyMutating(originGuardMiddleware(originOptions)));
+  app.use("*", async (c, next) => {
+    c.set("user", user);
+    c.set("sessionState", user ? "user" : "none");
+    await next();
+  });
+  app.use("*", onlyMutating(writeGuardMiddleware(originOptions)));
+  app.use("*", onlyMutating(dbMiddleware));
+  app.route("/api/admin/youtube-sync", youtubeSyncAdminRoutes);
+  const request = (origin = SITE) => app.request(
+    "/api/admin/youtube-sync/videos/vid-1/resync",
+    { method: "POST", headers: { Origin: origin } },
+    { DB: fixture.db, NEXT_PUBLIC_SITE_URL: SITE },
+  );
+  return { ...fixture, request };
+}
+
+test("MIG-0643 U04: parent guard rejects cross-origin before DB read or write", async () => {
+  const s = protectedSetup();
+  const response = await s.request("https://attacker.example");
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).reason, "invalid_origin");
+  assert.equal(s.stats.reads, 0);
+  assert.equal(s.stats.batches, 0);
+});
+
+test("MIG-0643 U04: parent guard rejects no session and non-admin with zero writes", async () => {
+  for (const [user, status] of [
+    [null, 401],
+    [{ ...ADMIN, role: "user" }, 403],
+    [{ ...ADMIN, is_banned: 1 }, 403],
+  ]) {
+    const s = protectedSetup({ user });
+    const response = await s.request();
+    assert.equal(response.status, status);
+    assert.equal(s.stats.batches, 0);
+    assert.equal(s.audit().length, 0);
+  }
+});
+
+test("MIG-0643 U04: CostGuard maintenance blocks before video mutation", async () => {
+  const s = protectedSetup();
+  s.sqlite.prepare("UPDATE system_settings SET operation_mode='maintenance'").run();
+  const response = await s.request();
+  assert.equal(response.status, 503);
+  assert.equal(s.stats.batches, 0);
+  assert.equal(s.audit().length, 0);
+});
+
+test("MIG-0643 U04: protected Hono stack uses S3 <=3 pre-reads and one batch", async () => {
+  const s = protectedSetup();
+  const response = await s.request();
+  assert.equal(response.status, 200);
+  assert.equal(s.stats.reads, 3);
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
 });
