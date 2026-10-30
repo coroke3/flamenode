@@ -153,3 +153,32 @@ test("MIG-0722 U01: cross-event, changed snapshot, invalid offset and duplicate 
     assert.equal(requests.length, 2);
   }
 });
+
+
+test("MIG-0722 U01: malformed UTF-16 and NUL event IDs reject before any fetch", async () => {
+  let calls = 0;
+  const fetchFn = async () => {
+    calls++;
+    throw Error("invalid event ID must not reach the network");
+  };
+  for (const eventId of ["\uD800", "\uDC00", "bad\uD800tail", "bad\uDC00tail", "bad\0tail"]) {
+    assert.deepEqual(await listSlots(eventId, "all", fetchFn),
+      { status: "unavailable" }, JSON.stringify(eventId));
+  }
+  assert.equal(calls, 0);
+
+  // Valid surrogate pairs are still encoded and accepted, unlike isolated
+  // surrogates. The response must still match the originally requested ID.
+  const unicodeId = "event-\uD83D\uDE80";
+  let seenPath = "";
+  const result = await listSlots(unicodeId, "all", async path => {
+    seenPath = path;
+    return json(200, page(0, [], {
+      event: { id: unicodeId, title: "Festival", accent_color: null,
+        slot_part_gap_minutes: 15, parts: [] },
+      total: 0, counts: {},
+    }));
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(seenPath, "/api/manage/events/event-%F0%9F%9A%80/slots?status=all&offset=0");
+});
