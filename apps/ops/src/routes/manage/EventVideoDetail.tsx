@@ -38,7 +38,7 @@ export function safeReviewNextHref(eventId: string, href: string): string | null
     const segment = url.pathname.slice(prefix.length);
     const decoded = decodeURIComponent(segment);
     if (!segment || segment.includes("/") || !decoded || decoded.includes("/") ||
-        decoded.includes("\\\\") || decoded === "." || decoded === "..") return null;
+        decoded.includes(String.fromCharCode(92)) || decoded === "." || decoded === "..") return null;
     return url.pathname + url.search + url.hash;
   } catch { return null; }
 }
