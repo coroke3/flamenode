@@ -49,7 +49,11 @@ async function writeBackfillState(kv: KVNamespace | undefined, state: ReturnType
 async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean> {
   if (!bucket) return false;
   const values: unknown[] = [];
-  for (const [key, maxBytes] of SHARED_INPUTS) {
+  // CURRENT loadStaticJsonFreshStaleUnavailable reports R2 exceptions as
+  // unavailable, which schedules both shared targets rather than failing the
+  // backfill. Only the later D1 queue failure should mark the run failed.
+  try {
+    for (const [key, maxBytes] of SHARED_INPUTS) {
     // Key literals are part of the audited MIG-0649 R2 consumer registry.
     const obj = key === "youtube/related-blocklist.v1.json"
       ? await bucket.get("youtube/related-blocklist.v1.json")
@@ -62,6 +66,9 @@ async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean>
     const text = await obj.text();
     if (new TextEncoder().encode(text).byteLength > maxBytes) return false;
     try { values.push(JSON.parse(text)); } catch { return false; }
+    }
+  } catch {
+    return false;
   }
   const block = values[0] as Record<string, unknown> | null;
   const pool = values[1] as Record<string, unknown> | null;
