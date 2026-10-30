@@ -2,10 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
-import { staticRebuildAdminRoutes } from "../src/routes/admin/staticRebuild.ts";
-import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts";
-import { visibilityRepairAdminRoutes } from "../src/routes/admin/visibilityRepair.ts";
-import { youtubeSyncAdminRoutes } from "../src/routes/admin/youtubeSync.ts";
+import { mountMig0643AdminRoutes } from "../src/routes/admin/mig0643.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 // The production admin parent router is currently owned by MIG-0637 PR #472.
@@ -35,13 +32,9 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
       await next();
     },
   });
-  // IMPORTANT: child route modules must be registered ON the protected admin
-  // Hono instance BEFORE that instance is mounted. Mounting sibling routes
-  // directly on app bypasses createAdminRoutes()'s private middleware stack.
-  admin.route("/static-builds", staticRebuildAdminRoutes);
-  admin.route("/static-builds/backfill", staticBackfillAdminRoutes);
-  admin.route("/visibility-repair", visibilityRepairAdminRoutes);
-  admin.route("/youtube-sync", youtubeSyncAdminRoutes);
+  // This is the exact one-call integration point that the owner of
+  // admin/index.ts will use once PR #472 releases the shared file.
+  mountMig0643AdminRoutes(admin);
   app.route("/api/admin", admin);
   const request = (item, origin = SITE) => app.request(item.path, {
     method: "POST",
