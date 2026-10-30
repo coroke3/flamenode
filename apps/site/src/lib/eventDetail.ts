@@ -40,11 +40,16 @@ export function eventIslandDetail(detail: StaticEventDetail): EventIslandDetail 
 
 
 /**
- * Browser-safe CURRENT recruit model. MIG-0506 topData.ts is build-only and
- * imports node:crypto/fs transitively: do not use it inside the hydrated Island.
+ * Browser-safe copy of CURRENT `EventRecruitCard` resolveState / resolveCountdown / formatRange.
+ * MIG-0506 `topData.ts` (recruitState / recruitCountdown) is build-only: it imports `publicDataLoader.ts`
+ * (node:crypto, node:perf_hooks) and `snapshotEnv.ts` (node:fs, node:path), so the hydrated Island cannot import it,
+ * and the Work Order forbids changing topData.ts. `scripts/migration-event-routes.test.mjs` "T02 differential"
+ * renders the CURRENT component and compares every state, so this copy cannot drift silently.
  */
 const recruitDate = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric" });
 function recruitRange(start: number | null, end: number | null): string {
+  // CURRENT EventRecruitCard `formatRange`: no dates at all is a single "-".
+  if (start == null && end == null) return "-";
   return (start != null ? recruitDate.format(new Date(start * 1000)) : "-") + " — " +
     (end != null ? recruitDate.format(new Date(end * 1000)) : "-");
 }
@@ -91,7 +96,8 @@ function detailRecruit(
     title: event.title,
     statusLabel,
     kind,
-    imageUrl: cachedGoogleImageUrl(event.img_url),
+    // CURRENT EventRecruitCard has no visual; the page hero already shows it (no second copy of the image).
+    imageUrl: null,
     countdownHeading: countdown.heading,
     countdownRange: countdown.range,
     countdownValue: metric?.value ?? null,

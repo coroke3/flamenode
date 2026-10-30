@@ -195,6 +195,47 @@ test("U01 /event built HTML: default view, GET form, anchors, no private event",
   assert.deepEqual([...doc.querySelectorAll(".seg a")].map((a) => a.getAttribute("href")), ["/event", "/event?status=open", "/event?status=upcoming", "/event?status=ended"]);
 });
 
+test("T04 /event search: ImeSafeGetForm data-fn-ime-composing contract and the native GET URL (D-13-39)", { skip: skipUi }, async (t) => {
+  const { EventsIndexView, AdapterProvider, IME_COMPOSING_ATTR } = await import("@flamenode/ui");
+  assert.equal(IME_COMPOSING_ATTR, "data-fn-ime-composing");
+  const pushed = [];
+  const navigator = { push: (href) => pushed.push(href), replace() {}, back() {} };
+  // navigateGetForm reads the form with the global FormData: use jsdom's, as a browser would.
+  const nodeFormData = globalThis.FormData;
+  globalThis.FormData = dom.window.FormData;
+  t.after(() => { globalThis.FormData = nodeFormData; });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const model = buildEventsIndexModel(data.index, parseEventsQuery(""), NOW);
+  await act(async () => root.render(h(AdapterProvider, { navigator }, h(EventsIndexView, { model }))));
+  const form = container.querySelector("main form[role=search]");
+  assert.equal(form.getAttribute("method"), "get");
+  assert.equal(form.getAttribute("action"), "/event");
+  const input = form.querySelector('input[name="q"]');
+  input.value = "秋";
+  const submit = () => act(async () => form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })));
+  await act(async () => input.dispatchEvent(new dom.window.CompositionEvent("compositionstart", { bubbles: true })));
+  assert.ok(form.hasAttribute("data-fn-ime-composing"), "composing marker set on compositionstart");
+  await submit();
+  assert.deepEqual(pushed, [], "no search while the IME is composing");
+  await act(async () => {
+    // compositionend and the confirming Enter's submit arrive in the same task: still blocked
+    input.dispatchEvent(new dom.window.CompositionEvent("compositionend", { bubbles: true }));
+    form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+  });
+  assert.deepEqual(pushed, []);
+  await act(async () => new Promise((r) => setTimeout(r, 0)));
+  assert.equal(form.hasAttribute("data-fn-ime-composing"), false, "marker cleared after compositionend");
+  await submit();
+  // Same URL a native GET submit of this form produces (action + its named controls in document order).
+  const native = "/event?" + new dom.window.URLSearchParams(new dom.window.FormData(form)).toString();
+  assert.deepEqual(pushed, [native]);
+  assert.match(native, /^\/event\?q=%E7%A7%8B&status=all&sort=priority$/);
+  await act(async () => root.unmount());
+  container.remove();
+});
+
 test("T03 private events leave no trace in any built file", { skip }, () => {
   for (const file of walk(DIST)) {
     if (!/\.(html|txt|json|js|css)$|_redirects$/.test(file)) continue;
@@ -339,6 +380,118 @@ test("U02 model: status, entry action, day metric, slot parts follow CURRENT", (
   assert.equal(buildEventDetailData(detail, NOW).videos.length, 2);
   assert.match(buildEventDetailData(detail, NOW).videos[0].metaLabel, /公開$/, "publication time on scheduled events");
   assert.equal(buildEventDetailData(detailOf("past-event-2020"), NOW).videos.length, 0);
+});
+
+// Differential T02: the browser-safe `detailRecruit` copy in eventDetail.ts against the CURRENT component itself.
+// CURRENT `src/components/layout/EventRecruitCard.tsx` is bundled with esbuild (next/link -> plain <a>; `@/` -> src/,
+// `@/lib/utils/eventStatus` -> its pure `eventStatusCore` re-export so drizzle is not loaded) and rendered at a
+// fixed clock. The CTA props are CURRENT `app/(public)/event/[id]/page.tsx:269-277` (guarded by a source match).
+async function loadCurrentRecruitCard() {
+  const { build } = await import("esbuild");
+  const { pathToFileURL } = await import("node:url");
+  const os = await import("node:os");
+  const root = path.resolve(".");
+  const reactPath = (await import("node:module")).createRequire(import.meta.url).resolve("react");
+  const out = await build({
+    stdin: { contents: `export { EventRecruitCard } from ${JSON.stringify(path.join(root, "src/components/layout/EventRecruitCard.tsx"))};`, resolveDir: root, loader: "ts" },
+    bundle: true, write: false, format: "esm", platform: "node", jsx: "transform", logLevel: "silent",
+    plugins: [{
+      name: "current-aliases",
+      setup(b) {
+        b.onResolve({ filter: /^react$/ }, () => ({ path: pathToFileURL(reactPath).href, external: true }));
+        b.onResolve({ filter: /^next\/link$/ }, () => ({ path: "next-link", namespace: "stub" }));
+        b.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
+          contents: `import * as React from "react"; export default function Link({ href, children, prefetch: _p, ...rest }) { return React.createElement("a", { href, ...rest }, children); }`,
+          resolveDir: root, loader: "js",
+        }));
+        b.onResolve({ filter: /^@\/lib\/utils\/eventStatus$/ }, () => ({ path: path.join(root, "src/lib/utils/eventStatusCore.ts") }));
+        b.onResolve({ filter: /^@\// }, (a) => {
+          const base = path.join(root, "src", a.path.slice(2));
+          for (const ext of ["", ".ts", ".tsx"]) if (fs.existsSync(base + ext) && fs.statSync(base + ext).isFile()) return { path: base + ext };
+          return undefined;
+        });
+      },
+    }],
+  });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "mig0502-current-")), "EventRecruitCard.mjs");
+  fs.writeFileSync(file, out.outputFiles[0].text);
+  return (await import(pathToFileURL(file).href)).EventRecruitCard;
+}
+
+test("T02 differential: detail recruit model equals CURRENT EventRecruitCard for every state", async () => {
+  assert.ok(detailSrc.includes('actionHref={inPostPeriod ? "/entry" : slotTotal > 0 ? `/event/${event.id}/slots` : undefined}'), "CURRENT CTA href expression moved");
+  assert.ok(detailSrc.includes('actionLabel={inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : slotTotal > 0 ? "枠表へ" : undefined}'), "CURRENT CTA label expression moved");
+  assert.ok(detailSrc.includes('{status !== "ended" ? ('), "CURRENT shows the card only when status is not ended");
+  const EventRecruitCard = await loadCurrentRecruitCard();
+  const { computeEventStatus, isAcceptingEntries } = await import("../src/lib/utils/eventStatusCore.ts");
+  const D = 86400;
+  const base = detailOf("autumn-collab-2026");
+  const at = (o) => ({ ...base.event, entry_start_time: null, entry_end_time: null, start_time: null, end_time: null, ...o });
+  const scenarios = {
+    before_entry: at({ entry_start_time: NOW + 5 * D, entry_end_time: NOW + 9 * D, start_time: NOW + 20 * D, end_time: NOW + 21 * D }),
+    accepting: at({ entry_start_time: NOW - D, entry_end_time: NOW + 5 * D, start_time: NOW + 20 * D, end_time: NOW + 21 * D }),
+    accepting_hours: at({ entry_start_time: NOW - D, entry_end_time: NOW + 5 * 3600, start_time: NOW + 20 * D, end_time: NOW + 21 * D }),
+    after_entry: at({ entry_start_time: NOW - 9 * D, entry_end_time: NOW - D, start_time: NOW + 10 * D, end_time: NOW + 11 * D }),
+    soon: at({ entry_start_time: NOW - 9 * D, entry_end_time: NOW - D, start_time: NOW + 2 * D, end_time: NOW + 3 * D }),
+    ongoing: at({ start_time: NOW - D, end_time: NOW + D }),
+    ended: at({ start_time: NOW - 3 * D, end_time: NOW - D }),
+    undated: at({}),
+  };
+  const liveCases = {
+    open: (slots) => ({ slots: slots.map((s, i) => ({ id: s.id, status: i === 0 ? "reserved" : "available" })) }),
+    full: (slots) => ({ slots: slots.map((s) => ({ id: s.id, status: "reserved" })) }),
+  };
+  const realDateNow = Date.now;
+  Date.now = () => NOW * 1000;
+  try {
+    let compared = 0;
+    for (const [name, event] of Object.entries(scenarios)) {
+      for (const slots of [base.slots, []]) {
+        for (const [liveName, mkLive] of Object.entries(liveCases)) {
+          const label = `${name}/${slots.length} slots/${liveName}`;
+          const live = mkLive(slots);
+          const model = buildEventDetailData(eventIslandDetail({ ...base, event, slots }), NOW, live).recruit;
+          const status = computeEventStatus(event, NOW);
+          if (status === "ended") { assert.equal(model, null, label); continue; }
+          // CURRENT page inputs (page.tsx:181-195, 269-277).
+          const accepting = isAcceptingEntries(event, NOW);
+          const inPostPeriod = !accepting && event.entry_end_time != null && NOW >= event.entry_end_time && event.start_time != null && NOW < event.start_time;
+          const slotTotal = slots.length;
+          const available = live.slots.filter((s) => s.status === "available").length;
+          const html = renderToString(h(EventRecruitCard, {
+            event, available, total: slotTotal,
+            actionHref: inPostPeriod ? "/entry" : slotTotal > 0 ? `/event/${event.id}/slots` : undefined,
+            actionLabel: inPostPeriod ? "作品を提出する" : accepting ? "枠を確保する" : slotTotal > 0 ? "枠表へ" : undefined,
+          }));
+          const doc = new JSDOM(html).window.document;
+          const q = (sel) => doc.querySelector(sel)?.textContent.trim() ?? null;
+          assert.ok(model, label + ": card expected");
+          assert.equal(doc.querySelector("img"), null, "CURRENT card has no image");
+          assert.equal(model.imageUrl, null, label + " no card visual (CURRENT has none)");
+          assert.equal(model.statusLabel, q(".fn-rec-status"), label + " status");
+          assert.equal(model.kind, doc.querySelector("article").getAttribute("data-kind"), label + " kind");
+          assert.equal(model.ctaHref, doc.querySelector(".fn-rec-cta").getAttribute("href"), label + " cta href");
+          assert.equal(model.ctaLabel, q(".fn-rec-cta span"), label + " cta label");
+          assert.equal(model.countdownHeading, q(".fn-rec-info-label"), label + " countdown heading");
+          assert.equal(model.countdownRange, q(".fn-rec-info-range"), label + " countdown range");
+          assert.equal(model.countdownValue ?? "—", q(".fn-rec-info-num"), label + " countdown value");
+          assert.equal(model.countdownUnit, q(".fn-rec-info-unit"), label + " countdown unit");
+          assert.equal(`${model.slotFilled ?? "-"}${model.slotTotal != null ? "/" + model.slotTotal : ""}`, q(".fn-rec-foot-v"), label + " slot counts");
+          compared++;
+        }
+      }
+      // Static HTML (no RH-020 yet): same card except counts are unknown, which CURRENT renders for available=null.
+      const ssg = buildEventDetailData(eventIslandDetail({ ...base, event }), NOW, null).recruit;
+      if (computeEventStatus(event, NOW) === "ended") continue;
+      const doc = new JSDOM(renderToString(h(EventRecruitCard, { event, available: null, total: null }))).window.document;
+      assert.equal(ssg.statusLabel, doc.querySelector(".fn-rec-status").textContent.trim(), name + " SSG status");
+      assert.equal(ssg.countdownHeading, doc.querySelector(".fn-rec-info-label").textContent.trim(), name + " SSG heading");
+      assert.deepEqual([ssg.slotFilled, ssg.slotTotal], [null, null], name + " SSG has no live counts");
+    }
+    assert.ok(compared >= 28, "compared " + compared);
+  } finally {
+    Date.now = realDateNow;
+  }
 });
 
 // ---------- U03 slots + U06 zero-slot redirect (G19) ----------
