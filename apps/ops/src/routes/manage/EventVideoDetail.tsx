@@ -35,7 +35,7 @@ export function safeReviewNextHref(eventId: string, href: string): string | null
   if (!href.startsWith(prefix) || href.includes("\\") || href.includes("//")) return null;
   try {
     const url = new URL(href, "https://flamenode.invalid");
-    if (url.origin !== "https://flamenode.invalid") return null;
+    if (url.origin !== "https://flamenode.invalid" || !url.pathname.startsWith(prefix)) return null;
     const segment = url.pathname.slice(prefix.length);
     const decoded = decodeURIComponent(segment);
     if (!segment || segment.includes("/") || !decoded || decoded.includes("/") ||

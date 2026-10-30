@@ -116,5 +116,7 @@ test("MIG-0724 U03: approve-next href remains limited to the same event queue", 
     "https://attacker.test", "//attacker.test", "/admin/videos/2", "/manage/events/other/videos/next",
     "/manage/events/event%2F1/videos/", "/manage/events/event%2F1/videos//escape",
     "/manage/events/event%2F1/videos/%ZZ",
+    "/manage/events/event%2F1/videos/../dashboard/edit/some-long-escaped-id",
+    "/manage/events/event%2F1/videos/%2e%2e/dashboard/edit/some-long-escaped-id",
   ]) assert.equal(safeReviewNextHref("event/1", unsafe), null, unsafe);
 });
