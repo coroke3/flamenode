@@ -108,3 +108,18 @@ test("MIG-0643 T01: actual parent guard permits audited manual rebuild", async (
   assert.equal(queue.status, "pending");
   assert.equal(queue.priority, "high");
 });
+
+test("MIG-0643 S3: sibling static routes cannot double-charge backfill CostGuard", async () => {
+  const s = setup();
+  const item = CASES.find((candidate) => candidate.name === "SA-069 backfill");
+  assert.ok(item);
+  const res = await s.request(item);
+  assert.equal(res.status, 200);
+  const payload = await res.json();
+  assert.equal(payload.backfill_kind, "event_crew");
+  assert.equal(payload.backfill_done, "1");
+  assert.equal(s.stats.reads, 3,
+    "real admin writeGuard (1) + exactly one CostGuard (1) + bounded backfill count/page (1)");
+  assert.equal(s.stats.batches, 0, "empty backfill writes no queue");
+  assert.equal(s.auditCount(), 0);
+});
