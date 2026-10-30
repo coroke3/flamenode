@@ -1,15 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { validateVideoMemberSubmission } from "@flamenode/domain/video";
-import { validateVideoMemberSubmission as legacyValidate } from "../../../src/lib/video/submissionValidation.ts";
+import { readFileSync } from "node:fs";
 
 function form(json) {
   const f = new FormData();
   if (json !== undefined) f.set("members_json", json);
   return f;
 }
-test("MIG-0651: CURRENT/target share exact member-submission validation", () => {
-  assert.strictEqual(validateVideoMemberSubmission, legacyValidate);
+test("MIG-0651: CURRENT delegates to canonical domain validation", () => {
+  const bridge = readFileSync(new URL("../../../src/lib/video/submissionValidation.ts", import.meta.url), "utf8");
+  assert.match(bridge, /validateVideoMemberSubmission,/);
+  assert.match(bridge, /from "@flamenode\/domain\/video"/);
+  assert.doesNotMatch(bridge, /function validateVideoMemberSubmission\(/);
 });
 test("MIG-0651: no cooperation does not parse malicious member JSON", () => {
   const value = validateVideoMemberSubmission(form("{broken"), false);
