@@ -7,7 +7,7 @@ import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import { STATIC_BACKFILL_KV_KEY } from "@flamenode/domain/admin";
 
-function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist: 100, pool: 100 }, r2BadSize = null, r2BadJson = null } = {}) {
+function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist: 100, pool: 100 }, r2BadSize = null, r2BadJson = null, kvGetterThrows = false, bucketGetterThrows = false } = {}) {
   const d1 = createAdminD1();
   seedBase(d1.sqlite);
   d1.sqlite.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT);");
@@ -56,7 +56,17 @@ function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist:
   const request = (body) => app.request("/api/admin/static-builds/backfill", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  }, { DB: d1.db, KV: kv, BUCKET: bucket });
+  }, {
+    DB: d1.db,
+    get KV() {
+      if (kvGetterThrows) throw new Error("PRIVATE_KV_BINDING_GETTER_CREDENTIAL");
+      return kv;
+    },
+    get BUCKET() {
+      if (bucketGetterThrows) throw new Error("PRIVATE_R2_BINDING_GETTER_CREDENTIAL");
+      return bucket;
+    },
+  });
   const rows = () => d1.sqlite.prepare("SELECT target_type,target_id,status,priority FROM static_rebuild_queue ORDER BY target_id").all();
   const audit = () => d1.sqlite.prepare("SELECT * FROM audit_logs").all();
   const saved = () => JSON.parse(state.raw);
@@ -309,4 +319,41 @@ test("MIG-0643 SA-069: forged or deleted tracking metadata never advances backfi
     assert.equal(s.stats.batches, 1);
     assert.equal(s.bucket.gets, 0);
   }
+});
+
+
+test("MIG-0643 SA-069: throwing KV binding getter remains best-effort after D1 queue commit", async () => {
+  const s = setup({ kvGetterThrows: true });
+  seedEvent(s.sqlite, { id: "ev-kv-binding" });
+  const response = await s.request({ kind: "event_crew" });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.doesNotMatch(body, /PRIVATE_KV_BINDING_GETTER_CREDENTIAL/);
+  assert.deepEqual(JSON.parse(body), {
+    backfill_kind: "event_crew", backfill_scanned: "1", backfill_enqueued: "1",
+    backfill_done: "1", backfill_state_persisted: "0",
+  });
+  assert.equal(s.rows().length, 1, "D1 queue write remains committed and reported accurately");
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
+  assert.equal(s.state.reads, 0);
+  assert.equal(s.state.writes, 0);
+});
+
+test("MIG-0643 SA-069: throwing R2 binding getter schedules shared-input repair, not a video queue", async () => {
+  const s = setup({ r2Ready: true, bucketGetterThrows: true });
+  s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+  const response = await s.request({ kind: "video_v2" });
+  assert.equal(response.status, 200);
+  const body = await response.text();
+  assert.doesNotMatch(body, /PRIVATE_R2_BINDING_GETTER_CREDENTIAL/);
+  assert.equal(JSON.parse(body).backfill_done, "0");
+  assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
+  assert.deepEqual(s.rows().map(r => r.target_type).sort(),
+    ["random_video_pool", "youtube_related_blocklist"]);
+  assert.equal(s.rows().some(r => r.target_type === "video"), false);
+  assert.equal(s.bucket.heads, 0);
+  assert.equal(s.bucket.gets, 0);
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
 });
