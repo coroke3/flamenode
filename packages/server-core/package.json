@@ -104,7 +104,8 @@
     "./video/unslottedEventEligibility": "./src/video/unslottedEventEligibility.ts",
     "./video/unslottedEventPlans": "./src/video/unslottedEventPlans.ts",
     "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts",
-    "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts"
+    "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts",
+    "./video/freeVideoRow": "./src/video/freeVideoRow.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
