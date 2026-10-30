@@ -830,3 +830,10 @@ test("Island /event/[id]/release: list on the server, mode follows the URL hash 
   assert.ok(text(c).includes("グループ参加"));
   await act(async () => r.unmount());
 });
+
+// Source contract only (jsdom has no layout): at <=640px the 52px fixed public header must not cover the /slots and
+// /release back links. Geometry was measured with playwright at 390/1440 (work-items/MIG-0502.md, 2026-10-30 lead fix).
+test("mobile fixed-header offset for /slots and /release back links is in events.css", () => {
+  const css = read("packages/ui/src/styles/events.css");
+  assert.match(css, /@media \(max-width:640px\)\{\.ev-slots\{padding-top:calc\(52px \+ 40px\)\}\.ev-release\{padding-top:calc\(52px \+ 48px\)\}\}/);
+});
