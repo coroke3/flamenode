@@ -45,6 +45,14 @@ async function mount(fetchFn, initialTable) {
   await flush();
   return {
     host,
+    rerender: async (newFetchFn, newInitialTable) => {
+      await React.act(async () => {
+        root.render(React.createElement(AdminSpreadsheetReadView, {
+          fetchFn: newFetchFn, initialTable: newInitialTable,
+        }));
+      });
+      await flush();
+    },
     cleanup: async () => {
       await React.act(async () => root.unmount());
       host.remove();
@@ -274,6 +282,34 @@ test("MIG-0737 U01: previous-page navigation hides stale rows until the new resp
     await flush();
     assert.match(ui.host.textContent, /<unsafe>/);
     assert.doesNotMatch(ui.host.textContent, /page two/);
+  } finally {
+    await ui.cleanup();
+  }
+});
+
+test("MIG-0737 U01: changing the API transport clears previous session rows immediately", async () => {
+  let resolveCatalog;
+  const firstFetch = async (path) => {
+    if (path.includes("/tables")) return json(200, catalog);
+    return json(200, { ...page("videos", 1), rows: [{ title: "SESSION_A_PRIVATE" }] });
+  };
+  const secondFetch = async (path) => {
+    if (path.includes("/tables")) {
+      return new Promise((resolve) => { resolveCatalog = resolve; });
+    }
+    return json(200, { ...page("videos", 1), rows: [{ title: "SESSION_B_PRIVATE" }] });
+  };
+  const ui = await mount(firstFetch, "videos");
+  try {
+    assert.match(ui.host.textContent, /SESSION_A_PRIVATE/);
+    await ui.rerender(secondFetch, "videos");
+    assert.ok(resolveCatalog, "new catalog request must run");
+    assert.doesNotMatch(ui.host.textContent, /SESSION_A_PRIVATE/);
+    assert.match(ui.host.textContent, /テーブルを読み込み中/);
+    await React.act(async () => resolveCatalog(json(200, catalog)));
+    await flush();
+    assert.match(ui.host.textContent, /SESSION_B_PRIVATE/);
+    assert.doesNotMatch(ui.host.textContent, /SESSION_A_PRIVATE/);
   } finally {
     await ui.cleanup();
   }
