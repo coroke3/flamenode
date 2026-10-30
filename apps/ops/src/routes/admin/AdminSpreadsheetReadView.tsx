@@ -7,6 +7,7 @@ import {
   loadSpreadsheetPage,
 } from "../../api/adminSpreadsheet.js";
 import { AdminSpreadsheetDisabled } from "./AdminSpreadsheetDisabled.js";
+import { AdminSpreadsheetEditableGrid } from "./AdminSpreadsheetEditableGrid.js";
 
 type CatalogState =
   | { status: "loading" }
@@ -29,9 +30,12 @@ function failureMessage(status: string): string {
 export function AdminSpreadsheetReadView({
   fetchFn = fetch,
   initialTable,
+  enableMutations = false,
 }: {
   fetchFn?: OpsFetch;
   initialTable?: string;
+  /** Explicit opt-in; not exposed by the router until MIG-0638/0726 gates pass. */
+  enableMutations?: boolean;
 }): React.ReactElement {
   const [catalog, setCatalog] = React.useState<CatalogState>({ status: "loading" });
   const [catalogOrigin, setCatalogOrigin] = React.useState<{ fetchFn: OpsFetch; initialTable?: string } | null>(null);
@@ -41,6 +45,21 @@ export function AdminSpreadsheetReadView({
   const [exportBusy, setExportBusy] = React.useState(false);
   const [exportMessage, setExportMessage] = React.useState<string | null>(null);
   const exportRef = React.useRef<AbortController | null>(null);
+  const visibleContext = React.useRef({ fetchFn, selectedTable, page });
+  visibleContext.current = { fetchFn, selectedTable, page };
+
+  async function refreshAfterMutation(): Promise<void> {
+    const requestedTable = selectedTable;
+    const requestedPage = page;
+    const source = fetchFn;
+    const result = await loadSpreadsheetPage(source, requestedTable, requestedPage);
+    const live = visibleContext.current;
+    if (live.fetchFn !== source || live.selectedTable !== requestedTable || live.page !== requestedPage) return;
+    setRows(result.status === "ok"
+      ? { status: "ready", data: result.data }
+      : { status: result.status });
+    if (result.status !== "ok") throw new Error("spreadsheet_reload_failed");
+  }
 
   React.useEffect(() => () => exportRef.current?.abort(), [selectedTable]);
 
@@ -170,7 +189,7 @@ export function AdminSpreadsheetReadView({
   return (
     <section aria-labelledby="ops-spreadsheet-title">
       <h1 id="ops-spreadsheet-title">DB スプレッドシート</h1>
-      <p>データの確認専用です。編集・インポート操作は移行準備中です。</p>
+      <p>{enableMutations ? "編集機能は移行検証中です。管理者権限と機能設定が必要です。" : "データの確認専用です。編集・インポート操作は移行準備中です。"}</p>
       <nav aria-label="テーブル一覧">
         {catalog.tables.map((item) => (
           <button type="button" key={item.table} aria-pressed={item.table === selectedTable}
@@ -190,8 +209,12 @@ export function AdminSpreadsheetReadView({
           {exportMessage ? <p role="status">{exportMessage}</p> : null}
           {data ? (
             <>
-              <p>ページ {data.page} ・ {data.limit} 件/ページ ・ 読み取り専用</p>
+              <p>ページ {data.page} ・ {data.limit} 件/ページ ・ {enableMutations ? "編集可能列のみ操作可" : "読み取り専用"}</p>
               {data.truncated ? <p role="status">一部の行が表示上限により省略されました。</p> : null}
+              {enableMutations ? (
+                <AdminSpreadsheetEditableGrid data={data} fetchFn={fetchFn}
+                  onRefresh={refreshAfterMutation} allowMutations={true} />
+              ) : (
               <div style={{ overflowX: "auto" }}>
                 <table>
                   <thead><tr>{data.columns.map((column) => <th key={column.name} scope="col">{column.name}</th>)}</tr></thead>
@@ -206,6 +229,7 @@ export function AdminSpreadsheetReadView({
                   </tbody>
                 </table>
               </div>
+              )}
               {data.rows.length === 0 ? <p>データがありません。</p> : null}
               <div>
                 <button type="button" disabled={page <= 1} onClick={() => { setRows({ status: "loading" }); setPage((n) => Math.max(1, n - 1)); }}>前へ</button>
