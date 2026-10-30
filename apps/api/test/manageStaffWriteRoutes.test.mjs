@@ -126,3 +126,15 @@ test("U02: non-admin cannot assign privileged presets; invalid URL ID rejects", 
   assert.equal(invalid.status, 400);
   assert.equal(admin.count("audit_logs"), 0);
 });
+
+
+test("U02: GET staff reader is unaffected by the write-only CostGuard", async () => {
+  const app = new Hono();
+  // Register the write middleware BEFORE the read handler: a missing D1
+  // binding would produce 503 if its CostGuard accidentally intercepted GET.
+  registerStaffWriteRoutes(app);
+  app.get("/events/:id/staff", (c) => c.json({ ok: true, id: c.req.param("id") }));
+  const result = await app.request("https://example.test/events/ev-1/staff", { method: "GET" });
+  assert.equal(result.status, 200);
+  assert.deepEqual(await result.json(), { ok: true, id: "ev-1" });
+});
