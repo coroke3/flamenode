@@ -17,6 +17,7 @@ function setup({ user = ADMIN, enabled = 1, lease = null, staff = false } = {}) 
   sqlite.exec(`
     CREATE TABLE event_staff (event_id TEXT, x_user_id TEXT, permission_preset TEXT,
       custom_permission_keys_json TEXT);
+    CREATE TABLE event_youtube_playlist_items (id TEXT PRIMARY KEY, event_id TEXT, playlist_item_id TEXT);
     CREATE TABLE event_youtube_playlist_sync (
       event_id TEXT PRIMARY KEY, playlist_id TEXT, enabled INTEGER, sync_mode TEXT,
       sync_interval_minutes INTEGER, sync_status TEXT, next_sync_at INTEGER,
@@ -50,11 +51,15 @@ function setup({ user = ADMIN, enabled = 1, lease = null, staff = false } = {}) 
     await next();
   });
   app.route("/api/manage/events/:id/youtube-playlist", playlistWriteRoutes);
+  const put = (body = { playlist_id: "PLTEST-123456", sync_mode: "mirror", sync_interval_minutes: "30" }, id = "ev-1") =>
+    app.request(`${SITE}/api/manage/events/${id}/youtube-playlist`,
+      { method: "PUT", headers: { Origin: SITE, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
   const post = (id = "ev-1") => app.request(`${SITE}/api/manage/events/${id}/youtube-playlist/sync`,
     { method: "POST", headers: { Origin: SITE } },
     { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
   const count = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
-  return { sqlite, stats, post, count };
+  return { sqlite, stats, post, put, count };
 }
 
 test("SA-039 manual sync: atomic UPDATE+strict audit, no Queue wake", async () => {
@@ -117,4 +122,58 @@ test("SA-039 malformed event ID has no effects", async () => {
   const s = setup();
   assert.equal((await s.post("bad%20id")).status, 400);
   assert.equal(s.count("audit_logs"), 0);
+});
+
+
+test("SA-038 settings update: playlist changes reset old items and enqueue projection atomically", async () => {
+  const s = setup();
+  s.sqlite.prepare("INSERT INTO event_youtube_playlist_items VALUES (?,?,?)").run("item1","ev-1","first");
+  s.sqlite.prepare("INSERT INTO event_youtube_playlist_items VALUES (?,?,?)").run("item2","ev-1","second");
+  const r = await s.put();
+  assert.equal(r.status, 200, await r.clone().text());
+  assert.equal(r.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await r.json(), { ok: true, saved: true });
+  const row = s.sqlite.prepare("SELECT * FROM event_youtube_playlist_sync WHERE event_id='ev-1'").get();
+  assert.equal(row.playlist_id, "PLTEST-123456");
+  assert.equal(row.sync_interval_minutes, 60);
+  assert.equal(row.sync_mode, "mirror");
+  assert.equal(row.last_synced_at, null);
+  assert.equal(row.pending_trigger, "settings_change");
+  assert.equal(s.count("event_youtube_playlist_items"), 0);
+  const queue = s.sqlite.prepare("SELECT target_type, target_id, reason, priority FROM static_rebuild_queue").get();
+  assert.equal(queue.target_type, "event_base");
+  assert.equal(queue.target_id, "ev-1");
+  assert.equal(queue.reason, "event_youtube_playlist_settings");
+  assert.equal(queue.priority, "high");
+  const audit = s.sqlite.prepare("SELECT * FROM audit_logs").get();
+  assert.equal(audit.operation, "UPDATE");
+  assert.equal(audit.reason, "event-youtube-playlist-settings");
+  assert.equal(JSON.parse(audit.before_json).last_synced_at, 100);
+  assert.equal(JSON.parse(audit.after_json).last_synced_at, null);
+  assert.equal(s.stats.batches, 1);
+  assert.ok(s.stats.reads <= 3, "S3 read ceiling");
+});
+
+test("SA-038 invalid playlist origins and insufficient auth never write", async () => {
+  const s = setup();
+  assert.equal((await s.put({playlist_id:"https://evil.example/?list=PLTEST-123456",sync_mode:"mirror"})).status,400);
+  assert.equal((await s.put({playlist_id:"",sync_mode:"mirror"})).status,400);
+  assert.equal(s.count("audit_logs"), 0);
+  assert.equal(s.count("static_rebuild_queue"), 0);
+  const viewer = setup({user: {id:"viewer-1",role:"user",is_banned:0}});
+  assert.equal((await viewer.put()).status,403);
+  assert.equal(viewer.count("audit_logs"),0);
+});
+
+test("SA-038 leased row and audit failure leave settings and projections unchanged", async () => {
+  const leased = setup({lease:"worker-one"});
+  assert.equal((await leased.put()).status,409);
+  assert.equal(leased.count("static_rebuild_queue"),0);
+  const broken = setup();
+  broken.sqlite.exec("DROP TABLE audit_logs");
+  assert.equal((await broken.put()).status,409);
+  const row = broken.sqlite.prepare("SELECT playlist_id,sync_status FROM event_youtube_playlist_sync").get();
+  assert.equal(row.playlist_id,"PLTEST");
+  assert.equal(row.sync_status,"synced");
+  assert.equal(broken.count("static_rebuild_queue"),0);
 });
