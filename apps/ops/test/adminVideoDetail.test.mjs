@@ -124,7 +124,7 @@ test("MIG-0729 T04: moderator case keys, HTTP denial, malformed and 500 success-
   const calls = [];
   const action = createModerationCaseAction(async (path, init) => {
     calls.push({ path, init, body: JSON.parse(init.body) });
-    return json(200, { ok: true, message: "created" });
+    return json(200, { ok: true, message: "created", pendingPublicReflection: true });
   });
   const fd = new FormData();
   for (const [key, value] of Object.entries({
@@ -132,7 +132,7 @@ test("MIG-0729 T04: moderator case keys, HTTP denial, malformed and 500 success-
     private_note: "note", due_at: "", related_x_user_id: "x",
     video_status: "pending",
   })) fd.set(key, value);
-  assert.deepEqual(await action(fd), { ok: true, message: "created" });
+  assert.deepEqual(await action(fd), { ok: true, message: "created", pendingPublicReflection: true });
   assert.equal(calls[0].path, "/api/admin/moderation/cases");
   assert.deepEqual(calls[0].body, {
     case_type: "void", public_reason: "reason", private_note: "note",
@@ -144,6 +144,8 @@ test("MIG-0729 T04: moderator case keys, HTTP denial, malformed and 500 success-
   assert.equal((await failed(fd)).ok, false, "500 cannot be promoted to success");
   const invalid = createModerationCaseAction(async () => json(200, { status: "ok" }));
   assert.equal((await invalid(fd)).ok, false, "malformed JSON cannot be promoted to success");
+  const badFlag = createModerationCaseAction(async () => json(200, { ok: true, pendingPublicReflection: "true" }));
+  assert.equal((await badFlag(fd)).ok, false, "malformed reflection flag must not be treated as success");
 });
 
 test("MIG-0729 U02: nextHref must stay within one admin video detail", () => {
