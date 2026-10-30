@@ -8,3 +8,4 @@ export * from "./requiredFields.ts";
 export * from "./fieldChangeGuard.ts";
 export * from "./auditSnapshot.ts";
 export * from "./interactions.ts";
+export * from "./parseEventIds.ts";

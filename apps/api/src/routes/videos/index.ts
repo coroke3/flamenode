@@ -10,13 +10,18 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { sessionMiddleware } from "../../auth/session.ts";
 import type { AppEnv } from "../../env.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
+import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../../middleware/writeOrigin.ts";
 import { createChapterRoutes } from "./chapters.ts";
+import { createVideoInteractionRoutes } from "./interaction.ts";
 import { videoDetailRoutes } from "./detail.ts";
 import { videoListRoutes } from "./list.ts";
 import { createVideoViewerOverlayRoutes, videoViewerOverlayRoutes } from "./viewerOverlay.ts";
 
-function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> {
+function videoWriteStack(
+  session?: MiddlewareHandler<AppEnv>,
+  feature: "chapter_comment" | "like_or_bookmark" = "chapter_comment",
+): MiddlewareHandler<AppEnv> {
   const originOptions = (c: Context<AppEnv>) => ({
     loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
     // Never derived from NODE_ENV: only the explicit preview flag.
@@ -29,8 +34,17 @@ function videoWriteStack(session?: MiddlewareHandler<AppEnv>): MiddlewareHandler
       writeGuardMiddleware({
         ...originOptions(c),
         requiredRole: null,
-        activeX: { requireApprovedActiveXId: true, feature: "chapter_comment" },
+        // With zero Active X requirements, CURRENT guard can run without an
+        // activeX object. writeGuardMiddleware({activeX}) assumes a non-null
+        // active_x snapshot; supplying false/false would incorrectly return 503
+        // for every SA-087 request. CostGuard runs separately below instead.
+        activeX: feature === "chapter_comment"
+          ? { requireApprovedActiveXId: true, feature: "chapter_comment" }
+          : undefined,
       })(c, next),
+    ...(feature === "like_or_bookmark"
+      ? [costGuardMiddleware("like_or_bookmark") as MiddlewareHandler<AppEnv>]
+      : []),
     dbMiddleware,
   ];
   return async (c, next) => {
@@ -56,6 +70,7 @@ export function createVideosRoutes(
   videos.route("/", createVideoViewerOverlayRoutes(options));
   videos.route("/", videoDetailRoutes);
   videos.route("/", createChapterRoutes(videoWriteStack(options.session)));
+  videos.route("/", createVideoInteractionRoutes(videoWriteStack(options.session, "like_or_bookmark")));
   return videos;
 }
 
