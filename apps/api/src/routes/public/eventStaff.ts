@@ -25,36 +25,29 @@ import { readVisibilityManifestObject } from "@flamenode/server-core/visibility/
  * Normalize X references exactly as the public DTO does before applying the
  * visibility manifest. The shared artifact filter historically compares raw
  * "@Handle" with canonical "handle"; this route must not expose that alias.
- * Invalid supplied identifiers fail closed instead of leaking display fields.
+ * A row whose supplied identifier cannot be canonicalised is dropped (it cannot
+ * be checked against the manifest), so one bad legacy row never takes the whole
+ * endpoint down; CURRENT keeps such a row with x_id null.
  */
 function fenceCanonicalStaffReferences(
   input: unknown,
   blockedUserIds: ReadonlySet<string> | undefined,
-): { value: unknown; removed: boolean; invalid: boolean } {
+): { value: unknown; removed: boolean } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return { value: input, removed: false, invalid: false };
+    return { value: input, removed: false };
   }
   const record = input as Record<string, unknown>;
   if (!Array.isArray(record.public_staff)) {
-    return { value: input, removed: false, invalid: false };
+    return { value: input, removed: false };
   }
   let removed = false;
-  let invalid = false;
   const staff = record.public_staff.filter((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return true;
     const row = entry as Record<string, unknown>;
     const raw = row.x_user_id ?? row.x_id;
     if (raw == null || raw === "") return true; // staff without an X account is valid
-    if (typeof raw !== "string") {
-      invalid = true;
-      return false;
-    }
-    const canonical = normalizeXId(raw);
-    if (!isCanonicalXId(canonical)) {
-      invalid = true;
-      return false;
-    }
-    if (blockedUserIds?.has(canonical)) {
+    const canonical = typeof raw === "string" ? normalizeXId(raw) : "";
+    if (!isCanonicalXId(canonical) || blockedUserIds?.has(canonical)) {
       removed = true;
       return false;
     }
@@ -63,7 +56,6 @@ function fenceCanonicalStaffReferences(
   return {
     value: removed ? { ...record, public_staff: staff } : input,
     removed,
-    invalid,
   };
 }
 
@@ -185,7 +177,6 @@ publicEventStaffRoutes.get("/:id/staff", async (c) => {
   const context = buildPublicArtifactVisibilityContext(before.manifest);
   const prefiltered = filterPublicArtifactPayload("event", artifact, context);
   const staffFence = fenceCanonicalStaffReferences(prefiltered, context?.blockedUserIds);
-  if (staffFence.invalid) return unavailable(request, "public_data_unavailable");
   const payload = normalizePublicEventStaffArtifact(staffFence.value, eventId);
   if (!payload) return unavailable(request, "public_data_unavailable");
   const sourceStaff = artifact && typeof artifact === "object" && !Array.isArray(artifact)

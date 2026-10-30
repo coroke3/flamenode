@@ -173,11 +173,19 @@ test("MIG-0647 P1: @-prefixed blocked X ID is redacted before conditional cache 
   assert.equal(wildcard.status, 200, "wildcard 304 could resurrect stale staff");
   assert.deepEqual((await wildcard.json()).staff, []);
 
-  const badIdentity = await request(bucketFixture({
-    body: artifact({ public_staff: [{ display_name: "Unknown", x_user_id: "https://invalid.example/attacker" }] }),
-  }));
-  assert.equal(badIdentity.status, 503, "invalid supplied X handle must fail closed");
-  assert.deepEqual(await badIdentity.json(), { error: "public_data_unavailable" });
+  // An identity that cannot be canonicalised drops only that row (no-store), never the endpoint.
+  const valid = artifact().public_staff[0];
+  for (const bad of ["https://invalid.example/attacker", 42, { id: "organizer_1" }]) {
+    const badIdentity = await request(bucketFixture({
+      body: artifact({ public_staff: [{ display_name: "Unknown", x_user_id: bad }, valid] }),
+    }));
+    assert.equal(badIdentity.status, 200, `invalid X handle ${JSON.stringify(bad)} drops its row only`);
+    const staff = (await badIdentity.json()).staff;
+    assert.equal(staff.length, 1);
+    assert.equal(staff[0].x_id, "organizer_1");
+    assert.ok(!JSON.stringify(staff).includes("Unknown"));
+    assert.equal(badIdentity.headers.get("Cache-Control"), "no-store");
+  }
 });
 
 test("MIG-0647 T03 manifest changed or blocked between reads never returns stale staff or 304", async () => {
