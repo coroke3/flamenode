@@ -187,6 +187,23 @@ test("MIG-0637 U03 SA-078: self BAN denied, reason required, unban allowed",asyn
   assert.equal(x.sqlite.prepare("SELECT is_banned FROM \"user\" WHERE id='target-1'").get().is_banned,1);
   assert.equal(x.sqlite.prepare("SELECT reason FROM audit_logs").get().reason,"違反");
 });
+test("MIG-0637 JSON null is rejected like a missing FormData field (no unban / notification cancel)",async()=>{
+  const x=setup();
+  x.sqlite.prepare("UPDATE \"user\" SET is_banned=1 WHERE id='target-1'").run();
+  x.sqlite.prepare("INSERT INTO notification_outbox (id,recipient_user_id,status) VALUES ('n1','target-1','pending')").run();
+  for(const [path,body] of [
+    ["/users/target-1/banned",{is_banned:null,reason:"x"}],
+    ["/users/target-1/notifications",{is_notification_enabled:null}],
+    ["/users/target-1/role",{role:null}],
+    ["/users/target-1/can-create-events",{can_create_events:null}],
+    ["/cost-guard/maintenance",{is_maintenance_mode:null,reason:"x"}],
+  ]){
+    assert.equal((await x.request(path,body)).status,400,path);
+  }
+  assert.equal(x.sqlite.prepare("SELECT is_banned FROM \"user\" WHERE id='target-1'").get().is_banned,1);
+  assert.equal(x.sqlite.prepare("SELECT status FROM notification_outbox WHERE id='n1'").get().status,"pending");
+  assert.equal(x.counts().audit,0);
+});
 test("MIG-0637 U03 SA-079: pending notifications cancelled in SAME batch, sent kept",async()=>{
   const x=setup();
   const stmt=x.sqlite.prepare("INSERT INTO notification_outbox (id,recipient_user_id,status) VALUES (?,?,?)");

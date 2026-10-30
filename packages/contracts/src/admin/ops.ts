@@ -10,7 +10,8 @@ export const AdminOpsResultSchema = z.object({
 export type AdminOpsResult = z.infer<typeof AdminOpsResultSchema>;
 /** Zod unknown() accepts absent properties. Require legacy FormData keys,
  * while preserving the domain validators' original error messages. */
-const present = z.unknown().refine((value) => value !== undefined);
+// CURRENT FormData can never carry JSON null; parsers would read null as 0 (e.g. unban).
+const present = z.unknown().refine((value) => value !== undefined && value !== null);
 
 export const CostGuardModeBodySchema = z.object({ mode: present, reason: present });
 export const CostGuardMaintenanceBodySchema = z.object({ is_maintenance_mode: present, reason: present });
