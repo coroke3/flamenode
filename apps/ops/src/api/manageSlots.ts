@@ -75,6 +75,16 @@ export async function listSlots(
       seen.add(slot.id);
       rows.push(slot);
     }
+    // Reject incomplete snapshots: the unfiltered total and each status count
+    // describe the same collection as the paginated rows. A short final page
+    // must match that count exactly. At the 500-row cap, additional records
+    // are expected and intentionally omitted.
+    const expectedMatches = filter === "all" ? first.total : (first.counts[filter] ?? 0);
+    if (!Number.isSafeInteger(expectedMatches) || expectedMatches < 0 ||
+        rows.length > expectedMatches ||
+        (data.slots.length < PAGE_SIZE && rows.length !== expectedMatches)) {
+      return { status: "unavailable" };
+    }
     if (data.slots.length < PAGE_SIZE) break;
   }
   if (first === null) return { status: "unavailable" };
