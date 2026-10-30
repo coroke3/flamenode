@@ -63,6 +63,29 @@ function previewPayload(payloadJson: string): string | null {
   }
 }
 
+/** Mirrors CURRENT formatUnix/formatRelative without importing the Next.js-only UI. */
+function NotificationDate({ unixSeconds }: { unixSeconds: number }): React.ReactElement {
+  const date = new Date(unixSeconds * 1000);
+  // Hono's current DTO accepts numbers without a Date range bound; a malformed
+  // outbox timestamp must not throw RangeError and take down the whole Ops view.
+  if (!Number.isFinite(unixSeconds) || !Number.isFinite(date.getTime())) return <span>—</span>;
+  const secondsAgo = Date.now() / 1000 - unixSeconds;
+  const relative = secondsAgo < 60 ? "今"
+    : secondsAgo < 3600 ? `${Math.floor(secondsAgo / 60)}分前`
+    : secondsAgo < 86400 ? `${Math.floor(secondsAgo / 3600)}時間前`
+    : secondsAgo < 2592000 ? `${Math.floor(secondsAgo / 86400)}日前`
+    : secondsAgo < 31536000 ? `${Math.floor(secondsAgo / 2592000)}か月前`
+    : `${Math.floor(secondsAgo / 31536000)}年前`;
+  const absolute = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  }).format(date);
+  return <>
+    <time dateTime={date.toISOString()}>{absolute}</time>
+    <div className="fn-td-muted">{relative}</div>
+  </>;
+}
+
 function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }): React.ReactElement {
   const status = row.status ?? "";
   const category = row.type.startsWith("video_") ? "作品"
@@ -152,9 +175,9 @@ export function ManageNotificationsBody({ data, search, change }: {
               {data.notifications.map((row) => (
                 <tr key={row.id}>
                   <td><NotificationSummary row={row} /></td>
-                  <td><time dateTime={new Date(row.created_at * 1000).toISOString()}>
-                    {new Date(row.created_at * 1000).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
-                  </time></td>
+                  <td className="manage-notification-date-cell">
+                    <NotificationDate unixSeconds={row.created_at} />
+                  </td>
                   <td>{row.event_id ? (
                     <a href={"/manage/events/" + encodeURIComponent(row.event_id)}>
                       {data.eventTitles[row.event_id]?.slice(0, 24) ?? row.event_id.slice(0, 8) + "…"}

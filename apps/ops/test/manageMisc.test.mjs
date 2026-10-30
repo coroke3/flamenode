@@ -98,3 +98,21 @@ test("MIG-0725 U02: admin event selector hidden, 50-row empty state and schema w
   assert.match(html, /通知はありません/);
   assert.match(html, /href="\/manage"/);
 });
+
+test("MIG-0725 U02: CURRENT absolute/relative date parity and malformed timestamp fail-safe", () => {
+  const row = {
+    id: "dt-1", type: "video_submitted", status: "sent",
+    payload_json: "{}", attempt_count: 0, last_error: null, dedupe_key: null,
+    recipient_user_id: null, event_id: "a/b", created_at: Math.floor(Date.now() / 1000) - 125,
+    recipient: null,
+  };
+  const good = render({ ...fixture, notifications: [row] });
+  assert.match(good, /dateTime="[^"]+"/);
+  assert.match(good, /2分前/);
+  assert.match(good, /manage-notification-date-cell/);
+  // z.number() accepts an integer outside JS Date's valid range; no RangeError.
+  const invalid = render({ ...fixture, notifications: [{ ...row, created_at: Number.MAX_SAFE_INTEGER }] });
+  assert.match(invalid, /manage-notification-date-cell/);
+  assert.doesNotMatch(invalid, /dateTime=/);
+  assert.match(invalid, /—/);
+});
