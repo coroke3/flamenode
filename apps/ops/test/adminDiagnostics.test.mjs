@@ -165,6 +165,12 @@ test("U02b Worker dashboard shows CURRENT cron, queue, pipelines, artifacts and 
   assert.match(html, /sync_failed/);
   assert.match(html, /operation_mode/);
   assert.match(html, /Cloudflare Dashboard/);
+  // A finite but out-of-range Unix timestamp must never throw RangeError in SSR.
+  const invalidDate = render(h(AdminWorkersView, {
+    data: { status: "ok", data: { snapshot: { ...snapshot, generatedAt: Number.MAX_VALUE }, error: null } },
+    onRefresh: () => {},
+  }), "/admin/workers");
+  assert.match(invalidDate, /取得: -/);
   assert.equal(dom.querySelectorAll("table").length, 3);
   assert.equal(dom.querySelectorAll('button[type="button"]').length, 1);
   assert.ok(dom.querySelector('a[href="/admin/health"]'));
