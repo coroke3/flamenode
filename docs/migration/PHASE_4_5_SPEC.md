@@ -1545,13 +1545,13 @@ PR を revert。`requested_at` が更新されなくなるだけ（MIG-0410 の�
 - 触らない: `workers/json-generator/**`（MIG-0907 まで動かす）, `workers/ga-analytics/ranking.ts`, 出力の key と形
 #### Micro-units
 - **U01 query**: `recentFromD1.ts` に `loadRecentListFromD1(db, { limit })` を書く。CURRENT `list/recent.json` と同じ公開条件・並び・上限の `LIMIT` 付き SELECT 1 文。返す形は `RecentListPayload`（`items` の field は ranking が使うものだけ）。
-- **U02 切替**: `loadRecentListPayload` が D1 を読む。R2 の読みは消す。`ga4_recent_list_missing` の代わりに 0 件なら CURRENT と同じ「同期しない」経路へ。
+- **U02 切替**: `loadRecentListPayload` が D1 を読む。旧入力R2の読みは消す。公開動画0件の正常なD1応答は GA4 外部呼出を省略するが、古い非公開動画IDを残さないよう `analytics/trending.json` に `items: []` の有効なartifactを1回PUTする（CURRENTは GA4 成功時に空ランキングをPUTする）。D1エラー時のみR2を保持してfail-closed。旧R2の保持判定は公開readerの全item検証と一致させる。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
 | T01 | 同じ seed から json-generator の `list/recent.json` と `loadRecentListFromD1` | id の集合と順序が一致（MIG-0509 T08） |
 | T02 | 非公開・削除済みの動画 | 入力に入らない |
-| T03 | 0 件 | 同期しない、`analytics/trending.json` を書かない（CURRENT と同じ） |
+| T03 | D1公開動画0件 | GA4外部呼出0回、空の有効な`analytics/trending.json`をR2へ1回PUT（旧非公開IDを消去）。D1失敗ではR2 PUTしない |
 | T04 | D1 の文数 | 1 |
 #### Commands
 ```bash

@@ -32,6 +32,7 @@ import {
 } from "../shared/runJob.ts";
 import { handleNotificationWakeQueue } from "./notificationQueueConsumer.ts";
 import { checkAndTriggerPublicBuild } from "./publicBuildTrigger.ts";
+import { recoverPendingPageRenders } from "../../apps/site/src/gateway/pageRenderRecovery.ts";
 
 export interface Env {
   DB: D1Database;
@@ -46,6 +47,8 @@ export interface Env {
   NOTIFICATION_WAKE_QUEUE?: {
     send: (body: unknown) => Promise<void>;
   };
+  /** Optional MIG-0411 producer binding; never provisioned by this code change. */
+  PAGE_RENDER_QUEUE?: { send: (body: unknown) => Promise<void> };
   QUEUE_DISPATCH_ENABLED?: string;
   QUEUE_CONTINUATION_ENABLED?: string;
   PUBLIC_BUILD_DEPLOY_HOOK_URL?: string;
@@ -105,6 +108,15 @@ async function maybeResendNotificationWake(
     kv: env.KV,
     sentKinds,
   });
+}
+
+/** Missing producer binding is a deliberate zero-query no-op. */
+export async function runPageRenderRecoveryStage(
+  env: Pick<Env, "DB" | "PAGE_RENDER_QUEUE">,
+): Promise<{ processed?: number; skipped?: number }> {
+  if (!env.PAGE_RENDER_QUEUE) return { skipped: 1 };
+  const count = await recoverPendingPageRenders(env.DB, env.PAGE_RENDER_QUEUE);
+  return { processed: count, skipped: count === 0 ? 1 : 0 };
 }
 
 export async function runNotificationRecovery(
@@ -215,9 +227,27 @@ export async function runNotificationRecovery(
             publicBuild = { failed: 1 };
           }
 
+          // When the optional producer is absent, no extra D1 statement is executed.
+          // This stage is independent of the notification dispatcher and bounded at 5 sends.
+          let pageRenderRecovery: unknown;
+          try {
+            pageRenderRecovery = await runJob(
+              "fast-jobs",
+              "page-render-recovery",
+              async () => {
+                signal?.throwIfAborted();
+                return runPageRenderRecoveryStage(budgetEnv);
+              },
+              { commitSha: budgetEnv.BUILD_COMMIT_SHA },
+            );
+          } catch (error) {
+            if (signal?.aborted) throw error;
+            pageRenderRecovery = { failed: 1 };
+          }
+
           signal?.throwIfAborted();
           if (!(await hasDuePendingNotifications(budgetEnv, signal))) {
-            return combineJobCounters(reminders, publicBuild, { skipped: 1 });
+            return combineJobCounters(reminders, publicBuild, pageRenderRecovery, { skipped: 1 });
           }
 
           // Queue wake成功時は配送を別invocationへ分離し、CronのCPU/D1予算と共有しない。
@@ -235,7 +265,7 @@ export async function runNotificationRecovery(
               sentKinds: wakeSentKinds,
             }));
           if (delegatedToQueue) {
-            return combineJobCounters(reminders, publicBuild, {
+            return combineJobCounters(reminders, publicBuild, pageRenderRecovery, {
               processed: 0,
               failed: 0,
               skipped: 1,
@@ -247,7 +277,7 @@ export async function runNotificationRecovery(
           );
           if (fallbackLimit <= 0) {
             // pending rowはD1正本に残るため、危険な半端配送をせず次回Recoveryへ繰り越す。
-            return combineJobCounters(reminders, publicBuild, { skipped: 1 });
+            return combineJobCounters(reminders, publicBuild, pageRenderRecovery, { skipped: 1 });
           }
 
           let notificationAbortError: Error | undefined;
@@ -274,7 +304,7 @@ export async function runNotificationRecovery(
           return throwIfJobFailed(
             "fast-jobs",
             "cron",
-            combineJobCounters(reminders, notifications, publicBuild),
+            combineJobCounters(reminders, notifications, publicBuild, pageRenderRecovery),
           );
         },
       );
