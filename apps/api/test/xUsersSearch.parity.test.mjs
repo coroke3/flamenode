@@ -382,14 +382,19 @@ if (runUnderRootTsx(import.meta.url)) {
       console.error = capture;
       for (const scenario of [
         { throwDbGetter: true, expected: "database_unavailable" },
+        { dbFailure: true, expected: "database_unavailable" },
         { throwBucketGetter: true, expected: "suggestions_unavailable" },
         { throwR2Get: true, expected: "suggestions_unavailable" },
       ]) {
         const { response, body, stats } = await request("?q=alice", scenario);
         assert.equal(response.status, 503);
         assert.deepEqual(body, { error: scenario.expected });
-        verifyPrivate(response, !scenario.throwDbGetter);
+        verifyPrivate(response, !scenario.throwDbGetter && !scenario.dbFailure);
         assert.equal(stats.writes, 0);
+        if (scenario.throwDbGetter || scenario.dbFailure) {
+          assert.equal(stats.gets.length, 0, "unavailable authentication must not read R2");
+          assert.equal(stats.reads, scenario.dbFailure ? 1 : 0);
+        }
       }
     } finally {
       console.warn = beforeWarn;
@@ -399,6 +404,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(output.length >= 3, "each provider failure should have a diagnostic marker");
     for (const secret of [
       "D1_BINDING_SECRET_SENTINEL",
+      "secret-db-message-not-for-client",
       "R2_BINDING_ACCESS_FAILURE_DO_NOT_EXPOSE",
       "R2_GET_SECRET_SENTINEL",
     ]) {
