@@ -12,6 +12,7 @@ import {
 
 type PreviewSnapshot = {
   draftFingerprint: string;
+  fetchFn: OpsFetch;
   data: SpreadsheetImportPreview;
 };
 
@@ -30,6 +31,7 @@ export function AdminSpreadsheetImportPreview({
   confirmApply?: (message: string) => boolean;
 }): React.ReactElement {
   const [text, setText] = React.useState("");
+  const MAX_IMPORT_FILE_BYTES = 2_000_000;
   const [hasHeader, setHasHeader] = React.useState(true);
   const [delimiter, setDelimiter] = React.useState<SpreadsheetImportDraft["delimiter"]>("auto");
   const [mode, setMode] = React.useState<SpreadsheetImportDraft["mode"]>("upsert");
@@ -45,10 +47,14 @@ export function AdminSpreadsheetImportPreview({
     [table, text, hasHeader, delimiter, mode],
   );
   const fingerprint = spreadsheetImportFingerprint(draft);
-  const canApply = Boolean(preview && preview.draftFingerprint === fingerprint &&
-    preview.data.rowCount > 0 &&
-    preview.data.rowCount <= MAX_IMPORT_APPLY_ROWS &&
-    (preview.data.applyMaxRows == null || preview.data.rowCount <= preview.data.applyMaxRows));
+  // Guard on render as well as in effects: a changed table/transport must never display
+  // a preview from the previous table or authenticated session, even transiently.
+  const currentPreview = preview && preview.draftFingerprint === fingerprint && preview.fetchFn === fetchFn
+    ? preview.data : null;
+  const canApply = Boolean(currentPreview &&
+    currentPreview.rowCount > 0 &&
+    currentPreview.rowCount <= MAX_IMPORT_APPLY_ROWS &&
+    (currentPreview.applyMaxRows == null || currentPreview.rowCount <= currentPreview.applyMaxRows));
 
   function resetPreview(): void {
     requestId.current += 1;
@@ -60,6 +66,33 @@ export function AdminSpreadsheetImportPreview({
     resetPreview();
     // Table switch must invalidate any outstanding request token.
   }, [table, fetchFn]);
+
+  async function readFile(file: File | null): Promise<void> {
+    if (!file || busy || inFlight.current) return;
+    resetPreview();
+    const id = requestId.current;
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      setError("ファイルが大きすぎます（上限 2MB）。");
+      return;
+    }
+    setBusy(true);
+    try {
+      const contents = await file.text();
+      if (id !== requestId.current) return;
+      if (contents.length > MAX_IMPORT_TEXT_CHARS) {
+        setError("ファイルの内容が長すぎます（上限 2,000,000 文字）。");
+        return;
+      }
+      setText(contents);
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".tsv")) setDelimiter("tsv");
+      else if (lower.endsWith(".csv")) setDelimiter("csv");
+    } catch {
+      if (id === requestId.current) setError("ファイルの読み込みに失敗しました。");
+    } finally {
+      if (id === requestId.current) setBusy(false);
+    }
+  }
 
   async function dryRun(): Promise<void> {
     if (inFlight.current) return;
@@ -78,7 +111,7 @@ export function AdminSpreadsheetImportPreview({
       if (result.status !== "ok") {
         setError("サーバー確認に失敗しました。権限、機能設定、入力内容を確認してください。");
       } else {
-        setPreview({ draftFingerprint: fingerprint, data: result.data });
+        setPreview({ draftFingerprint: fingerprint, fetchFn, data: result.data });
         setMessage(result.data.rowCount > MAX_IMPORT_APPLY_ROWS
           ? `プレビューは有効です。反映は${MAX_IMPORT_APPLY_ROWS}行以下に分割してください。`
           : "サーバーで確認しました。反映する前に内容を確認してください。");
@@ -90,7 +123,7 @@ export function AdminSpreadsheetImportPreview({
   }
 
   async function apply(): Promise<void> {
-    if (!preview || !canApply || inFlight.current) return;
+    if (!preview || !canApply || inFlight.current || preview.fetchFn !== fetchFn) return;
     const issued = preview;
     if (!confirmApply(`${mode === "upsert" ? "UPSERT" : "INSERT"} で ${issued.data.rowCount} 行を反映します。続行しますか？`)) {
       return;
@@ -118,7 +151,7 @@ export function AdminSpreadsheetImportPreview({
     }
   }
 
-  const previewRows = preview?.data.preview ?? [];
+  const previewRows = currentPreview?.preview ?? [];
   const headers = Object.keys(previewRows[0] ?? {});
 
   return (
@@ -148,11 +181,11 @@ export function AdminSpreadsheetImportPreview({
         <textarea value={text} rows={8} disabled={busy} maxLength={MAX_IMPORT_TEXT_CHARS}
           onChange={(e) => { resetPreview(); setText(e.target.value); }} />
       </label>
-      {preview ? (
+      {currentPreview ? (
         <div aria-label="サーバープレビュー">
-          <p>{preview.data.rowCount} 行 / {preview.data.mappedColumns.join(", ")}</p>
-          {preview.data.warnings.length > 0 ? (
-            <ul>{preview.data.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>
+          <p>{currentPreview.rowCount} 行 / {currentPreview.mappedColumns.join(", ")}</p>
+          {currentPreview.warnings.length > 0 ? (
+            <ul>{currentPreview.warnings.map((warning, i) => <li key={i}>{warning}</li>)}</ul>
           ) : null}
           <table>
             <thead><tr>{headers.map((h) => <th key={h} scope="col">{h}</th>)}</tr></thead>
@@ -162,6 +195,10 @@ export function AdminSpreadsheetImportPreview({
           </table>
         </div>
       ) : null}
+      <label>CSV / TSV ファイル
+        <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" disabled={busy}
+          onChange={(e) => void readFile(e.currentTarget.files?.[0] ?? null)} />
+      </label>
       {error ? <p role="alert">{error}</p> : null}
       {message ? <p role="status">{message}</p> : null}
       <button type="button" disabled={busy || !text.trim()} onClick={() => void dryRun()}>
