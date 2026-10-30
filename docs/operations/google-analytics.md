@@ -70,7 +70,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
 
 ### 同期フロー
 
-1. CURRENT（PR #442 の本番デプロイ前）は R2 `list/recent.json` から公開作品を読む。MIG-0517 TARGET（本番デプロイ後）は D1 の `videos` を公開条件で1回の上限付き SELECT（最大5,001件を取得して5,000件超は失敗）し、既存 generator と同じ `scheduled_time DESC`・ID タイブレークで並べる。非公開・まとめ作品は除外し、非公開イベント情報は付与しない。公開作品0件では GA4 呼出・R2 PUT を行わない
+1. CURRENT（PR #442 の本番デプロイ前）は R2 `list/recent.json` から公開作品を読む。MIG-0517 TARGET（本番デプロイ後）は D1 の `videos` を公開条件で1回の上限付き SELECT（最大5,001件を取得して5,000件超は失敗）し、既存 generator と同じ `scheduled_time DESC`・ID タイブレークで並べる。非公開・まとめ作品は除外し、非公開イベント情報は付与しない。公開作品0件でも空の有効な `trending.json`（`items: []`、`schema_version: 1`）を PUT する（CURRENT も空リストで空を書く）
 2. GA4 Data API `runReport` で 2 / 5 / 7 / 30 日の `flamenode_video_view` を `video_id` 別に集計。リクエストの dimension は `customEvent:video_id` のみ指定し、複数の名前付き date range に対して Data API がレスポンスへ自動追加する `dateRange` 列を使用する（`dateRange` 自体を dimension 指定すると 400）
 3. `rankTrendingItems` で決定的にソート（`views_2d` → `views_5d` → `views_7d` → `views_30d` → `video_id`）し、`rank` / `video_id` を付与
 4. R2 `analytics/trending.json` へ PUT（スキーマ version 1、最大 200 件）
