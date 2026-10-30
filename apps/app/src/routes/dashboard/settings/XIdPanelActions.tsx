@@ -146,13 +146,17 @@ export function XIdCompactProfileForm({
   const [message, setMessage] = React.useState<string | null>(null);
   const onSubmit = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
-    const data = new FormData(ev.currentTarget);
+    // Node test and browser FormData implementations differ for HTMLFormElement;
+    // reading the named controls also preserves empty strings exactly.
+    const form = ev.currentTarget;
+    const read = (name: string) => (form.elements.namedItem(name) as
+      HTMLInputElement | HTMLTextAreaElement | null)?.value ?? "";
     const fields: ProfileFields = {
-      x_name: String(data.get("x_name") ?? ""),
-      profile_text: String(data.get("profile_text") ?? ""),
-      portfolio_contact: String(data.get("portfolio_contact") ?? ""),
-      youtube_channel_url: String(data.get("youtube_channel_url") ?? ""),
-      other_social_links: String(data.get("other_social_links") ?? ""),
+      x_name: read("x_name"),
+      profile_text: read("profile_text"),
+      portfolio_contact: read("portfolio_contact"),
+      youtube_channel_url: read("youtube_channel_url"),
+      other_social_links: read("other_social_links"),
     };
     void execute(async () => {
       setError(null); setMessage(null);

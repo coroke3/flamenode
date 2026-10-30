@@ -1190,6 +1190,9 @@
 | `apps/app/src/api/xidProfile.ts` | HELPER | MIG-0708 U02 SA-098/102–105 Personal X ID profile actions | MIG-0708 | Provisional adapter; unmounted until MIG-0636 / shared write.ts contract gate | IN_PROGRESS | PR#486 SHA=1d71280f1f811ffe80589e844e5d453241f7dd02 TEST=apps/app/test/xidProfile.test.mjs CI=PENDING |
 | `apps/app/test/xidProfile.test.mjs` | TEST | MIG-0708 U02 method, encoding, same-origin, multipart and fail-closed parity | MIG-0708 | Same new test file | IN_PROGRESS | PR#486 SHA=1d71280f1f811ffe80589e844e5d453241f7dd02 TEST=apps/app/test/xidProfile.test.mjs CI=PENDING |
 
+| `apps/app/src/routes/dashboard/settings/XIdPanelActions.tsx` | HELPER | MIG-0708 U03 X ID Active/profile/icon/delete isolated settings controls (not mounted) | MIG-0708 | SAME (unmounted U03 module; MIG-0636 merge gate) | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
+| `apps/app/test/xidPanelActions.test.mjs` | TEST | MIG-0708 U03 T01..T05 interaction, duplicate-submit, role, upload and confirmation guards | MIG-0708 | SAME | IN_PROGRESS | PR#486 SHA=0cc0bae4a0a086aad7fec891572a328ca1a28f36 TEST=apps/app/test/xidPanelActions.test.mjs CI=PENDING |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
