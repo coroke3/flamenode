@@ -394,3 +394,40 @@ test("MIG-0643 S3: oversized valid KV state fails soft before JSON.parse (ASCII 
     s.sqlite.close();
   }
 });
+
+test("MIG-0643 S3: oversized persisted cursor cannot bypass 128-char form bound", async () => {
+  const s = setup();
+  seedEvent(s.sqlite, { id: "ev-first" });
+  s.state.raw = JSON.stringify({
+    schema_version: 1,
+    updated_at: 1,
+    runs: {
+      event_crew: {
+        cursor: "z".repeat(129), phase: "items", status: "running",
+        total: 100, scanned: 99, enqueued: 99,
+        last_error: null, last_run_at: 1,
+      },
+      user_profile: {
+        cursor: "safe-cursor", phase: "items", status: "running",
+        total: 5, scanned: 2, enqueued: 2,
+        last_error: null, last_run_at: 1,
+      },
+    },
+  });
+  assert.ok(s.state.raw.length < 64 * 1024, "tests the under-budget invalid cursor path");
+  const res = await s.request({ kind: "event_crew" });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    backfill_kind: "event_crew", backfill_scanned: "1", backfill_enqueued: "1",
+    backfill_done: "1", backfill_state_persisted: "1",
+  });
+  assert.equal(s.rows()[0].target_id, "ev-first");
+  assert.equal(s.saved().runs.event_crew.scanned, 1,
+    "invalid checkpoint must not contaminate restarted counters");
+  assert.equal(s.saved().runs.event_crew.cursor, null);
+  assert.equal(s.saved().runs.user_profile.cursor, "safe-cursor",
+    "unrelated valid checkpoint remains intact");
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
+  s.sqlite.close();
+});
