@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { AdminStaticBackfillBodySchema } from "@flamenode/contracts/admin/staticRebuildOps";
 import {
   createEmptyStaticBackfillState,
+  STATIC_BACKFILL_KINDS,
   parseStaticBackfillState,
   withStaticBackfillRun,
   STATIC_BACKFILL_KV_KEY,
@@ -52,7 +53,16 @@ async function readBackfillState(kv: KVNamespace | undefined) {
         new TextEncoder().encode(raw).byteLength > MAX_BACKFILL_KV_STATE_BYTES) {
       return createEmptyStaticBackfillState();
     }
-    return parseStaticBackfillState(JSON.parse(raw));
+    const state = parseStaticBackfillState(JSON.parse(raw));
+    // CURRENT form input accepts at most 128 cursor characters. KV is a
+    // best-effort checkpoint, not a trusted query parameter: a legacy/corrupt
+    // run must not bypass that bound or carry stale progress into a fresh scan.
+    for (const kind of STATIC_BACKFILL_KINDS) {
+      if ((state.runs[kind].cursor?.length ?? 0) > 128) {
+        state.runs[kind] = createEmptyStaticBackfillState().runs[kind];
+      }
+    }
+    return state;
   } catch {
     return createEmptyStaticBackfillState();
   }
