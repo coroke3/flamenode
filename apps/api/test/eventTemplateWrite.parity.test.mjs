@@ -53,7 +53,13 @@ function setup({ user = ADMIN, role = "admin", settings = "normal", seedEvent = 
       headers: { Origin: SITE, "Content-Type": "application/json", ...options.headers },
       body: options.body ?? JSON.stringify(value),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
-  return { sqlite, db, stats, post };
+  const get = (headers = {}) =>
+    app.request("/api/admin/event-templates", { method: "GET", headers },
+      { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+  const otherAdminGet = () =>
+    app.request("/api/admin/announcements", { method: "GET" },
+      { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+  return { sqlite, db, stats, post, get, otherAdminGet };
 }
 const rowCount = (sqlite, table) => sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n;
 
@@ -114,4 +120,70 @@ test("SA-035 audit failure does not leave a template row", async () => {
   s.sqlite.exec("DROP TABLE audit_logs");
   assert.equal((await s.post()).status, 500);
   assert.equal(rowCount(s.sqlite, "event_templates"), 0);
+});
+
+
+test("SA-037 GET: admin list returns all templates in updated_at DESC order and exact DTO shape", async () => {
+  const s = setup();
+  s.sqlite.prepare("INSERT INTO event_templates VALUES (?,?,?,?,?,?,?,?)")
+    .run("tpl-a","Alpha","Notes","ev-1","{}", "admin-1",10,200);
+  s.sqlite.prepare("INSERT INTO event_templates VALUES (?,?,?,?,?,?,?,?)")
+    .run("tpl-b","Beta",null,null,"{}", "admin-1",11,300);
+  const response = await s.get();
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get("cache-control"),"private, no-store");
+  assert.deepEqual(await response.json(), [
+    {id:"tpl-b",name:"Beta",description:null,source_event_id:null,updated_at:300},
+    {id:"tpl-a",name:"Alpha",description:"Notes",source_event_id:"ev-1",updated_at:200},
+  ]);
+  assert.ok(s.stats.reads <= 3, "SA-037 D1 pre-read budget: "+s.stats.reads);
+  assert.equal(s.stats.batches, 0);
+});
+
+test("SA-037 GET: denied guard returns [] and does not expose template metadata", async () => {
+  const cases = [
+    {user:null},
+    {user:{...ADMIN,role:"moderator"},role:"moderator"},
+    {user:{...ADMIN,is_banned:1}},
+    {settings:"maintenance"},
+  ];
+  for (const options of cases) {
+    const s = setup(options);
+    s.sqlite.prepare("INSERT INTO event_templates VALUES (?,?,?,?,?,?,?,?)")
+      .run("secret","Private",null,"ev-1","{}", "admin-1",10,20);
+    const response = await s.get();
+    assert.equal(response.status,200, JSON.stringify(options));
+    assert.equal(response.headers.get("cache-control"),"private, no-store");
+    assert.deepEqual(await response.json(), [], JSON.stringify(options));
+    assert.equal(rowCount(s.sqlite, "audit_logs"), 0);
+  }
+  // CURRENT also denies when TOS has not been accepted or major reaccept is due.
+  const tos = setup();
+  tos.sqlite.prepare('UPDATE "user" SET is_tos_accepted = 0 WHERE id = ?').run("admin-1");
+  assert.deepEqual(await (await tos.get()).json(),[]);
+  const reaccept = setup();
+  reaccept.sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("major-1","major",1234,1234);
+  assert.deepEqual(await (await reaccept.get()).json(),[]);
+  const disabledFeature = setup();
+  disabledFeature.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'")
+    .run(JSON.stringify(["admin_event_templates"]));
+  assert.deepEqual(await (await disabledFeature.get()).json(),[]);
+});
+
+test("SA-037 GET: default admin read guard still rejects unrelated paths", async () => {
+  const anon = setup({user:null});
+  const response = await anon.otherAdminGet();
+  assert.equal(response.status,401);
+  assert.equal(response.headers.get("cache-control"),"private, no-store");
+  const nonadmin = setup({user:{...ADMIN,role:"moderator"},role:"moderator"});
+  assert.equal((await nonadmin.otherAdminGet()).status,403);
+});
+
+test("SA-037 GET: storage error returns private fixed-code 503, never [] as a false success", async () => {
+  const s = setup();
+  s.sqlite.exec("DROP TABLE event_templates");
+  const r = await s.get();
+  assert.equal(r.status,503);
+  assert.deepEqual(await r.json(),{error:"unavailable"});
+  assert.equal(r.headers.get("cache-control"),"private, no-store");
 });
