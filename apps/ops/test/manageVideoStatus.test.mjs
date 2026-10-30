@@ -70,7 +70,7 @@ test("MIG-0724 U04: successful response retains safe typed fields for UI, never 
   }), "event/1");
   const res = await api.approveAndNext(form());
   assert.deepEqual(res, {
-    ok: true, message: "承認しました.", nextHref: "/manage/events/event%2F1/videos/next",
+    ok: true, message: "承認しました。", nextHref: "/manage/events/event%2F1/videos/next",
     pendingPublicReflection: true,
   }, "expected output should retain CURRENT message without rewriting");
 });
