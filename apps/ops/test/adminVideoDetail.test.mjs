@@ -117,23 +117,74 @@ test("MIG-0729 T03: only same-video open void case can unlock voided status", ()
   assert.equal(selectOpenVoidCaseId([]), null);
 });
 
-test("MIG-0729 T03: voided detail without an open void case displays the server precondition", () => {
-  const data = {
-    ...detail,
-    video: { ...detail.video, visibility_status: "voided" },
-    moderationCases: [{ id: "rights-1", case_type: "rights", status: "open" }],
-    openVoidCaseId: "rights-1",
-  };
+test("MIG-0729 T03: unrelated case cannot unlock voided, an open void case can", async () => {
+  // A server-side static render starts with status=voided. Exercise the actual
+  // controlled select before asserting the conditional warning and disabled button.
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const originalActEnv = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "https://flamenode.invalid" });
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  let writes = 0;
   const actions = {
     approve: async () => ({ ok: true }),
     approveAndNext: async () => ({ ok: true }),
-    setStatus: async () => ({ ok: true }),
+    setStatus: async () => { writes++; return { ok: true }; },
   };
-  const html = renderToStaticMarkup(React.createElement(StatusControls, {
-    data, eventId: null, onRefresh: () => {}, actions,
-  }));
-  assert.match(html, /voided解除には open な moderation case が必要/);
-  assert.match(html, /<option[^>]*value="pending"/);
+  const base = {
+    ...detail,
+    video: { ...detail.video, visibility_status: "voided" },
+    moderationCases: [{ id: "rights-1", case_type: "rights", status: "open" }],
+    openVoidCaseId: "rights-1", // The read DTO's legacy fallback is untrusted.
+  };
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(StatusControls, {
+        data: base, eventId: null, onRefresh: () => {}, actions,
+      }));
+    });
+    const select = dom.window.document.querySelector('select.fn-select');
+    assert.ok(select);
+    await React.act(async () => {
+      select.value = "pending";
+      select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    const apply = [...dom.window.document.querySelectorAll("button")]
+      .find(button => button.textContent.trim() === "適用");
+    assert.ok(apply);
+    assert.equal(apply.disabled, true, "unrelated rights case must not authorize un-void");
+    assert.match(dom.window.document.body.textContent,
+      /voided解除には open な moderation case が必要/);
+    assert.equal(writes, 0);
+    await React.act(async () => {
+      root.render(React.createElement(StatusControls, {
+        data: {
+          ...base,
+          moderationCases: [
+            { id: "rights-1", case_type: "rights", status: "open" },
+            { id: "void-1", case_type: "void", status: "open" },
+          ],
+          openVoidCaseId: "void-1",
+        },
+        eventId: null, onRefresh: () => {}, actions,
+      }));
+    });
+    assert.equal(apply.disabled, false, "matching open void case enables un-void");
+    assert.match(dom.window.document.body.textContent,
+      /voided解除に case_id=void-1 を送信します/);
+  } finally {
+    await React.act(async () => { root.unmount(); });
+    dom.window.close();
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    if (originalActEnv === undefined) delete globalThis.IS_REACT_ACT_ENVIRONMENT;
+    else globalThis.IS_REACT_ACT_ENVIRONMENT = originalActEnv;
+  }
 });
 
 test("MIG-0729 T01/T02: status action preserves event, approval and approved-next markers", async () => {
