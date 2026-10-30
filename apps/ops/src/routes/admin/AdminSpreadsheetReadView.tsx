@@ -3,6 +3,7 @@ import type { AdminSpreadsheetPageResponse, AdminSpreadsheetTableDef } from "@fl
 import type { OpsFetch } from "../../api/read.js";
 import {
   loadSpreadsheetCatalog,
+  loadSpreadsheetExport,
   loadSpreadsheetPage,
 } from "../../api/adminSpreadsheet.js";
 import { AdminSpreadsheetDisabled } from "./AdminSpreadsheetDisabled.js";
@@ -36,6 +37,55 @@ export function AdminSpreadsheetReadView({
   const [selectedTable, setSelectedTable] = React.useState("");
   const [page, setPage] = React.useState(1);
   const [rows, setRows] = React.useState<PageState>({ status: "loading" });
+  const [exportBusy, setExportBusy] = React.useState(false);
+  const [exportMessage, setExportMessage] = React.useState<string | null>(null);
+  const exportRef = React.useRef<AbortController | null>(null);
+
+  React.useEffect(() => () => exportRef.current?.abort(), [selectedTable]);
+
+  async function downloadExport(format: "csv" | "tsv"): Promise<void> {
+    if (!selectedTable || exportRef.current) return;
+    const controller = new AbortController();
+    exportRef.current = controller;
+    setExportBusy(true);
+    setExportMessage(null);
+    try {
+      const result = await loadSpreadsheetExport(fetchFn, selectedTable, format, controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.status === "disabled") {
+        setCatalog({ status: "disabled" });
+        return;
+      }
+      if (result.status !== "ok") {
+        setExportMessage(failureMessage(result.status));
+        return;
+      }
+      // No remote filename is trusted: the table ID is sanitized before download.
+      const safeName = selectedTable.replace(/[^A-Za-z0-9_-]/g, "_");
+      const name = `${safeName}${result.data.truncated ? "-partial" : ""}.${format}`;
+      const objectUrl = URL.createObjectURL(result.data.blob);
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = name;
+        document.body.append(anchor);
+        anchor.click();
+        anchor.remove();
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+      setExportMessage(result.data.truncated
+        ? "件数またはサイズ上限により一部のデータのみ保存しました。"
+        : `${format.toUpperCase()} をダウンロードしました。`);
+    } catch {
+      if (!controller.signal.aborted) setExportMessage("エクスポートに失敗しました。");
+    } finally {
+      if (exportRef.current === controller) {
+        exportRef.current = null;
+        if (!controller.signal.aborted) setExportBusy(false);
+      }
+    }
+  }
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -81,7 +131,7 @@ export function AdminSpreadsheetReadView({
       <nav aria-label="テーブル一覧">
         {catalog.tables.map((item) => (
           <button type="button" key={item.table} aria-pressed={item.table === selectedTable}
-            onClick={() => { setRows({ status: "loading" }); setSelectedTable(item.table); setPage(1); }}>
+            onClick={() => { exportRef.current?.abort(); exportRef.current = null; setExportBusy(false); setExportMessage(null); setRows({ status: "loading" }); setSelectedTable(item.table); setPage(1); }}>
             {item.label} ({item.mode === "readonly" ? "RO" : "RW"})
           </button>
         ))}
@@ -89,6 +139,11 @@ export function AdminSpreadsheetReadView({
       {active ? (
         <div aria-live="polite">
           <h2>{active.label}</h2>
+          <div role="toolbar" aria-label="CSV / TSV エクスポート">
+            <button type="button" disabled={exportBusy} onClick={() => void downloadExport("csv")}>CSV ダウンロード</button>
+            <button type="button" disabled={exportBusy} onClick={() => void downloadExport("tsv")}>TSV ダウンロード</button>
+          </div>
+          {exportMessage ? <p role="status">{exportMessage}</p> : null}
           {data ? (
             <>
               <p>ページ {data.page} ・ {data.limit} 件/ページ ・ 読み取り専用</p>
