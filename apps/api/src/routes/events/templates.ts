@@ -20,7 +20,9 @@ import { generateId } from "@flamenode/server-core/id";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { evaluateAdminWriteGuard, loadTosState } from "../../middleware/writeOrigin.ts";
+import { evaluateCostGuardWithSettings } from "../../middleware/costGuard.ts";
 import type { AppEnv } from "../../env.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
@@ -210,3 +212,42 @@ eventTemplateRoutes.delete("/:id", async (c) => {
   }
   return result(c, 200, { ok: true, message: "テンプレートを削除しました。" });
 });
+
+
+/**
+ * MIG-0655 U02 / SA-037: CURRENT listEventTemplatesForAdmin.
+ *
+ * This GET is registered explicitly in admin/index.ts before the default admin
+ * read guard; all other admin reads keep their standard 401/403/503 policy.
+ * Unlike generic admin reads, CURRENT SA-037 uses requireAdminWrite and returns
+ * [] for ALL identity/TOS/CostGuard denials. No Origin header is required on
+ * safe GET requests; write operations remain guarded by the parent stack.
+ */
+export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise<Response> {
+  c.header("Cache-Control", "private, no-store");
+  const user = c.get("user");
+  const rawDb = c.env.DB;
+  const guard = await evaluateAdminWriteGuard({
+    user,
+    hasDb: Boolean(rawDb),
+    originOk: true, // GET is safe, no CSRF Origin requirement.
+    requiredRole: "admin",
+    sessionUnavailable: c.get("sessionState") === "unavailable",
+    loadTosState: user && rawDb
+      ? async () => loadTosState(rawDb, user.id)
+      : undefined,
+  });
+  if (!guard.ok) return c.json([]);
+  const cost = await evaluateCostGuardWithSettings(rawDb, "admin_event_templates");
+  if (cost.denied) return c.json([]);
+  try {
+    const { results } = await rawDb
+      .prepare("SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC")
+      .all<{ id: string; name: string; description: string | null; source_event_id: string | null; updated_at: number }>();
+    // CURRENT does not page/truncate template results; preserve order and shape.
+    return c.json(results);
+  } catch {
+    console.error("[event-template-admin] LIST_FAILED");
+    return c.json({ error: "unavailable" }, 503);
+  }
+}
