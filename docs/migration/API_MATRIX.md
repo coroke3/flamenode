@@ -82,7 +82,7 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
-| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
+| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
