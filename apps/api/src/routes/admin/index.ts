@@ -22,6 +22,7 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
 import { auditAdminRoutes } from "./audit.ts";
+import { listEventTemplatesForAdminApi } from "../events/templates.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -44,6 +45,10 @@ export function createAdminRoutes(
   admin.use("*", onlyMutating((c, next) => writeGuardMiddleware(originOptions(c))(c, next)));
   // 4. drizzle handle for server-core (after the guard passed), then CostGuard per feature inside each route module.
   admin.use("*", onlyMutating(dbMiddleware));
+  // SA-037 is an exact-path exception: CURRENT Server Action returns [] when
+  // write identity/TOS/CostGuard denies. This handler evaluates those checks
+  // itself. It is registered BEFORE the generic read guard; no wildcard bypass.
+  admin.get("/event-templates", listEventTemplatesForAdminApi);
   // Safe reads (GET/HEAD) are denied by default unless an authenticated admin.
   admin.use("*", onlyReads(adminReadGuardMiddleware()));
   admin.route("/announcements", announcementRoutes);
