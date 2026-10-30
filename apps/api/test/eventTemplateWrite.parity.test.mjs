@@ -235,3 +235,30 @@ test("SA-037 GET: authenticated DB getter failure is private fixed 503, not an u
   assert.doesNotMatch(body, /PRIVATE_PROVIDER_DB_GETTER/);
   assert.equal(accesses, 1);
 });
+
+test("SA-037 GET: transient session resolution failure is private 503, not a false empty list", async () => {
+  for (const user of [null, ADMIN]) {
+    let accesses = 0;
+    const env = Object.defineProperty({ NEXT_PUBLIC_SITE_URL: SITE }, "DB", {
+      get() {
+        accesses += 1;
+        throw new Error("PRIVATE_PROVIDER_DB_GETTER");
+      },
+    });
+    const app = new Hono();
+    app.route("/api/admin", createAdminRoutes({
+      session: async (c, next) => {
+        c.set("user", user);
+        c.set("sessionState", "unavailable");
+        await next();
+      },
+    }));
+    const response = await app.request("/api/admin/event-templates", { method: "GET" }, env);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    const body = await response.text();
+    assert.deepEqual(JSON.parse(body), { error: "unavailable" });
+    assert.doesNotMatch(body, /PRIVATE_PROVIDER_DB_GETTER/);
+    assert.equal(accesses, 0, "unavailable session must be rejected before DB getter");
+  }
+});
