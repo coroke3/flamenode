@@ -226,9 +226,15 @@ eventTemplateRoutes.delete("/:id", async (c) => {
 export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
   const user = c.get("user");
-  // Identity/session denials must not access the DB binding.
-  // CURRENT SA-037 returns [] when requireAdminWrite denies.
-  if (!user || c.get("sessionState") === "unavailable") return c.json([]);
+  // CURRENT getCurrentUser throws CurrentUserUnavailableError on a transient
+  // session/DB failure; it is NOT an ordinary logged-out/identity denial.
+  // Do not return 200 [] and misrepresent a transient outage as an empty list.
+  // Neither failure nor anonymous denial should touch the DB binding.
+  if (c.get("sessionState") === "unavailable") {
+    return c.json({ error: "unavailable" }, 503);
+  }
+  // CURRENT SA-037 returns [] for normal requireAdminWrite denials.
+  if (!user) return c.json([]);
   try {
     const rawDb = c.env.DB;
     const guard = await evaluateAdminWriteGuard({
