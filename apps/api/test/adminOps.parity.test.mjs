@@ -169,6 +169,45 @@ test("MIG-0637 U02: stale full-row CAS rolls back DML and audit",async()=>{
   assert.equal(x.counts().audit,0);
   assert.equal(x.kvPuts.length,0);
 });
+test("MIG-0637 U03: concurrent target edits reject all five user/X writes without side effects",async()=>{
+  const attempts=[
+    ["/users/target-1/role",{role:"moderator"}],
+    ["/users/target-1/banned",{is_banned:"1",reason:"規約違反"}],
+    ["/users/target-1/notifications",{is_notification_enabled:"0"}],
+    ["/users/target-1/can-create-events",{can_create_events:"1"}],
+    ["/x-users/twitter1/icon-refresh",{}],
+  ];
+  for(const [path,body] of attempts){
+    let raced=false;
+    const x=setup({onFirst:(statement,sqlite)=>{
+      if(raced)return;
+      const userRead=statement.includes('FROM "user" WHERE id = ? LIMIT 1') ||
+        statement.includes('FROM "user" u WHERE u.id = ? LIMIT 1');
+      const xRead=statement.includes("FROM x_users x WHERE x.id=? LIMIT 1");
+      if(!userRead&&!xRead)return;
+      raced=true;
+      if(xRead){
+        sqlite.prepare("UPDATE x_users SET x_name='Concurrent admin' WHERE id='twitter1'").run();
+      }else{
+        sqlite.prepare('UPDATE "user" SET name=? WHERE id=?').run("Concurrent admin","target-1");
+      }
+    }});
+    x.sqlite.prepare("INSERT INTO notification_outbox (id,recipient_user_id,status) VALUES ('pending-1','target-1','pending')").run();
+    const res=await x.request(path,body);
+    assert.equal(raced,true,path+" must inject a write AFTER the preflight SELECT");
+    assert.equal(res.status,409,path);
+    assert.equal(x.counts().audit,0,path);
+    assert.equal(x.counts().rebuild,0,path);
+    assert.equal(x.kvPuts.length,0,path);
+    assert.equal(x.sqlite.prepare('SELECT role FROM "user" WHERE id=?').get("target-1").role,"user",path);
+    assert.equal(x.sqlite.prepare('SELECT is_banned FROM "user" WHERE id=?').get("target-1").is_banned,0,path);
+    assert.equal(x.sqlite.prepare('SELECT is_notification_enabled FROM "user" WHERE id=?').get("target-1").is_notification_enabled,1,path);
+    assert.equal(x.sqlite.prepare('SELECT can_create_events FROM "user" WHERE id=?').get("target-1").can_create_events,0,path);
+    assert.equal(x.sqlite.prepare("SELECT status FROM notification_outbox WHERE id='pending-1'").get().status,"pending",path);
+    assert.equal(x.sqlite.prepare("SELECT icon_url FROM x_users WHERE id='twitter1'").get().icon_url,"old.png",path);
+  }
+});
+
 test("MIG-0637 U03 SA-077: self role downgrade forbidden; another role audited",async()=>{
   const x=setup();
   const bad=await x.request("/users/admin-1/role",{role:"user"});
