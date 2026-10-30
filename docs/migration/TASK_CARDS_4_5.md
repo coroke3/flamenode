@@ -126,7 +126,7 @@
 - 読む: `work-items/MIG-0504.md`、CURRENT `UserProfilePage.tsx`（`notFound()`）、`routeShards.ts`（`normalizeKey`）、`migration-public-icon-map.test.mjs` と `migration-gateway.test.mjs`。MIG-0511（#432）と MIG-0512（#411）は main で DONE。
 - 変更: T03 の CURRENT 404 契約を維持し、`migration-user-routes.test.mjs` に props の量の test。既存の icon map と `/user/index.json` の gateway の回帰試験を再実行し、古い待ち状態を解消する。両者の実装を作り直さない。
 - 試験: 大小文字と `@`（gateway test）、15+15 page の props ≤ 256 KiB、390/1440。
-- DONE: T01〜T06 と既存 icon/gateway 回帰試験、390/1440 の画面確認、独立レビュー後に user 5行を PARITY_VERIFIED とする。MIG-0511 / MIG-0512 待ちは解消済みだが、本タスクはまだ READY。media API と build cadence・Queue の本番条件は担当タスクの gate に残す。
+- DONE: T01〜T06 と既存 icon/gateway 回帰試験、390/1440 の画面確認、独立レビュー後に user 5行を PARITY_VERIFIED とする。MIG-0511 / MIG-0512 待ちは解消済み。mainではMIG-0504はREADYだが、既存の実装PR #453はREVIEW（新規の二重claimは禁止）。media API と build cadence・Queue の本番条件は担当タスクの gate に残す。
 
 ### MIG-0505 — /list /recommend /trending
 

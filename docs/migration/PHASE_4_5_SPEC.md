@@ -770,7 +770,7 @@ PR を revert（文書だけ）。
 
 ### MIG-0504: user routes
 - **Model:** small
-- **Readiness:** READY_FOR_SMALL_MODEL — #352 で U01〜U05 は merge 済み。残りは CURRENT 404 契約の再確認、props JSON 量の試験、画面確認、記録。MIG-0511（#432）と MIG-0512（#411）は DONE で、icon map と `/user/index.json` の gateway 待ちは解消済み。live PR 所有権を再確認してから着手する
+- **Readiness:** READY_FOR_SMALL_MODEL — #352 で U01〜U05 は merge 済み。残りは CURRENT 404 契約の再確認、props JSON 量の試験、画面確認、記録。MIG-0511（#432）と MIG-0512（#411）は DONE で、icon map と `/user/index.json` の gateway 待ちは解消済み。MIG-0504のlive実装PR #453はREVIEW。main上のREADYだけで新規claimせず、既存ownerのレビュー・統合結果を確認する
 - **Recipe:** R-PAGE
 - **Runtime:** S0
 - **Depends on:** MIG-0407 / **Decisions:** D-02 DECIDED, D-03 DECIDED, D-06 DECIDED, D-08 DECIDED, D-11 DECIDED, D-13-3, D-13-25, D-13-28, D-13-35, D-13-36
