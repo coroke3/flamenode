@@ -109,7 +109,9 @@ test("U02 body: every CURRENT profile entry point is in the static HTML (texts, 
   assert.equal(links.filter((l) => l === "https://x.com/miku_producer").length, 1);
 });
 
-test("MIG-0504 mobile profile back navigation stays clear of the fixed 52px header", { skip }, () => {
+// Source contract only: jsdom has no layout, so this checks the back link exists and the offset rule is present.
+// The geometry (link below the 52px fixed header at 390px) is checked by the U03 screenshots recorded in MIG-0504.md.
+test("MIG-0504 mobile profile back link exists and the 52px fixed-header offset rule is in the route source", { skip }, () => {
   const doc = loadHtml("user/miku_producer/index.html");
   const back = doc.querySelector('main.cr-wrap > a[href="/user"]');
   assert.ok(back, "the profile needs a mock-compatible back-to-creators link");
@@ -117,7 +119,7 @@ test("MIG-0504 mobile profile back navigation stays clear of the fixed 52px head
   // Astro may bundle global CSS into an external asset; read the route source for the scoped rule.
   const styles = fs.readFileSync("apps/site/src/pages/user/[id]/index.astro", "utf8");
   assert.match(styles, /@media\s*\(max-width:\s*640px\)/,
-    "a mobile-specific fixed-header offset must be in generated HTML");
+    "a mobile-specific fixed-header offset must be in the route source");
   assert.match(styles, /\.p-root\s+\.cr-wrap\s*\{\s*padding-top:\s*calc\(52px\s*\+\s*24px\)\s*!important;/,
     "mobile back navigation must clear the 52px fixed header without altering desktop");
 });
