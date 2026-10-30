@@ -15,9 +15,11 @@ import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded } from "../admin/body.ts";
 import { resolveStaffPermissionKeys } from "./access.ts";
+import { isWriteConflict } from "../events/templates.ts";
 
 const NO_STORE = "private, no-store";
 const GENERIC_FAILURE = "同期予約に失敗しました。再読み込みしてお試しください。";
+const SETTINGS_FAILURE = "設定を保存できませんでした。同じ再生リストが別イベントに設定されていないか確認してください。";
 const LEASE_MESSAGE = "再生リスト同期が実行中です。完了後にもう一度お試しください。";
 const COLUMNS = [
   "event_id", "playlist_id", "enabled", "sync_mode", "sync_interval_minutes",
@@ -114,10 +116,12 @@ playlistWriteRoutes.post("/sync", async (c) => {
       }],
     });
     return c.json({ ok: true, queued: true }, 200);
-  } catch {
-    // No raw D1 error or SQL is exposed in response, logs, or audit.
+  } catch (error) {
+    // No raw D1 error or SQL is exposed in response, logs, or audit. Body is
+    // CURRENT's single failure message; a lease race (changes() assertion) is
+    // 409, any other failure (D1 outage, driver error) is 503.
     console.error("[MIG-0655] playlist sync request failed");
-    return c.json({ ok: false, message: GENERIC_FAILURE }, 409);
+    return c.json({ ok: false, message: GENERIC_FAILURE }, isWriteConflict(error) ? 409 : 503);
   }
 });
 
@@ -159,8 +163,6 @@ playlistWriteRoutes.put("/", async (c) => {
   const request = await readAdminJsonBody(c.req.raw);
   if (request.kind === "too_large") return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
   if (request.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
-  const parsed = parsePlaylistSettings(request.value);
-  if (!parsed.ok) return c.json({ ok: false, message: parsed.message }, 400);
   try {
     // Fold permission, event existence, all snapshot fields, reset count into
     // ONE pre-read. No partial approval if 101+ staff records are present.
@@ -181,16 +183,24 @@ playlistWriteRoutes.put("/", async (c) => {
         ) q) AS staff_json
     `).bind(eventId,eventId,eventId,eventId,user.id)
       .first<{exists_id: string | null; sync_json: string | null; item_count: number; staff_json: string | null}>();
-    if (!row?.exists_id) return c.json({ ok: false, message: "イベントが見つかりません。" }, 404);
+    if (!row) return c.json({ ok: false, message: SETTINGS_FAILURE }, 503);
     const grants: unknown = JSON.parse(row.staff_json ?? "[]");
     if (!Array.isArray(grants) || grants.length > 100) {
-      return c.json({ ok: false, message: GENERIC_FAILURE }, 503);
+      return c.json({ ok: false, message: SETTINGS_FAILURE }, 503);
     }
+    // CURRENT order: permission first, so a caller without event.publish gets
+    // the same 403 whether or not the event exists (no existence oracle).
     if (user.role !== "admin" && !grants.some((grant) =>
       grant && typeof grant === "object" &&
       resolveStaffPermissionKeys(grant as StaffRow).has("event.publish"))) {
       return c.json({ ok: false, message: "YouTube再生リスト同期を変更する権限がありません。" }, 403);
     }
+    // CURRENT validates the playlist fields after the permission check.
+    const parsed = parsePlaylistSettings(request.value);
+    if (!parsed.ok) return c.json({ ok: false, message: parsed.message }, 400);
+    // DOCUMENTED DIFFERENCE (MIG-0655 work item): CURRENT reaches the UPSERT and
+    // fails at the events FK with its generic message; Hono answers 404 first.
+    if (!row.exists_id) return c.json({ ok: false, message: "イベントが見つかりません。" }, 404);
     const before = row.sync_json ? JSON.parse(row.sync_json) as SyncRow : null;
     const now = Math.floor(Date.now()/1000);
     if (before?.run_lease_token && Number(before.run_lease_expires_at ?? 0) > now) {
@@ -260,9 +270,10 @@ playlistWriteRoutes.put("/", async (c) => {
       }],
     });
     return c.json({ ok: true, saved: true }, 200);
-  } catch {
+  } catch (error) {
+    // CURRENT's single failure message; UNIQUE playlist / lease race -> 409,
+    // anything else (D1 outage, driver error) -> 503. No driver text leaks.
     console.error("[MIG-0655] playlist settings save failed");
-    return c.json({ ok: false,
-      message: "設定を保存できませんでした。同じ再生リストが別イベントに設定されていないか確認してください。" }, 409);
+    return c.json({ ok: false, message: SETTINGS_FAILURE }, isWriteConflict(error) ? 409 : 503);
   }
 });

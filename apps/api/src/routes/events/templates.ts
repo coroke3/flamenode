@@ -53,13 +53,17 @@ function result(
 }
 
 /** D1 surfaces the changes() assertion (json_extract on invalid JSON) as malformed JSON. */
-function isAssertionConflict(error: unknown): boolean {
+export function isAssertionConflict(error: unknown): boolean {
   return error instanceof Error && /malformed JSON/i.test(error.message);
+}
+
+/** A write conflict the caller can resolve (changes()/CAS assertion or a UNIQUE index), as opposed to an outage. */
+export function isWriteConflict(error: unknown): boolean {
+  return isAssertionConflict(error) || (error instanceof Error && /UNIQUE constraint failed/i.test(error.message));
 }
 
 export const eventTemplateRoutes = new Hono<AppEnv>();
 eventTemplateRoutes.use("*", costGuardMiddleware("admin_event_templates"));
-
 
 /**
  * MIG-0655 U02 / SA-035: preserve the CURRENT snapshot shape and strict
@@ -89,10 +93,13 @@ eventTemplateRoutes.post("/", async (c) => {
           'description', q.description, 'type', q.type, 'required', q.required,
           'options_json', q.options_json, 'placeholder', q.placeholder,
           'max_length', q.max_length, 'sort_order', q.sort_order,
-          'is_active', q.is_active, 'visibility', q.visibility
+          'is_active', q.is_active, 'visibility', q.visibility,
+          'position', q.position, 'row_order', q.row_order
         )) FROM (
           SELECT question_key, label, description, type, required, options_json,
-                 placeholder, max_length, sort_order, is_active, visibility
+                 placeholder, max_length, sort_order, is_active, visibility,
+                 ROW_NUMBER() OVER (ORDER BY sort_order ASC, question_key ASC) AS position,
+                 rowid AS row_order
           FROM event_custom_questions WHERE event_id = e.id
           ORDER BY sort_order ASC, question_key ASC
           LIMIT 101
@@ -107,10 +114,19 @@ eventTemplateRoutes.post("/", async (c) => {
       // Do not silently serialize an incomplete template.
       return c.json({ ok: false, message: EVENT_TEMPLATE_FAILURE_MESSAGE }, 409);
     }
-    const questions = questionData as EventTemplateQuestionRow[];
-    const stageQuestions = [...questions]
+    const ordered = questionData as Array<EventTemplateQuestionRow & { position: number; row_order: number }>;
+    // json_group_array over an ordered subquery is not order-guaranteed by
+    // SQLite: re-apply CURRENT's ORDER BY sort_order, question_key via the
+    // SQL-computed position (same collation as CURRENT).
+    const questions: EventTemplateQuestionRow[] = [...ordered]
+      .sort((a, b) => a.position - b.position)
+      .map(({ position: _position, row_order: _rowOrder, ...q }) => q);
+    // CURRENT loadStagePermissionFormSettingsJson orders by (event_id, sort_order)
+    // only, served by event_custom_questions_event_sort_idx, so sort_order ties
+    // come back in rowid order. Reproduce that (differential test pins it).
+    const stageQuestions = [...ordered]
       .filter((q) => q.question_key === "stage_permission" || q.question_key.startsWith("stage_permission_"))
-      .sort((a, b) => a.sort_order - b.sort_order);
+      .sort((a, b) => a.sort_order - b.sort_order || a.row_order - b.row_order);
     const formSettingsJson = stageQuestions.length === 0 ? null : JSON.stringify({
       stage_permissions: stageQuestions.map((q) => ({
         id: q.question_key,

@@ -110,7 +110,8 @@ test("SA-039 rollback on audit insertion error preserves the scheduled state", a
   const s = setup();
   s.sqlite.exec("DROP TABLE audit_logs");
   const response = await s.post();
-  assert.equal(response.status, 409);
+  // Storage failure (not a lease/UNIQUE conflict) is 503, not 409.
+  assert.equal(response.status, 503);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   const row = s.sqlite.prepare("SELECT sync_status, pending_trigger, next_sync_at FROM event_youtube_playlist_sync").get();
   assert.equal(row.sync_status, "synced");
@@ -171,7 +172,7 @@ test("SA-038 leased row and audit failure leave settings and projections unchang
   assert.equal(leased.count("static_rebuild_queue"),0);
   const broken = setup();
   broken.sqlite.exec("DROP TABLE audit_logs");
-  assert.equal((await broken.put()).status,409);
+  assert.equal((await broken.put()).status,503);
   const row = broken.sqlite.prepare("SELECT playlist_id,sync_status FROM event_youtube_playlist_sync").get();
   assert.equal(row.playlist_id,"PLTEST");
   assert.equal(row.sync_status,"synced");
