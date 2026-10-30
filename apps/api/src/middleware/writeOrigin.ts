@@ -476,7 +476,17 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
     const { originUnavailable, originOk } = checkOrigin(c, options);
 
     const user = c.get("user") as SessionUser | null;
-    const db = (c.env as { DB?: D1DatabaseLike }).DB;
+    const sessionUnavailable = c.get("sessionState") === "unavailable";
+    let db: D1DatabaseLike | undefined;
+    // Resolve Origin and identity first; neither should consult a failing D1 binding.
+    if (!originUnavailable && originOk && !sessionUnavailable && user) {
+      try {
+        db = (c.env as { DB?: D1DatabaseLike } | undefined)?.DB;
+      } catch {
+        // Fixed-code denial only: the thrown provider error is not logged/serialized.
+        return writeGuardDenyResponse(c, "db_unavailable", 503);
+      }
+    }
 
     let actorSnapshotJson: string | undefined;
     let activeXRow: ActiveXRow | null = null;
@@ -485,7 +495,7 @@ export function writeGuardMiddleware(options: WriteGuardMiddlewareOptions) {
       hasDb: db !== undefined,
       originOk,
       originUnavailable,
-      sessionUnavailable: c.get("sessionState") === "unavailable",
+      sessionUnavailable,
       requiredRole: options.requiredRole,
       loadTosState:
         user && db

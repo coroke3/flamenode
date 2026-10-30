@@ -130,6 +130,9 @@ Conservative *bounded exception inventory* for R2 API calls whose first argument
 | `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `src/lib/video/memberSuggestionsLoader.ts` | `readBoundedR2Json(memberSuggestionsIndexObjectKey(manifestResult.generation))` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `src/lib/video/memberSuggestionsV2Loader.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
+| `packages/server-core/src/memberSuggestion/loader.ts` | `readBoundedR2Json(MEMBER_SUGGESTIONS_MANIFEST_OBJECT_KEY)` | 1 | MIG-0648 RH-019 target reader; canonical manifest commit point per request, keep CURRENT until gated cutover |
+| `packages/server-core/src/memberSuggestion/loader.ts` | `readBoundedR2Json(memberSuggestionsIndexObjectKey(manifestResult.generation))` | 1 | MIG-0648 RH-019 V1 fallback index; bounded read, generation validation, keep CURRENT until gated cutover |
+| `packages/server-core/src/memberSuggestion/v2Loader.ts` | `readBoundedR2Json(key)` | 1 | MIG-0648 RH-019 V2 posting reader; generation-specific R2 page/manifest, no D1 fallback; staged and not mounted |
 | `apps/api/src/lib/publicSnapshot.ts` | `readBoundedR2Json(key)` | 1 | R2 key helper on read-only public/API consumer path; MIG-0627 review required |
 | `workers/json-generator/memberSuggestionsArtifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
 | `workers/json-generator/memberSuggestionsV2Artifacts.ts` | `putJsonArtifact(key)` | 1 | R2 key helper on generator/producer path; MIG-0907 review required |
