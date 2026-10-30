@@ -110,6 +110,7 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
   const { q, status, event } = result.data;
   const totalPages = adminVideoTotalPages(paging);
   const isReview = status === "review" || status === "pending";
+  const activeGroup = status === "pending" ? "review" : status === "voided" ? "closed" : status;
 
   return (
     <section className="fn-public-container fn-page" aria-label="作品管理">
@@ -120,7 +121,7 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
       <nav aria-label="作品管理メニュー" className="fn-panel-actions">
         {VIDEO_GROUPS.map(({ status: tabStatus, label }) => (
           <a key={tabStatus} href={buildAdminVideoHref({ q, status: tabStatus, event })}
-            aria-current={(tabStatus === status || (!tabStatus && !status)) ? "page" : undefined}>
+            aria-current={tabStatus === activeGroup ? "page" : undefined}>
             {label}
           </a>
         ))}
