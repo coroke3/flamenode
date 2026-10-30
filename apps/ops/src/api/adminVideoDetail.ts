@@ -38,3 +38,19 @@ export async function loadAdminVideoDetail(
   if (!parsed.success || parsed.data.video.id !== videoId) return { status: "unavailable" };
   return { status: "ok", data: parsed.data };
 }
+
+const adminDateFormatter = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** Parity with CURRENT formatUnix: timestamps are UTC-based Unix seconds rendered in JST. */
+export function formatAdminVideoUnix(unixSec: number | null): string {
+  if (unixSec === null || !Number.isFinite(unixSec)) return "-";
+  const date = new Date(unixSec * 1000);
+  return Number.isFinite(date.getTime()) ? adminDateFormatter.format(date) : "-";
+}
