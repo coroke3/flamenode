@@ -7,7 +7,7 @@ import { staticBackfillAdminRoutes } from "../src/routes/admin/staticBackfill.ts
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 import { STATIC_BACKFILL_KV_KEY } from "@flamenode/domain/admin";
 
-function setup({ r2Ready = false, r2Throws = false } = {}) {
+function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist: 100, pool: 100 } } = {}) {
   const d1 = createAdminD1();
   seedBase(d1.sqlite);
   d1.sqlite.exec("CREATE TABLE videos (id TEXT PRIMARY KEY, visibility_status TEXT);");
@@ -21,8 +21,8 @@ function setup({ r2Ready = false, r2Throws = false } = {}) {
     if (r2Throws) throw new Error("simulated R2 unavailable");
     if (!r2Ready) return null;
     const value = key.includes("blocklist")
-      ? { schema_version: 1, generated_at: 100, blocked: {} }
-      : { schema_version: 1, generated_at: 100, generation_key: "ok", items: [] };
+      ? { schema_version: 1, generated_at: r2GeneratedAt.blocklist, blocked: {} }
+      : { schema_version: 1, generated_at: r2GeneratedAt.pool, generation_key: "ok", items: [] };
     const payload = JSON.stringify(value);
     return { size: payload.length, text: async () => payload };
   } };
@@ -152,4 +152,27 @@ test("MIG-0643 SA-069: R2 read error schedules shared-input repair instead of fa
   );
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
+});
+
+test("MIG-0643 SA-069: non-finite R2 generated_at fails closed like CURRENT normalizers", async () => {
+  for (const r2GeneratedAt of [
+    { blocklist: "Infinity", pool: 100 },
+    { blocklist: 100, pool: "1e309" },
+    { blocklist: 0, pool: 100 },
+    { blocklist: 100, pool: "NaN" },
+  ]) {
+    const s = setup({ r2Ready: true, r2GeneratedAt });
+    s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+    const response = await s.request({ kind: "video_v2" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).backfill_done, "0");
+    assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
+    assert.deepEqual(
+      s.rows().map(row => row.target_type).sort(),
+      ["random_video_pool", "youtube_related_blocklist"],
+    );
+    assert.equal(s.rows().some(row => row.target_type === "video"), false);
+    assert.equal(s.stats.batches, 1);
+    assert.equal(s.audit().length, 1);
+  }
 });
