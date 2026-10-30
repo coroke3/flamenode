@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { JSDOM } from "jsdom";
+import { createRoot } from "react-dom/client";
+import { DeleteEventTemplateButton } from "../.test-dist/apps/ops/src/routes/admin/DeleteEventTemplateButton.js";
 import {
   deleteAdminEventTemplate, eventDisplayState, eventIndexQuery, formatEventUnix,
   readAdminEvents, readAdminEventTemplates,
@@ -118,4 +121,48 @@ test("MIG-0728 U02: screens render CURRENT controls, safe links and no write bef
     React.createElement(EventTemplates)));
   assert.match(list, /イベントテンプレート/);
   assert.match(list, /読み込み中/);
+});
+
+
+test("MIG-0728 T04: cancel never calls DELETE; confirm calls once and refreshes", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://example.com/admin/events/templates" });
+  const oldWindow = globalThis.window;
+  const oldDocument = globalThis.document;
+  const oldFlag = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = dom.window.document.getElementById("root");
+  const root = createRoot(container);
+  let calls = 0;
+  let refreshed = 0;
+  const fetchFn = async () => {
+    calls++;
+    return json(200, { ok: true });
+  };
+  const click = async label => {
+    const button = [...container.querySelectorAll("button")].find(b => b.textContent === label);
+    assert.ok(button, label + " button must exist");
+    await React.act(async () => { button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })); });
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(DeleteEventTemplateButton, {
+      id: "tpl", name: "Demo", onDeleted: () => { refreshed++; }, fetchFn,
+    })));
+    await click("削除");
+    assert.equal(container.querySelector('[role="group"]')?.getAttribute("aria-label"), "イベントテンプレートを削除");
+    await click("キャンセル");
+    assert.equal(calls, 0);
+    assert.equal(container.querySelector('[role="group"]'), null);
+    await click("削除");
+    await click("削除する");
+    assert.equal(calls, 1);
+    assert.equal(refreshed, 1);
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.window = oldWindow;
+    globalThis.document = oldDocument;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = oldFlag;
+    dom.window.close();
+  }
 });
