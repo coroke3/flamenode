@@ -1,4 +1,9 @@
 import { Hono } from "hono";
+import {
+  authorizeDeepHealth,
+  buildDeepHealthFailureResponse,
+  runDeepHealthChecks,
+} from "@flamenode/server-core/health/deepHealth";
 import type { AppEnv } from "../env.ts";
 
 // CURRENT: src/lib/health/publicHealth.ts, src/lib/health/deepHealth.ts
@@ -12,27 +17,20 @@ function stringBinding(env: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function constantTimeEqual(left: string, right: string): boolean {
-  const length = Math.max(left.length, right.length);
-  let mismatch = left.length ^ right.length;
-  for (let index = 0; index < length; index += 1) {
-    mismatch |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
-  }
-  return mismatch === 0;
-}
-
-function deepHealthUnavailable(): Response {
-  return Response.json(
-    { ok: false, service: "flamenode-web" },
-    { status: 503, headers: NO_STORE },
-  );
-}
-
 export const healthRoutes = new Hono<AppEnv>();
 
 // RH-018: GET /api/health — exposes only the validated deployment commit.
 healthRoutes.get("/", (c) => {
-  const commit = stringBinding(c.env, "BUILD_COMMIT_SHA")?.trim() ?? "";
+  let commit: string;
+  try {
+    commit = stringBinding(c.env, "BUILD_COMMIT_SHA")?.trim() ?? "";
+  } catch {
+    // Cloudflare environment getters can throw synchronously. Never expose provider details.
+    return Response.json(
+      { ok: false, service: "flamenode-web", runtime: "cloudflare-worker" },
+      { status: 503, headers: NO_STORE },
+    );
+  }
   if (!COMMIT_PATTERN.test(commit)) {
     return Response.json(
       { ok: false, service: "flamenode-web", runtime: "cloudflare-worker" },
@@ -50,29 +48,34 @@ healthRoutes.get("/", (c) => {
   );
 });
 
-// RH-017: GET /api/health/deep
-//
-// The token gate matches CURRENT exactly (503 when WORKER_ADMIN_TOKEN is not
-// configured, 401 for a missing/malformed/wrong Bearer token).
-//
-// The authorized check body (schema version + runtime tables, tracked detail
-// artifact SLO, global artifact SLO probes, queue configuration and the
-// public-visibility manifest/fence join) still lives only in
-// src/lib/health/deepHealth.ts and its ~2,000-line public-data normalizer
-// closure, which apps/api must not import. Until that logic moves into a
-// package, this route fails closed with CURRENT's own failure response
-// instead of reporting checks it did not run as "ok". It reads no D1/KV/R2.
-healthRoutes.get("/deep", (c) => {
-  const token = stringBinding(c.env, "WORKER_ADMIN_TOKEN")?.trim();
-  if (!token) return deepHealthUnavailable();
-
-  const match = /^Bearer ([^\s]+)$/.exec(c.req.header("Authorization") ?? "");
-  if (!match || !constantTimeEqual(match[1], token)) {
-    return Response.json(
-      { ok: false, service: "flamenode-web" },
-      { status: 401, headers: NO_STORE },
-    );
+// RH-017: same token gate and read-only D1/KV/R2/Queue/visibility diagnostics as CURRENT.
+// Missing required bindings fail closed; the production Worker Route is not changed.
+healthRoutes.get("/deep", async (c) => {
+  // Authorization must finish before reading any diagnostic bindings.
+  let configuredToken: string | undefined;
+  try {
+    configuredToken = stringBinding(c.env, "WORKER_ADMIN_TOKEN");
+  } catch {
+    return buildDeepHealthFailureResponse(undefined);
   }
+  const unauthorized = authorizeDeepHealth(c.req.raw, configuredToken);
+  if (unauthorized) return unauthorized;
 
-  return deepHealthUnavailable();
+  try {
+    const { DB, KV, BUCKET } = c.env;
+    if (!DB || !KV || !BUCKET) {
+      // No silent success if the runtime lacks a mandatory read-only diagnostic binding.
+      return Response.json(
+        { ok: false, service: "flamenode-web" },
+        { status: 503, headers: NO_STORE },
+      );
+    }
+    const result = await runDeepHealthChecks({ ...c.env, DB, KV, BUCKET });
+    return Response.json(result, {
+      status: result.status === "degraded" ? 200 : result.ok ? 200 : 503,
+      headers: NO_STORE,
+    });
+  } catch (error) {
+    return buildDeepHealthFailureResponse(error);
+  }
 });

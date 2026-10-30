@@ -1,7 +1,6 @@
 export * from "./video.ts";
 export * from "./videoChapter.ts";
 export * from "./health.ts";
-export * from "./costGuardBanner.ts";
 export * from "./aboutStats.ts";
 export * from "./software.ts";
 export * from "./personal/index.ts";
@@ -11,3 +10,5 @@ export * from "./manage/index.ts";
 export * from "./admin/index.ts";
 export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
+export * from "./videoInteraction.ts";
+export * from "./costGuardBanner.ts";
