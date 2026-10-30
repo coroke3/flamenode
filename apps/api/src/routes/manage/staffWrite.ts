@@ -30,6 +30,7 @@ import { sql } from "@flamenode/server-core/sql";
 import { enqueueStaticRebuildMany } from "@flamenode/server-core/staticRebuild/enqueue";
 import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 import { canEditEvent, loadManageSnapshot } from "./access.ts";
 
@@ -202,8 +203,9 @@ export function registerStaffWriteRoutes(app: Hono<AppEnv>): void {
   // Register directly on the parent: its Origin/session/writeGuard/DB stack
   // must wrap these exact canonical paths, not an unmatched nested subrouter.
   const base = "/events/:id/staff";
-  app.use(base, costGuardMiddleware("manage_event_staff"));
-  app.use(`${base}/:staffId`, costGuardMiddleware("manage_event_staff"));
+  // GET /events/:id/staff remains a read: never impose a write CostGuard on it.
+  app.use(base, onlyMutating(costGuardMiddleware("manage_event_staff")));
+  app.use(`${base}/:staffId`, onlyMutating(costGuardMiddleware("manage_event_staff")));
   app.post(base, (c) => upsert(c, null));
   app.put(`${base}/:staffId`, (c) => {
   const id = c.req.param("staffId") ?? "";
