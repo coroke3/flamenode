@@ -110,7 +110,7 @@ async function sharedInputsReady(bucket: R2Bucket | undefined, proofs: SharedPro
       const obj = key === "youtube/related-blocklist.v1.json"
         ? await bucket.head("youtube/related-blocklist.v1.json")
         : await bucket.head("videos/random-pool.v1.json");
-      if (!obj || !Number.isSafeInteger(obj.size) || obj.size < 0 || obj.size > maxBytes) return false;
+      if (!obj || !Number.isSafeInteger(obj.size) || obj.size <= 0 || obj.size > maxBytes) return false;
       const meta = obj.customMetadata;
       if (meta?.schema_version !== "1" ||
           meta.content_hash !== proof.contentHash ||
