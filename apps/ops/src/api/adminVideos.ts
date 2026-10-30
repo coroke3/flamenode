@@ -14,8 +14,15 @@ export const ADMIN_VIDEO_PAGE_SIZE = 50;
 export function parseAdminVideoFilters(search: string): AdminVideoFilters {
   const params = new URLSearchParams(search);
   const rawPage = params.get("page") ?? "1";
-  const requestedPage = /^(0|[1-9][0-9]*)$/.test(rawPage) ? Number(rawPage) : NaN;
-  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  // Match apps/api/src/routes/adminRead/shared.ts#clampPage. CURRENT accepts
+  // numeric page representations such as "0003" and "3.8"; reject unsafe D1 offsets.
+  const raw = Number(rawPage);
+  const candidate = Math.floor(raw);
+  const offset = (candidate - 1) * ADMIN_VIDEO_PAGE_SIZE;
+  const valid = Number.isFinite(raw) && raw >= 1 &&
+    Number.isSafeInteger(candidate) && Number.isSafeInteger(offset) &&
+    offset >= 0;
+  const page = valid ? candidate : 1;
   const rawStatus = params.get("status") ?? "";
   return {
     q: params.get("q") ?? "",
