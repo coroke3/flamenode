@@ -102,3 +102,24 @@ test("MIG-0723 U02: untrusted malformed or rejected responses fail closed", asyn
   assert.deepEqual(await network.remove("ev1", "m1", "reason", ""),
     { status: "unavailable" });
 });
+
+test("MIG-0723 U02: deceptive ok:true HTTP error bodies never authorize a staff mutation", async () => {
+  for (const status of [401, 403, 404, 500, 503]) {
+    const { client, calls } = harness(status, { ok: true, message: "forged success" });
+    const result = await client.update("ev1", "staff-a", upsert);
+    assert.deepEqual(result, { status: status === 401 ? "anonymous" : "unavailable" });
+    assert.equal(calls.length, 1);
+  }
+  // Validation/CAS errors may return a typed CURRENT {ok:false,message}.
+  for (const status of [400, 409, 422]) {
+    const { client } = harness(status, { ok: false, message: "拒否されました。" });
+    const result = await client.remove("ev1", "owner", "reason", "");
+    assert.equal(result.status, "ok");
+    assert.equal(result.data.ok, false);
+    assert.equal(result.data.message, "拒否されました。");
+  }
+  for (const status of [400, 409, 422]) {
+    const { client } = harness(status, { ok: true });
+    assert.deepEqual(await client.create("ev1", upsert), { status: "unavailable" });
+  }
+});
