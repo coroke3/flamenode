@@ -106,7 +106,7 @@ test("MIG-0643 U04: missing metadata creates one pending row and strict audit in
   assert.equal(audit[0].context, "admin_youtube_sync");
   assert.equal(audit[0].reason, "YouTubeメタデータ再同期を予約");
   assert.equal(audit[0].actor_user_id, ADMIN.id);
-  assert.deepEqual(JSON.parse(audit[0].after_json), row);
+  assert.deepEqual(JSON.parse(audit[0].after_json), { ...row });
 });
 
 test("MIG-0643 U04: pending metadata is idempotent, zero batch/audit", async () => {
@@ -139,7 +139,7 @@ test("MIG-0643 U04: failed metadata is rescheduled without losing other fields",
   assert.equal(audit.length, 1);
   assert.equal(audit[0].operation, "UPDATE");
   assert.deepEqual(JSON.parse(audit[0].before_json), before);
-  assert.deepEqual(JSON.parse(audit[0].after_json), after);
+  assert.deepEqual(JSON.parse(audit[0].after_json), { ...after });
 });
 
 test("MIG-0643 U04: concurrent CAS conflict rolls back audit and mutation", async () => {
