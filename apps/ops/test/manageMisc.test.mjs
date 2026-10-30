@@ -1,0 +1,100 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
+import {
+  notificationCenterPath, readManageNotifications,
+} from "../.test-dist/apps/ops/src/api/manageNotifications.js";
+import {
+  ManageNotificationsBody,
+} from "../.test-dist/apps/ops/src/routes/manage/ManageNotifications.js";
+
+const fixture = {
+  isAdmin: false, activeXUserId: null, manageStaffXUserIds: [],
+  eventFilter: "a/b", notifFilter: "all", statusFilter: "",
+  managedEvents: [{ id: "a/b", title: "テストイベント" }],
+  eventTitles: { "a/b": "テストイベント" },
+  schemaMissing: false, failedCount: 0, notifications: [],
+};
+const response = (status, body) => new Response(JSON.stringify(body), {
+  status, headers: { "content-type": "application/json" },
+});
+const render = (data, query = "") => renderToStaticMarkup(
+  React.createElement(MemoryRouter, null,
+    React.createElement(ManageNotificationsBody, {
+      data, search: new URLSearchParams(query), change: () => {},
+    }),
+  ),
+);
+
+test("MIG-0725 U02: preserve CURRENT GET filter names and encode special IDs", () => {
+  assert.equal(
+    notificationCenterPath(new URLSearchParams("event=a%2Fb&notif=x_id&status=failed&unused=ignored")),
+    "/api/manage/notifications?event=a%2Fb&notif=x_id&status=failed",
+  );
+  assert.equal(notificationCenterPath(new URLSearchParams("notif=&status=")),
+    "/api/manage/notifications?notif=&status=");
+  assert.equal(notificationCenterPath(new URLSearchParams()), "/api/manage/notifications");
+});
+
+test("MIG-0725 U02: GET is no-store/same-origin and validates entire contract", async () => {
+  let request;
+  const control = new AbortController();
+  const result = await readManageNotifications(async (path, init) => {
+    request = { path, init };
+    return response(200, fixture);
+  }, new URLSearchParams("event=a%2Fb"), control.signal);
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.managedEvents[0].id, "a/b");
+  assert.equal(request.path, "/api/manage/notifications?event=a%2Fb");
+  assert.equal(request.init.method, "GET");
+  assert.equal(request.init.cache, "no-store");
+  assert.equal(request.init.credentials, "same-origin");
+  assert.equal(request.init.signal, control.signal);
+});
+
+test("MIG-0725 U02 T03: inaccessible event 404 remains 404 and no data leaks", async () => {
+  for (const [http, expected] of [
+    [401, "anonymous"], [403, "forbidden"], [404, "notFound"],
+    [500, "unavailable"], [501, "unsupported"],
+  ]) {
+    const value = await readManageNotifications(async () => response(http, {}),
+      new URLSearchParams("event=other-user-event"));
+    assert.equal(value.status, expected);
+    assert.equal("data" in value, false);
+  }
+  const invalid = await readManageNotifications(async () => response(200, {
+    ...fixture, notifications: [{ id: "partial-protected-row" }],
+  }), new URLSearchParams());
+  assert.deepEqual(invalid, { status: "unavailable" });
+});
+
+test("MIG-0725 U02 T04: filter select and event deep link are rendered safely", () => {
+  const html = render({
+    ...fixture, notifications: [{
+      id: "n1", type: "video_submitted", status: "dead_letter",
+      payload_json: JSON.stringify({ content: "<script>bad()</script>\nnext" }),
+      attempt_count: 2, last_error: "timeout", dedupe_key: null,
+      recipient_user_id: "user1", event_id: "a/b", created_at: 1700000000,
+      recipient: { userName: "投稿者", discordId: "123", notificationsEnabled: true },
+    }], failedCount: 1,
+  }, "event=a%2Fb&notif=video&status=failed");
+  assert.match(html, /name="event"[^>]*>/);
+  assert.match(html, /name="notif"[^>]*>/);
+  assert.match(html, /name="status"[^>]*>/);
+  assert.match(html, /最終失敗 1 件/);
+  assert.match(html, /href="\/manage\/events\/a%2Fb"/);
+  assert.match(html, /&lt;script&gt;bad\(\)&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test("MIG-0725 U02: admin event selector hidden, 50-row empty state and schema warning", () => {
+  const html = render({
+    ...fixture, isAdmin: true, managedEvents: [], schemaMissing: true,
+  });
+  assert.doesNotMatch(html, /name="event"/);
+  assert.match(html, /notification_outbox/);
+  assert.match(html, /通知はありません/);
+  assert.match(html, /href="\/manage"/);
+});
