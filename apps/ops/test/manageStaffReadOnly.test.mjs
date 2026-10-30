@@ -133,3 +133,17 @@ test("MIG-0723 U01a: event or account fetch changes never render a previous staf
   const failed = { eventId: "ev2", fetchFn: fetchA, result: { status: "forbidden" } };
   assert.equal(currentStaffResult("ev2", fetchA, failed), failed.result, "new result preserves 403 response");
 });
+
+
+test("MIG-0723 U01a: malformed UTF-16 and NUL event IDs fail closed before fetch", async () => {
+  let calls = 0;
+  const fetchFn = async () => {
+    calls += 1;
+    return json(200, staff());
+  };
+  for (const badId of ["\uD800", "\uDC00", "ev\uD800tail", "ev\0tail", ".", "..", ""]) {
+    const result = await readManageStaff(badId, fetchFn);
+    assert.deepEqual(result, { status: "unavailable" }, JSON.stringify(badId));
+  }
+  assert.equal(calls, 0, "malformed route parameters must never issue a network request");
+});
