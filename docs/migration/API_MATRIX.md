@@ -82,7 +82,7 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
-| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
+| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
@@ -480,6 +480,14 @@ Documented differences (PHASE_6_SPEC.md MIG-0634 & D-13-46):
 - RH-031 playlist overlay: CURRENT re-reads the visibility manifest after the artifact under `enforce` (TOCTOU etag check); Hono reads it once before (same reader as MIG-0631). Not covered by a test.
 
 
+
+## MIG-0648 — RH-019 authenticated X-user member suggestion search (Phase 6)
+
+| RH | CURRENT | Hono target | Permission | Data bound and fallback | State |
+| --- | --- | --- | --- | --- | --- |
+| RH-019 | `GET /api/internal/x-users/search` (`app/api/internal/x-users/search/route.ts`) | `apps/api/src/routes/internal/xUsersSearch.ts`, mounted via `apps/api/src/app.ts`; `@flamenode/server-core/memberSuggestion/{search,loader,v2Loader,core}` | Auth.js cookie session: 401 unauthorized, 403 account_disabled, 503 database_unavailable; private/no-store/no-cache, Retry-After 3 for artifact 503 | D1 <= 1 SELECT for session, D1 candidate reads/writes = 0; q length <= 64, limit 1..50, offset 0..5000; 2-char V2 posting lookup bounded to <=8 pages and <=1536 candidates; V2 generation must match canonical V1; >=3-char uncertain page and bad/missing V2 fall back to V1 R2 index; never return partial ranking; malformed or missing R2 returns fixed 503. Golden Next-vs-Hono HTTP parity in `apps/api/test/xUsersSearch.parity.test.mjs`. | IN_PROGRESS: MIG-0648 PR#440 U03 route mount/source exports implemented; latest code CI and independent review required before merge; no production cutover |
+
+Code landing only: Worker traffic still uses CURRENT Next handler until an authorized cutover. No remote D1 migration, R2 rewrite or Cloudflare Route change. The server-core root package entry stays type-only; dedicated package subpaths export the read-only functions. U03 surgical integration was placed away from live PR#419 (app.ts near top, API_MATRIX appendix), #437/#438 (package export tail), with post-merge reconciliation of all three open PRs required before merge.
 
 ## MIG-0664 — RH-001 degraded 原因の区別（D-17-14）
 
