@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory} from "./check-migration-work-items.mjs";
+import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -37,6 +37,31 @@ test("available source commit is accepted without claiming it is the tested head
  assert.deepEqual(errors,[]);
 });
 
+test("rewritten PR tip still verifies the exact old source SHA, never the replacement tip",()=>{
+ const prefix=path.join(os.tmpdir(),"flamenode-workitem-rewritten-");
+ const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
+ const git=(cwd,...args)=>execFileSync("git",["-c","commit.gpgsign=false","-c","core.hooksPath="+path.join(temp,"no-hooks"),...args],{cwd,encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
+ try {
+  fs.mkdirSync(builder);
+  git(builder,"init","-b","main"); git(builder,"config","user.name","Fixture"); git(builder,"config","user.email","fixture@example.invalid");
+  fs.writeFileSync(path.join(builder,"source.txt"),"base");git(builder,"add","source.txt");git(builder,"commit","-m","base");
+  git(builder,"checkout","-b","task-original"); fs.appendFileSync(path.join(builder,"source.txt"),"\\nfirst source");
+  git(builder,"add","source.txt");git(builder,"commit","-m","original task checkpoint");const original=git(builder,"rev-parse","HEAD");
+  git(builder,"checkout","main");fs.writeFileSync(path.join(builder,"source.txt"),"rewritten implementation");
+  git(builder,"add","source.txt");git(builder,"commit","-m","new unrelated PR tip");const newTip=git(builder,"rev-parse","HEAD");
+  git(builder,"update-ref","refs/pull/123/head",newTip);
+  git(temp,"init","--bare",remote);git(builder,"remote","add","origin",remote);
+  git(builder,"push","origin","main","task-original","refs/pull/123/head");
+  git(temp,"clone","--no-local","--single-branch","--branch","main",remote,clone);
+  assert.equal(gitCommitExists(clone,original),false,"source is absent even with a valid current PR tip");
+  const entries={"MIG-0301.md":active.replace("a".repeat(40),original)};
+  assert.deepEqual(fetchMissingSourceHistory(clone,entries),["123"]);
+  assert.equal(gitCommitExists(clone,original),true,"exact source object fetched from origin by SHA");
+  assert.notEqual(original,newTip,"must never substitute the updated PR head");
+  assert.deepEqual(validateWorkItems({statusText:status,entries,commitExists:value=>gitCommitExists(clone,value)}),[]);
+ }finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
+
 test("fresh squash clone can verify the prior source commit through its preserved PR ref",()=>{
  const prefix=path.join(os.tmpdir(),"flamenode-workitem-");
  const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
@@ -60,4 +85,62 @@ test("fresh squash clone can verify the prior source commit through its preserve
  } finally {
   if(path.resolve(temp).startsWith(path.resolve(prefix)))fs.rmSync(temp,{recursive:true,force:true});
  }
+});
+
+
+test("unavailable recorded source SHA remains rejected after PR history fetch", () => {
+ const prefix=path.join(os.tmpdir(),"flamenode-workitem-unavailable-");
+ const temp=fs.mkdtempSync(prefix),builder=path.join(temp,"builder"),remote=path.join(temp,"remote.git"),clone=path.join(temp,"clone");
+ const git=(cwd,...args)=>execFileSync("git",["-c","commit.gpgsign=false","-c","core.hooksPath="+path.join(temp,"no-hooks"),...args],{cwd,encoding:"utf8",stdio:["ignore","pipe","pipe"]}).trim();
+ try {
+  fs.mkdirSync(builder);
+  git(builder,"init","-b","main");
+  git(builder,"config","user.name","Fixture");
+  git(builder,"config","user.email","fixture@example.invalid");
+  fs.writeFileSync(path.join(builder,"base.txt"),"base");
+  git(builder,"add","base.txt");git(builder,"commit","-m","only valid source");
+  git(builder,"update-ref","refs/pull/123/head",git(builder,"rev-parse","HEAD"));
+  git(temp,"init","--bare",remote);
+  git(builder,"remote","add","origin",remote);
+  git(builder,"push","origin","main","refs/pull/123/head");
+  git(temp,"clone","--no-local","--single-branch","--branch","main",remote,clone);
+  const absent="f".repeat(40);
+  const entries={"MIG-0301.md":active.replace("a".repeat(40),absent)};
+  assert.equal(gitCommitExists(clone,absent),false);
+  // The PR ref fetch succeeds, but the exact recorded SHA is not reachable.
+  // Fallback fetch may fail; the final checker must never accept another tip.
+  assert.deepEqual(fetchMissingSourceHistory(clone,entries),["123"]);
+  assert.equal(gitCommitExists(clone,absent),false);
+  assert.match(
+   validateWorkItems({statusText:status,entries,commitExists:value=>gitCommitExists(clone,value)}).join("\n"),
+   /source SHA is not an available Git commit/,
+  );
+ }finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
+
+test("structural ownership conflict does not suppress requested SHA fetch or permit a false pass",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ const entries={"MIG-0301.md":active,"MIG-0302.md":another};
+ let available=false,fetchCount=0;
+ const errors=validateWithHistory({
+  statusText:status,entries,
+  commitExists:()=>available,
+  fetchHistory:()=>{fetchCount++;available=true;},
+ });
+ assert.equal(fetchCount,1,"fetch must run even when ownership is already invalid");
+ assert.match(errors.join("\n"),/already claimed/,"real ownership conflict must remain blocking");
+ assert.doesNotMatch(errors.join("\n"),/source SHA is not an available Git commit/,"fetched SHAs must be verified after retrieval");
+ const offline=validateWithHistory({statusText:status,entries,commitExists:()=>false});
+ assert.match(offline.join("\n"),/already claimed/);
+ assert.match(offline.join("\n"),/source SHA is not an available Git commit/,"offline missing-source checks stay strict");
+});
+
+test("failed history retrieval never masks structural errors or nonexistent commits",()=>{
+ const errors=validateWithHistory({
+  statusText:status,entries:{"MIG-0301.md":active},
+  commitExists:()=>false,
+  fetchHistory:()=>{throw new Error("no origin");},
+ });
+ assert.match(errors.join("\n"),/could not fetch required PR history/);
+ assert.match(errors.join("\n"),/source SHA is not an available Git commit/);
 });
