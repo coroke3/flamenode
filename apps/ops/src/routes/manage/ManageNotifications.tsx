@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { ManageNotificationCenterResponse, ManageNotificationWithRecipient } from "@flamenode/contracts";
 import { useSearchParams } from "react-router-dom";
-import { getJson, type OpsFetch } from "../../api/read.js";
+import type { OpsFetch } from "../../api/read.js";
 import { readManageNotifications } from "../../api/manageNotifications.js";
 import { EmptyState } from "../../components/shared/EmptyState.js";
 import { NotFoundView } from "../NotFoundView.js";
@@ -52,7 +52,7 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
     <div className="manage-notification-summary">
       <div>
         <span className={"fn-badge " + (TERMINAL_FAILURES.has(status) ? "fn-badge-danger" : status === "processing" ? "fn-badge-warning" : "fn-badge-soft")}>
-          {STATUS_LABELS[status] ?? status || "不明"}
+          {STATUS_LABELS[status] ?? (status || "不明")}
         </span>{" "}
         <span className="fn-badge fn-badge-soft">{category}</span>{" "}
         <strong>{row.type.replaceAll("_", " ")}</strong>
@@ -148,10 +148,12 @@ export function ManageNotificationsBody({ data, search, change }: {
  * Retains CURRENT query/deep-link/back-forward semantics.
  * The existing OpsGate still guards the route; the API enforces event ownership.
  */
-export function ManageNotifications({ fetchFn = DEFAULT_FETCH }: { fetchFn?: OpsFetch }): React.ReactElement {
-  const [search, setSearch] = useSearchParams();
-  const key = search.toString();
-  const result = useApiResult((signal) => readManageNotifications(fetchFn, search, signal), key);
+function ManageNotificationsForQuery({ fetchFn, search, setSearch }: {
+  fetchFn: OpsFetch;
+  search: URLSearchParams;
+  setSearch: ReturnType<typeof useSearchParams>[1];
+}): React.ReactElement {
+  const result = useApiResult((signal) => readManageNotifications(fetchFn, search, signal), search.toString());
   if (result.status === "loading") return <div role="status" aria-busy="true">読み込み中...</div>;
   if (result.status === "notFound") return <NotFoundView />;
   if (result.status === "anonymous") return <div role="alert">セッションが切れました。<a href="/entry">ログイン</a></div>;
@@ -164,4 +166,10 @@ export function ManageNotifications({ fetchFn = DEFAULT_FETCH }: { fetchFn?: Ops
       setSearch(next);
     }} />
   );
+}
+
+/** Remount on filter changes so previous-event data cannot flash before a new GET. */
+export function ManageNotifications({ fetchFn = DEFAULT_FETCH }: { fetchFn?: OpsFetch }): React.ReactElement {
+  const [search, setSearch] = useSearchParams();
+  return <ManageNotificationsForQuery key={search.toString()} fetchFn={fetchFn} search={search} setSearch={setSearch} />;
 }
