@@ -81,9 +81,11 @@ test("MIG-0737 U01: editable title PATCH, Undo and Redo preserve PK and values",
     title = JSON.parse(init.body).value;
     return json(200, { ok: true, pendingPublicReflection: true });
   };
-  const props = () => ({ data: fixture("videos", "editable", 1, [{ id: "v1", title, secret: "••••" }]),
-    fetchFn, allowMutations: true, onRefresh: async () => { refresh++; await ui.render(props()); } });
-  ui = await mount(props());
+  // The integrated read-view test owns RH-003 reload. Keep this unit test focused on
+  // the history transport; nesting React.act() within onRefresh corrupts subsequent tests.
+  const props = { data: fixture("videos", "editable", 1, [{ id: "v1", title, secret: "••••" }]),
+    fetchFn, allowMutations: true, onRefresh: () => { refresh++; } };
+  ui = await mount(props);
   try {
     assert.equal(ui.host.querySelectorAll('button[aria-label="1行 id を編集"]').length, 0);
     assert.equal(ui.host.querySelectorAll('button[aria-label="1行 secret を編集"]').length, 0);
