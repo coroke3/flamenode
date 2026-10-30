@@ -2,13 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
+import { JSDOM } from "jsdom";
 import { MemoryRouter } from "react-router-dom";
 import { loadManageNavigation } from "../.test-dist/apps/ops/src/api/manageNavigation.js";
 import { loadManageDashboard } from "../.test-dist/apps/ops/src/api/manageDashboard.js";
 import { loadOperationMode } from "../.test-dist/apps/ops/src/api/operationMode.js";
 import { shouldRenderManageSidebar, decideManageNavigation } from "../.test-dist/apps/ops/src/routes/manage/ManageLayout.js";
 import { shouldWarnManageActiveXMismatch } from "../.test-dist/apps/ops/src/routes/manage/ManageActiveXNotice.js";
-import { classifyManageEvent, filterManageEvents, isManageHrefActive } from "../.test-dist/apps/ops/src/routes/manage/ManageSidebarNav.js";
+import { ManageSidebarNav, classifyManageEvent, filterManageEvents, isManageHrefActive } from "../.test-dist/apps/ops/src/routes/manage/ManageSidebarNav.js";
 import { manageReviewTarget } from "../.test-dist/apps/ops/src/routes/manage/ManageReviewRedirect.js";
 import { manageKpiClasses, ManageDashboardContent } from "../.test-dist/apps/ops/src/routes/manage/ManageDashboard.js";
 import { summarizePayload } from "../.test-dist/apps/ops/src/components/notifications/NotificationOutboxSummary.js";
@@ -56,6 +58,43 @@ test("MIG-0719 T02/T07: sidebar absent with no permissions; Active X warning is 
   assert.deepEqual(filterManageEvents([event], " EVENT "), [event]);
   assert.equal(classifyManageEvent(event), "active");
   assert.equal(classifyManageEvent({ ...event, visibility_status: "private" }), "ended");
+});
+
+test("MIG-0719 T02: sidebar remains usable when browser localStorage throws", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+    url: "https://flamenode.test/manage/events/e1",
+  });
+  // Simulate the browser refusing both storage reads and writes.
+  Object.defineProperty(dom.window, "localStorage", {
+    configurable: true,
+    get() { throw new Error("SecurityError: blocked storage"); },
+  });
+  const keys = ["window", "document", "navigator", "HTMLElement", "Node", "IS_REACT_ACT_ENVIRONMENT"];
+  const original = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  for (const key of keys.slice(0, 5)) {
+    Object.defineProperty(globalThis, key, { configurable: true, value: dom.window[key] });
+  }
+  Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true });
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await React.act(async () => {
+      root.render(React.createElement(MemoryRouter, { initialEntries: ["/manage/events/e1"] },
+        React.createElement(ManageSidebarNav, {
+          events: [event], showXLinkRequests: false, warnActiveX: false, activeX: null,
+        })));
+    });
+    assert.match(dom.window.document.body.textContent, /Event 1/);
+    assert.match(dom.window.document.body.textContent, /最近/);
+    assert.match(dom.window.document.body.textContent, /運営トップ/);
+  } finally {
+    await React.act(async () => { root.unmount(); });
+    for (const key of keys) {
+      const descriptor = original.get(key);
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    dom.window.close();
+  }
 });
 
 test("MIG-0719 T03: dashboard validates DTO; pending and failed KPI, alert and empty state", async () => {

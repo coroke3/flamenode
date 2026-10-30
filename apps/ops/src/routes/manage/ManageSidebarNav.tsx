@@ -25,23 +25,36 @@ export function ManageSidebarNav({ events, showXLinkRequests, warnActiveX, activ
   const pathname = useLocation().pathname;
   const [query, setQuery] = React.useState("");
   const [recentIds, setRecentIds] = React.useState<string[]>([]);
+  // Keep the current browser-session ordering independent of optional localStorage.
+  const recentIdsRef = React.useRef<string[]>([]);
   React.useEffect(() => {
     try {
       const ids: unknown = JSON.parse(window.localStorage.getItem("flamenode:recent-manage-events") ?? "[]");
       const allowed = new Set(events.map(ev => ev.id));
-      setRecentIds(Array.isArray(ids) ? ids.filter((v): v is string => typeof v === "string" && allowed.has(v)).slice(0, 5) : []);
-    } catch { setRecentIds([]); }
+      const recent = Array.isArray(ids) ? ids.filter((v): v is string => typeof v === "string" && allowed.has(v)).slice(0, 5) : [];
+      recentIdsRef.current = recent;
+      setRecentIds(recent);
+    } catch {
+      // Storage may be disabled by a browser policy; the sidebar must still render.
+      recentIdsRef.current = [];
+      setRecentIds([]);
+    }
   }, [events]);
   React.useEffect(() => {
     const match = pathname.match(/^\/manage\/events\/([^/]+)/);
     if (!match) return;
     const id = safeDecodeURIComponent(match[1]);
     if (!id || !events.some(ev => ev.id === id)) return;
-    setRecentIds(prev => {
-      const next = [id, ...prev.filter(x => x !== id)].slice(0, 5);
+    const next = [id, ...recentIdsRef.current.filter(x => x !== id)].slice(0, 5);
+    recentIdsRef.current = next;
+    setRecentIds(next);
+    // Do not perform browser I/O inside a React state updater. Storage access or
+    // writes can throw SecurityError/QuotaExceededError (private mode/policy).
+    try {
       window.localStorage.setItem("flamenode:recent-manage-events", JSON.stringify(next));
-      return next;
-    });
+    } catch {
+      // Recent history is optional; permissions always come from the event DTO.
+    }
   }, [events, pathname]);
   const filtered = filterManageEvents(events, query);
   const categories = [
