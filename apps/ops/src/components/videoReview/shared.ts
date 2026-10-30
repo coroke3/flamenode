@@ -25,6 +25,8 @@ export const COMMUNICATION_ERROR_MESSAGE =
 export const PUBLIC_REFLECTION_DELAY_MESSAGE =
   "公開ページへの反映は、静的データの再生成が完了するまでしばらく時間がかかることがあります。";
 export function videoVisibilityLabel(status: string): string {
+  // Review queue uses CURRENT admin labels; the form's pending option says 公開待ち.
+  if (status === "pending") return "審査待ち";
   return Object.prototype.hasOwnProperty.call(VIDEO_STATUS_LABELS, status)
     ? VIDEO_STATUS_LABELS[status as VideoVisibilityStatus].label
     : status;
