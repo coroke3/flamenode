@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { writeGuard } from "@/lib/auth/writeGuard";
 import { validateActiveXSnapshot } from "@/lib/auth/activeXSnapshotCore";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
-import { videos, events } from "@/lib/db/schema";
+import { events } from "@/lib/db/schema";
 import { buildReplaceVideoSoftwarePlan } from "@/lib/db/software";
 import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
