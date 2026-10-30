@@ -155,7 +155,7 @@ test("MIG-0737 U01: DELETE requires explicit confirmation, no retry, clears undo
     assert.equal(prompts, 2);
     assert.equal(calls, 1);
     assert.match(ui.host.textContent, /保存できませんでした/);
-    assert.equal(ui.host.querySelectorAll("button").find(x => x.textContent === "元に戻す").disabled, true);
+    assert.equal([...ui.host.querySelectorAll("button")].find(x => x.textContent === "元に戻す").disabled, true);
   } finally { await ui.cleanup(); }
 });
 
@@ -185,7 +185,7 @@ test("MIG-0737 U01: changing table/page/transport immediately fences previous un
     assert.equal(ui.host.querySelectorAll("input").length, 1);
     await ui.render({ data: fixture("events"), fetchFn: fn, allowMutations: true, onRefresh: () => {} });
     assert.equal(ui.host.querySelectorAll("input").length, 0);
-    assert.equal(ui.host.querySelectorAll("button").find(x => x.textContent === "元に戻す").disabled, true);
+    assert.equal([...ui.host.querySelectorAll("button")].find(x => x.textContent === "元に戻す").disabled, true);
     await ui.render({ data: fixture("events", "editable", 2), fetchFn: fn,
       allowMutations: true, onRefresh: () => {} });
     assert.equal(ui.host.querySelectorAll("input").length, 0);
