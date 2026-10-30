@@ -141,7 +141,7 @@ test("MIG-0737 U01: CSV and TSV download clicks are GET-only and revoke blob URL
     if (path.includes("/data")) return json(200, page("videos", 1));
     if (path.includes("/export")) {
       const tsv = path.includes("format=tsv");
-      return new Response(tsv ? "id\\tname" : "id,name", {
+      return new Response(tsv ? "id\tname" : "id,name", {
         status: 200,
         headers: {
           "content-type": tsv ? "text/tab-separated-values" : "text/csv",
@@ -205,7 +205,7 @@ test("MIG-0737 U01: CSV clipboard copy supports primary API and denied-grant fal
     assert.equal(init.method, "GET");
     if (path.includes("/tables")) return json(200, catalog);
     if (path.includes("/data")) return json(200, page("videos", 1));
-    return new Response("id,name\\n1,value", { status: 200, headers: {
+    return new Response("id,name\n1,value", { status: 200, headers: {
       "content-type": "text/csv", "X-Spreadsheet-Truncated": "1",
     } });
   };
@@ -218,7 +218,7 @@ test("MIG-0737 U01: CSV clipboard copy supports primary API and denied-grant fal
     assert.ok(button);
     await React.act(async () => button.click());
     await flush();
-    assert.deepEqual(copied, ["id,name\\n1,value"]);
+    assert.deepEqual(copied, ["id,name\n1,value"]);
     assert.match(ui.host.textContent, /クリップボードにコピーしました（件数上限で一部のみ）/);
 
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
