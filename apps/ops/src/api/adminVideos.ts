@@ -61,3 +61,20 @@ export async function loadAdminVideos(
   const parsed = AdminVideosResponseSchema.safeParse(result.data);
   return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
 }
+
+/** CURRENT Pagination: current +/- 2, first/last page and compact ellipses. */
+export function adminVideoPageNumbers(current: number, total: number): (number | "…")[] {
+  const pages: (number | "…")[] = [];
+  const start = Math.max(1, current - 2);
+  const end = Math.min(total, current + 2);
+  if (start > 1) {
+    pages.push(1);
+    if (start > 2) pages.push("…");
+  }
+  for (let page = start; page <= end; page++) pages.push(page);
+  if (end < total) {
+    if (end < total - 1) pages.push("…");
+    pages.push(total);
+  }
+  return pages;
+}
