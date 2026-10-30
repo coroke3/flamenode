@@ -10,7 +10,7 @@ import {
 export type VideoReviewQueueRow = {
   id: string;
   title: string;
-  source_type: string;
+  source_type: string | null;
   youtube_video_id: string | null;
   display_name: string;
   visibility_status: string;
