@@ -5,10 +5,11 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
-import { getAdminHealth, getAdminSecurity, getAdminWorkers } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
+import { getAdminHealth, getAdminSecurity, getAdminWorkers, getAdminIntegrity } from "../.test-dist/apps/ops/src/api/adminDiagnostics.js";
 import { AdminHealthView } from "../.test-dist/apps/ops/src/routes/admin/AdminHealth.js";
 import { AdminSecurityView } from "../.test-dist/apps/ops/src/routes/admin/AdminSecurity.js";
 import { AdminWorkersView } from "../.test-dist/apps/ops/src/routes/admin/AdminWorkers.js";
+import { AdminIntegrityView } from "../.test-dist/apps/ops/src/routes/admin/AdminIntegrity.js";
 import { DiagnosticStatusResults, normalizeDiagnosticFilter } from "../.test-dist/apps/ops/src/routes/admin/DiagnosticStatusResults.js";
 
 const h = (type, props, ...children) => React.createElement(type, props, ...children);
@@ -181,5 +182,43 @@ test("U02b Worker dashboard does not expose stale snapshot on denied, failed or 
     assert.doesNotMatch(html, /query_failed/);
   }
   const denied = render(h(AdminWorkersView, { data: { status: "forbidden" }, onRefresh: () => {} }), "/admin/workers");
+  assert.match(denied, /閲覧権限がありません/);
+});
+
+
+test("U02c integrity does not query D1 before explicit run; run=1 preserves unsupported status", async () => {
+  let calls = 0;
+  const fetchFn = async (path, init) => {
+    calls++;
+    assert.equal(path, "/api/admin-read/ops/integrity?run=1");
+    assert.equal(init.method, "GET");
+    assert.equal(init.cache, "no-store");
+    assert.equal(init.credentials, "same-origin");
+    return response(501, { error: "integrity_run_unsupported" });
+  };
+  assert.deepEqual(await getAdminIntegrity(fetchFn, false), { status: "ok", data: { ran: false, results: [] } });
+  assert.equal(calls, 0);
+  assert.deepEqual(await getAdminIntegrity(fetchFn, true), { status: "unsupported" });
+  assert.equal(calls, 1);
+  assert.deepEqual(await getAdminIntegrity(async () => response(200, {
+    ran: true, results: [{ id: "unsafe", count: 10 }],
+  }), true), { status: "unavailable" }); // Await the contract from MIG-0626; never infer parity.
+});
+
+test("U02c integrity idle/unsupported/denied views show no fabricated check counts", () => {
+  const idle = render(h(AdminIntegrityView, {
+    data: { status: "ok", data: { ran: false, results: [] } }, shouldRun: false, onRefresh: () => {},
+  }), "/admin/health/integrity");
+  assert.match(idle, /DB整合性診断は未実行です/);
+  assert.match(idle, /href="\/admin\/health\/integrity\?run=1"/);
+  assert.doesNotMatch(idle, /総検出件数|危険チェック/);
+  const unavailable = render(h(AdminIntegrityView, {
+    data: { status: "unsupported" }, shouldRun: true, onRefresh: () => {},
+  }), "/admin/health/integrity?run=1");
+  assert.match(unavailable, /DB整合性診断は現在利用できません/);
+  assert.doesNotMatch(unavailable, /総検出件数|危険チェック/);
+  const denied = render(h(AdminIntegrityView, {
+    data: { status: "forbidden" }, shouldRun: true, onRefresh: () => {},
+  }), "/admin/health/integrity?run=1");
   assert.match(denied, /閲覧権限がありません/);
 });
