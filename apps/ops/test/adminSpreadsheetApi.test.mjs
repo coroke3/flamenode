@@ -113,7 +113,7 @@ test("MIG-0737 U01 RH-007 export retains CURRENT path, safety headers and partia
   const fetchFn = async (path, init) => {
     calls.push({ path, init });
     const tsv = path.includes("format=tsv");
-    return new Response(tsv ? "id\\tname\\n1\\ttest" : "id,name\\n1,test", {
+    return new Response(tsv ? "id\tname\n1\ttest" : "id,name\n1,test", {
       status: 200,
       headers: {
         "content-type": tsv ? "text/tab-separated-values; charset=utf-8" : "text/csv; charset=utf-8",
@@ -124,11 +124,11 @@ test("MIG-0737 U01 RH-007 export retains CURRENT path, safety headers and partia
   const csv = await loadSpreadsheetExport(fetchFn, "video/a & b", "csv");
   assert.equal(csv.status, "ok");
   assert.equal(csv.data.truncated, false);
-  assert.equal(await csv.data.blob.text(), "id,name\\n1,test");
+  assert.equal(await csv.data.blob.text(), "id,name\n1,test");
   const tsv = await loadSpreadsheetExport(fetchFn, "videos", "tsv");
   assert.equal(tsv.status, "ok");
   assert.equal(tsv.data.truncated, true);
-  assert.equal(await tsv.data.blob.text(), "id\\tname\\n1\\ttest");
+  assert.equal(await tsv.data.blob.text(), "id\tname\n1\ttest");
   assert.deepEqual(calls.map(x => x.path), [
     "/api/admin/spreadsheet/export?table=video%2Fa%20%26%20b&format=csv&header=1",
     "/api/admin/spreadsheet/export?table=videos&format=tsv&header=1",
