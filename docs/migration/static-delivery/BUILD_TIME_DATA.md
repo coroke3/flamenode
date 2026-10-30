@@ -330,15 +330,14 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
 | Consumer page render (D-11: the consumer does not render; R2 PUT = 0). The doorbell / recovery rows above are unchanged; `rebuild-page` for an excluded kind is finished at once (`excluded_kind`) | — | 3 operations per message, as before | — |
-| Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
+| Gateway `rebuild-page` when detail HTML is absent from both Static Assets and R2 | Not measured (visitor/miss dependent) | 3 operations/message | Requires measurement before Queue activation |
 
-With realistic update rates (far below one update per entity per day) the first two rows stay
-well inside 50 %. The third row used to be the risk: a generation mismatch answered 503. Decided
-2026-10-23 (F-02): the gateway accepts R2 HTML on identity (`kind`/`id`/`key`); generation is
-diagnostic, so a stale page is served and one deduplicated rebuild is requested. Visitors no
-longer see 503 after each build. The rebuild requests themselves can still reach
-1,460 × builds/day (≈ 35,000 messages/day) if every build changes the generation and every
-visited page asks once; keeping the route generation across data-only builds (MIG-0509) remains
-the way to bring that down. Unpublish and slug changes stay fenced by KV `deny:`, the consumer's
-R2 delete, and the route key.
+The bounded producer scenarios above total at most 1,460 update doorbells plus 120
+recovery messages/day (1,580 × 3 = 4,740 operations, 47.4% of 10,000/day).
+This conditional estimate leaves only 86 gateway messages/day before reaching
+the 50%-of-free-tier target (5,000 operations/day). Real gateway misses have
+**not been measured**. Under D-11 the consumer never renders or PUTs HTML;
+a missing page remains 503 until a build publishes it. Stale-generation HTML
+is served by identity and may still request a deduplicated rebuild while old
+R2 objects exist. Activation requires verifying gateway volume against the budget.
 
