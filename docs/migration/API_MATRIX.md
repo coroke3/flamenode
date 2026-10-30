@@ -326,10 +326,10 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-054 | `broadcastTermsReaccept` | `admin#parseTermsReacceptBroadcastInput` | re-accept predicate (`terms/reaccept.ts`, SQL), batch audit | U03 |
 | SA-055 | `archiveTermsVersion` | — | ADAPTER_ONLY: one CAS + optional rules rebuild, no rule beyond the row state | U03 |
 | SA-069 | `enqueueStaticBackfillBatch` | `admin#STATIC_BACKFILL_KINDS`, `#parseStaticBackfillState`, `#withStaticBackfillRun` | KV state, scan + queue enqueue | U04 |
-| SA-070 | `retryFailedStaticRebuild` | — | ADAPTER_ONLY: queue row retry DML | U04 |
-| SA-071 | `enqueueStaticRebuildAdmin` | — | ADAPTER_ONLY: queue enqueue | U04 |
-| SA-072 | `enqueueSharedRelatedInputsRebuildAdmin` | — | ADAPTER_ONLY: queue enqueue | U04 |
-| SA-073 | `retryAllFailedStaticRebuild` | — | ADAPTER_ONLY: bounded queue retry DML | U04 |
+| SA-070 | `retryFailedStaticRebuild` | `POST /api/admin/static-builds/queue/:queueId/retry` (PR#480, UNMOUNTED) | CURRENT CAS+strict audit; D1 retry one failed row; no immediate Queue wake | U02 IN_PROGRESS; isolated tests pending |
+| SA-071 | `enqueueStaticRebuildAdmin` | `POST /api/admin/static-builds/rebuild` (PR#480, UNMOUNTED) | CURRENT high-priority queue UPSERT+strict audit; wake=0 (no Queue binding) | U02 IN_PROGRESS; isolated tests pending |
+| SA-072 | `enqueueSharedRelatedInputsRebuildAdmin` | `POST /api/admin/static-builds/shared-inputs/rebuild` (PR#480, UNMOUNTED) | CURRENT two shared-target queue UPSERTs+strict audit; no R2 read, wake=0 | U02 IN_PROGRESS; isolated tests pending |
+| SA-073 | `retryAllFailedStaticRebuild` | `POST /api/admin/static-builds/retry-failed` (PR#480, UNMOUNTED) | CURRENT oldest failed 9 SELECT, up to 8 CAS retries + strict audit | U02 IN_PROGRESS; isolated tests pending |
 | SA-074 | `commitAcceptLatestTerms` | `user#isLatestTermsAlreadyAccepted` | consent INSERT + user CAS + audit | U04 |
 | SA-075 | `acceptLatestTerms` | via SA-074 | redirect | U04 |
 | SA-076 | `acceptOnboardingTerms` | via SA-074 | — | U04 |
