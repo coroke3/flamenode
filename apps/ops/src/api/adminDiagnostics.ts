@@ -2,9 +2,11 @@
 import {
   AdminHealthResponseSchema,
   AdminWorkersResponseSchema,
+  AdminIntegrityResponseSchema,
   AdminSecurityResponseSchema,
   type AdminHealthResponse,
   type AdminWorkersResponse,
+  type AdminIntegrityResponse,
   type AdminSecurityResponse,
 } from "@flamenode/contracts";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
@@ -63,4 +65,16 @@ export function getAdminWorkers(
   signal?: AbortSignal,
 ): Promise<OpsResult<AdminWorkersResponse>> {
   return validatedRead(fetchFn, "/api/admin-read/ops/workers", AdminWorkersResponseSchema, signal);
+}
+
+/** U02c: never run whole-table integrity scans without explicit run=1.
+ * CURRENT backend responds 501 for run=1 until MIG-0626 finishes per-check routes.
+ */
+export function getAdminIntegrity(
+  fetchFn: OpsFetch,
+  run: boolean,
+  signal?: AbortSignal,
+): Promise<OpsResult<AdminIntegrityResponse>> {
+  if (!run) return Promise.resolve({ status: "ok", data: { ran: false, results: [] } });
+  return validatedRead(fetchFn, "/api/admin-read/ops/integrity?run=1", AdminIntegrityResponseSchema, signal);
 }
