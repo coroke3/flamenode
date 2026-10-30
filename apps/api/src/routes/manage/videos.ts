@@ -22,17 +22,21 @@ const GROUPS = [
   { key: "closed", label: "無効", status: "voided" },
 ] as const;
 const STATUS_LABELS: Record<string, string> = { pending: "審査待ち", public: "公開", private: "非公開", voided: "無効化" };
+/** Only actual visibility statuses are allowed; inherited JS object keys must be rejected. */
+function isKnownStatus(value: string): boolean {
+  return Object.prototype.hasOwnProperty.call(STATUS_LABELS, value);
+}
 
 function normalizeFilter(raw: string | undefined): string {
   const value = raw === undefined ? "review" : raw;
   if (!value || value === "all") return "";
-  if (GROUPS.some((g) => g.key === value) || value in STATUS_LABELS) return value;
+  if (GROUPS.some((g) => g.key === value) || isKnownStatus(value)) return value;
   return "review";
 }
 
 function statusForFilter(filter: string): string | null {
   if (!filter) return null;
-  return GROUPS.find((g) => g.key === filter)?.status ?? (filter in STATUS_LABELS ? filter : null);
+  return GROUPS.find((g) => g.key === filter)?.status ?? (isKnownStatus(filter) ? filter : null);
 }
 
 function groupForFilter(filter: string): string | null {
