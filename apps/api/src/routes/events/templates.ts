@@ -11,13 +11,18 @@
 import {
   type EventTemplateActionResult,
   validateDeleteEventTemplateId,
+  validateSaveEventTemplateInput,
+  snapshotFromEvent,
+  type EventRow,
+  type EventTemplateQuestionRow,
 } from "@flamenode/domain/eventTemplates";
+import { generateId } from "@flamenode/server-core/id";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { auditPreloaded } from "../admin/body.ts";
+import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 
 export const EVENT_TEMPLATE_FAILURE_MESSAGE =
@@ -52,6 +57,99 @@ function isAssertionConflict(error: unknown): boolean {
 
 export const eventTemplateRoutes = new Hono<AppEnv>();
 eventTemplateRoutes.use("*", costGuardMiddleware("admin_event_templates"));
+
+
+/**
+ * MIG-0655 U02 / SA-035: preserve the CURRENT snapshot shape and strict
+ * audit/INSERT atomicity. The new API does not call Next revalidatePath.
+ * Stage permission questions are reused from the same ordered question read,
+ * avoiding an additional D1 request or a second source of truth.
+ */
+eventTemplateRoutes.post("/", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const body = await readAdminJsonBody(c.req.raw);
+  if (body.kind === "too_large") {
+    return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
+  }
+  if (body.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
+  const validated = validateSaveEventTemplateInput(body.value);
+  if (!validated.ok) return c.json({ ok: false, message: validated.message }, 400);
+  const input = validated.data;
+  const db = c.get("db");
+  const userId = c.get("user")!.id;
+  try {
+    const event = await c.env.DB.prepare("SELECT * FROM events WHERE id = ? LIMIT 1")
+      .bind(input.event_id)
+      .first<EventRow & { id: string }>();
+    if (!event) {
+      return c.json({ ok: false, message: "イベントが見つかりません。" }, 404);
+    }
+    const questions = await c.env.DB.prepare(`
+      SELECT question_key, label, description, type, required, options_json,
+             placeholder, max_length, sort_order, is_active, visibility
+      FROM event_custom_questions WHERE event_id = ?
+      ORDER BY sort_order ASC, question_key ASC
+      LIMIT 101
+    `).bind(event.id).all<EventTemplateQuestionRow>();
+    if (questions.results.length > 100) {
+      // Do not silently serialize an incomplete template.
+      return c.json({ ok: false, message: EVENT_TEMPLATE_FAILURE_MESSAGE }, 409);
+    }
+    const stageQuestions = [...questions.results]
+      .filter((q) => q.question_key === "stage_permission" || q.question_key.startsWith("stage_permission_"))
+      .sort((a, b) => a.sort_order - b.sort_order);
+    const formSettingsJson = stageQuestions.length === 0 ? null : JSON.stringify({
+      stage_permissions: stageQuestions.map((q) => ({
+        id: q.question_key,
+        enabled: q.is_active === 1,
+        required: q.required === 1,
+        label: q.label,
+        description: q.description ?? "",
+        placeholder: q.placeholder ?? "",
+      })),
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const after = {
+      id: generateId("etmpl"),
+      name: input.name,
+      description: input.description ?? null,
+      source_event_id: event.id,
+      settings_json: JSON.stringify(snapshotFromEvent(event, questions.results, formSettingsJson)),
+      created_by_user_id: userId,
+      created_at: now,
+      updated_at: now,
+    };
+    await mutateWithAudit(db, {
+      mutationStatements: [
+        db.run(sql`INSERT INTO event_templates (
+          id, name, description, source_event_id, settings_json,
+          created_by_user_id, created_at, updated_at
+        ) VALUES (
+          ${after.id}, ${after.name}, ${after.description}, ${after.source_event_id},
+          ${after.settings_json}, ${after.created_by_user_id}, ${after.created_at}, ${after.updated_at}
+        )`),
+      ],
+      expectedMutationChanges: 1,
+      preloaded: auditPreloaded(c),
+      audits: [{
+        table_name: "event_templates",
+        target_id: after.id,
+        operation: "CREATE",
+        after: { ...after },
+        actor_user_id: userId,
+        context: "admin_event_templates",
+        reason: "イベントテンプレートを保存",
+        retention_class: "normal",
+        strict: true,
+      }],
+    });
+    return c.json({ ok: true, templateId: after.id, message: "テンプレートを保存しました。" }, 200);
+  } catch {
+    // Driver errors may embed SQL/credentials; return only a stable private message.
+    console.error("[event-template-admin] CREATE_FAILED");
+    return c.json({ ok: false, message: EVENT_TEMPLATE_FAILURE_MESSAGE }, 500);
+  }
+});
 
 // SA-036 deleteEventTemplate
 eventTemplateRoutes.delete("/:id", async (c) => {
