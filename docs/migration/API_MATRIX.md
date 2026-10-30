@@ -82,8 +82,10 @@ Domain stage only; Hono endpoints are MIG-0603. Full mapping with adapter-side e
 | SA-082..084 | `creatorOwnerCanManagePermissions`, `ownerPolicyAllows`, `adminPolicyAllows` (`video.permissions`) |
 | SA-085 | `adminPolicyAllows` (`video.members`) |
 | SA-086, SA-088 | `requiredFields.ts` (`firstMissingRequiredVideoField`, `unionRequiredVideoFields`, …) |
-| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05) |
+| SA-087 | `nextVideoAppLikeCount` (Auth-User keyed as CURRENT; D-03 fan-out is MIG-0605 U05); MIG-0640 Hono `POST /api/videos/:videoId/interaction` via `apps/api/src/routes/videos/interaction.ts`. `kind=like|bookmark`; response `{ok, active?, videoId?, message?}`, 2 guard + 1 snapshot D1 reads, atomic interaction/count/queue/audit; D-0603-1 queue wake omitted. |
 | SA-089 | `requiredFields.ts`, `assertAllowedVideoFieldChanges`, `buildVideoAuditSnapshot`, `VIDEO_EDIT_SECTION_PERMISSION_KEYS`, `resolveAllowedVideoEditSections` |
+
+MIG-0651 U01 (#479): The existing UNIQUE-error classifier is now exported via `@flamenode/server-core/video/youtubeDuplicate` and re-exported by the Next legacy module. Target `POST /api/videos/free`, `POST /api/slots/:slotId/video`, and `PATCH /api/videos/:videoId` are **NOT MOUNTED**; multipart 8 MiB enforcement, auth, D1 atomic audit/Queue parity and HTTP regression tests remain U02–U04. This line does not certify API parity.
 
 ### Hono endpoints (MIG-0602 U02, PR #331)
 
@@ -523,3 +525,12 @@ Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All r
 | SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
 
 T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
+
+## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
+
+| RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
+| --- | --- | --- | --- | --- |
+| RH-027 | `OPTIONS /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | PVSF 2 origin のみ許可。GET/HEAD、If-None-Match 以外の preflight は 403。Vary / Expose-Headers / no-store CDN は CURRENT 同値 | MIGRATION_IN_PROGRESS |
+| RH-028 | `GET /api/public/events/:id/staff` | `apps/api/src/routes/public/eventStaff.ts` | 60/min isolate rate guard、R2 event-base 2MiB、visibility manifest の必須 ETag 前後照合、blocked event 404、blocked X staff 除去、DTO allowlist、非公開/欠損 503 | MIGRATION_IN_PROGRESS |
+
+DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
