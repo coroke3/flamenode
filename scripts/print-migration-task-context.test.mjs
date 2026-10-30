@@ -62,6 +62,15 @@ test("next-task advisory skips READY tasks already owned by an open PR",()=>{
  assert.deepEqual(next.ownedByPr,["MIG-0401"]);
  assert.equal(pickNextTask(status,"",new Map([["MIG-0401",1],["MIG-0301",2]])).selected,null);
 });
+test("duplicate open PRs for one MIG are rejected before task selection",()=>{
+ const prs=[
+  {number:481,headRefName:"migration/mig-0723-staff-view"},
+  {number:488,headRefName:"migration/mig-0723-staff-actions"},
+ ];
+ assert.throws(()=>parseOwnedTasks(prs),/Duplicate open PR ownership for MIG-0723: PR#481 and PR#488/);
+ assert.deepEqual([...parseOwnedTasks([{number:481,headRefName:"migration/mig-0723-staff-view"},{number:489,headRefName:"chore/migration-docs"}])],[["MIG-0723",481]]);
+});
+
 test("next-task advisory stops on unmerged dependencies",()=>{
  const status="| MIG-0105 | site | IN_PROGRESS | — |\n| MIG-0401 | perf | READY | MIG-0105 |";
  assert.equal(pickNextTask(status,"").selected,null);
@@ -150,6 +159,14 @@ test("--open-pr-branches carries MCP-read ownership into the selector", () => {
  assert.throws(()=>parseContextArgs(["--next","--offline","--open-pr-branches",""]),/exclusive/);
  const owned=parseOwnedTasks(a.openPrBranches.map(headRefName=>({number:"?("+headRefName+")",headRefName})));
  assert.deepEqual([...owned.keys()],["MIG-0201"]);
+});
+
+test("the MCP branch-list CLI fails closed on conflicting task ownership", () => {
+ const script=fileURLToPath(new URL("./print-migration-task-context.mjs",import.meta.url));
+ const result=spawnSync(process.execPath,[script,"--next","--open-pr-branches","migration/mig-0723-staff-a,migration/mig-0723-staff-b"],{encoding:"utf8"});
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,"");
+ assert.match(result.stderr,/Duplicate open PR ownership for MIG-0723/);
 });
 
 test("a lead takes the 1102 measurement path before other READY work", () => {
