@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
+import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps, youtubeSyncFilterParams } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
 const response = (status, payload) => new Response(JSON.stringify(payload), {
   status, headers: { "content-type": "application/json" },
@@ -102,4 +102,14 @@ test("MIG-0735: malformed read DTO and denied request never become success", asy
     {status:"anonymous"});
   assert.deepEqual(await getAdminOps("static-builds",{parse(){throw Error("schema drift");}},
     async () => response(200,{})),{status:"unavailable"});
+});
+
+test("MIG-0735 D-17-7: form navigation uses only seven exact filter names", () => {
+  const form = new FormData();
+  form.set("visibility","review");
+  form.set("failed","1");
+  form.set("unused","123");
+  assert.equal(youtubeSyncFilterParams(form).toString(),"visibility=review&failed=1");
+  form.delete("failed");
+  assert.equal(youtubeSyncFilterParams(form).toString(),"visibility=review");
 });

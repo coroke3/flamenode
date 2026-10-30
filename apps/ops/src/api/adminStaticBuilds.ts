@@ -103,3 +103,13 @@ export function mutationResultQuery(data: Record<string, unknown>): string {
 export function canContinueBackfill(status: string): boolean {
   return status !== "completed";
 }
+
+/** D-17-7: read filters are URL state; only the seven CURRENT names may travel. */
+export function youtubeSyncFilterParams(form: FormData): URLSearchParams {
+  const next = new URLSearchParams();
+  for (const key of ["sync_status", "privacy", "availability", "visibility", "failed", "stale", "missing"]) {
+    const value = form.get(key);
+    if (typeof value === "string" && value) next.set(key, value);
+  }
+  return next;
+}

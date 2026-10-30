@@ -1,14 +1,14 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { AdminYoutubeSyncResponse } from "@flamenode/contracts";
-import { postAdminOp, readYoutubeSync } from "../../api/adminStaticBuilds.js";
+import { postAdminOp, readYoutubeSync, youtubeSyncFilterParams } from "../../api/adminStaticBuilds.js";
 import { AdminVideoManagementTabs } from "../../components/admin/AdminVideoManagementTabs.js";
 
 const FILTERS = [
   ["sync_status", "同期", ["pending", "synced", "failed"]],
   ["privacy", "公開設定", ["public", "private", "unlisted"]],
-  ["availability", "利用可否", ["available", "unavailable", "deleted", "private", "unknown"]],
-  ["visibility", "FlameNode公開", ["review", "public", "private", "closed", "pending", "voided"]],
+  ["availability", "利用可否", ["available", "unavailable", "deleted", "private", "embed_disabled"]],
+  ["visibility", "FlameNode公開", ["review", "public", "private", "closed"]],
 ] as const;
 const CHECKS = [["failed", "失敗のみ"], ["stale", "14日以上未同期"], ["missing", "YouTube IDなし"]] as const;
 function formatTimestamp(value: number | null): string {
@@ -21,6 +21,7 @@ export function YoutubeSync(): React.ReactElement {
   const [error, setError] = React.useState<string | null>(null);
   const [refresh, setRefresh] = React.useState(0);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const busyRef = React.useRef(false);
   React.useEffect(() => {
     const controller = new AbortController();
     setData(null);
@@ -32,27 +33,25 @@ export function YoutubeSync(): React.ReactElement {
     return () => controller.abort();
   }, [query, refresh]);
   async function resync(videoId: string): Promise<void> {
-    if (busyId !== null) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusyId(videoId);
     try {
       const result = await postAdminOp("youtube-sync/videos/" + encodeURIComponent(videoId) + "/resync", {});
       if (result.status !== "ok") setError(result.status === "anonymous" ? "再ログインが必要です。" : "再同期を予約できませんでした。状態を確認してください。");
       else setRefresh(value => value + 1);
-    } finally { setBusyId(null); }
+    } finally { busyRef.current = false; setBusyId(null); }
   }
   return <div className="fn-public-container fn-page">
-    <header className="fn-page-head"><h1>YouTube同期状態</h1></header>
+    <header className="fn-page-head"><h1>YouTubeメタデータ同期状態</h1>
+      <p>video_youtube_metadataと作品情報を照合し、同期失敗・未同期・YouTube IDなしを確認します。</p></header>
     <AdminVideoManagementTabs />
-    <form key={query} className="fn-console-filters" onSubmit={event => {
-      event.preventDefault();
-      const form = new FormData(event.currentTarget);
-      const next = new URLSearchParams();
-      for (const key of ["sync_status", "privacy", "availability", "visibility", "failed", "stale", "missing"]) {
-        const value = form.get(key);
-        if (typeof value === "string" && value) next.set(key, value);
-      }
-      setParams(next);
-    }}>
+    <form key={query} method="get" className="fn-console-filter-form fn-console-filter-panel"
+      onChange={event => setParams(youtubeSyncFilterParams(new FormData(event.currentTarget)))}
+      onSubmit={event => {
+        event.preventDefault();
+        setParams(youtubeSyncFilterParams(new FormData(event.currentTarget)));
+      }}>
       {FILTERS.map(([name, label, options]) =>
         <label key={name} className="fn-console-filter-field">{label}
           <select name={name} defaultValue={params.get(name) ?? ""} className="fn-input">
@@ -83,11 +82,12 @@ export function YoutubeSync(): React.ReactElement {
             <td>{row.youtube_video_id || "なし"}</td>
             <td>{row.visibility_status}</td>
             <td>{row.youtube_privacy_status ?? "—"} / {row.youtube_availability_status ?? "—"}</td>
-            <td>{row.duration_seconds ?? "—"}秒</td><td>{row.view_count ?? 0}</td>
+            <td>{row.duration_seconds == null ? "—" : String(row.duration_seconds) + "秒"}</td><td>{row.view_count ?? 0}</td>
             <td>{row.sync_status ?? "metadataなし"}
               {row.sync_error && <details><summary>sync_error</summary><pre>{row.sync_error}</pre></details>}</td>
             <td>{formatTimestamp(row.synced_at)} / {formatTimestamp(row.updated_at)}</td>
             <td><Link to={"/admin/videos/" + encodeURIComponent(row.video_id)} className="fn-btn fn-btn-ghost fn-btn-sm">管理</Link>
+              <a href={"/" + encodeURIComponent(row.youtube_video_id?.trim() || row.video_id)} target="_blank" rel="noopener noreferrer" className="fn-btn fn-btn-ghost fn-btn-sm">公開</a>
               <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" disabled={busyId !== null}
                 aria-label={row.title + " のYouTubeメタデータ再同期を予約"}
                 onClick={() => void resync(row.video_id)}>再同期予約</button></td>

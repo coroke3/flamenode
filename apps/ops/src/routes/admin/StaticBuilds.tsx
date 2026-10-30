@@ -13,6 +13,7 @@ export function StaticBuilds(): React.ReactElement {
   const [data, setData] = React.useState<AdminStaticBuildsResponse | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const busyRef = React.useRef(false);
   const [refreshId, setRefreshId] = React.useState(0);
   React.useEffect(() => {
     const controller = new AbortController();
@@ -24,7 +25,8 @@ export function StaticBuilds(): React.ReactElement {
     return () => controller.abort();
   }, [refreshId]);
   async function mutate(path: string, payload: Record<string, string>, carryQuery = false): Promise<void> {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setLoadError(null);
     try {
@@ -40,6 +42,7 @@ export function StaticBuilds(): React.ReactElement {
       }
       setRefreshId(id => id + 1);
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
