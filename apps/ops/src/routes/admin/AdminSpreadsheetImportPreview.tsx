@@ -41,6 +41,7 @@ export function AdminSpreadsheetImportPreview({
   const [busy, setBusy] = React.useState(false);
   const requestId = React.useRef(0);
   const inFlight = React.useRef(false);
+  const pendingRequest = React.useRef<AbortController | null>(null);
 
   const draft = React.useMemo<SpreadsheetImportDraft>(
     () => ({ table, text, hasHeader, delimiter, mode }),
@@ -58,13 +59,21 @@ export function AdminSpreadsheetImportPreview({
 
   function resetPreview(): void {
     requestId.current += 1;
+    pendingRequest.current?.abort();
+    pendingRequest.current = null;
+    inFlight.current = false;
+    setBusy(false);
     setPreview(null);
     setMessage(null);
     setError(null);
   }
   React.useEffect(() => {
     resetPreview();
-    // Table switch must invalidate any outstanding request token.
+    // A table/identity change invalidates in-memory previews and in-flight requests.
+    return () => {
+      requestId.current += 1;
+      pendingRequest.current?.abort();
+    };
   }, [table, fetchFn]);
 
   async function readFile(file: File | null): Promise<void> {
@@ -101,12 +110,14 @@ export function AdminSpreadsheetImportPreview({
       return;
     }
     inFlight.current = true;
+    const controller = new AbortController();
+    pendingRequest.current = controller;
     const id = ++requestId.current;
     setBusy(true);
     setError(null);
     setPreview(null);
     try {
-      const result = await previewSpreadsheetImport(fetchFn, draft);
+      const result = await previewSpreadsheetImport(fetchFn, draft, controller.signal);
       if (id !== requestId.current) return;
       if (result.status !== "ok") {
         setError("サーバー確認に失敗しました。権限、機能設定、入力内容を確認してください。");
@@ -117,8 +128,11 @@ export function AdminSpreadsheetImportPreview({
           : "サーバーで確認しました。反映する前に内容を確認してください。");
       }
     } finally {
-      inFlight.current = false;
-      if (id === requestId.current) setBusy(false);
+      if (pendingRequest.current === controller) {
+        pendingRequest.current = null;
+        inFlight.current = false;
+        if (id === requestId.current) setBusy(false);
+      }
     }
   }
 
@@ -130,13 +144,15 @@ export function AdminSpreadsheetImportPreview({
     }
     if (issued.draftFingerprint !== spreadsheetImportFingerprint(draft)) return;
     inFlight.current = true;
+    const controller = new AbortController();
+    pendingRequest.current = controller;
     const id = ++requestId.current;
     setBusy(true);
     setError(null);
     // Single-use preview token. Never enable a second submit, even on error.
     setPreview(null);
     try {
-      const result = await applySpreadsheetImport(fetchFn, draft, issued.data, issued.draftFingerprint);
+      const result = await applySpreadsheetImport(fetchFn, draft, issued.data, issued.draftFingerprint, controller.signal);
       if (id !== requestId.current) return;
       if (result.status !== "ok") {
         setError("反映に失敗しました。再度サーバーで確認してください。");
@@ -146,8 +162,11 @@ export function AdminSpreadsheetImportPreview({
       setText("");
       await onImported?.();
     } finally {
-      inFlight.current = false;
-      if (id === requestId.current) setBusy(false);
+      if (pendingRequest.current === controller) {
+        pendingRequest.current = null;
+        inFlight.current = false;
+        if (id === requestId.current) setBusy(false);
+      }
     }
   }
 
