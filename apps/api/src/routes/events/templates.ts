@@ -226,8 +226,12 @@ eventTemplateRoutes.delete("/:id", async (c) => {
 export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
   const user = c.get("user");
-  const rawDb = c.env.DB;
-  const guard = await evaluateAdminWriteGuard({
+  // Identity/session denials must not consult a potentially throwing D1 binding.
+  // CURRENT SA-037 resolves a denied write guard to an empty list.
+  if (!user || c.get("sessionState") === "unavailable") return c.json([]);
+  try {
+    const rawDb = c.env.DB;
+    const guard = await evaluateAdminWriteGuard({
     user,
     hasDb: Boolean(rawDb),
     originOk: true, // GET is safe, no CSRF Origin requirement.
@@ -248,6 +252,8 @@ export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise
     // CURRENT does not page/truncate template results; preserve order and shape.
     return c.json(results);
   } catch {
+    // The DB binding getter, ToS/CostGuard reads, and final list read can all
+    // fail; never leak provider errors or return a false-success empty list.
     console.error("[event-template-admin] LIST_FAILED");
     return c.json({ error: "unavailable" }, 503);
   }
