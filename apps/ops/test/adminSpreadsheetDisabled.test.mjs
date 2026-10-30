@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AdminSpreadsheetDisabled } from "../.test-dist/apps/ops/src/routes/admin/AdminSpreadsheetDisabled.js";
 
-// Unmounted U01 source contract; runtime React rendering is covered during
-// subsequent Ops router integration once admin-only data gates are available.
-const source = readFileSync(new URL("../src/routes/admin/AdminSpreadsheetDisabled.tsx", import.meta.url), "utf8");
-test("disabled view preserves the CURRENT flag and restart instructions", () => {
-  assert.match(source, /ADMIN_SPREADSHEET_ENABLED=true/);
-  assert.match(source, /ADMIN_SPREADSHEET_ENABLED="true"/);
-  assert.match(source, /\.dev\.vars/);
-  assert.match(source, /npm run dev/);
-  assert.match(source, /aria-labelledby/);
+test("MIG-0737 U01: disabled spreadsheet page preserves CURRENT heading and instructions", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminSpreadsheetDisabled));
+  assert.match(html, /<h1 id="admin-spreadsheet-disabled-title">DB スプレッドシート<\/h1>/);
+  assert.match(html, /この機能は環境変数で有効化する必要があります。/);
+  assert.match(html, /ADMIN_SPREADSHEET_ENABLED=true/);
+  assert.match(html, /ADMIN_SPREADSHEET_ENABLED=&quot;true&quot;/);
+  assert.match(html, /\.dev\.vars/);
+  assert.match(html, /npm run dev/);
+  assert.match(html, /href="\/admin"[^>]*>ダッシュボードへ戻る<\/a>/);
 });
-test("disabled view does not handle feature flags or attempt API writes", () => {
-  assert.doesNotMatch(source, /fetch\s*\(|localStorage|process\.env|import\.meta\.env/);
+
+test("MIG-0737 U01: disabled view remains an accessible, non-mutation explanation", () => {
+  const html = renderToStaticMarkup(React.createElement(AdminSpreadsheetDisabled));
+  assert.match(html, /<section aria-labelledby="admin-spreadsheet-disabled-title"/);
+  assert.match(html, /<ol[^>]*>.*<li>.*<li>/s);
+  assert.doesNotMatch(html, /<form|<input|<button|data-action|type="submit"/);
 });
