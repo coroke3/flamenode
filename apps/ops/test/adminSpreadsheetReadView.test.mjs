@@ -314,3 +314,17 @@ test("MIG-0737 U01: changing the API transport clears previous session rows imme
     await ui.cleanup();
   }
 });
+
+test("MIG-0737 U01: mismatched server page/table identities never render rows", async () => {
+  for (const wrongPage of [page("events", 1), page("videos", 2)]) {
+    const ui = await mount(async (path) =>
+      path.includes("/tables") ? json(200, catalog) : json(200, wrongPage), "videos");
+    try {
+      assert.equal(ui.host.querySelectorAll("tbody tr").length, 0);
+      assert.doesNotMatch(ui.host.textContent, /<unsafe>/);
+      assert.match(ui.host.textContent, /データを取得できませんでした/);
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
