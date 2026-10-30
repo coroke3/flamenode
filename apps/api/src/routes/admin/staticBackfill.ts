@@ -162,8 +162,18 @@ async function loadBackfillPage(db: D1Database, kind: StaticBackfillKind, cursor
          ORDER BY id ASC LIMIT ${BATCH_SIZE + 1})) AS ids_json,
       ${proofsSql}
   `).bind(cursor).first<BackfillPage>();
-  const ids = row?.ids_json ? JSON.parse(row.ids_json) as unknown : [];
-  if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
+  // The SQL LIMIT caps the *number* of IDs, not their size. Keep the
+  // request-time JSON.parse boundary and downstream queue IDs bounded even
+  // if legacy/corrupt D1 rows contain very long TEXT primary keys.
+  const encodedIds = row?.ids_json ?? "[]";
+  if (typeof encodedIds !== "string" ||
+      encodedIds.length > MAX_BACKFILL_KV_STATE_BYTES ||
+      new TextEncoder().encode(encodedIds).byteLength > MAX_BACKFILL_KV_STATE_BYTES) {
+    throw new Error("invalid_backfill_page");
+  }
+  const ids: unknown = JSON.parse(encodedIds);
+  if (!Array.isArray(ids) || ids.length > BATCH_SIZE + 1 ||
+      ids.some((id) => typeof id !== "string" || id.length < 1 || id.length > 128)) {
     throw new Error("invalid_backfill_page");
   }
   return {
