@@ -98,7 +98,17 @@ test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Op
     if (path.startsWith("/api/admin-read/videos/video-2")) {
       return json(200, { ...detail, video: { ...detail.video, id: "video-2" } });
     }
-    return json(200, rows);
+    // The privileged list adapter rejects responses for another search key.
+    // Model the server's echoed filters/page rather than reusing page-2 data
+    // after back, next, previous and reset navigation.
+    const params = new URL(path, "https://flamenode.invalid").searchParams;
+    return json(200, {
+      ...rows,
+      q: params.get("q") ?? "",
+      status: params.get("status") ?? "",
+      event: params.get("event") ?? "",
+      paging: { ...rows.paging, page: Number(params.get("page") ?? "1") },
+    });
   };
   function LocationProbe() {
     const location = useLocation();
@@ -146,8 +156,10 @@ test("MIG-0729 U01/U02: internal list/detail/reset/pagination links remain in Op
       "approved nextHref must navigate in Ops Router without document reload");
     await click("作品一覧へ");
     assert.equal(route(), "/admin/videos?status=review&event=event-1");
+    await click("次へ");
+    assert.equal(route(), "/admin/videos?status=review&event=event-1&page=2");
     await click("前へ");
-    assert.equal(route(), "/admin/videos?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=1");
+    assert.equal(route(), "/admin/videos?status=review&event=event-1&page=1");
     await click("解除");
     assert.equal(route(), "/admin/videos");
   } finally {
