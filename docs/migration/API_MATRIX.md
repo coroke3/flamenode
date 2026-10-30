@@ -354,7 +354,7 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
 | SA-105 | `uploadXIdIcon` | `xid#normalizeXId` | image upload + R2 | U04 |
-| SA-106 | `queueYoutubeMetadataResync` | — | ADAPTER_ONLY: sync-state CAS + wake | U04 |
+| SA-106 | `queueYoutubeMetadataResync` | `POST /api/admin/youtube-sync/videos/:videoId/resync` (MIG-0643 PR#480; **UNMOUNTED**, partial U04) | ADAPTER_ONLY: sync-state CAS + strict audit; wake=0 per D-13-41 (cron), no Next cache revalidation | U04 IN_PROGRESS; T01/T02/T04 partial |
 
 ## MIG-0611 Hono Personal read APIs (Phase 6)
 
