@@ -1,0 +1,128 @@
+.vmembers-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vmembers-sampleTableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.vmembers-sampleTable {
+  min-width: 620px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  background: var(--bg-surface);
+}
+
+.vmembers-sampleTable th,
+.vmembers-sampleTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.vmembers-sampleTable th {
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.vmembers-sampleTable td {
+  color: var(--text-secondary);
+}
+
+.vmembers-sampleTable tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--bg-elevated) 54%, var(--bg-surface));
+}
+
+.vmembers-bulkTextarea {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.vmembers-bulkWarning {
+  margin: 0;
+  color: var(--accent-warning);
+  font-size: 12px;
+}
+
+.vmembers-bulkDetails {
+  margin-top: 6px;
+}
+
+.vmembers-bulkDetailsSummary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.vmembers-bulkContent {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.vmembers-sampleSection {
+  display: grid;
+  gap: 4px;
+}
+
+.vmembers-bulkSection {
+  display: grid;
+  gap: 6px;
+}
+
+.vmembers-bulkPreviewSection {
+  display: grid;
+  gap: 8px;
+}
+
+.vmembers-bulkLabel {
+  font-size: 12px;
+}
+
+.vmembers-bulkHint {
+  margin: 0;
+}
+
+.vmembers-bulkHintList {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.vmembers-bulkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.vmembers-bulkPreviewTable {
+  min-width: 640px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.vmembers-bulkPreviewTable th,
+.vmembers-bulkPreviewTable td {
+  padding: 4px;
+}
+
+.vmembers-bulkPreviewTable th {
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.vmembers-bulkPreviewTable td {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vmembers-bulkPreviewInvalid {
+  color: var(--accent-warning);
+}

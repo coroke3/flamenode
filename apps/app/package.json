@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@flamenode/contracts": "*",
+    "@flamenode/domain": "*",
     "@flamenode/ui": "*",
     "react": "^19.0.9",
     "react-dom": "^19.0.9",

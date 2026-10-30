@@ -6,6 +6,7 @@ export const MODULES = [
   ["onb", "app/(auth)/onboarding/page.module.css", "apps/app/src/styles/onboarding.css"],
   ["settings", "src/components/settings/settings-page.module.css", "apps/app/src/styles/settings.css"],
   ["vcard", "src/components/video/VideoCard.module.css", "apps/app/src/styles/video-card.css"],
+  ["vmembers", "src/components/forms/VideoMembersField.module.css", "apps/app/src/styles/video-members.css"],
 ];
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
