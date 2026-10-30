@@ -16,22 +16,35 @@ function setup({ r2Ready = false, r2Throws = false, r2GeneratedAt = { blocklist:
     async get(key) { assert.equal(key, STATIC_BACKFILL_KV_KEY); state.reads++; return state.raw; },
     async put(key, value) { assert.equal(key, STATIC_BACKFILL_KV_KEY); state.writes++; state.raw = value; },
   };
-  const bucket = { gets: 0, cancels: 0, async get(key) {
-    this.gets++;
+  // Successful producer writes record the hash and generation in D1 only
+  // after putting the JSON body and metadata in R2.
+  d1.sqlite.exec(`CREATE TABLE static_artifacts (
+    target_type TEXT NOT NULL, target_id TEXT NOT NULL, object_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL, generated_at INTEGER NOT NULL, deleted_at INTEGER
+  )`);
+  const proofHashes = { blocklist: "a".repeat(64), pool: "b".repeat(64) };
+  if (r2Ready) {
+    d1.sqlite.prepare(`INSERT INTO static_artifacts
+      (target_type,target_id,object_key,content_hash,generated_at,deleted_at)
+      VALUES ('youtube_related_blocklist','global','youtube/related-blocklist.v1.json',?,?,NULL)`)
+      .run(proofHashes.blocklist,r2GeneratedAt.blocklist);
+    d1.sqlite.prepare(`INSERT INTO static_artifacts
+      (target_type,target_id,object_key,content_hash,generated_at,deleted_at)
+      VALUES ('random_video_pool','global','videos/random-pool.v1.json',?,?,NULL)`)
+      .run(proofHashes.pool,r2GeneratedAt.pool);
+  }
+  const bucket = { heads: 0, gets: 0, async head(key) {
+    this.heads++;
     if (r2Throws) throw new Error("simulated R2 unavailable");
     if (!r2Ready) return null;
     const kind = key.includes("blocklist") ? "blocklist" : "pool";
-    const value = kind === "blocklist"
-      ? { schema_version: 1, generated_at: r2GeneratedAt.blocklist, blocked: {} }
-      : { schema_version: 1, generated_at: r2GeneratedAt.pool, generation_key: "ok", items: [] };
-    const payload = r2BadJson === kind ? "{malformed-json" : JSON.stringify(value);
-    const size = r2BadSize?.kind === kind ? r2BadSize.size : payload.length;
-    return {
-      size,
-      body: { cancel: async () => { this.cancels++; } },
-      text: async () => payload,
-    };
-  } };
+    const size = r2BadSize?.kind === kind ? r2BadSize.size : 1024;
+    const hash = r2BadJson === kind ? "mismatched-producer-hash" : proofHashes[kind];
+    return { size, customMetadata: {
+      schema_version: "1", content_hash: hash,
+      source_generation: kind === "pool" ? "valid-generation-key" : proofHashes.blocklist,
+    } };
+  }, async get() { this.gets++; throw new Error("S3 must never fetch or parse the shared JSON bodies"); } };
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", { id: "admin-1", role: "admin" });
@@ -109,7 +122,8 @@ test("MIG-0643 SA-069: video backfill without shared inputs queues two rebuild t
   assert.equal(s.saved().runs.video_v2.phase, "shared_inputs");
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
-  assert.equal(s.bucket.gets, 1);
+  assert.equal(s.bucket.heads, 1);
+  assert.equal(s.bucket.gets, 0);
 });
 
 test("MIG-0643 SA-069: ready video inputs allow actual video queue in same request", async () => {
@@ -120,7 +134,8 @@ test("MIG-0643 SA-069: ready video inputs allow actual video queue in same reque
   assert.equal(res.status, 200);
   assert.equal((await res.json()).backfill_done, "1");
   assert.deepEqual(s.rows().map(r => r.target_id), ["v1"]);
-  assert.equal(s.bucket.gets, 2);
+  assert.equal(s.bucket.heads, 2);
+  assert.equal(s.bucket.gets, 0);
   assert.equal(s.stats.batches, 1);
   assert.equal(s.audit().length, 1);
 });
@@ -202,13 +217,13 @@ test("MIG-0643 SA-069: unsafe/oversized R2 object metadata never advances video 
       s.rows().map(row => row.target_type).sort(),
       ["random_video_pool", "youtube_related_blocklist"],
     );
-    assert.equal(s.bucket.cancels, 1, "discarded object body must be cancelled");
+    assert.equal(s.bucket.gets, 0, "HEAD-only readiness never allocates an R2 object body");
     assert.equal(s.stats.batches, 1);
     assert.equal(s.audit().length, 1);
   }
 });
 
-test("MIG-0643 SA-069: malformed shared JSON fails closed and schedules both rebuilds", async () => {
+test("MIG-0643 SA-069: mismatched producer hash fails closed and schedules both rebuilds", async () => {
   for (const r2BadJson of ["blocklist", "pool"]) {
     const s = setup({ r2Ready: true, r2BadJson });
     s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
@@ -253,4 +268,44 @@ test("MIG-0643 SA-069: D1 provider failures never leak through API or persisted 
   assert.equal(s.saved().runs.event_crew.last_error, parsed.backfill_error);
   assert.equal(s.stats.batches, 0);
   assert.equal(s.audit().length, 0);
+});
+
+test("MIG-0643 SA-069: near-limit shared inputs use HEAD proofs without reading body", async () => {
+  const s = setup({ r2Ready: true, r2BadSize: { kind: "pool", size: 8 * 1024 * 1024 } });
+  s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+  const res = await s.request({ kind: "video_v2" });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).backfill_done, "1");
+  assert.equal(s.bucket.heads, 2);
+  assert.equal(s.bucket.gets, 0, "even 8 MiB input must not be fully read/parsed on S3");
+  assert.deepEqual(s.rows().map(row => row.target_id), ["v1"]);
+  assert.equal(s.stats.reads, 2, "CostGuard + combined D1 paging/tracking proof");
+});
+
+test("MIG-0643 SA-069: missing producer tracking fails closed for existing R2 HEAD objects", async () => {
+  const s = setup({ r2Ready: true });
+  s.sqlite.prepare("DELETE FROM static_artifacts WHERE target_type = 'random_video_pool'").run();
+  s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+  const res = await s.request({ kind: "video_v2" });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).backfill_done, "0");
+  assert.equal(s.bucket.gets, 0);
+  assert.deepEqual(s.rows().map(row => row.target_type).sort(),
+    ["random_video_pool", "youtube_related_blocklist"]);
+});
+
+test("MIG-0643 SA-069: forged or deleted tracking metadata never advances backfill", async () => {
+  for (const mutation of ["bad_hash","deleted","bad_timestamp"]) {
+    const s = setup({ r2Ready: true });
+    if (mutation === "bad_hash") s.sqlite.exec("UPDATE static_artifacts SET content_hash = 'untrusted'");
+    if (mutation === "deleted") s.sqlite.exec("UPDATE static_artifacts SET deleted_at = 99");
+    if (mutation === "bad_timestamp") s.sqlite.exec("UPDATE static_artifacts SET generated_at = 0");
+    s.sqlite.prepare("INSERT INTO videos VALUES('v1','public')").run();
+    const response = await s.request({ kind: "video_v2" });
+    assert.equal(response.status, 200, mutation);
+    assert.equal((await response.json()).backfill_done, "0", mutation);
+    assert.equal(s.rows().some(row => row.target_type === "video"), false);
+    assert.equal(s.stats.batches, 1);
+    assert.equal(s.bucket.gets, 0);
+  }
 });
