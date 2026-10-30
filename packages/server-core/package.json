@@ -103,7 +103,8 @@
     "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
     "./video/unslottedEventEligibility": "./src/video/unslottedEventEligibility.ts",
     "./video/unslottedEventPlans": "./src/video/unslottedEventPlans.ts",
-    "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts"
+    "./video/requiredVideoFields": "./src/video/requiredVideoFields.ts",
+    "./video/freeVideoRebuildTargets": "./src/video/freeVideoRebuildTargets.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

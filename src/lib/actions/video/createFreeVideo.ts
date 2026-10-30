@@ -12,7 +12,7 @@ import { snapshotYoutubeChannelUrl } from "@/lib/db/youtubeChannelCandidates";
 import { buildNotificationOutboxStatement } from "@/lib/notifications/enqueue";
 import { buildFreeVideoSubmittedNotification } from "@/lib/notifications/templates/video";
 import { buildStaticRebuildQueueBatch } from "@/lib/staticRebuild/enqueue";
-import { topVideoVisibilityTargets } from "@/lib/staticRebuild/hooks";
+import { buildFreeVideoRebuildTargets } from "@flamenode/server-core/video/freeVideoRebuildTargets";
 import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
@@ -324,51 +324,12 @@ export async function createFreeVideo(formData: FormData): Promise<VideoActionRe
       notificationWakeSource = "web";
     }
 
-    const queueTargets = [
-      {
-        targetType: "video" as const,
-        targetId: videoId,
-        reason: "video_create",
-        priority: "high" as const,
-        requestedByUserId: userId,
-      },
-      { targetType: "list_recent" as const, targetId: "global", reason: "video_create" },
-      { targetType: "list_popular" as const, targetId: "global", reason: "video_create" },
-      { targetType: "search_index" as const, targetId: "global", reason: "video_create" },
-      { targetType: "users_index" as const, targetId: "global", reason: "video_create" },
-      { targetType: "member_suggestions" as const, targetId: "global", reason: "video_create" },
-      ...topVideoVisibilityTargets("video_create"),
-      {
-        targetType: "random_video_pool" as const,
-        targetId: "global",
-        reason: "video_create",
-        priority: "normal" as const,
-        requestedByUserId: userId,
-      },
-      { targetType: "user" as const, targetId: activeX, reason: "video_create" },
-      ...(eventId
-        ? [
-            {
-              targetType: "event_base" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-            {
-              targetType: "event_slots" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-            {
-              targetType: "event_release" as const,
-              targetId: eventId,
-              reason: "video_create",
-              priority: "high" as const,
-            },
-          ]
-        : []),
-    ];
+    const queueTargets = buildFreeVideoRebuildTargets({
+      videoId,
+      userId,
+      activeXId: activeX,
+      eventId,
+    });
     const queue = await buildStaticRebuildQueueBatch(db, queueTargets);
     staticRebuildEnqueued = queue.statements.length > 0;
     plan.statements.push(...queue.statements);
