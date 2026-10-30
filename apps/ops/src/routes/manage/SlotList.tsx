@@ -18,9 +18,13 @@ export function slotStatusLabel(value: string): string {
     ? STATUS_LABELS[value as keyof typeof STATUS_LABELS] : "不明";
 }
 export function slotTimeLabel(row: ManageSlotRow): string {
-  return row.start_time !== null
-    ? TOKYO_TIME.format(new Date(row.start_time * 1000))
-    : (row.slot_label ?? "—");
+  const fallback = row.slot_label ?? "—";
+  if (row.start_time === null || !Number.isFinite(row.start_time)) return fallback;
+  // Zod's numeric wire schema does not bound database timestamps. Even a
+  // finite seconds value may overflow Date's TimeClip range and throw in
+  // Intl.DateTimeFormat, taking down the entire management screen.
+  const date = new Date(row.start_time * 1000);
+  return Number.isFinite(date.getTime()) ? TOKYO_TIME.format(date) : fallback;
 }
 
 /** MIG-0722 U02a: CURRENT SlotList read fields; U02b mutations are deliberately absent. */
