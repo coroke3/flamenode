@@ -1094,6 +1094,20 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(denied.status, 403);
     assert.equal(denied.stats.statements, 1);
 
+    // A per-check D1 failure is a fixed 503; never disclose SQL, credentials, or raw provider errors.
+    const deepFailD1 = createD1(sqlite);
+    const originalDeepPrepare = deepFailD1.prepare;
+    deepFailD1.prepare = (statement) => {
+      if (/video_events/.test(statement)) throw new Error("secret-d1-internal-not-for-client");
+      return originalDeepPrepare(statement);
+    };
+    const deepFailure = await call("/api/admin-read/ops/health/checks/primary_event_sync", ADMIN, { d1: deepFailD1 });
+    assert.equal(deepFailure.status, 503);
+    assert.deepEqual(deepFailure.body, { error: "unavailable" });
+    assert.equal(deepFailure.headers.get("cache-control"), "private, no-store");
+    assert.equal(deepFailure.stats.writes, 0);
+    assert.doesNotMatch(deepFailure.text, /secret-d1-internal-not-for-client|SELECT|video_events/);
+
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;
     d1.prepare = (text) => {
