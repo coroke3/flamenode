@@ -22,8 +22,15 @@ export function createXidRoutes(
     c.header("Cache-Control", "private, no-store");
     await next();
   });
-  xid.use("*", (c, next) => originGuardMiddleware(originOptions(c))(c, next));
-  xid.use("*", options.session ?? sessionMiddleware());
+  // Only the mounted POST /active write needs Origin and session resolution.
+  // Unknown paths and non-mutating methods must retain Hono's 404/405
+  // behavior without consulting D1 or requiring an Origin header.
+  xid.use("/active", (c, next) =>
+    c.req.method === "POST" ? originGuardMiddleware(originOptions(c))(c, next) : next(),
+  );
+  xid.use("/active", (c, next) =>
+    c.req.method === "POST" ? (options.session ?? sessionMiddleware())(c, next) : next(),
+  );
   // SA-098 shares its one D1 read between TOS, user CAS snapshot and
   // selected linked-X access. Its route performs the remaining identity,
   // CostGuard, strict audit, and Drizzle checks in CURRENT order.
