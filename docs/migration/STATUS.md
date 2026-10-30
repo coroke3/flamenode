@@ -297,7 +297,7 @@ Validation:
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
 | MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | READY | MIG-0407 |
 | MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | READY | MIG-0409 |
-| MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | READY | MIG-0409 |
+| MIG-0517 | GA4 sync input from D1 instead of R2 `list/recent.json` (MIG-0509 U06) | DONE | MIG-0409 |
 | MIG-0518 | `/[id]` chapter composer + comments + `?playlist=` dock Islands, viewer-overlay client | READY | MIG-0407, MIG-0634 |
 | MIG-0519 | `/rules` consent form Island on the SA-075 API (MIG-0515 U01, merge gate MIG-0641, D-16) | READY | MIG-0407 |
 | MIG-0508 | Phase 5 Gate | BLOCKED | MIG-0501..MIG-0507, MIG-0509..MIG-0519, MIG-0621, MIG-0607 |

@@ -6,7 +6,7 @@ Last audited: 2026-10-26. This is an inventory of CURRENT/bridge R2 artifact dep
 
 | Artifact key | Producer (source:line or target) | Consumer (source:line or family) | Target / retention | Owner MIG |
 | --- | --- | --- | --- | --- |
-| `list/recent.json` | workers/json-generator/rebuild.ts:1142 | src/lib/publicData/loader.ts:1113; src/lib/publicData/sitemapSources.ts:42; workers/ga-analytics/sync.ts:142 | Build snapshot: video recent / migrate GA4 input in MIG-0517 | MIG-0509 / MIG-0517 |
+| `list/recent.json` | workers/json-generator/rebuild.ts:1142 | src/lib/publicData/loader.ts:1113; src/lib/publicData/sitemapSources.ts:42 | Build snapshot: video recent / GA4 input moved to bounded D1 read in MIG-0517 | MIG-0509 / MIG-0517 (R2 reader removed in #442) |
 | `list/popular.json` | workers/json-generator/rebuild.ts:1164 | src/lib/publicData/loader.ts:1155; src/lib/health/artifactSlo.ts:118 | Build snapshot popular list; remove runtime R2 dependence | MIG-0509 / MIG-0627 |
 | `events/index.json` | workers/json-generator/rebuild.ts (events_index target) | src/lib/publicData/loader.ts:1064; src/lib/publicData/sitemapSources.ts:48 | Build event index; Hono static_only preserves until replacement | MIG-0509 / MIG-0627 |
 | `users/index.json` | workers/json-generator/rebuild.ts (users_index target) | src/lib/publicData/loader.ts:1780; src/lib/publicData/sitemapSources.ts:54 | Build user index / sitemap / public search | MIG-0509 / MIG-0627 |
