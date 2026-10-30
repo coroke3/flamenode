@@ -58,7 +58,7 @@ async function loadFailedRows(d1: D1Database, id?: string): Promise<QueueRow[]> 
   const response = await d1.prepare(
     `SELECT ${columns} FROM static_rebuild_queue
      WHERE status = 'failed' ORDER BY created_at ASC LIMIT ${BULK_RETRY_MAX + 1}`,
-  ).all<QueueRow>();
+  ).bind().all<QueueRow>();
   return response.results.slice(0, BULK_RETRY_MAX);
 }
 
