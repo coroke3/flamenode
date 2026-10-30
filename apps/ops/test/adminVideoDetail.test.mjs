@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
+import { MemoryRouter } from "react-router-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createRoot } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -17,7 +18,8 @@ import {
   safeAdminNextHref,
 } from "../.test-dist/apps/ops/src/api/adminVideoStatus.js";
 import { CreateModerationCaseForm } from "../.test-dist/apps/ops/src/routes/admin/CreateModerationCaseForm.js";
-import { StatusControls } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
+import { StatusControls, AdminVideoTabs } from "../.test-dist/apps/ops/src/routes/admin/AdminVideoDetail.js";
+import { AdminVideoManagementTabs } from "../.test-dist/apps/ops/src/routes/admin/AdminVideos.js";
 import { SaveSuccessNotice } from "../.test-dist/apps/ops/src/components/shared/SaveSuccessNotice.js";
 
 const detail = {
@@ -36,6 +38,35 @@ const detail = {
 };
 const json = (status, body) => new Response(JSON.stringify(body), {
   status, headers: { "content-type": "application/json" },
+});
+
+test("MIG-0729 U01/U02: CURRENT tab labels, icons, active state, filter and cross-SPA links", () => {
+  const render = (element, at) => renderToStaticMarkup(
+    React.createElement(MemoryRouter, { initialEntries: [at] }, element),
+  );
+  const listHtml = render(React.createElement(AdminVideoManagementTabs, {
+    q: "a & b", status: "pending", event: "event/1",
+  }), "/admin/videos?status=pending");
+  const listDoc = new JSDOM(listHtml).window.document;
+  const nav = listDoc.querySelector('nav[aria-label="作品管理メニュー"]');
+  assert.ok(nav?.classList.contains("fn-console-resource-tabs"));
+  assert.equal(nav.querySelectorAll("a").length, 7);
+  const review = [...nav.querySelectorAll("a")].find(a => a.textContent.includes("審査待ち"));
+  assert.equal(review?.getAttribute("aria-current"), "page");
+  assert.equal(review?.getAttribute("href"), "/admin/videos?q=a+%26+b&status=review&event=event%2F1");
+  assert.equal(nav.querySelector('a[href="/admin/youtube-sync"]')?.textContent.trim(), "メタデータ同期");
+  assert.equal(nav.querySelector('a[href="/admin/youtube-sync/playlists"]')?.textContent.trim(), "再生リスト同期");
+  assert.equal(nav.querySelectorAll("svg").length, 7, "CURRENT resource tabs retain icons");
+  const detailHtml = render(React.createElement(AdminVideoTabs, {
+    videoId: "video/1", youtubeVideoId: "AbcD1234567", active: "detail",
+  }), "/admin/videos/video%2F1");
+  const detailNav = new JSDOM(detailHtml).window.document.querySelector('nav[aria-label="作品管理メニュー"]');
+  assert.equal(detailNav.querySelectorAll("a").length, 6);
+  assert.equal(detailNav.querySelector('a[aria-current="page"]')?.getAttribute("href"), "/admin/videos/video%2F1");
+  assert.ok(detailNav.querySelector('a[href="/dashboard/edit/video%2F1?privileged=admin"]'));
+  assert.ok(detailNav.querySelector('a[href="/dashboard/edit/video%2F1/permissions?privileged=admin"]'));
+  assert.ok(detailNav.querySelector('a[href="/AbcD1234567"]'));
+  assert.ok(detailNav.querySelector('a[href="/admin/audit?table=videos&record=video%2F1"]'));
 });
 
 test("MIG-0729: Unix dates use explicit Asia/Tokyo time zone", () => {
