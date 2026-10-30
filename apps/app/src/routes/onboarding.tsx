@@ -37,14 +37,14 @@ function renderMarkdown(markdown: string): React.ReactNode[] {
 export function Onboarding({ api }: { api: PersonalApi }): React.ReactElement {
   useDocumentTitle("初期設定");
   const [params] = useSearchParams();
-  const [refreshKey, setRefreshKey] = React.useState(0);
+  const [refreshed, setRefreshed] = React.useState<import("../api/personal.js").ApiResult<OnboardingResponse> | null>(null);
   const next = sanitizeOnboardingNext(params.get("next"), "/dashboard");
   const selfHref = onboardingHref(next);
-  const state = useApiResult(api, `onboarding:${refreshKey}`, (a, signal) => a.getOnboarding(signal));
+  const state = useApiResult(api, "onboarding", (a, signal) => a.getOnboarding(signal));
   return (
-    <ResultView state={state} next={selfHref}>
+    <ResultView state={refreshed ?? state} next={selfHref}>
       {(data) => <OnboardingView data={data} next={next} started={params.get("start") === "1"} requestApi={api.xidRequests}
-        onRefresh={() => setRefreshKey((key) => key + 1)} />}
+        onRefresh={() => { void api.getOnboarding().then(setRefreshed, () => setRefreshed({ status: "unavailable" })); }} />}
     </ResultView>
   );
 }
