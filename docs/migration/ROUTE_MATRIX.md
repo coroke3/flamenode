@@ -200,7 +200,7 @@ MIG-0010 baselineをMIG-0011 Frontendでroute class別にreconcileした。正�
 | `/admin` | MIG-0626 | `GET /api/admin-read/ops/top` | DONE |
 | `/admin/api-endpoints` | MIG-0626 | `GET /api/admin-read/api-endpoints` | DONE |
 | `/admin/health` | MIG-0626 | `GET /api/admin-read/ops/health` | PARTIAL (operational view DONE; deep=1/run=1 STOP -> 501, see work item) |
-| `/admin/health/integrity` | MIG-0626 | `GET /api/admin-read/ops/integrity` | PARTIAL (idle state only; run=1 STOP -> 501, per-check design in work item) |
+| `/admin/health/integrity` | MIG-0626 | `GET /api/admin-read/ops/integrity` (catalog) + `GET /api/admin-read/ops/integrity/:checkId` (36 independent read checks) | IN_PROGRESS (U05 PR#505; require final-head CI, UX integration and review) |
 | `/admin/import` | MIG-0626 | — | NONE (static page + client component; writes are server actions) |
 | `/admin/permissions/simulator` | MIG-0626 | `GET /api/admin-read/permissions/simulator` | DONE |
 | `/admin/security` | MIG-0626 | `GET /api/admin-read/ops/security?run=1` | DONE |
