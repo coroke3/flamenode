@@ -60,6 +60,9 @@ export function EventStaffManager({
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const activeIdRef = React.useRef({ eventId, fetchFn, canManageMembers, isSiteAdmin });
   const serialRef = React.useRef(0);
+  // A state update is not synchronous: two submits in one event batch must not
+  // start two privileged writes before React renders the disabled controls.
+  const inFlightRef = React.useRef<number | null>(null);
   // Prevent a request from one event/account context updating another event UI
   // during the render before React's passive effect cleanup.
   if (activeIdRef.current.eventId !== eventId || activeIdRef.current.fetchFn !== fetchFn ||
@@ -67,6 +70,7 @@ export function EventStaffManager({
       activeIdRef.current.isSiteAdmin !== isSiteAdmin) {
     activeIdRef.current = { eventId, fetchFn, canManageMembers, isSiteAdmin };
     serialRef.current += 1;
+    inFlightRef.current = null; // A new event/identity is a separate write context.
   }
   React.useEffect(() => () => { serialRef.current += 1; }, [eventId, fetchFn, canManageMembers, isSiteAdmin]);
 
@@ -74,8 +78,9 @@ export function EventStaffManager({
     status: "ok" | "anonymous" | "unavailable";
     data?: { ok: boolean; message?: string; pendingPublicReflection?: boolean };
   }>) => {
-    if (busy) return;
+    if (inFlightRef.current !== null) return;
     const serial = ++serialRef.current;
+    inFlightRef.current = serial;
     const source = activeIdRef.current;
     setBusy(true);
     setError(null);
@@ -99,6 +104,8 @@ export function EventStaffManager({
         setError("操作に失敗しました。");
       }
     } finally {
+      // A stale request must never release a newer request's in-flight guard.
+      if (inFlightRef.current === serial) inFlightRef.current = null;
       if (serial === serialRef.current && source === activeIdRef.current) setBusy(false);
     }
   };
