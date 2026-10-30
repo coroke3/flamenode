@@ -30,3 +30,16 @@ export const AdminStaticRebuildResultSchema = z.object({
   retried: z.number().int().nonnegative().optional(),
 });
 export type AdminStaticRebuildResult = z.infer<typeof AdminStaticRebuildResultSchema>;
+
+/** MIG-0643 U03: SA-050 CURRENT manifest fence repair body. */
+export const AdminVisibilityRepairBodySchema = z.object({
+  entity_type: z.enum(["video", "event", "x_user", "event_group"]),
+  entity_id: z.string().trim().min(1).max(128),
+  fence_token: z.string().trim().min(1).max(160),
+});
+export const AdminVisibilityRepairResultSchema = z.object({
+  visibility_repair: z.enum([
+    "forbidden", "invalid_input", "d1_fence_present",
+    "manifest_token_not_found", "repaired", "failed",
+  ]),
+});
