@@ -123,3 +123,75 @@ test("MIG-0737 U01: failed catalog never renders spreadsheet data or writes", as
     assert.equal(ui.host.querySelectorAll("table,nav button").length, 0);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0737 U01: CSV and TSV download clicks are GET-only and revoke blob URLs", async () => {
+  const calls = [];
+  const downloads = [];
+  const oldCreate = URL.createObjectURL;
+  const oldRevoke = URL.revokeObjectURL;
+  const oldClick = dom.window.HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = () => "blob:https://flamenode.test/export";
+  URL.revokeObjectURL = (url) => downloads.push(["revoke", url]);
+  dom.window.HTMLAnchorElement.prototype.click = function () {
+    downloads.push(["click", this.download, this.href]);
+  };
+  const ui = await mount(async (path, init) => {
+    calls.push({ path, init });
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) return json(200, page("videos", 1));
+    if (path.includes("/export")) {
+      const tsv = path.includes("format=tsv");
+      return new Response(tsv ? "id\\tname" : "id,name", {
+        status: 200,
+        headers: {
+          "content-type": tsv ? "text/tab-separated-values" : "text/csv",
+          "X-Spreadsheet-Truncated": tsv ? "1" : "0",
+        },
+      });
+    }
+    throw Error("unexpected API path");
+  }, "videos");
+  try {
+    const csv = [...ui.host.querySelectorAll("button")].find(b => b.textContent === "CSV ダウンロード");
+    const tsv = [...ui.host.querySelectorAll("button")].find(b => b.textContent === "TSV ダウンロード");
+    assert.ok(csv);
+    assert.ok(tsv);
+    await React.act(async () => csv.click());
+    await flush();
+    await React.act(async () => tsv.click());
+    await flush();
+    assert.ok(downloads.some(x => x[0] === "click" && x[1] === "videos.csv"));
+    assert.ok(downloads.some(x => x[0] === "click" && x[1] === "videos-partial.tsv"));
+    assert.equal(downloads.filter(x => x[0] === "revoke").length, 2);
+    assert.match(ui.host.textContent, /一部のデータのみ保存しました/);
+    assert.ok(calls.some(x => x.path.includes("/export?table=videos&format=csv&header=1")));
+    assert.ok(calls.some(x => x.path.includes("/export?table=videos&format=tsv&header=1")));
+    assert.ok(calls.every(x => x.init.method === "GET"));
+  } finally {
+    await ui.cleanup();
+    URL.createObjectURL = oldCreate;
+    URL.revokeObjectURL = oldRevoke;
+    dom.window.HTMLAnchorElement.prototype.click = oldClick;
+  }
+});
+
+test("MIG-0737 U01: export JSON response is not downloaded", async () => {
+  let downloaded = 0;
+  const oldCreate = URL.createObjectURL;
+  URL.createObjectURL = () => { downloaded++; return "blob:invalid"; };
+  const ui = await mount(async (path) => {
+    if (path.includes("/tables")) return json(200, catalog);
+    if (path.includes("/data")) return json(200, page("videos", 1));
+    return json(200, { error: "invalid_response" });
+  });
+  try {
+    const csv = [...ui.host.querySelectorAll("button")].find(b => b.textContent === "CSV ダウンロード");
+    await React.act(async () => csv.click());
+    await flush();
+    assert.equal(downloaded, 0);
+    assert.match(ui.host.textContent, /データを取得できませんでした/);
+  } finally {
+    await ui.cleanup();
+    URL.createObjectURL = oldCreate;
+  }
+});
