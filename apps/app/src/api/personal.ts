@@ -6,6 +6,7 @@
  *   200 -> ok(body)   401 -> anonymous   403 -> banned   anything else / network / bad JSON -> unavailable
  * "unavailable" must never be shown as logout or as a role change (UX-AUTH-005).
  */
+import { createXidRequestsApi, type XidRequestsApi } from "./xidRequests.js";
 import type {
   DashboardResponse,
   LibraryResponse,
@@ -41,6 +42,8 @@ export interface SettingsQuery {
 }
 
 export interface PersonalApi {
+  /** Optional for migration-only read fixtures; production always supplies this adapter. */
+  xidRequests?: XidRequestsApi;
   getSession(signal?: AbortSignal): Promise<SessionResult>;
   getDashboard(signal?: AbortSignal): Promise<ApiResult<DashboardResponse>>;
   getLibrary(query: LibraryQuery, signal?: AbortSignal): Promise<ApiResult<LibraryResponse>>;
@@ -84,6 +87,7 @@ async function read<T>(fetchFn: FetchLike, target: string, signal?: AbortSignal)
 
 export function createPersonalApi(fetchFn: FetchLike = (input, init) => fetch(input, init)): PersonalApi {
   return {
+    xidRequests: createXidRequestsApi(fetchFn),
     async getSession(signal) {
       const r = await read<PersonalSessionResponse>(fetchFn, url("session"), signal);
       return r.status === "ok" ? { status: "ok", user: r.data.user } : r;
