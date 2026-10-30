@@ -97,7 +97,18 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
   const category = row.type.startsWith("video_") ? "作品"
     : row.type.startsWith("slot_") ? "枠"
     : row.type.startsWith("x_id_") ? "X ID"
-    : row.type.startsWith("chapter_") ? "チャプター" : "その他";
+    : row.type.startsWith("chapter_") ? "チャプター"
+    : row.type.startsWith("moderation_") ? "モデレーション"
+    : row.type.startsWith("announcement_") ? "お知らせ"
+    : row.type.startsWith("event_") ? "イベント"
+    : row.type.startsWith("ops_") || row.type === "discord_webhook" || row.type === "welcome_account"
+      ? "システム" : "その他";
+  // Match CURRENT's high-severity notification categories, not a generic soft badge.
+  const critical = row.type === "video_voided" || row.type === "ops_youtube_playlist_sync_failed";
+  const warning = new Set([
+    "slot_force_released", "slot_submission_released", "x_id_rejected",
+    "moderation_created", "slot_deadline_reminder", "ops_youtube_quota_deferred",
+  ]).has(row.type);
   const recipient = row.recipient;
   const destination = recipient?.userName
     ? recipient.discordId ? recipient.userName + " (" + recipient.discordId + ")" : recipient.userName
@@ -106,10 +117,10 @@ function NotificationSummary({ row }: { row: ManageNotificationWithRecipient }):
   return (
     <div className="manage-notification-summary">
       <div>
-        <span className={"fn-badge " + (TERMINAL_FAILURES.has(status) ? "fn-badge-danger" : status === "processing" ? "fn-badge-warning" : "fn-badge-soft")}>
+        <span className={"fn-badge " + (TERMINAL_FAILURES.has(status) ? "fn-badge-danger" : status === "processing" ? "fn-badge-warning" : status === "sent" ? "fn-badge-accent" : "fn-badge-soft")}>
           {ownLabel(STATUS_LABELS, status) ?? (status || "不明")}
         </span>{" "}
-        <span className="fn-badge fn-badge-soft">{category}</span>{" "}
+        <span className={"fn-badge " + (critical ? "fn-badge-danger" : warning ? "fn-badge-warning" : "fn-badge-soft")}>{category}</span>{" "}
         <strong>{ownLabel(TYPE_LABELS, row.type) ?? row.type.replaceAll("_", " ")}</strong>
       </div>
       <div className="fn-td-muted">宛先: {destination}{recipient?.notificationsEnabled === false ? "（通知OFF）" : ""}</div>

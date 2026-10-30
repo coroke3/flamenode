@@ -141,3 +141,26 @@ test("MIG-0725 U02: inherited Object.prototype keys cannot crash notification or
   assert.match(own, /実際のイベント名/, "explicit own event titles remain usable");
   assert.match(own, /送信済み/, "ordinary status label remains intact");
 });
+
+
+test("MIG-0725 U02: CURRENT category, severity and delivery badges remain distinct", () => {
+  const makeRow = (type, status = "sent") => ({
+    id: type, type, status, payload_json: "{}", attempt_count: 0,
+    last_error: null, dedupe_key: null, recipient_user_id: null,
+    event_id: null, created_at: 1700000000, recipient: null,
+  });
+  for (const [type, category, badge] of [
+    ["video_voided", "作品", "fn-badge-danger"],
+    ["moderation_created", "モデレーション", "fn-badge-warning"],
+    ["ops_youtube_playlist_sync_failed", "システム", "fn-badge-danger"],
+    ["announcement_broadcast", "お知らせ", "fn-badge-soft"],
+    ["slot_deadline_reminder", "枠", "fn-badge-warning"],
+    ["event_updated", "イベント", "fn-badge-soft"],
+  ]) {
+    const html = render({ ...fixture, notifications: [makeRow(type)] });
+    assert.ok(html.includes(category), "category: " + type);
+    assert.ok(html.includes(badge), "severity: " + type);
+  }
+  assert.match(render({ ...fixture, notifications: [makeRow("video_approved")] }), /fn-badge-accent/, "sent status");
+  assert.match(render({ ...fixture, notifications: [makeRow("video_approved", "processing")] }), /fn-badge-warning/, "processing status");
+});
