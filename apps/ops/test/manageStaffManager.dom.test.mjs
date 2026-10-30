@@ -132,3 +132,29 @@ test("MIG-0723: completed creation writes exact body and calls refresh", async (
     assert.match(ui.target.textContent, /追加しました/);
   } finally { await ui.cleanup(); }
 });
+
+test("MIG-0723: two submits before a render issue only one privileged write", async () => {
+  let complete;
+  const pendingReply = new Promise(resolve => { complete = resolve; });
+  const ui = fixture({ reply: pendingReply });
+  try {
+    await ui.view();
+    await ui.click(".manage-staff-list-head button");
+    const form = ui.target.querySelector(".manage-staff-add-form");
+    form.elements.namedItem("display_name").value = "Bob";
+    form.elements.namedItem("x_user_id").value = "bob_1";
+    form.elements.namedItem("reason").value = "追加";
+    await React.act(async () => {
+      const submit = () => form.dispatchEvent(
+        new dom.window.Event("submit", { bubbles: true, cancelable: true }),
+      );
+      submit();
+      submit(); // React has not rendered the busy/disabled state yet.
+      assert.equal(ui.calls.length, 1, "the second submit must be ignored synchronously");
+      complete(json(200, { ok: true, message: "追加しました。" }));
+    });
+    assert.equal(ui.calls.length, 1);
+    assert.deepEqual(ui.refresh, ["refresh"]);
+    assert.match(ui.target.textContent, /追加しました/);
+  } finally { await ui.cleanup(); }
+});
