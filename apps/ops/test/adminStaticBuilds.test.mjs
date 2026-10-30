@@ -125,8 +125,8 @@ test("MIG-0735 T04 UI: real rendered sync filters preserve CURRENT embed-disable
   const html=renderToStaticMarkup(React.createElement(MemoryRouter,
     {initialEntries:["/admin/youtube-sync?availability=embed_disabled&visibility=closed"]},
     React.createElement(YoutubeSync)));
-  const availability=html.match(/<select name="availability"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
-  const visibility=html.match(/<select name="visibility"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  const availability=html.match(/<select name="availability"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  const visibility=html.match(/<select name="visibility"[^>]*>([\s\S]*?)<\/select>/)?.[1];
   assert.ok(availability, "availability filter must be rendered");
   assert.ok(visibility, "visibility filter must be rendered");
   assert.match(availability, /value="embed_disabled"/);
@@ -141,8 +141,8 @@ test("MIG-0735 T05 UI: playlist screen renders CURRENT enabled and health filter
   const html=renderToStaticMarkup(React.createElement(MemoryRouter,
     {initialEntries:["/admin/youtube-sync/playlists?enabled=0&status=failed"]},
     React.createElement(YoutubePlaylists)));
-  const enabled=html.match(/<select name="enabled"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
-  const status=html.match(/<select name="status"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  const enabled=html.match(/<select name="enabled"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+  const status=html.match(/<select name="status"[^>]*>([\s\S]*?)<\/select>/)?.[1];
   assert.ok(enabled);
   assert.ok(status);
   assert.deepEqual([...enabled.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),["","1","0"]);
@@ -161,7 +161,7 @@ test("MIG-0735 queue UI: linked targets are encoded and unknown future top_* can
         reason:"manual_rebuild",priority:"high",attempt_count:2,updated_at:1,error:"safe text"}],
       busy:false,retry:()=>{},retryAll:()=>{},
     })));
-  assert.match(html,/href="\\/manage\\/events\\/ev%2F1"/);
+  assert.match(html,/href="\/manage\/events\/ev%2F1"/);
   assert.match(html,/再試行/);
   assert.match(html,/失敗 1 件を一括再試行/);
 });
