@@ -123,6 +123,8 @@ export function AdminSpreadsheetReadView({
   React.useEffect(() => {
     const controller = new AbortController();
     setCatalog({ status: "loading" });
+    // Identity/transport changes must never keep rows from an earlier session visible.
+    setRows({ status: "loading" });
     void loadSpreadsheetCatalog(fetchFn, false, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.status !== "ok") {
