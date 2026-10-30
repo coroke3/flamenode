@@ -1,5 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
+import { YoutubeSync } from "../.test-dist/apps/ops/src/routes/admin/YoutubeSync.js";
+import { YoutubePlaylists } from "../.test-dist/apps/ops/src/routes/admin/YoutubePlaylists.js";
+import { StaticRebuildQueuePanel, staticRebuildAdminHref } from "../.test-dist/apps/ops/src/routes/admin/StaticRebuildQueuePanel.js";
 import { postAdminOp, mutationResultQuery, canContinueBackfill, readYoutubeSync, readYoutubePlaylists, readYoutubeQuota, getAdminOps, youtubeSyncFilterParams } from "../.test-dist/apps/ops/src/api/adminStaticBuilds.js";
 
 const response = (status, payload) => new Response(JSON.stringify(payload), {
@@ -113,4 +119,49 @@ test("MIG-0735 D-17-7: form navigation uses only seven exact filter names", () =
   assert.equal(youtubeSyncFilterParams(form).toString(),"visibility=review&failed=1");
   form.delete("failed");
   assert.equal(youtubeSyncFilterParams(form).toString(),"visibility=review");
+});
+
+test("MIG-0735 T04 UI: real rendered sync filters preserve CURRENT embed-disabled and four visibility groups", () => {
+  const html=renderToStaticMarkup(React.createElement(MemoryRouter,
+    {initialEntries:["/admin/youtube-sync?availability=embed_disabled&visibility=closed"]},
+    React.createElement(YoutubeSync)));
+  const availability=html.match(/<select name="availability"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  const visibility=html.match(/<select name="visibility"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  assert.ok(availability, "availability filter must be rendered");
+  assert.ok(visibility, "visibility filter must be rendered");
+  assert.match(availability, /value="embed_disabled"/);
+  assert.deepEqual([...visibility.matchAll(/<option value="([^"]+)"/g)].map(m=>m[1]),
+    ["","review","public","private","closed"]);
+  assert.match(html, /name="failed"/);
+  assert.match(html, /name="stale"/);
+  assert.match(html, /name="missing"/);
+});
+
+test("MIG-0735 T05 UI: playlist screen renders CURRENT enabled and health filters without fetching on server", () => {
+  const html=renderToStaticMarkup(React.createElement(MemoryRouter,
+    {initialEntries:["/admin/youtube-sync/playlists?enabled=0&status=failed"]},
+    React.createElement(YoutubePlaylists)));
+  const enabled=html.match(/<select name="enabled"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  const status=html.match(/<select name="status"[^>]*>([\\s\\S]*?)<\\/select>/)?.[1];
+  assert.ok(enabled);
+  assert.ok(status);
+  assert.deepEqual([...enabled.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),["","1","0"]);
+  assert.deepEqual([...status.matchAll(/<option value="([^"]*)"/g)].map(m=>m[1]),
+    ["","disabled","idle","scanning","synced","deferred","failed"]);
+});
+
+test("MIG-0735 queue UI: linked targets are encoded and unknown future top_* cannot silently redirect", () => {
+  assert.equal(staticRebuildAdminHref("event_release","ev/1"),"/manage/events/ev%2F1");
+  assert.equal(staticRebuildAdminHref("top_slot_stats","global"),"/");
+  assert.equal(staticRebuildAdminHref("top_unrecognized","global"),null);
+  assert.equal(staticRebuildAdminHref("user","name + space"),"/admin/users?q=name%20%2B%20space");
+  const html=renderToStaticMarkup(React.createElement(MemoryRouter,null,
+    React.createElement(StaticRebuildQueuePanel,{
+      rows:[{id:"queue1",status:"failed",target_type:"event_release",target_id:"ev/1",
+        reason:"manual_rebuild",priority:"high",attempt_count:2,updated_at:1,error:"safe text"}],
+      busy:false,retry:()=>{},retryAll:()=>{},
+    })));
+  assert.match(html,/href="\\/manage\\/events\\/ev%2F1"/);
+  assert.match(html,/再試行/);
+  assert.match(html,/失敗 1 件を一括再試行/);
 });

@@ -12,7 +12,7 @@ export function staticRebuildAdminHref(targetType: string, targetId: string): st
   if (targetType === "users_index") return "/user";
   if (["recommend", "recommend_core"].includes(targetType)) return "/recommend";
   if (["list_recent", "list_popular"].includes(targetType)) return "/admin/videos";
-  if (targetType === "top" || targetType.startsWith("top_")) return "/";
+  if (["top", "top_recommended", "top_latest", "top_nostalgic", "top_events", "top_announcements", "top_stats", "top_slot_stats"].includes(targetType)) return "/";
   if (targetType === "rules") return "/rules";
   return null;
 }
