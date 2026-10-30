@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { staffWriteRoutes } from "../src/routes/manage/staffWrite.ts";
+import { registerStaffWriteRoutes } from "../src/routes/manage/staffWrite.ts";
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ADMIN = { id: "admin-1", name: "Admin", role: "admin", is_banned: 0 };
@@ -44,9 +44,19 @@ function setup(user = ADMIN) {
     c.set("actorSnapshotJsonById", { [user.id]: JSON.stringify({ id: user.id, role: user.role }) });
     await next();
   });
-  app.route("/events/:id/staff", staffWriteRoutes);
+  registerStaffWriteRoutes(app);
+  assert.deepEqual(
+    app.routes.filter((r) => ["POST", "PUT", "DELETE"].includes(r.method))
+      .map((r) => [r.method, r.path]),
+    [
+      ["POST", "/events/:id/staff"],
+      ["PUT", "/events/:id/staff/:staffId"],
+      ["DELETE", "/events/:id/staff/:staffId"],
+    ],
+    "all staff mutations must be directly registered on canonical parent paths",
+  );
   async function send(method, path, body) {
-    return app.request("https://example.test/events/ev-1/staff" + path, {
+    return app.request("https://example.test/events/ev-1/staff" + (path === "/" ? "" : path), {
       method, headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }, { DB: db });
