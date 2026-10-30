@@ -70,8 +70,9 @@ visibilityRepairAdminRoutes.post("/", async (c) => {
           service: "visibility_fence",
           flow: "admin_visibility_repair",
           result: "released_dangling_manifest_entry",
+          // Fence tokens are CAS capabilities; never emit them in telemetry.
           entity_type: entityType, entity_id: entityId,
-          fence_token: token, actor_user_id: c.get("user")!.id,
+          actor_user_id: c.get("user")!.id,
         }));
       }
     }
