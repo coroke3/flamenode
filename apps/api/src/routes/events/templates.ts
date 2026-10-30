@@ -243,6 +243,7 @@ export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise
   try {
     const { results } = await rawDb
       .prepare("SELECT id, name, description, source_event_id, updated_at FROM event_templates ORDER BY updated_at DESC")
+      .bind()
       .all<{ id: string; name: string; description: string | null; source_event_id: string | null; updated_at: number }>();
     // CURRENT does not page/truncate template results; preserve order and shape.
     return c.json(results);
