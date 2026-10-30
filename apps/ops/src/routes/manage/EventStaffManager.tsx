@@ -72,7 +72,17 @@ export function EventStaffManager({
     serialRef.current += 1;
     inFlightRef.current = null; // A new event/identity is a separate write context.
   }
-  React.useEffect(() => () => { serialRef.current += 1; }, [eventId, fetchFn, canManageMembers, isSiteAdmin]);
+  React.useEffect(() => {
+    // A settled request from event A must not leave event B disabled, or leak
+    // A's success/error and open editor state into the new authorization context.
+    setBusy(false);
+    setError(null);
+    setSuccess(null);
+    setAddOpen(false);
+    setExpandedId(null);
+    setDeleteId(null);
+    return () => { serialRef.current += 1; };
+  }, [eventId, fetchFn, canManageMembers, isSiteAdmin]);
 
   const run = async (operation: () => Promise<{
     status: "ok" | "anonymous" | "unavailable";
