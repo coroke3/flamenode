@@ -262,3 +262,20 @@ test("SA-037 GET: transient session resolution failure is private 503, not a fal
     assert.equal(accesses, 0, "unavailable session must be rejected before DB getter");
   }
 });
+
+test("SA-037 GET: authenticated ToS D1 pre-read failure is private 503, never 200 []", async () => {
+  const s = setup();
+  let attempts = 0;
+  s.db.prepare = () => {
+    attempts += 1;
+    throw new Error("PRIVATE_PROVIDER_TOS_READ_FAILURE");
+  };
+  const response = await s.get();
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const body = await response.text();
+  assert.deepEqual(JSON.parse(body), { error: "unavailable" });
+  assert.doesNotMatch(body, /PRIVATE_PROVIDER_TOS_READ_FAILURE/);
+  assert.equal(attempts, 1, "deny without retrying a failed ToS read");
+  assert.equal(rowCount(s.sqlite, "audit_logs"), 0);
+});
