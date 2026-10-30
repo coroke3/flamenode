@@ -84,7 +84,8 @@
     "./publicData/eventDetailCore": "./src/publicData/eventDetailCore.ts",
     "./publicData/videoDetailCore": "./src/publicData/videoDetailCore.ts",
     "./publicData/eventPlaylistCore": "./src/publicData/eventPlaylistCore.ts",
-    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts"
+    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts",
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
