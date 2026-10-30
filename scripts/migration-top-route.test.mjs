@@ -2,15 +2,14 @@
 // JSON-LD), the recruit-card state/countdown vs CURRENT EventRecruitCard, and fail-closed snapshot handling.
 // Run `npm run build -w @flamenode/ui && npm run build -w @flamenode/site` first (default-build tests read apps/site/dist).
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { TOP_KEY, TRENDING_KEY, LIST_FIRST_PAGE_KEY, RECOMMEND_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 import { buildTopView, loadTopForBuild, recruitState, recruitCountdown, toEventCard } from "../apps/site/src/lib/topData.ts";
+import { D, ev, nowSec, topPayload, trendingPayload, writeSnapshot, writeFixtureSnapshot } from "./fixtures/topSnapshotFixture.mjs";
 
 const DIST = path.resolve("apps/site/dist");
 const built = fs.existsSync(path.join(DIST, "index.html"));
@@ -23,8 +22,38 @@ const page = fs.readFileSync("app/(public)/page.tsx", "utf-8");
 const recruitSrc = fs.readFileSync("src/components/layout/EventRecruitCard.tsx", "utf-8");
 
 const NOW = 1_790_000_000;
-const D = 86400;
-const ev = (id, o = {}) => ({ id, title: `イベント${id}`, visibility_status: "public", start_time: null, end_time: null, entry_start_time: null, entry_end_time: null, ...o });
+test("visual fixture writer refuses cwd, root, and nonempty directories", () => {
+  for (const unsafe of ["", ".", "../existing", path.parse(process.cwd()).root, null]) {
+    assert.throws(() => writeFixtureSnapshot(unsafe), { name: "TypeError" },
+      `unsafe fixture destination: ${String(unsafe)}`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-top-safe-fixture-"));
+  try {
+    const existing = path.join(dir, "keep.txt");
+    fs.writeFileSync(existing, "unchanged");
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
+    assert.equal(fs.readFileSync(existing, "utf8"), "unchanged");
+    fs.rmSync(existing);
+    if (process.platform !== "win32") {
+      const target = path.join(dir, "target");
+      const alias = path.join(dir, "alias");
+      fs.mkdirSync(target);
+      fs.symlinkSync(target, alias, "dir");
+      assert.throws(() => writeFixtureSnapshot(alias), /must exist and be empty/,
+        "a symlink must not redirect fixture writes to another directory");
+      assert.deepEqual(fs.readdirSync(target), [], "symlink target remains untouched");
+      fs.unlinkSync(alias);
+      fs.rmdirSync(target);
+    }
+    const env = writeFixtureSnapshot(dir);
+    assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);
+    assert.ok(fs.statSync(env.FLAMENODE_SNAPSHOT_MANIFEST_FILE).size > 0);
+    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/,
+      "repeat invocation must not silently replace prior fixture snapshots");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("recruit card: state labels and countdown headings are CURRENT EventRecruitCard's", () => {
   for (const s of ["募集開始前", "募集期間中", "公開前作品受付中", "近日公開", "開催中", "終了", "満枠", "募集開始まで", "募集締切まで", "投稿期間まで", "投稿期間終了まで", "終了済み", "詳細ページへ"]) assert.ok(recruitSrc.includes(s), s);
@@ -53,42 +82,6 @@ test("event card: pill tone, status label and range follow CURRENT PublicEventCa
   assert.equal(toEventCard(ev("e", { start_time: null, end_time: null }), NOW).rangeLabel, "- - -", "CURRENT quirk: formatUnix(null) is \"-\", so an undated event shows \"- - -\"");
   assert.match(card.rangeLabel, /^\d{4}\/\d{2}\/\d{2} - \d{4}\/\d{2}\/\d{2}$/);
 });
-
-const row = (n, extra = {}) => ({ id: `v${n}`, title: `作品${n}`, youtube_video_id: `AAAAAAAAA${String(n).padStart(2, "0")}`, display_name: `作者${n}`, icon_url: null, primary_event_id: null, scheduled_time: 1790000000 + n, status: "public", ...extra });
-const nowSec = Math.floor(Date.now() / 1000);
-const topPayload = () => ({
-  generated_at: nowSec,
-  recommended: Array.from({ length: 12 }, (_, i) => row(10 + i)).concat([row(99, { status: "private" })]),
-  latest: Array.from({ length: 12 }, (_, i) => row(30 + i)),
-  nostalgic: Array.from({ length: 3 }, (_, i) => row(60 + i)),
-  active_events: [
-    ev("pvsf", { title: "PVSF2026", entry_start_time: nowSec - D, entry_end_time: nowSec + 12 * D - 3600, start_time: nowSec + 20 * D, end_time: nowSec + 21 * D }),
-    ev("ongo", { title: "開催中祭", start_time: nowSec - D, end_time: nowSec + D }),
-  ],
-  latest_events: Array.from({ length: 5 }, (_, i) => ev(`le${i}`, { start_time: nowSec + (i + 1) * D, end_time: nowSec + (i + 2) * D })),
-  announcements: Array.from({ length: 4 }, (_, i) => ({ id: `n${i}`, title: `お知らせ${i}`, body: i === 0 ? "あ".repeat(200) : "本文" })),
-  creators: [{ id: "c1", x_name: "c1", icon_url: null, video_count: 1, collab_count: 0 }],
-  slot_stats: [{ event_id: "pvsf", available: 32, total: 160 }],
-  stats: { publicVideos: 3240, creators: 812, activeEvents: 2 },
-});
-const trendingPayload = (generated = nowSec) => ({ schema_version: 1, generated_at: generated, items: Array.from({ length: 10 }, (_, i) => ({ ...row(80 + i), primary_event_title: null, views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4, rank: i + 1 })) });
-
-function envelope(key, payload, over = {}) {
-  return { schemaVersion: 1, generation: "g1", key, visibility: "public", payload, sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), ...over };
-}
-function writeSnapshot(dir, { top = topPayload(), trending = trendingPayload() } = {}, over = {}) {
-  fs.mkdirSync(path.join(dir, "snapshot/top"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "snapshot/trending"), { recursive: true });
-  // The other pages of the same site build need their own snapshots (a configured build is all-or-nothing).
-  fs.mkdirSync(path.join(dir, "snapshot/list"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "snapshot/recommend"), { recursive: true });
-  fs.writeFileSync(path.join(dir, LIST_FIRST_PAGE_KEY), JSON.stringify(envelope(LIST_FIRST_PAGE_KEY, { videos: [row(1)], total: 1 })));
-  fs.writeFileSync(path.join(dir, RECOMMEND_KEY), JSON.stringify(envelope(RECOMMEND_KEY, { generated_at: 1, recommended: [row(2)], latest: [], underrated: [], creators: [] })));
-  fs.writeFileSync(path.join(dir, TOP_KEY), JSON.stringify(envelope(TOP_KEY, top, over.top)));
-  fs.writeFileSync(path.join(dir, TRENDING_KEY), JSON.stringify(envelope(TRENDING_KEY, trending, over.trending)));
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ schemaVersion: 1, generation: "g1", allowedKeys: [TOP_KEY, TRENDING_KEY, LIST_FIRST_PAGE_KEY, RECOMMEND_KEY], blockedKeys: [] }));
-  return { FLAMENODE_SNAPSHOT_DIR: dir, FLAMENODE_SNAPSHOT_MANIFEST_FILE: path.join(dir, "manifest.json"), FLAMENODE_SNAPSHOT_GENERATION: "g1" };
-}
 
 test("CURRENT page.tsx limits, section texts and order are the ones the model uses", async () => {
   for (const s of ["TOP_SHELF_DISPLAY_LIMIT = 8", "FlameNodeで注目", "今週のピックアップ", "新着アップロード", "懐かしの映像", "最近のイベント", "おすすめできる作品がまだありません。", "公開作品がまだありません。", "対象になる作品がまだありません。", "公開中のイベントがまだありません。", "body.length > 180", 'moreHref="/list?sort=old"', 'moreLabel="過去の作品を見る"', "!trendingLoaded.tooOldForHome"]) assert.ok(page.includes(s), s);
@@ -123,7 +116,7 @@ test("snapshot build: intro, news, recruit cards, shelves, events and CTA follow
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-top-"));
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "fn-top-out-"));
   try {
-    const env = writeSnapshot(dir);
+    const env = writeFixtureSnapshot(dir);
     execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], { cwd: path.resolve("apps/site"), env: { ...process.env, ...env }, stdio: "pipe" });
     const doc = dom(out);
     const main = doc.querySelector("main");
