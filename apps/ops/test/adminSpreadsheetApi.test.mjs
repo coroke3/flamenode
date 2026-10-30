@@ -146,6 +146,7 @@ test("MIG-0737 U01 RH-007 export never turns JSON or HTML into an attachment", a
     json(200, { error: "secret" }),
     new Response("<html>private</html>", { status: 200, headers: { "content-type": "text/html" } }),
     new Response("fake export", { status: 200, headers: { "content-type": "application/octet-stream" } }),
+    new Response("fake", { status: 200, headers: { "content-type": "text/csv-unsafe" } }),
     new Response("bad", { status: 500 }),
   ]) {
     assert.deepEqual(await loadSpreadsheetExport(async () => response.clone(), "videos", "csv"),
