@@ -50,7 +50,10 @@ async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean>
   if (!bucket) return false;
   const values: unknown[] = [];
   for (const [key, maxBytes] of SHARED_INPUTS) {
-    const obj = await bucket.get(key);
+    // Key literals are part of the audited MIG-0649 R2 consumer registry.
+    const obj = key === "youtube/related-blocklist.v1.json"
+      ? await bucket.get("youtube/related-blocklist.v1.json")
+      : await bucket.get("videos/random-pool.v1.json");
     if (!obj) return false;
     if (!Number.isFinite(obj.size) || obj.size > maxBytes) {
       await obj.body?.cancel().catch(() => undefined);
