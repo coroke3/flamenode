@@ -431,3 +431,36 @@ test("MIG-0643 S3: oversized persisted cursor cannot bypass 128-char form bound"
   assert.equal(s.audit().length, 1);
   s.sqlite.close();
 });
+
+test("MIG-0643 S3: D1 target IDs over the queue contract fail closed before any audit batch", async () => {
+  // LIMIT 13 is a row-count guard, NOT a guarantee of bounded D1 TEXT IDs.
+  // Test the 128-char queue contract and the independent 64-KiB parse budget.
+  for (const invalidId of ["x".repeat(129), "x".repeat(70 * 1024)]) {
+    const s = setup();
+    seedEvent(s.sqlite, { id: invalidId });
+    const response = await s.request({ kind: "event_crew" });
+    assert.equal(response.status, 500);
+    const payload = await response.json();
+    assert.equal(payload.backfill_kind, "event_crew");
+    assert.match(payload.backfill_error, /再試行/);
+    assert.doesNotMatch(JSON.stringify(payload), /xxxxxxxxxxxxxxxxxxxxxxxx/);
+    assert.equal(s.rows().length, 0, "no queue targets can escape the D1 ID bound");
+    assert.equal(s.stats.batches, 0, "no audit or mutation for invalid D1 page");
+    assert.equal(s.audit().length, 0);
+    assert.equal(s.saved().runs.event_crew.status, "failed");
+    s.sqlite.close();
+  }
+});
+
+test("MIG-0643 S3: a valid 128-char D1 target ID stays queueable", async () => {
+  const s = setup();
+  const eventId = "e".repeat(128);
+  seedEvent(s.sqlite, { id: eventId });
+  const response = await s.request({ kind: "event_crew" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).backfill_enqueued, "1");
+  assert.equal(s.rows()[0].target_id, eventId);
+  assert.equal(s.stats.batches, 1);
+  assert.equal(s.audit().length, 1);
+  s.sqlite.close();
+});
