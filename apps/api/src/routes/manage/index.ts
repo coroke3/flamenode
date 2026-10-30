@@ -15,10 +15,11 @@ import { manageNotificationCenterRoutes } from "./notificationCenter.ts";
 import { manageOverviewRoutes } from "./overview.ts";
 import { manageSlotsRoutes } from "./slots.ts";
 import { manageStaffRoutes } from "./staff.ts";
+import { staffWriteRoutes } from "./staffWrite.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist PUT/POST only)
+// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist and MIG-0654 staff mutations)
 // go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
@@ -33,17 +34,19 @@ manageRoutes.use("*", async (c, next) => {
 });
 // MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
+const staffWritePaths = ["/events/:id/staff", "/events/:id/staff/:staffId"];
+const guardedWritePaths = [...playlistWritePaths, ...staffWritePaths];
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
 });
-for (const path of playlistWritePaths) {
+for (const path of guardedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
 }
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
 // The existing read-only /manage API remains unchanged. Only these mutating
-// playlist paths use the CURRENT writeGuard(identity/TOS) -> DB adapter.
+// playlist and staff paths use the CURRENT writeGuard(identity/TOS) -> DB adapter.
 for (const path of playlistWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
@@ -52,6 +55,7 @@ for (const path of playlistWritePaths) {
 
 manageRoutes.route("/navigation", manageNavigationRoutes);
 manageRoutes.route("/events/:id/staff", manageStaffRoutes);
+manageRoutes.route("/events/:id/staff", staffWriteRoutes);
 manageRoutes.route("/events/:id/slots", manageSlotsRoutes);
 manageRoutes.route("/events/:id/edit", manageEventEditRoutes);
 manageRoutes.route("/events/:id/videos/:videoId", manageVideoDetailRoutes);
