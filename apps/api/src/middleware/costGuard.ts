@@ -87,7 +87,13 @@ export function costGuardMiddleware(feature: WriteFeatureKey) {
       await next();
       return;
     }
-    const db = (c.env as { DB?: D1Database }).DB;
+    let db: D1Database | undefined;
+    try {
+      db = (c.env as { DB?: D1Database } | undefined)?.DB;
+    } catch {
+      // Do not expose a provider exception or fall through to mutation handlers.
+      return writeGuardDenyResponse(c, "cost_guard_blocked", 503);
+    }
     // writeGuardMiddleware already returned 503 db_unavailable without a DB.
     const result = db
       ? await evaluateCostGuardWithSettings(db, feature)
