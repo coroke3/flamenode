@@ -13,6 +13,8 @@ import type {
   AdminYoutubeSyncResponse,
 } from "@flamenode/contracts";
 import { derivePlaylistSyncHealth } from "./playlistHealth.ts";
+import { INTEGRITY_CHECK_IDS, runIntegrityCheckById } from "@flamenode/server-core/admin/integrityChecks";
+import { dbMiddleware } from "../../middleware/db.ts";
 import { loadWorkerMonitoring } from "./workerMonitoring.ts";
 import {
   STATIC_BACKFILL_KINDS,
@@ -318,16 +320,21 @@ adminOpsRoutes.get("/health", async (c) => {
 });
 
 // ---- /ops/integrity (health/integrity/page.tsx; src/lib/admin/integrityChecks.ts) ----
-// CURRENT renders only the "run" prompt without ?run=1 (no query), and with ?run=1 runs 28 table-scanning checks
-// (runIntegrityChecks, ~910 lines of check definitions) in one page load.
-//
-// STOP (recorded, not implemented): 28 scans cannot fit one S2 request (<= 3 D1 statements). The run=1 view is answered
-// 501. Follow-up design (not built here): GET /ops/integrity/:checkId, one window-count statement per check
-// (session + 1, LIMIT 10 sample), called one by one by the SPA; this needs the 28 makeCheck definitions ported from
-// drizzle sql`` fragments to plain SQL with a per-check parity test.
+// MIG-0626 U05: CURRENT exposes the full read-only result set. To fit the S2 request
+// budget, return an allowlisted check ID catalog and execute only the requested check.
+// The enclosing adminReadRoutes guard enforces session -> non-banned -> admin.
 adminOpsRoutes.get("/integrity", (c) => {
-  if (c.req.query("run") === "1") return c.json({ error: "integrity_run_unsupported" }, 501);
-  const body: AdminIntegrityResponse = { ran: false, results: [] };
+  const body: AdminIntegrityResponse = { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] };
+  return c.json(body);
+});
+
+adminOpsRoutes.get("/integrity/:checkId", dbMiddleware, async (c) => {
+  const id = c.req.param("checkId");
+  if (!INTEGRITY_CHECK_IDS.some((checkId) => checkId === id)) {
+    return c.json({ error: "not_found" }, 404);
+  }
+  const result = await runIntegrityCheckById(c.get("db"), id);
+  const body: AdminIntegrityResponse = { ran: true, results: result ? [result] : [] };
   return c.json(body);
 });
 
