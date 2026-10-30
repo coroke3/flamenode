@@ -2,11 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createAdminRoutes } from "../src/routes/admin/index.ts";
-import { mountMig0643AdminRoutes } from "../src/routes/admin/mig0643.ts";
 import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
-// The production admin parent router is currently owned by MIG-0637 PR #472.
-// This test constructs its ordered middleware stack without editing that file.
+// Verify the real production admin parent route registration and the full guard chain.
 const SITE = "https://app.flamenode.example";
 const ADMIN = { id: "admin-1", role: "admin", name: "Admin", is_banned: 0 };
 const CASES = [
@@ -23,8 +21,7 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
   const fake = createAdminD1();
   seedBase(fake.sqlite, { settings: mode });
   const app = new Hono();
-  // The REAL admin parent router must apply the middleware chain to every
-  // subsequently mounted feature route. This is the same ordering as app.ts.
+  // The REAL createAdminRoutes() registers all seven MIG-0643 routes internally.
   const admin = createAdminRoutes({
     session: async (c, next) => {
       c.set("user", user);
@@ -32,9 +29,6 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
       await next();
     },
   });
-  // This is the exact one-call integration point that the owner of
-  // admin/index.ts will use once PR #472 releases the shared file.
-  mountMig0643AdminRoutes(admin);
   app.route("/api/admin", admin);
   const request = (item, origin = SITE) => app.request(item.path, {
     method: "POST",
@@ -45,7 +39,7 @@ function setup({ user = ADMIN, mode = "normal" } = {}) {
   return { ...fake, request, auditCount };
 }
 
-test("MIG-0643 T02: actual createAdminRoutes parent applies origin guard to all seven future mounts", async () => {
+test("MIG-0643 T02: actual createAdminRoutes parent applies origin guard to all seven mounted routes", async () => {
   const s = setup();
   for (const item of CASES) {
     const res = await s.request(item, "https://not-our-site.example");
