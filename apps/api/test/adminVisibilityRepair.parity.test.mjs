@@ -141,3 +141,29 @@ test("MIG-0643 U03: result contract includes CURRENT redirect query value", () =
   assert.equal(AdminVisibilityRepairResultSchema.safeParse({ visibility_repair: "repaired" }).success, true);
   assert.equal(AdminVisibilityRepairResultSchema.safeParse({ visibility_repair: "not-possible" }).success, false);
 });
+
+test("MIG-0643 U03: successful CAS repair never logs the fence capability token", async () => {
+  const token = "PRIVATE_VISIBILITY_FENCE_CAPABILITY_TOKEN";
+  const s = setup({
+    initial: manifest("video", "v1", token),
+    fence: { state: "released", fence_token: token },
+  });
+  const captured = [];
+  const previous = console.warn;
+  console.warn = (...args) => captured.push(args.map(String).join(" "));
+  let response;
+  try {
+    response = await s.request({ entity_type: "video", entity_id: "v1", fence_token: token });
+  } finally {
+    console.warn = previous;
+  }
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { visibility_repair: "repaired" });
+  assert.equal(s.bucket.value().entities.length, 0);
+  assert.equal(captured.length, 1, "successful repair retains redacted operational telemetry");
+  const log = captured.join("\n");
+  assert.doesNotMatch(log, /PRIVATE_VISIBILITY_FENCE_CAPABILITY_TOKEN/);
+  const record = JSON.parse(log);
+  assert.equal(record.result, "released_dangling_manifest_entry");
+  assert.equal(Object.hasOwn(record, "fence_token"), false);
+});
