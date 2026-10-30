@@ -169,3 +169,30 @@ test("MIG-0643 U02 SA-070: concurrent mutation produces rollback with no audit",
   assert.equal(s.rows()[0].status, "failed");
   assert.equal(s.audits().length, 0);
 });
+
+test("MIG-0643 SA-070/071/073: provider-sensitive batch failures use fixed logs and responses", async () => {
+  const sentinel = "PRIVATE_AUDIT_DB_TOKEN_MUST_NOT_LEAK";
+  for (const { path, body, seed } of [
+    { path: "/rebuild", body: { target_type: "video", target_id: "vid-1" }, seed: false },
+    { path: "/queue/f-1/retry", body: {}, seed: true },
+    { path: "/retry-failed", body: {}, seed: true },
+  ]) {
+    const s = setup();
+    if (seed) s.seed("f-1");
+    const before = s.rows();
+    s.db.batch = async () => { throw new Error(sentinel); };
+    const captured = [];
+    const prior = console.error;
+    console.error = (...args) => captured.push(args.map(String).join(" "));
+    let res;
+    try { res = await s.request(path, body); }
+    finally { console.error = prior; }
+    assert.equal(res.status, 500, path);
+    const text = await res.text();
+    assert.doesNotMatch(text, /PRIVATE_AUDIT_DB_TOKEN_MUST_NOT_LEAK/, path);
+    assert.doesNotMatch(captured.join("\n"), /PRIVATE_AUDIT_DB_TOKEN_MUST_NOT_LEAK/, path);
+    assert.equal(captured.length, 1, path);
+    assert.deepEqual(s.rows(), before, "failed batch must not persist queue changes");
+    assert.equal(s.audits().length, 0, "strict audit must roll back");
+  }
+});
