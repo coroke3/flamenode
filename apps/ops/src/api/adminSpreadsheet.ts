@@ -125,7 +125,7 @@ export async function loadSpreadsheetExport(
     if (response.status !== 200) return { status: "unavailable" };
     const mime = response.headers.get("content-type")?.toLowerCase() ?? "";
     const expected = format === "csv" ? "text/csv" : "text/tab-separated-values";
-    if (!mime.startsWith(expected) || mime.includes("application/json")) {
+    if (mime.split(";")[0]?.trim() !== expected) {
       return { status: "unavailable" };
     }
     const blob = await response.blob();
