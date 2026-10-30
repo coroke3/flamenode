@@ -16,6 +16,7 @@ import {
 } from "../../api/adminVideoStatus.js";
 import { useApiResult } from "../useApiResult.js";
 import { CreateModerationCaseForm } from "./CreateModerationCaseForm.js";
+import { SaveSuccessNotice } from "../../components/shared/SaveSuccessNotice.js";
 
 const browserFetch: OpsFetch = (path, init) => fetch(path, init);
 const STATUS_OPTIONS = ["pending", "public", "private", "voided"] as const;
@@ -91,7 +92,7 @@ function StatusControls({
   const [category, setCategory] = React.useState<string>("operator_decision");
   const [pending, setPending] = React.useState(false);
   const inFlight = React.useRef(false);
-  const [message, setMessage] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const [message, setMessage] = React.useState<{ ok: boolean; text: string; pendingPublicReflection?: boolean } | null>(null);
   const openCase = selectOpenVoidCaseId(data.moderationCases);
 
   React.useEffect(() => { setSelected(v.visibility_status); setMessage(null); }, [v.id, v.visibility_status]);
@@ -105,7 +106,11 @@ function StatusControls({
       if (eventId) form.set("review_event_id", eventId);
       const result: AdminVideoMutationResult = await action(form);
       if (result.ok) {
-        setMessage({ ok: true, text: result.message ?? "更新しました。" });
+        setMessage({
+          ok: true,
+          text: result.message ?? "更新しました。",
+          pendingPublicReflection: result.pendingPublicReflection === true,
+        });
         setReason("");
         if (result.nextHref) {
           window.location.assign(result.nextHref);
@@ -181,7 +186,11 @@ function StatusControls({
           適用
         </button>
       </form>
-      {message ? <p role={message.ok ? "status" : "alert"}>{message.text}</p> : null}
+      {message
+        ? message.ok
+          ? <SaveSuccessNotice message={message.text} pendingPublicReflection={message.pendingPublicReflection} />
+          : <p role="alert">{message.text}</p>
+        : null}
     </section>
   );
 }
