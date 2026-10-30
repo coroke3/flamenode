@@ -32,6 +32,10 @@ function setup({ user = ADMIN, enabled = 1, lease = null, staff = false } = {}) 
      pending_trigger,created_at,updated_at)
     VALUES ('ev-1','PLTEST',?,'mirror',720,'synced',111,100,99,?,?,'scheduled',10,20)`)
     .run(enabled, lease, lease ? Math.floor(Date.now()/1000)+3600 : null);
+  if (user && user.id !== "admin-1") {
+    sqlite.prepare('INSERT INTO "user" (id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)')
+      .run(user.id, "Viewer", user.role);
+  }
   if (staff) {
     sqlite.prepare("INSERT INTO x_users (id,approval_status) VALUES (?,?)").run("x1","approved");
     sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(user.id,"x1");
@@ -104,7 +108,9 @@ test("SA-039 rollback on audit insertion error preserves the scheduled state", a
   assert.equal(response.status, 409);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   const row = s.sqlite.prepare("SELECT sync_status, pending_trigger, next_sync_at FROM event_youtube_playlist_sync").get();
-  assert.deepEqual(row,{sync_status:"synced",pending_trigger:"scheduled",next_sync_at:111});
+  assert.equal(row.sync_status, "synced");
+  assert.equal(row.pending_trigger, "scheduled");
+  assert.equal(row.next_sync_at, 111);
 });
 
 test("SA-039 malformed event ID has no effects", async () => {
