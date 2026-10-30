@@ -43,8 +43,8 @@ const [
   read("src/lib/publicData/publicCache.ts"),
   read("workers/sync-jobs/scoreRankingRebuildThrottle.ts"),
   read("workers/json-generator/usersIndexV2Artifacts.ts"),
-  read("src/lib/health/artifactSlo.ts"),
-  read("src/lib/health/deepHealth.ts"),
+  read("packages/server-core/src/health/artifactSlo.ts"),
+  read("packages/server-core/src/health/deepHealth.ts"),
   read("workers/ga-analytics/sync.ts"),
   read("src/lib/publicData/loader.ts"),
   read("workers/json-generator/optimizedRebuild.ts"),
@@ -155,22 +155,27 @@ test("health diagnosticsはoversize artifactを本文parse前に拒否してbody
   assert.match(deepHealthSource, /cancelR2BodyBestEffort\(object\)/);
 });
 
-test("GA trending syncはrecent/existing trendingをbounded readしabort時にbodyを解放する", () => {
-  assert.match(gaTrendingSyncSource, /GA4_RECENT_LIST_MAX_OBJECT_BYTES = 8 \* 1024 \* 1024/);
+test("GA trending syncはD1をbounded readしexisting trending R2のbodyを保護する", async () => {
+  const d1RecentSource = await read("workers/ga-analytics/recentFromD1.ts");
+  assert.match(gaTrendingSyncSource, /loadRecentListFromD1\(env\.DB/);
+  assert.doesNotMatch(gaTrendingSyncSource, /GA4_RECENT_LIST_KEY|ga4_recent_list_too_large/);
+  assert.match(d1RecentSource, /GA4_RECENT_D1_MAX_ROWS = 5000/);
+  assert.match(d1RecentSource, /COUNTABLE_PUBLIC_VIDEO_SQL/);
+  assert.match(d1RecentSource, /LIMIT \?/);
+  assert.match(d1RecentSource, /ga4_recent_d1_pool_exceeds_limit/);
+  assert.match(d1RecentSource, /signal\?\.throwIfAborted\(\)/);
   assert.match(gaTrendingSyncSource, /GA4_TRENDING_MAX_OBJECT_BYTES = 1024 \* 1024/);
   assert.match(gaTrendingSyncSource, /cancelR2BodyBestEffort\(object\)/);
-  assert.match(gaTrendingSyncSource, /ga4_recent_list_too_large/);
-  const recentGuard = gaTrendingSyncSource.indexOf(
-    "isOversizedR2Object(object, GA4_RECENT_LIST_MAX_OBJECT_BYTES)",
+  const trendingGuard = gaTrendingSyncSource.indexOf(
+    "isOversizedR2Object(object, GA4_TRENDING_MAX_OBJECT_BYTES)",
   );
-  const recentRead = gaTrendingSyncSource.indexOf("const text = await object.text()", recentGuard);
-  assert.ok(recentGuard >= 0 && recentRead > recentGuard);
+  const trendingRead = gaTrendingSyncSource.indexOf("const text = await object.text()", trendingGuard);
+  assert.ok(trendingGuard >= 0 && trendingRead > trendingGuard);
   assert.match(
     gaTrendingSyncSource,
     /if \(signal\?\.aborted\) \{\s*await cancelR2BodyBestEffort\(object\);\s*signal\.throwIfAborted\(\);/,
   );
 });
-
 test("public共通loaderはR2 JSONを16MiBでbounded readする", () => {
   assert.match(
     publicLoaderSource,
