@@ -213,6 +213,8 @@ test("MIG-0643 SA-069: unsafe/oversized R2 object metadata never advances video 
   const inputs = [
     { kind: "blocklist", size: 2 * 1024 * 1024 + 1 },
     { kind: "pool", size: 8 * 1024 * 1024 + 1 },
+    { kind: "blocklist", size: 0 },
+    { kind: "pool", size: 0 },
     { kind: "blocklist", size: -1 },
     { kind: "pool", size: 0.5 },
     { kind: "pool", size: Number.MAX_SAFE_INTEGER + 1 },
