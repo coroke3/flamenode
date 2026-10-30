@@ -150,3 +150,96 @@ test("MIG-0737 U01: failed or oversized preview never unlocks apply", async () =
     } finally { await ui.cleanup(); }
   }
 });
+
+async function selectFile(ui, file) {
+  const input = ui.host.querySelector('input[type="file"]');
+  assert.ok(input, "file input must exist");
+  Object.defineProperty(input, "files", { configurable: true, value: [file] });
+  await React.act(async () => {
+    input.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  });
+  await flush();
+}
+
+test("MIG-0737 U01: CSV/TSV file upload reads UTF-8 and switches separator without importing", async () => {
+  const requests = [];
+  const fetchFn = async (_, init) => { requests.push(JSON.parse(init.body)); return json(200, preview); };
+  const ui = await mount({ table: "videos", tableLabel: "動画", fetchFn });
+  try {
+    await selectFile(ui, {
+      name: "data.TSV", size: 32,
+      text: async () => "id\ttitle\n1\tbravo",
+    });
+    assert.equal(ui.host.querySelector("textarea").value, "id\ttitle\n1\tbravo");
+    assert.equal(ui.host.querySelectorAll("select")[0].value, "tsv");
+    assert.equal(requests.length, 0, "reading a file must not call the server");
+    await click(ui, "サーバーで確認");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].delimiter, "tsv");
+    assert.equal(requests[0].dryRun, true);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, false);
+
+    await selectFile(ui, { name: "next.csv", size: 12, text: async () => "id,title\n2,charlie" });
+    assert.equal(ui.host.querySelectorAll("select")[0].value, "csv");
+    assert.equal(ui.host.querySelector("textarea").value, "id,title\n2,charlie");
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true, "new file invalidates old preview");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: files above 2 MB and unreadable files fail closed without changing text", async () => {
+  const ui = await mount({ table: "videos", tableLabel: "動画" });
+  try {
+    let reads = 0;
+    await selectFile(ui, {
+      name: "too-big.csv", size: 2_000_001,
+      text: async () => { reads++; return "must not be read"; },
+    });
+    assert.equal(reads, 0);
+    assert.match(ui.host.textContent, /上限 2MB/);
+    assert.equal(ui.host.querySelector("textarea").value, "");
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+
+    await selectFile(ui, {
+      name: "bad.csv", size: 20,
+      text: async () => { throw Error("disk failed"); },
+    });
+    assert.match(ui.host.textContent, /ファイルの読み込みに失敗/);
+    assert.equal(ui.host.querySelector("textarea").value, "");
+  } finally { await ui.cleanup(); }
+});
+
+test("MIG-0737 U01: table or API transport switch clears preview immediately and aborts in-flight dry run", async () => {
+  const fetchFn = async () => json(200, preview);
+  const ui = await mount({ table: "videos", tableLabel: "動画", fetchFn });
+  try {
+    await typeText(ui, "id,title\n1,alpha");
+    await click(ui, "サーバーで確認");
+    assert.match(ui.host.textContent, /&lt;PRIVATE&gt;|<PRIVATE>/);
+    await ui.rerender({ table: "events", tableLabel: "イベント", fetchFn });
+    assert.doesNotMatch(ui.host.textContent, /<PRIVATE>/);
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+    const otherFetch = async () => json(200, preview);
+    await ui.rerender({ table: "events", tableLabel: "イベント", fetchFn: otherFetch });
+    assert.equal(ui.host.querySelectorAll("button")[1].disabled, true);
+  } finally { await ui.cleanup(); }
+
+  let settle, signal;
+  const pendingFetch = async (_, init) => {
+    signal = init.signal;
+    return await new Promise(resolve => { settle = resolve; });
+  };
+  const pendingUi = await mount({ table: "videos", tableLabel: "動画", fetchFn: pendingFetch });
+  try {
+    await typeText(pendingUi, "id,title\n1,alpha");
+    const button = [...pendingUi.host.querySelectorAll("button")].find(b => b.textContent.trim() === "サーバーで確認");
+    await React.act(async () => { button.click(); });
+    assert.ok(signal);
+    assert.equal(signal.aborted, false);
+    await pendingUi.rerender({ table: "events", tableLabel: "イベント", fetchFn: pendingFetch });
+    assert.equal(signal.aborted, true);
+    assert.equal(pendingUi.host.querySelectorAll("button")[1].disabled, true);
+    await React.act(async () => settle(json(200, preview)));
+    await flush();
+    assert.doesNotMatch(pendingUi.host.innerHTML, /SECRET_PREVIEW_TOKEN|&lt;PRIVATE&gt;/);
+  } finally { await pendingUi.cleanup(); }
+});
