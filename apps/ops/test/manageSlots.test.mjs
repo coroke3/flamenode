@@ -30,7 +30,7 @@ function makePagedFetch(n, options = {}) {
     if (options.respond) return options.respond({ offset, url, init, request: requests.length });
     return json(200, page(offset, Array.from(
       { length: Math.max(0, Math.min(100, n - offset)) }, (_, i) => slot(offset + i),
-    ), { statusFilter: url.searchParams.get("status") }));
+    ), { statusFilter: url.searchParams.get("status"), total: n, counts: { available: n } }));
   };
   return { fetchFn, requests };
 }
@@ -42,8 +42,8 @@ test("MIG-0722 U01 T01: 450 rows via exactly 5 bounded reads, first counts, iden
   assert.equal(result.status, "ok");
   assert.equal(result.data.slots.length, 450);
   assert.equal(result.data.slots[449].id, "slot-449");
-  assert.equal(result.data.total, 520);
-  assert.deepEqual(result.data.counts, { available: 520 });
+  assert.equal(result.data.total, 450);
+  assert.deepEqual(result.data.counts, { available: 450 });
   assert.equal(result.data.pendingCount, 3);
   assert.equal(result.data.offset, 0);
   assert.equal(result.data.atLimit, false);
@@ -181,4 +181,68 @@ test("MIG-0722 U01: malformed UTF-16 and NUL event IDs reject before any fetch",
   });
   assert.equal(result.status, "ok");
   assert.equal(seenPath, "/api/manage/events/event-%F0%9F%9A%80/slots?status=all&offset=0");
+});
+
+
+test("MIG-0722 U01: short page inconsistent with first snapshot is unavailable", async () => {
+  const { fetchFn, requests } = makePagedFetch(450, {
+    respond: ({ offset }) => json(200, page(offset, Array.from(
+      { length: Math.max(0, Math.min(100, 450 - offset)) },
+      (_, index) => slot(offset + index),
+    ))), // All pages promise 520 available slots but return only 450.
+  });
+  assert.deepEqual(await listSlots("ev1", "all", fetchFn), { status: "unavailable" });
+  assert.equal(requests.length, 5, "the incomplete final page must be rejected");
+  for (const [count, expected] of [[1, 0], [2, 1]]) {
+    const { fetchFn } = makePagedFetch(count, {
+      respond: () => json(200, page(0, [], {
+        total: expected, counts: { available: expected },
+      })),
+    });
+    assert.deepEqual(await listSlots("ev1", "all", fetchFn), { status: "unavailable" });
+  }
+});
+
+test("MIG-0722 U01: filtered reads use matching status counts, not unfiltered total", async () => {
+  const requests = [];
+  const fetchFn = async (path) => {
+    requests.push(path);
+    const offset = Number(new URL(path, "https://flamenode.test").searchParams.get("offset"));
+    return json(200, page(offset, Array.from(
+      { length: Math.max(0, Math.min(100, 150 - offset)) },
+      (_, index) => slot(offset + index, { status: "reserved" }),
+    ), {
+      statusFilter: "reserved", total: 220,
+      counts: { available: 70, reserved: 150 },
+    }));
+  };
+  const result = await listSlots("ev1", "reserved", fetchFn);
+  assert.equal(result.status, "ok");
+  assert.equal(result.data.slots.length, 150);
+  assert.equal(result.data.total, 220);
+  assert.equal(result.data.atLimit, false);
+  assert.equal(requests.length, 2);
+
+  const wrongCount = await listSlots("ev1", "reserved", async (path) => {
+    const offset = Number(new URL(path, "https://flamenode.test").searchParams.get("offset"));
+    return json(200, page(offset, Array.from(
+      { length: Math.max(0, Math.min(100, 150 - offset)) },
+      (_, index) => slot(offset + index, { status: "reserved" }),
+    ), {
+      statusFilter: "reserved", total: 220,
+      counts: { available: 71, reserved: 149 },
+    }));
+  });
+  assert.deepEqual(wrongCount, { status: "unavailable" });
+});
+
+test("MIG-0722 U01: at 500-row cap, reject counts smaller than delivered rows", async () => {
+  const rows = offset => Array.from({ length: 100 }, (_, index) => slot(offset + index));
+  const fetchFn = async path => {
+    const offset = Number(new URL(path, "https://flamenode.test").searchParams.get("offset"));
+    return json(200, page(offset, rows(offset), {
+      total: 499, counts: { available: 499 },
+    }));
+  };
+  assert.deepEqual(await listSlots("ev1", "all", fetchFn), { status: "unavailable" });
 });
