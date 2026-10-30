@@ -1,8 +1,8 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
 
-/** Paths served by this SPA. Everything else (/entry, /dashboard/edit/*, /rules, public pages) is another app. */
-const SPA_PATHS = new Set(["/dashboard", "/dashboard/library", "/dashboard/settings", "/onboarding"]);
+/** Paths served by this SPA. Everything else (/dashboard/edit/*, /rules, public pages) is another app. */
+const SPA_PATHS = new Set(["/dashboard", "/dashboard/library", "/dashboard/settings", "/onboarding", "/entry"]);
 
 type AnchorProps = Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & { href: string };
 

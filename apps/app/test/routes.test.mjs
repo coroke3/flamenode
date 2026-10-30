@@ -13,9 +13,9 @@ const next = await import("../.test-dist/apps/app/src/routes/next.js");
 const html = (state, nextPath = "/dashboard") =>
   renderToStaticMarkup(React.createElement(GateView, { state, next: nextPath, children: () => "PAGE" }));
 
-test("route table covers the 5 MIG-0701 paths", () => {
+test("route table covers the 5 MIG-0701 paths and MIG-0711 /entry", () => {
   assert.deepEqual([...PERSONAL_READ_PATHS], [
-    "/dashboard", "/dashboard/library", "/dashboard/settings", "/dashboard/youtube-playlists", "/onboarding",
+    "/dashboard", "/dashboard/library", "/dashboard/settings", "/dashboard/youtube-playlists", "/onboarding", "/entry",
   ]);
 });
 
@@ -69,7 +69,7 @@ test("youtube-playlists compat target: admin -> admin SPA, others -> /dashboard"
 const sessionApi = (result) => fakeApi({ getSession: result });
 
 test("direct deep links render the guard per session (reload = fresh mount)", async () => {
-  for (const path of PERSONAL_READ_PATHS) {
+  for (const path of PERSONAL_READ_PATHS.filter((path) => path !== "/entry")) {
     const anon = await mount(path, uniformApi("anonymous"));
     assert.match(anon.container.textContent, /ログインが必要です/, path);
     const expectedNext = path === "/onboarding" ? next.onboardingHref("/dashboard") : path;
