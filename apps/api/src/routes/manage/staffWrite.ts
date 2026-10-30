@@ -14,7 +14,6 @@ import {
   isAdminOnlyKey,
   normalizePermissionKeys,
 } from "@flamenode/domain/auth/permissions";
-import { getPresetPermissions } from "@flamenode/domain/auth/permissions/presets";
 import { parseEventStaffPermissionKeys } from "@flamenode/domain/event";
 import { parseCanonicalXId } from "@flamenode/domain/xid";
 import {
