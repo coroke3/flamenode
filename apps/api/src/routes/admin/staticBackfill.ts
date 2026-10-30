@@ -78,10 +78,17 @@ async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean>
   const pool = values[1] as Record<string, unknown> | null;
   const plainObject = (x: unknown): x is Record<string, unknown> =>
     x !== null && typeof x === "object" && !Array.isArray(x);
+  // Match CURRENT normalizeYoutubeRelatedBlocklist / normalizeRandomVideoPool:
+  // Number("Infinity") must never count as a valid generated_at. Invalid
+  // shared inputs should enqueue regeneration, not advance video backfill.
+  const validGeneratedAt = (value: unknown): boolean => {
+    const timestamp = Number(value);
+    return Number.isFinite(timestamp) && timestamp > 0;
+  };
   return plainObject(block) && Number(block.schema_version) === 1 &&
-    Number(block.generated_at) > 0 && plainObject(block.blocked) &&
+    validGeneratedAt(block.generated_at) && plainObject(block.blocked) &&
     plainObject(pool) && Number(pool.schema_version) === 1 &&
-    Number(pool.generated_at) > 0 && Array.isArray(pool.items) &&
+    validGeneratedAt(pool.generated_at) && Array.isArray(pool.items) &&
     typeof pool.generation_key === "string" && pool.generation_key.trim().length > 0;
 }
 
