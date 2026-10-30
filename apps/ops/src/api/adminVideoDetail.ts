@@ -17,11 +17,13 @@ export function adminVideoBackHref(event: string | null): string {
     : "/admin/videos";
 }
 
-/** CURRENT chooses the first open void case, otherwise the first open case. */
+/**
+ * The status-write handler accepts only a matching open case of type "void".
+ * CURRENT's fallback to an unrelated open case is rejected by that handler.
+ * Do not advertise a possible un-void action until a valid case exists.
+ */
 export function selectOpenVoidCaseId(cases: readonly AdminVideoModerationCase[]): string | null {
-  return cases.find((item) => item.status === "open" && item.case_type === "void")?.id
-    ?? cases.find((item) => item.status === "open")?.id
-    ?? null;
+  return cases.find((item) => item.status === "open" && item.case_type === "void")?.id ?? null;
 }
 
 export async function loadAdminVideoDetail(
