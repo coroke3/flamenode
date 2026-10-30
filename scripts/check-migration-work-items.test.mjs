@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory} from "./check-migration-work-items.mjs";
+import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -116,4 +116,31 @@ test("unavailable recorded source SHA remains rejected after PR history fetch", 
    /source SHA is not an available Git commit/,
   );
  }finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
+
+test("structural ownership conflict does not suppress requested SHA fetch or permit a false pass",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ const entries={"MIG-0301.md":active,"MIG-0302.md":another};
+ let available=false,fetchCount=0;
+ const errors=validateWithHistory({
+  statusText:status,entries,
+  commitExists:()=>available,
+  fetchHistory:()=>{fetchCount++;available=true;},
+ });
+ assert.equal(fetchCount,1,"fetch must run even when ownership is already invalid");
+ assert.match(errors.join("\n"),/already claimed/,"real ownership conflict must remain blocking");
+ assert.doesNotMatch(errors.join("\n"),/source SHA is not an available Git commit/,"fetched SHAs must be verified after retrieval");
+ const offline=validateWithHistory({statusText:status,entries,commitExists:()=>false});
+ assert.match(offline.join("\n"),/already claimed/);
+ assert.match(offline.join("\n"),/source SHA is not an available Git commit/,"offline missing-source checks stay strict");
+});
+
+test("failed history retrieval never masks structural errors or nonexistent commits",()=>{
+ const errors=validateWithHistory({
+  statusText:status,entries:{"MIG-0301.md":active},
+  commitExists:()=>false,
+  fetchHistory:()=>{throw new Error("no origin");},
+ });
+ assert.match(errors.join("\n"),/could not fetch required PR history/);
+ assert.match(errors.join("\n"),/source SHA is not an available Git commit/);
 });
