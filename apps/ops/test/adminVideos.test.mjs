@@ -157,3 +157,83 @@ test("MIG-0729 U01: revocation/absence and offline never return old video data",
     return json(fixture);
   }, "", controller.signal), { status: "unavailable" });
 });
+
+
+test("FIX-507: 200 event options use at most two bounded requests (0/99/100/101/200/201)", async () => {
+  for (const count of [0, 99, 100, 101, 200, 201]) {
+    const events = Array.from({ length: count }, (_, i) => ({
+      id: `event-${String(i).padStart(3, "0")}`, title: `Event ${i}`,
+    }));
+    const paths = [];
+    const read = await loadAdminVideos(async (path) => {
+      paths.push(path);
+      const offset = new URL(path, "https://localhost").searchParams.get("offset");
+      return json({ ...fixture, events: offset === "100" ? events.slice(100, 200) : events.slice(0, 100) });
+    }, "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+    assert.equal(read.status, "ok", `count=${count}`);
+    assert.deepEqual(read.data.events, events.slice(0, 200), `count=${count}`);
+    assert.equal(paths.length, count >= 100 ? 2 : 1, `count=${count}`);
+    assert.equal(paths[0], "/api/admin-read/videos?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+    if (paths.length === 2) assert.equal(paths[1], `${paths[0]}&offset=100`);
+  }
+});
+
+test("FIX-507: default-filter URL uses ?offset=100, not an invalid appended &", async () => {
+  const events = Array.from({ length: 100 }, (_, i) => ({ id: `e-${i}`, title: `Event ${i}` }));
+  const base = { ...fixture, q: "", status: "", event: "",
+    paging: { ...fixture.paging, page: 1 }, reviewSummaries: "not_requested" };
+  const paths = [];
+  const response = await loadAdminVideos(async (path) => {
+    paths.push(path);
+    return json({ ...base, events: path.includes("offset=100") ? [] : events });
+  }, "");
+  assert.equal(response.status, "ok");
+  assert.equal(response.data.events.length, 100);
+  assert.deepEqual(paths, ["/api/admin-read/videos?page=1", "/api/admin-read/videos?page=1&offset=100"]);
+});
+
+test("FIX-507: repeated first page or mismatched second private page fails closed", async () => {
+  const events = Array.from({ length: 100 }, (_, i) => ({ id: `e-${i}`, title: `Event ${i}` }));
+  const first = { ...fixture, events };
+  const repeat = async () => {
+    let calls = 0;
+    const outcome = await loadAdminVideos(async () => {
+      calls += 1;
+      return json(first); // pre-FIX API ignored offset=100
+    }, "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+    assert.equal(calls, 2);
+    assert.deepEqual(outcome, { status: "unavailable" });
+  };
+  await repeat();
+
+  for (const mismatch of [
+    { q: "other" }, { event: "other" }, { paging: { ...fixture.paging, total: 222 } },
+    { videos: [] }, { degraded: true }, { events },
+  ]) {
+    let calls = 0;
+    const response = await loadAdminVideos(async () => {
+      calls += 1;
+      return json(calls === 1 ? first : { ...fixture, events: [{ id: "new", title: "New" }], ...mismatch });
+    }, "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+    assert.deepEqual(response, { status: "unavailable" });
+    assert.equal(calls, 2);
+  }
+
+  let calls = 0;
+  const revoked = await loadAdminVideos(async () => {
+    calls += 1;
+    return calls === 1 ? json(first) : json({ redirect: "/dashboard" }, 403);
+  }, "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+  assert.deepEqual(revoked, { status: "forbidden", redirect: "/dashboard" });
+});
+
+test("FIX-507: oversized event DTO fails closed before a second call", async () => {
+  const events = Array.from({ length: 101 }, (_, i) => ({ id: `event-${i}`, title: `Event ${i}` }));
+  let calls = 0;
+  const response = await loadAdminVideos(async () => {
+    calls += 1;
+    return json({ ...fixture, events });
+  }, "?q=%E4%BD%9C%E8%80%85&status=review&event=event-1&page=3");
+  assert.deepEqual(response, { status: "unavailable" });
+  assert.equal(calls, 1);
+});
