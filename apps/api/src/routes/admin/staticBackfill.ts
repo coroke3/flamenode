@@ -219,6 +219,8 @@ export const staticBackfillAdminRoutes = new Hono<AppEnv>();
 staticBackfillAdminRoutes.use("*", onlyMutating(costGuardMiddleware("admin_static_rebuild")));
 
 staticBackfillAdminRoutes.post("/", async (c) => {
+  // Progress and cursor data belong to the authenticated admin session only.
+  c.header("Cache-Control", "private, no-store");
   const raw = await readAdminJsonBody(c.req.raw);
   if (raw.kind === "too_large") return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
   const parsed = raw.kind === "ok" ? AdminStaticBackfillBodySchema.safeParse(raw.value) : null;
