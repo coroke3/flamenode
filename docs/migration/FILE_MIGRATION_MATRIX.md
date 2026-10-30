@@ -1219,6 +1219,10 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
 | `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
+| `src/lib/video/youtubeDuplicate.ts` | HELPER | SA-086, SA-088, SA-089 | MIG-0651 | Next re-export bridge to @flamenode/server-core/video/youtubeDuplicate | IN_PROGRESS | PR#479 SHA=418a589bfb4953eca20fb856ce56792032ced2c4 TEST=packages/server-core/test/youtubeDuplicate.test.mjs (CI pending) |
+| `packages/server-core/src/video/youtubeDuplicate.ts` | TARGET_HELPER | SA-086, SA-088, SA-089 | MIG-0651 | Canonical SQLite duplicate-video error classifier | IN_PROGRESS | PR#479 SHA=418a589bfb4953eca20fb856ce56792032ced2c4 TEST=packages/server-core/test/youtubeDuplicate.test.mjs (CI pending) |
+| `packages/server-core/test/youtubeDuplicate.test.mjs` | TEST | SA-086, SA-088, SA-089 | MIG-0651 | Shared helper / legacy bridge parity regression | IN_PROGRESS | PR#479 SHA=418a589bfb4953eca20fb856ce56792032ced2c4 TEST=npm run test --workspace=@flamenode/server-core (CI pending) |
+
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 
 <!-- MIG-0401 #283 owns ONLY nonproduction fixture files. Unchanged planned source ownership transferred: astro.config/package -> MIG-0403, index.astro -> MIG-0506, legacy publicData loader/test -> MIG-0505, before marking MIG-0401 DONE. PR review: https://github.com/coroke3/flamenode/pull/283#pullrequestreview-5541888183 -->
