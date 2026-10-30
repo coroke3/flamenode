@@ -16,7 +16,13 @@ import { parseJsonColumn } from "../personal/context.ts";
 export const ADMIN_EVENT_GROUPS_LIMIT = 100;
 export const ADMIN_EVENT_GROUP_MEMBERS_LIMIT = 100;
 export const EVENT_GROUP_EVENT_PAGE_SIZE = 80;
-const GROUP_TYPE_LABELS: Record<string, true> = { series: true, genre: true, related: true, collection: true, other: true };
+// Whitelist own keys only: `in` also accepts inherited prototype properties
+// such as "constructor" and "__proto__", incorrectly applying a SQL filter.
+const GROUP_TYPES = new Set(["series", "genre", "related", "collection", "other"]);
+
+export function normalizeAdminEventGroupType(value: string | undefined): string {
+  return value !== undefined && GROUP_TYPES.has(value) ? value : "any";
+}
 
 export const adminEventGroupsRoutes = new Hono<AppEnv>()
   .get("/", async (c) => {
@@ -24,8 +30,8 @@ export const adminEventGroupsRoutes = new Hono<AppEnv>()
     const visibility =
       visibilityParam === "public" || visibilityParam === "private" || visibilityParam === "archived" ? visibilityParam : "any";
     const typeParam = c.req.query("type");
-    // CURRENT: `sp.type in GROUP_TYPE_LABELS` (prototype keys pass and then match no row)
-    const type = typeParam && typeParam in GROUP_TYPE_LABELS ? typeParam : "any";
+    // Deliberately harden CURRENT's inherited-key quirk: unknown values mean "any".
+    const type = normalizeAdminEventGroupType(typeParam);
     const conds: string[] = [];
     const params: unknown[] = [];
     if (visibility !== "any") {
