@@ -27,6 +27,16 @@ const SHARED_INPUTS = [
   ["videos/random-pool.v1.json", 8 * 1024 * 1024],
 ] as const;
 
+// Optional KV/R2 bindings are best-effort for backfill state and shared-input
+// readiness. Accessing a provider binding itself can throw before .get/.head;
+// never expose provider details or misreport a committed D1 queue batch as 500.
+function getOptionalKvBinding(env: AppEnv["Bindings"]): KVNamespace | undefined {
+  try { return env.KV; } catch { return undefined; }
+}
+function getOptionalBucketBinding(env: AppEnv["Bindings"]): R2Bucket | undefined {
+  try { return env.BUCKET; } catch { return undefined; }
+}
+
 /** CURRENT: KV read failures yield fresh state, KV writes are best-effort. */
 async function readBackfillState(kv: KVNamespace | undefined) {
   if (!kv) return createEmptyStaticBackfillState();
@@ -185,7 +195,8 @@ staticBackfillAdminRoutes.post("/", async (c) => {
 
   const { kind, mode, cursor: requestedCursor } = parsed.data;
   const restart = mode === "restart";
-  const state = await readBackfillState(c.env.KV);
+  const kv = getOptionalKvBinding(c.env);
+  const state = await readBackfillState(kv);
   const previous = state.runs[kind];
   const cursor = restart ? "" : requestedCursor || previous.cursor || "";
   const now = Math.floor(Date.now() / 1000);
@@ -193,7 +204,7 @@ staticBackfillAdminRoutes.post("/", async (c) => {
   const baseEnqueued = restart ? 0 : previous.enqueued;
 
   const reply = async (run: StaticBackfillRunState, scanned: number, enqueued: number) => {
-    const persisted = await writeBackfillState(c.env.KV, withStaticBackfillRun(state, kind, run, now));
+    const persisted = await writeBackfillState(kv, withStaticBackfillRun(state, kind, run, now));
     return c.json({
       backfill_kind: kind,
       backfill_scanned: String(scanned),
@@ -207,7 +218,7 @@ staticBackfillAdminRoutes.post("/", async (c) => {
   try {
     const { total, selected, proofs } = await loadBackfillPage(c.env.DB, kind, cursor);
 
-    if (kind === "video_v2" && !await sharedInputsReady(c.env.BUCKET, proofs)) {
+    if (kind === "video_v2" && !await sharedInputsReady(getOptionalBucketBinding(c.env), proofs)) {
       await queueBackfill(c, [
         { targetType: "youtube_related_blocklist", targetId: "global", reason: "backfill_video_v2_shared_inputs", priority: "high", requestedByUserId: c.get("user")!.id },
         { targetType: "random_video_pool", targetId: "global", reason: "backfill_video_v2_shared_inputs", priority: "high", requestedByUserId: c.get("user")!.id },
@@ -252,7 +263,7 @@ staticBackfillAdminRoutes.post("/", async (c) => {
     const failed: StaticBackfillRunState = {
       ...previous, status: "failed", last_error: message, last_run_at: now,
     };
-    const persisted = await writeBackfillState(c.env.KV, withStaticBackfillRun(state, kind, failed, now));
+    const persisted = await writeBackfillState(kv, withStaticBackfillRun(state, kind, failed, now));
     return c.json({
       backfill_kind: kind, backfill_error: message,
       backfill_state_persisted: persisted ? "1" : "0",
