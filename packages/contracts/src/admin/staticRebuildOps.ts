@@ -43,3 +43,10 @@ export const AdminVisibilityRepairResultSchema = z.object({
     "manifest_token_not_found", "repaired", "failed",
   ]),
 });
+
+/** MIG-0643 U02 SA-069: CURRENT FormData fields as bounded JSON. */
+export const AdminStaticBackfillBodySchema = z.object({
+  kind: z.enum(["video_v2", "user_profile", "event_crew"]),
+  mode: z.string().optional().default("continue"),
+  cursor: z.string().trim().max(128).optional().default(""),
+});
