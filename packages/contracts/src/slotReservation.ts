@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 
 /**
  * MIG-0657 U01: HTTP bodies for SA-065..068.
@@ -7,6 +6,9 @@ import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
  * The eventId and slotId are URL parameters, never trusted from a JSON body.
  * Parsing these inputs does not authorize a reservation or replace its D1 CAS guard.
  */
+// Keep contracts independent from @flamenode/domain (domain depends on contracts).
+// The contract test pins this CURRENT bound to domain MAX_SLOTS_PER_VIDEO.
+const MAX_RESERVATION_COUNT = 20;
 const operatorOverride = z.union([z.string(), z.boolean()]).optional();
 
 /** POST /api/events/:eventId/slots/:slotId/reserve (SA-065). */
@@ -15,7 +17,7 @@ export const SlotReserveBodySchema = z.object({
   // FormData supplies strings in CURRENT; JSON additionally allows finite numbers.
   // Exclude booleans, which z.coerce.number would accidentally convert to 0/1.
   consecutive_count: z.union([z.string(), z.number()])
-    .pipe(z.coerce.number().int().min(1).max(MAX_SLOTS_PER_VIDEO))
+    .pipe(z.coerce.number().int().min(1).max(MAX_RESERVATION_COUNT))
     .default(1),
   operator_override: operatorOverride,
 });
