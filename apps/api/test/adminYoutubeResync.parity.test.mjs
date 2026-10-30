@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
-import { AdminYoutubeResyncVideoIdSchema, AdminYoutubeResyncResultSchema } from "@flamenode/contracts";
+import { AdminYoutubeResyncVideoIdSchema, AdminYoutubeResyncResultSchema } from "@flamenode/contracts/admin/staticRebuildOps";
 import { youtubeSyncAdminRoutes } from "../src/routes/admin/youtubeSync.ts";
 import { originGuardMiddleware, writeGuardMiddleware, onlyMutating } from "../src/middleware/writeOrigin.ts";
 import { dbMiddleware } from "../src/middleware/db.ts";
