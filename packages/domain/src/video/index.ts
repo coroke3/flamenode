@@ -11,3 +11,4 @@ export * from "./interactions.ts";
 export * from "./parseEventIds.ts";
 export * from "./unslottedEventSelection.ts";
 export * from "./memberInputs.ts";
+export * from "./memberSubmission.ts";

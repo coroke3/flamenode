@@ -2,33 +2,12 @@ import type { DB } from "@/lib/db/client";
 import { MAX_ATOMIC_VIDEO_CUSTOM_ANSWERS } from "@/lib/video/atomicLimits";
 import { fetchActiveCustomQuestionsForEvents } from "@/lib/video/customQuestionAnswers";
 import { readCustomAnswersFromFormData } from "@/lib/video/customQuestions";
-import {
-  type MemberInput,
-  type ParsedMemberChapter,
-  normalizeMemberChapters,
-  parseVideoMemberInputs,
-} from "@/lib/video/memberInputs";
 
-export interface ValidatedMemberSubmission {
-  members: MemberInput[];
-  chaptersByIndex: Map<number, ParsedMemberChapter[]>;
-}
-
-export function validateVideoMemberSubmission(
-  formData: FormData,
-  isCollab: boolean,
-): { ok: true; value: ValidatedMemberSubmission } | { ok: false; message: string } {
-  const parsed = parseVideoMemberInputs(formData.get("members_json"), isCollab);
-  if (!parsed.ok) return parsed;
-
-  const chaptersByIndex = new Map<number, ParsedMemberChapter[]>();
-  for (let i = 0; i < parsed.members.length; i++) {
-    const normalized = normalizeMemberChapters(parsed.members[i], i);
-    if (!normalized.ok) return normalized;
-    chaptersByIndex.set(i, normalized.chapters);
-  }
-  return { ok: true, value: { members: parsed.members, chaptersByIndex } };
-}
+// CURRENT compatibility entrypoint; the canonical implementation has no Next dependency.
+export {
+  validateVideoMemberSubmission,
+  type ValidatedMemberSubmission,
+} from "@flamenode/domain/video";
 
 export async function validateCustomAnswersForEvents(
   db: DB,
