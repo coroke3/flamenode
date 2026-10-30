@@ -46,5 +46,7 @@ export function useApiResult<T>(
     return () => controller.abort();
   }, [key, refreshKey]);
 
-  return state;
+  // Effects execute after render; the first render for a new key must not expose
+  // data produced for the previous event/account, even for a single frame.
+  return shownKey.current === key ? state : LOADING;
 }
