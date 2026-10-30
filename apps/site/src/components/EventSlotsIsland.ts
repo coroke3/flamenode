@@ -1,12 +1,12 @@
 import React from "react";
 import { EventSlotsView } from "@flamenode/ui";
-import type { StaticEventDetail } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
+import type { EventIslandDetail } from "../lib/eventDetail.ts";
 import { buildEventSlotsModel, type SlotsLivePhase } from "../lib/eventSlots.ts";
 import { fetchLiveSlots, type LiveSlots } from "../lib/liveSlots.ts";
 import { IslandWrapper } from "./IslandWrapper.ts";
 
 export interface EventSlotsIslandProps {
-  detail: StaticEventDetail;
+  detail: EventIslandDetail;
   builtAt: number;
 }
 
