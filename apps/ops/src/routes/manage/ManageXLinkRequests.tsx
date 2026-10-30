@@ -23,10 +23,18 @@ function formatRequestedAt(value: number): string {
 }
 
 function safeIconUrl(raw: string | null): string | null {
-  // API icons can be absolute HTTPS, but never allow untrusted executable/relative protocol URLs.
-  if (raw && /^https:\/\//i.test(raw)) return raw;
-  if (raw && /^\/(?!\/)/.test(raw)) return raw;
-  return null;
+  if (!raw || /[\u0000-\u0020\u007f\\]/.test(raw)) return null;
+  // WHATWG treats "/\\evil.example" as an external network-path URL.
+  // Check for both slash forms before passing any source to an <img>.
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  if (!raw.startsWith("https://")) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === "https:" && url.hostname && !url.username && !url.password
+      ? raw : null;
+  } catch {
+    return null;
+  }
 }
 
 function XIdPreview({ id, name, icon, compact = false }: {
