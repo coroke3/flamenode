@@ -22,6 +22,9 @@ import { onlyMutating } from "../../middleware/writeOrigin.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 
 const BATCH_SIZE = 12;
+// ZERO_1102 §4: request-time JSON.parse inputs must not exceed 64 KiB.
+// Producer-owned backfill state contains only three small run records.
+const MAX_BACKFILL_KV_STATE_BYTES = 64 * 1024;
 const SHARED_INPUTS = [
   ["youtube/related-blocklist.v1.json", 2 * 1024 * 1024],
   ["videos/random-pool.v1.json", 8 * 1024 * 1024],
@@ -42,7 +45,14 @@ async function readBackfillState(kv: KVNamespace | undefined) {
   if (!kv) return createEmptyStaticBackfillState();
   try {
     const raw = await kv.get(STATIC_BACKFILL_KV_KEY);
-    return raw ? parseStaticBackfillState(JSON.parse(raw)) : createEmptyStaticBackfillState();
+    if (!raw) return createEmptyStaticBackfillState();
+    // Reject oversized legacy/corrupt KV state before JSON.parse. Check UTF-16
+    // length first to avoid allocating a large UTF-8 buffer for obvious misses.
+    if (raw.length > MAX_BACKFILL_KV_STATE_BYTES ||
+        new TextEncoder().encode(raw).byteLength > MAX_BACKFILL_KV_STATE_BYTES) {
+      return createEmptyStaticBackfillState();
+    }
+    return parseStaticBackfillState(JSON.parse(raw));
   } catch {
     return createEmptyStaticBackfillState();
   }
