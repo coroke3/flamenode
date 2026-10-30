@@ -45,77 +45,104 @@ async function writeBackfillState(kv: KVNamespace | undefined, state: ReturnType
   } catch { return false; }
 }
 
-/** CURRENT needs both R2 shared objects, with generated_at and generation_key. */
-async function sharedInputsReady(bucket: R2Bucket | undefined): Promise<boolean> {
-  if (!bucket) return false;
-  const values: unknown[] = [];
-  // CURRENT loadStaticJsonFreshStaleUnavailable reports R2 exceptions as
-  // unavailable, which schedules both shared targets rather than failing the
-  // backfill. Only the later D1 queue failure should mark the run failed.
+/**
+ * Backfill readiness uses only producer-authored R2 HEAD metadata and the
+ * tracked D1 hash/generation proof returned in the existing page SELECT.
+ * Parsing the 2 MiB/8 MiB bodies in a request violates ZERO_1102 S3.
+ * Legacy objects without these proofs fail closed and enqueue regeneration.
+ */
+type ArtifactProof = { contentHash: string; generatedAt: number };
+type SharedProofs = { blocklist: ArtifactProof | null; pool: ArtifactProof | null };
+function parseArtifactProof(json: string | null): ArtifactProof | null {
+  if (!json || json.length > 512) return null;
   try {
-    for (const [key, maxBytes] of SHARED_INPUTS) {
-      // Key literals are part of the audited MIG-0649 R2 consumer registry.
-      const obj = key === "youtube/related-blocklist.v1.json"
-        ? await bucket.get("youtube/related-blocklist.v1.json")
-        : await bucket.get("videos/random-pool.v1.json");
-      if (!obj) return false;
-      // Align R2 size bounds with server-core/readBoundedR2Json: a
-      // negative, fractional or unsafe integer size is not a trusted length.
-      if (!Number.isSafeInteger(obj.size) || obj.size < 0 || obj.size > maxBytes) {
-        await obj.body?.cancel().catch(() => undefined);
-        return false;
-      }
-      const text = await obj.text();
-      if (new TextEncoder().encode(text).byteLength > maxBytes) return false;
-      try {
-        values.push(JSON.parse(text));
-      } catch {
-        return false;
-      }
-    }
-  } catch {
-    return false;
-  }
-  const block = values[0] as Record<string, unknown> | null;
-  const pool = values[1] as Record<string, unknown> | null;
-  const plainObject = (x: unknown): x is Record<string, unknown> =>
-    x !== null && typeof x === "object" && !Array.isArray(x);
-  // Match CURRENT normalizeYoutubeRelatedBlocklist / normalizeRandomVideoPool:
-  // Number("Infinity") must never count as a valid generated_at. Invalid
-  // shared inputs should enqueue regeneration, not advance video backfill.
-  const validGeneratedAt = (value: unknown): boolean => {
-    const timestamp = Number(value);
-    return Number.isFinite(timestamp) && timestamp > 0;
-  };
-  return plainObject(block) && Number(block.schema_version) === 1 &&
-    validGeneratedAt(block.generated_at) && plainObject(block.blocked) &&
-    plainObject(pool) && Number(pool.schema_version) === 1 &&
-    validGeneratedAt(pool.generated_at) && Array.isArray(pool.items) &&
-    typeof pool.generation_key === "string" && pool.generation_key.trim().length > 0;
+    const raw: unknown = JSON.parse(json);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const row = raw as Record<string, unknown>;
+    const contentHash = row.contentHash;
+    const generatedAt = row.generatedAt;
+    if (typeof contentHash !== "string" || !/^[a-f0-9]{64}$/i.test(contentHash) ||
+        typeof generatedAt !== "number" || !Number.isSafeInteger(generatedAt) ||
+        generatedAt <= 0) return null;
+    return { contentHash, generatedAt };
+  } catch { return null; }
 }
 
-type BackfillPage = { total: number; ids_json: string };
-/** One DB call: total count and next 13 IDs in deterministic CURRENT order. */
+/** The HEAD is a producer-integrity hint, not a JSON schema validator. */
+async function sharedInputsReady(bucket: R2Bucket | undefined, proofs: SharedProofs): Promise<boolean> {
+  if (!bucket) return false;
+  try {
+    for (const [index, [key, maxBytes]] of SHARED_INPUTS.entries()) {
+      const proof = index === 0 ? proofs.blocklist : proofs.pool;
+      if (!proof) return false;
+      // Exact keys are audited in the MIG-0649 R2 artifact consumer registry.
+      const obj = key === "youtube/related-blocklist.v1.json"
+        ? await bucket.head("youtube/related-blocklist.v1.json")
+        : await bucket.head("videos/random-pool.v1.json");
+      if (!obj || !Number.isSafeInteger(obj.size) || obj.size < 0 || obj.size > maxBytes) return false;
+      const meta = obj.customMetadata;
+      if (meta?.schema_version !== "1" ||
+          meta.content_hash !== proof.contentHash ||
+          typeof meta.source_generation !== "string" ||
+          meta.source_generation.trim().length === 0 ||
+          meta.source_generation.length > 128) return false;
+    }
+    return true;
+  } catch {
+    // Missing R2 binding, HEAD error or incomplete producer metadata: treat
+    // both inputs as unavailable, keeping the existing shared-input repair.
+    return false;
+  }
+}
+
+type BackfillPage = {
+  total: number;
+  ids_json: string;
+  blocklist_proof_json: string | null;
+  pool_proof_json: string | null;
+};
+/** One DB call: total count, next 13 IDs, and (video-only) producer proofs. */
 async function loadBackfillPage(db: D1Database, kind: StaticBackfillKind, cursor: string) {
   const selection = kind === "video_v2"
     ? { table: "videos", condition: "visibility_status = 'public'" }
     : kind === "user_profile"
       ? { table: "x_users", condition: "approval_status IN ('approved','pending','imported')" }
       : { table: "events", condition: "visibility_status = 'public'" };
-  // Both identifiers and predicate are closed literal constants, never user input.
+  // Closed constants only. The additional two scalar lookup expressions use
+  // static_artifacts' live target/key indexes and no extra D1 statement.
+  const proofsSql = kind === "video_v2" ? `
+      (SELECT json_object('contentHash', content_hash, 'generatedAt', generated_at)
+       FROM static_artifacts
+       WHERE target_type = 'youtube_related_blocklist'
+         AND target_id = 'global' AND object_key = 'youtube/related-blocklist.v1.json'
+         AND deleted_at IS NULL LIMIT 1) AS blocklist_proof_json,
+      (SELECT json_object('contentHash', content_hash, 'generatedAt', generated_at)
+       FROM static_artifacts
+       WHERE target_type = 'random_video_pool'
+         AND target_id = 'global' AND object_key = 'videos/random-pool.v1.json'
+         AND deleted_at IS NULL LIMIT 1) AS pool_proof_json`
+    : "NULL AS blocklist_proof_json, NULL AS pool_proof_json";
   const row = await db.prepare(`
     SELECT
       (SELECT COUNT(*) FROM ${selection.table} WHERE ${selection.condition}) AS total,
       (SELECT json_group_array(id) FROM
         (SELECT id FROM ${selection.table}
          WHERE ${selection.condition} AND id > ?
-         ORDER BY id ASC LIMIT ${BATCH_SIZE + 1})) AS ids_json
+         ORDER BY id ASC LIMIT ${BATCH_SIZE + 1})) AS ids_json,
+      ${proofsSql}
   `).bind(cursor).first<BackfillPage>();
   const ids = row?.ids_json ? JSON.parse(row.ids_json) as unknown : [];
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== "string")) {
     throw new Error("invalid_backfill_page");
   }
-  return { total: Math.max(0, Number(row?.total ?? 0)), selected: ids as string[] };
+  return {
+    total: Math.max(0, Number(row?.total ?? 0)),
+    selected: ids as string[],
+    proofs: {
+      blocklist: parseArtifactProof(row?.blocklist_proof_json ?? null),
+      pool: parseArtifactProof(row?.pool_proof_json ?? null),
+    },
+  };
 }
 
 async function queueBackfill(
@@ -178,9 +205,9 @@ staticBackfillAdminRoutes.post("/", async (c) => {
   };
 
   try {
-    const { total, selected } = await loadBackfillPage(c.env.DB, kind, cursor);
+    const { total, selected, proofs } = await loadBackfillPage(c.env.DB, kind, cursor);
 
-    if (kind === "video_v2" && !await sharedInputsReady(c.env.BUCKET)) {
+    if (kind === "video_v2" && !await sharedInputsReady(c.env.BUCKET, proofs)) {
       await queueBackfill(c, [
         { targetType: "youtube_related_blocklist", targetId: "global", reason: "backfill_video_v2_shared_inputs", priority: "high", requestedByUserId: c.get("user")!.id },
         { targetType: "random_video_pool", targetId: "global", reason: "backfill_video_v2_shared_inputs", priority: "high", requestedByUserId: c.get("user")!.id },
