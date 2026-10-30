@@ -11,4 +11,5 @@ export * from "./admin/index.ts";
 export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
 export * from "./videoInteraction.ts";
+export * from "./eventPlaylistWrite.ts";
 export * from "./costGuardBanner.ts";

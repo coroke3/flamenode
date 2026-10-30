@@ -17,11 +17,21 @@ export function escapeLike(raw: string | null | undefined): string {
   return String(raw).replace(/[\\%_]/g, "\\$&");
 }
 
-/** CURRENT clampPaging with defaultPageSize === maxPageSize === pageSize. */
+/**
+ * CURRENT clampPaging for ordinary values (defaultPageSize === maxPageSize === pageSize).
+ * Deliberate safety hardening: CURRENT accepts a finite but enormous page and
+ * computes Infinity / an unsafe integer for the D1 OFFSET bind. Such inputs
+ * must fall back to page 1 rather than degrade the entire admin listing.
+ */
 export function clampPage(pageRaw: unknown, pageSize: number): { page: number; pageSize: number; offset: number } {
   const raw = Number(pageRaw);
-  const page = Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 1;
-  return { page, pageSize, offset: (page - 1) * pageSize };
+  const candidate = Math.floor(raw);
+  const candidateOffset = (candidate - 1) * pageSize;
+  const valid = Number.isFinite(raw) && raw >= 1 &&
+    Number.isSafeInteger(candidate) && Number.isSafeInteger(candidateOffset) &&
+    candidateOffset >= 0;
+  const page = valid ? candidate : 1;
+  return { page, pageSize, offset: valid ? candidateOffset : 0 };
 }
 
 /** CURRENT normalizeXId (packages/domain xid/format.ts) as SQL: JS trim whitespace set, strip all leading '@', lower. */
