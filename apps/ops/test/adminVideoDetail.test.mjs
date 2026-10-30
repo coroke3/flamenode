@@ -105,12 +105,35 @@ test("MIG-0729 U02: 404, 403, invalid DTO and mismatched private detail are fail
     { status: "notFound" });
 });
 
-test("MIG-0729 T03: open void case preferred, then open fallback, then no case", () => {
+test("MIG-0729 T03: only same-video open void case can unlock voided status", () => {
   const other = { id: "other", case_type: "rights", status: "open" };
   const voidCase = { id: "void", case_type: "void", status: "open" };
   assert.equal(selectOpenVoidCaseId([other, voidCase]), "void");
-  assert.equal(selectOpenVoidCaseId([other]), "other");
+  assert.equal(selectOpenVoidCaseId([other]), null,
+    "a rights case cannot satisfy the server's case_type=void precondition");
   assert.equal(selectOpenVoidCaseId([{ ...voidCase, status: "closed" }]), null);
+  assert.equal(selectOpenVoidCaseId([{ ...voidCase, status: "resolved" }, other]), null);
+  assert.equal(selectOpenVoidCaseId([other, { ...voidCase, status: "open" }]), "void");
+  assert.equal(selectOpenVoidCaseId([]), null);
+});
+
+test("MIG-0729 T03: voided detail without an open void case displays the server precondition", () => {
+  const data = {
+    ...detail,
+    video: { ...detail.video, visibility_status: "voided" },
+    moderationCases: [{ id: "rights-1", case_type: "rights", status: "open" }],
+    openVoidCaseId: "rights-1",
+  };
+  const actions = {
+    approve: async () => ({ ok: true }),
+    approveAndNext: async () => ({ ok: true }),
+    setStatus: async () => ({ ok: true }),
+  };
+  const html = renderToStaticMarkup(React.createElement(StatusControls, {
+    data, eventId: null, onRefresh: () => {}, actions,
+  }));
+  assert.match(html, /voided解除には open な moderation case が必要/);
+  assert.match(html, /<option[^>]*value="pending"/);
 });
 
 test("MIG-0729 T01/T02: status action preserves event, approval and approved-next markers", async () => {
