@@ -6,13 +6,14 @@
  */
 import { SetActiveXBodySchema } from "@flamenode/contracts";
 import { normalizeXId } from "@flamenode/domain/xid";
+import { evaluateCostGuardCore } from "@flamenode/domain/admin";
+import { mapAuditSettings, type AuditSettingsRow } from "@flamenode/server-core/audit/settings";
 import { expectedRowCondition } from "@flamenode/server-core/audit/expectedRowCondition";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { sql } from "@flamenode/server-core/sql";
 import { Hono } from "hono";
 import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
 import { evaluateAdminWriteGuard, writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
-import { evaluateCostGuardWithSettings } from "../../middleware/costGuard.ts";
 import { dbMiddleware } from "../../middleware/db.ts";
 import {
   TERMS_REACCEPT_REQUIRED_CTE_SQL,
@@ -36,6 +37,23 @@ type RawUserRow = Record<string, string | number | null> & {
   derived_terms_reaccept_required?: number | null;
   actor_x_name?: string | null;
   actor_x_icon_url?: string | null;
+  cg_settings_id?: string | null;
+  cg_operation_mode?: string | null;
+  cg_disabled_features_json?: string | null;
+  cg_cost_guard_exception_until?: number | null;
+  cg_cost_guard_exception_features_json?: string | null;
+  cg_audit_normal_retention_days?: number | null;
+  cg_audit_restorable_retention_days?: number | null;
+  cg_audit_long_retention_days?: number | null;
+  cg_audit_max_payload_bytes?: number | null;
+  cg_audit_compact_after_days?: number | null;
+};
+
+type XidCostGuardSettings = AuditSettingsRow & {
+  operation_mode: string | null;
+  disabled_features_json: string | null;
+  cost_guard_exception_until: number | null;
+  cost_guard_exception_features_json: string | null;
 };
 
 /**
@@ -54,6 +72,7 @@ async function loadSelectedIdentity(
   canonicalXId: string | null;
   tos: { is_tos_accepted: number; terms_reaccept_required: number };
   actorSnapshotJson: string;
+  costGuardSettings: XidCostGuardSettings | null;
 } | null> {
   // Identical fail-closed alias/direct collision policy to
   // @flamenode/domain/xid#decideCanonicalXUserResolution, in one D1 read.
@@ -102,6 +121,16 @@ async function loadSelectedIdentity(
       ${TERMS_REACCEPT_REQUIRED_CASE_SQL} AS derived_terms_reaccept_required,
       active_x.x_name AS actor_x_name,
       active_x.icon_url AS actor_x_icon_url,
+      settings.id AS cg_settings_id,
+      settings.operation_mode AS cg_operation_mode,
+      settings.disabled_features_json AS cg_disabled_features_json,
+      settings.cost_guard_exception_until AS cg_cost_guard_exception_until,
+      settings.cost_guard_exception_features_json AS cg_cost_guard_exception_features_json,
+      settings.audit_normal_retention_days AS cg_audit_normal_retention_days,
+      settings.audit_restorable_retention_days AS cg_audit_restorable_retention_days,
+      settings.audit_long_retention_days AS cg_audit_long_retention_days,
+      settings.audit_max_payload_bytes AS cg_audit_max_payload_bytes,
+      settings.audit_compact_after_days AS cg_audit_compact_after_days,
       (SELECT canonical_id FROM resolved) AS resolved_x_user_id,
       (SELECT x.approval_status FROM x_user_account_links l
        INNER JOIN x_users x ON x.id = l.x_user_id
@@ -109,14 +138,21 @@ async function loadSelectedIdentity(
        WHERE l.auth_user_id = u.id
          AND lower(trim(ltrim(trim(l.x_user_id), '@'))) = r.canonical_id
        LIMIT 1) AS linked_approval_status
-    FROM "user" u LEFT JOIN x_users active_x ON active_x.id = u.active_x_user_id
+    FROM "user" u
+    LEFT JOIN x_users active_x ON active_x.id = u.active_x_user_id
+    LEFT JOIN system_settings settings ON settings.id = 'default'
     WHERE u.id = ? LIMIT 1
   `).bind(requestedXId, requestedXId, authUserId).first<RawUserRow>();
 
   if (!row) return null;
   const {
     linked_approval_status, resolved_x_user_id, derived_terms_reaccept_required,
-    actor_x_name, actor_x_icon_url, ...user
+    actor_x_name, actor_x_icon_url,
+    cg_settings_id, cg_operation_mode, cg_disabled_features_json,
+    cg_cost_guard_exception_until, cg_cost_guard_exception_features_json,
+    cg_audit_normal_retention_days, cg_audit_restorable_retention_days,
+    cg_audit_long_retention_days, cg_audit_max_payload_bytes, cg_audit_compact_after_days,
+    ...user
   } = row;
   // Drizzle timestamp_ms columns are Date objects in CURRENT select().
   if (typeof user.emailVerified === "number") {
@@ -124,6 +160,20 @@ async function loadSelectedIdentity(
   }
   return {
     user,
+    // Missing settings is maintenance mode; never manufacture normal settings.
+    // This is the SAME D1 read as the user/link/TOS snapshot, not a fourth
+    // session + identity + CostGuard + strict audit preflight.
+    costGuardSettings: cg_settings_id == null ? null : {
+      operation_mode: cg_operation_mode ?? null,
+      disabled_features_json: cg_disabled_features_json ?? null,
+      cost_guard_exception_until: cg_cost_guard_exception_until ?? null,
+      cost_guard_exception_features_json: cg_cost_guard_exception_features_json ?? null,
+      audit_normal_retention_days: cg_audit_normal_retention_days!,
+      audit_restorable_retention_days: cg_audit_restorable_retention_days!,
+      audit_long_retention_days: cg_audit_long_retention_days!,
+      audit_max_payload_bytes: cg_audit_max_payload_bytes!,
+      audit_compact_after_days: cg_audit_compact_after_days!,
+    },
     linkedApproval: linked_approval_status ?? null,
     canonicalXId: resolved_x_user_id ?? null,
     tos: {
@@ -193,9 +243,25 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
   if (!outcome.ok) return writeGuardDenyResponse(c, outcome.reason, outcome.status);
   if (!selected) return c.json({ ok: false, message: USER_NOT_FOUND }, 404);
 
-  const cost = await evaluateCostGuardWithSettings(db, "xid_links");
-  if (cost.denied) return writeGuardDenyResponse(c, cost.denied, 503);
-  if (cost.auditSettings) c.set("auditSettings", cost.auditSettings);
+  // CostGuard uses the settings returned in the identity SELECT. Retain the
+  // same domain core and audit retention mapping as costGuardMiddleware;
+  // strict actor-X pair validation still runs in mutateWithAudit.
+  if (!selected.costGuardSettings) {
+    return writeGuardDenyResponse(c, "maintenance_mode", 503);
+  }
+  const cost = evaluateCostGuardCore({
+    feature: "xid_links",
+    operationMode: selected.costGuardSettings.operation_mode,
+    disabledFeaturesJson: selected.costGuardSettings.disabled_features_json,
+    exceptionUntil: selected.costGuardSettings.cost_guard_exception_until,
+    exceptionFeaturesJson: selected.costGuardSettings.cost_guard_exception_features_json,
+    now: Math.floor(Date.now() / 1000),
+  });
+  if (cost.blocked) {
+    return writeGuardDenyResponse(c,
+      cost.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked", 503);
+  }
+  c.set("auditSettings", mapAuditSettings(selected.costGuardSettings));
   if (!selected.canonicalXId || !selected.linkedApproval) {
     return c.json({ ok: false, message: LINK_NOT_FOUND }, 403);
   }
