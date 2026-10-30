@@ -15,6 +15,7 @@ import {
   safeAdminNextHref,
 } from "../.test-dist/apps/ops/src/api/adminVideoStatus.js";
 import { CreateModerationCaseForm } from "../.test-dist/apps/ops/src/routes/admin/CreateModerationCaseForm.js";
+import { SaveSuccessNotice } from "../.test-dist/apps/ops/src/components/shared/SaveSuccessNotice.js";
 
 const detail = {
   video: {
@@ -158,6 +159,21 @@ test("MIG-0729 U02: nextHref must stay within one admin video detail", () => {
     if (link === "/admin/videos/next#fragment") continue; // legacy fragments are local
     assert.equal(safeAdminNextHref(link), false, link);
   }
+});
+
+
+test("MIG-0729 U02: status and case save notices retain CURRENT pending-public-reflection warning", () => {
+  const pending = renderToStaticMarkup(React.createElement(SaveSuccessNotice, {
+    message: "保存しました。",
+    pendingPublicReflection: true,
+  }));
+  assert.match(pending, /保存しました。/);
+  assert.match(pending, /公開ページへの反映は、静的データの再生成が完了するまで/);
+  const settled = renderToStaticMarkup(React.createElement(SaveSuccessNotice, {
+    message: "保存しました。",
+    pendingPublicReflection: false,
+  }));
+  assert.doesNotMatch(settled, /静的データの再生成/);
 });
 
 test("MIG-0729 U02: moderation form matches CURRENT visible field names", () => {
