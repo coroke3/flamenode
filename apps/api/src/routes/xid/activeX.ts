@@ -155,7 +155,16 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
     return writeGuardDenyResponse(c, "database_unavailable", 503);
   }
   if (!sessionUser) return writeGuardDenyResponse(c, "unauthenticated", 401);
-  if (!c.env.DB) return writeGuardDenyResponse(c, "db_unavailable", 503);
+  // A Worker D1 binding getter can synchronously throw provider-specific
+  // exceptions. Resolve once and reuse the same validated binding for both
+  // the identity and CostGuard reads; never leak the exception to Hono.
+  let db: D1Database | undefined;
+  try {
+    db = c.env?.DB;
+  } catch {
+    return writeGuardDenyResponse(c, "db_unavailable", 503);
+  }
+  if (!db) return writeGuardDenyResponse(c, "db_unavailable", 503);
 
   let raw: unknown;
   try {
@@ -169,7 +178,7 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
 
   let selected: Awaited<ReturnType<typeof loadSelectedIdentity>>;
   try {
-    selected = await loadSelectedIdentity(c.env.DB, sessionUser.id, xUserId);
+    selected = await loadSelectedIdentity(db, sessionUser.id, xUserId);
   } catch {
     return writeGuardDenyResponse(c, "db_unavailable", 503);
   }
@@ -184,7 +193,7 @@ activeXRoutes.post("/", limitXIdActionBody("SA-098"), async (c, next) => {
   if (!outcome.ok) return writeGuardDenyResponse(c, outcome.reason, outcome.status);
   if (!selected) return c.json({ ok: false, message: USER_NOT_FOUND }, 404);
 
-  const cost = await evaluateCostGuardWithSettings(c.env.DB, "xid_links");
+  const cost = await evaluateCostGuardWithSettings(db, "xid_links");
   if (cost.denied) return writeGuardDenyResponse(c, cost.denied, 503);
   if (cost.auditSettings) c.set("auditSettings", cost.auditSettings);
   if (!selected.canonicalXId || !selected.linkedApproval) {
