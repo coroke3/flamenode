@@ -770,31 +770,32 @@ PR を revert（文書だけ）。
 
 ### MIG-0504: user routes
 - **Model:** small
-- **Readiness:** READY_FOR_SMALL_MODEL — #352 で U01〜U05 は merge 済み。残りは T03 の CURRENT 準拠への書き換え、HTML 量の試験、画面確認、記録。icon map は MIG-0511、`/user/index.json` の gateway は MIG-0512
+- **Readiness:** READY_FOR_SMALL_MODEL — #352 で U01〜U05 は merge 済み。残りは CURRENT 404 契約の再確認、props JSON 量の試験、画面確認、記録。MIG-0511（#432）と MIG-0512（#411）は DONE で、icon map と `/user/index.json` の gateway 待ちは解消済み。MIG-0504のlive実装PR #453はREVIEW。main上のREADYだけで新規claimせず、既存ownerのレビュー・統合結果を確認する
 - **Recipe:** R-PAGE
 - **Runtime:** S0
 - **Depends on:** MIG-0407 / **Decisions:** D-02 DECIDED, D-03 DECIDED, D-06 DECIDED, D-08 DECIDED, D-11 DECIDED, D-13-3, D-13-25, D-13-28, D-13-35, D-13-36
-- **Verified against:** `7a19a42` (2026-10-25)
+- **Verified against:** `b378bd8da4a2fbb8545634dd01f4851ff4946950` (2026-10-28)
 #### Source snapshot
 - merge 済み: `apps/site/src/pages/user/index.astro`, `user/index.json.ts`, `user/[id]/index.astro`, `user/[id]/portfolio.astro`, `apps/site/src/lib/userData.ts`, `userViews.ts`（`buildSectionPages` :75-94、`USER_STATIC_DISPLAY_MAX_PAGES` = 15 :34-35、`USER_WORKS_DISPLAY_PAGE_SIZE` = 8 :31）, `apps/site/src/components/CreatorProfileIsland.ts`, `UsersIndexIsland.ts`。試験は `scripts/migration-user-routes.test.mjs`（`buildSectionPages` の使い方は :239-259）。
 - CURRENT `app/(public)/user/[id]/UserProfilePage.tsx:115,148` は `normalizeXId`、未公開・不明は `notFound()`（:228, :242, :305, :307）。旧 ID の redirect は無い。
 - gateway の大小文字畳み込み: `apps/site/src/gateway/routeShards.ts:44-48`、test `scripts/migration-gateway.test.mjs:175-184`。
 - producer 済み: `scripts/migration-snapshot-producers.test.mjs:147-177, 328-332`。
+- 解消済みの境界: `apps/site/src/pages/user/[id]/portfolio.astro` は `loadPublicXIconMapForBuild` / `portfolioIconUrl` / `resolveProjectedIcon` を使用（MIG-0511）。`scripts/migration-public-icon-map.test.mjs` が投影・fallback・build の回帰試験。`scripts/migration-gateway.test.mjs` は `/user/index.json` の exact path と lookalike 拒否を検証（MIG-0512）。ここでは両方の実装を変更せず回帰試験だけを実行する。
 - mock: `docs/migration/mock/screenshots/Creators.*`, `Creator.*`, `Portfolio.*`。fixture の user: `miku_producer`, `long_list`, `minimal_user`（`apps/site/src/lib/userFixtures.ts`）。
 #### Owned paths
-- 変更: `scripts/migration-user-routes.test.mjs`, `docs/migration/work-items/MIG-0504.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（user 5行）, `docs/migration/PHASE_4_5_SPEC.md`（この order の T03 行だけ、D-13-35）
+- 変更: `scripts/migration-user-routes.test.mjs`, `docs/migration/work-items/MIG-0504.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（user 5行）, `docs/migration/PERF_HOTPATH_MATRIX.md`（既存ユーザーページ行への U02 byte 数のみ）。この order の T03 は既に D-13-35 準拠で、書き換え不要
 - 触らない: `apps/site/src/gateway/**`（MIG-0512）, `app/(public)/user/**`, `src/lib/x/**`（icon map は MIG-0511）
 #### Micro-units
-- **U01 T03 と gap 1 の記録（D-13-35）**: T03 を「不明・merge 済みの X ID → CURRENT と同じ 404」に変える。gap 1 は「大小文字と `@` は gateway が畳む（routeShards.ts:44-48 と gateway test :175）。旧 ID の redirect は CURRENT に無い」と書いて閉じる。コードは変えない。
+- **U01 T03 と gap 1 の記録（D-13-35）**: T03「不明・merge 済みの X ID → CURRENT と同じ 404」を CURRENT code/test と照合し、その契約を維持する。gap 1 は「大小文字と `@` は gateway が畳む（routeShards.ts:44-48 と gateway test :175）。旧 ID の redirect は CURRENT に無い」と書いて閉じる。コードは変えない。
 ```bash
-node --test --experimental-strip-types scripts/migration-gateway.test.mjs --test-name-pattern="normalizeXId"
+node --test --experimental-strip-types --test-name-pattern="normalizeXId" scripts/migration-gateway.test.mjs
 ```
   期待: 1 test pass。
-- **U02 HTML 量（gap 3, D-13-36）**: `scripts/migration-user-routes.test.mjs` に test「G-size: profile Island props stay under 256 KiB at 15+15 display pages」を足す。`card = (i) => ({ id: "w" + i, title: "あ".repeat(100), youtube_video_id: "AAAAAAAAAAA", display_name: "い".repeat(30) })`。section は `{ total: 120, pageSize: 24, items: 24 件 }`、extra は `new Map([[2..5, { page, total: 120, pageSize: 24, generatedAt: null, items: 24 件 }]])`。`views.buildSectionPages(section, extra, 8, 24)` を works と collabs の両方に使う。`Buffer.byteLength(JSON.stringify({ works, collabs }), "utf8") <= 262144` を assert し、値を `console.log` する。`pages.length === 15` と全 page が非 null であることも assert する。
+- **U02 HTML 量（gap 3, D-13-36）**: `scripts/migration-user-routes.test.mjs` に test「G-size: profile Island props stay under 256 KiB at 15+15 display pages」を足す。`card = (i) => ({ id: "w" + i, title: "あ".repeat(100), youtube_video_id: "AAAAAAAAAAA", display_name: "い".repeat(30) })`。section は `{ total: 120, pageSize: 24, items: 24 件 }`、extra は `new Map([[2..5, { page, total: 120, pageSize: 24, generatedAt: null, items: 24 件 }]])`。`views.buildSectionPages(section, extra, 8, 24)` を works と collabs の両方に使う。`Buffer.byteLength(JSON.stringify({ works, collabs }), "utf8") <= 262144` を assert し、値を `console.log` する。`works.pages.length === 15` / `collabs.pages.length === 15` と両方の全 page が非 null であることも assert する。
 ```bash
-node --test --experimental-strip-types scripts/migration-user-routes.test.mjs --test-name-pattern="G-size"
+node --test --experimental-strip-types --test-name-pattern="G-size" scripts/migration-user-routes.test.mjs
 ```
-  期待: pass し、log の byte 数を work item に書く。超えたら STOP。
+  この test は module 読込時に依存を解決するため、先に Commands の `npm ci` と ui/site build を済ませる。期待: pass し、log の byte 数を work item に書く。超えたら STOP。
 - **U03 画面確認（gap 5）**: 共通の手順で `user/`, `user/miku_producer/`, `user/miku_producer/portfolio/`, `user/long_list/`（fixture build）。mock: Creators / Creator / Portfolio。
 ```bash
 OUT=$(mktemp -d); SHOTS=$(mktemp -d)
@@ -809,7 +810,7 @@ done
 kill $SERVER; ls -la "$SHOTS"
 ```
   期待: png 8枚。(c) が0件。
-- **U04 記録**: Parity gaps: 1 → 閉（U01）、2 → MIG-0511、3 → 閉（U02 の値）、4 → MIG-0512、5 → 閉（U03）、6 → MIG-0605 media routes（MIG-0508 経由）、7 → D-11。producer の証跡（`migration-snapshot-producers.test.mjs:147-177, 328-332`）を Validation に書く。
+- **U04 記録**: Parity gaps: 1 → 閉（U01）、2 → MIG-0511 DONE（icon regression の再実行）、3 → 閉（U02 の値）、4 → MIG-0512 DONE（gateway regression の再実行）、5 → 閉（U03）、6 → MIG-0646 media routes（MIG-0508 / API Gate 経由）、7 → D-11 / MIG-0411 / MIG-0509 の本番条件。producer と icon / gateway の実行コマンド・結果を Validation に書く。他 task の work-item は変更しない。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
@@ -825,7 +826,7 @@ PR の前に repo root で全部 pass させる。
 npm ci
 npm run build --workspace=@flamenode/ui
 npm run build --workspace=@flamenode/site
-REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-user-routes.test.mjs scripts/migration-snapshot-producers.test.mjs
+REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scripts/migration-user-routes.test.mjs scripts/migration-snapshot-producers.test.mjs scripts/migration-public-icon-map.test.mjs
 node --test --experimental-strip-types scripts/migration-gateway.test.mjs
 node scripts/check-public-site-build-budget.mjs
 npm run check:public-visibility-fences
@@ -833,12 +834,13 @@ npm run typecheck
 npm run check:project-docs
 ```
 #### Ledger updates
-`FILE_MIGRATION_MATRIX.md`: `app/(public)/user/page.tsx`, `app/(public)/user/~query/page.tsx` → `PARITY_VERIFIED`（target の `+` を外す。gateway の `/user/index.json` は MIG-0512 の行）。`app/(public)/user/[id]/page.tsx`, `app/(public)/user/[id]/paged/page.tsx`, `app/(public)/user/[id]/portfolio/page.tsx` → `IN_PROGRESS`（icon map は MIG-0511）。`PERF_HOTPATH_MATRIX.md` の `/user/*` 行に U02 の byte 数。
+`FILE_MIGRATION_MATRIX.md`: `app/(public)/user/page.tsx`, `app/(public)/user/~query/page.tsx` → `PARITY_VERIFIED`（target の `+` を外す。gateway の `/user/index.json` は MIG-0512 の行）。`app/(public)/user/[id]/page.tsx`, `app/(public)/user/[id]/paged/page.tsx`, `app/(public)/user/[id]/portfolio/page.tsx` も U01〜U04 / T01〜T06・icon/gateway regression と独立レビューが揃ってから `PARITY_VERIFIED`（icon map / gateway は main で解決済み）。本番未切替のため `CUTOVER` にはしない。`PERF_HOTPATH_MATRIX.md` の `/user/*` 行に U02 の byte 数。
 #### DONE checklist
 - [ ] T01〜T06 pass
 - [ ] 非公開作品が HTML に含まれない
-- [ ] T03 が CURRENT 準拠に書き換わっている
+- [ ] T03 が CURRENT 準拠で、MIG-0511 icon / MIG-0512 gateway の回帰試験が PASS
 #### STOP
+- live open PR が同じ user source/test・台帳行を所有していたら claim せず止める。
 - props が 262,144 byte を超えたら止める（lead が per-page JSON を決める）。
 - D-03（Active X fan-out）のロジックを表示側へ持ち込む必要が出たら止める。
 - gateway を変える必要が出たら止める（MIG-0512）。
