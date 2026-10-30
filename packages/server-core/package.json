@@ -11,6 +11,12 @@
     "./sql": "./src/sql.ts",
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
+    "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
+    "./memberSuggestion/rank": "./src/memberSuggestion/rank.ts",
+    "./memberSuggestion/search": "./src/memberSuggestion/search.ts",
+    "./memberSuggestion/loader": "./src/memberSuggestion/loader.ts",
+    "./memberSuggestion/postingsV2": "./src/memberSuggestion/postingsV2.ts",
+    "./memberSuggestion/v2Loader": "./src/memberSuggestion/v2Loader.ts",
     "./audit/adapters": "./src/audit/adapters.ts",
     "./audit/capability": "./src/audit/capability.ts",
     "./audit/diff": "./src/audit/diff.ts",
@@ -82,9 +88,11 @@
     "./publicData/searchIndexCore": "./src/publicData/searchIndexCore.ts",
     "./publicData/eventListCore": "./src/publicData/eventListCore.ts",
     "./publicData/eventDetailCore": "./src/publicData/eventDetailCore.ts",
+    "./publicData/publicEventStaff": "./src/publicData/publicEventStaff.ts",
     "./publicData/videoDetailCore": "./src/publicData/videoDetailCore.ts",
     "./publicData/eventPlaylistCore": "./src/publicData/eventPlaylistCore.ts",
-    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts"
+    "./publicData/loaderPolicy": "./src/publicData/loaderPolicy.ts",
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
