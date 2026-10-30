@@ -8,7 +8,7 @@ import {
   EventStaffReadOnlyList, presetLabel,
 } from "../.test-dist/apps/ops/src/routes/manage/EventStaffReadOnlyList.js";
 import {
-  EventStaffReadOnlyPage, EventStaffReadOnlyView,
+  EventStaffReadOnlyPage, EventStaffReadOnlyView, currentStaffResult,
 } from "../.test-dist/apps/ops/src/routes/manage/EventStaffReadOnlyPage.js";
 
 const json = (status, data) => new Response(JSON.stringify(data), {
@@ -119,4 +119,17 @@ test("MIG-0723 U01a: no event.members means read-only, counts and cap are truthf
   assert.doesNotMatch(privileged, /event.members 権限が必要/);
   const loading = render(React.createElement(EventStaffReadOnlyPage, { eventId: "ev1" }));
   assert.match(loading, /読み込み中/);
+});
+
+
+test("MIG-0723 U01a: event or account fetch changes never render a previous staff snapshot", () => {
+  const fetchA = async () => json(200, staff());
+  const fetchB = async () => json(200, staff());
+  const prior = { eventId: "ev1", fetchFn: fetchA, result: { status: "ok", data: staff() } };
+  assert.equal(currentStaffResult("ev1", fetchA, prior), prior.result);
+  assert.equal(currentStaffResult("ev2", fetchA, prior), null, "switching event hides prior authorized members during pre-effect render");
+  assert.equal(currentStaffResult("ev1", fetchB, prior), null, "fetch identity change invalidates prior authorized members");
+  assert.equal(currentStaffResult("ev1", fetchA, null), null);
+  const failed = { eventId: "ev2", fetchFn: fetchA, result: { status: "forbidden" } };
+  assert.equal(currentStaffResult("ev2", fetchA, failed), failed.result, "new result preserves 403 response");
 });
