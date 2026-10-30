@@ -245,7 +245,14 @@ export async function listEventTemplatesForAdminApi(c: Context<AppEnv>): Promise
       sessionUnavailable: c.get("sessionState") === "unavailable",
       loadTosState: rawDb ? async () => loadTosState(rawDb, user.id) : undefined,
     });
-    if (!guard.ok) return c.json([]);
+    if (!guard.ok) {
+      // A failed ToS identity read is a transient DB outage, not a normal
+      // identity/TOS/CostGuard denial. CURRENT getCurrentUser throws for it.
+      if (guard.reason === "db_unavailable") {
+        return c.json({ error: "unavailable" }, 503);
+      }
+      return c.json([]);
+    }
     const cost = await evaluateCostGuardWithSettings(rawDb, "admin_event_templates");
     if (cost.denied) return c.json([]);
     const { results } = await rawDb
