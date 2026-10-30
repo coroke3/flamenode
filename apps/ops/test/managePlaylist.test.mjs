@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { JSDOM } from "jsdom";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -142,8 +143,10 @@ test("MIG-0725 U01 T01/T02: CURRENT banner, form disabled for read-only staff, s
   assert.match(readOnly, /閲覧のみです/);
   assert.doesNotMatch(readOnly, /保存して同期を予約<\/button>/);
   assert.doesNotMatch(readOnly, /今すぐ同期を予約/);
-  assert.match(readOnly, /name="playlist_id"[^>]*disabled=""/);
-  assert.match(readOnly, /name="sync_mode"[^>]*disabled=""/);
+  const readOnlyDoc = new JSDOM(readOnly).window.document;
+  assert.equal(readOnlyDoc.querySelector('input[name="playlist_id"]')?.disabled, true);
+  assert.equal(readOnlyDoc.querySelector('select[name="sync_mode"]')?.disabled, true);
+  assert.equal(readOnlyDoc.querySelector('select[name="sync_interval_minutes"]')?.disabled, true);
   const disabledSync = render({ ...fixture, config: { ...fixture.config, enabled: 0 } });
   assert.doesNotMatch(disabledSync, /今すぐ同期を予約/);
   assert.ok(edit.includes("https://www.youtube.com/playlist?list=PL123"));
