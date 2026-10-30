@@ -4,6 +4,7 @@ import type { AdminVideoRow } from "@flamenode/contracts";
 import type { OpsFetch } from "../../api/read.js";
 import {
   adminVideoTotalPages,
+  adminVideoPageNumbers,
   buildAdminVideoHref,
   loadAdminVideos,
   parseAdminVideoFilters,
@@ -31,9 +32,16 @@ function detailHref(videoId: string, event: string): string {
   const path = `/admin/videos/${encodeURIComponent(videoId)}`;
   return event ? `${path}?event=${encodeURIComponent(event)}` : path;
 }
+/** CURRENT src/lib/utils/format.ts#formatRelative, unix seconds. */
 function createdLabel(timestamp: number): string {
-  const date = new Date(timestamp * 1000);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString("ja-JP") : "—";
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
+  const diff = Date.now() / 1000 - timestamp;
+  if (diff < 60) return "今";
+  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
+  if (diff < 2592000) return `${Math.floor(diff / 86400)}日前`;
+  if (diff < 31536000) return `${Math.floor(diff / 2592000)}か月前`;
+  return `${Math.floor(diff / 31536000)}年前`;
 }
 
 function VideoRow({ video, event, isReview }: {
@@ -142,13 +150,29 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
           {videos.length === 0 ? <tr><td colSpan={5}>条件に合う作品がありません。</td></tr> : null}
         </tbody>
       </table>
-      <nav aria-label="作品一覧ページ" className="fn-panel-actions">
-        {paging.page > 1
-          ? <a href={buildAdminVideoHref({ q, status, event }, paging.page - 1)}>前へ</a> : null}
-        <span>{paging.total} 件 · {paging.page} / {totalPages} ページ</span>
-        {paging.page < totalPages
-          ? <a href={buildAdminVideoHref({ q, status, event }, paging.page + 1)}>次へ</a> : null}
-      </nav>
+      {totalPages > 1 ? (
+        <nav aria-label="ページ送り" className="fn-panel-actions" style={{ flexWrap: "wrap" }}>
+          <span>
+            {(paging.page - 1) * paging.pageSize + 1}〜{Math.min(paging.page * paging.pageSize, paging.total)}
+            {" / 全 "}{paging.total} 件 ({paging.page} / {totalPages} ページ)
+          </span>
+          {paging.page > 1 ? (
+            <a className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="前のページ"
+              href={buildAdminVideoHref({ q, status, event }, paging.page - 1)}>前へ</a>
+          ) : <span aria-disabled="true">前へ</span>}
+          {adminVideoPageNumbers(paging.page, totalPages).map((page, index) =>
+            page === "…" ? <span key={`gap-${index}`}>…</span> : (
+              <a key={page} className={page === paging.page ? "fn-btn fn-btn-primary fn-btn-sm" : "fn-btn fn-btn-ghost fn-btn-sm"}
+                aria-current={page === paging.page ? "page" : undefined}
+                href={buildAdminVideoHref({ q, status, event }, page)}>{page}</a>
+            ),
+          )}
+          {paging.page < totalPages ? (
+            <a className="fn-btn fn-btn-ghost fn-btn-sm" aria-label="次のページ"
+              href={buildAdminVideoHref({ q, status, event }, paging.page + 1)}>次へ</a>
+          ) : <span aria-disabled="true">次へ</span>}
+        </nav>
+      ) : null}
     </section>
   );
 }
