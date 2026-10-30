@@ -87,7 +87,7 @@
 | `app/(manage)/manage/events/[id]/review/page.tsx` | PAGE | /manage/events/[id]/review (COMPAT_REDIRECT) | MIG-0704 | apps/ops (route=/manage/events/[id]/review; exact component TBD) | NOT_STARTED | — |
 | `app/(manage)/manage/events/[id]/slots/page.tsx` | PAGE | /manage/events/[id]/slots (VISUAL_SCREEN) | MIG-0704 | apps/ops (route=/manage/events/[id]/slots; exact component TBD) | NOT_STARTED | — |
 | `app/(manage)/manage/events/[id]/staff/page.tsx` | PAGE | /manage/events/[id]/staff (VISUAL_SCREEN) | MIG-0704 | apps/ops (route=/manage/events/[id]/staff; exact component TBD) | NOT_STARTED | — |
-| `app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx` | PAGE | /manage/events/[id]/videos/[videoId] (VISUAL_SCREEN) | MIG-0704 | apps/ops (route=/manage/events/[id]/videos/[videoId]; exact component TBD) | NOT_STARTED | — |
+| `app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx` | PAGE | /manage/events/[id]/videos/[videoId] (VISUAL_SCREEN) | MIG-0704 | apps/ops/src/routes/manage/EventVideoDetail.tsx#EventVideoDetail + apps/ops/src/api/manageVideoDetail.ts#createManageVideoDetailApi (U03, router not mounted) | IN_PROGRESS | PR#501 SHA=9413beb2f27a7974f7c5756fe7d507150b45dda2 (read-only detail, injection pending) |
 | `app/(manage)/manage/events/[id]/videos/page.tsx` | PAGE | /manage/events/[id]/videos (VISUAL_SCREEN) | MIG-0704 | apps/ops/src/routes/manage/EventVideos.tsx#EventVideos + apps/ops/src/api/manageVideos.ts#createManageVideosApi (U02 list only; route mounting U03/U04) | IN_PROGRESS | PR#501 SHA=116187de337589d5dde899afc99c924430c24e51 (U02 list component; no production route) |
 | `app/(manage)/manage/events/[id]/youtube-playlist/page.tsx` | PAGE | /manage/events/[id]/youtube-playlist (VISUAL_SCREEN) | MIG-0704 | apps/ops (route=/manage/events/[id]/youtube-playlist; exact component TBD) | NOT_STARTED | — |
 | `app/(manage)/manage/notifications/page.tsx` | PAGE | /manage/notifications (VISUAL_SCREEN) | MIG-0704 | apps/ops (route=/manage/notifications; exact component TBD) | NOT_STARTED | — |
@@ -1208,6 +1208,10 @@
 | `apps/ops/src/api/manageVideos.ts` | HELPER | MIG-0724 U02 GET /api/manage/events/:id/videos, two bounded pages | MIG-0724 | SAME (EventVideos.tsx imports createManageVideosApi) | IN_PROGRESS | PR#501 SHA=fd04be401bfca4a3628ff87114c519fbc8dcea71 (U02 DTO + fail-closed) |
 | `apps/ops/src/routes/manage/EventVideos.tsx` | TARGET_SKELETON | MIG-0724 U02 /manage/events/:id/videos; route not mounted | MIG-0724 | SAME (EventVideos and EventVideosContent, U03/U04 router integration pending) | IN_PROGRESS | PR#501 SHA=116187de337589d5dde899afc99c924430c24e51 (U02 list, not yet routed) |
 | `apps/ops/test/manageVideosRead.test.mjs` | TEST | MIG-0724 U02 150/200 rows and auth/error/stale view tests | MIG-0724 | SAME (createManageVideosApi and EventVideosContent) | IN_PROGRESS | PR#501 SHA=b9c09227b7bb55611ec73257f5d32a6b7353fad6 (U02 tests; exact-head CI pending) |
+
+| `apps/ops/src/api/manageVideoDetail.ts` | HELPER | MIG-0724 U03 GET /api/manage/events/:id/videos/:videoId | MIG-0724 | SAME (EventVideoDetail.tsx, schema and event/video validation) | IN_PROGRESS | PR#501 SHA=da52ec912224ae6227335d08d23397b9dfe69903 (read client, pending independent review) |
+| `apps/ops/src/routes/manage/EventVideoDetail.tsx` | TARGET_SKELETON | MIG-0724 U03 video review detail, permission display, U04 unmounted | MIG-0724 | SAME (EventVideoDetail and EventVideoDetailContent, status injected after U04) | IN_PROGRESS | PR#501 SHA=9413beb2f27a7974f7c5756fe7d507150b45dda2 (U03 read-only detail) |
+| `apps/ops/test/manageVideoDetail.test.mjs` | TEST | MIG-0724 U03 schema/403/404/UI/nextHref contract regressions | MIG-0724 | SAME (read and render parity coverage) | IN_PROGRESS | PR#501 SHA=a98a4ca6fa751717f4a0da0e6c42d40da39bdd6d (U03 tests, CI pending) |
 
 ## Future files requiring source/target registration
 
