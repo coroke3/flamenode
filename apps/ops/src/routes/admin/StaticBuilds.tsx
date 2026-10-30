@@ -38,7 +38,6 @@ export function StaticBuilds(): React.ReactElement {
       if (carryQuery) {
         const query = mutationResultQuery(result.data);
         window.history.replaceState(null, "", window.location.pathname + (query ? "?" + query : ""));
-        if (typeof result.data.backfill_error === "string") setLoadError("バックフィルの実行に失敗しました。進捗を確認してください。");
       }
       setRefreshId(id => id + 1);
     } finally {
@@ -121,7 +120,8 @@ export function StaticBuilds(): React.ReactElement {
       </section>
       <section className="fn-card" style={{ padding: 16 }}>
         <h2>段階的バックフィル（12件ずつ）</h2>
-        {backfillKind && <p role="status">直近: {backfillKind} / 走査済み {query.get("backfill_scanned") ?? "—"} / キュー投入 {query.get("backfill_enqueued") ?? "—"} / {query.get("backfill_done") === "1" ? "完了" : "継続可能"}</p>}
+        {backfillKind && <p role="status">直近: {backfillKind}{query.get("backfill_error") ? " / error=" + query.get("backfill_error") : " / scanned=" + (query.get("backfill_scanned") ?? "—") + " / enqueued=" + (query.get("backfill_enqueued") ?? "—")}{query.get("backfill_done") === "1" ? " / 完了" : query.get("backfill_cursor") ? " / next=" + query.get("backfill_cursor") : ""}</p>}
+        {query.get("backfill_error") && <p role="alert">バックフィルが失敗しました。エラー内容を確認してください。</p>}
         {stateFailed && <p role="alert">KVに進捗を保存できませんでした。キュー投入自体は完了している可能性があります。</p>}
         {KINDS.map(kind => {
           const run = data.backfillState.runs[kind];
