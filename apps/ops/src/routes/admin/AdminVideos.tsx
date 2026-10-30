@@ -17,13 +17,13 @@ const VIDEO_GROUPS = [
   { status: "review", label: "審査待ち" },
   { status: "public", label: "公開" },
   { status: "private", label: "非公開" },
-  { status: "closed", label: "終了" },
+  { status: "closed", label: "無効" },
 ] as const;
 const VISIBILITY_LABELS: Record<string, string> = {
   pending: "審査待ち",
   public: "公開",
   private: "非公開",
-  voided: "無効",
+  voided: "無効化",
 };
 function visibilityLabel(status: string): string {
   return Object.hasOwn(VISIBILITY_LABELS, status) ? VISIBILITY_LABELS[status]! : status;
@@ -142,7 +142,8 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
         <button type="submit" className="fn-btn">検索</button>
         {(q || status || event) ? <a className="fn-btn fn-btn-ghost" href="/admin/videos">解除</a> : null}
       </form>
-      <table className="fn-table" style={{ marginTop: 18 }}>
+      <div style={{ maxWidth: "100%", overflowX: "auto", marginTop: 18 }} aria-label="作品一覧スクロール領域">
+        <table className="fn-table">
         <thead><tr>
           <th>サムネイル</th><th>作品</th><th>状態</th><th>登録</th><th>操作</th>
         </tr></thead>
@@ -150,7 +151,8 @@ export function AdminVideos({ fetchFn = browserFetch }: { fetchFn?: OpsFetch }):
           {videos.map((video) => <VideoRow key={video.id} video={video} event={event} isReview={isReview} />)}
           {videos.length === 0 ? <tr><td colSpan={5}>条件に合う作品がありません。</td></tr> : null}
         </tbody>
-      </table>
+        </table>
+      </div>
       {totalPages > 1 ? (
         <nav aria-label="ページ送り" className="fn-panel-actions" style={{ flexWrap: "wrap" }}>
           <span>
