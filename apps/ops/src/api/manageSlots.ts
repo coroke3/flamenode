@@ -25,7 +25,17 @@ export async function listSlots(
   fetchFn: OpsFetch = (path, init) => fetch(path, init),
   signal?: AbortSignal,
 ): Promise<OpsResult<ManageSlotsList>> {
-  if (!eventId || eventId === "." || eventId === ".." || eventId.includes("/") || eventId.includes("\\")) {
+  if (!eventId || eventId === "." || eventId === ".." || eventId.includes("/") ||
+      eventId.includes("\\") || eventId.includes("\0")) {
+    return { status: "unavailable" };
+  }
+  // A route parameter can contain an unpaired UTF-16 surrogate. Encoding
+  // outside a try block throws URIError and rejects the entire read instead
+  // of showing a recoverable error. Never start the request for invalid IDs.
+  let encodedEventId: string;
+  try {
+    encodedEventId = encodeURIComponent(eventId);
+  } catch {
     return { status: "unavailable" };
   }
   const filter = normalizeSlotFilter(status);
@@ -36,7 +46,7 @@ export async function listSlots(
   for (let page = 0; page < MAX_PAGES; page++) {
     if (signal?.aborted) return { status: "unavailable" };
     const offset = page * PAGE_SIZE;
-    const path = "/api/manage/events/" + encodeURIComponent(eventId) +
+    const path = "/api/manage/events/" + encodedEventId +
       "/slots?status=" + filter + "&offset=" + offset;
     const result = await getJson<unknown>(fetchFn, path, signal);
     if (result.status !== "ok") return result;
