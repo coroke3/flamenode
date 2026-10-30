@@ -37,7 +37,7 @@ type Fetcher = { fetch: (request: Request) => Promise<Response> };
 export interface GatewayEnv extends EdgePolicyEnv {
   /** Static Assets; must run with `run_worker_first = true` so every request passes this gate. */
   ASSETS?: Fetcher;
-  /** Prebuilt HTML for pages that do not fit in Static Assets (MIG-0406, D-06); the MIG-0411 consumer writes it. */
+  /** Prebuilt HTML; MIG-0411 deletes fenced pages but never renders or PUTs. */
   R2_STORAGE?: R2HtmlBucket & Partial<PageRenderR2Bucket>;
   /** Non-production only: rebuild requests for the MIG-0411 consumer. */
   REBUILD_QUEUE?: RebuildQueue;
@@ -48,8 +48,6 @@ export interface GatewayEnv extends EdgePolicyEnv {
   };
   /** MIG-0411 consumer only: public_page_renders and the entity rows. Never read by fetch(). */
   DB?: D1DatabaseLike;
-  /** MIG-0411 consumer only: comma-separated /_astro/*.css paths of the build (page stylesheet link). */
-  PUBLIC_PAGE_STYLESHEETS?: string;
 }
 
 const NO_STORE = "no-store, private";
@@ -393,14 +391,14 @@ export default {
   /** MIG-0411: the REBUILD_QUEUE consumer (max_batch_size = 1, max_concurrency = 1). Non-production. */
   async queue(batch: QueueBatch, env: GatewayEnv): Promise<PageRenderOutcome[]> {
     const r2 = env.R2_STORAGE;
-    const writable = r2?.put && r2.delete ? (r2 as PageRenderR2Bucket) : undefined;
+    const writable = r2?.delete ? (r2 as PageRenderR2Bucket) : undefined;
     // Same shard lookup as fetch(): the Assets binding ignores the origin.
     const lookup: RouteLookup = env.ASSETS
       ? createShardLookup(env.ASSETS, "https://gateway.invalid")
       : async () => undefined;
     return handlePageRenderQueue(
       batch,
-      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV, PUBLIC_PAGE_STYLESHEETS: env.PUBLIC_PAGE_STYLESHEETS },
+      { DB: env.DB, R2_STORAGE: writable, VISIBILITY_KV: env.VISIBILITY_KV },
       lookup,
     );
   },
