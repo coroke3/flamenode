@@ -41,6 +41,42 @@ test("quoted Markdown link titles do not become filenames",()=>fixture(root=>{
  assert.doesNotMatch(errors.join("\n"),/Child file|Angle destination|Remote|Missing file|Unsafe/);
 }));
 
+test("balanced parentheses, escaped punctuation and titles resolve to their real files",()=>fixture(root=>{
+  const base=path.join(root,"docs/migration");
+  for(const filename of ["foo(bar).md","foo)bar.md","two(nest(level)).md"]){
+    fs.writeFileSync(path.join(base,filename),"# Fixture\n");
+  }
+  const md=[
+    "[literal](foo(bar).md)",
+    "[escaped](foo\\(bar\\).md)",
+    "[escaped close](foo\\)bar.md)",
+    "[nested](two(nest(level)).md)",
+    '[quoted title](foo(bar).md "Parenthesis title")',
+    "[angle](<foo(bar).md> 'Angle title')",
+    "[paren title](foo(bar).md (Optional title))",
+    "[remote](https://example.com/path(foo))",
+    "\\[escaped label](not-a-real-link.md)",
+    "[missing](missing(with-parens).md)",
+    "[escaped missing](missing\\(escaped\\).md)",
+    "[outside](../../../../../outside(evil).md)",
+  ].join("\n");
+  fs.appendFileSync(path.join(base,"README.md"),"\n"+md+"\n");
+  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+  assert.equal(errors.length,3,errors.join("\n"));
+  assert.match(errors.join("\n"),/broken relative link: missing\(with-parens\)\.md/);
+  assert.match(errors.join("\n"),/broken relative link: missing\(escaped\)\.md/);
+  assert.match(errors.join("\n"),/link outside repository: \.\.\/\.\.\/\.\.\/\.\.\/\.\.\/outside\(evil\)\.md/);
+  assert.doesNotMatch(errors.join("\n"),/foo\(|foo\)|two\(|not-a-real-link|Parenthesis title|Angle title/);
+}));
+
+test("malformed unbalanced link cannot swallow a following valid missing-file link",()=>fixture(root=>{
+  fs.appendFileSync(path.join(root,"docs/migration/README.md"),
+    "\n[invalid](broken(unbalanced.md) [real](missing-after-unbalanced.md)\n");
+  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+  assert.equal(errors.length,1,errors.join("\n"));
+  assert.match(errors[0],/broken relative link: missing-after-unbalanced\.md/);
+}));
+
 test("does not treat a fragment-only URL as a local file",()=>fixture(root=>{
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n[heading](#entry)\n");
  assert.deepEqual(validateLinks({root,documents:listMarkdownFiles(root)}),[]);
