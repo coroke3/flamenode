@@ -79,6 +79,23 @@ test("missing leading pipe, MIG separator, or noncanonical indentation fails clo
   }
 });
 
+test("task rows missing every pipe fail closed within STATUS task tables", () => {
+  const row = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  for (const malformed of [
+    "MIG-0301 core PoC READY MIG-0108",
+    "MIG-0301",
+    "  MIG-0301 core PoC READY MIG-0108",
+    "| MIG-0301 core PoC READY MIG-0108",
+  ]) {
+    const changed = status.replace(row, malformed);
+    assert.throws(() => parseTaskRows(changed), /malformed task row: MIG-0301/, malformed);
+    assert.match(run({ statusText: changed }).join("\n"),
+      /invalid STATUS task ledger: malformed task row: MIG-0301/, malformed);
+  }
+  const prose = status + "\n## Ordinary section\nMIG-0301 core PoC READY MIG-0108\n";
+  assert.deepEqual(run({ statusText: prose }), []);
+});
+
 test("ordinary MIG prose outside task tables is not treated as a broken task row", () => {
   const appended = status + "\nMIG-0301 is discussed in prose.\nMIG-0302 | paragraph reference, not a row.\n";
   assert.equal(parseTaskRows(appended).size, parseTaskRows(status).size);
