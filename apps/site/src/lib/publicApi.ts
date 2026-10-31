@@ -10,9 +10,12 @@ export async function fetchPublicJson<T>(
   init: RequestInit = {},
   fetcher: typeof fetch = fetch,
 ): Promise<PublicJsonResult<T>> {
-  // Do not allow API callers to turn credentialed fetch into an external request.
+  // The browser resolves dot segments before routing. Validate the path portion only,
+  // so query values may still contain percent-encoded search text.
+  const pathname = path.split(/[?#]/, 1)[0];
   if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\") ||
-      /[\u0000-\u001f\u007f]/.test(path) || path.includes("://")) {
+      /[\u0000-\u001f\u007f]/.test(path) || path.includes("://") ||
+      /(?:^|\/)\.{1,2}(?:\/|$)/.test(pathname) || /%(?:2e|2f|5c)/i.test(pathname)) {
     return { ok: false, status: 0 };
   }
   try {
