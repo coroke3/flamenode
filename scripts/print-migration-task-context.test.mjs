@@ -107,6 +107,11 @@ test("incomplete open PR records fail closed instead of silently releasing MIG o
   {number:3,headRefName:""},
   {number:4,headRefName:"   "},
   {number:null,headRefName:"migration/mig-0651-submit"},
+  {number:"0",headRefName:"migration/mig-0651-submit"},
+  {number:"not-an-id",headRefName:"migration/mig-0651-submit"},
+  {number:" ?(migration/mig-0651-submit)",headRefName:"migration/mig-0651-submit"},
+  {number:"?(migration/mig-0652-other)",headRefName:"migration/mig-0651-submit"},
+  {number:"9007199254740992",headRefName:"migration/mig-0651-submit"},
   {headRefName:"migration/mig-0651-submit"},
   Object.assign(Object.create({headRefName:"migration/mig-0651-submit"}),{number:9}),
  ];
@@ -118,6 +123,7 @@ test("incomplete open PR records fail closed instead of silently releasing MIG o
  const valid=[
   {number:481,headRefName:"migration/mig-0723-staff-view"},
   {number:482,headRefName:"fix/standalone"},
+  {number:"483",headRefName:"fix/another-standalone"},
   {number:"?(migration/mig-0651-submit)",headRefName:"migration/mig-0651-submit"},
  ];
  assert.deepEqual([...parseOwnedTasks(valid)],[["MIG-0723",481],["MIG-0651","?(migration/mig-0651-submit)"]]);
