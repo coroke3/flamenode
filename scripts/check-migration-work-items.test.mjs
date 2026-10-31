@@ -25,6 +25,32 @@ test("duplicate paths are rejected",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":another}}).join(" "),/already claimed/);
 });
+test("directory ownership conflicts with nested file locks in either order",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const directory of ["src/**","src/","./src/**","src/./**","src\\**"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+directory);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":another};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,directory);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":another,"MIG-0301.md":first}}).join("\n"),/already claimed/,directory);
+ }
+});
+
+test("equivalent spellings cannot bypass the work-item path lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const alias of ["./src/a.ts","src\\a.ts","src/x/../a.ts","src//a.ts"]) {
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+alias);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":second}}).join("\n"),/already claimed/,alias);
+ }
+});
+
+test("sibling paths and similarly prefixed filenames remain independent",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const other of ["src/a.tsx","src/ab.ts","src2/a.ts","tests/a.ts"]) {
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+other);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":second}}),[],other);
+ }
+});
+
 test("REVIEW requires evidence",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active.replace("State: IN_PROGRESS","State: REVIEW")}}).join(" "),/Evidence required/));
 test("unknown MIG rejected",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0999.md":ready}}).join(" "),/absent from STATUS/));
 
