@@ -53,6 +53,51 @@ Route HandlerはHonoへ機械copyしない。HTTP transport、business/read mode
 | RH-032 | GET | /api/videos | public video list/search | public rate limit + explicit DTO | R2/static list/search/event pages; bounded strategy | public cache by static artifact strategy | FN-API-003,FN-PUB-014,FN-PLAT-002,FN-PLAT-008 | UX-DISC-001..004,UX-GLOBAL-005 | publicApi/publicDto/publicRouteHardening tests | static-first query facade; no universal repository | CURRENT_VERIFIED |
 | RH-033 | GET | /api/youtube-thumbnail/[id]/[size] | YouTube thumbnail proxy | strict YouTube ID/size allowlist | external image fetch/proxy | proxy cache/object size contract | FN-API-009 | UX-VID-004..005 | externalImageProxy + YouTube id evidence | prefer direct/static where safe; retain SSRF/size/type guard | CURRENT_VERIFIED |
 
+## Phase 6 migration owner coverage (MIG-0605 U07)
+
+> Assignment snapshot: 2026-10-31, `PHASE_6_SPEC.md` and `TASK_MICRO_UNITS.md`. This table identifies exactly one **primary task owner** for each CURRENT HTTP method (RH-001–033). It does **not** assert that a task is DONE, that the Hono route is production-routed, or that compatibility tests/independent review passed. Main `STATUS.md` and each task's PR govern actual completion.
+
+| HTTP method ID | Primary MIG owner | Boundary / exception |
+| --- | --- | --- |
+| RH-001 | MIG-0605 | — |
+| RH-002 | MIG-0645 | — |
+| RH-003 | MIG-0605 | spreadsheet read |
+| RH-004 | MIG-0638 | — |
+| RH-005 | MIG-0638 | — |
+| RH-006 | MIG-0638 | — |
+| RH-007 | MIG-0605 | spreadsheet export read; paging follow-up with MIG-0638 |
+| RH-008 | MIG-0638 | — |
+| RH-009 | MIG-0605 | spreadsheet discovery read |
+| RH-010 | MIG-0802 | Phase 8 Auth.js compatibility; hand-off, not Hono cutover |
+| RH-011 | MIG-0802 | Phase 8 Auth.js compatibility; hand-off, not Hono cutover |
+| RH-012 | MIG-0631 | — |
+| RH-013 | MIG-0632 | — |
+| RH-014 | MIG-0604 | — |
+| RH-015 | MIG-0631 | — |
+| RH-016 | MIG-0605 | — |
+| RH-017 | MIG-0660 | deep-health split from MIG-0601 |
+| RH-018 | MIG-0601 | — |
+| RH-019 | MIG-0648 | — |
+| RH-020 | MIG-0604 | — |
+| RH-021 | MIG-0604 | — |
+| RH-022 | MIG-0604 | — |
+| RH-023 | MIG-0646 | — |
+| RH-024 | MIG-0646 | — |
+| RH-025 | MIG-0646 | — |
+| RH-026 | MIG-0601 | — |
+| RH-027 | MIG-0647 | — |
+| RH-028 | MIG-0647 | — |
+| RH-029 | MIG-0601 | — |
+| RH-030 | MIG-0603 | video detail migrated with MIG-0603 |
+| RH-031 | MIG-0634 | — |
+| RH-032 | MIG-0634 | — |
+| RH-033 | MIG-0605 | — |
+
+- **RH-010/011** intentionally remain Auth.js compatibility methods until Phase 8; MIG-0802 is the integration PoC owner, and actual Auth parity/cutover is gated by MIG-0803–0806. Their presence in this ownership ledger does **not** authorize an Auth.js → Hono switch.
+- RH-003/007/009 are the existing read half delivered under MIG-0605 (#392); RH-004/005/006/008 and the `/export` pagination follow-up are MIG-0638.
+- MIG-0605 retains SA-090/091 X link review mutations as a separate unfinished unit. SA-107 login-inline UI is tracked by MIG-0703 / MIG-0802; SA-108/109 page wrappers delegate to the MIG-0602 typed API; SA-110 X merge dispatcher belongs to **MIG-0644** under later D-14-10 / `PHASE_6_SPEC.md` source snapshot. An earlier U07 note saying MIG-0637 for SA-110 conflicts with that delegation; do not assign it to both without a Lead ledger correction.
+- A method owner can have separate follow-up tasks (e.g. MIG-0664's RH-001 degraded reason); the primary method owner here remains unique. Owner assignment is not evidence of production route cutover.
+
 ## Reuse candidates
 
 - **Public API envelope**: rate limit、explicit DTO、safe error、cache headerは共有可能。ただしvisibility source/static fallbackはrouteごとに明示する。
