@@ -90,10 +90,34 @@ export function validateCheckpointPolicy(documents) {
 
 export function parseTaskRows(statusText) {
   const rows = new Map();
+  let inTaskTable = false;
   for (const line of statusText.split("\n")) {
+    const trimmed = line.trim();
+    // Scope damaged-row detection to STATUS task tables, not incidental MIG prose.
+    if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|/.test(trimmed)) {
+      inTaskTable = true;
+      continue;
+    }
+    if (!trimmed) {
+      inTaskTable = false;
+      continue;
+    }
+    const match = line.match(/^\|\s*(MIG-\d{4})\s*\|/);
+    // A broken table row may omit its initial pipe or MIG-ID separator.
+    // Valid standalone rows remain accepted for existing STATUS fixtures.
+    const candidate = match || (inTaskTable && trimmed.includes("|")
+      ? trimmed.match(/^\|?\s*(MIG-\d{4})\b/) : null);
+    if (!candidate) {
+      if (inTaskTable && !trimmed.startsWith("|")) inTaskTable = false;
+      continue;
+    }
     const cells = line.split("|").map((cell) => cell.trim());
-    if (cells.length < 6 || !/^MIG-\d{4}$/.test(cells[1])) continue;
-    rows.set(cells[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
+    // Phase 0 includes Acceptance; later phases contain four data columns.
+    if (!match || ![6, 7].includes(cells.length) || cells[0] !== "" || cells.at(-1) !== "" ||
+        !cells[2] || !cells[3] || !cells[4] || (cells.length === 7 && !cells[5])) {
+      throw new Error("malformed task row: " + candidate[1]);
+    }
+    rows.set(match[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
   }
   return rows;
 }
@@ -132,7 +156,9 @@ export function validateMigrationExecution({
 }) {
   const errors = [];
   if (checkpointDocuments) errors.push(...validateCheckpointPolicy(checkpointDocuments));
-  const tasks = parseTaskRows(statusText);
+  let tasks;
+  try { tasks = parseTaskRows(statusText); }
+  catch (error) { return [...errors, "invalid STATUS task ledger: " + error.message]; }
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   let decisions;
   try { decisions = parseDecisionRows(decisionsText); }
