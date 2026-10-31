@@ -128,6 +128,9 @@ export function listMarkdownFiles(root,rel="docs/migration") {
 }
 export function validateLinks({root,documents}) {
   const errors=[];
+  // Lexical path checks are insufficient: a repository-local symlink can
+  // resolve to a file outside the checkout. Resolve both ends before accepting.
+  const realRoot=fs.realpathSync(root);
   for(const filename of documents) {
     const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
@@ -140,8 +143,14 @@ export function validateLinks({root,documents}) {
         errors.push(filename+": link outside repository: "+target);
         continue;
       }
-      if(!fs.existsSync(resolved) || !fs.statSync(resolved).isFile())
+      if(!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
         errors.push(filename+": broken relative link: "+target);
+        continue;
+      }
+      const realTarget=fs.realpathSync(resolved);
+      const relative=path.relative(realRoot,realTarget);
+      if(relative===".." || relative.startsWith(".."+path.sep) || path.isAbsolute(relative))
+        errors.push(filename+": link outside repository: "+target);
     }
   }
   return errors;
