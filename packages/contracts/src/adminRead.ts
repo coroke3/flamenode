@@ -163,7 +163,8 @@ export const AdminVideosResponseSchema = z.object({
   paging: AdminPagingSchema,
   videos: z.array(AdminVideoRowSchema),
   events: z.array(z.object({ id: z.string(), title: z.string() })),
-  /** FIX #507: optional for existing clients; API always sends this for 100-row event-option pages. */
+  /** FIX #507: optional for existing clients. hasMore means another accepted 100-row page
+   * can be requested; offset=100 is the final page, even when over 200 events exist. */
   eventOptionsPaging: z.object({
     offset: z.union([z.literal(0), z.literal(100)]),
     hasMore: z.boolean(),
