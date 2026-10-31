@@ -103,7 +103,13 @@ export function parseOwnedTasks(prs){
     // appear claimable. MCP-provided branch snapshots use a nonempty string
     // surrogate for number; gh JSON snapshots use a positive integer.
     const validNumber=(Number.isSafeInteger(pr?.number)&&pr.number>0)
-      ||(typeof pr?.number==="string"&&pr.number.trim().length>0);
+      ||(typeof pr?.number==="string" && (
+        // A string PR number must be a canonical positive GitHub number,
+        // or the exact branch-tied placeholder produced by --open-pr-branches.
+        // Any arbitrary string would make a corrupt snapshot look complete.
+        /^[1-9]\d*$/.test(pr.number) && Number.isSafeInteger(Number(pr.number))
+        || pr.number==="?("+pr.headRefName+")"
+      ));
     if(!pr||typeof pr!=="object"||!Object.hasOwn(pr,"headRefName")
       ||typeof pr.headRefName!=="string"||!pr.headRefName.trim()||!validNumber){
       throw new Error("Invalid open PR record at index "+index+"; migration ownership cannot be verified");
