@@ -62,20 +62,96 @@ export function fetchMissingSourceHistory(root, entries) {
 // Normalize path spellings before checking ownership so "./", Windows separators,
 // and internal "." / ".." segments cannot bypass another active writer's lock.
 function canonicalOwnedPath(value) {
-  const posix = value.replaceAll("\\", "/");
-  const withoutRecursiveGlob = posix.endsWith("/**") ? posix.slice(0, -3) : posix;
-  // Existing work-items also contain glob patterns (for example event*.ts)
-  // and descriptive pattern notes. Preserve them; only reject claims that
-  // escape the repository or normalize to its entire root.
+  // Existing checkpoint notes can be scoped (e.g. "app.ts (mount lines only)").
+  // Keep those labels intact rather than broadening the ownership claim.
+  const posix = value.replaceAll("\\", "/").replace(/\/+$/, "");
   if (path.posix.isAbsolute(posix) || /^[A-Za-z]:/.test(posix)) return null;
-  const normalized = path.posix.normalize(withoutRecursiveGlob).replace(/\/$/, "");
+  const segments = posix.split("/");
+  // Collapsing ".." after a wildcard would change its meaning, not just spelling.
+  if (segments.some((part, i) => part === ".." && segments.slice(0, i).some(x => x.includes("*") || x.includes("?"))))
+    return null;
+  const normalized = path.posix.normalize(posix);
   if (normalized === "." || normalized === ".." || normalized.startsWith("../"))
     return null;
   return normalized;
 }
 
+// A path claim includes that path and its descendants. Globs in existing
+// work-items (event*.ts, *.test.mjs, src/**/foo.ts) also need intersection
+// checks; treating "*" as a literal silently grants two writers one file.
+// This is a small glob-language intersection check, not filesystem expansion:
+// it also catches conflicts for files that have not been created yet.
+function tokenizeOwnedGlob(value) {
+  const tokens = [];
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "*" && value[i + 1] === "*") {
+      tokens.push({kind:"globstar"});
+      i++;
+    } else if (value[i] === "*") tokens.push({kind:"star"});
+    else if (value[i] === "?") tokens.push({kind:"any"});
+    else tokens.push({kind:"literal",char:value[i]});
+  }
+  return tokens;
+}
+
+function globLanguagesIntersect(left, right) {
+  const a = tokenizeOwnedGlob(left), b = tokenizeOwnedGlob(right);
+  const alphabet = new Set(["/", "\u0000"]);
+  for (const t of [...a, ...b]) if (t.kind === "literal") alphabet.add(t.char);
+  const closure = (tokens, initial) => {
+    const states = new Set(initial), pending = [...initial];
+    for (const index of pending) {
+      if (index < tokens.length && ["star","globstar"].includes(tokens[index].kind) && !states.has(index+1)) {
+        states.add(index+1);
+        pending.push(index+1);
+      }
+    }
+    return [...states].sort((x,y)=>x-y);
+  };
+  const advance = (tokens, states, char) => {
+    const next = new Set();
+    for (const index of states) {
+      const token = tokens[index];
+      if (!token) continue;
+      if (token.kind === "literal" && token.char === char || token.kind === "any" && char !== "/") next.add(index+1);
+      else if (token.kind === "globstar" || token.kind === "star" && char !== "/") next.add(index);
+    }
+    return closure(tokens, next);
+  };
+  const first = [closure(a,[0]),closure(b,[0])], queue = [first], seen = new Set();
+  for (let i=0; i<queue.length; i++) {
+    const [leftStates,rightStates] = queue[i], key = leftStates.join(",")+"|"+rightStates.join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (leftStates.includes(a.length) && rightStates.includes(b.length)) return true;
+    for (const char of alphabet) {
+      const nextLeft = advance(a,leftStates,char), nextRight = advance(b,rightStates,char);
+      if (nextLeft.length && nextRight.length) queue.push([nextLeft,nextRight]);
+    }
+  }
+  return false;
+}
+
+function ownedGlobForms(value) {
+  // "**/" may represent zero or more path segments. Include the zero-depth
+  // form as well as the literal globstar form for each occurrence.
+  const forms = new Set([value, value+"/**"]);
+  for (const form of [...forms]) {
+    const index = form.indexOf("/**/");
+    if (index >= 0) forms.add(form.slice(0,index+1)+form.slice(index+4));
+  }
+  return forms;
+}
+
 function ownedPathsOverlap(left, right) {
-  return left === right || left.startsWith(right + "/") || right.startsWith(left + "/");
+  if (left === right || left.startsWith(right + "/") || right.startsWith(left + "/")) return true;
+  if (!/[?*]/.test(left) && !/[?*]/.test(right)) return false;
+  for (const a of ownedGlobForms(left)) {
+    for (const b of ownedGlobForms(right)) {
+      if (globLanguagesIntersect(a,b)) return true;
+    }
+  }
+  return false;
 }
 
 export function validateWorkItems({statusText,entries,commitExists}) {
