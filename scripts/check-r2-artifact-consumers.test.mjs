@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -254,4 +254,47 @@ test("T12 partial literals, empty keys and typed consts", () => {
   const hits = extractArtifactKeys(src, "src/partial.ts");
   assert.deepEqual(hits.map((h) => h.key), ["typed.json"]);
   assert.deepEqual(hits.unresolved.map((r) => r.expression), ["<complex>", "<complex>", "K", '""']);
+});
+
+test("T13 inventory rejects source file, directory, and dangling symlinks instead of skipping them", () => {
+  for (const kind of ["file", "directory", "dangling"]) {
+    const root = mkdtempSync(join(tmpdir(), "fn-r2-symlink-"));
+    try {
+      for (const dir of ["app", "src", "apps", "workers", "packages"]) mkdirSync(join(root, dir));
+      mkdirSync(join(root, "external"));
+      writeFileSync(join(root, "external/hidden.ts"), 'await env.R2.get("undocumented/key.json");');
+      const name = kind === "directory" ? "linked" : kind === "file" ? "linked.ts" : "missing.ts";
+      const target = kind === "directory" ? join(root, "external")
+        : kind === "file" ? join(root, "external/hidden.ts") : join(root, "not-present.ts");
+      symlinkSync(target, join(root, "src", name), kind === "directory" ? "dir" : "file");
+      assert.throws(
+        () => checkInventory({ root, inventoryText: table([]) }),
+        (error) => error.message.includes("symlink in audited source tree: src/" + name),
+        kind,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("T14 symlinked source roots are rejected; excluded directories remain out of scope", () => {
+  const root = mkdtempSync(join(tmpdir(), "fn-r2-root-link-"));
+  try {
+    for (const dir of ["app", "src", "apps", "workers", "packages"]) mkdirSync(join(root, dir));
+    mkdirSync(join(root, "external"));
+    writeFileSync(join(root, "src/reader.ts"), 'await env.BUCKET.get("known.json");');
+    symlinkSync(join(root, "external"), join(root, "src/node_modules"), "dir");
+    const safe = checkInventory({ root, inventoryText: table(["known.json"]) });
+    assert.deepEqual(safe.missing, []);
+    assert.deepEqual(safe.unexpected, []);
+    rmSync(join(root, "apps"), { recursive: true });
+    symlinkSync(join(root, "external"), join(root, "apps"), "dir");
+    assert.throws(
+      () => checkInventory({ root, inventoryText: table(["known.json"]) }),
+      /symlink in audited source tree: apps/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
