@@ -332,3 +332,50 @@ test("ID example contains only zero placeholders and Workers Builds variable nam
   assert.equal(example.CF_KV_NAMESPACE_ID, "0".repeat(32));
   assert.equal(Object.hasOwn(example, "pages_project_name"), false);
 });
+
+
+test("symlinked required Worker template is rejected without following it", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const worker = path.join(root, "workers/fast-jobs/wrangler.toml");
+    const target = path.join(root, "workers/fast-jobs/worker-original.toml");
+    fs.renameSync(worker, target);
+    fs.symlinkSync(target, worker, "file");
+    const errors = checkCloudflareTemplate({ root }).join("\n");
+    assert.match(errors, /workers\/fast-jobs\/wrangler\.toml: required config file must not be a symlink/);
+    assert.match(errors, /workers\/fast-jobs\/wrangler\.toml: symlink escapes tracked TOML audit/);
+  }));
+
+test("linked nested TOML cannot hide production IDs outside the scanned tree", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-toml-outside-"));
+    try {
+      write(outside, "real.toml", 'database_id = "12345678-1234-4234-9234-123456789abc"\n');
+      fs.mkdirSync(path.join(root, "design"), { recursive: true });
+      fs.symlinkSync(path.join(outside, "real.toml"), path.join(root, "design/linked.toml"), "file");
+      const errors = checkCloudflareTemplate({ root }).join("\n");
+      assert.match(errors, /design\/linked\.toml: symlink escapes tracked TOML audit/);
+      assert.doesNotMatch(errors, /12345678-1234-4234-9234-123456789abc/);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }));
+
+test("linked and dangling directories are rejected but unrelated file links are ignored", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-toml-dir-"));
+    try {
+      write(outside, "wrangler.toml", 'database_id = "12345678-1234-4234-9234-123456789abc"\n');
+      fs.symlinkSync(outside, path.join(root, "linked-configs"), "dir");
+      fs.symlinkSync(path.join(outside, "missing"), path.join(root, "dangling-configs"), "dir");
+      fs.symlinkSync(path.join(outside, "wrangler.toml"), path.join(root, "linked-readme.md"), "file");
+      const errors = checkCloudflareTemplate({ root }).join("\n");
+      assert.match(errors, /linked-configs: symlink escapes tracked TOML audit/);
+      assert.match(errors, /dangling-configs: symlink escapes tracked TOML audit/);
+      assert.doesNotMatch(errors, /linked-readme\.md/);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  }));
