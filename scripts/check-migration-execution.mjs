@@ -119,7 +119,16 @@ export function parseTaskRows(statusText) {
       // Only the Markdown delimiter line may lack a MIG task ID in this table.
       if (inTaskTable && trimmed.startsWith("|")) {
         const firstCell = trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim();
-        if (firstCell !== undefined && !/^:?-+:?$/.test(firstCell)) {
+        if (firstCell && /^:?-{3,}:?$/.test(firstCell)) {
+          // Separator rows must be complete, not just start with "| --- |".
+          // A partial separator can otherwise hide a corrupted task row.
+          const cells = trimmed.split("|");
+          if (!([6, 7].includes(cells.length) && cells[0] === "" &&
+            cells.at(-1) === "" &&
+            cells.slice(1, -1).every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell)))) {
+            throw new Error("malformed task row: separator");
+          }
+        } else {
           throw new Error("malformed task row: " + (firstCell || "<missing ID>"));
         }
       }
