@@ -33,8 +33,17 @@ export function parseFileRows(markdown) {
   if (!section) throw new Error("FILE_MIGRATION_MATRIX: missing migration ledger section");
   const rows = new Map(), errors = [];
   for (const line of section.split("\n")) {
-    if(!FILE_ROW_RE.test(line))continue;
-    const cells=line.split("|").slice(1,-1).map(x=>x.trim());
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Only the canonical header and separator are non-file table rows. A malformed
+    // file path must never disappear from the ledger unnoticed (including rows for
+    // optional helpers that are not part of the mandatory source inventory).
+    if (/^\|\s*CURRENT path \(exact\)\s*\|/.test(trimmed) || /^\|\s*:?-{3,}:?\s*\|/.test(trimmed)) continue;
+    if (!FILE_ROW_RE.test(trimmed)) {
+      errors.push("malformed migration ledger row: " + trimmed.slice(0, 90));
+      continue;
+    }
+    const cells=trimmed.split("|").slice(1,-1).map(x=>x.trim());
     if(cells.length!==7){errors.push("file row has "+cells.length+" columns, expected 7: "+line.slice(0,90));continue;}
     const match=cells[0].match(/^\x60([^\x60]+)\x60$/);
     if(!match){errors.push("invalid file path cell: "+cells[0]);continue;}
