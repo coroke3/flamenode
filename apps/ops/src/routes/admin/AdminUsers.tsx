@@ -146,15 +146,18 @@ export function AdminUsers(): React.ReactElement {
     status: params.get("status"), page: params.get("page"),
   };
   const result = useApiResult(
-    (signal) => api.getUsers(query, signal),
+    async (signal) => {
+      const response = await api.getUsers(query, signal);
+      return response.status === "redirect" ? { status: "notFound" as const } : response;
+    },
     "admin-users:" + queryKey, refreshKey,
   );
   React.useEffect(() => {
-    if (result.status === "redirect") window.location.assign(result.to);
+    if (normalizeUsersTab(params.get("view")) === "links") window.location.assign("/admin/x-link-requests");
     if (result.status === "anonymous") window.location.assign("/entry");
     if (result.status === "forbidden") window.location.assign(result.redirect || "/dashboard");
-  }, [result]);
-  if (result.status === "loading" || result.status === "redirect" ||
+  }, [result, params]);
+  if (result.status === "loading" || normalizeUsersTab(params.get("view")) === "links" ||
       result.status === "anonymous" || result.status === "forbidden") {
     return <div role="status" aria-busy="true">読み込み中...</div>;
   }
