@@ -91,6 +91,18 @@ test("T03: public JSON transport uses same-origin/no-store; 503, bad JSON or net
     { ok: false, status: 0 });
   assert.deepEqual(await fetchPublicJson("https://evil.example/steal", {}, fetcher),
     { ok: false, status: 0 });
+  // An absolute same-origin input is not sufficient: URL normalization could
+  // otherwise turn /api/../admin into an authenticated non-API request.
+  for (const unsafe of [
+    "/api/../admin", "/api/./videos", "/api/%2e%2e/admin",
+    "/api/%2Fadmin", "/api/%5cadmin", "/api/videos/..",
+  ]) {
+    assert.deepEqual(await fetchPublicJson(unsafe, {}, fetcher),
+      { ok: false, status: 0 }, `must reject path escape: ${unsafe}`);
+  }
+  assert.deepEqual(await fetchPublicJson("/api/videos?q=%2E%2F", {}, fetcher),
+    { ok: true, status: 200, data: { items: [] } },
+    "percent-encoded search query is not a path escape");
 });
 
 test("T02/T04: top GET search works without JS; /list static fallback keeps legal controls absent", () => {
