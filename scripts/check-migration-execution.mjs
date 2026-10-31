@@ -109,6 +109,12 @@ export function parseTaskRows(statusText) {
     const candidate = match || (inTaskTable
       ? trimmed.match(/^\|?\s*(MIG-\d{4})\b/) : null);
     if (!candidate) {
+      // A task-table row may lose all pipes and corrupt its MIG ID at once.
+      // Never mistake an invalid bare MIG token for the start of prose.
+      if (inTaskTable) {
+        const bareId = trimmed.match(/^MIG-[^\\s|]+/);
+        if (bareId) throw new Error("malformed task row: " + bareId[0]);
+      }
       // A data row with an empty or corrupted ID must not silently disappear.
       // Only the Markdown delimiter line may lack a MIG task ID in this table.
       if (inTaskTable && trimmed.startsWith("|")) {
