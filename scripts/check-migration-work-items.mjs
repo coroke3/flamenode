@@ -64,7 +64,15 @@ export function fetchMissingSourceHistory(root, entries) {
 function canonicalOwnedPath(value) {
   const posix = value.replaceAll("\\", "/");
   const withoutRecursiveGlob = posix.endsWith("/**") ? posix.slice(0, -3) : posix;
-  return path.posix.normalize(withoutRecursiveGlob).replace(/\/$/, "");
+  // Only repository-relative files/directories or a terminal dir/** are
+  // valid. Root-wide, parent-traversing and unrecognized glob claims could
+  // otherwise appear harmless while overlapping every other writer.
+  if (path.posix.isAbsolute(posix) || /^[A-Za-z]:/.test(posix) ||
+      withoutRecursiveGlob.includes("*")) return null;
+  const normalized = path.posix.normalize(withoutRecursiveGlob).replace(/\/$/, "");
+  if (normalized === "." || normalized === ".." || normalized.startsWith("../"))
+    return null;
+  return normalized;
 }
 
 function ownedPathsOverlap(left, right) {
@@ -99,6 +107,10 @@ export function validateWorkItems({statusText,entries,commitExists}) {
       }
       if(activeStates.has(map.State))for(const p of (map["Owned paths"]||"").split(";").map(x=>x.trim()).filter(x=>x&&x!=="none")){
         const normalized=canonicalOwnedPath(p);
+        if (normalized === null) {
+          errors.push(filename+": invalid owned path "+p+" (expected repository-relative path or dir/**)");
+          continue;
+        }
         const collision=[...claimed].find(([existing])=>ownedPathsOverlap(existing,normalized));
         if(collision)errors.push(filename+": path "+p+" already claimed by "+collision[1]+" ("+collision[0]+")");
         else claimed.set(normalized,filename);
