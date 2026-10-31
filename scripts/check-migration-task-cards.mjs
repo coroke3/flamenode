@@ -107,13 +107,31 @@ export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 function proseLines(text) {
   let fence = null;
   return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    // CommonMark list items can start fences as "- ```md" or "1. ~~~md".
+    // Their contents are indented relative to the list marker.
+    const listOpening = line.match(/^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
+    const ordinaryOpening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      const indent = line.match(/^ */)[0].length;
+      const closing = line.slice(indent).match(/^(`{3,}|~{3,})(.*)$/);
+      const isClosing = closing && indent <= fence.indent + 3 &&
+        closing[1][0] === fence.char && closing[1].length >= fence.length && !closing[2].trim();
+      if (isClosing) {
+        fence = null;
+      } else if (fence.indent > 0 && line.trim() && indent < fence.indent) {
+        // An unclosed list fence ends on dedent; do not hide subsequent prose.
+        fence = null;
+        return line;
+      }
       return " ".repeat(line.length);
     }
+    const marker = listOpening || ordinaryOpening;
     if (marker) {
-      fence = { char: marker[1][0], length: marker[1].length };
+      fence = {
+        char: marker[1][0],
+        length: marker[1].length,
+        indent: listOpening ? line.indexOf(marker[1]) : 0,
+      };
       return " ".repeat(line.length);
     }
     return line;
