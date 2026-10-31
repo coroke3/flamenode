@@ -91,9 +91,16 @@ export function validateCheckpointPolicy(documents) {
 export function parseTaskRows(statusText) {
   const rows = new Map();
   for (const line of statusText.split("\n")) {
+    const match = line.match(/^\|\s*(MIG-\d{4})\s*\|/);
+    if (!match) continue;
     const cells = line.split("|").map((cell) => cell.trim());
-    if (cells.length < 6 || !/^MIG-\d{4}$/.test(cells[1])) continue;
-    rows.set(cells[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
+    // Phase 0 includes an Acceptance column; other phases have four data columns.
+    // Never silently drop a malformed task: it can hide dependencies or inflate progress.
+    if (![6, 7].includes(cells.length) || cells[0] !== "" || cells.at(-1) !== "" ||
+        !cells[2] || !cells[3] || !cells[4] || (cells.length === 7 && !cells[5])) {
+      throw new Error("malformed task row: " + match[1]);
+    }
+    rows.set(match[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
   }
   return rows;
 }
@@ -132,7 +139,9 @@ export function validateMigrationExecution({
 }) {
   const errors = [];
   if (checkpointDocuments) errors.push(...validateCheckpointPolicy(checkpointDocuments));
-  const tasks = parseTaskRows(statusText);
+  let tasks;
+  try { tasks = parseTaskRows(statusText); }
+  catch (error) { return [...errors, "invalid STATUS task ledger: " + error.message]; }
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   let decisions;
   try { decisions = parseDecisionRows(decisionsText); }
