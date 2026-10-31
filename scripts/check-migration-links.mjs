@@ -18,11 +18,12 @@ function withoutFencedCode(markdown) {
     // container prefixes for detecting the marker, but preserve the original
     // line for checking actual links outside code blocks.
     const quote = /^(?: {0,3}>[ \t]?)+/.exec(line);
+    const quoteDepth = (quote?.[0].match(/>/g) ?? []).length;
     let body = quote ? line.slice(quote[0].length) : line;
 
-    // Leaving a blockquote ends its fenced block. Do not accidentally mask
-    // a subsequent real link in a normal paragraph.
-    if (fence?.quoted && !quote && body.trim()) fence = null;
+    // Exiting a nested blockquote ends its code fence, even if an outer
+    // blockquote remains. Otherwise real links in that outer quote are hidden.
+    if (fence?.quoteDepth > quoteDepth && body.trim()) fence = null;
     // A fenced block inside a list also ends when its containing list item
     // ends. Without this, an unclosed fence hides real links after dedenting.
     // Empty lines may still be part of the list item, so keep the fence then.
@@ -60,7 +61,7 @@ function withoutFencedCode(markdown) {
     // Backtick info strings cannot contain backticks; tilde info may.
     if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
       fence = {char: marker[1][0], length: marker[1].length,
-        quoted: Boolean(quote), listIndent};
+        quoteDepth, listIndent};
       return "";
     }
     // Four-space / tab-indented code is not a filesystem dependency. Inside
