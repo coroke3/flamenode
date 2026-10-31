@@ -32,18 +32,33 @@ export function parseFileRows(markdown) {
   const section = normalized.split("## Migration ledger\n")[1]?.split("\n## Future files")[0];
   if (!section) throw new Error("FILE_MIGRATION_MATRIX: missing migration ledger section");
   const rows = new Map(), errors = [];
+  let headerSeen = false, separatorSeen = false;
   for (const line of section.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Only the canonical header and separator are non-file table rows. A malformed
-    // file path must never disappear from the ledger unnoticed (including rows for
-    // optional helpers that are not part of the mandatory source inventory).
-    if (/^\|\s*CURRENT path(?: \(exact\))?\s*\|/.test(trimmed) || /^\|\s*:?-{3,}:?\s*\|/.test(trimmed)) continue;
-    if (!FILE_ROW_RE.test(trimmed)) {
+    // Accept exactly one complete header and one complete 7-column separator.
+    // Prefix-only checks can silently discard malformed data rows masquerading
+    // as a table header or separator.
+    const tableCells = trimmed.startsWith("|") && trimmed.endsWith("|")
+      ? trimmed.split("|").slice(1, -1).map((cell) => cell.trim())
+      : null;
+    const isHeader = tableCells?.length === 7 &&
+      ["CURRENT path", "CURRENT path (exact)"].includes(tableCells[0]) &&
+      tableCells[1] === "Kind" &&
+      tableCells[2] === "Route / RH / SA linkage" &&
+      tableCells[3] === "First owner MIG" &&
+      ["Target / bridge", "Target / bridge (candidate unless proven)"].includes(tableCells[4]) &&
+      tableCells[5] === "File state" &&
+      tableCells[6] === "PR / tests / evidence";
+    const isSeparator = tableCells?.length === 7 &&
+      tableCells.every((cell) => /^:?-{3,}:?$/.test(cell));
+    if (!headerSeen && isHeader) { headerSeen = true; continue; }
+    if (headerSeen && !separatorSeen && isSeparator) { separatorSeen = true; continue; }
+    if (!headerSeen || !separatorSeen || isHeader || isSeparator || !FILE_ROW_RE.test(trimmed)) {
       errors.push("malformed migration ledger row: " + trimmed.slice(0, 90));
       continue;
     }
-    const cells=trimmed.split("|").slice(1,-1).map(x=>x.trim());
+    const cells=tableCells ?? [];
     if(cells.length!==7){errors.push("file row has "+cells.length+" columns, expected 7: "+line.slice(0,90));continue;}
     const match=cells[0].match(/^\x60([^\x60]+)\x60$/);
     if(!match){errors.push("invalid file path cell: "+cells[0]);continue;}
