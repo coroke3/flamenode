@@ -95,7 +95,7 @@ test("a blank ### heading followed by a MIG ID on the next line is not a task ca
   ].join("\n");
   const alone = collectTaskCards({ "example.md": example });
   assert.equal(alone.cards.size, 0);
-  assert.match(alone.errors.join("\n"), /example\\.md: no MIG cards/);
+  assert.match(alone.errors.join("\n"), /example\.md: no MIG cards/);
 
   const doc = { ...cards,
     "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
