@@ -146,7 +146,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const countCreator = q ? countBase.leftJoin(S.xUsers, eq(S.xUsers.id, S.videos.creator_x_user_id)) : countBase;
     const countEvent = event ? countCreator.innerJoin(S.videoEvents, eq(S.videoEvents.video_id, S.videos.id)) : countCreator;
     const total = Number((await countEvent.where(where).limit(1))[0]?.c ?? 0);
-    const events = await refDb.select({ id: S.events.id, title: S.events.title }).from(S.events).where(eq(S.events.visibility_status, "public")).orderBy(desc(S.events.start_time), desc(S.events.id)).limit(100);
+    const events = await refDb.select({ id: S.events.id, title: S.events.title }).from(S.events).where(eq(S.events.visibility_status, "public")).orderBy(desc(S.events.start_time)).limit(100);
     return { status, page: Math.floor(offset / pageSize) + 1, pageSize, total, rows, events };
   }
 
@@ -456,7 +456,8 @@ if (runUnderRootTsx(import.meta.url)) {
     try {
       for (const count of [0, 99, 100, 101, 200, 201]) {
         for (let i = 0; i < count; i += 1) {
-          // Two events share every timestamp; ID is the stable tie-breaker.
+          // Two events share each timestamp; the existing SQLite index provides
+          // rowid ASC tie ordering, matching CURRENT without temporary sorting.
           insertEvent.run(`fix507-${String(i).padStart(3, "0")}`,
             `Boundary Event ${i}`, 1_700_000_000 + Math.floor(i / 2));
         }
@@ -473,7 +474,7 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.deepEqual(second.body.eventOptionsPaging,
             { offset: 100, hasMore: false });
           const expected = sqlite.prepare(
-            "SELECT id FROM events WHERE visibility_status = 'public' ORDER BY start_time DESC, id DESC LIMIT 200",
+            "SELECT id FROM events WHERE visibility_status = 'public' ORDER BY start_time DESC, rowid ASC LIMIT 200",
           ).all().map(row => row.id);
           const ids = [...first.body.events, ...second.body.events].map(event => event.id);
           assert.deepEqual(ids, expected, `${count}: ordered two-page union`);
