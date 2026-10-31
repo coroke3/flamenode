@@ -114,6 +114,8 @@ test("incomplete open PR records fail closed instead of silently releasing MIG o
   {number:"9007199254740992",headRefName:"migration/mig-0651-submit"},
   {headRefName:"migration/mig-0651-submit"},
   Object.assign(Object.create({headRefName:"migration/mig-0651-submit"}),{number:9}),
+  Object.assign(Object.create({number:9}),{headRefName:"migration/mig-0651-submit"}),
+  Object.assign([],{number:9,headRefName:"migration/mig-0651-submit"}),
  ];
  for(const record of malformed){
   assert.throws(()=>parseOwnedTasks([record]),/Invalid open PR record at index 0/);
