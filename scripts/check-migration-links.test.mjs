@@ -68,3 +68,20 @@ test("unterminated fences ignore examples until the end of the file",()=>fixture
    "\n~~~example\n[not-real](missing-at-eof.md)\n");
  assert.deepEqual(validateLinks({root,documents:listMarkdownFiles(root)}),[]);
 }));
+
+
+test("invalid backtick fence info cannot hide broken links; tilde info may contain backticks",()=>fixture(root=>{
+ const md=[
+  "```lang`invalid",
+  "[real](broken-after-invalid-fence.md)",
+  "~~~lang`valid",
+  "[example](not-a-dependency.md)",
+  "~~~",
+  "[real](broken-after-valid-tilde.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,2);
+ assert.match(errors.join("\n"),/broken-after-invalid-fence\.md/);
+ assert.match(errors.join("\n"),/broken-after-valid-tilde\.md/);
+}));
