@@ -101,7 +101,14 @@ export function mockArtifactExists(root, file) {
   if (typeof file !== "string" || !file || path.isAbsolute(file) ||
       file.split(/[\\/]/).includes("..")) return false;
   try {
+    // The bundle root itself must be the checked-out, real mock directory.
+    // Resolving it first and treating that result as trusted allows an
+    // external symlink at docs/migration/mock to redefine the trust boundary.
+    const repoRoot = fs.realpathSync(root);
+    const expectedMockRoot = path.join(repoRoot, "docs", "migration", "mock");
+    if (!fs.lstatSync(expectedMockRoot).isDirectory()) return false;
     const mockRoot = fs.realpathSync(path.join(root, "docs/migration/mock"));
+    if (mockRoot !== expectedMockRoot) return false;
     const candidate = fs.realpathSync(path.join(mockRoot, file));
     const within = path.relative(mockRoot, candidate);
     return within !== "" && within !== ".." &&
