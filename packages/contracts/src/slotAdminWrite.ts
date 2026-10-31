@@ -49,8 +49,8 @@ export const SlotBatchLabelsBodySchema = SlotBatchIdsBodySchema.and(
 export type SlotBatchLabelsBody = z.infer<typeof SlotBatchLabelsBodySchema>;
 
 /**
- * SA-058 delete all available slots, SA-059/060 delete/release one slot and
- * SA-056/057 dangerous submitted-slot operations read only eventId/slotId
+ * SA-059 deletes all available slots; SA-060/061 release/delete one slot;
+ * SA-056/057 are dangerous submitted-slot operations. All use eventId/slotId
  * from the URL. CURRENT has no confirmation FormData field for SA-056/057;
  * authorization, CAS/version checks and audit must be implemented by Hono.
  */
