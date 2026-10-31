@@ -379,3 +379,35 @@ test("linked and dangling directories are rejected but unrelated file links are 
       fs.rmSync(outside, { recursive: true, force: true });
     }
   }));
+
+test("symlinked repository root is rejected before reading outside config", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const linkedRoot = path.join(root, "linked-root");
+    fs.symlinkSync(root, linkedRoot, "dir");
+    assert.deepEqual(checkCloudflareTemplate({ root: linkedRoot }), [
+      "root: symbolic link is forbidden in the Cloudflare template audit",
+    ]);
+  }));
+
+test("linked Worker parent directory cannot bypass required template validation", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const workerDir = path.join(root, "workers/fast-jobs");
+    const realDir = path.join(root, "workers/fast-jobs-real");
+    fs.renameSync(workerDir, realDir);
+    fs.symlinkSync(realDir, workerDir, "dir");
+    const errors = checkCloudflareTemplate({ root }).join("\\n");
+    assert.match(errors, /workers\\/fast-jobs\\/wrangler\\.toml: required config file must not be a symlink/);
+    assert.match(errors, /workers\\/fast-jobs: symlink escapes tracked TOML audit/);
+  }));
+
+test("optional Next config symlink is rejected without reading external file", { skip: process.platform === "win32" }, () =>
+  withFixture((root) => {
+    writeValidTemplate(root);
+    const external = path.join(root, "next-config-external.mjs");
+    fs.writeFileSync(external, "// outside\\n");
+    fs.symlinkSync(external, path.join(root, "next.config.mjs"), "file");
+    const errors = checkCloudflareTemplate({ root }).join("\\n");
+    assert.match(errors, /next\\.config\\.mjs: config file must not be a symlink/);
+  }));
