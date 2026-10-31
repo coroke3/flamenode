@@ -114,6 +114,30 @@ test("required task-card fields inside fenced code do not satisfy an executable 
   assert.match(errors.join("\n"), /MIG-0308: missing card field 試験:/);
 });
 
+test("required fields cannot leak from the next prose heading into an incomplete card", () => {
+  const incomplete = cards["docs/migration/TASK_CARDS_2_3.md"].replace(
+    "- 試験: zero diff", "- no test instructions",
+  );
+  for (const heading of ["# Appendix", "## Supplemental notes", "### Non-task heading"]) {
+    const doc = { ...cards,
+      "docs/migration/TASK_CARDS_2_3.md": incomplete + "\n" + heading + "\n- 試験: belongs to the next section\n",
+    };
+    assert.match(
+      validateTaskCards({ ...base, fileContents: doc }).join("\n"),
+      /MIG-0308: missing card field 試験:/,
+      heading,
+    );
+  }
+});
+
+test("h4 subsections remain part of the containing MIG task card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "#### Verification details\n- 試験: zero diff"),
+  };
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
 test("CRLF task card offsets stay aligned after masking fenced examples", () => {
   const extra = "\n```md\n### MIG-0399 example\n- 読む: not a card\n```\n";
   const doc = { ...cards,
