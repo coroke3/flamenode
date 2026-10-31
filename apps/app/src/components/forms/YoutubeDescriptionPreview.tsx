@@ -1,0 +1,232 @@
+// Port of CURRENT src/components/forms/YoutubeDescriptionPreview.tsx (MIG-0712). Same DOM/handlers.
+import * as React from "react";
+import {
+  YOUTUBE_DESCRIPTION_VARIABLES,
+  renderYoutubeDescriptionTemplate,
+  type YoutubeDescriptionContext,
+  type YoutubeDescriptionContextKey,
+  type YoutubeDescriptionDynamicVariableDefinition,
+  type YoutubeDescriptionLoopMember,
+} from "../../lib/youtubeDescriptionTemplate.js";
+
+export interface YoutubeDescriptionPreviewProps {
+  template: string;
+  eventTitle: string;
+  context: YoutubeDescriptionContext;
+  /** {{#members}} ループ用の生メンバー行。未指定時はループが空で出力される。 */
+  members?: readonly YoutubeDescriptionLoopMember[];
+  /** 現在のイベントに存在する質問別変数。警告を日本語ラベルで表示する。 */
+  dynamicVariables?: readonly YoutubeDescriptionDynamicVariableDefinition[];
+}
+
+const VARIABLE_LABELS = new Map<YoutubeDescriptionContextKey, string>(
+  YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => [variable.key, variable.label]),
+);
+
+function variableLabel(
+  key: YoutubeDescriptionContextKey,
+  dynamicLabels: ReadonlyMap<YoutubeDescriptionContextKey, string>,
+): string {
+  return VARIABLE_LABELS.get(key) ?? dynamicLabels.get(key) ?? key;
+}
+
+function hasValue(value: unknown): boolean {
+  return value != null && String(value).trim().length > 0;
+}
+
+async function copyText(text: string, textarea: HTMLTextAreaElement | null): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Permission-denied browsers can still support the selection fallback.
+    }
+  }
+  if (!textarea) throw new Error("clipboard_unavailable");
+  textarea.focus();
+  textarea.select();
+  if (!document.execCommand("copy")) throw new Error("clipboard_unavailable");
+}
+
+export function YoutubeDescriptionPreview({
+  template,
+  eventTitle,
+  context,
+  members,
+  dynamicVariables = [],
+}: YoutubeDescriptionPreviewProps): React.ReactElement {
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const manualBaseTextRef = React.useRef("");
+  const [copyState, setCopyState] = React.useState<"idle" | "copied" | "error">("idle");
+  const [draftMode, setDraftMode] = React.useState<"auto" | "manual">("auto");
+  const dynamicLabels = React.useMemo(
+    () => new Map<YoutubeDescriptionContextKey, string>(
+      dynamicVariables.map((variable) => [variable.key, variable.label]),
+    ),
+    [dynamicVariables],
+  );
+  const rendered = React.useMemo(
+    () => renderYoutubeDescriptionTemplate(template, context, { members }),
+    [context, members, template],
+  );
+  const [draftText, setDraftText] = React.useState(rendered.text);
+  const sourceIdentity = `${String(context.event_id ?? eventTitle)}\u0000${template}`;
+  const sourceIdentityRef = React.useRef(sourceIdentity);
+
+  React.useEffect(() => {
+    if (sourceIdentityRef.current === sourceIdentity) return;
+    sourceIdentityRef.current = sourceIdentity;
+    // 別イベント/別テンプレートへ切り替わったときに、前のイベント用の
+    // 手動調整文を持ち越さない。作品情報だけの更新とは区別する。
+    setDraftMode("auto");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
+  }, [rendered.text, sourceIdentity]);
+
+  React.useEffect(() => {
+    if (draftMode === "auto") {
+      setDraftText(rendered.text);
+      manualBaseTextRef.current = rendered.text;
+    }
+    setCopyState("idle");
+  }, [draftMode, rendered.text]);
+
+  const missingVariables = React.useMemo(
+    () => rendered.usedVariables.filter((key) => !hasValue(context[key])),
+    [context, rendered.usedVariables],
+  );
+  const sourceChangedWhileEditing =
+    draftMode === "manual" && manualBaseTextRef.current !== rendered.text;
+
+  const handleCopy = async () => {
+    if (!draftText) return;
+    setCopyState("idle");
+    try {
+      await copyText(draftText, textareaRef.current);
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+  };
+
+  const restoreAuto = () => {
+    setDraftMode("auto");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
+  };
+
+  const refreshManualFromSource = () => {
+    setDraftMode("manual");
+    setDraftText(rendered.text);
+    manualBaseTextRef.current = rendered.text;
+    setCopyState("idle");
+  };
+
+  return (
+    <section className="ydesc-panel" aria-labelledby="youtube-description-preview-title">
+      <div className="ydesc-head">
+        <div>
+          <div className="ydesc-titleRow">
+            <h3 id="youtube-description-preview-title" className="ydesc-title">
+              YouTube概要欄（コピー用）
+            </h3>
+            <span
+              className="ydesc-modeBadge"
+              data-mode={draftMode}
+              aria-label={draftMode === "auto" ? "自動生成モード" : "手動調整モード"}
+            >
+              {draftMode === "auto" ? "自動生成" : "手動調整中"}
+            </span>
+          </div>
+          <p className="ydesc-event">イベントテンプレート: {eventTitle}</p>
+        </div>
+        <button
+          type="button"
+          className={`fn-btn fn-btn-primary fn-btn-sm ydesc-copyButton`}
+          onClick={handleCopy}
+          disabled={!draftText}
+        >
+          {copyState === "copied" ? "コピーしました" : "概要欄をコピー"}
+        </button>
+      </div>
+
+      {missingVariables.length > 0 ? (
+        <div className="ydesc-warning" role="status">
+          <strong>テンプレートで使う情報に未入力があります。</strong>
+          <ul className="ydesc-warningList">
+            {missingVariables.map((key) => (
+              <li key={key}>{variableLabel(key, dynamicLabels)}が未入力です。</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {sourceChangedWhileEditing ? (
+        <div className="ydesc-warningBox" role="status">
+          <div>
+            <strong>作品情報が更新されています。</strong>
+            <p>
+              手動調整した概要欄は保持しています。最新データへ置き換える場合だけ更新してください。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={refreshManualFromSource}
+          >
+            最新の自動生成を反映
+          </button>
+        </div>
+      ) : null}
+
+      <textarea
+        ref={textareaRef}
+        className={`fn-input ydesc-textarea`}
+        value={draftText}
+        onChange={(event) => {
+          if (draftMode !== "manual") {
+            manualBaseTextRef.current = rendered.text;
+            setDraftMode("manual");
+          }
+          setDraftText(event.target.value);
+          setCopyState("idle");
+        }}
+        aria-label={`${eventTitle} のYouTube概要欄`}
+      />
+      <div className="ydesc-footer">
+        <p className="ydesc-hint">
+          {draftMode === "manual"
+            ? "手動調整中です。作品情報が変わっても自動では上書きしません。ここでの調整は作品データには保存されません。"
+            : "入力中の作品情報から自動生成しています。ここでの最終調整は作品データには保存されません。"}
+        </p>
+        {draftMode === "manual" ? (
+          <button
+            type="button"
+            className="fn-btn fn-btn-ghost fn-btn-sm"
+            onClick={restoreAuto}
+          >
+            自動生成に戻す
+          </button>
+        ) : null}
+      </div>
+
+      {rendered.unknownVariables.length > 0 ? (
+        <p className="ydesc-warning" role="alert">
+          テンプレートに未登録の変数があります。空欄として出力しました: {rendered.unknownVariables.map((key) => `{{${key}}}`).join("、")}
+        </p>
+      ) : null}
+      {copyState === "error" ? (
+        <p className="ydesc-status" role="status">
+          コピーに失敗しました。概要欄を選択して手動でコピーしてください。
+        </p>
+      ) : copyState === "copied" ? (
+        <p className="ydesc-status" role="status">
+          YouTubeの概要欄へ貼り付けできます。
+        </p>
+      ) : null}
+    </section>
+  );
+}

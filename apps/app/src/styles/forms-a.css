@@ -1,0 +1,300 @@
+.ydesc-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 28%, var(--border-subtle));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary-soft) 42%, var(--bg-surface));
+}
+
+.ydesc-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ydesc-titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ydesc-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.ydesc-modeBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ydesc-modeBadge[data-mode="manual"] {
+  background: color-mix(in srgb, var(--accent-warning-soft) 72%, var(--bg-elevated));
+  color: var(--text-primary);
+}
+
+.ydesc-event {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.ydesc-copyButton {
+  flex: 0 0 auto;
+}
+
+.ydesc-textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.ydesc-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ydesc-hint,
+.ydesc-warning,
+.ydesc-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.ydesc-hint {
+  flex: 1 1 320px;
+  color: var(--text-muted);
+}
+
+.ydesc-warning {
+  color: var(--status-warning, #a46b00);
+}
+
+.ydesc-warningList {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.ydesc-warningBox {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-warning-soft) 70%, var(--bg-surface));
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.ydesc-warningBox p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.ydesc-status {
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .ydesc-copyButton,
+  .ydesc-footer > button,
+  .ydesc-warningBox > button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+.cq-customChoiceGroup {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+  min-inline-size: 0;
+}
+
+.cq-customChoiceOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--fn-control-h);
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  cursor: pointer;
+}
+
+.cq-customChoiceOption:has(input:checked) {
+  border-color: var(--accent-primary);
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+}
+
+.cq-customChoiceOption:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+.cq-customChoiceOption input {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .cq-customChoiceOption {
+    min-height: var(--fn-control-h-touch);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cq-customChoiceOption {
+    transition: none;
+  }
+}
+
+.perm-badge-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill, 999px);
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.perm-badge-icon {
+  flex-shrink: 0;
+}
+
+.perm-badge-editable {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.perm-badge-editable.perm-badge-privilegedEditable {
+  border-color: color-mix(in srgb, var(--accent-primary) 48%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-mixed {
+  border-color: color-mix(in srgb, var(--accent-warning) 52%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-warning-soft) 82%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-ownerDenied {
+  border-color: color-mix(in srgb, var(--accent-warning) 50%, var(--border-subtle));
+  background: var(--accent-warning-soft);
+  color: var(--text-primary);
+}
+
+.perm-badge-event {
+  border-color: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 50%, var(--border-subtle));
+  background: color-mix(in srgb, var(--event-accent, var(--accent-primary)) 10%, var(--bg-surface));
+  color: var(--text-primary);
+}
+
+.perm-badge-admin {
+  border-color: color-mix(in srgb, var(--accent-danger) 55%, var(--border-subtle));
+  background: var(--accent-danger-soft);
+  color: var(--text-primary);
+}
+
+.perm-badge-locked {
+  border-color: var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+.perm-lock-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+.perm-lock-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.perm-lock-copy {
+  min-width: 0;
+}
+
+.perm-lock-reason {
+  margin: 0;
+}
+
+.perm-lock-hint {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+}
+
+.perm-label-labelRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 6px;
+}
+
+.perm-label-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.perm-label-required::after {
+  content: "*";
+  margin-left: 4px;
+  color: var(--accent-danger);
+}
+
+.perm-label-badge {
+  font-size: 10px;
+}
