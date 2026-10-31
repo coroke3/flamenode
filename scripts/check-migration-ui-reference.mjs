@@ -95,6 +95,24 @@ export function validateUiReference({ uiText, currentRoutesText, mappingText, pa
   return errors;
 }
 
+// An existing symlink is not proof that an acceptance artifact belongs to
+// the registered mock bundle. Check canonical targets as well as existence.
+export function mockArtifactExists(root, file) {
+  if (typeof file !== "string" || !file || path.isAbsolute(file) ||
+      file.split(/[\\/]/).includes("..")) return false;
+  try {
+    const mockRoot = fs.realpathSync(path.join(root, "docs/migration/mock"));
+    const candidate = fs.realpathSync(path.join(mockRoot, file));
+    const within = path.relative(mockRoot, candidate);
+    return within !== "" && within !== ".." &&
+      !within.startsWith(".." + path.sep) && !path.isAbsolute(within) &&
+      fs.statSync(candidate).isFile();
+  } catch {
+    // A missing file or a dangling/cyclic symlink is not a valid artifact.
+    return false;
+  }
+}
+
 export function readUiReferenceInputs(root) {
   const read = file => fs.readFileSync(path.join(root, file), "utf8");
   return {
@@ -102,7 +120,7 @@ export function readUiReferenceInputs(root) {
     currentRoutesText: read("docs/migration/CURRENT_ROUTES.md"),
     mappingText: read("docs/migration/screen-mapping/README.md"),
     pages: JSON.parse(read("docs/migration/mock/pages.json")).pages,
-    artifactExists: file => fs.existsSync(path.join(root, "docs/migration/mock", file)),
+    artifactExists: file => mockArtifactExists(root, file),
   };
 }
 
