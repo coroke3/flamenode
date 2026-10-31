@@ -58,6 +58,19 @@ export function fetchMissingSourceHistory(root, entries) {
   return [...fetched];
 }
 
+// A task can claim either a file or a directory (including dir/**).
+// Normalize path spellings before checking ownership so "./", Windows separators,
+// and internal "." / ".." segments cannot bypass another active writer's lock.
+function canonicalOwnedPath(value) {
+  const posix = value.replaceAll("\\", "/");
+  const withoutRecursiveGlob = posix.endsWith("/**") ? posix.slice(0, -3) : posix;
+  return path.posix.normalize(withoutRecursiveGlob).replace(/\/$/, "");
+}
+
+function ownedPathsOverlap(left, right) {
+  return left === right || left.startsWith(right + "/") || right.startsWith(left + "/");
+}
+
 export function validateWorkItems({statusText,entries,commitExists}) {
   const errors=[], ids=new Set([...statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map(m=>m[1])), claimed=new Map(), prs=new Map(), branches=new Map();
   for(const [filename,body] of Object.entries(entries)) {
@@ -85,8 +98,10 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         if(value&&value!=="none"){if(seen.has(value))errors.push(filename+": "+label+" also claimed by "+seen.get(value));else seen.set(value,filename);}
       }
       if(activeStates.has(map.State))for(const p of (map["Owned paths"]||"").split(";").map(x=>x.trim()).filter(x=>x&&x!=="none")){
-        if(claimed.has(p))errors.push(filename+": path "+p+" already claimed by "+claimed.get(p));
-        else claimed.set(p,filename);
+        const normalized=canonicalOwnedPath(p);
+        const collision=[...claimed].find(([existing])=>ownedPathsOverlap(existing,normalized));
+        if(collision)errors.push(filename+": path "+p+" already claimed by "+collision[1]+" ("+collision[0]+")");
+        else claimed.set(normalized,filename);
       }
     }
     if(["REVIEW","DONE"].includes(map.State))for(const f of ["Validation","Evidence"]){
