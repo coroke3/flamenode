@@ -113,4 +113,61 @@ describe("check-domain-imports", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("fails closed on symlinked source files, directories and dangling links", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-domain-symlink-"));
+    try {
+      const source = path.join(tempDir, "packages", "domain", "src");
+      const external = path.join(tempDir, "external");
+      fs.mkdirSync(source, { recursive: true });
+      fs.mkdirSync(external);
+      fs.writeFileSync(path.join(source, "safe.ts"), "export const safe = true;\n");
+      fs.writeFileSync(path.join(external, "bad.ts"), 'import "next/navigation";\n');
+      fs.symlinkSync(path.join(external, "bad.ts"), path.join(source, "linked.ts"), "file");
+      fs.symlinkSync(external, path.join(source, "linked-dir"), "dir");
+      fs.symlinkSync(path.join(external, "missing.ts"), path.join(source, "dangling.ts"), "file");
+
+      const result = validateDomainImports({ rootDir: tempDir, targetDirs: [source] });
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.filesCheckedCount, 1, "ordinary source is still scanned");
+      assert.deepStrictEqual(
+        result.errors.map((e) => [path.basename(e.file), e.rule]).sort(),
+        [["dangling.ts", "symlink"], ["linked-dir", "symlink"], ["linked.ts", "symlink"]],
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects symlinked package ancestors and src roots before scanning", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-domain-root-link-"));
+    try {
+      const packages = path.join(tempDir, "packages");
+      const source = path.join(packages, "domain", "src");
+      const external = path.join(tempDir, "external");
+      fs.mkdirSync(packages);
+      fs.mkdirSync(path.join(external, "src"), { recursive: true });
+      fs.writeFileSync(path.join(external, "src", "bad.ts"), 'import "hono";\n');
+
+      fs.symlinkSync(external, path.join(packages, "domain"), "dir");
+      const ancestor = validateDomainImports({ rootDir: tempDir, targetDirs: [source] });
+      assert.strictEqual(ancestor.ok, false);
+      assert.strictEqual(ancestor.filesCheckedCount, 0);
+      assert.deepStrictEqual(ancestor.errors.map((e) => [e.file, e.rule]), [
+        ["packages/domain", "symlink"],
+      ]);
+
+      fs.unlinkSync(path.join(packages, "domain"));
+      fs.mkdirSync(path.join(packages, "domain"));
+      fs.symlinkSync(path.join(external, "src"), source, "dir");
+      const target = validateDomainImports({ rootDir: tempDir, targetDirs: [source] });
+      assert.deepStrictEqual(target.errors.map((e) => [e.file, e.rule]), [
+        ["packages/domain/src", "symlink"],
+      ]);
+      assert.strictEqual(target.filesCheckedCount, 0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
 });
