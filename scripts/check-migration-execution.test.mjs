@@ -64,6 +64,27 @@ test("malformed STATUS task rows fail closed rather than disappearing from depen
   assert.deepEqual(run(), []);
 });
 
+test("missing leading pipe, MIG separator, or noncanonical indentation fails closed", () => {
+  const row = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  for (const malformed of [
+    "MIG-0301 | core PoC | READY | MIG-0108 |",
+    " | MIG-0301 | core PoC | READY | MIG-0108 |",
+    "\t| MIG-0301 | core PoC | READY | MIG-0108 |",
+    "| MIG-0301 core PoC | READY | MIG-0108 |",
+  ]) {
+    const changed = status.replace(row, malformed);
+    assert.throws(() => parseTaskRows(changed), /malformed task row: MIG-0301/);
+    assert.match(run({ statusText: changed }).join("\n"),
+      /invalid STATUS task ledger: malformed task row: MIG-0301/);
+  }
+});
+
+test("ordinary MIG prose outside task tables is not treated as a broken task row", () => {
+  const appended = status + "\nMIG-0301 is discussed in prose.\nMIG-0302 | paragraph reference, not a row.\n";
+  assert.equal(parseTaskRows(appended).size, parseTaskRows(status).size);
+  assert.deepEqual(run({ statusText: appended }), []);
+});
+
 test("Phase 0 acceptance column remains valid while malformed acceptance fails", () => {
   const withAcceptance = status + "| MIG-0001 | base inventory | DONE | — | complete |\n";
   assert.equal(parseTaskRows(withAcceptance).get("MIG-0001").state, "DONE");
