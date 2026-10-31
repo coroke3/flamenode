@@ -55,12 +55,6 @@ test("remote orphan audit handles shell metacharacters without invoking a shell 
       path.join(sqlDir, "check-event-owners.sql"),
       "SELECT 1;\n",
     );
-    // check-auth-orphan-users imports check-event-owners, which reads its SQL
-    // at module initialization even when the remote audit path is selected.
-    fs.writeFileSync(
-      path.join(sqlDir, "check-event-owners.sql"),
-      "SELECT 1;\n",
-    );
     fs.writeFileSync(
       path.join(wranglerDir, "wrangler.js"),
       [
