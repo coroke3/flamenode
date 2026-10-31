@@ -135,7 +135,12 @@ export function validateLinks({root,documents}) {
     const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(const match of content.matchAll(/\[[^\]\n]*\]\(([^)\n]+)\)/g)) {
-      let target=match[1].trim().replace(/^<|>$/g,"");
+      let target=match[1].trim();
+      // CommonMark permits an optional quoted title after the destination.
+      // The title is metadata, not part of the local file path.
+      const withTitle=/^(<[^>]*>|[^\\s]+)\\s+(?:"[^"]*"|'[^']*')$/.exec(target);
+      if(withTitle) target=withTitle[1];
+      target=target.replace(/^<|>$/g,"");
       if(!target||target.startsWith("#")||/^(?:https?:|mailto:|data:)/i.test(target))continue;
       target=target.split("#")[0].split("?")[0];
       const resolved=path.resolve(target.startsWith("/")?root:path.dirname(path.join(root,filename)),target.replace(/^\//,""));
