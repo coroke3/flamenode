@@ -76,6 +76,46 @@ test("symlinked output root is rejected by audit and manifest writer", (t) => {
   assert.throws(() => writeBuildManifest({ outputRoot, commit: COMMIT }), /symbolic link is forbidden/);
 });
 
+test("linked ancestor directory cannot redirect audit or manifest writes", (t) => {
+  const { repoRoot, outputRoot, args } = fixture(t);
+  const originalManifest = fs.readFileSync(
+    path.join(outputRoot, "flamenode-build-manifest.json"), "utf8",
+  );
+  const linkedParent = path.join(repoRoot, "linked-parent");
+  fs.symlinkSync(repoRoot, linkedParent, "dir");
+  const nestedOutput = path.join(linkedParent, ".open-next");
+
+  assert.throws(
+    () => checkOpenNextOutput({ ...args, outputRoot: nestedOutput }),
+    /symbolic link is forbidden/,
+  );
+  assert.throws(
+    () => writeBuildManifest({ outputRoot: nestedOutput, commit: "b".repeat(40) }),
+    /symbolic link is forbidden/,
+  );
+  assert.equal(
+    fs.readFileSync(path.join(outputRoot, "flamenode-build-manifest.json"), "utf8"),
+    originalManifest,
+  );
+});
+
+test("dangling linked ancestor is rejected before creating an output directory", (t) => {
+  const { repoRoot, args } = fixture(t);
+  const linkedParent = path.join(repoRoot, "dangling-parent");
+  fs.symlinkSync(path.join(repoRoot, "nonexistent"), linkedParent, "dir");
+  const nestedOutput = path.join(linkedParent, ".open-next");
+
+  assert.throws(
+    () => checkOpenNextOutput({ ...args, outputRoot: nestedOutput }),
+    /symbolic link is forbidden/,
+  );
+  assert.throws(
+    () => writeBuildManifest({ outputRoot: nestedOutput, commit: COMMIT }),
+    /symbolic link is forbidden/,
+  );
+  assert.equal(fs.existsSync(path.join(repoRoot, "nonexistent")), false);
+});
+
 test("manifest writer refuses a linked manifest without modifying its target", (t) => {
   const { repoRoot, outputRoot } = fixture(t);
   const manifestPath = path.join(outputRoot, "flamenode-build-manifest.json");
