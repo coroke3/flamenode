@@ -114,6 +114,18 @@ test("blockquote fences exclude examples but not following blockquote links",()=
  assert.match(errors[0],/broken relative link: missing-quote-target\.md/);
 }));
 
+test("exiting a nested blockquote code fence restores link validation in the outer quote",()=>fixture(root=>{
+ const md=[
+  "> > ```markdown",
+  "> > [example](not-a-file-in-nested-quote.md)",
+  "> [real](missing-after-nested-quote.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1,errors.join("\n"));
+ assert.match(errors[0],/broken relative link: missing-after-nested-quote\.md/);
+}));
+
 test("indented code examples are excluded, ordinary links remain validated",()=>fixture(root=>{
  const md=[
   "    [sample](not-a-file-in-indented-code.md)",
