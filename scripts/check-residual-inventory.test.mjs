@@ -670,3 +670,25 @@ test("T67: tracked observability and placement semantics cannot silently drift",
   assert.throws(()=>extractConfigRows(background,fastPath),
     /unexpected placement.mode/);
 });
+
+test("T68: damaged inventory rows cannot disappear when pipe delimiters are lost",()=>{
+  const row=docs.split("\n").find(line=>line.includes("| worker.main |"));
+  assert.ok(row?.startsWith("| ")&&row.endsWith(" |"));
+  const mutations=[
+    row.slice(2),        // missing initial pipe
+    row.slice(0,-2),     // missing final pipe
+    row.replaceAll("|",""), // a pipe-free record within the inventory table
+  ];
+  for(const [index,broken] of mutations.entries()) {
+    assert.notEqual(broken,row);
+    assert.throws(()=>readInventoryRows(docs.replace(row,broken)),
+      /invalid inventory row .*missing table boundary/, "mutation "+index);
+  }
+});
+
+test("T69: inventory table count marker is required to delimit audited rows",()=>{
+  assert.equal(readInventoryRows(docs).length,36);
+  assert.throws(()=>readInventoryRows(docs.replace(
+    "**Counts (tracked source only):**","**Unverified counts:**")),
+    /inventory table boundaries missing/);
+});
