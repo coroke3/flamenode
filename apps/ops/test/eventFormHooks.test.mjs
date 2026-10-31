@@ -95,9 +95,12 @@ test("MIG-0721 U01a: only matching, unexpired drafts restore automatically", asy
   const metadata = { schemaVersion: "event-form-v3", eventId: "event-1" };
   const restored = [], stale = [];
   const value = { title: "old draft" };
+  const onRestore = (next) => restored.push(next);
+  const onStale = (next) => stale.push(next);
+  const initialValue = {};
   function Probe() {
-    useFormDraft({ storageKey: key, value: {}, metadata, shouldSave: false,
-      onRestore: (next) => restored.push(next), onStale: (next) => stale.push(next) });
+    useFormDraft({ storageKey: key, value: initialValue, metadata, shouldSave: false,
+      onRestore, onStale });
     return null;
   }
   const stored = (meta, savedAt = Date.now()) =>
