@@ -133,6 +133,25 @@ test("pipe-free STATUS task rows with invalid MIG IDs fail closed", () => {
   assert.deepEqual(run({ statusText: status + "\n## Details\nMIG-030A is a prose example.\n" }), []);
 });
 
+test("STATUS task table separators must be complete, not merely start with dashes", () => {
+  const canonical = "| --- | --- | --- | --- |";
+  for (const broken of [
+    "| --- | --- | text | --- |",
+    "| --- |",
+    "| --- | --- | --- | ---",
+    "| --- | --- | --- | --- | extra |",
+  ]) {
+    const corrupted = status.replace(canonical, broken);
+    assert.throws(() => parseTaskRows(corrupted), /malformed task row: separator/, broken);
+    assert.match(
+      run({ statusText: corrupted }).join("\n"),
+      /invalid STATUS task ledger: malformed task row: separator/,
+      broken,
+    );
+  }
+  assert.deepEqual(run(), []);
+});
+
 test("ordinary MIG prose outside task tables is not treated as a broken task row", () => {
   const appended = status + "\nMIG-0301 is discussed in prose.\nMIG-0302 | paragraph reference, not a row.\n";
   assert.equal(parseTaskRows(appended).size, parseTaskRows(status).size);
