@@ -179,3 +179,44 @@ test("dedenting out of a list ends an unclosed fenced block and checks following
  assert.equal(errors.length,1);
  assert.match(errors[0],/broken relative link: missing-after-list-dedent\.md/);
 }));
+
+test("list then blockquote fences ignore example links but validate the following real link",()=>fixture(root=>{
+ const md=[
+  "- > ```md",
+  "  > [example](not-a-list-quote-dependency.md)",
+  "  > ```",
+  "[real](missing-after-list-quote.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1,errors.join("\n"));
+ assert.match(errors[0],/missing-after-list-quote\.md/);
+ assert.doesNotMatch(errors.join("\n"),/not-a-list-quote-dependency/);
+}));
+
+test("blockquote then list fences recognize their nesting without hiding later links",()=>fixture(root=>{
+ const md=[
+  "> - ```md",
+  ">   [example](not-a-quote-list-dependency.md)",
+  ">   ```",
+  "> [real](missing-after-quote-list.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1,errors.join("\n"));
+ assert.match(errors[0],/missing-after-quote-list\.md/);
+ assert.doesNotMatch(errors.join("\n"),/not-a-quote-list-dependency/);
+}));
+
+test("unclosed combined list-quote fence stops at list dedent rather than hiding a real link",()=>fixture(root=>{
+ const md=[
+  "- > ```md",
+  "  > [example](not-a-file-in-unclosed-fence.md)",
+  "[real](missing-after-composite-dedent.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1,errors.join("\n"));
+ assert.match(errors[0],/missing-after-composite-dedent\.md/);
+ assert.doesNotMatch(errors.join("\n"),/not-a-file-in-unclosed-fence/);
+}));
