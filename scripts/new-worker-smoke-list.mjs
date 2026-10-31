@@ -88,9 +88,34 @@ function normalizeRoutePath(rawPath) {
   return { path, requiresFixture: hasQuery };
 }
 
+// API_MATRIX contains illustrative Markdown code blocks as well as live route
+// documentation. Never treat code-fenced examples as registered smoke targets.
+// Follow CommonMark's 0-3 space indentation and same-character closing rule.
+function omitFencedExamples(markdown) {
+  let fenceChar = null;
+  let fenceLength = 0;
+  return markdown.split(/\r?\n/).map((line) => {
+    if (fenceChar) {
+      const closing = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (closing && closing[1][0] === fenceChar && closing[1].length >= fenceLength) {
+        fenceChar = null;
+        fenceLength = 0;
+      }
+      return "";
+    }
+    const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (opening && (opening[1][0] === "~" || !opening[2].includes("`"))) {
+      fenceChar = opening[1][0];
+      fenceLength = opening[1].length;
+      return "";
+    }
+    return line;
+  }).join("\n");
+}
+
 export function collectApiMatrixRoutes(matrix) {
   const out = [];
-  for (const match of matrix.matchAll(/\b(GET|HEAD|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s\x60|"<>]+)/g)) {
+  for (const match of omitFencedExamples(matrix).matchAll(/\b(GET|HEAD|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s\x60|"<>]+)/g)) {
     const method = match[1];
     const parsed = normalizeRoutePath(match[2]);
     if (parsed && METHOD.has(method)) {
