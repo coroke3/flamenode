@@ -100,6 +100,12 @@ function readFile(root, relative, errors) {
     errors.push(`${relative}: required file is missing`);
     return "";
   }
+  // statSync follows links. Reject a linked template before reading it, so a
+  // checked-in config cannot silently point to an untracked external file.
+  if (fs.lstatSync(full).isSymbolicLink()) {
+    errors.push(`${relative}: required config file must not be a symlink`);
+    return "";
+  }
   return fs.readFileSync(full, "utf8");
 }
 
@@ -114,14 +120,31 @@ function checkPlaceholderIds(errors, text, relative) {
   }
 }
 
-function trackedTomlFiles(root) {
+function trackedTomlFiles(root, errors) {
   const files = [];
   const pending = [root];
   while (pending.length > 0) {
     const current = pending.pop();
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.isDirectory() && TOML_SCAN_EXCLUDED_DIRECTORIES.has(entry.name)) continue;
+      if (TOML_SCAN_EXCLUDED_DIRECTORIES.has(entry.name)) continue;
       const fullPath = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) {
+        // Dirent.isFile/isDirectory are both false for symlinks. Without this
+        // guard a linked TOML or linked directory is silently omitted from the
+        // placeholder-ID audit. Never follow links (cycles/out-of-tree reads).
+        let linkedDirectory = false;
+        try {
+          linkedDirectory = fs.statSync(fullPath).isDirectory();
+        } catch {
+          // Dangling/inaccessible links have unknown contents: fail closed.
+          linkedDirectory = true;
+        }
+        if (linkedDirectory || entry.name.toLowerCase().endsWith(".toml")) {
+          const relative = path.relative(root, fullPath).replaceAll("\\", "/");
+          errors.push(`${relative}: symlink escapes tracked TOML audit`);
+        }
+        continue;
+      }
       if (entry.isDirectory()) pending.push(fullPath);
       else if (entry.isFile() && entry.name.toLowerCase().endsWith(".toml")) files.push(fullPath);
     }
@@ -130,7 +153,7 @@ function trackedTomlFiles(root) {
 }
 
 function checkAllTrackedTomlIds(errors, root) {
-  for (const filePath of trackedTomlFiles(root)) {
+  for (const filePath of trackedTomlFiles(root, errors)) {
     const relative = path.relative(root, filePath).replaceAll("\\", "/");
     checkPlaceholderIds(errors, fs.readFileSync(filePath, "utf8"), relative);
   }
