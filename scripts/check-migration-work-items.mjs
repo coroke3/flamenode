@@ -203,7 +203,7 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         // Scoped legacy claims must identify their actual work-item owner.
         // Otherwise any task could declare "(MIG-XXXX files)" from another
         // task to bypass the overlapping-glob lock.
-        const scopedOwner=p.match(/ \\((MIG-\\d{4}) (?:files|mount lines only|spreadsheet vars only)\\)$/)?.[1];
+        const scopedOwner=p.match(/ \((MIG-\d{4}) (?:files|mount lines only|spreadsheet vars only)\)$/)?.[1];
         if(scopedOwner && scopedOwner!==id) {
           errors.push(filename+": scoped owned path "+p+" names "+scopedOwner+" instead of "+id);
           continue;
