@@ -138,7 +138,7 @@ export function validateLinks({root,documents}) {
       let target=match[1].trim();
       // CommonMark permits an optional quoted title after the destination.
       // The title is metadata, not part of the local file path.
-      const withTitle=/^(<[^>]*>|[^\\s]+)\\s+(?:"[^"]*"|'[^']*')$/.exec(target);
+      const withTitle=/^(<[^>]*>|[^\s]+)\s+(?:"[^"]*"|'[^']*')$/.exec(target);
       if(withTitle) target=withTitle[1];
       target=target.replace(/^<|>$/g,"");
       if(!target||target.startsWith("#")||/^(?:https?:|mailto:|data:)/i.test(target))continue;
