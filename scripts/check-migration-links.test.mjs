@@ -137,5 +137,5 @@ test("dedenting out of a list ends an unclosed fenced block and checks following
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
  assert.equal(errors.length,1);
- assert.match(errors[0],/broken relative link: missing-after-list-dedent\\.md/);
+ assert.match(errors[0],/broken relative link: missing-after-list-dedent\.md/);
 }));
