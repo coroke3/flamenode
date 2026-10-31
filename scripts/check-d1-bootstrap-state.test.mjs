@@ -82,3 +82,16 @@ test("remote malformed results fail closed rather than reporting empty", () => f
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Missing user_tables/);
 }));
+
+test("remote initialized state reads the migration count after the table inventory", () => fixture((root) => {
+  const cli = path.join(root, "node_modules/wrangler/bin/wrangler.js");
+  const log = path.join(root, "commands.jsonl");
+  fs.mkdirSync(path.dirname(cli), { recursive: true });
+  fs.writeFileSync(cli, `import fs from 'node:fs';\nfs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');\nconst row = process.argv.at(-1).includes('FROM d1_migrations') ? {migration_rows:2} : {user_tables:5,has_migrations:1};\nconsole.log(JSON.stringify([{results:[row]}]));\n`);
+  fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}');
+  const result = invoke(root, ["--remote", "--expect-initialized"], {FLAMENODE_D1_DATABASE_ID:"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"});
+  assert.equal(result.status, 0, result.stderr);
+  const calls = fs.readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].at(-1), /COUNT\(\*\) AS migration_rows FROM d1_migrations/);
+}));
