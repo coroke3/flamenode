@@ -38,7 +38,7 @@ export function parseFileRows(markdown) {
     // Only the canonical header and separator are non-file table rows. A malformed
     // file path must never disappear from the ledger unnoticed (including rows for
     // optional helpers that are not part of the mandatory source inventory).
-    if (/^\|\s*CURRENT path \(exact\)\s*\|/.test(trimmed) || /^\|\s*:?-{3,}:?\s*\|/.test(trimmed)) continue;
+    if (/^\|\s*CURRENT path(?: \(exact\))?\s*\|/.test(trimmed) || /^\|\s*:?-{3,}:?\s*\|/.test(trimmed)) continue;
     if (!FILE_ROW_RE.test(trimmed)) {
       errors.push("malformed migration ledger row: " + trimmed.slice(0, 90));
       continue;
