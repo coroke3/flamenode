@@ -136,7 +136,9 @@ function ownedGlobForms(value) {
   // "**/" may represent zero or more path segments. Include the zero-depth
   // form as well as the literal globstar form for each occurrence.
   const forms = new Set([value, value+"/**"]);
-  for (const form of [...forms]) {
+  // Set iteration includes newly added forms; visit successive zero-depth
+  // variants so multiple "/**/" segments cannot conceal an overlapping owner.
+  for (const form of forms) {
     const index = form.indexOf("/**/");
     if (index >= 0) forms.add(form.slice(0,index+1)+form.slice(index+4));
   }
