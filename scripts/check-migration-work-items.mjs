@@ -215,7 +215,7 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         // visible to the ordinary terminal-suffix stripper.
         const hasParens=/[()]/.test(normalized);
         const annotated=hasParens ? /^(.+?) \(([^()]*)\)$/.exec(normalized) : null;
-        if(/[^\S ]/.test(normalized) || (hasParens && (!annotated || /\s$/.test(annotated[1])))) {
+        if(/[^\S ]/.test(normalized) || (hasParens && (!annotated || /\s$/.test(annotated[1]) || /[()]/.test(annotated[1])))) {
           errors.push(filename+": ambiguous owned path annotations: "+p);
           continue;
         }
