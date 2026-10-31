@@ -70,6 +70,38 @@ function withoutFencedCode(markdown) {
     return line;
   }).join("\n");
 }
+// CommonMark inline code spans (one or more matching backticks) are literal.
+// Mask their text while preserving newlines, so examples do not become links
+// and genuine links outside the span are still checked. Unmatched delimiters
+// stay literal instead of hiding the rest of the document.
+function withoutInlineCode(markdown) {
+  const runs = [];
+  for (const match of markdown.matchAll(/`+/g)) {
+    const backslashes = markdown.slice(0, match.index).match(/\\+$/)?.[0]?.length ?? 0;
+    const escaped = backslashes % 2 === 1;
+    const length = match[0].length - (escaped ? 1 : 0);
+    if (length > 0) runs.push({ index: match.index + (escaped ? 1 : 0), length });
+  }
+  const next = new Array(runs.length);
+  const last = new Map();
+  for (let i = runs.length - 1; i >= 0; i--) {
+    next[i] = last.get(runs[i].length);
+    last.set(runs[i].length, i);
+  }
+  let result = "", cursor = 0;
+  for (let i = 0; i < runs.length; i++) {
+    const closing = next[i];
+    if (closing === undefined) continue;
+    const start = runs[i].index;
+    const stop = runs[closing].index + runs[closing].length;
+    result += markdown.slice(cursor, start) +
+      markdown.slice(start, stop).replace(/[^\r\n]/g, " ");
+    cursor = stop;
+    i = closing;
+  }
+  return result + markdown.slice(cursor);
+}
+
 export function listMarkdownFiles(root,rel="docs/migration") {
   const abs=path.join(root,rel);
   const out=[];
@@ -83,7 +115,7 @@ export function listMarkdownFiles(root,rel="docs/migration") {
 export function validateLinks({root,documents}) {
   const errors=[];
   for(const filename of documents) {
-    const content=withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8"));
+    const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(const match of content.matchAll(/\[[^\]\n]*\]\(([^)\n]+)\)/g)) {
       let target=match[1].trim().replace(/^<|>$/g,"");
