@@ -28,15 +28,29 @@ export function collectTaskCards(fileContents) {
   const cards = new Map();
   const errors = [];
   for (const [path, content] of Object.entries(fileContents)) {
-    const matches = [...content.matchAll(/^###\s+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
+    // A fenced Markdown example is neither an executable MIG card nor proof
+    // that required instructions exist. Preserve offsets while masking fences.
+    const normalized = content.replace(/\r\n/g, "\n");
+    const prose = proseLines(normalized).join("\n");
+    // Only horizontal whitespace may separate ### and the ID; \s also spans
+    // newlines and incorrectly turns an empty heading + a following ID into a card.
+    const matches = [...prose.matchAll(/^###[ \t]+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
     if (!matches.length) errors.push(path + ": no MIG cards");
     for (let i = 0; i < matches.length; i++) {
-      const [heading, id] = matches[i];
-      const text = content.slice(matches[i].index + heading.length, matches[i + 1]?.index ?? content.length);
+      const [, id] = matches[i];
+      const heading = normalized.slice(matches[i].index, matches[i].index + matches[i][0].length);
+      // A card ends at the next h1–h3 prose heading, not merely at the next
+      // MIG card. Otherwise instructions in a later section can falsely satisfy
+      // required fields missing from this card. Fenced headings are masked.
+      const start = matches[i].index + matches[i][0].length;
+      const nextHeading = prose.slice(start).search(/^#{1,3}[ \t]+[^\n]*$/m);
+      const end = nextHeading < 0 ? prose.length : start + nextHeading;
+      const text = normalized.slice(start, end);
+      const proseText = prose.slice(start, end);
       if (cards.has(id)) errors.push(id + ": duplicate card in " + path + " and " + cards.get(id).path);
       else cards.set(id,{path,heading,text});
       for(const marker of REQUIRED_CARD_FIELDS) {
-        if(!text.includes(marker)) errors.push(id + ": missing card field " + marker);
+        if(!proseText.includes(marker)) errors.push(id + ": missing card field " + marker);
       }
     }
   }

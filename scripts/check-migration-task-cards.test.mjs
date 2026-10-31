@@ -58,6 +58,95 @@ test("missing task, duplicate task, orphan task all fail", () => {
   assert.match(validateTaskCards({...base,fileContents:orphan}).join(" "),/no STATUS task/);
 });
 
+test("fenced sample headings cannot create orphan or duplicate executable MIG cards", () => {
+  const example = [
+    "~~~markdown",
+    "### MIG-0399 — example only",
+    "- 読む: example",
+    "- 変更: example",
+    "- 試験: example",
+    "- DONE: example",
+    "~~~",
+    "````md",
+    "### MIG-0301 — duplicate example of an existing card",
+    "```js",
+    "### MIG-0308 — not a real heading",
+    "```",
+    "````",
+  ].join("\n");
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+  const onlyExample = collectTaskCards({ "fake.md": example });
+  assert.equal(onlyExample.cards.size, 0);
+  assert.match(onlyExample.errors.join("\n"), /fake\.md: no MIG cards/);
+});
+
+test("a blank ### heading followed by a MIG ID on the next line is not a task card", () => {
+  const example = [
+    "###",
+    "MIG-0399 — plain prose, not a heading",
+    "- 読む: a sample",
+    "- 変更: a sample",
+    "- 試験: a sample",
+    "- DONE: a sample",
+  ].join("\n");
+  const alone = collectTaskCards({ "example.md": example });
+  assert.equal(alone.cards.size, 0);
+  assert.match(alone.errors.join("\n"), /example\.md: no MIG cards/);
+
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
+test("required task-card fields inside fenced code do not satisfy an executable card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "")
+      + "\n```bash\n# Sample only\n- 試験: echo passing\n```\n",
+  };
+  const errors=validateTaskCards({ ...base, fileContents:doc });
+  assert.match(errors.join("\n"), /MIG-0308: missing card field 試験:/);
+});
+
+test("required fields cannot leak from the next prose heading into an incomplete card", () => {
+  const incomplete = cards["docs/migration/TASK_CARDS_2_3.md"].replace(
+    "- 試験: zero diff", "- no test instructions",
+  );
+  for (const heading of ["# Appendix", "## Supplemental notes", "### Non-task heading"]) {
+    const doc = { ...cards,
+      "docs/migration/TASK_CARDS_2_3.md": incomplete + "\n" + heading + "\n- 試験: belongs to the next section\n",
+    };
+    assert.match(
+      validateTaskCards({ ...base, fileContents: doc }).join("\n"),
+      /MIG-0308: missing card field 試験:/,
+      heading,
+    );
+  }
+});
+
+test("h4 subsections remain part of the containing MIG task card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "#### Verification details\n- 試験: zero diff"),
+  };
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
+test("CRLF task card offsets stay aligned after masking fenced examples", () => {
+  const extra = "\n```md\n### MIG-0399 example\n- 読む: not a card\n```\n";
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": (cards["docs/migration/TASK_CARDS_2_3.md"]+extra).replace(/\n/g,"\r\n"),
+  };
+  assert.equal(collectTaskCards(doc).cards.size,5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+});
+
 test("incomplete card cannot pass merely by presence of MIG heading", () => {
   const incomplete={...cards,"docs/migration/TASK_CARDS_2_3.md":cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff","- test omitted")};
   assert.match(validateTaskCards({...base,fileContents:incomplete}).join(" "),/missing card field 試験:/);
