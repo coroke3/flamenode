@@ -99,26 +99,64 @@ export function parseOwnedTasks(prs){
   const owned=new Map();
   for(const pr of prs){
     const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName||"");
-    if(match)owned.set("MIG-"+match[1],pr.number);
+    if(!match)continue;
+    const id="MIG-"+match[1];
+    if(owned.has(id)){
+      throw new Error("Duplicate open PR ownership for "+id+": PR#"+owned.get(id)+" and PR#"+pr.number+"; reconcile the owners before selecting another task");
+    }
+    owned.set(id,pr.number);
   }
   return owned;
 }
+// The gh CLI only returns the first N open PRs. At the configured limit,
+// ownership is NOT exhaustive: the next page could own the selected task.
+// Stop instead of silently treating an incomplete set as a live lock registry.
+export function parseOpenPrSnapshot(prs,limit=100){
+  if(!Array.isArray(prs)||!Number.isSafeInteger(limit)||limit<1){
+    throw new Error("Invalid open PR owner snapshot or page limit");
+  }
+  if(prs.length>=limit){
+    throw new Error("Open PR list reached the "+limit+"-PR fetch limit; ownership may be incomplete. Paginate all open PRs or stop");
+  }
+  return parseOwnedTasks(prs);
+}
 export function readOpenPrOwners(root=ROOT){
+  let prs;
   try{
     const out=execFileSync("gh",["pr","list","--state","open","--limit","100","--json","number,headRefName"],{cwd:root,encoding:"utf8",timeout:15000,stdio:["ignore","pipe","ignore"]});
-    return {owned:parseOwnedTasks(JSON.parse(out)),live:true};
+    prs=JSON.parse(out);
   }catch{return {owned:new Map(),live:false};}
+  // A real owner collision must surface as an error, not masquerade as an unavailable gh CLI.
+  return {owned:parseOpenPrSnapshot(prs),live:true};
 }
 
 // Phase 4 Gate prerequisites on the 1102 measurement track, in an order that respects STATUS dependencies (tested).
 export const CRITICAL_PATH=["MIG-0401","MIG-0404","MIG-0405","MIG-0406"]; // 0409/0410/0411 left the Gate dependencies by owner decision 2026-10-23
 // Advisory selector: merged STATUS dependency state, minus tasks already owned by an open PR when known.
 export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()=>true){
+  // CI's status-card validator rejects duplicate MIG IDs, but migration:next
+  // can run before CI. Do not allow Map.set(last-row-wins) in parseTaskRows
+  // to convert an IN_PROGRESS/BLOCKED dependency into a fake DONE/READY.
+  const observedTaskIds=new Set();
+  for(const line of statusText.split("\n")){
+    const cells=line.split("|").map(x=>x.trim());
+    if(cells.length<6||!/^MIG-\d{4}$/.test(cells[1]||""))continue;
+    if(observedTaskIds.has(cells[1])){
+      throw new Error("Duplicate task ID in migration:next: "+cells[1]+"; reconcile STATUS before claiming a task");
+    }
+    observedTaskIds.add(cells[1]);
+  }
   const tasks=parseTaskRows(statusText);
   const decisions=new Map();
   for(const line of decisionText.split("\n")){
     const cells=line.split("|").map(x=>x.trim());
-    if(/^D-\d{2}$/.test(cells[1]||""))decisions.set(cells[1],cells[3]);
+    if(/^D-\d{2}$/.test(cells[1]||"")){
+      // The main migration gate validator also rejects duplicate Decision IDs.
+      // Do not permit a second row to overwrite OPEN with DECIDED in the
+      // task selector, even before that validator's PR has been merged.
+      if(decisions.has(cells[1]))throw new Error("Duplicate Decision ID in migration:next: "+cells[1]+"; reconcile the decision ledger before claiming a task");
+      decisions.set(cells[1],cells[3]);
+    }
   }
   const candidates=[];
   for(const [id,task] of tasks){

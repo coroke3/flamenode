@@ -1,7 +1,7 @@
 /**
- * Queue consumer: rebuild one public detail page per message into R2 (MIG-0411 /
- * R-JOB / Runtime B). Runs in the gateway Worker, so it reads the same route shards
- * (Static Assets) and writes exactly what `r2Html.ts` serves:
+ * Queue consumer: visibility-fenced DELETE and tracker closure (MIG-0411 / D-11).
+ * No HTML generation or R2 PUT is permitted. It reads the route shards
+ * (Static Assets) to verify the canonical identity of a page:
  *   key  = r2HtmlKey(<route key>)            e.g. `abc/index.html`, `user/x/index.html`
  *   meta = { kind, id, key, generation }   id = internal row id (videos.id), key = route key
  *          (video: the YouTube id slug); the gateway serves on kind/id/key, generation is diagnostic
@@ -18,14 +18,12 @@
  * is pending while `request_version > rendered_version`. requested_at / rendered_at are
  * kept for ordering and diagnostics only.
  *
- * Kinds whose PAGE_BODY_FORMAT is "excluded" (no page body this consumer can produce) are
- * never written: deletes for unpublished / revoked / unrouted pages still apply, a public
- * page is left to the build (MIG-0509) and the request is marked done.
+ * Public pages are left to the build (MIG-0509): complete the tracker as
+ * excluded_kind. Only unpublished / revoked / unrouted pages are deleted.
  *
  * Per message, bounded: D1 ≤ 3 statements (tracker, entity row LIMIT 1, CAS update),
- * 1 route shard read, 1 KV read, 1 R2 PUT or DELETE. Nothing is written for a page that
- * is not positively public: not in the route shards, revoked (deny:<kind>:<id>), or not
- * public in D1 by CURRENT's rules — its R2 HTML is deleted instead.
+ * 1 route shard read (2 for a video alias), 1 KV read, and at most 1 R2 DELETE.
+ * Unrouted, revoked or non-public pages have their R2 HTML deleted.
  *
  * Ordering: the queue must be consumed with max_batch_size = 1 and max_concurrency = 1.
  * With one consumer at a time, a render that raced an unpublish loses its CAS and the
@@ -36,27 +34,17 @@ import {
   isPublicVideoDirect,
   normalizePublicEventVisibility,
 } from "../../../../src/lib/publicData/visibility.ts";
-import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN, PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
+import { PUBLIC_LISTABLE_X_APPROVAL_STATUSES } from "../../../../src/lib/utils/publicXUser.ts";
 import { r2HtmlKey, type RebuildRequest } from "./r2Html.ts";
-import {
-  PAGE_BODY_FORMAT,
-  parseStylesheets,
-  renderPublicPage,
-  type PageRenderEntityKind,
-  type PublicPageRow,
-} from "./renderPublicPage.ts";
+import type { PageRenderEntityKind } from "./pageRenderRecovery.ts";
+export { MAX_RECOVERY_DOORBELLS, recoverPendingPageRenders } from "./pageRenderRecovery.ts";
+export type { PageRenderEntityKind, PageRenderQueueSender } from "./pageRenderRecovery.ts";
 import { canonicalEntityId, revocationKey, routeKeyFromPath } from "./routeShards.ts";
 import type { RouteLookup } from "./visibility.ts";
 
 const MAX_PAGE_RENDERS_PER_INVOCATION = 1;
-export const MAX_RECOVERY_DOORBELLS = 5;
 
 export interface PageRenderR2Bucket {
-  put: (
-    key: string,
-    value: string,
-    options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
-  ) => Promise<unknown>;
   delete: (key: string) => Promise<unknown>;
 }
 
@@ -71,14 +59,11 @@ export interface D1DatabaseLike {
   prepare: (query: string) => D1PreparedStatementLike;
 }
 
-export type PageRenderQueueSender = { send: (message: PageRenderDoorbell) => Promise<unknown> };
 
 export interface PageRenderEnv {
   DB?: D1DatabaseLike;
   R2_STORAGE?: PageRenderR2Bucket;
   VISIBILITY_KV?: { get: (key: string) => Promise<string | null> };
-  /** Comma-separated /_astro/*.css paths of the build (renderPublicPage.ts parseStylesheets). Required to render. */
-  PUBLIC_PAGE_STYLESHEETS?: string;
 }
 
 export type PageRenderDoorbell = Readonly<{ type: "render-page"; kind: PageRenderEntityKind; id: string }>;
@@ -88,7 +73,6 @@ export type PageRenderMessage =
   | Readonly<{ source: "doorbell"; kind: PageRenderEntityKind; id: string; key: string }>;
 
 export type PageRenderOutcome =
-  | Readonly<{ action: "rendered"; kind: PageRenderEntityKind; id: string; key: string; generation: string }>
   | Readonly<{ action: "deleted"; kind: PageRenderEntityKind; id: string; key: string; reason: "not_routed" | "revoked" | "not_public" }>
   | Readonly<{ action: "excluded_kind"; kind: PageRenderEntityKind; id: string }>
   | Readonly<{ action: "skipped_up_to_date"; kind: PageRenderEntityKind; id: string }>
@@ -152,19 +136,10 @@ export function requestPageRenderStatement(
 }
 
 const ENTITY_SQL: Record<PageRenderEntityKind, string> = {
-  // Only what the build's page reads (publicPages.ts videoScreenData / videoMetadata).
-  // creator_has_public_profile: CURRENT's link condition, a primary-key lookup in the same statement.
-  video: `SELECT id, title, creator_display_name, creator_x_user_id, creator_icon_url, creator_youtube_channel_url,
-                 youtube_video_id, scheduled_time, music, credit, intro_comment, highlights, visibility_status,
-                 EXISTS (SELECT 1 FROM x_users u WHERE lower(u.id) = lower(videos.creator_x_user_id)
-                           AND u.approval_status IN (${PUBLIC_LISTABLE_X_APPROVAL_SQL_IN})) AS creator_has_public_profile
-          FROM videos WHERE id = ? LIMIT 1`,
-  // x_users ids are compared lower-cased, as CURRENT fences and routes do (x_users_lower_id_idx).
-  user: `SELECT id, x_name, icon_url, profile_text, youtube_channel_url, approval_status
-         FROM x_users WHERE lower(id) = ? LIMIT 1`,
-  event: `SELECT id, title, explanation, icon_url, img_url, visibility_status,
-                 start_time, end_time, entry_start_time, entry_end_time
-          FROM events WHERE id = ? LIMIT 1`,
+  video: "SELECT id, visibility_status FROM videos WHERE id = ? LIMIT 1",
+  // CURRENT normalises X ids case-insensitively.
+  user: "SELECT id, approval_status FROM x_users WHERE lower(id) = ? LIMIT 1",
+  event: "SELECT id, visibility_status FROM events WHERE id = ? LIMIT 1",
 };
 
 const LISTABLE_USER: ReadonlySet<string> = new Set(PUBLIC_LISTABLE_X_APPROVAL_STATUSES);
@@ -187,8 +162,8 @@ function changesOf(result: { meta?: { changes?: number }; changes?: number }): n
 }
 
 /**
- * Rebuild or delete one page. Throws only for conditions a retry can fix (missing
- * binding or configuration, route data / KV / D1 / R2 unavailable).
+ * Delete a page that is not positively public, or close the tracker for build-owned HTML.
+ * Throws only for retryable binding/route/KV/D1/R2 failures.
  */
 export async function processPageRender(
   message: PageRenderMessage,
@@ -260,20 +235,8 @@ export async function processPageRender(
 
   const row = await db.prepare(ENTITY_SQL[kind]).bind(entityId).first<Record<string, unknown>>();
   if (!isPublicRow(kind, row)) return remove("not_public");
-  // A kind whose render does not fit the budget is left to the build (PAGE_BODY_FORMAT).
-  if (PAGE_BODY_FORMAT[kind] === "excluded") return finish({ action: "excluded_kind", kind, id: entityId });
-
-  // Throws (retry) while the build's stylesheet is not configured: an unstyled page is never written.
-  const html = await renderPublicPage(kind, row as PublicPageRow, {
-    stylesheets: parseStylesheets(env.PUBLIC_PAGE_STYLESHEETS),
-    nowSeconds: Math.floor(now / 1000),
-  });
-  await r2.put(r2HtmlKey(key), html, {
-    httpMetadata: { contentType: "text/html; charset=utf-8" },
-    // Identity for the gateway (r2Html.ts); generation is diagnostic there.
-    customMetadata: { kind, id: entityId, key, generation: route.generation },
-  });
-  return finish({ action: "rendered", kind, id: entityId, key, generation: route.generation });
+  // D-11: the build owns every Island HTML document; this consumer never PUTs.
+  return finish({ action: "excluded_kind", kind, id: entityId });
 }
 
 export interface QueueMessage<T = unknown> {
@@ -318,27 +281,3 @@ export async function handlePageRenderQueue(
   return outcomes;
 }
 
-/**
- * U04 recovery: one bounded statement (partial index public_page_renders_pending_idx),
- * then one doorbell per pending row. NOT WIRED: the gateway has no Cron, and the
- * existing Cron Workers have no binding to this queue (adding one is a Cloudflare
- * configuration change that needs approval).
- */
-export async function recoverPendingPageRenders(
-  db: D1DatabaseLike,
-  queue: PageRenderQueueSender,
-  limit = MAX_RECOVERY_DOORBELLS,
-): Promise<number> {
-  const bounded = Math.min(Math.max(1, Math.floor(limit)), MAX_RECOVERY_DOORBELLS);
-  const res = await db
-    .prepare(
-      "SELECT entity, entity_id FROM public_page_renders WHERE request_version > rendered_version ORDER BY requested_at ASC LIMIT ?",
-    )
-    .bind(bounded)
-    .all<{ entity: PageRenderEntityKind; entity_id: string }>();
-  const rows = res.results ?? [];
-  for (const row of rows) {
-    await queue.send({ type: "render-page", kind: row.entity, id: row.entity_id });
-  }
-  return rows.length;
-}

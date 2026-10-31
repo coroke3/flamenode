@@ -46,7 +46,33 @@ test("next-task advisory prioritizes performance without requiring D-08 for nonv
  assert.equal(next.selected,"MIG-0401");
  assert.deepEqual(next.candidates,["MIG-0401","MIG-0301"]);
 });
-import { parseOwnedTasks } from "./print-migration-task-context.mjs";
+import { parseOwnedTasks,parseOpenPrSnapshot } from "./print-migration-task-context.mjs";
+
+test("migration:next rejects duplicate MIG task IDs regardless of row order",()=>{
+ const site="| MIG-0105 | site | DONE | — |";
+ const blocked="| MIG-0105 | site | BLOCKED | — |";
+ const perf="| MIG-0401 | perf | READY | MIG-0105 |";
+ for(const status of [site+"\n"+blocked+"\n"+perf,blocked+"\n"+site+"\n"+perf,site+"\n"+site+"\n"+perf]){
+   assert.throws(()=>pickNextTask(status,""),/Duplicate task ID in migration:next: MIG-0105/);
+ }
+ assert.equal(pickNextTask(blocked+"\n"+perf,"").selected,null);
+ assert.equal(pickNextTask(site+"\n"+perf,"").selected,"MIG-0401");
+});
+
+test("migration:next rejects duplicate Decision IDs before picking a READY task",()=>{
+ const status=[
+  "| Task | Purpose | State | Dependencies |",
+  "| --- | --- | --- | --- |",
+  "| MIG-0201 | visual | READY | - |",
+ ].join("\n");
+ const open="| D-08 | HTML | OPEN | user |";
+ const decided="| D-08 | HTML | DECIDED | user |";
+ assert.throws(()=>pickNextTask(status,open+"\n"+decided),/Duplicate Decision ID in migration:next: D-08/);
+ assert.throws(()=>pickNextTask(status,decided+"\n"+open),/Duplicate Decision ID in migration:next: D-08/);
+ assert.throws(()=>pickNextTask(status,decided+"\n"+decided),/Duplicate Decision ID in migration:next: D-08/);
+ assert.equal(pickNextTask(status,open).selected,null);
+ assert.equal(pickNextTask(status,decided).selected,"MIG-0201");
+});
 
 test("next-task advisory skips READY tasks already owned by an open PR",()=>{
  const status=[
@@ -62,6 +88,28 @@ test("next-task advisory skips READY tasks already owned by an open PR",()=>{
  assert.deepEqual(next.ownedByPr,["MIG-0401"]);
  assert.equal(pickNextTask(status,"",new Map([["MIG-0401",1],["MIG-0301",2]])).selected,null);
 });
+test("duplicate open PRs for one MIG are rejected before task selection",()=>{
+ const prs=[
+  {number:481,headRefName:"migration/mig-0723-staff-view"},
+  {number:488,headRefName:"migration/mig-0723-staff-actions"},
+ ];
+ assert.throws(()=>parseOwnedTasks(prs),/Duplicate open PR ownership for MIG-0723: PR#481 and PR#488/);
+ assert.deepEqual([...parseOwnedTasks([{number:481,headRefName:"migration/mig-0723-staff-view"},{number:489,headRefName:"chore/migration-docs"}])],[["MIG-0723",481]]);
+});
+
+test("100-open-PR owner snapshot fails closed instead of losing the next page",()=>{
+ const prs=Array.from({length:100},(_,index)=>({
+  number:index+1,
+  headRefName:"migration/mig-"+String(index+1).padStart(4,"0")+"-owner",
+ }));
+ const partial=parseOpenPrSnapshot(prs.slice(0,99));
+ assert.equal(partial.size,99);
+ assert.throws(()=>parseOpenPrSnapshot(prs),/reached the 100-PR fetch limit/);
+ assert.throws(()=>parseOpenPrSnapshot(prs,50),/reached the 50-PR fetch limit/);
+ assert.throws(()=>parseOpenPrSnapshot({},100),/Invalid open PR owner snapshot/);
+ assert.deepEqual([...parseOpenPrSnapshot([])],[]);
+});
+
 test("next-task advisory stops on unmerged dependencies",()=>{
  const status="| MIG-0105 | site | IN_PROGRESS | — |\n| MIG-0401 | perf | READY | MIG-0105 |";
  assert.equal(pickNextTask(status,"").selected,null);
@@ -150,6 +198,14 @@ test("--open-pr-branches carries MCP-read ownership into the selector", () => {
  assert.throws(()=>parseContextArgs(["--next","--offline","--open-pr-branches",""]),/exclusive/);
  const owned=parseOwnedTasks(a.openPrBranches.map(headRefName=>({number:"?("+headRefName+")",headRefName})));
  assert.deepEqual([...owned.keys()],["MIG-0201"]);
+});
+
+test("the MCP branch-list CLI fails closed on conflicting task ownership", () => {
+ const script=fileURLToPath(new URL("./print-migration-task-context.mjs",import.meta.url));
+ const result=spawnSync(process.execPath,[script,"--next","--open-pr-branches","migration/mig-0723-staff-a,migration/mig-0723-staff-b"],{encoding:"utf8"});
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,"");
+ assert.match(result.stderr,/Duplicate open PR ownership for MIG-0723/);
 });
 
 test("a lead takes the 1102 measurement path before other READY work", () => {
