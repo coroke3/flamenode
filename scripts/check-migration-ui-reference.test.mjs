@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { readUiReferenceInputs, validateUiReference } from "./check-migration-ui-reference.mjs";
+import { mockArtifactExists, readUiReferenceInputs, validateUiReference } from "./check-migration-ui-reference.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = () => readUiReferenceInputs(root);
@@ -39,4 +41,46 @@ test("missing mock artifacts and unclassified parts fail validation", () => {
   assert.match(validateUiReference(f).join("\n"), /missing artifact/);
   const g = fixture(); g.uiText = g.uiText.split("\n").filter(l => !l.startsWith("| `ManageInbox` |")).join("\n");
   assert.match(validateUiReference(g).join("\n"), /missing mock disposition: ManageInbox/);
+});
+
+test("mock artifacts require an actual file whose resolved target stays inside the registered bundle", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-ui-mock-"));
+  try {
+    const mock = path.join(tmp, "docs/migration/mock");
+    const inside = path.join(mock, "nested");
+    const external = path.join(tmp, "external");
+    fs.mkdirSync(inside, { recursive: true });
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(inside, "inside.html"), "<p>registered</p>");
+    fs.writeFileSync(path.join(external, "external.html"), "<p>not registered</p>");
+    fs.symlinkSync("nested/inside.html", path.join(mock, "internal-alias.html"), "file");
+    fs.symlinkSync(inside, path.join(mock, "internal-dir-alias"), "dir");
+    fs.symlinkSync(path.join(external, "external.html"), path.join(mock, "external-alias.html"), "file");
+    fs.symlinkSync(external, path.join(mock, "external-dir-alias"), "dir");
+    fs.symlinkSync(path.join(tmp, "missing-target.html"), path.join(mock, "dangling.html"), "file");
+
+    for (const candidate of [
+      "nested/inside.html",
+      "internal-alias.html",
+      "internal-dir-alias/inside.html",
+    ]) assert.equal(mockArtifactExists(tmp, candidate), true, candidate);
+
+    for (const candidate of [
+      "external-alias.html",
+      "external-dir-alias/external.html",
+      "dangling.html",
+      "nested",
+      "missing.html",
+      "../external/external.html",
+      path.join(external, "external.html"),
+      "",
+    ]) assert.equal(mockArtifactExists(tmp, candidate), false, candidate);
+
+    // readUiReferenceInputs must use the same canonical guard, not existsSync.
+    const registered = readUiReferenceInputs(root);
+    assert.equal(registered.artifactExists("source/boards/Main.dc.html"), true);
+    assert.equal(registered.artifactExists("nonexistent-artifact.html"), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
