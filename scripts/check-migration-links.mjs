@@ -20,7 +20,9 @@ function withoutFencedCode(markdown) {
       }
       return "";
     }
-    if (marker) {
+    // CommonMark forbids backticks inside a backtick fence info string.
+    // An invalid opener must not hide real broken links that follow it.
+    if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
       fence = {char: marker[1][0], length: marker[1].length};
       return "";
     }
