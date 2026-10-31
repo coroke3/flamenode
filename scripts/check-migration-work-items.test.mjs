@@ -134,6 +134,34 @@ test("stacked or nonterminal ownership notes cannot evade locks",()=>{
  ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/);
 });
 
+test("whitespace-aliased ownership notes fail closed in either writer order",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const claim of [
+  "src/a.ts  (reason)",
+  "src/a.ts   (MIG-0302 files)",
+  "src/a.ts\t(reason)",
+  "src/a.ts\t(MIG-0302 files)/.",
+  "src/a.ts \t(reason)",
+  "src/a.ts\u00a0(reason)",
+  "src/a.ts\u202f(MIG-0302 files)",
+  "src/*.ts  (reason)",
+  "src/a.ts (one) (two)",
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+claim);
+  for(const otherPath of ["src/a.ts","src/*.ts"]) {
+   const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+otherPath);
+   for(const entries of [
+    {"MIG-0301.md":first,"MIG-0302.md":second},
+    {"MIG-0302.md":second,"MIG-0301.md":first},
+   ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/ambiguous owned path annotations/,claim+" vs "+otherPath);
+  }
+ }
+ for(const allowed of ["src/a.ts (reason)", "src/a.ts (MIG-0301 files)", "src/a.ts (MIG-0301 mount lines only)"]) {
+  const own=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+allowed);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":own}}),[],allowed);
+ }
+});
+
 test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const [firstPath,secondPath] of [
