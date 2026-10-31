@@ -112,7 +112,8 @@ export function parseOwnedTasks(prs){
       ));
     if(!pr||typeof pr!=="object"||Array.isArray(pr)
       ||!Object.hasOwn(pr,"number")||!Object.hasOwn(pr,"headRefName")
-      ||typeof pr.headRefName!=="string"||!pr.headRefName.trim()||!validNumber){
+      ||typeof pr.headRefName!=="string"||!pr.headRefName.trim()
+      ||pr.headRefName!==pr.headRefName.trim()||!validNumber){
       throw new Error("Invalid open PR record at index "+index+"; migration ownership cannot be verified");
     }
     const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName);
