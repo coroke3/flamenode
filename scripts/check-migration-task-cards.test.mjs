@@ -84,6 +84,26 @@ test("fenced sample headings cannot create orphan or duplicate executable MIG ca
   assert.match(onlyExample.errors.join("\n"), /fake\.md: no MIG cards/);
 });
 
+test("a blank ### heading followed by a MIG ID on the next line is not a task card", () => {
+  const example = [
+    "###",
+    "MIG-0399 — plain prose, not a heading",
+    "- 読む: a sample",
+    "- 変更: a sample",
+    "- 試験: a sample",
+    "- DONE: a sample",
+  ].join("\n");
+  const alone = collectTaskCards({ "example.md": example });
+  assert.equal(alone.cards.size, 0);
+  assert.match(alone.errors.join("\n"), /example\\.md: no MIG cards/);
+
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
 test("required task-card fields inside fenced code do not satisfy an executable card", () => {
   const doc = { ...cards,
     "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
