@@ -103,8 +103,10 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
               LIMIT 1 OFFSET ?
             ) ELSE 0 END AS has_more
            FROM events WHERE visibility_status = 'public'
-           ORDER BY start_time DESC, id DESC LIMIT ? OFFSET ?`,
+           ORDER BY start_time DESC, rowid ASC LIMIT ? OFFSET ?`,
       )
+      // The visibility/start_time index includes rowid as the stable tie key;
+      // unlike id DESC this avoids an unindexed temporary sort.
       // Only offset=0 has a reachable next page. Do not scan for row 201
       // when offset=100 is the last supported event-option page.
       // D1 statements stay at S2=2 (+session=3).
