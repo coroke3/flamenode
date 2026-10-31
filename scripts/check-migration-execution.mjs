@@ -103,9 +103,10 @@ export function parseTaskRows(statusText) {
       continue;
     }
     const match = line.match(/^\|\s*(MIG-\d{4})\s*\|/);
-    // A broken table row may omit its initial pipe or MIG-ID separator.
+    // A broken table row may lose every pipe separator; fail closed while
+    // remaining inside an actual task table. Ignore incidental MIG prose.
     // Valid standalone rows remain accepted for existing STATUS fixtures.
-    const candidate = match || (inTaskTable && trimmed.includes("|")
+    const candidate = match || (inTaskTable
       ? trimmed.match(/^\|?\s*(MIG-\d{4})\b/) : null);
     if (!candidate) {
       if (inTaskTable && !trimmed.startsWith("|")) inTaskTable = false;
