@@ -49,6 +49,28 @@ test("parse status task and decision inventory", () => {
   assert.deepEqual(expandDependencies("MIG-0304..MIG-0306"), ["MIG-0304", "MIG-0305", "MIG-0306"]);
 });
 
+test("malformed STATUS task rows fail closed rather than disappearing from dependency checks", () => {
+  const row = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  for (const malformed of [
+    "| MIG-0301 | core PoC | READY | MIG-0108",
+    "| MIG-0301 | core PoC | READY | |",
+    "| MIG-0301 | core PoC | READY | MIG-0108 | extra | extra |",
+    "| MIG-0301 | core PoC | READY | MIG-0108 ||",
+  ]) {
+    const changed = status.replace(row, malformed);
+    assert.throws(() => parseTaskRows(changed), /malformed task row: MIG-0301/);
+    assert.match(run({ statusText: changed }).join("\n"), /invalid STATUS task ledger: malformed task row: MIG-0301/);
+  }
+  assert.deepEqual(run(), []);
+});
+
+test("Phase 0 acceptance column remains valid while malformed acceptance fails", () => {
+  const withAcceptance = status + "| MIG-0001 | base inventory | DONE | — | complete |\n";
+  assert.equal(parseTaskRows(withAcceptance).get("MIG-0001").state, "DONE");
+  assert.deepEqual(run({ statusText: withAcceptance }), []);
+  assert.match(run({ statusText: withAcceptance.replace("| complete |", "| |") }).join("\n"), /malformed task row: MIG-0001/);
+});
+
 test("unrelated pure MIG-0301 can run before decisions", () => {
   assert.deepEqual(run(), []);
 });
