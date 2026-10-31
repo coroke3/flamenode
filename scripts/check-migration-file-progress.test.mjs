@@ -51,7 +51,7 @@ test("malformed ledger paths fail closed even for optional non-inventory helpers
  ]) {
   const broken=matrix.replace("## Future files",brokenRow+"\n## Future files");
   assert.match(parseFileRows(broken).errors.join("\n"),/malformed migration ledger row/);
-  assert.match(validateFileProgress({...base,matrix:broken}).join("\n"),/malformed migration ledger row/);
+  assert.match(validateFileProgress({...fixture,matrix:broken}).join("\n"),/malformed migration ledger row/);
  }
 });
 
