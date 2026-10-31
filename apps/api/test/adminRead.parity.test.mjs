@@ -444,6 +444,20 @@ if (runUnderRootTsx(import.meta.url)) {
 
   // ---------------- FIX #507: two bounded event-option pages ----------------
   test("FIX-507: stable public event options 0/99/100/101/200/201, offset 0/100, and 3-D1 budget", async () => {
+    // The real schema index (visibility_status, start_time DESC) already
+    // orders ties by rowid. Keep the bounded API query on that index rather
+    // than introducing a potentially large temporary B-tree for id DESC.
+    const eventOptionsPlan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN SELECT id, title,
+        CASE WHEN ? = 0 THEN EXISTS(
+          SELECT 1 FROM events WHERE visibility_status = 'public'
+          LIMIT 1 OFFSET ?
+        ) ELSE 0 END AS has_more
+      FROM events WHERE visibility_status = 'public'
+      ORDER BY start_time DESC, rowid ASC LIMIT ? OFFSET ?
+    `).all(0, 100, 100, 0).map(row => String(row.detail)).join("\n");
+    assert.match(eventOptionsPlan, /events_visibility_start_idx/);
+    assert.doesNotMatch(eventOptionsPlan, /USE TEMP B-TREE/, eventOptionsPlan);
     // Temporarily hide the normal fixture's public events (leave all their
     // FK relations untouched) to test exact boundary sizes, then restore.
     const previousPublic = sqlite.prepare(
