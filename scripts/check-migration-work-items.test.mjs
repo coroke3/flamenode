@@ -59,6 +59,50 @@ test("root, traversal and absolute path claims fail closed without rejecting leg
  }
 });
 
+test("trailing slash on recursive ownership cannot bypass a file lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for (const glob of ["src/**","src/**/","src/**//","./src/**/","src\\**\\"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+glob);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts");
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,glob);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\n"),/already claimed/,glob);
+ }
+});
+
+test("filename and intermediate glob claims overlap their concrete files",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [glob,file] of [
+  ["src/event*.ts","src/eventCreate.ts"],
+  ["src/*.ts","src/a.ts"],
+  ["src/**/foo.ts","src/a/foo.ts"],
+  ["src/**/foo.ts","src/foo.ts"],
+  ["src/**/*.test.mjs","src/unit/a.test.mjs"],
+  ["src/event*.ts","src/eventCreate*.ts"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+glob);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+file);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,glob+" vs "+file);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\n"),/already claimed/,glob+" vs "+file);
+ }
+});
+
+test("disjoint globs, sibling paths and annotated ownership scopes stay independent",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [firstPath,secondPath] of [
+  ["src/event*.ts","src/video*.ts"],
+  ["src/*.ts","src/a.tsx"],
+  ["src/events*.test.mjs","src/videos*.test.mjs"],
+  ["src/**/foo.ts","test/a/foo.ts"],
+  ["apps/api/src/app.ts (MIG-0604 mount lines only)","apps/api/src/app.ts (MIG-0605 mount lines only)"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+firstPath);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+secondPath);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":first,"MIG-0302.md":second}}),[],firstPath+" vs "+secondPath);
+ }
+});
+
 test("REVIEW requires evidence",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active.replace("State: IN_PROGRESS","State: REVIEW")}}).join(" "),/Evidence required/));
 test("unknown MIG rejected",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0999.md":ready}}).join(" "),/absent from STATUS/));
 
