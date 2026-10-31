@@ -71,7 +71,7 @@ function canonicalOwnedPath(value) {
   if (segments.some((part, i) => part === ".." && segments.slice(0, i).some(x => x.includes("*") || x.includes("?"))))
     return null;
   const normalized = path.posix.normalize(posix);
-  if (normalized === "." || normalized === ".." || normalized.startsWith("../"))
+  if (normalized === "." || normalized === ".." || normalized === "**" || normalized.startsWith("../"))
     return null;
   return normalized;
 }
