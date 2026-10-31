@@ -205,6 +205,14 @@ export function validateWorkItems({statusText,entries,commitExists}) {
           errors.push(filename+": invalid owned path "+p+" (expected repository-relative path or dir/**)");
           continue;
         }
+        // A path may carry at most one trailing explanatory scope note.
+        // Two notes can otherwise hide the real path from ownedPathsOverlap,
+        // and a nonterminal note can bypass both scope owner and file checks.
+        const notes=[...normalized.matchAll(/ \([^()]*\)/g)];
+        if(notes.length>1 || notes.some(note=>note.index+note[0].length!==normalized.length)) {
+          errors.push(filename+": ambiguous owned path annotations: "+p);
+          continue;
+        }
         // Check the canonical spelling: trailing slash or "/." after a
         // qualified claim must not bypass the MIG owner identity check.
         const scopedOwner=normalized.match(/ \((MIG-\d{4}) (?:files|mount lines only|spreadsheet vars only)\)$/)?.[1];
