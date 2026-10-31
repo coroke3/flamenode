@@ -397,17 +397,17 @@ test("linked Worker parent directory cannot bypass required template validation"
     const realDir = path.join(root, "workers/fast-jobs-real");
     fs.renameSync(workerDir, realDir);
     fs.symlinkSync(realDir, workerDir, "dir");
-    const errors = checkCloudflareTemplate({ root }).join("\\n");
-    assert.match(errors, /workers\\/fast-jobs\\/wrangler\\.toml: required config file must not be a symlink/);
-    assert.match(errors, /workers\\/fast-jobs: symlink escapes tracked TOML audit/);
+    const errors = checkCloudflareTemplate({ root }).join("\n");
+    assert.match(errors, /workers\/fast-jobs\/wrangler\.toml: required config file must not be a symlink/);
+    assert.match(errors, /workers\/fast-jobs: symlink escapes tracked TOML audit/);
   }));
 
 test("optional Next config symlink is rejected without reading external file", { skip: process.platform === "win32" }, () =>
   withFixture((root) => {
     writeValidTemplate(root);
     const external = path.join(root, "next-config-external.mjs");
-    fs.writeFileSync(external, "// outside\\n");
+    fs.writeFileSync(external, "// outside\n");
     fs.symlinkSync(external, path.join(root, "next.config.mjs"), "file");
-    const errors = checkCloudflareTemplate({ root }).join("\\n");
-    assert.match(errors, /next\\.config\\.mjs: config file must not be a symlink/);
+    const errors = checkCloudflareTemplate({ root }).join("\n");
+    assert.match(errors, /next\.config\.mjs: config file must not be a symlink/);
   }));
