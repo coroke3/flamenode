@@ -99,6 +99,24 @@ test("multiple zero-depth recursive segments cannot evade an ownership lock",()=
  }
 });
 
+test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [firstPath,secondPath] of [
+  ["src/a.ts (ignore collision)","src/a.ts"],
+  ["src/a.ts (owner A)","src/a.ts (owner B)"],
+  ["src/** (unverified subset)","src/a.ts"],
+  ["src/a.ts","src/** (says it is safe)"],
+  ["src/a.ts (ignore collision)","src/*.ts"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+firstPath);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+secondPath);
+  for(const entries of [
+   {"MIG-0301.md":first,"MIG-0302.md":second},
+   {"MIG-0302.md":second,"MIG-0301.md":first}
+  ]) assert.match(validateWorkItems({statusText:status,entries}).join("\\n"),/already claimed/,firstPath+" vs "+secondPath);
+ }
+});
+
 test("disjoint globs, sibling paths and annotated ownership scopes stay independent",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const [firstPath,secondPath] of [
