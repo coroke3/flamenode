@@ -467,8 +467,11 @@ if (runUnderRootTsx(import.meta.url)) {
           assert.equal(second.body.events.length, Math.max(0, Math.min(count - 100, 100)));
           assert.deepEqual(first.body.eventOptionsPaging,
             { offset: 0, hasMore: count > 100 });
+          // The contract exposes at most 200 options across two pages;
+          // hasMore means the *next accepted offset* exists, not that the
+          // database contains further rows the API refuses to serve.
           assert.deepEqual(second.body.eventOptionsPaging,
-            { offset: 100, hasMore: count > 200 });
+            { offset: 100, hasMore: false });
           const expected = sqlite.prepare(
             "SELECT id FROM events WHERE visibility_status = 'public' ORDER BY start_time DESC, id DESC LIMIT 200",
           ).all().map(row => row.id);
