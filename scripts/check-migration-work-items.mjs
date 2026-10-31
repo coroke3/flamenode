@@ -151,7 +151,7 @@ function ownedPathsOverlap(left, right) {
   // identical qualified claim can be compared automatically; interpreting
   // its prose as path bytes creates fictitious collisions with valid globs.
   // The precise edited paths must still be checked from the live PR diff.
-  const scopedNote = / \\([^/]+\\)$/;
+  const scopedNote = / \([^)]*\)$/;
   if (scopedNote.test(left) || scopedNote.test(right)) return left === right;
   if (left === right || left.startsWith(right + "/") || right.startsWith(left + "/")) return true;
   if (!/[?*]/.test(left) && !/[?*]/.test(right)) return false;
