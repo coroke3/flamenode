@@ -15,12 +15,22 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 function rejectSymlink(filePath) {
-  try {
-    if (fs.lstatSync(filePath).isSymbolicLink()) {
-      throw new Error(`${filePath}: symbolic link is forbidden in OpenNext output`);
+  // lstatSync on the leaf alone cannot detect a symlink in an existing parent.
+  // Check the full lexical path before mkdir/reads; do not follow any link.
+  let current = path.resolve(filePath);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) {
+        throw new Error(`${current}: symbolic link is forbidden in OpenNext output`);
+      }
+    } catch (error) {
+      // Missing components are allowed for the manifest writer, but their
+      // existing ancestors must still be inspected (including dangling links).
+      if (error?.code !== "ENOENT") throw error;
     }
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
   }
 }
 
