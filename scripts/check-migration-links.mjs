@@ -126,6 +126,78 @@ export function listMarkdownFiles(root,rel="docs/migration") {
   }
   return out;
 }
+// Parse destination boundaries before validating a Markdown inline link.
+// A regex ending at the first ")" incorrectly breaks `foo(bar).md` and
+// escaped punctuation like `foo\\)bar.md`. Titles are not part of the path.
+// This is deliberately scoped to inline links (the existing checker contract),
+// not reference-style definitions or images.
+function markdownLinkDestinations(markdown) {
+  const punctuation = (ch) => {
+    if (!ch) return false;
+    const n=ch.charCodeAt(0);
+    return (n>=33&&n<=47)||(n>=58&&n<=64)||(n>=91&&n<=96)||(n>=123&&n<=126);
+  };
+  const destinations=[];
+  for (const match of markdown.matchAll(/\\[[^\\]\\n]*\\]\\(/g)) {
+    // An escaped opening bracket is literal text, not a link.
+    let backslashes=0;
+    for (let j=match.index-1;j>=0&&markdown[j]==="\\\\";j--) backslashes++;
+    if (backslashes%2) continue;
+    let i=match.index+match[0].length, target="", valid=true;
+    while (markdown[i]===" "||markdown[i]==="\\t") i++;
+    if (markdown[i]==="<") {
+      // Angle destinations allow parentheses without balancing.
+      i++;
+      let closed=false;
+      while (i<markdown.length) {
+        const c=markdown[i];
+        if (c==="\\r"||c==="\\n"||c==="<") {valid=false;break;}
+        if (c==="\\\\"&&punctuation(markdown[i+1])) {
+          target+=markdown[i+1];i+=2;continue;
+        }
+        if (c===">") {closed=true;i++;break;}
+        target+=c;i++;
+      }
+      if (!closed) valid=false;
+    } else {
+      // Unescaped parentheses inside unbracketed destinations must balance.
+      // Escaped ASCII punctuation becomes the actual filename character.
+      let depth=0;
+      while (i<markdown.length) {
+        const c=markdown[i];
+        if (c==="\\r"||c==="\\n"||c==="<"||c===">") {valid=false;break;}
+        if (c==="\\\\"&&punctuation(markdown[i+1])) {
+          target+=markdown[i+1];i+=2;continue;
+        }
+        if (c==="(") depth++;
+        else if (c===")") {if (depth===0) break;depth--;}
+        else if (c===" "||c==="\\t") break;
+        target+=c;i++;
+      }
+      if (depth!==0) valid=false;
+    }
+    if (!valid) continue;
+    const beforeTitle=i;
+    while (markdown[i]===" "||markdown[i]==="\\t") i++;
+    if (markdown[i]!==")") {
+      // Optional CommonMark title: "title", 'title' or (title).
+      if (i===beforeTitle||!['"',"'","("].includes(markdown[i])) continue;
+      const delimiter=markdown[i++], closing=delimiter==="("?")":delimiter;
+      let closed=false;
+      while (i<markdown.length) {
+        if (markdown[i]==="\\r"||markdown[i]==="\\n") break;
+        if (markdown[i]==="\\\\"&&punctuation(markdown[i+1])) {i+=2;continue;}
+        if (markdown[i]===closing) {closed=true;i++;break;}
+        i++;
+      }
+      if (!closed) continue;
+      while (markdown[i]===" "||markdown[i]==="\\t") i++;
+    }
+    if (markdown[i]===")") destinations.push(target);
+  }
+  return destinations;
+}
+
 export function validateLinks({root,documents}) {
   const errors=[];
   // Lexical path checks are insufficient: a repository-local symlink can
@@ -134,13 +206,8 @@ export function validateLinks({root,documents}) {
   for(const filename of documents) {
     const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
-    for(const match of content.matchAll(/\[[^\]\n]*\]\(([^)\n]+)\)/g)) {
-      let target=match[1].trim();
-      // CommonMark permits an optional quoted title after the destination.
-      // The title is metadata, not part of the local file path.
-      const withTitle=/^(<[^>]*>|[^\s]+)\s+(?:"[^"]*"|'[^']*')$/.exec(target);
-      if(withTitle) target=withTitle[1];
-      target=target.replace(/^<|>$/g,"");
+    for(let target of markdownLinkDestinations(content)) {
+      target=target.trim();
       if(!target||target.startsWith("#")||/^(?:https?:|mailto:|data:)/i.test(target))continue;
       target=target.split("#")[0].split("?")[0];
       const resolved=path.resolve(target.startsWith("/")?root:path.dirname(path.join(root,filename)),target.replace(/^\//,""));
