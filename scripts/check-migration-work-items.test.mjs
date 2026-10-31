@@ -99,6 +99,36 @@ test("multiple zero-depth recursive segments cannot evade an ownership lock",()=
  }
 });
 
+test("stacked or nonterminal ownership notes cannot evade locks",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const fake of [
+  "src/a.ts (reason A) (reason B)",
+  "src/a.ts (MIG-0301 files) (reason B)",
+  "src/a.ts (reason A) (MIG-0301 files)",
+  "src/a.ts (MIG-0302 files) (unknown)",
+  "src/a.ts (MIG-0302 files) (unknown)/.",
+  "src/a.ts (reason A) (reason B)////",
+  "src/a.ts (reason A)/child.ts",
+  "src/a.ts (reason A)(reason B)",
+ ]) {
+  const owner=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+fake);
+  const other=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/*.ts");
+  for(const entries of [
+   {"MIG-0301.md":owner,"MIG-0302.md":other},
+   {"MIG-0302.md":other,"MIG-0301.md":owner},
+  ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),
+    /ambiguous owned path annotations/,fake);
+ }
+ // A single trailing note remains compatible, even after path normalization,
+ // but arbitrary wording must never suppress a real file/glob collision.
+ const withNote=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts (reason A)/.");
+ const exact=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts");
+ for(const entries of [
+  {"MIG-0301.md":withNote,"MIG-0302.md":exact},
+  {"MIG-0302.md":exact,"MIG-0301.md":withNote},
+ ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/);
+});
+
 test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const [firstPath,secondPath] of [
