@@ -76,8 +76,17 @@ export function validateLedgerCompleteness({ matrix, status, trackedFiles }) {
   const used = new Set();
   for (const file of required) {
     if (exact.has(file)) continue;
-    const fam = families.find((f) => file.startsWith(f.prefix));
-    if (fam) { used.add(fam.pattern); continue; }
+    const matches = families.filter((f) => file.startsWith(f.prefix));
+    if (matches.length) {
+      // Exact rows win, but overlapping family rows must not silently select
+      // whichever owner happens to appear first in the Markdown table.
+      for (const fam of matches) used.add(fam.pattern);
+      if (new Set(matches.map((f) => f.owner)).size > 1) {
+        errors.push("ambiguous family ownership for " + file + ": " +
+          matches.map((f) => f.pattern + " (" + f.owner + ")").join(", "));
+      }
+      continue;
+    }
     errors.push("tracked source has no FILE_MIGRATION_MATRIX row or family: " + file);
   }
   for (const fam of families) {
