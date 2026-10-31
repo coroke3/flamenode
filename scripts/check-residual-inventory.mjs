@@ -343,12 +343,16 @@ export function readInventoryRows(markdown) {
   const countIndex=sourceLines.findIndex((line,index)=>
     index>headerIndex && line.trim().startsWith("**Counts (tracked source only):**"));
   if(headerIndex<0 || countIndex<0) throw Error("inventory table boundaries missing");
-  const lines=sourceLines.slice(headerIndex,countIndex).filter(line=>line.trim());
-  for(const [index,line] of lines.entries()) {
+  const tableLines=sourceLines.slice(headerIndex,countIndex).filter(line=>line.trim());
+  for(const [index,line] of tableLines.entries()) {
     const cellLine=line.trim();
     if(!cellLine.startsWith("|") || !cellLine.endsWith("|"))
       throw Error("invalid inventory row "+Math.max(1,index-1)+": missing table boundary");
   }
+  // Preserve the existing audit of stray/duplicate pipe rows later in the
+  // same section (before the next heading), including rows after the count
+  // paragraph. Only the pre-count region is required to be all table rows.
+  const lines=sourceLines.filter(line=>line.trim().startsWith("|"));
   const head=lines[0]?.split("|").slice(1,-1).map(clean).join("|");
   if(head!=="Config|Kind|Setting / binding|Value / resource|移行後の担当（Worker / MIG）|退役 MIG")
     throw Error("inventory table header mismatch");
