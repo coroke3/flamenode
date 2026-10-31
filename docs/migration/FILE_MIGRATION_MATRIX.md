@@ -1215,6 +1215,9 @@
 | `scripts/benchmark-api-cpu.mjs`, `scripts/benchmark-api-cpu.test.mjs` | MIG-0606 | IN_PROGRESS | U01 harness (new, no CURRENT counterpart; Runtime N): LOCAL-only `wrangler dev --local` / in-process runs of `apps/api` that record CPU p50/p95/p99/max for 4 input kinds; judged by max against ZERO_1102 section 3; never writes production values. U02 full run waits for MIG-0603..0605 |
 | `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
 
+| `packages/contracts/src/xidLinkRequest.ts` | HELPER | SA-090/091 JSON transport schemas (future Hono review API, not mounted) | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=331dd67ebd99ab4b600c65b1d925ee9626f7cbc5 |
+| `apps/api/test/xidLinkRequests.parity.test.mjs` | TEST | SA-090/091 input-contract characterization against CURRENT FormData semantics | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=4c96ddeb2dc95fcac8437abf18acdc06ee8f12ae |
+
 ## Source families (MIG-0622 completeness)
 
 `scripts/check-migration-ledger-completeness.mjs` fails when a tracked non-test file under `app/`, `src/lib/`, `src/components/`, `src/styles/`, `public/`, `workers/`, `cloudflare/` or a listed root config has neither an exact ledger row above nor a family row here. A family row names a directory (`dir/**`) and its **first owner MIG** (the task that decides the disposition, not necessarily the one that extracts it). Exact rows win. When an owner MIG touches a file in a family it adds an exact row in the same PR (the file-progress checker already requires that for changed files). Owners marked `closest` were not decided by a Work Order; the MIG-0901 residual inventory may reassign them.
@@ -1296,8 +1299,6 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
 
-| `packages/contracts/src/xidLinkRequest.ts` | HELPER | SA-090/091 JSON transport schemas (future Hono review API, not mounted) | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=331dd67ebd99ab4b600c65b1d925ee9626f7cbc5 |
-| `apps/api/test/xidLinkRequests.parity.test.mjs` | TEST | SA-090/091 input-contract characterization against CURRENT FormData semantics | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=4c96ddeb2dc95fcac8437abf18acdc06ee8f12ae |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 
