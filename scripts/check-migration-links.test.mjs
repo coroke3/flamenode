@@ -24,6 +24,23 @@ test("detects broken relative links without requiring remote HTTP access",()=>fi
  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
  assert.match(errors.join("\n"),/broken relative link: nothing.md/);
 }));
+test("quoted Markdown link titles do not become filenames",()=>fixture(root=>{
+ const md=[
+  '[first](deep/CHILD.md "Child file")',
+  "[second](deep/CHILD.md 'Child file')",
+  '[third](<deep/CHILD.md> "Angle destination")',
+  '[external](https://example.com/path "Remote")',
+  '[missing](not-present.md "Missing file")',
+  '[escape](../../../../../outside.md "Unsafe")',
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,2,errors.join("\n"));
+ assert.match(errors.join("\n"),/broken relative link: not-present\.md/);
+ assert.match(errors.join("\n"),/link outside repository: \.\.\/\.\.\/\.\.\/\.\.\/\.\.\/outside\.md/);
+ assert.doesNotMatch(errors.join("\n"),/Child file|Angle destination|Remote|Missing file|Unsafe/);
+}));
+
 test("does not treat a fragment-only URL as a local file",()=>fixture(root=>{
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n[heading](#entry)\n");
  assert.deepEqual(validateLinks({root,documents:listMarkdownFiles(root)}),[]);
