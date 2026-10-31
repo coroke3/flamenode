@@ -126,6 +126,34 @@ test("exiting a nested blockquote code fence restores link validation in the out
  assert.match(errors[0],/broken relative link: missing-after-nested-quote\.md/);
 }));
 
+test("inline code spans are ignored while adjacent file links are checked",()=>fixture(root=>{
+ const md=[
+  "`[example](fake-inline.md)` and [real](missing-after-inline.md)",
+  "``[example](fake-double-inline.md)`` and [real](missing-after-double.md)",
+  "Before `multiline",
+  "[example](fake-multiline.md)",
+  "` [real](missing-after-multiline.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,3,errors.join("\n"));
+ for(const target of ["missing-after-inline.md","missing-after-double.md","missing-after-multiline.md"])
+  assert.match(errors.join("\n"),new RegExp(target.replace(".", "\\.")));
+ assert.doesNotMatch(errors.join("\n"),/fake-/);
+}));
+
+test("escaped and unmatched backticks cannot hide real file links",()=>fixture(root=>{
+ const md=[
+  "Escaped \\`[real](missing-escaped.md)\\`",
+  "Unmatched `[real](missing-unmatched.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,2,errors.join("\n"));
+ assert.match(errors.join("\n"),/missing-escaped\.md/);
+ assert.match(errors.join("\n"),/missing-unmatched\.md/);
+}));
+
 test("indented code examples are excluded, ordinary links remain validated",()=>fixture(root=>{
  const md=[
   "    [sample](not-a-file-in-indented-code.md)",
