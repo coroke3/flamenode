@@ -85,3 +85,43 @@ test("invalid backtick fence info cannot hide broken links; tilde info may conta
  assert.match(errors.join("\n"),/broken-after-invalid-fence\.md/);
  assert.match(errors.join("\n"),/broken-after-valid-tilde\.md/);
 }));
+
+
+test("nested list fences exclude examples but still check actual list links",()=>fixture(root=>{
+ const md=[
+  "- examples:",
+  "    ```md",
+  "    [sample](not-a-file-in-list.md)",
+  "    ```",
+  "    [real](missing-list-target.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1);
+ assert.match(errors[0],/broken relative link: missing-list-target\.md/);
+}));
+
+test("blockquote fences exclude examples but not following blockquote links",()=>fixture(root=>{
+ const md=[
+  "> ```markdown",
+  "> [sample](not-a-file-in-quote.md)",
+  "> ```",
+  "> [real](missing-quote-target.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1);
+ assert.match(errors[0],/broken relative link: missing-quote-target\.md/);
+}));
+
+test("indented code examples are excluded, ordinary links remain validated",()=>fixture(root=>{
+ const md=[
+  "    [sample](not-a-file-in-indented-code.md)",
+  "",
+  "[real](missing-after-code.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1);
+ assert.match(errors[0],/broken relative link: missing-after-code\.md/);
+}));
