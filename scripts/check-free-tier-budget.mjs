@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readWorkerConfigs } from "./free-tier-worker-configs.mjs";
 import {
   D1_QUERY_HARD_LIMIT,
   D1_QUERY_SOFT_LIMIT,
@@ -22,18 +23,6 @@ const OFFICIAL_FREE_LIMITS = Object.freeze({
   queueOperationsPerDay: 10_000,
 });
 
-function readWorkerConfigs() {
-  const workersRoot = path.join(REPO_ROOT, "workers");
-  return fs
-    .readdirSync(workersRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(workersRoot, entry.name, "wrangler.toml"))
-    .filter((filePath) => fs.existsSync(filePath))
-    .map((filePath) => ({
-      filePath,
-      text: fs.readFileSync(filePath, "utf8"),
-    }));
-}
 
 function parseCronExpressions(configText) {
   return [...configText.matchAll(/^\s*crons\s*=\s*\[([^\]]*)\]\s*$/gm)]
@@ -49,7 +38,7 @@ function parseQueueConsumerBlocks(configText) {
 
 const rootWrangler = fs.readFileSync(path.join(REPO_ROOT, "wrangler.toml"), "utf8");
 assert.match(rootWrangler, /^\[assets\][\s\S]*?^run_worker_first\s*=\s*false\s*$/m);
-const workerConfigs = readWorkerConfigs();
+const workerConfigs = readWorkerConfigs(REPO_ROOT);
 for (const config of [
   { filePath: path.join(REPO_ROOT, "wrangler.toml"), text: rootWrangler },
   ...workerConfigs,
