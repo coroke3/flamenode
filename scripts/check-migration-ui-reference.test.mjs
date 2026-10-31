@@ -84,3 +84,47 @@ test("mock artifacts require an actual file whose resolved target stays inside t
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("mock bundle root and its ancestor cannot redirect validation to a symlink target", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-mock-root-"));
+  try {
+    const repo = path.join(tmp, "repo");
+    const docs = path.join(repo, "docs");
+    const migration = path.join(docs, "migration");
+    const mock = path.join(migration, "mock");
+    const original = path.join(migration, "original-mock");
+    const outside = path.join(tmp, "outside");
+    const internal = path.join(repo, "other-mocks");
+    fs.mkdirSync(mock, { recursive: true });
+    fs.mkdirSync(outside);
+    fs.mkdirSync(internal);
+    for (const dir of [mock, outside, internal]) {
+      fs.writeFileSync(path.join(dir, "reference.html"), "<p>artifact</p>");
+    }
+    assert.equal(mockArtifactExists(repo, "reference.html"), true);
+
+    fs.renameSync(mock, original);
+    fs.symlinkSync(outside, mock, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "bundle root points outside checkout");
+    fs.unlinkSync(mock);
+
+    fs.symlinkSync(internal, mock, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "bundle root points to another in-repo directory");
+    fs.unlinkSync(mock);
+    fs.renameSync(original, mock);
+    assert.equal(mockArtifactExists(repo, "reference.html"), true, "normal registered directory still works");
+
+    // A symlink one level higher is also not allowed to move the bundle.
+    const altMigration = path.join(outside, "migration");
+    fs.mkdirSync(path.join(altMigration, "mock"), { recursive: true });
+    fs.writeFileSync(path.join(altMigration, "mock", "reference.html"), "<p>outside</p>");
+    fs.renameSync(migration, path.join(docs, "original-migration"));
+    fs.symlinkSync(altMigration, migration, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "ancestor redirects bundle outside");
+    fs.unlinkSync(migration);
+    fs.renameSync(path.join(docs, "original-migration"), migration);
+    assert.equal(mockArtifactExists(repo, "reference.html"), true, "restored directory passes");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
