@@ -23,6 +23,11 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `src/lib/interactions/useFormDraft.ts` | HELPER | EventForm U01a draft persistence (SA-022/023 future consumer) | MIG-0721 | `apps/ops/src/lib/useFormDraft.ts`; CURRENT unchanged | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=apps/ops/test/eventFormDraft.test.mjs (CI-pending; parity + behavior) |
+| `src/lib/interactions/useUnsavedChangesGuard.ts` | HELPER | EventForm U01a beforeunload (SA-022/023 future consumer) | MIG-0721 | `apps/ops/src/lib/useUnsavedChangesGuard.ts`; CURRENT unchanged | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=apps/ops/test/eventFormDraft.test.mjs (CI-pending; beforeunload) |
+| `apps/ops/src/lib/useFormDraft.ts` | HELPER | MIG-0721 U01a nonproduction browser-local draft | MIG-0721 | SAME (new; copied CURRENT; EventForm consumer not yet ported) | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=apps/ops/test/eventFormDraft.test.mjs (CI-pending) |
+| `apps/ops/src/lib/useUnsavedChangesGuard.ts` | HELPER | MIG-0721 U01a nonproduction browser navigation guard | MIG-0721 | SAME (new; copied CURRENT; EventForm consumer not yet ported) | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=apps/ops/test/eventFormDraft.test.mjs (CI-pending) |
+| `apps/ops/test/eventFormDraft.test.mjs` | TEST | MIG-0721 U01a CURRENT parity and draft/browser behavior | MIG-0721 | SAME (new; 4 cases) | IN_PROGRESS | PR#515 SHA=d382e8e09a6c6f998c4b0d57cac4a39ebed6e136 TEST=CI-pending |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
