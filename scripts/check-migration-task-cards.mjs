@@ -32,7 +32,9 @@ export function collectTaskCards(fileContents) {
     // that required instructions exist. Preserve offsets while masking fences.
     const normalized = content.replace(/\r\n/g, "\n");
     const prose = proseLines(normalized).join("\n");
-    // Only horizontal whitespace may separate ### and the ID; \s also spans\n    // newlines and incorrectly turns an empty heading + a following ID into a card.\n    const matches = [...prose.matchAll(/^###[ \t]+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
+    // Only horizontal whitespace may separate ### and the ID; \s also spans
+    // newlines and incorrectly turns an empty heading + a following ID into a card.
+    const matches = [...prose.matchAll(/^###[ \t]+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
     if (!matches.length) errors.push(path + ": no MIG cards");
     for (let i = 0; i < matches.length; i++) {
       const [, id] = matches[i];
