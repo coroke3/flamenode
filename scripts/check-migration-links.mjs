@@ -5,6 +5,28 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
+
+// Link-like syntax in Markdown code fences is an example, not a dependency.
+// Match CommonMark's 0–3 leading spaces, backtick/tilde fences, and close
+// only with the same marker of at least the opening length.
+function withoutFencedCode(markdown) {
+  let fence = null;
+  return markdown.split(/\r?\n/).map((line) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char &&
+          marker[1].length >= fence.length && !marker[2].trim()) {
+        fence = null;
+      }
+      return "";
+    }
+    if (marker) {
+      fence = {char: marker[1][0], length: marker[1].length};
+      return "";
+    }
+    return line;
+  }).join("\n");
+}
 export function listMarkdownFiles(root,rel="docs/migration") {
   const abs=path.join(root,rel);
   const out=[];
@@ -18,7 +40,7 @@ export function listMarkdownFiles(root,rel="docs/migration") {
 export function validateLinks({root,documents}) {
   const errors=[];
   for(const filename of documents) {
-    const content=fs.readFileSync(path.join(root,filename),"utf8");
+    const content=withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8"));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(const match of content.matchAll(/\[[^\]\n]*\]\(([^)\n]+)\)/g)) {
       let target=match[1].trim().replace(/^<|>$/g,"");
