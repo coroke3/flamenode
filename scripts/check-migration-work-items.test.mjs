@@ -117,6 +117,26 @@ test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
  }
 });
 
+test("scoped ownership annotations cannot impersonate another MIG task",()=>{
+ for(const annotation of [
+  "src/** (MIG-0302 files)",
+  "src/a.ts (MIG-0302 mount lines only)",
+  "src/a.ts (MIG-0302 spreadsheet vars only)",
+ ]) {
+  const forged=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+annotation);
+  const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":forged}});
+  assert.match(errors.join("\n"),/scoped owned path .* names MIG-0302 instead of MIG-0301/,annotation);
+ }
+ for(const own of [
+  "src/** (MIG-0301 files)",
+  "src/a.ts (MIG-0301 mount lines only)",
+  "src/a.ts (MIG-0301 spreadsheet vars only)"
+ ]) {
+  const item=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+own);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":item}}),[],own);
+ }
+});
+
 test("disjoint globs, sibling paths and annotated ownership scopes stay independent",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const [firstPath,secondPath] of [
