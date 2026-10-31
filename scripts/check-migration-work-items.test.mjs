@@ -106,7 +106,8 @@ test("disjoint globs, sibling paths and annotated ownership scopes stay independ
   ["src/*.ts","src/a.tsx"],
   ["src/events*.test.mjs","src/videos*.test.mjs"],
   ["src/**/foo.ts","test/a/foo.ts"],
-  ["apps/api/src/app.ts (MIG-0604 mount lines only)","apps/api/src/app.ts (MIG-0605 mount lines only)"]
+  ["apps/api/src/app.ts (MIG-0604 mount lines only)","apps/api/src/app.ts (MIG-0605 mount lines only)"],
+  ["apps/api/test/** (MIG-0605 files)","apps/api/test/events*.test.mjs"]
  ]) {
   const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+firstPath);
   const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+secondPath);
