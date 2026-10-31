@@ -15,6 +15,32 @@ export interface SpreadsheetTableDef {
   inSchema: boolean;
 }
 
+export type SpreadsheetColumnPolicy = {
+  enum?: readonly string[];
+  json?: boolean;
+  url?: boolean;
+  maxLength?: number;
+};
+
+export const SPREADSHEET_COLUMN_POLICIES: Record<string, SpreadsheetColumnPolicy> = {
+  "event_groups.icon_url": { url: true, maxLength: 2048 },
+  "event_groups.img_url": { url: true, maxLength: 2048 },
+  "event_groups.group_type": { maxLength: 32 },
+  "event_groups.visibility_status": { maxLength: 32 },
+  "events.icon_url": { url: true, maxLength: 2048 },
+  "events.img_url": { url: true, maxLength: 2048 },
+  "events.review_settings": { json: true, maxLength: 100_000 },
+  "events.editable_fields": { json: true, maxLength: 100_000 },
+  "events.repeat_rules": { json: true, maxLength: 100_000 },
+  "events.parts_json": { json: true, maxLength: 100_000 },
+  "events.required_video_fields_json": { json: true, maxLength: 2_000 },
+  "videos.music_reference_url": { url: true, maxLength: 2048 },
+  "x_users.icon_url": { url: true, maxLength: 2048 },
+  "x_users.youtube_channel_url": { url: true, maxLength: 2048 },
+  "events.user_video_edit_permission_keys_json": { json: true, maxLength: 100_000 },
+  "announcements.body": { maxLength: 200_000 },
+};
+
 /**
  * 公開状態の変更は、R2 の可視性フェンス・静的再生成・Cache API 無効化を
  * 同じ書き込みフローで行う必要があるため、汎用スプレッドシートからは
@@ -28,6 +54,31 @@ export const SPREADSHEET_VISIBILITY_STATUS_READONLY_COLUMNS = new Set([
   // X ID lifecycle actionだけで行う。generic CRUDのqueue投入だけでは足りない。
   "x_users.approval_status",
 ]);
+
+/**
+ * 公開正本は物理削除せず専用 lifecycle actionを利用する。event_groups / x_users
+ * はrelation cascadeやR2 fenceを伴うためgeneric DELETEからも除外する。
+ */
+export const SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES = new Set([
+  "events",
+  "event_groups",
+  "system_settings",
+  "videos",
+  "x_users",
+]);
+
+export const SPREADSHEET_DEFAULT_MAX_CELL_CHARS = 100_000;
+
+export function getSpreadsheetColumnPolicy(
+  table: string,
+  column: string,
+  enumValues?: readonly string[],
+): SpreadsheetColumnPolicy {
+  return {
+    ...SPREADSHEET_COLUMN_POLICIES[`${table}.${column}`],
+    ...(enumValues && enumValues.length > 0 ? { enum: enumValues } : {}),
+  };
+}
 
 export function primaryKeysFromColumns(
   columns: Array<{ name: string; pk: number }>,
@@ -234,4 +285,8 @@ export function isSpreadsheetColumnEditable(
     return false;
   }
   return true;
+}
+
+export function isSpreadsheetPhysicalDeleteBlocked(table: string): boolean {
+  return SPREADSHEET_PHYSICAL_DELETE_BLOCKED_TABLES.has(table);
 }
