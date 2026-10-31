@@ -32,22 +32,39 @@ const SERVER_CORE_IMPORT_RULES = [
 
 const API_ROUTE_DB_SPECIFIER = /^(?:drizzle-orm|@flamenode\/db)(?:\/|$)/;
 
+// Parentheses and TS type-only wrappers do not change which host object is read.
+function unwrapStaticExpression(node) {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  ) {
+    node = node.expression;
+  }
+  return node;
+}
+
 // Only literal member names are accepted: dynamic property names are outside this guard.
 // Match both process.env and its static computed/globalThis equivalents.
 function hasStaticMemberName(node, memberName) {
+  node = unwrapStaticExpression(node);
   if (ts.isPropertyAccessExpression(node)) return node.name.text === memberName;
   if (!ts.isElementAccessExpression(node)) return false;
-  const argument = node.argumentExpression;
+  const argument = node.argumentExpression && unwrapStaticExpression(node.argumentExpression);
   return Boolean(argument) &&
     (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) &&
     argument.text === memberName;
 }
 
 function isProcessReference(node) {
+  node = unwrapStaticExpression(node);
   if (ts.isIdentifier(node)) return node.text === "process";
-  return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-    ts.isIdentifier(node.expression) &&
-    node.expression.text === "globalThis" &&
+  if (!(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) return false;
+  const host = unwrapStaticExpression(node.expression);
+  return ts.isIdentifier(host) &&
+    host.text === "globalThis" &&
     hasStaticMemberName(node, "process");
 }
 
