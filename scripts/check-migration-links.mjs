@@ -138,21 +138,21 @@ function markdownLinkDestinations(markdown) {
     return (n>=33&&n<=47)||(n>=58&&n<=64)||(n>=91&&n<=96)||(n>=123&&n<=126);
   };
   const destinations=[];
-  for (const match of markdown.matchAll(/\\[[^\\]\\n]*\\]\\(/g)) {
+  for (const match of markdown.matchAll(/\[[^\]\n]*\]\(/g)) {
     // An escaped opening bracket is literal text, not a link.
     let backslashes=0;
-    for (let j=match.index-1;j>=0&&markdown[j]==="\\\\";j--) backslashes++;
+    for (let j=match.index-1;j>=0&&markdown[j]==="\\";j--) backslashes++;
     if (backslashes%2) continue;
     let i=match.index+match[0].length, target="", valid=true;
-    while (markdown[i]===" "||markdown[i]==="\\t") i++;
+    while (markdown[i]===" "||markdown[i]==="\t") i++;
     if (markdown[i]==="<") {
       // Angle destinations allow parentheses without balancing.
       i++;
       let closed=false;
       while (i<markdown.length) {
         const c=markdown[i];
-        if (c==="\\r"||c==="\\n"||c==="<") {valid=false;break;}
-        if (c==="\\\\"&&punctuation(markdown[i+1])) {
+        if (c==="\r"||c==="\n"||c==="<") {valid=false;break;}
+        if (c==="\\"&&punctuation(markdown[i+1])) {
           target+=markdown[i+1];i+=2;continue;
         }
         if (c===">") {closed=true;i++;break;}
@@ -165,33 +165,33 @@ function markdownLinkDestinations(markdown) {
       let depth=0;
       while (i<markdown.length) {
         const c=markdown[i];
-        if (c==="\\r"||c==="\\n"||c==="<"||c===">") {valid=false;break;}
-        if (c==="\\\\"&&punctuation(markdown[i+1])) {
+        if (c==="\r"||c==="\n"||c==="<"||c===">") {valid=false;break;}
+        if (c==="\\"&&punctuation(markdown[i+1])) {
           target+=markdown[i+1];i+=2;continue;
         }
         if (c==="(") depth++;
         else if (c===")") {if (depth===0) break;depth--;}
-        else if (c===" "||c==="\\t") break;
+        else if (c===" "||c==="\t") break;
         target+=c;i++;
       }
       if (depth!==0) valid=false;
     }
     if (!valid) continue;
     const beforeTitle=i;
-    while (markdown[i]===" "||markdown[i]==="\\t") i++;
+    while (markdown[i]===" "||markdown[i]==="\t") i++;
     if (markdown[i]!==")") {
       // Optional CommonMark title: "title", 'title' or (title).
       if (i===beforeTitle||!['"',"'","("].includes(markdown[i])) continue;
       const delimiter=markdown[i++], closing=delimiter==="("?")":delimiter;
       let closed=false;
       while (i<markdown.length) {
-        if (markdown[i]==="\\r"||markdown[i]==="\\n") break;
-        if (markdown[i]==="\\\\"&&punctuation(markdown[i+1])) {i+=2;continue;}
+        if (markdown[i]==="\r"||markdown[i]==="\n") break;
+        if (markdown[i]==="\\"&&punctuation(markdown[i+1])) {i+=2;continue;}
         if (markdown[i]===closing) {closed=true;i++;break;}
         i++;
       }
       if (!closed) continue;
-      while (markdown[i]===" "||markdown[i]==="\\t") i++;
+      while (markdown[i]===" "||markdown[i]==="\t") i++;
     }
     if (markdown[i]===")") destinations.push(target);
   }
