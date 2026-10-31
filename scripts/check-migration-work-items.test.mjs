@@ -103,6 +103,11 @@ test("stacked or nonterminal ownership notes cannot evade locks",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const fake of [
   "src/a.ts (reason A) (reason B)",
+  "src/a.ts (reason(one))",
+  "src/a.ts (MIG-0302 files(x))",
+  "src/a.ts (reason(one)) (reason B)",
+  "src/a.ts (MIG-0302 files(x))///.",
+  "src/*.ts (embedded(note))",
   "src/a.ts (MIG-0301 files) (reason B)",
   "src/a.ts (reason A) (MIG-0301 files)",
   "src/a.ts (MIG-0302 files) (unknown)",
