@@ -40,7 +40,8 @@ test("SA-001..003: only exact string '1' means true after FormData-style convers
   }
   assert.equal(admin({ and_next: 1, force_notify: 1 }).andNext, true);
   assert.equal(admin({ and_next: 1, force_notify: 1 }).forceNotify, true);
-  assert.equal(admin({ and_next: " 1 ", force_notify: " 1 " }).andNext, true);
+  assert.equal(admin({ and_next: " 1 ", force_notify: " 1 " }).andNext, false);
+  assert.equal(admin({ and_next: " 1 ", force_notify: " 1 " }).forceNotify, false);
 });
 
 test("SA-001..003: invalid review filter silently drops; no length truncation", () => {
