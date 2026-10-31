@@ -23,6 +23,14 @@ function withoutFencedCode(markdown) {
     // Leaving a blockquote ends its fenced block. Do not accidentally mask
     // a subsequent real link in a normal paragraph.
     if (fence?.quoted && !quote && body.trim()) fence = null;
+    // A fenced block inside a list also ends when its containing list item
+    // ends. Without this, an unclosed fence hides real links after dedenting.
+    // Empty lines may still be part of the list item, so keep the fence then.
+    if (fence?.listIndent && body.trim() &&
+        !body.startsWith(" ".repeat(fence.listIndent))) {
+      fence = null;
+      listIndent = 0;
+    }
 
     if (fence) {
       if (fence.listIndent && body.startsWith(" ".repeat(fence.listIndent))) {

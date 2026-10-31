@@ -125,3 +125,17 @@ test("indented code examples are excluded, ordinary links remain validated",()=>
  assert.equal(errors.length,1);
  assert.match(errors[0],/broken relative link: missing-after-code\.md/);
 }));
+
+test("dedenting out of a list ends an unclosed fenced block and checks following links",()=>fixture(root=>{
+ const md=[
+  "- examples:",
+  "    ```md",
+  "    [sample](not-a-file-in-list.md)",
+  "",
+  "[real](missing-after-list-dedent.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1);
+ assert.match(errors[0],/broken relative link: missing-after-list-dedent\\.md/);
+}));
