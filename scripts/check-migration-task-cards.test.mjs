@@ -116,11 +116,12 @@ test("required task-card fields inside fenced code do not satisfy an executable 
 
 test("list-contained fenced code cannot supply missing task-card fields", () => {
   for (const opening of ["- ```md", "1. ~~~markdown"]) {
+    const continuation = opening.startsWith("1.") ? "   " : "  ";
     const closing = opening.includes("`") ? "  ```" : "   ~~~";
     const doc = { ...cards,
       "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
         .replace("- 試験: zero diff", "- test instructions are missing")
-        + "\n" + opening + "\n  - 試験: fake inside code\n" + closing + "\n",
+        + "\n" + opening + "\n" + continuation + "- 試験: fake inside code\n" + closing + "\n",
     };
     assert.match(
       validateTaskCards({ ...base, fileContents: doc }).join("\n"),
