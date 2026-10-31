@@ -28,6 +28,23 @@ test("does not treat a fragment-only URL as a local file",()=>fixture(root=>{
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n[heading](#entry)\n");
  assert.deepEqual(validateLinks({root,documents:listMarkdownFiles(root)}),[]);
 }));
+test("repository symlinks may not escape the checkout and local symlinks remain valid",()=>fixture(root=>{
+ const outsideDir=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-outside-link-"));
+ try{
+  const outside=path.join(outsideDir,"secret.md");
+  fs.writeFileSync(outside,"# external fixture\n");
+  fs.symlinkSync(outside,path.join(root,"docs/migration/external-alias.md"));
+  fs.symlinkSync(path.join(root,"docs/migration/deep/CHILD.md"),
+    path.join(root,"docs/migration/inside-alias.md"));
+  fs.appendFileSync(path.join(root,"docs/migration/README.md"),
+    "\n[outside](external-alias.md)\n[inside](inside-alias.md)\n");
+  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+  assert.equal(errors.length,1,errors.join("\n"));
+  assert.match(errors[0],/link outside repository: external-alias\.md/);
+  assert.doesNotMatch(errors.join("\n"),/inside-alias/);
+ }finally{fs.rmSync(outsideDir,{recursive:true,force:true});}
+}));
+
 test("does not permit relative links escaping the repository",()=>fixture(root=>{
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n[escape](../../../../../outside.md)\n");
  assert.match(validateLinks({root,documents:listMarkdownFiles(root)}).join("\n"),/outside repository/);
