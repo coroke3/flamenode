@@ -94,16 +94,31 @@ function rejectPattern(errors, text, relative, pattern, description) {
   if (pattern.test(text)) errors.push(`${relative}: ${description}`);
 }
 
+function firstSymlinkInPath(filePath) {
+  // lstat on the leaf misses symlinked parent directories. Check every
+  // lexical component before any required configuration is read.
+  let current = path.resolve(filePath);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) return current;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
 function readFile(root, relative, errors) {
   const full = path.join(root, relative);
-  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
-    errors.push(`${relative}: required file is missing`);
+  if (firstSymlinkInPath(full)) {
+    errors.push(`${relative}: required config file must not be a symlink`);
     return "";
   }
-  // statSync follows links. Reject a linked template before reading it, so a
-  // checked-in config cannot silently point to an untracked external file.
-  if (fs.lstatSync(full).isSymbolicLink()) {
-    errors.push(`${relative}: required config file must not be a symlink`);
+  if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    errors.push(`${relative}: required file is missing`);
     return "";
   }
   return fs.readFileSync(full, "utf8");
@@ -261,6 +276,11 @@ function workerTemplateDirectories(root) {
 
 export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   const errors = [];
+  // The caller can supply a linked repository root. Never audit or read
+  // an outside tree while reporting it as the checked-in configuration.
+  if (firstSymlinkInPath(root)) {
+    return ["root: symbolic link is forbidden in the Cloudflare template audit"];
+  }
   const rootToml = readFile(root, "wrangler.toml", errors);
   requirePattern(errors, rootToml, "wrangler.toml", /^name\s*=\s*"flamenode-web"\s*$/m, "Worker name must be flamenode-web");
   requirePattern(errors, rootToml, "wrangler.toml", /^main\s*=\s*"\.open-next\/worker\.js"\s*$/m, "main must be .open-next/worker.js");
@@ -350,7 +370,9 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   requirePattern(errors, openNext, "open-next.config.ts", /defineCloudflareConfig/, "defineCloudflareConfig is required");
 
   const nextConfigPath = path.join(root, "next.config.mjs");
-  if (fs.existsSync(nextConfigPath)) {
+  if (firstSymlinkInPath(nextConfigPath)) {
+    errors.push("next.config.mjs: config file must not be a symlink");
+  } else if (fs.existsSync(nextConfigPath)) {
     rejectPattern(errors, fs.readFileSync(nextConfigPath, "utf8"), "next.config.mjs", /@cloudflare\/next-on-pages|setupDevPlatform/, "legacy next-on-pages development setup is forbidden");
   }
 
