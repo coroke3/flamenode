@@ -58,6 +58,51 @@ test("missing task, duplicate task, orphan task all fail", () => {
   assert.match(validateTaskCards({...base,fileContents:orphan}).join(" "),/no STATUS task/);
 });
 
+test("fenced sample headings cannot create orphan or duplicate executable MIG cards", () => {
+  const example = [
+    "~~~markdown",
+    "### MIG-0399 — example only",
+    "- 読む: example",
+    "- 変更: example",
+    "- 試験: example",
+    "- DONE: example",
+    "~~~",
+    "````md",
+    "### MIG-0301 — duplicate example of an existing card",
+    "```js",
+    "### MIG-0308 — not a real heading",
+    "```",
+    "````",
+  ].join("\n");
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+  const onlyExample = collectTaskCards({ "fake.md": example });
+  assert.equal(onlyExample.cards.size, 0);
+  assert.match(onlyExample.errors.join("\n"), /fake\.md: no MIG cards/);
+});
+
+test("required task-card fields inside fenced code do not satisfy an executable card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "")
+      + "\n```bash\n# Sample only\n- 試験: echo passing\n```\n",
+  };
+  const errors=validateTaskCards({ ...base, fileContents:doc });
+  assert.match(errors.join("\n"), /MIG-0308: missing card field 試験:/);
+});
+
+test("CRLF task card offsets stay aligned after masking fenced examples", () => {
+  const extra = "\n```md\n### MIG-0399 example\n- 読む: not a card\n```\n";
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": (cards["docs/migration/TASK_CARDS_2_3.md"]+extra).replace(/\n/g,"\r\n"),
+  };
+  assert.equal(collectTaskCards(doc).cards.size,5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+});
+
 test("incomplete card cannot pass merely by presence of MIG heading", () => {
   const incomplete={...cards,"docs/migration/TASK_CARDS_2_3.md":cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff","- test omitted")};
   assert.match(validateTaskCards({...base,fileContents:incomplete}).join(" "),/missing card field 試験:/);
