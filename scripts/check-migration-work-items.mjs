@@ -64,11 +64,10 @@ export function fetchMissingSourceHistory(root, entries) {
 function canonicalOwnedPath(value) {
   const posix = value.replaceAll("\\", "/");
   const withoutRecursiveGlob = posix.endsWith("/**") ? posix.slice(0, -3) : posix;
-  // Only repository-relative files/directories or a terminal dir/** are
-  // valid. Root-wide, parent-traversing and unrecognized glob claims could
-  // otherwise appear harmless while overlapping every other writer.
-  if (path.posix.isAbsolute(posix) || /^[A-Za-z]:/.test(posix) ||
-      withoutRecursiveGlob.includes("*")) return null;
+  // Existing work-items also contain glob patterns (for example event*.ts)
+  // and descriptive pattern notes. Preserve them; only reject claims that
+  // escape the repository or normalize to its entire root.
+  if (path.posix.isAbsolute(posix) || /^[A-Za-z]:/.test(posix)) return null;
   const normalized = path.posix.normalize(withoutRecursiveGlob).replace(/\/$/, "");
   if (normalized === "." || normalized === ".." || normalized.startsWith("../"))
     return null;
