@@ -37,6 +37,10 @@ export type ManageVideoStatusBody = z.infer<typeof ManageVideoStatusBodySchema>;
 const text = (value: string | number | boolean | null | undefined): string =>
   String(value ?? "").trim();
 
+// CURRENT reads each FormData flag with === "1", without trimming whitespace.
+const flag = (value: string | number | boolean | null | undefined): boolean =>
+  String(value ?? "") === "1";
+
 export function normalizeAdminVideoStatusBody(body: AdminVideoStatusBody) {
   const reviewEventId = text(body.review_event_id);
   return {
@@ -44,8 +48,8 @@ export function normalizeAdminVideoStatusBody(body: AdminVideoStatusBody) {
     status: text(body.status),
     reason: text(body.reason),
     caseId: text(body.case_id),
-    andNext: text(body.and_next) === "1",
-    forceNotify: text(body.force_notify) === "1",
+    andNext: flag(body.and_next),
+    forceNotify: flag(body.force_notify),
     voidReasonCategory: text(body.void_reason_category),
     // CURRENT silently discards an invalid review filter; it does not deny
     // the status update or allow an oversized filter into the review query.
@@ -60,6 +64,6 @@ export function normalizeManageVideoStatusBody(body: ManageVideoStatusBody) {
     videoId: text(body.video_id),
     status: text(body.status),
     reason: text(body.reason),
-    andNext: text(body.and_next) === "1",
+    andNext: flag(body.and_next),
   };
 }
