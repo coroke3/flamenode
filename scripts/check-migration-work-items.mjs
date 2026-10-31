@@ -146,13 +146,23 @@ function ownedGlobForms(value) {
 }
 
 function ownedPathsOverlap(left, right) {
-  // Legacy "path/** (MIG-XXXX files)" and "app.ts (mount lines only)"
-  // are scoped ownership declarations, not filesystem globs. Only an
-  // identical qualified claim can be compared automatically; interpreting
-  // its prose as path bytes creates fictitious collisions with valid globs.
-  // The precise edited paths must still be checked from the live PR diff.
-  const scopedNote = / \([^)]*\)$/;
-  if (scopedNote.test(left) || scopedNote.test(right)) return left === right;
+  // Only known, explicitly scoped legacy notes may carry separate ownership.
+  // Arbitrary suffixes such as "(ignore)" must not turn a real file/glob
+  // collision into an unchecked literal string comparison.
+  // Broad "MIG-XXXX files" claims still require live-PR diff inspection:
+  // the checkpoint text alone does not enumerate that subset.
+  const note = / \(([^()]*)\)$/;
+  const recognizedScope = value => {
+    const suffix = note.exec(value)?.[1];
+    return suffix !== undefined && (
+      /^MIG-\d{4} files$/.test(suffix) ||
+      /^(?:MIG-\d{4} )?(?:mount lines only|spreadsheet vars only)$/.test(suffix)
+    );
+  };
+  if (recognizedScope(left) || recognizedScope(right)) return left === right;
+  // An unknown note is not an ownership partition: compare its path normally.
+  left = left.replace(note, "");
+  right = right.replace(note, "");
   if (left === right || left.startsWith(right + "/") || right.startsWith(left + "/")) return true;
   if (!/[?*]/.test(left) && !/[?*]/.test(right)) return false;
   for (const a of ownedGlobForms(left)) {
