@@ -120,6 +120,9 @@ test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
 test("scoped ownership annotations cannot impersonate another MIG task",()=>{
  for(const annotation of [
   "src/** (MIG-0302 files)",
+  "src/** (MIG-0302 files)/",
+  "src/** (MIG-0302 files)/.",
+  "src/** (MIG-0302 files)////",
   "src/a.ts (MIG-0302 mount lines only)",
   "src/a.ts (MIG-0302 spreadsheet vars only)",
  ]) {
