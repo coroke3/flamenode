@@ -1206,6 +1206,8 @@
 | `packages/contracts/src/xidLinkRequest.ts` | HELPER | SA-090/091 JSON transport schemas (future Hono review API, not mounted) | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=331dd67ebd99ab4b600c65b1d925ee9626f7cbc5 |
 | `apps/api/test/xidLinkRequests.parity.test.mjs` | TEST | SA-090/091 input-contract characterization against CURRENT FormData semantics | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=4c96ddeb2dc95fcac8437abf18acdc06ee8f12ae |
 
+| `docs/migration/D04_CUTOVER_CHECKPOINT.md` | DOC | D-04 Active X cutover; MIG-0605 U05e preflight / STOP / rollback only | MIG-0605 | SAME (new document; no production mutation) | IN_PROGRESS | PR#524 SHA=497277f1099ad6d262df8c786eb7a05bf69fb289 EVIDENCE=docs/migration/ACTIVE_X_MIGRATION_PLAN.md §3/5/6 + OPEN_DECISIONS.md D-04; execution and independent review pending |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
