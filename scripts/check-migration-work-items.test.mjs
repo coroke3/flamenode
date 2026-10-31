@@ -51,8 +51,8 @@ test("sibling paths and similarly prefixed filenames remain independent",()=>{
  }
 });
 
-test("root, traversal, absolute and unsupported glob path claims fail closed",()=>{
- for(const bad of ["./**","../src/a.ts","src/../../secret.ts","/src/a.ts","C:\\src\\a.ts","src/**/child.ts","src/**/"]) {
+test("root, traversal and absolute path claims fail closed without rejecting legacy globs",()=>{
+ for(const bad of ["./**","../src/a.ts","src/../../secret.ts","/src/a.ts","C:\\src\\a.ts","..","src/../**"]) {
   const entry=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+bad);
   const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":entry}});
   assert.match(errors.join("\n"),/invalid owned path/,bad);
