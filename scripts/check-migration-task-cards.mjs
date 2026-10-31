@@ -39,8 +39,14 @@ export function collectTaskCards(fileContents) {
     for (let i = 0; i < matches.length; i++) {
       const [, id] = matches[i];
       const heading = normalized.slice(matches[i].index, matches[i].index + matches[i][0].length);
-      const text = normalized.slice(matches[i].index + matches[i][0].length, matches[i + 1]?.index ?? normalized.length);
-      const proseText = prose.slice(matches[i].index + matches[i][0].length, matches[i + 1]?.index ?? prose.length);
+      // A card ends at the next h1–h3 prose heading, not merely at the next
+      // MIG card. Otherwise instructions in a later section can falsely satisfy
+      // required fields missing from this card. Fenced headings are masked.
+      const start = matches[i].index + matches[i][0].length;
+      const nextHeading = prose.slice(start).search(/^#{1,3}[ \t]+[^\n]*$/m);
+      const end = nextHeading < 0 ? prose.length : start + nextHeading;
+      const text = normalized.slice(start, end);
+      const proseText = prose.slice(start, end);
       if (cards.has(id)) errors.push(id + ": duplicate card in " + path + " and " + cards.get(id).path);
       else cards.set(id,{path,heading,text});
       for(const marker of REQUIRED_CARD_FIELDS) {
