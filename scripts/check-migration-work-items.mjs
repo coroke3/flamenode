@@ -208,12 +208,14 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         // A path may carry at most one trailing explanatory scope note.
         // Two notes can otherwise hide the real path from ownedPathsOverlap,
         // and a nonterminal note can bypass both scope owner and file checks.
-        // Exactly one non-nested trailing annotation is allowed, if any.
-        // matchAll() misses malformed nested notes such as "(reason(one))":
-        // those would otherwise be compared as literal filename characters.
-        const firstNote=normalized.indexOf(" (");
-        const suffixNote=/ \([^()]*\)$/.exec(normalized);
-        if(firstNote>=0 && (!suffixNote || suffixNote.index!==firstNote)) {
+        // Exactly one non-nested trailing annotation may use one ASCII
+        // space as separator. Reject doubled spaces, tabs, NBSP and other
+        // Unicode whitespace that would turn a real file into a fake claim.
+        // Also reject nonterminal and nested parentheses, not just matches
+        // visible to the ordinary terminal-suffix stripper.
+        const hasParens=/[()]/.test(normalized);
+        const annotated=hasParens ? /^(.+?) \(([^()]*)\)$/.exec(normalized) : null;
+        if(/[^\S ]/.test(normalized) || (hasParens && (!annotated || /\s$/.test(annotated[1])))) {
           errors.push(filename+": ambiguous owned path annotations: "+p);
           continue;
         }
