@@ -96,6 +96,25 @@ test("task rows missing every pipe fail closed within STATUS task tables", () =>
   assert.deepEqual(run({ statusText: prose }), []);
 });
 
+
+test("invalid or missing task IDs inside STATUS tables fail closed", () => {
+  const row = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  for (const malformed of [
+    "| MIG-030A | core PoC | READY | MIG-0108 |",
+    "| MIG-03012 | core PoC | READY | MIG-0108 |",
+    "| | core PoC | READY | MIG-0108 |",
+    "| not-a-task | core PoC | READY | MIG-0108 |",
+  ]) {
+    const changed = status.replace(row, malformed);
+    assert.throws(() => parseTaskRows(changed), /malformed task row:/, malformed);
+    assert.match(run({ statusText: changed }).join("\n"),
+      /invalid STATUS task ledger: malformed task row:/, malformed);
+  }
+  // A delimiter row and prose outside the table remain valid.
+  assert.deepEqual(run(), []);
+  assert.deepEqual(run({ statusText: status + "\n| not-a-task | prose only |\n" }), []);
+});
+
 test("ordinary MIG prose outside task tables is not treated as a broken task row", () => {
   const appended = status + "\nMIG-0301 is discussed in prose.\nMIG-0302 | paragraph reference, not a row.\n";
   assert.equal(parseTaskRows(appended).size, parseTaskRows(status).size);

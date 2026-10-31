@@ -109,6 +109,14 @@ export function parseTaskRows(statusText) {
     const candidate = match || (inTaskTable
       ? trimmed.match(/^\|?\s*(MIG-\d{4})\b/) : null);
     if (!candidate) {
+      // A data row with an empty or corrupted ID must not silently disappear.
+      // Only the Markdown delimiter line may lack a MIG task ID in this table.
+      if (inTaskTable && trimmed.startsWith("|")) {
+        const firstCell = trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim();
+        if (firstCell !== undefined && !/^:?-+:?$/.test(firstCell)) {
+          throw new Error("malformed task row: " + (firstCell || "<missing ID>"));
+        }
+      }
       if (inTaskTable && !trimmed.startsWith("|")) inTaskTable = false;
       continue;
     }
