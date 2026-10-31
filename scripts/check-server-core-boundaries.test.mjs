@@ -97,6 +97,29 @@ describe("check-server-core-boundaries", () => {
     );
   });
 
+  it("T03aa detects parenthesized, non-null, as/satisfies and static globalThis host access", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-wrapped.ts": [
+          "const a = (process).env.ONE;",
+          'const b = (process)["env"].TWO;',
+          "const c = process!.env.THREE;",
+          "const d = (globalThis.process).env.FOUR;",
+          "const e = (globalThis[\"process\"]).env.FIVE;",
+          'const f = (globalThis)["process"].env.SIX;',
+          "const g = (process as any).env.SEVEN;",
+          "const h = (globalThis as any).process.env.EIGHT;",
+          "const i = (process satisfies typeof process).env.NINE;",
+          'const j = process[("env")].TEN;',
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      },
+    );
+  });
+
   it("T03b ignores unrelated computed properties, comments, and string literals", () => {
     withFixture(
       {
