@@ -44,8 +44,8 @@ export function normalizeAdminVideoStatusBody(body: AdminVideoStatusBody) {
     status: text(body.status),
     reason: text(body.reason),
     caseId: text(body.case_id),
-    andNext: body.and_next === "1",
-    forceNotify: body.force_notify === "1",
+    andNext: text(body.and_next) === "1",
+    forceNotify: text(body.force_notify) === "1",
     voidReasonCategory: text(body.void_reason_category),
     // CURRENT silently discards an invalid review filter; it does not deny
     // the status update or allow an oversized filter into the review query.
@@ -60,6 +60,6 @@ export function normalizeManageVideoStatusBody(body: ManageVideoStatusBody) {
     videoId: text(body.video_id),
     status: text(body.status),
     reason: text(body.reason),
-    andNext: body.and_next === "1",
+    andNext: text(body.and_next) === "1",
   };
 }
