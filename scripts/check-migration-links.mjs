@@ -17,24 +17,29 @@ function withoutFencedCode(markdown) {
     // A fenced block can be nested in a blockquote or a list item. Strip
     // container prefixes for detecting the marker, but preserve the original
     // line for checking actual links outside code blocks.
-    const quote = /^(?: {0,3}>[ \t]?)+/.exec(line);
-    const quoteDepth = (quote?.[0].match(/>/g) ?? []).length;
-    let body = quote ? line.slice(quote[0].length) : line;
-
-    // Exiting a nested blockquote ends its code fence, even if an outer
-    // blockquote remains. Otherwise real links in that outer quote are hidden.
-    if (fence?.quoteDepth > quoteDepth && body.trim()) fence = null;
+    // An existing list item can contain a quote after its continuation
+    // indentation (e.g. "  > ```md"). Remove the list indent first so
+    // both list > quote and quote > list containers are recognized.
+    let body = line;
+    let continuedList = false;
+    if (listIndent && body.startsWith(" ".repeat(listIndent))) {
+      body = body.slice(listIndent);
+      continuedList = true;
+    }
+    const quote = /^(?: {0,3}>[ \t]?)+/.exec(body);
+    let quoteDepth = (quote?.[0].match(/>/g) ?? []).length;
+    if (quote) body = body.slice(quote[0].length);
     // A fenced block inside a list also ends when its containing list item
     // ends. Without this, an unclosed fence hides real links after dedenting.
     // Empty lines may still be part of the list item, so keep the fence then.
-    if (fence?.listIndent && body.trim() &&
+    if (fence?.listIndent && body.trim() && !continuedList &&
         !body.startsWith(" ".repeat(fence.listIndent))) {
       fence = null;
       listIndent = 0;
     }
 
     if (fence) {
-      if (fence.listIndent && body.startsWith(" ".repeat(fence.listIndent))) {
+      if (fence.listIndent && !continuedList && body.startsWith(" ".repeat(fence.listIndent))) {
         body = body.slice(fence.listIndent);
       }
     } else {
@@ -42,13 +47,22 @@ function withoutFencedCode(markdown) {
       if (list) {
         listIndent = list[0].length;
         body = body.slice(listIndent);
-      } else if (listIndent && body.startsWith(" ".repeat(listIndent))) {
+      } else if (listIndent && !continuedList && body.startsWith(" ".repeat(listIndent))) {
         body = body.slice(listIndent);
-      } else if (body.trim()) {
+      } else if (body.trim() && !continuedList) {
         listIndent = 0;
       }
     }
 
+    // A block quote can also follow the newly recognized list marker
+    // ("- > ```md"). Count both quote layers before checking fence scope.
+    const nestedQuote = /^(?: {0,3}>[ \t]?)+/.exec(body);
+    if (nestedQuote) {
+      quoteDepth += (nestedQuote[0].match(/>/g) ?? []).length;
+      body = body.slice(nestedQuote[0].length);
+    }
+    // Leaving an inner quote ends its unclosed code fence.
+    if (fence?.quoteDepth > quoteDepth && body.trim()) fence = null;
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(body);
     if (fence) {
       if (marker && marker[1][0] === fence.char &&
