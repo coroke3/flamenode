@@ -200,6 +200,14 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         if(value&&value!=="none"){if(seen.has(value))errors.push(filename+": "+label+" also claimed by "+seen.get(value));else seen.set(value,filename);}
       }
       if(activeStates.has(map.State))for(const p of (map["Owned paths"]||"").split(";").map(x=>x.trim()).filter(x=>x&&x!=="none")){
+        // Scoped legacy claims must identify their actual work-item owner.
+        // Otherwise any task could declare "(MIG-XXXX files)" from another
+        // task to bypass the overlapping-glob lock.
+        const scopedOwner=p.match(/ \\((MIG-\\d{4}) (?:files|mount lines only|spreadsheet vars only)\\)$/)?.[1];
+        if(scopedOwner && scopedOwner!==id) {
+          errors.push(filename+": scoped owned path "+p+" names "+scopedOwner+" instead of "+id);
+          continue;
+        }
         const normalized=canonicalOwnedPath(p);
         if (normalized === null) {
           errors.push(filename+": invalid owned path "+p+" (expected repository-relative path or dir/**)");
