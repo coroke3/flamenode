@@ -32,16 +32,34 @@ const SERVER_CORE_IMPORT_RULES = [
 
 const API_ROUTE_DB_SPECIFIER = /^(?:drizzle-orm|@flamenode\/db)(?:\/|$)/;
 
+// Only literal member names are accepted: dynamic property names are outside this guard.
+// Match both process.env and its static computed/globalThis equivalents.
+function hasStaticMemberName(node, memberName) {
+  if (ts.isPropertyAccessExpression(node)) return node.name.text === memberName;
+  if (!ts.isElementAccessExpression(node)) return false;
+  const argument = node.argumentExpression;
+  return Boolean(argument) &&
+    (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) &&
+    argument.text === memberName;
+}
+
+function isProcessReference(node) {
+  if (ts.isIdentifier(node)) return node.text === "process";
+  return (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+    ts.isIdentifier(node.expression) &&
+    node.expression.text === "globalThis" &&
+    hasStaticMemberName(node, "process");
+}
+
 function findAmbientHostReferences(content, fileName) {
   const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true);
   const found = [];
   const lineOf = (node) => sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
   const visit = (node) => {
     if (
-      ts.isPropertyAccessExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "process" &&
-      node.name.text === "env"
+      (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      hasStaticMemberName(node, "env") &&
+      isProcessReference(node.expression)
     ) {
       found.push({ line: lineOf(node), specifier: "process.env", rule: "process.env", message: "ambient env is forbidden in packages/server-core; take values through EnvValues" });
     }
