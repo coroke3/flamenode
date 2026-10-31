@@ -1203,6 +1203,9 @@
 | `apps/api/test/eventPlaylistWrite.current.parity.test.mjs` | TEST | SA-038/039 differential vs the real CURRENT actions under tsx (full Hono stack, migrated schema FK ON; sync/items/static_rebuild_queue/audit rows, permission matrix, parser table, T04 stack, DOCUMENTED DIFFERENCE DD1-DD3/DD7/DD8) | MIG-0655 | SAME (new file) | IN_PROGRESS | PR#476 SHA=9e3eb92ef71858a9f7b662439345587d46a82627 TEST=node --test --experimental-strip-types apps/api/test/eventPlaylistWrite.current.parity.test.mjs LOG=local PASS 38 subtests (final-head CI pending) |
 | `apps/api/test/eventTemplateWrite.current.parity.test.mjs` | TEST | SA-035/037 differential vs the real CURRENT actions under tsx (pre-move snapshot reference; event_templates/audit rows, save->list order, non-admin [], DD5, snapshot drift guard) | MIG-0655 | SAME (new file) | IN_PROGRESS | PR#476 SHA=9e3eb92ef71858a9f7b662439345587d46a82627 TEST=node --test --experimental-strip-types apps/api/test/eventTemplateWrite.current.parity.test.mjs LOG=local PASS 11 subtests (final-head CI pending) |
 | `apps/api/test/support/legacyEventTemplateSettings.ts` | TEST | Test-only verbatim copy of pre-move src/lib/admin/eventTemplateSettings.ts (imports live src/lib helpers) used as the CURRENT reference/drift guard; never imported by production code | MIG-0655 | SAME (new file) | IN_PROGRESS | PR#476 SHA=7ebe7074619042d3f1232a944d73832caefa11cf TEST=apps/api/test/eventTemplateWrite.current.parity.test.mjs |
+| `packages/contracts/src/xidLinkRequest.ts` | HELPER | SA-090/091 JSON transport schemas (future Hono review API, not mounted) | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=331dd67ebd99ab4b600c65b1d925ee9626f7cbc5 |
+| `apps/api/test/xidLinkRequests.parity.test.mjs` | TEST | SA-090/091 input-contract characterization against CURRENT FormData semantics | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=4c96ddeb2dc95fcac8437abf18acdc06ee8f12ae |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -1215,8 +1218,6 @@
 | `scripts/benchmark-api-cpu.mjs`, `scripts/benchmark-api-cpu.test.mjs` | MIG-0606 | IN_PROGRESS | U01 harness (new, no CURRENT counterpart; Runtime N): LOCAL-only `wrangler dev --local` / in-process runs of `apps/api` that record CPU p50/p95/p99/max for 4 input kinds; judged by max against ZERO_1102 section 3; never writes production values. U02 full run waits for MIG-0603..0605 |
 | `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
 
-| `packages/contracts/src/xidLinkRequest.ts` | HELPER | SA-090/091 JSON transport schemas (future Hono review API, not mounted) | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=331dd67ebd99ab4b600c65b1d925ee9626f7cbc5 |
-| `apps/api/test/xidLinkRequests.parity.test.mjs` | TEST | SA-090/091 input-contract characterization against CURRENT FormData semantics | MIG-0605 | SAME (new file) | IN_PROGRESS | PR#524 SHA=4c96ddeb2dc95fcac8437abf18acdc06ee8f12ae |
 
 ## Source families (MIG-0622 completeness)
 
