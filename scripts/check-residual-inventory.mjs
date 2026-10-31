@@ -335,7 +335,20 @@ export function readInventoryRows(markdown) {
     .split("## 1. Tracked code-side inventory")[1]
     ?.split(/\n#{2,6}\s/)[0];
   if(!body) throw Error("inventory sections 1 and 2 required");
-  const lines=body.split("\n").filter(x=>x.trim().startsWith("|"));
+  // All nonblank lines between the table header and the audited count marker
+  // belong to the table. Filtering only pipe-prefixed lines silently discards
+  // a damaged ledger record when its leading pipe was accidentally removed.
+  const sourceLines=body.split("\n");
+  const headerIndex=sourceLines.findIndex(line=>line.trim().startsWith("| Config | Kind |"));
+  const countIndex=sourceLines.findIndex((line,index)=>
+    index>headerIndex && line.trim().startsWith("**Counts (tracked source only):**"));
+  if(headerIndex<0 || countIndex<0) throw Error("inventory table boundaries missing");
+  const lines=sourceLines.slice(headerIndex,countIndex).filter(line=>line.trim());
+  for(const [index,line] of lines.entries()) {
+    const cellLine=line.trim();
+    if(!cellLine.startsWith("|") || !cellLine.endsWith("|"))
+      throw Error("invalid inventory row "+Math.max(1,index-1)+": missing table boundary");
+  }
   const head=lines[0]?.split("|").slice(1,-1).map(clean).join("|");
   if(head!=="Config|Kind|Setting / binding|Value / resource|移行後の担当（Worker / MIG）|退役 MIG")
     throw Error("inventory table header mismatch");
