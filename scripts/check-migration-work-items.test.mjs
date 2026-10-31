@@ -88,6 +88,17 @@ test("filename and intermediate glob claims overlap their concrete files",()=>{
  }
 });
 
+test("multiple zero-depth recursive segments cannot evade an ownership lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const file of ["src/nested/file.ts","src/a/nested/file.ts","src/nested/b/file.ts","src/a/nested/b/file.ts"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/**/nested/**/file.ts");
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+file);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\\n"),/already claimed/,file);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\\n"),/already claimed/,file);
+ }
+});
+
 test("disjoint globs, sibling paths and annotated ownership scopes stay independent",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  for(const [firstPath,secondPath] of [
