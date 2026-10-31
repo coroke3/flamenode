@@ -34,15 +34,16 @@ test("parse page, method, action contract links and source rows",()=>{
 test("accept complete file matrix and all source coverage",()=>assert.deepEqual(validateFileProgress(base),[]));
 test("missing current source or changed file must fail",()=>{
  const broken=replace("| \x60src/lib/actions/announcement.ts\x60 | SERVER_ACTION | SA-004 | MIG-0303 | domain service + Hono adapter (exact file TBD) | NOT_STARTED | — |","");
- assert.match(validateFileProgress({...base,matrix:broken}).join("\n"),/missing file progress row/);
+ assert.match(validateFileProgress({...fixture,matrix:broken}).join("\n"),/missing file progress row/);
  assert.match(validateFileProgress({...base,changedPaths:["src/lib/anotherModule.ts"]}).join("\n"),/changed migration source missing/);
 });
 test("malformed ledger paths fail closed even for optional non-inventory helpers",()=>{
  const optional="src/lib/optionalLedgerHelper.ts";
+ const fixture={...base,filePaths:[...filePaths,optional]};
  const validRow="| `"+optional+"` | HELPER | optional source | MIG-0501 | SAME | NOT_STARTED | — |";
  const withValid=matrix.replace("## Future files",validRow+"\n## Future files");
  assert.deepEqual(parseFileRows(withValid).errors,[]);
- assert.deepEqual(validateFileProgress({...base,matrix:withValid}),[]);
+ assert.deepEqual(validateFileProgress({...fixture,matrix:withValid}),[]);
  for(const brokenRow of [
   validRow.replace("`"+optional+"`",optional),
   validRow.slice(2),
