@@ -110,7 +110,8 @@ export function parseOwnedTasks(prs){
         /^[1-9]\d*$/.test(pr.number) && Number.isSafeInteger(Number(pr.number))
         || pr.number==="?("+pr.headRefName+")"
       ));
-    if(!pr||typeof pr!=="object"||!Object.hasOwn(pr,"headRefName")
+    if(!pr||typeof pr!=="object"||Array.isArray(pr)
+      ||!Object.hasOwn(pr,"number")||!Object.hasOwn(pr,"headRefName")
       ||typeof pr.headRefName!=="string"||!pr.headRefName.trim()||!validNumber){
       throw new Error("Invalid open PR record at index "+index+"; migration ownership cannot be verified");
     }
