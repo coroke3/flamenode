@@ -442,6 +442,103 @@ if (runUnderRootTsx(import.meta.url)) {
     }
   });
 
+  // ---------------- FIX #507: two bounded event-option pages ----------------
+  test("FIX-507: stable public event options 0/99/100/101/200/201, offset 0/100, and 3-D1 budget", async () => {
+    // The real schema index (visibility_status, start_time DESC) already
+    // orders ties by rowid. Keep the bounded API query on that index rather
+    // than introducing a potentially large temporary B-tree for id DESC.
+    const eventOptionsPlan = sqlite.prepare(`
+      EXPLAIN QUERY PLAN SELECT id, title,
+        CASE WHEN ? = 0 THEN EXISTS(
+          SELECT 1 FROM events WHERE visibility_status = 'public'
+          LIMIT 1 OFFSET ?
+        ) ELSE 0 END AS has_more
+      FROM events WHERE visibility_status = 'public'
+      ORDER BY start_time DESC, rowid ASC LIMIT ? OFFSET ?
+    `).all(0, 100, 100, 0).map(row => String(row.detail)).join("\n");
+    assert.match(eventOptionsPlan, /events_visibility_start_idx/);
+    assert.doesNotMatch(eventOptionsPlan, /USE TEMP B-TREE/, eventOptionsPlan);
+    // Temporarily hide the normal fixture's public events (leave all their
+    // FK relations untouched) to test exact boundary sizes, then restore.
+    const previousPublic = sqlite.prepare(
+      "SELECT id FROM events WHERE visibility_status = 'public'",
+    ).all().map(row => row.id);
+    sqlite.exec("UPDATE events SET visibility_status = 'private' WHERE visibility_status = 'public'");
+    const insertEvent = sqlite.prepare(
+      "INSERT INTO events (id, title, visibility_status, start_time) VALUES (?, ?, 'public', ?)",
+    );
+    try {
+      for (const count of [0, 99, 100, 101, 200, 201]) {
+        for (let i = 0; i < count; i += 1) {
+          // Two events share each timestamp; the existing SQLite index provides
+          // rowid ASC tie ordering, matching CURRENT without temporary sorting.
+          insertEvent.run(`fix507-${String(i).padStart(3, "0")}`,
+            `Boundary Event ${i}`, 1_700_000_000 + Math.floor(i / 2));
+        }
+        try {
+          const first = await get("/api/admin-read/videos?offset=0");
+          const second = await get("/api/admin-read/videos?offset=100");
+          assert.equal(first.body.events.length, Math.min(count, 100));
+          assert.equal(second.body.events.length, Math.max(0, Math.min(count - 100, 100)));
+          assert.deepEqual(first.body.eventOptionsPaging,
+            { offset: 0, hasMore: count > 100 });
+          // The contract exposes at most 200 options across two pages;
+          // hasMore means the *next accepted offset* exists, not that the
+          // database contains further rows the API refuses to serve.
+          assert.deepEqual(second.body.eventOptionsPaging,
+            { offset: 100, hasMore: false });
+          const expected = sqlite.prepare(
+            "SELECT id FROM events WHERE visibility_status = 'public' ORDER BY start_time DESC, rowid ASC LIMIT 200",
+          ).all().map(row => row.id);
+          const ids = [...first.body.events, ...second.body.events].map(event => event.id);
+          assert.deepEqual(ids, expected, `${count}: ordered two-page union`);
+          assert.equal(new Set(ids).size, ids.length, "no duplicate event choices");
+          assert.equal(first.body.events.every(event => !("total_available" in event)), true,
+            "private pagination metadata cannot leak into event choices");
+          assert.equal(second.body.events.every(event => !("total_available" in event)), true);
+          assert.equal(first.stats.statements, 3, "session + page + bounded options");
+          assert.equal(second.stats.statements, 3);
+          assert.equal(first.stats.maxBinds <= 100 && second.stats.maxBinds <= 100, true);
+          assert.equal(first.headers.get("cache-control"), "private, no-store");
+          assert.equal(second.headers.get("cache-control"), "private, no-store");
+        } finally {
+          sqlite.exec("DELETE FROM events WHERE id LIKE 'fix507-%'");
+        }
+      }
+    } finally {
+      sqlite.exec("DELETE FROM events WHERE id LIKE 'fix507-%'");
+      const restore = sqlite.prepare(
+        "UPDATE events SET visibility_status = 'public' WHERE id = ?",
+      );
+      for (const id of previousPublic) restore.run(id);
+    }
+  });
+
+  test("FIX-507: invalid and duplicate offsets reject before private D1 reads; video filters survive", async () => {
+    for (const raw of ["", "-1", "1", "99", "101", "200", "00100", "1e2",
+      "1.0", "NaN", "999999999999999999", "abc", "0&offset=100"]) {
+      const path = `/api/admin-read/videos?offset=${raw}`;
+      const response = await call(path, "tok-root");
+      assert.equal(response.status, 400, path);
+      assert.deepEqual(response.body, { error: "invalid_event_options_offset" });
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+      assert.equal(response.stats.statements, 1, "only the session D1 read is allowed");
+      assert.equal(response.stats.writes, 0);
+    }
+    const query = "?q=Admin&status=review&event=a-open&page=2";
+    const first = await get(`/api/admin-read/videos${query}&offset=0`);
+    const second = await get(`/api/admin-read/videos${query}&offset=100`);
+    assert.deepEqual(first.body.videos, second.body.videos,
+      "event-choice offset must not change video rows");
+    assert.deepEqual(first.body.paging, second.body.paging,
+      "event-choice offset must not change page/counters");
+    for (const field of ["q", "status", "event", "reviewSummaries", "degraded"]) {
+      assert.deepEqual(first.body[field], second.body[field], field);
+    }
+    assert.equal(first.body.eventOptionsPaging.offset, 0);
+    assert.equal(second.body.eventOptionsPaging.offset, 100);
+  });
+
   // ---------------- users ----------------
   test("T01 users: discord / xid / permissions views equal CURRENT (filters, q, paging)", async () => {
     const queries = [

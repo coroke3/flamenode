@@ -13,7 +13,9 @@ import {
 // CURRENT: app/(admin)/admin/videos/page.tsx (+ src/lib/admin/videoVisibilityLabels.ts, videoReviewQueueOrder.ts).
 // D1 (S2, 2 statements + the session lookup = 3): (1) total + page rows as one JSON-column row, (2) event options.
 // CURRENT wraps the reads in try/catch and renders the empty page, so a D1 failure is 200 + degraded.
-// DIVERGENCE: event options LIMIT 200 -> 100 (ZERO_1102 S2 named LIMIT <= 100); see the MIG-0625 work item.
+// FIX #507: CURRENT shows up to 200 events. D-17-7 fetches offset=0 and
+// offset=100, retaining the ZERO_1102 maximum of 100 results per D1 query.
+// The offset contract applies only to event options; video paging uses "page".
 // Review group (status review|pending, CURRENT useReviewTable): fetchVideoReviewSummaries via apps/api/src/lib/videoReviewSummaries.ts
 // (MIG-0624 / PR #345, copied verbatim) as correlated subqueries of the page statement; >4 stage questions -> 503 like CURRENT.
 const GROUPS: Record<string, readonly string[]> = {
@@ -35,6 +37,15 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const q = c.req.query("q") ?? "";
   const status = normalizeStatus(c.req.query("status"));
   const event = c.req.query("event") ?? "";
+  // Distinct from video-page pagination. Reject ambiguous/oversized offsets
+  // before doing any D1 work; "0"/"100" are the entire D-17-7 contract.
+  const rawEventOffsets = c.req.queries("offset");
+  const eventOptionsOffset = rawEventOffsets?.[0] ?? "0";
+  if ((rawEventOffsets?.length ?? 0) > 1 ||
+      (eventOptionsOffset !== "0" && eventOptionsOffset !== "100")) {
+    return c.json({ error: "invalid_event_options_offset" }, 400);
+  }
+  const eventOffset = Number(eventOptionsOffset);
   const { page, pageSize, offset } = clampPage(c.req.query("page") || "1", ADMIN_VIDEOS_PAGE_SIZE);
 
   const joins: string[] = [];
@@ -68,6 +79,7 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const db = c.env.DB;
   let videos: (AdminVideoRow & Partial<ReviewSummaryRow>)[] = [];
   let events: { id: string; title: string }[] = [];
+  let eventOptionsHasMore = false;
   let total = 0;
   let degraded = false;
   try {
@@ -85,16 +97,30 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
       .bind(...params, ...(review?.params ?? []), ...params, pageSize, offset);
     const eventsStatement = db
       .prepare(
-        `SELECT id, title FROM events WHERE visibility_status = 'public' ORDER BY start_time DESC LIMIT ?`,
+        `SELECT id, title,
+            CASE WHEN ? = 0 THEN EXISTS(
+              SELECT 1 FROM events WHERE visibility_status = 'public'
+              LIMIT 1 OFFSET ?
+            ) ELSE 0 END AS has_more
+           FROM events WHERE visibility_status = 'public'
+           ORDER BY start_time DESC, rowid ASC LIMIT ? OFFSET ?`,
       )
-      .bind(ADMIN_EVENT_OPTIONS_LIMIT);
+      // The visibility/start_time index includes rowid as the stable tie key;
+      // unlike id DESC this avoids an unindexed temporary sort.
+      // Only offset=0 has a reachable next page. Do not scan for row 201
+      // when offset=100 is the last supported event-option page.
+      // D1 statements stay at S2=2 (+session=3).
+      .bind(eventOffset, ADMIN_EVENT_OPTIONS_LIMIT, ADMIN_EVENT_OPTIONS_LIMIT, eventOffset);
     const [pageRow, eventRows] = await Promise.all([
       pageStatement.first<{ total: number; rows: string | null }>(),
-      eventsStatement.all<{ id: string; title: string }>(),
+      eventsStatement.all<{ id: string; title: string; has_more: number }>(),
     ]);
     videos = parseJsonColumn<(AdminVideoRow & Partial<ReviewSummaryRow>)[]>(pageRow?.rows, []);
     total = Number(pageRow?.total ?? 0);
-    events = eventRows.results;
+    events = eventRows.results.map(({ id, title }) => ({ id, title }));
+    // hasMore promises another supported offset; offset=100 has no next page.
+    // The first-page EXISTS lookahead is bounded at 100; no full COUNT.
+    eventOptionsHasMore = eventRows.results[0]?.has_more === 1;
   } catch {
     console.error("[adminRead:videos] READ_FAILED");
     degraded = true;
@@ -113,6 +139,7 @@ export const adminVideosRoutes = new Hono<AppEnv>().get("/", async (c) => {
     paging: { page, pageSize, total },
     videos: outRows,
     events,
+    eventOptionsPaging: { offset: eventOffset as 0 | 100, hasMore: eventOptionsHasMore },
     reviewSummaries: useReview ? "included" : "not_requested",
     degraded,
   };
