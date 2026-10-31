@@ -51,6 +51,14 @@ test("sibling paths and similarly prefixed filenames remain independent",()=>{
  }
 });
 
+test("root, traversal, absolute and unsupported glob path claims fail closed",()=>{
+ for(const bad of ["./**","../src/a.ts","src/../../secret.ts","/src/a.ts","C:\\src\\a.ts","src/**/child.ts","src/**/"]) {
+  const entry=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+bad);
+  const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":entry}});
+  assert.match(errors.join("\n"),/invalid owned path/,bad);
+ }
+});
+
 test("REVIEW requires evidence",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active.replace("State: IN_PROGRESS","State: REVIEW")}}).join(" "),/Evidence required/));
 test("unknown MIG rejected",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0999.md":ready}}).join(" "),/absent from STATUS/));
 
