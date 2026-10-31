@@ -112,7 +112,7 @@ export function parseTaskRows(statusText) {
       // A task-table row may lose all pipes and corrupt its MIG ID at once.
       // Never mistake an invalid bare MIG token for the start of prose.
       if (inTaskTable) {
-        const bareId = trimmed.match(/^MIG-[^\\s|]+/);
+        const bareId = trimmed.match(/^MIG-[^\s|]+/);
         if (bareId) throw new Error("malformed task row: " + bareId[0]);
       }
       // A data row with an empty or corrupted ID must not silently disappear.
