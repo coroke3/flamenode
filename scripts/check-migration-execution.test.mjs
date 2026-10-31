@@ -126,11 +126,11 @@ test("pipe-free STATUS task rows with invalid MIG IDs fail closed", () => {
     const changed = status.replace(row, malformed);
     assert.throws(() => parseTaskRows(changed), /malformed task row: MIG-/,
       "corrupted pipe-free row must not disappear: " + malformed);
-    assert.match(run({ statusText: changed }).join("\\n"),
+    assert.match(run({ statusText: changed }).join("\n"),
       /invalid STATUS task ledger: malformed task row: MIG-/);
   }
   // A section boundary and regular prose outside the task table are unaffected.
-  assert.deepEqual(run({ statusText: status + "\\n## Details\\nMIG-030A is a prose example.\\n" }), []);
+  assert.deepEqual(run({ statusText: status + "\n## Details\nMIG-030A is a prose example.\n" }), []);
 });
 
 test("ordinary MIG prose outside task tables is not treated as a broken task row", () => {
