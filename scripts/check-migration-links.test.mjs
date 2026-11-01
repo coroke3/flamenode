@@ -315,7 +315,7 @@ test("explicit source documents and symlinked migration roots fail closed",()=>f
   const source=path.join(root,"docs/migration");
   const relocated=path.join(root,"real-migration");
   fs.renameSync(source,relocated);
-  fs.symlinkSync("real-migration",source,"dir");
+  fs.symlinkSync("../real-migration",source,"dir");
   assert.throws(()=>listMarkdownFiles(root),/symlink in migration documents/);
   assert.throws(()=>validateLinks({root,documents:["docs/migration/README.md"]}),/symlink in migration documents/);
 }));
