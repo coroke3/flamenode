@@ -39,8 +39,8 @@ function collectTsFiles(dir) {
       entries.push(...collectTsFiles(full));
     } else if (
       entry.isFile() &&
-      /\.(?:ts|tsx|mts|cts)$/.test(entry.name) &&
-      !/(?:\.test|\.spec|\.d)\.(?:ts|tsx|mts|cts)$/.test(entry.name)
+      /\.(?:ts|tsx|mts|cts)$/i.test(entry.name) &&
+      !/\.test\.(?:ts|tsx|mts|cts)$/i.test(entry.name)
     ) {
       entries.push(full);
     }

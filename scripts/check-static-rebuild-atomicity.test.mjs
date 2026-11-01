@@ -68,6 +68,19 @@ for (const extension of ["tsx", "mts", "cts"]) {
   });
 }
 
+for (const name of ["real.spec.ts", "types.d.ts", "UNSAFE.TS"]) {
+  test(`unsafe ${name} is still audited (only *.test.* is excluded)`, (t) => {
+    const { put, run } = fixture(t);
+    put(
+      `src/lib/actions/${name}`,
+      "const visibility_status = 'public'; mutateWithAudit(); enqueueStaticRebuild();",
+    );
+    const result = run();
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /mutateWithAudit.*enqueueStaticRebuild/);
+  });
+}
+
 test("a symlinked source file is rejected rather than silently skipped", (t) => {
   const { root, put, run } = fixture(t);
   if (process.platform === "win32") return t.skip("symlink privileges vary on Windows");
