@@ -549,7 +549,7 @@ T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuse
 
 DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
 
-## MIG-0661 — CostGuardBanner read DTO endpoints (U01–U03 code implemented; CI/review pending)
+## MIG-0661 — CostGuardBanner read DTO endpoints (merged: PR#419, squash 1f583403cbc817ccac5cc182df97ab25e32e2425, final Head 604ef28349b3fde19b6565598842fcb3e12353f8)
 
 | Endpoint | CURRENT source | Hono target | Guard and data read | State |
 | --- | --- | --- | --- | --- |
@@ -559,3 +559,15 @@ DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next
 U03 contract: both Hono handlers validate successful and fallback JSON via `@flamenode/contracts#CostGuardBannerResponseSchema` (`packages/contracts/src/costGuardBanner.ts`) before serialization. `mode` is the five-value OperationMode vocabulary; `reason` is string or null. Regression checks are in `apps/api/test/costGuardBanner.test.mjs` T05. PR#419 source Head 66af40edddc45cb0b5cf46ea0d513cf3e33a2cd1 is the prior green U02 checkpoint; U03 CI is pending.
 
 U01–U03 budget/parity note (MIG-0661): public/admin banner reasons longer than 2,048 code units return `null` while retaining the operation mode. Valid KV mirrors above 64 KiB are NOT JSON.parsed (D-16-13 P2 resolution, owner-authorized 2026-11-01): a bounded head/tail scan recovers mode and updated_at, reason is null, so maintenance/read_only/static_only/economy parity is kept within the ZERO_1102 64 KiB parse rule. T06/T09 cover this; T08 adds cold-KV concurrent single-flight/error-cache regressions. No S2 CPU budget approval or production cutover is claimed.
+
+## MIG-0641 Hono Personal terms / onboarding writes (Phase 6)
+
+Authenticated POST writes (no CURRENT `/api/*` equivalent; CURRENT are Server Actions). Mounted in `apps/api/src/routes/personal/index.ts` BEFORE the read-only session middleware so Origin is checked before any session D1 read. Guard order: Origin (403) -> session -> requireAuth (401 anonymous / 403 banned) -> CostGuard `personal_terms_accept` (503; decision adopted by owner authorization 2026-11-01, one key for all three routes) -> handler. No writeGuard TOS check (ToS-pending users must be able to agree). Body <= 2,048 bytes (413), invalid JSON/shape 400. All responses `Cache-Control: private, no-store`. Evidence: `apps/api/test/terms.mounted.test.mjs` (T01-T06 through the real app, real session cookie, real CostGuard, real atomic `mutateWithAudit` batch) and `apps/api/test/terms.parity.test.mjs`. CPU / workerd not measured (no production action).
+
+| Endpoint | CURRENT source | Target (Hono) | D1 statements incl. session lookup | Notes | CPU | State |
+| --- | --- | --- | --- | --- | --- | --- |
+| `POST /api/personal/terms/accept` (SA-075) | `src/lib/actions/terms.ts` acceptLatestTerms | `termsRoutes.ts` + `termsCommit.ts` | 3 reads (session, CostGuard/audit settings, one terms+user+consent snapshot) + 1 audited batch (consent INSERT + user CAS UPDATE + 2 audit rows); already-accepted = 3 reads, no batch | JSON `{ok,next}`; external `next` sanitized (`sanitizeNextPath` parity); failure returns `/rules?...error=` target; CAS race -> 409 retryable, same-version race = idempotent success | unmeasured | BRIDGED (unrouted by SPA until MIG-0710/0519) |
+| `POST /api/personal/onboarding/terms` (SA-076) | `acceptOnboardingTerms` | same | same as above | `{ok:true,alreadyAccepted}` or `{ok:false,message,retryable?}`; 503/409/404/500 by outcome | unmeasured | BRIDGED |
+| `POST /api/personal/onboarding/complete` | `src/lib/auth/onboarding.ts` maybeMarkOnboardingComplete | `termsRoutes.ts` + `termsCompletion.ts` | session + CostGuard + personal context reads + 1 conditional UPDATE (only for server-derived pending/approved X; never overwrites) | `{ok:true}` always once guards pass; failure ignored (CURRENT); client-supplied status ignored | unmeasured | BRIDGED |
+
+DOCUMENTED DIFFERENCE (MIG-0641): CURRENT `acceptLatestTerms` / `acceptOnboardingTerms` do not consult CostGuard, so users can accept terms during `maintenance` / `read_only` or when disabled. The Hono routes require CostGuard (`personal_terms_accept`, Work Order rule) and return 503 in those states. SA-076 and `onboarding/complete` require a JSON object body (`OnboardingEmptyBodySchema`; clients send `{}`). The audit actor snapshot is preloaded from the single terms snapshot read, so first-time acceptance is exactly 3 pre-reads + 1 audited batch.

@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0506
-Current Owner: chatgpt
+Current Task: MIG-0641
+Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0506
-Last Task PR: #431
+Last Completed Task: MIG-0641
+Last Task PR: #441
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -110,9 +110,9 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0506 / 0511 / 0512 / 0517 DONE (MIG-0501 PR#429, MIG-0506 PR#431 merged 2026-11-01); MIG-0505, 0507, 0509, 0510, 0513..0516, 0518, 0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
-| 6 | Hono API | PARTIALLY_READY (2026-10-30: 37 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0655 / MIG-0658 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664 (MIG-0661 PR#419 merged 2026-11-01); 21 READY; MIG-0604 / MIG-0606 / MIG-0610 / MIG-0627 / MIG-0662 / MIG-0607 BLOCKED. MIG-0660 deep health core in PR#438; MIG-0655 template/playlist writes in PR#476; production cutover not authorized) | CLOSED |
-| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701, MIG-0707 DONE; MIG-0708..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0511 / 0512 / 0517 DONE (MIG-0501 PR#429, MIG-0506 PR#431 merged 2026-11-01); MIG-0507, 0509, 0510, 0513..0516, 0518, 0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
+| 6 | Hono API | PARTIALLY_READY (2026-11-01: 38 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0641 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0655 / MIG-0658 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664; 20 READY; MIG-0604 / MIG-0606 / MIG-0610 / MIG-0627 / MIG-0662 / MIG-0607 BLOCKED. MIG-0660 deep health core in PR#438; MIG-0655 template/playlist writes in PR#476; production cutover not authorized) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-01: MIG-0701, MIG-0707, MIG-0712, MIG-0713 DONE; MIG-0708..0711, 0714, 0715, 0718..0730, 0731..0737 READY; MIG-0702..0706, 0716, 0717 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445) / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
@@ -286,7 +286,7 @@ Validation:
 | MIG-0502 | event routes | DONE | MIG-0407 |
 | MIG-0503 | group routes | DONE | MIG-0407 |
 | MIG-0504 | user routes | DONE | MIG-0407 |
-| MIG-0505 | list/search/recommend/trending | READY | MIG-0407 |
+| MIG-0505 | list/search/recommend/trending | DONE | MIG-0407 |
 | MIG-0506 | root/top | DONE | MIG-0407 |
 | MIG-0507 | `/:id` video catch-all | READY | MIG-0407 |
 | MIG-0509 | all public data generated at build time (D-09) | READY | MIG-0409 |
@@ -304,7 +304,7 @@ Validation:
 
 Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満たしていないため DONE にしていない（`work-items/MIG-05xx.md` の Parity gaps / Not done が正本）。2026-10-25 の D-13（OPEN_DECISIONS.md）で残りを整理した: MIG-0501〜0506 は依存を MIG-0407 に替えて READY（共有 layout は #340 で merge 済み、D-13-1）。Phase 6 API を要る操作部品は MIG-0510（D-13-2 の時点では BLOCKED。現行は下の D-14 の記述と表の行を正とする）、X アイコン map は MIG-0511（READY、D-13-3）、gateway の 404/503・sub-page の非公開 fence・allowlist は MIG-0512（READY、D-13-25）へ移した。MIG-0507 は MIG-0511 待ちの BLOCKED（D-13-22）だったが、D-14-6 で依存を外して READY（`/[id]` のアイコン投影は MIG-0511 T03 と MIG-0508 の checklist で見る）。MIG-0510 は D-14-12 で `/list` だけに縮め、MIG-0634（#401）の DONE で READY。`/[id]` 操作は MIG-0513、枠予約は MIG-0514、規約同意と Active X 切替は MIG-0515 へ分けた。MIG-0509 は依存を MIG-0409 に替えて READY（D-13-13 で詳細 HTML は Static Assets のまま、build は R2 に HTML を書かない）。MIG-0409 は DONE（残りの実測と read-only token は MIG-0509 の owner 手順、D-13-10）。MIG-0411 は code の残り（render 経路の削除、r2Html.ts の P2、recovery の host）で READY、Queue / binding の作成は owner 手順。Island ページの queue 再生成は `excluded`（user / event / video、D-11）。MIG-0508（Phase 5 Gate）は BLOCKED のままで、承認していない。
 
-2026-11-01 統合（merge 後に漏れていた分）: MIG-0501 は PR #429（squash `01b04863debfdfdc7931389867f87601e2ec46eb`、最終 Head `8ac33c59ff33cdde48d7b88c6bbae3e63644cc05`）、MIG-0506 は PR #431（squash `fbe1ace6eccdcbc1cd3e325335f7be8bb3de2c0f`、最終 Head `6cbea5adc6bf2275eafab14a263a58df312287f3`）を DONE にした。どちらも builder（Sonnet）より上位の Claude Opus による最終 Head の APPROVE と CI green を確認済み。MIG-0501 に残る `/rules` の同意 form は MIG-0519、header の account / Active X は MIG-0507 / MIG-0515 が持つ。gateway の maintenance 時の静的 asset bypass は MIG-0512 / MIG-0619 側の cutover 前 blocker。MIG-0508（Phase 5 Gate）は BLOCKED のままで承認していない。MIG-0661 は Phase 6 の行を参照（PR #419、squash `1f583403cbc817ccac5cc182df97ab25e32e2425`、最終 Head `604ef28349b3fde19b6565598842fcb3e12353f8`）。MIG-0661 は merge gate として MIG-0718 / 0719 / 0726 が参照するが、それらは他の gate / 依存が未達のため、この統合では READY の変更をしない。MIG-0606 / 0607 / 0704 / 0705 も他の依存が未 DONE のため BLOCKED のまま。
+2026-11-01 統合（merge 後に漏れていた分）: MIG-0501 は PR #429（squash `01b04863debfdfdc7931389867f87601e2ec46eb`、最終 Head `8ac33c59ff33cdde48d7b88c6bbae3e63644cc05`）、MIG-0506 は PR #431（squash `fbe1ace6eccdcbc1cd3e325335f7be8bb3de2c0f`、最終 Head `6cbea5adc6bf2275eafab14a263a58df312287f3`）を DONE にした。どちらも builder（Sonnet）より上位の Claude Opus による最終 Head の APPROVE と CI green を確認済み。MIG-0501 に残る `/rules` の同意 form は MIG-0519、header の account / Active X は MIG-0507 / MIG-0515 が持つ。gateway の maintenance 時の静的 asset bypass は MIG-0512 / MIG-0619 側の cutover 前 blocker。MIG-0508（Phase 5 Gate）は BLOCKED のままで承認していない。MIG-0661 は Phase 6 の行を参照（PR #419、squash `1f583403cbc817ccac5cc182df97ab25e32e2425`、最終 Head `604ef28349b3fde19b6565598842fcb3e12353f8`）。MIG-0718 / 0719 / 0726 は既に READY で、MIG-0661 は merge gate としてのみ参照されるため、その merge gate は今回満たされた。MIG-0606 / 0607 / 0704 / 0705 も他の依存が未 DONE のため BLOCKED のまま。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
@@ -353,7 +353,7 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 | MIG-0638 | admin spreadsheet writes / import (RH-004..008) | READY | MIG-0602, MIG-0631 |
 | MIG-0639 | API CPU benchmark part A: endpoints already on main, Linux host (D-12 / MIG-0631 T17 verdicts) | READY | MIG-0602, MIG-0611, MIG-0617, MIG-0623, MIG-0624, MIG-0625, MIG-0630, MIG-0631 |
 | MIG-0640 | like / bookmark API (SA-087) | DONE | MIG-0602 |
-| MIG-0641 | terms acceptance + onboarding APIs (SA-074..076, onboarding complete) | READY | MIG-0602 |
+| MIG-0641 | terms acceptance + onboarding APIs (SA-074..076, onboarding complete) | DONE | MIG-0602 |
 | MIG-0642 | admin ops writes B: terms versions, editable fields, notifications (SA-045..049, SA-051..055) | READY | MIG-0602 |
 | MIG-0643 | admin ops writes C: static rebuild admin, YouTube resync, visibility repair (SA-050, SA-069..073, SA-106) | READY | MIG-0602 |
 | MIG-0644 | admin X merge APIs (SA-092..097, SA-110) | READY | MIG-0602, MIG-0618 |
@@ -400,9 +400,9 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0709 | Personal settings + onboarding: X link / merge request, cancel, merge-revert forms (SA-099..101; merge gate MIG-0659) | READY | MIG-0611 |
 | MIG-0710 | `/onboarding` terms agree form + onboarding-complete POST (SA-076; merge gate MIG-0641) | READY | MIG-0611 |
 | MIG-0711 | `/entry` index screen (read-only, Discord login via the Auth.js HTTP flow) | READY | MIG-0611, MIG-0623 |
-| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | READY | MIG-0623, MIG-0630 |
-| MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | READY | MIG-0623, MIG-0630 |
-| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | BLOCKED | MIG-0712, MIG-0713 |
+| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | DONE | MIG-0623, MIG-0630 |
+| MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | DONE | MIG-0623, MIG-0630 |
+| MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | READY | MIG-0712, MIG-0713 |
 | MIG-0715 | `/dashboard/edit/:id/permissions` screen (SA-082..084; merge gate MIG-0650) | READY | MIG-0630 |
 | MIG-0716 | `/entry/slotted` + `/entry/unslotted` screens (SA-086, SA-088; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
 | MIG-0717 | `/dashboard/edit/:id` screen (SA-089; merge gate MIG-0651, MIG-0648, MIG-0650) | BLOCKED | MIG-0714 |
@@ -418,7 +418,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0727 | `/admin/announcements` x3, `/admin/api-endpoints`, `/admin/rules` x3 (SA-004..008, 051..055; merge gate MIG-0707, MIG-0726, MIG-0642) | READY | MIG-0602, MIG-0625 |
 | MIG-0728 | `/admin/event-groups` x3, `/admin/events`, `/admin/events/templates` (SA-025..030, 036; merge gate MIG-0707, MIG-0726, MIG-0653) | READY | MIG-0625 |
 | MIG-0729 | `/admin/videos`, `/admin/videos/:id` (SA-001..003, 043; merge gate MIG-0707, MIG-0726, MIG-0603) | READY | MIG-0625, MIG-0635 |
-| MIG-0730 | `/admin/videos/:id/members` (SA-085; `VideoMembersField` to `packages/ui`; merge gate MIG-0707, MIG-0726, MIG-0650, MIG-0648) | BLOCKED | MIG-0635, MIG-0713 |
+| MIG-0730 | `/admin/videos/:id/members` (SA-085; `VideoMembersField` to `packages/ui`; merge gate MIG-0707, MIG-0726, MIG-0650, MIG-0648) | READY | MIG-0635, MIG-0713 |
 | MIG-0731 | `/admin/users` x3, `/admin/moderation` (SA-044, 049, 077..081; merge gate MIG-0707, MIG-0726, MIG-0637, MIG-0642, MIG-0603) | READY | MIG-0625, MIG-0635 |
 | MIG-0732 | `/admin/x-link-requests`, `/admin/x-id-merges` (SA-090..097; merge gate MIG-0707, MIG-0726, MIG-0605, MIG-0644) | READY | MIG-0625 |
 | MIG-0733 | `/admin/audit` x4 (SA-009..011; merge gate MIG-0707, MIG-0726, MIG-0662) | READY | MIG-0625, MIG-0629 |
