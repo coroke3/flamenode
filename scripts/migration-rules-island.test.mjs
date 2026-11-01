@@ -63,6 +63,10 @@ test("T03: failed accept follows existing safe redirect, otherwise shows message
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { ok: false, next: "/entry?next=%2Fx" })), { navigate: "/entry?next=%2Fx" });
   // Real MIG-0641 middleware replies BEFORE its handler with {error}, unlike
   // its body-schema responses. They must still preserve CURRENT navigation.
+  // The real requireAuth() middleware uses "Unauthorized" (case-sensitive).
+  const sessionAuth = fs.readFileSync("apps/api/src/auth/session.ts", "utf8");
+  assert.match(sessionAuth, /return c\.json\(\{ error: "Unauthorized" \}, 401\)/);
+  assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { error: "Unauthorized" })), { navigate: "/entry?next=%2Fx" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { error: "unauthenticated" })), { navigate: "/entry?next=%2Fx" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(503, { error: "database_unavailable" })), { navigate: "/rules?next=%2Fx&error=database_unavailable" });
   assert.deepEqual(await submitRulesConsent("https://evil.example", mkFetch(401, { error: "unauthenticated" })), { navigate: "/entry?next=%2Fdashboard" });
