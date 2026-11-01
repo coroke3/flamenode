@@ -11,10 +11,24 @@ const allStates = new Set(["READY","IN_PROGRESS","REVIEW","BLOCKED","DONE"]);
 const sha = /^[0-9a-f]{40}$/;
 
 export function readWorkItems(root) {
-  const dir=path.join(root,"docs/migration/work-items");
-  if (!fs.existsSync(dir)) return {};
-  return Object.fromEntries(fs.readdirSync(dir).filter(x=>x.endsWith(".md")&&!["README.md","TEMPLATE.md"].includes(x))
-    .map(x=>[x,fs.readFileSync(path.join(dir,x),"utf8")]));
+  // Git symlinks can redirect a checkpoint or any parent directory outside
+  // this checkout. A missing work-items directory must not become "0 OK".
+  let dir = root;
+  for (const segment of ["docs", "migration", "work-items"]) {
+    dir = path.join(dir, segment);
+    if (!fs.lstatSync(dir).isDirectory()) {
+      throw new Error("work-item directory is not a real directory: " + path.relative(root, dir));
+    }
+  }
+  return Object.fromEntries(fs.readdirSync(dir)
+    .filter(name => name.endsWith(".md") && !["README.md", "TEMPLATE.md"].includes(name))
+    .map(name => {
+      const file = path.join(dir, name);
+      if (!fs.lstatSync(file).isFile()) {
+        throw new Error("work-item checkpoint is not a regular file: " + path.relative(root, file));
+      }
+      return [name, fs.readFileSync(file, "utf8")];
+    }));
 }
 export function gitCommitExists(root, value) {
   if (!sha.test(value || "")) return false;
