@@ -33,6 +33,26 @@ export function entryLoginHref(next?: string): string {
   return `/entry?next=${encodeURIComponent(sanitizeNextPath(next, "/dashboard"))}`;
 }
 
+/** CURRENT authComplete.ts: OAuth finishes on the lightweight landing, never a raw external URL. */
+export function sanitizeAuthCompleteNext(next?: string | null, fallback = "/dashboard"): string {
+  const candidate = sanitizeNextPath(next, fallback);
+  const pathOnly = candidate.split(/[?#]/, 1)[0] || "/";
+  if (pathOnly === "/auth/complete" || pathOnly.startsWith("/auth/complete/")) return fallback;
+  for (const prefix of BLOCKED_PREFIXES) {
+    if (pathOnly === prefix || pathOnly.startsWith(`${prefix}/`)) return fallback;
+  }
+  return candidate;
+}
+
+export function buildAuthCompleteHref(next?: string | null): string {
+  return `/auth/complete?next=${encodeURIComponent(sanitizeAuthCompleteNext(next))}`;
+}
+
+/** CURRENT entryLoginRedirectTo: the first fallback is /entry, the callback fallback is /dashboard. */
+export function entryLoginRedirectTo(next?: string | null): string {
+  return buildAuthCompleteHref(sanitizeNextPath(next, "/entry"));
+}
+
 /** CURRENT settings/page.tsx:72-79: guard next = sanitized ?next unless it is settings itself. */
 export function settingsNext(rawNextParam: string | null | undefined): string | null {
   const rawNext = rawNextParam?.trim();

@@ -7,6 +7,7 @@ import { Library } from "./dashboard/Library.js";
 import { Settings } from "./dashboard/Settings.js";
 import { YoutubePlaylists } from "./dashboard/YoutubePlaylists.js";
 import { Onboarding } from "./onboarding.js";
+import { EntryIndex } from "./entry/EntryIndex.js";
 
 /** Routes owned by MIG-0701 (CURRENT_ROUTES.md Personal). Other Personal routes are later MIG tasks. */
 export const PERSONAL_READ_PATHS = [
@@ -15,6 +16,7 @@ export const PERSONAL_READ_PATHS = [
   "/dashboard/settings",
   "/dashboard/youtube-playlists",
   "/onboarding",
+  "/entry",
 ] as const;
 
 /** CURRENT app/(auth)/error.tsx equivalent: `reset` clears the failure and re-renders. */
@@ -41,6 +43,7 @@ export function PersonalRoutes({ api }: { api: PersonalApi }): React.ReactElemen
         <Route path="/dashboard/settings" element={<Settings api={api} />} />
         <Route path="/dashboard/youtube-playlists" element={<YoutubePlaylists api={api} />} />
         <Route path="/onboarding" element={<Onboarding api={api} />} />
+        <Route path="/entry" element={<EntryIndex api={api} />} />
           </Routes>
         </RouteErrorBoundary>
       </main>
