@@ -60,3 +60,33 @@ test("top-level directory family would pass vacuously and is rejected", () => {
   }
   assert.match(run([], ["app/**"], ["app/layout.tsx"]).join(" "), /would cover everything/);
 });
+
+test("different owner MIGs claiming overlapping families fail for an uncovered source", () => {
+  const file = "src/lib/video/private/secret.ts";
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const conflicting = matrix([], [parent, child]).replace(familyRow(child), familyRow(child, "MIG-0619"));
+  const errors = validateLedgerCompleteness({ matrix: conflicting, status, trackedFiles: [file] });
+  assert.equal(errors.length, 1, errors.join("\n"));
+  assert.match(errors[0], /ambiguous family ownership for src\/lib\/video\/private\/secret\.ts/);
+  assert.match(errors[0], /src\/lib\/video\/\*\* \(MIG-0501\)/);
+  assert.match(errors[0], /src\/lib\/video\/private\/\*\* \(MIG-0619\)/);
+});
+
+test("explicit exact file rows override ambiguous family owners", () => {
+  const file = "src/lib/video/private/secret.ts";
+  const child = "src/lib/video/private/**";
+  const conflicting = matrix([file], ["src/lib/video/**", child])
+    .replace(familyRow(child), familyRow(child, "MIG-0619"));
+  assert.deepEqual(validateLedgerCompleteness({ matrix: conflicting, status, trackedFiles: [file] }), []);
+});
+
+test("nested families with one owner and adjacent prefixes do not false-positive", () => {
+  assert.deepEqual(run([], ["src/lib/video/**", "src/lib/video/private/**"], [
+    "src/lib/video/private/secret.ts",
+  ]), []);
+  assert.deepEqual(run([], ["src/lib/video/**", "src/lib/videos/**"], [
+    "src/lib/video/file.ts",
+    "src/lib/videos/file.ts",
+  ]), []);
+});

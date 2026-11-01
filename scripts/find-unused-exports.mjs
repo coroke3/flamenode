@@ -25,7 +25,11 @@ export function countReferences(targets, files) {
   }
   return targets.flatMap((target) => exportedNames(files.get(target) ?? "").map((name) => {
     const others = (filesByName.get(name) ?? []).filter((file) => file !== target);
-    const tests = others.filter((file) => /\.test\.[cm]?[jt]sx?$/.test(file));
+    // Test-only imports must not justify moving a CURRENT export into TARGET.
+    // Git paths use forward slashes even on Windows.
+    const tests = others.filter((file) =>
+      /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) ||
+      /(?:^|\/)__tests__\//.test(file));
     const localUses = (files.get(target).match(new RegExp("(?<![\\w$])" + name.replace(/\$/g, "\\$") + "(?![\\w$])", "g")) ?? []).length - 1;
     return { file: target, name, nonTest: others.length - tests.length, test: tests.length, local: localUses };
   }));
@@ -35,7 +39,7 @@ function listSourceFiles(root) {
   const existing = SEARCH_DIRS.filter((dir) => fs.existsSync(path.join(root, dir)));
   return execFileSync("git", ["ls-files", "--", ...existing], { cwd: root, encoding: "utf8" })
     .split("\n")
-    .filter((file) => /\.(ts|tsx|mjs|js|cjs|astro)$/.test(file));
+    .filter((file) => /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|astro)$/.test(file));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
