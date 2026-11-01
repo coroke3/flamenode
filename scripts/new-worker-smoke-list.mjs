@@ -112,6 +112,15 @@ export function collectApiMatrixRoutes(matrix) {
 export function buildNewWorkerSmokePlan({ routeMatrix, apiMatrix, appEntry, sourceRoutes = [] }) {
   const mounts = listHonoMounts(appEntry);
   if (mounts.length === 0) throw new Error("apps/api/src/app.ts has no parsable Hono mounts");
+  // Generate no cutover checklist when an executable Hono mount is not
+  // represented by the supported literal parser (or is silently deduplicated).
+  // The standalone test alone is not a sufficient guard for CLI consumers.
+  const activeCalls = countActiveHonoMountCalls(appEntry);
+  if (activeCalls !== mounts.length) {
+    throw new Error(
+      `Hono mount coverage mismatch: ${activeCalls} active calls, ${mounts.length} parsable unique mounts`,
+    );
+  }
   const documentedByKey = new Map();
   for (const route of [
     ...collectApiMatrixRoutes(apiMatrix),
