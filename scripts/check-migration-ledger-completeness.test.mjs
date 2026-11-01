@@ -175,6 +175,6 @@ test("P2 regression: family table requires one boundary and rejects moved bounda
     /exactly one Update rule boundary/,
   );
   const early = valid.replace(familyRow(family), "**Update rule:** x\n" + familyRow(family))
-    .replace("\n**Update rule:** x\n", "\n");
+    .replace(/\n\*\*Update rule:\*\* x$/, "");
   assert.match(parseFamilyRows(early).errors.join("\n"), /family row appears after Update rule boundary/);
 });
