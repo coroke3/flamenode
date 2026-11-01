@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0510
+Current Task: MIG-0513
 Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0510
-Last Task PR: #450
+Last Completed Task: MIG-0513
+Last Task PR: #452
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -110,7 +110,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 2 | Design System / HTML mock integration (公開画面用) | DONE | PASSED |
 | 3 | Domain extraction | DONE | PASSED |
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
-| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0510 / 0511 / 0512 / 0517 DONE (MIG-0501 PR#429, MIG-0506 PR#431 merged 2026-11-01; MIG-0510 PR#450 builder-complete 2026-11-01, merge pending human approval); MIG-0507, 0509, 0513..0516, 0518, 0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
+| 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0501 / 0502 / 0503 / 0504 / 0505 / 0506 / 0510 / 0511 / 0512 / 0513 / 0517 / 0519 DONE (MIG-0501 PR#429, MIG-0506 PR#431, MIG-0519 PR#447, MIG-0510 PR#450 merged 2026-11-01; MIG-0513 PR#452 builder-complete 2026-11-01, merge pending human approval); MIG-0507, 0509, 0514..0516, 0518 READY (0514..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
 | 6 | Hono API | PARTIALLY_READY (2026-11-01: 38 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0641 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0655 / MIG-0658 / MIG-0660 / MIG-0661 / MIG-0663 / MIG-0664; 20 READY; MIG-0604 / MIG-0606 / MIG-0610 / MIG-0627 / MIG-0662 / MIG-0607 BLOCKED. MIG-0660 deep health core in PR#438; MIG-0655 template/playlist writes in PR#476; production cutover not authorized) | CLOSED |
 | 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-01: MIG-0701, MIG-0707, MIG-0712, MIG-0713 DONE; MIG-0708..0711, 0714, 0715, 0718..0730, 0731..0737 READY; MIG-0702..0706, 0716, 0717 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445) / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
@@ -293,7 +293,7 @@ Validation:
 | MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | DONE | MIG-0634 |
 | MIG-0511 | public X icon map projection at build time | DONE | MIG-0407, MIG-0409 |
 | MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | DONE | MIG-0405, MIG-0619 |
-| MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | READY | MIG-0407, MIG-0634 |
+| MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | DONE | MIG-0407, MIG-0634 |
 | MIG-0514 | `/event/[id]/slots` viewer panel + reservation Island (merge gate MIG-0657, D-16) | READY | MIG-0407 |
 | MIG-0515 | header Active X switch on the SA-098 API (merge gate MIG-0636, D-16) | READY | MIG-0407 |
 | MIG-0516 | public build request mark in the static rebuild enqueue batch (MIG-0509 U05) | READY | MIG-0409 |
@@ -307,6 +307,8 @@ Phase 5 の各 task は PR で merge 済みだが Work Order の受入を満た�
 2026-11-01 統合（merge 後に漏れていた分）: MIG-0501 は PR #429（squash `01b04863debfdfdc7931389867f87601e2ec46eb`、最終 Head `8ac33c59ff33cdde48d7b88c6bbae3e63644cc05`）、MIG-0506 は PR #431（squash `fbe1ace6eccdcbc1cd3e325335f7be8bb3de2c0f`、最終 Head `6cbea5adc6bf2275eafab14a263a58df312287f3`）を DONE にした。どちらも builder（Sonnet）より上位の Claude Opus による最終 Head の APPROVE と CI green を確認済み。MIG-0501 に残る `/rules` の同意 form は MIG-0519、header の account / Active X は MIG-0507 / MIG-0515 が持つ。gateway の maintenance 時の静的 asset bypass は MIG-0512 / MIG-0619 側の cutover 前 blocker。MIG-0508（Phase 5 Gate）は BLOCKED のままで承認していない。MIG-0661 は Phase 6 の行を参照（PR #419、squash `1f583403cbc817ccac5cc182df97ab25e32e2425`、最終 Head `604ef28349b3fde19b6565598842fcb3e12353f8`）。MIG-0718 / 0719 / 0726 は既に READY で、MIG-0661 は merge gate としてのみ参照されるため、その merge gate は今回満たされた。MIG-0606 / 0607 / 0704 / 0705 も他の依存が未 DONE のため BLOCKED のまま。
 
 2026-11-01 統合（MIG-0510、PR #450）: `/list` の ListFilterIsland と top 検索 band を DONE にした（U01 list + 検索 band のみ、D-14-12）。この統合で新たに依存が満たされて READY になる task は無い（MIG-0508 Phase 5 Gate は他の Phase 5 task が未 DONE のため BLOCKED のまま、承認していない）。event 名の parity 限界（RH-032 `PublicVideoDto` に `primary_event_title` が無い）は OPEN_DECISIONS.md D-18 に記録した。最終 Head の独立レビューと人間の merge 承認は PR #450 で待つ。
+
+2026-11-01 統合（MIG-0513、PR #452）: `/[id]` の like / save Island（SA-087 / RH-031、`VideoInteractionIsland.ts`）を DONE にした。この統合で新たに依存が満たされて READY になる task は無い（MIG-0518 は PR #468 が本 branch に stack されており、#452 の merge 後に main へ retarget して CI と ledger を再確認する。MIG-0508 Phase 5 Gate は BLOCKED のままで承認していない）。bundle 増（VideoPageIsland client chunk 15.2KB -> 107.9KB raw、zod が @flamenode/contracts 経由で入る）は U04 の要件として受容し、schema import の分離（type-only + 軽量 runtime check）を follow-up にする。最終 Head の独立レビューと人間の merge 承認は PR #452 で待つ。
 
 公開画面の like / 枠予約 / 規約同意 / Active X 切替は Server Action を直接呼ぶため、各ルートの本番切替は対応する Phase 6 API（MIG-0603/0604/0605/0608）の DONE 後に行う（[`PHASE_4_5_SPEC.md`](PHASE_4_5_SPEC.md) Phase 5 共通契約）。
 
