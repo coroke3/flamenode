@@ -163,7 +163,15 @@ export async function discoverVideoDetailEndpoint(baseUrl, fetchPage = fetchWith
   if (!json || typeof json !== "object" || !Array.isArray(json.items)) {
     return { kind: "invalid_json", url };
   }
-  if (json.items.length === 0) return { kind: "empty" };
+  const isInt = (value, min) => Number.isInteger(value) && value >= min;
+  // Public list envelope is { items, total, page, limit }; anything else is malformed.
+  if (!isInt(json.total, 0) || !isInt(json.page, 1) || !isInt(json.limit, 1)) {
+    return { kind: "invalid_json", url };
+  }
+  if (json.items.length === 0) {
+    return json.total === 0 ? { kind: "empty" } : { kind: "invalid_json", url };
+  }
+  if (json.total < json.items.length) return { kind: "invalid_json", url };
   const id = json.items[0]?.id;
   if (typeof id !== "string" || !id.trim()) {
     return { kind: "invalid_json", url };
