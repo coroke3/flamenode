@@ -159,6 +159,24 @@ test("SKIPPED task cannot bypass dependent gate without independent approval", (
   assert.match(run({statusText:changed}).join("\n"),/SKIP_APPROVAL/);
 });
 
+test("SKIPPED approval requires a real PR number and nonblank review/alternative evidence", () => {
+  const skipped = status
+    .replace("Task State: READY", "Task State: SKIPPED")
+    .replace("| MIG-0301 | core PoC | READY | MIG-0108 |", "| MIG-0301 | core PoC | SKIPPED | MIG-0108 |");
+  const evidence = "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=https://github.com/coroke3/flamenode/pull/123#pullrequestreview-1 | ALTERNATIVE=MIG-0302";
+  assert.deepEqual(run({ statusText: skipped + "\n" + evidence }), []);
+
+  for (const invalid of [
+    "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=   | ALTERNATIVE=MIG-0302",
+    "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=review-url | ALTERNATIVE=   ",
+    "SKIP_APPROVAL: MIG-0301 | PR#0 | APPROVAL=review-url | ALTERNATIVE=MIG-0302",
+    "SKIP_APPROVAL: MIG-9999 | PR#123 | APPROVAL=review-url | ALTERNATIVE=MIG-0302",
+  ]) {
+    assert.match(run({ statusText: skipped + "\n" + invalid }).join("\n"), /SKIP_APPROVAL/);
+  }
+});
+
+
 
 const performanceDagStatus = status
  .replace("| MIG-0402 | Astro | BLOCKED | MIG-0301 |","| MIG-0402 | Astro | BLOCKED | MIG-0206, MIG-0401 |")
