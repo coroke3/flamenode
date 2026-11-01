@@ -42,10 +42,12 @@ function actionLabel(href: string | undefined): string {
 }
 
 function InteractionIcon({ kind, active }: { kind: InteractionKind; active: boolean }): React.ReactElement {
+  // Same paths and stroke attributes as CURRENT Icon (heart / heart-filled / bookmark / bookmark-filled).
   const path = kind === "like"
-    ? "M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"
-    : "M6 3h12v18l-6-4-6 4z";
-  return h("svg", { width: 13, height: 13, viewBox: "0 0 24 24", "aria-hidden": true, fill: active ? "currentColor" : "none", stroke: "currentColor", strokeWidth: 2 }, h("path", { d: path }));
+    ? "M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+    : "M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z";
+  return h("svg", { width: 13, height: 13, viewBox: "0 0 24 24", "aria-hidden": true, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" },
+    h("path", { d: path, ...(active ? { fill: "currentColor" } : {}) }));
 }
 
 export function InteractionButton({
@@ -120,7 +122,7 @@ export function InteractionButton({
 /** Browser-only; parent does not render this subtree into SSG/no-JS HTML. */
 export function VideoInteractionIsland({ videoId, likeCount }: { videoId: string; likeCount: number }): React.ReactElement {
   const { overlay, loading } = useVideoViewerOverlay(videoId);
-  const currentPath = typeof window === "undefined" ? "/" : window.location.pathname + window.location.search;
+  const currentPath = typeof window === "undefined" ? "/" : window.location.pathname; // CURRENT uses `/${rawId}` (no query) for next=
   const policy = interactionPolicy(overlay, loading, currentPath);
   return h(React.Fragment, null,
     h(InteractionButton, { videoId, kind: "like", initialActive: overlay.likeActive, count: likeCount, policy }),
