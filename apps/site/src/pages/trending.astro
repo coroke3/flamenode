@@ -27,3 +27,10 @@ const items = (trending?.items ?? []).slice(0, TRENDING_PAGE_LIMIT).map(toTrendi
     stale={trending?.stale ?? false}
   />
 </PublicLayout>
+
+<!-- On <=640px the shared header is fixed (52px) and leaves normal flow: keep the screen's 32px top gap below it (MIG-0505 U02 defect, same pattern as MIG-0504). -->
+<style is:global>
+  @media (max-width: 640px) {
+    main.tr-wrap { padding-top: calc(52px + 32px); }
+  }
+</style>
