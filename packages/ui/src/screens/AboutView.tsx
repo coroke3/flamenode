@@ -159,8 +159,7 @@ export function AboutView({ stats, logoSrc = "/brand/flamenode-mark.svg", classN
             <div className="stack ab-tile">
               <span
                 className="ab-logo"
-                role="img"
-                aria-label="FlameNode Logo"
+                aria-hidden="true"
                 style={{
                   width: "24.35px",
                   background: "currentColor",

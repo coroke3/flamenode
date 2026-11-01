@@ -162,20 +162,22 @@ test("about U03: identity mark is text-colour masked like CURRENT Logo (a black 
   const doc = load("about");
   assert.equal(doc.querySelector("img.ab-logo"), null, "flamenode-mark.svg has no fill; an <img> renders black on the dark theme");
   const logo = doc.querySelector(".ab-logo");
-  assert.equal(logo.getAttribute("role"), "img");
-  assert.equal(logo.getAttribute("aria-label"), "FlameNode Logo");
+  assert.equal(logo.getAttribute("aria-hidden"), "true", "decorative mark: the visible label already names it (CURRENT Logo is aria-hidden)");
+  assert.equal(logo.getAttribute("role"), null);
+  assert.equal(logo.getAttribute("aria-label"), null);
   const style = logo.getAttribute("style");
   assert.ok(style.includes("background:currentColor") || style.includes("background: currentColor"));
   assert.ok(/mask:\s*url\(&quot;\/brand\/flamenode-mark\.svg&quot;\)|mask:\s*url\("?\/brand\/flamenode-mark\.svg"?\)/.test(style), style);
 });
 
-test("maintenance U03: dark-only body is an approved decision (owner authorization 2026-11-01, D-13-27) inside the theme-following shell", { skip }, () => {
+test("maintenance U03: body follows the stored/system theme like CURRENT (D-13-27), no nested dark pin", { skip }, () => {
   const html = fs.readFileSync(path.join(DIST, "maintenance/index.html"), "utf-8");
   const doc = new JSDOM(html).window.document;
-  assert.equal(doc.querySelectorAll('body [data-theme="dark"]').length, 1, "exactly the shared MaintenanceView root is pinned dark");
-  assert.ok(doc.querySelector('.p-root[data-theme="dark"] main'), "the dark pin wraps the maintenance body (<main>) only");
-  assert.equal(doc.querySelector('.p-root header, .p-root footer'), null, "header/footer follow the stored theme");
+  assert.equal(doc.querySelectorAll("body [data-theme]").length, 0, "no nested data-theme: the whole page follows the document theme (CURRENT page.tsx)");
+  assert.ok(doc.querySelector(".p-root main"), "maintenance body is in the shared view");
   assert.ok(html.includes("localStorage"), "CURRENT theme bootstrap still runs before first paint");
+  const src = fs.readFileSync("packages/ui/src/screens/MaintenanceView.tsx", "utf-8");
+  assert.equal(/data-theme/.test(src), false, "MaintenanceView must not hardcode a theme");
 });
 
 test("about: mock structure (hero, kv, 3 columns, identity, credits) and no stats block without a snapshot", { skip }, () => {
