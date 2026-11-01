@@ -32,6 +32,7 @@
 | D-15 | **MIG-0633 の DONE を受けて書き込み API を SA 群ごとに分割（MIG-0650〜0660）、build 側の残り（MIG-0516〜0518）、Ops SPA の土台（MIG-0707）、code 側の残存棚卸し（MIG-0908）を登録。個別の決定 D-15-1〜15 は §D-15** | DECIDED | MIG-0509, 0513, 0514, 0516〜0518, 0603〜0607, 0626, 0636, 0650〜0660, 0702〜0707, 0901, 0908 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）は従来どおり作業直前の明示承認 |
 | D-16 | **API 待ちの画面・Island を契約先行で着手できるようにする（Merge gate）。MIG-0702 / 0703 / 0513〜0515 を分割（MIG-0519, 0708〜0718）、CostGuardBanner の読み API（MIG-0661）、既存 Hono session の security review（MIG-0807）。個別の決定 D-16-1〜14 は §D-16** | DECIDED | MIG-0513〜0515, 0519, 0606, 0607, 0636, 0640, 0641, 0648, 0650, 0651, 0657, 0659, 0661, 0701〜0705, 0708〜0718, 0804, 0807 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）と SPA の本番 Route 切替は従来どおり作業直前の明示承認 |
 | D-17 | **Ops SPA の画面を画面群に分割（MIG-0719〜0737）、SA-011 の API（MIG-0662）、Manage navigation の 2 field（MIG-0663）、Ops guard の degraded の写像（MIG-0664）。個別は §D-17** | DECIDED | MIG-0606, 0607, 0626, 0637, 0642〜0644, 0662〜0664, 0704〜0707, 0719〜0737 | 本番操作（Ops の Worker / Route / Custom Domain、Remote D1、secret）は従来どおり作業直前の明示承認 |
+| D-18 | **`/list` の event 名 parity: RH-032 `PublicVideoDto` に event title が無いため DTO は変えず CURRENT の title 欠落時 fallback（chip は event ID、index 行は `イベント`）を採る（Option A、accepted parity limitation）。個別は §D-18** | DECIDED | MIG-0510, 0634 | 公開 API field の追加は MIG-0634 owner の別 task。本番操作なし |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 

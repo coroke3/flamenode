@@ -22,7 +22,7 @@ const query = normalizeListQuery({});
 const videos = (list?.videos ?? []).map(toListVideo);
 // CURRENT `listEmptyMessage`: a missing artifact is "reflecting", never "no results".
 // MIG-0510: empty slot below the header; the Island fills it so the header stays first (CURRENT order).
-const filterSlot = React.createElement("div", { id: "list-filter-mount", className: "lv-toolbar" });
+const filterSlot = React.createElement("div", { id: "list-filter-mount", className: "lv-toolbar", "data-total": String(list?.total ?? 0) });
 const emptyMessage = "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
 ---
 <PublicLayout head={head} currentPath="/list">

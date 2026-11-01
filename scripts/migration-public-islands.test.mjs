@@ -113,6 +113,7 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
   const page = fs.readFileSync("apps/site/src/pages/list.astro", "utf8");
   assert.match(page, /id="list-static-fallback"/);
   assert.match(page, /id: "list-filter-mount"/);
+  assert.match(page, /"data-total"/, "build-time total feeds the default-view Pagination");
   assert.match(page, /toolbar=\{filterSlot\}/, "controls slot is passed into ListView below the header");
   assert.match(page, /mountListFilters\(\)/);
   if (!fs.existsSync(topPath) || !fs.existsSync(listPath)) {
@@ -259,5 +260,47 @@ test("UX-DISC-005: live pagination keeps CURRENT range summary, first/last jump 
     globalThis.fetch = old.fetch;
     globalThis.IS_REACT_ACT_ENVIRONMENT = old.act;
     dom.window.close();
+  }
+});
+
+test("UX-DISC-005: the default /list (no fetch) still shows Pagination from the build-time total", { skip: skipHydratedUi }, async () => {
+  const { mountListFilters } = await import("../apps/site/src/components/ListFilterIsland.ts");
+  for (const [total, expectNav] of [[240, true], [24, false]]) {
+    const dom = new JSDOM(
+      `<!doctype html><div id="list-static-fallback"><main><div id="list-filter-mount" data-total="${total}"></div></main></div>`,
+      { url: "https://flamenode.net/list" },
+    );
+    const old = {
+      window: globalThis.window, document: globalThis.document,
+      HTMLElement: globalThis.HTMLElement, Node: globalThis.Node,
+      fetch: globalThis.fetch, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    };
+    const fetched = [];
+    try {
+      globalThis.window = dom.window;
+      globalThis.document = dom.window.document;
+      globalThis.HTMLElement = dom.window.HTMLElement;
+      globalThis.Node = dom.window.Node;
+      globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+      globalThis.fetch = async url => { fetched.push(String(url)); throw new Error("default view must not fetch"); };
+      await act(async () => { mountListFilters(); });
+      const doc = dom.window.document;
+      assert.deepEqual(fetched, [], "default view stays static (no D1/API read)");
+      assert.equal(doc.getElementById("list-static-fallback").hidden, false);
+      const nav = doc.querySelector("#list-results-mount .fn-pagination");
+      assert.equal(Boolean(nav), expectNav);
+      if (nav) {
+        assert.match(nav.textContent, /1〜24 \/ 全 240 件 \(1 \/ 10 ページ\)/);
+        assert.ok([...nav.querySelectorAll("a")].some(a => a.getAttribute("href") === "/list?page=2"), "page 2 reachable");
+      }
+    } finally {
+      globalThis.window = old.window;
+      globalThis.document = old.document;
+      globalThis.HTMLElement = old.HTMLElement;
+      globalThis.Node = old.Node;
+      globalThis.fetch = old.fetch;
+      globalThis.IS_REACT_ACT_ENVIRONMENT = old.act;
+      dom.window.close();
+    }
   }
 });

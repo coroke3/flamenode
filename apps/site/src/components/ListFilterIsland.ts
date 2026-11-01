@@ -49,7 +49,7 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
       query.event ? chip(listHref(query, { event: "", page: "1" }), `イベント: ${query.event}`) : null) : null);
 }
 
-function Pages({ query, data }: { query: ListQuery; data: Loaded }): React.ReactElement | null {
+function Pages({ query, data }: { query: ListQuery; data: { total: number; totalPages: number } }): React.ReactElement | null {
   if (data.totalPages <= 1) return null;
   // CURRENT Pagination (shared): first/last jump, "…" gaps and "1〜24 / 全 240 件 (1 / 10 ページ)".
   return h("div", { className: "lv-page-nav" },
@@ -87,6 +87,10 @@ export function ListFilterIsland({ search }: { search: string }): React.ReactEle
   const [liveSlot, setLiveSlot] = React.useState<HTMLElement | null>(null);
   const staticSlot = React.useMemo(() => document.getElementById("list-filter-mount"), []);
   const loaded = state.kind === "loaded";
+  // Default view (static list, no fetch): CURRENT still shows Pagination, so derive it from the build-time total.
+  const staticTotal = Number(staticSlot?.dataset.total ?? "");
+  const idlePages = state.kind === "idle" && isDefaultListQuery(query) && Number.isSafeInteger(staticTotal) && staticTotal > 0
+    ? h(Pages, { query, data: { total: staticTotal, totalPages: Math.max(1, Math.ceil(staticTotal / LIST_PAGE_SIZE)) } }) : null;
   const filters = h(Filters, { query });
   const status = state.kind === "error" ? h("p", { role: "alert", className: "lv-island-status" },
       query.event ? LIST_EVENT_UNAVAILABLE_MESSAGE : LIST_UNAVAILABLE_MESSAGE)
@@ -102,7 +106,7 @@ export function ListFilterIsland({ search }: { search: string }): React.ReactEle
       h(ListView, { videos: state.data.videos, total: state.data.total, view: query.view,
         toolbar: h("div", { className: "lv-toolbar", ref: setLiveSlot }),
         emptyMessage: query.searchTooShort ? LIST_SHORT_SEARCH_MESSAGE : LIST_NO_RESULTS_MESSAGE }),
-      !query.searchTooShort ? h(Pages, { query, data: state.data }) : null) : null);
+      !query.searchTooShort ? h(Pages, { query, data: state.data }) : null) : idlePages);
 }
 
 /** SSG remains useful without JS; only browser execution exposes the live filter controls. */
