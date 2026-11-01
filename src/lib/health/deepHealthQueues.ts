@@ -1,5 +1,2 @@
-export { assertArtifactSloFresh, ARTIFACT_SLO_PROBES } from "./artifactSlo.ts";
-export {
-  evaluateDeepHealthQueueConfiguration,
-  resolveQueueEmergencyState,
-} from "./queueEmergency.ts";
+// Compatibility bridge (MIG-0660, D-10): implementation lives in packages/server-core; remove when callers migrate.
+export * from "@flamenode/server-core/health/deepHealthQueues";
