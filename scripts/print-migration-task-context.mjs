@@ -183,7 +183,8 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
     const state=tasks.get(id)?.state;
     if(state==="DONE")return true;
     if(state!=="SKIPPED")return false;
-    return new RegExp("^SKIP_APPROVAL: "+id+" \\| PR#[0-9]+ \\| APPROVAL=[^\\n|]+ \\| ALTERNATIVE=[^\\n|]+$","m").test(statusText);
+    const approval=statusText.match(new RegExp("^SKIP_APPROVAL: "+id+" \\| PR#[0-9]+ \\| APPROVAL=([^\\n|]+) \\| ALTERNATIVE=([^\\n|]+)$","m"));
+    return Boolean(approval?.[1].trim()&&approval?.[2].trim());
   };
   const candidates=[];
   for(const [id,task] of tasks){
