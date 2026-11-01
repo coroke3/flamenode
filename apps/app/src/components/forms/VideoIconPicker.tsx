@@ -325,7 +325,6 @@ export function VideoIconPicker({
                   border: "1px solid var(--border-subtle)",
                 }}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={uploadPreview} alt="" style={thumbStyle} />
               </div>
               <p className="fn-muted fn-text-sm" style={{ margin: 0 }}>
@@ -370,7 +369,6 @@ export function VideoIconPicker({
                 disabled={disabled}
                 style={{ ...buttonStyle, ...(active ? activeStyle : {}) }}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={url} alt="" style={thumbStyle} />
                 {active ? (
                   <span style={checkMarkStyle}>
