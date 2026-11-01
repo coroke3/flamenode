@@ -65,13 +65,23 @@ export function parseFamilyRows(markdown) {
     "NOT_STARTED", "IN_PROGRESS", "BRIDGED", "PARITY_VERIFIED",
     "CUTOVER", "RETIRED", "RETAINED", "BLOCKED",
   ]);
-  for (const line of lines.slice(headerIndex + 2)) {
+  // A known structural boundary, rather than a guessed "prose starts here"
+  // heuristic, makes every malformed family row visible to the validator.
+  const boundaryIndexes = lines.flatMap((line, index) =>
+    /^\*\*Update rule:\*\*(?:\s|$)/.test(line.trim()) ? [index] : []);
+  if (boundaryIndexes.length !== 1 || boundaryIndexes[0] <= headerIndex + 1) {
+    return { rows, errors: [...errors, "expected exactly one Update rule boundary after family table"] };
+  }
+  const tableEnd = boundaryIndexes[0];
+  // A misplaced boundary must not hide otherwise well-formed family rows.
+  if (lines.slice(tableEnd + 1).some((line) =>
+    /^\s*\|/.test(line) || /`[^`\n]+\/\*\*`\s*\|/.test(line))) {
+    errors.push("family row appears after Update rule boundary");
+  }
+
+  for (const line of lines.slice(headerIndex + 2, tableEnd)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Stop at prose after the table, but inspect malformed rows that lost a
-    // leading pipe or backtick instead of silently dropping the family.
-    if (!trimmed.startsWith("|") &&
-        !/^(?:\x60|app\/|src\/|public\/|workers\/|cloudflare\/)/.test(trimmed)) break;
     if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
       errors.push("malformed family row: " + trimmed.slice(0, 90));
       continue;
