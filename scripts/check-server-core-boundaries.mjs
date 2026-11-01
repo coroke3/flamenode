@@ -68,15 +68,47 @@ function isProcessReference(node) {
     hasStaticMemberName(node, "process");
 }
 
+// Static key of a destructuring property (`env`, `"env"`, `["env"]`); undefined when dynamic.
+function staticPropertyKey(name) {
+  if (!name) return undefined;
+  if (ts.isComputedPropertyName(name)) {
+    const inner = unwrapStaticExpression(name.expression);
+    return ts.isStringLiteral(inner) || ts.isNoSubstitutionTemplateLiteral(inner) ? inner.text : undefined;
+  }
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) return name.text;
+  return undefined;
+}
+
+// `const { env } = process`, `const { env: c } = globalThis.process`, `({ env } = process)`.
+function isEnvDestructuring(node) {
+  if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+    const key = staticPropertyKey(node.propertyName ?? node.name);
+    const decl = node.parent.parent;
+    return key === "env" && ts.isVariableDeclaration(decl) && Boolean(decl.initializer) && isProcessReference(decl.initializer);
+  }
+  if (
+    (ts.isShorthandPropertyAssignment(node) || ts.isPropertyAssignment(node)) &&
+    ts.isObjectLiteralExpression(node.parent)
+  ) {
+    const key = staticPropertyKey(node.name);
+    const assign = node.parent.parent;
+    return key === "env" && ts.isBinaryExpression(assign) &&
+      assign.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      assign.left === node.parent && isProcessReference(assign.right);
+  }
+  return false;
+}
+
 function findAmbientHostReferences(content, fileName) {
   const sourceFile = ts.createSourceFile(fileName, content, ts.ScriptTarget.Latest, true);
   const found = [];
   const lineOf = (node) => sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
   const visit = (node) => {
     if (
-      (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-      hasStaticMemberName(node, "env") &&
-      isProcessReference(node.expression)
+      isEnvDestructuring(node) ||
+      ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+        hasStaticMemberName(node, "env") &&
+        isProcessReference(node.expression))
     ) {
       found.push({ line: lineOf(node), specifier: "process.env", rule: "process.env", message: "ambient env is forbidden in packages/server-core; take values through EnvValues" });
     }

@@ -120,6 +120,25 @@ describe("check-server-core-boundaries", () => {
     );
   });
 
+  it("T03ab detects destructuring of process.env", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-destructure.ts": [
+          "const { env } = process;",
+          "const { env: a } = globalThis.process;",
+          'const { ["env"]: b } = process;',
+          "const { env: c } = (process as any);",
+          "let d; ({ env: d } = process);",
+          "let e; ({ env: e } = globalThis.process);",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6]);
+      },
+    );
+  });
+
   it("T03b ignores unrelated computed properties, comments, and string literals", () => {
     withFixture(
       {
@@ -127,6 +146,9 @@ describe("check-server-core-boundaries", () => {
           'const argv = process["argv"];',
           "const versions = globalThis.process.versions;",
           "const unrelated = other.process.env;",
+          "const { argv } = process;",
+          "const { env } = other;",
+          "const { versions: v } = globalThis.process;",
           'const text = "process[env] and globalThis.process.env";',
           "// process['env'] is prohibited",
         ].join("\n"),
