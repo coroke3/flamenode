@@ -588,3 +588,35 @@ test("MIG-0628 U04: matrix-only fictitious GET stays manual even under a real mo
   assert.equal(invented?.mode, "fixture-required",
     "a mounted prefix does not prove the documented leaf handler exists");
 });
+
+test("MIG-0628 U04: generated smoke plan rejects unparsed or duplicated active Hono mounts", () => {
+  const legitimate = 'app.route("/api/health", healthRoutes);';
+  const extras = [
+    'app?.route("/api/hidden", hiddenRoutes);',
+    'app["route"]("/api/hidden", hiddenRoutes);',
+    "app['route']('/api/hidden', hiddenRoutes);",
+    'app.route(dynamicPath, dynamicRoutes);',
+    'app.route("/api/health", healthRoutes);',
+  ];
+  for (const extra of extras) {
+    const appEntry = legitimate + "\n" + extra;
+    assert.equal(countActiveHonoMountCalls(appEntry), 2, extra);
+    assert.equal(listHonoMounts(appEntry).length, 1, extra);
+    assert.throws(() => buildNewWorkerSmokePlan({
+      appEntry,
+      apiMatrix: "| GET /api/health | public |",
+      routeMatrix: "",
+    }), /Hono mount coverage mismatch: 2 active calls, 1 parsable unique mounts/, extra);
+  }
+
+  const inert = [
+    '// app.route("/api/commented", ghostRoutes);',
+    "const documentation = 'app.route(\"/api/quoted\", ghostRoutes)';",
+  ].join("\n");
+  const result = buildNewWorkerSmokePlan({
+    appEntry: legitimate + "\n" + inert,
+    apiMatrix: "| GET /api/health | public |",
+    routeMatrix: "",
+  });
+  assert.deepEqual(result.coverage.map((entry) => entry.mount), ["/api/health"]);
+});
