@@ -116,11 +116,29 @@ function withoutInlineCode(markdown) {
   return result + markdown.slice(cursor);
 }
 
+// A symlinked source or ancestor can hide Markdown from the audit or make
+// enumeration follow files outside the checkout. Never traverse these paths.
+function assertNoSymlinkInDocumentPath(root, filename) {
+  const relative = path.relative(path.resolve(root), path.resolve(root, filename));
+  if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+    throw new Error(`migration document outside repository: ${filename}`);
+  }
+  let current = path.resolve(root);
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (fs.lstatSync(current).isSymbolicLink()) {
+      throw new Error(`symlink in migration documents: ${filename}`);
+    }
+  }
+}
+
 export function listMarkdownFiles(root,rel="docs/migration") {
   const abs=path.join(root,rel);
+  assertNoSymlinkInDocumentPath(root, rel);
   const out=[];
   for(const item of fs.readdirSync(abs,{withFileTypes:true})) {
     const next=path.posix.join(rel,item.name);
+    if (item.isSymbolicLink()) throw new Error(`symlink in migration documents: ${next}`);
     if(item.isDirectory())out.push(...listMarkdownFiles(root,next));
     else if(item.isFile() && item.name.endsWith(".md"))out.push(next);
   }
@@ -204,6 +222,7 @@ export function validateLinks({root,documents}) {
   // resolve to a file outside the checkout. Resolve both ends before accepting.
   const realRoot=fs.realpathSync(root);
   for(const filename of documents) {
+    assertNoSymlinkInDocumentPath(root, filename);
     const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(let target of markdownLinkDestinations(content)) {
