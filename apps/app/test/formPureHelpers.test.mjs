@@ -1,0 +1,335 @@
+// Port of CURRENT src/lib/event/youtubeDescriptionTemplate.test.mjs (MIG-0712); test the SPA copy, not the legacy source.
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  YOUTUBE_DESCRIPTION_LOOP_VARIABLES,
+  YOUTUBE_DESCRIPTION_VARIABLES,
+  formatYoutubeDescriptionMembers,
+  normalizeYoutubeDescriptionTemplate,
+  renderYoutubeDescriptionTemplate,
+  youtubeDescriptionCustomAnswerVariableKey,
+  youtubeDescriptionStagePermissionVariableKey,
+} from "../.test-dist/apps/app/src/lib/youtubeDescriptionTemplate.js";
+
+test("renders known variables and normalizes line endings", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{event_title}}\r\n{{title}} / {{youtube_video_id}}",
+    {
+      event_title: "春の上映会",
+      title: "First Light",
+      youtube_video_id: "abc123",
+    },
+  );
+
+  assert.equal(rendered.text, "春の上映会\nFirst Light / abc123");
+  assert.deepEqual(rendered.unknownVariables, []);
+  assert.deepEqual(rendered.usedVariables, [
+    "event_title",
+    "title",
+    "youtube_video_id",
+  ]);
+});
+
+test("unknown variables are removed and reported", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "title={{title}} typo={{titlle}} invalid={{bad-key}}",
+    { title: "作品" },
+  );
+
+  assert.equal(rendered.text, "title=作品 typo= invalid=");
+  assert.deepEqual(rendered.unknownVariables, ["bad-key", "titlle"]);
+});
+
+test("固定変数は実フォームの全項目と追加質問の集約値を公開する", () => {
+  const keys = new Set(YOUTUBE_DESCRIPTION_VARIABLES.map((variable) => variable.key));
+  for (const key of [
+    "creator_icon_url",
+    "collaboration_type",
+    "music_reference_url",
+    "stage_permissions",
+    "custom_answers",
+  ]) {
+    assert.ok(keys.has(key), `${key} が変数一覧に含まれる`);
+  }
+  assert.ok(YOUTUBE_DESCRIPTION_VARIABLES.every((variable) => variable.group));
+  assert.deepEqual(
+    YOUTUBE_DESCRIPTION_LOOP_VARIABLES.map((variable) => variable.key),
+    [
+      "member_index",
+      "member_name",
+      "member_x_id",
+      "member_chapter",
+      "member_chapters",
+      "member_role",
+      "member_comment",
+    ],
+  );
+});
+
+test("現在のイベントに存在する質問別変数は回答内容を出力する", () => {
+  const stageKey = youtubeDescriptionStagePermissionVariableKey("stage_rights");
+  const customKey = youtubeDescriptionCustomAnswerVariableKey("favorite_cut");
+  assert.equal(stageKey, "stage_permission:stage_rights");
+  assert.equal(customKey, "custom_answer:favorite_cut");
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{stage_permission:stage_rights}} / {{custom_answer:favorite_cut}}",
+    {
+      [stageKey]: "規約確認済み",
+      [customKey]: "カメラワーク",
+    },
+  );
+  assert.equal(rendered.text, "規約確認済み / カメラワーク");
+  assert.deepEqual(rendered.unknownVariables, []);
+  assert.deepEqual(rendered.usedVariables, [stageKey, customKey]);
+});
+
+test("削除済み・不正な質問別変数は許可せず空欄と警告にする", () => {
+  assert.equal(youtubeDescriptionCustomAnswerVariableKey("bad:key"), null);
+  assert.equal(youtubeDescriptionStagePermissionVariableKey(""), null);
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{custom_answer:removed}}|{{stage_permission:bad.key}}",
+    {},
+  );
+  assert.equal(rendered.text, "|");
+  assert.deepEqual(rendered.unknownVariables, [
+    "custom_answer:removed",
+    "stage_permission:bad.key",
+  ]);
+});
+
+test("missing values become empty strings without throwing", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{creator_name}}|{{members}}|{{member_names}}|{{member_x_ids}}|{{member_roles}}|{{member_comments}}|{{part}}",
+    {},
+  );
+  assert.equal(rendered.text, "||||||");
+});
+
+test("member values can be selected independently and empty fields stay blank", () => {
+  const values = formatYoutubeDescriptionMembers([
+    { name: "Alice", x_user_id: "@Alice_X", role: "作画", comment: "担当" },
+    { name: "", x_user_id: "", role: "", comment: "" },
+    { name: "Bob", x_user_id: "", role: "", comment: "" },
+  ]);
+
+  assert.deepEqual(values, {
+    members: "Alice / Bob",
+    member_names: "Alice / Bob",
+    member_x_ids: "@alice_x",
+    member_roles: "作画",
+    member_comments: "担当",
+  });
+  assert.equal(
+    renderYoutubeDescriptionTemplate(
+      "{{members}}\n{{member_x_ids}}\n{{member_roles}}\n{{member_comments}}",
+      values,
+    ).text,
+    "Alice / Bob\n@alice_x\n作画\n担当",
+  );
+  assert.deepEqual(formatYoutubeDescriptionMembers([]), {
+    members: "",
+    member_names: "",
+    member_x_ids: "",
+    member_roles: "",
+    member_comments: "",
+  });
+});
+
+test("normalization trims and rendering bounds oversized templates", () => {
+  assert.equal(normalizeYoutubeDescriptionTemplate("  a\r\nb  "), "a\nb");
+  assert.equal(normalizeYoutubeDescriptionTemplate("   "), null);
+  assert.equal(
+    renderYoutubeDescriptionTemplate(
+      "x".repeat(MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH + 10),
+      {},
+    ).text.length,
+    MAX_YOUTUBE_DESCRIPTION_TEMPLATE_LENGTH,
+  );
+});
+
+const LOOP_MEMBERS = [
+  {
+    name: "Alice",
+    x_user_id: "@Alice_X",
+    role: "映像",
+    comment: "モーション担当",
+    chapters: [{ time: "1:23" }, { time: "12:5" }],
+  },
+  { name: "Bob", x_user_id: "", role: "", comment: "", chapters: [] },
+];
+
+test("members loop repeats per member in input order", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}{{member_index}}. {{member_name}} @{{member_x_id}}\n{{/members}}",
+    {},
+    { members: LOOP_MEMBERS },
+  );
+  assert.equal(rendered.text, "1. Alice @alice_x\n2. Bob @\n");
+  assert.deepEqual(rendered.unknownVariables, []);
+  assert.deepEqual(rendered.templateWarnings, []);
+});
+
+test("members loop numbers only non-empty members", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}{{member_index}}:{{member_name}};{{/members}}",
+    {},
+    { members: [{}, { name: "Alice" }] },
+  );
+  assert.equal(rendered.text, "1:Alice;");
+});
+
+test("members loop disappears entirely with zero members", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "参加者:\n{{#members}}- {{member_name}}\n{{/members}}おわり",
+    {},
+    { members: [] },
+  );
+  assert.equal(rendered.text, "参加者:\nおわり");
+  const noOption = renderYoutubeDescriptionTemplate(
+    "{{#members}}x{{/members}}",
+    {},
+  );
+  assert.equal(noOption.text, "");
+});
+
+test("members loop exposes chapter helpers and preserves display casing", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}{{member_chapter}}/{{member_chapters}}/{{member_role}}/{{member_comment}}\n{{/members}}",
+    {},
+    { members: LOOP_MEMBERS },
+  );
+  // member_chapter は最初のチャプター、member_chapters は ; 区切り、時刻は正規化される。
+  assert.equal(
+    rendered.text,
+    "1:23/1:23;12:05/映像/モーション担当\n///\n",
+  );
+  const blankRole = renderYoutubeDescriptionTemplate(
+    "{{#members}}[{{member_role}}][{{member_comment}}]{{/members}}",
+    {},
+    {
+      members: [
+        { name: "Bob", x_user_id: "BOB", role: "  ", comment: "" },
+      ],
+    },
+  );
+  assert.equal(blankRole.text, "[][]");
+});
+
+test("scalar {{members}} and loop {{#members}} coexist", () => {
+  const values = formatYoutubeDescriptionMembers(LOOP_MEMBERS);
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{members}}\n{{#members}}* {{member_name}}\n{{/members}}",
+    values,
+    { members: LOOP_MEMBERS },
+  );
+  assert.equal(rendered.text, "Alice / Bob\n* Alice\n* Bob\n");
+  assert.deepEqual(rendered.usedVariables, ["members"]);
+});
+
+test("unknown variables inside loop bodies are removed and reported", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}{{member_name}} {{titlle}}{{/members}}",
+    {},
+    { members: [{ name: "Alice" }] },
+  );
+  assert.equal(rendered.text, "Alice ");
+  assert.deepEqual(rendered.unknownVariables, ["titlle"]);
+});
+
+test("unclosed members loop is dropped safely without leaking raw tokens", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "A\n{{#members}}{{member_name}}\nB {{title}}",
+    { title: "T" },
+    { members: [{ name: "Alice" }] },
+  );
+  assert.equal(rendered.text, "A\n\nB T");
+  assert.ok(rendered.templateWarnings.length > 0);
+  assert.ok(!rendered.text.includes("{{"));
+});
+
+test("nested members loops are rejected and the whole block removed", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}A{{#members}}B{{/members}}C{{/members}}D",
+    {},
+    { members: [{ name: "X" }] },
+  );
+  assert.equal(rendered.text, "D");
+  assert.ok(
+    rendered.templateWarnings.some((w) => w.includes("ネスト")),
+  );
+  assert.ok(!rendered.text.includes("{{"));
+});
+
+test("deeply nested members loops remove the entire outer block", () => {
+  for (const depth of [3, 4, 100]) {
+    const nested = "{{#members}}".repeat(depth) +
+      "inner" + "{{/members}}tail".repeat(depth - 1) + "{{/members}}";
+    const rendered = renderYoutubeDescriptionTemplate(
+      `before${nested}after {{title}}`,
+      { title: "作品" },
+      { members: [{ name: "Alice" }] },
+    );
+    assert.equal(rendered.text, "beforeafter 作品", `depth=${depth}`);
+    assert.equal(rendered.templateWarnings.length, 1);
+    assert.match(rendered.templateWarnings[0], /ネスト/);
+  }
+});
+
+test("rejecting a deeply nested block preserves a following valid loop", () => {
+  const rendered = renderYoutubeDescriptionTemplate(
+    "{{#members}}A{{#members}}B{{#members}}C{{/members}}D{{/members}}E{{/members}}" +
+      "{{#members}}{{member_index}}:{{member_name}};{{/members}}",
+    {},
+    { members: LOOP_MEMBERS },
+  );
+  assert.equal(rendered.text, "1:Alice;2:Bob;");
+  assert.equal(rendered.templateWarnings.length, 1);
+});
+
+test("stray close tag is removed with a warning", () => {
+  const rendered = renderYoutubeDescriptionTemplate("A\n{{/members}}\nB", {});
+  assert.equal(rendered.text, "A\n\nB");
+  assert.ok(rendered.templateWarnings.length > 0);
+});
+
+test("MIG-0712 U01: pure URL helpers reject unsafe protocols and malformed inputs", async () => {
+  const { normalizeHttpUrl, safeDecodeURIComponent } = await import("../.test-dist/apps/app/src/lib/url.js");
+  assert.equal(normalizeHttpUrl("javascript:alert(1)"), null);
+  assert.equal(normalizeHttpUrl("mailto:admin@example.com"), null);
+  assert.equal(normalizeHttpUrl("https://www.example.com/path"), "https://www.example.com/path");
+  assert.equal(normalizeHttpUrl(" /a/b "), null);
+  assert.equal(normalizeHttpUrl("https://x.example/" + "a".repeat(600)), null);
+  assert.equal(safeDecodeURIComponent("%ZZ"), null);
+  assert.equal(safeDecodeURIComponent("%40"), "@");
+});
+
+test("MIG-0712 U01: YouTube channel forms and display labels are deterministic", async () => {
+  const { normalizeYoutubeChannelUrl, normalizeYoutubeChannelInput, formatYoutubeChannelLabel } =
+    await import("../.test-dist/apps/app/src/lib/youtubeChannel.js");
+  assert.equal(normalizeYoutubeChannelUrl("https://m.youtube.com/@creator/videos"), "https://www.youtube.com/@creator");
+  assert.equal(normalizeYoutubeChannelUrl("https://www.youtube.com/channel/UCexample?view=1"), "https://www.youtube.com/channel/UCexample");
+  assert.equal(normalizeYoutubeChannelUrl("https://www.youtube.com/watch?v=1"), null);
+  assert.equal(normalizeYoutubeChannelUrl("https://evil.example/@creator"), null);
+  assert.equal(normalizeYoutubeChannelInput("https://evil.example/other"), "https://evil.example/other");
+  assert.equal(normalizeYoutubeChannelInput("javascript:alert(1)"), null);
+  assert.equal(formatYoutubeChannelLabel("https://www.youtube.com/@creator"), "youtube.com/@creator");
+});
+
+test("MIG-0712 U01: social links normalize valid entries and never persist unsafe schemes", async () => {
+  const { parseSocialLinks, serializeSocialLinks, validateSocialLinksJson, socialLinkIconName, profileHeaderSocialLinks } =
+    await import("../.test-dist/apps/app/src/lib/socialLinks.js");
+  const source = [{ type: "twitter", url: "https://x.com/example" }, { type: "Email", url: "hello@example.com" }];
+  const normalized = serializeSocialLinks(source);
+  assert.ok(normalized);
+  assert.deepEqual(parseSocialLinks(normalized), [
+    { type: "X", url: "https://x.com/example" },
+    { type: "Email", url: "mailto:hello@example.com" },
+  ]);
+  assert.equal(validateSocialLinksJson(JSON.stringify([{ type: "X", url: "javascript:alert(1)" }])).ok, false);
+  assert.equal(validateSocialLinksJson("{}").ok, false);
+  assert.equal(socialLinkIconName("discord"), "discord");
+  assert.deepEqual(profileHeaderSocialLinks(parseSocialLinks(normalized), "@example"), [
+    { type: "Email", url: "mailto:hello@example.com" },
+  ]);
+});
