@@ -46,7 +46,7 @@ const REQUIRED_PATTERNS = [
 // containing // or /* remain intact. Preserve offsets and newlines for patterns.
 export function withoutComments(source) {
   const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
-  const chars = [...source];
+  const chars = source.split(""); // TS scanner offsets count UTF-16 code units.
   for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
     if (token !== ts.SyntaxKind.SingleLineCommentTrivia &&
         token !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
