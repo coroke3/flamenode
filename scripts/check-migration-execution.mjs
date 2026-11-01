@@ -155,7 +155,15 @@ export function validateMigrationExecution({
   const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
-    if (row.state === "SKIPPED" && !new RegExp("^SKIP_APPROVAL: " + id + " \\| PR#[0-9]+ \\| APPROVAL=[^\\n|]+ \\| ALTERNATIVE=[^\\n|]+$", "m").test(statusText)) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
+    if (row.state === "SKIPPED") {
+      // Whitespace-only evidence must not authorize bypassing a migration dependency.
+      const approvals = statusText.matchAll(new RegExp(
+        "^SKIP_APPROVAL: " + id + " \\| PR#([1-9][0-9]*) \\| APPROVAL=([^\\n|]+) \\| ALTERNATIVE=([^\\n|]+)$",
+        "gm",
+      ));
+      const approved = [...approvals].some((match) => match[2].trim() !== "" && match[3].trim() !== "");
+      if (!approved) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
+    }
     let deps = [];
     try { deps = expandDependencies(row.dependencies); }
     catch (error) { errors.push(id + ": " + error.message); }
