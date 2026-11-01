@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildScenarios, judge, parseArgs, percentile, renderMarkdown, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, judge, parseArgs, percentile, renderMarkdown, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("percentile uses nearest rank on an ascending array", () => {
@@ -193,7 +193,10 @@ test("MIG-0639: inventory specs are well formed (session, origin, JSON body, fai
       if (access === "s" || access === "a") {
         assert.equal(Boolean(spec.headers.cookie), kind !== "invalid", `${sc.id}/${kind} session only on normal/limit`);
       }
-      if (access === "p") assert.equal(spec.headers.cookie, undefined, `${sc.id}/${kind} is anonymous`);
+      if (access === "p") {
+        const viewer = Boolean(row[4]?.session) && kind !== "invalid";
+        assert.equal(Boolean(spec.headers.cookie), viewer, `${sc.id}/${kind} is anonymous unless it is a viewer-overlay with a session`);
+      }
     }
     if (access === "p" && pattern.includes(":id")) {
       assert.equal(sc.kinds.invalid(0, "t").path.split("?")[0].split("/").some((seg) => seg.length === 129), true, `${sc.id} invalid uses a 129-char id`);
@@ -342,4 +345,19 @@ test("MIG-0639: shared fixtures and per-sample setup rows insert on the migrated
   } finally {
     db.close();
   }
+});
+
+test("MIG-0639 / PR #457: RH-013 upper bound is owned here, excluded until MIG-0632 mounts the route", async () => {
+  assert.equal(buildScenarios({ adminToken: "t" }).some((x) => x.id === "RH-013"), false, "not measured while unmounted");
+  const withPending = buildScenarios({ adminToken: "t" }, { includePending: true });
+  const rh13 = withPending.find((x) => x.id === "RH-013");
+  assert.equal(rh13.pending, "MIG-0632");
+  assert.equal(withPending.at(-1).id, "BASELINE");
+  assert.equal(JSON.parse(rh13.prepareKind.limit.r2Objects["events/bench-evt/release.v1.json"]).videos.length, 500);
+  assert.equal(buildPendingScenarios().length, 1);
+  assert.equal(parseArgs(["--include-pending"]).includePending, true);
+  assert.equal(parseArgs([]).includePending, false);
+  const { app } = await import("../apps/api/src/app.ts");
+  assert.equal(app.routes.some((r) => r.method === "GET" && r.path === "/api/event-endpoints/:id"), false,
+    "RH-013 is now mounted: move its entry from buildPendingScenarios() into ROUTE_INVENTORY and update MAIN_HONO_METHODS");
 });

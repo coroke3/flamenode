@@ -101,7 +101,7 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
 export function parseArgs(argv) {
   const out = {
     mode: "wrangler", samples: MIN_SAMPLES, coldSamples: MIN_SAMPLES, warmup: 10,
-    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false,
+    port: 8788, inspectorPort: 9239, d1: "replay", samplingUs: 100, only: null, out: null, dryRun: false, skipCold: false, includePending: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
@@ -123,6 +123,7 @@ export function parseArgs(argv) {
     else if (a === "--out") out.out = next();
     else if (a === "--dry-run") out.dryRun = true;
     else if (a === "--skip-cold") out.skipCold = true;
+    else if (a === "--include-pending") out.includePending = true;
     else throw new Error(`Unsupported argument: ${a}`);
   }
   if (!["replay", "sim"].includes(out.d1)) throw new Error("--d1 must be replay|sim");
@@ -180,7 +181,7 @@ function adminHeaders() {
 const json = (v) => JSON.stringify(v);
 const annBody = (extra = {}) => ({ title: "Bench", body: "Bench body", severity: "info", target_audience: "all", is_published: 1, ...extra });
 
-export function buildScenarios(ctx) {
+export function buildScenarios(ctx, { includePending = false } = {}) {
   const stats = (padBytes) => {
     const base = { schema_version: 1, generated_at: 1_700_000_000, stats: { public_videos: 3000, creators: 800, public_events: 20 } };
     if (padBytes <= 0) return json(base);
@@ -344,7 +345,7 @@ export function buildScenarios(ctx) {
   ];
   // MIG-0639: every other main Hono method (inventory below), then BASELINE last (noise floor of the same run).
   const baseline = core.pop();
-  return [...core, ...buildRouteScenarios(), baseline];
+  return [...core, ...buildRouteScenarios(), ...(includePending ? buildPendingScenarios() : []), baseline];
 }
 
 // ------------------------------------------------ MIG-0639 route inventory
@@ -483,12 +484,14 @@ export const ROUTE_INVENTORY = [
   ["HONO-ADM-06", "POST", "/api/admin/x-users/:xUserId/icon-refresh", "w"],
   ["HONO-ADM-07", "POST", "/api/admin/event-templates", "w"],
   ["SA-036", "DELETE", "/api/admin/event-templates/:id", "w", { params: (k, i, tag) => ({ id: `tpl-${tag}-${i}` }), setup: (k, i, tag) => [tplRow(`tpl-${tag}-${i}`)] }],
-  ["RH-014", "GET", "/api/events/:id/slots/viewer-overlay", "p"],
-  ["RH-015", "GET", "/api/events", "p"],
+  // RH-014 limit = D-12: the signed-in viewer owns exactly MAX_VIEWER_SLOTS (100) slots (fails closed above that or above 64 KiB).
+  ["RH-014", "GET", "/api/events/:id/slots/viewer-overlay", "p", { session: true, params: (k) => (k === "limit" ? { id: "bench-evt-own" } : {}), setup: (k) => (k === "limit" ? [ownEventRow(), ownSlotRows(100)] : undefined) }],
+  // RH-015 limit = MIG-0631 T17: a full page of 60 public events with a 2,000-char explanation each.
+  ["RH-015", "GET", "/api/events", "p", { lq: "?page=1&limit=60", setup: (k) => (k === "limit" ? [publicEventRows(60)] : undefined) }],
   // RH-012 limit = MIG-0631 T17: 500 videos x 100 members in the event_release artifact (EVENT_RELEASE_MAX_*).
   ["RH-012", "GET", "/api/event-endpoints/:id/release", "p", { prepare: prep({ [RELEASE_KEY]: releaseArtifact(1, 1) }, { [RELEASE_KEY]: releaseArtifact(500, 100) }) }],
   ["RH-032", "GET", "/api/videos", "p", { lq: "?limit=48&page=1&sort=recent", prepare: prep({ "list/recent.json": recentArtifact(5) }, { "list/recent.json": recentArtifact(200) }) }],
-  ["RH-031", "GET", "/api/videos/:id/viewer-overlay", "p", { prepare: prep({ "videos/bench-vid.json": videoOverlayArtifact }, { "videos/bench-vid.json": videoOverlayArtifact }) }],
+  ["RH-031", "GET", "/api/videos/:id/viewer-overlay", "p", { session: true, prepare: prep({ "videos/bench-vid.json": videoOverlayArtifact }, { "videos/bench-vid.json": videoOverlayArtifact }) }],
   ["RH-030", "GET", "/api/videos/:id", "p"],
   ["SA-012", "POST", "/api/videos/:videoId/chapters", "w"],
   ["SA-015", "POST", "/api/videos/:videoId/chapters/bulk", "w"],
@@ -530,6 +533,20 @@ const fillRoute = (pattern, longId, dyn = {}) => pattern
 
 // Spreadsheet max page (MIG-0605 F-7): enough `events` rows that the page (50) / export (99) caps are what bound the work.
 const spreadsheetRows = (count) => numberedRows(count, "INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) SELECT 'sp-' || n, 'spreadsheet row ' || n, 'event', 'public', n, n + 1, 1, 1, 0 FROM seq", []);
+const ownEventRow = () => ({
+  sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled) VALUES ('bench-evt-own', 'own slots event', 'event', 'public', 1000, 2000, 10, 20, 0)`,
+  params: [],
+});
+const ownSlotRows = (count) => numberedRows(
+  count,
+  "INSERT OR REPLACE INTO slots (id, event_id, start_time, status, reserved_by_user_id, display_name, reserved_x_id_snapshot) SELECT 'own-' || n, 'bench-evt-own', n, 'reserved', 'bench-admin', ?, 'bench-x' FROM seq",
+  ["N".repeat(200)],
+);
+const publicEventRows = (count) => numberedRows(
+  count,
+  "INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, public_api_enabled, explanation) SELECT 'pub15-' || n, 'public event ' || n, 'event', 'public', 2000000000 + n, 2000000100 + n, 1, 1, 0, ? FROM seq",
+  ["E".repeat(2000)],
+);
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
@@ -559,6 +576,25 @@ const WRITE_BODIES = {
   "POST /api/videos/:videoId/interaction": (k, i) => ({ kind: i % 2 ? "like" : "bookmark" }),
 };
 
+/**
+ * Scenarios for methods that are NOT mounted on main yet (so they cannot be measured, and are excluded unless
+ * --include-pending). RH-013 belongs to MIG-0632 (PR #457); the owner-authorized single harness owner is MIG-0639,
+ * so the upper-bound input (1 event, 500 videos x 100 members) lives here and MIG-0632 only moves the entry into
+ * ROUTE_INVENTORY when it mounts the route. The mounted-routes test fails the day that happens.
+ */
+export function buildPendingScenarios() {
+  const ip = (kind, i) => ({ "cf-connecting-ip": BENCH_IP(kind, i) });
+  return [{
+    id: "RH-013", title: "GET /api/event-endpoints/:id", runtimeClass: "S2", pending: "MIG-0632",
+    prepareKind: prep({ [RELEASE_KEY]: releaseArtifact(1, 1) }, { [RELEASE_KEY]: releaseArtifact(500, 100) }),
+    kinds: {
+      normal: (i) => ({ method: "GET", path: "/api/event-endpoints/bench-evt", headers: ip("normal", i), expect: [200] }),
+      limit: (i) => ({ method: "GET", path: "/api/event-endpoints/bench-evt", headers: ip("limit", i), expect: [200] }),
+      invalid: (i) => ({ method: "GET", path: `/api/event-endpoints/${"e".repeat(129)}`, headers: ip("invalid", i), expect: [404] }),
+    },
+  }];
+}
+
 export function buildRouteScenarios() {
   return ROUTE_INVENTORY.map(([id, method, pattern, access, opts = {}]) => {
     const writes = access === "w";
@@ -571,7 +607,7 @@ export function buildRouteScenarios() {
       if (kind === "limit") query = opts.lq ?? opts.nq ?? (method === "GET" ? BIG_Q : "");
       if (kind === "invalid" && access === "p") query = "?limit=-5&page=0&q=%00";
       const headers = { "cf-connecting-ip": BENCH_IP(kind, i), ...(opts.headers?.(kind) ?? {}) };
-      if (writes || (access !== "p" && kind !== "invalid")) headers.cookie = ADMIN_COOKIE;
+      if (writes || ((access !== "p" || opts.session) && kind !== "invalid")) headers.cookie = ADMIN_COOKIE;
       let body;
       if (writes) {
         headers.origin = SITE_URL;
@@ -1231,7 +1267,7 @@ function createReplayTarget(inproc, wr) {
 export async function main(argv) {
   const opts = parseArgs(argv);
   const plan = { adminToken: `bench-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}` };
-  const scenarios = buildScenarios(plan).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
+  const scenarios = buildScenarios(plan, { includePending: opts.includePending }).filter((s) => !opts.only || opts.only.includes(s.id) || s.id === "BASELINE");
 
   if (opts.dryRun) {
     const fake = Array.from({ length: opts.samples }, (_, i) => ({ kind: "normal", cpuMs: (i % 7) + 0.5, status: 200, bytes: 10, d1: 2, unexpected: false }));
