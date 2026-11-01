@@ -53,6 +53,26 @@ test("unrelated pure MIG-0301 can run before decisions", () => {
   assert.deepEqual(run(), []);
 });
 
+test("duplicate decision IDs fail closed instead of replacing an OPEN gate with DECIDED", () => {
+  const original = "| D-01 | schema | OPEN | MIG-0303 |";
+  const approved = "| D-01 | schema | DECIDED | MIG-0303 |";
+  for (const duplicate of [
+    decisions.replace(original, original + "\n" + approved),
+    decisions.replace(original, approved + "\n" + original),
+    decisions.replace(original, original + "\n" + original),
+  ]) {
+    assert.throws(() => parseDecisionRows(duplicate), /duplicate decision row: D-01/);
+    assert.match(run({ decisionsText: duplicate }).join("\n"),
+      /invalid decision ledger: duplicate decision row: D-01/);
+  }
+  // A clean ledger is still accepted, including a genuine single DECIDED row.
+  assert.equal(parseDecisionRows(decisions).get("D-01"), "OPEN");
+  assert.equal(parseDecisionRows(decisions.replace(original, approved)).get("D-01"), "DECIDED");
+  assert.deepEqual(run(), []);
+});
+
+
+
 test("adapter checkpoint marker cannot hide contradictory STATUS write rules", () => {
   const valid = "Checkpoint policy: WORK_ITEM_ONLY. Save work-items/MIG-XXXX.md every wake; reconcile STATUS at merge integration.";
   assert.deepEqual(validateCheckpointPolicy({adapter:valid}), []);
