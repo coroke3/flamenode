@@ -28,44 +28,63 @@ const SERVER_CORE_IMPORT_RULES = [
     test: (spec) => spec.startsWith("@opennextjs/"),
     message: "OpenNext imports are forbidden in packages/server-core; the host supplies bindings through ports",
   },
+  {
+    name: "process module",
+    test: (spec) => spec === "process" || spec === "node:process",
+    message: "the process module exposes ambient env in packages/server-core; take values through EnvValues",
+  },
 ];
 
 const API_ROUTE_DB_SPECIFIER = /^(?:drizzle-orm|@flamenode\/db)(?:\/|$)/;
 
-// Parentheses and TS type-only wrappers do not change which host object is read.
+const GLOBAL_ROOTS = new Set(["globalThis", "global", "self"]);
+
+// Parentheses, TS type-only wrappers and comma expressions (`(0, process)`) do not change which host object is read.
 function unwrapStaticExpression(node) {
-  while (
-    ts.isParenthesizedExpression(node) ||
-    ts.isNonNullExpression(node) ||
-    ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) ||
-    ts.isSatisfiesExpression(node)
-  ) {
-    node = node.expression;
+  for (;;) {
+    if (
+      ts.isParenthesizedExpression(node) ||
+      ts.isNonNullExpression(node) ||
+      ts.isAsExpression(node) ||
+      ts.isTypeAssertionExpression(node) ||
+      ts.isSatisfiesExpression(node)
+    ) {
+      node = node.expression;
+    } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+      node = node.right;
+    } else {
+      return node;
+    }
   }
-  return node;
 }
 
 // Only literal member names are accepted: dynamic property names are outside this guard.
-// Match both process.env and its static computed/globalThis equivalents.
-function hasStaticMemberName(node, memberName) {
+function staticMemberName(node) {
   node = unwrapStaticExpression(node);
-  if (ts.isPropertyAccessExpression(node)) return node.name.text === memberName;
-  if (!ts.isElementAccessExpression(node)) return false;
+  if (ts.isPropertyAccessExpression(node)) return node.name.text;
+  if (!ts.isElementAccessExpression(node)) return undefined;
   const argument = node.argumentExpression && unwrapStaticExpression(node.argumentExpression);
-  return Boolean(argument) &&
-    (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) &&
-    argument.text === memberName;
+  return argument && (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))
+    ? argument.text
+    : undefined;
+}
+
+function hasStaticMemberName(node, memberName) {
+  return staticMemberName(node) === memberName;
+}
+
+// globalThis / global / self, including `globalThis.globalThis`.
+function isGlobalReference(node) {
+  node = unwrapStaticExpression(node);
+  if (ts.isIdentifier(node)) return GLOBAL_ROOTS.has(node.text);
+  const name = staticMemberName(node);
+  return name !== undefined && GLOBAL_ROOTS.has(name) && isGlobalReference(node.expression);
 }
 
 function isProcessReference(node) {
   node = unwrapStaticExpression(node);
   if (ts.isIdentifier(node)) return node.text === "process";
-  if (!(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) return false;
-  const host = unwrapStaticExpression(node.expression);
-  return ts.isIdentifier(host) &&
-    host.text === "globalThis" &&
-    hasStaticMemberName(node, "process");
+  return hasStaticMemberName(node, "process") && isGlobalReference(node.expression);
 }
 
 // Static key of a destructuring property (`env`, `"env"`, `["env"]`); undefined when dynamic.
@@ -79,24 +98,64 @@ function staticPropertyKey(name) {
   return undefined;
 }
 
-// `const { env } = process`, `const { env: c } = globalThis.process`, `({ env } = process)`.
-function isEnvDestructuring(node) {
-  if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
-    const key = staticPropertyKey(node.propertyName ?? node.name);
-    const decl = node.parent.parent;
-    return key === "env" && ts.isVariableDeclaration(decl) && Boolean(decl.initializer) && isProcessReference(decl.initializer);
+// Entries of an object binding pattern or object literal assignment target: [key, nested pattern].
+function patternEntries(pattern) {
+  const entries = [];
+  if (ts.isObjectBindingPattern(pattern)) {
+    for (const el of pattern.elements) {
+      if (el.dotDotDotToken) continue;
+      entries.push([staticPropertyKey(el.propertyName ?? el.name), ts.isObjectBindingPattern(el.name) ? el.name : undefined]);
+    }
+  } else {
+    for (const prop of pattern.properties) {
+      if (ts.isShorthandPropertyAssignment(prop)) entries.push([prop.name.text, undefined]);
+      else if (ts.isPropertyAssignment(prop)) {
+        const init = unwrapStaticExpression(prop.initializer);
+        entries.push([staticPropertyKey(prop.name), ts.isObjectLiteralExpression(init) ? init : undefined]);
+      }
+    }
   }
-  if (
-    (ts.isShorthandPropertyAssignment(node) || ts.isPropertyAssignment(node)) &&
-    ts.isObjectLiteralExpression(node.parent)
-  ) {
-    const key = staticPropertyKey(node.name);
-    const assign = node.parent.parent;
-    return key === "env" && ts.isBinaryExpression(assign) &&
-      assign.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      assign.left === node.parent && isProcessReference(assign.right);
+  return entries;
+}
+
+// Does destructuring `pattern` out of a "process" or "global" object bind process.env?
+function patternReadsEnv(pattern, source) {
+  for (const [key, nested] of patternEntries(pattern)) {
+    if (key === undefined) continue;
+    if (source === "process") {
+      if (key === "env") return true;
+    } else if (nested && key === "process") {
+      if (patternReadsEnv(nested, "process")) return true;
+    } else if (nested && GLOBAL_ROOTS.has(key)) {
+      if (patternReadsEnv(nested, "global")) return true;
+    }
   }
   return false;
+}
+
+function sourceKind(expression) {
+  if (isProcessReference(expression)) return "process";
+  return isGlobalReference(expression) ? "global" : undefined;
+}
+
+// `const { env } = process`, `const { process: { env } } = globalThis`, `({ env } = process)`,
+// `function f({ env } = process)`.
+function isEnvDestructuring(node) {
+  let pattern;
+  let initializer;
+  if ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && ts.isObjectBindingPattern(node.name)) {
+    pattern = node.name;
+    initializer = node.initializer;
+  } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const left = unwrapStaticExpression(node.left);
+    if (ts.isObjectLiteralExpression(left)) {
+      pattern = left;
+      initializer = node.right;
+    }
+  }
+  if (!pattern || !initializer) return false;
+  const source = sourceKind(initializer);
+  return source !== undefined && patternReadsEnv(pattern, source);
 }
 
 function findAmbientHostReferences(content, fileName) {

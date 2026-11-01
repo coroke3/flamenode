@@ -139,6 +139,49 @@ describe("check-server-core-boundaries", () => {
     );
   });
 
+  it("T03ac detects nested, parameter-default and alternate-root env access", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-more.ts": [
+          'const { process: { env } } = globalThis;',
+          'const { ["process"]: { env: a } } = globalThis;',
+          "let b; ({ process: { env: b } } = globalThis);",
+          "export function f({ env } = process) { return env; }",
+          "export const g = ({ env: e } = globalThis.process) => e;",
+          "const h = global.process.env.K;",
+          "const i = self.process.env.K;",
+          "const j = (0, process).env.K;",
+          "const k = globalThis.globalThis.process.env.K;",
+          "const { global: { process: { env: l } } } = globalThis;",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      },
+    );
+  });
+
+  it("T03ad rejects importing the process module", () => {
+    withFixture(
+      {
+        "packages/server-core/src/p1.ts": 'import { env } from "node:process";',
+        "packages/server-core/src/p2.ts": 'import * as p from "process";',
+        "packages/server-core/src/p3.ts": 'const e = require("process").env;',
+        "packages/server-core/src/p4.ts": 'export const e = (await import("node:process")).env;',
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process module");
+        assert.deepEqual(errors.map((error) => error.file).sort(), [
+          "packages/server-core/src/p1.ts",
+          "packages/server-core/src/p2.ts",
+          "packages/server-core/src/p3.ts",
+          "packages/server-core/src/p4.ts",
+        ]);
+      },
+    );
+  });
+
   it("T03b ignores unrelated computed properties, comments, and string literals", () => {
     withFixture(
       {
@@ -149,6 +192,10 @@ describe("check-server-core-boundaries", () => {
           "const { argv } = process;",
           "const { env } = other;",
           "const { versions: v } = globalThis.process;",
+          "const { process: { argv: a2 } } = globalThis;",
+          "export function f2({ argv } = process) { return argv; }",
+          "const { env: e2 } = globalThis;",
+          "const m = self.other.process.env;",
           'const text = "process[env] and globalThis.process.env";',
           "// process['env'] is prohibited",
         ].join("\n"),
