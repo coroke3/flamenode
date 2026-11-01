@@ -25,3 +25,10 @@ const emptyMessage = "作品一覧への反映を準備しています。しば�
 <PublicLayout head={head} currentPath="/list">
   <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} />
 </PublicLayout>
+
+<!-- On <=640px the shared header is fixed (52px) and leaves normal flow: keep the screen's 32px top gap below it (MIG-0505 U02 defect, same pattern as MIG-0504). -->
+<style is:global>
+  @media (max-width: 640px) {
+    main.lv-wrap { padding-top: calc(52px + 32px); }
+  }
+</style>
