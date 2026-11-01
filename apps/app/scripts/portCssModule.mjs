@@ -6,6 +6,15 @@ export const MODULES = [
   ["onb", "app/(auth)/onboarding/page.module.css", "apps/app/src/styles/onboarding.css"],
   ["settings", "src/components/settings/settings-page.module.css", "apps/app/src/styles/settings.css"],
   ["vcard", "src/components/video/VideoCard.module.css", "apps/app/src/styles/video-card.css"],
+  ["ydesc", "src/components/forms/YoutubeDescriptionPreview.module.css", "apps/app/src/styles/forms-a.css"],
+  ["cq", "src/components/forms/CustomQuestionFields.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-badge", "src/components/video/permission/PermissionBadge.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-lock", "src/components/video/permission/FieldLockNote.module.css", "apps/app/src/styles/forms-a.css"],
+  ["perm-label", "src/components/video/permission/PermissionFieldLabel.module.css", "apps/app/src/styles/forms-a.css"],
+  ["social", "src/components/forms/SocialLinksEditor.module.css", "apps/app/src/styles/shared-social.css"],
+  ["ychan", "src/components/settings/YoutubeChannelPicker.module.css", "apps/app/src/styles/shared-social.css"],
+  ["cdlg", "src/components/ui/ConfirmDialog.module.css", "apps/app/src/styles/shared-social.css"],
+  ["sqicon", "src/components/media/SquareIconEditor.module.css", "apps/app/src/styles/shared-social.css"],
 ];
 export function portCssModule(css, prefix) {
   const parts = css.split(/([{}])/);
@@ -21,7 +30,14 @@ export function portCssModule(css, prefix) {
 
 if (import.meta.url === new URL(process.argv[1], "file://").href) {
   const root = new URL("../../../", import.meta.url);
+  const byTarget = new Map();
   for (const [prefix, from, to] of MODULES) {
-    fs.writeFileSync(new URL(to, root), portCssModule(fs.readFileSync(new URL(from, root), "utf8"), prefix));
+    const chunks = byTarget.get(to) ?? [];
+    chunks.push(portCssModule(fs.readFileSync(new URL(from, root), "utf8"), prefix));
+    byTarget.set(to, chunks);
+  }
+  // Multiple current CSS modules can share forms-a.css: never overwrite an earlier module.
+  for (const [to, chunks] of byTarget) {
+    fs.writeFileSync(new URL(to, root), chunks.join("\n"));
   }
 }

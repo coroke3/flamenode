@@ -15,11 +15,24 @@ test("MIG-0701 U04 T07: CURRENT CSS and font are byte-identical", async () => {
   ]);
   assert.ok(a.equals(b));
 });
-test("MIG-0701 U04 T07: generated CSS modules match CURRENT without :global", async () => {
+test("MIG-0701/MIG-0712 T07: CSS modules merge deterministically without overwriting a shared target", async () => {
+  const targets = new Map();
   for (const [prefix, from, to] of MODULES) {
+    const chunks = targets.get(to) ?? [];
+    chunks.push(portCssModule(await read(from), prefix));
+    targets.set(to, chunks);
+  }
+  for (const [to, chunks] of targets) {
     const output = await read(to);
-    assert.equal(output, portCssModule(await read(from), prefix), to);
+    assert.equal(output, chunks.join("\n"), to);
     assert.equal(output.includes(":global("), false, to);
+  }
+  for (const [path, expected] of [
+    ["apps/app/src/styles/forms-a.css", ["ydesc", "cq", "perm-badge", "perm-lock", "perm-label"]],
+    ["apps/app/src/styles/shared-social.css", ["social", "ychan", "cdlg", "sqicon"]],
+  ]) {
+    const prefixes = MODULES.filter((entry) => entry[2] === path).map((entry) => entry[0]);
+    for (const prefix of expected) assert.ok(prefixes.includes(prefix), path + " must include " + prefix);
   }
 });
 test("MIG-0701 follow-up: mobile dashboard actions match the global fn-btn class", async () => {
@@ -83,6 +96,6 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
   assert.deepEqual(actual, [
     "./styles/current/globals.css", "./styles/current/mobile-hardening.css",
     "./styles/fonts.css", "./styles/video-card.css", "./styles/dashboard.css",
-    "./styles/settings.css", "./styles/onboarding.css",
+    "./styles/settings.css", "./styles/onboarding.css", "./styles/forms-a.css", "./styles/shared-social.css",
   ]);
 });

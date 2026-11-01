@@ -18,13 +18,13 @@ Claude / Codex / Antigravityが共有する**mainにmerge済みのtask/依存関
 
 ```text
 Current Phase: 5–8 implementation tracks; Phase 4 follow-ups and Phase 9 inventory (production cutover not started)
-Current Task: MIG-0505
-Current Owner: chatgpt
+Current Task: MIG-0712
+Current Owner: claude
 Task State: DONE
 Overall State: IN_PROGRESS
 Production Cutover: NOT STARTED
-Last Completed Task: MIG-0505
-Last Task PR: #430
+Last Completed Task: MIG-0712
+Last Task PR: #434
 Merged READY: MIG-0411, MIG-0501..MIG-0506, MIG-0509, MIG-0511, MIG-0512, MIG-0603 (remainder), MIG-0626 (remainder), MIG-0629, MIG-0633..MIG-0638, MIG-0701 (D-13, 2026-10-25); MIG-0507, MIG-0510, MIG-0609, MIG-0621, MIG-0628, MIG-0632, MIG-0639..MIG-0649, MIG-0802 (D-14, 2026-10-25); MIG-0516..MIG-0518, MIG-0605, MIG-0650..MIG-0660, MIG-0707, MIG-0908 (D-15, 2026-10-26); MIG-0513..MIG-0515, MIG-0519, MIG-0661, MIG-0708..MIG-0713, MIG-0715, MIG-0718, MIG-0807 (D-16, 2026-10-26); MIG-0663, MIG-0664, MIG-0719..MIG-0729, MIG-0731..MIG-0737 (D-17, 2026-10-27)
 Next: one unowned READY task per wake (AGENT_PROTOCOL.md Wake decision)
 ```
@@ -112,7 +112,7 @@ Phase 0 GateはMIG-0012でPASSED（未監査必須機能・UX/FN mapping・backe
 | 4 | Public PoC: performance-first P0 + later visual | PARTIALLY_READY (Gate MIG-0407 DONE: owner-approved 2026-10-23 with deferrals in PHASE_4_GATE.md §5; MIG-0401, MIG-0404, MIG-0405, MIG-0406, MIG-0402, MIG-0403, MIG-0409 DONE (MIG-0409 closed by D-13-10; its remaining Cloudflare owner steps are tracked by MIG-0509 / MIG-0410) / MIG-0410 BLOCKED on owner production steps / MIG-0411 BLOCKED on owner steps 1–3 and the non-production B-new measurement (code remainder merged in #465: render path removed, DELETE + tracker close only, Cron recovery; #326 merged, migration 0066 applied to production)) | PASSED (owner approval 2026-10-23, with deferrals) |
 | 5 | Public migration | PARTIALLY_READY (2026-10-30: MIG-0502 / 0503 / 0504 / 0505 / 0511 / 0512 / 0517 DONE; MIG-0501, 0506, 0507, 0509, 0510, 0513..0516, 0518, 0519 READY (0513..0515 contract-first, D-16-1); partial PRs #340 #344 #350 #352 #354 #355 #356 #357 merged; MIG-0508 Gate BLOCKED) | CLOSED |
 | 6 | Hono API | PARTIALLY_READY (2026-10-30: 36 DONE — MIG-0601 / MIG-0608 / MIG-0611 / MIG-0602 / MIG-0612 / MIG-0613 / MIG-0614 / MIG-0615 / MIG-0616 / MIG-0617 / MIG-0618 / MIG-0619 / MIG-0620 / MIG-0621 / MIG-0622 / MIG-0623 / MIG-0624 / MIG-0625 / MIG-0628 / MIG-0629 / MIG-0630 / MIG-0631 / MIG-0633 / MIG-0634 / MIG-0635 / MIG-0637 / MIG-0640 / MIG-0646 / MIG-0647 / MIG-0648 / MIG-0649 / MIG-0655 / MIG-0658 / MIG-0660 / MIG-0663 / MIG-0664; 22 READY; MIG-0604 / MIG-0606 / MIG-0610 / MIG-0627 / MIG-0662 / MIG-0607 BLOCKED. MIG-0660 deep health core in PR#438; MIG-0655 template/playlist writes in PR#476; production cutover not authorized) | CLOSED |
-| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-10-28: MIG-0701, MIG-0707 DONE; MIG-0708..0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
+| 7 | Private SPA (現行UI流用) | PARTIALLY_READY (2026-11-01: MIG-0701, MIG-0707, MIG-0712 DONE; MIG-0708..0711, 0713, 0715, 0718..0729, 0731..0737 READY; MIG-0702..0706, 0714, 0716, 0717, 0730 BLOCKED) | CLOSED |
 | 8 | Auth | IN_PROGRESS (MIG-0801 / MIG-0807 DONE (MIG-0807 Hono session/write guard review, PR#444; SEC-0807-01 fixed in #445) / MIG-0802 READY (non-production PoC, D-14-5)) | CLOSED |
 | 9 | Next/OpenNext retirement | BLOCKED | CLOSED |
 
@@ -398,7 +398,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0709 | Personal settings + onboarding: X link / merge request, cancel, merge-revert forms (SA-099..101; merge gate MIG-0659) | READY | MIG-0611 |
 | MIG-0710 | `/onboarding` terms agree form + onboarding-complete POST (SA-076; merge gate MIG-0641) | READY | MIG-0611 |
 | MIG-0711 | `/entry` index screen (read-only, Discord login via the Auth.js HTTP flow) | READY | MIG-0611, MIG-0623 |
-| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | READY | MIG-0623, MIG-0630 |
+| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | DONE | MIG-0623, MIG-0630 |
 | MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | READY | MIG-0623, MIG-0630 |
 | MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | BLOCKED | MIG-0712, MIG-0713 |
 | MIG-0715 | `/dashboard/edit/:id/permissions` screen (SA-082..084; merge gate MIG-0650) | READY | MIG-0630 |
