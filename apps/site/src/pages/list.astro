@@ -4,6 +4,7 @@
  * Query-bearing URLs (`?q`, `sort`, `page`, `event`, `view`) are served by the same file and need the
  * ListFilterIsland of MIG-0510; the key table is in `lib/listQuery.ts`. SSG never reads request-time data.
  */
+import React from "react";
 import { ListView } from "@flamenode/ui";
 import PublicLayout from "../layouts/PublicLayout.astro";
 import { loadListingForBuild } from "../lib/listingData.ts";
@@ -20,12 +21,13 @@ const { list } = await loadListingForBuild();
 const query = normalizeListQuery({});
 const videos = (list?.videos ?? []).map(toListVideo);
 // CURRENT `listEmptyMessage`: a missing artifact is "reflecting", never "no results".
+// MIG-0510: empty slot below the header; the Island fills it so the header stays first (CURRENT order).
+const filterSlot = React.createElement("div", { id: "list-filter-mount", className: "lv-toolbar" });
 const emptyMessage = "作品一覧への反映を準備しています。しばらくしてから再読み込みしてください。";
 ---
 <PublicLayout head={head} currentPath="/list">
-  <div id="list-filter-mount"></div>
   <div id="list-static-fallback">
-    <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} />
+    <ListView videos={videos} total={list?.total ?? 0} view={query.view} emptyMessage={emptyMessage} toolbar={filterSlot} />
   </div>
 </PublicLayout>
 
@@ -35,22 +37,20 @@ const emptyMessage = "作品一覧への反映を準備しています。しば�
   mountListFilters();
 </script>
 <style is:global>
-  #list-filter-mount:not(:empty) { max-width: 1120px; margin: 0 auto; padding: 24px clamp(16px,4vw,40px) 0; }
   .lv-filter-panel { padding: 16px 0; }
   .lv-filter-panel summary { cursor: pointer; font-weight: 600; }
   .lv-filter-form { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; }
   .lv-filter-form .fn-list-search { flex: 1 1 210px; min-width: 0; }
   .lv-filter-form input[type=search] { width: 100%; max-width: 520px; }
   .lv-sort-label { display: inline-flex; align-items: center; gap: 8px; }
-  .lv-view-options,.lv-active-filters,.lv-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-  .lv-view-options a[aria-current=page],.lv-pagination a[aria-current=page] { text-decoration: underline; font-weight: 700; }
+  .lv-view-options,.lv-active-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .lv-view-options a[aria-current=page] { text-decoration: underline; font-weight: 700; }
   .lv-active-filters { margin-top: 16px; }
   .lv-filter-chip { padding: 4px 10px; background: var(--surface-subtle); }
   .lv-island-status { padding-top: 24px; color: var(--ink-muted); }
-  .lv-pagination { padding: 16px 0 64px; justify-content: center; }
+  .lv-page-nav { display: flex; justify-content: center; padding: 16px 0 64px; }
   #list-static-fallback[hidden] { display: none; }
   @media (max-width: 640px) {
     main.lv-wrap { padding-top: calc(52px + 32px); }
-    #list-filter-mount:not(:empty) { padding-top: calc(52px + 24px); }
   }
 </style>

@@ -112,7 +112,8 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
   assert.match(source, /name="q"/);
   const page = fs.readFileSync("apps/site/src/pages/list.astro", "utf8");
   assert.match(page, /id="list-static-fallback"/);
-  assert.match(page, /id="list-filter-mount"/);
+  assert.match(page, /id: "list-filter-mount"/);
+  assert.match(page, /toolbar=\{filterSlot\}/, "controls slot is passed into ListView below the header");
   assert.match(page, /mountListFilters\(\)/);
   if (!fs.existsSync(topPath) || !fs.existsSync(listPath)) {
     if (process.env.REQUIRE_BUILT) throw new Error("Built / and /list required");
@@ -127,6 +128,8 @@ test("T02/T04: top GET search works without JS; /list static fallback keeps lega
   assert.ok(listing.querySelector("#list-static-fallback main"));
   assert.equal(listing.querySelector("#list-static-fallback button"), null);
   assert.equal(listing.querySelector("#list-filter-mount button"), null);
+  assert.ok(listing.querySelector("#list-static-fallback .lv-head + #list-filter-mount"),
+    "filter slot sits below the 作品一覧 header, as in CURRENT");
 });
 
 
@@ -204,8 +207,50 @@ test("T01: an accepted RH-032 page replaces the static default and renders the s
     await act(async () => { mountListFilters(); });
     const doc = dom.window.document;
     assert.equal(doc.getElementById("list-static-fallback").hidden, true);
-    assert.match(doc.getElementById("list-filter-mount").textContent, /公開作品/);
+    assert.match(doc.getElementById("list-results-mount").textContent, /公開作品/);
     assert.ok(doc.querySelector(".lv-grid.lv-compact"), "compact mode follows the query after the API load");
+    assert.ok(doc.querySelector("#list-results-mount .lv-head + .lv-toolbar form"),
+      "after a live load the controls stay below the header");
+    assert.equal(doc.getElementById("list-filter-mount").querySelector("form"), null, "controls are not duplicated");
+  } finally {
+    globalThis.window = old.window;
+    globalThis.document = old.document;
+    globalThis.HTMLElement = old.HTMLElement;
+    globalThis.Node = old.Node;
+    globalThis.fetch = old.fetch;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = old.act;
+    dom.window.close();
+  }
+});
+
+test("UX-DISC-005: live pagination keeps CURRENT range summary, first/last jump and gaps", { skip: skipHydratedUi }, async () => {
+  const { mountListFilters } = await import("../apps/site/src/components/ListFilterIsland.ts");
+  const dom = new JSDOM(
+    '<!doctype html><div id="list-filter-mount"></div><div id="list-static-fallback">STATIC-DEFAULT</div>',
+    { url: "https://flamenode.net/list?q=abcd&page=5" },
+  );
+  const old = {
+    window: globalThis.window, document: globalThis.document,
+    HTMLElement: globalThis.HTMLElement, Node: globalThis.Node,
+    fetch: globalThis.fetch, act: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  };
+  try {
+    globalThis.window = dom.window;
+    globalThis.document = dom.window.document;
+    globalThis.HTMLElement = dom.window.HTMLElement;
+    globalThis.Node = dom.window.Node;
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    globalThis.fetch = async () => new Response(JSON.stringify({ ...okPage(listQueryFromSearch("?q=abcd&page=5")), total: 240 }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+    await act(async () => { mountListFilters(); });
+    const nav = dom.window.document.querySelector("#list-results-mount .fn-pagination");
+    assert.ok(nav, "shared Pagination rendered");
+    assert.match(nav.textContent, /97〜120 \/ 全 240 件 \(5 \/ 10 ページ\)/);
+    const hrefs = [...nav.querySelectorAll("a")].map(a => a.getAttribute("href"));
+    assert.ok(hrefs.includes("/list?q=abcd"), "page 1 reachable directly");
+    assert.ok(hrefs.includes("/list?q=abcd&page=10"), "last page reachable directly");
+    assert.ok(nav.querySelector(".fn-pagination-ellipsis"), "gap marker");
   } finally {
     globalThis.window = old.window;
     globalThis.document = old.document;

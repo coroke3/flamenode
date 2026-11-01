@@ -1,7 +1,8 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { ListView } from "@flamenode/ui";
-import { LIST_MAX_SEARCH_LENGTH, type ListQuery } from "../lib/listQuery.ts";
+import { ListView, Pagination } from "@flamenode/ui";
+import { LIST_MAX_SEARCH_LENGTH, LIST_PAGE_SIZE, type ListQuery } from "../lib/listQuery.ts";
 import {
   LIST_EVENT_UNAVAILABLE_MESSAGE, LIST_NO_RESULTS_MESSAGE, LIST_SHORT_SEARCH_MESSAGE,
   LIST_UNAVAILABLE_MESSAGE, decodePublicList, isDefaultListQuery, listHref,
@@ -50,15 +51,10 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
 
 function Pages({ query, data }: { query: ListQuery; data: Loaded }): React.ReactElement | null {
   if (data.totalPages <= 1) return null;
-  const pages = Array.from({ length: Math.min(5, data.totalPages) }, (_, index) =>
-    Math.max(1, Math.min(data.totalPages - 4, query.page - 2)) + index);
-  const link = (page: number, label: string) => h("a", {
-    key: label, href: listHref(query, { page: String(page) }), "aria-current": page === query.page ? "page" : undefined,
-  }, label);
-  return h("nav", { className: "lv-pagination", "aria-label": "ページ切り替え" },
-    query.page > 1 ? link(query.page - 1, "前へ") : null,
-    ...pages.map(page => link(page, String(page))),
-    query.page < data.totalPages ? link(query.page + 1, "次へ") : null);
+  // CURRENT Pagination (shared): first/last jump, "…" gaps and "1〜24 / 全 240 件 (1 / 10 ページ)".
+  return h("div", { className: "lv-page-nav" },
+    h(Pagination, { currentPage: query.page, totalPages: data.totalPages, total: data.total, pageSize: LIST_PAGE_SIZE,
+      buildHref: (page: number) => listHref(query, { page: String(page) }) }));
 }
 
 export function ListFilterIsland({ search }: { search: string }): React.ReactElement {
@@ -88,13 +84,23 @@ export function ListFilterIsland({ search }: { search: string }): React.ReactEle
     return () => { fallback.hidden = false; };
   }, [state.kind]);
 
+  const [liveSlot, setLiveSlot] = React.useState<HTMLElement | null>(null);
+  const staticSlot = React.useMemo(() => document.getElementById("list-filter-mount"), []);
+  const loaded = state.kind === "loaded";
+  const filters = h(Filters, { query });
+  const status = state.kind === "error" ? h("p", { role: "alert", className: "lv-island-status" },
+      query.event ? LIST_EVENT_UNAVAILABLE_MESSAGE : LIST_UNAVAILABLE_MESSAGE)
+    : state.kind === "loading" ? h("p", { role: "status", className: "lv-island-status" }, "作品を読み込んでいます…") : null;
+
+  // The header always comes first (CURRENT): controls live in the slot below the static header, or below
+  // the live ListView header once a result replaces the static list.
+  const target = loaded ? liveSlot : staticSlot;
+  const controls = loaded ? filters : h(React.Fragment, null, filters, status);
   return h(React.Fragment, null,
-    h(Filters, { query }),
-    state.kind === "error" ? h("p", { role: "alert", className: "lv-island-status" },
-      query.event ? LIST_EVENT_UNAVAILABLE_MESSAGE : LIST_UNAVAILABLE_MESSAGE) : null,
-    state.kind === "loading" ? h("p", { role: "status", className: "lv-island-status" }, "作品を読み込んでいます…") : null,
+    target ? createPortal(controls, target) : (staticSlot ? null : controls),
     state.kind === "loaded" ? h(React.Fragment, null,
       h(ListView, { videos: state.data.videos, total: state.data.total, view: query.view,
+        toolbar: h("div", { className: "lv-toolbar", ref: setLiveSlot }),
         emptyMessage: query.searchTooShort ? LIST_SHORT_SEARCH_MESSAGE : LIST_NO_RESULTS_MESSAGE }),
       !query.searchTooShort ? h(Pages, { query, data: state.data }) : null) : null);
 }
@@ -104,5 +110,10 @@ export function mountListFilters(root: Document = document): void {
   const host = root.getElementById("list-filter-mount");
   if (!host || host.dataset.mounted) return;
   host.dataset.mounted = "1";
-  createRoot(host).render(h(ListFilterIsland, { search: window.location.search }));
+  // The live result gets its own root after the static fallback; the controls portal into `host`.
+  const results = root.createElement("div");
+  results.id = "list-results-mount";
+  const fallback = root.getElementById("list-static-fallback");
+  (fallback ?? host).after(results);
+  createRoot(results).render(h(ListFilterIsland, { search: window.location.search }));
 }
