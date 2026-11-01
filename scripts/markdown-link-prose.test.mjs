@@ -59,3 +59,53 @@ test("CRLF and up to three leading spaces in tilde fences", () => {
   assert.doesNotMatch(result, /bad\.md/);
   assert.match(result, /two\.md/);
 });
+
+test("fences inside blockquotes are masked", () => {
+  const markdown = [
+    "> " + fence + "md",
+    "> [example](bq-missing.md)",
+    "> " + fence,
+    "[after](after.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /bq-missing/);
+  assert.match(result, /after\.md/);
+});
+
+test("fences inside nested blockquotes are masked", () => {
+  const markdown = [
+    "> > " + fence,
+    "> > [example](nested-missing.md)",
+    "> > " + fence,
+    "> [quoted](quoted.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /nested-missing/);
+  assert.match(result, /quoted\.md/);
+});
+
+test("blockquote fence ends when the quote ends", () => {
+  const markdown = "> " + fence + "\n> [x](a-missing.md)\n\n[real](real.md)";
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /a-missing/);
+  assert.match(result, /real\.md/);
+});
+
+test("fences nested in list items are masked", () => {
+  const markdown = [
+    "- item",
+    "    " + fence + "md",
+    "    [example](list-missing.md)",
+    "    " + fence,
+    "    [in item](item.md)",
+    "1. " + fence,
+    "   [ex2](list2-missing.md)",
+    "   " + fence,
+    "",
+    "[outside](outside.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /missing/);
+  assert.match(result, /item\.md/);
+  assert.match(result, /outside\.md/);
+});
