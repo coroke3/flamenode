@@ -12,3 +12,4 @@ export * from "./eventSlotViewerOverlay.ts";
 export * from "./videoViewerOverlay.ts";
 export * from "./videoInteraction.ts";
 export * from "./eventPlaylistWrite.ts";
+export * from "./slotReservation.ts";
