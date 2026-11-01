@@ -123,6 +123,7 @@ test("MIG-0719 T05: operation-mode banner all modes, normal and failed", async (
     assert.deepEqual(response, { status: "ok", data: { mode, reason: "テスト" } });
   }
   assert.equal((await loadOperationMode(fetchJson(200, { mode: "future", reason: null }))).status, "unavailable");
+  assert.equal((await loadOperationMode(fetchJson(200, { mode: "economy", reason: "x".repeat(2049) }))).status, "unavailable");
   assert.equal((await loadOperationMode(fetchJson(503, {}))).status, "unavailable");
   assert.equal(summarizePayload(JSON.stringify({ content: "one\ntwo" })), "one");
   assert.equal(summarizePayload("{"), "—");
