@@ -52,10 +52,25 @@ test("MIG-0712 ConfirmDialog: expectedText gates confirm; busy disables Escape a
     const confirm = () => m.container.querySelectorAll(".cdlg-footer button")[1];
     assert.equal(confirm().disabled, true);
     assert.equal(m.container.querySelector(".cdlg-confirmation code").textContent, "DELETE");
+    const input = m.container.querySelector(".cdlg-confirmation input");
+    // helpers.mjs imports react-dom before the jsdom globals exist, so React's native "input" delegation is off here;
+    // drive the input through its React onChange prop instead.
+    const type = async (v) => act(async () => {
+      const propsKey = Object.keys(input).find((k) => k.startsWith("__reactProps$"));
+      input[propsKey].onChange({ target: { value: v } });
+    });
+    await type("DELET");
+    assert.equal(confirm().disabled, true);
+    await type("DELETE");
+    assert.equal(confirm().disabled, false);
+    await act(async () => confirm().click());
+    assert.equal(confirmed, 1);
     await m.rerender({ ...base, busy: true });
+    assert.equal(m.container.querySelectorAll(".cdlg-footer button")[0].disabled, true);
+    assert.equal(confirm().disabled, true);
     await act(async () => { dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape" })); });
     assert.equal(cancelled, 0);
     assert.match(confirm().textContent, /処理中/);
-    assert.equal(confirmed, 0);
+    assert.equal(confirmed, 1);
   } finally { await m.unmount(); }
 });
