@@ -90,3 +90,47 @@ test("nested families with one owner and adjacent prefixes do not false-positive
     "src/lib/videos/file.ts",
   ]), []);
 });
+
+
+test("family table rejects corrupted path delimiters instead of silently omitting a row", () => {
+  const family = "src/lib/video/private/**";
+  const valid = matrix([], [family]);
+  const originalCell = "| " + B + family + B + " |";
+  assert.deepEqual(parseFamilyRows(valid).errors, []);
+  for (const damaged of [
+    valid.replace(originalCell, B + family + B + " |"), // no opening pipe
+    valid.replace(originalCell, family + " |"), // no pipe or backticks
+    valid.replace(originalCell, "| " + family + " |"), // missing backticks
+    valid.replace(originalCell, "| " + B + family + " |"), // unmatched backtick
+    valid.replace("| NOT_STARTED |", "| NOT_STARTED"), // missing trailing pipe
+  ]) {
+    assert.match(parseFamilyRows(damaged).errors.join("\n"), /malformed family row|invalid family path cell/);
+  }
+});
+
+test("family table rejects malformed separator, missing cells, and unknown state", () => {
+  const family = "src/lib/video/**";
+  const valid = matrix([], [family]);
+  const familyHeader = "| Family | Kind | Owner | Disp | State |";
+  const familySeparator = "| --- | --- | --- | --- | --- |";
+  assert.match(parseFamilyRows(valid.replace(
+    familyHeader + "\n" + familySeparator,
+    familyHeader + "\n| -- | --- | --- | --- | --- |",
+  )).errors.join("\n"), /invalid family table separator/);
+  assert.match(parseFamilyRows(valid.replace(
+    familyRow(family), "| " + B + family + B + " | HELPER | MIG-0501 | NOT_STARTED |",
+  )).errors.join("\n"), /4 columns, expected 5/);
+  assert.match(parseFamilyRows(valid.replace("| NOT_STARTED |", "| NOT_STRTED |")).errors.join("\n"), /invalid family state/);
+  assert.match(parseFamilyRows(valid.replace(familyHeader, "| Broken | Kind | Owner | Disp | State |")).errors.join("\n"), /missing family table header/);
+});
+
+test("malformed overlapping family cannot suppress ambiguous owner detection silently", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const valid = matrix([], [parent, child]).replace(familyRow(child), familyRow(child, "MIG-0619"));
+  const broken = valid.replace("| " + B + child + B + " |", "| " + child + " |");
+  const errors = validateLedgerCompleteness({
+    matrix: broken, status, trackedFiles: ["src/lib/video/private/secret.ts"],
+  });
+  assert.match(errors.join("\n"), /invalid family path cell/);
+});
