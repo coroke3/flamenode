@@ -56,7 +56,7 @@ export function extractRelativeSpecifiers(source, fileName = "static-generator-s
     if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1
+      node.arguments.length >= 1
     ) {
       add(node.arguments[0]);
     }
