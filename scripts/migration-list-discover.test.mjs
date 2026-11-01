@@ -146,6 +146,12 @@ test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and pu
     const env = writeFixtureSnapshot(dir);
     execFileSync(process.execPath, [path.resolve("node_modules/astro/astro.js"), "build", "--outDir", out], { cwd: path.resolve("apps/site"), env: { ...process.env, ...env }, stdio: "pipe" });
 
+    // U02 defect: at <=640px the shared header is fixed (52px) and leaves the flow, so each screen must offset 52px + its 32px gap.
+    for (const [route, cls] of [["list", "lv"], ["recommend", "rc"], ["trending", "tr"]]) {
+      const html = fs.readFileSync(path.join(out, route, "index.html"), "utf-8");
+      assert.match(html, new RegExp(`@media \\(max-width: ?640px\\)\\s*\\{\\s*main\\.${cls}-wrap\\s*\\{\\s*padding-top:\\s*(84px|calc\\(52px \\+ 32px\\))`), `${route} keeps content below the fixed mobile header`);
+    }
+
     const list = dom(out, "list/index.html");
     const cards = [...list.querySelectorAll("main .grid-v > a")];
     assert.equal(cards.length, 2, "private and voided rows are not emitted");
