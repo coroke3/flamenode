@@ -398,7 +398,7 @@ MIG-0608 は Phase 8 の Auth.js 移行を待たずに、認証付き Hono API �
 | MIG-0709 | Personal settings + onboarding: X link / merge request, cancel, merge-revert forms (SA-099..101; merge gate MIG-0659) | READY | MIG-0611 |
 | MIG-0710 | `/onboarding` terms agree form + onboarding-complete POST (SA-076; merge gate MIG-0641) | READY | MIG-0611 |
 | MIG-0711 | `/entry` index screen (read-only, Discord login via the Auth.js HTTP flow) | READY | MIG-0611, MIG-0623 |
-| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | READY | MIG-0623, MIG-0630 |
+| MIG-0712 | Personal SPA video form part A: sub-fields port (custom questions, social links, icon picker, description preview, channel picker) | DONE | MIG-0623, MIG-0630 |
 | MIG-0713 | Personal SPA video form part B: `VideoMembersField` port with injected search / permission adapters | READY | MIG-0623, MIG-0630 |
 | MIG-0714 | Personal SPA video form part C: `VideoForm` + `UnslottedPostForm` port with injected submit adapter | BLOCKED | MIG-0712, MIG-0713 |
 | MIG-0715 | `/dashboard/edit/:id/permissions` screen (SA-082..084; merge gate MIG-0650) | READY | MIG-0630 |
