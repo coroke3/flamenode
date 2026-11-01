@@ -1050,7 +1050,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.deepEqual((await fetchPage(stateJson, undefined)).sharedInputs.map((s) => s.objectState), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   });
 
-  test("T02 health (operational view) equals CURRENT runOperationalHealthChecks; deep run is 501", async () => {
+  test("T02 health (operational view) equals CURRENT and deep diagnostics are allowlisted per check", async () => {
     const { runOperationalHealthChecks } = await import("../../../src/lib/admin/healthChecks.ts");
     ins("x_identity_requests", { id: "xs1", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "alice_x", target_x_user_id: "alice_y", requested_at: nowS - 9 * 86400, updated_at: nowS });
     ins("x_identity_requests", { id: "xs2", request_type: "merge", status: "pending", requested_by_auth_user_id: "u_alice", source_x_user_id: "frank_x", target_x_user_id: "frank_y", requested_at: nowS - 8 * 86400, updated_at: nowS });
@@ -1066,11 +1066,47 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(byId.x_id_merge_pending_stale.count >= 2 && byId.open_moderation_cases_overdue.count >= 1);
     assert.equal((await get("/ops/health?status=info")).body.status, "info");
 
+    const { HEALTH_CHECK_IDS, runHealthChecks } = await import("@flamenode/server-core/admin/healthChecks");
     const deep = await call("/api/admin-read/ops/health?deep=1", ADMIN);
-    assert.equal(deep.status, 501);
+    assert.equal(deep.status, 200);
+    assert.deepEqual(deep.body, { status: "all", results: [], error: null, checkIds: [...HEALTH_CHECK_IDS] });
     assert.equal(deep.headers.get("cache-control"), "private, no-store");
-    assert.equal(deep.stats.statements, 1, "no health query for a deep run");
-    assert.equal((await call("/api/admin-read/ops/health?run=1", ADMIN)).status, 501);
+    assert.equal(deep.stats.statements, 1, "catalog only performs the session lookup");
+    assert.deepEqual((await call("/api/admin-read/ops/health?run=1", ADMIN)).body, deep.body);
+    assert.equal(new Set(HEALTH_CHECK_IDS).size, 22);
+    const fullResults = await runHealthChecks(refDb);
+    for (const id of HEALTH_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/health/checks/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id + " " + result.text.slice(0, 200));
+      assert.deepEqual(canon(result.body), canon({ status: "all", results: fullResults.filter((row) => row.id === id), error: null }), id);
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      assert.equal(result.stats.writes, 0, id);
+      // CURRENT audit retention reads settings + a COUNT + a sample (3 D1 reads),
+      // in addition to the shared session lookup. Other checks use at most 2.
+      const maximumStatements = id === "audit_logs_retention_candidates" ? 4 : 3;
+      assert.ok(result.stats.statements <= maximumStatements,
+        id + ": session + CURRENT's per-check D1 reads (max " + maximumStatements + ")");
+    }
+    const unknown = await call("/api/admin-read/ops/health/checks/unknown_check", ADMIN);
+    assert.equal(unknown.status, 404);
+    assert.equal(unknown.stats.statements, 1);
+    const denied = await call("/api/admin-read/ops/health/checks/like_count_drift", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1);
+
+    // A per-check D1 failure is a fixed 503; never disclose SQL, credentials, or raw provider errors.
+    const deepFailD1 = createD1(sqlite);
+    const originalDeepPrepare = deepFailD1.prepare;
+    deepFailD1.prepare = (statement) => {
+      if (/video_events/.test(statement)) throw new Error("secret-d1-internal-not-for-client");
+      return originalDeepPrepare(statement);
+    };
+    const deepFailure = await call("/api/admin-read/ops/health/checks/primary_event_sync", ADMIN, { d1: deepFailD1 });
+    assert.equal(deepFailure.status, 503);
+    assert.deepEqual(deepFailure.body, { error: "unavailable" });
+    assert.equal(deepFailure.headers.get("cache-control"), "private, no-store");
+    assert.equal(deepFailure.stats.writes, 0);
+    assert.doesNotMatch(deepFailure.text, /secret-d1-internal-not-for-client|SELECT|video_events/);
 
     const d1 = createD1(sqlite);
     const prepare = d1.prepare;
@@ -1084,15 +1120,39 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failed.text, /secret-internal/);
   });
 
-  test("T02 integrity: idle state like CURRENT (no query); run=1 is the recorded STOP (501)", async () => {
+  test("T02 integrity: idle catalog and run=1 are read-only; per-check results match full CURRENT helper", async () => {
+    const { runIntegrityChecks, INTEGRITY_CHECK_IDS } = await import(
+      "@flamenode/server-core/admin/integrityChecks"
+    );
     const idle = await get("/ops/integrity");
-    assert.deepEqual(idle.body, { ran: false, results: [] });
-    assert.equal(idle.stats.statements, 1, "no page query without run=1");
-    const run = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
-    assert.equal(run.status, 501);
-    assert.equal(run.headers.get("cache-control"), "private, no-store");
-    assert.equal(run.stats.statements, 1);
+    assert.deepEqual(idle.body, { ran: false, results: [], checkIds: [...INTEGRITY_CHECK_IDS] });
+    assert.equal(idle.stats.statements, 1, "catalog must only read the session");
+    assert.equal(new Set(INTEGRITY_CHECK_IDS).size, INTEGRITY_CHECK_IDS.length, "unique allowlisted check IDs");
+    const requested = await call("/api/admin-read/ops/integrity?run=1", ADMIN);
+    assert.deepEqual(requested.body, idle.body);
+    assert.equal(requested.headers.get("cache-control"), "private, no-store");
+    assert.equal(requested.stats.statements, 1);
     assert.equal((await call("/api/admin-read/ops/integrity", "tok-alice")).status, 403);
+
+    // The same read-only CURRENT business logic is still used by Next via its compatibility bridge.
+    // Run it once as the reference and make every Hono per-ID request execute only its selected check.
+    const expected = await runIntegrityChecks(refDb);
+    for (const id of INTEGRITY_CHECK_IDS) {
+      const result = await call("/api/admin-read/ops/integrity/" + encodeURIComponent(id), ADMIN);
+      assert.equal(result.status, 200, id);
+      assert.equal(result.headers.get("cache-control"), "private, no-store", id);
+      assert.deepEqual(canon(result.body), canon({
+        ran: true,
+        results: expected.filter((check) => check.id === id),
+      }), id);
+      assert.ok(result.stats.statements <= 2, id + ": session + at most one check query");
+    }
+    const missing = await call("/api/admin-read/ops/integrity/unknown_check", ADMIN);
+    assert.equal(missing.status, 404);
+    assert.equal(missing.stats.statements, 1, "unknown check must not query the DB");
+    const denied = await call("/api/admin-read/ops/integrity/videos_primary_event_missing_event", "tok-alice");
+    assert.equal(denied.status, 403);
+    assert.equal(denied.stats.statements, 1, "denial occurs before the check");
   });
 
   test("T02 cost guard equals CURRENT (mode resolution, exception window, last 20 system_settings updates); no row -> defaults", async () => {

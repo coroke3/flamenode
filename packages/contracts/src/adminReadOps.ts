@@ -494,16 +494,41 @@ export const AdminDiagnosticResultSchema = z.object({
   samples: z.array(z.string()),
   note: z.string().optional(),
 });
-// Operational (default) health view only; the deep view is answered 501 by the API (see ops.ts).
+// Operational default view and an idle allowlisted catalog for bounded per-check deep diagnostics.
 export const AdminHealthResponseSchema = z.object({
   status: z.enum(["all", "warn", "info", "ok"]),
   results: z.array(AdminDiagnosticResultSchema),
   error: z.literal("query_failed").nullable(),
+  checkIds: z.array(z.string()).optional(),
 });
 export type AdminHealthResponse = z.infer<typeof AdminHealthResponseSchema>;
 
-// Integrity page: only the pre-run state is served (ran false, no results); run=1 is 501 (see ops.ts).
-export const AdminIntegrityResponseSchema = z.object({ ran: z.literal(false), results: z.array(z.never()) });
+// Admin integrity: idle catalog + bounded per-check results (MIG-0626 U05).
+// Every check ID is server-defined. The route never accepts arbitrary SQL.
+export const AdminIntegrityResultSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  area: z.string(),
+  severity: z.enum(["danger", "warning", "info"]),
+  description: z.string(),
+  count: z.number().int().nonnegative(),
+  issues: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    adminHref: z.string().optional(),
+    publicHref: z.string().optional(),
+    sqlPreview: z.string().optional(),
+  })),
+  moreCount: z.number().int().nonnegative(),
+  recommendation: z.string(),
+  sqlPreview: z.string().optional(),
+});
+export const AdminIntegrityResponseSchema = z.object({
+  ran: z.boolean(),
+  results: z.array(AdminIntegrityResultSchema),
+  checkIds: z.array(z.string()).optional(),
+});
 export type AdminIntegrityResponse = z.infer<typeof AdminIntegrityResponseSchema>;
 export type AdminPermissionSimulatorResponse =z.infer<typeof AdminPermissionSimulatorResponseSchema>;
 export type AdminTopResponse =z.infer<typeof AdminTopResponseSchema>;
