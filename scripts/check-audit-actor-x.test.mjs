@@ -65,7 +65,7 @@ test("line comments cannot fake a missing audit field", () => {
 test("comment-looking text within strings remains unchanged", () => {
   const code = 'const url = "https://example.com/a/* literal */"; // absent\nconst active = true;';
   const filtered = withoutComments(code);
-  assert.match(filtered, /https:\/\/example.com\/a\/\\* literal \\*\//);
+  assert.ok(filtered.includes("https://example.com/a/* literal */"));
   assert.match(filtered, /const active = true/);
   assert.doesNotMatch(filtered, /absent/);
 });
