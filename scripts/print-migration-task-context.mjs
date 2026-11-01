@@ -176,11 +176,20 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
       decisions.set(cells[1],cells[3]);
     }
   }
+  // The migration execution gate accepts an explicitly approved SKIPPED task as
+  // a completed dependency. Require that same approval record here; an
+  // unapproved SKIPPED must never unlock another task.
+  const dependencyComplete=(id)=>{
+    const state=tasks.get(id)?.state;
+    if(state==="DONE")return true;
+    if(state!=="SKIPPED")return false;
+    return new RegExp("^SKIP_APPROVAL: "+id+" \\\\| PR#[0-9]+ \\\\| APPROVAL=[^\\\\n|]+ \\\\| ALTERNATIVE=[^\\\\n|]+$","m").test(statusText);
+  };
   const candidates=[];
   for(const [id,task] of tasks){
     if(task.state!=="READY")continue;
     const deps=expandDependencies(task.dependencies);
-    if(deps.some(d=>tasks.get(d)?.state!=="DONE"))continue;
+    if(deps.some(d=>!dependencyComplete(d)))continue;
     if((REQUIRED_DECISIONS[id]||[]).some(d=>decisions.get(d)!=="DECIDED"))continue;
     if(!eligible(id))continue;
     candidates.push(id);
