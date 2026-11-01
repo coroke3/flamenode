@@ -95,6 +95,7 @@ jobs:
         run: |
           node scripts/check-migration-work-items.mjs --fetch-pr-history
           npm run check:project-docs
+          npm run check:static-rebuild-atomicity
       - name: 既存Nextの型・回帰・軽量検証
         run: |
           npm run typecheck
