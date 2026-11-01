@@ -390,6 +390,18 @@ test("symlinked repository root is rejected before reading outside config", { sk
     ]);
   }));
 
+test("symlinked ancestor above the audited root does not fail the audit", { skip: process.platform === "win32" }, () =>
+  withFixture((base) => {
+    const real = path.join(base, "real-home");
+    const linkedHome = path.join(base, "linked-home");
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, linkedHome, "dir");
+    const root = path.join(linkedHome, "repo");
+    fs.mkdirSync(root);
+    writeValidTemplate(root);
+    assert.deepEqual(checkCloudflareTemplate({ root }), []);
+  }));
+
 test("linked Worker parent directory cannot bypass required template validation", { skip: process.platform === "win32" }, () =>
   withFixture((root) => {
     writeValidTemplate(root);
