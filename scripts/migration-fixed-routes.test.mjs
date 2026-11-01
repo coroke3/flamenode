@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import { RESERVED_ROOT_SLUGS } from "../apps/site/src/lib/routeMap.ts";
-import { buildPageHead, compactText } from "../apps/site/src/lib/pageHead.ts";
+import { buildPageHead, compactText, siteOrigin } from "../apps/site/src/lib/pageHead.ts";
 import { loadRulesForBuild, rulesSourceFromEnv, RulesBuildError } from "../apps/site/src/lib/rulesLoader.ts";
 import { parseLegalMarkdown } from "../src/lib/terms/legalMarkdown.ts";
 import { DEFAULT_TERMS_MARKDOWN, DEFAULT_TERMS_VERSION_LABEL } from "../src/lib/terms/defaultTerms.ts";
@@ -71,6 +71,66 @@ test("pageHead: compactText keeps CURRENT collapsing, cap and fallback", () => {
   assert.equal(buildPageHead({ path: "/about", title: "T" }).canonical, "https://flamenode.net/about");
 });
 
+test("pageHead: canonical and OGP URLs normalize relative paths like CURRENT absoluteUrl", () => {
+  for (const [route, expected] of [
+    ["about", "https://flamenode.net/about"],
+    ["/about", "https://flamenode.net/about"],
+    ["rules?version=1", "https://flamenode.net/rules?version=1"],
+    ["/about#mission", "https://flamenode.net/about#mission"],
+  ]) {
+    const head = buildPageHead({ path: route, title: "Page" });
+    assert.equal(head.canonical, expected, route);
+    assert.ok(head.canonical.startsWith("https://flamenode.net/"), route);
+  }
+});
+
+test("pageHead: CURRENT readableTitle rejects broken or empty headings and preserves OG alt", () => {
+  const cases = [
+    { path: "/about", fallback: "FlameNodeについて" },
+    { path: "/rules", fallback: "利用規約" },
+    { path: "/maintenance", fallback: "FlameNode" },
+  ];
+  for (const { path, fallback } of cases) {
+    for (const title of [" ", "Broken\uFFFD title", "bad\u0001title"]) {
+      const head = buildPageHead({ path, title, image: "/brand/flamenode-social-card.png" });
+      assert.equal(head.title, `${fallback} | FlameNode`, path);
+      assert.equal(head.ogTitle, fallback, path);
+      assert.equal(head.ogImageAlt, fallback, path);
+    }
+  }
+  const valid = buildPageHead({ path: "/about", title: " 正常なタイトル " });
+  assert.equal(valid.title, "正常なタイトル | FlameNode");
+  assert.equal(valid.ogTitle, "正常なタイトル");
+});
+
+test("pageHead: CURRENT rejects mojibake or control characters in description metadata", () => {
+  const fallback = "映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。";
+  for (const value of ["broken\\uFFFD text", "bad\\u0001content"]) {
+    const bad = value.replace("\\uFFFD", "\uFFFD").replace("\\u0001", "\u0001");
+    assert.equal(compactText(bad), fallback);
+    assert.equal(buildPageHead({ path: "/about", title: "A", description: bad }).description, fallback);
+  }
+  assert.equal(compactText("   正常な 説明文  "), "正常な 説明文");
+});
+
+test("pageHead: only HTTP(S) site origins may be emitted into canonical and structured data", () => {
+  const fallback = "https://flamenode.net";
+  const maliciousOrInvalid = [
+    "data:text/html,hello",
+    "javascript:alert(1)",
+    "file:///tmp/site",
+    "mailto:admin@example.com",
+    "ftp://example.com/site",
+    "not a URL",
+  ];
+  for (const raw of maliciousOrInvalid) {
+    assert.equal(siteOrigin({ PUBLIC_SITE_URL: raw }), fallback, raw);
+  }
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "https://flamenode.net/a?x=1" }), fallback);
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "http://localhost:4321/about" }), "http://localhost:4321");
+  assert.equal(siteOrigin({ PUBLIC_SITE_URL: "" }), fallback);
+});
+
 test("about T01: every CURRENT text is in the built HTML without JS (static body)", { skip }, () => {
   const doc = load("about");
   const html = text(doc.body);
@@ -96,6 +156,28 @@ test("about: entry links and credit links match CURRENT (UX-PUB-009), external l
   assert.deepEqual([...main.querySelectorAll(".actions a")].map(text), ["作品を見る", "イベントを見る"]);
   assert.equal(main.querySelectorAll("h1").length, 1);
   assert.match(text(main.querySelector("h1")), /^作品が見つかり、 ?イベントの記録も残る場所。$/);
+});
+
+test("about U03: identity mark is text-colour masked like CURRENT Logo (a black <img> is invisible on dark)", { skip }, () => {
+  const doc = load("about");
+  assert.equal(doc.querySelector("img.ab-logo"), null, "flamenode-mark.svg has no fill; an <img> renders black on the dark theme");
+  const logo = doc.querySelector(".ab-logo");
+  assert.equal(logo.getAttribute("aria-hidden"), "true", "decorative mark: the visible label already names it (CURRENT Logo is aria-hidden)");
+  assert.equal(logo.getAttribute("role"), null);
+  assert.equal(logo.getAttribute("aria-label"), null);
+  const style = logo.getAttribute("style");
+  assert.ok(style.includes("background:currentColor") || style.includes("background: currentColor"));
+  assert.ok(/mask:\s*url\(&quot;\/brand\/flamenode-mark\.svg&quot;\)|mask:\s*url\("?\/brand\/flamenode-mark\.svg"?\)/.test(style), style);
+});
+
+test("maintenance U03: body follows the stored/system theme like CURRENT (D-13-27), no nested dark pin", { skip }, () => {
+  const html = fs.readFileSync(path.join(DIST, "maintenance/index.html"), "utf-8");
+  const doc = new JSDOM(html).window.document;
+  assert.equal(doc.querySelectorAll("body [data-theme]").length, 0, "no nested data-theme: the whole page follows the document theme (CURRENT page.tsx)");
+  assert.ok(doc.querySelector(".p-root main"), "maintenance body is in the shared view");
+  assert.ok(html.includes("localStorage"), "CURRENT theme bootstrap still runs before first paint");
+  const src = fs.readFileSync("packages/ui/src/screens/MaintenanceView.tsx", "utf-8");
+  assert.equal(/data-theme/.test(src), false, "MaintenanceView must not hardcode a theme");
 });
 
 test("about: mock structure (hero, kv, 3 columns, identity, credits) and no stats block without a snapshot", { skip }, () => {

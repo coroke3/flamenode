@@ -13,6 +13,7 @@ describe("admin/costGuard", () => {
   it("recognizes write feature keys", () => {
     assert.equal(isWriteFeatureKey("post_video_unslotted"), true);
     assert.equal(isWriteFeatureKey("manage_slot_create"), true);
+    assert.equal(isWriteFeatureKey("personal_terms_accept"), true); // MIG-0641
     assert.equal(isWriteFeatureKey("unknown_feature"), false);
   });
 
