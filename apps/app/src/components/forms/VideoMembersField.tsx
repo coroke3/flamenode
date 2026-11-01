@@ -412,7 +412,7 @@ export function VideoMembersField({
   const add = () => {
     if (disabled) return;
     setRows((prev) => {
-      // Blank editor rows also consume UI resources; never add more than the display cap.
+      // CURRENT parity: only non-blank members count toward the cap; blank editor rows do not.
       if (normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
       return [...prev, { ...EMPTY_ROW }];
     });
@@ -573,8 +573,6 @@ export function VideoMembersField({
   const [replaceConfirmOpen, setReplaceConfirmOpen] = React.useState(false);
   const [permConfirmOpen, setPermConfirmOpen] = React.useState(false);
   const [permPending, setPermPending] = React.useState(false);
-  // State updates are batched: guard repeated submits in the same event turn.
-  const permPendingRef = React.useRef(false);
   const [permResult, setPermResult] = React.useState<{ ok: boolean; message: string } | null>(
     null,
   );
@@ -747,8 +745,7 @@ export function VideoMembersField({
 
   /** 編集権限だけを専用batch Server Actionで一括反映する。 */
   const applyPermissionsBatch = async () => {
-    if (!bulkPreview || !permissionTargetVideoId || permPendingRef.current) return;
-    permPendingRef.current = true;
+    if (!bulkPreview || !permissionTargetVideoId || permPending) return;
     setPermPending(true);
     setPermResult(null);
     try {
@@ -781,7 +778,6 @@ export function VideoMembersField({
     } catch {
       setPermResult({ ok: false, message: "編集権限の反映中にエラーが発生しました。" });
     } finally {
-      permPendingRef.current = false;
       setPermPending(false);
     }
   };
