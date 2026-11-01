@@ -91,7 +91,8 @@ test("repository symlinks may not escape the checkout and local symlinks remain 
     path.join(root,"docs/migration/inside-alias.md"));
   fs.appendFileSync(path.join(root,"docs/migration/README.md"),
     "\n[outside](external-alias.md)\n[inside](inside-alias.md)\n");
-  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+  // Link targets may be symlinks; source documents themselves may not.
+  const errors=validateLinks({root,documents:["docs/migration/README.md","docs/migration/deep/CHILD.md"]});
   assert.equal(errors.length,1,errors.join("\n"));
   assert.match(errors[0],/link outside repository: external-alias\.md/);
   assert.doesNotMatch(errors.join("\n"),/inside-alias/);
@@ -289,4 +290,32 @@ test("unclosed combined list-quote fence stops at list dedent rather than hiding
  assert.equal(errors.length,1,errors.join("\n"));
  assert.match(errors[0],/missing-after-composite-dedent\.md/);
  assert.doesNotMatch(errors.join("\n"),/not-a-file-in-unclosed-fence/);
+}));
+
+test("enumeration rejects symlinked Markdown instead of silently omitting it",()=>fixture(root=>{
+  const alias=path.join(root,"docs/migration/alias.md");
+  fs.symlinkSync("deep/CHILD.md",alias);
+  assert.throws(()=>listMarkdownFiles(root),/symlink in migration documents: docs\/migration\/alias\.md/);
+}));
+
+test("enumeration rejects directory symlinks, including dangling links",()=>fixture(root=>{
+  const base=path.join(root,"docs/migration");
+  for (const [alias,target] of [["alias-directory","deep"],["dangling-directory","not-present"]]) {
+    fs.symlinkSync(target,path.join(base,alias),"dir");
+    assert.throws(()=>listMarkdownFiles(root),/symlink in migration documents/);
+    fs.unlinkSync(path.join(base,alias));
+  }
+}));
+
+test("explicit source documents and symlinked migration roots fail closed",()=>fixture(root=>{
+  const alias="docs/migration/alias.md";
+  fs.symlinkSync("README.md",path.join(root,alias));
+  assert.throws(()=>validateLinks({root,documents:[alias]}),/symlink in migration documents/);
+  fs.unlinkSync(path.join(root,alias));
+  const source=path.join(root,"docs/migration");
+  const relocated=path.join(root,"real-migration");
+  fs.renameSync(source,relocated);
+  fs.symlinkSync("real-migration",source,"dir");
+  assert.throws(()=>listMarkdownFiles(root),/symlink in migration documents/);
+  assert.throws(()=>validateLinks({root,documents:["docs/migration/README.md"]}),/symlink in migration documents/);
 }));
