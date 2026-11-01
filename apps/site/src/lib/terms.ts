@@ -2,7 +2,9 @@
  * MIG-0519 U03: SA-075 JSON transport on the merged MIG-0641 contract
  * (POST /api/personal/terms/accept, @flamenode/contracts AcceptLatestTermsResponseSchema).
  */
-import { AcceptLatestTermsResponseSchema } from "@flamenode/contracts";
+// Import the schema source directly: test:unit (scripts/**/*.test.mjs) runs before any
+// workspace build, so the package entry (dist/index.js) is not resolvable there.
+import { AcceptLatestTermsResponseSchema } from "../../../../packages/contracts/src/terms.ts";
 import { sanitizeNextPath } from "../../../../src/lib/utils/next.ts";
 
 export type TermsAcceptResponse =
@@ -31,7 +33,9 @@ export async function acceptLatestTerms(
   // /rules?error=database_unavailable. Keep those same-origin destinations.
   if (typeof body === "object" && body !== null && !Array.isArray(body)) {
     const middlewareError = (body as { error?: unknown }).error;
-    if (response.status === 401 && middlewareError === "unauthenticated") {
+    // The real requireAuth() (apps/api/src/auth/session.ts) sends "Unauthorized"; accept the
+    // legacy lowercase code too.
+    if (response.status === 401 && (middlewareError === "Unauthorized" || middlewareError === "unauthenticated")) {
       return { ok: false, next: `/entry?next=${encodeURIComponent(safeNext)}` };
     }
     if (response.status === 503 && middlewareError === "database_unavailable") {

@@ -58,14 +58,21 @@ test("T02: unsafe next and server-selected URL never cause open redirects", asyn
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(200, { ok: true, next: "//evil.example" })), { error: RULES_GENERIC_ERROR });
 });
 
+test("T03: anonymous fixture body matches the real requireAuth() source", () => {
+  const src = fs.readFileSync("apps/api/src/auth/session.ts", "utf8");
+  assert.match(src, /c\.json\(\{ error: "Unauthorized" \}, 401\)/);
+  assert.match(src, /SESSION_UNAVAILABLE_CODE = "database_unavailable"/);
+});
+
 test("T03: failed accept follows existing safe redirect, otherwise shows message and stays on form", async () => {
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(409, { ok: false, next: "/rules?next=%2Fx&error=concurrent_update" })), { navigate: "/rules?next=%2Fx&error=concurrent_update" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { ok: false, next: "/entry?next=%2Fx" })), { navigate: "/entry?next=%2Fx" });
-  // Real MIG-0641 middleware replies BEFORE its handler with {error}, unlike
+  // Real MIG-0641 requireAuth() (apps/api/src/auth/session.ts) replies BEFORE its handler with {error}, unlike
   // its body-schema responses. They must still preserve CURRENT navigation.
+  assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { error: "Unauthorized" })), { navigate: "/entry?next=%2Fx" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(401, { error: "unauthenticated" })), { navigate: "/entry?next=%2Fx" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(503, { error: "database_unavailable" })), { navigate: "/rules?next=%2Fx&error=database_unavailable" });
-  assert.deepEqual(await submitRulesConsent("https://evil.example", mkFetch(401, { error: "unauthenticated" })), { navigate: "/entry?next=%2Fdashboard" });
+  assert.deepEqual(await submitRulesConsent("https://evil.example", mkFetch(401, { error: "Unauthorized" })), { navigate: "/entry?next=%2Fdashboard" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(403, { error: "banned" })), { error: RULES_COMMIT_ERROR });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(503, { ok: false, message: "混雑しています。" })), { error: "混雑しています。" });
   assert.deepEqual(await submitRulesConsent("/x", mkFetch(200, { ok: false, message: "再試行してください。" })), { error: "再試行してください。" });
