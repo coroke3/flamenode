@@ -54,9 +54,9 @@ test("instrumentation は schema version を読むだけで migration しない"
   assert.doesNotMatch(instrumentation, /ALTER\s+TABLE|CREATE\s+TABLE|migrations apply/i);
 });
 
-test("deep health は read-only schema 検査のみ", async () => {
+test("server-core deep health は read-only schema 検査のみ", async () => {
   const deepHealth = await readFile(
-    path.join(root, "src/lib/health/deepHealth.ts"),
+    path.join(root, "packages/server-core/src/health/deepHealth.ts"),
     "utf8",
   );
   assert.match(deepHealth, /sqlite_master/);

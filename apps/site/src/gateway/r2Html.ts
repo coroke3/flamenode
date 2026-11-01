@@ -75,8 +75,16 @@ function requestRebuild(
     generation: decision.generation,
     reason,
   };
-  // A failed send must not change the answer, which is already a 503.
-  return queue.send(message).then(() => undefined, () => undefined);
+  // Neither a synchronous throw nor an async rejection should suppress a later retry.
+  // A newer in-flight attempt must retain its own deduplication marker.
+  return Promise.resolve()
+    .then(() => queue.send(message))
+    .then(
+      () => undefined,
+      () => {
+        if (recentRebuilds.get(decision.key) === now) recentRebuilds.delete(decision.key);
+      },
+    );
 }
 
 export async function loadR2PrebuiltHtml(

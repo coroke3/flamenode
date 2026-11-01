@@ -8,6 +8,7 @@ import PublicLayout from "../../../layouts/PublicLayout.astro";
 import { EventSlotsIsland } from "../../../components/EventSlotsIsland.ts";
 import { getEventBuildData } from "../../../lib/eventData.ts";
 import { buildPageHead } from "../../../lib/pageHead.ts";
+import { eventIslandDetail } from "../../../lib/eventDetail.ts";
 import type { StaticEventDetail } from "../../../../../src/lib/publicData/staticEventDetailCore.ts";
 
 export async function getStaticPaths() {
@@ -22,6 +23,7 @@ interface Props {
 }
 
 const { detail } = Astro.props;
+const islandDetail = eventIslandDetail(detail);
 const head = buildPageHead({
   path: `/event/${detail.event.id}/slots`,
   title: `${detail.event.title} 枠確保`,
@@ -30,5 +32,5 @@ const head = buildPageHead({
 const builtAt = Math.floor(Date.now() / 1000);
 ---
 <PublicLayout head={head} currentPath="/event">
-  <EventSlotsIsland client:load detail={detail} builtAt={builtAt} />
+  <EventSlotsIsland client:load detail={islandDetail} builtAt={builtAt} />
 </PublicLayout>
