@@ -17,6 +17,8 @@ No Cloudflare account/remote D1/R2, secrets or outbound HTTP traffic is allowed.
 | `fast-jobs` | `0 * * * *` | `flamenode-notification-wake` | queue batch 10 |
 | `sync-jobs` | `7,52 * * * *` | `flamenode-youtube-sync-wake` | queue batch 10 |
 
+Queue probes send canonical wake bodies (`static_rebuild_available` / `notification_available` / `youtube_sync_pending`) and a sample counts only when D1 was touched and messages acked (malformed `invalid` wakes: acked, zero D1); HTTP 200 alone is not valid.
+
 U01 records six generic trigger probes for the three Workers. They are **not** a replacement for the named per-job scenarios in U02, and must not be presented as a completed budget or throughput measurement.
 
 ## U02 per-job measurement ledger (pending)

@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   WORKERS, BUDGET_MS, FIXED_TIME, plan, parseArgs, seedForKind, wrapperSource,
-  judgeBackground, limitRecommendation, cpuFromProfile,
+  judgeBackground, limitRecommendation, cpuFromProfile, validateSample,
 } from "./benchmark-background-cpu.mjs";
 import { judge, summarize, MIN_SAMPLES } from "./benchmark-api-cpu.mjs";
 
@@ -57,7 +61,7 @@ test("T05 external fetch trap precedes importing the worker; unknown outbound re
 test("Queue inputs are strictly bounded to ten and scheduled cron is encoded", () => {
   for(const sc of plan()) {
     const limit=seedForKind(sc,"limit");
-    if(sc.kind==="queue") assert.equal(JSON.parse(limit.body).count,10);
+    if(sc.kind==="queue") { assert.equal(JSON.parse(limit.body).count,10); assert.equal(JSON.parse(seedForKind(sc,"invalid").body).count,1); }
     else assert.ok(limit.path.includes("cron="+encodeURIComponent(sc.cron)));
     assert.ok(seedForKind(sc,"normal").path.startsWith("/__bench/"));
   }
@@ -91,4 +95,83 @@ test("workerd V8 sampling ignores idle and counts actual busy-sample resolution"
   },0.1);
   assert.ok(Math.abs(cpuMs-0.8) < 1e-9);
   assert.equal(resolutionMs,0.7);
+});
+
+/** Loads the generated wrapper around a stub entry; counts calls reaching the REAL fetch. */
+async function loadWrapper(entrySource) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-bg-wrapper-test-"));
+  fs.writeFileSync(path.join(dir, "entry.mjs"), entrySource);
+  fs.writeFileSync(path.join(dir, "wrapper.mjs"), wrapperSource("entry.mjs", dir));
+  const original = globalThis.fetch;
+  const realCalls = [];
+  globalThis.fetch = async (...args) => { realCalls.push(args); throw Error("real fetch reached"); };
+  try {
+    const mod = await import(pathToFileURL(path.join(dir, "wrapper.mjs")).href + "?t=" + Math.random());
+    const call = async (spec, env = { DB: { prepare: () => ({}) } }) => {
+      const res = await mod.default.fetch(new Request("http://127.0.0.1" + spec.path,
+        { method: "POST", body: spec.body }), env, {});
+      return { status: res.status, text: await res.text() };
+    };
+    return { call, realCalls, restore: () => { globalThis.fetch = original; fs.rmSync(dir, { recursive: true, force: true }); } };
+  } catch (e) { globalThis.fetch = original; throw e; }
+}
+
+test("T05: wrapper counts external fetches; zero reach the real host and a job hitting one is invalid", async () => {
+  const w = await loadWrapper(`export default {
+    async scheduled() { await fetch("https://discord.com/api/webhooks/x"); },
+    async queue() { await fetch("https://youtube.googleapis.com/v3/videos"); },
+  };`);
+  try {
+    for (const sc of plan()) {
+      const spec = seedForKind(sc, "normal");
+      const r = await w.call(spec);
+      assert.ok([500, 502].includes(r.status), sc.id);
+      assert.equal(validateSample(spec, r.status, r.text), false, sc.id);
+      assert.equal(JSON.parse(r.text).outbound, 1);
+    }
+    assert.equal(w.realCalls.length, 0);
+  } finally { w.restore(); }
+});
+
+test("Queue wake: canonical bodies are processed, malformed bodies are skipped, HTTP 200 alone is not valid", async () => {
+  const w = await loadWrapper(`const KINDS = ["notification_available","static_rebuild_available","youtube_sync_pending","youtube_playlist_sync"];
+    const ok = b => b && b.version === 1 && KINDS.includes(b.kind) && typeof b.source === "string"
+      && Number.isFinite(b.requested_at) && typeof b.trace_id === "string" && b.trace_id.length > 0;
+    export default {
+      async scheduled(_c, env) { await env.DB.prepare("SELECT 1"); },
+      async queue(batch, env) {
+        const wake = batch.messages.find(m => ok(m.body));
+        if (wake) await env.DB.prepare("SELECT 1");
+        for (const m of batch.messages) m.ack();
+      },
+    };`);
+  try {
+    for (const sc of plan().filter(s => s.kind === "queue")) {
+      for (const kind of ["normal", "limit", "cold"]) {
+        const spec = seedForKind(sc, kind);
+        const r = await w.call(spec);
+        const body = JSON.parse(r.text);
+        assert.equal(r.status, 200);
+        assert.equal(body.acked, kind === "limit" ? 10 : 1, sc.id + kind);
+        assert.ok(body.d1 > 0, "consumer touched D1: " + sc.id + kind);
+        assert.equal(validateSample(spec, r.status, r.text), true);
+      }
+      const bad = seedForKind(sc, "invalid");
+      const r = await w.call(bad);
+      assert.equal(JSON.parse(r.text).d1, 0, "malformed wake must not process");
+      assert.equal(validateSample(bad, r.status, r.text), true);
+      // A consumer that silently skipped a canonical wake (HTTP 200, d1 = 0) is NOT a valid measurement.
+      const good = seedForKind(sc, "normal");
+      assert.equal(validateSample(good, 200, JSON.stringify({ ok: true, outbound: 0, acked: 1, retried: 0, d1: 0 })), false);
+      assert.equal(validateSample(good, 200, JSON.stringify({ ok: true, outbound: 0, acked: 0, retried: 1, d1: 3 })), false);
+    }
+    const sched = await w.call(seedForKind(plan().find(s => s.kind === "scheduled"), "normal"));
+    assert.equal(sched.status, 200);
+  } finally { w.restore(); }
+});
+
+test("Queue plan uses the canonical wake kind per worker", () => {
+  const kinds = Object.fromEntries(plan().filter(s => s.kind === "queue").map(s => [s.worker, s.wakeKind]));
+  assert.deepEqual(kinds, { content: "static_rebuild_available", fast: "notification_available", sync: "youtube_sync_pending" });
+  assert.match(seedForKind(plan().find(s => s.kind === "queue"), "normal").path, /wake=static_rebuild_available/);
 });

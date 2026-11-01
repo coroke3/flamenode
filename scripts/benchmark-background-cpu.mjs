@@ -17,13 +17,13 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const BUDGET_MS = 8;
 export const FIXED_TIME = 1760000000000;
 export const WORKERS = Object.freeze([
-  { id: "content", entry: "workers/content-jobs/index.ts", cron: "15 * * * *", queue: "flamenode-static-rebuild-wake" },
-  { id: "fast", entry: "workers/fast-jobs/index.ts", cron: "0 * * * *", queue: "flamenode-notification-wake" },
-  { id: "sync", entry: "workers/sync-jobs/index.ts", cron: "7,52 * * * *", queue: "flamenode-youtube-sync-wake" },
+  { id: "content", entry: "workers/content-jobs/index.ts", cron: "15 * * * *", queue: "flamenode-static-rebuild-wake", wakeKind: "static_rebuild_available" },
+  { id: "fast", entry: "workers/fast-jobs/index.ts", cron: "0 * * * *", queue: "flamenode-notification-wake", wakeKind: "notification_available" },
+  { id: "sync", entry: "workers/sync-jobs/index.ts", cron: "7,52 * * * *", queue: "flamenode-youtube-sync-wake", wakeKind: "youtube_sync_pending" },
 ]);
 export const plan = () => WORKERS.flatMap(w => [
   { id: w.id + ".scheduled", worker: w.id, kind: "scheduled", cron: w.cron, inputMax: 1 },
-  { id: w.id + ".queue", worker: w.id, kind: "queue", queue: w.queue, inputMax: 10 },
+  { id: w.id + ".queue", worker: w.id, kind: "queue", queue: w.queue, wakeKind: w.wakeKind, inputMax: 10 },
 ]);
 
 export function parseArgs(args) {
@@ -63,8 +63,8 @@ export function judgeBackground(values, noiseMs = 0, resolutionMs = 0) {
  * Ephemeral Worker generated as a file. It imports the entry only after
  * assigning fetch's fail-closed trap, and only exposes localhost bench routes.
  */
-export function wrapperSource(entry) {
-  const fullPath = path.join(ROOT, entry).replaceAll("\\", "/");
+export function wrapperSource(entry, rootDir = ROOT) {
+  const fullPath = path.join(rootDir, entry).replaceAll("\\", "/");
   return [
     "// LOCAL BENCH ONLY - MIG-0609",
     "let outbound = 0;",
@@ -72,12 +72,26 @@ export function wrapperSource(entry) {
     "let entry;",
     "const getEntry = async () => entry ??= (await import(" + JSON.stringify(fullPath) + ")).default;",
     "const fixedTime = " + FIXED_TIME + ";",
-    "const batch = (kind, n) => ({",
+    "const counts = { acked: 0, retried: 0, d1: 0 };",
+    "const countingEnv = env => {",
+    "  if (!env.DB) return env;",
+    "  const db = new Proxy(env.DB, { get(target, prop) {",
+    "    const value = target[prop];",
+    "    if (typeof value !== 'function') return value;",
+    "    return (...args) => { if (prop === 'prepare' || prop === 'batch' || prop === 'exec') counts.d1++; return value.apply(target, args); };",
+    "  } });",
+    "  return { ...env, DB: db };",
+    "};",
+    "// Canonical wake body (parseQueueWakeMessage); invalid = deliberately malformed, must be skipped.",
+    "const wakeBody = (wakeKind, valid, i) => valid",
+    "  ? { version:1, kind:wakeKind, source:'recovery', requested_at: Math.floor(fixedTime/1000), trace_id:'bench-' + i }",
+    "  : { kind:'recovery', version:1 };",
+    "const batch = (wakeKind, valid, n) => ({",
     "  queue: 'flamenode-bench-local',",
     "  messages: Array.from({length:n}, (_,i)=>({",
     "    id:'bench-'+i, timestamp:new Date(fixedTime),",
-    "    body:{kind, source:'recovery', version:1}, attempts:1,",
-    "    ack(){}, retry(){}",
+    "    body:wakeBody(wakeKind, valid, i), attempts:1,",
+    "    ack(){ counts.acked++; }, retry(){ counts.retried++; }",
     "  })), ackAll(){}, retryAll(){}",
     "});",
     "export default { async fetch(req, env, ctx) {",
@@ -86,18 +100,20 @@ export function wrapperSource(entry) {
     "  if (url.pathname === '/__bench/noop') return new Response('ok');",
     "  if (req.method !== 'POST') return new Response('Not found', {status:404});",
     "  const before = outbound;",
+    "  counts.acked = 0; counts.retried = 0; counts.d1 = 0;",
+    "  const benchEnv = countingEnv(env);",
     "  try {",
     "    const current = await getEntry();",
     "    const kind = url.searchParams.get('kind') || 'normal';",
     "    if (url.pathname === '/__bench/scheduled') {",
-    "      await current.scheduled({ cron:url.searchParams.get('cron') || '0 * * * *', scheduledTime:fixedTime, type:'scheduled' }, env, ctx);",
+    "      await current.scheduled({ cron:url.searchParams.get('cron') || '0 * * * *', scheduledTime:fixedTime, type:'scheduled' }, benchEnv, ctx);",
     "    } else if (url.pathname === '/__bench/queue') {",
     "      const body = await req.json();",
     "      if (!Number.isInteger(body.count) || body.count < 0 || body.count > 10) return new Response('invalid count', {status:400});",
-    "      await current.queue(batch(kind, body.count), env, ctx);",
+    "      await current.queue(batch(url.searchParams.get('wake') || '', kind !== 'invalid', body.count), benchEnv, ctx);",
     "    } else return new Response('Not found', {status:404});",
     "    if (outbound > before) return Response.json({ok:false, reason:'external_blocked', outbound:outbound-before}, {status:502});",
-    "    return Response.json({ok:true, outbound:0});",
+    "    return Response.json({ok:true, outbound:0, acked:counts.acked, retried:counts.retried, d1:counts.d1});",
     "  } catch { return Response.json({ok:false, reason:'job_failed', outbound:outbound-before}, {status:500}); }",
     "} };",
   ].join("\n");
@@ -107,8 +123,21 @@ export function seedForKind(scenario, kind) {
     return { path: "/__bench/scheduled?cron=" + encodeURIComponent(scenario.cron) +
       "&kind=" + kind, body: "{}" };
   }
-  const count = kind === "limit" ? scenario.inputMax : kind === "invalid" ? 0 : 1;
-  return { path: "/__bench/queue?kind=" + kind, body: JSON.stringify({count}) };
+  const count = kind === "limit" ? scenario.inputMax : 1;
+  return { path: "/__bench/queue?kind=" + kind + "&wake=" + scenario.wakeKind, body: JSON.stringify({count}), count };
+}
+/**
+ * A queue sample is valid only if the consumer really ran: valid wakes touch D1 and are acked;
+ * malformed wakes are acked without any D1 statement. HTTP 200 alone proves nothing.
+ */
+export function validateSample(spec, status, responseText) {
+  if (status !== 200) return false;
+  let body;
+  try { body = JSON.parse(responseText); } catch { return false; }
+  if (body?.ok !== true || body.outbound !== 0) return false;
+  if (!spec.path.startsWith("/__bench/queue")) return Number.isInteger(body.d1);
+  if (body.retried !== 0 || body.acked !== spec.count) return false;
+  return spec.path.includes("kind=invalid") ? body.d1 === 0 : body.d1 > 0;
 }
 export function cpuFromProfile(profile, initialResolutionMs = 0.1) {
   const names = new Map(profile.nodes.map(n => [n.id, n.callFrame.functionName]));
@@ -203,12 +232,13 @@ async function localTarget(worker, opts) {
     await call("Profiler.enable");
     await call("Profiler.setSamplingInterval",{interval:100});
     const run=async(spec)=>{
-      await call("Profiler.start");
+      const started=await call("Profiler.start");
+      if (started.error) throw Error("V8 sampling start failed: "+JSON.stringify(started.error));
       const r=await fetch(base+spec.path,{method:"POST",body:spec.body,
         headers:{"content-type":"application/json"}});
       const responseText=await r.text();
       const result=await call("Profiler.stop");
-      if (result.error) throw Error("V8 sampling failed");
+      if (result.error || !result.result?.profile) throw Error("V8 sampling failed: "+JSON.stringify(result).slice(0,300));
       return {status:r.status, bytes:responseText.length, responseText,
         ...cpuFromProfile(result.result.profile)};
     };
@@ -254,16 +284,17 @@ export async function main(args) {
           for(let i=0;i<opts.samples;i++) {
             const r=await target.run(spec);
             rows.get(s.id).push({kind,cpuMs:r.cpuMs,status:r.status,
-              bytes:r.bytes,d1:0,unexpected:r.status!==200});
+              bytes:r.bytes,d1:0,unexpected:!validateSample(spec,r.status,r.responseText)});
           }
         }
       }
       for(let i=0;i<opts.coldSamples;i++) {
         await target.reload();
         for(const s of scenariosForWorker) {
-          const r=await target.run(seedForKind(s,"normal"));
+          const spec=seedForKind(s,"normal");
+          const r=await target.run(spec);
           rows.get(s.id).push({kind:"cold",cpuMs:r.cpuMs,status:r.status,
-            bytes:r.bytes,d1:0,unexpected:r.status!==200});
+            bytes:r.bytes,d1:0,unexpected:!validateSample(spec,r.status,r.responseText)});
         }
       }
       for(const [id,samples] of rows) {
