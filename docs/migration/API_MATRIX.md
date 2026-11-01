@@ -549,7 +549,7 @@ T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuse
 
 DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next 側は `src/lib/api/publicEventStaff.ts` で bridge 維持。テスト: `apps/api/test/publicEventStaff.parity.test.mjs`。実装 commit `483b34b26c15916302f002b90d15377618ed4e0d`。独立レビュー・最新 CI 未完了につき PARITY_VERIFIED にはしない。CURRENT の `publicJsonResponse` は一致する `If-None-Match` に 304 を返す。PHASE_6_SPEC の「304 を返さない」は実装と矛盾するため、コード準拠で 304 を保持（ドキュメントの調整はレビュー時）。
 
-## MIG-0661 — CostGuardBanner read DTO endpoints (U01–U03 code implemented; CI/review pending)
+## MIG-0661 — CostGuardBanner read DTO endpoints (merged: PR#419, squash 1f583403cbc817ccac5cc182df97ab25e32e2425, final Head 604ef28349b3fde19b6565598842fcb3e12353f8)
 
 | Endpoint | CURRENT source | Hono target | Guard and data read | State |
 | --- | --- | --- | --- | --- |
