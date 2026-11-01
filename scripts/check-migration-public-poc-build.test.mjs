@@ -68,3 +68,21 @@ test("linked islands directory cannot be accepted as a fixture", (t) => {
   assert.match(failures, /symlink in fixture output: islands/);
   assert.match(failures, /islands fixture HTML is not a real file/);
 });
+
+test("nested file and directory symlinks at any depth are rejected, including dangling ones", (t) => {
+  const dir = fixture(t);
+  const outside = mkdtempSync(join(tmpdir(), "flamenode-poc-external-nested-"));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(join(outside, "leak.html"), publicHtml);
+  symlinkSync(join(outside, "leak.html"), join(dir, "public_demo/leaked.html"));
+  assert.match(inspectPublicFixtureBuild(dir).join("\n"), /symlink in fixture output: public_demo\/leaked\.html/);
+  rmSync(join(dir, "public_demo/leaked.html"));
+
+  symlinkSync(outside, join(dir, "islands/nested-private"), "dir");
+  assert.match(inspectPublicFixtureBuild(dir).join("\n"), /symlink in fixture output: islands\/nested-private/);
+  rmSync(join(dir, "islands/nested-private"));
+
+  mkdirSync(join(dir, "public_demo/a/b"), { recursive: true });
+  symlinkSync(join(dir, "gone"), join(dir, "public_demo/a/b/dangling"));
+  assert.match(inspectPublicFixtureBuild(dir).join("\n"), /symlink in fixture output: public_demo\/a\/b\/dangling/);
+});

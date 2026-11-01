@@ -17,6 +17,23 @@ function entryStat(target) {
   }
 }
 
+// Walk without following links so nested symlinks (including dangling ones) are reported.
+function findNestedSymlinks(base, relative = "") {
+  const found = [];
+  let children;
+  try {
+    children = fs.readdirSync(path.join(base, relative), { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const child of children) {
+    const rel = relative ? relative + "/" + child.name : child.name;
+    if (child.isSymbolicLink()) found.push(rel);
+    else if (child.isDirectory()) found.push(...findNestedSymlinks(base, rel));
+  }
+  return found;
+}
+
 export function inspectPublicFixtureBuild(outputDir) {
   const issues = [];
   const fail = (message) => issues.push(message);
@@ -31,6 +48,9 @@ export function inspectPublicFixtureBuild(outputDir) {
   const entries = fs.readdirSync(outputDir, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink()) fail("symlink in fixture output: " + entry.name);
+    else if (entry.isDirectory()) {
+      for (const nested of findNestedSymlinks(outputDir, entry.name)) fail("symlink in fixture output: " + nested);
+    }
   }
 
   const htmlPath = path.join(outputDir, "public_demo/index.html");
