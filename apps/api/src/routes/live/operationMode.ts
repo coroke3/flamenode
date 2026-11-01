@@ -55,9 +55,38 @@ export type ParsedOperationModeKvMirror = {
   reason?: string | null;
 };
 
+/** ZERO_1102 rule 78: request-time JSON.parse is capped at 64 KiB. */
+export const KV_MIRROR_PARSE_LIMIT = 64 * 1024;
+const KV_MIRROR_TAIL_SCAN = 256;
+const OVERSIZED_OPEN = /^\s*\{/;
+const OVERSIZED_MODE = /"mode"\s*:\s*"([a-z_]+)"/;
+const OVERSIZED_UPDATED_AT = /"updated_at"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\s*[,}]/;
+const OVERSIZED_CLOSE = /\}\s*$/;
+
+/**
+ * Bounded scan for a valid mirror above the parse limit (no JSON.parse).
+ * Mode and updated_at are looked up only in the first 64 KiB head and a short
+ * tail (writers put them outside the large reason string; an escaped quote
+ * inside a reason cannot match the unescaped key patterns). Reason is dropped
+ * (null). Truncated or unrecognised text stays null (normal).
+ */
+function scanOversizedKvMirror(raw: string): ParsedOperationModeKvMirror | null {
+  const head = raw.slice(0, KV_MIRROR_PARSE_LIMIT);
+  const tail = raw.slice(-KV_MIRROR_TAIL_SCAN);
+  if (!OVERSIZED_OPEN.test(head) || !OVERSIZED_CLOSE.test(tail)) return null;
+  const mode = OVERSIZED_MODE.exec(head)?.[1];
+  if (!isOperationMode(mode)) return null;
+  const at = OVERSIZED_UPDATED_AT.exec(head) ?? OVERSIZED_UPDATED_AT.exec(tail);
+  if (!at) return null;
+  const updatedAt = Number(at[1]);
+  if (!Number.isFinite(updatedAt)) return null;
+  return { mode, updated_at: updatedAt, reason: null };
+}
+
 /** Mirrors CURRENT kvMirrorCore: invalid reason is absent, not coerced. */
 export function parseKvMirror(raw: string | null): ParsedOperationModeKvMirror | null {
   if (!raw) return null;
+  if (raw.length > KV_MIRROR_PARSE_LIMIT) return scanOversizedKvMirror(raw);
   try {
     const parsed = JSON.parse(raw) as {
       mode?: unknown;

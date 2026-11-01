@@ -437,3 +437,37 @@ test("MIG-0661 T06: admin DB legacy oversized reason stays under S2 response bud
     sqlite.close();
   }
 });
+
+test("MIG-0661 T09: oversized mirror never JSON.parses and preserves mode (bounded scan)", async () => {
+  const realParse = JSON.parse;
+  for (const mode of ["maintenance", "read_only", "static_only", "economy"]) {
+    resetOperationModeCachesForTests();
+    const d1 = { count: 0 }, kv = { count: 0 };
+    const text = JSON.stringify({ mode, reason: "Y".repeat(70 * 1024), updated_at: 1700000000000 });
+    assert.ok(text.length > 64 * 1024);
+    const env = { DB: unavailableD1(d1), KV: kvResponse(text, kv) };
+    let bigParses = 0;
+    JSON.parse = (t, ...r) => { if (typeof t === "string" && t.length > 64 * 1024) bigParses++; return realParse(t, ...r); };
+    try {
+      assert.equal(await resolvePublicOperationMode(env, { allowD1: false }), mode);
+      assert.deepEqual(await requestWith(env), { mode, reason: null });
+    } finally {
+      JSON.parse = realParse;
+    }
+    assert.equal(bigParses, 0);
+    assert.equal(kv.count, 1);
+    assert.equal(d1.count, 0);
+  }
+});
+
+test("MIG-0661 T09: oversized mirror with bad mode or missing updated_at stays normal", async () => {
+  for (const text of [
+    JSON.stringify({ mode: "bogus", reason: "Y".repeat(70 * 1024), updated_at: 1 }),
+    JSON.stringify({ mode: "maintenance", reason: "Y".repeat(70 * 1024) }),
+  ]) {
+    resetOperationModeCachesForTests();
+    const kv = { count: 0 };
+    assert.deepEqual(await requestWith({ DB: unavailableD1({ count: 0 }), KV: kvResponse(text, kv) }),
+      { mode: "normal", reason: null });
+  }
+});
