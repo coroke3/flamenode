@@ -1,12 +1,13 @@
 /**
- * MIG-0519 U01: provisional SA-075 JSON transport until MIG-0641 merges its Zod contract.
- * This endpoint is NOT mounted in the current Hono API yet. Do not cut over /rules.
+ * MIG-0519 U03: SA-075 JSON transport on the merged MIG-0641 contract
+ * (POST /api/personal/terms/accept, @flamenode/contracts AcceptLatestTermsResponseSchema).
  */
+import { AcceptLatestTermsResponseSchema } from "@flamenode/contracts";
 import { sanitizeNextPath } from "../../../../src/lib/utils/next.ts";
 
 export type TermsAcceptResponse =
   | { ok: true; next: string }
-  | { ok: false; next?: string; message?: string; reason?: string };
+  | { ok: false; next?: string; message?: string };
 
 export async function acceptLatestTerms(
   next: string,
@@ -37,22 +38,24 @@ export async function acceptLatestTerms(
       return { ok: false, next: `/rules?next=${encodeURIComponent(safeNext)}&error=database_unavailable` };
     }
   }
-  if (typeof body !== "object" || body === null || Array.isArray(body) ||
-      typeof (body as { ok?: unknown }).ok !== "boolean") {
-    throw new Error("Invalid terms response");
+  const parsed = AcceptLatestTermsResponseSchema.safeParse(body);
+  if (parsed.success) {
+    const { ok, next: serverNext, message } = parsed.data;
+    if (ok) {
+      if (!response.ok) throw new Error("Invalid terms success");
+      return { ok: true, next: serverNext };
+    }
+    return { ok: false, next: serverNext, message };
   }
-  const result = body as Record<string, unknown>;
-  if (result.next !== undefined && typeof result.next !== "string") throw new Error("Invalid terms next");
-  if (result.message !== undefined && typeof result.message !== "string") throw new Error("Invalid terms message");
-  if (result.reason !== undefined && typeof result.reason !== "string") throw new Error("Invalid terms reason");
-  if (result.ok === true) {
-    if (!response.ok || typeof result.next !== "string") throw new Error("Invalid terms success");
-    return { ok: true, next: result.next };
+  // The merged schema requires `next`; a failure carrying only an actionable
+  // message (CURRENT shows it and stays on the form) is still accepted.
+  const result = body as Record<string, unknown> | null;
+  const isObject = typeof result === "object" && result !== null && !Array.isArray(result);
+  if (isObject && result.ok === false && typeof result.message === "string" && result.next === undefined) {
+    return { ok: false, message: result.message };
   }
-  // A failing response must carry an actionable redirect or an error message.
-  if (typeof result.next !== "string" && typeof result.message !== "string") {
-    throw new Error("Invalid terms error");
+  if (isObject && result.next !== undefined && typeof result.next !== "string") {
+    throw new Error("Invalid terms next");
   }
-  return { ok: false, next: result.next as string | undefined, message: result.message as string | undefined,
-    reason: result.reason as string | undefined };
+  throw new Error("Invalid terms response");
 }

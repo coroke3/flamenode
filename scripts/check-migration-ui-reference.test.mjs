@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { readUiReferenceInputs, validateUiReference } from "./check-migration-ui-reference.mjs";
+import { mockArtifactExists, readUiReferenceInputs, validateUiReference } from "./check-migration-ui-reference.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = () => readUiReferenceInputs(root);
@@ -39,4 +41,90 @@ test("missing mock artifacts and unclassified parts fail validation", () => {
   assert.match(validateUiReference(f).join("\n"), /missing artifact/);
   const g = fixture(); g.uiText = g.uiText.split("\n").filter(l => !l.startsWith("| `ManageInbox` |")).join("\n");
   assert.match(validateUiReference(g).join("\n"), /missing mock disposition: ManageInbox/);
+});
+
+test("mock artifacts require an actual file whose resolved target stays inside the registered bundle", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-ui-mock-"));
+  try {
+    const mock = path.join(tmp, "docs/migration/mock");
+    const inside = path.join(mock, "nested");
+    const external = path.join(tmp, "external");
+    fs.mkdirSync(inside, { recursive: true });
+    fs.mkdirSync(external);
+    fs.writeFileSync(path.join(inside, "inside.html"), "<p>registered</p>");
+    fs.writeFileSync(path.join(external, "external.html"), "<p>not registered</p>");
+    fs.symlinkSync("nested/inside.html", path.join(mock, "internal-alias.html"), "file");
+    fs.symlinkSync(inside, path.join(mock, "internal-dir-alias"), "dir");
+    fs.symlinkSync(path.join(external, "external.html"), path.join(mock, "external-alias.html"), "file");
+    fs.symlinkSync(external, path.join(mock, "external-dir-alias"), "dir");
+    fs.symlinkSync(path.join(tmp, "missing-target.html"), path.join(mock, "dangling.html"), "file");
+
+    for (const candidate of [
+      "nested/inside.html",
+      "internal-alias.html",
+      "internal-dir-alias/inside.html",
+    ]) assert.equal(mockArtifactExists(tmp, candidate), true, candidate);
+
+    for (const candidate of [
+      "external-alias.html",
+      "external-dir-alias/external.html",
+      "dangling.html",
+      "nested",
+      "missing.html",
+      "../external/external.html",
+      path.join(external, "external.html"),
+      "",
+    ]) assert.equal(mockArtifactExists(tmp, candidate), false, candidate);
+
+    // readUiReferenceInputs must use the same canonical guard, not existsSync.
+    const registered = readUiReferenceInputs(root);
+    assert.equal(registered.artifactExists("source/boards/Main.dc.html"), true);
+    assert.equal(registered.artifactExists("nonexistent-artifact.html"), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("mock bundle root and its ancestor cannot redirect validation to a symlink target", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "flamenode-mock-root-"));
+  try {
+    const repo = path.join(tmp, "repo");
+    const docs = path.join(repo, "docs");
+    const migration = path.join(docs, "migration");
+    const mock = path.join(migration, "mock");
+    const original = path.join(migration, "original-mock");
+    const outside = path.join(tmp, "outside");
+    const internal = path.join(repo, "other-mocks");
+    fs.mkdirSync(mock, { recursive: true });
+    fs.mkdirSync(outside);
+    fs.mkdirSync(internal);
+    for (const dir of [mock, outside, internal]) {
+      fs.writeFileSync(path.join(dir, "reference.html"), "<p>artifact</p>");
+    }
+    assert.equal(mockArtifactExists(repo, "reference.html"), true);
+
+    fs.renameSync(mock, original);
+    fs.symlinkSync(outside, mock, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "bundle root points outside checkout");
+    fs.unlinkSync(mock);
+
+    fs.symlinkSync(internal, mock, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "bundle root points to another in-repo directory");
+    fs.unlinkSync(mock);
+    fs.renameSync(original, mock);
+    assert.equal(mockArtifactExists(repo, "reference.html"), true, "normal registered directory still works");
+
+    // A symlink one level higher is also not allowed to move the bundle.
+    const altMigration = path.join(outside, "migration");
+    fs.mkdirSync(path.join(altMigration, "mock"), { recursive: true });
+    fs.writeFileSync(path.join(altMigration, "mock", "reference.html"), "<p>outside</p>");
+    fs.renameSync(migration, path.join(docs, "original-migration"));
+    fs.symlinkSync(altMigration, migration, "dir");
+    assert.equal(mockArtifactExists(repo, "reference.html"), false, "ancestor redirects bundle outside");
+    fs.unlinkSync(migration);
+    fs.renameSync(path.join(docs, "original-migration"), migration);
+    assert.equal(mockArtifactExists(repo, "reference.html"), true, "restored directory passes");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

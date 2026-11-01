@@ -792,6 +792,7 @@ PR を revert（まだどの route からも使われない）。
 - **U02 adapter**: `VideoForm` の props に `submit(mode: "free" | "slot" | "update", fd: FormData): Promise<VideoActionResult>` を足し、`createFreeVideo` / `submitSlotVideo` / `updateVideo` の直呼びを置き換える。`VideoMembersField` の 2 adapter（MIG-0713）は `VideoForm` の props から渡す。
 - **U03 移植**: 残りは React のまま（wizard の手順・必須 field の検査・下書き・文言を変えない）。`next/link` は `<a>`、`useRouter` は `useNavigate`。
 - **U04 test**: CURRENT の `src/components/forms/*.contract.test.mjs` と同じ入力で、adapter に渡る FormData の key と値が同じことを確かめる。
+- **Follow-up gate（MIG-0712 から引き継ぎ、owner authorization 2026-11-01）**: MIG-0712 の部品（`SquareIconEditor` / `VideoIconPicker` 等）は 390px / 1440px の browser parity を未実施。route が最初にこれらを mount する task（MIG-0713 / 0714 / route task）の DONE 前に実施する。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |

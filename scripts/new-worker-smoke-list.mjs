@@ -88,9 +88,48 @@ function normalizeRoutePath(rawPath) {
   return { path, requiresFixture: hasQuery };
 }
 
+// API_MATRIX contains illustrative Markdown code blocks as well as live route
+// documentation. Never treat code-fenced examples as registered smoke targets.
+// Follow CommonMark's same-character closing rule. Fences may be nested in
+// blockquote (>) or list-item containers, so strip those container prefixes
+// (and the indentation they imply) before looking for a fence delimiter.
+const CONTAINER_PREFIX = "(?:[ \\t]*>)*[ \\t]*(?:(?:[-*+]|\\d{1,9}[.)])[ \\t]+)*";
+const FENCE_OPEN = new RegExp("^" + CONTAINER_PREFIX + "(`{3,}|~{3,})(.*)$");
+const FENCE_CLOSE = new RegExp("^" + CONTAINER_PREFIX + "(`{3,}|~{3,})[ \\t]*$");
+
+// Inline-code spans in free prose (outside a Markdown table row) are
+// illustrative examples. Real route inventory lives in table rows, including
+// routes named in a row's parenthetical, so table rows keep their spans.
+function omitInlineCodeExamples(line) {
+  if (!line.includes("`") || /^\s*\|/.test(line)) return line;
+  return line.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, " ");
+}
+
+function omitFencedExamples(markdown) {
+  let fenceChar = null;
+  let fenceLength = 0;
+  return markdown.split(/\r?\n/).map((line) => {
+    if (fenceChar) {
+      const closing = FENCE_CLOSE.exec(line);
+      if (closing && closing[1][0] === fenceChar && closing[1].length >= fenceLength) {
+        fenceChar = null;
+        fenceLength = 0;
+      }
+      return "";
+    }
+    const opening = FENCE_OPEN.exec(line);
+    if (opening && (opening[1][0] === "~" || !opening[2].includes("`"))) {
+      fenceChar = opening[1][0];
+      fenceLength = opening[1].length;
+      return "";
+    }
+    return omitInlineCodeExamples(line);
+  }).join("\n");
+}
+
 export function collectApiMatrixRoutes(matrix) {
   const out = [];
-  for (const match of matrix.matchAll(/\b(GET|HEAD|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s\x60|"<>]+)/g)) {
+  for (const match of omitFencedExamples(matrix).matchAll(/\b(GET|HEAD|POST|PUT|PATCH|DELETE)\s+(\/api\/[^\s\x60|"<>]+)/g)) {
     const method = match[1];
     const parsed = normalizeRoutePath(match[2]);
     if (parsed && METHOD.has(method)) {

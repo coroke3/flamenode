@@ -90,3 +90,14 @@ test("T04: static legal page has no dead consent control without JS", () => {
   assert.match(astro, /showConsentMount=\{true\}/);
   assert.match(astro, /mountRulesConsent\(\)/);
 });
+
+test("U03: terms client parses with the merged MIG-0641 contract schema", async () => {
+  const { AcceptLatestTermsResponseSchema } = await import("../packages/contracts/src/index.ts");
+  const ok = { ok: true, next: "/x" };
+  assert.deepEqual(AcceptLatestTermsResponseSchema.parse(ok), ok);
+  assert.deepEqual(await acceptLatestTerms("/x", mkFetch(200, ok)), ok);
+  assert.deepEqual(await acceptLatestTerms("/x", mkFetch(409, { ok: false, next: "/rules?next=%2Fx", message: "m" })), { ok: false, next: "/rules?next=%2Fx", message: "m" });
+  assert.deepEqual(await acceptLatestTerms("/x", mkFetch(503, { ok: false, message: "m" })), { ok: false, message: "m" });
+  await assert.rejects(() => acceptLatestTerms("/x", mkFetch(200, { ok: "yes", next: "/x" })), /Invalid terms/);
+  await assert.rejects(() => acceptLatestTerms("/x", mkFetch(200, [])), /Invalid terms/);
+});
