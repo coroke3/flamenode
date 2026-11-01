@@ -5,7 +5,9 @@
  * An untouched database may not contain d1_migrations yet.
  * --expect-empty accepts a d1_migrations table with zero rows (created by a
  * wrangler apply that recorded nothing) but rejects any migration row.
- * Reserved prefixes are matched literally: LIKE treats _ as a wildcard.
+ * Reserved prefixes (sqlite_, _cf_) are matched literally with substr():
+ * LIKE treats _ as a wildcard. "user_tables" counts every user schema object
+ * (tables, views, triggers, indexes), so a views-only DB is not empty.
  */
 import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
@@ -18,8 +20,11 @@ const SCRIPT = "check-d1-bootstrap-state";
 const TABLES_SQL = `
 SELECT
   (SELECT COUNT(*) FROM sqlite_master
-   WHERE type='table' AND name NOT LIKE 'sqlite_%'
-     AND substr(name, 1, 4) <> '_cf_' AND name <> 'd1_migrations') AS user_tables,
+   WHERE type IN ('table','view','trigger','index')
+     AND substr(name, 1, 7) <> 'sqlite_'
+     AND substr(name, 1, 4) <> '_cf_'
+     AND substr(tbl_name, 1, 4) <> '_cf_'
+     AND name <> 'd1_migrations' AND tbl_name <> 'd1_migrations') AS user_tables,
   (SELECT COUNT(*) FROM sqlite_master
    WHERE type='table' AND name='d1_migrations') AS has_migrations
 `;

@@ -111,3 +111,24 @@ test("empty d1_migrations table is empty; any migration row is not", () => fixtu
   db.close();
   assert.equal(invoke(root, [`--database=${file}`, "--expect-empty"]).status, 1);
 }));
+
+test("names resembling the sqlite_ prefix still count as user tables", () => fixture((root) => {
+  for (const name of ["sqlitex", "sqlite1data"]) {
+    const dir = fs.mkdtempSync(path.join(root, "s-"));
+    const file = createDb(dir, [`CREATE TABLE ${name} (id INTEGER)`]);
+    assert.equal(invoke(root, [`--database=${file}`, "--expect-empty"]).status, 1, name);
+  }
+  const dir = fs.mkdtempSync(path.join(root, "p-"));
+  const pk = createDb(dir, ["CREATE TABLE t_ok (id INTEGER PRIMARY KEY AUTOINCREMENT)"]);
+  assert.equal(invoke(root, [`--database=${pk}`, "--expect-empty"]).status, 1);
+}));
+
+test("views, triggers and indexes alone make the DB non-empty", () => fixture((root) => {
+  const view = createDb(fs.mkdtempSync(path.join(root, "v-")), ["CREATE VIEW v AS SELECT 1"]);
+  assert.equal(invoke(root, [`--database=${view}`, "--expect-empty"]).status, 1);
+  const empty = createDb(fs.mkdtempSync(path.join(root, "m-")), [
+    "CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY, name TEXT UNIQUE)",
+    "CREATE INDEX d1m_idx ON d1_migrations(name)",
+  ]);
+  assert.equal(invoke(root, [`--database=${empty}`, "--expect-empty"]).status, 0);
+}));
