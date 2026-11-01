@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -14,13 +14,36 @@ const actionRoots = [
 
 const violations = [];
 
+// A symlink anywhere in a scan root can hide mutations or redirect the audit outside this checkout.
+function rejectSymlinkAncestors(target) {
+  let current = path.resolve(target);
+  const repositoryRoot = path.resolve(root);
+  while (true) {
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      throw new Error(`[check:static-rebuild-atomicity] symlink in scan path: ${path.relative(root, current)}`);
+    }
+    if (current === repositoryRoot || current === path.dirname(current)) break;
+    current = path.dirname(current);
+  }
+}
+
 function collectTsFiles(dir) {
+  rejectSymlinkAncestors(dir);
   const entries = [];
-  for (const name of readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, name.name);
-    if (name.isDirectory()) entries.push(...collectTsFiles(full));
-    else if (name.name.endsWith(".ts") && !name.name.endsWith(".test.ts"))
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`[check:static-rebuild-atomicity] symlink in scan tree: ${path.relative(root, full)}`);
+    }
+    if (entry.isDirectory()) {
+      entries.push(...collectTsFiles(full));
+    } else if (
+      entry.isFile() &&
+      /\.(?:ts|tsx|mts|cts)$/i.test(entry.name) &&
+      !/\.test\.(?:ts|tsx|mts|cts)$/i.test(entry.name)
+    ) {
       entries.push(full);
+    }
   }
   return entries;
 }
@@ -48,10 +71,13 @@ for (const dir of actionRoots) {
   }
 }
 
-const enqueueSource = readFileSync(
-  path.join(root, "packages/server-core/src/staticRebuild/enqueue.ts"),
-  "utf8",
-);
+function readRepositoryFile(relative) {
+  const target = path.join(root, relative);
+  rejectSymlinkAncestors(target);
+  return readFileSync(target, "utf8");
+}
+
+const enqueueSource = readRepositoryFile("packages/server-core/src/staticRebuild/enqueue.ts");
 const batchStart = enqueueSource.indexOf(
   "export async function buildStaticRebuildQueueBatch",
 );
@@ -73,10 +99,7 @@ assert.match(
 assert.doesNotMatch(batchBuilderSource, /shouldSkipRecentRow/);
 assert.doesNotMatch(batchBuilderSource, /\.select\(staticRebuildActiveLookupSelect\)/);
 
-const loaderSource = readFileSync(
-  path.join(root, "src/lib/publicData/loader.ts"),
-  "utf8",
-);
+const loaderSource = readRepositoryFile("src/lib/publicData/loader.ts");
 assert.match(loaderSource, /directEnqueueStaticRebuild/);
 assert.match(loaderSource, /probePublicStaticTarget/);
 assert.match(loaderSource, /enqueued =[\s\S]*enqueueResult\.action === "inserted"/);

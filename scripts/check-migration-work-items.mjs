@@ -58,6 +58,121 @@ export function fetchMissingSourceHistory(root, entries) {
   return [...fetched];
 }
 
+// A task can claim either a file or a directory (including dir/**).
+// Normalize path spellings before checking ownership so "./", Windows separators,
+// and internal "." / ".." segments cannot bypass another active writer's lock.
+function canonicalOwnedPath(value) {
+  // Existing checkpoint notes can be scoped (e.g. "app.ts (mount lines only)").
+  // Keep those labels intact rather than broadening the ownership claim.
+  const posix = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  if (path.posix.isAbsolute(posix) || /^[A-Za-z]:/.test(posix)) return null;
+  const segments = posix.split("/");
+  // Collapsing ".." after a wildcard would change its meaning, not just spelling.
+  if (segments.some((part, i) => part === ".." && segments.slice(0, i).some(x => x.includes("*") || x.includes("?"))))
+    return null;
+  const normalized = path.posix.normalize(posix);
+  if (normalized === "." || normalized === ".." || normalized === "**" || normalized.startsWith("../"))
+    return null;
+  return normalized;
+}
+
+// A path claim includes that path and its descendants. Globs in existing
+// work-items (event*.ts, *.test.mjs, src/**/foo.ts) also need intersection
+// checks; treating "*" as a literal silently grants two writers one file.
+// This is a small glob-language intersection check, not filesystem expansion:
+// it also catches conflicts for files that have not been created yet.
+function tokenizeOwnedGlob(value) {
+  const tokens = [];
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === "*" && value[i + 1] === "*") {
+      tokens.push({kind:"globstar"});
+      i++;
+    } else if (value[i] === "*") tokens.push({kind:"star"});
+    else if (value[i] === "?") tokens.push({kind:"any"});
+    else tokens.push({kind:"literal",char:value[i]});
+  }
+  return tokens;
+}
+
+function globLanguagesIntersect(left, right) {
+  const a = tokenizeOwnedGlob(left), b = tokenizeOwnedGlob(right);
+  const alphabet = new Set(["/", "\u0000"]);
+  for (const t of [...a, ...b]) if (t.kind === "literal") alphabet.add(t.char);
+  const closure = (tokens, initial) => {
+    const states = new Set(initial), pending = [...initial];
+    for (const index of pending) {
+      if (index < tokens.length && ["star","globstar"].includes(tokens[index].kind) && !states.has(index+1)) {
+        states.add(index+1);
+        pending.push(index+1);
+      }
+    }
+    return [...states].sort((x,y)=>x-y);
+  };
+  const advance = (tokens, states, char) => {
+    const next = new Set();
+    for (const index of states) {
+      const token = tokens[index];
+      if (!token) continue;
+      if (token.kind === "literal" && token.char === char || token.kind === "any" && char !== "/") next.add(index+1);
+      else if (token.kind === "globstar" || token.kind === "star" && char !== "/") next.add(index);
+    }
+    return closure(tokens, next);
+  };
+  const first = [closure(a,[0]),closure(b,[0])], queue = [first], seen = new Set();
+  for (let i=0; i<queue.length; i++) {
+    const [leftStates,rightStates] = queue[i], key = leftStates.join(",")+"|"+rightStates.join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (leftStates.includes(a.length) && rightStates.includes(b.length)) return true;
+    for (const char of alphabet) {
+      const nextLeft = advance(a,leftStates,char), nextRight = advance(b,rightStates,char);
+      if (nextLeft.length && nextRight.length) queue.push([nextLeft,nextRight]);
+    }
+  }
+  return false;
+}
+
+function ownedGlobForms(value) {
+  // "**/" may represent zero or more path segments. Include the zero-depth
+  // form as well as the literal globstar form for each occurrence.
+  const forms = new Set([value, value+"/**"]);
+  // Set iteration includes newly added forms; visit successive zero-depth
+  // variants so multiple "/**/" segments cannot conceal an overlapping owner.
+  for (const form of forms) {
+    const index = form.indexOf("/**/");
+    if (index >= 0) forms.add(form.slice(0,index+1)+form.slice(index+4));
+  }
+  return forms;
+}
+
+function ownedPathsOverlap(left, right) {
+  // Only known, explicitly scoped legacy notes may carry separate ownership.
+  // Arbitrary suffixes such as "(ignore)" must not turn a real file/glob
+  // collision into an unchecked literal string comparison.
+  // Broad "MIG-XXXX files" claims still require live-PR diff inspection:
+  // the checkpoint text alone does not enumerate that subset.
+  const note = / \(([^()]*)\)$/;
+  const recognizedScope = value => {
+    const suffix = note.exec(value)?.[1];
+    return suffix !== undefined && (
+      /^MIG-\d{4} files$/.test(suffix) ||
+      /^(?:MIG-\d{4} )?(?:mount lines only|spreadsheet vars only)$/.test(suffix)
+    );
+  };
+  if (recognizedScope(left) || recognizedScope(right)) return left === right;
+  // An unknown note is not an ownership partition: compare its path normally.
+  left = left.replace(note, "");
+  right = right.replace(note, "");
+  if (left === right || left.startsWith(right + "/") || right.startsWith(left + "/")) return true;
+  if (!/[?*]/.test(left) && !/[?*]/.test(right)) return false;
+  for (const a of ownedGlobForms(left)) {
+    for (const b of ownedGlobForms(right)) {
+      if (globLanguagesIntersect(a,b)) return true;
+    }
+  }
+  return false;
+}
+
 export function validateWorkItems({statusText,entries,commitExists}) {
   const errors=[], ids=new Set([...statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map(m=>m[1])), claimed=new Map(), prs=new Map(), branches=new Map();
   for(const [filename,body] of Object.entries(entries)) {
@@ -85,8 +200,35 @@ export function validateWorkItems({statusText,entries,commitExists}) {
         if(value&&value!=="none"){if(seen.has(value))errors.push(filename+": "+label+" also claimed by "+seen.get(value));else seen.set(value,filename);}
       }
       if(activeStates.has(map.State))for(const p of (map["Owned paths"]||"").split(";").map(x=>x.trim()).filter(x=>x&&x!=="none")){
-        if(claimed.has(p))errors.push(filename+": path "+p+" already claimed by "+claimed.get(p));
-        else claimed.set(p,filename);
+        const normalized=canonicalOwnedPath(p);
+        if (normalized === null) {
+          errors.push(filename+": invalid owned path "+p+" (expected repository-relative path or dir/**)");
+          continue;
+        }
+        // A path may carry at most one trailing explanatory scope note.
+        // Two notes can otherwise hide the real path from ownedPathsOverlap,
+        // and a nonterminal note can bypass both scope owner and file checks.
+        // Exactly one non-nested trailing annotation may use one ASCII
+        // space as separator. Reject doubled spaces, tabs, NBSP and other
+        // Unicode whitespace that would turn a real file into a fake claim.
+        // Also reject nonterminal and nested parentheses, not just matches
+        // visible to the ordinary terminal-suffix stripper.
+        const hasParens=/[()]/.test(normalized);
+        const annotated=hasParens ? /^(.+?) \(([^()]*)\)$/.exec(normalized) : null;
+        if(/[^\S ]/.test(normalized) || (hasParens && (!annotated || /\s$/.test(annotated[1]) || /[()]/.test(annotated[1])))) {
+          errors.push(filename+": ambiguous owned path annotations: "+p);
+          continue;
+        }
+        // Check the canonical spelling: trailing slash or "/." after a
+        // qualified claim must not bypass the MIG owner identity check.
+        const scopedOwner=normalized.match(/ \((MIG-\d{4}) (?:files|mount lines only|spreadsheet vars only)\)$/)?.[1];
+        if(scopedOwner && scopedOwner!==id) {
+          errors.push(filename+": scoped owned path "+p+" names "+scopedOwner+" instead of "+id);
+          continue;
+        }
+        const collision=[...claimed].find(([existing])=>ownedPathsOverlap(existing,normalized));
+        if(collision)errors.push(filename+": path "+p+" already claimed by "+collision[1]+" ("+collision[0]+")");
+        else claimed.set(normalized,filename);
       }
     }
     if(["REVIEW","DONE"].includes(map.State))for(const f of ["Validation","Evidence"]){
