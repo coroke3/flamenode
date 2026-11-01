@@ -48,6 +48,11 @@ test("visual fixture writer refuses cwd, root, symlinks and directories that alr
       assert.deepEqual(fs.readdirSync(target), [], "symlink target remains untouched");
       fs.unlinkSync(alias);
       fs.rmdirSync(target);
+      // a dangling symlink named manifest.json must not be written through
+      fs.symlinkSync(path.join(dir, "nowhere"), path.join(dir, "manifest.json"));
+      assert.throws(() => writeFixtureSnapshot(dir), /must not already contain/);
+      fs.unlinkSync(path.join(dir, "manifest.json"));
+      assert.ok(!fs.existsSync(path.join(dir, "nowhere")), "dangling target not created");
     }
     const env = writeFixtureSnapshot(dir);
     assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);

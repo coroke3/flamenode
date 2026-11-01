@@ -404,7 +404,7 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .tp-sec{margin-top:80px}
 .tp-sec .sec-head .stack{gap:4px}
 .tp-empty{margin:0}
-.tp-shelf{margin-inline:calc(50% - 50vw);padding-inline:calc(50vw - 50%);overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-padding-inline:calc(50vw - 50%);outline-offset:-2px}
+.tp-shelf{--tp-rail:max(40px,calc((100vw - var(--wrap-max,1360px)) / 2 + 40px));margin-inline:calc(50% - 50vw);padding-inline:var(--tp-rail);overflow-x:auto;overscroll-behavior-x:contain;scroll-snap-type:x proximity;scroll-padding-inline:var(--tp-rail);outline-offset:-2px}
 .tp-shelf-track{display:flex;gap:24px;width:max-content;padding:0 0 8px}
 .tp-shelf-i{position:relative;flex:none;width:clamp(220px,22vw,300px);scroll-snap-align:start}
 .tp-shelf-rank{position:absolute;top:8px;left:8px;z-index:1;min-width:28px;padding:2px 8px;background:var(--bg);color:var(--ink);font-size:14px;line-height:20px;text-align:center}
@@ -445,7 +445,9 @@ a.p-link:where(:not(.fn-btn)){color:var(--brand-text)}
 .tp-closing{display:flex;flex-direction:column;gap:12px;padding-bottom:32px}
 .tp-closing p{margin:0}
 @media (max-width:640px){
-  .tp-intro{padding-top:32px}
+  /* the shared public header is fixed (52px) at <=640px and leaves the flow: keep the h1 below it (MIG-0506 U02 c4) */
+  .tp-intro{padding-top:calc(52px + 32px)}
+  .tp-shelf{--tp-rail:16px}
   .tp-rec-primary .tp-rec-status{font-size:24px;line-height:32px}
   .tp-sec{margin-top:40px}
   .tp-shelf-i{width:62vw}

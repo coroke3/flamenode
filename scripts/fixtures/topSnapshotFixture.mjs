@@ -54,8 +54,10 @@ export function writeFixtureSnapshot(dir) {
   }
   // The Work Order U02 command redirects stdout to "$SNAP/env.txt" before node runs, so the directory
   // may already hold unrelated files. Only refuse when the writer would replace its own outputs.
-  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()
-    || ["snapshot", "manifest.json"].some((n) => fs.existsSync(path.join(dir, n)))) {
+  // lstat (not exists) so a dangling symlink named snapshot/manifest.json also counts as present.
+  const present = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+  if (!present(dir) || !fs.lstatSync(dir).isDirectory()
+    || ["snapshot", "manifest.json"].some((n) => present(path.join(dir, n)))) {
     throw new Error("Fixture directory must exist and must not already contain snapshot/ or manifest.json");
   }
   return writeSnapshot(dir);
