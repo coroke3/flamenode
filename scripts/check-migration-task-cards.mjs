@@ -10,7 +10,7 @@ export const TASK_CARD_FILES = Object.freeze([
   "docs/migration/TASK_CARDS_6_7.md",
   "docs/migration/TASK_CARDS_8_9.md",
 ]);
-export const REQUIRED_CARD_FIELDS = Object.freeze(["読む:", "変更", "試験:", "DONE:"]);
+export const REQUIRED_CARD_FIELDS = Object.freeze(["読む:", "変更:", "試験:", "DONE:"]);
 
 export function parseTrackedMigrationTasks(status) {
   const tasks = new Map();
@@ -22,6 +22,14 @@ export function parseTrackedMigrationTasks(status) {
     }
   }
   return tasks;
+}
+
+// A required field is an instruction line ("- 試験: ...", "1. **試験:** ...", or a bare
+// "試験: ..." line start). Inline code, descriptive prose ("注記: `試験:` ...") and
+// blockquote text mention the marker without instructing anything.
+function hasCardField(proseText, marker) {
+  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("^[ \\t]*(?:(?:[-*+]|\\d{1,9}[.)])[ \\t]+)?(?:\\*\\*)?" + escaped, "m").test(proseText);
 }
 
 export function collectTaskCards(fileContents) {
@@ -50,7 +58,7 @@ export function collectTaskCards(fileContents) {
       if (cards.has(id)) errors.push(id + ": duplicate card in " + path + " and " + cards.get(id).path);
       else cards.set(id,{path,heading,text});
       for(const marker of REQUIRED_CARD_FIELDS) {
-        if(!proseText.includes(marker)) errors.push(id + ": missing card field " + marker);
+        if(!hasCardField(proseText, marker)) errors.push(id + ": missing card field " + marker);
       }
     }
   }
@@ -104,6 +112,7 @@ export const WORK_ORDER_SECTIONS = Object.freeze(["Source snapshot", "Owned path
 export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 
 // Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
+const QUOTE_PREFIX = /^( {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?(?:>[ \t]?)+)(.*)$/;
 function proseLines(text) {
   let fence = null;
   return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
@@ -111,6 +120,15 @@ function proseLines(text) {
     // Their contents are indented relative to the list marker.
     const listOpening = line.match(/^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
     const ordinaryOpening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence?.quote) {
+      const q = line.match(QUOTE_PREFIX);
+      if (!q) fence = null; // a non-quote line ends the quoted fence; fall through as prose
+      else {
+        const closing = q[2].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length && !closing[2].trim()) fence = null;
+        return " ".repeat(line.length);
+      }
+    }
     if (fence) {
       const indent = line.match(/^ */)[0].length;
       const closing = line.slice(indent).match(/^(`{3,}|~{3,})(.*)$/);
@@ -123,6 +141,13 @@ function proseLines(text) {
         fence = null;
         return line;
       }
+      return " ".repeat(line.length);
+    }
+    // Fences inside blockquotes ("> ```md", "- > ```md") are code too.
+    const quoted = line.match(QUOTE_PREFIX);
+    const quoteOpening = quoted?.[2].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (quoteOpening) {
+      fence = { char: quoteOpening[1][0], length: quoteOpening[1].length, indent: 0, quote: true };
       return " ".repeat(line.length);
     }
     const marker = listOpening || ordinaryOpening;

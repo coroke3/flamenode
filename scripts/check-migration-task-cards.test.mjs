@@ -374,3 +374,25 @@ test("spec read errors cannot silently hide invalid work orders", () => {
   assert.throws(() => readSpecs(() => { throw Object.assign(new Error("access denied"), { code: "EACCES" }); }), /access denied/);
   assert.ok(Object.values(readSpecs(() => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); })).every(value => value === undefined));
 });
+
+test("blockquote-contained fences cannot supply missing task-card fields", () => {
+  for (const [opening, closing] of [["> ```md", "> ```"], ["- > ```md", "  > ```"], ["> > ~~~md", "> > ~~~"]]) {
+    const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "- test instructions are missing");
+    const fenced = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "\n" + opening + "\n> - 試験: fake inside code\n" + closing + "\n" };
+    assert.match(validateTaskCards({ ...base, fileContents: fenced }).join("\n"), /MIG-0308: missing card field 試験:/, opening);
+    const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": fenced["docs/migration/TASK_CARDS_2_3.md"] + "- 試験: real after closing fence\n" };
+    assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /missing card field 試験:/, opening);
+  }
+});
+
+test("required field markers in inline code or prose do not satisfy the card", () => {
+  const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "");
+  for (const mention of ["注記: `試験:` は後で書く", "- 注記 試験: 参照", "> 試験: quoted note"]) {
+    const doc = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing.replace("### MIG-0308 — DB\n", "### MIG-0308 — DB\n" + mention + "\n") };
+    assert.match(validateTaskCards({ ...base, fileContents: doc }).join("\n"), /MIG-0308: missing card field 試験:/, mention);
+  }
+  for (const field of ["- 試験: zero diff", "- **試験:** zero diff", "1. 試験: zero diff"]) {
+    const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + field + "\n" };
+    assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /MIG-0308: missing card field 試験:/, field);
+  }
+});
