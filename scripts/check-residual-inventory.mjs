@@ -340,8 +340,13 @@ export function readInventoryRows(markdown) {
   // a damaged ledger record when its leading pipe was accidentally removed.
   const sourceLines=body.split("\n");
   const headerIndex=sourceLines.findIndex(line=>line.trim().startsWith("| Config | Kind |"));
-  const countIndex=sourceLines.findIndex((line,index)=>
-    index>headerIndex && line.trim().startsWith("**Counts (tracked source only):**"));
+  // The count marker is the only table terminator and must be unique. Taking
+  // the first of several would let an early or duplicated marker hide a
+  // pipe-less damaged row between it and the real terminator (fail-open).
+  const countIndexes=sourceLines.flatMap((line,index)=>
+    index>headerIndex && line.trim().startsWith("**Counts (tracked source only):**")?[index]:[]);
+  if(countIndexes.length>1) throw Error("inventory table count marker must be unique");
+  const countIndex=countIndexes.length?countIndexes[0]:-1;
   if(headerIndex<0 || countIndex<0) throw Error("inventory table boundaries missing");
   const tableLines=sourceLines.slice(headerIndex,countIndex).filter(line=>line.trim());
   for(const [index,line] of tableLines.entries()) {

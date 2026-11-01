@@ -692,3 +692,18 @@ test("T69: inventory table count marker is required to delimit audited rows",()=
     "**Counts (tracked source only):**","**Unverified counts:**")),
     /inventory table boundaries missing/);
 });
+
+test("T70: duplicate or early count markers cannot hide a damaged row",()=>{
+  const marker="**Counts (tracked source only):**";
+  const row=docs.split("\n").find(line=>line.includes("| worker.main |"));
+  const broken=row.replaceAll("|","");
+  // early marker: a second marker placed before the damaged row
+  assert.throws(()=>readInventoryRows(docs.replace(row,marker+" early\n"+broken)),
+    /count marker must be unique/);
+  // duplicate marker directly after the real one
+  assert.throws(()=>readInventoryRows(docs.replace(marker,marker+" x\n\n"+marker)),
+    /count marker must be unique/);
+  // broken row between an early marker and the real marker
+  assert.throws(()=>readInventoryRows(docs.replace(row,row+"\n"+marker+" early\n"+broken)),
+    /count marker must be unique/);
+});
