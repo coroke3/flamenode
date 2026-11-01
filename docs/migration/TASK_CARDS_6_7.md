@@ -72,7 +72,7 @@ Before writing code, capture one row for every impacted RH/SA (actual current so
 - 読む: `PHASE_6_SPEC.md` の MIG-0609 Work Order、`ZERO_1102.md` §5。
 - 変更: `+scripts/benchmark-background-cpu.mjs`（+test）、`+docs/migration/cloudflare/BACKGROUND_CPU.md`。`scripts/benchmark-api-cpu.mjs` は MIG-0606 の所有で変更しない。
 - 試験: 残る job すべての p50/p95/max（4種類の入力、各 50回以上）。
-- DONE: 全 job の LOCAL 測定値（simulator 込みの上限値）と、`floor(7ms / 1件 max)` の計算がある。D1 replay での再測定は MIG-0610 T00。
+- DONE: 全 job の LOCAL 測定値（simulator 込みの上限値）と、`floor(7ms / 1件 max)` の計算がある。D1 replay での再測定は MIG-0610 T00。 （2026-11-01 owner 承認で元の「max < 8ms にする上限の計算」から弱めた。merge 承認者は明示確認）
 
 ### MIG-0610 — split background jobs under 8ms (D-09)
 

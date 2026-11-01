@@ -475,17 +475,17 @@ PRをrevert（script と文書だけ）。
 
 ### MIG-0610: 予算を超える背景処理を1回 8ms 未満に分ける（D-09）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0609 の表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる
+- **Readiness:** NEEDS_REFINEMENT — 最初に T00（D1 replay 再測定）を実施し、その表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を T00 の表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる（MIG-0609 の表は simulator 込みの上限値で、そのままは使えない）
 - **Recipe:** R-JOB
 - **Runtime:** B
 - **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED
-- **Verified against:** `96f20dc` (2026-10-15)
+- **Verified against:** `6a39035` (2026-11-01、T00 / Owned paths / Commands は PR #455 のレビューで更新。job の定数と行番号は `96f20dc` 時点なので着手時に `rg -n` で引き直す)
 #### Source snapshot
 - 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作る）。
 - Cron の入口: `workers/content-jobs/index.ts:111`、`workers/fast-jobs/index.ts:114`、`workers/sync-jobs/index.ts:170`。CURRENT は1回の Cron の中で複数の job を順に動かす。
 - 仕事の正本は D1 の行、Queue は doorbell だけ（`background-jobs/README.md` の最重要原則）。
 #### Owned paths
-- 変更: MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
+- 変更: T00 用に `scripts/benchmark-background-cpu.mjs` と `scripts/benchmark-background-cpu.test.mjs`（MIG-0609 が作成。`--d1 replay` を足す。`scripts/benchmark-api-cpu.mjs` は MIG-0606 の所有なので変更せず、replay の仕組みは読んで同じ形で実装する）、`docs/migration/cloudflare/BACKGROUND_CPU.md`（T00 の表と分割後の測定値）、MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
 - 触らない: `workers/json-generator/**`（MIG-0907 で消す）、`crons` の式、本番の Queue 設定
 #### Micro-units
 - **T00 D1 replay 再測定（2026-11-01 追加）**: MIG-0609（PR #455）の測定は local D1 simulator の CPU（trivial read 1 回 約3.9ms）を含む上限値で、`cap = floor(7/1件 max)` は全 job で 0 になり cap として使えない。定数を下げる前に、`benchmark-api-cpu.mjs` の `--d1 replay` 相当（D1/R2 の結果を record して workerd に replay し、app code の CPU だけを測る）で `BACKGROUND_CPU.md` の同じ fixture と G18 hash を測り直し、その表を以降の unit の基準にする。
@@ -506,7 +506,8 @@ PRをrevert（script と文書だけ）。
 #### Commands
 ```bash
 npm run test:unit
-node scripts/benchmark-api-cpu.mjs --background
+node --test scripts/benchmark-background-cpu.test.mjs
+node scripts/benchmark-background-cpu.mjs --run --d1 replay   # T00 で足す option。分割前後とも同じ fixture
 npm run typecheck
 ```
 #### Ledger updates
