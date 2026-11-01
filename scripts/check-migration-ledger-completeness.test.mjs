@@ -134,3 +134,47 @@ test("malformed overlapping family cannot suppress ambiguous owner detection sil
   });
   assert.match(errors.join("\n"), /invalid family path cell/);
 });
+
+test("P2 regression: arbitrary damaged row prefix fails closed instead of hiding another owner", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const valid = matrix([], [parent, child])
+    .replace(familyRow(child), familyRow(child, "MIG-0619"));
+  const path = "src/lib/video/private/secret.ts";
+  assert.match(
+    validateLedgerCompleteness({ matrix: valid, status, trackedFiles: [path] }).join("\n"),
+    /ambiguous family ownership/,
+  );
+  for (const prefix of ["x ", "invalid-prefix ", "# "]) {
+    const damaged = valid.replace(familyRow(child, "MIG-0619"), prefix + familyRow(child, "MIG-0619"));
+    const errors = validateLedgerCompleteness({ matrix: damaged, status, trackedFiles: [path] });
+    assert.match(errors.join("\n"), /malformed family row/, prefix);
+  }
+});
+
+test("P2 regression: malformed row cannot stop validation of later family rows", () => {
+  const before = "src/lib/video/private/**";
+  const after = "src/lib/account/**";
+  const damaged = matrix([], [before, after])
+    .replace(familyRow(before), "x " + familyRow(before));
+  const parsed = parseFamilyRows(damaged);
+  assert.match(parsed.errors.join("\n"), /malformed family row/);
+  assert.deepEqual(parsed.rows.map((r) => r.pattern), [after]);
+});
+
+test("P2 regression: family table requires one boundary and rejects moved boundaries", () => {
+  const family = "src/lib/video/**";
+  const valid = matrix([], [family]);
+  assert.deepEqual(parseFamilyRows(valid).errors, []);
+  assert.match(
+    parseFamilyRows(valid.replace("**Update rule:** x", "")).errors.join("\n"),
+    /exactly one Update rule boundary/,
+  );
+  assert.match(
+    parseFamilyRows(valid.replace("**Update rule:** x", "**Update rule:** x\n**Update rule:** again")).errors.join("\n"),
+    /exactly one Update rule boundary/,
+  );
+  const early = valid.replace(familyRow(family), "**Update rule:** x\n" + familyRow(family))
+    .replace("\n**Update rule:** x\n", "\n");
+  assert.match(parseFamilyRows(early).errors.join("\n"), /family row appears after Update rule boundary/);
+});
