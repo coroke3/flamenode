@@ -38,7 +38,6 @@ export function isRequiredSource(file) {
   return REQUIRED_ROOT_FILES.includes(file) || REQUIRED_DIRS.some((d) => file.startsWith(d));
 }
 
-const FAMILY_ROW_RE = new RegExp("^\\|\\s*" + B + "([^" + B + "]+)" + B + "\\s*\\|");
 // Family rows live in "## Source families" (after the ledger, so parseFileRows ignores them).
 export function parseFamilyRows(markdown) {
   const text = markdown.replace(/\r\n/g, "\n");
