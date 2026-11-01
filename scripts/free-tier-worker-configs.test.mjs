@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { readWorkerConfigs } from "./free-tier-worker-configs.mjs";
+import { parseCronExpressions, parseQueueConsumerBlocks, readWorkerConfigs } from "./free-tier-worker-configs.mjs";
 import { WORKER_TARGETS } from "./new-worker-dry-run.mjs";
 
 function withFixture(run) {
@@ -39,6 +39,21 @@ test("free-tier audit refuses a missing TARGET Worker config", () => {
     fs.rmSync(path.join(root, "apps", "api", "wrangler.toml"));
     assert.throws(() => readWorkerConfigs(root), /ENOENT/);
   });
+});
+
+test("free-tier parsers see cron and consumer lines with end-of-line comments", () => {
+  const text = [
+    "[triggers]",
+    'crons = ["*/5 * * * *", "0 # x * * *"] # nightly',
+    "[[queues.consumers]] # wake",
+    'queue = "q"',
+    "max_retries = 3 # bounded",
+    '# crons = ["commented"]',
+  ].join("\n");
+  assert.deepEqual(parseCronExpressions(text), ["*/5 * * * *", "0 # x * * *"]);
+  const blocks = parseQueueConsumerBlocks(text);
+  assert.equal(blocks.length, 1);
+  assert.match(blocks[0], /^max_retries\s*=\s*3\s*$/m);
 });
 
 test("free-tier audit passes TARGET limits, cron and consumer declarations to the checker", () => {
