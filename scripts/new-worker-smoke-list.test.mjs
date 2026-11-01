@@ -618,3 +618,29 @@ test("MIG-0628 follow-up: unclosed Markdown fences remain excluded through EOF",
     ["GET /api/health"],
   );
 });
+
+test("MIG-0628 follow-up: container-nested fences and inline-code examples are excluded", () => {
+  const matrix = [
+    "| SA-001 | `GET /api/health` | real |",
+    "> ```ts",
+    "> GET /api/ghost-quote",
+    "> ```",
+    "- item",
+    "  ```sh",
+    "  GET /api/ghost-list",
+    "  ```",
+    "1. step",
+    "   ~~~",
+    "   POST /api/ghost-ordered",
+    "   ~~~",
+    "> - ```",
+    ">   DELETE /api/ghost-both",
+    ">   ```",
+    "Example: `GET /api/ghost-inline` is illustrative.",
+    "| SA-002 | `PATCH /api/health/check` | real |",
+  ].join("\n");
+  assert.deepEqual(
+    collectApiMatrixRoutes(matrix).map(({ method, path }) => method + " " + path),
+    ["GET /api/health", "PATCH /api/health/check"],
+  );
+});
