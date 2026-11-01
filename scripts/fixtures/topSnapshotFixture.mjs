@@ -47,13 +47,16 @@ export function writeSnapshot(dir, { top = topPayload(), trending = trendingPayl
 }
 
 export function writeFixtureSnapshot(dir) {
-  // Only write the visual fixture into a newly created temporary directory.
+  // Only write the visual fixture into a newly created temporary directory (unrelated files such as env.txt are left alone).
   // An empty or relative path would write snapshot/ and manifest.json into cwd.
   if (typeof dir !== "string" || !path.isAbsolute(dir) || dir === path.parse(dir).root) {
     throw new TypeError("Fixture directory must be a non-root absolute path");
   }
-  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory() || fs.readdirSync(dir).length !== 0) {
-    throw new Error("Fixture directory must exist and be empty");
+  // The Work Order U02 command redirects stdout to "$SNAP/env.txt" before node runs, so the directory
+  // may already hold unrelated files. Only refuse when the writer would replace its own outputs.
+  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()
+    || ["snapshot", "manifest.json"].some((n) => fs.existsSync(path.join(dir, n)))) {
+    throw new Error("Fixture directory must exist and must not already contain snapshot/ or manifest.json");
   }
   return writeSnapshot(dir);
 }

@@ -22,7 +22,7 @@ const page = fs.readFileSync("app/(public)/page.tsx", "utf-8");
 const recruitSrc = fs.readFileSync("src/components/layout/EventRecruitCard.tsx", "utf-8");
 
 const NOW = 1_790_000_000;
-test("visual fixture writer refuses cwd, root, and nonempty directories", () => {
+test("visual fixture writer refuses cwd, root, symlinks and directories that already hold a fixture", () => {
   for (const unsafe of ["", ".", "../existing", path.parse(process.cwd()).root, null]) {
     assert.throws(() => writeFixtureSnapshot(unsafe), { name: "TypeError" },
       `unsafe fixture destination: ${String(unsafe)}`);
@@ -31,15 +31,19 @@ test("visual fixture writer refuses cwd, root, and nonempty directories", () => 
   try {
     const existing = path.join(dir, "keep.txt");
     fs.writeFileSync(existing, "unchanged");
-    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/);
-    assert.equal(fs.readFileSync(existing, "utf8"), "unchanged");
-    fs.rmSync(existing);
+    // Unrelated files (the Work Order U02 command writes env.txt via shell redirect first) are allowed and kept.
+    for (const own of ["snapshot", "manifest.json"]) {
+      fs.mkdirSync(path.join(dir, own));
+      assert.throws(() => writeFixtureSnapshot(dir), /must not already contain/);
+      fs.rmdirSync(path.join(dir, own));
+    }
+    assert.throws(() => writeFixtureSnapshot(path.join(dir, "missing")), /must exist/);
     if (process.platform !== "win32") {
       const target = path.join(dir, "target");
       const alias = path.join(dir, "alias");
       fs.mkdirSync(target);
       fs.symlinkSync(target, alias, "dir");
-      assert.throws(() => writeFixtureSnapshot(alias), /must exist and be empty/,
+      assert.throws(() => writeFixtureSnapshot(alias), /must exist/,
         "a symlink must not redirect fixture writes to another directory");
       assert.deepEqual(fs.readdirSync(target), [], "symlink target remains untouched");
       fs.unlinkSync(alias);
@@ -48,7 +52,8 @@ test("visual fixture writer refuses cwd, root, and nonempty directories", () => 
     const env = writeFixtureSnapshot(dir);
     assert.equal(env.FLAMENODE_SNAPSHOT_DIR, dir);
     assert.ok(fs.statSync(env.FLAMENODE_SNAPSHOT_MANIFEST_FILE).size > 0);
-    assert.throws(() => writeFixtureSnapshot(dir), /must exist and be empty/,
+    assert.equal(fs.readFileSync(existing, "utf8"), "unchanged", "unrelated file kept");
+    assert.throws(() => writeFixtureSnapshot(dir), /must not already contain/,
       "repeat invocation must not silently replace prior fixture snapshots");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
