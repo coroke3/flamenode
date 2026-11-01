@@ -276,3 +276,25 @@ test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows",
   for(const later of CRITICAL_PATH.slice(i+1))assert.ok(!ancestors(id).has(later),id+" depends on later "+later);
  });
 });
+
+test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()=>{
+ const rows=[
+   "| MIG-0105 | obsolete gate | SKIPPED | — |",
+   "| MIG-0401 | independent PoC | READY | MIG-0105 |",
+ ].join("\n");
+ const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://example.test/review/1 | ALTERNATIVE=MIG-0108";
+ const selected=pickNextTask(rows+"\n"+approval,"");
+ assert.equal(selected.selected,"MIG-0401");
+ assert.deepEqual(selected.candidates,["MIG-0401"]);
+ assert.equal(pickNextTask(rows.replace("SKIPPED","DONE"),"").selected,"MIG-0401");
+ assert.equal(pickNextTask(rows,"").selected,null);
+ for(const invalid of [
+   approval.replace("MIG-0105 | PR#","MIG-9999 | PR#"),
+   approval.replace("PR#404","PR#invalid"),
+   approval.replace(" | ALTERNATIVE=MIG-0108",""),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE="),
+   approval.replace("APPROVAL=https://example.test/review/1","APPROVAL="),
+ ]) {
+   assert.equal(pickNextTask(rows+"\n"+invalid,"").selected,null,invalid);
+ }
+});
