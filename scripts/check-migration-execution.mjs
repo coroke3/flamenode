@@ -91,8 +91,11 @@ export function validateCheckpointPolicy(documents) {
 export function parseTaskRows(statusText) {
   const rows = new Map();
   let inTaskTable = false;
+  let inFence = false;
   for (const line of statusText.split("\n")) {
     const trimmed = line.trim();
+    if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; inTaskTable = false; continue; }
+    if (inFence) continue;
     // Scope damaged-row detection to STATUS task tables, not incidental MIG prose.
     if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|/.test(trimmed)) {
       inTaskTable = true;
@@ -156,42 +159,67 @@ export function parseTaskRows(statusText) {
 }
 
 // Whole-STATUS structure guard: every MIG row must sit under a canonical
-// header and delimiter row. parseTaskRows stays lenient for single-row fixtures.
+// header and a delimiter row of the same width. parseTaskRows stays lenient
+// for single-row fixtures. Fenced code blocks are ignored.
+const CANONICAL_HEADER = /^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(\s*Acceptance\s*\|)?$/;
+const DELIMITER_ROW = /^\|(\s*:?-{3,}:?\s*\|)+$/;
+const cellCount = (row) => row.split("|").length - 2;
+
 export function validateStatusTableStructure(statusText) {
   const errors = [];
-  const lines = statusText.split("\n");
+  let inFence = false;
   let inTable = false;
   let expectDelimiter = false;
-  lines.forEach((line, index) => {
+  let width = 0;
+  statusText.split("\n").forEach((line, index) => {
     const trimmed = line.trim();
     const where = "STATUS line " + (index + 1);
-    if (!trimmed || (/^#{1,6}\s/.test(trimmed))) {
+    if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; return; }
+    if (inFence) return;
+    if (!trimmed || /^#{1,6}\s/.test(trimmed)) {
       if (expectDelimiter) errors.push(where + ": task table header not followed by delimiter row");
+      inTable = false;
+      expectDelimiter = false;
+      return;
+    }
+    // A quoted task table is not rendered as a ledger; never let it vanish.
+    if (/^>\s*\|\s*(ID|MIG-)/i.test(trimmed)) {
+      errors.push(where + ": task table row inside a blockquote");
       inTable = false;
       expectDelimiter = false;
       return;
     }
     if (expectDelimiter) {
       expectDelimiter = false;
-      if (!/^\|(\s*:?-{3,}:?\s*\|)+$/.test(trimmed)) {
+      if (!DELIMITER_ROW.test(trimmed)) {
         errors.push(where + ": task table header not followed by delimiter row");
+        inTable = false;
+      } else if (cellCount(trimmed) !== width) {
+        errors.push(where + ": delimiter row column count differs from header");
         inTable = false;
       }
       return;
     }
     const firstCell = trimmed.startsWith("|") ? trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim() : undefined;
     if (firstCell !== undefined && /^id$/i.test(firstCell)) {
-      if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(\s*Acceptance\s*\|)?$/.test(trimmed)) {
+      if (CANONICAL_HEADER.test(trimmed)) {
         inTable = true;
         expectDelimiter = true;
+        width = cellCount(trimmed);
       } else {
         errors.push(where + ": non-canonical task table header");
         inTable = false;
       }
       return;
     }
+    if (inTable && DELIMITER_ROW.test(trimmed)) {
+      errors.push(where + ": unexpected delimiter row inside task table");
+      return;
+    }
     if (/^\|\s*MIG-/.test(trimmed) && !inTable) {
       errors.push(where + ": task row outside a recognized task table: " + trimmed.match(/MIG-[^\s|]*/)[0]);
+    } else if (inTable && trimmed.startsWith("|") && cellCount(trimmed) !== width) {
+      errors.push(where + ": row column count differs from header");
     }
   });
   if (expectDelimiter) errors.push("STATUS: task table header not followed by delimiter row");

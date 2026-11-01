@@ -182,7 +182,7 @@ test("ordinary MIG prose outside task tables is not treated as a broken task row
 });
 
 test("Phase 0 acceptance column remains valid while malformed acceptance fails", () => {
-  const withAcceptance = status + "| MIG-0001 | base inventory | DONE | — | complete |\n";
+  const withAcceptance = status + "\n| ID | Task | State | Depends on | Acceptance |\n| --- | --- | --- | --- | --- |\n| MIG-0001 | base inventory | DONE | — | complete |\n";
   assert.equal(parseTaskRows(withAcceptance).get("MIG-0001").state, "DONE");
   assert.deepEqual(run({ statusText: withAcceptance }), []);
   assert.match(run({ statusText: withAcceptance.replace("| complete |", "| |") }).join("\n"), /malformed task row: MIG-0001/);
@@ -352,4 +352,24 @@ test("STATUS task table header and delimiter must be present and canonical", () 
   // Phase 0 tables with an Acceptance column stay valid.
   const withAcceptance = "| ID | Task | State | Depends on | Acceptance |\n| --- | --- | --- | --- | --- |\n| MIG-0101 | t | DONE | — | ok |\n";
   assert.deepEqual(validateStatusTableStructure(withAcceptance), []);
+});
+
+test("STATUS table width, blockquote, repeated delimiter and code fence handling", () => {
+  const H = "| ID | Task | State | Depends on |";
+  const D = "| --- | --- | --- | --- |";
+  const R = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  const struct = (text) => validateStatusTableStructure(text).join("\n");
+  assert.match(struct([H, "| --- | --- | --- | --- | --- |", R].join("\n")), /delimiter row column count/);
+  assert.match(struct([H, "| --- | --- | --- |", R].join("\n")), /delimiter row column count/);
+  const acceptance = "| ID | Task | State | Depends on | Acceptance |";
+  assert.match(struct([acceptance, D, "| MIG-0001 | t | DONE | — | ok |"].join("\n")), /delimiter row column count/);
+  assert.match(struct([H, D, "| MIG-0301 | a | READY | b | c |"].join("\n")), /row column count differs/);
+  assert.match(struct([acceptance, "| --- | --- | --- | --- | --- |", R].join("\n")), /row column count differs/);
+  assert.match(struct([H, D, R, D, R].join("\n")), /unexpected delimiter row/);
+  assert.match(struct(["> " + H, "> " + D, "> " + R].join("\n")), /blockquote/);
+  const fenced = ["```", "| ID | Task |", R, "```", "", H, D, R].join("\n");
+  assert.equal(struct(fenced), "");
+  assert.equal(parseTaskRows(fenced).size, 1);
+  const changed = status.replace(D, "| --- | --- | --- | --- | --- |");
+  assert.match(run({ statusText: changed }).join("\n"), /invalid STATUS task ledger/);
 });
