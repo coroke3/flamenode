@@ -109,3 +109,58 @@ test("fences nested in list items are masked", () => {
   assert.match(result, /item\.md/);
   assert.match(result, /outside\.md/);
 });
+
+test("quote markers inside a top-level fence do not close it", () => {
+  const markdown = [
+    fence + "md",
+    "> " + fence,
+    "> [ex](ex-missing.md)",
+    "> " + fence,
+    fence,
+    "[real](REAL-LINK.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /ex-missing/);
+  assert.match(result, /REAL-LINK/);
+});
+
+test("over-indented fence lines inside a list fence do not close it", () => {
+  const markdown = [
+    "- item",
+    "  " + fence + "md",
+    "      " + fence,
+    "      [ex](ex-missing.md)",
+    "  " + fence,
+    "[real](REAL-LINK.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /ex-missing/);
+  assert.match(result, /REAL-LINK/);
+});
+
+test("indented code in a list item does not open a fence", () => {
+  const markdown = [
+    "- item",
+    "",
+    "        " + fence + " text",
+    "",
+    "  [in item](REAL-LINK.md)",
+    "[top](TOP-LINK.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.match(result, /REAL-LINK/);
+  assert.match(result, /TOP-LINK/);
+});
+
+test("a fence left open in a list item ends with the item", () => {
+  const markdown = [
+    "- item",
+    "  " + fence,
+    "  [code](code-missing.md)",
+    "",
+    "[real](REAL-LINK.md)",
+  ].join("\n");
+  const result = proseOutsideFencedCode(markdown);
+  assert.doesNotMatch(result, /code-missing/);
+  assert.match(result, /REAL-LINK/);
+});
