@@ -1,8 +1,8 @@
 /**
  * MIG-0641 U01h/U02/U03b: isolated write route factory.
  *
- * Do not mount it into personal/index.ts until the owner approves a dedicated
- * terms acceptance CostGuard feature. The caller MUST supply the operation
+ * Mounted by personal/index.ts with the dedicated `personal_terms_accept` CostGuard feature
+ * (decision adopted by owner authorization 2026-11-01). The caller MUST supply the operation
  * guard; no default allow/no-op feature mapping exists. Cross-origin requests
  * are rejected before the session D1 lookup. Unaccepted users can agree,
  * while anonymous and banned accounts are rejected before the mutation.
@@ -21,6 +21,7 @@ import { markOnboardingComplete, type CompletionStatus } from "./termsCompletion
 import { commitLatestTermsForUser, createTermsCommitPort } from "./termsCommit.ts";
 import { projectLatestTerms, projectOnboardingTerms, type TermsCommitOutcome } from "./termsDecision.ts";
 
+const TERMS_PATH = /\/(?:terms\/accept|onboarding\/terms|onboarding\/complete)\/?$/;
 const NO_STORE = "private, no-store";
 const MAX_TERMS_REQUEST_BYTES = 2048;
 
@@ -110,15 +111,20 @@ export function createIsolatedTermsWriteRoutes(options: TermsWriteRouteOptions):
     throw new Error("MIG-0641: approved CostGuard middleware is required");
   }
   const routes = new Hono<AppEnv>();
-  routes.use("*", async (c, next) => {
+  // Scoped to the three POST endpoints so the factory can be mounted at the personal root
+  // BEFORE the read router's session middleware (Origin must precede any session D1 read)
+  // without wrapping any other personal route.
+  const scoped = (mw: MiddlewareHandler<AppEnv>): MiddlewareHandler<AppEnv> =>
+    (c, next) => (c.req.method === "POST" && TERMS_PATH.test(c.req.path) ? mw(c, next) : next());
+  routes.use("*", scoped(async (c, next) => {
     await next();
     c.header("Cache-Control", NO_STORE);
-  });
-  routes.use("*", (c, next) => originGuardMiddleware(originOptions(c))(c, next));
-  routes.use("*", options.session ?? (sessionMiddleware() as MiddlewareHandler<AppEnv>));
-  routes.use("*", requireAuth());
-  routes.use("*", options.operationGuard);
-  routes.use("*", dbMiddleware);
+  }));
+  routes.use("*", scoped((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
+  routes.use("*", scoped(options.session ?? (sessionMiddleware() as MiddlewareHandler<AppEnv>)));
+  routes.use("*", scoped(requireAuth()));
+  routes.use("*", scoped(options.operationGuard));
+  routes.use("*", scoped(dbMiddleware));
 
   const commit: TermsCommit = options.commit ?? defaultCommit;
 
