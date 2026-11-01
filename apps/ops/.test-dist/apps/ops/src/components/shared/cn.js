@@ -1,8 +1,0 @@
-// Port of CURRENT src/lib/utils/cn.ts (MIG-0707 U05, D-17-6). Same output.
-/**
- * 軽量 className マージヘルパー (Tailwind 非依存)。
- * truthy な文字列をスペース連結する。
- */
-export function cn(...args) {
-    return args.filter(Boolean).join(" ");
-}

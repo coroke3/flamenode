@@ -30,8 +30,8 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
               <Route path="*" element={<UnmigratedView />} />
             </Routes></ManageLayout></OpsGate>
           } />
-          <Route path="/admin" element={<OpsGate surface="admin" api={api}><UnmigratedView /></OpsGate>} />
-          <Route path="/admin/*" element={<OpsGate surface="admin" api={api}><UnmigratedView /></OpsGate>} />
+          <Route path="/admin" element={<OpsGate surface="admin" api={api}><main><UnmigratedView /></main></OpsGate>} />
+          <Route path="/admin/*" element={<OpsGate surface="admin" api={api}><main><UnmigratedView /></main></OpsGate>} />
         </Routes>
       </OpsRouteErrorBoundary>
     </div>

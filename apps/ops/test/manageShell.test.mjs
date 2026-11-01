@@ -143,3 +143,23 @@ test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/
   assert.ok(args.includes("apps/ops/wrangler.toml"));
   assert.throws(() => opsDryRunArgs("relative/path"), /Absolute/);
 });
+
+test("MIG-0719 router: admin routes keep a single main landmark", async () => {
+  const { OpsRoutes } = await import("../.test-dist/apps/ops/src/routes/router.js");
+  const dom = new JSDOM("<!doctype html><div id=root></div>", { url: "http://localhost/admin/cost-guard" });
+  const saved = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  try {
+    const api = {
+      getSummary: async () => ({ status: "ok", summary: { role: "admin", canAccessAdmin: true, canAccessManage: true } }),
+      checkManageNavigation: async () => "allow",
+    };
+    const root = createRoot(dom.window.document.getElementById("root"));
+    root.render(React.createElement(MemoryRouter, { initialEntries: ["/admin/cost-guard"] }, React.createElement(OpsRoutes, { api })));
+    for (let i = 0; i < 50 && !dom.window.document.querySelector("main"); i++) await new Promise(r => setTimeout(r, 10));
+    assert.equal(dom.window.document.querySelectorAll("main").length, 1);
+    root.unmount();
+  } finally {
+    globalThis.window = saved.window; globalThis.document = saved.document;
+  }
+});
