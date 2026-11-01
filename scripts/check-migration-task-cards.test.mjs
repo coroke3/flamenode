@@ -396,3 +396,20 @@ test("required field markers in inline code or prose do not satisfy the card", (
     assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /MIG-0308: missing card field 試験:/, field);
   }
 });
+
+test("HTML comments, indented code and deeply nested list fences cannot supply fields", () => {
+  const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "");
+  for (const fake of ["<!--\n- 試験: fake\n-->\n", "\n    試験: fake indented code\n", "- outer\n    - ```md\n      - 試験: fake\n      ```\n"]) {
+    const doc = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + fake };
+    assert.match(validateTaskCards({ ...base, fileContents: doc }).join("\n"), /MIG-0308: missing card field 試験:/, fake);
+  }
+  const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "- **試験**: real\n" };
+  assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /missing card field 試験:/);
+  const nested = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "- outer\n    - 試験: nested real\n" };
+  assert.doesNotMatch(validateTaskCards({ ...base, fileContents: nested }).join("\n"), /missing card field 試験:/);
+});
+
+test("card text for task context extends to the next MIG card, not the next h2", () => {
+  const f = { "t.md": "### MIG-0301 — a\n- 読む: r\n- 変更: c\n- 試験: t\n- DONE: d\n## Section\nkeep me\n### MIG-0302 — b\n" };
+  assert.match(collectTaskCards(f).cards.get("MIG-0301").text, /keep me/);
+});

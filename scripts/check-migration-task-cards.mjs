@@ -28,8 +28,33 @@ export function parseTrackedMigrationTasks(status) {
 // "試験: ..." line start). Inline code, descriptive prose ("注記: `試験:` ...") and
 // blockquote text mention the marker without instructing anything.
 function hasCardField(proseText, marker) {
-  const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp("^[ \\t]*(?:(?:[-*+]|\\d{1,9}[.)])[ \\t]+)?(?:\\*\\*)?" + escaped, "m").test(proseText);
+  const name = marker.replace(/:$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const list = "(?:[-*+]|\\d{1,9}[.)])[ \\t]+";
+  const field = "(?:\\*\\*)?" + name + "(?::(?:\\*\\*)?|\\*\\*:)";
+  // A list item may be nested at any depth; a bare field line is at most 3 spaces
+  // indented (4+ spaces is an indented code block).
+  return new RegExp("^(?:[ \\t]*" + list + field + "|[ ]{0,3}" + field + ")", "m").test(maskNonInstructions(proseText));
+}
+
+// HTML comments and top-level indented code blocks are not instructions.
+function maskNonInstructions(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  const lines = text.replace(/<!--[\s\S]*?(?:-->|$)/g, blank).split("\n");
+  let inList = false, prevBlank = true, inCode = false;
+  return lines.map((line) => {
+    if (!line.trim()) { prevBlank = true; return line; }
+    const indented = /^(?: {4}|\t)/.test(line);
+    const listItem = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.test(line);
+    let out = line;
+    if (indented && !inList && (prevBlank || inCode)) { inCode = true; out = blank(line); }
+    else {
+      inCode = false;
+      if (listItem) inList = true;
+      else if (!indented) inList = false;
+    }
+    prevBlank = false;
+    return out;
+  }).join("\n");
 }
 
 export function collectTaskCards(fileContents) {
@@ -53,7 +78,9 @@ export function collectTaskCards(fileContents) {
       const start = matches[i].index + matches[i][0].length;
       const nextHeading = prose.slice(start).search(/^#{1,3}[ \t]+[^\n]*$/m);
       const end = nextHeading < 0 ? prose.length : start + nextHeading;
-      const text = normalized.slice(start, end);
+      // Printed task context keeps the pre-existing span (up to the next MIG card);
+      // only required-field detection is bounded by the h1–h3 heading.
+      const text = normalized.slice(start, matches[i + 1]?.index ?? normalized.length);
       const proseText = prose.slice(start, end);
       if (cards.has(id)) errors.push(id + ": duplicate card in " + path + " and " + cards.get(id).path);
       else cards.set(id,{path,heading,text});
@@ -118,7 +145,7 @@ function proseLines(text) {
   return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
     // CommonMark list items can start fences as "- ```md" or "1. ~~~md".
     // Their contents are indented relative to the list marker.
-    const listOpening = line.match(/^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
+    const listOpening = line.match(/^ *(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
     const ordinaryOpening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence?.quote) {
       const q = line.match(QUOTE_PREFIX);
