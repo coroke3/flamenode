@@ -133,6 +133,29 @@ test("pipe-free STATUS task rows with invalid MIG IDs fail closed", () => {
   assert.deepEqual(run({ statusText: status + "\n## Details\nMIG-030A is a prose example.\n" }), []);
 });
 
+test("missing ID plus lost pipe markers fails closed inside STATUS task tables", () => {
+  const row = "| MIG-0301 | core PoC | READY | MIG-0108 |";
+  for (const malformed of [
+    "core PoC READY MIG-0108",
+    "0301 core PoC READY MIG-0108",
+    "core PoC | READY | MIG-0108 |",
+  ]) {
+    const changed = status.replace(row, malformed);
+    assert.throws(() => parseTaskRows(changed), /malformed task row: <missing ID>/,
+      "broken table row must not become prose: " + malformed);
+    assert.match(run({ statusText: changed }).join("\n"),
+      /invalid STATUS task ledger: malformed task row: <missing ID>/);
+  }
+  const validHeader = [
+    "| ID | Task | State | Depends on |",
+    "| --- | --- | --- | --- |",
+    row,
+  ].join("\n");
+  const expected = ["MIG-0301"];
+  assert.deepEqual([...parseTaskRows(validHeader + "\n\nordinary prose").keys()], expected);
+  assert.deepEqual([...parseTaskRows(validHeader + "\n## Next section\nordinary prose").keys()], expected);
+});
+
 test("STATUS task table separators must be complete, not merely start with dashes", () => {
   const canonical = "| --- | --- | --- | --- |";
   for (const broken of [

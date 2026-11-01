@@ -102,6 +102,11 @@ export function parseTaskRows(statusText) {
       inTaskTable = false;
       continue;
     }
+    // A heading is an explicit task-table boundary even without a blank line.
+    if (inTaskTable && /^#{1,6}\s/.test(trimmed)) {
+      inTaskTable = false;
+      continue;
+    }
     const match = line.match(/^\|\s*(MIG-\d{4})\s*\|/);
     // A broken table row may lose every pipe separator; fail closed while
     // remaining inside an actual task table. Ignore incidental MIG prose.
@@ -132,7 +137,11 @@ export function parseTaskRows(statusText) {
           throw new Error("malformed task row: " + (firstCell || "<missing ID>"));
         }
       }
-      if (inTaskTable && !trimmed.startsWith("|")) inTaskTable = false;
+      // Unknown non-empty content inside a task table is not implicit prose:
+      // the row may have lost both its pipe markers and MIG identifier.
+      if (inTaskTable && !trimmed.startsWith("|")) {
+        throw new Error("malformed task row: <missing ID>");
+      }
       continue;
     }
     const cells = line.split("|").map((cell) => cell.trim());
