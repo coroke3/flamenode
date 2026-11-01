@@ -15,9 +15,17 @@ Each named job runs the CURRENT job function directly inside the wrapper (no job
 ### What these numbers mean (read before using the caps)
 
 * **The local D1 simulator is inside the numbers.** A trivial `SELECT 1` costs about **3.9 ms CPU** locally (calibration at the bottom), and the bench route itself costs about 2.8 ms. A production D1 call is a remote round trip whose wait is not Worker CPU. So every statement-heavy job is overstated here; the numbers are an **upper bound** and `cap = floor(7 ms / 1-item max)` collapses to `0` for every job, which is the literal Work Order formula and **not** a usable cap.
-* **Host noise is large.** The same-run BASELINE (a no-op request, 10 warm-up runs discarded, 50 samples) has a max of 5.8–8.1 ms per Worker, i.e. the profiler / shared host alone nearly consumes the 8 ms budget (D-14-1 rule: BASELINE max >= 4 ms and job max 4–12 ms => INCONCLUSIVE; `score-recalc` is the only job in that band).
+* **Host noise is large.** The same-run BASELINE (a no-op request, 10 warm-up runs discarded, 50 samples) has a max of 5.8–8.1 ms per Worker, i.e. the profiler / shared host alone nearly consumes the 8 ms budget (D-14-1 rule: BASELINE max >= 4 ms and job max 4–12 ms => INCONCLUSIVE). `score-recalc` is INCONCLUSIVE for the other reason: its max (15.77 ms) is outside the 4–12 ms band, but `judge()` subtracts the same-run noise (15.77 - 8.07 = 7.70 ms < 8 ms), so the local number cannot tell pass from fail.
 * Jobs that are over budget by a wide margin **regardless of the simulator** (few D1 statements, large CPU): `static-rebuild-queue` limit (16 statements, p50 561 ms, heaviest probed target `search_index` over 300 videos), `queue-consumer-content` limit (same drain, 10 duplicate wakes coalesce into one), `ga4-ranking` (1 statement, p50 34 ms: 4,000 report rows parsed + ranked + RSA JWT signed), `playlist-sync` limit (5,000-row source diff).
 * Jobs that **cannot be classified** from this run because the simulator dominates: `x-slot-bind-recovery` limit (216 statements), `audit-cleanup` limit (4,000 row changes), `notification-dispatch` limit (23 statements + 12 synthetic Discord requests), `slot-reminders` limit (52 statements). MIG-0610 must re-measure these with D1 replayed (MIG-0606 `--d1 replay` style: app code only) **before** lowering any constant. This is the follow-up this measurement hands to MIG-0610; no job code was changed here.
+
+### Decision and handoff to MIG-0610
+
+Decision adopted by owner authorization 2026-11-01: MIG-0609 records the CURRENT jobs as **simulator-inclusive LOCAL upper bounds** (Work Order scope: measure only, no job code and no change to `scripts/benchmark-api-cpu.mjs`, which MIG-0606 owns). Excluding the D1 simulator (the `--d1 replay` mode of `benchmark-api-cpu.mjs`) needs per-job statement recording and is therefore the first unit of MIG-0610 (new `T00`, added to `PHASE_6_SPEC.md`), not a cap source. Consequences:
+
+* The `cap` column below is the literal Work Order formula, kept for the record only. It is `0` for every row and **must not be used to lower any constant**.
+* MIG-0610 must run `T00` (re-measure with D1 replayed, same fixtures and the same G18 hash) before any constant is lowered; its `T01` is judged on that table.
+* Jobs that are over budget independent of the simulator (static rebuild queue, GA4 ranking, playlist-sync limit, the content queue drain) are already known to need a split.
 
 ## Host and run conditions
 
@@ -50,6 +58,8 @@ Each named job runs the CURRENT job function directly inside the wrapper (no job
 | `queue-consumer-content` / `-fast` / `-sync` (G18) | `max_batch_size = 10` | 1 canonical wake | 10 duplicate wakes -> one drain of the same work as the job above (sync: 50 pending videos, 1 API batch) | 1 malformed wake (acked, 0 work) |
 
 `<worker>.scheduled` rows are the three cron entry points on an empty database (no due work): the end-to-end idle cost of the cron wrapper.
+
+Differences from the U01 wording (stated, not hidden): the three named queue-consumer rows call the CURRENT inner handler of each consumer (`staticRebuildWakeQueue.ts`, the notification / YouTube wake handlers) with a canonical wake message and count ack / retry, not `default.queue()` of the Worker entry; `default.queue()` itself is exercised only by the idle `<worker>.queue` scenario. The sync consumer is sent `youtube_sync_pending` wakes only; the `youtube_playlist_sync` wake kind (playlist sync, covered by the `playlist-sync` row) is not sent through the consumer.
 
 Not measured (stated, not hidden): `static-rebuild-queue` targets that need extra R2 inputs (`video` v2 pages, etc.) were not seeded — the path is removed by MIG-0907 and the whole-catalogue targets are the heavy ones; playlist-sync with a playlist scan in progress and order repair; real Discord / YouTube / GA4 latency and quota behaviour (synthetic only).
 
