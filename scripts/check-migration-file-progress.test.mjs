@@ -37,6 +37,40 @@ test("missing current source or changed file must fail",()=>{
  assert.match(validateFileProgress({...base,matrix:broken}).join("\n"),/missing file progress row/);
  assert.match(validateFileProgress({...base,changedPaths:["src/lib/anotherModule.ts"]}).join("\n"),/changed migration source missing/);
 });
+test("malformed ledger paths fail closed even for optional non-inventory helpers",()=>{
+ const optional="src/lib/optionalLedgerHelper.ts";
+ const fixture={...base,filePaths:[...filePaths,optional]};
+ const validRow="| `"+optional+"` | HELPER | optional source | MIG-0501 | SAME | NOT_STARTED | — |";
+ const withValid=matrix.replace("## Future files",validRow+"\n## Future files");
+ assert.deepEqual(parseFileRows(withValid).errors,[]);
+ assert.deepEqual(validateFileProgress({...fixture,matrix:withValid}),[]);
+ for(const brokenRow of [
+  validRow.replace("`"+optional+"`",optional),
+  validRow.slice(2),
+  validRow.replace("`"+optional+"`","`"+optional),
+ ]) {
+  const broken=matrix.replace("## Future files",brokenRow+"\n## Future files");
+  assert.match(parseFileRows(broken).errors.join("\n"),/malformed migration ledger row/);
+  assert.match(validateFileProgress({...fixture,matrix:broken}).join("\n"),/malformed migration ledger row/);
+ }
+});
+
+test("partial or repeated headers and separators never hide file rows",()=>{
+ const optional="src/lib/optionalLedgerHelper.ts";
+ const validRow="| `"+optional+"` | HELPER | optional source | MIG-0501 | SAME | NOT_STARTED | — |";
+ const original=matrix.replace("## Future files",validRow+"\n## Future files");
+ const cases=[
+   original.replace(validRow,validRow.replace("`"+optional+"`","CURRENT path (exact)")),
+   original.replace(validRow,validRow.replace("`"+optional+"`","---")),
+   original.replace("## Future files","| CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge | File state | PR / tests / evidence |\n## Future files"),
+   original.replace("| --- | --- | --- | --- | --- | --- | --- |\n",""),
+ ];
+ for(const corrupted of cases){
+   assert.match(parseFileRows(corrupted).errors.join("\n"),/malformed migration ledger row/);
+   assert.match(validateFileProgress({...base,matrix:corrupted}).join("\n"),/malformed migration ledger row/);
+ }
+});
+
 test("duplicate file path must fail",()=>{
  const line="| \x60app/api/health/route.ts\x60 | ROUTE_HANDLER | RH-018:GET | MIG-0601 | +apps/api/src/routes/health.ts | NOT_STARTED | — |";
  const m=matrix.replace(line,line+"\n"+line);
