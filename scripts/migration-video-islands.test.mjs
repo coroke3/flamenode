@@ -36,7 +36,7 @@ test("T01/T02: SA-087 same-origin JSON client, API error and malformed/network f
   assert.deepEqual(await toggleInteraction("vid", "bookmark", undefined, async () => json({ ok: false, message: "競合" }, 409)),
     { ok: false, message: "競合" });
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ unexpected: 1 })), /Invalid interaction/);
-  await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true, active: "yes" })), /Invalid active/);
+  await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true, active: "yes" })), /Invalid interaction response/);
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true }, 503)), /Invalid success/);
   await assert.rejects(toggleInteraction("", "like", undefined, fetcher), /Invalid interaction request/);
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => { throw Error("offline"); }), /offline/);
