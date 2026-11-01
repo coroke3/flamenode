@@ -179,6 +179,28 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(await result.text(), /auth_user_id/);
     await Promise.all(globalThis.__eventExport.pending);
   });
+  test("WO-T07: full response header set (incl. CORS) matches CURRENT; no OPTIONS handler", async () => {
+    const all = (r) => [...r.headers.entries()].map(([k, v]) => `${k}: ${v}`).sort();
+    for (const path of ["export-event", "export-event?format=legacy&update=scheduled&refresh=15"]) {
+      reset();
+      const a = await current(path);
+      reset();
+      const b = await hono(path);
+      assert.deepEqual(all(b), all(a), path);
+    }
+    // CURRENT exports GET only: Hono must not add an OPTIONS/CORS preflight handler.
+    reset();
+    const preflight = await hono("export-event", { method: "OPTIONS", headers: { origin: "https://example.test", "access-control-request-method": "GET" } });
+    assert.notEqual(preflight.status, 200);
+    assert.equal(preflight.headers.get("Access-Control-Allow-Origin"), null);
+  });
+  test("WO-T05: leak gate source guard: forbidden key in built payload returns 503 public_payload_unavailable", async () => {
+    // The built payload is sanitized upstream (answers/social links drop FORBIDDEN_PUBLIC_KEYS), so the
+    // 503 gate is defense in depth with no reachable data path; guard that it stays fail-closed.
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/routes/events/export.ts", import.meta.url), "utf8");
+    assert.match(src, /try \{ assertNoForbiddenKeys\(payload\); \}\s*catch \{ return publicJsonResponse\(req, \{ error: "public_payload_unavailable" \}, "no-store", 503\); \}/);
+  });
   test("T08: matching cache metadata never bypasses private DTO validation (v5 and legacy)", async () => {
     for (const [format, body, schemaVersion] of [
       ["v5", '{"schema_version":5,"auth_user_id":"secret"}', 5],
