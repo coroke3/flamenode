@@ -27,11 +27,12 @@ export async function acceptLatestTerms(
   const body: unknown = await response.json();
   // MIG-0641's route factory authenticates *before* the handler. Middleware
   // failures are {error: code}, not the handler's {ok, next} schema.
+  // requireAuth currently uses {error:"Unauthorized"} for missing sessions.
   // CURRENT redirects anonymous users to /entry and unavailable sessions to
   // /rules?error=database_unavailable. Keep those same-origin destinations.
   if (typeof body === "object" && body !== null && !Array.isArray(body)) {
     const middlewareError = (body as { error?: unknown }).error;
-    if (response.status === 401 && middlewareError === "unauthenticated") {
+    if (response.status === 401 && (middlewareError === "Unauthorized" || middlewareError === "unauthenticated")) {
       return { ok: false, next: `/entry?next=${encodeURIComponent(safeNext)}` };
     }
     if (response.status === 503 && middlewareError === "database_unavailable") {
