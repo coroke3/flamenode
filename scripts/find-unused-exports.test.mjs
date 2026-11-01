@@ -19,3 +19,25 @@ test("countReferences separates non-test and test callers and ignores the defini
     { file: "src/lib/x.ts", name: "unused", nonTest: 0, test: 0, local: 0 },
   ]);
 });
+
+test("spec and __tests__ are test-only, while production and local callers remain distinct", () => {
+  const files = new Map([
+    ["src/domain/item.ts", [
+      "export const specOnly = 1;",
+      "export const helperOnly = 2;",
+      "export const production = 3;",
+      "export const localOnly = 4;",
+      "localOnly;",
+    ].join("\n")],
+    ["src/domain/item.spec.tsx", "import { specOnly } from './item';"],
+    ["src/domain/item.spec.mjs", "import { specOnly } from './item';"],
+    ["src/domain/__tests__/helper.ts", "import { helperOnly } from '../item';"],
+    ["src/domain/consumer.ts", "import { production } from './item';"],
+  ]);
+  assert.deepEqual(countReferences(["src/domain/item.ts"], files), [
+    { file: "src/domain/item.ts", name: "specOnly", nonTest: 0, test: 2, local: 0 },
+    { file: "src/domain/item.ts", name: "helperOnly", nonTest: 0, test: 1, local: 0 },
+    { file: "src/domain/item.ts", name: "production", nonTest: 1, test: 0, local: 0 },
+    { file: "src/domain/item.ts", name: "localOnly", nonTest: 0, test: 0, local: 1 },
+  ]);
+});
