@@ -129,3 +129,31 @@ test("実 repo の root は UI / docs を含まず json-generator と src/lib・
   }
   assert.match(computeStaticGeneratorHash(repoRoot), /^[0-9a-f]{64}$/);
 });
+
+test("文字列中のコメント記号で実importを消さず、疑似importは辿らない", () =>
+  withFixture((repoRoot) => {
+    write(
+      repoRoot,
+      "workers/json-generator/queue.ts",
+      [
+        'const opening = "/*";',
+        'import "./real.ts";',
+        'const closing = "*/";',
+        'export const example = \'import "./ghost.ts"\';',
+        'const load = () => import(`./dynamic.ts`);',
+        '// import "./commented.ts";',
+      ].join("\n"),
+    );
+    write(repoRoot, "workers/json-generator/real.ts", "export const version = 1;\n");
+    write(repoRoot, "workers/json-generator/dynamic.ts", "export const lazy = true;\n");
+
+    assert.deepEqual(collectStaticGeneratorFiles(repoRoot, ROOTS), [
+      "workers/json-generator/dynamic.ts",
+      "workers/json-generator/queue.ts",
+      "workers/json-generator/real.ts",
+    ]);
+
+    const before = computeStaticGeneratorHash(repoRoot, ROOTS);
+    write(repoRoot, "workers/json-generator/real.ts", "export const version = 2;\n");
+    assert.notEqual(computeStaticGeneratorHash(repoRoot, ROOTS), before);
+  }));
