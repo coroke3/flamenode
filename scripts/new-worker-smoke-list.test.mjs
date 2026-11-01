@@ -588,3 +588,59 @@ test("MIG-0628 U04: matrix-only fictitious GET stays manual even under a real mo
   assert.equal(invented?.mode, "fixture-required",
     "a mounted prefix does not prove the documented leaf handler exists");
 });
+
+test("MIG-0628 follow-up: Markdown fenced examples never become API smoke targets", () => {
+  const matrix = [
+    "| GET /api/health | real route |",
+    "  ```ts",
+    "| POST /api/admin/ghost | illustrative write only |",
+    "  ```",
+    "~~~md",
+    "DELETE /api/admin/reset",
+    "~~~",
+    "````js",
+    "| HEAD /api/not-real | fictional |",
+    "```", // too short to close a four-backtick fence
+    "| PUT /api/also-not-real | fictional |",
+    "````",
+    "| PATCH /api/health/check | real route |",
+  ].join("\r\n");
+  assert.deepEqual(
+    collectApiMatrixRoutes(matrix).map(({ method, path }) => method + " " + path),
+    ["GET /api/health", "PATCH /api/health/check"],
+  );
+});
+
+test("MIG-0628 follow-up: unclosed Markdown fences remain excluded through EOF", () => {
+  const matrix = "| GET /api/health | real |\n~~~sh\nGET /api/invented\n";
+  assert.deepEqual(
+    collectApiMatrixRoutes(matrix).map(({ method, path }) => method + " " + path),
+    ["GET /api/health"],
+  );
+});
+
+test("MIG-0628 follow-up: container-nested fences and inline-code examples are excluded", () => {
+  const matrix = [
+    "| SA-001 | `GET /api/health` | real |",
+    "> ```ts",
+    "> GET /api/ghost-quote",
+    "> ```",
+    "- item",
+    "  ```sh",
+    "  GET /api/ghost-list",
+    "  ```",
+    "1. step",
+    "   ~~~",
+    "   POST /api/ghost-ordered",
+    "   ~~~",
+    "> - ```",
+    ">   DELETE /api/ghost-both",
+    ">   ```",
+    "Example: `GET /api/ghost-inline` is illustrative.",
+    "| SA-002 | `PATCH /api/health/check` | real |",
+  ].join("\n");
+  assert.deepEqual(
+    collectApiMatrixRoutes(matrix).map(({ method, path }) => method + " " + path),
+    ["GET /api/health", "PATCH /api/health/check"],
+  );
+});

@@ -38,6 +38,8 @@ export interface EventSlotsViewModel {
   entryBadge: { label: string; tone: BadgeStatus } | null;
   /** CURRENT `募集: … - …` or null. */
   periodLabel: string | null;
+  /** CURRENT accent vars, absent when no accent color is set. */
+  accentStyle?: Readonly<Record<string, string>>;
   /** loading = live read not finished, ready = shown, unavailable = the read failed (T05). */
   live: "loading" | "ready" | "unavailable";
   stats: { filled: number; total: number; ratio: number } | null;
@@ -74,7 +76,7 @@ function Cell({ block }: { block: Extract<SlotsBlock, { kind: "slot" }> }): Reac
 export function EventSlotsView({ model, className }: EventSlotsViewProps): React.ReactElement {
   const { stats } = model;
   return (
-    <div className={cx("p-root fn-screen", className)}>
+    <div className={cx("p-root fn-screen", className)} style={model.accentStyle as React.CSSProperties | undefined}>
       <main className="wrap ev-scope ev-slots">
         <Link href={`/event/${model.eventId}`} className="il t-sm muted">
           <ScreenIcon name="arrowLeft" />
