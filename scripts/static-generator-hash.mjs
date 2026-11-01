@@ -30,13 +30,14 @@ const TEST_FILE_PATTERN = /\.test\.[^/]+$/;
  * Parse real module references instead of matching import-like text in comments
  * or string literals. A false-negative here can suppress a needed global rebuild.
  */
-export function extractRelativeSpecifiers(source) {
+export function extractRelativeSpecifiers(source, fileName = "static-generator-source.ts") {
+  const scriptKind = path.extname(fileName) === ".tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const file = ts.createSourceFile(
-    "static-generator-source.tsx",
+    fileName,
     source,
     ts.ScriptTarget.Latest,
     true,
-    ts.ScriptKind.TSX,
+    scriptKind,
   );
   const specifiers = new Set();
   const add = (module) => {
@@ -110,7 +111,7 @@ export function collectStaticGeneratorFiles(
     visited.add(current);
     if (!CODE_EXTENSIONS.includes(path.extname(current))) continue;
     const source = fs.readFileSync(current, "utf8");
-    for (const specifier of extractRelativeSpecifiers(source)) {
+    for (const specifier of extractRelativeSpecifiers(source, current)) {
       const resolved = resolveSpecifier(current, specifier);
       if (!resolved) {
         throw new Error(
