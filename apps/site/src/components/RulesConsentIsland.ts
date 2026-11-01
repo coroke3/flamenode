@@ -71,19 +71,19 @@ export function RulesConsentIsland(): React.ReactElement {
     React.Fragment,
     null,
     error
-      ? h("div", { className: "fn-entry-status fn-entry-status--warn", role: "alert" },
-        h("h2", { className: "fn-panel-title" }, "同意処理の確認"),
-        h("p", { className: "fn-panel-lead" }, error))
+      ? h("div", { className: "fn-status-notice fn-status-notice--degraded", role: "alert" },
+        h("strong", null, "同意処理の確認"),
+        h("span", null, error))
       : null,
-    h("section", { className: "fn-surface-panel", "aria-labelledby": "rules-consent-title" },
-      h("h2", { id: "rules-consent-title", className: "fn-panel-title" }, "利用規約への同意"),
-      h("p", { className: "fn-panel-lead" },
+    h("section", { className: "stack", "aria-labelledby": "rules-consent-title" },
+      h("h2", { id: "rules-consent-title", className: "t-h3" }, "利用規約への同意"),
+      h("p", { className: "t-sm muted" },
         "いいね・セーブにはログインと利用規約への同意が必要です。承認済みの活動名義は不要です。イベント枠の確保には",
         " X ID の申請が、作品投稿にも承認済みの活動名義が必要です。",
         next !== "/dashboard" ? " 同意後、元のページへ戻ります。" : ""),
-      h("form", { className: "fn-panel-actions", onSubmit: submit },
+      h("form", { className: "stack", onSubmit: submit },
         h("input", { type: "hidden", name: "next", value: next }),
-        h("button", { type: "submit", disabled: pending, "aria-busy": pending, className: "fn-btn fn-btn-primary" },
+        h("button", { type: "submit", disabled: pending, "aria-busy": pending, className: "fn-btn fn-btn--primary" },
           pending ? "同意状態を保存中…" : "利用規約に同意して戻る"))),
   );
 }
