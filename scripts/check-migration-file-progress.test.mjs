@@ -211,3 +211,34 @@ test("CLI fails closed in CI without MIGRATION_FILE_BASE_SHA",()=>{
  assert.equal(r.status,1);
  assert.match(r.stderr,/MIGRATION_FILE_BASE_SHA is required in CI/);
 });
+
+
+test("changed CURRENT public assets, styles, Cloudflare declarations, and root config cannot bypass the PR ledger",()=>{
+ const paths=[
+  "public/logo.svg", "src/styles/globals.css", "cloudflare/edge.toml",
+  "middleware.ts", "next.config.mjs", "open-next.config.ts",
+  "instrumentation.ts", "next-env.d.ts", "tsconfig.json"
+ ];
+ for(const file of paths){
+  const errors=validateFileProgress({...base,changedPaths:[file]});
+  assert.ok(errors.includes("changed migration source missing file progress row: "+file), file+": "+errors.join("; "));
+ }
+ for(const file of [
+  "docs/migration/STATUS.md", "scripts/check-migration-file-progress.mjs",
+  "src/styles/.next/generated.css", "cloudflare/dist/asset.js",
+  "public/node_modules/dep.js"
+ ]){
+  assert.deepEqual(validateFileProgress({...base,changedPaths:[file]}), [], file);
+ }
+});
+
+test("changed public asset with an IN_PROGRESS row requires a fresh SHA belonging to this PR",()=>{
+ const file="public/logo.svg", oldSha="1".repeat(40), newSha="2".repeat(40);
+ const row=(evidence)=>"| \`"+file+"\` | HELPER | brand asset | MIG-0501 | SAME | IN_PROGRESS | "+evidence+" |";
+ const before=matrix.replace("## Future files",row("PR#1 SHA="+oldSha)+"\n## Future files");
+ const after=matrix.replace("## Future files",row("PR#1 SHA="+oldSha+"; PR#2 SHA="+newSha)+"\n## Future files");
+ const input={...base,filePaths:[...filePaths,file],changedPaths:[file],baseMatrix:before,isPrCommit:sha=>sha===newSha};
+ const stale=validateFileProgress({...input,matrix:before});
+ assert.match(stale.join("\n"),/cites no SHA= newer than base/);
+ assert.deepEqual(validateFileProgress({...input,matrix:after}),[]);
+});
