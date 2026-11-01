@@ -290,7 +290,7 @@ Validation:
 | MIG-0506 | root/top | READY | MIG-0407 |
 | MIG-0507 | `/:id` video catch-all | READY | MIG-0407 |
 | MIG-0509 | all public data generated at build time (D-09) | READY | MIG-0409 |
-| MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | READY | MIG-0634 |
+| MIG-0510 | Phase 5 `/list` filter Island + top search band on RH-032 | DONE | MIG-0634 |
 | MIG-0511 | public X icon map projection at build time | DONE | MIG-0407, MIG-0409 |
 | MIG-0512 | public gateway: HTML 404/503 + Retry-After, entity sub-page fence, build-file allowlist | DONE | MIG-0405, MIG-0619 |
 | MIG-0513 | `/[id]` like / bookmark Island on the SA-087 API (merge gate MIG-0640, D-16) | READY | MIG-0407, MIG-0634 |
