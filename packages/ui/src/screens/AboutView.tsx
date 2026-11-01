@@ -1,5 +1,5 @@
 import React from "react";
-import { Image, Link } from "../adapters/index.js";
+import { Link } from "../adapters/index.js";
 import { cx } from "../cx.js";
 import { EXTERNAL, ScreenIcon } from "./parts.js";
 
@@ -157,7 +157,17 @@ export function AboutView({ stats, logoSrc = "/brand/flamenode-mark.svg", classN
           <h2 id="ab-identity" className="t-h2 ab-head">アイデンティティ</h2>
           <div className="ab-ident">
             <div className="stack ab-tile">
-              <Image className="ab-logo" src={logoSrc} alt="FlameNode Logo" />
+              <span
+                className="ab-logo"
+                role="img"
+                aria-label="FlameNode Logo"
+                style={{
+                  width: "24.35px",
+                  background: "currentColor",
+                  WebkitMask: `url("${logoSrc}") center / contain no-repeat`,
+                  mask: `url("${logoSrc}") center / contain no-repeat`,
+                }}
+              />
               <span className="t-label muted">FlameNode Logo</span>
             </div>
             <div className="stack ab-tile">

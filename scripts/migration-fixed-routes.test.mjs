@@ -158,6 +158,26 @@ test("about: entry links and credit links match CURRENT (UX-PUB-009), external l
   assert.match(text(main.querySelector("h1")), /^作品が見つかり、 ?イベントの記録も残る場所。$/);
 });
 
+test("about U03: identity mark is text-colour masked like CURRENT Logo (a black <img> is invisible on dark)", { skip }, () => {
+  const doc = load("about");
+  assert.equal(doc.querySelector("img.ab-logo"), null, "flamenode-mark.svg has no fill; an <img> renders black on the dark theme");
+  const logo = doc.querySelector(".ab-logo");
+  assert.equal(logo.getAttribute("role"), "img");
+  assert.equal(logo.getAttribute("aria-label"), "FlameNode Logo");
+  const style = logo.getAttribute("style");
+  assert.ok(style.includes("background:currentColor") || style.includes("background: currentColor"));
+  assert.ok(/mask:\s*url\(&quot;\/brand\/flamenode-mark\.svg&quot;\)|mask:\s*url\("?\/brand\/flamenode-mark\.svg"?\)/.test(style), style);
+});
+
+test("maintenance U03: dark-only body is an approved decision (owner authorization 2026-11-01, D-13-27) inside the theme-following shell", { skip }, () => {
+  const html = fs.readFileSync(path.join(DIST, "maintenance/index.html"), "utf-8");
+  const doc = new JSDOM(html).window.document;
+  assert.equal(doc.querySelectorAll('body [data-theme="dark"]').length, 1, "exactly the shared MaintenanceView root is pinned dark");
+  assert.ok(doc.querySelector('.p-root[data-theme="dark"] main'), "the dark pin wraps the maintenance body (<main>) only");
+  assert.equal(doc.querySelector('.p-root header, .p-root footer'), null, "header/footer follow the stored theme");
+  assert.ok(html.includes("localStorage"), "CURRENT theme bootstrap still runs before first paint");
+});
+
 test("about: mock structure (hero, kv, 3 columns, identity, credits) and no stats block without a snapshot", { skip }, () => {
   const doc = load("about");
   for (const sel of [".ab-hero .t-display", ".actions .fn-btn--primary", ".actions .fn-btn--secondary", ".kv.ab-kv", ".ab-cols", ".ab-ident", "dl.kv[aria-label='制作クレジット']"]) {
