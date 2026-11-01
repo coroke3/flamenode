@@ -69,3 +69,10 @@ test("comment-looking text within strings remains unchanged", () => {
   assert.match(filtered, /const active = true/);
   assert.doesNotMatch(filtered, /absent/);
 });
+
+test("astral Unicode before comments does not shift lexer offsets", () => {
+  const source = 'const icon = "🌟"; /* actor_x_user_id?: string | null; */\nconst alive = true;';
+  const filtered = withoutComments(source);
+  assert.doesNotMatch(filtered, /actor_x_user_id/);
+  assert.match(filtered, /const alive = true/);
+});
