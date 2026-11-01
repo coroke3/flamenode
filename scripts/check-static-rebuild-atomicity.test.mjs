@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   mkdtempSync,
+  readFileSync,
   mkdirSync,
   rmSync,
   renameSync,
@@ -54,7 +55,7 @@ test("ordinary scan roots pass without unsafe source", (t) => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-for (const extension of ["tsx", "mts"]) {
+for (const extension of ["tsx", "mts", "cts"]) {
   test(`unsafe ${extension} action source cannot bypass the atomicity audit`, (t) => {
     const { put, run } = fixture(t);
     put(
@@ -99,3 +100,21 @@ test("a symlinked scan-root ancestor is rejected", (t) => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /symlink in scan path/);
 });
+
+for (const relative of [
+  "packages/server-core/src/staticRebuild/enqueue.ts",
+  "src/lib/publicData/loader.ts",
+]) {
+  test(`a symlinked fixed audit target is rejected: ${relative}`, (t) => {
+    const { root, put, run } = fixture(t);
+    if (process.platform === "win32") return t.skip("symlink privileges vary on Windows");
+    const target = path.join(root, relative);
+    const original = readFileSync(target, "utf8");
+    rmSync(target);
+    const external = put("outside-copy.ts", original);
+    symlinkSync(external, target);
+    const result = run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /symlink in scan path/);
+  });
+}

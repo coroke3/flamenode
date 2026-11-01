@@ -39,8 +39,8 @@ function collectTsFiles(dir) {
       entries.push(...collectTsFiles(full));
     } else if (
       entry.isFile() &&
-      /\.(?:ts|tsx|mts)$/.test(entry.name) &&
-      !/(?:\.test|\.spec|\.d)\.(?:ts|tsx|mts)$/.test(entry.name)
+      /\.(?:ts|tsx|mts|cts)$/.test(entry.name) &&
+      !/(?:\.test|\.spec|\.d)\.(?:ts|tsx|mts|cts)$/.test(entry.name)
     ) {
       entries.push(full);
     }
@@ -71,10 +71,13 @@ for (const dir of actionRoots) {
   }
 }
 
-const enqueueSource = readFileSync(
-  path.join(root, "packages/server-core/src/staticRebuild/enqueue.ts"),
-  "utf8",
-);
+function readRepositoryFile(relative) {
+  const target = path.join(root, relative);
+  rejectSymlinkAncestors(target);
+  return readFileSync(target, "utf8");
+}
+
+const enqueueSource = readRepositoryFile("packages/server-core/src/staticRebuild/enqueue.ts");
 const batchStart = enqueueSource.indexOf(
   "export async function buildStaticRebuildQueueBatch",
 );
@@ -96,10 +99,7 @@ assert.match(
 assert.doesNotMatch(batchBuilderSource, /shouldSkipRecentRow/);
 assert.doesNotMatch(batchBuilderSource, /\.select\(staticRebuildActiveLookupSelect\)/);
 
-const loaderSource = readFileSync(
-  path.join(root, "src/lib/publicData/loader.ts"),
-  "utf8",
-);
+const loaderSource = readRepositoryFile("src/lib/publicData/loader.ts");
 assert.match(loaderSource, /directEnqueueStaticRebuild/);
 assert.match(loaderSource, /probePublicStaticTarget/);
 assert.match(loaderSource, /enqueued =[\s\S]*enqueueResult\.action === "inserted"/);
