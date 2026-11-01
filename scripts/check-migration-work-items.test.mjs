@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
+import {readWorkItems,validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -337,4 +337,58 @@ test("failed history retrieval never masks structural errors or nonexistent comm
  });
  assert.match(errors.join("\n"),/could not fetch required PR history/);
  assert.match(errors.join("\n"),/source SHA is not an available Git commit/);
+});
+
+test("work-item reader accepts regular checkpoints and excludes template files", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-regular-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  fs.writeFileSync(path.join(dir,"MIG-0301.md"),ready);
+  fs.writeFileSync(path.join(dir,"README.md"),"instructions");
+  assert.deepEqual(readWorkItems(root),{"MIG-0301.md":ready});
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("missing checkpoint directory is not silently accepted as zero checkpoints", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-missing-"));
+ try {
+  assert.throws(()=>readWorkItems(root),{code:"ENOENT"});
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("symlinked checkpoint and dangling checkpoint are rejected", {skip:process.platform==="win32"}, () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-file-link-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  const outside=path.join(root,"other.md");
+  fs.writeFileSync(outside,ready);
+  for (const target of [outside,path.join(root,"absent.md")]) {
+   const link=path.join(dir,"MIG-0301.md");
+   fs.symlinkSync(target,link,"file");
+   assert.throws(()=>readWorkItems(root),/checkpoint is not a regular file/);
+   fs.unlinkSync(link);
+  }
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("symlinked parent directories cannot redirect checkpoint validation", {skip:process.platform==="win32"}, () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-parent-link-"));
+ try {
+  const external=path.join(root,"external");
+  fs.mkdirSync(path.join(external,"migration","work-items"),{recursive:true});
+  fs.writeFileSync(path.join(external,"migration","work-items","MIG-0301.md"),ready);
+  fs.symlinkSync(external,path.join(root,"docs"),"dir");
+  assert.throws(()=>readWorkItems(root),/directory is not a real directory: docs/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("directory named like a checkpoint is rejected instead of skipped", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-not-file-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(path.join(dir,"MIG-0301.md"),{recursive:true});
+  assert.throws(()=>readWorkItems(root),/checkpoint is not a regular file/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
