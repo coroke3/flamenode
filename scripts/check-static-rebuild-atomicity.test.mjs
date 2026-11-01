@@ -32,7 +32,7 @@ function fixture(t) {
     "packages/server-core/src/staticRebuild/enqueue.ts",
     [
       "export async function buildStaticRebuildQueueBatch() {",
-      "  const statement = 'FROM json_each(${payload}) ON CONFLICT(target_type, target_id) WHERE status IN (\\'pending\\', \\'processing\\')';",
+      "  const statement = \"FROM json_each(${payload}) ON CONFLICT(target_type, target_id) WHERE status IN (\'pending\', \'processing\')\";",
       "  return statement;",
       "}",
       "export async function enqueueStaticRebuild() {}",
