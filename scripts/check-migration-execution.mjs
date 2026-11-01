@@ -155,6 +155,49 @@ export function parseTaskRows(statusText) {
   return rows;
 }
 
+// Whole-STATUS structure guard: every MIG row must sit under a canonical
+// header and delimiter row. parseTaskRows stays lenient for single-row fixtures.
+export function validateStatusTableStructure(statusText) {
+  const errors = [];
+  const lines = statusText.split("\n");
+  let inTable = false;
+  let expectDelimiter = false;
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    const where = "STATUS line " + (index + 1);
+    if (!trimmed || (/^#{1,6}\s/.test(trimmed))) {
+      if (expectDelimiter) errors.push(where + ": task table header not followed by delimiter row");
+      inTable = false;
+      expectDelimiter = false;
+      return;
+    }
+    if (expectDelimiter) {
+      expectDelimiter = false;
+      if (!/^\|(\s*:?-{3,}:?\s*\|)+$/.test(trimmed)) {
+        errors.push(where + ": task table header not followed by delimiter row");
+        inTable = false;
+      }
+      return;
+    }
+    const firstCell = trimmed.startsWith("|") ? trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim() : undefined;
+    if (firstCell !== undefined && /^id$/i.test(firstCell)) {
+      if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(\s*Acceptance\s*\|)?$/.test(trimmed)) {
+        inTable = true;
+        expectDelimiter = true;
+      } else {
+        errors.push(where + ": non-canonical task table header");
+        inTable = false;
+      }
+      return;
+    }
+    if (/^\|\s*MIG-/.test(trimmed) && !inTable) {
+      errors.push(where + ": task row outside a recognized task table: " + trimmed.match(/MIG-[^\s|]*/)[0]);
+    }
+  });
+  if (expectDelimiter) errors.push("STATUS: task table header not followed by delimiter row");
+  return errors;
+}
+
 export function parseDecisionRows(decisionsText) {
   const decisions = new Map();
   for (const line of decisionsText.split("\n")) {
@@ -192,6 +235,8 @@ export function validateMigrationExecution({
   let tasks;
   try { tasks = parseTaskRows(statusText); }
   catch (error) { return [...errors, "invalid STATUS task ledger: " + error.message]; }
+  const structureErrors = validateStatusTableStructure(statusText);
+  if (structureErrors.length) return [...errors, ...structureErrors.map((e) => "invalid STATUS task ledger: " + e)];
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   let decisions;
   try { decisions = parseDecisionRows(decisionsText); }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy } from "./check-migration-execution.mjs";
+import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy, validateStatusTableStructure } from "./check-migration-execution.mjs";
 
 const status = `Current Task: MIG-0301
 Task State: READY
@@ -260,7 +260,7 @@ test("requires known decision references", () => {
 });
 
 test("reject missing packages/db migration task", () => {
-  const changed = status.replace("| MIG-0308 | packages/db | BLOCKED | MIG-0302 |", "");
+  const changed = status.replace("| MIG-0308 | packages/db | BLOCKED | MIG-0302 |\n", "");
   assert.match(run({ statusText: changed }).join("\n"), /MIG-0308 packages\/db/);
 });
 
@@ -330,4 +330,26 @@ test("0401 cannot silently acquire the visual HTML dependency",()=>{
 test("Phase 4 Gate depends on 0403 and 0406 only (owner decision 2026-10-23)",()=>{
  const changed=performanceDagStatus.replace("| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |","| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0407 performance\/visual DAG/);
+});
+
+test("STATUS task table header and delimiter must be present and canonical", () => {
+  const header = "| ID | Task | State | Depends on |\n";
+  const delimiter = "| --- | --- | --- | --- |\n";
+  assert.deepEqual(validateStatusTableStructure(status), []);
+  assert.deepEqual(run(), []);
+  const cases = {
+    "deleted header": [header, "", /outside a recognized task table|not followed by delimiter/],
+    "altered header column": [header, "| ID | Title | State | Depends on |\n", /non-canonical task table header/],
+    "altered ID column": [header, "| Id2 | Task | State | Depends on |\n", /outside a recognized task table/],
+    "deleted delimiter": [delimiter, "", /not followed by delimiter row/],
+  };
+  for (const [name, [from, to, pattern]] of Object.entries(cases)) {
+    const changed = status.replace(from, to);
+    assert.notEqual(changed, status, name);
+    assert.match(validateStatusTableStructure(changed).join("\n"), pattern, name);
+    assert.match(run({ statusText: changed }).join("\n"), /invalid STATUS task ledger/, name);
+  }
+  // Phase 0 tables with an Acceptance column stay valid.
+  const withAcceptance = "| ID | Task | State | Depends on | Acceptance |\n| --- | --- | --- | --- | --- |\n| MIG-0101 | t | DONE | — | ok |\n";
+  assert.deepEqual(validateStatusTableStructure(withAcceptance), []);
 });
