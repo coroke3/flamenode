@@ -616,7 +616,7 @@ if (runUnderRootTsx(import.meta.url)) {
 
   test("T01 event groups: list filters/counts and edit detail (members, first option page) equal CURRENT", async () => {
     const { queryEventGroupEventOptions } = await import("../../../src/lib/admin/eventGroupEventOptions.ts");
-    for (const query of ["", "?visibility=public", "?visibility=private", "?visibility=archived", "?type=series", "?type=other&visibility=archived", "?type=bogus", "?type=toString", "?visibility=zzz"]) {
+    for (const query of ["", "?visibility=public", "?visibility=private", "?visibility=archived", "?type=series", "?type=other&visibility=archived", "?type=bogus", "?visibility=zzz"]) {
       const sp = Object.fromEntries(new URLSearchParams(query));
       const visibilityFilter = ["public", "private", "archived"].includes(sp.visibility) ? sp.visibility : "any";
       const typeFilter = sp.type && sp.type in { series: 1, genre: 1, related: 1, collection: 1, other: 1 } ? sp.type : "any";
@@ -641,6 +641,27 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(r.stats.statements, 3);
     }
     assert.equal((await call("/api/admin-read/event-groups/nope", "tok-root")).status, 404);
+  });
+
+  // Deliberate exception to CURRENT parity: Object.prototype keys used to pass
+  // CURRENT's `type in { ... }` check and cause an empty list. The target
+  // route must ignore such unrecognized type values instead of filtering SQL.
+  test("event group inherited-key type hardening is explicit and preserves ordinary visibility filters", async () => {
+    const all = await get("/api/admin-read/event-groups");
+    assert.equal(all.body.type, "any");
+    const privateOnly = await get("/api/admin-read/event-groups?visibility=private");
+    assert.equal(privateOnly.body.visibility, "private");
+    for (const key of ["toString", "constructor", "__proto__", "valueOf", "hasOwnProperty"]) {
+      const query = "?type=" + encodeURIComponent(key);
+      const normalized = await get("/api/admin-read/event-groups" + query);
+      assert.equal(normalized.body.type, "any", query);
+      assert.deepEqual(normalized.body.groups, all.body.groups, query);
+      assert.equal(normalized.stats.statements, all.stats.statements, query);
+      const withVisibility = await get("/api/admin-read/event-groups?visibility=private&type=" + encodeURIComponent(key));
+      assert.equal(withVisibility.body.type, "any", key);
+      assert.equal(withVisibility.body.visibility, "private", key);
+      assert.deepEqual(withVisibility.body.groups, privateOnly.body.groups, key);
+    }
   });
 
   test("contracts: every endpoint response parses with its zod schema (and a malformed body does not)", async () => {
