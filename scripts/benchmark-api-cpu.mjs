@@ -701,7 +701,7 @@ const ROUTE_EXPECT = {
 };
 
 // ------------------------------------------------------------ shared seeding
-const SEED = (adminToken) => [
+export const SEED = (adminToken) => [
   { sql: `INSERT OR REPLACE INTO "user" (id, name, role, is_banned, is_tos_accepted) VALUES ('bench-admin', 'Bench Admin', 'admin', 0, 1)`, params: [] },
   { sql: `INSERT OR REPLACE INTO "session" ("sessionToken", "userId", "expires") VALUES (?, 'bench-admin', ?)`, params: [SESSION_TOKEN, Date.now() + 365 * 24 * 3600 * 1000] },
   { sql: `INSERT OR REPLACE INTO system_settings (id, operation_mode) VALUES ('default', 'normal')`, params: [] },
