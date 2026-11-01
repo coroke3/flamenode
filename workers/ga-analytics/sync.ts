@@ -1,6 +1,6 @@
 /**
- * GA4 trending 同期: list/recent.json → GA4 report → rank → analytics/trending.json。
- * 失敗時は R2 put しない（fail-closed）。D1 は使わない。
+ * GA4 trending 同期: D1 公開作品 → GA4 report → rank → analytics/trending.json。
+ * D1/GA4 失敗時は R2 put しない（fail-closed）。
  */
 import { cancelR2BodyBestEffort } from "../../src/lib/r2Body.ts";
 import { ExternalRequestBudget } from "../shared/externalApi.ts";
@@ -15,15 +15,15 @@ import {
 } from "./dataApi.ts";
 import type { Ga4DataApiEnv } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
+import { normalizeStaticTrending } from "../../src/lib/publicData/staticTrendingCore.ts";
+import { loadRecentListFromD1 } from "./recentFromD1.ts";
 import type { RecentListPayload, TrendingItem } from "./ranking.ts";
 
-export const GA4_RECENT_LIST_KEY = "list/recent.json";
 export const GA4_TRENDING_OUTPUT_KEY = "analytics/trending.json";
 export const GA4_TRENDING_CACHE_CONTROL = staticR2CacheControl(
   STATIC_R2_MAX_AGE_SEC.trending,
   3600,
 );
-export const GA4_RECENT_LIST_MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 export const GA4_TRENDING_MAX_OBJECT_BYTES = 1024 * 1024;
 export const TRENDING_SCHEMA_VERSION = 1;
 export const TRENDING_RANKING_RULE = [
@@ -94,6 +94,7 @@ function countMatchedVideos(
 }
 
 export interface Ga4TrendingSyncEnv extends Ga4DataApiEnv {
+  DB: D1Database;
   R2: R2Bucket;
   GA4_SYNC_ENABLED?: string;
 }
@@ -117,6 +118,7 @@ function hasRequiredGa4Config(env: Ga4TrendingSyncEnv): boolean {
       env.GA4_SERVICE_ACCOUNT_EMAIL?.trim() &&
       env.GA4_SERVICE_ACCOUNT_PRIVATE_KEY?.trim() &&
       env.R2 &&
+      env.DB &&
       env.KV,
   );
 }
@@ -148,32 +150,26 @@ function isOversizedR2Object(
   );
 }
 
+function isOversizedUtf8Text(text: string, maxBytes: number): boolean {
+  // UTF-8 never uses fewer bytes than UTF-16 code units. Avoid encoding the
+  // usual small ASCII artifact; count real bytes when multibyte is possible.
+  return (
+    text.length > maxBytes ||
+    (text.length * 3 > maxBytes &&
+      new TextEncoder().encode(text).byteLength > maxBytes)
+  );
+}
+
 async function loadRecentListPayload(
   env: Ga4TrendingSyncEnv,
   signal?: AbortSignal,
 ): Promise<RecentListPayload> {
-  signal?.throwIfAborted();
-  const object = await env.R2.get(GA4_RECENT_LIST_KEY);
-  if (signal?.aborted) {
-    await cancelR2BodyBestEffort(object);
-    signal.throwIfAborted();
-  }
-  if (!object) throw new Error("ga4_recent_list_missing");
-  if (isOversizedR2Object(object, GA4_RECENT_LIST_MAX_OBJECT_BYTES)) {
-    await cancelR2BodyBestEffort(object);
-    throw new Error("ga4_recent_list_too_large");
-  }
-  const text = await object.text();
-  signal?.throwIfAborted();
-  try {
-    return JSON.parse(text) as RecentListPayload;
-  } catch {
-    throw new Error("ga4_recent_list_invalid_json");
-  }
+  return loadRecentListFromD1(env.DB, {}, signal);
 }
 
 async function loadExistingTrendingItemCount(
   env: Ga4TrendingSyncEnv,
+  recent: RecentListPayload,
   signal?: AbortSignal,
 ): Promise<number> {
   signal?.throwIfAborted();
@@ -189,9 +185,35 @@ async function loadExistingTrendingItemCount(
   }
   const text = await object.text();
   signal?.throwIfAborted();
+  // R2 object.size may be absent in mocks/proxies or disagree with the body.
+  // Never JSON.parse an oversized artifact, even when metadata looked safe.
+  if (isOversizedUtf8Text(text, GA4_TRENDING_MAX_OBJECT_BYTES)) return 0;
   try {
     const payload = JSON.parse(text) as TrendingOutputPayload;
-    return Array.isArray(payload.items) ? payload.items.length : 0;
+    // Retain only artifacts where the public reader can render every item.
+    // ID/status alone are insufficient: title, view windows, rank and video_id
+    // also affect the public reader's acceptance of each row.
+    const normalized = normalizeStaticTrending(payload);
+    if (
+      !normalized ||
+      !Array.isArray(payload.items) ||
+      payload.items.length === 0 ||
+      normalized.items.length !== payload.items.length
+    ) return 0;
+    // A last-success ranking may outlive a video's public visibility. Only
+    // preserve the artifact if ALL its IDs are still in the current D1
+    // allow-list; keeping one old private/deleted row would leak stale data.
+    if (!Array.isArray(recent.items)) return 0;
+    const publicIds = new Set<string>();
+    for (const item of recent.items) {
+      if (item && typeof item === "object" &&
+        typeof item.id === "string" && item.id.trim()) {
+        publicIds.add(item.id.trim());
+      }
+    }
+    return normalized.items.every((item) => publicIds.has(item.id))
+      ? normalized.items.length
+      : 0;
   } catch {
     return 0;
   }
@@ -203,13 +225,21 @@ async function putTrendingPayload(
   signal?: AbortSignal,
 ): Promise<void> {
   signal?.throwIfAborted();
-  await env.R2.put(GA4_TRENDING_OUTPUT_KEY, JSON.stringify(payload), {
+  const body = JSON.stringify(payload);
+  // The public consumer rejects analytics/trending.json above this cap.
+  // Count UTF-8 bytes (not JS UTF-16 units) before replacing last-good R2.
+  if (isOversizedUtf8Text(body, GA4_TRENDING_MAX_OBJECT_BYTES)) {
+    throw new Error("ga4_trending_output_exceeds_size_limit");
+  }
+  signal?.throwIfAborted();
+  await env.R2.put(GA4_TRENDING_OUTPUT_KEY, body, {
     httpMetadata: {
       contentType: "application/json; charset=utf-8",
       cacheControl: GA4_TRENDING_CACHE_CONTROL,
     },
   });
-  signal?.throwIfAborted();
+  // R2 PUT is the commit point. If cancellation arrives while it succeeds,
+  // do not report an unwritten failure and trigger duplicate retries.
 }
 
 export async function syncGa4Trending(
@@ -247,30 +277,59 @@ export async function syncGa4Trending(
 
   try {
     const recent = await loadRecentListPayload(env, signal);
+    // A successful D1 read with zero public videos invalidates every former
+    // public ranking. Avoid a GA4 call, but publish an empty valid artifact so
+    // removed/private video IDs cannot persist in R2.
+    if (!Array.isArray(recent.items)) throw new Error("ga4_recent_d1_invalid_result");
+    if (recent.items.length === 0) {
+      const generatedAt = Math.floor(Date.now() / 1000);
+      await putTrendingPayload(env, {
+        schema_version: TRENDING_SCHEMA_VERSION,
+        generated_at: generatedAt,
+        source: "ga4",
+        ranking_rule: [...TRENDING_RANKING_RULE],
+        windows: buildTrendingWindows(new Date(generatedAt * 1000)),
+        items: [],
+      }, signal);
+      logGa4TrendingEvent({
+        service: "flamenode-sync-jobs",
+        worker: "sync-jobs",
+        job: "ga4-trending-sync",
+        enabled: true,
+        result: "ok",
+        reason: "no_public_videos",
+        generated_at: generatedAt,
+        ranked_videos: 0,
+        r2_written: true,
+        external_api_calls: 0,
+      });
+      return emptyResult({ processed: 0, failed: 0, skipped: 0 });
+    }
     const { periods, quota } = await fetchVideoViewPeriods(
       env,
       budget,
       fetch,
       signal,
     );
-    if (
-      periods.length === 0 &&
-      Array.isArray(recent.items) &&
-      recent.items.length > 0
-    ) {
-      const existingItemCount = await loadExistingTrendingItemCount(env, signal);
+    const items = rankTrendingItems(recent, periods);
+    // A report with rows only for removed/private/unknown videos is just as
+    // unusable as an empty GA4 report. Do not replace a working public ranking
+    // with [] because the GA4 property temporarily reports unrelated IDs.
+    if (items.length === 0) {
+      const existingItemCount = await loadExistingTrendingItemCount(env, recent, signal);
       if (existingItemCount > 0) {
         throw new Error("ga4_empty_report_preserving_existing");
       }
     }
-    const items = rankTrendingItems(recent, periods);
     const generatedAt = Math.floor(Date.now() / 1000);
     const outputPayload: TrendingOutputPayload = {
       schema_version: TRENDING_SCHEMA_VERSION,
       generated_at: generatedAt,
       source: "ga4",
       ranking_rule: [...TRENDING_RANKING_RULE],
-      windows: buildTrendingWindows(),
+      // Anchor the four reported windows to the same UTC second as generated_at.
+      // Two independent clock reads can straddle UTC midnight.
+      windows: buildTrendingWindows(new Date(generatedAt * 1000)),
       items,
     };
     await putTrendingPayload(env, outputPayload, signal);
