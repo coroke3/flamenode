@@ -96,9 +96,27 @@ export function getTaskContext(id,root=ROOT,{smallOnly=false}={}){
 
 // Live ownership hint from open PR branch names (migration/mig-XXXX-*). Never a lock; the PR itself stays authoritative.
 export function parseOwnedTasks(prs){
+  if(!Array.isArray(prs))throw new Error("Invalid open PR owner snapshot");
   const owned=new Map();
-  for(const pr of prs){
-    const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName||"");
+  for(const [index,pr] of prs.entries()){
+    // A partial/malformed GitHub response must never make an already-owned MIG
+    // appear claimable. MCP-provided branch snapshots use a nonempty string
+    // surrogate for number; gh JSON snapshots use a positive integer.
+    const validNumber=(Number.isSafeInteger(pr?.number)&&pr.number>0)
+      ||(typeof pr?.number==="string" && (
+        // A string PR number must be a canonical positive GitHub number,
+        // or the exact branch-tied placeholder produced by --open-pr-branches.
+        // Any arbitrary string would make a corrupt snapshot look complete.
+        /^[1-9]\d*$/.test(pr.number) && Number.isSafeInteger(Number(pr.number))
+        || pr.number==="?("+pr.headRefName+")"
+      ));
+    if(!pr||typeof pr!=="object"||Array.isArray(pr)
+      ||!Object.hasOwn(pr,"number")||!Object.hasOwn(pr,"headRefName")
+      ||typeof pr.headRefName!=="string"||!pr.headRefName.trim()
+      ||pr.headRefName!==pr.headRefName.trim()||!validNumber){
+      throw new Error("Invalid open PR record at index "+index+"; migration ownership cannot be verified");
+    }
+    const match=/^migration\/mig-(\d{4})-/.exec(pr.headRefName);
     if(!match)continue;
     const id="MIG-"+match[1];
     if(owned.has(id)){
