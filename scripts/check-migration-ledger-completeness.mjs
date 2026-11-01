@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import { parseFileRows, parseMigs } from "./check-migration-file-progress.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const B = "\x60";
 
 // Directories whose tracked files are all required (unless excluded below).
 export const REQUIRED_DIRS = ["app/", "src/lib/", "src/components/", "src/styles/", "public/", "workers/", "cloudflare/"];
