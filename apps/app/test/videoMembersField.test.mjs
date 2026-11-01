@@ -510,13 +510,13 @@ async function previewTsv(container, data) {
   await act(async () => buttonNamed(container, "内容を確認").click());
 }
 
-test("MIG-0713 U03 T02: empty editor rows cannot exceed the 100-row display limit", async () => {
-  for (const rowCount of [99, 100]) {
+test("MIG-0713 U03 T02: blank editor rows do not count toward the 100-member add limit (CURRENT parity)", async () => {
+  for (const blankCount of [99, 100]) {
     const container = dom.window.document.createElement("div");
     dom.window.document.body.append(container);
     const root = createRoot(container);
     const empty = () => ({ name: "", x_user_id: "", role: "", comment: "", chapters: [] });
-    const initialMembers = [alice, ...Array.from({ length: rowCount - 1 }, empty)];
+    const initialMembers = [alice, ...Array.from({ length: blankCount - 1 }, empty)];
     try {
       await act(async () => root.render(React.createElement(VideoMembersField, {
         ...noopAdapters,
@@ -524,12 +524,10 @@ test("MIG-0713 U03 T02: empty editor rows cannot exceed the 100-row display limi
       })));
       const countInputs = () => container.querySelectorAll('input[placeholder="表示名"]').length;
       const addRow = buttonNamed(container, "行を追加");
-      assert.equal(countInputs(), rowCount);
-      assert.equal(addRow.disabled, rowCount === 100,
-        "empty rows count toward the visible editing limit");
+      assert.equal(countInputs(), blankCount);
+      assert.equal(addRow.disabled, false, "only non-blank members count toward the limit");
       await act(async () => addRow.click());
-      assert.equal(countInputs(), 100, "the add action must never create a 101st blank row");
-      assert.equal(buttonNamed(container, "行を追加").disabled, true);
+      assert.equal(countInputs(), blankCount + 1, "add appends a row exactly as CURRENT does");
       const members = JSON.parse(container.querySelector('input[name="members_json"]').value);
       assert.equal(members.length, 1, "blank editor rows remain excluded from the payload");
       assert.equal(members[0].x_user_id, "alice");
@@ -537,6 +535,20 @@ test("MIG-0713 U03 T02: empty editor rows cannot exceed the 100-row display limi
       await act(async () => root.unmount());
       container.remove();
     }
+  }
+});
+
+test("MIG-0713 U03 T02: add is disabled once 100 non-blank members exist", async () => {
+  const container = dom.window.document.createElement("div");
+  dom.window.document.body.append(container);
+  const root = createRoot(container);
+  const full = Array.from({ length: 100 }, (_, i) => ({ name: "N" + i, x_user_id: "x" + i, role: "", comment: "", chapters: [] }));
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, { ...noopAdapters, initialMembers: full })));
+    assert.equal(buttonNamed(container, "行を追加").disabled, true);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
   }
 });
 
@@ -793,6 +805,26 @@ test("MIG-0713 U03 T03: pending permission batch prevents duplicate writes or ea
   } finally {
     await act(async () => root.unmount());
     container.remove();
+  }
+});
+
+test("MIG-0713 U03 T04: ok:false without a message shows CURRENT fallback text", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(React.createElement(VideoMembersField, {
+      ...noopAdapters,
+      permissionTargetVideoId: "vid1",
+      applyPermissionBatch: async () => ({ ok: false }),
+    })));
+    await previewTsv(container, "Alice\talice\t\t\t\tON");
+    await act(async () => buttonNamed(container, "追加").click());
+    await act(async () => buttonNamed(container, "変更を反映").click());
+    const dialog = container.querySelector('[role="alertdialog"]');
+    assert.ok(dialog);
+    assert.match(dialog.textContent, /反映に失敗しました。/);
+  } finally {
+    await act(async () => root.unmount());
   }
 });
 

@@ -39,7 +39,11 @@ interface VideoMembersFieldProps {
    * 未指定（新規投稿など）のときは権限列を反映せず、その旨を明示する。
    */
   permissionTargetVideoId?: string | null;
-  /** Inject the existing X-user search boundary; component never calls fetch directly. */
+  /**
+   * Inject the existing X-user search boundary; component never calls fetch directly.
+   * Contract (CURRENT parity): the adapter must reject (throw) on a non-2xx response so the
+   * field shows its error state, and must not serve cached results (CURRENT used cache: "no-store").
+   */
   searchXUsers: (q: string, offset: number, signal: AbortSignal) => Promise<{
     items?: { id: string; x_name: string | null; score?: number; matchedBy?: string }[];
     hasMore?: boolean;
@@ -409,7 +413,7 @@ export function VideoMembersField({
     if (disabled) return;
     setRows((prev) => {
       // Blank editor rows also consume UI resources; never add more than the display cap.
-      if (prev.length >= MAX_VIDEO_MEMBERS || normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
+      if (normalizeMemberRows(prev).length >= MAX_VIDEO_MEMBERS) return prev;
       return [...prev, { ...EMPTY_ROW }];
     });
   };
@@ -745,11 +749,11 @@ export function VideoMembersField({
   const applyPermissionsBatch = async () => {
     if (!bulkPreview || !permissionTargetVideoId || permPendingRef.current) return;
     permPendingRef.current = true;
-    const intents = bulkPreview.permissionIntents.slice(0, MAX_COLLABORATOR_PERMISSION_BATCH);
-    const explicitPrivilegeMode = currentExplicitPermissionPrivilegeMode();
     setPermPending(true);
     setPermResult(null);
     try {
+      const intents = bulkPreview.permissionIntents.slice(0, MAX_COLLABORATOR_PERMISSION_BATCH);
+      const explicitPrivilegeMode = currentExplicitPermissionPrivilegeMode();
       const result = await applyPermissionBatch({
         videoId: permissionTargetVideoId,
         ...(explicitPrivilegeMode
@@ -1155,7 +1159,7 @@ export function VideoMembersField({
           type="button"
           className="fn-btn fn-btn-ghost fn-btn-sm"
           onClick={add}
-          disabled={disabled || rows.length >= MAX_VIDEO_MEMBERS || normalizedRows.length >= MAX_VIDEO_MEMBERS}
+          disabled={disabled || normalizedRows.length >= MAX_VIDEO_MEMBERS}
         >
           <Icon name="plus" size={11} aria-hidden /> 行を追加
         </button>
