@@ -37,6 +37,11 @@ export function analyzeDistFiles(distDir, options = {}) {
   if (!fs.existsSync(distDir)) {
     throw new Error(`Build output directory not found: ${distDir}`);
   }
+  // Following a symlinked dist root can inspect a different asset tree than
+  // the one deployed. The preflight must not report a quota PASS for it.
+  if (fs.lstatSync(distDir).isSymbolicLink()) {
+    throw new Error(`Build output directory is a symbolic link: ${distDir}`);
+  }
 
   const breakdown = {
     html: 0,
@@ -54,6 +59,12 @@ export function analyzeDistFiles(distDir, options = {}) {
     const entries = fs.readdirSync(currentDir, { withFileTypes: true });
     for (const entry of entries) {
       const fullPath = path.join(currentDir, entry.name);
+      // Dirent.isFile()/isDirectory() are both false for symlinks. Silently
+      // skipping them undercounts assets (including linked directories).
+      if (entry.isSymbolicLink()) {
+        const relative = path.relative(distDir, fullPath).replaceAll(path.sep, "/");
+        throw new Error(`Symbolic link in build output: ${relative}`);
+      }
       if (entry.isDirectory()) {
         walk(fullPath);
       } else if (entry.isFile()) {

@@ -1,5 +1,5 @@
-import { and, eq, ne } from "drizzle-orm";
-import { events as eventsTable, slots, videos } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
+import { events as eventsTable, slots } from "@/lib/db/schema";
 import type { DB } from "@/lib/db/client";
 import { buildSlotParts } from "@/lib/utils/slotGroupingCore";
 import { parseEventPartsJson } from "@/lib/video/parseEventIds";
@@ -37,23 +37,5 @@ export async function resolvePartFromSlot(
   return slotPart ? (configuredParts[slotPart.index - 1] ?? null) : null;
 }
 
-export async function checkYoutubeVideoDuplicate(
-  db: DB,
-  youtubeId: string,
-  excludeVideoId?: string,
-): Promise<boolean> {
-  const row = (
-    await db
-      .select({ id: videos.id })
-      .from(videos)
-      .where(
-        and(
-          eq(videos.youtube_video_id, youtubeId),
-          ne(videos.visibility_status, "voided"),
-          excludeVideoId ? ne(videos.id, excludeVideoId) : undefined,
-        )!,
-      )
-      .limit(1)
-  )[0];
-  return Boolean(row);
-}
+/** Legacy import retained for the CURRENT Server Actions. */
+export { checkYoutubeVideoDuplicate } from "@flamenode/server-core/video/youtubeDuplicate";

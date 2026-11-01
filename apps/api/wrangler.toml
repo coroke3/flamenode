@@ -1,0 +1,34 @@
+# MIG-0628 U02 — Hono API non-production dry-run template. NO routes or secrets.
+name = "flamenode-hono-api"
+main = "./src/index.ts"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
+workers_dev = false
+minify = true
+
+[vars]
+# Verified commit SHA must replace this placeholder in the approved deploy pipeline.
+BUILD_COMMIT_SHA = "UNVERIFIED_DRY_RUN_ONLY"
+PUBLIC_VISIBILITY_GUARD_MODE = "observe"
+FORCE_STATIC_ONLY = "0"
+YOUTUBE_DAILY_QUOTA_LIMIT = "0"
+NEXT_PUBLIC_SITE_URL = "https://flamenode.net"
+FLAMENODE_LOCAL_PREVIEW = "0"
+ADMIN_SPREADSHEET_ENABLED = "0"
+ADMIN_SPREADSHEET_PAGE_SIZE = "50"
+
+# Secrets WORKER_ADMIN_TOKEN and AUTH_SECRET are deliberately NOT stored here.
+# Owner must configure both through an approved secrets workflow before deployment.
+[[d1_databases]]
+binding = "DB"
+database_name = "flamenode_db"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../migrations"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "flamenode-storage"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"

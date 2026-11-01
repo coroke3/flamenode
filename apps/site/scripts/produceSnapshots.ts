@@ -31,6 +31,7 @@ import {
   TOP_KEY,
   TRENDING_KEY,
   USERS_INDEX_KEY,
+  PUBLIC_X_ICON_MAP_KEY,
   EVENT_INDEX_KEY,
   eventDetailKey,
   eventReleaseKey,
@@ -47,6 +48,8 @@ const ID_LIST_LIMIT = 5000;
 const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
 import { normalizeStaticUsersIndex } from "../../../src/lib/publicData/staticUsersIndexCore.ts";
+import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../../../src/lib/publicData/publicIconProjection.ts";
+import { projectPublicXIconMap } from "../src/lib/publicIconMap.ts";
 import { normalizeStaticRecentVideoPage } from "../../../src/lib/publicData/staticRecentVideoCore.ts";
 import { normalizeStaticVideoDetail } from "../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { normalizeXId } from "../../../src/lib/utils/xid.ts";
@@ -352,6 +355,9 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     } : undefined);
     add(TRENDING_KEY, input.trending);
     add(USERS_INDEX_KEY, objects.get("users/index.json"));
+    add(PUBLIC_X_ICON_MAP_KEY, projectPublicXIconMap(
+      objects.get(PUBLIC_X_ICON_MAP_OBJECT_KEY), objects.get("users/index.json"),
+    ) ?? undefined);
     for (const id of creatorIds) {
       if (!objects.has(`users/${id}.json`)) continue;
       add(userProfileSnapshotKey(id), objects.get(`users/${id}.json`));
