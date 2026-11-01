@@ -95,3 +95,19 @@ test("remote initialized state reads the migration count after the table invento
   assert.equal(calls.length, 2);
   assert.match(calls[1].at(-1), /COUNT\(\*\) AS migration_rows FROM d1_migrations/);
 }));
+
+test("table names resembling the _cf_ prefix still count as user tables", () => fixture((root) => {
+  const file = createDb(root, ["CREATE TABLE acfx (id TEXT)"]);
+  assert.equal(invoke(root, [`--database=${file}`, "--expect-empty"]).status, 1);
+  const reserved = createDb(fs.mkdtempSync(path.join(root, "r-")), ["CREATE TABLE _cf_KV (key TEXT)"]);
+  assert.equal(invoke(root, [`--database=${reserved}`, "--expect-empty"]).status, 0);
+}));
+
+test("empty d1_migrations table is empty; any migration row is not", () => fixture((root) => {
+  const file = createDb(root, ["CREATE TABLE d1_migrations (id INTEGER)"]);
+  assert.equal(invoke(root, [`--database=${file}`, "--expect-empty"]).status, 0);
+  const db = new DatabaseSync(file);
+  db.exec("INSERT INTO d1_migrations VALUES (1)");
+  db.close();
+  assert.equal(invoke(root, [`--database=${file}`, "--expect-empty"]).status, 1);
+}));

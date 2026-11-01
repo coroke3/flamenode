@@ -3,6 +3,9 @@
 /**
  * Read-only D1 bootstrap state preflight for local SQLite and remote Wrangler.
  * An untouched database may not contain d1_migrations yet.
+ * --expect-empty accepts a d1_migrations table with zero rows (created by a
+ * wrangler apply that recorded nothing) but rejects any migration row.
+ * Reserved prefixes are matched literally: LIKE treats _ as a wildcard.
  */
 import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
@@ -16,7 +19,7 @@ const TABLES_SQL = `
 SELECT
   (SELECT COUNT(*) FROM sqlite_master
    WHERE type='table' AND name NOT LIKE 'sqlite_%'
-     AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations') AS user_tables,
+     AND substr(name, 1, 4) <> '_cf_' AND name <> 'd1_migrations') AS user_tables,
   (SELECT COUNT(*) FROM sqlite_master
    WHERE type='table' AND name='d1_migrations') AS has_migrations
 `;
