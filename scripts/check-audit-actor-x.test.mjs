@@ -76,3 +76,21 @@ test("astral Unicode before comments does not shift lexer offsets", () => {
   assert.doesNotMatch(filtered, /actor_x_user_id/);
   assert.match(filtered, /const alive = true/);
 });
+
+test("regex literals containing comment openers do not mask later code", () => {
+  const source = [
+    "const re = /[/*]foo/; const audit = { actor_x_user_id: id };",
+    "const re2 = /\\/\\*foo\\*\\//; const ok = { actor_x_user_id: id2 };",
+    "const re3 = /a\\/\\/b/; // trailing actor_x_hidden",
+  ].join("\n");
+  const filtered = withoutComments(source);
+  assert.match(filtered, /actor_x_user_id: id \}/);
+  assert.match(filtered, /actor_x_user_id: id2 \}/);
+  assert.doesNotMatch(filtered, /actor_x_hidden/);
+  const files = new Map(baseline);
+  files.set(
+    "src/lib/actions/xid.ts",
+    "const re = /[/*]foo/; const audit = { actor_x_user_id: xId }; xLinkDeletionAllowedSql(userId, xId);",
+  );
+  assert.deepEqual(inspect(files), []);
+});

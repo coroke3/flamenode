@@ -42,18 +42,30 @@ const REQUIRED_PATTERNS = [
 ];
 
 // A textual contract marker in a comment is not evidence of executable wiring.
-// Use the TS lexer instead of a comment regex so URLs, strings and templates
-// containing // or /* remain intact. Preserve offsets and newlines for patterns.
+// Walk the parsed AST's tokens and blank the comment trivia around each one, so
+// regex literals (e.g. /[/*]foo/), URLs, strings and templates containing // or
+// /* remain intact (a bare lexer scan cannot tell a regex from a comment start).
+// Preserve offsets and newlines for patterns.
 export function withoutComments(source) {
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
-  const chars = source.split(""); // TS scanner offsets count UTF-16 code units.
-  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
-    if (token !== ts.SyntaxKind.SingleLineCommentTrivia &&
-        token !== ts.SyntaxKind.MultiLineCommentTrivia) continue;
-    for (let i = scanner.getTokenPos(); i < scanner.getTextPos(); i++) {
-      if (chars[i] !== "\n" && chars[i] !== "\r") chars[i] = " ";
+  const sf = ts.createSourceFile("input.ts", source, ts.ScriptTarget.Latest, true);
+  const chars = source.split(""); // TS offsets count UTF-16 code units.
+  const blank = (ranges) => {
+    for (const range of ranges ?? []) {
+      for (let i = range.pos; i < range.end; i++) {
+        if (chars[i] !== "\n" && chars[i] !== "\r") chars[i] = " ";
+      }
     }
-  }
+  };
+  const visit = (node) => {
+    const children = node.getChildren(sf);
+    if (children.length === 0) {
+      blank(ts.getLeadingCommentRanges(source, node.pos));
+      blank(ts.getTrailingCommentRanges(source, node.end));
+      return;
+    }
+    for (const child of children) visit(child);
+  };
+  visit(sf);
   return chars.join("");
 }
 
