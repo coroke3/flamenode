@@ -17,6 +17,13 @@ export const AcceptLatestTermsResponseSchema = z.object({
 export type AcceptLatestTermsBody = z.infer<typeof AcceptLatestTermsBodySchema>;
 export type AcceptLatestTermsResponse = z.infer<typeof AcceptLatestTermsResponseSchema>;
 
+/**
+ * SA-076 / onboarding complete take no arguments in CURRENT, but the Hono POST requires a JSON
+ * OBJECT body (clients send `{}`); an empty body, array or null is rejected with 400.
+ */
+export const OnboardingEmptyBodySchema = z.object({}).passthrough();
+export type OnboardingEmptyBody = z.infer<typeof OnboardingEmptyBodySchema>;
+
 /** CURRENT acceptOnboardingTerms() is a success-or-message union. */
 export const OnboardingTermsAcceptResponseSchema = z.discriminatedUnion("ok", [
   z.object({ ok: z.literal(true), alreadyAccepted: z.boolean().optional() }),

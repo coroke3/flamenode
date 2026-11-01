@@ -300,10 +300,11 @@ test("MIG-0641 U01f: snapshot performs ONE bounded D1 statement with published-o
   const { loadTermsSnapshot, TERMS_SNAPSHOT_SQL } = await import("../src/routes/personal/termsSnapshot.ts");
   const sqlite = new DatabaseSync(":memory:");
   try {
-    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "name" TEXT, "emailVerified" INTEGER, "is_tos_accepted" INTEGER, "accepted_terms_version_id" TEXT, "terms_reaccept_required" INTEGER)');
+    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "name" TEXT, "emailVerified" INTEGER, "is_tos_accepted" INTEGER, "accepted_terms_version_id" TEXT, "terms_reaccept_required" INTEGER, "active_x_user_id" TEXT)');
+    sqlite.exec('CREATE TABLE "x_users" ("id" TEXT PRIMARY KEY, "x_name" TEXT, "icon_url" TEXT)');
     sqlite.exec('CREATE TABLE "terms_versions" ("id" TEXT PRIMARY KEY, "status" TEXT, "published_at" INTEGER, "updated_at" INTEGER)');
     sqlite.exec('CREATE TABLE "user_tos_consents" ("id" TEXT PRIMARY KEY, "user_id" TEXT, "terms_version_id" TEXT)');
-    sqlite.prepare('INSERT INTO "user" VALUES (?, ?, ?, ?, ?, ?)').run("u1", "Name", 1760000000000, 0, null, 0);
+    sqlite.prepare('INSERT INTO "user" VALUES (?, ?, ?, ?, ?, ?, ?)').run("u1", "Name", 1760000000000, 0, null, 0, null);
     for(const [id,status,pub,updated] of [
       ["old", "published", 100, 100], ["new-a", "published", 200, 100],
       ["new-b", "published", 200, 200], ["draft", "draft", 900, 900],
@@ -323,6 +324,8 @@ test("MIG-0641 U01f: snapshot performs ONE bounded D1 statement with published-o
     assert.equal(result.userBefore.name, "Name");
     assert.equal(result.userBefore.emailVerified.getTime(), 1760000000000);
     assert.equal(Object.hasOwn(result.userBefore, "__terms_version_id"), false);
+    assert.equal(Object.hasOwn(result.userBefore, "__actor_x_name"), false);
+    assert.equal(JSON.parse(result.actorSnapshotJson).discord_name, "Name");
     assert.equal(await loadTermsSnapshot(d1, "missing"), null);
     assert.equal(count, 2, "one statement for each lookup, no follow-up read");
   } finally { sqlite.close(); }
@@ -333,14 +336,16 @@ test("MIG-0641 U01f: snapshot fallback and no-consent return, without publishing
   const { loadTermsSnapshot } = await import("../src/routes/personal/termsSnapshot.ts");
   const sqlite = new DatabaseSync(":memory:");
   try {
-    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "emailVerified" INTEGER)');
+    sqlite.exec('CREATE TABLE "user" ("id" TEXT PRIMARY KEY, "emailVerified" INTEGER, "active_x_user_id" TEXT)');
+    sqlite.exec('CREATE TABLE "x_users" ("id" TEXT PRIMARY KEY, "x_name" TEXT, "icon_url" TEXT)');
     sqlite.exec('CREATE TABLE "terms_versions" ("id" TEXT PRIMARY KEY, "status" TEXT, "published_at" INTEGER, "updated_at" INTEGER)');
     sqlite.exec('CREATE TABLE "user_tos_consents" ("id" TEXT PRIMARY KEY, "user_id" TEXT, "terms_version_id" TEXT)');
-    sqlite.prepare('INSERT INTO "user" VALUES (?, ?)').run("u1", null);
+    sqlite.prepare('INSERT INTO "user" VALUES (?, ?, ?)').run("u1", null, null);
     sqlite.prepare('INSERT INTO "terms_versions" VALUES (?, ?, ?, ?)').run("not-published", "draft", 999, 999);
     const d1 = { prepare: q => ({ bind: (...values) => ({ first: async () => sqlite.prepare(q).get(...values) ?? null }) }) };
     assert.deepEqual(await loadTermsSnapshot(d1, "u1"), {
-      userBefore: { id: "u1", emailVerified: null },
+      userBefore: { id: "u1", emailVerified: null, active_x_user_id: null },
+      actorSnapshotJson: JSON.stringify({ discord_id: null, discord_name: null, x_user_id: null, x_name: null, icon_url: null }),
       termsVersionId: "fallback-current", existingConsentId: null,
     });
   } finally { sqlite.close(); }
@@ -538,4 +543,10 @@ test("MIG-0641 U01h: SA-075 sanitized JSON next, CAS conflict, malformed and ove
   assert.equal((await request("{broken json")).status,400);
   assert.equal((await request("x".repeat(2049))).status,413);
   assert.equal(writes,1,"invalid requests must not invoke the consent commit");
+});
+
+test("MIG-0641 review P3: SA-076 body contract requires a JSON object (clients send {})", async () => {
+  const { OnboardingEmptyBodySchema } = await import("@flamenode/contracts");
+  assert.equal(OnboardingEmptyBodySchema.safeParse({}).success, true);
+  for (const invalid of [null, [], "x", 1, undefined]) assert.equal(OnboardingEmptyBodySchema.safeParse(invalid).success, false);
 });

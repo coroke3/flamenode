@@ -103,9 +103,17 @@ test("MIG-0641 T04: anonymous, banned, cross-origin and CostGuard-denied request
 
 test("MIG-0641 T05: acceptance updates the CURRENT user/consent fields with strict audit in one atomic batch", async () => {
   const w = world();
+  const readsBefore = w.d1.stats.reads;
   const res = await post(w, "/terms/accept", "tok-carol", { body: { next: "/rules" } });
   assert.equal(res.status, 200);
   assert.equal(w.d1.stats.batches, 1, "one D1 batch");
+  assert.equal(w.d1.stats.reads - readsBefore, 3, "S3: session + CostGuard + terms snapshot only (actor snapshot preloaded)");
+  const actor = JSON.parse(w.sqlite.prepare("SELECT actor_snapshot_json j FROM audit_logs LIMIT 1").get().j);
+  assert.equal(actor.discord_id, userRow(w, "u_carol").discord_id, "audit actor snapshot is the real actor, not empty");
+  const w3 = world();
+  const r3 = w3.d1.stats.reads;
+  assert.equal((await post(w3, "/onboarding/terms", "tok-carol")).status, 200);
+  assert.equal(w3.d1.stats.reads - r3, 3, "SA-076 also within 3 pre-reads");
   const user = userRow(w, "u_carol");
   assert.equal(user.is_tos_accepted, 1);
   assert.equal(user.accepted_terms_version_id, "T2", "latest published major terms");

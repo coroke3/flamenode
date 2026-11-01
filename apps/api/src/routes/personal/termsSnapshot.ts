@@ -5,6 +5,7 @@
  * terms version, current user and existing consent must share ONE statement.
  * This is read-only and is not exposed as an HTTP route.
  */
+import { actorSnapshotFromRow } from "@flamenode/server-core/audit/logger";
 import type { TermsUserSnapshot } from "./termsConsentPlan.ts";
 
 export const FALLBACK_TERMS_VERSION_ID = "fallback-current";
@@ -13,6 +14,8 @@ export const FALLBACK_TERMS_VERSION_ID = "fallback-current";
 type TermsSnapshotRow = TermsUserSnapshot & {
   __terms_version_id: string;
   __existing_consent_id: string | null;
+  __actor_x_name: string | null;
+  __actor_x_icon_url: string | null;
   emailVerified?: number | null;
 };
 
@@ -20,6 +23,8 @@ export type TermsSnapshot = {
   userBefore: TermsUserSnapshot;
   termsVersionId: string;
   existingConsentId: string | null;
+  /** JSON.stringify(actorSnapshotFromRow(row)): lets the audit skip its own actor read (S3). */
+  actorSnapshotJson: string;
 };
 
 /**
@@ -40,7 +45,9 @@ SELECT u.*,
   version.terms_id AS __terms_version_id,
   (SELECT c."id" FROM "user_tos_consents" c
     WHERE c."user_id" = u."id" AND c."terms_version_id" = version.terms_id
-    LIMIT 1) AS __existing_consent_id
+    LIMIT 1) AS __existing_consent_id,
+  (SELECT x."x_name" FROM "x_users" x WHERE x."id" = u."active_x_user_id") AS __actor_x_name,
+  (SELECT x."icon_url" FROM "x_users" x WHERE x."id" = u."active_x_user_id") AS __actor_x_icon_url
 FROM "user" u CROSS JOIN version
 WHERE u."id" = ? LIMIT 1
 `;
@@ -51,7 +58,7 @@ export async function loadTermsSnapshot(
 ): Promise<TermsSnapshot | null> {
   const row = await d1.prepare(TERMS_SNAPSHOT_SQL).bind(authenticatedUserId).first<TermsSnapshotRow>();
   if (!row) return null;
-  const { __terms_version_id, __existing_consent_id, ...user } = row;
+  const { __terms_version_id, __existing_consent_id, __actor_x_name, __actor_x_icon_url, ...user } = row;
   if (
     user.id !== authenticatedUserId ||
     typeof __terms_version_id !== "string" ||
@@ -69,7 +76,16 @@ export async function loadTermsSnapshot(
     if (!Number.isFinite(verifiedAt.getTime())) throw new Error("invalid_terms_timestamp");
     userBefore = { ...user, emailVerified: verifiedAt };
   }
+  const actorSnapshotJson = JSON.stringify(actorSnapshotFromRow({
+    discord_id: (user.discord_id as string | null | undefined) ?? null,
+    discord_name: (user.name as string | null | undefined) ?? null,
+    active_x_user_id: (user.active_x_user_id as string | null | undefined) ?? null,
+    user_image: (user.image as string | null | undefined) ?? null,
+    x_name: __actor_x_name ?? null,
+    x_icon_url: __actor_x_icon_url ?? null,
+  }));
   return {
+    actorSnapshotJson,
     userBefore,
     termsVersionId: __terms_version_id,
     existingConsentId: __existing_consent_id,

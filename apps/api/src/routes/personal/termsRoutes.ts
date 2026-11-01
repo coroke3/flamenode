@@ -10,6 +10,7 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import {
   AcceptLatestTermsBodySchema,
+  OnboardingEmptyBodySchema,
   type AcceptLatestTermsResponse,
 } from "@flamenode/contracts";
 import { requireAuth, sessionMiddleware } from "../../auth/session.ts";
@@ -146,7 +147,7 @@ export function createIsolatedTermsWriteRoutes(options: TermsWriteRouteOptions):
   routes.post("/onboarding/terms", async (c) => {
     const body = await readTermsBody(c.req.raw);
     if (body.kind === "too_large") return c.json({ ok: false, message: "リクエストが大きすぎます。" }, 413);
-    if (body.kind !== "ok" || !body.value || typeof body.value !== "object" || Array.isArray(body.value)) {
+    if (body.kind !== "ok" || !OnboardingEmptyBodySchema.safeParse(body.value).success) {
       return c.json({ ok: false, message: "入力内容を確認してください。" }, 400);
     }
     const result = await commit(c, c.get("user")!.id);

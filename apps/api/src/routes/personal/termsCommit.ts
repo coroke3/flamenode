@@ -16,7 +16,7 @@ import { commitPlannedTermsConsent } from "./termsAtomic.ts";
 
 export type TermsCommitPort = {
   load(userId: string): Promise<TermsSnapshot | null>;
-  commit(plan: TermsConsentPlan): Promise<"accepted" | "already_accepted">;
+  commit(plan: TermsConsentPlan, snapshot?: TermsSnapshot): Promise<"accepted" | "already_accepted">;
   generateConsentId(): string;
   now(): number;
 };
@@ -34,8 +34,17 @@ export function createTermsCommitPort(
 ): TermsCommitPort {
   return {
     load: (userId) => loadTermsSnapshot(d1, userId),
-    commit: (plan) => commitPlannedTermsConsent(db, plan, {
-      preloaded: options.preloaded,
+    commit: (plan, snapshot) => commitPlannedTermsConsent(db, plan, {
+      // The terms snapshot already read the actor's row: reuse it (3 pre-reads total, S3).
+      preloaded: snapshot
+        ? {
+            ...options.preloaded,
+            actorSnapshotJsonById: {
+              ...options.preloaded?.actorSnapshotJsonById,
+              [snapshot.userBefore.id]: snapshot.actorSnapshotJson,
+            },
+          }
+        : options.preloaded,
       callerQueryCount: options.callerQueryCount,
     }),
     generateConsentId: () => generateId("tos"),
@@ -83,7 +92,7 @@ export async function commitLatestTermsForUser(
   }
 
   try {
-    await port.commit(plan);
+    await port.commit(plan, snapshot);
     return { kind: "accepted", termsVersionId };
   } catch (error) {
     if (!(error instanceof AuditMutationError)) {
