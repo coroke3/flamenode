@@ -2,6 +2,7 @@ import * as React from "react";
 import { Route, Routes } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { AuthErrorView, OpsGate } from "./guard.js";
+import { AdminUsers } from "./admin/AdminUsers.js";
 
 /** MIG-0707 U02: placeholder only. No protected screen data is served until its own MIG is reviewed. */
 function UnmigratedView(): React.ReactElement {
@@ -28,6 +29,7 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/manage" element={manage} />
             <Route path="/manage/*" element={manage} />
             <Route path="/admin" element={admin} />
+            <Route path="/admin/users" element={<OpsGate surface="admin" api={api}><AdminUsers /></OpsGate>} />
             <Route path="/admin/*" element={admin} />
           </Routes>
         </OpsRouteErrorBoundary>
