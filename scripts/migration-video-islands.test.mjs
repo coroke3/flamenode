@@ -6,7 +6,6 @@ import { JSDOM } from "jsdom";
 import { act } from "react";
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { toggleInteraction } from "../apps/site/src/lib/videoInteraction.ts";
 
 const goodOverlay = {
   loggedIn: true, authUnavailable: false, isBanned: false,
@@ -20,7 +19,9 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 const buildExists = fs.existsSync("packages/ui/dist/index.js") && fs.existsSync("packages/contracts/dist/index.js");
 const skipHydrated = buildExists ? false : process.env.REQUIRE_BUILT ? false : "requires built @flamenode/ui and @flamenode/contracts";
 
-test("T01/T02: SA-087 same-origin JSON client, API error and malformed/network failure", async () => {
+test("T01/T02: SA-087 same-origin JSON client, API error and malformed/network failure", { skip: skipHydrated }, async () => {
+  // Dynamic: videoInteraction.ts imports @flamenode/contracts, which needs its dist build.
+  const { toggleInteraction } = await import("../apps/site/src/lib/videoInteraction.ts");
   const calls = [];
   const fetcher = async (url, options) => {
     calls.push({ url, options });
@@ -36,7 +37,7 @@ test("T01/T02: SA-087 same-origin JSON client, API error and malformed/network f
   assert.deepEqual(await toggleInteraction("vid", "bookmark", undefined, async () => json({ ok: false, message: "競合" }, 409)),
     { ok: false, message: "競合" });
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ unexpected: 1 })), /Invalid interaction/);
-  await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true, active: "yes" })), /Invalid active/);
+  await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true, active: "yes" })), /Invalid interaction response/);
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => json({ ok: true }, 503)), /Invalid success/);
   await assert.rejects(toggleInteraction("", "like", undefined, fetcher), /Invalid interaction request/);
   await assert.rejects(toggleInteraction("vid", "like", undefined, async () => { throw Error("offline"); }), /offline/);
@@ -46,31 +47,33 @@ test("T04: static video detail has no nonfunctional interaction buttons", () => 
   const source = fs.readFileSync("apps/site/src/components/VideoPageIsland.ts", "utf8");
   assert.match(source, /React\.useEffect\(\(\) => \{ setMounted\(true\); \}, \[\]\)/);
   assert.match(source, /const interactions = mounted/);
-  const path = "apps/site/dist/AAAAAAAAAAA/index.html";
-  if (process.env.REQUIRE_BUILT && !fs.existsSync(path)) {
-    // The fixture slug varies; source-level mount contract is tested above.
-    return;
-  }
-  if (fs.existsSync(path)) {
+  // Fixture pages (videoFixtures.ts): vid-aaa at its internal id and at its YouTube id.
+  for (const slug of ["vid-aaa", "dKw1xV41f8s"]) {
+    const path = `apps/site/dist/${slug}/index.html`;
+    if (!fs.existsSync(path)) {
+      assert.ok(!process.env.REQUIRE_BUILT, `${path} must exist when REQUIRE_BUILT=1`);
+      continue;
+    }
     const doc = new JSDOM(fs.readFileSync(path, "utf8")).window.document;
-    assert.equal(doc.querySelector(".vd-acts button"), null);
+    assert.ok(doc.querySelector(".vd-acts"), `${slug}: action row is present in static HTML`);
+    assert.equal(doc.querySelector(".vd-acts button"), null, `${slug}: no nonfunctional buttons`);
   }
 });
 
 test("T05/T06: identical CURRENT permission/redirect matrix; zero Active X allowed", { skip: skipHydrated }, async () => {
   const { interactionPolicy } = await import("../apps/site/src/components/VideoInteractionIsland.ts");
-  const path = "/AAAAAAAAAAA?playlist=lib-like";
+  const path = "/AAAAAAAAAAA"; // CURRENT next= is `/${rawId}` without query
   const base = { ...goodOverlay };
   assert.equal(interactionPolicy(base, false, path).canInteract, true, "no Active X is permitted");
   assert.deepEqual(interactionPolicy(base, true, path), { canInteract: false, disabledReason: "ログイン状態を確認中です。" });
   assert.equal(interactionPolicy({ ...base, authUnavailable: true }, false, path).canInteract, false);
   const anon = interactionPolicy({ ...base, loggedIn: false }, false, path);
-  assert.equal(anon.actionHref, "/entry?next=%2FAAAAAAAAAAA%3Fplaylist%3Dlib-like");
+  assert.equal(anon.actionHref, "/entry?next=%2FAAAAAAAAAAA");
   assert.equal(anon.disabledReason, "ログインするといいね、セーブができます。");
   assert.equal(interactionPolicy({ ...base, isBanned: true }, false, path).actionHref, undefined);
   for (const o of [{ ...base, isTosAccepted: false }, { ...base, termsReacceptRequired: true }]) {
     const p = interactionPolicy(o, false, path);
-    assert.equal(p.actionHref, "/rules?next=%2FAAAAAAAAAAA%3Fplaylist%3Dlib-like");
+    assert.equal(p.actionHref, "/rules?next=%2FAAAAAAAAAAA");
     assert.equal(p.canInteract, false);
   }
 });

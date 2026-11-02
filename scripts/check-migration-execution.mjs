@@ -103,6 +103,8 @@ export function parseDecisionRows(decisionsText) {
   for (const line of decisionsText.split("\n")) {
     const cells = line.split("|").map((cell) => cell.trim());
     if (cells.length < 5 || !/^D-\d{2}$/.test(cells[1])) continue;
+    // A duplicate row must never override a decision gate (e.g. OPEN -> DECIDED).
+    if (decisions.has(cells[1])) throw new Error("duplicate decision row: " + cells[1]);
     decisions.set(cells[1], cells[3]);
   }
   return decisions;
@@ -132,7 +134,12 @@ export function validateMigrationExecution({
   if (checkpointDocuments) errors.push(...validateCheckpointPolicy(checkpointDocuments));
   const tasks = parseTaskRows(statusText);
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
-  const decisions = parseDecisionRows(decisionsText);
+  let decisions;
+  try { decisions = parseDecisionRows(decisionsText); }
+  catch (error) {
+    // Fail closed without a stack trace or silently using the last decision.
+    return [...errors, "invalid decision ledger: " + error.message];
+  }
   const currentTask = statusText.match(/^Current Task:\s*(MIG-\d{4})/m)?.[1];
   const currentState = statusText.match(/^Task State:\s*(\S+)/m)?.[1];
 

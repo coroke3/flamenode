@@ -46,7 +46,7 @@ export async function loadVideoViewerOverlay(
   if (cached?.value && cached.at != null && now - cached.at <= (cached.value.authUnavailable ? FAILURE_TTL : FRESH_TTL)) {
     remember(cacheKey, cached); return cached.value;
   }
-  if (cached?.request) return cached.request;
+  if (cached?.request) { remember(cacheKey, cached); return cached.request; }
   cache.delete(cacheKey);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

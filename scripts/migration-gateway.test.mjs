@@ -6,7 +6,7 @@ import { PerformanceObserver } from "node:perf_hooks";
 import { existsSync } from "node:fs";
 import { RESERVED_ROOT_SLUGS, buildRouteMap } from "../apps/site/src/lib/routeMap.ts";
 import gateway, { resetGatewayCaches } from "../apps/site/src/gateway/index.ts";
-import { resetRebuildMemory } from "../apps/site/src/gateway/r2Html.ts";
+import { loadR2PrebuiltHtml, resetRebuildMemory } from "../apps/site/src/gateway/r2Html.ts";
 import {
   FIXED_PUBLIC_PAGES,
   PUBLIC_ASSET_FILES,
@@ -522,7 +522,7 @@ test("an Assets redirect or error is not forwarded as public content", async () 
   }
 });
 
-// What the MIG-0411 consumer writes (pageRenderQueue.ts): identity plus the route generation.
+// Build-owned R2 HTML metadata required by the gateway: identity plus route generation.
 const EVENT_META = { kind: "event", id: "spring-fest-2026", key: "event/spring-fest-2026", generation: GENERATION };
 
 test("MIG-0406 T02/T03: R2 HTML is served for the same kind/id/key, typed and non-empty; otherwise 503", async () => {
@@ -984,4 +984,50 @@ test("MIG-0507: deny:video:<internal id> revokes both the YouTube-id URL and the
     assert.equal(res.status, 404, path);
     assert.equal(res.headers.get("Location"), null, path);
   }
+});
+
+test("MIG-0411 T06: rejected and synchronously throwing sends do not suppress the next request", async () => {
+  const decision = {
+    action: "serve", kind: "event", id: "spring-fest-2026",
+    key: "event/spring-fest-2026", generation: GENERATION,
+  };
+  const r2 = { get: async () => null };
+  for (const failure of ["reject", "throw"]) {
+    resetRebuildMemory();
+    let calls = 0;
+    const queue = { send: () => {
+      calls++;
+      if (failure === "throw") throw new Error("synchronous queue failure");
+      return Promise.reject(new Error("async queue failure"));
+    } };
+    const first = await loadR2PrebuiltHtml(r2, decision, "GET", queue, 1000);
+    assert.equal(first.action, "unavailable", failure);
+    assert.equal(first.reason, "html_missing");
+    await first.rebuild;
+    assert.equal(calls, 1);
+    const retry = await loadR2PrebuiltHtml(r2, decision, "GET", queue, 1001);
+    assert.equal(retry.action, "unavailable", failure);
+    await retry.rebuild;
+    assert.equal(calls, 2, failure + " should not suppress the next visit for 60s");
+  }
+
+  // A successful send remains deduplicated and cannot be overwritten by an older failure.
+  resetRebuildMemory();
+  let rejectFirst;
+  let sends = 0;
+  const queue = { send: () => {
+    sends++;
+    if (sends === 1) return new Promise((_, reject) => { rejectFirst = reject; });
+    return Promise.resolve();
+  } };
+  const pending = await loadR2PrebuiltHtml(r2, decision, "GET", queue, 2000);
+  await Promise.resolve(); // let the first send enter its microtask
+  // This newer request may only start after the dedup interval.
+  const newer = await loadR2PrebuiltHtml(r2, decision, "GET", queue, 62001);
+  await newer.rebuild;
+  rejectFirst(new Error("late failure"));
+  await pending.rebuild;
+  const sameWindow = await loadR2PrebuiltHtml(r2, decision, "GET", queue, 62002);
+  assert.equal(sameWindow.rebuild, undefined, "the newer success retains its dedup marker");
+  assert.equal(sends, 2);
 });

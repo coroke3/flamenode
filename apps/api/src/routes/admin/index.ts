@@ -22,6 +22,12 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { announcementRoutes } from "./announcements.ts";
 import { apiEndpointRoutes } from "./apiEndpoints.ts";
 import { auditAdminRoutes } from "./audit.ts";
+import { listEventTemplatesForAdminApi } from "../events/templates.ts";
+import { costGuardAdminRoutes } from "./costGuard.ts";
+import { adminNotificationRoutes } from "./notifications.ts";
+import { adminPermissionsRoutes } from "./permissions.ts";
+import { adminTermsRoutes } from "./terms.ts";
+import { adminUsersRoutes, adminXUsersRoutes } from "./users.ts";
 
 export function createAdminRoutes(
   options: { session?: MiddlewareHandler<AppEnv> } = {},
@@ -45,9 +51,18 @@ export function createAdminRoutes(
   // 4. drizzle handle for server-core (after the guard passed), then CostGuard per feature inside each route module.
   admin.use("*", onlyMutating(dbMiddleware));
   // Safe reads (GET/HEAD) are denied by default unless an authenticated admin.
+  // SA-037: exact GET path applies CURRENT write-identity/CostGuard-to-[]
+  // parity inside its own handler; other admin GETs keep the strict read guard.
+  admin.get("/event-templates", listEventTemplatesForAdminApi);
   admin.use("*", onlyReads(adminReadGuardMiddleware()));
   admin.route("/announcements", announcementRoutes);
   admin.route("/api-endpoints", apiEndpointRoutes);
   admin.route("/audit", auditAdminRoutes);
+  admin.route("/cost-guard", costGuardAdminRoutes);
+  admin.route("/notifications", adminNotificationRoutes);
+  admin.route("/permissions", adminPermissionsRoutes);
+  admin.route("/terms", adminTermsRoutes);
+  admin.route("/users", adminUsersRoutes);
+  admin.route("/x-users", adminXUsersRoutes);
   return admin;
 }
