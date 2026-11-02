@@ -104,3 +104,22 @@
     transform: none;
   }
 }
+
+/* MIG-0726 U02: CURRENT src/components/layout/CostGuardBanner.module.css mapped to global names. */
+.cost-guard-banner {
+  border-bottom: 1px solid;
+  font-size: 12px;
+}
+
+.cost-guard-banner-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.cost-guard-banner-reason {
+  font-style: normal;
+}

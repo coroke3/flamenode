@@ -8,7 +8,9 @@ export function adminCompatTarget(pathname: string): string | null {
   if (!match) return null;
   try {
     const id = decodeURIComponent(match[1]);
-    if (!id || id.includes("/") && !/%2f/i.test(match[1])) return null;
+    if (!id) return null;
+    // CURRENT app/(admin)/admin/events/{new,templates}/page.tsx are static pages that win over [id].
+    if (!match[2] && (id === "new" || id === "templates")) return null;
     const encoded = encodeURIComponent(id);
     return "/manage/events/" + encoded + (match[2] ? "/" + match[2] : "");
   } catch {
@@ -16,7 +18,7 @@ export function adminCompatTarget(pathname: string): string | null {
   }
 }
 
-/** Mount on each of five exact old paths; unknown paths must remain 404. */
+/** Mount on each of five exact old paths; any other path renders nothing (the 404 route owns it). */
 export function AdminCompatRedirect(): React.ReactElement | null {
   const { pathname } = useLocation();
   const target = adminCompatTarget(pathname);
