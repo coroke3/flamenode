@@ -552,6 +552,25 @@ Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All r
 
 T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
 
+## MIG-0642 — Hono Admin Ops mutation mapping B (D-17-4)
+
+Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notifications}.ts`, contracts `packages/contracts/src/admin/termsNotifications.ts`. All routes use the existing `/api/admin` origin -> session -> admin/TOS/BAN guard and the feature's CostGuard middleware, then full-row CAS + strict audit in one D1 batch. Bodies keep the CURRENT FormData keys; ids are path params. Queue wake is 0 (D-0603-1; **DOCUMENTED DIFFERENCE**: CURRENT wakes after notification retry / force-resend / retry-failed and terms publish / archive). Errors: 400 validation, 404 not found, 409 rejected state or CAS conflict, 413 oversize, 503 guard or fail-closed preflight.
+
+| SA | Hono method + path | feature key | CURRENT parity and response |
+| --- | --- | --- | --- |
+| SA-045 | POST `/api/admin/notifications/:id/retry` | `admin_notifications` | terminal failure only; CAS to pending + strict `admin_notification_retry` audit |
+| SA-046 | POST `/api/admin/notifications/:id/cancel` | `admin_notifications` | body `reason` optional (<=500); sent / cancelled idempotent success, processing 409; CAS + strict `admin_notification_cancel` |
+| SA-047 | POST `/api/admin/notifications/:id/force-resend` | `admin_notifications` | new forced outbox row (`:force:<uuid>` dedupe) + strict CREATE `admin_notification_force_resend`; DM needs an existing recipient |
+| SA-048 | POST `/api/admin/notifications/retry-failed` | `admin_notifications` | oldest 10 terminal failures (fetch 11), one batch, returns `retried` |
+| SA-049 | PUT `/api/admin/permissions/editable-fields` | `admin_permissions` | body `default_editable_fields[]` / `upcoming_editable_fields[]`; no-op short circuit; CAS + strict `long_audit`; no queue |
+| SA-051 | POST `/api/admin/terms` | `admin_terms_create` | draft INSERT + strict CREATE `long_audit`; no queue |
+| SA-052 | PATCH `/api/admin/terms/:id` | `admin_terms_update` | draft only (409 otherwise); path id wins over body `id`; CAS + `long_audit` |
+| SA-053 | POST `/api/admin/terms/:id/publish` | `admin_terms_publish` | archive current + publish target + `rules/global` high rebuild row in one batch; already published = success; returns `pendingPublicReflection` |
+| SA-054 | POST `/api/admin/terms/:id/reaccept-broadcast` | `admin_terms_broadcast` | body `confirm` = TERMS, `cursor`, `content`; max 30 per page (read 31); audit only, **no DM, no outbox, no queue**; returns next `cursor` |
+| SA-055 | POST `/api/admin/terms/:id/archive` | `admin_terms_archive` | CAS archive; rebuild row only if it was published |
+
+T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
+
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
 | RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
