@@ -120,7 +120,7 @@ export function VideoChapterIsland({
       epoch.current += 1;
       pending.current = false;
       setBusy(false);
-      setTime(""); setLabel(""); setNote(""); setBulkCsv("");
+      setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
       draftBaseline.current = { time: "", label: "", note: "", csv: "" };
       setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
     };
@@ -167,7 +167,7 @@ export function VideoChapterIsland({
         : await createChapter(videoId, { ...body, active_x_snapshot: activeXId!.trim() });
       if (!end(generation)) return;
       if (!result.ok) { setError(result.message ?? "投稿に失敗しました。"); return; }
-      setTime(""); setLabel(""); setNote(""); setEditingId(null); setComposerOpen(false);
+      setTime(""); setLabel(""); setNote(""); setVisibility("public"); setEditingId(null); setComposerOpen(false);
       draftBaseline.current = { time: "", label: "", note: "", csv: "" };
       setMessage(result.pendingPublicReflection
         ? "保存しました。公開ページへの反映には時間がかかる場合があります。"
@@ -229,7 +229,7 @@ export function VideoChapterIsland({
         const initialTime = formatChapterDraftTime(playerSeconds ?? 0);
         draftBaseline.current = { time: initialTime, label: "", note: "", csv: "" };
         setTime(initialTime);
-        setLabel(""); setNote(""); setEditingId(null);
+        setLabel(""); setNote(""); setVisibility("public"); setEditingId(null);
         setError(""); setComposerOpen(true);
       },
     }, "現在位置にコメントする") : null,
@@ -264,7 +264,7 @@ export function VideoChapterIsland({
         type: "button", disabled: busy,
         onClick: () => {
           setComposerOpen(false); setEditingId(null);
-          setTime(""); setLabel(""); setNote(""); setError("");
+          setTime(""); setLabel(""); setNote(""); setVisibility("public"); setError("");
           draftBaseline.current = { time: "", label: "", note: "", csv: "" };
         },
       }, "キャンセル"),

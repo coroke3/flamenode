@@ -460,3 +460,81 @@ test("U02 composer opens only on action, prefills the current player time and ca
     dom.window.close();
   }
 });
+
+// P2 (PR #468 review): a previous private edit must never leak into the next new-post form.
+async function withChapterDom(run) {
+  const { JSDOM } = await import("jsdom");
+  const { createRoot } = await import("react-dom/client");
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://flamenode.net/abc" });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "CustomEvent"];
+  const original = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const oldAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  const oldFetch = globalThis.fetch;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, chapterId: "ch1" }) });
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    await run(dom.window.document, root);
+  } finally {
+    await React.act(async () => root.unmount());
+    globalThis.fetch = oldFetch;
+    for (const [key, descriptor] of original) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = oldAct;
+    dom.window.close();
+  }
+}
+const clickButton = (doc, text) => React.act(async () => {
+  [...doc.querySelectorAll("button")].find((button) => button.textContent === text).click();
+});
+const PRIVATE_CHAPTER = {
+  id: "c1", chapter_time: "0:10", chapter_label: "秘密", note: "", visibility: "private", canManage: true,
+};
+
+test("P2 new-post form starts public after edit(private) -> cancel", async () => {
+  await withChapterDom(async (doc, root) => {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters: [PRIVATE_CHAPTER],
+    })));
+    await clickButton(doc, "編集");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, false, "edit shows the chapter's private state");
+    await clickButton(doc, "キャンセル");
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true, "new post defaults to public");
+  });
+});
+
+test("P2 new-post form starts public after edit(private) -> save", async () => {
+  await withChapterDom(async (doc, root) => {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters: [PRIVATE_CHAPTER],
+    })));
+    await clickButton(doc, "編集");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, false);
+    await React.act(async () => {
+      doc.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(doc.querySelector("form"), null, "composer closes after a successful update");
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true, "new post defaults to public");
+  });
+});
+
+test("P2 Active X switch resets a private edit to the public default", async () => {
+  await withChapterDom(async (doc, root) => {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters: [PRIVATE_CHAPTER],
+    })));
+    await clickButton(doc, "編集");
+    await React.act(async () => {
+      doc.defaultView.dispatchEvent(new doc.defaultView.CustomEvent("flamenode:active-x-changed"));
+    });
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true);
+  });
+});
