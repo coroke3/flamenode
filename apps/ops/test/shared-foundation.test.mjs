@@ -26,6 +26,7 @@ function setup() {
   document.body.append(target);
   const root = createRoot(target);
   const requests = [];
+  const observed = [];
   const load = (signal) => {
     const request = deferred();
     requests.push({ ...request, signal });
@@ -33,13 +34,14 @@ function setup() {
   };
   const Probe = ({ item, refreshKey = 0 }) => {
     const result = useApiResult(load, item, refreshKey);
-    return React.createElement("p", null,
-      result.status === "ok" ? "ok:" + result.data.id : result.status);
+    const content = result.status === "ok" ? "ok:" + result.data.id : result.status;
+    observed.push({ item, content });
+    return React.createElement("p", null, content);
   };
   const render = (item, refreshKey = 0) =>
     React.act(async () => { root.render(React.createElement(Probe, { item, refreshKey })); });
   const cleanup = () => React.act(async () => { root.unmount(); target.remove(); });
-  return { target, requests, render, cleanup };
+  return { target, requests, render, cleanup, observed };
 }
 
 test("MIG-0707 U05b: initial load, silent same-key refresh, keep last good data on failure", async () => {
@@ -64,6 +66,36 @@ test("MIG-0707 U05b: initial load, silent same-key refresh, keep last good data 
   }
 });
 
+test("MIG-0707 U05b: same-key 401/403/404/501 revokes previously visible private data", async () => {
+  for (const status of ["anonymous", "forbidden", "notFound", "unsupported"]) {
+    const ui = setup();
+    try {
+      await ui.render("private-event");
+      await React.act(async () => {
+        ui.requests[0].resolve({ status: "ok", data: { id: "secret" } });
+      });
+      assert.equal(ui.target.textContent, "ok:secret");
+
+      await ui.render("private-event", 1);
+      assert.equal(ui.target.textContent, "ok:secret", "refresh starts silently");
+      await React.act(async () => {
+        ui.requests[1].resolve({ status });
+      });
+      assert.equal(ui.target.textContent, status,
+        status + " must clear cached private content after an explicit HTTP denial");
+
+      await ui.render("private-event", 2);
+      await React.act(async () => {
+        ui.requests[2].resolve({ status: "unavailable" });
+      });
+      assert.equal(ui.target.textContent, status,
+        "transient failure cannot revive previously revoked private content");
+    } finally {
+      await ui.cleanup();
+    }
+  }
+});
+
 test("MIG-0707 U05b: changed key resets loading and aborts obsolete requests", async () => {
   const ui = setup();
   try {
@@ -78,6 +110,31 @@ test("MIG-0707 U05b: changed key resets loading and aborts obsolete requests", a
   } finally {
     await ui.cleanup();
   }
+});
+
+test("MIG-0707 U05b: first render of a changed key never exposes the prior private view", async () => {
+  const ui = setup();
+  try {
+    await ui.render("private-event");
+    await React.act(async () => {
+      ui.requests[0].resolve({ status: "ok", data: { id: "private-event-secret" } });
+    });
+    assert.equal(ui.target.textContent, "ok:private-event-secret");
+
+    const renderCount = ui.observed.length;
+    await ui.render("other-event");
+    const newKeyRenders = ui.observed.slice(renderCount).filter(x => x.item === "other-event");
+    assert.ok(newKeyRenders.length > 0, "new event must render");
+    assert.equal(newKeyRenders[0].content, "loading",
+      "the render before useEffect must not return the previous event's private data");
+    assert.equal(ui.target.textContent, "loading");
+    assert.equal(ui.requests[0].signal.aborted, true);
+
+    await React.act(async () => {
+      ui.requests[1].resolve({ status: "ok", data: { id: "other-event" } });
+    });
+    assert.equal(ui.target.textContent, "ok:other-event");
+  } finally { await ui.cleanup(); }
 });
 
 test("MIG-0707 U05b: initial rejected fetch is unavailable; unmount aborts active request", async () => {

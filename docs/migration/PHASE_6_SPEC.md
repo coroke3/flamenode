@@ -438,8 +438,8 @@ PRをrevert。
 - 予算は `ZERO_1102.md` §3 の B（< 8ms）を **max** で判定。p50/p95 は記録だけ。
 #### Owned paths
 - 新規: `+docs/migration/cloudflare/BACKGROUND_CPU.md`, `+scripts/benchmark-background-cpu.mjs`, `+scripts/benchmark-background-cpu.test.mjs`
-- 変更: `scripts/benchmark-api-cpu.mjs`（`percentile` / `summarize` / `judge` / inspector 接続を export するだけ。API 側の挙動は変えない）, `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`（link 1 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`（新規 script 2 行）
-- 触らない: `workers/**`（直すのは MIG-0610）、`apps/api/**`、各 `wrangler.toml`
+- 変更: `docs/migration/cloudflare/PERFORMANCE_BASELINE.md`（link 1 行）, `docs/migration/FILE_MIGRATION_MATRIX.md`（新規 script 2 行）
+- 触らない: `workers/**`（直すのは MIG-0610）、`apps/api/**`、各 `wrangler.toml`、`scripts/benchmark-api-cpu.mjs`（MIG-0606 の所有。既に export 済みの `judge` / `summarize` を import するだけで変更しない。2026-11-01 の PR #455 で確認）
 #### Micro-units
 - **U01 harness**: `benchmark-background-cpu.mjs` が Worker ごとに wrapper worker を生成する。wrapper は `workers/<w>/index.ts` の default を import し、`POST /__bench/scheduled?cron=<expr>` で `default.scheduled({ cron, scheduledTime }, env, ctx)`、`POST /__bench/queue` で `default.queue(batch, env, ctx)`（body の JSON を `messages[]` にした fake `MessageBatch`、`ack` / `retry` は記録するだけ）を呼ぶ。local D1 は repo の migration から作る（`benchmark-api-cpu.mjs:554` と同じ `d1 migrations apply --local`）。外部 API（YouTube / Discord / GA4）は wrapper が `fetch` を差し替えて固定応答を返す（本物の外部 request は 0）。`--dry-run` は plan と集計の self-check だけ。
 - **U02 measure**: 表の job ごとに (a) 1件あたりの CPU、(b) 上限ちょうどの入力（seed を `scripts/benchmark-background-cpu.mjs` 内で生成）の CPU を、`ZERO_1102.md` §5 の4種類（normal / limit / invalid / cold）各 50 回以上。同じ run で BASELINE（何もしない `scheduled`）の max を取り、noise として記録する（D-14-1）。
@@ -475,26 +475,28 @@ PRをrevert（script と文書だけ）。
 
 ### MIG-0610: 予算を超える背景処理を1回 8ms 未満に分ける（D-09）
 - **Model:** lead
-- **Readiness:** NEEDS_REFINEMENT — MIG-0609 の表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる
+- **Readiness:** NEEDS_REFINEMENT — 最初に T00（D1 replay 再測定）を実施し、その表で予算を超えた job ごとに micro-unit を作ってから。各 unit は「定数を T00 の表の値に変える + R-JOB の5種の test」の形なので、値が決まれば small に渡せる（MIG-0609 の表は simulator 込みの上限値で、そのままは使えない）
 - **Recipe:** R-JOB
 - **Runtime:** B
 - **Depends on:** MIG-0609 / **Decisions:** D-09 DECIDED
-- **Verified against:** `96f20dc` (2026-10-15)
+- **Verified against:** `6a39035` (2026-11-01、T00 / Owned paths / Commands は PR #455 のレビューで更新。job の定数と行番号は `96f20dc` 時点なので着手時に `rg -n` で引き直す)
 #### Source snapshot
 - 上限と入口は MIG-0609 の Source snapshot の表。測定値は `cloudflare/BACKGROUND_CPU.md`（MIG-0609 が作る）。
 - Cron の入口: `workers/content-jobs/index.ts:111`、`workers/fast-jobs/index.ts:114`、`workers/sync-jobs/index.ts:170`。CURRENT は1回の Cron の中で複数の job を順に動かす。
 - 仕事の正本は D1 の行、Queue は doorbell だけ（`background-jobs/README.md` の最重要原則）。
 #### Owned paths
-- 変更: MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
+- 変更: T00 用に `scripts/benchmark-background-cpu.mjs` と `scripts/benchmark-background-cpu.test.mjs`（MIG-0609 が作成。`--d1 replay` を足す。`scripts/benchmark-api-cpu.mjs` は MIG-0606 の所有なので変更せず、replay の仕組みは読んで同じ形で実装する）、`docs/migration/cloudflare/BACKGROUND_CPU.md`（T00 の表と分割後の測定値）、MIG-0609 の表で予算を超えた job の file と、その test（unit ごとに PR 本文で file を列挙する）、`workers/*/wrangler.toml` の `max_batch_size`
 - 触らない: `workers/json-generator/**`（MIG-0907 で消す）、`crons` の式、本番の Queue 設定
 #### Micro-units
+- **T00 D1 replay 再測定（2026-11-01 追加）**: MIG-0609（PR #455）の測定は local D1 simulator の CPU（trivial read 1 回 約3.9ms）を含む上限値で、`cap = floor(7/1件 max)` は全 job で 0 になり cap として使えない。定数を下げる前に、`benchmark-api-cpu.mjs` の `--d1 replay` 相当（D1/R2 の結果を record して workerd に replay し、app code の CPU だけを測る）で `BACKGROUND_CPU.md` の同じ fixture と G18 hash を測り直し、その表を以降の unit の基準にする。
 - **U01 cron fan-out**: 3つの Cron を「job ごとに doorbell を1つ enqueue する」形にし、Cron 自体は D1 を読まない（MIG-0410 の build 要求の確認だけは例外）。
 - **U02 batch size**: 各 Queue consumer の `max_batch_size` を「8ms ÷ 1 message の max CPU」以下にする（計算を PR に書く）。
-- **U03..Unn job**: 予算を超えた job ごとに1 unit。定数を MIG-0609 の値に下げ、残りを D1 に残して続きの doorbell を enqueue する。R-JOB の5種の test を足す。
+- **U03..Unn job**: 予算を超えた job ごとに1 unit。定数を T00（D1 replay 再測定）の値に下げ、残りを D1 に残して続きの doorbell を enqueue する。R-JOB の5種の test を足す。
 - **coverage gap G18 の job**: MIG-0609 の表に追加した `ensureDailyTopNostalgicShuffle`、static rebuild queue の処理、wake queue の consumer 3つ（batch 10）も unit にする。日替わり top の並びは MIG-0410 の build 側の置き換えと整合させる。
 #### Test cases
 | ID | 入力/操作 | 期待 |
 | --- | --- | --- |
+| T00 | MIG-0609 の fixture を D1 replay で測り直す | app code だけの CPU 表と G18 hash の一致がある |
 | T01 | 各 job の上限ちょうどの入力 | 非本番の max < 8ms |
 | T01b | 固定した seed と日付での top の出力、wake queue consumer の batch 10 件（G18） | top の並びは CURRENT と一致、consumer は 8ms 未満 |
 | T02 | 上限 + 1 件 | 続きの doorbell が1つ enqueue され、D1 に残りがある |
@@ -504,7 +506,8 @@ PRをrevert（script と文書だけ）。
 #### Commands
 ```bash
 npm run test:unit
-node scripts/benchmark-api-cpu.mjs --background
+node --test scripts/benchmark-background-cpu.test.mjs
+node scripts/benchmark-background-cpu.mjs --run --d1 replay   # T00 で足す option。分割前後とも同じ fixture
 npm run typecheck
 ```
 #### Ledger updates

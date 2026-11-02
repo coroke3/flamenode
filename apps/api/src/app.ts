@@ -13,11 +13,13 @@ import { adminEventRoutes } from "./routes/events/index.ts";
 import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
 import { publicListRoutes } from "./routes/events/publicList.ts";
 import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
+import { eventExportRoutes } from "./routes/events/export.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
 import { mediaRoutes } from "./routes/media/mediaRoutes.ts";
 import { xUsersSearchRoutes } from "./routes/internal/xUsersSearch.ts";
+import { operationModeBannerRoutes } from "./routes/operationModeBanner.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
 
@@ -25,6 +27,8 @@ export const app = new Hono<AppEnv>();
 
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
+// MIG-0661: public read-only banner, no D1/session.
+app.route("/api/operation-mode/banner", operationModeBannerRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
 // MIG-0647 (RH-027/028): public staff allowlist with manifest double-read fence.
 app.route("/api/public/events", publicEventStaffRoutes);
@@ -46,6 +50,8 @@ app.route("/api/events", slotViewerOverlayRoutes);
 app.route("/api/events", publicListRoutes);
 // MIG-0631 (RH-012): GET /api/event-endpoints/:id/release
 app.route("/api/event-endpoints", publicReleaseRoutes);
+// MIG-0632 RH-013: public event export, authorization checked fresh before every cache HIT.
+app.route("/api/event-endpoints", eventExportRoutes);
 app.route("/api/videos", videosRoutes);
 // MIG-0605 U01 (RH-001): GET /api/account/summary
 app.route("/api/account/summary", accountSummaryRoutes);
