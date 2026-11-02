@@ -195,6 +195,8 @@
 .ev-release-modes{gap:0;margin-top:20px}
 .ev-release-body{margin-top:24px}
 .ev-release-day{margin-bottom:40px}
+/* <=640px the shared public header is fixed (52px) and leaves the flow: keep the back links below it (MIG-0502, lead-approved 2026-10-30) */
+@media (max-width:640px){.ev-slots{padding-top:calc(52px + 40px)}.ev-release{padding-top:calc(52px + 48px)}}
 :where(.ev-scope) .rl-wrap-row{margin-bottom:2px}
 :where(.ev-scope) .rl-time{font-size:18px;line-height:24px;text-align:center}
 :where(.ev-scope) .rl-cre{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

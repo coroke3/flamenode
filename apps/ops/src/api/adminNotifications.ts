@@ -1,5 +1,5 @@
-// D-16-1 provisional: replace with @flamenode/contracts at merge
-import {AdminNotificationsResponseSchema,type AdminNotificationsResponse} from "@flamenode/contracts";
+// MIG-0734 U03: cancel body via AdminNotificationCancelBodySchema (SA-046); retry/force-resend/retry-failed have no body schema on main (SA-045/047/048 take no body).
+import {AdminNotificationCancelBodySchema,AdminNotificationsResponseSchema,type AdminNotificationsResponse} from "@flamenode/contracts";
 import type {AdminReadResult,AdminWriteResult} from "./adminCostGuard.js";
 type Fetcher=(input:string,init?:RequestInit)=>Promise<Response>;
 export type NotificationFilters={status:string;cat:string;type:string;event:string;q:string};
@@ -44,7 +44,10 @@ export function createAdminNotificationsApi(fetcher:Fetcher=(url,init)=>fetch(ur
   return {
     list,
     retry:(id:string)=>write("/api/admin/notifications/"+encodeURIComponent(id)+"/retry"),
-    cancel:(id:string,reason:string)=>write("/api/admin/notifications/"+encodeURIComponent(id)+"/cancel",{reason}),
+    cancel:(id:string,reason:string)=>{
+      const body=AdminNotificationCancelBodySchema.safeParse({reason});
+      return body.success?write("/api/admin/notifications/"+encodeURIComponent(id)+"/cancel",body.data):Promise.resolve<AdminWriteResult>({ok:false,message:"入力内容が不正です。"});
+    },
     forceResend:(id:string)=>write("/api/admin/notifications/"+encodeURIComponent(id)+"/force-resend"),
     retryFailed:()=>write("/api/admin/notifications/retry-failed"),
   };

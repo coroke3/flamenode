@@ -1,5 +1,9 @@
-// D-16-1 provisional: replace with @flamenode/contracts at merge
-import { AdminCostGuardResponseSchema, type AdminCostGuardResponse } from "@flamenode/contracts";
+// MIG-0734 U03: request bodies are built through the shared @flamenode/contracts body schemas (SA-016..020).
+import {
+  AdminCostGuardResponseSchema, CostGuardClearBodySchema, CostGuardDisabledBodySchema,
+  CostGuardMaintenanceBodySchema, CostGuardModeBodySchema, CostGuardOverrideBodySchema,
+  type AdminCostGuardResponse,
+} from "@flamenode/contracts";
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 export type AdminWriteResult = {ok:boolean;message?:string};
 export type AdminReadResult<T> = {status:"ok";data:T} | {status:"anonymous"|"forbidden"|"unavailable"};
@@ -20,7 +24,10 @@ export function createAdminCostGuardApi(fetcher:Fetcher=(url,init)=>fetch(url,in
       return parsed.success?{status:"ok",data:parsed.data}:{status:"unavailable"};
     }catch{return {status:"unavailable"};}
   }
-  async function write(path:string,body:object):Promise<AdminWriteResult>{
+  async function write(path:string,schema:{safeParse:(v:unknown)=>{success:boolean;data?:unknown}},raw:object):Promise<AdminWriteResult>{
+    const checked=schema.safeParse(raw);
+    if(!checked.success)return {ok:false,message:"入力内容が不正です。"};
+    const body=checked.data as object;
     try{
       const res=await fetcher(path,jsonInit("POST",body));
       if(res.status===401)return {ok:false,message:"ログインしてください。"};
@@ -33,11 +40,11 @@ export function createAdminCostGuardApi(fetcher:Fetcher=(url,init)=>fetch(url,in
   }
   return {
     read,
-    setMode:(mode:string,reason:string)=>write("/api/admin/cost-guard/mode",{mode,reason}),
-    setMaintenance:(enabled:boolean,reason:string)=>write("/api/admin/cost-guard/maintenance",{is_maintenance_mode:String(enabled?1:0),reason}),
-    setOverride:(reason:string,features:readonly string[])=>write("/api/admin/cost-guard/override",{reason,confirm:"OVERRIDE",features:[...features]}),
-    clearOverride:(reason:string)=>write("/api/admin/cost-guard/override/clear",{reason,confirm:"CLEAR"}),
-    setDisabled:(reason:string,features:readonly string[],expected:string|null)=>write("/api/admin/cost-guard/disabled-features",{
+    setMode:(mode:string,reason:string)=>write("/api/admin/cost-guard/mode",CostGuardModeBodySchema,{mode,reason}),
+    setMaintenance:(enabled:boolean,reason:string)=>write("/api/admin/cost-guard/maintenance",CostGuardMaintenanceBodySchema,{is_maintenance_mode:String(enabled?1:0),reason}),
+    setOverride:(reason:string,features:readonly string[])=>write("/api/admin/cost-guard/override",CostGuardOverrideBodySchema,{reason,confirm:"OVERRIDE",features:[...features]}),
+    clearOverride:(reason:string)=>write("/api/admin/cost-guard/override/clear",CostGuardClearBodySchema,{reason,confirm:"CLEAR"}),
+    setDisabled:(reason:string,features:readonly string[],expected:string|null)=>write("/api/admin/cost-guard/disabled-features",CostGuardDisabledBodySchema,{
       reason,confirm:"APPLY",features:[...features],expected_disabled_features_json:JSON.stringify(expected),
     }),
   };

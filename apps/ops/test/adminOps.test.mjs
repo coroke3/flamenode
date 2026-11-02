@@ -164,3 +164,20 @@ test("MIG-0734 U01 audit history changed keys remains compatible with CURRENT",(
  assert.deepEqual(changedCostGuardKeys("not-json",'{"mode":"normal"}'),[]);
  assert.deepEqual(changedCostGuardKeys(null,'{"mode":"normal"}'),["mode"]);
 });
+
+test("MIG-0734 U03 cost-guard bodies go through shared contract schemas and fail closed when invalid",async()=>{
+  const calls=[];
+  const api=createAdminCostGuardApi(async(url,init)=>{calls.push({url,body:JSON.parse(init.body)});return response(200,{ok:true});});
+  assert.deepEqual(await api.setMode("normal","r"),{ok:true,message:undefined});
+  assert.deepEqual(calls[0],{url:"/api/admin/cost-guard/mode",body:{mode:"normal",reason:"r"}});
+  assert.equal((await api.setMode(undefined,"r")).ok,false);
+  assert.equal((await api.clearOverride(null)).ok,false);
+  assert.equal(calls.length,1);
+});
+
+test("MIG-0734 router mounts cost-guard and notifications inside the OpsGate-guarded admin frame",()=>{
+  const src=readFileSync(new URL("../src/routes/router.tsx",import.meta.url),"utf8");
+  assert.match(src,/<Route path="\/admin" element=\{adminFrame\}>[\s\S]*path="cost-guard"[\s\S]*path="notifications"/);
+  const layout=readFileSync(new URL("../src/routes/admin/AdminLayout.tsx",import.meta.url),"utf8");
+  assert.match(layout,/<OpsGate surface="admin"/);
+});
