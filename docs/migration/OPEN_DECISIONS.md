@@ -32,6 +32,7 @@
 | D-15 | **MIG-0633 の DONE を受けて書き込み API を SA 群ごとに分割（MIG-0650〜0660）、build 側の残り（MIG-0516〜0518）、Ops SPA の土台（MIG-0707）、code 側の残存棚卸し（MIG-0908）を登録。個別の決定 D-15-1〜15 は §D-15** | DECIDED | MIG-0509, 0513, 0514, 0516〜0518, 0603〜0607, 0626, 0636, 0650〜0660, 0702〜0707, 0901, 0908 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）は従来どおり作業直前の明示承認 |
 | D-16 | **API 待ちの画面・Island を契約先行で着手できるようにする（Merge gate）。MIG-0702 / 0703 / 0513〜0515 を分割（MIG-0519, 0708〜0718）、CostGuardBanner の読み API（MIG-0661）、既存 Hono session の security review（MIG-0807）。個別の決定 D-16-1〜14 は §D-16** | DECIDED | MIG-0513〜0515, 0519, 0606, 0607, 0636, 0640, 0641, 0648, 0650, 0651, 0657, 0659, 0661, 0701〜0705, 0708〜0718, 0804, 0807 | 本番操作（Remote D1・secret・deploy・Route・Queue binding）と SPA の本番 Route 切替は従来どおり作業直前の明示承認 |
 | D-17 | **Ops SPA の画面を画面群に分割（MIG-0719〜0737）、SA-011 の API（MIG-0662）、Manage navigation の 2 field（MIG-0663）、Ops guard の degraded の写像（MIG-0664）。個別は §D-17** | DECIDED | MIG-0606, 0607, 0626, 0637, 0642〜0644, 0662〜0664, 0704〜0707, 0719〜0737 | 本番操作（Ops の Worker / Route / Custom Domain、Remote D1、secret）は従来どおり作業直前の明示承認 |
+| D-18 | **`/list` の event 名 parity: RH-032 `PublicVideoDto` に event title が無いため DTO は変えず CURRENT の title 欠落時 fallback（chip は event ID、index 行は `イベント`）を採る（Option A、accepted parity limitation）。個別は §D-18** | DECIDED | MIG-0510, 0634 | 公開 API field の追加は MIG-0634 owner の別 task。本番操作なし |
 
 ## D-01 — DB schemaをpackages/dbへ独立（A）
 
@@ -515,3 +516,17 @@ Option 4（hybrid）を採る。
 理由: 画面群の境目は CURRENT の部品の境目（同じ client component を使う画面を同じ task に入れる）。1 task は CURRENT の client 部品で約 2,000 行以内。READY になるのは MIG-0719〜0729 と MIG-0731〜0737 の 18 件。MIG-0730 と MIG-0662 は依存の task が DONE になるまで BLOCKED。
 
 見送ったもの: MIG-0610（MIG-0609 の測定値が要る）、MIG-0627 U02〜U05（MIG-0509 の build 経路が要る）、MIG-0803〜0805（MIG-0802 の `authjs.ts` が要る）、MIG-0714 / 0716 / 0717（MIG-0712 / 0713 の部品が要る）、Gate と本番の観測・操作。
+
+## D-18 — `/list` の event 名 parity（RH-032 `PublicVideoDto` に event title が無い）（DECIDED、2026-11-01）
+
+決定者: owner authorization 2026-11-01（MIG-0510 / PR #450）。
+
+状況: CURRENT の `/list?event=` chip は `イベント: {eventInfo?.title ?? event}`、index 表の行は `primary_event_title ?? "イベント"` を出す。MIG-0634 (RH-032 `GET /api/videos`) の `PublicVideoDto` は `primary_event_title` / `eventInfo.title` を返さない。静的 SSG の `/list` は build snapshot から title を出せる。
+
+選択肢:
+- A（採用）: RH-032 DTO は変えない。Island は CURRENT が title 欠落時に使う fallback（chip は event ID、index 行は `イベント`）をそのまま使う。CURRENT の title 付き表示との差は accepted parity limitation として work-item と FILE_MIGRATION_MATRIX に残す。
+- B: MIG-0634 の owner が DTO に `primary_event_title` を足す（public API の変更で、MIG-0510 の範囲外）。
+
+Decision adopted by owner authorization 2026-11-01: A。理由: 公開 API field の追加は MIG-0510 の owned paths 外で、MIG-0634 は DONE。A は CURRENT の fallback 文言と同じで、権限・公開範囲・D1 budget に影響しない。
+
+Follow-up（まだ MIG task ではない）: B を行う場合は MIG-0634 owner の小さな DTO 拡張 task を新設し、完了後に Island の chip / index 行の title を戻す。それまで Phase 5 Gate (MIG-0508) では accepted limitation として扱う。

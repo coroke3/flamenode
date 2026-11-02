@@ -10,7 +10,7 @@ import { ScreenIcon } from "./parts.js";
  */
 export function MaintenanceView(): React.ReactElement {
   return (
-    <div className="p-root" data-theme="dark" lang="ja" style={{ display: "flex", flexDirection: "column" }}>
+    <div className="p-root" lang="ja" style={{ display: "flex", flexDirection: "column" }}>
       <main
         className="wrap"
         style={{ width: "100%", flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", gap: 24, paddingBottom: 120 }}

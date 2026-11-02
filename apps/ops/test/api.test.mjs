@@ -43,7 +43,7 @@ test("MIG-0707 T05: malformed response, rejected network and late abort fail clo
   assert.deepEqual(await getJson(async () => new Response("not-json", { status: 200 }), "/api/manage"),
     { status: "unavailable" });
   assert.deepEqual(await getJson(async () => new Response("not-json", { status: 403 }), "/api/manage"),
-    { status: "unavailable" });
+    { status: "forbidden" }, "malformed 403 must revoke cached access");
   assert.deepEqual(await getJson(async () => { throw new Error("offline"); }, "/api/manage"),
     { status: "unavailable" });
   const controller = new AbortController();
@@ -57,6 +57,27 @@ test("MIG-0707 T05: forbidden result never copies non-string redirect or reason"
   assert.deepEqual(await getJson(async () => jsonResponse(403, {
     redirect: { unsafe: true }, reason: ["untrusted"],
   }), "/api/manage"), { status: "forbidden" });
+});
+
+test("MIG-0707: fail-closed 403 body handling and strict forbidden redirect allowlist", async () => {
+  for (const redirect of ["/dashboard", "/entry", "/onboarding",
+    "/entry?error=auth_temporarily_unavailable"]) {
+    assert.deepEqual(await getJson(async () => jsonResponse(403, { redirect, reason: "denied" }), "/api/manage"),
+      { status: "forbidden", redirect, reason: "denied" });
+  }
+  for (const redirect of [
+    "https://evil.example/path", "//evil.example", "javascript:alert(1)",
+    "data:text/html,evil", "/\\evil.example", "/%2f%2fevil.example",
+    "/dashboard?next=https://evil.example", "/dashboard#//evil.example",
+    "/dashboard/", "/dashboard/../admin", " /dashboard", "/dashboard\n",
+  ]) {
+    assert.deepEqual(await getJson(async () => jsonResponse(403, { redirect, reason: "denied" }), "/api/manage"),
+      { status: "forbidden", reason: "denied" }, redirect);
+  }
+  for (const body of ["invalid-json", "null", "[]", "true", "123"]) {
+    assert.deepEqual(await getJson(async () => new Response(body, { status: 403 }), "/api/manage"),
+      { status: "forbidden" }, body);
+  }
 });
 
 test("MIG-0707 T05: send JSON and FormData with correct headers, preserves false ok", async () => {
