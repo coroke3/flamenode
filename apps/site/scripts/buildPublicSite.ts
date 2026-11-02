@@ -17,7 +17,7 @@ export interface BuildCommand {
 }
 export interface BuildReport {
   keys:number; bytes:number; d1Statements:number; elapsedMs:number;
-  buildElapsedMs:number; generation:string; snapshotDir:string;
+  buildElapsedMs:number; generation:string; snapshotDir?:string;
 }
 export function buildPublicSiteArgs(argv:readonly string[], env:Record<string,string|undefined>=process.env):string[] {
   if(argv.includes("--out"))throw new Error("buildPublicSite manages its own temporary snapshot directory");
@@ -66,7 +66,9 @@ export async function buildPublicSite(
     const report={keys:result.report.keys,bytes:result.report.bytes,d1Statements:result.report.d1Statements,
       elapsedMs:Math.round(performance.now()-started),
       buildElapsedMs:Math.round(performance.now()-started-result.report.elapsedMs),
-      generation:result.report.generation,snapshotDir};
+      generation:result.report.generation,
+      // Only reported when the caller keeps it; otherwise finally{} removes the directory.
+      ...(options.keepSnapshotDir?{snapshotDir}:{})};
     console.log(JSON.stringify({buildPublicSite:report}));
     return report;
   }finally{
