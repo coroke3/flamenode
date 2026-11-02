@@ -65,6 +65,7 @@
     "./moderation/openCases": "./src/moderation/openCases.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts",
     "./xid/pendingInsert": "./src/xid/pendingInsert.ts",
+    "./xid/requests": "./src/xid/requests.ts",
     "./publicCache/eventExportKeys": "./src/publicCache/eventExportKeys.ts",
     "./eventExport/payload": "./src/eventExport/payload.ts",
     "./eventExport/data": "./src/eventExport/data.ts",

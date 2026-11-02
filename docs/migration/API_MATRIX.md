@@ -116,6 +116,18 @@ New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> or
 
 Known difference (DECIDED, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API sends 0 wakes by design. The `static_rebuild_queue` row is persisted in the same D1 batch, drained by the content-jobs Recovery Cron `15 * * * *` (worst case about 60 min, equal to the D-11 accepted delay). The Queue binding decision is made once with MIG-0614 U06.
 
+### Hono endpoints (MIG-0659, SA-099..101, PR #460)
+
+New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, banned / TOS identity, **no** active-X requirement) -> CostGuard `xid_links` -> drizzle handle = CURRENT `writeGuard({ feature: "xid_links" })`. Body keys are CURRENT's FormData keys (D-16-1); the request id of cancel is the path value. Response is CURRENT's `{ ok, message? }` with `Cache-Control: private, no-store`; contract `packages/contracts/src/xidRequest.ts`, core `packages/server-core/src/xid/requests.ts`, routes `apps/api/src/routes/xid/requests.ts` mounted by `apps/api/src/routes/xid/index.ts` (D-15-8: MIG-0636 adds its own `route(...)` line to that file).
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Writes (one D1 batch) |
+| --- | --- | --- | --- | --- |
+| SA-099 | `POST /api/xid/requests` body `{ x_id, request_type \| link_type, target_x_user_id }` | `xid_links` | 200 / 400 / 401 / 403 / 404 / 409 / 413 / 503 | conditional request INSERT (dedupe + pending limit 5), ops webhook outbox row for link types, audit CREATE with `actor_x_user_id`; best-effort onboarding marker after commit |
+| SA-100 | `POST /api/xid/requests/:id/cancel` (no body) | `xid_links` | 200 / 401 / 403 / 404 / 409 / 413 / 503 | pending to cancelled CAS (own request), cancel webhook outbox row for link and alias types, audit UPDATE with `actor_x_user_id` |
+| SA-101 | `POST /api/xid/merge-revert-requests` body `{ parent_request_id }` | `xid_links` | 200 / 400 / 401 / 403 / 404 / 409 / 413 / 503 | child INSERT with parent `updated_at` CAS and one live child, no snapshot copy, audit CREATE with `actor_x_user_id`; no outbox row |
+
+Known difference (DECIDED, D-0603-1): CURRENT wakes the notification queue once after a link or cancel commit; the Hono API sends 0 wakes. The `notification_outbox` row is persisted in the same D1 batch and drained by the existing recovery path. Status classes: 400 invalid input, 403 not owner / not allowed / guard deny, 404 not found, 409 conflict or limit or already processed, 503 D1 unavailable or save failed (the `message` is CURRENT's). D1 budget: guard reads (session, user, CostGuard) plus at most 11 handler reads and exactly 1 batch; audit settings and actor snapshot are preloaded by the guards. Parity: `apps/api/test/xidRequests.parity.test.mjs` runs CURRENT `xid.ts` and Hono on the same migrated SQLite and compares request, audit, outbox (including `payload_json`) and onboarding rows field by field.
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
@@ -349,9 +361,9 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-096 | `executeXIdMergeRequest` | `xid#validateXIdentityRequestShape`; merge plan `xid#buildXIdMergeBeforeState`, `#buildXIdMergeAfterState` | `merge.ts` body, `xIdMergeStateMatchesSql` CAS, `mergeBudget`, `mergeAudits` | U02 |
 | SA-097 | `approveXIdMergeRevert` | `xid#isRevertDeadlineOpen`, `#validateXIdentityRequestShape`; same merge plan as SA-096 | revert body untouched (task rule) | U02 |
 | SA-098 | `setActiveXId` | `xid#normalizeXId` | approved-link read + user CAS | U04 |
-| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | U04 |
-| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | U04 |
-| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | U04 |
+| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | MIG-0659 (`POST /api/xid/requests`) |
+| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | MIG-0659 (`POST /api/xid/requests/:id/cancel`) |
+| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | MIG-0659 (`POST /api/xid/merge-revert-requests`) |
 | SA-102 | `updateXIdProfile` | `xid#normalizeXId` | profile CAS + static rebuild | U04 |
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
