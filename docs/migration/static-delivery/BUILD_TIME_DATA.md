@@ -333,7 +333,7 @@ Owner-only checkpoint, after explicit permission:
 4. Recompute the `MAX_DATA_BUILDS_PER_DAY` and `MIN_BUILD_INTERVAL_MS` constants against the actual 80% Workers Builds Free-plan budget; stop if one build is ≥4 minutes or exceeds the approved constraints. This is an owner/lead review, not automatic CI completion.
 5. Only after reviewed results and separate production approval may anyone consider a build project or Route cutover; this PR does not request or execute that change.
 
-**Current validation state:** PR #469 is local code/tests only until its latest-head GitHub Actions passes. The 5 Workers Builds measurements, production 0065 check and credential setup remain unperformed. No claim of MIG-0509 `DONE` is made here.
+**Current validation state:** MIG-0509 (code task) is DONE in PR #469 (2026-11-02 integration) once the latest-head GitHub Actions are green and an independent review plus human merge approval are recorded. The 5 Workers Builds measurements, the production `0065` check and credential setup are **owner follow-ups that remain unperformed** (tracked in `OPEN_DECISIONS.md` D-11 follow-up B and `work-items/MIG-0509.md`); they are not performed by an agent.
 
 ## 6. Sizing from the production counts (one read-only count, 2026-10-18)
 
