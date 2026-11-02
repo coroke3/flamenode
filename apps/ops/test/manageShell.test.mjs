@@ -13,7 +13,9 @@ import { shouldWarnManageActiveXMismatch } from "../.test-dist/apps/ops/src/rout
 import { ManageSidebarNav, classifyManageEvent, filterManageEvents, isManageHrefActive } from "../.test-dist/apps/ops/src/routes/manage/ManageSidebarNav.js";
 import { manageReviewTarget } from "../.test-dist/apps/ops/src/routes/manage/ManageReviewRedirect.js";
 import { manageKpiClasses, ManageDashboardContent } from "../.test-dist/apps/ops/src/routes/manage/ManageDashboard.js";
-import { summarizePayload } from "../.test-dist/apps/ops/src/components/notifications/NotificationOutboxSummary.js";
+import { NotificationOutboxSummary } from "../.test-dist/apps/ops/src/components/notifications/NotificationOutboxSummary.js";
+import { summarizeNotificationPayload } from "../.test-dist/apps/ops/src/components/notifications/notificationDisplay.js";
+import { formatUnix, formatRelative } from "../.test-dist/apps/ops/src/routes/manage/manageFormat.js";
 
 const access = { isAdmin: false, canAccessAdmin: false, canAccessManage: true, canManageXIdLinkRequests: false };
 const event = { id: "e1", title: "Event 1", accent_color: null, visibility_status: "public", start_time: null, end_time: null, entry_start_time: null, entry_end_time: null, pending_review_count: 3 };
@@ -125,8 +127,8 @@ test("MIG-0719 T05: operation-mode banner all modes, normal and failed", async (
   assert.equal((await loadOperationMode(fetchJson(200, { mode: "future", reason: null }))).status, "unavailable");
   assert.equal((await loadOperationMode(fetchJson(200, { mode: "economy", reason: "x".repeat(2049) }))).status, "unavailable");
   assert.equal((await loadOperationMode(fetchJson(503, {}))).status, "unavailable");
-  assert.equal(summarizePayload(JSON.stringify({ content: "one\ntwo" })), "one");
-  assert.equal(summarizePayload("{"), "—");
+  assert.equal(summarizeNotificationPayload(JSON.stringify({ content: "one\ntwo" })).preview, "one");
+  assert.equal(summarizeNotificationPayload("{").preview, "—");
 });
 
 test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/bindings", async () => {
@@ -162,4 +164,47 @@ test("MIG-0719 router: admin routes keep a single main landmark", async () => {
   } finally {
     globalThis.window = saved.window; globalThis.document = saved.document;
   }
+});
+
+test("MIG-0719 U03 parity: notification summary matches CURRENT label, badges, guidance and translated error", () => {
+  const row = { type: "video_approved", status: "failed", payload_json: JSON.stringify({ content: "hello" }), attempt_count: 5, last_error: "discord_dm_bot_token_unconfigured", dedupe_key: null, recipient_user_id: null };
+  const html = renderToStaticMarkup(React.createElement(NotificationOutboxSummary, { row }));
+  assert.match(html, /作品が公開されました/);
+  assert.doesNotMatch(html, />video_approved</);
+  assert.match(html, /fn-badge-danger">失敗</);
+  assert.match(html, />作品</);
+  assert.match(html, /宛先: 運営チャンネル/);
+  assert.match(html, /Discord Bot の認証設定に問題があります。/);
+  assert.match(html, /利用者 DM 用 Bot Token \(DISCORD_BOT_TOKEN\) が未設定です。/);
+  assert.match(html, /color:var\(--accent-danger\)/);
+  assert.doesNotMatch(html, /discord_dm_bot_token_unconfigured/);
+  const sent = renderToStaticMarkup(React.createElement(NotificationOutboxSummary, { row: { ...row, status: "sent", last_error: null, recipient_user_id: "u1" } }));
+  assert.match(sent, /fn-badge-accent">送信済み</);
+  assert.match(sent, /宛先: u1/);
+  assert.doesNotMatch(sent, /認証設定/);
+});
+
+test("MIG-0719 U03 parity: Manage dates are Asia/Tokyo regardless of process time zone", () => {
+  const sec = Date.UTC(2026, 9, 31, 15, 30) / 1000; // 2026-11-01 00:30 JST
+  assert.equal(formatUnix(sec, { dateOnly: true }), "2026/11/01");
+  assert.equal(formatUnix(sec), "2026/11/01 00:30");
+  assert.equal(formatUnix(null), "-");
+  assert.equal(formatRelative(sec, (sec + 5 * 60) * 1000), "5分前");
+  assert.equal(formatRelative(sec, (sec + 10) * 1000), "今");
+});
+
+test("MIG-0719 U01 parity: only the ended sidebar group is a collapsible details", () => {
+  const ended = { ...event, id: "old", title: "Old", start_time: 1, end_time: 2 };
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(ManageSidebarNav, { events: [event, ended], showXLinkRequests: false, warnActiveX: false, activeX: null })));
+  assert.match(html, /<details class="console-sidebar-event-group"><summary class="console-sidebar-event-group-title">終了<\/summary>/);
+  assert.match(html, /<h3 class="console-sidebar-event-group-title">開催中・公開中<\/h3>/);
+});
+
+test("MIG-0719 U03 parity: dashboard dated cells carry relative text and CURRENT classes", () => {
+  const html = renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(ManageDashboardContent, { data: { ...dashboard, notificationSchemaMissing: true, notifications: [{ id: "n1", type: "video_approved", status: "sent", payload_json: "{}", attempt_count: 1, last_error: null, dedupe_key: null, recipient_user_id: null, event_id: "e1", created_at: Date.UTC(2026, 9, 31, 15, 30) / 1000 }] } })));
+  assert.match(html, /manage-notification-th-date/);
+  assert.match(html, /manage-notification-event-cell/);
+  assert.match(html, /2026\/11\/01 00:30/);
+  assert.match(html, /fn-td-muted/);
+  assert.match(html, /`npm.cmd run db:local-apply`/);
 });

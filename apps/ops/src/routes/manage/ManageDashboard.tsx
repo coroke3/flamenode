@@ -10,6 +10,7 @@ import { EmptyState } from "../../components/shared/EmptyState.js";
 import { FnTable } from "../../components/shared/FnTable.js";
 import { Icon } from "../../components/shared/Icon.js";
 import { NotificationOutboxSummary } from "../../components/notifications/NotificationOutboxSummary.js";
+import { formatRelative, formatUnix } from "./manageFormat.js";
 import { ManageActiveXNotice } from "./ManageActiveXNotice.js";
 
 export function manageDashboardRedirect(status: string, reason?: string): string | null {
@@ -21,8 +22,8 @@ export function manageDashboardRedirect(status: string, reason?: string): string
 export function manageKpiClasses(data: Pick<ManageDashboardResponse, "pendingReviewTotal" | "failedNotificationCount">): { pending: string; failed: string } {
   return { pending: "manage-dashboard-kpi" + (data.pendingReviewTotal > 0 ? " manage-dashboard-kpi--warn" : ""), failed: "manage-dashboard-kpi" + (data.failedNotificationCount > 0 ? " manage-dashboard-kpi--danger" : "") };
 }
-function formatted(value: number | null | undefined): string { return value == null ? "—" : new Date(value * 1000).toLocaleString("ja-JP"); }
-function dateOnly(value: number | null | undefined): string { return value == null ? "—" : new Date(value * 1000).toLocaleDateString("ja-JP"); }
+function dateOnly(value: number | null | undefined): string { return value ? formatUnix(value, { dateOnly: true }) : "—"; }
+function DateCell({ value }: { value: number }): React.ReactElement { return <><div>{formatUnix(value)}</div><div className="fn-td-muted">{formatRelative(value)}</div></>; }
 function EventCard({ ev, isAdmin }: { ev: ManageDashboardEvent; isAdmin: boolean }): React.ReactElement {
   const status = computeEventStatus(ev);
   const pending = ev.pending_review_count;
@@ -71,16 +72,16 @@ export function ManageDashboardContent({ data }: { data: ManageDashboardResponse
       </div>
     </section>
     {data.failedNotificationCount > 0 ? <div role="status" className="fn-alert fn-alert--danger"><strong>担当イベントに失敗通知が {data.failedNotificationCount} 件</strong>あります。 <Link href="/manage/notifications?status=failed">通知センターで確認 →</Link></div> : null}
-    {data.notificationSchemaMissing ? <div role="status" className="fn-alert fn-alert--warn">イベント通知の絞り込みに必要な DB migration が未適用です。ローカルでは npm.cmd run db:local-apply を実行してください。</div> : null}
+    {data.notificationSchemaMissing ? <div role="status" className="fn-alert fn-alert--warn">イベント通知の絞り込みに必要な DB migration が未適用です。ローカルでは `npm.cmd run db:local-apply` を実行してください。</div> : null}
     {data.eventsTruncated ? <div role="status" className="fn-alert fn-alert--warn">表示件数の上限に達しました。残りの担当イベントはここに表示されない場合があります。</div> : null}
     <section className="fn-console-section fn-console-section--tight"><h2 className="fn-console-eyebrow">運営状況一覧</h2><div className="fn-console-stack">{events.map(ev => <EventCard key={ev.id} ev={ev} isAdmin={access.isAdmin} />)}</div></section>
     {data.notifications.length > 0 ? <section className="fn-console-section"><h2 className="fn-console-eyebrow">イベント通知（直近）</h2>
-      <FnTable className="manage-event-notifications-table"><thead><tr><th>通知</th><th>日時</th><th>イベント</th></tr></thead><tbody>
-        {data.notifications.map(n => { const ev = events.find(item => item.id === n.event_id); return <tr key={n.id}><td><NotificationOutboxSummary row={n} /></td><td className="fn-td-nowrap">{formatted(n.created_at)}</td><td>{ev ? <Link href={"/manage/events/" + encodeURIComponent(ev.id)}>{ev.title}</Link> : n.event_id ? n.event_id.slice(0, 8) + "…" : "—"}</td></tr>; })}
+      <FnTable className="manage-event-notifications-table"><thead><tr><th>通知</th><th className="manage-notification-th-date">日時</th><th className="manage-notification-th-event">イベント</th></tr></thead><tbody>
+        {data.notifications.map(n => { const ev = events.find(item => item.id === n.event_id); return <tr key={n.id}><td><NotificationOutboxSummary row={n} /></td><td className="fn-td-nowrap"><DateCell value={n.created_at} /></td><td className="manage-notification-event-cell">{ev ? <Link href={"/manage/events/" + encodeURIComponent(ev.id)}>{ev.title}</Link> : n.event_id ? <span className="fn-td-mono">{n.event_id.slice(0, 8)}…</span> : "—"}</td></tr>; })}
       </tbody></FnTable></section> : null}
     <section className="fn-console-section"><h2 className="fn-console-eyebrow">受信箱 (担当イベント関連の更新履歴)</h2>
       {data.inbox.length === 0 ? <EmptyState tone="success" title="直近の更新はありません" description="担当イベントに関する履歴更新は、ここに表示されます。問題がなければこのままで大丈夫です。" iconName="check" actions={[{ href: "/manage", label: "イベント運営トップへ", variant: "ghost" }]} /> :
-        <FnTable><thead><tr><th>日時</th><th>イベント</th><th>操作</th><th>実行者</th></tr></thead><tbody>{data.inbox.map(h => { const ev = events.find(item => item.id === h.target_id); return <tr key={h.id}><td className="fn-td-nowrap">{formatted(h.created_at)}</td><td>{ev ? <Link href={"/event/" + encodeURIComponent(ev.id)}>{ev.title}</Link> : h.target_id}</td><td><span className={"fn-badge " + (h.operation === "DELETE" ? "fn-badge-danger" : h.operation === "CREATE" ? "fn-badge-accent" : "fn-badge-soft")}>{h.operation}</span></td><td>{h.actor_user_id ?? "-"}</td></tr>; })}</tbody></FnTable>}
+        <FnTable><thead><tr><th>日時</th><th>イベント</th><th>操作</th><th>実行者</th></tr></thead><tbody>{data.inbox.map(h => { const ev = events.find(item => item.id === h.target_id); return <tr key={h.id}><td className="fn-td-nowrap"><DateCell value={h.created_at} /></td><td>{ev ? <Link href={"/event/" + encodeURIComponent(ev.id)}>{ev.title}</Link> : <span className="fn-td-mono">{h.target_id}</span>}</td><td><span className={"fn-badge " + (h.operation === "DELETE" ? "fn-badge-danger" : h.operation === "CREATE" ? "fn-badge-accent" : "fn-badge-soft")}>{h.operation}</span></td><td className="fn-td-muted">{h.actor_user_id ?? "-"}</td></tr>; })}</tbody></FnTable>}
     </section>
   </div>;
 }

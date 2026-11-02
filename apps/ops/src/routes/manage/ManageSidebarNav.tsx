@@ -57,11 +57,11 @@ export function ManageSidebarNav({ events, showXLinkRequests, warnActiveX, activ
     }
   }, [events, pathname]);
   const filtered = filterManageEvents(events, query);
-  const categories = [
+  const categories: { label: string; rows: ManageNavigationEvent[]; collapsible?: boolean }[] = [
     { label: "最近", rows: recentIds.map(id => filtered.find(ev => ev.id === id)).filter((ev): ev is ManageNavigationEvent => Boolean(ev)) },
     { label: "開催中・公開中", rows: filtered.filter(ev => classifyManageEvent(ev) === "active") },
     { label: "開始前", rows: filtered.filter(ev => classifyManageEvent(ev) === "scheduled") },
-    { label: "終了", rows: filtered.filter(ev => classifyManageEvent(ev) === "ended") },
+    { label: "終了", rows: filtered.filter(ev => classifyManageEvent(ev) === "ended"), collapsible: true },
   ];
   return <section className="adminnav-navGroup console-manage-nav" aria-label="イベント運営ナビ">
     <h2 className="adminnav-navGroupTitle">イベント運営</h2>
@@ -69,10 +69,16 @@ export function ManageSidebarNav({ events, showXLinkRequests, warnActiveX, activ
     <Link href="/manage" className={"adminnav-navLink" + (isManageHrefActive("/manage", pathname) ? " adminnav-navLinkActive" : "")} aria-current={isManageHrefActive("/manage", pathname) ? "page" : undefined}><Icon name="grid" size={14} aria-hidden /><span className="console-sidebar-link-label">運営トップ</span></Link>
     {showXLinkRequests ? <Link href="/manage/x-link-requests" className={"adminnav-navLink" + (isManageHrefActive("/manage/x-link-requests", pathname) ? " adminnav-navLinkActive" : "")} aria-current={isManageHrefActive("/manage/x-link-requests", pathname) ? "page" : undefined}><Icon name="user" size={14} aria-hidden /><span className="console-sidebar-link-label">X ID 連携申請</span></Link> : null}
     <label className="console-sidebar-search"><Icon name="search" size={13} aria-hidden /><span className="fn-sr-only">イベントを検索</span><input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="イベント名・ID" /></label>
-    {categories.map(cat => cat.rows.length ? <div className="console-sidebar-event-group" key={cat.label}><h3 className="console-sidebar-event-group-title">{cat.label}</h3>
-      {cat.rows.map(ev => { const href = "/manage/events/" + encodeURIComponent(ev.id); const active = isManageHrefActive(href, pathname);
+    {categories.map(cat => {
+      if (!cat.rows.length) return null;
+      const body = cat.rows.map(ev => { const href = "/manage/events/" + encodeURIComponent(ev.id); const active = isManageHrefActive(href, pathname);
         return <Link key={ev.id} href={href} className={"adminnav-navLink" + (active ? " adminnav-navLinkActive" : "")} aria-current={active ? "page" : undefined} style={ev.accent_color ? { "--event-accent": ev.accent_color } as React.CSSProperties : undefined}><span className="console-sidebar-event-dot" aria-hidden /><span className="console-sidebar-link-label">{ev.title}</span>{ev.pending_review_count > 0 ? <span className="console-sidebar-count">{ev.pending_review_count}</span> : null}</Link>;
-      })}</div> : null)}
+      });
+      // CURRENT EventGroup: only the ended group is collapsible (<details>).
+      return cat.collapsible
+        ? <details className="console-sidebar-event-group" key={cat.label}><summary className="console-sidebar-event-group-title">{cat.label}</summary>{body}</details>
+        : <div className="console-sidebar-event-group" key={cat.label}><h3 className="console-sidebar-event-group-title">{cat.label}</h3>{body}</div>;
+    })}
     {events.length === 0 ? <p className="console-sidebar-empty">担当イベントが割り当てられると、ここに一覧が表示されます。</p> : null}
   </section>;
 }
