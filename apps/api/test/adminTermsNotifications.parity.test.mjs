@@ -339,6 +339,27 @@ test("MIG-0642 T01 SA-047: force-resend inserts a fresh forced row + CREATE audi
   assert.equal((await x.request("POST", "/notifications/none/force-resend", {})).status, 404);
 });
 
+test("MIG-0642 T01 SA-047: non-object payloads and invalid payloads are rejected before the recipient check, with no write", async () => {
+  const x = setup();
+  const count = () => x.sqlite.prepare("SELECT count(*) AS n FROM notification_outbox").get().n;
+  let i = 0;
+  for (const payload of ["[]", "5", '"str"', "null"]) {
+    const id = `np${i++}`;
+    x.seedNotification({ id, status: "sent", payload });
+    const n = count();
+    const r = await x.request("POST", `/notifications/${id}/force-resend`, {});
+    assert.equal(r.status, 400, payload);
+    assert.equal((await r.json()).message, "通知 payload が不正です: payload はオブジェクトである必要があります", payload);
+    assert.equal(count(), n);
+  }
+  assert.equal(x.audits().length, 0);
+  // CURRENT validates the payload before resolving the recipient
+  x.seedNotification({ id: "nq", recipient: "gone", status: "sent", payload: '{"content":5}' });
+  const r = await x.request("POST", "/notifications/nq/force-resend", {});
+  assert.equal(r.status, 400);
+  assert.match((await r.json()).message, /^通知 payload が不正です/);
+});
+
 test("MIG-0642 T01 SA-048: retry-failed handles oldest 10 of 11 and reports the count", async () => {
   const x = setup();
   for (let i = 0; i < 11; i++) x.seedNotification({ id: `f${String(i).padStart(2, "0")}`, status: i % 2 ? "failed" : "dead_letter", created_at: 100 + i });

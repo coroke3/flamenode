@@ -320,12 +320,15 @@ adminTermsRoutes.post("/:id/reaccept-broadcast", async (c) => {
   // target + latest published major (CURRENT getLatestPublishedMajorTerms) in one read.
   const found = await c.env.DB
     .prepare(
-      `SELECT ${COLUMN_LIST},
-         (SELECT id FROM terms_versions WHERE severity = 'major' AND published_at IS NOT NULL
-            ORDER BY published_at DESC, updated_at DESC LIMIT 1) AS _major_id,
-         (SELECT published_at FROM terms_versions WHERE severity = 'major' AND published_at IS NOT NULL
-            ORDER BY published_at DESC, updated_at DESC LIMIT 1) AS _major_published_at
-       FROM terms_versions WHERE id = ? LIMIT 1`,
+      `SELECT ${TERMS_COLUMNS.map((column) => `terms_versions."${column}"`).join(", ")},
+         major._id AS _major_id, major._published_at AS _major_published_at
+       FROM terms_versions
+       LEFT JOIN (
+         SELECT id AS _id, published_at AS _published_at FROM terms_versions
+         WHERE severity = 'major' AND published_at IS NOT NULL
+         ORDER BY published_at DESC, updated_at DESC LIMIT 1
+       ) AS major ON 1 = 1
+       WHERE terms_versions.id = ? LIMIT 1`,
     )
     .bind(termsId)
     .first<TermsRow & { _major_id: string | null; _major_published_at: number | null }>();

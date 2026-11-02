@@ -219,24 +219,28 @@ const MAX_PAYLOAD_BYTES = 8 * 1024;
 const OPS_WEBHOOK_TARGETS = ["account", "event", "system"];
 
 /** CURRENT validateNotificationPayload (src/lib/notifications/format.ts), thrown as in prepareNotification. */
-function assertForcePayload(type: string, payload: Record<string, unknown>): void {
+function assertForcePayload(type: string, payload: unknown): asserts payload is Record<string, unknown> {
   const fail = (reason: string): never => {
     throw new Error(`通知 payload が不正です: ${reason}`);
   };
   if (type.length === 0) fail("type が文字列ではありません");
   if (type.length > 64) fail("type が 64 文字を超えています");
   if (!/^[a-z0-9_]+$/i.test(type)) fail("type は英数と _ のみ使用可能です");
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    fail("payload はオブジェクトである必要があります");
+  }
   if (new TextEncoder().encode(JSON.stringify(payload)).byteLength > MAX_PAYLOAD_BYTES) {
     fail(`payload が ${MAX_PAYLOAD_BYTES} バイトを超えています`);
   }
-  const content = payload.content;
+  const record = payload as Record<string, unknown>;
+  const content = record.content;
   if (content !== undefined && typeof content !== "string") fail("payload.content は文字列である必要があります");
   if (typeof content === "string" && content.length > 2000) fail("payload.content は 2000 文字以内にしてください");
-  const target = payload.webhook_target;
+  const target = record.webhook_target;
   if (target !== undefined && !(typeof target === "string" && OPS_WEBHOOK_TARGETS.includes(target))) {
     fail("payload.webhook_target が不正です");
   }
-  const threadName = payload.thread_name;
+  const threadName = record.thread_name;
   if (threadName !== undefined) {
     if (typeof threadName !== "string") fail("payload.thread_name は文字列である必要があります");
     if ((threadName as string).length > 100) fail("payload.thread_name は 100 文字以内にしてください");
@@ -259,11 +263,18 @@ adminNotificationRoutes.post("/:id/force-resend", async (c) => {
   if (!found) return respond(c, 404, { ok: false, message: "通知が見つかりません。" });
   const { _recipient_exists, ...source } = found;
 
-  let payload: Record<string, unknown>;
+  let payload: unknown;
   try {
-    payload = JSON.parse(source.payload_json) as Record<string, unknown>;
+    payload = JSON.parse(source.payload_json);
   } catch {
     return respond(c, 400, { ok: false, message: "payloadを解析できません。" });
+  }
+
+  try {
+    assertForcePayload(source.type, payload);
+  } catch (error) {
+    console.error("[notification-admin] force-resend payload rejected");
+    return respond(c, 400, { ok: false, message: error instanceof Error ? error.message : NOTIFICATION_CONFLICT_MESSAGE });
   }
 
   const deliveryRoute = source.delivery_route ?? (source.type === "discord_webhook" ? "channel" : "dm");
@@ -273,13 +284,6 @@ adminNotificationRoutes.post("/:id/force-resend", async (c) => {
   if (route === "dm" && !recipientUserId) {
     return respond(c, 409, { ok: false, message: "宛先の通知設定がOFF、または再送通知を構築できません。" });
   }
-  try {
-    assertForcePayload(source.type, payload);
-  } catch (error) {
-    console.error("[notification-admin] force-resend payload rejected");
-    return respond(c, 400, { ok: false, message: error instanceof Error ? error.message : NOTIFICATION_CONFLICT_MESSAGE });
-  }
-
   const now = Math.floor(Date.now() / 1000);
   const row = {
     id: crypto.randomUUID(),
