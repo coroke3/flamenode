@@ -3,7 +3,7 @@ import { Navigate, useLocation } from "react-router-dom";
 
 /** Reproduce CURRENT's five server redirects without emitting double-encoded IDs. */
 export function adminCompatTarget(pathname: string): string | null {
-  if (pathname === "/admin/history") return "/admin/audit";
+  if (pathname === "/admin/history" || pathname === "/admin/history/") return "/admin/audit";
   const match = /^\/admin\/events\/([^/]+)(?:\/(edit|slots|staff))?\/?$/.exec(pathname);
   if (!match) return null;
   try {

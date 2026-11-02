@@ -68,6 +68,8 @@ test("MIG-0726 U04: all five CURRENT compatible redirects preserve encoded ids",
       "/manage/events/%E3%83%86%E3%82%B9%E3%83%88" + suffix);
   }
   assert.equal(adminCompatTarget("/admin/history"), "/admin/audit");
+  assert.equal(adminCompatTarget("/admin/history/"), "/admin/audit");
+  assert.equal(adminCompatTarget("/admin/events/x/"), "/manage/events/x");
   for (const path of ["/admin/events", "/admin/events/a/more", "/admin/other",
     "/admin/events/%bad/staff"]) assert.equal(adminCompatTarget(path), null);
 });
@@ -146,6 +148,20 @@ test("MIG-0726 T04: simulator with an empty input never calls the API and shows 
   let url = "";
   await fetchPermissionSimulator(async (input) => { url = input; return new Response('{"eventId":"a","xUserId":"b","result":null}'); }, { eventId: "a b", xUserId: "@x" });
   assert.equal(url, "/api/admin-read/permissions/simulator?event_id=a+b&x_user_id=%40x");
+});
+
+test("MIG-0726: a malformed simulator result is unavailable, not a render crash", async () => {
+  const ok = { found: true, eventId: "e", xUserId: "x", displayName: null, preset: null, presetLabel: null,
+    resolvedKeys: ["a"], resolvedLabels: ["A"], spotlight: [{ key: "a", label: "A", allowed: true }] };
+  const query = { eventId: "e", xUserId: "x" };
+  const read = (result) => fetchPermissionSimulator(
+    async () => new Response(JSON.stringify({ eventId: "e", xUserId: "x", result })), query);
+  assert.equal((await read(ok)).status, "ok");
+  assert.equal((await read(null)).status, "ok");
+  const { spotlight: _s, ...noSpotlight } = ok;
+  assert.equal((await read(noSpotlight)).status, "unavailable");
+  assert.equal((await read({ ...ok, spotlight: [{ key: 1 }] })).status, "unavailable");
+  assert.equal((await read("x")).status, "unavailable");
 });
 
 test("MIG-0726 U03: simulator result links to the encoded staff page", () => {

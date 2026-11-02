@@ -65,6 +65,21 @@ export function normalizeSimulatorQuery(params: URLSearchParams): SimulatorQuery
   };
 }
 
+function isSimulatorBody(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return false;
+  const result = (value as { result?: unknown }).result;
+  if (result === null) return true;
+  if (typeof result !== "object") return false;
+  const r = result as Record<string, unknown>;
+  const strings = (x: unknown) => Array.isArray(x) && x.every((v) => typeof v === "string");
+  const nullableString = (x: unknown) => x === null || typeof x === "string";
+  return typeof r.found === "boolean" && typeof r.eventId === "string" && nullableString(r.xUserId)
+    && nullableString(r.displayName) && nullableString(r.preset) && nullableString(r.presetLabel)
+    && strings(r.resolvedKeys) && strings(r.resolvedLabels) && Array.isArray(r.spotlight)
+    && r.spotlight.every((e) => e !== null && typeof e === "object" && typeof (e as { key?: unknown }).key === "string"
+      && typeof (e as { label?: unknown }).label === "string" && typeof (e as { allowed?: unknown }).allowed === "boolean");
+}
+
 /** T04: when either input is empty the API is not called and there is no result. */
 export async function fetchPermissionSimulator(
   fetchFn: OpsFetch,
@@ -79,7 +94,6 @@ export async function fetchPermissionSimulator(
     fetchFn, "/api/admin-read/permissions/simulator?" + qs.toString(), signal,
   );
   if (result.status !== "ok") return result;
-  const data = result.data as unknown;
-  if (data === null || typeof data !== "object" || !("result" in data)) return { status: "unavailable" };
+  if (!isSimulatorBody(result.data)) return { status: "unavailable" };
   return result;
 }
