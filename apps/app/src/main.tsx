@@ -7,6 +7,9 @@ import "./styles/video-card.css";
 import "./styles/dashboard.css";
 import "./styles/settings.css";
 import "./styles/onboarding.css";
+import "./styles/video-members.css";
+import "./styles/forms-a.css";
+import "./styles/shared-social.css";
 import { App } from "./App.js";
 
 const rootElement = document.getElementById("root");
