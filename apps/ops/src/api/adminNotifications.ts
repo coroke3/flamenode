@@ -1,55 +1,57 @@
 // MIG-0734 U03: cancel body via AdminNotificationCancelBodySchema (SA-046); retry/force-resend/retry-failed have no body schema on main (SA-045/047/048 take no body).
-import {AdminNotificationCancelBodySchema,AdminNotificationsResponseSchema,type AdminNotificationsResponse} from "@flamenode/contracts";
-import type {AdminReadResult,AdminWriteResult} from "./adminCostGuard.js";
-type Fetcher=(input:string,init?:RequestInit)=>Promise<Response>;
-export type NotificationFilters={status:string;cat:string;type:string;event:string;q:string};
-export function notificationQuery(filters:NotificationFilters):string{
-  const params=new URLSearchParams();
-  if(filters.status&&filters.status!=="all")params.set("status",filters.status);
-  if(filters.cat&&filters.cat!=="all")params.set("cat",filters.cat);
-  if(filters.type.trim())params.set("type",filters.type.trim());
-  if(filters.event.trim())params.set("event",filters.event.trim());
-  if(filters.q.trim())params.set("q",filters.q.trim().slice(0,100));
+// Reads use D-17-2 getJson, writes use D-17-3 send (see adminCostGuard.ts).
+import {
+  AdminNotificationCancelBodySchema, AdminNotificationsResponseSchema, type AdminNotificationsResponse,
+} from "@flamenode/contracts";
+import { postAdminBody } from "./adminCostGuard.js";
+import { getJson, type OpsFetch, type OpsResult } from "./read.js";
+
+export type NotificationFilters = { status: string; cat: string; type: string; event: string; q: string };
+
+/** Query for GET /api/admin-read/ops/notifications (status=failed is expanded to the terminal set by the API). */
+export function notificationQuery(filters: NotificationFilters): string {
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== "all") params.set("status", filters.status);
+  if (filters.cat && filters.cat !== "all") params.set("cat", filters.cat);
+  if (filters.type.trim()) params.set("type", filters.type.trim());
+  if (filters.event.trim()) params.set("event", filters.event.trim());
+  if (filters.q.trim()) params.set("q", filters.q.trim().slice(0, 100));
   return params.toString();
 }
-export function createAdminNotificationsApi(fetcher:Fetcher=(url,init)=>fetch(url,init)){
-  async function list(filters:NotificationFilters):Promise<AdminReadResult<AdminNotificationsResponse>>{
-    try{
-      const query=notificationQuery(filters);
-      const res=await fetcher("/api/admin-read/ops/notifications"+(query?"?"+query:""),{
-        method:"GET",cache:"no-store",credentials:"same-origin",headers:{accept:"application/json"},signal:AbortSignal.timeout(5000),
-      });
-      if(res.status===401)return {status:"anonymous"};
-      if(res.status===403)return {status:"forbidden"};
-      if(!res.ok)return {status:"unavailable"};
-      const parsed=AdminNotificationsResponseSchema.safeParse(await res.json());
-      return parsed.success?{status:"ok",data:parsed.data}:{status:"unavailable"};
-    }catch{return {status:"unavailable"};}
-  }
-  async function write(path:string,body:object={}):Promise<AdminWriteResult>{
-    try{
-      const response=await fetcher(path,{
-        method:"POST",cache:"no-store",credentials:"same-origin",
-        headers:{accept:"application/json","content-type":"application/json"},body:JSON.stringify(body),
-        signal:AbortSignal.timeout(5000),
-      });
-      if(response.status===401)return {ok:false,message:"ログインしてください。"};
-      if(response.status===403)return {ok:false,message:"操作する権限がありません。"};
-      const value:unknown=await response.json();
-      if(value&&typeof value==="object"&&"ok" in value&&typeof value.ok==="boolean")
-        return {ok:value.ok,message:"message" in value&&typeof value.message==="string"?value.message:undefined};
-    }catch{/* fail closed */}
-    return {ok:false,message:"通信エラーが発生しました。"};
-  }
+
+/** Page URL in CURRENT filterHref order (status, type, event, q, cat). */
+export function notificationFilterHref(filters: NotificationFilters): string {
+  const params = new URLSearchParams();
+  if (filters.status !== "all") params.set("status", filters.status);
+  if (filters.type) params.set("type", filters.type);
+  if (filters.event) params.set("event", filters.event);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.cat !== "all") params.set("cat", filters.cat);
+  const query = params.toString();
+  return query ? "/admin/notifications?" + query : "/admin/notifications";
+}
+
+export async function fetchAdminNotifications(
+  fetchFn: OpsFetch, filters: NotificationFilters, signal?: AbortSignal,
+): Promise<OpsResult<AdminNotificationsResponse>> {
+  const query = notificationQuery(filters);
+  const result = await getJson<unknown>(
+    fetchFn, "/api/admin-read/ops/notifications" + (query ? "?" + query : ""), signal,
+  );
+  if (result.status !== "ok") return result;
+  const parsed = AdminNotificationsResponseSchema.safeParse(result.data);
+  return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+}
+
+export function createAdminNotificationsApi(fetchFn: OpsFetch = (url, init) => fetch(url, init)) {
+  const path = (id: string, action: string) => "/api/admin/notifications/" + encodeURIComponent(id) + "/" + action;
   return {
-    list,
-    retry:(id:string)=>write("/api/admin/notifications/"+encodeURIComponent(id)+"/retry"),
-    cancel:(id:string,reason:string)=>{
-      const body=AdminNotificationCancelBodySchema.safeParse({reason});
-      return body.success?write("/api/admin/notifications/"+encodeURIComponent(id)+"/cancel",body.data):Promise.resolve<AdminWriteResult>({ok:false,message:"入力内容が不正です。"});
-    },
-    forceResend:(id:string)=>write("/api/admin/notifications/"+encodeURIComponent(id)+"/force-resend"),
-    retryFailed:()=>write("/api/admin/notifications/retry-failed"),
+    list: (filters: NotificationFilters, signal?: AbortSignal) => fetchAdminNotifications(fetchFn, filters, signal),
+    retry: (id: string) => postAdminBody(fetchFn, path(id, "retry"), null),
+    cancel: (id: string, reason: string) =>
+      postAdminBody(fetchFn, path(id, "cancel"), AdminNotificationCancelBodySchema, { reason }),
+    forceResend: (id: string) => postAdminBody(fetchFn, path(id, "force-resend"), null),
+    retryFailed: () => postAdminBody(fetchFn, "/api/admin/notifications/retry-failed", null),
   };
 }
-export type AdminNotificationsApi=ReturnType<typeof createAdminNotificationsApi>;
+export type AdminNotificationsApi = ReturnType<typeof createAdminNotificationsApi>;

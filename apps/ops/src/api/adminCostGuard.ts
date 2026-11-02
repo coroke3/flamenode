@@ -1,52 +1,66 @@
 // MIG-0734 U03: request bodies are built through the shared @flamenode/contracts body schemas (SA-016..020).
+// Reads go through D-17-2 getJson (401 -> anonymous, 403 -> forbidden + allow-listed redirect, 404/501 mapped);
+// writes go through D-17-3 send (a body with a boolean `ok` is returned verbatim, so CURRENT's write-guard
+// message such as cost_guard_blocked / maintenance_mode / banned / invalid_origin reaches the screen).
 import {
   AdminCostGuardResponseSchema, CostGuardClearBodySchema, CostGuardDisabledBodySchema,
   CostGuardMaintenanceBodySchema, CostGuardModeBodySchema, CostGuardOverrideBodySchema,
   type AdminCostGuardResponse,
 } from "@flamenode/contracts";
-type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
-export type AdminWriteResult = {ok:boolean;message?:string};
-export type AdminReadResult<T> = {status:"ok";data:T} | {status:"anonymous"|"forbidden"|"unavailable"};
-const jsonInit = (method:"GET"|"POST",body?:object):RequestInit => ({
-  method,cache:"no-store",credentials:"same-origin",
-  headers:{"accept":"application/json",...(body?{"content-type":"application/json"}:{})},
-  ...(body?{body:JSON.stringify(body)}:{}),
-  signal:AbortSignal.timeout(5000),
-});
-export function createAdminCostGuardApi(fetcher:Fetcher=(url,init)=>fetch(url,init)){
-  async function read():Promise<AdminReadResult<AdminCostGuardResponse>>{
-    try{
-      const res=await fetcher("/api/admin-read/ops/cost-guard",jsonInit("GET"));
-      if(res.status===401)return {status:"anonymous"};
-      if(res.status===403)return {status:"forbidden"};
-      if(!res.ok)return {status:"unavailable"};
-      const parsed=AdminCostGuardResponseSchema.safeParse(await res.json());
-      return parsed.success?{status:"ok",data:parsed.data}:{status:"unavailable"};
-    }catch{return {status:"unavailable"};}
+import { getJson, type OpsFetch, type OpsResult } from "./read.js";
+import { send, type OpsWriteResult } from "./write.js";
+
+export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean };
+export type AdminOpsBody = { ok: boolean; message?: string };
+type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: unknown } };
+
+/** Maps a D-17-3 send() result to the `{ok, message}` shape CURRENT's server actions returned. */
+export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteResult {
+  if (result.status === "ok") {
+    const { ok, message } = result.data;
+    return { ok, ...(typeof message === "string" ? { message } : {}) };
   }
-  async function write(path:string,schema:{safeParse:(v:unknown)=>{success:boolean;data?:unknown}},raw:object):Promise<AdminWriteResult>{
-    const checked=schema.safeParse(raw);
-    if(!checked.success)return {ok:false,message:"入力内容が不正です。"};
-    const body=checked.data as object;
-    try{
-      const res=await fetcher(path,jsonInit("POST",body));
-      if(res.status===401)return {ok:false,message:"ログインしてください。"};
-      if(res.status===403)return {ok:false,message:"操作する権限がありません。"};
-      const data:unknown=await res.json();
-      if(data&&typeof data==="object"&&"ok" in data&&typeof data.ok==="boolean")
-        return {ok:data.ok,message:"message" in data&&typeof data.message==="string"?data.message:undefined};
-    }catch{/* fail closed */}
-    return {ok:false,message:"通信エラーが発生しました。"};
+  if (result.status === "anonymous") return { ok: false, message: "ログインしてください。", anonymous: true };
+  return { ok: false, message: "通信エラーが発生しました。" };
+}
+
+export async function postAdminBody(
+  fetchFn: OpsFetch, path: string, schema: BodySchema | null, raw?: object,
+): Promise<AdminWriteResult> {
+  let body: object | undefined;
+  if (schema) {
+    const checked = schema.safeParse(raw);
+    if (!checked.success) return { ok: false, message: "入力内容が不正です。" };
+    body = checked.data as object;
   }
+  return toWriteResult(await send<AdminOpsBody>(fetchFn, "POST", path, body));
+}
+
+export async function fetchAdminCostGuard(
+  fetchFn: OpsFetch, signal?: AbortSignal,
+): Promise<OpsResult<AdminCostGuardResponse>> {
+  const result = await getJson<unknown>(fetchFn, "/api/admin-read/ops/cost-guard", signal);
+  if (result.status !== "ok") return result;
+  const parsed = AdminCostGuardResponseSchema.safeParse(result.data);
+  return parsed.success ? { status: "ok", data: parsed.data } : { status: "unavailable" };
+}
+
+export function createAdminCostGuardApi(fetchFn: OpsFetch = (url, init) => fetch(url, init)) {
+  const post = (path: string, schema: BodySchema, raw: object) => postAdminBody(fetchFn, path, schema, raw);
   return {
-    read,
-    setMode:(mode:string,reason:string)=>write("/api/admin/cost-guard/mode",CostGuardModeBodySchema,{mode,reason}),
-    setMaintenance:(enabled:boolean,reason:string)=>write("/api/admin/cost-guard/maintenance",CostGuardMaintenanceBodySchema,{is_maintenance_mode:String(enabled?1:0),reason}),
-    setOverride:(reason:string,features:readonly string[])=>write("/api/admin/cost-guard/override",CostGuardOverrideBodySchema,{reason,confirm:"OVERRIDE",features:[...features]}),
-    clearOverride:(reason:string)=>write("/api/admin/cost-guard/override/clear",CostGuardClearBodySchema,{reason,confirm:"CLEAR"}),
-    setDisabled:(reason:string,features:readonly string[],expected:string|null)=>write("/api/admin/cost-guard/disabled-features",CostGuardDisabledBodySchema,{
-      reason,confirm:"APPLY",features:[...features],expected_disabled_features_json:JSON.stringify(expected),
-    }),
+    read: (signal?: AbortSignal) => fetchAdminCostGuard(fetchFn, signal),
+    setMode: (mode: string, reason: string) =>
+      post("/api/admin/cost-guard/mode", CostGuardModeBodySchema, { mode, reason }),
+    setMaintenance: (enabled: boolean, reason: string) =>
+      post("/api/admin/cost-guard/maintenance", CostGuardMaintenanceBodySchema, { is_maintenance_mode: String(enabled ? 1 : 0), reason }),
+    setOverride: (reason: string, confirm: string, features: readonly string[]) =>
+      post("/api/admin/cost-guard/override", CostGuardOverrideBodySchema, { reason, confirm, features: [...features] }),
+    clearOverride: (reason: string, confirm: string) =>
+      post("/api/admin/cost-guard/override/clear", CostGuardClearBodySchema, { reason, confirm }),
+    setDisabled: (reason: string, confirm: string, features: readonly string[], expected: string | null) =>
+      post("/api/admin/cost-guard/disabled-features", CostGuardDisabledBodySchema, {
+        reason, confirm, features: [...features], expected_disabled_features_json: JSON.stringify(expected),
+      }),
   };
 }
-export type AdminCostGuardApi=ReturnType<typeof createAdminCostGuardApi>;
+export type AdminCostGuardApi = ReturnType<typeof createAdminCostGuardApi>;

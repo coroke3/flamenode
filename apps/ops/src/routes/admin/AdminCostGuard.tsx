@@ -1,48 +1,171 @@
+// MIG-0734 U01: port of CURRENT app/(admin)/admin/cost-guard/page.tsx (SA-016..020 callers). Same order, copy, links and classes.
 import * as React from "react";
-import {createAdminCostGuardApi,type AdminCostGuardApi} from "../../api/adminCostGuard.js";
-import {CostGuardForm} from "./CostGuardForm.js";
-import {CostGuardOverrideForm} from "./CostGuardOverrideForm.js";
-import {CostGuardDisabledFeaturesForm} from "./CostGuardDisabledFeaturesForm.js";
-export function changedCostGuardKeys(before:string|null,after:string|null):string[]{
-  const parse=(raw:string|null):Record<string,unknown>|null=>{
-    if(!raw)return {};
-    try{
-      const value:unknown=JSON.parse(raw);
-      return value&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:{value};
-    }catch{return null;}
+import type { AdminCostGuardResponse } from "@flamenode/contracts";
+import { adminReadRedirect } from "../../api/adminTop.js";
+import { createAdminCostGuardApi, type AdminCostGuardApi } from "../../api/adminCostGuard.js";
+import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
+import { FnTable } from "../../components/shared/FnTable.js";
+import { OpsLink as Link } from "../../components/shared/OpsLink.js";
+import { useApiResult } from "../useApiResult.js";
+import { formatRelative, formatUnix } from "./adminFormat.js";
+import { CostGuardDisabledFeaturesForm } from "./CostGuardDisabledFeaturesForm.js";
+import { CostGuardForm } from "./CostGuardForm.js";
+import { CostGuardOverrideForm } from "./CostGuardOverrideForm.js";
+
+/** CURRENT parseAuditDiff().changedKeys: sorted union of keys whose JSON value differs; unparsable -> none. */
+export function changedCostGuardKeys(before: string | null, after: string | null): string[] {
+  const parse = (raw: string | null): Record<string, unknown> | null => {
+    if (!raw) return {};
+    try {
+      const value: unknown = JSON.parse(raw);
+      return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : { value };
+    } catch { return null; }
   };
-  const a=parse(before),b=parse(after);
-  if(a===null||b===null)return [];
-  return [...new Set([...Object.keys(a),...Object.keys(b)])]
-    .sort().filter(key=>JSON.stringify(a[key])!==JSON.stringify(b[key]));
+  const a = parse(before), b = parse(after);
+  if (a === null || b === null) return [];
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .sort().filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key]));
 }
-const defaultApi=createAdminCostGuardApi();
-export function AdminCostGuard({api=defaultApi}:{api?:AdminCostGuardApi}):React.ReactElement{
-  const [refresh,setRefresh]=React.useState(0);
-  const [result,setResult]=React.useState<Awaited<ReturnType<AdminCostGuardApi["read"]>>|null>(null);
-  React.useEffect(()=>{
-    let alive=true;
-    setResult(null);
-    api.read().then(r=>{if(alive)setResult(r);});
-    return ()=>{alive=false;};
-  },[api,refresh]);
-  if(!result)return <p role="status">読み込み中…</p>;
-  if(result.status!=="ok")return <section role="alert">コストガード設定を取得できません（{result.status}）。書き込みは利用できません。
-    <button onClick={()=>setRefresh(v=>v+1)}>再試行</button>
-  </section>;
-  const {data}=result;
-  const reload=()=>setRefresh(v=>v+1);
-  return <section aria-label="コストガード">
-    <h1>コストガード</h1>
-    <p>実測collectorがないため、自動判定せず手動モードと15分限定overrideを管理します。</p>
-    <p>mode: {data.mode} / メンテナンス: {data.isMaintenance?"ON":"OFF"}</p>
-    <CostGuardForm settings={data} api={api} onSuccess={reload}/>
-    <CostGuardOverrideForm settings={data} api={api} onSuccess={reload}/>
-    <CostGuardDisabledFeaturesForm settings={data} api={api} onSuccess={reload}/>
-    <h2>変更履歴（最大20件）</h2>
-    {data.truncated?<p role="status">一部の履歴はサイズ制限で省略されています。</p>:null}
-    <table><thead><tr><th>変更日時</th><th>操作者</th><th>変更キー</th></tr></thead><tbody>
-    {data.history.map(row=><tr key={row.id}><td>{new Date(row.created_at*1000).toLocaleString("ja-JP")}</td><td>{row.actor_user_id}</td><td>{(()=>{const keys=changedCostGuardKeys(row.before_json,row.after_json);return keys.length?keys.slice(0,6).join(", ")+(keys.length>6?" ほか "+(keys.length-6)+" 件":""):"変更なし";})()} {" "}<a href={"/admin/audit?table=system_settings&record="+encodeURIComponent(row.target_id)}>詳細</a></td></tr>)}
-    </tbody></table>
-  </section>;
+
+export const MODES: ReadonlyArray<{ value: string; label: string; description: string; badge: string }> = [
+  { value: "normal", label: "通常", description: "全機能をフル稼働。", badge: "fn-badge-accent" },
+  { value: "economy", label: "省エネ", description: "重い検索や推薦の更新間隔を緩める。", badge: "fn-badge-warning" },
+  { value: "read_only", label: "読み取り専用", description: "投稿・更新・通知系を停止し、閲覧のみを許可する。", badge: "fn-badge-warning" },
+  { value: "static_only", label: "静的のみ", description: "静的 JSON ベースの閲覧のみ提供する。", badge: "fn-badge-danger" },
+  { value: "maintenance", label: "メンテナンス", description: "全機能停止、メンテナンス画面に誘導する。", badge: "fn-badge-danger" },
+];
+
+const sectionHeading: React.CSSProperties = {
+  fontSize: 13, fontWeight: 700, letterSpacing: "0.18em", color: "var(--text-muted)",
+  textTransform: "uppercase", marginBottom: 12,
+};
+
+/** Pure view over the API response, testable without a network. */
+export function AdminCostGuardView({ data, api, onSuccess }: {
+  data: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: () => void;
+}): React.ReactElement {
+  const { mode, isMaintenance, updatedAt, history } = data;
+  return (
+    <div>
+      <ConsolePageHeader
+        title="コストガード"
+        description="実測collectorがないため、自動判定は行わず手動モードと15分限定overrideだけを管理します。"
+      />
+
+      <section
+        aria-label="現在の状態"
+        style={{
+          marginTop: 22, padding: "20px 22px", background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)",
+          display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+        }}
+      >
+        <span className={`fn-badge ${MODES.find((m) => m.value === mode)?.badge ?? "fn-badge-soft"}`}>mode: {mode}</span>
+        <span className={`fn-badge ${isMaintenance ? "fn-badge-danger" : "fn-badge-soft"}`}>
+          メンテナンス: {isMaintenance ? "ON" : "OFF"}
+        </span>
+        {updatedAt ? (
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            最終更新: {new Date(updatedAt * 1000).toLocaleString("ja-JP")}
+          </span>
+        ) : null}
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <h2 style={sectionHeading}>設定</h2>
+        <div style={{ padding: "16px 18px", background: "var(--bg-surface)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)" }}>
+          <CostGuardForm settings={data} api={api} onSuccess={onSuccess} />
+          <CostGuardOverrideForm settings={data} api={api} onSuccess={onSuccess} />
+          <CostGuardDisabledFeaturesForm settings={data} api={api} onSuccess={onSuccess} />
+        </div>
+        <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-muted)" }}>
+          モードの説明:
+          <ul style={{ marginTop: 6, paddingLeft: 16 }}>
+            {MODES.map((m) => (
+              <li key={m.value} style={{ marginBottom: 4 }}>
+                <strong>{m.label}</strong> ({m.value}) — {m.description}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <h2 style={sectionHeading}>変更履歴 (直近 20 件)</h2>
+        {history.length === 0 ? (
+          <p className="fn-muted fn-text-sm" style={{ marginTop: 8 }}>
+            まだ system_settings の変更履歴はありません。
+          </p>
+        ) : (
+          <FnTable>
+            <thead>
+              <tr><th>日時</th><th>実行者</th><th>変更キー</th></tr>
+            </thead>
+            <tbody>
+              {history.map((h) => {
+                const changed = changedCostGuardKeys(h.before_json, h.after_json);
+                return (
+                  <tr key={h.id}>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <div>{formatUnix(h.created_at)}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)" }}>{formatRelative(h.created_at)}</div>
+                    </td>
+                    <td style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                      {h.actor_user_id ? (
+                        <Link href={`/admin/users/${encodeURIComponent(h.actor_user_id)}`}>{h.actor_user_id}</Link>
+                      ) : "-"}
+                    </td>
+                    <td style={{ fontSize: 11, fontFamily: "monospace", color: "var(--text-secondary)", wordBreak: "break-all" }}>
+                      {changed.length === 0 ? (
+                        <span style={{ color: "var(--text-muted)" }}>変更なし</span>
+                      ) : (
+                        <>
+                          {changed.slice(0, 6).join(", ")}
+                          {changed.length > 6 ? ` ほか ${changed.length - 6} 件` : ""}
+                          {h.target_id ? (
+                            <Link
+                              href={`/admin/audit?table=system_settings&record=${encodeURIComponent(h.target_id)}`}
+                              className="fn-btn fn-btn-ghost fn-btn-sm"
+                              style={{ marginLeft: 6, padding: "0 6px", height: 22, fontSize: 11 }}
+                            >
+                              詳細
+                            </Link>
+                          ) : null}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </FnTable>
+        )}
+      </section>
+    </div>
+  );
+}
+
+const defaultApi = createAdminCostGuardApi();
+
+export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }): React.ReactElement {
+  const [refresh, setRefresh] = React.useState(0);
+  const state = useApiResult((signal) => api.read(signal), "admin-cost-guard", refresh);
+  const redirect = state.status === "loading" ? null : adminReadRedirect(state);
+  React.useEffect(() => {
+    if (redirect) window.location.assign(redirect);
+  }, [redirect]);
+
+  if (state.status === "loading" || state.status === "anonymous" || state.status === "forbidden") {
+    return <div role="status" aria-busy="true">読み込み中...</div>;
+  }
+  if (state.status !== "ok") {
+    // Fail closed: without a read there is no CAS token, so no write form is rendered.
+    return (
+      <div role="alert" className="fn-alert fn-alert--danger" style={{ marginTop: 20 }}>
+        コストガード設定を取得できません（{state.status}）。書き込みは利用できません。{" "}
+        <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setRefresh((v) => v + 1)}>再試行</button>
+      </div>
+    );
+  }
+  return <AdminCostGuardView data={state.data} api={api} onSuccess={() => setRefresh((v) => v + 1)} />;
 }
