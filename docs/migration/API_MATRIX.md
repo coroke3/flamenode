@@ -573,7 +573,7 @@ Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notificat
 
 T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
 
-Callers (MIG-0734, PR #470): SA-045..048 from `apps/ops/src/api/adminNotifications.ts` via `apps/ops/src/routes/admin/AdminNotifications.tsx` (`/admin/notifications`); SA-046 body parsed with `AdminNotificationCancelBodySchema`, the other three send `{}`.
+Callers (MIG-0734, PR #470): SA-045..048 from `apps/ops/src/api/adminNotifications.ts` via `apps/ops/src/routes/admin/AdminNotifications.tsx` (`/admin/notifications`); SA-046 body parsed with `AdminNotificationCancelBodySchema`, the other three (retry, force-resend, retry-failed) send no body; writes go through `api/write.ts` `send` so CURRENT write-guard messages and a 401 -> /entry are preserved.
 
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
