@@ -317,11 +317,37 @@ adminTermsRoutes.post("/:id/reaccept-broadcast", async (c) => {
   if (!input.ok) return respond(c, 400, input);
   const { termsId, cursor, content } = input;
 
-  // target + latest published major (CURRENT getLatestPublishedMajorTerms) in one read.
+  // target + latest published major (CURRENT getLatestPublishedMajorTerms) + the
+  // re-accept user page in ONE D1 read (ZERO_1102 S3: guards 2 + this 1 + batch 1).
+  // termsReacceptRequiredCondition: published_at 0/null matches no one (CURRENT `0 = 1`).
   const found = await c.env.DB
     .prepare(
       `SELECT ${TERMS_COLUMNS.map((column) => `terms_versions."${column}"`).join(", ")},
-         major._id AS _major_id, major._published_at AS _major_published_at
+         major._id AS _major_id, major._published_at AS _major_published_at,
+         CASE WHEN terms_versions.status = 'published' AND major._published_at IS NOT NULL AND major._published_at != 0 THEN (
+           SELECT json_group_array(page.user_id) FROM (
+             SELECT u.id AS user_id FROM "user" u
+             WHERE u.is_tos_accepted = 1
+               AND NOT (
+                 EXISTS (
+                   SELECT 1 FROM terms_versions accepted_terms
+                   WHERE accepted_terms.id = u.accepted_terms_version_id
+                     AND accepted_terms.published_at IS NOT NULL
+                     AND (accepted_terms.id = major._id OR accepted_terms.published_at > major._published_at)
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM user_tos_consents consent
+                   INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
+                   WHERE consent.user_id = u.id
+                     AND consent_terms.published_at IS NOT NULL
+                     AND (consent_terms.id = major._id OR consent_terms.published_at > major._published_at)
+                 )
+               )
+               AND u.is_notification_enabled = 1
+               ${cursor ? "AND u.id > ?" : ""}
+             ORDER BY u.id LIMIT ?
+           ) AS page
+         ) END AS _user_ids
        FROM terms_versions
        LEFT JOIN (
          SELECT id AS _id, published_at AS _published_at FROM terms_versions
@@ -330,53 +356,25 @@ adminTermsRoutes.post("/:id/reaccept-broadcast", async (c) => {
        ) AS major ON 1 = 1
        WHERE terms_versions.id = ? LIMIT 1`,
     )
-    .bind(termsId)
-    .first<TermsRow & { _major_id: string | null; _major_published_at: number | null }>();
+    .bind(...(cursor ? [cursor] : []), TERMS_REACCEPT_BATCH_SIZE + 1, termsId)
+    .first<TermsRow & { _major_id: string | null; _major_published_at: number | null; _user_ids: string | null }>();
   if (!found) return respond(c, 404, { ok: false, message: "公開中の規約だけ通知できます。" });
-  const { _major_id, _major_published_at, ...target } = found;
+  const { _major_id, _major_published_at: _unusedPublishedAt, _user_ids, ...target } = found;
+  void _unusedPublishedAt;
   if (target.status !== "published") {
     return respond(c, 409, { ok: false, message: "公開中の規約だけ通知できます。" });
   }
   if (!_major_id) {
     return respond(c, 200, { ok: true, message: "再同意が必要なmajor規約はありません。", enqueued: 0, cursor });
   }
-
-  // termsReacceptRequiredCondition: published_at 0/null matches no one (CURRENT `0 = 1`).
   let userIds: string[] = [];
-  if (_major_published_at) {
-    const { results } = await c.env.DB
-      .prepare(
-        `SELECT u.id AS user_id FROM "user" u
-         WHERE u.is_tos_accepted = 1
-           AND NOT (
-             EXISTS (
-               SELECT 1 FROM terms_versions accepted_terms
-               WHERE accepted_terms.id = u.accepted_terms_version_id
-                 AND accepted_terms.published_at IS NOT NULL
-                 AND (accepted_terms.id = ? OR accepted_terms.published_at > ?)
-             )
-             OR EXISTS (
-               SELECT 1 FROM user_tos_consents consent
-               INNER JOIN terms_versions consent_terms ON consent_terms.id = consent.terms_version_id
-               WHERE consent.user_id = u.id
-                 AND consent_terms.published_at IS NOT NULL
-                 AND (consent_terms.id = ? OR consent_terms.published_at > ?)
-             )
-           )
-           AND u.is_notification_enabled = 1
-           ${cursor ? "AND u.id > ?" : ""}
-         ORDER BY u.id LIMIT ?`,
-      )
-      .bind(
-        _major_id,
-        _major_published_at,
-        _major_id,
-        _major_published_at,
-        ...(cursor ? [cursor] : []),
-        TERMS_REACCEPT_BATCH_SIZE + 1,
-      )
-      .all<{ user_id: string }>();
-    userIds = (results ?? []).map((r) => r.user_id);
+  if (_user_ids) {
+    try {
+      const parsed = JSON.parse(_user_ids);
+      if (Array.isArray(parsed)) userIds = parsed.map(String);
+    } catch {
+      userIds = [];
+    }
   }
   const targets = userIds.slice(0, TERMS_REACCEPT_BATCH_SIZE);
   if (targets.length === 0) {

@@ -459,3 +459,48 @@ test("MIG-0642 fail closed: a throwing preflight D1 read returns 503 without lea
     assert.equal(x.count("audit_logs"), 0, path);
   }
 });
+
+test("MIG-0642 T06: every route stays within 3 D1 reads + 1 batch (SA-054 pinned at 3 reads)", async () => {
+  const cases = [
+    ["POST", "/terms", { version_label: "v1", body_markdown: "x" }, () => {}],
+    ["PATCH", "/terms/t1", { version_label: "n", body_markdown: "b" }, (x) => x.seedTerms({ id: "t1" })],
+    ["POST", "/terms/t1/publish", {}, (x) => x.seedTerms({ id: "t1" })],
+    ["POST", "/terms/t1/archive", {}, (x) => x.seedTerms({ id: "t1", status: "published", published_at: 5 })],
+    ["POST", "/terms/t1/reaccept-broadcast", { confirm: "TERMS" }, (x) => {
+      x.seedTerms({ id: "t1", status: "published", severity: "major", published_at: 900 });
+      x.sqlite.prepare("UPDATE \"user\" SET accepted_terms_version_id='t1' WHERE id='admin-1'").run();
+      x.sqlite.prepare("INSERT INTO \"user\" (id,name,role,is_tos_accepted,is_banned,is_notification_enabled) VALUES ('need','n','user',1,0,1)").run();
+    }],
+    ["PUT", "/permissions/editable-fields", { default_editable_fields: ["title"], upcoming_editable_fields: [] }, () => {}],
+    ["POST", "/notifications/n1/retry", {}, (x) => x.seedNotification({ id: "n1" })],
+    ["POST", "/notifications/n1/cancel", {}, (x) => x.seedNotification({ id: "n1", status: "pending" })],
+    ["POST", "/notifications/n1/force-resend", {}, (x) => x.seedNotification({ id: "n1", status: "sent" })],
+    ["POST", "/notifications/retry-failed", {}, (x) => x.seedNotification({ id: "n1" })],
+  ];
+  for (const [method, path, body, seed] of cases) {
+    const x = setup();
+    seed(x);
+    const r = await x.request(method, path, body);
+    assert.equal(r.status, 200, path);
+    assert.ok(x.stats.reads <= 3, `${path} reads=${x.stats.reads}`);
+    assert.equal(x.stats.batches, 1, `${path} batches`);
+  }
+});
+
+test("MIG-0642 SA-054: the single-read page lists the users that still need to re-accept", async () => {
+  const x = setup();
+  x.seedTerms({ id: "t1", status: "published", severity: "major", published_at: 900 });
+  x.sqlite.prepare("UPDATE \"user\" SET accepted_terms_version_id='t1' WHERE id='admin-1'").run();
+  x.sqlite.prepare("INSERT INTO \"user\" (id,name,role,is_tos_accepted,is_banned,is_notification_enabled) VALUES ('need','n','user',1,0,1)").run();
+  const body = await (await x.request("POST", "/terms/t1/reaccept-broadcast", { confirm: "TERMS" })).json();
+  assert.equal(body.cursor, "need");
+  assert.equal(x.audits()[0].reason, "再同意案内（DMなし） batch cursor= targets=1");
+});
+
+test("MIG-0642 SA-047: a recipient id with surrounding whitespace resolves like CURRENT (trimmed)", async () => {
+  const x = setup();
+  x.seedNotification({ id: "n1", status: "sent", recipient: " admin-1 " });
+  const r = await x.request("POST", "/notifications/n1/force-resend", {});
+  assert.equal(r.status, 200);
+  assert.equal(x.sqlite.prepare("SELECT recipient_user_id r FROM notification_outbox WHERE id <> 'n1'").get().r, "admin-1");
+});

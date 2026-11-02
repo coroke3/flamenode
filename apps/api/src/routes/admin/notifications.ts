@@ -255,7 +255,7 @@ adminNotificationRoutes.post("/:id/force-resend", async (c) => {
   const found = await c.env.DB
     .prepare(
       `SELECT ${COLUMN_LIST},
-         (SELECT 1 FROM "user" WHERE "user".id = notification_outbox.recipient_user_id) AS _recipient_exists
+         (SELECT 1 FROM "user" WHERE "user".id = trim(notification_outbox.recipient_user_id)) AS _recipient_exists
        FROM notification_outbox WHERE id = ? LIMIT 1`,
     )
     .bind(id)
