@@ -118,6 +118,25 @@ test("MIG-0642 T02: a non-admin and a stopped CostGuard write nothing", async ()
   }
 });
 
+const FEATURE_KEYS = [
+  "admin_terms_create", "admin_terms_update", "admin_terms_publish", "admin_terms_broadcast", "admin_terms_archive",
+  "admin_permissions", "admin_notifications", "admin_notifications", "admin_notifications", "admin_notifications",
+];
+
+test("MIG-0642 T02: each route is stopped only by its own CostGuard feature key", async () => {
+  for (const disabled of new Set(FEATURE_KEYS)) {
+    for (const [i, [method, path, body]] of ROUTES.entries()) {
+      const x = setup();
+      x.sqlite.prepare("UPDATE system_settings SET disabled_features_json = ?").run(JSON.stringify([disabled]));
+      const r = await x.request(method, path, body);
+      const j = await r.json().catch(() => ({}));
+      const blocked = r.status === 503 && j.reason === "cost_guard_blocked";
+      assert.equal(blocked, FEATURE_KEYS[i] === disabled, `${disabled} vs ${method} ${path} -> ${r.status}`);
+      if (blocked) assert.equal(x.count("audit_logs"), 0);
+    }
+  }
+});
+
 test("MIG-0642 T01 SA-051: create inserts a draft + CREATE long_audit, no queue", async () => {
   const x = setup();
   const r = await x.request("POST", "/terms", { id: "t-new", version_label: " v1 ", body_markdown: "本文", severity: "major" });
