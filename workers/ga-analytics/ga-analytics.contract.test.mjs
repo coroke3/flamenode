@@ -4,13 +4,17 @@ import { test } from "node:test";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("ga-analytics ranking and sync do not reference D1 or env.DB", async () => {
+test("ga-analytics keeps ranking pure, and uses D1 only in bounded recent-source loader", async () => {
   const ranking = await read("./ranking.ts");
   const sync = await read("./sync.ts");
   const syncJobs = await read("../sync-jobs/index.ts");
+  const recentFromD1 = await read("./recentFromD1.ts");
 
   assert.doesNotMatch(ranking, /env\.DB|D1Database|\.prepare\(/);
-  assert.doesNotMatch(sync, /env\.DB|D1Database|\.prepare\(/);
+  assert.match(sync, /loadRecentListFromD1\(env\.DB/);
+  assert.doesNotMatch(sync, /GA4_RECENT_LIST_KEY|list\/recent\.json/);
+  assert.match(recentFromD1, /COUNTABLE_PUBLIC_VIDEO_SQL/);
+  assert.match(recentFromD1, /LIMIT \?/);
   assert.match(syncJobs, /ga4-trending-sync/);
   assert.match(syncJobs, /syncGa4Trending\(budgetEnv, signal\)/);
   assert.match(syncJobs, /rethrow:\s*false/);

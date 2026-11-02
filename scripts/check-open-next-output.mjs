@@ -14,15 +14,46 @@ const TEXT_EXTENSIONS = new Set([
   "", ".css", ".html", ".js", ".json", ".map", ".mjs", ".svg", ".txt", ".xml",
 ]);
 
+function rejectSymlink(filePath) {
+  // lstatSync on the leaf alone cannot detect a symlink in an existing parent.
+  // Check the full lexical path before mkdir/reads; do not follow any link.
+  let current = path.resolve(filePath);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) {
+        throw new Error(`${current}: symbolic link is forbidden in OpenNext output`);
+      }
+    } catch (error) {
+      // Missing components are allowed for the manifest writer, but their
+      // existing ancestors must still be inspected (including dangling links).
+      if (error?.code !== "ENOENT") throw error;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+}
+
 function listFiles(root) {
   const files = [];
   const pending = [root];
   while (pending.length > 0) {
     const current = pending.pop();
+    const currentStat = fs.lstatSync(current);
+    if (currentStat.isSymbolicLink()) {
+      throw new Error(`${current}: symbolic link is forbidden in OpenNext output`);
+    }
+    if (!currentStat.isDirectory()) {
+      throw new Error(`${current}: expected an OpenNext output directory`);
+    }
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const fullPath = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`${fullPath}: symbolic link is forbidden in OpenNext output`);
+      }
       if (entry.isDirectory()) pending.push(fullPath);
       else if (entry.isFile()) files.push(fullPath);
+      else throw new Error(`${fullPath}: unsupported OpenNext output entry type`);
     }
   }
   return files;
@@ -73,8 +104,10 @@ export function writeBuildManifest({
   outputRoot = path.resolve(".open-next"),
   commit,
 } = {}) {
+  rejectSymlink(outputRoot);
   fs.mkdirSync(outputRoot, { recursive: true });
   const manifestPath = path.join(outputRoot, MANIFEST_NAME);
+  rejectSymlink(manifestPath);
   fs.writeFileSync(
     manifestPath,
     `${JSON.stringify({ formatVersion: 1, commit }, null, 2)}\n`,
@@ -101,6 +134,11 @@ export function checkOpenNextOutput({
     "default",
     "open-next.config.mjs",
   );
+
+  // Fail closed before reading any artifact: a linked entry could otherwise
+  // hide forbidden files, secret values, or external build outputs.
+  rejectSymlink(outputRoot);
+  const outputFiles = fs.existsSync(outputRoot) ? listFiles(outputRoot) : [];
 
   if (!fs.existsSync(workerPath) || !fs.statSync(workerPath).isFile() || fs.statSync(workerPath).size === 0) {
     errors.push("worker.js is missing or empty");
@@ -142,7 +180,7 @@ export function checkOpenNextOutput({
 
   if (fs.existsSync(outputRoot)) {
     const secrets = sensitiveValues(env, repoRoot);
-    for (const filePath of listFiles(outputRoot)) {
+    for (const filePath of outputFiles) {
       const relative = path.relative(outputRoot, filePath).replaceAll("\\", "/");
       if (FORBIDDEN_PATH_PATTERN.test(relative) || relative === "_routes.json" || relative === "_worker.js") {
         errors.push(`${relative}: forbidden Pages/config artifact`);
