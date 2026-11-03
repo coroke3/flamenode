@@ -354,3 +354,23 @@ test("HTML comment markers inside inline or fenced code cannot hide real links",
  for(const x of ["missing-after-inline-comment-marker.md","missing-after-fenced-comment-marker.md","missing-after-closed-comment.md"])assert.ok(errors.some(e=>e.includes(x)),x);
  assert.doesNotMatch(errors.join("\n"),/hidden-comment-link/);
 }));
+
+
+test("a code fence inside an HTML comment cannot hide a later real link",()=>fixture(root=>{
+ const md=[
+  "<!--",
+  "```markdown",
+  "[example](fake-inside-comment.md)",
+  "-->",
+  "[real](missing-after-commented-fence.md)",
+  "<!-- `",
+  "-->",
+  "` [real](missing-after-commented-backtick.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,2,errors.join("\n"));
+ for(const name of ["missing-after-commented-fence.md","missing-after-commented-backtick.md"])
+  assert.ok(errors.some(e=>e.includes(name)),name);
+ assert.doesNotMatch(errors.join("\n"),/fake-inside-comment/);
+}));
