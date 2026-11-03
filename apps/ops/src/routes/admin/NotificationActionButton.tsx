@@ -7,15 +7,17 @@ type Props =
   | { kind: "retry" | "force-resend"; id: string; api: AdminNotificationsApi; onSuccess: () => void }
   | { kind: "bulk-retry"; id?: never; api: AdminNotificationsApi; onSuccess: () => void };
 
+// The Hono SA-048 endpoint currently mutates at most 10 rows atomically per call.
+// CURRENT's legacy 50-row label would overstate the migrated API's actual batch size.
 export const NOTIFICATION_CONFIRM = {
   "force-resend": "同内容の通知を再送キューに追加しますか？",
-  "bulk-retry": "failed 通知をまとめてリトライしますか? (上限 50 件)",
+  "bulk-retry": "failed 通知をまとめてリトライしますか? (上限 10 件)",
 } as const;
 
 const CONFIG = {
   retry: { label: "再試行", className: "fn-btn fn-btn-ghost fn-btn-sm", fallbackError: "リトライに失敗しました。", showSuccess: false },
   "force-resend": { label: "強制再送", className: "fn-btn fn-btn-ghost fn-btn-sm", fallbackError: "再送に失敗しました。", showSuccess: false },
-  "bulk-retry": { label: "failed を一括リトライ (上限 50)", className: "fn-btn fn-btn-danger fn-btn-sm", fallbackError: "一括リトライに失敗しました。", showSuccess: true },
+  "bulk-retry": { label: "failed を一括リトライ (上限 10)", className: "fn-btn fn-btn-danger fn-btn-sm", fallbackError: "一括リトライに失敗しました。", showSuccess: true },
 } as const;
 
 export function NotificationActionButton(props: Props): React.ReactElement {
