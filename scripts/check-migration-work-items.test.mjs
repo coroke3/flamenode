@@ -392,3 +392,37 @@ test("directory named like a checkpoint is rejected instead of skipped", () => {
   assert.throws(()=>readWorkItems(root),/checkpoint is not a regular file/);
  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test("work-item checkpoint reader rejects an empty directory and templates only", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-empty-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  assert.throws(()=>readWorkItems(root),/ledger has no checkpoints/);
+  fs.writeFileSync(path.join(dir,"README.md"),"guide");
+  fs.writeFileSync(path.join(dir,"TEMPLATE.md"),"template");
+  assert.throws(()=>readWorkItems(root),/ledger has no checkpoints/);
+  assert.match(validateWorkItems({statusText:status,entries:{}}).join("\n"),/ledger has no checkpoints/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("DONE task checkpoints from Phase 2 onward cannot disappear silently", () => {
+ const completed=status+"| MIG-0200 | migrated | DONE | — |\n";
+ const missing=validateWorkItems({statusText:completed,entries:{"MIG-0301.md":ready}});
+ assert.match(missing.join("\n"),/missing DONE task checkpoint: MIG-0200\.md/);
+ const done=ready.replaceAll("MIG-0301","MIG-0200")
+  .replace("State: READY","State: DONE")
+  .replace("Owner: none","Owner: builder")
+  .replace("Branch: none","Branch: migration/mig-0200-completed")
+  .replace("PR: none","PR: #123")
+  .replace("Head: none","Head: "+"a".repeat(40))
+  .replace("Owned paths: none","Owned paths: src/completed.ts")
+  .replace("Current unit: none","Current unit: U01")
+  .replace("Validation: not run","Validation: CI success")
+  .replace("Evidence: none","Evidence: final review");
+ assert.deepEqual(validateWorkItems({statusText:completed,entries:{"MIG-0301.md":ready,"MIG-0200.md":done}}),[]);
+ // Phase 0/1 predates per-task checkpoints and must remain exempt.
+ const historic=status+"| MIG-0108 | old gate | DONE | — |\n";
+ assert.deepEqual(validateWorkItems({statusText:historic,entries:{"MIG-0301.md":ready}}),[]);
+});
