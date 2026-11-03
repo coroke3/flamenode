@@ -119,7 +119,9 @@ function withoutInlineCode(markdown) {
 }
 
 // Commented-out links are examples, not navigable dependencies. Find each
-// comment opener outside code, then mask that comment in the ORIGINAL text.
+// comment opener outside code, then mask that comment with inert non-whitespace text in the ORIGINAL.
+// Whitespace masking can turn a real link after an inline comment into a
+// spurious 4-space-indented code block, silently dropping its validation.
 // Re-scan after each comment: backticks/fences inside HTML comments must not
 // mask real links after the comment has closed.
 function withoutHtmlComments(markdown) {
@@ -132,7 +134,7 @@ function withoutHtmlComments(markdown) {
     const closing = result.indexOf("-->", start + 4);
     const end = closing < 0 ? result.length : closing + 3;
     result = result.slice(0, start) +
-      result.slice(start, end).replace(/[^\r\n]/g, " ") +
+      result.slice(start, end).replace(/[^\r\n]/g, "x") +
       result.slice(end);
     cursor = end;
   }
