@@ -346,6 +346,9 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
  * requests per run; the token is never logged or put in an error message.
  */
 export const MAX_D1_HTTP_STATEMENTS = 19;
+// The batched snapshot producer explicitly needs up to 200 statements. Do not
+// allow callers to silently disable this budget with NaN, Infinity or huge caps.
+export const MAX_D1_HTTP_STATEMENTS_OVERRIDE = 200;
 export const D1_HTTP_TIMEOUT_MS = 15_000;
 export const D1_HTTP_ENV = {
   accountId: "CLOUDFLARE_ACCOUNT_ID",
@@ -425,6 +428,9 @@ export function openD1HttpReader(options: {
   }
   const fetchFn = options.fetchFn ?? fetch;
   const max = options.maxStatements ?? MAX_D1_HTTP_STATEMENTS;
+  if (!Number.isSafeInteger(max) || max < 1 || max > MAX_D1_HTTP_STATEMENTS_OVERRIDE) {
+    throw new RangeError(`D1 API statement budget must be an integer from 1 to ${MAX_D1_HTTP_STATEMENTS_OVERRIDE}`);
+  }
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
   let count = 0;
   const statement = (sql: string, params: unknown[] = []): D1PreparedStatementLike => ({
