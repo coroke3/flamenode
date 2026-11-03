@@ -2,6 +2,7 @@ import "server-only";
 
 import type { MetadataRoute } from "next";
 import { absoluteUrl } from "@/lib/seo";
+import { videoPageHref } from "@/lib/youtube/id";
 import { loadPublicJson } from "./loader";
 import { normalizeStaticEventsIndex } from "./staticEventsIndexCore";
 import {
@@ -84,7 +85,7 @@ export async function buildStaticSitemapEntries(): Promise<SitemapEntry[]> {
 
   const videoEntries =
     recentPage?.videos.map((video) =>
-      entry(`/${encodeURIComponent(video.youtube_video_id ?? video.id)}`, {
+      entry(videoPageHref(video), {
         lastModified: unixDate(video.scheduled_time) ?? fallbackModified,
         changeFrequency: "weekly",
         priority: 0.7,
