@@ -32,15 +32,22 @@ test("invalid stored IDs never invalidate a foreign host or unrelated root", () 
   }
 });
 
-test("all CURRENT visibility write paths invalidate both public aliases", () => {
+test("all CURRENT video mutations invalidate both detail aliases", () => {
   const actions = [
     ["src/lib/actions/admin.ts", "publicVideoRevalidationPaths(videoId, youtubeVideoId)"],
     ["src/lib/actions/manage-video.ts", "publicVideoRevalidationPaths(videoId, youtubeVideoId)"],
     ["src/lib/actions/moderation-admin.ts", "publicVideoRevalidationPaths(video.id, video.youtube_video_id)"],
+    ["src/lib/actions/youtube-sync-admin.ts", "publicVideoRevalidationPaths(videoId, youtubeVideoId)"],
+    ["src/lib/actions/chapter.ts", "publicVideoRevalidationPaths(videoId, youtubeVideoId)"],
+    ["src/lib/actions/video/interaction.ts", "publicVideoRevalidationPaths(videoId, youtubeVideoId)"],
+    ["src/lib/actions/video/adminMembers.ts", "publicVideoRevalidationPaths(input.videoId, input.youtubeVideoId)"],
   ];
   for (const [path, call] of actions) {
     const source = fs.readFileSync(path, "utf8");
     assert.ok(source.includes(call), `${path}: missing dual-alias invalidation`);
     assert.ok(source.includes("revalidatePath(publicPath)"), `${path}: missing revalidatePath call`);
+    assert.doesNotMatch(source,
+      /revalidatePath\(`\/\$\{(?:youtubeVideoId|input\.youtubeVideoId|video\.youtube_video_id)\s*\?\?/,
+      `${path}: old unchecked YouTube URL revalidation is still present`);
   }
 });
