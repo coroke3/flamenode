@@ -39,7 +39,7 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
-import { D1_HTTP_ENV, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
+import { D1_HTTP_ENV, MAX_D1_HTTP_STATEMENTS_OVERRIDE, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
 import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
@@ -159,7 +159,7 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 }
 
 /** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
-export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
+export const DEFAULT_MAX_REMOTE_STATEMENTS = MAX_D1_HTTP_STATEMENTS_OVERRIDE;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
 function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
@@ -275,6 +275,12 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
   const counter = { n: 0 };
   const batched = input.mode === "batched";
   const maxRemote = input.maxRemoteStatements ?? DEFAULT_MAX_REMOTE_STATEMENTS;
+  // The local overlay also has an independent statement fence. Validate before
+  // opening scratch DBs or executing a remote SELECT; NaN/Infinity would evade
+  // counter.n > maxRemote just as they did in the REST reader.
+  if (batched && (!Number.isSafeInteger(maxRemote) || maxRemote < 1 || maxRemote > DEFAULT_MAX_REMOTE_STATEMENTS)) {
+    throw new RangeError(`batched snapshot statement budget must be an integer from 1 to ${DEFAULT_MAX_REMOTE_STATEMENTS}`);
+  }
   const remote = batched ? limitedDb(input.db, counter, maxRemote) : countingDb(input.db, counter);
   const generatorDb = batched ? overlayDb(remote, input.scratch ?? (await openMigratedScratch())) : remote;
   const { env, objects } = captureEnv(generatorDb);
