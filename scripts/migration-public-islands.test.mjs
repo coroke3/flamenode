@@ -372,3 +372,31 @@ test("MIG-0510: CURRENT event-detail playlist cards never resolve off-origin", (
   assert.match(eventPage, /href=\{eventVideoPageHref\(video, eventId\)\}/);
   assert.doesNotMatch(eventPage, /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/);
 });
+
+test("MIG-0510: remaining public video navigations use validated paths", () => {
+  // An untrusted video ID must never be interpolated directly after a slash.
+  const list = fs.readFileSync("app/(public)/list/ListIndexView.tsx", "utf8");
+  const rail = fs.readFileSync("src/components/video/PlaylistRail.tsx", "utf8");
+  const users = fs.readFileSync("apps/site/src/lib/userViews.ts", "utf8");
+
+  assert.ok(list.includes("const href = videoPageHref(v);"),
+    "CURRENT /list index mode must use the shared video route helper");
+  assert.ok(rail.includes("playlistId ? eventVideoPageHref(item, playlistId) : videoPageHref(item)"),
+    "CURRENT playlist rail and autoplay must navigate through the same-origin guard");
+  assert.ok(!rail.includes("const target = item.youtube_video_id?.trim() || item.id"),
+    "old unsafe protocol-relative route construction must not be reintroduced");
+  assert.ok(users.includes("href: videoPageHref(video),"),
+    "Astro user-profile works and collab cards must use the same guard");
+
+  const site = "https://flamenode.net";
+  const bad = { id: "safe_internal", youtube_video_id: "/outside.example" };
+  const playlist = "list/123?next=https://outside.example&x=1";
+  assert.equal(videoPageHref(bad), "/safe_internal");
+  assert.equal(eventVideoPageHref(bad, playlist),
+    "/safe_internal?playlist=" + encodeURIComponent(playlist));
+  for (const target of [bad, { id: "//outside.example", youtube_video_id: null }]) {
+    const href = videoPageHref(target);
+    assert.equal(new URL(href, site).origin, site);
+    assert.equal(new URL(eventVideoPageHref(target, playlist), site).origin, site);
+  }
+});
