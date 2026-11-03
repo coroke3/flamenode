@@ -178,3 +178,18 @@ test("P2 regression: family table requires one boundary and rejects moved bounda
     .replace(/\n\*\*Update rule:\*\* x$/, "");
   assert.match(parseFamilyRows(early).errors.join("\n"), /family row appears after Update rule boundary/);
 });
+
+
+test("P2: duplicate Source families sections fail closed instead of using only the first",()=>{
+ const original=matrix([],["src/lib/video/**"]);
+ const duplicate=original+"\n## Source families (second copy)\n"+
+  "| Family | Kind | Owner | Disp | State |\n| --- | --- | --- | --- | --- |\n"+
+  familyRow("src/lib/private/**","MIG-0619")+"\n**Update rule:** second\n";
+ assert.match(parseFamilyRows(duplicate).errors.join("\n"),/duplicate '## Source families' sections/);
+ assert.match(validateLedgerCompleteness({matrix:duplicate,status,trackedFiles:["src/lib/private/secret.ts"]}).join("\n"),/duplicate '## Source families' sections/);
+ const without=original.replace("## Source families (MIG-0622 completeness)","## Wrong section");
+ assert.match(parseFamilyRows(without).errors.join("\n"),/missing '## Source families'/);
+ // An example heading in a fenced code block is not a second real ledger.
+ const example=original+"\n```md\n## Source families (example only)\n```\n";
+ assert.deepEqual(parseFamilyRows(example).errors,[]);
+});
