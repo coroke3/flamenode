@@ -319,3 +319,38 @@ test("explicit source documents and symlinked migration roots fail closed",()=>f
   assert.throws(()=>listMarkdownFiles(root),/symlink in migration documents/);
   assert.throws(()=>validateLinks({root,documents:["docs/migration/README.md"]}),/symlink in migration documents/);
 }));
+
+
+test("HTML comments do not create false Markdown link dependencies",()=>fixture(root=>{
+ const md=[
+  "<!-- [example](missing-inline-comment.md) --> [real](missing-after-comment.md)",
+  "<!--",
+  "[example](missing-multiline-comment.md)",
+  "-->",
+  "[real](missing-after-block-comment.md)",
+  "<!-- [example](missing-unclosed-comment.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,2,errors.join("\n"));
+ assert.match(errors.join("\n"),/missing-after-comment\\.md/);
+ assert.match(errors.join("\n"),/missing-after-block-comment\\.md/);
+ assert.doesNotMatch(errors.join("\n"),/missing-(?:inline-comment|multiline-comment|unclosed-comment)\\.md/);
+}));
+
+test("HTML comment markers inside inline or fenced code cannot hide real links",()=>fixture(root=>{
+ const md=[
+  "`<!--` [real](missing-after-inline-comment-marker.md)",
+  "```md",
+  "<!--",
+  "```",
+  "[real](missing-after-fenced-comment-marker.md)",
+  "<!-- [example](hidden-comment-link.md) -->",
+  "[real](missing-after-closed-comment.md)",
+ ].join("\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,3,errors.join("\n"));
+ for(const x of ["missing-after-inline-comment-marker.md","missing-after-fenced-comment-marker.md","missing-after-closed-comment.md"])assert.ok(errors.some(e=>e.includes(x)),x);
+ assert.doesNotMatch(errors.join("\n"),/hidden-comment-link/);
+}));
