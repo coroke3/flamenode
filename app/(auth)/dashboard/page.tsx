@@ -24,6 +24,7 @@ import { getOnboardingState, onboardingHref } from "@/lib/auth/onboarding";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatUnix, formatRelative } from "@/lib/utils/format";
+import { videoPageHref } from "@/lib/youtube/id";
 import { excludePvsfSummaryVideos } from "@/lib/db/queries";
 import { buildAccentVars } from "@/lib/theme/accent";
 
@@ -560,7 +561,7 @@ export default async function DashboardPage(): Promise<React.ReactElement> {
             {myChapters.map((chapter) => (
               <Link
                 key={chapter.id}
-                href={`/${chapter.youtube_video_id?.trim() || chapter.video_id}`}
+                href={videoPageHref({ id: chapter.video_id, youtube_video_id: chapter.youtube_video_id })}
                 className="fn-card fn-stack-item"
               >
                 <div className="fn-stack-item-head">
