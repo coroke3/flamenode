@@ -333,9 +333,9 @@ test("HTML comments do not create false Markdown link dependencies",()=>fixture(
  fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\n"+md+"\n");
  const errors=validateLinks({root,documents:listMarkdownFiles(root)});
  assert.equal(errors.length,2,errors.join("\n"));
- assert.match(errors.join("\n"),/missing-after-comment\\.md/);
- assert.match(errors.join("\n"),/missing-after-block-comment\\.md/);
- assert.doesNotMatch(errors.join("\n"),/missing-(?:inline-comment|multiline-comment|unclosed-comment)\\.md/);
+ assert.match(errors.join("\n"),/missing-after-comment\.md/);
+ assert.match(errors.join("\n"),/missing-after-block-comment\.md/);
+ assert.doesNotMatch(errors.join("\n"),/missing-(?:inline-comment|multiline-comment|unclosed-comment)\.md/);
 }));
 
 test("HTML comment markers inside inline or fenced code cannot hide real links",()=>fixture(root=>{
