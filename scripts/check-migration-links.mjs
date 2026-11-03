@@ -116,6 +116,14 @@ function withoutInlineCode(markdown) {
   return result + markdown.slice(cursor);
 }
 
+// HTML comments are documentation examples, not navigable Markdown links.
+// Run this after masking fenced and inline code, so a literal <!-- inside
+// code cannot accidentally hide real links outside that code.
+function withoutHtmlComments(markdown) {
+  return markdown.replace(/<!--[\s\S]*?(?:-->|$)/g, match =>
+    match.replace(/[^\r\n]/g, " "));
+}
+
 // A symlinked source or ancestor can hide Markdown from the audit or make
 // enumeration follow files outside the checkout. Never traverse these paths.
 function assertNoSymlinkInDocumentPath(root, filename) {
@@ -223,7 +231,7 @@ export function validateLinks({root,documents}) {
   const realRoot=fs.realpathSync(root);
   for(const filename of documents) {
     assertNoSymlinkInDocumentPath(root, filename);
-    const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
+    const content=withoutHtmlComments(withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8"))));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(let target of markdownLinkDestinations(content)) {
       target=target.trim();
