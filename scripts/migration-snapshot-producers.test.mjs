@@ -38,6 +38,7 @@ import { computeUsersIndexView, buildSectionPages } from "../apps/site/src/lib/u
 import { normalizeStaticUserProfile } from "../src/lib/publicData/staticUserProfileCore.ts";
 import { normalizeStaticRecentVideoPage } from "../src/lib/publicData/staticRecentVideoCore.ts";
 import { buildSitemapEntries, publishedSitemapRows } from "../apps/site/src/lib/sitemap.ts";
+import { videoPageHref } from "../src/lib/youtube/id.ts";
 import { loadEventBuildData } from "../apps/site/src/lib/eventData.ts";
 
 const NOW = 1_760_000_000;
@@ -241,8 +242,15 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
   });
   const paths = sitemap.map((row) => new URL(row.url).pathname);
   assert.deepEqual(paths.slice(7, 7 + publishedVideos.length),
-    publishedVideos.map((video) => "/" + encodeURIComponent(video.youtube_video_id ?? video.id)),
-    "dynamic sitemap video URL set must match CURRENT recent index (not truncated to 24)");
+    publishedVideos.map((video) => videoPageHref(video)),
+    "dynamic sitemap video URLs must match the CURRENT recent index after safe canonical route normalization (not truncated to 24)");
+  // The CURRENT seed includes malformed 12-character YouTube IDs on b-1/c-1.
+  // These remain published via their valid internal IDs rather than advertising
+  // routes the migrated detail build cannot serve.
+  assert.ok(paths.includes("/b-1") && paths.includes("/c-1"),
+    "malformed YouTube IDs retain published internal-id detail routes");
+  assert.ok(!paths.includes("/ytb000000001") && !paths.includes("/ytc000000001"),
+    "malformed YouTube IDs must never be published as canonical sitemap routes");
   assert.ok(paths.includes("/event/public-event"), "public event is included");
   assert.deepEqual(publishedSitemapRows(
     [...loaded.videos, { id: "unbuilt_video", youtube_video_id: "not_built", scheduled_time: null }],
