@@ -73,9 +73,27 @@ function hasStaticMemberName(node, memberName) {
   return staticMemberName(node) === memberName;
 }
 
+// Nullish/logical and conditional expressions can return either branch.
+// Match static host references on either branch so the common Workers-safe
+// `(globalThis.process ?? {}).env` spelling cannot bypass this CI guard.
+function staticHostAlternative(node, check) {
+  if (ts.isBinaryExpression(node) && [
+    ts.SyntaxKind.QuestionQuestionToken,
+    ts.SyntaxKind.BarBarToken,
+    ts.SyntaxKind.AmpersandAmpersandToken,
+  ].includes(node.operatorToken.kind)) {
+    return check(node.left) || check(node.right);
+  }
+  if (ts.isConditionalExpression(node)) {
+    return check(node.whenTrue) || check(node.whenFalse);
+  }
+  return false;
+}
+
 // globalThis / global / self, including `globalThis.globalThis`.
 function isGlobalReference(node) {
   node = unwrapStaticExpression(node);
+  if (staticHostAlternative(node, isGlobalReference)) return true;
   if (ts.isIdentifier(node)) return GLOBAL_ROOTS.has(node.text);
   const name = staticMemberName(node);
   return name !== undefined && GLOBAL_ROOTS.has(name) && isGlobalReference(node.expression);
@@ -83,6 +101,7 @@ function isGlobalReference(node) {
 
 function isProcessReference(node) {
   node = unwrapStaticExpression(node);
+  if (staticHostAlternative(node, isProcessReference)) return true;
   if (ts.isIdentifier(node)) return node.text === "process";
   return hasStaticMemberName(node, "process") && isGlobalReference(node.expression);
 }
@@ -110,7 +129,12 @@ function patternEntries(pattern) {
     for (const prop of pattern.properties) {
       if (ts.isShorthandPropertyAssignment(prop)) entries.push([prop.name.text, undefined]);
       else if (ts.isPropertyAssignment(prop)) {
-        const init = unwrapStaticExpression(prop.initializer);
+        let init = unwrapStaticExpression(prop.initializer);
+        // Object assignment destructuring supports nested defaults:
+        // ({ process: { env: value } = {} } = globalThis).
+        if (ts.isBinaryExpression(init) && init.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          init = unwrapStaticExpression(init.left);
+        }
         entries.push([staticPropertyKey(prop.name), ts.isObjectLiteralExpression(init) ? init : undefined]);
       }
     }
