@@ -11,7 +11,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
-import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
+import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "@/lib/youtube/id";
 import { parsePublicVideoSort } from "@/lib/db/listQueries";
 import {
   loadStaticRecentVideosPage,
@@ -387,7 +387,7 @@ export async function ListPage({
                 <tbody>
                   {videos.map((v, index) => {
                     const youtubeVideoId = v.youtube_video_id?.trim() || null;
-                    const href = `/${youtubeVideoId ?? v.id}`;
+                    const href = videoPageHref(v);
                     const youtubeId = extractYoutubeId(youtubeVideoId);
                     return (
                       <tr key={`${v.id}-index-${index}`}>
