@@ -120,17 +120,17 @@ function statusWithoutHtmlComments(source) {
       }
       if (line[i] === "`") {
         const length = /^`+/.exec(line.slice(i))[0].length;
-        let close = i + length;
-        while (close < line.length) {
-          const runStart = line.indexOf("`", close);
+        let cursor = i + length, closing = -1;
+        while (cursor < line.length) {
+          const runStart = line.indexOf("`", cursor);
           if (runStart < 0) break;
           const runLength = /^`+/.exec(line.slice(runStart))[0].length;
-          if (runLength === length) { close = runStart + length; break; }
-          close = runStart + runLength;
+          if (runLength === length) { closing = runStart + length; break; }
+          cursor = runStart + runLength;
         }
-        if (close < line.length || (close === line.length && line.endsWith("`".repeat(length)))) {
-          output += line.slice(i, close);
-          i = close;
+        if (closing >= 0) {
+          output += line.slice(i, closing);
+          i = closing;
           continue;
         }
       }
