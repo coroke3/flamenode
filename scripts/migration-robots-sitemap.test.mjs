@@ -62,7 +62,7 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   assert.equal(typeof resolveSitemap, "function", "Next sitemap serializer must exist");
   const entries = buildSitemapEntries({
     origin,
-    videos: [{ id: "video_1", youtube_video_id: "yt-1", scheduled_time: 1_700_000_000 }],
+    videos: [{ id: "video_1", youtube_video_id: "AAAAAAAAAAA", scheduled_time: 1_700_000_000 }],
     events: [{ id: "event 1", end_time: null, start_time: 1_700_000_100 }],
     creators: [{ x_id: "creator_a", updated_at: null }],
     generatedAt: [1_700_000_020],
@@ -70,7 +70,7 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   });
   assert.equal(entries.length, 10, "seven static entries and three dynamic entries");
   assert.deepEqual(entries.map((row) => new URL(row.url).pathname.slice(0, 6)).filter((x) => x === "/event").length, 2);
-  assert.ok(entries.some((row) => row.url === origin + "/yt-1"));
+  assert.ok(entries.some((row) => row.url === origin + "/AAAAAAAAAAA"));
   assert.ok(entries.some((row) => row.url === origin + "/event/event%201"));
   assert.ok(entries.some((row) => row.url === origin + "/user/creator_a"));
   assert.equal(entries.at(-1).lastModified.toISOString(), new Date(1_700_000_020_000).toISOString());
@@ -82,11 +82,11 @@ test("MIG-0621: duplicate video aliases and creators never duplicate sitemap loc
   const entries = buildSitemapEntries({
     origin,
     videos: [
-      { id: "vid_a", youtube_video_id: "shared_alias", scheduled_time: first },
-      { id: "vid_b", youtube_video_id: "shared_alias", scheduled_time: first + 60 },
+      { id: "vid_a", youtube_video_id: "SharedAlias", scheduled_time: first },
+      { id: "vid_b", youtube_video_id: "SharedAlias", scheduled_time: first + 60 },
       { id: "about", youtube_video_id: null, scheduled_time: null },
       { id: "dot", youtube_video_id: ".", scheduled_time: null },
-      { id: "vid_c", youtube_video_id: "unique_alias", scheduled_time: null },
+      { id: "vid_c", youtube_video_id: "UniqueAlias", scheduled_time: null },
     ],
     events: [
       { id: "public-event", start_time: first, end_time: null },
@@ -100,20 +100,20 @@ test("MIG-0621: duplicate video aliases and creators never duplicate sitemap loc
     now: new Date("2026-10-27T00:00:00Z"),
   });
   const urls = entries.map((item) => item.url);
-  assert.equal(entries.length, 11, "7 fixed pages, 2 unique video URLs, 1 event, 1 creator");
+  assert.equal(entries.length, 12, "7 fixed pages, 3 unique video URLs (including invalid alias fallback), 1 event, 1 creator");
   assert.equal(new Set(urls).size, urls.length);
   assert.equal(urls.filter((url) => url === origin + "/").length, 1);
   assert.equal(urls.filter((url) => url === origin + "/about").length, 1);
-  assert.equal(urls.filter((url) => url === origin + "/shared_alias").length, 1);
-  assert.equal(entries.find((item) => item.url === origin + "/shared_alias")?.lastModified.toISOString(),
+  assert.equal(urls.filter((url) => url === origin + "/SharedAlias").length, 1);
+  assert.equal(entries.find((item) => item.url === origin + "/SharedAlias")?.lastModified.toISOString(),
     new Date(first * 1000).toISOString(), "first canonical video entry must retain CURRENT ordering");
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
 
 test("MIG-0621: unpublished video/event detail must never appear in sitemap", () => {
   const videos = [
-    { id: "published", youtube_video_id: "published_yt", scheduled_time: null },
-    { id: "missing_detail", youtube_video_id: "missing_yt", scheduled_time: null },
+    { id: "published", youtube_video_id: "PublishId01", scheduled_time: null },
+    { id: "missing_detail", youtube_video_id: "MissingId01", scheduled_time: null },
   ];
   const events = [
     { id: "published_event", start_time: null, end_time: null },
@@ -128,9 +128,9 @@ test("MIG-0621: unpublished video/event detail must never appear in sitemap", ()
     now: new Date("2026-10-27T00:00:00Z"),
   });
   const urls = entries.map((row) => row.url);
-  assert.ok(urls.includes(origin + "/published_yt"));
+  assert.ok(urls.includes(origin + "/PublishId01"));
   assert.ok(urls.includes(origin + "/event/published_event"));
-  assert.equal(urls.includes(origin + "/missing_yt"), false);
+  assert.equal(urls.includes(origin + "/MissingId01"), false);
   assert.equal(urls.includes(origin + "/event/missing_event"), false);
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
