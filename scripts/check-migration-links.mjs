@@ -7,13 +7,15 @@ import { fileURLToPath } from "node:url";
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 
 // Link-like syntax in Markdown code fences is an example, not a dependency.
+// Preserve character offsets, including CRLF, so HTML comment spans can be
+// located in the original Markdown even after code fences are masked.
 // Match CommonMark's 0–3 leading spaces, backtick/tilde fences, and close
 // only with the same marker of at least the opening length.
 function withoutFencedCode(markdown) {
   let fence = null;
   let listIndent = 0;
 
-  return markdown.split(/\r?\n/).map((line) => {
+  return markdown.split(/\n/).map((line) => {
     // A fenced block can be nested in a blockquote or a list item. Strip
     // container prefixes for detecting the marker, but preserve the original
     // line for checking actual links outside code blocks.
@@ -69,18 +71,18 @@ function withoutFencedCode(markdown) {
           marker[1].length >= fence.length && !marker[2].trim()) {
         fence = null;
       }
-      return "";
+      return line.replace(/[^\r]/g, " ");
     }
 
     // Backtick info strings cannot contain backticks; tilde info may.
     if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
       fence = {char: marker[1][0], length: marker[1].length,
         quoteDepth, listIndent};
-      return "";
+      return line.replace(/[^\r]/g, " ");
     }
     // Four-space / tab-indented code is not a filesystem dependency. Inside
     // list items, indentation is measured relative to that item's content.
-    if (/^(?: {4}|\t)/.test(body)) return "";
+    if (/^(?: {4}|\t)/.test(body)) return line.replace(/[^\r]/g, " ");
     return line;
   }).join("\n");
 }
