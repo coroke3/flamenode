@@ -65,3 +65,35 @@ test("MIG-0509 U03: build entry requires remote generation and isolates credenti
   assert.equal(env.FLAMENODE_SNAPSHOT_GENERATION,"generation");
   assert.ok(env.FLAMENODE_RULES_SNAPSHOT_FILE.endsWith("rules-current.json"));
 });
+
+
+test("MIG-0509 regression: each build selects its own rules snapshot, never an inherited one", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-rules-isolation-"));
+  try {
+    const snapshotDir = path.join(base, "new-build");
+    fs.mkdirSync(snapshotDir);
+    const previousRules = path.join(base, "previous-rules.json");
+    fs.writeFileSync(previousRules, JSON.stringify({ body: "old build" }));
+    const inherited = {
+      FLAMENODE_RULES_SNAPSHOT_FILE: previousRules,
+      FLAMENODE_SNAPSHOT_DIR: path.join(base, "previous-build"),
+      FLAMENODE_SNAPSHOT_GENERATION: "previous-generation",
+    };
+
+    // No published rules in the new snapshot means CURRENT's built-in terms.
+    // The previous build's valid on-disk file must not override this fallback.
+    const withoutRules = safeBuildEnv(inherited, snapshotDir, "new-generation");
+    assert.equal(withoutRules.FLAMENODE_RULES_SNAPSHOT_FILE, undefined);
+    assert.equal(withoutRules.FLAMENODE_SNAPSHOT_DIR, snapshotDir);
+    assert.equal(withoutRules.FLAMENODE_SNAPSHOT_GENERATION, "new-generation");
+    assert.equal(inherited.FLAMENODE_RULES_SNAPSHOT_FILE, previousRules, "caller env is not mutated");
+
+    // A newly produced rules file must take precedence over the inherited path.
+    const currentRules = path.join(snapshotDir, "rules-current.json");
+    fs.writeFileSync(currentRules, JSON.stringify({ body: "new build" }));
+    const withRules = safeBuildEnv(inherited, snapshotDir, "new-generation");
+    assert.equal(withRules.FLAMENODE_RULES_SNAPSHOT_FILE, currentRules);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
