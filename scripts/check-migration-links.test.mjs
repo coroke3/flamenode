@@ -374,3 +374,19 @@ test("a code fence inside an HTML comment cannot hide a later real link",()=>fix
   assert.ok(errors.some(e=>e.includes(name)),name);
  assert.doesNotMatch(errors.join("\n"),/fake-inside-comment/);
 }));
+
+
+test("fenced examples before HTML comments preserve offsets in CRLF documents",()=>fixture(root=>{
+ const md=[
+  "```md",
+  "[example](fake-inside-fence.md)",
+  "```",
+  "<!-- [example](fake-inside-comment.md) -->",
+  "[real](missing-after-CRLF-comment.md)",
+ ].join("\r\n");
+ fs.appendFileSync(path.join(root,"docs/migration/README.md"),"\r\n"+md+"\r\n");
+ const errors=validateLinks({root,documents:listMarkdownFiles(root)});
+ assert.equal(errors.length,1,errors.join("\n"));
+ assert.match(errors[0],/missing-after-CRLF-comment/);
+ assert.doesNotMatch(errors.join("\n"),/fake-inside-/);
+}));
