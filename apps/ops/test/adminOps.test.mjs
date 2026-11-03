@@ -259,7 +259,7 @@ test("MIG-0734 T04 force-resend and bulk-retry cancelled confirmation never call
     for(const button of dom.window.document.querySelectorAll("button"))await React.act(async()=>button.click());
     assert.equal(calls,0);
     assert.equal(NOTIFICATION_CONFIRM["force-resend"],"同内容の通知を再送キューに追加しますか？");
-    assert.equal(NOTIFICATION_CONFIRM["bulk-retry"],"failed 通知をまとめてリトライしますか? (上限 50 件)");
+    assert.equal(NOTIFICATION_CONFIRM["bulk-retry"],"failed 通知をまとめてリトライしますか? (上限 10 件)");
   });
 });
 
@@ -274,7 +274,7 @@ test("MIG-0734 notification actions: retry needs no confirm, failed write is an 
     await React.act(async()=>byText(dom,"再試行").click());
     assert.match(dom.window.document.querySelector('[role="alert"]').textContent,/再試行できません/);
     assert.equal(refreshed,0);
-    await React.act(async()=>byText(dom,"failed を一括リトライ (上限 50)").click());
+    await React.act(async()=>byText(dom,"failed を一括リトライ (上限 10)").click());
     assert.match(dom.window.document.querySelector('[role="status"]').textContent,/3件をリトライしました/);
     assert.equal(refreshed,1);
   });
@@ -398,7 +398,7 @@ test("MIG-0734 notifications view ports CURRENT row content: recipient, summary,
   assert.match(text,/evt_abcdef…/);
   assert.match(text,/href="\/admin\/audit\?table=notification_outbox&amp;record=n1"/);
   assert.match(text,/失敗 1 件 \/ dead_letter 1 件/);
-  assert.match(text,/failed を一括リトライ \(上限 50\)/);
+  assert.match(text,/failed を一括リトライ \(上限 10\)/);
   assert.match(text,/再試行/);
   assert.match(text,/強制再送/);
   assert.match(text,/通知 n1 をキャンセル/);
@@ -467,4 +467,20 @@ test("MIG-0734 screens use the shared D-17-2/3/6 parts instead of private copies
   assert.match(read("../src/routes/admin/CostGuardForm.tsx"),/ConfirmDialog/);
   assert.doesNotMatch(read("../src/routes/admin/CostGuardForm.tsx"),/window\.confirm/);
   assert.doesNotMatch(cost,/<a href/);
+});
+
+
+test("MIG-0734 regression: bulk-retry prompt matches the Hono SA-048 batch cap", () => {
+  // The API owns D1 atomic-batch size. The Ops UI must not promise more.
+  const apiSource = read("../../api/src/routes/admin/notifications.ts");
+  const cap = apiSource.match(/export const BULK_RETRY_MAX\\s*=\\s*(\\d+)/);
+  assert.ok(cap, "Hono notification bulk limit is not declared");
+  const max = Number(cap[1]);
+  assert.equal(NOTIFICATION_CONFIRM["bulk-retry"],
+    `failed 通知をまとめてリトライしますか? (上限 ${max} 件)`);
+  const html = renderToStaticMarkup(h(NotificationActionButton, {
+    kind: "bulk-retry", api: createAdminNotificationsApi(async () => response(500, {})),
+    onSuccess: () => {},
+  }));
+  assert.ok(html.includes(`一括リトライ (上限 ${max})`), "rendered button must use the API limit");
 });
