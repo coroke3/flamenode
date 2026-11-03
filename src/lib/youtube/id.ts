@@ -65,6 +65,15 @@ export function videoPageHref(video: { id: string; youtube_video_id?: string | n
   return SAFE_INTERNAL_VIDEO_ID.test(video.id) ? `/${video.id}` : "/list";
 }
 
+/** Keep event playlist links on the same origin even with corrupted video IDs. */
+export function eventVideoPageHref(
+  video: { id: string; youtube_video_id?: string | null },
+  eventId: string,
+): string {
+  const href = videoPageHref(video);
+  return href === "/list" ? href : `${href}?playlist=${encodeURIComponent(eventId)}`;
+}
+
 /** YouTube サムネイル URL (高画質)。 */
 export function youtubeThumbUrl(
   id: string | null | undefined,
