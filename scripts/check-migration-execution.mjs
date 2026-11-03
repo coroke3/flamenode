@@ -88,11 +88,70 @@ export function validateCheckpointPolicy(documents) {
   return errors;
 }
 
+// Markdown HTML comments cannot supply task rows or approval evidence.
+// Preserve line endings/columns while hiding comments, and do not treat comment
+// markers inside fenced or same-line inline code as real HTML comments.
+function statusWithoutHtmlComments(source) {
+  let inComment = false;
+  let fence = null;
+  const lines = [];
+  for (const line of source.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!inComment && fence) {
+      if (marker && marker[1][0] === fence.char &&
+          marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      lines.push(line);
+      continue;
+    }
+    if (!inComment && marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
+      fence = { char: marker[1][0], length: marker[1].length };
+      lines.push(line);
+      continue;
+    }
+    let output = "", i = 0;
+    while (i < line.length) {
+      if (inComment) {
+        const end = line.indexOf("-->", i);
+        if (end < 0) { output += " ".repeat(line.length - i); break; }
+        output += " ".repeat(end + 3 - i);
+        i = end + 3;
+        inComment = false;
+        continue;
+      }
+      if (line[i] === "`") {
+        const length = /^`+/.exec(line.slice(i))[0].length;
+        let close = i + length;
+        while (close < line.length) {
+          const runStart = line.indexOf("`", close);
+          if (runStart < 0) break;
+          const runLength = /^`+/.exec(line.slice(runStart))[0].length;
+          if (runLength === length) { close = runStart + length; break; }
+          close = runStart + runLength;
+        }
+        if (close < line.length || (close === line.length && line.endsWith("`".repeat(length)))) {
+          output += line.slice(i, close);
+          i = close;
+          continue;
+        }
+      }
+      if (line.startsWith("<!--", i)) {
+        output += "    ";
+        i += 4;
+        inComment = true;
+        continue;
+      }
+      output += line[i++];
+    }
+    lines.push(output);
+  }
+  return lines.join("\n");
+}
+
 export function parseTaskRows(statusText) {
   const rows = new Map();
   let inTaskTable = false;
   let inFence = false;
-  for (const line of statusText.split("\n")) {
+  for (const [index, line] of statusWithoutHtmlComments(statusText).split("\n").entries()) {
     const trimmed = line.trim();
     if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; inTaskTable = false; continue; }
     if (inFence) continue;
@@ -153,6 +212,7 @@ export function parseTaskRows(statusText) {
         !cells[2] || !cells[3] || !cells[4] || (cells.length === 7 && !cells[5])) {
       throw new Error("malformed task row: " + candidate[1]);
     }
+    if (rows.has(match[1])) throw new Error("duplicate task row: " + match[1] + " at STATUS line " + (index + 1));
     rows.set(match[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
   }
   return rows;
@@ -171,7 +231,8 @@ export function validateStatusTableStructure(statusText) {
   let inTable = false;
   let expectDelimiter = false;
   let width = 0;
-  statusText.split("\n").forEach((line, index) => {
+  const seenTaskIds = new Set();
+  statusWithoutHtmlComments(statusText).split("\n").forEach((line, index) => {
     const trimmed = line.trim();
     const where = "STATUS line " + (index + 1);
     if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; return; }
@@ -211,6 +272,11 @@ export function validateStatusTableStructure(statusText) {
         inTable = false;
       }
       return;
+    }
+    const visibleTask = inTable ? trimmed.match(/^\|\s*(MIG-\d{4})\s*\|/) : null;
+    if (visibleTask) {
+      if (seenTaskIds.has(visibleTask[1])) errors.push(where + ": duplicate task row: " + visibleTask[1]);
+      seenTaskIds.add(visibleTask[1]);
     }
     if (inTable && DELIMITER_ROW.test(trimmed)) {
       errors.push(where + ": unexpected delimiter row inside task table");
@@ -277,13 +343,6 @@ export function validateMigrationExecution({
 
   if (!currentTask || !tasks.has(currentTask)) errors.push("current task is not in STATUS table");
   else if (tasks.get(currentTask).state !== currentState) errors.push("current task/header state mismatch");
-  const duplicateIds = new Set();
-  const seenIds = new Set();
-  for (const m of statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)) {
-    if (seenIds.has(m[1])) duplicateIds.add(m[1]);
-    seenIds.add(m[1]);
-  }
-  for (const id of duplicateIds) errors.push("duplicate task row: " + id);
   const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
