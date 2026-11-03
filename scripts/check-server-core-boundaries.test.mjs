@@ -182,6 +182,48 @@ describe("check-server-core-boundaries", () => {
     );
   });
 
+  it("T03ae catches logical/conditional fallbacks and assignment-nested defaults", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-fallback.ts": [
+          "const a = (globalThis.process ?? {}).env;",
+          "const b = (process || {}).env;",
+          "const c = (globalThis.process && {}).env;",
+          "const { env = {} } = process ?? {};",
+          "const { env } = process || {};",
+          "const { env } = (ok ? process : {});",
+          'const d = (typeof process === "object" ? process : undefined)?.env;',
+          "const { process: { env: e } = {} } = globalThis;",
+          "let f; ({ process: { env: f } = {} } = globalThis);",
+          "let g; ({ process: { env: g } = {} } = globalThis.globalThis);",
+          "const h = (ok ? globalThis : {}).process.env;",
+          "const i = (ok ? globalThis.process : other).env;",
+          "const j = (other ?? globalThis.process).env;",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), Array.from({ length: 13 }, (_, i) => i + 1));
+      },
+    );
+  });
+
+  it("T03af does not confuse unrelated fallback objects with ambient process", () => {
+    withFixture(
+      {
+        "packages/server-core/src/other-fallback.ts": [
+          "const a = (other ?? {}).env;",
+          "const b = (other || {}).env;",
+          "const c = (ok ? other : {}).env;",
+          "const { env } = other || {};",
+          "const { env } = (ok ? other : {});",
+          "const { process: { env } } = otherGlobal;",
+        ].join("\n"),
+      },
+      (rootDir) => assert.deepEqual(check(rootDir).errors, []),
+    );
+  });
+
   it("T03b ignores unrelated computed properties, comments, and string literals", () => {
     withFixture(
       {
