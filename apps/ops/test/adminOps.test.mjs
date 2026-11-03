@@ -473,7 +473,7 @@ test("MIG-0734 screens use the shared D-17-2/3/6 parts instead of private copies
 test("MIG-0734 regression: bulk-retry prompt matches the Hono SA-048 batch cap", () => {
   // The API owns D1 atomic-batch size. The Ops UI must not promise more.
   const apiSource = read("../../api/src/routes/admin/notifications.ts");
-  const cap = apiSource.match(/export const BULK_RETRY_MAX\\s*=\\s*(\\d+)/);
+  const cap = apiSource.match(/export const BULK_RETRY_MAX\s*=\s*(\d+)/);
   assert.ok(cap, "Hono notification bulk limit is not declared");
   const max = Number(cap[1]);
   assert.equal(NOTIFICATION_CONFIRM["bulk-retry"],
