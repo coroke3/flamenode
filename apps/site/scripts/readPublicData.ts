@@ -376,7 +376,7 @@ function executableSqlOnly(source: string): string | null {
       code += " ";
       continue;
     }
-    if (char === "'" || char === '"' || char === "\`" || char === "[") {
+    if (char === "'" || char === '"' || char === "`" || char === "[") {
       const closing = char === "[" ? "]" : char;
       i += 1;
       let closed = false;
