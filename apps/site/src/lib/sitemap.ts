@@ -3,6 +3,7 @@
  * Public-only inputs come from verified build snapshots, never request-time D1.
  */
 import type { SitemapVideoRow } from "./publicDataLoader.ts";
+import { videoPageHref } from "../../../../src/lib/youtube/id.ts";
 
 export type SitemapFrequency = "daily" | "weekly" | "monthly";
 export interface SitemapEntry {
@@ -57,7 +58,7 @@ export function buildSitemapEntries(input: {
     entry("/user", "weekly", 0.6),
     entry("/about", "monthly", 0.4),
     entry("/rules", "monthly", 0.3),
-    ...input.videos.map((v) => entry(`/${encodeURIComponent(v.youtube_video_id ?? v.id)}`, "weekly", 0.7, v.scheduled_time)),
+    ...input.videos.map((v) => entry(videoPageHref(v), "weekly", 0.7, v.scheduled_time)),
     ...input.events.map((e) => entry(`/event/${encodeURIComponent(e.id)}`, "weekly", 0.7, e.end_time ?? e.start_time)),
     ...input.creators.map((u) => entry(`/user/${encodeURIComponent(u.x_id)}`, "weekly", 0.6, u.updated_at)),
   ];
