@@ -12,7 +12,7 @@ import {
 import { fetchPublicJson } from "../apps/site/src/lib/publicApi.ts";
 import { LIST_PAGE_SIZE } from "../apps/site/src/lib/listQuery.ts";
 import { toTrendingRow } from "../apps/site/src/lib/videoCards.ts";
-import { videoPageHref } from "../src/lib/youtube/id.ts";
+import { eventVideoPageHref, videoPageHref } from "../src/lib/youtube/id.ts";
 
 const dto = (id = "test") => ({
   id, title: "公開作品", youtube_video_id: "AAAAAAAAAAA", display_name: "作者",
@@ -351,4 +351,24 @@ test("MIG-0510 regression: corrupt public IDs cannot produce cross-origin card l
   const currentVideoCard = fs.readFileSync("src/components/video/VideoCard.tsx", "utf8");
   assert.match(currentVideoCard, /href \?\? videoPageHref\(video\)/,
     "CURRENT Next VideoCard must use the same safe route helper as migrated Astro");
+});
+
+test("MIG-0510: CURRENT event-detail playlist cards never resolve off-origin", () => {
+  const base = "https://flamenode.net";
+  const eventId = "event/ID?bad=1&next=2";
+  for (const youtube_video_id of [
+    "/outside.example", "//outside.example", "javascript:alert(1)",
+    "\\\\outside.example", "https://outside.example/watch?v=AAAAAAAAAAA",
+  ]) {
+    const href = eventVideoPageHref({ id: "safe_internal", youtube_video_id }, eventId);
+    assert.equal(href, "/safe_internal?playlist="+encodeURIComponent(eventId));
+    assert.equal(new URL(href, base).origin, base, youtube_video_id);
+  }
+  assert.equal(eventVideoPageHref({ id: "safe_internal", youtube_video_id: "AAAAAAAAAAA" }, "EV1"), "/AAAAAAAAAAA?playlist=EV1");
+  assert.equal(eventVideoPageHref({ id: "//evil.example", youtube_video_id: null }, "EV1"), "/list");
+
+  // Verify that CURRENT's explicit href override cannot bypass this shared helper.
+  const eventPage = fs.readFileSync("app/(public)/event/[id]/page.tsx", "utf8");
+  assert.match(eventPage, /href=\{eventVideoPageHref\(video, eventId\)\}/);
+  assert.doesNotMatch(eventPage, /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/);
 });
