@@ -413,3 +413,46 @@ test("card text for task context extends to the next MIG card, not the next h2",
   const f = { "t.md": "### MIG-0301 — a\n- 読む: r\n- 変更: c\n- 試験: t\n- DONE: d\n## Section\nkeep me\n### MIG-0302 — b\n" };
   assert.match(collectTaskCards(f).cards.get("MIG-0301").text, /keep me/);
 });
+
+
+test("continuation fences and deeply-indented list code cannot supply required fields", () => {
+ const base = "### MIG-0301 — real card\n- 読む: input\n- 変更: code\n- DONE: verified\n";
+ const fakeCases = [
+  "- item\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- item\n    ```md\n    - 試験: fake code\n    ```\n",
+  "10. item\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- outer\n  - inner\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- item\n\n      - 試験: fake indented code\n",
+  "- item\n        - 試験: fake indented code\n",
+ ];
+ for (const example of fakeCases) {
+  const result = collectTaskCards({ "test.md": base + example });
+  assert.match(result.errors.join("\n"), /MIG-0301: missing card field 試験:/, example);
+ }
+ const genuine = ["- 試験: plain real", "- item\n    - 試験: nested real", "- outer\n  - inner\n      - 試験: nested real"];
+ for (const example of genuine) {
+  const result = collectTaskCards({ "test.md": base + example + "\n" });
+  assert.doesNotMatch(result.errors.join("\n"), /missing card field 試験:/, example);
+ }
+ const after = collectTaskCards({ "test.md": base + "- item\n\n    ```md\n    - 試験: fake\n    ```\n- 試験: genuine\n" });
+ assert.deepEqual(after.errors, []);
+});
+
+test("HTML commented card headings and fields are not executable instructions", () => {
+ const fields = "- 読む: yes\n- 変更: yes\n- 試験: yes\n- DONE: yes\n";
+ const hidden = "<!--\n### MIG-0301 — example\n" + fields + "-->\n";
+ const only = collectTaskCards({ "comment.md": hidden });
+ assert.equal(only.cards.size, 0);
+ assert.match(only.errors.join("\n"), /comment\.md: no MIG cards/);
+ const inline = collectTaskCards({ "comment.md": "<!-- ### MIG-0301 — example\n"+fields+"-->\n" });
+ assert.equal(inline.cards.size, 0);
+ const unfinished = collectTaskCards({ "comment.md": "<!--\n### MIG-0301 — example\n"+fields });
+ assert.equal(unfinished.cards.size, 0);
+ const valid = collectTaskCards({ "comment.md": hidden + "### MIG-0301 — real\n" + fields });
+ assert.equal(valid.cards.size, 1);
+ assert.deepEqual(valid.errors, []);
+ const inlineCode = collectTaskCards({ "comment.md": "`<!--`\n### MIG-0301 — real\n"+fields });
+ assert.equal(inlineCode.cards.size, 1);
+ assert.deepEqual(inlineCode.errors, []);
+ assert.equal(extractWorkOrder(hidden,"MIG-0301"),null);
+});
