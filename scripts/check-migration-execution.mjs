@@ -44,6 +44,32 @@ export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0802": ["D-07"],
 });
 
+// This is a *structural* gate only. Human/Lead approval and reviewer identity
+// still require live GitHub evidence at merge time; a matching string is never
+// proof of actual approval. Reject markdown examples and placeholder records.
+export function hasValidSkipApprovalRecord(statusText, id) {
+  if (!/^MIG-\d{4}$/.test(id)) return false;
+  let fence = null;
+  const records = [];
+  for (const line of statusText.replace(/\r\n/g, "\n").split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char &&
+        marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
+    // A status note inside an HTML comment or a quoted/list example is not approval.
+    if (line.startsWith("SKIP_APPROVAL: " + id + " | ")) records.push(line);
+  }
+  if (records.length !== 1) return false;
+  const match = /^SKIP_APPROVAL: (MIG-\d{4}) \| PR#([1-9]\d*) \| APPROVAL=(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/([1-9]\d*)#(?:issuecomment-\d+|pullrequestreview-\d+)) \| ALTERNATIVE=(.+)$/.exec(records[0]);
+  if (!match || match[1] !== id || match[2] !== match[6]) return false;
+  const alt = match[7].trim();
+  return /^MIG-\d{4}$/.test(alt) ||
+    (alt.length >= 12 && !/^(?:none|n\/a|unknown|pending|example|not-approved|未定|なし)$/i.test(alt));
+}
+
 const COMPLETED = new Set(["DONE", "SKIPPED"]);
 const ACTIVE = new Set(["READY", "IN_PROGRESS", "REVIEW", "DONE"]);
 const STATES = new Set(["READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "SKIPPED"]);
@@ -155,7 +181,7 @@ export function validateMigrationExecution({
   const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
-    if (row.state === "SKIPPED" && !new RegExp("^SKIP_APPROVAL: " + id + " \\| PR#[0-9]+ \\| APPROVAL=[^\\n|]+ \\| ALTERNATIVE=[^\\n|]+$", "m").test(statusText)) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
+    if (row.state === "SKIPPED" && !hasValidSkipApprovalRecord(statusText, id)) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
     let deps = [];
     try { deps = expandDependencies(row.dependencies); }
     catch (error) { errors.push(id + ": " + error.message); }
