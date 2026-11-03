@@ -586,11 +586,39 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
   it("refuses non-read statements before any request", async () => {
     let requests = 0;
     const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: async () => { requests++; return new Response("{}"); } });
-    for (const sql of ["UPDATE events SET title = 'x'", "DELETE FROM events", "SELECT 1; DROP TABLE events", "PRAGMA table_info(events)", "INSERT INTO events DEFAULT VALUES"]) {
-      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/);
+    const forbidden = [
+      "UPDATE events SET title = 'x'",
+      "DELETE FROM events",
+      "SELECT 1; DROP TABLE events",
+      "PRAGMA table_info(events)",
+      "INSERT INTO events DEFAULT VALUES",
+      // SQLite executes these data-changing WITH statements even though they start with WITH.
+      "WITH c AS (SELECT 1) UPDATE events SET title = 'x'",
+      "WITH c AS (SELECT 1) DELETE FROM events",
+      "WITH c AS (SELECT 1) INSERT INTO events DEFAULT VALUES",
+      "WITH c AS (SELECT 1) REPLACE INTO events (id) VALUES ('x')",
+      "WITH c AS (SELECT 1) SELECT * FROM c; DELETE FROM events",
+      "WITH c AS (SELECT 1) SELECT * FROM c WHERE id IN (SELECT 1); UPDATE events SET title = 'x'",
+      "SELECT 1 /* unterminated",
+      "SELECT 'unterminated",
+    ];
+    for (const sql of forbidden) {
+      assert.equal(MIGRATED.isReadOnlyStatement(sql), false, sql);
+      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/, sql);
     }
-    assert.equal(requests, 0);
-    assert.ok(MIGRATED.isReadOnlyStatement("  WITH a AS (SELECT 1) SELECT * FROM a;"));
+    assert.equal(requests, 0, "no unsafe SQL reaches the D1 HTTP transport");
+    // Literal words and comments are not executable SQL, including quoted reserved identifiers.
+    for (const sql of [
+      "  WITH a AS (SELECT 1) SELECT * FROM a;",
+      "WITH c AS (SELECT 'DELETE' AS operation) SELECT operation FROM c",
+      "SELECT 'UPDATE events; DROP TABLE x' AS operation",
+      'SELECT "UPDATE" FROM "CREATE"',
+      "SELECT 1 /* INSERT INTO ignored */",
+      "SELECT 1; -- UPDATE after terminal semicolon",
+      "SELECT 1 /* -- UPDATE */",
+    ]) {
+      assert.equal(MIGRATED.isReadOnlyStatement(sql), true, sql);
+    }
   });
 
   it("caps the number of requests and never puts the token in an error", async () => {
