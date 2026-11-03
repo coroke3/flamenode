@@ -484,3 +484,16 @@ test("MIG-0734 regression: bulk-retry prompt matches the Hono SA-048 batch cap",
   }));
   assert.ok(html.includes(`一括リトライ (上限 ${max})`), "rendered button must use the API limit");
 });
+
+
+test("MIG-0734 regression: admin retry messaging matches Hono's no-wake behavior", () => {
+  const hono = read("../../api/src/routes/admin/notifications.ts");
+  assert.match(hono, /this Worker never wakes/);
+  const html = renderNotifications(
+    notificationData({ rows: [row({ status: "pending" })] }, { failed: 0, deadLetter: 0, pending: 3 }),
+  );
+  assert.match(html, /管理者の再試行・強制再送・一括再試行はQueue wakeを送信せず/);
+  assert.match(html, /管理者操作はQueue wakeなし/);
+  assert.match(html, /毎時 Recovery Cron/);
+  assert.doesNotMatch(html, /Queue wake で即時起動/);
+});
