@@ -13,6 +13,7 @@ import { fetchPublicJson } from "../apps/site/src/lib/publicApi.ts";
 import { LIST_PAGE_SIZE } from "../apps/site/src/lib/listQuery.ts";
 import { toTrendingRow } from "../apps/site/src/lib/videoCards.ts";
 import { eventVideoPageHref, videoPageHref } from "../src/lib/youtube/id.ts";
+import { videoPageHref as spaVideoPageHref, eventVideoPageHref as spaEventVideoPageHref } from "../apps/app/src/routes/ui/media.ts";
 
 const dto = (id = "test") => ({
   id, title: "公開作品", youtube_video_id: "AAAAAAAAAAA", display_name: "作者",
@@ -398,5 +399,41 @@ test("MIG-0510: remaining public video navigations use validated paths", () => {
     const href = videoPageHref(target);
     assert.equal(new URL(href, site).origin, site);
     assert.equal(new URL(eventVideoPageHref(target, playlist), site).origin, site);
+  }
+});
+
+test("MIG-0510: personal SPA video links match CURRENT same-origin route semantics", () => {
+  const site = "https://flamenode.net";
+  const videos = [
+    { id: "internal-1", youtube_video_id: "AAAAAAAAAAA" },
+    { id: "internal-1", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" },
+    { id: "internal-1", youtube_video_id: "/outside.example" },
+    { id: "internal-1", youtube_video_id: "//outside.example" },
+    { id: "//outside.example", youtube_video_id: null },
+    { id: "../path", youtube_video_id: "javascript:alert(1)" },
+  ];
+  for (const item of videos) {
+    assert.equal(spaVideoPageHref(item), videoPageHref(item));
+    assert.equal(spaEventVideoPageHref(item, "lib-like&bad=1"),
+      eventVideoPageHref(item, "lib-like&bad=1"));
+    assert.equal(new URL(spaVideoPageHref(item), site).origin, site);
+    assert.equal(new URL(spaEventVideoPageHref(item, "lib-like&bad=1"), site).origin, site);
+  }
+
+  const sources = [
+    ["apps/app/src/routes/dashboard/Library.tsx",
+      "eventVideoPageHref(firstVideo, playlistId)", "eventVideoPageHref(video, playlistId)"],
+    ["apps/app/src/routes/ui/ChapterItems.tsx", "href={videoPageHref({ id: chapter.video_id"],
+    ["app/(auth)/dashboard/library/page.tsx",
+      "eventVideoPageHref(firstVideo, playlistId)", "eventVideoPageHref(video, playlistId)",
+      "href={videoPageHref({ id: chapter.video_id"],
+    ["app/(auth)/dashboard/page.tsx", "href={videoPageHref({ id: chapter.video_id"],
+    ["src/components/admin/AdminVideoMembersForm.tsx", "href={videoPageHref(video)}"],
+  ];
+  for (const [path, ...safeCalls] of sources) {
+    const source = fs.readFileSync(path, "utf8");
+    for (const call of safeCalls) {
+      assert.ok(source.includes(call), `${path} missing same-origin route: ${call}`);
+    }
   }
 });
