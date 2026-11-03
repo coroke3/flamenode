@@ -5,11 +5,19 @@
 import type { VideoCardData } from "../../../../src/components/video/VideoCard.tsx";
 import type { TrendingItem } from "../../../../src/lib/publicData/staticTrendingCore.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
-import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { extractYoutubeId, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
 import type { ListVideo, TrendingRow } from "@flamenode/ui";
 
-const href = (v: Pick<VideoCardData, "id" | "youtube_video_id">): string => `/${v.youtube_video_id?.trim() || v.id}`;
+// An untrusted/legacy youtube_video_id can start with "/": prepending another
+// slash would create a protocol-relative link to an external host. Only route
+// to normalized YouTube IDs or a validated same-origin internal video ID.
+const SAFE_INTERNAL_VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const href = (v: Pick<VideoCardData, "id" | "youtube_video_id">): string => {
+  const youtubeId = extractYoutubeId(v.youtube_video_id);
+  if (youtubeId) return `/${youtubeId}`;
+  return SAFE_INTERNAL_VIDEO_ID.test(v.id) ? `/${v.id}` : "/list";
+};
 const thumb = (v: Pick<VideoCardData, "youtube_video_id">): string | null => youtubeThumbUrl(v.youtube_video_id, "mqdefault") || null;
 
 export function toListVideo(v: VideoCardData & { primary_event_title?: string | null }): ListVideo {
