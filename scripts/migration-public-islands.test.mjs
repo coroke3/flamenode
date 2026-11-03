@@ -12,6 +12,7 @@ import {
 import { fetchPublicJson } from "../apps/site/src/lib/publicApi.ts";
 import { LIST_PAGE_SIZE } from "../apps/site/src/lib/listQuery.ts";
 import { toTrendingRow } from "../apps/site/src/lib/videoCards.ts";
+import { videoPageHref } from "../src/lib/youtube/id.ts";
 
 const dto = (id = "test") => ({
   id, title: "公開作品", youtube_video_id: "AAAAAAAAAAA", display_name: "作者",
@@ -343,4 +344,11 @@ test("MIG-0510 regression: corrupt public IDs cannot produce cross-origin card l
     primary_event_id: null, primary_event_title: null, views_7d: 0, rank: 1,
   }, 0);
   assert.equal(trending.href, "/list", "malformed trending URLs fall back to a same-origin route");
+
+  assert.equal(videoPageHref({ id: "v_ok", youtube_video_id: "/outside.example" }), "/v_ok");
+  assert.equal(videoPageHref({ id: "//outside.example", youtube_video_id: null }), "/list");
+  assert.equal(videoPageHref({ id: "v_ok", youtube_video_id: "AAAAAAAAAAA" }), "/AAAAAAAAAAA");
+  const currentVideoCard = fs.readFileSync("src/components/video/VideoCard.tsx", "utf8");
+  assert.match(currentVideoCard, /href \\?\\? videoPageHref\\(video\\)/,
+    "CURRENT Next VideoCard must use the same safe route helper as migrated Astro");
 });
