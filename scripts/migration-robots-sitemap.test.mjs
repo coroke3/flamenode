@@ -7,6 +7,7 @@ import { buildRobotsText, GET, ROBOTS_DISALLOW } from "../apps/site/src/pages/ro
 import { siteOrigin } from "../apps/site/src/lib/pageHead.ts";
 import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
 import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
+import { dedupeSitemapEntries } from "../src/lib/publicData/sitemapDedupe.ts";
 import { SITEMAP_VIDEOS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 
 const require = createRequire(import.meta.url);
@@ -271,4 +272,21 @@ test("MIG-0621 regression: malformed YouTube IDs never escape the sitemap origin
   const astroSource = await readFile(new URL("apps/site/src/lib/sitemap.ts", root), "utf8");
   assert.match(nextSource, /entry\(videoPageHref\(video\),/);
   assert.match(astroSource, /entry\(videoPageHref\(v\),/);
+});
+
+test("MIG-0621 regression: CURRENT sitemap de-duplicates fixed routes and repeated video aliases", async () => {
+  const rows = [
+    { url: origin + "/list", priority: 0.8, marker: "fixed" },
+    { url: origin + "/AAAAAAAAAAA", priority: 0.7, marker: "first-video" },
+    { url: origin + "/AAAAAAAAAAA", priority: 0.7, marker: "duplicate-alias" },
+    { url: origin + "/list", priority: 0.7, marker: "malformed-internal-fallback" },
+    { url: origin + "/BBBBBBBBBBB", priority: 0.7, marker: "second-video" },
+  ];
+  assert.deepEqual(dedupeSitemapEntries(rows).map((r) => r.marker),
+    ["fixed", "first-video", "second-video"],
+    "fixed paths win over invalid legacy aliases, preserving first published canonical order");
+  assert.deepEqual(dedupeSitemapEntries([]), []);
+  const current = await readFile(new URL("app/sitemap.ts", root), "utf8");
+  assert.match(current, /return dedupeSitemapEntries\(\[\.\.\.buildStaticSitemapStaticEntries\(\), \.\.\.dynamicEntries\]\);/,
+    "CURRENT must apply dedupe to static and dynamic sitemap entries together");
 });
