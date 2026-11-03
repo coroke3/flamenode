@@ -251,3 +251,24 @@ test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once"
   }
 });
 
+
+test("MIG-0621 regression: malformed YouTube IDs never escape the sitemap origin", async () => {
+  const items = [
+    { id: "safe_internal", youtube_video_id: "/outside.example", scheduled_time: null },
+    { id: "safe_url", youtube_video_id: "https://youtu.be/AAAAAAAAAAA", scheduled_time: null },
+    { id: "//outside.example", youtube_video_id: null, scheduled_time: null },
+    { id: "safe_normal", youtube_video_id: "BBBBBBBBBBB", scheduled_time: null },
+  ];
+  const entries = buildSitemapEntries({ origin, videos: items, events: [], creators: [], now: new Date("2026-01-01T00:00:00Z") });
+  const urls = entries.map((item) => item.url);
+  assert.ok(urls.includes(origin + "/safe_internal"), "broken YouTube ID must fall back to internal ID");
+  assert.ok(urls.includes(origin + "/AAAAAAAAAAA"), "a trusted YouTube share link must normalize");
+  assert.ok(urls.includes(origin + "/BBBBBBBBBBB"), "a valid YouTube ID must remain unchanged");
+  assert.equal(urls.filter((url) => url === origin + "/list").length, 1, "unsafe internal ID fallback deduplicates with static /list");
+  for (const url of urls) assert.equal(new URL(url).origin, origin);
+
+  const nextSource = await readFile(new URL("src/lib/publicData/sitemapSources.ts", root), "utf8");
+  const astroSource = await readFile(new URL("apps/site/src/lib/sitemap.ts", root), "utf8");
+  assert.match(nextSource, /entry\(videoPageHref\(video\),/);
+  assert.match(astroSource, /entry\(videoPageHref\(v\),/);
+});
