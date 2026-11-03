@@ -116,12 +116,25 @@ function withoutInlineCode(markdown) {
   return result + markdown.slice(cursor);
 }
 
-// HTML comments are documentation examples, not navigable Markdown links.
-// Run this after masking fenced and inline code, so a literal <!-- inside
-// code cannot accidentally hide real links outside that code.
+// Commented-out links are examples, not navigable dependencies. Find each
+// comment opener outside code, then mask that comment in the ORIGINAL text.
+// Re-scan after each comment: backticks/fences inside HTML comments must not
+// mask real links after the comment has closed.
 function withoutHtmlComments(markdown) {
-  return markdown.replace(/<!--[\s\S]*?(?:-->|$)/g, match =>
-    match.replace(/[^\r\n]/g, " "));
+  let result = markdown;
+  let cursor = 0;
+  while (cursor < result.length) {
+    const visible = withoutInlineCode(withoutFencedCode(result));
+    const start = visible.indexOf("<!--", cursor);
+    if (start < 0) break;
+    const closing = result.indexOf("-->", start + 4);
+    const end = closing < 0 ? result.length : closing + 3;
+    result = result.slice(0, start) +
+      result.slice(start, end).replace(/[^\r\n]/g, " ") +
+      result.slice(end);
+    cursor = end;
+  }
+  return result;
 }
 
 // A symlinked source or ancestor can hide Markdown from the audit or make
@@ -231,7 +244,7 @@ export function validateLinks({root,documents}) {
   const realRoot=fs.realpathSync(root);
   for(const filename of documents) {
     assertNoSymlinkInDocumentPath(root, filename);
-    const content=withoutHtmlComments(withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8"))));
+    const content=withoutInlineCode(withoutFencedCode(withoutHtmlComments(fs.readFileSync(path.join(root,filename),"utf8"))));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(let target of markdownLinkDestinations(content)) {
       target=target.trim();
