@@ -349,6 +349,6 @@ test("MIG-0510 regression: corrupt public IDs cannot produce cross-origin card l
   assert.equal(videoPageHref({ id: "//outside.example", youtube_video_id: null }), "/list");
   assert.equal(videoPageHref({ id: "v_ok", youtube_video_id: "AAAAAAAAAAA" }), "/AAAAAAAAAAA");
   const currentVideoCard = fs.readFileSync("src/components/video/VideoCard.tsx", "utf8");
-  assert.match(currentVideoCard, /href \\?\\? videoPageHref\\(video\\)/,
+  assert.match(currentVideoCard, /href \?\? videoPageHref\(video\)/,
     "CURRENT Next VideoCard must use the same safe route helper as migrated Astro");
 });
