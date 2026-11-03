@@ -38,8 +38,17 @@ export function safeBuildEnv(original:NodeJS.ProcessEnv,snapshotDir:string,gener
   delete env.FLAMENODE_RULES_SNAPSHOT_FILE;
   const rules=path.join(snapshotDir,"rules-current.json");
   if(fs.existsSync(rules))env.FLAMENODE_RULES_SNAPSHOT_FILE=rules;
-  for(const key of ["FLAMENODE_D1_READ_TOKEN","FLAMENODE_R2_READ_TOKEN",
-    "CLOUDFLARE_API_TOKEN","CF_API_TOKEN","CLOUDFLARE_API_KEY"])delete env[key];
+  // The snapshot producer uses credentials, but the Astro build and its budget
+  // check must not inherit unrelated CI/package-registry/cloud credentials.
+  // Preserve ordinary build variables (PATH, CI, NODE_ENV, etc.).
+  for (const key of Object.keys(env)) {
+    if (
+      /(?:^|[_:])(?:TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|ACCESS_KEY(?:_ID)?|CREDENTIALS?|AUTH)(?:$|[_:])/i.test(key) ||
+      /(?:^|[_:])AUTH_?TOKEN(?:$|[_:])/i.test(key) ||
+      /(?:^|[_:])_?AUTHTOKEN$/i.test(key) ||
+      /^(?:DATABASE_URL|POSTGRES_URL|REDIS_URL)$/i.test(key)
+    ) delete env[key];
+  }
   return env;
 }
 export async function runBuildCommand({command,args,env}:BuildCommand):Promise<void> {
