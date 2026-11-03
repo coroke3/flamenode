@@ -373,3 +373,56 @@ test("STATUS table width, blockquote, repeated delimiter and code fence handling
   const changed = status.replace(D, "| --- | --- | --- | --- | --- |");
   assert.match(run({ statusText: changed }).join("\n"), /invalid STATUS task ledger/);
 });
+
+
+test("duplicate visible MIG IDs fail closed in parser, structure validator and execution gate",()=>{
+ const first="| MIG-0301 | core PoC | READY | MIG-0108 |";
+ for (const [stateA,stateB] of [["BLOCKED","DONE"],["DONE","BLOCKED"]]) {
+  const initial=first.replace("| READY |","| "+stateA+" |");
+  const duplicate=first.replace("| READY |","| "+stateB+" |");
+  const altered=status.replace(first,initial+"\n"+duplicate);
+  assert.throws(()=>parseTaskRows(altered),/duplicate task row: MIG-0301 at STATUS line \d+/);
+  assert.match(validateStatusTableStructure(altered).join("\n"),/duplicate task row: MIG-0301/);
+  assert.match(run({statusText:altered}).join("\n"),/duplicate task row: MIG-0301/);
+ }
+ const later=status+"\n## Next phase\n| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-0301 | fake later | DONE | — |\n";
+ assert.throws(()=>parseTaskRows(later),/duplicate task row: MIG-0301/);
+ assert.match(validateStatusTableStructure(later).join("\n"),/duplicate task row: MIG-0301/);
+ assert.equal(parseTaskRows(status).size,new Set([...parseTaskRows(status).keys()]).size);
+});
+
+test("closed HTML comments cannot supply fake DONE dependencies or task-table headers",()=>{
+ const fakeHeader="| ID | Task | State | Depends on |\n| --- | --- | --- | --- |";
+ const fakeDone="| MIG-9999 | example only | DONE | — |";
+ const before=status.replace("| MIG-0301 | core PoC | READY | MIG-0108 |",
+  "| MIG-0301 | core PoC | READY | MIG-9999 |");
+ const commented=before+"\n<!--\n"+fakeHeader+"\n"+fakeDone+"\n\n-->\n";
+ assert.equal(parseTaskRows(commented).has("MIG-9999"),false);
+ assert.deepEqual(validateStatusTableStructure(commented),[]);
+ assert.match(run({statusText:commented}).join("\n"),/missing dependency MIG-9999/);
+ const normal=status+"\n<!--\n"+fakeHeader+"\n"+fakeDone+"\n-->\n";
+ assert.deepEqual(run({statusText:normal}),[]);
+ const inline=status+"\n<!-- "+fakeDone+" -->\n";
+ assert.deepEqual(run({statusText:inline}),[]);
+});
+
+test("real task table after HTML comment is parsed, fenced comment markers remain examples",()=>{
+ const header="| ID | Task | State | Depends on |";
+ const separator="| --- | --- | --- | --- |";
+ const actual="| MIG-0301 | real | READY | MIG-0108 |";
+ const doc=[
+  "```md",
+  "<!-- not a real comment opener inside a code fence",
+  "```",
+  "<!--",header,separator,"| MIG-9999 | fake | DONE | — |","-->",
+  header,separator,actual,
+ ].join("\n");
+ assert.deepEqual([...parseTaskRows(doc).keys()],["MIG-0301"]);
+ assert.deepEqual(validateStatusTableStructure(doc),[]);
+ const inlineCode="`<!--`\n"+header+"\n"+separator+"\n"+actual+"\n";
+ assert.deepEqual([...parseTaskRows(inlineCode).keys()],["MIG-0301"]);
+ // An unclosed comment cannot reveal apparent rows as completed prerequisites.
+ const unclosed=header+"\n"+separator+"\n"+actual+"\n<!--\n"+
+  header+"\n"+separator+"\n| MIG-9999 | fake | DONE | — |\n";
+ assert.deepEqual([...parseTaskRows(unclosed).keys()],["MIG-0301"]);
+});
