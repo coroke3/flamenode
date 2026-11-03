@@ -51,6 +51,20 @@ export function extractYoutubeId(input: string | null | undefined): string | nul
   return null;
 }
 
+/**
+ * Same-origin video detail route for CURRENT Next and Astro cards.
+ *
+ * Even if a legacy/corrupt youtube_video_id begins with "/", it must not
+ * create a protocol-relative //host link when prepended to a slash.
+ * Valid internal IDs use the same safe alphabet as public video snapshots.
+ */
+const SAFE_INTERNAL_VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export function videoPageHref(video: { id: string; youtube_video_id?: string | null }): string {
+  const youtubeId = extractYoutubeId(video.youtube_video_id);
+  if (youtubeId) return `/${youtubeId}`;
+  return SAFE_INTERNAL_VIDEO_ID.test(video.id) ? `/${video.id}` : "/list";
+}
+
 /** YouTube サムネイル URL (高画質)。 */
 export function youtubeThumbUrl(
   id: string | null | undefined,
