@@ -33,6 +33,9 @@ export function safeBuildEnv(original:NodeJS.ProcessEnv,snapshotDir:string,gener
     FLAMENODE_SNAPSHOT_MANIFEST_FILE:path.join(snapshotDir,"manifest.json"),
     FLAMENODE_SNAPSHOT_GENERATION:generation,
   };
+  // Do not inherit a previous build's terms artifact. An absent rules snapshot
+  // must use CURRENT's built-in terms, not an unrelated/stale external file.
+  delete env.FLAMENODE_RULES_SNAPSHOT_FILE;
   const rules=path.join(snapshotDir,"rules-current.json");
   if(fs.existsSync(rules))env.FLAMENODE_RULES_SNAPSHOT_FILE=rules;
   for(const key of ["FLAMENODE_D1_READ_TOKEN","FLAMENODE_R2_READ_TOKEN",
