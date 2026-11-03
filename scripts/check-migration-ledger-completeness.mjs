@@ -40,9 +40,30 @@ export function isRequiredSource(file) {
 // Family rows live in "## Source families" (after the ledger, so parseFileRows ignores them).
 export function parseFamilyRows(markdown) {
   const text = markdown.replace(/\r\n/g, "\n");
-  const section = text.split("\n## Source families")[1]?.split("\n## ")[0];
   const rows = [], errors = [];
-  if (!section) return { rows, errors: ["FILE_MIGRATION_MATRIX: missing '## Source families' section"] };
+  // A second family section must not be ignored by the first-match parser.
+  // Only top-level headings count: code-fenced examples are not ledger sections.
+  const headings = [];
+  let fence = null;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char &&
+          marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
+    if (/^## Source families(?:[ \t].*)?$/.test(line)) headings.push(i);
+  }
+  if (headings.length !== 1) {
+    return { rows, errors: [headings.length === 0
+      ? "FILE_MIGRATION_MATRIX: missing '## Source families' section"
+      : "FILE_MIGRATION_MATRIX: duplicate '## Source families' sections"] };
+  }
+  const start = headings[0] + 1;
+  const section = lines.slice(start).join("\n").split("\n## ")[0];
 
   const lines = section.split("\n");
   const headerIndex = lines.findIndex((line) => /^\|\s*Family\s*\|/.test(line.trim()));
