@@ -39,7 +39,7 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
-import { D1_HTTP_ENV, openD1HttpReader } from "./readPublicData.ts";
+import { D1_HTTP_ENV, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
 import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
@@ -165,7 +165,7 @@ export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
 function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
   return {
     prepare(sql: string) {
-      if (!/^\s*(SELECT|WITH)\b/i.test(sql) || sql.trim().replace(/;\s*$/, "").includes(";")) {
+      if (!isReadOnlyStatement(sql)) {
         throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
       }
       counter.n += 1;
