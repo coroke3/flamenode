@@ -621,6 +621,26 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
     }
   });
 
+  it("refuses invalid D1 statement budgets at construction (including NaN / Infinity)", () => {
+    let attempted = 0;
+    const fetchFn = async () => { attempted++; throw new Error("unexpected D1 request"); };
+    for (const invalid of [0, -1, 1.2, NaN, Infinity, -Infinity, 201, Number.MAX_SAFE_INTEGER]) {
+      assert.throws(
+        () => MIGRATED.openD1HttpReader({
+          accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn,
+          maxStatements: invalid,
+        }),
+        /D1 API statement budget must be an integer from 1 to 200/,
+        `invalid budget: ${invalid}`,
+      );
+    }
+    assert.equal(attempted, 0);
+    const valid = MIGRATED.openD1HttpReader({
+      accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn, maxStatements: 200,
+    });
+    assert.equal(valid.statements(), 0, "batched producer's documented cap stays valid");
+  });
+
   it("caps the number of requests and never puts the token in an error", async () => {
     const ok = async () => new Response(JSON.stringify({ success: true, result: [{ success: true, results: [] }] }));
     const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: ok, maxStatements: 2 });
