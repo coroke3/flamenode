@@ -195,7 +195,7 @@ export function validateWorkItems({statusText,entries,commitExists}) {
   if (Object.keys(entries).length === 0) errors.push("work-item ledger has no checkpoints");
   // Phase 0/1 tasks predate checkpoint tracking; every later DONE task must
   // retain its own auditable work-item, even if files were removed in a PR.
-  for (const [, id, state] of statusText.matchAll(/^\\|\\s*(MIG-\\d{4})\\s*\\|[^\\n]*\\|\\s*(DONE|READY|IN_PROGRESS|REVIEW|BLOCKED|SKIPPED)\\s*\\|/gm)) {
+  for (const [, id, state] of statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|[^\n]*\|\s*(DONE|READY|IN_PROGRESS|REVIEW|BLOCKED|SKIPPED)\s*\|/gm)) {
     if (state === "DONE" && Number(id.slice(4)) >= 200 && !Object.hasOwn(entries, id+".md")) {
       errors.push("missing DONE task checkpoint: " + id + ".md");
     }
