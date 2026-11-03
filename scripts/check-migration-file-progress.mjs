@@ -212,7 +212,10 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  for(const file of changedPaths.filter(trackedChangeCandidate)){
   const row=rows.get(file);
   if(!row){errors.push("changed migration source missing file progress row: "+file);continue;}
-  if(row.state==="NOT_STARTED")continue;
+  if(row.state==="NOT_STARTED"){
+   errors.push(file+" changed in this PR but file state is NOT_STARTED; update state and add fresh PR evidence");
+   continue;
+  }
   // A changed started file must cite, anywhere in its row, a SHA= that is new versus base
   // and is a commit from this PR's own history.
   const baseShas=new Set(shasOf(baseRows.get(file)));
