@@ -426,3 +426,14 @@ test("real task table after HTML comment is parsed, fenced comment markers remai
   header+"\n"+separator+"\n| MIG-9999 | fake | DONE | — |\n";
  assert.deepEqual([...parseTaskRows(unclosed).keys()],["MIG-0301"]);
 });
+
+
+test("mismatched backtick runs do not conceal real HTML comment openers",()=>{
+ const H="| ID | Task | State | Depends on |";
+ const D="| --- | --- | --- | --- |";
+ const fake="| MIG-9999 | fake | DONE | — |";
+ const doc="\`\`<!--\`\`\`\`\n"+H+"\n"+D+"\n"+fake+"\n-->\n"+
+  H+"\n"+D+"\n| MIG-0301 | real | READY | MIG-0108 |\n";
+ assert.deepEqual([...parseTaskRows(doc).keys()],["MIG-0301"]);
+ assert.deepEqual(validateStatusTableStructure(doc),[]);
+});
