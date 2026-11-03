@@ -45,9 +45,9 @@ export function parseFamilyRows(markdown) {
   // Only top-level headings count: code-fenced examples are not ledger sections.
   const headings = [];
   let fence = null;
-  const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  const allLines = text.split("\n");
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (marker && marker[1][0] === fence.char &&
@@ -63,7 +63,7 @@ export function parseFamilyRows(markdown) {
       : "FILE_MIGRATION_MATRIX: duplicate '## Source families' sections"] };
   }
   const start = headings[0] + 1;
-  const section = lines.slice(start).join("\n").split("\n## ")[0];
+  const section = allLines.slice(start).join("\n").split("\n## ")[0];
 
   const lines = section.split("\n");
   const headerIndex = lines.findIndex((line) => /^\|\s*Family\s*\|/.test(line.trim()));
