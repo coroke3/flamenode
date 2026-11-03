@@ -437,3 +437,25 @@ test("MIG-0510: personal SPA video links match CURRENT same-origin route semanti
     }
   }
 });
+
+test("MIG-0510: video detail metadata and Astro related cards use safe routes", () => {
+  // Metadata and VideoObject JSON-LD must not advertise an external canonical
+  // when a broken legacy youtube_video_id begins with slash.
+  const nextPage = fs.readFileSync("app/(public)/[id]/page.tsx", "utf8");
+  const astroVideo = fs.readFileSync("apps/site/src/lib/videoPage.ts", "utf8");
+  assert.ok(nextPage.includes("const videoPath = videoPageHref(video);"));
+  assert.ok(nextPage.includes("url: absoluteUrl(videoPageHref(video)),"));
+  assert.ok(astroVideo.includes("const canonicalSlug = youtubeId ?? video.id;"),
+    "Astro canonical slug must use a normalized 11-char YouTube ID, never a raw URL");
+  assert.ok(astroVideo.includes("href: videoPageHref(r),"),
+    "Astro related cards must not interpolate an unchecked ID");
+
+  const site = "https://flamenode.net";
+  for (const bad of ["/evil.example", "//evil.example", "javascript:alert(1)", "https://evil.example/watch?v=AAAAAAAAAAA"]) {
+    const href = videoPageHref({ id: "safe_internal", youtube_video_id: bad });
+    assert.equal(href, "/safe_internal");
+    assert.equal(new URL(href, site).origin, site);
+  }
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }),
+    "/AAAAAAAAAAA");
+});
