@@ -36,22 +36,76 @@ function hasCardField(proseText, marker) {
   return new RegExp("^(?:[ \\t]*" + list + field + "|[ ]{0,3}" + field + ")", "m").test(maskNonInstructions(proseText));
 }
 
+// CommonMark nested list items are positioned at their parent's content
+// column. An additional 4 columns is code, not another list instruction.
+function listItemColumn(line) {
+  const m = /^( *)(?:[-+*]|\d{1,9}[.)])[ \t]+/.exec(line);
+  return m ? { marker: m[1].length, content: m[0].length } : null;
+}
+function listCodeLine(line, stack) {
+  if (!line.trim()) return false;
+  const indent = line.match(/^ */)?.[0].length ?? 0;
+  while (stack.length && indent < stack.at(-1).content) stack.pop();
+  if (stack.length && indent >= stack.at(-1).content + 4) return true;
+  const item = listItemColumn(line);
+  if (item && (stack.length || item.marker <= 3)) stack.push(item);
+  return false;
+}
+
+// Preserve offsets and line breaks while hiding HTML comments. Inline code
+// spans and previously masked fences cannot create fake comment boundaries.
+function maskHtmlCommentsOutsideCode(source) {
+  let output = "", inComment = false, inline = 0;
+  const hasClosingTicks = (start, length) => {
+    let cursor = start;
+    while (cursor < source.length) {
+      const pos = source.indexOf("`", cursor);
+      if (pos < 0) return false;
+      let end = pos;
+      while (source[end] === "`") end++;
+      if (end - pos === length) return true;
+      cursor = end;
+    }
+    return false;
+  };
+  for (let i = 0; i < source.length;) {
+    if (inComment) {
+      if (source.startsWith("-->", i)) { output += "   "; i += 3; inComment = false; }
+      else { output += source[i] === "\n" ? "\n" : " "; i++; }
+      continue;
+    }
+    if (source[i] === "`") {
+      let end = i + 1;
+      while (source[end] === "`") end++;
+      const count = end - i;
+      if (inline === count) inline = 0;
+      else if (!inline && hasClosingTicks(end, count)) inline = count;
+      output += source.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (!inline && source.startsWith("<!--", i)) {
+      output += "    "; i += 4; inComment = true;
+      continue;
+    }
+    output += source[i++];
+  }
+  return output;
+}
+
 // HTML comments and top-level indented code blocks are not instructions.
 function maskNonInstructions(text) {
   const blank = (s) => s.replace(/[^\n]/g, " ");
   const lines = text.replace(/<!--[\s\S]*?(?:-->|$)/g, blank).split("\n");
-  let inList = false, prevBlank = true, inCode = false;
+  let prevBlank = true, inCode = false;
+  const listStack = [];
   return lines.map((line) => {
     if (!line.trim()) { prevBlank = true; return line; }
     const indented = /^(?: {4}|\t)/.test(line);
-    const listItem = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.test(line);
-    let out = line;
-    if (indented && !inList && (prevBlank || inCode)) { inCode = true; out = blank(line); }
-    else {
-      inCode = false;
-      if (listItem) inList = true;
-      else if (!indented) inList = false;
-    }
+    const nestedCode = listCodeLine(line, listStack);
+    const out = nestedCode || (indented && !listStack.length && (prevBlank || inCode))
+      ? blank(line) : line;
+    inCode = out !== line;
     prevBlank = false;
     return out;
   }).join("\n");
@@ -142,7 +196,8 @@ export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 const QUOTE_PREFIX = /^( {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?(?:>[ \t]?)+)(.*)$/;
 function proseLines(text) {
   let fence = null;
-  return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
+  const listStack = [];
+  const fencedLines = text.replace(/\r\n/g, "\n").split("\n").map((line) => {
     // CommonMark list items can start fences as "- ```md" or "1. ~~~md".
     // Their contents are indented relative to the list marker.
     const listOpening = line.match(/^ *(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
@@ -177,17 +232,25 @@ function proseLines(text) {
       fence = { char: quoteOpening[1][0], length: quoteOpening[1].length, indent: 0, quote: true };
       return " ".repeat(line.length);
     }
-    const marker = listOpening || ordinaryOpening;
+    if (listCodeLine(line, listStack)) return " ".repeat(line.length);
+    // A list-item continuation fence can open without another list marker.
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    const parent = listStack.at(-1);
+    const continuation = parent && indent >= parent.content && indent <= parent.content + 3
+      ? line.slice(indent).match(/^(`{3,}|~{3,})(.*)$/)
+      : null;
+    const marker = listOpening || continuation || ordinaryOpening;
     if (marker) {
       fence = {
         char: marker[1][0],
         length: marker[1].length,
-        indent: listOpening ? line.indexOf(marker[1]) : 0,
+        indent: listOpening ? line.indexOf(marker[1]) : continuation ? indent : 0,
       };
       return " ".repeat(line.length);
     }
     return line;
   });
+  return maskHtmlCommentsOutsideCode(fencedLines.join("\n")).split("\n");
 }
 
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
