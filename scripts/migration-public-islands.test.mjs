@@ -11,6 +11,7 @@ import {
 } from "../apps/site/src/lib/listFilterCore.ts";
 import { fetchPublicJson } from "../apps/site/src/lib/publicApi.ts";
 import { LIST_PAGE_SIZE } from "../apps/site/src/lib/listQuery.ts";
+import { toTrendingRow } from "../apps/site/src/lib/videoCards.ts";
 
 const dto = (id = "test") => ({
   id, title: "公開作品", youtube_video_id: "AAAAAAAAAAA", display_name: "作者",
@@ -303,4 +304,43 @@ test("UX-DISC-005: the default /list (no fetch) still shows Pagination from the 
       dom.window.close();
     }
   }
+});
+
+
+test("MIG-0510 regression: corrupt public IDs cannot produce cross-origin card links", () => {
+  const query = listQueryFromSearch("?q=valid");
+
+  // An unexpected youtube_video_id from the API must never turn /ID into //host.
+  for (const badYoutube of [
+    "//outside.example", "/outside.example", "https://outside.example/watch?v=AAAAAAAAAAA",
+    "javascript:alert(1)", "\\\\outside.example", "bad-id",
+  ]) {
+    const result = decodePublicList(
+      okPage(query, [{ ...dto("v_safe-1"), youtube_video_id: badYoutube }]), query,
+    );
+    assert.ok(result, "invalid optional YouTube IDs still allow the safe internal video route");
+    assert.equal(result.videos[0].href, "/v_safe-1");
+    assert.equal(new URL(result.videos[0].href, "https://flamenode.net").origin, "https://flamenode.net");
+  }
+
+  const normalized = decodePublicList(
+    okPage(query, [{ ...dto("v_safe-1"), youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }]), query,
+  );
+  assert.equal(normalized?.videos[0].href, "/AAAAAAAAAAA", "valid full YouTube URLs normalize to ID");
+
+  // A broken internal ID fails the list boundary instead of rendering a link.
+  for (const badId of ["//outside.example", "/outside", "..", ".", "bad?query", "", "x".repeat(129)]) {
+    assert.equal(
+      decodePublicList(okPage(query, [{ ...dto(badId), youtube_video_id: null }]), query),
+      null, `unsafe ID must be rejected: ${badId}`,
+    );
+  }
+
+  // The same shared card mapper is used by trending cards without the list DTO boundary.
+  const trending = toTrendingRow({
+    id: "//outside.example", youtube_video_id: "//outside.example",
+    title: "corrupt card", display_name: "example", icon_url: null,
+    primary_event_id: null, primary_event_title: null, views_7d: 0, rank: 1,
+  }, 0);
+  assert.equal(trending.href, "/list", "malformed trending URLs fall back to a same-origin route");
 });
