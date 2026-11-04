@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS } from "./check-migration-execution.mjs";
+import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS, hasValidSkipApprovalRecord } from "./check-migration-execution.mjs";
 import { parseFileRows } from "./check-migration-file-progress.mjs";
 import { TASK_CARD_FILES, collectTaskCards, specFileFor, extractWorkOrder, validateWorkOrder } from "./check-migration-task-cards.mjs";
 
@@ -183,8 +183,7 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
     const state=tasks.get(id)?.state;
     if(state==="DONE")return true;
     if(state!=="SKIPPED")return false;
-    const approval=statusText.match(new RegExp("^SKIP_APPROVAL: "+id+" \\| PR#[0-9]+ \\| APPROVAL=([^\\n|]+) \\| ALTERNATIVE=([^\\n|]+)$","m"));
-    return Boolean(approval?.[1].trim()&&approval?.[2].trim());
+    return hasValidSkipApprovalRecord(statusText,id);
   };
   const candidates=[];
   for(const [id,task] of tasks){
