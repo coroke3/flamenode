@@ -12,6 +12,7 @@ import {
   statusBadgeClass,
 } from "../../components/notifications/notificationDisplay.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
+import { isImeComposingForm } from "../../components/shared/imeSafeSearch.js";
 import { EmptyState } from "../../components/shared/EmptyState.js";
 import { FnTable } from "../../components/shared/FnTable.js";
 import { OpsLink as Link } from "../../components/shared/OpsLink.js";
@@ -57,6 +58,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
   // D-17-7: category changes must update React Router query state, not navigateGetForm's
   // document-level location.assign(). Preserve the same GET form field names/normalization.
   const submitFilters = (form: HTMLFormElement): void => {
+    // Preserve AutoSubmitSelect: do not submit while a search input is in IME composition.
+    if (isImeComposingForm(form)) return;
     const next = new URLSearchParams();
     for (const [key, value] of new FormData(form)) {
       if (typeof value === "string" && value.trim()) next.set(key, value.trim());
