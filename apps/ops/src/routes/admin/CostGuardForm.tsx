@@ -18,7 +18,17 @@ export function CostGuardForm({ settings, api, onSuccess }: {
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [confirmationSnapshot, setConfirmationSnapshot] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
+  // Another admin can change Cost Guard while the maintenance confirmation is open.
+  // Bind the confirmation to the observed settings rather than reusing stale intent.
+  const settingsSnapshot = JSON.stringify([
+    settings.mode, settings.isMaintenance, settings.reason, settings.updatedAt,
+  ]);
+  React.useEffect(() => {
+    setConfirmOpen(false);
+    setConfirmationSnapshot(null);
+  }, [settingsSnapshot]);
   // A D1 maintenance mode is not a valid SA-016 manual-mode input.
   const manualModeSelected = MODES.some(([value]) => value === mode);
   React.useEffect(() => { setMode(settings.mode); setReason(settings.reason ?? ""); }, [settings.mode, settings.reason]);
@@ -63,7 +73,14 @@ export function CostGuardForm({ settings, api, onSuccess }: {
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700 }}>メンテナンス即時切替</h2>
         <button type="button" className="fn-btn fn-btn-danger fn-btn-sm" disabled={busy || !reason.trim()}
-          onClick={() => (settings.isMaintenance ? maintenance(0) : setConfirmOpen(true))}>
+          onClick={() => {
+            if (settings.isMaintenance) {
+              maintenance(0);
+            } else {
+              setConfirmationSnapshot(settingsSnapshot);
+              setConfirmOpen(true);
+            }
+          }}>
           {settings.isMaintenance ? "OFFにする" : "ONにする"}
         </button>
       </section>
@@ -75,9 +92,17 @@ export function CostGuardForm({ settings, api, onSuccess }: {
         confirmLabel="ONにする"
         cancelLabel="キャンセル"
         tone="danger"
-        busy={busy}
-        onConfirm={() => { setConfirmOpen(false); maintenance(1); }}
-        onCancel={() => setConfirmOpen(false)}
+        busy={busy || confirmationSnapshot !== settingsSnapshot}
+        onConfirm={() => {
+          if (confirmationSnapshot !== settingsSnapshot || settings.isMaintenance || !reason.trim()) return;
+          setConfirmOpen(false);
+          setConfirmationSnapshot(null);
+          maintenance(1);
+        }}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setConfirmationSnapshot(null);
+        }}
       />
     </div>
   );
