@@ -14,10 +14,23 @@ export function CostGuardOverrideForm({ settings, api, onSuccess }: {
   const [confirm, setConfirm] = React.useState("");
   const [features, setFeatures] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState<string | null>(null);
+  // An external admin may replace or clear an override while this form is open.
+  // Never apply a confirmation entered for the previous authoritative snapshot.
+  const snapshot = JSON.stringify([settings.exceptionUntil, settings.exceptionFeaturesJson]);
+  const [confirmedSnapshot, setConfirmedSnapshot] = React.useState(snapshot);
+  const snapshotCurrent = confirmedSnapshot === snapshot;
+  React.useEffect(() => {
+    setReason("");
+    setConfirm("");
+    setFeatures([]);
+    setMessage(null);
+    setConfirmedSnapshot(snapshot);
+  }, [snapshot]);
   const active = Boolean(settings.exceptionUntil && settings.exceptionUntil > Math.floor(Date.now() / 1000));
 
   const submit = async (clear: boolean): Promise<void> => {
-    if (busyRef.current) return;
+    if (busyRef.current || !snapshotCurrent || !reason.trim() ||
+        (clear ? confirm !== "CLEAR" : confirm !== "OVERRIDE" || features.length === 0)) return;
     busyRef.current = true;
     setBusy(true);
     setMessage(null);
@@ -70,9 +83,9 @@ export function CostGuardOverrideForm({ settings, api, onSuccess }: {
         placeholder={active ? "有効化はOVERRIDE、解除はCLEAR" : "OVERRIDE"} disabled={busy} />
       <div style={{ display: "flex", gap: 8 }}>
         <button type="button" className="fn-btn fn-btn-warning fn-btn-sm"
-          disabled={busy || confirm !== "OVERRIDE" || !reason.trim() || features.length === 0} onClick={() => void submit(false)}>15分有効化</button>
+          disabled={busy || !snapshotCurrent || confirm !== "OVERRIDE" || !reason.trim() || features.length === 0} onClick={() => void submit(false)}>15分有効化</button>
         <button type="button" className="fn-btn fn-btn-danger fn-btn-sm"
-          disabled={busy || confirm !== "CLEAR" || !reason.trim()} onClick={() => void submit(true)}>即時解除</button>
+          disabled={busy || !snapshotCurrent || confirm !== "CLEAR" || !reason.trim()} onClick={() => void submit(true)}>即時解除</button>
       </div>
       {message ? <p role="status" style={{ fontSize: 12 }}>{message}</p> : null}
     </section>
