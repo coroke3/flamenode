@@ -100,9 +100,33 @@ test("MIG-0707 T05: send JSON and FormData with correct headers, preserves false
   assert.equal("content-type" in seen[1].init.headers, false);
 });
 
+test("fix(ops): non-2xx HTTP status must not accept an ok:true write body", async () => {
+  for (const status of [400, 403, 409, 500, 503]) {
+    const result = await send(async () => jsonResponse(status, { ok: true, message: "unexpected" }), "POST", "/api/admin/test");
+    assert.deepEqual(result, { status: "unavailable" }, `HTTP ${status} must fail closed`);
+  }
+  assert.deepEqual(await send(async () => jsonResponse(401, { ok: true }), "POST", "/api/admin/test"),
+    { status: "anonymous" }, "401 must not look like a successful write");
+  for (const status of [200, 201]) {
+    assert.deepEqual(await send(async () => jsonResponse(status, { ok: true }), "POST", "/api/admin/test"),
+      { status: "ok", data: { ok: true } }, `HTTP ${status} should remain successful`);
+  }
+  for (const status of [400, 401, 403, 409, 503]) {
+    const body = { ok: false, reason: status === 401 ? "unauthenticated" : "failed", message: "サーバー拒否" };
+    assert.deepEqual(await send(async () => jsonResponse(status, body), "POST", "/api/admin/test"),
+      { status: "ok", data: body }, `HTTP ${status} must preserve real failure details`);
+  }
+});
+
 test("MIG-0707 T05: send 401 without ok, invalid JSON and network errors", async () => {
   assert.deepEqual(await send(async () => jsonResponse(401, { error: "login" }), "POST", "/api/ops"),
     { status: "anonymous" });
+  for (const malformed of ["not-json", ""]) {
+    assert.deepEqual(await send(async () => new Response(malformed, { status: 401 }), "POST", "/api/ops"),
+      { status: "anonymous" }, "malformed or empty 401 still requires login");
+  }
+  assert.deepEqual(await send(async () => new Response("not-json", { status: 403 }), "POST", "/api/ops"),
+    { status: "unavailable" }, "malformed non-401 cannot be mistaken for authentication");
   assert.deepEqual(await send(async () => jsonResponse(200, { result: true }), "PUT", "/api/ops"),
     { status: "unavailable" });
   assert.deepEqual(await send(async () => new Response("oops", { status: 200 }), "DELETE", "/api/ops"),
