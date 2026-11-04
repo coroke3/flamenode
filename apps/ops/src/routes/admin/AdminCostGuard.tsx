@@ -149,7 +149,9 @@ const defaultApi = createAdminCostGuardApi();
 
 export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }): React.ReactElement {
   const [refresh, setRefresh] = React.useState(0);
-  const state = useApiResult((signal) => api.read(signal), "admin-cost-guard", refresh);
+  // A failed refresh must never leave privileged controls enabled with stale settings.
+  // Treat each refresh as a new read identity instead of retaining last-known data.
+  const state = useApiResult((signal) => api.read(signal), "admin-cost-guard:" + refresh);
   const redirect = state.status === "loading" ? null : adminReadRedirect(state);
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
