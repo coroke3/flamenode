@@ -240,6 +240,8 @@ test("MIG-0621 U02: 500-video sitemap snapshot matches CURRENT's independent rec
     generatedAt: [loaded.generated_at, eventBuild.index?.generatedAt],
     now: new Date(NOW * 1000),
   });
+  assert.ok(sitemap.every((row) => new URL(row.url).origin === "https://flamenode.net"),
+    "canonical sitemap entries must remain on the configured site origin");
   const paths = sitemap.map((row) => new URL(row.url).pathname);
   assert.deepEqual(paths.slice(7, 7 + publishedVideos.length),
     publishedVideos.map((video) => videoPageHref(video)),
