@@ -511,7 +511,7 @@ test("MIG-0734 privileged notification actions fail closed for URL dot segments 
   const api=createAdminNotificationsApi(async(path,init)=>{sent.push({path,init});return response(200,{ok:true});});
   // encodeURIComponent(".") and encodeURIComponent("..") are unchanged.
   // A Fetch URL would collapse these segments and target an unintended admin route.
-  for(const id of [".",".."," . "," .. ","","  ","a".repeat(129),"\\uD800"]){
+  for(const id of [".",".."," . "," .. ","","  ","a".repeat(129),String.fromCharCode(0xD800)]){
     for(const action of [
       ()=>api.retry(id),()=>api.cancel(id,"reason"),()=>api.forceResend(id),
     ]){
