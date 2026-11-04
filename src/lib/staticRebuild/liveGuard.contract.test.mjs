@@ -53,8 +53,27 @@ test("live API micro-cache stores only successful non-null payload strings", () 
   );
   assert.match(
     source,
-    /return "public, s-maxage=5, stale-while-revalidate=30"/,
+    /return "no-store"/,
   );
+});
+
+test("private event transition is checked before serving a cached CURRENT response", async () => {
+  const sourceApi = await readFile(new URL("./liveApi.ts", import.meta.url), "utf8");
+  const checkIndex = source.indexOf("await isLiveEventPublic(db, id)");
+  const cacheRead = source.indexOf("isolateMicroCacheGet(microCacheKey)");
+  const sendResponse = source.indexOf("return new NextResponse(body");
+  assert.ok(checkIndex > cacheRead && checkIndex < sendResponse,
+    "cached CURRENT payload must re-check public visibility before response");
+  const helper = sourceApi.slice(sourceApi.indexOf("export async function isLiveEventPublic("),
+    sourceApi.indexOf("export async function getLiveEventSummary("));
+  assert.ok(helper.includes('eq(events.visibility_status, "public")'),
+    "visibility helper must enforce public status at the DB layer");
+  assert.ok(helper.includes("eq(events.id, eventId)"),
+    "visibility check must be scoped to the requested event");
+  assert.ok(source.includes('error: "not_found"'),
+    "private events must respond 404 after cache hits");
+  assert.match(source, /return "no-store"/,
+    "CDN may not retain public content after an event becomes private");
 });
 
 test("live API routes pass a stable route name for the cache key", async () => {
