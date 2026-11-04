@@ -111,7 +111,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         </Link>
       </p>
 
-      {!data.error && unhealthyLeaseCount > 0 ? (
+      {data.error ? null : unhealthyLeaseCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
           <strong>配送リース期限超過・欠損 {unhealthyLeaseCount} 件</strong>
           {" "}— 期限超過は毎時 Recovery Cron の回収対象です。欠損行または10分以上続く場合はWorkerとD1を確認してください。
