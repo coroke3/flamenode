@@ -281,6 +281,42 @@ test("MIG-0734 T03 disabled-features form sends the rendered value as the CAS to
   });
 });
 
+test("MIG-0734 T03 external CAS refresh invalidates prior APPLY confirmation and selections",async()=>{
+  await inDom(async(dom,root)=>{
+    const calls=[];
+    const api={setDisabled:async(reason,confirm,features,expected)=>{
+      calls.push({reason,confirm,features,expected});return {ok:true};
+    }};
+    const render=raw=>h(CostGuardDisabledFeaturesForm,{
+      settings:{...settings,disabledFeaturesJson:raw},api,onSuccess:()=>{},
+    });
+    const before='["edit_video"]',after='["like_or_bookmark"]';
+    await React.act(async()=>root.render(render(before)));
+    const fields=[...dom.window.document.querySelectorAll("input:not([type=checkbox])")];
+    const button=byText(dom,"無効化設定を保存");
+    await type(dom,fields[0],"前の設定に対する理由");
+    await type(dom,fields[1],"APPLY");
+    assert.equal(button.disabled,false);
+    // An unrelated admin saved new settings and this page silently refreshed.
+    // Previously reason+APPLY remained armed with the new CAS token.
+    await React.act(async()=>root.render(render(after)));
+    assert.equal(fields[0].value,"","previous rationale must not be reused");
+    assert.equal(fields[1].value,"","previous APPLY token must not be reused");
+    assert.equal(button.disabled,true);
+    const checked=[...dom.window.document.querySelectorAll("input[type=checkbox]:checked")];
+    assert.equal(checked.length,1);
+    assert.equal(checked[0].parentElement.textContent.includes("like_or_bookmark"),true);
+    await React.act(async()=>button.click());
+    assert.deepEqual(calls,[],"stale confirmation must not submit with the new CAS");
+    await type(dom,fields[0],"新しい設定を確認");
+    await type(dom,fields[1],"APPLY");
+    await React.act(async()=>button.click());
+    assert.deepEqual(calls,[{
+      reason:"新しい設定を確認",confirm:"APPLY",features:["like_or_bookmark"],expected:after,
+    }]);
+  });
+});
+
 test("MIG-0734 T04 force-resend and bulk-retry cancelled confirmation never calls API",async()=>{
   await inDom(async(dom,root)=>{
     let calls=0;
