@@ -110,9 +110,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         ))}
       </nav>
 
+      {/* URL navigation must remount uncontrolled filter fields in the persistent SPA view. */}
       <form
-        // A SPA route change preserves this component instance. Remount uncontrolled
-        // inputs when URL filters change so back/forward and clear links stay in sync.
         key={notificationFilterHref(filters)}
         method="get"
         role="search"
