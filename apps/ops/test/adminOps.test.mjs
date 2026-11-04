@@ -624,7 +624,7 @@ test("MIG-0734 privileged screens hide stale data and writes when a same-page re
     await React.act(async()=>byText(dom,"再試行").click());
     assert.equal(writes,1);
     assert.equal(reads,2);
-    assert.equal(dom.window.document.querySelector('[aria-label="通知配信状況"]'),null);
+    assert.equal(dom.window.document.querySelector("tbody"),null,"failed refresh removes the previous notification rows");
     assert.equal(byText(dom,"強制再送"),undefined,"no stale notification mutations after read failure");
     assert.equal(byText(dom,"payload"),undefined,"private payload is not exposed on failed refresh");
     assert.match(dom.window.document.querySelector('[role="alert"]')?.textContent??" ",/取得できません/);
