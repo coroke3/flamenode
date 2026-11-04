@@ -4,7 +4,7 @@
  * src/lib/staticRebuild/liveGuard.ts handleLiveApiGet + liveApi.ts.
  * Same contract: gate (id -> DB -> live_api_enabled per request) before the
  * 15s isolate micro-cache; only successful non-null bodies are cached;
- * success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`;
+ * success `Cache-Control: no-store` to prevent CDN retention after privacy changes;
  * every error body is JSON with `Cache-Control: no-store`.
  * Raw D1 (no drizzle): read-only, <= 2 queries per uncached request.
  */
