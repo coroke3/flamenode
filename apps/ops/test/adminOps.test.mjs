@@ -205,6 +205,40 @@ test("MIG-0734 T01 maintenance ON uses ConfirmDialog and writes only after confi
   });
 });
 
+test("MIG-0734 T01 stale maintenance confirmation is invalidated on an external settings refresh",async()=>{
+  await inDom(async(dom,root)=>{
+    const calls=[];
+    const api={
+      setMode:async()=>({ok:true}),
+      setMaintenance:async(enabled,reason)=>{calls.push({enabled,reason});return {ok:true};},
+    };
+    const initial={...settings,reason:"担当者の確認",updatedAt:100};
+    const render=async(next)=>React.act(async()=>root.render(h(CostGuardForm,{
+      settings:next,api,onSuccess:()=>{},
+    })));
+    await render(initial);
+    await React.act(async()=>byText(dom,"ONにする").click());
+    assert.ok(dom.window.document.querySelector('[role="alertdialog"]'),"confirmation opened");
+
+    // Another administrator changed the mode while our dialog remained open.
+    // Neither the previous confirmation nor its reason may authorize that new state.
+    await render({...initial,mode:"economy",updatedAt:101});
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'),null,
+      "external state refresh closes the stale dialog");
+    assert.deepEqual(calls,[],"no stale maintenance write");
+    await React.act(async()=>byText(dom,"ONにする").click());
+    const fresh=dom.window.document.querySelector('[role="alertdialog"]');
+    assert.ok(fresh,"new operator confirmation is possible after refresh");
+    await React.act(async()=>fresh.querySelector(".fn-btn-danger").click());
+    assert.deepEqual(calls,[{enabled:true,reason:"担当者の確認"}]);
+
+    // A concurrent maintenance-ON also invalidates a pending ON confirmation.
+    await render({...initial,mode:"maintenance",isMaintenance:true,updatedAt:102});
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'),null);
+    assert.equal(byText(dom,"OFFにする").disabled,false);
+  });
+});
+
 test("MIG-0734 T01 maintenance and mode need a reason; failed write shows the server message and keeps the form",async()=>{
   await inDom(async(dom,root)=>{
     let refreshed=0;
