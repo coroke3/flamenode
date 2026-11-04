@@ -45,6 +45,8 @@ export function safeBuildEnv(original:NodeJS.ProcessEnv,snapshotDir:string,gener
     if (
       /(?:^|[_:])(?:TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|ACCESS_KEY(?:_ID)?|CREDENTIALS?|AUTH)(?:$|[_:])/i.test(key) ||
       /(?:^|[_:])AUTH_?TOKEN(?:$|[_:])/i.test(key) ||
+      // Discord/Slack webhook URLs are bearer credentials despite lacking TOKEN/SECRET in their names.
+      /(?:^|[_:])WEBHOOK_URL(?:$|[_:])/i.test(key) ||
       /(?:^|[_:])_?AUTHTOKEN$/i.test(key) ||
       /^(?:DATABASE_URL|POSTGRES_URL|REDIS_URL)$/i.test(key)
     ) delete env[key];
