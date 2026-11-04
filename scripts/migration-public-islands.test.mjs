@@ -475,4 +475,7 @@ test("regression: admin, edit and event management detail links validate YouTube
     assert.ok(source.includes("href={videoPageHref("), filename + " must use checked same-origin video href");
     assert.ok(!source.includes("href={`/${youtubeVideoId"), filename + " must not interpolate a raw YouTube alias");
   }
+  const adminTabs = fs.readFileSync(new URL("../src/components/admin/AdminVideoTabs.tsx", import.meta.url), "utf8");
+  assert.ok(adminTabs.includes("href: videoPageHref({ id: videoId, youtube_video_id: youtubeVideoId })"));
+  assert.ok(!adminTabs.includes("const publicId = encodeURIComponent"));
 });
