@@ -193,3 +193,30 @@ test("P2: duplicate Source families sections fail closed instead of using only t
  const example=original+"\n```md\n## Source families (example only)\n```\n";
  assert.deepEqual(parseFamilyRows(example).errors,[]);
 });
+
+test("P2: moved Update rule cannot hide malformed owner rows after the boundary", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const file = "src/lib/video/private/secret.ts";
+  const original = matrix([], [parent, child])
+    .replace(familyRow(child), familyRow(child, "MIG-0619"));
+  assert.match(
+    validateLedgerCompleteness({ matrix: original, status, trackedFiles: [file] }).join("\\n"),
+    /ambiguous family ownership/,
+  );
+  const damagedRows = [
+    "x | src/lib/video/private/** | HELPER | MIG-0619 | note | NOT_STARTED |",
+    "x src/lib/video/private/** HELPER MIG-0619 note NOT_STARTED",
+    "x | damaged path | HELPER | MIG-0619 | note | NOT_STARTED |",
+    "| src/lib/video/private/** | HELPER | MIG-0619 | note | NOT_STARTED |",
+  ];
+  for (const row of damagedRows) {
+    const moved = original
+      .replace(familyRow(child, "MIG-0619"), "**Update rule:** moved\\n" + row)
+      .replace(/\\n\\*\\*Update rule:\\*\\* x$/, "");
+    const parsed = parseFamilyRows(moved);
+    assert.match(parsed.errors.join("\\n"), /family row appears after Update rule boundary/, row);
+    const errors = validateLedgerCompleteness({ matrix: moved, status, trackedFiles: [file] });
+    assert.match(errors.join("\\n"), /family row appears after Update rule boundary/, row);
+  }
+});
