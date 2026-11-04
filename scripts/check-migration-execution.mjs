@@ -50,6 +50,8 @@ export const REQUIRED_DECISIONS = Object.freeze({
 export function hasValidSkipApprovalRecord(statusText, id) {
   if (!/^MIG-\d{4}$/.test(id)) return false;
   let fence = null;
+  let inTaskTable = false;
+  let expectSeparator = false;
   const records = [];
   const visibleTasks = new Map();
   const outsideComments = statusText.replace(/<!--[\s\S]*?(?:-->|$)/g, match => match.replace(/[^\n]/g, " "));
@@ -61,9 +63,28 @@ export function hasValidSkipApprovalRecord(statusText, id) {
       continue;
     }
     if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
-    // Only real, unquoted/unfenced STATUS task rows count as alternatives.
-    // A forged DONE row inside an example or HTML comment is not evidence.
-    const cells = line.startsWith("|") ? line.split("|").map(cell => cell.trim()) : [];
+    // An arbitrary table/example elsewhere in STATUS is not the canonical
+    // task inventory. Only cells under ID/Task/State/Depends on headers count.
+    const trimmed = line.trim();
+    if (!trimmed || /^#{1,6}\s/.test(trimmed)) {
+      inTaskTable = false;
+      expectSeparator = false;
+    }
+    if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(?:\s*Acceptance\s*\|)?$/.test(trimmed)) {
+      inTaskTable = true;
+      expectSeparator = true;
+      continue;
+    }
+    if (expectSeparator) {
+      const parts = trimmed.split("|").slice(1, -1).map(cell => cell.trim());
+      if (!trimmed.startsWith("|") || !trimmed.endsWith("|") ||
+          ![4,5].includes(parts.length) ||
+          !parts.every(cell => /^:?-{3,}:?$/.test(cell))) inTaskTable = false;
+      expectSeparator = false;
+      continue;
+    }
+    // Only actual unquoted/unfenced task-table rows can complete an alternate.
+    const cells = inTaskTable && line.startsWith("|") ? line.split("|").map(cell => cell.trim()) : [];
     if ((cells.length === 6 || cells.length === 7) && /^MIG-\d{4}$/.test(cells[1])) {
       const previous = visibleTasks.get(cells[1]);
       // Ambiguous duplicate records fail closed; main STATUS validation also rejects them.
