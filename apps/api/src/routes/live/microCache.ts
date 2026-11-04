@@ -7,7 +7,10 @@ const entries = new Map<string, Entry>();
 export function isolateMicroCacheGet(key: string, nowMs: number = Date.now()): string | null {
   const entry = entries.get(key);
   if (!entry) return null;
-  if (nowMs >= entry.expiresAt) {
+  // A wall-clock rollback must not extend a private/public snapshot's TTL.
+  // The insertion time is recoverable without changing the cache entry shape.
+  if (!Number.isFinite(nowMs) || nowMs < entry.expiresAt - ISOLATE_MICRO_CACHE_TTL_MS ||
+      nowMs >= entry.expiresAt) {
     entries.delete(key);
     return null;
   }
@@ -17,6 +20,10 @@ export function isolateMicroCacheGet(key: string, nowMs: number = Date.now()): s
 export function isolateMicroCacheSet(key: string, value: string, nowMs: number = Date.now()): void {
   if (typeof value !== "string") {
     throw new TypeError("isolateMicroCache stores finished strings only");
+  }
+  // NaN would make expiresAt=NaN and bypass every expiry comparison.
+  if (!Number.isFinite(nowMs)) {
+    throw new RangeError("isolateMicroCache requires a finite timestamp");
   }
   entries.delete(key);
   if (entries.size >= ISOLATE_MICRO_CACHE_MAX_ENTRIES) {
