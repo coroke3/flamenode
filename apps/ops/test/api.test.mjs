@@ -121,6 +121,12 @@ test("fix(ops): non-2xx HTTP status must not accept an ok:true write body", asyn
 test("MIG-0707 T05: send 401 without ok, invalid JSON and network errors", async () => {
   assert.deepEqual(await send(async () => jsonResponse(401, { error: "login" }), "POST", "/api/ops"),
     { status: "anonymous" });
+  for (const malformed of ["not-json", ""]) {
+    assert.deepEqual(await send(async () => new Response(malformed, { status: 401 }), "POST", "/api/ops"),
+      { status: "anonymous" }, "malformed or empty 401 still requires login");
+  }
+  assert.deepEqual(await send(async () => new Response("not-json", { status: 403 }), "POST", "/api/ops"),
+    { status: "unavailable" }, "malformed non-401 cannot be mistaken for authentication");
   assert.deepEqual(await send(async () => jsonResponse(200, { result: true }), "PUT", "/api/ops"),
     { status: "unavailable" });
   assert.deepEqual(await send(async () => new Response("oops", { status: 200 }), "DELETE", "/api/ops"),
