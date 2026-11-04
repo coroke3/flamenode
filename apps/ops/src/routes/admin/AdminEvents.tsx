@@ -3,12 +3,36 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { AdminEventsResponse } from "@flamenode/contracts";
 import { eventDisplayState, eventIndexQuery, formatEventUnix, readAdminEvents } from "../../api/adminEvents.js";
 import type { OpsFetch, OpsResult } from "../../api/read.js";
+import { IME_COMPOSING_FORM_ATTR, isImeComposingForm } from "../../components/shared/imeSafeSearch.js";
 
 /** MIG-0728 U02: CURRENT /admin/events; no router mount until MIG-0726 owner releases it. */
 export function AdminEvents({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactElement {
   const [params, setParams] = useSearchParams();
   const key = eventIndexQuery(params);
   const [result, setResult] = React.useState<OpsResult<AdminEventsResponse> | null>(null);
+  // Match CURRENT AutoSubmitSelect/ImeSafeGetForm: an IME candidate commit
+  // must not submit a partially converted search value.
+  const composingTimer = React.useRef<number | null>(null);
+  React.useEffect(() => () => {
+    if (composingTimer.current !== null) window.clearTimeout(composingTimer.current);
+  }, []);
+  const clearComposingTimer = (): void => {
+    if (composingTimer.current !== null) {
+      window.clearTimeout(composingTimer.current);
+      composingTimer.current = null;
+    }
+  };
+  const beginComposition = (form: HTMLFormElement): void => {
+    clearComposingTimer();
+    form.setAttribute(IME_COMPOSING_FORM_ATTR, "");
+  };
+  const endComposition = (form: HTMLFormElement): void => {
+    clearComposingTimer();
+    composingTimer.current = window.setTimeout(() => {
+      form.removeAttribute(IME_COMPOSING_FORM_ATTR);
+      composingTimer.current = null;
+    }, 0);
+  };
   React.useEffect(() => {
     const controller = new AbortController();
     setResult(null); // Do not show stale or cross-account privileged data.
@@ -19,6 +43,7 @@ export function AdminEvents({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactEle
   }, [key, fetchFn]);
 
   function change(form: HTMLFormElement): void {
+    if (isImeComposingForm(form)) return;
     const fd = new FormData(form);
     const next = new URLSearchParams();
     for (const field of ["q", "filter", "sort"]) {
@@ -36,16 +61,29 @@ export function AdminEvents({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactEle
     </header>
     <nav aria-label="イベント管理"><Link to="/admin/event-groups">イベントグループ</Link>{" / "}
       <Link to="/admin/events/templates">テンプレート</Link></nav>
-    <form className="fn-form-grid" role="search" onSubmit={e => {
-      e.preventDefault();
-      change(e.currentTarget);
-    }}>
+    <form className="fn-form-grid" role="search"
+      onCompositionStart={e => beginComposition(e.currentTarget)}
+      onCompositionEnd={e => endComposition(e.currentTarget)}
+      onKeyDown={e => {
+        const form = e.currentTarget;
+        if (e.nativeEvent.isComposing) {
+          if (!isImeComposingForm(form)) beginComposition(form);
+        } else if (e.nativeEvent.keyCode === 229 && !isImeComposingForm(form)) {
+          // Windows IME may send Process/229 without compositionstart.
+          beginComposition(form);
+          endComposition(form);
+        }
+      }}
+      onSubmit={e => {
+        e.preventDefault();
+        change(e.currentTarget);
+      }}>
       <label>タイトル / ID で検索
         <input className="fn-input" type="search" name="q" defaultValue={current.get("q") ?? ""} key={"q:" + key} />
       </label>
       <label>公開状態
         <select className="fn-select" name="filter" value={current.get("filter") ?? "all"}
-          onChange={e => { e.currentTarget.form?.requestSubmit(); }}>
+          onChange={e => { const form = e.currentTarget.form; if (form && !isImeComposingForm(form)) form.requestSubmit(); }}>
           <option value="all">全イベント</option>
           <option value="public">public</option>
           <option value="private">private</option>
@@ -54,7 +92,7 @@ export function AdminEvents({ fetchFn }: { fetchFn?: OpsFetch }): React.ReactEle
       </label>
       <label>開催日
         <select className="fn-select" name="sort" value={current.get("sort") ?? "newest"}
-          onChange={e => { e.currentTarget.form?.requestSubmit(); }}>
+          onChange={e => { const form = e.currentTarget.form; if (form && !isImeComposingForm(form)) form.requestSubmit(); }}>
           <option value="newest">開催日 新→旧</option>
           <option value="oldest">開催日 旧→新</option>
           <option value="upcoming">開催日 早い順</option>
