@@ -143,6 +143,71 @@ test("MIG-0728 U02: screens render CURRENT controls, safe links and no write bef
 });
 
 
+test("MIG-0728 U02: IME composition blocks automatic and manual event searches until commit tick ends", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/admin/events",
+  });
+  const keys = ["window", "document", "FormData", "Element", "HTMLElement", "Node", "navigator"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const wasAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) {
+    Object.defineProperty(globalThis, key, {
+      configurable: true, writable: true, value: dom.window[key],
+    });
+  }
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const root = createRoot(dom.window.document.getElementById("root"));
+  const paths = [];
+  const fetchFn = async path => {
+    paths.push(path);
+    const q = new URL(path, "https://flamenode.test").searchParams.get("q") ?? "";
+    return json(200, { ...events, q });
+  };
+  try {
+    await React.act(async () => root.render(React.createElement(MemoryRouter, {
+      initialEntries: ["/admin/events?q=initial"],
+    }, React.createElement(AdminEvents, { fetchFn }))));
+    assert.equal(paths.length, 1);
+    const form = dom.window.document.querySelector('form[role="search"]');
+    const input = form.querySelector('input[name="q"]');
+    const filter = form.querySelector('select[name="filter"]');
+    const nativeInputSet = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value").set;
+    const nativeSelectSet = Object.getOwnPropertyDescriptor(dom.window.HTMLSelectElement.prototype, "value").set;
+    await React.act(async () => {
+      nativeInputSet.call(input, "変換途中");
+      input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      input.dispatchEvent(new dom.window.CompositionEvent("compositionstart", { bubbles: true }));
+    });
+    assert.equal(form.hasAttribute("data-fn-ime-composing"), true);
+    await React.act(async () => {
+      nativeSelectSet.call(filter, "public");
+      filter.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(paths.length, 1, "select auto-submit and form submit must not navigate during IME conversion");
+    await React.act(async () => {
+      input.dispatchEvent(new dom.window.CompositionEvent("compositionend", { bubbles: true }));
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(paths.length, 1, "the IME commit event tick must not trigger search");
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(form.hasAttribute("data-fn-ime-composing"), false);
+    await React.act(async () => {
+      form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true }));
+    });
+    assert.equal(paths.length, 2, "search works after composition has ended");
+    assert.equal(new URL(paths[1], "https://flamenode.test").searchParams.get("q"), "変換途中");
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, old] of previous) {
+      if (old) Object.defineProperty(globalThis, key, old);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = wasAct;
+    dom.window.close();
+  }
+});
+
 test("MIG-0728 T04: cancel never calls DELETE; confirm calls once and refreshes", async () => {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "https://example.com/admin/events/templates" });
   const oldWindow = globalThis.window;
