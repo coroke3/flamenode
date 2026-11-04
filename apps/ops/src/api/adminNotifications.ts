@@ -3,7 +3,7 @@
 import {
   AdminNotificationCancelBodySchema, AdminNotificationsResponseSchema, type AdminNotificationsResponse,
 } from "@flamenode/contracts";
-import { postAdminBody } from "./adminCostGuard.js";
+import { postAdminBody, type AdminWriteResult } from "./adminCostGuard.js";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 
 export type NotificationFilters = { status: string; cat: string; type: string; event: string; q: string };
@@ -44,13 +44,30 @@ export async function fetchAdminNotifications(
 }
 
 export function createAdminNotificationsApi(fetchFn: OpsFetch = (url, init) => fetch(url, init)) {
-  const path = (id: string, action: string) => "/api/admin/notifications/" + encodeURIComponent(id) + "/" + action;
+  const path = (id: string, action: "retry" | "cancel" | "force-resend"): string | null => {
+    const normalized = id.trim();
+    // encodeURIComponent leaves "." and ".." unchanged; URL normalization would
+    // reroute a privileged POST outside /notifications/:id/:action.
+    if (!normalized || normalized.length > 128 || normalized === "." || normalized === "..") return null;
+    try {
+      return "/api/admin/notifications/" + encodeURIComponent(normalized) + "/" + action;
+    } catch {
+      // A lone UTF-16 surrogate is not a valid URI component.
+      return null;
+    }
+  };
+  const postId = (id: string, action: "retry" | "cancel" | "force-resend", reason?: string): Promise<AdminWriteResult> => {
+    const target = path(id, action);
+    if (target === null) return Promise.resolve({ ok: false, message: "idが不正です。" });
+    return action === "cancel"
+      ? postAdminBody(fetchFn, target, AdminNotificationCancelBodySchema, { reason: reason ?? "" })
+      : postAdminBody(fetchFn, target, null);
+  };
   return {
     list: (filters: NotificationFilters, signal?: AbortSignal) => fetchAdminNotifications(fetchFn, filters, signal),
-    retry: (id: string) => postAdminBody(fetchFn, path(id, "retry"), null),
-    cancel: (id: string, reason: string) =>
-      postAdminBody(fetchFn, path(id, "cancel"), AdminNotificationCancelBodySchema, { reason }),
-    forceResend: (id: string) => postAdminBody(fetchFn, path(id, "force-resend"), null),
+    retry: (id: string) => postId(id, "retry"),
+    cancel: (id: string, reason: string) => postId(id, "cancel", reason),
+    forceResend: (id: string) => postId(id, "force-resend"),
     retryFailed: () => postAdminBody(fetchFn, "/api/admin/notifications/retry-failed", null),
   };
 }
