@@ -51,7 +51,8 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   if (!/^MIG-\d{4}$/.test(id)) return false;
   let fence = null;
   const records = [];
-  for (const line of statusText.replace(/\r\n/g, "\n").split("\n")) {
+  const outsideComments = statusText.replace(/<!--[\s\S]*?(?:-->|$)/g, match => match.replace(/[^\n]/g, " "));
+  for (const line of outsideComments.replace(/\r\n/g, "\n").split("\n")) {
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
       if (marker && marker[1][0] === fence.char &&
