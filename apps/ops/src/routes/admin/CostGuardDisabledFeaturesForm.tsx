@@ -16,10 +16,20 @@ export function CostGuardDisabledFeaturesForm({ settings, api, onSuccess }: {
   const [reason, setReason] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
   const [message, setMessage] = React.useState<string | null>(null);
-  React.useEffect(() => { setFeatures(initial.features); }, [initial.features]);
+  // A background admin read can change the authoritative CAS token while this
+  // form is open. Never reuse an APPLY confirmation from the previous snapshot.
+  const [confirmedSnapshot, setConfirmedSnapshot] = React.useState(disabledFeaturesJson);
+  const snapshotCurrent = confirmedSnapshot === disabledFeaturesJson;
+  React.useEffect(() => {
+    setFeatures(initial.features);
+    setReason("");
+    setConfirm("");
+    setMessage(null);
+    setConfirmedSnapshot(disabledFeaturesJson);
+  }, [initial.features, disabledFeaturesJson]);
 
   const submit = async (): Promise<void> => {
-    if (busyRef.current) return;
+    if (busyRef.current || !snapshotCurrent || confirm !== "APPLY" || !reason.trim()) return;
     busyRef.current = true;
     setBusy(true);
     setMessage(null);
@@ -74,7 +84,7 @@ export function CostGuardDisabledFeaturesForm({ settings, api, onSuccess }: {
         <input className="fn-input" value={confirm} aria-label="確認文字列" onChange={(event) => setConfirm(event.currentTarget.value)}
           placeholder="APPLY" disabled={busy} />
       </div>
-      <button type="button" className="fn-btn fn-btn-warning fn-btn-sm" disabled={busy || confirm !== "APPLY" || !reason.trim()}
+      <button type="button" className="fn-btn fn-btn-warning fn-btn-sm" disabled={busy || !snapshotCurrent || confirm !== "APPLY" || !reason.trim()}
         onClick={() => void submit()} style={{ marginTop: 8 }}>
         無効化設定を保存
       </button>
