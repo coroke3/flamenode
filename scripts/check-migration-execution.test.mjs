@@ -219,8 +219,9 @@ test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval
  ]) {
   assert.equal(hasValidSkipApprovalRecord(bad,"MIG-0105"),false,bad);
  }
- assert.equal(hasValidSkipApprovalRecord(withDoneAlternative+
-   "\n| MIG-0108 | duplicate alternative | DONE | — |","MIG-0105"),false);
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+   "| MIG-0108 | completed alternative | DONE | — |\n",
+   "| MIG-0108 | completed alternative | DONE | — |\n| MIG-0108 | duplicate alternative | DONE | — |\n"),"MIG-0105"),false);
  for(const state of ["READY","SKIPPED","BLOCKED","IN_PROGRESS"]) {
    assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
      "| MIG-0108 | completed alternative | DONE |",
