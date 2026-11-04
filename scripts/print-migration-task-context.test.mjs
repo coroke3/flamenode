@@ -280,6 +280,7 @@ test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows",
 test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()=>{
  const rows=[
    "| MIG-0105 | obsolete gate | SKIPPED | — |",
+   "| MIG-0108 | approved alternate | DONE | — |",
    "| MIG-0401 | independent PoC | READY | MIG-0105 |",
  ].join("\n");
  const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789 | ALTERNATIVE=MIG-0108";
@@ -294,6 +295,7 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    approval.replace(" | ALTERNATIVE=MIG-0108",""),
    approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE="),
    approval.replace("APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789","APPROVAL="),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
    approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
    approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
    approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
@@ -306,5 +308,20 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    "<!--\n"+approval+"\n-->",
  ]) {
    assert.equal(pickNextTask(rows+"\n"+invalid,"").selected,null,invalid);
+ }
+ for (const invalidState of ["READY","BLOCKED","SKIPPED","IN_PROGRESS"]) {
+   const invalidRows = rows.replace("| MIG-0108 | approved alternate | DONE |",
+     "| MIG-0108 | approved alternate | " + invalidState + " |");
+   assert.equal(pickNextTask(invalidRows+"\n"+approval,"").selected,null,invalidState);
+ }
+ assert.equal(pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,"").selected,null,
+   "duplicate DONE alternative must not count");
+ for (const hidden of [
+   "<!--\n| MIG-9999 | fake alternative | DONE | — |\n-->",
+   "```md\n| MIG-9999 | fake alternative | DONE | — |\n```",
+ ]) {
+   const withoutRealAlt = rows.replace("| MIG-0108 | approved alternate | DONE | — |\n","");
+   assert.equal(pickNextTask(withoutRealAlt+"\n"+hidden+"\n"+
+     approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"").selected,null,hidden);
  }
 });
