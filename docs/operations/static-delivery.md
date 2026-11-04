@@ -159,20 +159,21 @@ rows and does not replace usable public static detail.
 
 正本定数: `src/lib/publicData/publicJsonCacheTtl.ts`（web）、`workers/shared/staticR2CacheControl.ts`（R2 PUT）。
 
-公開メディア (`/api/media/{key}`) はkeyを検証してからCache APIを確認し、hitならCloudflare
-binding取得・D1 ACL照合・R2読取へ進まず返す。miss時だけD1の公開ACLを確認し、安全なMIME /
-サイズのR2 objectを返す。成功レスポンスのCache API keyは実際のzone hostとcanonical path
-（query stringを除外）を使い、既存の `max-age=86400` / `s-maxage=604800` を維持する。
-Workers Cache API はPoP単位で、`stale-while-revalidate` 指令を `cache.put` / `cache.match`
-では処理しない。isolate内ACL cacheはbooleanと期限だけを保持し、D1 bindingやPromiseを持たない。
-positive 10分 / negative 1分を維持し、D1 quota errorはretryせず503でfail-closedする。
-日次Free row-read quota到達後はUTC 00:00のresetまでD1 query自体が失敗するため、retryでは
-回復しない。Web・Cron横断のrow-read量はD1 Dashboard/Analyticsで確認し、`meta.rows_read`と
-併せて大きいquery/full scanを特定する（上限・usage計測は[Cloudflare D1 pricing]
-(https://developers.cloudflare.com/d1/platform/pricing/)と[limits]
-(https://developers.cloudflare.com/d1/platform/limits/)を正本とする）。公開解除後に以前の公開画像が
-共有cacheに最大7日残る既存性質は変えない。公開枠アイコンは各リクエストでslot / event ACLを
-再確認した後にR2 Cache APIを使う。about statsもqueryを除いたcanonical keyでR2結果を5分保存する。
+公開メディア (`/api/media/{key}`) はkey検証後、**Cache APIの前に毎回D1の公開ACLを照合**する。
+公開権限が取り消された場合は既存のCache API 200/304が残っていても404を返し、D1障害時は503でfail-closedする。
+成功したリクエストだけ、実際のzone hostとcanonical path（query除外）をkeyとするCache APIから
+画像byteを再利用する。内部Cache API用のstorage copyには `s-maxage=604800` を設定するが、
+HTTP 200/304/公開枠アイコンの公開レスポンスは必ず `Cache-Control: no-store` とする。
+従来のisolate内ACL cache（positive 10分 / negative 1分）は廃止。画像リクエスト1件につき
+D1 readが最低1回必要となり、R2 GETはCache API HITなら省略できる。D1 free枠、レイテンシへの影響は
+導入前に計測・承認する。既にブラウザ/CDNに保存済みの旧 `public, s-maxage=604800` レスポンスは
+コード更新だけでは失効しないため、必要に応じて本番のcache purgeを人間が別途実施する。
+`static_artifacts` の `public_media` 行は現行SQLで明示的な公開許可として扱うため、
+その公開権限の取消は行の無効化が必要となる。公開枠アイコンも各リクエストのslot/event ACL後に
+内部byte cacheを使い、共有HTTP cacheには保存させない。
+D1 quota errorはretryせず503でfail-closedする。日次Free row-read quota到達後はUTC 00:00のresetまで
+D1 query自体が失敗するため、Web・Cron横断のrow-read量はD1 Dashboard/Analyticsと
+`meta.rows_read`で監視する。about statsのcanonical keyによる5分Cacheは別実装として維持する。
 
 YouTube thumbnail proxyはR2を使わない。Worker FreeのCPU上限を抑えるため、IDとsizeを
 allowlist検証後にCache APIを参照し、upstream bodyはsize別に96KiB〜1MiBで制限する。
