@@ -11,7 +11,6 @@ import {
   ADMIN_NOTIFICATION_CATEGORY_OPTIONS, getNotificationStatusLabel, isTerminalNotificationFailure,
   statusBadgeClass,
 } from "../../components/notifications/notificationDisplay.js";
-import { AutoSubmitSelect } from "../../components/shared/AutoSubmitSelect.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
 import { EmptyState } from "../../components/shared/EmptyState.js";
 import { FnTable } from "../../components/shared/FnTable.js";
@@ -55,6 +54,21 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
   const unhealthyLeaseCount = counts.unhealthyLease;
   const filterInput = { type: filters.type, event: filters.event, q: filters.q, cat: filters.cat };
   const hasDetailFilter = Boolean(filters.type || filters.event || filters.q || filters.cat !== "all");
+  // D-17-7: category changes must update React Router query state, not navigateGetForm's
+  // document-level location.assign(). Preserve the same GET form field names/normalization.
+  const submitFilters = (form: HTMLFormElement): void => {
+    const next = new URLSearchParams();
+    for (const [key, value] of new FormData(form)) {
+      if (typeof value === "string" && value.trim()) next.set(key, value.trim());
+    }
+    if (onSearch) {
+      onSearch(next);
+    } else {
+      // Pure view fallback outside the SPA router.
+      const query = next.toString();
+      window.location.assign("/admin/notifications" + (query ? "?" + query : ""));
+    }
+  };
 
   return (
     <div>
@@ -118,22 +132,17 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         aria-label="通知の絞り込み"
         style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
         onSubmit={(event) => {
-          // D-17-7: the GET form writes the same query names to the URL; the read is re-run from it.
-          if (!onSearch) return;
           event.preventDefault();
-          const next = new URLSearchParams();
-          for (const [key, value] of new FormData(event.currentTarget)) {
-            if (typeof value === "string" && value.trim()) next.set(key, value.trim());
-          }
-          onSearch(next);
+          submitFilters(event.currentTarget);
         }}
       >
         {status !== "all" ? <input type="hidden" name="status" value={status} /> : null}
-        <AutoSubmitSelect name="cat" defaultValue={filters.cat} className="fn-input fn-input-sm" aria-label="カテゴリ">
+        <select name="cat" defaultValue={filters.cat} className="fn-input fn-input-sm" aria-label="カテゴリ"
+          onChange={(event) => { if (event.currentTarget.form) submitFilters(event.currentTarget.form); }}>
           {ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((option) => (
             <option key={option.key} value={option.key}>{option.label}</option>
           ))}
-        </AutoSubmitSelect>
+        </select>
         <input name="type" defaultValue={filters.type} placeholder="type 完全一致（例: x_id_approved）"
           aria-label="type 完全一致" className="fn-input fn-input-sm" style={{ minWidth: 220 }} />
         <input name="event" defaultValue={filters.event} placeholder="event_id 完全一致"
