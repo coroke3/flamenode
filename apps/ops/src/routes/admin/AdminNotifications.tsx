@@ -161,10 +161,17 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         onCompositionStart={(event) => beginComposition(event.currentTarget)}
         onCompositionEnd={(event) => finishComposition(event.currentTarget)}
         onKeyDown={(event) => {
-          // Some Windows IMEs emit keyCode 229 without a compositionstart event.
-          if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {
-            beginComposition(event.currentTarget);
-            finishComposition(event.currentTarget);
+          if (event.key !== "Enter") return;
+          const form = event.currentTarget;
+          if (event.nativeEvent.isComposing) {
+            // A conversion is still active: only compositionend may schedule removal.
+            // Restarting the timeout here would clear the guard before the IME commits.
+            if (!isImeComposingForm(form)) beginComposition(form);
+          } else if (event.nativeEvent.keyCode === 229 && !isImeComposingForm(form)) {
+            // Windows can send a commit Enter (229) without compositionstart.
+            // Keep the guard for the following implicit-submit tick.
+            beginComposition(form);
+            finishComposition(form);
           }
         }}
         onSubmit={(event) => {
