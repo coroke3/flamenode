@@ -318,8 +318,9 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    assert.ok(!invalidSelection.candidates.includes("MIG-0401"),
      invalidState+": unfinished alternate cannot unlock its SKIPPED dependent");
  }
- assert.equal(pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,"").selected,null,
-   "duplicate DONE alternative must not count");
+ assert.throws(() => pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,""),
+   /Duplicate task ID in migration:next: MIG-0108/,
+   "duplicate DONE alternative must fail closed instead of unlocking a dependency");
  for (const hidden of [
    "<!--\n| MIG-9999 | fake alternative | DONE | — |\n-->",
    "```md\n| MIG-9999 | fake alternative | DONE | — |\n```",
