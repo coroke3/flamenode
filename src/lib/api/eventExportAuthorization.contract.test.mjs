@@ -30,6 +30,10 @@ test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を�
     route,
     /async function readCachedPayload[\s\S]*assertNoForbiddenKeys\(parsed\)/,
   );
+  // A metadata marker is serialized Cache API data, not authority to skip
+  // the DTO leak check. Hono already validates every cached body.
+  assert.doesNotMatch(route, /if \(isTrustedCacheMetadata\(metadata, format\)\) return cached/);
+  assert.match(route, /metadata != null && !isTrustedCacheMetadata\(metadata, format\)/);
   assert.doesNotMatch(route, /export const runtime = "edge"/);
 });
 
