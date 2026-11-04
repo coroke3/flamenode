@@ -239,6 +239,32 @@ test("MIG-0734 T01 stale maintenance confirmation is invalidated on an external 
   });
 });
 
+test("MIG-0734 maintenance ON confirmation cannot reuse a changed audit reason",async()=>{
+  await inDom(async(dom,root)=>{
+    const calls=[];
+    const api={
+      setMode:async()=>({ok:true}),
+      setMaintenance:async(enabled,reason)=>{calls.push({enabled,reason});return {ok:true};},
+    };
+    await React.act(async()=>root.render(h(CostGuardForm,{
+      settings:{...settings,reason:"最初の監査理由"},api,onSuccess:()=>{},
+    })));
+    await React.act(async()=>byText(dom,"ONにする").click());
+    assert.ok(dom.window.document.querySelector('[role="alertdialog"]'),
+      "original reason has a pending maintenance confirmation");
+    await type(dom,dom.window.document.querySelector('[aria-label="変更理由"]'),"変更後の監査理由");
+    assert.equal(dom.window.document.querySelector('[role="alertdialog"]'),null,
+      "editing the reason dismisses an outstanding confirmation");
+    assert.deepEqual(calls,[],"an unconfirmed new reason cannot write maintenance");
+
+    await React.act(async()=>byText(dom,"ONにする").click());
+    const dialog=dom.window.document.querySelector('[role="alertdialog"]');
+    assert.ok(dialog,"new reason requires a new confirmation");
+    await React.act(async()=>dialog.querySelector(".fn-btn-danger").click());
+    assert.deepEqual(calls,[{enabled:true,reason:"変更後の監査理由"}]);
+  });
+});
+
 test("MIG-0734 T01 maintenance and mode need a reason; failed write shows the server message and keeps the form",async()=>{
   await inDom(async(dom,root)=>{
     let refreshed=0;
