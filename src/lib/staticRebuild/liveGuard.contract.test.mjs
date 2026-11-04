@@ -76,6 +76,16 @@ test("private event transition is checked before serving a cached CURRENT respon
     "CDN may not retain public content after an event becomes private");
 });
 
+test("CURRENT never reuses identity-bearing payloads and clears a private summary", () => {
+  assert.match(source, /const cacheable = routeName === "summary"/);
+  assert.match(source, /cacheable \? isolateMicroCacheGet\(microCacheKey\) : null/);
+  assert.match(source, /if \(cacheable\) isolateMicroCacheSet\(microCacheKey, body\)/);
+  assert.match(source, /if \(cacheable\) isolateMicroCacheDelete\(microCacheKey\)/);
+  const check = source.indexOf("await isLiveEventPublic(db, id)");
+  const deleteIndex = source.indexOf("isolateMicroCacheDelete(microCacheKey)");
+  assert.ok(check >= 0 && deleteIndex > check, "revoked event visibility deletes the cached summary");
+});
+
 test("live API routes pass a stable route name for the cache key", async () => {
   for (const name of ["summary", "slots", "submissions"]) {
     const route = await readFile(
