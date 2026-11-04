@@ -158,7 +158,7 @@ test("MIG-0734 U01 server markup keeps OVERRIDE/CLEAR/APPLY disabled until token
 
 async function inDom(callback){
   const dom=new JSDOM("<!doctype html><div id='root'></div>",{url:"https://flamenode.test/admin/cost-guard"});
-  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent","CompositionEvent","FormData"];
+  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent","CompositionEvent","FormData","ResizeObserver"];
   const prior=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
   const oldAct=globalThis.IS_REACT_ACT_ENVIRONMENT;
   for(const k of keys)Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:dom.window[k]});
@@ -610,6 +610,9 @@ test("MIG-0734 privileged screens hide stale data and writes when a same-page re
     assert.ok(byText(dom,"モードを更新"),"controls return only after a successful new read");
   });
   await inDom(async(dom,root)=>{
+    // JSDOM has no ResizeObserver; TableScroll needs only observe/disconnect.
+    // inDom saves/restores this global to keep the mock limited to this test.
+    globalThis.ResizeObserver=class { observe(){} disconnect(){} };
     let reads=0,writes=0;
     const api={
       list:async()=>{
