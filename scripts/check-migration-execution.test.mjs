@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy } from "./check-migration-execution.mjs";
+import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy, hasValidSkipApprovalRecord } from "./check-migration-execution.mjs";
 
 const status = `Current Task: MIG-0301
 Task State: READY
@@ -191,4 +191,25 @@ test("0401 cannot silently acquire the visual HTML dependency",()=>{
 test("Phase 4 Gate depends on 0403 and 0406 only (owner decision 2026-10-23)",()=>{
  const changed=performanceDagStatus.replace("| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406 |","| MIG-0407 | Phase4 Gate | BLOCKED | MIG-0403, MIG-0406, MIG-0410, MIG-0411 |");
  assert.match(run({statusText:changed}).join("\n"),/MIG-0407 performance\/visual DAG/);
+});
+
+test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval references", () => {
+ const good="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=MIG-0108";
+ assert.equal(hasValidSkipApprovalRecord(good,"MIG-0105"),true);
+ assert.equal(hasValidSkipApprovalRecord(good,"MIG-0104"),false);
+ for(const bad of [
+  good.replace("PR#404","PR#405"),
+  good.replace("pull/404","pull/405"),
+  good.replace("https://github.com/coroke3/flamenode/pull/404#issuecomment-123","not-approved"),
+  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+  good+"\\n"+good,
+  "```md\\n"+good+"\\n```",
+  "<!--\\n"+good+"\\n-->",
+  "<!--\\n"+good+"\\n",
+  "> "+good,
+  "- "+good,
+ ]) {
+  assert.equal(hasValidSkipApprovalRecord(bad,"MIG-0105"),false,bad);
+ }
+ assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
 });
