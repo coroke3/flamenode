@@ -116,6 +116,18 @@ New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> or
 
 Known difference (DECIDED, D-0603-1 in `work-items/MIG-0603.md`): CURRENT sends one `static_rebuild_available` Queue wake after commit; the Hono API sends 0 wakes by design. The `static_rebuild_queue` row is persisted in the same D1 batch, drained by the content-jobs Recovery Cron `15 * * * *` (worst case about 60 min, equal to the D-11 accepted delay). The Queue binding decision is made once with MIG-0614 U06.
 
+### Hono endpoints (MIG-0659, SA-099..101, PR #460)
+
+New URLs (CURRENT has no `/api/*` for these). Guard order: no-store header -> origin (pure) -> session -> `writeGuardMiddleware` (any role, banned / TOS identity, **no** active-X requirement) -> CostGuard `xid_links` -> drizzle handle = CURRENT `writeGuard({ feature: "xid_links" })`. Body keys are CURRENT's FormData keys (D-16-1); the request id of cancel is the path value. Response is CURRENT's `{ ok, message? }` with `Cache-Control: private, no-store`; contract `packages/contracts/src/xidRequest.ts`, core `packages/server-core/src/xid/requests.ts`, routes `apps/api/src/routes/xid/requests.ts` mounted by `apps/api/src/routes/xid/index.ts` (D-15-8: MIG-0636 adds its own `route(...)` line to that file).
+
+| SA | Hono endpoint | CostGuard feature | Statuses | Writes (one D1 batch) |
+| --- | --- | --- | --- | --- |
+| SA-099 | `POST /api/xid/requests` body `{ x_id, request_type \| link_type, target_x_user_id }` | `xid_links` | 200 / 400 / 401 / 403 / 404 / 409 / 413 / 503 | conditional request INSERT (dedupe + pending limit 5), ops webhook outbox row for link types, audit CREATE with `actor_x_user_id`; best-effort onboarding marker after commit |
+| SA-100 | `POST /api/xid/requests/:id/cancel` (no body) | `xid_links` | 200 / 401 / 403 / 404 / 409 / 413 / 503 | pending to cancelled CAS (own request), cancel webhook outbox row for link and alias types, audit UPDATE with `actor_x_user_id` |
+| SA-101 | `POST /api/xid/merge-revert-requests` body `{ parent_request_id }` | `xid_links` | 200 / 400 / 401 / 403 / 404 / 409 / 413 / 503 | child INSERT with parent `updated_at` CAS and one live child, no snapshot copy, audit CREATE with `actor_x_user_id`; no outbox row |
+
+Known difference (DECIDED, D-0603-1): CURRENT wakes the notification queue once after a link or cancel commit; the Hono API sends 0 wakes. The `notification_outbox` row is persisted in the same D1 batch and drained by the existing recovery path. Status classes: 400 invalid input, 403 not owner / not allowed / guard deny, 404 not found, 409 conflict or limit or already processed, 503 D1 unavailable or save failed (the `message` is CURRENT's). D1 budget: guard reads (session, user, CostGuard) plus at most 11 handler reads and exactly 1 batch; audit settings and actor snapshot are preloaded by the guards. Parity: `apps/api/test/xidRequests.parity.test.mjs` runs CURRENT `xid.ts` and Hono on the same migrated SQLite and compares request, audit, outbox (including `payload_json`) and onboarding rows field by field.
+
 ## MIG-0305 domain extraction — event / slot (Phase 3)
 
 Domain stage only: the Server Actions remain the CURRENT adapter (D1 batch / CAS / audit / R2 / Queue / revalidate). Hono endpoints are MIG-0604. `@flamenode/domain/event` = `packages/domain/src/event/*`, `@flamenode/domain/slots/*` = `packages/domain/src/slots/*`.
@@ -349,9 +361,9 @@ Domain stage only (no Hono route, no traffic change). Every SA below also passes
 | SA-096 | `executeXIdMergeRequest` | `xid#validateXIdentityRequestShape`; merge plan `xid#buildXIdMergeBeforeState`, `#buildXIdMergeAfterState` | `merge.ts` body, `xIdMergeStateMatchesSql` CAS, `mergeBudget`, `mergeAudits` | U02 |
 | SA-097 | `approveXIdMergeRevert` | `xid#isRevertDeadlineOpen`, `#validateXIdentityRequestShape`; same merge plan as SA-096 | revert body untouched (task rule) | U02 |
 | SA-098 | `setActiveXId` | `xid#normalizeXId` | approved-link read + user CAS | U04 |
-| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | U04 |
-| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | U04 |
-| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | U04 |
+| SA-099 | `requestXIdLink` | `xid#parseXIdentityInput`, `#validateXIdentityRequestShape`, `#isXIdLinkRequestType`, `#reconcilePendingXIdRequest`, `#isRetryableXIdMutationError` | pending insert (`xidPendingInsert.ts`) + audit | MIG-0659 (`POST /api/xid/requests`) |
+| SA-100 | `cancelXIdLinkRequest` | `xid#buildXIdentityDecisionFields`, `#processedXIdRequestMessage`, `#isRetryableXIdMutationError` | request CAS + audit | MIG-0659 (`POST /api/xid/requests/:id/cancel`) |
+| SA-101 | `requestXIdMergeRevert` | `xid#isRevertDeadlineOpen` | request insert + audit | MIG-0659 (`POST /api/xid/merge-revert-requests`) |
 | SA-102 | `updateXIdProfile` | `xid#normalizeXId` | profile CAS + static rebuild | U04 |
 | SA-103 | `deleteLinkedXId` | `xid#normalizeXId` | `xLinkDependencies.ts` (SQL) + link delete | U04 |
 | SA-104 | `setXIdIcon` | `xid#normalizeXId` | icon resolution + R2 | U04 |
@@ -540,6 +552,25 @@ Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All r
 
 T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
 
+## MIG-0642 — Hono Admin Ops mutation mapping B (D-17-4)
+
+Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notifications}.ts`, contracts `packages/contracts/src/admin/termsNotifications.ts`. All routes use the existing `/api/admin` origin -> session -> admin/TOS/BAN guard and the feature's CostGuard middleware, then full-row CAS + strict audit in one D1 batch. Bodies keep the CURRENT FormData keys; ids are path params. Queue wake is 0 (D-0603-1; **DOCUMENTED DIFFERENCE**: CURRENT wakes after notification retry / force-resend / retry-failed and terms publish / archive). Errors: 400 validation, 404 not found, 409 rejected state or CAS conflict, 413 oversize, 503 guard or fail-closed preflight.
+
+| SA | Hono method + path | feature key | CURRENT parity and response |
+| --- | --- | --- | --- |
+| SA-045 | POST `/api/admin/notifications/:id/retry` | `admin_notifications` | terminal failure only; CAS to pending + strict `admin_notification_retry` audit |
+| SA-046 | POST `/api/admin/notifications/:id/cancel` | `admin_notifications` | body `reason` optional (<=500); sent / cancelled idempotent success, processing 409; CAS + strict `admin_notification_cancel` |
+| SA-047 | POST `/api/admin/notifications/:id/force-resend` | `admin_notifications` | new forced outbox row (`:force:<uuid>` dedupe) + strict CREATE `admin_notification_force_resend`; DM needs an existing recipient |
+| SA-048 | POST `/api/admin/notifications/retry-failed` | `admin_notifications` | oldest 10 terminal failures (fetch 11), one batch, returns `retried` |
+| SA-049 | PUT `/api/admin/permissions/editable-fields` | `admin_permissions` | body `default_editable_fields[]` / `upcoming_editable_fields[]`; no-op short circuit; CAS + strict `long_audit`; no queue |
+| SA-051 | POST `/api/admin/terms` | `admin_terms_create` | draft INSERT + strict CREATE `long_audit`; no queue |
+| SA-052 | PATCH `/api/admin/terms/:id` | `admin_terms_update` | draft only (409 otherwise); path id wins over body `id`; CAS + `long_audit` |
+| SA-053 | POST `/api/admin/terms/:id/publish` | `admin_terms_publish` | archive current + publish target + `rules/global` high rebuild row in one batch; already published = success; returns `pendingPublicReflection` |
+| SA-054 | POST `/api/admin/terms/:id/reaccept-broadcast` | `admin_terms_broadcast` | body `confirm` = TERMS, `cursor`, `content`; max 30 per page (read 31); audit only, **no DM, no outbox, no queue**; returns next `cursor` |
+| SA-055 | POST `/api/admin/terms/:id/archive` | `admin_terms_archive` | CAS archive; rebuild row only if it was published |
+
+T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
+
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
 | RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
@@ -553,7 +584,7 @@ DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next
 
 | ID | CURRENT | TARGET | Auth and cache safety | Work status |
 | --- | --- | --- | --- | --- |
-| RH-013 | GET `/api/event-endpoints/[id]`, format v5/new/default or legacy/old/v1; realtime/scheduled; refresh 15/60/360/1440 | Implemented `apps/api/src/routes/events/export.ts` (not production routed); pure D1 reader `@flamenode/server-core/eventExport/data`, pure payload now `@flamenode/server-core/eventExport/payload`, cache identity now `@flamenode/server-core/publicCache/eventExportKeys` | Cache HIT **must** follow per-request D1 public+public_api_enabled gate; unknown/stale cache must be validated with forbidden-key check or evicted; 404 on private; 503 on failed data/leak gate; scheduled Cache API, realtime isolate micro-cache; CORS and X-FlameNode-* headers unchanged | DONE (PR#457; Hono route, data/cache core, CURRENT parity tests and D-12 measurement recorded; D-12 over-budget exception below; no cutover) |
+| RH-013 | GET `/api/event-endpoints/[id]`, format v5/new/default or legacy/old/v1; realtime/scheduled; refresh 15/60/360/1440 | Implemented `apps/api/src/routes/events/export.ts` (not production routed); pure D1 reader `@flamenode/server-core/eventExport/data`, pure payload now `@flamenode/server-core/eventExport/payload`, cache identity now `@flamenode/server-core/publicCache/eventExportKeys` | Cache HIT **must** follow per-request D1 public+public_api_enabled gate; unknown/stale cache must be validated with forbidden-key check or evicted; 404 on private; 503 on failed data/leak gate; scheduled Cache API retained inside origin, realtime isolate micro-cache; both modes use `Cache-Control: no-store` to prevent CDN reuse after event becomes private; CORS and X-FlameNode-* headers unchanged | DONE (PR#457; Hono route, data/cache core, CURRENT parity tests and D-12 measurement recorded; D-12 over-budget exception below; no cutover) |
 
 D-12 measurement (MIG-0632 U04, local only, NOT a production value): upper-bound fixture = event 1 x 500 public videos x 100 public members each (seeded by `scripts/benchmark-api-cpu.mjs` scenario `RH-013`, scheduled + cleared Cache API so every sample runs the D1 gate, snapshot and payload build; distinct client IP per request because of the 60/min guard). Response size: v5 = 4,445,432 bytes (about 4.24 MiB), legacy = 972,781 bytes; both exceed the 64 KiB budget. D1 statements: 8 per cold build (gate + snapshot reads, no writes). Local workerd (`--mode wrangler --d1 replay`, V8 sampling profiler, D1 stubbed with recorded results, 50 samples/kind): v5 p50 101.96 ms, max 162.30 ms; legacy p50 27.53 ms, max 45.89 ms; invalid-option 400 max 7.66 ms (harness noise floor about 9 ms). Node proxy (`--mode inproc`, wall time, not authoritative): v5 max 213 ms, legacy max 148 ms. Verdict: FAIL against the 7 ms warm CPU budget and the 64 KiB size budget at the upper bound. CURRENT `app/api/event-endpoints/[id]/route.ts` returns the same payload (byte-parity tests), so this is an inherited CURRENT limitation, not a regression.
 

@@ -32,7 +32,7 @@ export function ManageLayout({ children, fetchFn = fetch }: {
       warnActiveX={!data.access.isAdmin && shouldWarnManageActiveXMismatch(data.activeXUserId, data.manageStaffXUserIds)}
       activeX={data.activeXUserId} /></aside> : null;
   return <div data-manage-shell data-fn-surface="manage">
-    <CostGuardBanner fetchFn={fetchFn} />
+    <CostGuardBanner source="manage" fetchFn={fetchFn} />
     <ConsoleShell consoleMode="manage" navigation={sidebar}><main className="manage-main">{children}</main></ConsoleShell>
   </div>;
 }

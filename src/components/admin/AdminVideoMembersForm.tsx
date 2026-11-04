@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/Icon";
 import { PublicReflectionDelayNotice } from "@/components/ui/PublicReflectionDelayNotice";
+import { videoPageHref } from "@/lib/youtube/id";
 import { updateVideoMembersAdmin } from "@/lib/actions/video";
 import type { VideoActionResult } from "@/lib/video/types";
 import { redirectForGuardReason } from "@/lib/client/guardRedirect";
@@ -152,7 +153,7 @@ export function AdminVideoMembersForm({
           詳細へ戻る
         </Link>
         <Link
-          href={`/${video.youtube_video_id?.trim() || video.id}`}
+          href={videoPageHref(video)}
           className="fn-btn fn-btn-ghost"
           target="_blank"
           rel="noopener noreferrer"
