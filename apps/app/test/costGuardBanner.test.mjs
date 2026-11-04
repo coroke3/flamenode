@@ -356,3 +356,54 @@ test("MIG-0718 U02 T05: malformed or oversized reason never crashes React render
   }));
   assert.match(html, /\(理由: valid\)/);
 });
+
+test("MIG-0718 U03: merged Personal wrapper mounts banner before main and never blocks its routes", async () => {
+  const { PersonalRoutes } = await import("../.test-dist/apps/app/src/routes/router.js");
+  const { MemoryRouter } = await import("react-router-dom");
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const seen = [];
+  const bannerApi = { getBanner: async (signal) => {
+    seen.push(signal);
+    return { mode: "maintenance", reason: "運用上の確認" };
+  } };
+  try {
+    // Use an unmatched Personal route so only the shared wrapper is exercised.
+    await act(async () => root.render(React.createElement(
+      MemoryRouter, { initialEntries: ["/__banner_probe__"] },
+      React.createElement(PersonalRoutes, { api: {}, bannerApi }),
+    )));
+    await flush();
+    const shell = container.querySelector('[data-fn-surface="personal"]');
+    assert.ok(shell, "the merged Personal shell is preserved");
+    const [banner, main] = [...shell.children];
+    assert.equal(banner.getAttribute("role"), "status");
+    assert.equal(banner.getAttribute("aria-live"), "polite");
+    assert.equal(banner.querySelector("strong").textContent, "メンテナンス中:");
+    assert.equal(banner.querySelector(".cgb-reason").textContent, "(理由: 運用上の確認)");
+    assert.equal(main.tagName, "MAIN");
+    assert.equal(seen.length, 1, "one banner fetch per mounted wrapper");
+    assert.equal(seen[0].aborted, false);
+  } finally {
+    await act(async () => root.unmount());
+  }
+  assert.equal(seen[0].aborted, true, "unmount must cancel the banner reader");
+});
+
+test("MIG-0718 U03: banner CSS loads and regenerates from CURRENT module", () => {
+  const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
+  const generator = readFileSync(new URL("../scripts/portCssModule.mjs", import.meta.url), "utf8");
+  assert.match(main, /import "\.\/styles\/cost-guard-banner\.css";/,
+    "missing banner stylesheet must not silently remove the notice");
+  assert.match(generator, /\["cgb", "src\/components\/layout\/CostGuardBanner\.module\.css", "apps\/app\/src\/styles\/cost-guard-banner\.css"\]/,
+    "CSS regeneration must retain the banner styles");
+});
+
+test("MIG-0718 U03: client uses merged CostGuardBannerResponseSchema, not a provisional DTO", async () => {
+  const source = readFileSync(new URL("../src/api/operationMode.ts", import.meta.url), "utf8");
+  assert.match(source, /CostGuardBannerResponseSchema\.safeParse\(raw\)/);
+  assert.doesNotMatch(source, /NON_NORMAL_MODES|MAX_REASON_CHARS/);
+  assert.deepEqual(await client(respond(200, { mode: "maintenance", reason: "共有契約" })).api.getBanner(),
+    { mode: "maintenance", reason: "共有契約" });
+  assert.equal(await client(respond(200, { mode: "normal", reason: null })).api.getBanner(), null);
+});
