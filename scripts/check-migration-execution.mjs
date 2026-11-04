@@ -44,6 +44,86 @@ export const REQUIRED_DECISIONS = Object.freeze({
   "MIG-0802": ["D-07"],
 });
 
+// This is a *structural* gate only. Human/Lead approval and reviewer identity
+// still require live GitHub evidence at merge time; a matching string is never
+// proof of actual approval. Reject markdown examples and placeholder records.
+export function hasValidSkipApprovalRecord(statusText, id) {
+  if (!/^MIG-\d{4}$/.test(id)) return false;
+  let fence = null;
+  let inTaskTable = false;
+  let expectSeparator = false;
+  const records = [];
+  const visibleTasks = new Map();
+  const outsideComments = statusText.replace(/<!--[\s\S]*?(?:-->|$)/g, match => match.replace(/[^\n]/g, " "));
+  for (const line of outsideComments.replace(/\r\n/g, "\n").split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char &&
+        marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = {char: marker[1][0], length: marker[1].length};
+      // A fenced example ends the preceding Markdown table.
+      inTaskTable = false;
+      expectSeparator = false;
+      continue;
+    }
+    // An arbitrary table/example elsewhere in STATUS is not the canonical
+    // task inventory. Only cells under ID/Task/State/Depends on headers count.
+    const trimmed = line.trim();
+    if (!trimmed || /^#{1,6}\s/.test(trimmed) ||
+        (inTaskTable && !trimmed.startsWith("|"))) {
+      // Any prose or a new block closes a Markdown table. A forged MIG row
+      // after that point cannot impersonate a real STATUS task.
+      inTaskTable = false;
+      expectSeparator = false;
+    }
+    if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(?:\s*Acceptance\s*\|)?$/.test(trimmed)) {
+      inTaskTable = true;
+      expectSeparator = true;
+      continue;
+    }
+    if (expectSeparator) {
+      const parts = trimmed.split("|").slice(1, -1).map(cell => cell.trim());
+      if (!trimmed.startsWith("|") || !trimmed.endsWith("|") ||
+          ![4,5].includes(parts.length) ||
+          !parts.every(cell => /^:?-{3,}:?$/.test(cell))) inTaskTable = false;
+      expectSeparator = false;
+      continue;
+    }
+    // Only actual unquoted/unfenced task-table rows can complete an alternate.
+    const cells = inTaskTable && line.startsWith("|") ? line.split("|").map(cell => cell.trim()) : [];
+    if ((cells.length === 6 || cells.length === 7) && /^MIG-\d{4}$/.test(cells[1])) {
+      const previous = visibleTasks.get(cells[1]);
+      // Ambiguous duplicate records fail closed; main STATUS validation also rejects them.
+      visibleTasks.set(cells[1], previous === undefined ? cells[3] : "AMBIGUOUS");
+    }
+    // A status note inside an HTML comment or a quoted/list example is not approval.
+    if (line.startsWith("SKIP_APPROVAL: " + id + " | ")) records.push(line);
+  }
+  if (records.length !== 1) return false;
+  const match = /^SKIP_APPROVAL: (MIG-\d{4}) \| PR#([1-9]\d*) \| APPROVAL=(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/([1-9]\d*)#(?:issuecomment-\d+|pullrequestreview-\d+)) \| ALTERNATIVE=(.+)$/.exec(records[0]);
+  // Do not accept a valid-looking review link in a different repository.
+  // Syntax validation is not proof that the review exists or is independent.
+  if (!match || match[1] !== id || match[2] !== match[6] ||
+      match[4] !== "coroke3" || match[5] !== "flamenode") return false;
+  const alt = match[7].trim();
+  // A named alternate MIG is usable only after it actually exists and is
+  // DONE. A missing, READY, BLOCKED, SKIPPED or duplicated alternative cannot
+  // unlock a dependent task merely by appearing in an approval-shaped note.
+  if (/^MIG-\d{4}$/.test(alt)) {
+    if (alt === id) return false;
+    // Missing task tables are not authorization. Require exactly one real
+    // completed alternative row even for direct helper calls.
+    return visibleTasks.get(alt) === "DONE";
+  }
+  // A longer placeholder (e.g. "pending independent review") is still NOT
+  // an alternative or a documented rationale.
+  return alt.length >= 12 &&
+    !/^(?:none|n\/a|unknown|pending|example|not-approved|todo|tbd|未定|なし)(?:$|[\s:：—-])/i.test(alt);
+}
+
 const COMPLETED = new Set(["DONE", "SKIPPED"]);
 const ACTIVE = new Set(["READY", "IN_PROGRESS", "REVIEW", "DONE"]);
 const STATES = new Set(["READY", "IN_PROGRESS", "REVIEW", "BLOCKED", "DONE", "SKIPPED"]);
@@ -346,7 +426,7 @@ export function validateMigrationExecution({
   const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
-    if (row.state === "SKIPPED" && !new RegExp("^SKIP_APPROVAL: " + id + " \\| PR#[0-9]+ \\| APPROVAL=[^\\n|]+ \\| ALTERNATIVE=[^\\n|]+$", "m").test(statusText)) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
+    if (row.state === "SKIPPED" && !hasValidSkipApprovalRecord(statusText, id)) errors.push(id + " SKIPPED requires SKIP_APPROVAL with PR, reviewer and alternative");
     let deps = [];
     try { deps = expandDependencies(row.dependencies); }
     catch (error) { errors.push(id + ": " + error.message); }

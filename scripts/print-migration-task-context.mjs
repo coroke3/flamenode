@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS } from "./check-migration-execution.mjs";
+import { parseTaskRows, expandDependencies, REQUIRED_DECISIONS, hasValidSkipApprovalRecord } from "./check-migration-execution.mjs";
 import { parseFileRows } from "./check-migration-file-progress.mjs";
 import { TASK_CARD_FILES, collectTaskCards, specFileFor, extractWorkOrder, validateWorkOrder } from "./check-migration-task-cards.mjs";
 
@@ -176,11 +176,20 @@ export function pickNextTask(statusText,decisionText,owned=new Map(),eligible=()
       decisions.set(cells[1],cells[3]);
     }
   }
+  // The migration execution gate accepts an explicitly approved SKIPPED task as
+  // a completed dependency. Require that same approval record here; an
+  // unapproved SKIPPED must never unlock another task.
+  const dependencyComplete=(id)=>{
+    const state=tasks.get(id)?.state;
+    if(state==="DONE")return true;
+    if(state!=="SKIPPED")return false;
+    return hasValidSkipApprovalRecord(statusText,id);
+  };
   const candidates=[];
   for(const [id,task] of tasks){
     if(task.state!=="READY")continue;
     const deps=expandDependencies(task.dependencies);
-    if(deps.some(d=>tasks.get(d)?.state!=="DONE"))continue;
+    if(deps.some(d=>!dependencyComplete(d)))continue;
     if((REQUIRED_DECISIONS[id]||[]).some(d=>decisions.get(d)!=="DECIDED"))continue;
     if(!eligible(id))continue;
     candidates.push(id);

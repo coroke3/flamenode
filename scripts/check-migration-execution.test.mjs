@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy, validateStatusTableStructure } from "./check-migration-execution.mjs";
+import { expandDependencies, parseDecisionRows, parseTaskRows, validateMigrationExecution, validateCheckpointPolicy, validateStatusTableStructure, hasValidSkipApprovalRecord } from "./check-migration-execution.mjs";
 
 const status = `Current Task: MIG-0301
 Task State: READY
@@ -436,4 +436,65 @@ test("mismatched backtick runs do not conceal real HTML comment openers",()=>{
   H+"\n"+D+"\n| MIG-0301 | real | READY | MIG-0108 |\n";
  assert.deepEqual([...parseTaskRows(doc).keys()],["MIG-0301"]);
  assert.deepEqual(validateStatusTableStructure(doc),[]);
+});
+
+test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval references", () => {
+ const good="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=MIG-0108";
+ const withDoneAlternative = "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-0108 | completed alternative | DONE | — |\n"+good;
+ assert.equal(hasValidSkipApprovalRecord(good,"MIG-0105"),false,
+   "a bare approval note cannot invent an absent alternate task");
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative,"MIG-0105"),true);
+ assert.equal(hasValidSkipApprovalRecord(good,"MIG-0104"),false);
+ for(const bad of [
+  withDoneAlternative.replace("PR#404","PR#405"),
+  withDoneAlternative.replace("pull/404","pull/405"),
+  withDoneAlternative.replace("github.com/coroke3/flamenode","github.com/other-owner/other-repo"),
+  withDoneAlternative.replace("https://github.com/coroke3/flamenode/pull/404#issuecomment-123","not-approved"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=not-approved by lead"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=TBD: next meeting"),
+  withDoneAlternative+"\n"+withDoneAlternative,
+  "```md\n"+withDoneAlternative+"\n```",
+  "<!--\n"+withDoneAlternative+"\n-->",
+  "<!--\n"+withDoneAlternative+"\n",
+  "> "+withDoneAlternative,
+  "- "+withDoneAlternative,
+ ]) {
+  assert.equal(hasValidSkipApprovalRecord(bad,"MIG-0105"),false,bad);
+ }
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+   "| MIG-0108 | completed alternative | DONE | — |\n",
+   "| MIG-0108 | completed alternative | DONE | — |\n| MIG-0108 | duplicate alternative | DONE | — |\n"),"MIG-0105"),false);
+ for(const state of ["READY","SKIPPED","BLOCKED","IN_PROGRESS"]) {
+   assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+     "| MIG-0108 | completed alternative | DONE |",
+     "| MIG-0108 | completed alternative | "+state+" |"),"MIG-0105"),false,state);
+ }
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+   "ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"MIG-0105"),false);
+ assert.equal(hasValidSkipApprovalRecord(
+   "| MIG-9999 | fake DONE row outside official task table | DONE | — |\n"+
+   withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "standalone rows outside canonical task table do not authorize an alternative");
+ assert.equal(hasValidSkipApprovalRecord(
+   "~~~md\n| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-9999 | forged DONE | DONE | — |\n~~~\n"+
+   withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+    "MIG-0105"),false, "a fenced fake task table is not an approved alternative");
+ assert.equal(hasValidSkipApprovalRecord(
+   "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n"+
+   "| MIG-0105 | skipped | SKIPPED | — |\n"+
+   "Explanatory text ends the task table.\n"+
+   "| MIG-9999 | invented alternative | DONE | — |\n"+
+   good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "prose cannot extend the canonical task table");
+ assert.equal(hasValidSkipApprovalRecord(
+   "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n"+
+   "| MIG-0105 | skipped | SKIPPED | — |\n"+
+   "```md\nexample\n```\n"+
+   "| MIG-9999 | invented alternative | DONE | — |\n"+
+   good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "fenced examples cannot extend the canonical table");
+  assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
 });

@@ -456,7 +456,16 @@ export function openD1HttpReader(options: {
       } | null;
       const first = body?.result?.[0];
       if (!response.ok || !body?.success || !first?.success || !Array.isArray(first.results)) {
-        const codes = (body?.errors ?? []).map((e) => e.code).filter((c) => c !== undefined).join(",");
+        // Cloudflare errors are untrusted JSON. A malformed error collection
+        // must still report a controlled D1 API failure, not throw TypeError.
+        // Limit work on untrusted error arrays, not just the final message:
+        // a malformed upstream response may contain thousands of entries.
+        const codes = (Array.isArray(body?.errors) ? body.errors : [])
+          .slice(0, 64)
+          .flatMap((error) => error && typeof error === "object" &&
+            typeof error.code === "number" && Number.isSafeInteger(error.code) ? [error.code] : [])
+          .slice(0, 8)
+          .join(",");
         throw new Error(`D1 API query failed (status=${response.status}${codes ? `, codes=${codes}` : ""})`);
       }
       return { results: first.results };
