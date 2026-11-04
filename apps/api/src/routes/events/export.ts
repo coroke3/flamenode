@@ -82,8 +82,10 @@ async function exportResponse(
   req: Request, body: string, format: EventExportFormat, updateMode: EventExportUpdateMode,
   refreshMinutes: EventExportRefreshMinutes, cacheState: "HIT" | "MISS" | "BYPASS",
 ): Promise<Response> {
-  const cacheControl = updateMode === "realtime"
-    ? "no-store" : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
+  // The internal Cache API remains available for scheduled exports, but a
+  // public CDN cache cannot re-check the D1 visibility gate after a private
+  // transition. All public export responses therefore require no-store.
+  const cacheControl = "no-store";
   const response = await publicJsonBodyResponse(req, body, cacheControl);
   response.headers.set("X-FlameNode-Schema-Version", format === "legacy" ? "1" : "5");
   response.headers.set("X-FlameNode-Format", format === "legacy" ? "legacy" : "flamenode-event-export");
