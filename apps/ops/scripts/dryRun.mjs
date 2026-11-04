@@ -38,6 +38,8 @@ export function assertOpsStaticConfig(config) {
     const expected = {
       ".name": '"flamenode-ops"',
       ".workers_dev": "false",
+      ".compatibility_date": '"2026-07-21"',
+      ".compatibility_flags": '["nodejs_compat", "global_fetch_strictly_public"]',
       "assets.directory": '"./dist"',
       "assets.not_found_handling": '"single-page-application"',
       "assets.run_worker_first": "false",
@@ -46,7 +48,7 @@ export function assertOpsStaticConfig(config) {
       throw new Error("Unsafe Ops config value: " + key);
     }
   }
-  for (const required of [".name", ".workers_dev", "assets.directory", "assets.not_found_handling", "assets.run_worker_first"]) {
+  for (const required of [".name", ".workers_dev", ".compatibility_date", ".compatibility_flags", "assets.directory", "assets.not_found_handling", "assets.run_worker_first"]) {
     if (!seen.has(required)) throw new Error("Missing mandatory Ops config key: " + required);
   }
   return true;

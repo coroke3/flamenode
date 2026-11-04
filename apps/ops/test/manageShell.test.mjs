@@ -137,6 +137,15 @@ test("MIG-0719 T06: Ops packaging dry-run has a fixed target and rejects routes/
   const { resolve } = await import("node:path");
   const config = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
   assert.equal(assertOpsStaticConfig(config), true);
+  // The offline-only packaging guard must not silently accept a changed runtime
+  // compatibility profile, or a missing profile that Wrangler will default.
+  const date = 'compatibility_date = "2026-07-21"';
+  const flags = 'compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]';
+  assert.ok(config.includes(date) && config.includes(flags));
+  assert.throws(() => assertOpsStaticConfig(config.replace(date, 'compatibility_date = "2027-01-01"')), /Unsafe Ops config value: \.compatibility_date/);
+  assert.throws(() => assertOpsStaticConfig(config.replace(flags, 'compatibility_flags = ["nodejs_compat", "unsafe_eval"]')), /Unsafe Ops config value: \.compatibility_flags/);
+  assert.throws(() => assertOpsStaticConfig(config.replace(date, "")), /Missing mandatory Ops config key: \.compatibility_date/);
+  assert.throws(() => assertOpsStaticConfig(config.replace(flags, "")), /Missing mandatory Ops config key: \.compatibility_flags/);
   assert.throws(() => assertOpsStaticConfig(config + '\nroute = "example.invalid/*"'), /Unapproved/);
   assert.throws(() => assertOpsStaticConfig(config + '\n[[d1_databases]]'), /only one assets table/);
   assert.throws(() => assertOpsStaticConfig(config.replace("workers_dev = false", "workers_dev = true")), /Unsafe/);
