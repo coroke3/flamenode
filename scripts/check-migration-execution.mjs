@@ -70,8 +70,12 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   if (!match || match[1] !== id || match[2] !== match[6] ||
       match[4] !== "coroke3" || match[5] !== "flamenode") return false;
   const alt = match[7].trim();
-  return /^MIG-\d{4}$/.test(alt) ||
-    (alt.length >= 12 && !/^(?:none|n\/a|unknown|pending|example|not-approved|未定|なし)$/i.test(alt));
+  // A SKIPPED task cannot name itself as its own replacement.
+  if (/^MIG-\d{4}$/.test(alt)) return alt !== id;
+  // A longer placeholder (e.g. "pending independent review") is still NOT
+  // an alternative or a documented rationale.
+  return alt.length >= 12 &&
+    !/^(?:none|n\/a|unknown|pending|example|not-approved|todo|tbd|未定|なし)(?:$|[\s:：—-])/i.test(alt);
 }
 
 const COMPLETED = new Set(["DONE", "SKIPPED"]);
