@@ -9,6 +9,13 @@ import type { SnapshotLoadOptions, SnapshotSource } from "./publicDataLoader.ts"
 
 export type SnapshotAccess = Readonly<{ source: SnapshotSource; options: SnapshotLoadOptions }>;
 
+/** A snapshot key must resolve to a file inside the configured root, not an ancestor or sibling. */
+function isInsideSnapshotRoot(root: string, file: string): boolean {
+  const relative = path.relative(root, file);
+  return Boolean(relative) && relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
 export function snapshotAccessFromEnv(env: Record<string, string | undefined> = process.env): SnapshotAccess | null {
   const dir = env.FLAMENODE_SNAPSHOT_DIR?.trim();
   const manifestFile = env.FLAMENODE_SNAPSHOT_MANIFEST_FILE?.trim();
@@ -17,11 +24,24 @@ export function snapshotAccessFromEnv(env: Record<string, string | undefined> = 
   if (!dir || !manifestFile || !generation) {
     throw new Error("Snapshot env incomplete: set FLAMENODE_SNAPSHOT_DIR, _MANIFEST_FILE and _GENERATION together");
   }
+  const root = path.resolve(dir);
   return {
     source: {
       async read(key) {
-        const file = path.join(dir, key);
-        return fs.existsSync(file) ? new Uint8Array(fs.readFileSync(file)) : null;
+        // Snapshot keys come from a signed/validated manifest in the normal build path, but
+        // this filesystem adapter must not allow a malformed key or symlink to escape the root.
+        if (!key || path.isAbsolute(key) || key.includes("\\") || key.includes("\0")) return null;
+        const file = path.resolve(root, key);
+        if (!isInsideSnapshotRoot(root, file) || !fs.existsSync(file)) return null;
+
+        // Resolve symlinks before reading: a snapshot entry must never dereference a file
+        // outside the snapshot root, even if its lexically normalized path looks safe.
+        const actualRoot = fs.realpathSync(root);
+        const actualFile = fs.realpathSync(file);
+        if (!isInsideSnapshotRoot(actualRoot, actualFile) || !fs.statSync(actualFile).isFile()) {
+          return null;
+        }
+        return new Uint8Array(fs.readFileSync(actualFile));
       },
     },
     options: { manifest: JSON.parse(fs.readFileSync(manifestFile, "utf-8")), generation },
