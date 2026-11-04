@@ -195,26 +195,38 @@ test("Phase 4 Gate depends on 0403 and 0406 only (owner decision 2026-10-23)",()
 
 test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval references", () => {
  const good="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=MIG-0108";
- assert.equal(hasValidSkipApprovalRecord(good,"MIG-0105"),true);
+ const withDoneAlternative = good+"\n| MIG-0108 | completed alternative | DONE | — |";
+ assert.equal(hasValidSkipApprovalRecord(good,"MIG-0105"),false,
+   "a bare approval note cannot invent an absent alternate task");
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative,"MIG-0105"),true);
  assert.equal(hasValidSkipApprovalRecord(good,"MIG-0104"),false);
  for(const bad of [
-  good.replace("PR#404","PR#405"),
-  good.replace("pull/404","pull/405"),
-  good.replace("github.com/coroke3/flamenode","github.com/other-owner/other-repo"),
-  good.replace("https://github.com/coroke3/flamenode/pull/404#issuecomment-123","not-approved"),
-  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
-  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
-  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
-  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=not-approved by lead"),
-  good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=TBD: next meeting"),
-  good+"\n"+good,
-  "```md\n"+good+"\n```",
-  "<!--\n"+good+"\n-->",
-  "<!--\n"+good+"\n",
-  "> "+good,
-  "- "+good,
+  withDoneAlternative.replace("PR#404","PR#405"),
+  withDoneAlternative.replace("pull/404","pull/405"),
+  withDoneAlternative.replace("github.com/coroke3/flamenode","github.com/other-owner/other-repo"),
+  withDoneAlternative.replace("https://github.com/coroke3/flamenode/pull/404#issuecomment-123","not-approved"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=not-approved by lead"),
+  withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=TBD: next meeting"),
+  withDoneAlternative+"\n"+withDoneAlternative,
+  "```md\n"+withDoneAlternative+"\n```",
+  "<!--\n"+withDoneAlternative+"\n-->",
+  "<!--\n"+withDoneAlternative+"\n",
+  "> "+withDoneAlternative,
+  "- "+withDoneAlternative,
  ]) {
   assert.equal(hasValidSkipApprovalRecord(bad,"MIG-0105"),false,bad);
  }
- assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative+
+   "\n| MIG-0108 | duplicate alternative | DONE | — |","MIG-0105"),false);
+ for(const state of ["READY","SKIPPED","BLOCKED","IN_PROGRESS"]) {
+   assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+     "| MIG-0108 | completed alternative | DONE |",
+     "| MIG-0108 | completed alternative | "+state+" |"),"MIG-0105"),false,state);
+ }
+ assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
+   "ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"MIG-0105"),false);
+  assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
 });
