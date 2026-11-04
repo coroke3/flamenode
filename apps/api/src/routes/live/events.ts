@@ -21,7 +21,9 @@ const MAX_EVENT_ID_LEN = 128;
 /** 1 イベントあたりの live slots 取得上限（D1 負荷・レスポンス肥大化の防止） */
 export const MAX_LIVE_SLOTS = 6000;
 const ACTIVE_GRACE_AFTER_END_SEC = 86400;
-export const LIVE_API_CACHE_CONTROL = "public, s-maxage=5, stale-while-revalidate=30";
+// Live responses may stop being public at any moment. An intermediary
+// stale-while-revalidate cache can outlive the event's public status.
+export const LIVE_API_CACHE_CONTROL = "no-store";
 
 function normalizeEventId(eventId: string): string | null {
   const id = eventId.trim();
@@ -188,6 +190,17 @@ export async function handleLiveApiGet(
     }
     const microCacheKey = `live:${routeName}:${id}`;
     let body = isolateMicroCacheGet(microCacheKey);
+    if (body !== null) {
+      // Each loader checks visibility only on a cache MISS. Do not reuse an
+      // old public result after the event has become private in D1.
+      const stillPublic = await db
+        .prepare("SELECT 1 AS visible FROM events WHERE id = ? AND visibility_status = 'public' LIMIT 1")
+        .bind(id)
+        .first<{ visible: number }>();
+      if (!stillPublic) {
+        return jsonError("not_found", "イベントが見つかりません。", 404);
+      }
+    }
     if (body === null) {
       const payload = await load(db, id);
       if (!payload) return jsonError("not_found", "イベントが見つかりません。", 404);
