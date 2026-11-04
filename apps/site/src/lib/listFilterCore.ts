@@ -57,11 +57,14 @@ export function isDefaultListQuery(query: ListQuery): boolean {
   return !query.q && !query.event && query.page === 1 && query.sort === "new" && query.view === "grid";
 }
 
+// Same route-segment alphabet and maximum length as public snapshot IDs. A
+// malformed ID must not be passed to a card/link, even in an otherwise public DTO.
+const SAFE_VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
 function isVideo(value: unknown): value is PublicVideoDto {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
   return v.status === "public" &&
-    typeof v.id === "string" && v.id.length > 0 &&
+    typeof v.id === "string" && SAFE_VIDEO_ID.test(v.id) &&
     typeof v.title === "string" &&
     (v.youtube_video_id === null || typeof v.youtube_video_id === "string") &&
     (v.display_name === null || typeof v.display_name === "string") &&
