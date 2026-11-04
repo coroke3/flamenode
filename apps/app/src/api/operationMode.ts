@@ -1,7 +1,6 @@
 // MIG-0718 U03: consume the merged MIG-0661 public DTO, not a local approximation.
 import {
   CostGuardBannerResponseSchema,
-  MAX_COST_GUARD_BANNER_REASON_CHARS,
   type CostGuardBannerResponse,
 } from "@flamenode/contracts";
 
