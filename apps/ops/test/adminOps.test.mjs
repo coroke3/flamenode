@@ -588,6 +588,39 @@ const renderNotifications=(data,query="")=>{
   return renderToStaticMarkup(h(MemoryRouter,null,h(AdminNotificationsView,{data,filters:filtersOf(query),api,onSuccess:()=>{}})));
 };
 
+test("MIG-0734 query_failed partial counts never expose bulk mutation and can retry",async()=>{
+  // Hono builds operational counts before formatting rows. If row projection
+  // fails after counts have been assigned, it returns query_failed + counts.
+  const data=notificationData({error:"query_failed"},{failed:4,deadLetter:3,unhealthyLease:2});
+  const html=renderNotifications(data);
+  assert.match(html,/通知ログの取得に失敗しました/);
+  assert.match(html,/再試行/);
+  assert.doesNotMatch(html,/failed を一括リトライ|強制再送|>確定</,
+    "partial-query errors must never render privileged mutation buttons");
+  assert.doesNotMatch(html,/配送リース期限超過・欠損|失敗 4 件|現在、失敗・滞留はありません/,
+    "incomplete counts must not appear as authoritative status banners");
+
+  await inDom(async(dom,root)=>{
+    let reads=0;
+    const api={
+      list:async()=>{
+        reads++;
+        return {status:"ok",data:reads===1
+          ? notificationData({error:"query_failed",rows:[]},{failed:8,deadLetter:2})
+          : notificationData({rows:[]},{failed:0,deadLetter:0})};
+      },
+    };
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotifications,{api}))));
+    assert.equal(reads,1);
+    assert.match(dom.window.document.querySelector('[role="alert"]')?.textContent??"",/query_failed/);
+    assert.equal(byText(dom,"failed を一括リトライ (上限 10)"),undefined);
+    await React.act(async()=>byText(dom,"再試行").click());
+    assert.equal(reads,2,"retry reloads the admin read with a fresh cache identity");
+    assert.equal(dom.window.document.querySelector('[role="alert"]'),null);
+    assert.match(dom.window.document.body.textContent,/通知ログはありません/);
+  });
+});
+
 test("MIG-0734 privileged screens hide stale data and writes when a same-page refresh fails",async()=>{
   await inDom(async(dom,root)=>{
     let reads=0,writes=0;
