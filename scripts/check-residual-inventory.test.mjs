@@ -670,3 +670,40 @@ test("T67: tracked observability and placement semantics cannot silently drift",
   assert.throws(()=>extractConfigRows(background,fastPath),
     /unexpected placement.mode/);
 });
+
+test("T68: damaged inventory rows cannot disappear when pipe delimiters are lost",()=>{
+  const row=docs.split("\n").find(line=>line.includes("| worker.main |"));
+  assert.ok(row?.startsWith("| ")&&row.endsWith(" |"));
+  const mutations=[
+    row.slice(2),        // missing initial pipe
+    row.slice(0,-2),     // missing final pipe
+    row.replaceAll("|",""), // a pipe-free record within the inventory table
+  ];
+  for(const [index,broken] of mutations.entries()) {
+    assert.notEqual(broken,row);
+    assert.throws(()=>readInventoryRows(docs.replace(row,broken)),
+      /invalid inventory row .*missing table boundary/, "mutation "+index);
+  }
+});
+
+test("T69: inventory table count marker is required to delimit audited rows",()=>{
+  assert.equal(readInventoryRows(docs).length,36);
+  assert.throws(()=>readInventoryRows(docs.replace(
+    "**Counts (tracked source only):**","**Unverified counts:**")),
+    /inventory table boundaries missing/);
+});
+
+test("T70: duplicate or early count markers cannot hide a damaged row",()=>{
+  const marker="**Counts (tracked source only):**";
+  const row=docs.split("\n").find(line=>line.includes("| worker.main |"));
+  const broken=row.replaceAll("|","");
+  // early marker: a second marker placed before the damaged row
+  assert.throws(()=>readInventoryRows(docs.replace(row,marker+" early\n"+broken)),
+    /count marker must be unique/);
+  // duplicate marker directly after the real one
+  assert.throws(()=>readInventoryRows(docs.replace(marker,marker+" x\n\n"+marker)),
+    /count marker must be unique/);
+  // broken row between an early marker and the real marker
+  assert.throws(()=>readInventoryRows(docs.replace(row,row+"\n"+marker+" early\n"+broken)),
+    /count marker must be unique/);
+});
