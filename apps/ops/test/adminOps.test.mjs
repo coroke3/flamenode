@@ -421,6 +421,36 @@ const renderNotifications=(data,query="")=>{
   return renderToStaticMarkup(h(MemoryRouter,null,h(AdminNotificationsView,{data,filters:filtersOf(query),api,onSuccess:()=>{}})));
 };
 
+test("MIG-0734 SPA navigation resets uncontrolled notification filter fields",async()=>{
+  await inDom(async(dom,root)=>{
+    const api=createAdminNotificationsApi(async()=>response(500,{}));
+    const data=notificationData({rows:[]},{failed:0,deadLetter:0});
+    const render=async(query)=>{
+      await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotificationsView,{
+        data,filters:filtersOf(query),api,onSuccess:()=>{}
+      }))));
+    };
+    await render("status=failed&type=old-type&event=old-event&cat=x_id&q=old-query");
+    const field=name=>dom.window.document.querySelector(`[name="${name}"]`);
+    assert.equal(field("type").value,"old-type");
+    assert.equal(field("event").value,"old-event");
+    assert.equal(field("cat").value,"x_id");
+    assert.equal(field("q").value,"old-query");
+    // Typing an unsubmitted draft must not survive a URL change to a different query.
+    field("type").value="unsaved-edit";
+    await render("status=pending&type=new-type&event=new-event&cat=all&q=new-query");
+    assert.equal(field("type").value,"new-type");
+    assert.equal(field("event").value,"new-event");
+    assert.equal(field("cat").value,"all");
+    assert.equal(field("q").value,"new-query");
+    await render("");
+    assert.equal(field("type").value,"");
+    assert.equal(field("event").value,"");
+    assert.equal(field("cat").value,"all");
+    assert.equal(field("q").value,"");
+  });
+});
+
 test("MIG-0734 notifications view ports CURRENT row content: recipient, summary, labels, tab counts, links",()=>{
   const text=renderNotifications(notificationData());
   assert.match(text,/class="fn-console-title">通知配信状況</);
