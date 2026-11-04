@@ -84,9 +84,9 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   // unlock a dependent task merely by appearing in an approval-shaped note.
   if (/^MIG-\d{4}$/.test(alt)) {
     if (alt === id) return false;
-    // Standalone raw-record fixtures validate syntax without an attached STATUS
-    // task inventory; the selector and normal execution checker always supply it.
-    return visibleTasks.size === 0 || visibleTasks.get(alt) === "DONE";
+    // Missing task tables are not authorization. Require exactly one real
+    // completed alternative row even for direct helper calls.
+    return visibleTasks.get(alt) === "DONE";
   }
   // A longer placeholder (e.g. "pending independent review") is still NOT
   // an alternative or a documented rationale.
