@@ -8,13 +8,13 @@ import { MemoryRouter } from "react-router-dom";
 import {createAdminCostGuardApi} from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
 import {createAdminNotificationsApi,notificationQuery,notificationFilterHref} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
 import {CostGuardForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardForm.js";
-import {AdminCostGuardView,changedCostGuardKeys,MODES} from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
+import {AdminCostGuard,AdminCostGuardView,changedCostGuardKeys,MODES} from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 import {CostGuardOverrideForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardOverrideForm.js";
 import {CostGuardDisabledFeaturesForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardDisabledFeaturesForm.js";
 import {NotificationActionButton,NOTIFICATION_CONFIRM} from "../.test-dist/apps/ops/src/routes/admin/NotificationActionButton.js";
 import {NotificationCancelButton} from "../.test-dist/apps/ops/src/routes/admin/NotificationCancelButton.js";
 import {NotificationPayloadButton} from "../.test-dist/apps/ops/src/routes/admin/NotificationPayloadButton.js";
-import {AdminNotificationsView,readNotificationFilters} from "../.test-dist/apps/ops/src/routes/admin/AdminNotifications.js";
+import {AdminNotifications,AdminNotificationsView,readNotificationFilters} from "../.test-dist/apps/ops/src/routes/admin/AdminNotifications.js";
 import {parseCostFeatures,WRITE_FEATURE_KEYS,FEATURE_LABELS} from "../.test-dist/apps/ops/src/routes/admin/costGuardFeatures.js";
 import {leaveWhenAnonymous} from "../.test-dist/apps/ops/src/routes/admin/adminWrite.js";
 import {formatRelative,formatUnix} from "../.test-dist/apps/ops/src/routes/admin/adminFormat.js";
@@ -587,6 +587,52 @@ const renderNotifications=(data,query="")=>{
   const api=createAdminNotificationsApi(async()=>response(500,{}));
   return renderToStaticMarkup(h(MemoryRouter,null,h(AdminNotificationsView,{data,filters:filtersOf(query),api,onSuccess:()=>{}})));
 };
+
+test("MIG-0734 privileged screens hide stale data and writes when a same-page refresh fails",async()=>{
+  await inDom(async(dom,root)=>{
+    let reads=0,writes=0;
+    const costApi={
+      read:async()=>{
+        reads++;
+        return reads===2 ? {status:"unavailable"} : {status:"ok",data:{...settings,reason:"管理者による確認"}};
+      },
+      setMode:async()=>{writes++;return {ok:true};},
+    };
+    await React.act(async()=>root.render(h(AdminCostGuard,{api:costApi})));
+    assert.ok(byText(dom,"モードを更新"),"initial authoritative read exposes controls");
+    await React.act(async()=>byText(dom,"モードを更新").click());
+    assert.equal(reads,2,"successful mutation triggers a fresh authoritative read");
+    assert.equal(writes,1);
+    assert.equal(byText(dom,"モードを更新"),undefined,"failed refresh must unmount stale privileged controls");
+    assert.match(dom.window.document.querySelector('[role="alert"]')?.textContent??" ",/取得できません/);
+    await React.act(async()=>byText(dom,"再試行").click());
+    assert.equal(reads,3);
+    assert.ok(byText(dom,"モードを更新"),"controls return only after a successful new read");
+  });
+  await inDom(async(dom,root)=>{
+    let reads=0,writes=0;
+    const api={
+      list:async()=>{
+        reads++;
+        return reads===2 ? {status:"unavailable"} : {status:"ok",data:notificationData()};
+      },
+      retry:async()=>{writes++;return {ok:true};},
+    };
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotifications,{api}))));
+    assert.ok(byText(dom,"再試行"),"initial failed notification can be retried");
+    assert.ok(dom.window.document.querySelector("pre")===null);
+    await React.act(async()=>byText(dom,"再試行").click());
+    assert.equal(writes,1);
+    assert.equal(reads,2);
+    assert.equal(dom.window.document.querySelector('[aria-label="通知配信状況"]'),null);
+    assert.equal(byText(dom,"強制再送"),undefined,"no stale notification mutations after read failure");
+    assert.equal(byText(dom,"payload"),undefined,"private payload is not exposed on failed refresh");
+    assert.match(dom.window.document.querySelector('[role="alert"]')?.textContent??" ",/取得できません/);
+    await React.act(async()=>byText(dom,"再試行").click());
+    assert.equal(reads,3);
+    assert.ok(byText(dom,"強制再送"),"actions return after authoritative data recovers");
+  });
+});
 
 test("MIG-0734 SPA navigation resets uncontrolled notification filter fields",async()=>{
   await inDom(async(dom,root)=>{
