@@ -1,4 +1,5 @@
 import * as React from "react";
+import { MAX_COST_GUARD_BANNER_REASON_CHARS } from "@flamenode/contracts";
 import {
   createOperationModeBannerApi,
   type BannerMode,
@@ -18,7 +19,7 @@ type Tone = {
 /**
  * MIG-0718 U02: exact CURRENT CostGuardBanner tone/markup parity.
  * Reads only the public banner endpoint; no admin D1, session or writes.
- * U03 will mount below MIG-0701's auth shell wrapper, before <main>.
+ * U03 mounts under the merged MIG-0701 Personal wrapper, before <main>.
  */
 const TONE: Record<BannerMode, Tone> = {
   economy: {
@@ -62,8 +63,8 @@ export function CostGuardBannerView({
   if (!snapshot || !Object.prototype.hasOwnProperty.call(TONE, snapshot.mode)) return null;
   const tone = TONE[snapshot.mode];
   // Keep the render boundary resilient to stale/corrupt data even if a future
-  // caller bypasses the read client's provisional validator (U03 shared DTO).
-  const reason = typeof snapshot.reason === "string" && snapshot.reason.length <= 2048
+  // caller bypasses the merged shared DTO read validator.
+  const reason = typeof snapshot.reason === "string" && snapshot.reason.length <= MAX_COST_GUARD_BANNER_REASON_CHARS
     ? snapshot.reason
     : null;
   return (
