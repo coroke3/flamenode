@@ -314,7 +314,9 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
  for (const invalidState of ["READY","BLOCKED","SKIPPED","IN_PROGRESS"]) {
    const invalidRows = rows.replace("| MIG-0108 | approved alternate | DONE |",
      "| MIG-0108 | approved alternate | " + invalidState + " |");
-   assert.equal(pickNextTask(invalidRows+"\n"+approval,"").selected,null,invalidState);
+   const invalidSelection = pickNextTask(invalidRows+"\n"+approval,"");
+   assert.ok(!invalidSelection.candidates.includes("MIG-0401"),
+     invalidState+": unfinished alternate cannot unlock its SKIPPED dependent");
  }
  assert.equal(pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,"").selected,null,
    "duplicate DONE alternative must not count");
