@@ -611,6 +611,35 @@ test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",
     await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
     await React.act(async()=>submit());
     assert.equal(queries.length,2);
+
+    // Windows IME can emit key="Process" instead of "Enter" for keyCode 229.
+    // The fallback must guard the same-tick search button and form submission.
+    await React.act(async()=>{
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown",{
+        key:"Process",keyCode:229,bubbles:true,
+      }));
+      searchButton.click();
+      submit();
+    });
+    assert.equal(queries.length,2,"Process/229 cannot submit in the IME commit tick");
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    await React.act(async()=>searchButton.click());
+    assert.equal(queries.length,3,"Process/229 fallback clears for intentional later search");
+
+    // A Process/229 key while composing must not start the one-tick clear timer.
+    await React.act(async()=>{
+      compose("compositionstart");
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown",{
+        key:"Process",keyCode:229,isComposing:true,bubbles:true,
+      }));
+    });
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    assert.equal(form.hasAttribute("data-fn-ime-composing"),true);
+    await React.act(async()=>submit());
+    assert.equal(queries.length,3,"ongoing Process composition remains protected");
+    await React.act(async()=>compose("compositionend"));
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    assert.equal(form.hasAttribute("data-fn-ime-composing"),false);
   });
 });
 
