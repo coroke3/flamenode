@@ -175,6 +175,57 @@ test("MIG-0512: genuine 404-page HTML is accepted, generic 404 bodies fail safel
   }
 });
 
+test("MIG-0512 regression: 200 static error assets must be non-empty HTML before relabeling", async () => {
+  const cases = [
+    { name: "plain-text", body: "raw upstream text", headers: { "Content-Type": "text/plain" } },
+    { name: "json", body: '{"error":"upstream"}', headers: { "Content-Type": "application/json" } },
+    { name: "missing-type", body: "unknown page", headers: {} },
+    { name: "missing-body", body: null, headers: { "Content-Type": "text/html" } },
+    { name: "zero-length", body: "", headers: { "Content-Type": "text/html", "Content-Length": "0" } },
+  ];
+  for (const [path, status, fallback] of [
+    ["/%2f", 404, "Not Found"],
+    ["/video-public-1", 503, "Service Unavailable"],
+  ]) {
+    for (const method of ["GET", "HEAD"]) {
+      for (const testCase of cases) {
+        const calls = [];
+        const { env } = createEnv({ assets: { fetch: async (req) => {
+          calls.push(new URL(req.url).pathname);
+          return new Response(testCase.body, { status: 200, headers: testCase.headers });
+        } } });
+        if (status === 503) env.VISIBILITY_KV = undefined;
+        const res = await get(path, env, { method });
+        assert.equal(res.status, status, `${path} ${method} ${testCase.name}`);
+        assert.equal(res.headers.get("Content-Type"), "text/plain; charset=utf-8");
+        assert.equal(res.headers.get("Cache-Control"), "no-store, private");
+        assert.equal(res.headers.get("X-Robots-Tag"), "noindex, nofollow");
+        assert.equal(res.headers.get("Retry-After"), status === 503 ? "30" : null);
+        assert.equal(await res.text(), method === "HEAD" ? "" : fallback);
+        assert.deepEqual(calls, [status === 404 ? "/404" : "/503/"]);
+      }
+    }
+  }
+});
+
+test("MIG-0512 regression: valid 200 HTML error assets still serve GET and HEAD", async () => {
+  const html = "<html><body>Custom error</body></html>";
+  for (const [path, status] of [["/%2f", 404], ["/video-public-1", 503]]) {
+    for (const method of ["GET", "HEAD"]) {
+      const { env } = createEnv({ assets: { fetch: async () =>
+        new Response(method === "HEAD" ? null : html, {
+          status: 200, headers: { "Content-Type": "text/html; charset=utf-8" },
+        }),
+      } });
+      if (status === 503) env.VISIBILITY_KV = undefined;
+      const res = await get(path, env, { method });
+      assert.equal(res.status, status);
+      assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");
+      assert.equal(await res.text(), method === "HEAD" ? "" : html);
+    }
+  }
+});
+
 test("MIG-0512: failing fixed HTML and maintenance Assets return retryable, fail-closed 503", async () => {
   const { env, calls } = createEnv();
   env.ASSETS = { fetch: async (request) => {
