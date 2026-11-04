@@ -529,6 +529,17 @@ test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",
     });
     assert.deepEqual(queries,[],"category and explicit submit must not navigate while composing");
     await React.act(async()=>{
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown",{
+        key:"Enter",keyCode:229,isComposing:true,bubbles:true,
+      }));
+    });
+    // A 229 keydown during an active conversion must NOT start a removal timer.
+    // A premature timer would permit search while composition is still active.
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    assert.equal(form.hasAttribute("data-fn-ime-composing"),true,"ongoing composition must retain its guard");
+    await React.act(async()=>submit());
+    assert.deepEqual(queries,[],"same-form submit remains blocked before compositionend");
+    await React.act(async()=>{
       compose("compositionend");
       submit(); // same tick as IME commit must still be blocked
     });
