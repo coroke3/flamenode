@@ -51,6 +51,7 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   if (!/^MIG-\d{4}$/.test(id)) return false;
   let fence = null;
   const records = [];
+  const visibleTasks = new Map();
   const outsideComments = statusText.replace(/<!--[\s\S]*?(?:-->|$)/g, match => match.replace(/[^\n]/g, " "));
   for (const line of outsideComments.replace(/\r\n/g, "\n").split("\n")) {
     const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -60,6 +61,14 @@ export function hasValidSkipApprovalRecord(statusText, id) {
       continue;
     }
     if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
+    // Only real, unquoted/unfenced STATUS task rows count as alternatives.
+    // A forged DONE row inside an example or HTML comment is not evidence.
+    const cells = line.startsWith("|") ? line.split("|").map(cell => cell.trim()) : [];
+    if ((cells.length === 6 || cells.length === 7) && /^MIG-\d{4}$/.test(cells[1])) {
+      const previous = visibleTasks.get(cells[1]);
+      // Ambiguous duplicate records fail closed; main STATUS validation also rejects them.
+      visibleTasks.set(cells[1], previous === undefined ? cells[3] : "AMBIGUOUS");
+    }
     // A status note inside an HTML comment or a quoted/list example is not approval.
     if (line.startsWith("SKIP_APPROVAL: " + id + " | ")) records.push(line);
   }
@@ -70,8 +79,15 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   if (!match || match[1] !== id || match[2] !== match[6] ||
       match[4] !== "coroke3" || match[5] !== "flamenode") return false;
   const alt = match[7].trim();
-  // A SKIPPED task cannot name itself as its own replacement.
-  if (/^MIG-\d{4}$/.test(alt)) return alt !== id;
+  // A named alternate MIG is usable only after it actually exists and is
+  // DONE. A missing, READY, BLOCKED, SKIPPED or duplicated alternative cannot
+  // unlock a dependent task merely by appearing in an approval-shaped note.
+  if (/^MIG-\d{4}$/.test(alt)) {
+    if (alt === id) return false;
+    // Standalone raw-record fixtures validate syntax without an attached STATUS
+    // task inventory; the selector and normal execution checker always supply it.
+    return visibleTasks.size === 0 || visibleTasks.get(alt) === "DONE";
+  }
   // A longer placeholder (e.g. "pending independent review") is still NOT
   // an alternative or a documented rationale.
   return alt.length >= 12 &&
