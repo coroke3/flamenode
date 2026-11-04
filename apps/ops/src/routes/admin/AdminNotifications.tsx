@@ -111,7 +111,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         </Link>
       </p>
 
-      {unhealthyLeaseCount > 0 ? (
+      {!data.error && unhealthyLeaseCount > 0 ? (
         <div role="status" className="fn-alert fn-alert--danger" style={{ marginTop: 14 }}>
           <strong>配送リース期限超過・欠損 {unhealthyLeaseCount} 件</strong>
           {" "}— 期限超過は毎時 Recovery Cron の回収対象です。欠損行または10分以上続く場合はWorkerとD1を確認してください。
@@ -207,7 +207,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
 
       {data.error ? (
         <div role="alert" className="fn-alert fn-alert--danger" style={{ marginTop: 20 }}>
-          エラー: 通知ログの取得に失敗しました（{data.error}）。
+          エラー: 通知ログの取得に失敗しました（{data.error}）。{" "}
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onSuccess}>再試行</button>
         </div>
       ) : (
         <section style={{ marginTop: 18 }}>
