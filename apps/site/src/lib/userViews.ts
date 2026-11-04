@@ -19,9 +19,9 @@ import {
   prepareUsersIndexItems,
   type StaticUsersIndexEntry,
 } from "../../../../src/lib/publicData/staticUsersIndexCore.ts";
-import { normalizePublicIconUrl } from "../../../../src/lib/publicData/publicIconProjection.ts";
+import { normalizePublicIconUrl, resolveProjectedIcon, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
-import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatSocialLinkLabel, parseSocialLinks, profileHeaderSocialLinks } from "../../../../src/lib/socialLinks.ts";
 import { normalizePortfolioContact } from "../../../../src/lib/profileContact.ts";
 import { totalPagesFor } from "../../../../src/lib/utils/sql.ts";
@@ -39,7 +39,7 @@ export const PORTFOLIO_WORK_LIMIT = 36;
 /** CURRENT `VideoCard`: link is the YouTube ID or the internal ID, thumbnail via the thumbnail API. */
 export function toScreenVideoCard(video: VideoCardData): ScreenVideoCard {
   return {
-    href: `/${video.youtube_video_id?.trim() || video.id}`,
+    href: videoPageHref(video),
     title: video.title,
     thumbnailUrl: youtubeThumbUrl(video.youtube_video_id, "mqdefault") || null,
     creatorName: video.display_name,
@@ -183,14 +183,22 @@ export function buildProfileHead(profile: StaticUserProfile): PageHead {
 }
 
 /** CURRENT `generateMetadata` of `/user/[id]/portfolio` (always noindex). */
-export function buildPortfolioHead(profile: StaticUserProfile): PageHead {
+export function buildPortfolioHead(
+  profile: StaticUserProfile,
+  iconMap: ReadonlyMap<string, PublicXIconEntry> = new Map(),
+): PageHead {
   const { user } = profile;
   const name = user.x_name || user.id;
   return buildPageHead({
     title: `${name} - Portfolio`,
     description: compactText(user.profile_text),
     path: `/user/${user.id}/portfolio`,
-    image: cachedGoogleImageUrl(normalizePublicIconUrl(user.icon_url)),
+    // userViews is imported by the browser UsersIndexIsland: never import the
+    // server-only snapshotEnv/publicDataLoader dependency graph from here.
+    image: cachedGoogleImageUrl(
+      normalizePublicIconUrl(user.icon_url) ??
+      resolveProjectedIcon({ xUserId: user.id, iconMap, legacyIconUrl: null }),
+    ),
     noIndex: true,
   });
 }

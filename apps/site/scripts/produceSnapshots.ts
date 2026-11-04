@@ -9,13 +9,12 @@
  * forbidden-key sanitizing and LIMITs are CURRENT's, not a copy. The bucket is captured, never uploaded.
  *
  * Safety: CURRENT's generators also write tracking rows (static_artifacts, static_rebuild_queue). The CLI
- * therefore only accepts a local file (a sqlite copy or a `wrangler d1 export` SQL dump) that it loads into a scratch
- * in-memory database; it never talks to Cloudflare. Production D1 access (read-only REST token, MIG-0409
- * `--d1-api`) is not used here: this producer runs about 6 statements per creator, far above that reader's
- * 19-request cap. How the build obtains the local copy is the MIG-0509 decision (see the work item).
+ * therefore routes those writes to a migrated in-memory scratch database. --d1-api uses the bounded
+ * read-only REST reader with batched/set-based SQL (max 200 SELECT statements); it never sends writes to D1.
+ * Local --sqlite and --sql-dump fixtures remain supported, with explicit --batched parity mode.
  *
  * CLI: node --experimental-strip-types apps/site/scripts/produceSnapshots.ts
- *        (--sqlite FILE | --sql-dump FILE) --out DIR --generation ID [--trending-file FILE] [--now SEC]
+ *        (--sqlite FILE | --sql-dump FILE | --d1-api) --out DIR --generation ID [--trending-file FILE] [--now SEC]
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -26,10 +25,12 @@ import { readUserObjects } from "./batchedUserReader.ts";
 import {
   ABOUT_STATS_KEY,
   LIST_FIRST_PAGE_KEY,
+  SITEMAP_VIDEOS_KEY,
   RECOMMEND_KEY,
   TOP_KEY,
   TRENDING_KEY,
   USERS_INDEX_KEY,
+  PUBLIC_X_ICON_MAP_KEY,
   EVENT_INDEX_KEY,
   eventDetailKey,
   eventReleaseKey,
@@ -38,6 +39,8 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
+import { D1_HTTP_ENV, MAX_D1_HTTP_STATEMENTS_OVERRIDE, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
+import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -46,8 +49,23 @@ const ID_LIST_LIMIT = 5000;
 const videoDetailKey = (id: string): string => `snapshot/video-detail/${id}.json`;
 import { normalizeTopStatsSection, TOP_STATS_OBJECT_KEY } from "../../../src/lib/publicData/staticTopSectionsCore.ts";
 import { normalizeStaticUsersIndex } from "../../../src/lib/publicData/staticUsersIndexCore.ts";
+import { PUBLIC_X_ICON_MAP_OBJECT_KEY } from "../../../src/lib/publicData/publicIconProjection.ts";
+import { projectPublicXIconMap } from "../src/lib/publicIconMap.ts";
+import { normalizeStaticRecentVideoPage } from "../../../src/lib/publicData/staticRecentVideoCore.ts";
+import { normalizeStaticVideoDetail } from "../../../src/lib/publicData/staticVideoDetailCore.ts";
 import { normalizeXId } from "../../../src/lib/utils/xid.ts";
 import { PUBLIC_LISTABLE_X_APPROVAL_SQL_IN } from "../../../src/lib/utils/publicXUser.ts";
+
+/** A recent-list alias is indexable only when it is the canonical URL of a public, built detail. */
+export function sitemapVideoMatchesDetail(
+  row: { id: string; youtube_video_id: string | null },
+  rawDetail: unknown,
+): boolean {
+  if (!rawDetail || typeof rawDetail !== "object") return false;
+  const detail = normalizeStaticVideoDetail(rawDetail as Parameters<typeof normalizeStaticVideoDetail>[0]);
+  if (!detail || detail.video.visibility_status !== "public" || detail.video.id !== row.id) return false;
+  return (detail.video.youtube_video_id?.trim() || detail.video.id) === (row.youtube_video_id ?? row.id);
+}
 
 /** CURRENT `/list` page size: the first page is the only list content rendered at build time. */
 export const LIST_FIRST_PAGE_SIZE = 24;
@@ -141,13 +159,13 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 }
 
 /** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
-export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
+export const DEFAULT_MAX_REMOTE_STATEMENTS = MAX_D1_HTTP_STATEMENTS_OVERRIDE;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
 function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
   return {
     prepare(sql: string) {
-      if (!/^\s*(SELECT|WITH)\b/i.test(sql) || sql.trim().replace(/;\s*$/, "").includes(";")) {
+      if (!isReadOnlyStatement(sql)) {
         throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
       }
       counter.n += 1;
@@ -252,11 +270,44 @@ async function allRows(db: D1Like, sql: string, ...values: unknown[]): Promise<R
   return (await stmt.all()).results ?? [];
 }
 
+// CURRENT's static generators call Date.now() directly. A build with --now
+// temporarily overrides that process-global function; concurrent producers
+// must not overlap or a run can stamp another generation's timestamps.
+let snapshotProducerTail: Promise<void> = Promise.resolve();
+
 export async function produceSnapshots(input: ProduceInput): Promise<ProduceResult> {
+  // Programmatic callers bypass the CLI's --now validation. Reject malformed
+  // clocks before entering the queue or touching D1/the temporary SQLite DB.
+  // Date's TimeClip range ends at 8.64e15 ms, below MAX_SAFE_INTEGER.
+  // CURRENT's generators call new Date(nowSec * 1000), not just Date.now().
+  const maxDateUnixSec = 8_640_000_000_000;
+  if (input.nowSec !== undefined &&
+      (!Number.isSafeInteger(input.nowSec) || input.nowSec < 0 || input.nowSec > maxDateUnixSec)) {
+    throw new RangeError("snapshot nowSec must be a nonnegative integer within JavaScript Date range");
+  }
+  const previous = snapshotProducerTail;
+  let release!: () => void;
+  snapshotProducerTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await produceSnapshotsExclusive(input);
+  } finally {
+    // Release even when a generator throws, so subsequent builds cannot hang.
+    release();
+  }
+}
+
+async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceResult> {
   const started = performance.now();
   const counter = { n: 0 };
   const batched = input.mode === "batched";
   const maxRemote = input.maxRemoteStatements ?? DEFAULT_MAX_REMOTE_STATEMENTS;
+  // The local overlay also has an independent statement fence. Validate before
+  // opening scratch DBs or executing a remote SELECT; NaN/Infinity would evade
+  // counter.n > maxRemote just as they did in the REST reader.
+  if (batched && (!Number.isSafeInteger(maxRemote) || maxRemote < 1 || maxRemote > DEFAULT_MAX_REMOTE_STATEMENTS)) {
+    throw new RangeError(`batched snapshot statement budget must be an integer from 1 to ${DEFAULT_MAX_REMOTE_STATEMENTS}`);
+  }
   const remote = batched ? limitedDb(input.db, counter, maxRemote) : countingDb(input.db, counter);
   const generatorDb = batched ? overlayDb(remote, input.scratch ?? (await openMigratedScratch())) : remote;
   const { env, objects } = captureEnv(generatorDb);
@@ -324,8 +375,23 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
     add(RECOMMEND_KEY, objects.get("recommend.json"));
     const recent = objects.get("list/recent.json") as { items?: unknown[]; total?: number } | undefined;
     add(LIST_FIRST_PAGE_KEY, recent ? { videos: (recent.items ?? []).slice(0, LIST_FIRST_PAGE_SIZE), total: recent.total } : undefined);
+    // CURRENT sitemap uses the first 500 normalized public recent videos, not the 24-item UI page.
+    const sitemapPage = recent ? normalizeStaticRecentVideoPage(recent, 1, 500) : null;
+    add(SITEMAP_VIDEOS_KEY, sitemapPage ? {
+      generated_at: sitemapPage.generatedAt,
+      videos: sitemapPage.videos
+        .filter((video) => sitemapVideoMatchesDetail(video, evObjects.get(`videos/${video.id}.json`)))
+        .map((video) => ({
+        id: video.id,
+        youtube_video_id: video.youtube_video_id ?? null,
+        scheduled_time: video.scheduled_time ?? null,
+      })),
+    } : undefined);
     add(TRENDING_KEY, input.trending);
     add(USERS_INDEX_KEY, objects.get("users/index.json"));
+    add(PUBLIC_X_ICON_MAP_KEY, projectPublicXIconMap(
+      objects.get(PUBLIC_X_ICON_MAP_OBJECT_KEY), objects.get("users/index.json"),
+    ) ?? undefined);
     for (const id of creatorIds) {
       if (!objects.has(`users/${id}.json`)) continue;
       add(userProfileSnapshotKey(id), objects.get(`users/${id}.json`));
@@ -387,7 +453,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       },
     };
   } finally {
-    Date.now = realNow;
+    if (input.nowSec !== undefined) Date.now = realNow;
   }
 }
 
@@ -416,6 +482,9 @@ export function writeSnapshotDir(outDir: string, result: ProduceResult): Record<
 async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promise<D1Like> {
   const { DatabaseSync } = await import("node:sqlite");
   const scratch = new DatabaseSync(":memory:");
+  // Copy SQLite tables in schema order before enabling FK checks; SQLite's sqlite_master order
+  // is not a topological dependency order. The source snapshot is read-only throughout.
+  scratch.exec("PRAGMA foreign_keys = OFF");
   if (args.sqlite) {
     // Copy through the backup-free route: attach read-only and copy tables is overkill; load the file bytes.
     const source = new DatabaseSync(args.sqlite, { readOnly: true });
@@ -435,6 +504,9 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   } else {
     throw new Error("--sqlite FILE or --sql-dump FILE is required (no Cloudflare access from this producer)");
   }
+  const broken = scratch.prepare("PRAGMA foreign_key_check").all();
+  if (broken.length) throw new Error("Local SQLite snapshot has broken foreign keys");
+  scratch.exec("PRAGMA foreign_keys = ON");
   return {
     prepare(sql: string) {
       let params: unknown[] = [];
@@ -449,30 +521,78 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   };
 }
 
-function argValue(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+export interface SnapshotCliOptions {
+  env?: Record<string, string | undefined>;
+  fetchFn?: typeof fetch;
+  quiet?: boolean;
+}
+type SnapshotCliArgs = {
+  out: string; generation: string;
+  sqlite?: string; sqlDump?: string; d1Api: boolean; batched: boolean;
+  trendingFile?: string; trendingR2: boolean; now?: number;
+};
+const CLI_USAGE = "expected exactly one of --sqlite FILE, --sql-dump FILE, --d1-api, plus --out DIR --generation ID";
+export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
+  const values = new Map<string,string>();
+  let d1Api = false, batched = false, trendingR2 = false;
+  const known = new Set(["--out","--generation","--sqlite","--sql-dump","--trending-file","--now"]);
+  for (let i = 0; i < argv.length; i++) {
+    const key = argv[i];
+    if (key === "--d1-api" || key === "--batched" || key === "--trending-r2") {
+      if ((key === "--d1-api" && d1Api) || (key === "--batched" && batched) || (key === "--trending-r2" && trendingR2)) throw new Error(CLI_USAGE);
+      if (key === "--d1-api") d1Api = true; else if(key === "--trending-r2") trendingR2 = true; else batched = true;
+      continue;
+    }
+    if (!known.has(key) || values.has(key) || !argv[i+1] || argv[i+1].startsWith("--")) throw new Error(CLI_USAGE);
+    values.set(key,argv[++i]);
+  }
+  if (trendingR2 && values.has("--trending-file")) throw new Error(CLI_USAGE);
+  const sqlite = values.get("--sqlite"), sqlDump = values.get("--sql-dump");
+  const sourceCount = Number(d1Api)+Number(Boolean(sqlite))+Number(Boolean(sqlDump));
+  if (sourceCount !== 1 || !values.get("--out") || !values.get("--generation")) throw new Error(CLI_USAGE);
+  const nowRaw = values.get("--now");
+  const now = nowRaw === undefined ? undefined : Number(nowRaw);
+  if (now !== undefined && (!Number.isSafeInteger(now)||now<0)) throw new Error(CLI_USAGE);
+  return {
+    out:values.get("--out")!,generation:values.get("--generation")!,
+    sqlite,sqlDump,d1Api,batched:batched||d1Api,trendingFile:values.get("--trending-file"),trendingR2,now,
+  };
 }
 
-export async function main(argv: string[]): Promise<void> {
-  const out = argValue(argv, "--out");
-  const generation = argValue(argv, "--generation");
-  if (!out || !generation) throw new Error("--out DIR and --generation ID are required");
-  const db = await openScratchDb({ sqlite: argValue(argv, "--sqlite"), sqlDump: argValue(argv, "--sql-dump") });
-  const trendingFile = argValue(argv, "--trending-file");
-  const nowArg = argValue(argv, "--now");
+export async function main(argv: string[], options: SnapshotCliOptions = {}): Promise<ProduceResult> {
+  const args = parseSnapshotCliArgs(argv);
+  const env = options.env ?? process.env;
+  const db = args.d1Api
+    ? openD1HttpReader({
+        accountId: env[D1_HTTP_ENV.accountId]?.trim() ?? "",
+        databaseId: env[D1_HTTP_ENV.databaseId]?.trim() ?? "",
+        token: env[D1_HTTP_ENV.token]?.trim() ?? "",
+        fetchFn: options.fetchFn,
+        maxStatements: DEFAULT_MAX_REMOTE_STATEMENTS,
+      }).db
+    : await openScratchDb({sqlite: args.sqlite,sqlDump: args.sqlDump});
+  const trending = args.trendingR2
+    ? await readR2Json({accountId:env.CLOUDFLARE_ACCOUNT_ID?.trim()??"",
+      bucket:env.FLAMENODE_R2_BUCKET?.trim()||DEFAULT_R2_BUILD_BUCKET,
+      key:"analytics/trending.json",token:env.FLAMENODE_R2_READ_TOKEN?.trim()??"",
+      fetchFn:options.fetchFn})
+    : args.trendingFile ? JSON.parse(fs.readFileSync(args.trendingFile,"utf8")) : undefined;
   const result = await produceSnapshots({
     db,
-    mode: argv.includes("--batched") ? "batched" : "oracle",
-    generation,
-    nowSec: nowArg ? Number(nowArg) : undefined,
-    trending: trendingFile ? JSON.parse(fs.readFileSync(trendingFile, "utf-8")) : undefined,
+    mode:args.batched ? "batched" : "oracle",
+    maxRemoteStatements:DEFAULT_MAX_REMOTE_STATEMENTS,
+    generation:args.generation,
+    nowSec:args.now,
+    trending:trending===null?undefined:trending,
   });
-  const env = writeSnapshotDir(out, result);
-  console.log(JSON.stringify({ report: result.report, env }, null, 2));
-  if (result.report.trending === "missing") {
-    console.warn("[snapshots] trending was not produced (no --trending-file): the /trending and / builds fail closed until it is supplied");
+  const buildEnv = writeSnapshotDir(args.out, result);
+  if (!options.quiet) {
+    console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
+    if (result.report.trending === "missing") {
+      console.warn("[snapshots] trending was not produced: the /trending and / builds fail closed until it is supplied");
+    }
   }
+  return result;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

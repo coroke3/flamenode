@@ -166,7 +166,9 @@ test("admin 編集導線は privileged=admin を付ける", () => {
     "utf8",
   );
   assert.match(tabs, /privileged=admin/);
-  assert.match(tabs, /youtubeVideoId\?\.trim\(\) \|\| videoId/);
+  // Public links must use the shared validated route, not the raw YouTube alias.
+  assert.ok(tabs.includes("href: videoPageHref({ id: videoId, youtube_video_id: youtubeVideoId })"));
+  assert.ok(!tabs.includes("youtubeVideoId?.trim() || videoId"));
   const editPage = readFileSync(
     new URL("../../../app/(auth)/dashboard/edit/[id]/page.tsx", import.meta.url),
     "utf8",

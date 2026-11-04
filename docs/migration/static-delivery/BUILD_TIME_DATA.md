@@ -28,7 +28,7 @@ CURRENT `revalidate` values are read from the page files (`export const revalida
 | `events/index.json` (event list + group sections) | 30 s (`app/(public)/event/page.tsx:8`); R2 object `max-age=300` (`workers/json-generator/rebuild.ts` `rebuildEventsIndex`) | event / group / public staff edit, visibility change | **build** (`apps/site/scripts/readPublicData.ts`, this PR) | MIG-0409 → MIG-0509 |
 | Home `top.json` sections | 120 s (`app/(public)/page.tsx:53`) | video publish, featured edit, stats | build (sections faster than the build interval → API) | MIG-0509 / MIG-06xx |
 | Work list `/list` | 30 s (`app/(public)/list/page.tsx:8`) | video publish / score | **NOT DECIDED** — U06 shard CPU not measured | MIG-0409 U06 |
-| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | **NOT DECIDED** — U06 | MIG-0409 U06 |
+| Recommend / trending | 300 s (`recommend/page.tsx:27`, `trending/page.tsx:23`) | score / sync jobs | GA4 input: D1 bounded public snapshot, 1 SELECT / no R2 list read (MIG-0517 PR #442; code review/CI pending) | MIG-0409 U06 → MIG-0517 |
 | User list `/user` | 30 s (`app/(public)/user/page.tsx:8`) | profile / approval | **NOT DECIDED** — U06 | MIG-0409 U06 |
 | Video `/[id]` | 30 s (`app/(public)/[id]/page.tsx:65`) | video edit / visibility | Queue → R2 HTML, **server-rendered like the build's static page** (MIG-0403 mapping, empty lists; warm max ≈ 1.2 ms local Node wall). **Re-measure when MIG-0502 / MIG-0507 add lists** (upper-bound with lists: 25–49 ms) | MIG-0411 |
 | User `/user/[id]` | 30 s (`app/(public)/user/[id]/page.tsx:9`) | profile edit, work publish | Queue → R2 HTML, **server-rendered** (`renderToString` max 4.4–5.8 ms) | MIG-0411 |
@@ -253,6 +253,15 @@ The auth/missing-Queue/invalid-count regression test is run by the migration CI
 (`apps/site/scripts/queue-cpu-probe/worker.test.mjs`). This fixes the previously
 public CPU amplification endpoint; it does **not** prove any workerd CPU limit.
 
+## MIG-0509 U03: reproducible local build entry (no production change)
+
+`npm run build:public --workspace=@flamenode/site -- --sqlite <seed.sqlite> --trending-file <trending.json> --now <unix-seconds> --generation <id>`
+
+- Runs the existing CURRENT-parity producers with local SQLite fixtures and writes all public snapshot kinds and a manifest in a temporary directory.
+- Exposes `FLAMENODE_SNAPSHOT_DIR`, `FLAMENODE_SNAPSHOT_MANIFEST_FILE` and `FLAMENODE_SNAPSHOT_GENERATION` only to the Astro and static build-budget child processes, then verifies the output. D1/R2 read tokens are removed from these child processes' environments.
+- Reports the number of snapshot keys, bytes, D1 SELECT statements and build elapsed milliseconds as a JSON line. This is a **local/CI result**, not Workers Builds or production timing. Absent trending is a hard build failure.
+- The work item `MIG-0509.md` keeps live-build measurements separate from local simulation. File-count/budget checks cannot substitute for production data.
+
 ## 5. How the build reads D1
 
 | Option | What | Status |
@@ -294,6 +303,38 @@ by `LIMIT` / window limits from the `MAX_` constants (which equal CURRENT's), fa
 It never runs inside a Worker request. Choosing A or B, and creating the token or credential,
 is pending user approval.
 
+### MIG-0509 U01/U02/U04: target Workers Builds integration — instructions only
+
+**Not authorized/executed by this PR**: create any token, connect a Workers Builds project, query production D1 or R2, deploy a Worker, change production Route/secret, or run five live builds. Every such step requires the owner's explicit approval before execution. The current `flamenode-web` and its authentication routes remain the rollback path.
+
+When separately approved, configure Workers Builds with:
+
+```bash
+npm run build:public --workspace=@flamenode/site -- --d1-api --trending-r2 --generation "$WORKERS_CI_COMMIT_SHA"
+```
+
+The build must have the already-approved dependencies built first (including `@flamenode/ui`), and uses read-only D1 API (`openD1HttpReader`, maximum 200 SELECT requests per build). `--d1-api`, `--sql-dump` and `--sqlite` are mutually exclusive; `--trending-r2` and `--trending-file` are mutually exclusive.
+
+| Build variable | Use / required privilege |
+| --- | --- |
+| `CLOUDFLARE_ACCOUNT_ID` | Only the FlameNode account; 32-hex ID, not a token |
+| `FLAMENODE_D1_DATABASE_ID` | Existing D1 database ID; do not change it |
+| `FLAMENODE_D1_READ_TOKEN` | Dedicated account-scoped D1 Read token; the code sends SELECT only. Never commit or echo |
+| `FLAMENODE_R2_READ_TOKEN` | Dedicated account-scoped R2 Read token (no write permission), reads only `analytics/trending.json` |
+| `FLAMENODE_R2_BUCKET` | Optional; existing `flamenode-storage` by default, from current `wrangler.toml` |
+| `WORKERS_CI_COMMIT_SHA` | Stable build generation; required on the remote path unless `--generation` supplied |
+
+The R2 read uses `GET /client/v4/accounts/<account>/r2/buckets/<bucket>/objects/analytics/trending.json`, a 15-second timeout and 2 MiB limit. 404 causes the build to fail closed because trending is required; 401 and malformed JSON fail without displaying the credential. It does not perform `PUT` or any R2 Class A write.
+
+Owner-only checkpoint, after explicit permission:
+1. Confirm production D1 migration `0065` is applied using an approved read-only check. Do **not** widen the token to D1 Edit if the `/query` endpoint rejects Read.
+2. Prepare the dedicated read-only tokens in a trusted environment; verify `SELECT 1` through the D1 REST path, and a read of the analytics key. Any credential scope error is a STOP and requires an updated decision.
+3. Create/configure a **nonproduction** Workers Builds project with no Route or deployment (explicit separate approval), install dependencies and perform 5 builds without changing production. Record per-run elapsed time, D1 statement count, file count, max individual snapshot size, total bytes and Class A usage.
+4. Recompute the `MAX_DATA_BUILDS_PER_DAY` and `MIN_BUILD_INTERVAL_MS` constants against the actual 80% Workers Builds Free-plan budget; stop if one build is ≥4 minutes or exceeds the approved constraints. This is an owner/lead review, not automatic CI completion.
+5. Only after reviewed results and separate production approval may anyone consider a build project or Route cutover; this PR does not request or execute that change.
+
+**Current validation state:** MIG-0509 (code task) is DONE in PR #469 (2026-11-02 integration) once the latest-head GitHub Actions are green and an independent review plus human merge approval are recorded. The 5 Workers Builds measurements, the production `0065` check and credential setup are **owner follow-ups that remain unperformed** (tracked in `OPEN_DECISIONS.md` D-11 follow-up B and `work-items/MIG-0509.md`); they are not performed by an agent.
+
 ## 6. Sizing from the production counts (one read-only count, 2026-10-18)
 
 Source: `project-files/migration-review/2026-10-18-prod-d1-count.log` (one SELECT via the
@@ -330,15 +371,14 @@ delete — under 64 KB; 50 % = 5,000 operations ≈ 1,666 messages/day). Sources
 | Update doorbells, every public entity updated once a day (≤ 1,460) | ≤ 1,460 | ≤ 4,380 | ≤ 43.8 % |
 | Recovery doorbells (≤ 5 per Cron run, hourly; only rows still pending) | ≤ 120 | ≤ 360 | ≤ 3.6 % |
 | Consumer page render (D-11: the consumer does not render; R2 PUT = 0). The doorbell / recovery rows above are unchanged; `rebuild-page` for an excluded kind is finished at once (`excluded_kind`) | — | 3 operations per message, as before | — |
-| Gateway `rebuild-page` for a stale-generation page (served, not a 503; each visited page once per isolate per minute) | ≤ 1,460 × builds that change the generation | — | **see note** |
+| Gateway `rebuild-page` when detail HTML is absent from both Static Assets and R2 | Not measured (visitor/miss dependent) | 3 operations/message | Requires measurement before Queue activation |
 
-With realistic update rates (far below one update per entity per day) the first two rows stay
-well inside 50 %. The third row used to be the risk: a generation mismatch answered 503. Decided
-2026-10-23 (F-02): the gateway accepts R2 HTML on identity (`kind`/`id`/`key`); generation is
-diagnostic, so a stale page is served and one deduplicated rebuild is requested. Visitors no
-longer see 503 after each build. The rebuild requests themselves can still reach
-1,460 × builds/day (≈ 35,000 messages/day) if every build changes the generation and every
-visited page asks once; keeping the route generation across data-only builds (MIG-0509) remains
-the way to bring that down. Unpublish and slug changes stay fenced by KV `deny:`, the consumer's
-R2 delete, and the route key.
+The bounded producer scenarios above total at most 1,460 update doorbells plus 120
+recovery messages/day (1,580 × 3 = 4,740 operations, 47.4% of 10,000/day).
+This conditional estimate leaves only 86 gateway messages/day before reaching
+the 50%-of-free-tier target (5,000 operations/day). Real gateway misses have
+**not been measured**. Under D-11 the consumer never renders or PUTs HTML;
+a missing page remains 503 until a build publishes it. Stale-generation HTML
+is served by identity and may still request a deduplicated rebuild while old
+R2 objects exist. Activation requires verifying gateway volume against the budget.
 

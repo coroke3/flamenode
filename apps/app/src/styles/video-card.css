@@ -1,0 +1,149 @@
+.vcard-card {
+  width: 100%;
+  min-width: 0;
+}
+
+.vcard-compact {
+  max-width: none;
+}
+
+.vcard-compact .vcard-statusBadge {
+  top: 4px;
+  right: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+.vcard-compact .vcard-partBadge {
+  top: 4px;
+  left: 4px;
+  font-size: 9px;
+  padding: 1px 5px;
+  letter-spacing: 0;
+}
+
+.vcard-thumbWrap {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+
+.vcard-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.vcard-thumbFallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-muted);
+}
+
+.vcard-statusBadge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+}
+
+.vcard-partBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  font-size: 10px;
+  padding: 2px 7px;
+  letter-spacing: 0;
+  background: var(--overlay-scrim);
+  color: var(--overlay-ink);
+}
+
+.vcard-secondaryMeta {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.vcard-list {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+  text-decoration: none;
+  color: inherit;
+}
+
+.vcard-list:hover {
+  border-color: var(--border-subtle);
+  background-color: var(--bg-elevated);
+}
+
+.vcard-listThumb {
+  position: relative;
+  width: 144px;
+  flex-shrink: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--r-card);
+  background-color: var(--bg-elevated);
+}
+
+.vcard-listThumb img,
+.vcard-listThumb .vcard-thumbFallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.vcard-listThumb img {
+  transition: transform 0.25s ease;
+}
+
+.vcard-list:hover .vcard-listThumb img {
+  transform: scale(1.04);
+}
+
+.vcard-listBody {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.vcard-listTitle {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.vcard-listAuthor {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

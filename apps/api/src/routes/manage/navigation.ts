@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { ManageNavigationResponse } from "@flamenode/contracts";
 import type { AppEnv } from "../../env.ts";
 import { accessOf, loadManageSnapshot, manageGate } from "./access.ts";
+import { resolveActiveXUserId } from "../personal/context.ts";
 import { loadManageData } from "./events.ts";
 
 // CURRENT: app/(manage)/layout.tsx (gate) + src/lib/manage/navigationEvents.ts (ConsoleSidebar events, pending counts).
@@ -13,9 +14,11 @@ export const manageNavigationRoutes = new Hono<AppEnv>().get("/", async (c) => {
   const snapshot = await loadManageSnapshot(db, user);
   const denied = manageGate(c, snapshot);
   if (denied) return denied;
-  const data = await loadManageData(db, user, snapshot, {});
+  const data = await loadManageData(db, user, snapshot, { linked: !snapshot.isAdmin });
   const body: ManageNavigationResponse = {
     access: accessOf(snapshot),
+    activeXUserId: snapshot.isAdmin ? null : resolveActiveXUserId(user.active_x_user_id, data.linked),
+    manageStaffXUserIds: snapshot.isAdmin ? [] : snapshot.manageStaffXUserIds,
     events: data.events.map((row) => {
       const { created_at: _createdAt, ...event } = row;
       return event;

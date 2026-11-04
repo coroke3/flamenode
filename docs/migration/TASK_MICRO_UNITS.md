@@ -101,6 +101,8 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 
 ## MIG-0704 — Ops SPA creation + Manage
 
+> D-17-11 (2026-10-27): the units below are now separate tasks — U01/U02 → MIG-0719 (shell, `/manage`, review) / MIG-0720 (overview, audience) / MIG-0721 (edit), U03 → MIG-0722 (slots) / MIG-0723 (staff), U04 → MIG-0724 (videos) / MIG-0725 (playlist), U05 → MIG-0725. MIG-0704 keeps only the Final audit.
+
 - **U01 scaffold**: MIG-0707 (D-15-13): `+apps/ops` package/tsconfig/entry/Vite/bundle, guard, distinct `/_ops_assets/*` + CI build. No production routing。This task keeps the Manage layout, `CostGuardBanner` and `apps/ops/wrangler.toml`。
 - **U02 Manage index/event overview**: `/manage`, `/manage/events/[id]`, `.../edit`, `.../audience`。
 - **U03 slots/staff**: `.../slots`, `.../staff`, event0-owner CAS/privilege。
@@ -109,6 +111,8 @@ Merge eligibility: NO until all micro-units DONE and independent review/CI
 - **Final audit**: count Manage12 incl compatibility, deny wrong scope, independent Ops build/deep URL.
 
 ## MIG-0705 — Admin 45 screens in Ops SPA
+
+> D-17-11 (2026-10-27): the units below are now separate tasks — U01 → MIG-0726, U02 → MIG-0727 / 0728, U03 → MIG-0728 / 0721 (`/admin/events/new`), U04 → MIG-0729 / 0730, U05 → MIG-0731 / 0732, U06 → MIG-0737, U07 → MIG-0734 / 0735 / 0736, U08 audit screens → MIG-0733 (the 45-route sweep stays in MIG-0705's Final audit).
 
 - **U01 shell/security**: admin layout, 401/403, top dashboard, permission simulation, no-store, error/empty states。
 - **U02 content rules**: announcements, API endpoints, ToS/rules, event groups and list navigation。

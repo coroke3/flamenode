@@ -16,6 +16,7 @@ const current = await import("../../../../src/lib/seo.ts");
 const { youtubeThumbUrl } = await import("../../../../src/lib/youtube/id.ts");
 const site = await import("./pageMetadata.ts");
 const { loadRepresentativeEvents, loadRepresentativeUsers, loadRepresentativeVideos } = await import("./representativeFixtures.ts");
+const { videoPaths, videoMetadata, videoScreenData } = await import("./publicPages.ts");
 /** The non-public fixtures of representativeFixtures.ts (private / voided / deleted). */
 const NON_PUBLIC_REPRESENTATIVE_IDS = [
   "video:repvideo-private", "video:repvideo-voided", "video:repvideo-deleted",
@@ -298,4 +299,30 @@ test("event status badge follows CURRENT app/(public)/event/[id]/page.tsx:234-23
   }
   // The MIG-0502 event page is built from the event fixture (entry window open until 2100): the same pill, 募集期間中.
   assert.match(read(EVENT_ROUTE), /<span class="fn-status fn-status--public" data-status="public"><span>募集期間中<\/span><\/span>/);
+});
+
+test("MIG-0510: representative page URLs and playback state reject malformed YouTube IDs", () => {
+  const siteOrigin = "https://flamenode.net";
+  for (const invalid of ["/outside.example", "//outside.example", "https://outside.example/watch?v=AAAAAAAAAAA", "javascript:alert(1)", "not-a-youtube-id"]) {
+    const data = { ...video, youtubeVideoId: invalid };
+    assert.deepEqual(videoPaths(data), [video.id], "invalid YouTube aliases must not create extra public paths");
+    const metadata = videoMetadata(data);
+    assert.equal(metadata.canonical, siteOrigin + "/" + video.id);
+    assert.equal(new URL(metadata.canonical).origin, siteOrigin);
+    assert.notEqual(metadata.image.url, siteOrigin + "/api/youtube-thumbnail/" + invalid + "/maxresdefault");
+    const props = videoScreenData(data);
+    assert.equal(props.hasYoutube, false);
+    assert.equal(props.thumbnailUrl, null);
+  }
+
+  const fullUrl = { ...video, youtubeVideoId: "https://youtu.be/AAAAAAAAAAA?si=example" };
+  assert.deepEqual(videoPaths(fullUrl), [video.id, "AAAAAAAAAAA"]);
+  assert.equal(videoMetadata(fullUrl).canonical, siteOrigin + "/AAAAAAAAAAA");
+  assert.equal(videoScreenData(fullUrl).thumbnailUrl, "/api/youtube-thumbnail/AAAAAAAAAAA/hqdefault");
+  assert.equal(videoScreenData(fullUrl).hasYoutube, true);
+
+  const missing = { ...video, youtubeVideoId: null };
+  assert.deepEqual(videoPaths(missing), [video.id]);
+  assert.equal(videoMetadata(missing).canonical, siteOrigin + "/" + video.id);
+  assert.equal(videoScreenData(missing).hasYoutube, false);
 });

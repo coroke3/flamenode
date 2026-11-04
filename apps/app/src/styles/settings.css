@@ -1,0 +1,742 @@
+.settings-wrap {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin: 0;
+}
+
+.settings-hd {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.settings-back {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  text-decoration: none;
+  width: fit-content;
+  transition: color 120ms ease;
+}
+
+.settings-back:hover {
+  color: var(--accent-primary);
+}
+
+.settings-onboardingEyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-primary);
+}
+
+.settings-nextRow {
+  margin-top: 6px;
+}
+
+.settings-tabs {
+  margin: 0 0 14px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.settings-tabList {
+  display: flex;
+  gap: 1px;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  background: var(--bg-surface);
+}
+
+.settings-tab {
+  flex: 0 0 auto;
+  min-width: 148px;
+  max-width: 220px;
+  min-height: 50px;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  text-decoration: none;
+  background: color-mix(in srgb, var(--bg-base) 72%, transparent);
+  border: 0;
+}
+
+.settings-tab:hover,
+.settings-tab:focus-visible {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
+  outline: none;
+}
+
+.settings-tabActive,
+.settings-tabActive:hover,
+.settings-tabActive:focus-visible {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 14%, var(--bg-surface));
+}
+
+.settings-tabLabel {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tabBody {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-tabIcon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.settings-tabIconImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.settings-tabIconMuted {
+  color: var(--text-muted);
+}
+
+.settings-tabMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-faint, var(--text-muted));
+}
+
+.settings-tabCurrent:not(.settings-tabActive) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-primary) 6%, var(--bg-surface));
+}
+
+.settings-accountPanel {
+  padding: 0 18px 18px;
+}
+
+.settings-accountActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0 16px 16px;
+}
+
+.settings-accountActions .fn-btn-sm {
+  min-height: var(--fn-control-h);
+  box-sizing: border-box;
+}
+
+.settings-accountNote {
+  margin: 0 18px 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.settings-card {
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-surface);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.settings-cardAccent {
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-surface));
+}
+
+.settings-cardHd {
+  padding: 20px 22px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-cardAccent .settings-cardHd {
+  padding-bottom: 10px;
+}
+
+.settings-cardHdBordered {
+  border-bottom: 0;
+}
+
+.settings-cardTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.settings-cardTitleAccent {
+  font-size: 15px;
+  color: var(--accent-primary);
+}
+
+.settings-cardDesc {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.settings-activePanel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 16px 16px;
+  padding: 16px 18px;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+}
+
+.settings-activePanelEmpty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.settings-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 0;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: var(--font-display, inherit);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.settings-avatarSm {
+  width: 40px;
+  height: 40px;
+  font-size: 16px;
+  grid-row: span 2;
+}
+
+.settings-avatarPending {
+  box-shadow: none;
+  outline: 1px dashed var(--text-muted);
+  outline-offset: 2px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.settings-avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-activeId {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-activeName {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.settings-activeNameLink {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: inherit;
+  text-decoration: none;
+}
+
+.settings-activeNameLink:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+.settings-activeHandle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.settings-activeBadges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.settings-pillDot {
+  margin-right: 2px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 16px 18px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-listTight {
+  padding-top: 0;
+}
+
+.settings-row {
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-base);
+  padding: 14px 16px;
+}
+
+.settings-rowActive,
+.settings-rowEditing {
+  background: color-mix(in srgb, var(--accent-primary) 16%, var(--bg-base));
+}
+
+.settings-rowHead {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) auto auto;
+  gap: 10px 12px;
+  align-items: center;
+}
+
+.settings-rowInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  grid-column: 2;
+}
+
+.settings-rowName {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-rowNameLink {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+}
+
+.settings-rowNameLink:hover {
+  color: var(--accent-primary);
+  text-decoration: underline;
+}
+
+.settings-avatarLink {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: 50%;
+  text-decoration: none;
+}
+
+.settings-avatarLink:hover .settings-avatar {
+  filter: brightness(1.06);
+}
+
+.settings-rowHandle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.settings-rowDate {
+  font-size: 10.5px;
+  color: var(--text-faint, var(--text-muted));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.02em;
+}
+
+.settings-rowBadges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  grid-column: 3;
+  align-self: center;
+}
+
+.settings-rowOps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  grid-column: 4;
+  align-items: center;
+}
+
+.settings-rowOps .fn-btn-sm {
+  min-height: var(--fn-control-h);
+  box-sizing: border-box;
+}
+
+.settings-rowOps:empty {
+  display: none;
+}
+
+.settings-activeMarker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--fn-control-h);
+  padding: 0 11px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.settings-actionBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--fn-control-h);
+  min-height: var(--fn-control-h);
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  box-sizing: border-box;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.settings-actionBtn:hover:not(:disabled),
+.settings-actionBtn:focus-visible {
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.settings-actionBtn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.settings-actionBtnPrimary {
+  border-color: transparent;
+  background: var(--accent-primary);
+  color: var(--accent-ink);
+  font-weight: 800;
+}
+
+.settings-actionBtnPrimary:hover:not(:disabled),
+.settings-actionBtnPrimary:focus-visible {
+  border-color: transparent;
+  background: var(--accent-primary-strong);
+  color: var(--accent-ink);
+}
+
+.settings-actionBtnDanger {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-danger) 15%, transparent);
+  color: var(--accent-danger);
+}
+
+.settings-actionBtnDanger:hover:not(:disabled),
+.settings-actionBtnDanger:focus-visible {
+  background: color-mix(in srgb, var(--accent-danger) 22%, transparent);
+  color: #ff8a8a;
+}
+
+.settings-actionBtnMuted {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.settings-editPanel {
+  border-top: 0;
+  margin-top: 14px;
+  padding-top: 16px;
+}
+
+.settings-editTitle {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.settings-addBox {
+  margin: 8px 18px 18px;
+  border: 0;
+  border-radius: 0;
+  padding: 16px;
+  background: var(--bg-base);
+}
+
+.settings-addLabel {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.settings-addHint {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settings-discordBadge {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 22px 0;
+  padding: 14px 16px;
+  border-radius: 0;
+  background: var(--bg-base);
+  border: 0;
+}
+
+.settings-discordAvatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #5865f2;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.settings-discordId {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-discordName {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.settings-discordMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.settings-discordNote {
+  margin: 12px 22px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.settings-emptyList {
+  margin: 0;
+  padding: 8px 22px 18px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.settings-onboarding {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  margin: 0 0 20px;
+  padding: 18px 20px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 22%, var(--border-subtle));
+}
+
+.settings-onboardingIcon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+
+.settings-onboardingBody {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-onboardingTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.settings-onboardingLead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.settings-onboardingList {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.settings-onboardingPending {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .settings-wrap {
+    padding-top: 24px;
+    padding-bottom: 48px;
+  }
+
+  .settings-title {
+    font-size: clamp(36px, 9.5vw, 48px);
+    overflow-wrap: anywhere;
+  }
+
+  .settings-tabList {
+    flex-direction: row;
+  }
+
+  .settings-tab {
+    min-width: 118px;
+    max-width: none;
+  }
+
+  .settings-cardHd,
+  .settings-activePanel,
+  .settings-discordBadge {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .settings-rowHead {
+    grid-template-columns: auto 1fr;
+  }
+
+  .settings-rowBadges,
+  .settings-rowOps {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .settings-rowOps {
+    width: 100%;
+  }
+
+  .settings-actionBtn,
+  .settings-activeMarker {
+    min-height: var(--fn-control-h-touch);
+  }
+
+  .settings-actionBtn {
+    flex: 1 1 180px;
+  }
+
+  .settings-activeBadges {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .settings-onboarding {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-addRow .fn-btn {
+    width: 100%;
+    min-height: var(--fn-control-h-touch);
+    justify-content: center;
+  }
+}
