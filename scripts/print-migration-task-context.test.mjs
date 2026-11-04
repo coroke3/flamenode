@@ -282,7 +282,7 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    "| MIG-0105 | obsolete gate | SKIPPED | — |",
    "| MIG-0401 | independent PoC | READY | MIG-0105 |",
  ].join("\n");
- const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://example.test/review/1 | ALTERNATIVE=MIG-0108";
+ const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789 | ALTERNATIVE=MIG-0108";
  const selected=pickNextTask(rows+"\n"+approval,"");
  assert.equal(selected.selected,"MIG-0401");
  assert.deepEqual(selected.candidates,["MIG-0401"]);
@@ -293,7 +293,13 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    approval.replace("PR#404","PR#invalid"),
    approval.replace(" | ALTERNATIVE=MIG-0108",""),
    approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE="),
-   approval.replace("APPROVAL=https://example.test/review/1","APPROVAL="),
+   approval.replace("APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789","APPROVAL="),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+   approval.replace("PR#404","PR#0"),
+   approval.replace("pull/404#","pull/405#"),
+   approval.replace("github.com/coroke3","example.test/coroke3"),
+   "```md\n"+approval+"\n```",
+   "<!--\n"+approval+"\n-->",
  ]) {
    assert.equal(pickNextTask(rows+"\n"+invalid,"").selected,null,invalid);
  }
