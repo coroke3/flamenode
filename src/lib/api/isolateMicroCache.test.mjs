@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   ISOLATE_MICRO_CACHE_MAX_ENTRIES,
+  ISOLATE_MICRO_CACHE_MAX_BYTES,
   ISOLATE_MICRO_CACHE_TTL_MS,
   isolateMicroCacheGet,
   isolateMicroCacheSet,
@@ -11,6 +12,7 @@ import {
 } from "./isolateMicroCache.ts";
 
 import {
+  ISOLATE_MICRO_CACHE_MAX_BYTES as HONO_MAX_BYTES,
   isolateMicroCacheGet as honoGet,
   isolateMicroCacheSet as honoSet,
   resetIsolateMicroCacheForTests as resetHono,
@@ -47,6 +49,57 @@ test("非有限時刻はCURRENT/Honoとも無期限エントリを作れない",
     set("good", "v", 1_000);
     assert.equal(get("good", NaN), null, name + ": nonfinite read invalidates");
     assert.equal(get("good", 1_000), null, name + ": invalidated cache must not reappear");
+    reset();
+  }
+});
+
+test("CURRENT/Honoの16-bit文字列キャッシュは合計8MiB以内に制限する", () => {
+  assert.equal(ISOLATE_MICRO_CACHE_MAX_BYTES, 8 * 1024 * 1024);
+  assert.equal(HONO_MAX_BYTES, ISOLATE_MICRO_CACHE_MAX_BYTES);
+  const sixMiBInUtf16 = "x".repeat(3 * 1024 * 1024);
+  const oversized = "y".repeat(ISOLATE_MICRO_CACHE_MAX_BYTES / 2 + 1);
+  for (const [name, get, set, reset] of [
+    ["CURRENT", isolateMicroCacheGet, isolateMicroCacheSet, resetIsolateMicroCacheForTests],
+    ["Hono", honoGet, honoSet, resetHono],
+  ]) {
+    reset();
+    set("first", sixMiBInUtf16, 1_000);
+    assert.equal(get("first", 1_000), sixMiBInUtf16, name + ": one 6MiB payload fits");
+    set("second", sixMiBInUtf16, 1_000);
+    assert.equal(get("first", 1_000), null, name + ": evict LRU to stay under 8MiB");
+    assert.equal(get("second", 1_000), sixMiBInUtf16, name + ": latest payload remains");
+
+    set("too-large", oversized, 1_000);
+    assert.equal(get("too-large", 1_000), null, name + ": oversized body never cached");
+    assert.equal(get("second", 1_000), sixMiBInUtf16,
+      name + ": skipping a large body does not clear unrelated entries");
+
+    set("second", oversized, 1_000);
+    assert.equal(get("second", 1_000), null,
+      name + ": replacing an old key with an uncached large response discards stale content");
+    set("small", "v", 1_000);
+    assert.equal(get("small", 15_999), "v", name + ": TTL unaffected by byte budgeting");
+    assert.equal(get("small", 16_000), null, name + ": standard expiration still works");
+    reset();
+  }
+});
+
+
+test("byte-eviction honors read recency in CURRENT and Hono without extending TTL", () => {
+  const fourMiBInUtf16 = "q".repeat(2 * 1024 * 1024);
+  for (const [name, get, set, reset] of [
+    ["CURRENT", isolateMicroCacheGet, isolateMicroCacheSet, resetIsolateMicroCacheForTests],
+    ["Hono", honoGet, honoSet, resetHono],
+  ]) {
+    reset();
+    set("hot", fourMiBInUtf16, 1_000);
+    set("cold", fourMiBInUtf16, 1_000);
+    assert.equal(get("hot", 1_001), fourMiBInUtf16, name + ": read refreshes recency");
+    set("next", fourMiBInUtf16, 1_002);
+    assert.equal(get("cold", 1_002), null, name + ": least recently used key evicted");
+    assert.equal(get("hot", 1_002), fourMiBInUtf16, name + ": hot key retained");
+    assert.equal(get("next", 1_002), fourMiBInUtf16, name + ": recent payload retained");
+    assert.equal(get("hot", 16_000), null, name + ": cache reads never extend 15s TTL");
     reset();
   }
 });
