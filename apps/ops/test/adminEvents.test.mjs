@@ -4,7 +4,6 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { JSDOM } from "jsdom";
-import { createRoot } from "react-dom/client";
 import { DeleteEventTemplateButton } from "../.test-dist/apps/ops/src/routes/admin/DeleteEventTemplateButton.js";
 import {
   deleteAdminEventTemplate, eventDisplayState, eventIndexQuery, formatEventUnix,
@@ -156,6 +155,9 @@ test("MIG-0728 U02: IME composition blocks automatic and manual event searches u
     });
   }
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  // React DOM probes composition event support at module initialization.
+  // Import only after JSDOM globals are present (same as adminOps.test.mjs).
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(dom.window.document.getElementById("root"));
   const paths = [];
   const fetchFn = async path => {
@@ -216,6 +218,7 @@ test("MIG-0728 T04: cancel never calls DELETE; confirm calls once and refreshes"
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
   const container = dom.window.document.getElementById("root");
   const root = createRoot(container);
   let calls = 0;
