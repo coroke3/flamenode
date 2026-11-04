@@ -506,6 +506,41 @@ test("MIG-0734 D-17-7 category auto-filter uses SPA URL state and retains draft 
   });
 });
 
+test("MIG-0734 D-17-7 auto-filter preserves the IME composition guard",async()=>{
+  await inDom(async(dom,root)=>{
+    const queries=[];
+    const data=notificationData({rows:[]},{failed:0,deadLetter:0});
+    const api=createAdminNotificationsApi(async()=>response(500,{}));
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotificationsView,{
+      data,filters:filtersOf("status=failed&type=draft"),api,onSuccess:()=>{},
+      onSearch:next=>queries.push(next.toString()),
+    }))));
+    const form=dom.window.document.querySelector('form[role="search"]');
+    const category=form.querySelector('[name="cat"]');
+    // AutoSubmitSelect previously suppressed GET navigation while IME composing.
+    form.setAttribute("data-fn-ime-composing","");
+    await React.act(async()=>{
+      category.value="x_id";
+      category.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
+    });
+    assert.deepEqual(queries,[],"category changes must not navigate during composition");
+    await React.act(async()=>{
+      form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true}));
+    });
+    assert.deepEqual(queries,[],"the explicit GET submit uses the same guard");
+    form.removeAttribute("data-fn-ime-composing");
+    await React.act(async()=>{
+      category.value="video";
+      category.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
+    });
+    assert.equal(queries.length,1,"category auto-filter resumes after composition");
+    const next=new URLSearchParams(queries[0]);
+    assert.equal(next.get("status"),"failed");
+    assert.equal(next.get("type"),"draft");
+    assert.equal(next.get("cat"),"video");
+  });
+});
+
 test("MIG-0734 notifications view ports CURRENT row content: recipient, summary, labels, tab counts, links",()=>{
   const text=renderNotifications(notificationData());
   assert.match(text,/class="fn-console-title">通知配信状況</);
