@@ -97,3 +97,50 @@ test("MIG-0509 regression: each build selects its own rules snapshot, never an i
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+
+test("MIG-0509 regression: Astro and budget children never inherit unrelated credentials", () => {
+  const inherited = {
+    FLAMENODE_D1_READ_TOKEN: "d1-secret",
+    FLAMENODE_R2_READ_TOKEN: "r2-secret",
+    GITHUB_TOKEN: "github-secret",
+    GH_TOKEN: "gh-secret",
+    AWS_ACCESS_KEY_ID: "aws-id",
+    AWS_SECRET_ACCESS_KEY: "aws-secret",
+    AWS_SESSION_TOKEN: "aws-session",
+    GOOGLE_APPLICATION_CREDENTIALS: "/tmp/private-credentials.json",
+    SENTRY_AUTH_TOKEN: "sentry-secret",
+    DATABASE_URL: "postgres://private:secret@host/db",
+    npm_config_registry_authToken: "npm-secret",
+    CLOUDFLARE_API_KEY: "cf-secret",
+    DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/test",
+    DISCORD_WEBHOOK_URL_FORUM_ACCOUNT: "https://discord.com/api/webhooks/account",
+    DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://discord.com/api/webhooks/event",
+    DISCORD_WEBHOOK_URL_FORUM_SYSTEM: "https://discord.com/api/webhooks/system",
+    SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/test",
+    PATH: "/usr/bin",
+    NODE_ENV: "production",
+    CI: "true",
+    OTHER_SAFE: "preserved",
+  };
+  const result = safeBuildEnv(inherited, "/tmp/public-snapshot", "new-generation");
+  for (const key of [
+    "FLAMENODE_D1_READ_TOKEN", "FLAMENODE_R2_READ_TOKEN",
+    "GITHUB_TOKEN", "GH_TOKEN", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "GOOGLE_APPLICATION_CREDENTIALS", "SENTRY_AUTH_TOKEN",
+    "DATABASE_URL", "npm_config_registry_authToken", "CLOUDFLARE_API_KEY",
+    "DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+    "DISCORD_WEBHOOK_URL_FORUM_EVENT", "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    "SLACK_WEBHOOK_URL",
+  ]) {
+    assert.equal(result[key], undefined, key + " must not reach child processes");
+    assert.equal(inherited[key] !== undefined, true, "do not mutate caller env");
+  }
+  assert.equal(result.PATH, inherited.PATH);
+  assert.equal(result.NODE_ENV, "production");
+  assert.equal(result.CI, "true");
+  assert.equal(result.OTHER_SAFE, "preserved");
+  assert.equal(result.FLAMENODE_SNAPSHOT_DIR, "/tmp/public-snapshot");
+  assert.equal(result.FLAMENODE_SNAPSHOT_GENERATION, "new-generation");
+});
