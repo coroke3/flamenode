@@ -200,6 +200,7 @@ test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval
  for(const bad of [
   good.replace("PR#404","PR#405"),
   good.replace("pull/404","pull/405"),
+  good.replace("github.com/coroke3/flamenode","github.com/other-owner/other-repo"),
   good.replace("https://github.com/coroke3/flamenode/pull/404#issuecomment-123","not-approved"),
   good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
   good+"\n"+good,
