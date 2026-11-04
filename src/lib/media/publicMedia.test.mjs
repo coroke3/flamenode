@@ -37,11 +37,8 @@ test("public media objectはMIMEと5MiB上限をfail-closedで検査する", () 
   assert.equal(isPublicMediaObjectSafe({ size: 100, contentType: null }), false);
 });
 
-test("公開メディアの従来の長期共有キャッシュTTLを維持する", () => {
-  assert.equal(
-    PUBLIC_MEDIA_CACHE_CONTROL,
-    "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400",
-  );
+test("公開可否が変わる画像をブラウザ/CDNは保持しない", () => {
+  assert.equal(PUBLIC_MEDIA_CACHE_CONTROL, "no-store");
 });
 
 test("public media access queryはartifactとentity visibilityを1 statementで照合する", () => {
@@ -180,13 +177,14 @@ test("public mediaはACL拒否時にIf-None-Match一致でも304を返さない"
   assert.equal(result.state.gets, 0);
 });
 
-test("isolate ACL cacheはD1 bindingを保持せず短時間の判定を再利用する", async () => {
+test("公開状態の変化は次のリクエストで反映され、isolate ACLを再利用しない", async () => {
   const key = "event-icons/event/acl-cache.png";
   const first = await requestMedia({ key, allowed: true });
   const second = await requestMedia({ key, allowed: false });
   assert.equal(first.state.prepares, 1);
-  assert.equal(second.state.prepares, 0);
-  assert.equal(second.response.status, 200);
+  assert.equal(second.state.prepares, 1);
+  assert.equal(second.response.status, 404);
+  assert.equal(second.state.gets, 0);
 });
 
 test("公開entityでも危険MIMEまたは上限超過objectは404", async () => {
@@ -271,7 +269,7 @@ test("public media障害ログは秘密情報とスタックを含めない", as
   assert.match(logLines[0], /REDACTED/);
 });
 
-test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせずCacheから直接返す", async () => {
+test("Cache APIはD1の再判定後だけR2 byteを再利用しno-storeを返す", async () => {
   const store = new Map();
   const mockCache = {
     async match(req) {
@@ -302,26 +300,60 @@ test("Cache APIが存在する場合、2回目以降はD1/R2へアクセスせ�
       [`https://example.test/api/media/${key}`],
     );
 
-    // 2回目はキャッシュから取得され、D1とR2の回数は0
+    // D1は毎回検証し、R2だけをCache APIから再利用する
     const second = await requestMedia({
       key,
       allowed: true,
       request: new Request(`https://example.test/api/media/${key}?cache-buster=two`),
     });
     assert.equal(second.response.status, 200);
-    assert.equal(second.state.prepares, 0);
+    assert.equal(second.state.prepares, 1);
     assert.equal(second.state.gets, 0);
+    assert.equal(second.response.headers.get("cache-control"), "no-store");
     assert.equal(second.response.headers.get("etag"), '"etag"');
 
-    // 3回目: If-None-Matchが一致する場合はCacheから304を返す (D1/R2は0)
+    // 3回目: 304もfresh D1確認後だけ返し、共有キャッシュ可能にしない
     const reqWithEtag = new Request(`https://example.test/api/media/${key}?cache-buster=three`, {
       headers: { "If-None-Match": '"etag"' },
     });
     const third = await requestMedia({ key, allowed: true, request: reqWithEtag });
     assert.equal(third.response.status, 304);
-    assert.equal(third.state.prepares, 0);
+    assert.equal(third.state.prepares, 1);
     assert.equal(third.state.gets, 0);
+    assert.equal(third.response.headers.get("cache-control"), "no-store");
   } finally {
     delete globalThis.caches;
+  }
+});
+
+test("revocation: Cache APIに旧200が残っていても非公開化後は404でR2を読まない", async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const store = new Map();
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match(req) { return store.get(req.url)?.clone() ?? null; },
+        async put(req, res) { store.set(req.url, res.clone()); },
+      },
+    },
+  });
+  try {
+    const key = "event-icons/event/revoked.png";
+    const request = new Request(`https://example.test/api/media/${key}`);
+    const first = await requestMedia({ key, request, allowed: true });
+    assert.equal(first.response.status, 200);
+    assert.equal(store.size, 1);
+    const revoked = await requestMedia({ key, request, allowed: false });
+    assert.equal(revoked.response.status, 404);
+    assert.equal(revoked.state.prepares, 1, "Cache API must not skip D1");
+    assert.equal(revoked.state.gets, 0);
+    const conditional = await requestMedia({
+      key, request: new Request(request.url, { headers: { "If-None-Match": '"etag"' } }), allowed: false,
+    });
+    assert.equal(conditional.response.status, 404, "old ETag cannot yield 304 after revocation");
+  } finally {
+    if (original) Object.defineProperty(globalThis, "caches", original);
+    else delete globalThis.caches;
   }
 });
