@@ -26,6 +26,13 @@ export async function send<T extends { ok: boolean }>(
     const payload: unknown = await response.json();
     if (payload !== null && typeof payload === "object" && !Array.isArray(payload) &&
         typeof (payload as Record<string, unknown>).ok === "boolean") {
+      // HTTP failures must never be reported as successful writes, even if a
+      // proxy or malformed upstream response contains {ok:true}. Preserve
+      // {ok:false} error bodies (including the 401 guard reason) for callers
+      // that display the server's actual failure message.
+      if (!response.ok && (payload as { ok: boolean }).ok) {
+        return response.status === 401 ? { status: "anonymous" } : { status: "unavailable" };
+      }
       return { status: "ok", data: payload as T };
     }
     if (response.status === 401) return { status: "anonymous" };
