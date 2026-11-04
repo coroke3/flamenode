@@ -61,6 +61,11 @@ export function isolateMicroCacheSizeForTests(): number {
   return entries.size;
 }
 
+/** Remove a cached response immediately when its visibility gate rejects access. */
+export function isolateMicroCacheDelete(key: string): void {
+  entries.delete(key);
+}
+
 export function resetIsolateMicroCacheForTests(): void {
   entries.clear();
 }
