@@ -59,7 +59,7 @@ test("slots: public_name event exposes only public video ids; 5s CDN cache heade
   const { db } = createDb();
   const res = await get("/api/live/events/ev-1/slots", { DB: db });
   assert.equal(res.status, 200);
-  assert.equal(res.headers.get("cache-control"), "public, s-maxage=5, stale-while-revalidate=30");
+  assert.equal(res.headers.get("cache-control"), "no-store", "live event bodies must not remain public in CDN caches");
   assert.match(res.headers.get("content-type"), /application\/json/);
   const body = await res.json();
   assert.equal(body.event_id, "ev-1");
@@ -154,11 +154,35 @@ test("micro cache coalesces successes (1 D1 snapshot) but never caches 404/error
   const afterFirst = queries();
   await get("/api/live/events/ev-1/slots", { DB: db });
   await get("/api/live/events/ev-1/slots", { DB: db });
-  assert.equal(queries(), afterFirst, "no extra D1 reads while cached");
+  assert.equal(queries() - afterFirst, 2,
+    "each cached HIT re-checks public status via one D1 SELECT");
   const before = queries();
   await get("/api/live/events/missing/slots", { DB: db });
   await get("/api/live/events/missing/slots", { DB: db });
   assert.equal(queries() - before, 2, "404 is re-queried each time");
+});
+
+test("privacy regression: cached live responses turn 404 immediately after event is made private", async () => {
+  for (const route of ["slots", "submissions", "summary"]) {
+    const { db, sqlite, queries } = createDb();
+    const url = `/api/live/events/ev-1/${route}`;
+    const initial = await get(url, { DB: db });
+    assert.equal(initial.status, 200, route + ": initial public payload");
+    assert.equal(initial.headers.get("cache-control"), "no-store",
+      route + ": no intermediary stale caching of private-boundary responses");
+    const beforeHit = queries();
+    const warm = await get(url, { DB: db });
+    assert.equal(warm.status, 200, route + ": warm cache");
+    assert.equal(queries() - beforeHit, 1, route + ": fresh visibility SELECT for cache HIT");
+    sqlite.prepare("UPDATE events SET visibility_status = 'private' WHERE id = 'ev-1'").run();
+    const afterPrivate = await get(url, { DB: db });
+    assert.equal(afterPrivate.status, 404, route + ": cache must not outlive public visibility");
+    assert.equal(afterPrivate.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await afterPrivate.json(),
+      { error: "not_found", message: "イベントが見つかりません。" });
+    resetIsolateMicroCacheForTests();
+    sqlite.close();
+  }
 });
 
 test("D1 failure -> 503 live_api_error no-store; operation-mode D1 failure falls back to normal", async () => {
