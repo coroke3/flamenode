@@ -2,10 +2,12 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { getDatabase } from "@/lib/cloudflare";
 import {
+  isolateMicroCacheDelete,
   isolateMicroCacheGet,
   isolateMicroCacheSet,
 } from "@/lib/api/isolateMicroCache";
 import type { DB } from "@/lib/db/client";
+import { isLiveEventPublic } from "./liveApi";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 
@@ -69,20 +71,31 @@ export async function handleLiveApiGet<T>(
       );
     }
 
-    // 許可判定は毎request行い、通過後だけ同一isolate内5秒のbody(string)を再利用する。
-    // 成功した非nullの結果だけを保持し、not_found / errorはcacheしない。
+    // Event public status alone cannot validate cached video identities.
+    // Slots/submissions must re-run their visibility-filtered loader on every
+    // request; only the identity-free summary may use a 15s isolate cache.
+    const cacheable = routeName === "summary";
     const microCacheKey = `live:${routeName}:${id}`;
-    let body = isolateMicroCacheGet(microCacheKey);
+    let body = cacheable ? isolateMicroCacheGet(microCacheKey) : null;
+    if (body !== null && !(await isLiveEventPublic(db, id))) {
+      // A private→public transition must not resurrect an old summary.
+      isolateMicroCacheDelete(microCacheKey);
+      return jsonErrorResponse(
+        { error: "not_found", message: "イベントが見つかりません。" },
+        404,
+      );
+    }
     if (body === null) {
       const payload = await load(db, id);
       if (!payload) {
+        if (cacheable) isolateMicroCacheDelete(microCacheKey);
         return jsonErrorResponse(
           { error: "not_found", message: "イベントが見つかりません。" },
           404,
         );
       }
       body = JSON.stringify(payload);
-      isolateMicroCacheSet(microCacheKey, body);
+      if (cacheable) isolateMicroCacheSet(microCacheKey, body);
     }
 
     return new NextResponse(body, {
@@ -112,5 +125,8 @@ export async function liveApiAllowed(db: DB): Promise<boolean> {
 }
 
 export function liveApiCacheControl(): string {
-  return "public, s-maxage=5, stale-while-revalidate=30";
+  // A CDN stale-while-revalidate window can serve a previously public
+  // event even after the origin rejects it. Do not cache private-boundary
+  // live responses in shared intermediaries.
+  return "no-store";
 }
