@@ -1,5 +1,4 @@
 import type { events } from "@/lib/db/schema";
-import { parseJstDatetimeLocal } from "@/lib/utils/dateInput";
 import {
   EVENT_SECTION_PERMISSION_KEYS,
   type EventEditSection,
@@ -11,15 +10,11 @@ import {
   type EventFormData,
 } from "@/lib/event/eventForm";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
-import type { EventEditPermissions } from "@flamenode/domain/event";
+import { parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
-export function parseDateInput(raw: string | null | undefined): number | null {
-  return parseJstDatetimeLocal(raw);
-}
-
-export type { EventEditPermissions } from "@flamenode/domain/event";
+export { parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
 
 export function buildEventUpdatePayload(args: {
   data: EventFormData;

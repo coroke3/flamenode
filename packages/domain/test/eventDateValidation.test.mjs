@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EVENT_DATE_FIELDS,
+  parseDateInput,
   validateEventDateValues,
 } from "@flamenode/domain/event";
 import {
@@ -66,4 +67,13 @@ test("MIG-0652: malformed JST values reject the exact affected field before writ
     entry_start_time: "2026-10-17T10:00",
     entry_end_time: "2026-10-17T09:59",
   }), { ok: false, field: "entry_start_time", message: "entry_start_time must not be later than entry_end_time" });
+});
+
+test("MIG-0652 U01: event update date parse retains CURRENT null fallback and JST seconds", () => {
+  for (const raw of [null, undefined, "", "  ", "2026-02-30T09:00", "2026-13-01T00:00", "2026-10-17T24:00", "2026-10-17T09:00Z"]) {
+    assert.equal(parseDateInput(raw), null, String(raw));
+  }
+  assert.equal(parseDateInput("2026-10-17T09:00"), Date.UTC(2026, 9, 17, 0, 0) / 1000);
+  assert.equal(parseDateInput("2028-02-29T00:00"), Date.UTC(2028, 1, 28, 15, 0) / 1000);
+  assert.equal(parseDateInput(" 2026-10-17T09:00:30 "), Date.UTC(2026, 9, 17, 0, 0, 30) / 1000);
 });

@@ -55,3 +55,9 @@ export function validateEventDateValues(values: EventDateValues): EventDateValid
 
   return { ok: true, timestamps };
 }
+
+/** Preserve CURRENT's permissive parseDateInput result for update payloads. */
+export function parseDateInput(raw: string | null | undefined): number | null {
+  const parsed = parseJstDatetimeLocalStrict(raw);
+  return parsed.ok ? parsed.value : null;
+}
