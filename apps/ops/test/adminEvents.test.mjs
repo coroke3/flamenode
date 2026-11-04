@@ -95,6 +95,25 @@ test("MIG-0728 U02: delete enforces HTTP authentication, encoded ID, and strict 
   }
 });
 
+test("MIG-0728 U02: dot-segment template IDs cannot escape the DELETE route", async () => {
+  assert.equal(new URL("/api/admin/event-templates/..", "https://flamenode.test").pathname,
+    "/api/admin/", "URL normalization would otherwise redirect the DELETE");
+  assert.equal(new URL("/api/admin/event-templates/.", "https://flamenode.test").pathname,
+    "/api/admin/event-templates/");
+  let requests = 0;
+  const fetchFn = async () => {
+    requests++;
+    return json(200, { ok: true });
+  };
+  for (const invalid of [".", "..", "", " ", " x", "x ", "\\uD800", "\\uDC00"]) {
+    assert.deepEqual(await deleteAdminEventTemplate(invalid, fetchFn), { status: "unavailable" },
+      "reject unsafe ID " + JSON.stringify(invalid));
+  }
+  assert.equal(requests, 0, "no unsafe ID must reach fetch");
+  assert.deepEqual(await deleteAdminEventTemplate("tpl-1", fetchFn), { status: "ok" });
+  assert.equal(requests, 1, "valid IDs still reach the template DELETE endpoint");
+});
+
 test("MIG-0728 U02: CURRENT event status parity includes point event and accepting fence", () => {
   assert.deepEqual(eventDisplayState(event, 100), { label: "公開", accepting: false });
   assert.deepEqual(eventDisplayState({ ...event, start_time: 200, entry_start_time: 50 }, 100),
