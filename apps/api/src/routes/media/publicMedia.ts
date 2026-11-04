@@ -211,7 +211,7 @@ export async function servePublicMedia(
   env: PublicMediaEnv,
   rawKey: string,
   request?: Request,
-  options?: { skipEdgeCacheLookup?: boolean; waitUntil?: (promise: Promise<unknown>) => void },
+  options?: { waitUntil?: (promise: Promise<unknown>) => void },
 ): Promise<Response> {
   if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
 
