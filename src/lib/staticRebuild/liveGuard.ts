@@ -6,6 +6,7 @@ import {
   isolateMicroCacheSet,
 } from "@/lib/api/isolateMicroCache";
 import type { DB } from "@/lib/db/client";
+import { isLiveEventPublic } from "./liveApi";
 import { isLiveApiEnabled } from "@/lib/operationMode/policy";
 import { resolvePublicOperationMode } from "@/lib/operationMode/publicMode";
 
@@ -73,6 +74,17 @@ export async function handleLiveApiGet<T>(
     // 成功した非nullの結果だけを保持し、not_found / errorはcacheしない。
     const microCacheKey = `live:${routeName}:${id}`;
     let body = isolateMicroCacheGet(microCacheKey);
+    if (body !== null) {
+      // The loader checked event visibility only when this payload was first
+      // cached. An event may have become private since then: re-check D1
+      // before reusing a previously public body, including slot identities.
+      if (!(await isLiveEventPublic(db, id))) {
+        return jsonErrorResponse(
+          { error: "not_found", message: "イベントが見つかりません。" },
+          404,
+        );
+      }
+    }
     if (body === null) {
       const payload = await load(db, id);
       if (!payload) {
@@ -112,5 +124,8 @@ export async function liveApiAllowed(db: DB): Promise<boolean> {
 }
 
 export function liveApiCacheControl(): string {
-  return "public, s-maxage=5, stale-while-revalidate=30";
+  // A CDN stale-while-revalidate window can serve a previously public
+  // event even after the origin rejects it. Do not cache private-boundary
+  // live responses in shared intermediaries.
+  return "no-store";
 }
