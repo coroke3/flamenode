@@ -240,7 +240,7 @@ test("T04: throwing Cloudflare binding getters fail closed without leaking provi
   }
 });
 
-test("T04: public Cache API HIT does not touch a throwing DB or BUCKET getter", async () => {
+test("T04: cached public image must fail closed when D1 binding is missing", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "caches");
   const { env, calls } = bindings();
   const sentinel = "CACHE_HIT_MUST_NOT_READ_BINDINGS";
@@ -264,8 +264,8 @@ test("T04: public Cache API HIT does not touch a throwing DB or BUCKET getter", 
   });
   try {
     const response = await request("/api/media/video-icons/owner/icon.png", env);
-    assert.equal(response.status, 200);
-    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("cache-control"), "no-store");
     assert.equal(calls.queries.length, 0);
     assert.equal(calls.objects.length, 0);
   } finally {
@@ -282,4 +282,41 @@ test("GET-only and CURRENT signature 404 contract despite task card T02 saying 4
   const currentSource = readFileSync(new URL("../../../src/lib/media/manageXIcon.ts", import.meta.url), "utf8");
   assert.match(nextRoute, /serveManageXIcon/);
   assert.match(currentSource, /if \(!validSignature\)\s*\{\s*return new Response\("Not found", \{ status: 404 \}\)/);
+});
+
+test("T04 privacy: an existing image cache HIT never bypasses a revoked D1 ACL", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  const store = new Map();
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match(req) { return store.get(req.url)?.clone() ?? null; },
+        async put(req, res) { store.set(req.url, res.clone()); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings();
+    let allowed = true;
+    env.DB.prepare = (sql) => {
+      calls.queries.push(sql);
+      return { bind: () => ({ first: async () => allowed ? { allowed: 1 } : null }) };
+    };
+    const key = "/api/media/event-icons/event/revoked.png";
+    const first = await request(key, env);
+    assert.equal(first.status, 200);
+    assert.equal(first.headers.get("cache-control"), "no-store");
+    assert.equal(store.size, 1);
+    allowed = false;
+    const revoked = await request(key, env);
+    assert.equal(revoked.status, 404);
+    assert.equal(calls.queries.length, 2, "every request must recheck visibility in D1");
+    assert.equal(calls.objects.length, 1, "revocation must not read cached/R2 bytes");
+    const conditional = await request(key, env, { "If-None-Match": '"test-etag"' });
+    assert.equal(conditional.status, 404, "revoked media must not return 304");
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
 });
