@@ -111,6 +111,9 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
       </nav>
 
       <form
+        // A SPA route change preserves this component instance. Remount uncontrolled
+        // inputs when URL filters change so back/forward and clear links stay in sync.
+        key={notificationFilterHref(filters)}
         method="get"
         role="search"
         aria-label="通知の絞り込み"
