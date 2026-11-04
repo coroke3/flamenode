@@ -148,14 +148,19 @@ test("FORCE_STATIC_ONLY env and KV mirror take precedence over D1", async () => 
   assert.equal((await get("/api/live/events/ev-1/slots", { DB: db, KV: badKv })).status, 200);
 });
 
-test("micro cache coalesces successes (1 D1 snapshot) but never caches 404/errors", async () => {
+test("summary micro-cache rechecks visibility, but identity-sensitive routes always query D1", async () => {
   const { db, queries } = createDb();
-  await get("/api/live/events/ev-1/slots", { DB: db });
+  await get("/api/live/events/ev-1/summary", { DB: db });
   const afterFirst = queries();
-  await get("/api/live/events/ev-1/slots", { DB: db });
-  await get("/api/live/events/ev-1/slots", { DB: db });
-  assert.equal(queries() - afterFirst, 2,
-    "each cached HIT re-checks public status via one D1 SELECT");
+  await get("/api/live/events/ev-1/summary", { DB: db });
+  await get("/api/live/events/ev-1/summary", { DB: db });
+  assert.equal(queries() - afterFirst, 2, "summary HIT re-checks event visibility with one SELECT");
+  for (const route of ["slots", "submissions"]) {
+    const before = queries();
+    await get(`/api/live/events/ev-1/${route}`, { DB: db });
+    await get(`/api/live/events/ev-1/${route}`, { DB: db });
+    assert.equal(queries() - before, 2, route + ": never reuse cached video identities");
+  }
   const before = queries();
   await get("/api/live/events/missing/slots", { DB: db });
   await get("/api/live/events/missing/slots", { DB: db });
@@ -181,6 +186,47 @@ test("privacy regression: cached live responses turn 404 immediately after event
     assert.deepEqual(await afterPrivate.json(),
       { error: "not_found", message: "イベントが見つかりません。" });
     resetIsolateMicroCacheForTests();
+    sqlite.close();
+  }
+});
+
+test("privacy regression: video is privatized while its event stays public", async () => {
+  for (const route of ["slots", "submissions"]) {
+    resetIsolateMicroCacheForTests();
+    const { db, sqlite } = createDb();
+    const url = `/api/live/events/ev-1/${route}`;
+    const before = await (await get(url, { DB: db })).json();
+    assert.ok(JSON.stringify(before).includes("v-pub"), route + ": initially public ID visible");
+    sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v-pub'").run();
+    const after = await get(url, { DB: db });
+    assert.equal(after.status, 200, route);
+    assert.equal(after.headers.get("cache-control"), "no-store");
+    assert.ok(!JSON.stringify(await after.json()).includes("v-pub"),
+      route + ": a cached ID must not survive video privatization");
+    sqlite.close();
+  }
+});
+
+test("privacy regression: private→public transition never revives old cached responses", async () => {
+  for (const route of ["slots", "submissions", "summary"]) {
+    resetIsolateMicroCacheForTests();
+    const { db, sqlite } = createDb();
+    const url = `/api/live/events/ev-1/${route}`;
+    assert.equal((await get(url, { DB: db })).status, 200, route);
+    sqlite.prepare("UPDATE events SET visibility_status = 'private' WHERE id = 'ev-1'").run();
+    assert.equal((await get(url, { DB: db })).status, 404, route);
+    sqlite.prepare("UPDATE videos SET visibility_status = 'private' WHERE id = 'v-pub'").run();
+    sqlite.prepare("UPDATE slots SET status = 'reserved' WHERE id = 's3'").run();
+    sqlite.prepare("UPDATE events SET visibility_status = 'public' WHERE id = 'ev-1'").run();
+    const after = await get(url, { DB: db });
+    assert.equal(after.status, 200, route);
+    const payload = await after.json();
+    if (route === "summary") {
+      assert.equal(payload.open_slots, 0, "stale summary was invalidated on private result");
+      assert.equal(payload.reserved_slots, 2);
+    } else {
+      assert.ok(!JSON.stringify(payload).includes("v-pub"), route + ": private video no longer leaked");
+    }
     sqlite.close();
   }
 });
