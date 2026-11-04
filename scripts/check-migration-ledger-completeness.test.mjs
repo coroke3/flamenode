@@ -201,7 +201,7 @@ test("P2: moved Update rule cannot hide malformed owner rows after the boundary"
   const original = matrix([], [parent, child])
     .replace(familyRow(child), familyRow(child, "MIG-0619"));
   assert.match(
-    validateLedgerCompleteness({ matrix: original, status, trackedFiles: [file] }).join("\\n"),
+    validateLedgerCompleteness({ matrix: original, status, trackedFiles: [file] }).join("\n"),
     /ambiguous family ownership/,
   );
   const damagedRows = [
@@ -212,11 +212,11 @@ test("P2: moved Update rule cannot hide malformed owner rows after the boundary"
   ];
   for (const row of damagedRows) {
     const moved = original
-      .replace(familyRow(child, "MIG-0619"), "**Update rule:** moved\\n" + row)
-      .replace(/\\n\\*\\*Update rule:\\*\\* x$/, "");
+      .replace(familyRow(child, "MIG-0619"), "**Update rule:** moved\n" + row)
+      .replace(/\n\*\*Update rule:\*\* x$/, "");
     const parsed = parseFamilyRows(moved);
-    assert.match(parsed.errors.join("\\n"), /family row appears after Update rule boundary/, row);
+    assert.match(parsed.errors.join("\n"), /family row appears after Update rule boundary/, row);
     const errors = validateLedgerCompleteness({ matrix: moved, status, trackedFiles: [file] });
-    assert.match(errors.join("\\n"), /family row appears after Update rule boundary/, row);
+    assert.match(errors.join("\n"), /family row appears after Update rule boundary/, row);
   }
 });
