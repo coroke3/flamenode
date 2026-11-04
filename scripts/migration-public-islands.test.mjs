@@ -459,3 +459,23 @@ test("MIG-0510: video detail metadata and Astro related cards use safe routes", 
   assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }),
     "/AAAAAAAAAAA");
 });
+
+test("regression: admin, edit and event management detail links validate YouTube aliases", () => {
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "/outside.example" }), "/safe_internal");
+  assert.equal(videoPageHref({ id: "/unsafe-internal", youtube_video_id: "/outside.example" }), "/list");
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }), "/AAAAAAAAAAA");
+
+  for (const filename of [
+    "app/(admin)/admin/youtube-sync/page.tsx",
+    "app/(admin)/admin/videos/[id]/page.tsx",
+    "app/(auth)/dashboard/edit/[id]/page.tsx",
+    "app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx",
+  ]) {
+    const source = fs.readFileSync(new URL("../" + filename, import.meta.url), "utf8");
+    assert.ok(source.includes("href={videoPageHref("), filename + " must use checked same-origin video href");
+    assert.ok(!source.includes("href={`/${youtubeVideoId"), filename + " must not interpolate a raw YouTube alias");
+  }
+  const adminTabs = fs.readFileSync(new URL("../src/components/admin/AdminVideoTabs.tsx", import.meta.url), "utf8");
+  assert.ok(adminTabs.includes("href: videoPageHref({ id: videoId, youtube_video_id: youtubeVideoId })"));
+  assert.ok(!adminTabs.includes("const publicId = encodeURIComponent"));
+});
