@@ -192,6 +192,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
           aria-label="event_id 完全一致" className="fn-input fn-input-sm" style={{ minWidth: 200 }} />
         <input name="q" defaultValue={filters.q} placeholder="通知本文を検索"
           aria-label="通知本文を検索" className="fn-input fn-input-sm" style={{ minWidth: 200 }} />
+        {/* Three text inputs prevent reliable implicit Enter submission without a submit button. */}
+        <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">検索</button>
         {hasDetailFilter ? (
           <Link
             href={notificationFilterHref({ status, type: "", event: "", q: "", cat: "all" })}
