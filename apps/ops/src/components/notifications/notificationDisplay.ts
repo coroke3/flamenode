@@ -1,7 +1,25 @@
-// Port of CURRENT src/lib/notifications/{display,types,recipient,opsWebhook,status}.ts display helpers
-// (MIG-0734 U02, D-17-6). Same output; drizzle / DB lookups are not ported (the API returns the recipient).
+// Pure display helpers for notification_outbox rows, ported unchanged from
+// src/lib/notifications/{types,display,status}.ts (MIG-0719 U03 parity). The CURRENT
+// modules import drizzle and "@/" aliases, so the Ops SPA keeps a dependency-free copy.
+import { isTerminalNotificationFailure } from "@flamenode/domain/admin";
+export { isTerminalNotificationFailure };
+
+/**
+ * notification_outbox.type の分類・重要度・表示ラベル。
+ * enqueue 側の type 文字列と UI フィルタの正本。
+ */
+
 export type NotificationCategory =
-  | "video" | "slot" | "x_id" | "event" | "system" | "moderation" | "chapter" | "announcement" | "unknown";
+  | "video"
+  | "slot"
+  | "x_id"
+  | "event"
+  | "system"
+  | "moderation"
+  | "chapter"
+  | "announcement"
+  | "unknown";
+
 export type NotificationSeverity = "critical" | "warning" | "info" | "silent";
 
 export const TYPE_LABELS: Record<string, string> = {
@@ -78,32 +96,28 @@ export function getNotificationTypeLabel(type: string): string {
   return TYPE_LABELS[key] ?? key.replace(/_/g, " ");
 }
 
-export function getNotificationCategoryLabel(category: NotificationCategory): string {
+export function getNotificationCategoryLabel(
+  category: NotificationCategory,
+): string {
   const map: Record<NotificationCategory, string> = {
-    video: "作品", slot: "枠", x_id: "X ID", event: "イベント", system: "システム",
-    moderation: "モデレーション", chapter: "チャプター", announcement: "お知らせ", unknown: "その他",
+    video: "作品",
+    slot: "枠",
+    x_id: "X ID",
+    event: "イベント",
+    system: "システム",
+    moderation: "モデレーション",
+    chapter: "チャプター",
+    announcement: "お知らせ",
+    unknown: "その他",
   };
   return map[category];
 }
 
-export const ADMIN_NOTIFICATION_CATEGORY_OPTIONS: ReadonlyArray<{ key: NotificationCategory | "all"; label: string }> = [
-  { key: "all", label: "すべて" },
-  { key: "video", label: "作品" },
-  { key: "slot", label: "枠" },
-  { key: "x_id", label: "X ID" },
-  { key: "chapter", label: "チャプター" },
-  { key: "moderation", label: "モデレーション" },
-  { key: "announcement", label: "お知らせ" },
-  { key: "event", label: "イベント" },
-  { key: "system", label: "システム" },
-  { key: "unknown", label: "その他" },
-];
 
-/** CURRENT TERMINAL_NOTIFICATION_FAILURE_STATUSES (packages/domain/src/admin/notificationOutbox.ts). */
-export function isTerminalNotificationFailure(status: string | null | undefined): boolean {
-  return status === "failed" || status === "dead_letter";
+export function getNotificationStatusLabel(status: string | null | undefined): string {
+  if (!status) return "不明";
+  return STATUS_LABELS[status] ?? status;
 }
-
 export const STATUS_LABELS: Record<string, string> = {
   pending: "配信待ち",
   processing: "送信中",
@@ -112,15 +126,6 @@ export const STATUS_LABELS: Record<string, string> = {
   dead_letter: "最終失敗",
   cancelled: "キャンセル",
 };
-
-export function getNotificationStatusLabel(status: string | null | undefined): string {
-  if (!status) return "不明";
-  return STATUS_LABELS[status] ?? status;
-}
-
-export function notificationDeliveryRouteLabel(type: string): string {
-  return type === "discord_webhook" ? "チャンネル（Webhook）" : "DM（Bot）";
-}
 
 export interface NotificationFailureGuidance {
   summary: string;
@@ -175,13 +180,18 @@ export function getNotificationFailureGuidance(input: {
   if (err.includes("delivery lease expired") || err.includes("processing timeout")) {
     return {
       summary: "送信処理のリースが期限切れになりました。",
-      nextSteps: ["Worker の実行履歴とD1接続を確認する", "原因解消後に通知を再試行する"],
+      nextSteps: [
+        "Worker の実行履歴とD1接続を確認する",
+        "原因解消後に通知を再試行する",
+      ],
     };
   }
 
   if (err.includes("forum_webhook_unconfigured")) {
     const raw = input.lastError ?? "";
-    const targetMatch = raw.match(/forum_webhook_unconfigured:(account|event|system)/i);
+    const targetMatch = raw.match(
+      /forum_webhook_unconfigured:(account|event|system)/i,
+    );
     const forumSecretByTarget: Record<string, string> = {
       account: "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
       event: "DISCORD_WEBHOOK_URL_FORUM_EVENT",
@@ -211,10 +221,17 @@ export function getNotificationFailureGuidance(input: {
     };
   }
 
-  if (err.includes("bot_token_unconfigured") || err.includes("401") || err.includes("unauthorized")) {
+  if (
+    err.includes("bot_token_unconfigured") ||
+    err.includes("401") ||
+    err.includes("unauthorized")
+  ) {
     return {
       summary: "Discord Bot の認証設定に問題があります。",
-      nextSteps: ["DISCORD_BOT_TOKEN を確認する", "設定修正後に失敗通知を再試行する"],
+      nextSteps: [
+        "DISCORD_BOT_TOKEN を確認する",
+        "設定修正後に失敗通知を再試行する",
+      ],
     };
   }
 
@@ -231,21 +248,38 @@ export function getNotificationFailureGuidance(input: {
   if (err.includes("recipient_missing") || err.includes("404")) {
     return {
       summary: "有効なDiscord宛先を解決できませんでした。",
-      nextSteps: ["ユーザーのDiscord連携状態を確認する", "連携解除済みなら再送せずキャンセルする"],
+      nextSteps: [
+        "ユーザーのDiscord連携状態を確認する",
+        "連携解除済みなら再送せずキャンセルする",
+      ],
     };
   }
 
-  if (err.includes("rate") || err.includes("429") || err.includes("cooldown")) {
+  if (
+    err.includes("rate") ||
+    err.includes("429") ||
+    err.includes("cooldown")
+  ) {
     return {
       summary: "Discordのレート制限に達した可能性があります。",
-      nextSteps: ["Discord指定の待機時間を空ける", "短時間に通知が集中していないか確認する"],
+      nextSteps: [
+        "Discord指定の待機時間を空ける",
+        "短時間に通知が集中していないか確認する",
+      ],
     };
   }
 
-  if (err.includes("timeout") || err.includes("network") || err.includes("request_budget")) {
+  if (
+    err.includes("timeout") ||
+    err.includes("network") ||
+    err.includes("request_budget")
+  ) {
     return {
       summary: "Discord通信または無料枠内の実行予算で失敗しました。",
-      nextSteps: ["一時障害なら時間を空けて再試行する", "繰り返す場合はWorkerログと外部通信件数を確認する"],
+      nextSteps: [
+        "一時障害なら時間を空けて再試行する",
+        "繰り返す場合はWorkerログと外部通信件数を確認する",
+      ],
     };
   }
 
@@ -259,14 +293,21 @@ export function getNotificationFailureGuidance(input: {
   };
 }
 
-export function summarizeNotificationPayload(payloadJson: string): {
-  preview: string; fullContent: string; videoId?: string; eventId?: string;
+export function summarizeNotificationPayload(
+  payloadJson: string,
+): {
+  preview: string;
+  fullContent: string;
+  videoId?: string;
+  eventId?: string;
 } {
   try {
     const obj = JSON.parse(payloadJson) as Record<string, unknown>;
-    const content = typeof obj.content === "string" ? obj.content.trim() : "";
+    const content =
+      typeof obj.content === "string" ? obj.content.trim() : "";
     const firstLine = content.split("\n").find((line) => line.trim()) ?? "";
-    const preview = firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine || "—";
+    const preview =
+      firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine || "—";
     return {
       preview,
       fullContent: content || "—",
@@ -279,7 +320,9 @@ export function summarizeNotificationPayload(payloadJson: string): {
 }
 
 /** 運営画面向け: last_error を日本語要約へ変換する。 */
-export function translateNotificationError(lastError: string | null | undefined): string | null {
+export function translateNotificationError(
+  lastError: string | null | undefined,
+): string | null {
   const err = (lastError ?? "").trim();
   if (!err) return null;
   const lower = err.toLowerCase();
@@ -298,26 +341,40 @@ export function translateNotificationError(lastError: string | null | undefined)
   return err;
 }
 
-export function severityBadgeClass(severity: NotificationSeverity): string {
+export function severityBadgeClass(
+  severity: NotificationSeverity,
+): string {
   switch (severity) {
-    case "critical": return "fn-badge-danger";
-    case "warning": return "fn-badge-warning";
-    default: return "fn-badge-soft";
+    case "critical":
+      return "fn-badge-danger";
+    case "warning":
+      return "fn-badge-warning";
+    case "silent":
+      return "fn-badge-soft";
+    default:
+      return "fn-badge-soft";
   }
 }
 
 export function statusBadgeClass(status: string | null | undefined): string {
   switch (status) {
-    case "sent": return "fn-badge-accent";
+    case "sent":
+      return "fn-badge-accent";
     case "failed":
-    case "dead_letter": return "fn-badge-danger";
-    case "processing": return "fn-badge-warning";
-    default: return "fn-badge-soft";
+    case "dead_letter":
+      return "fn-badge-danger";
+    case "processing":
+      return "fn-badge-warning";
+    default:
+      return "fn-badge-soft";
   }
 }
 
 export function formatNotificationRowTitle(type: string): {
-  label: string; category: NotificationCategory; categoryLabel: string; severity: NotificationSeverity;
+  label: string;
+  category: NotificationCategory;
+  categoryLabel: string;
+  severity: NotificationSeverity;
 } {
   const category = categorizeNotificationType(type);
   return {
@@ -328,16 +385,24 @@ export function formatNotificationRowTitle(type: string): {
   };
 }
 
-export type RecipientLookup = {
-  userId: string;
-  discordId: string | null;
-  userName: string | null;
-  notificationsEnabled: boolean | null;
-};
-
-export function formatRecipientDisplay(userId: string | null, lookup?: RecipientLookup | null): string {
-  if (lookup?.userName) {
-    return lookup.discordId ? `${lookup.userName} (${lookup.discordId})` : lookup.userName;
-  }
-  return lookup?.discordId ?? userId ?? "運営チャンネル";
+export function notificationDeliveryRoute(type: string): "dm" | "channel" {
+  return type === "discord_webhook" ? "channel" : "dm";
 }
+
+export function notificationDeliveryRouteLabel(type: string): string {
+  return notificationDeliveryRoute(type) === "channel" ? "チャンネル（Webhook）" : "DM（Bot）";
+}
+
+// MIG-0734: admin filter labels; MIG-0719 remains canonical owner of shared notification display.
+export const ADMIN_NOTIFICATION_CATEGORY_OPTIONS: ReadonlyArray<{ key: NotificationCategory | "all"; label: string }> = [
+  { key: "all", label: "すべて" },
+  { key: "video", label: "作品" },
+  { key: "slot", label: "枠" },
+  { key: "x_id", label: "X ID" },
+  { key: "chapter", label: "チャプター" },
+  { key: "moderation", label: "モデレーション" },
+  { key: "announcement", label: "お知らせ" },
+  { key: "event", label: "イベント" },
+  { key: "system", label: "システム" },
+  { key: "unknown", label: "その他" },
+];
