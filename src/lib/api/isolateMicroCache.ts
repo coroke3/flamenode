@@ -12,10 +12,18 @@
 // window (a 5s TTL would miss on every exact-interval poll).
 export const ISOLATE_MICRO_CACHE_TTL_MS = 15_000;
 export const ISOLATE_MICRO_CACHE_MAX_ENTRIES = 64;
+// Upper bound on retained UTF-16 string storage across the 64-entry isolate cache.
+// Cache is an optimization; oversize bodies still reach the HTTP caller uncached.
+export const ISOLATE_MICRO_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 
 type Entry = { value: string; expiresAt: number };
 
 const entries = new Map<string, Entry>();
+
+function cachedStringBytes(value: string): number {
+  // Two bytes per UTF-16 code unit is an upper bound for JS string content.
+  return value.length * 2;
+}
 
 export function isolateMicroCacheGet(
   key: string,
@@ -30,6 +38,10 @@ export function isolateMicroCacheGet(
     entries.delete(key);
     return null;
   }
+  // Refresh recency on successful reads: byte-pressure eviction is true LRU,
+  // not just insertion-order FIFO. Preserve expiresAt; reads do not extend TTL.
+  entries.delete(key);
+  entries.set(key, entry);
   return entry.value;
 }
 
@@ -46,22 +58,32 @@ export function isolateMicroCacheSet(
     throw new RangeError("isolateMicroCache requires a finite timestamp");
   }
   // 再設定は挿入順を更新し、最古のentryから追い出す。
+  // Cache is best effort: a single huge export must never monopolize isolate memory.
+  const incomingBytes = cachedStringBytes(value);
   entries.delete(key);
-  if (entries.size >= ISOLATE_MICRO_CACHE_MAX_ENTRIES) {
-    // 期限切れを先に掃除し、それでも満杯なら最古を1件ずつ追い出す。
-    for (const [k, e] of entries) {
-      if (nowMs >= e.expiresAt) entries.delete(k);
+  if (incomingBytes > ISOLATE_MICRO_CACHE_MAX_BYTES) return;
+
+  // Reclaim expired/clock-rolled-back payloads before enforcing count and bytes.
+  let retainedBytes = 0;
+  for (const [cachedKey, entry] of entries) {
+    if (!Number.isFinite(entry.expiresAt) ||
+        nowMs < entry.expiresAt - ISOLATE_MICRO_CACHE_TTL_MS ||
+        nowMs >= entry.expiresAt) {
+      entries.delete(cachedKey);
+      continue;
     }
-    while (entries.size >= ISOLATE_MICRO_CACHE_MAX_ENTRIES) {
-      const oldest = entries.keys().next();
-      if (oldest.done) break;
-      entries.delete(oldest.value);
-    }
+    retainedBytes += cachedStringBytes(entry.value);
   }
-  entries.set(key, {
-    value,
-    expiresAt: nowMs + ISOLATE_MICRO_CACHE_TTL_MS,
-  });
+  // Bound combined content size as well as the entry count, evicting LRU-first.
+  while (entries.size >= ISOLATE_MICRO_CACHE_MAX_ENTRIES ||
+         retainedBytes + incomingBytes > ISOLATE_MICRO_CACHE_MAX_BYTES) {
+    const oldestKey = entries.keys().next().value;
+    if (oldestKey === undefined) break;
+    const oldest = entries.get(oldestKey)!;
+    retainedBytes -= cachedStringBytes(oldest.value);
+    entries.delete(oldestKey);
+  }
+  entries.set(key, { value, expiresAt: nowMs + ISOLATE_MICRO_CACHE_TTL_MS });
 }
 
 export function isolateMicroCacheSizeForTests(): number {
