@@ -166,6 +166,8 @@ test("SKIPPED approval requires a real PR number and nonblank review/alternative
   const evidence = "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=https://github.com/coroke3/flamenode/pull/123#pullrequestreview-1 | ALTERNATIVE=MIG-0302";
   assert.deepEqual(run({ statusText: skipped + "\n" + evidence }), []);
 
+  // Even structurally valid strings must not be mistaken for evidence of an actual independent review.
+  // The migration gate remains a syntax check; GitHub reviewer verification is a separate mandatory gate.
   for (const invalid of [
     "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=   | ALTERNATIVE=MIG-0302",
     "SKIP_APPROVAL: MIG-0301 | PR#123 | APPROVAL=review-url | ALTERNATIVE=   ",
