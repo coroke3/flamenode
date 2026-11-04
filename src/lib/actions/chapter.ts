@@ -21,6 +21,7 @@ import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflecti
 import { MAX_ATOMIC_CHAPTER_BULK_ROWS, parseChapterBulkCsv } from "./chapterLimits";
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 
 export interface ChapterActionResult extends PendingPublicReflection {
   ok: boolean;
@@ -198,7 +199,9 @@ async function revalidateChapterPath(
     [{
       name: "revalidate",
       run: async () => {
-        revalidatePath(`/${youtubeVideoId ?? videoId}`);
+        for (const publicPath of publicVideoRevalidationPaths(videoId, youtubeVideoId)) {
+          revalidatePath(publicPath);
+        }
       },
     }],
   );

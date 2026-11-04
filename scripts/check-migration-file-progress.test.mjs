@@ -186,8 +186,8 @@ test("changed started file must cite a SHA= newer than base that is a PR commit"
  assert.deepEqual(validateFileProgress({...input,matrix:row("PR#2 SHA="+sha(2))}),[]);
  // The new SHA counts wherever it sits in the row, e.g. after kept prior evidence.
  assert.deepEqual(validateFileProgress({...input,matrix:row("PR#1 SHA="+sha(1)+"; PR#2 SHA="+sha(2))}),[]);
- // NOT_STARTED rows keep the existence-only check.
- assert.deepEqual(validateFileProgress({...base,changedPaths:["app/api/health/route.ts"],baseMatrix:matrix,isPrCommit:()=>false}),[]);
+ // A changed NOT_STARTED source cannot silently bypass the PR evidence gate.
+ assert.match(validateFileProgress({...base,changedPaths:["app/api/health/route.ts"],baseMatrix:matrix,isPrCommit:()=>false}).join("\n"),/state is NOT_STARTED/);
 });
 
 test("PR commit check: old main commit and base fail, branch commit passes",()=>{
@@ -210,4 +210,62 @@ test("CLI fails closed in CI without MIGRATION_FILE_BASE_SHA",()=>{
  const r=spawnSync(process.execPath,[script],{env,encoding:"utf8"});
  assert.equal(r.status,1);
  assert.match(r.stderr,/MIGRATION_FILE_BASE_SHA is required in CI/);
+});
+
+
+test("changed CURRENT public assets, styles, Cloudflare declarations, and root config cannot bypass the PR ledger",()=>{
+ const paths=[
+  "public/logo.svg", "src/styles/globals.css", "cloudflare/edge.toml",
+  "middleware.ts", "next.config.mjs", "open-next.config.ts",
+  "instrumentation.ts", "next-env.d.ts", "tsconfig.json"
+ ];
+ for(const file of paths){
+  const errors=validateFileProgress({...base,changedPaths:[file]});
+  assert.ok(errors.includes("changed migration source missing file progress row: "+file), file+": "+errors.join("; "));
+ }
+ for(const file of [
+  "docs/migration/STATUS.md", "scripts/check-migration-file-progress.mjs",
+  "src/styles/.next/generated.css", "cloudflare/dist/asset.js",
+  "public/node_modules/dep.js"
+ ]){
+  assert.deepEqual(validateFileProgress({...base,changedPaths:[file]}), [], file);
+ }
+});
+
+test("changed public asset with an IN_PROGRESS row requires a fresh SHA belonging to this PR",()=>{
+ const file="public/logo.svg", oldSha="1".repeat(40), newSha="2".repeat(40);
+ const row=(evidence)=>"| \`"+file+"\` | HELPER | brand asset | MIG-0501 | SAME | IN_PROGRESS | "+evidence+" |";
+ const before=matrix.replace("## Future files",row("PR#1 SHA="+oldSha)+"\n## Future files");
+ const after=matrix.replace("## Future files",row("PR#1 SHA="+oldSha+"; PR#2 SHA="+newSha)+"\n## Future files");
+ const input={...base,filePaths:[...filePaths,file],changedPaths:[file],baseMatrix:before,isPrCommit:sha=>sha===newSha};
+ const stale=validateFileProgress({...input,matrix:before});
+ assert.match(stale.join("\n"),/cites no SHA= newer than base/);
+ assert.deepEqual(validateFileProgress({...input,matrix:after}),[]);
+});
+
+
+test("changed tracked NOT_STARTED assets, styles and config fail closed even with an existing ledger row",()=>{
+ const files=["public/brand/mark.svg","cloudflare/routes.toml","src/styles/theme.css","next.config.mjs"];
+ for(const file of files){
+  const row="| `"+file+"` | HELPER | CURRENT asset/config | MIG-0501 | SAME | NOT_STARTED | — |";
+  const currentMatrix=matrix.replace("## Future files",row+"\n## Future files");
+  const input={...base,matrix:currentMatrix,filePaths:[...filePaths,file],changedPaths:[file],baseMatrix:currentMatrix,isPrCommit:()=>false};
+  const errors=validateFileProgress(input);
+  assert.ok(errors.some(e=>e.includes(file+" changed in this PR but file state is NOT_STARTED")),file+": "+errors.join("; "));
+  // An untouched NOT_STARTED row remains a legitimate inventory entry.
+  assert.deepEqual(validateFileProgress({...input,changedPaths:[]}),[],file);
+ }
+});
+
+test("changing IN_PROGRESS back to NOT_STARTED cannot bypass fresh PR evidence",()=>{
+ const file="public/brand/mark.svg";
+ const old="1".repeat(40), next="2".repeat(40);
+ const make=(state,evidence)=>matrix.replace("## Future files",
+  "| `"+file+"` | HELPER | tracked public asset | MIG-0501 | SAME | "+state+" | "+evidence+" |\n## Future files");
+ const before=make("IN_PROGRESS","PR#1 SHA="+old);
+ const downgraded=make("NOT_STARTED","—");
+ const updated=make("IN_PROGRESS","PR#1 SHA="+old+"; PR#2 SHA="+next+" TEST=node:test");
+ const input={...base,filePaths:[...filePaths,file],changedPaths:[file],baseMatrix:before,isPrCommit:sha=>sha===next};
+ assert.match(validateFileProgress({...input,matrix:downgraded}).join("\n"),/state is NOT_STARTED/);
+ assert.deepEqual(validateFileProgress({...input,matrix:updated}),[]);
 });
