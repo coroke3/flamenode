@@ -158,7 +158,7 @@ test("MIG-0734 U01 server markup keeps OVERRIDE/CLEAR/APPLY disabled until token
 
 async function inDom(callback){
   const dom=new JSDOM("<!doctype html><div id='root'></div>",{url:"https://flamenode.test/admin/cost-guard"});
-  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent","FormData"];
+  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent","CompositionEvent","FormData"];
   const prior=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
   const oldAct=globalThis.IS_REACT_ACT_ENVIRONMENT;
   for(const k of keys)Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:dom.window[k]});
@@ -506,7 +506,7 @@ test("MIG-0734 D-17-7 category auto-filter uses SPA URL state and retains draft 
   });
 });
 
-test("MIG-0734 D-17-7 auto-filter preserves the IME composition guard",async()=>{
+test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",async()=>{
   await inDom(async(dom,root)=>{
     const queries=[];
     const data=notificationData({rows:[]},{failed:0,deadLetter:0});
@@ -516,28 +516,44 @@ test("MIG-0734 D-17-7 auto-filter preserves the IME composition guard",async()=>
       onSearch:next=>queries.push(next.toString()),
     }))));
     const form=dom.window.document.querySelector('form[role="search"]');
+    const input=form.querySelector('[name="type"]');
     const category=form.querySelector('[name="cat"]');
-    // AutoSubmitSelect previously suppressed GET navigation while IME composing.
-    form.setAttribute("data-fn-ime-composing","");
+    const submit=()=>form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true}));
+    const compose=name=>input.dispatchEvent(new dom.window.CompositionEvent(name,{bubbles:true}));
+    await React.act(async()=>compose("compositionstart"));
+    assert.equal(form.hasAttribute("data-fn-ime-composing"),true,"real compositionstart marks the form");
     await React.act(async()=>{
       category.value="x_id";
       category.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
+      submit();
     });
-    assert.deepEqual(queries,[],"category changes must not navigate during composition");
+    assert.deepEqual(queries,[],"category and explicit submit must not navigate while composing");
     await React.act(async()=>{
-      form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true}));
+      compose("compositionend");
+      submit(); // same tick as IME commit must still be blocked
     });
-    assert.deepEqual(queries,[],"the explicit GET submit uses the same guard");
-    form.removeAttribute("data-fn-ime-composing");
+    assert.deepEqual(queries,[]);
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    assert.equal(form.hasAttribute("data-fn-ime-composing"),false);
     await React.act(async()=>{
       category.value="video";
       category.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
     });
-    assert.equal(queries.length,1,"category auto-filter resumes after composition");
+    assert.equal(queries.length,1,"category auto-filter resumes after IME commit");
     const next=new URLSearchParams(queries[0]);
     assert.equal(next.get("status"),"failed");
     assert.equal(next.get("type"),"draft");
     assert.equal(next.get("cat"),"video");
+
+    // Windows IME may report 229 without a preceding compositionstart event.
+    await React.act(async()=>{
+      input.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"Enter",keyCode:229,bubbles:true}));
+      submit();
+    });
+    assert.equal(queries.length,1,"keyCode 229 commit Enter cannot search");
+    await React.act(async()=>{await new Promise(resolve=>dom.window.setTimeout(resolve,5));});
+    await React.act(async()=>submit());
+    assert.equal(queries.length,2);
   });
 });
 
