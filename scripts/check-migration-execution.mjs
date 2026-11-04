@@ -62,11 +62,20 @@ export function hasValidSkipApprovalRecord(statusText, id) {
         marker[1].length >= fence.length && !marker[2].trim()) fence = null;
       continue;
     }
-    if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
+    if (marker) {
+      fence = {char: marker[1][0], length: marker[1].length};
+      // A fenced example ends the preceding Markdown table.
+      inTaskTable = false;
+      expectSeparator = false;
+      continue;
+    }
     // An arbitrary table/example elsewhere in STATUS is not the canonical
     // task inventory. Only cells under ID/Task/State/Depends on headers count.
     const trimmed = line.trim();
-    if (!trimmed || /^#{1,6}\s/.test(trimmed)) {
+    if (!trimmed || /^#{1,6}\s/.test(trimmed) ||
+        (inTaskTable && !trimmed.startsWith("|"))) {
+      // Any prose or a new block closes a Markdown table. A forged MIG row
+      // after that point cannot impersonate a real STATUS task.
       inTaskTable = false;
       expectSeparator = false;
     }
