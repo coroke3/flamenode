@@ -594,8 +594,10 @@ test("MIG-0734 query_failed partial counts never expose bulk mutation and can re
   const data=notificationData({error:"query_failed"},{failed:4,deadLetter:3,unhealthyLease:2});
   const html=renderNotifications(data);
   assert.match(html,/通知ログの取得に失敗しました/);
-  assert.match(html,/再試行/);
-  assert.doesNotMatch(html,/failed を一括リトライ|強制再送|>確定</,
+  assert.match(html,/>再試行<\/button>/,"a failed read must expose an actual retry control");
+  // The page header legitimately describes 強制再送 as help text. Match only
+  // executable button labels; prose mentions must not count as mutation UI.
+  assert.doesNotMatch(html,/<button\b[^>]*>\s*(?:failed を一括リトライ \(上限 10\)|強制再送|確定)\s*<\/button>/,
     "partial-query errors must never render privileged mutation buttons");
   assert.doesNotMatch(html,/配送リース期限超過・欠損|失敗 4 件|現在、失敗・滞留はありません/,
     "incomplete counts must not appear as authoritative status banners");
