@@ -31,6 +31,20 @@ function normalizeEventId(eventId: string): string | null {
   return id && id.length <= MAX_EVENT_ID_LEN ? id : null;
 }
 
+/**
+ * CURRENT live responses are cached in-isolate for 15s. Cached payloads skip
+ * their original SELECT ... visibility_status='public' query, so re-check
+ * public status against D1 before returning ANY cache HIT.
+ */
+export async function isLiveEventPublic(db: DB, eventId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.id, eventId), eq(events.visibility_status, "public")))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function getLiveEventSummary(db: DB, eventId: string) {
   const id = normalizeEventId(eventId);
   if (!id) return null;

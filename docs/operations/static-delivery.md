@@ -139,7 +139,11 @@ rows and does not replace usable public static detail.
 
 ### 公開 polling API の isolate coalescing
 
-`/api/event-endpoints/[id]`（realtime）と `/api/live/events/[id]/{slots,summary,submissions}` は、同一 isolate 内で組み立て済みの body 文字列を 15 秒間だけ再利用する（5 秒間隔の単独 polling でも 1 窓 1 snapshot に合流させるため）（`src/lib/api/isolateMicroCache.ts`。最大 64 件・最古から追い出し・値は解決済み string のみ・Promise や binding は保持しない）。認可は毎 request で確認する。event-endpoints は 1 行の `loadEventExportEvent` による公開可否判定を cache 参照前に必ず実行し、key に `events.updated_at` を含める。scheduled/realtime どちらも成功レスポンスは `Cache-Control: no-store` とし、公開→非公開の変化後にCDNが旧レスポンスを返さないようにする（scheduledのオリジン内Cache APIは維持）。live API は `resolvePublicOperationMode`（env / isolate 30 秒 / KV 複製、いずれも無いときだけ D1）で `isLiveApiEnabled` を毎 request 判定する。realtime の `Cache-Control: no-store` / `X-FlameNode-Cache: BYPASS` と live API の `liveApiCacheControl()` は変えない。not_found・エラー・null は cache しない。event-endpoints の非公開化は即時に 404 になり、動画追加などの内容反映と live API の `load` 内の判定は最大 15 秒遅れ得る。より低頻度でよい利用者は scheduled モード（KV、15 分以上）を使う。
+`/api/event-endpoints/[id]` の realtime 応答と `/api/live/events/[id]/summary` は、組み立て済み body 文字列を同一 isolate 内で最大 15 秒再利用する（`src/lib/api/isolateMicroCache.ts`。最大64件・合計8MiB、LRU追い出し、解決済み string のみ保持）。ただし live の `slots` / `submissions` は動画単位の公開状態が変化し得るため micro-cache を使わず、毎回 D1 の公開条件を満たすデータを再取得する。エラー、not_found、null はいずれもキャッシュしない。
+
+`/api/event-endpoints/[id]` は Cache API / micro-cache 参照前に `loadEventExportEvent` でイベントの公開可否を必ず確認し、realtime cache key に `events.updated_at` を含める。scheduled モードはオリジン内 Cache API（15/60/360/1440 分の更新指定）を維持するが、scheduled/realtime とも成功レスポンスは `Cache-Control: no-store` とし、共有 CDN が非公開化後に旧bodyを再配信しないようにする。realtime の `X-FlameNode-Cache: BYPASS` は維持する。
+
+live API は `resolvePublicOperationMode`（env / isolate 30秒 / KV 複製、必要時 D1）と `isLiveApiEnabled` のゲートを毎 request 確認する。summary の micro-cache HIT でも D1 のイベント公開状態を再検証し、非公開・削除時は 404（`no-store`）を返してキャッシュを即時削除する。live API の成功レスポンスも `Cache-Control: no-store` とする（旧 `public, s-maxage=5, stale-while-revalidate=30` は廃止）。summary の非識別集計には最大15秒の内容反映遅延が残る。公開作品ID等を含む slots/submissions にはこの遅延を持ち込まない。
 
 ### Cache TTL（Cache API / R2 max-age）
 
