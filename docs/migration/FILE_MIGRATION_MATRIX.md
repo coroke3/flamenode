@@ -1374,6 +1374,9 @@
 | `src/components/forms/VideoForm.tsx` | HELPER | CURRENT save/submit-success public video URL validated before linking | MIG-0702 | apps/app (future form port; CURRENT bugfix only) | RETAINED | PR#574 SHA=855b11c600b7539a493d5f18c19e16ebf9fa0363 TEST=node --test --experimental-strip-types scripts/migration-public-islands.test.mjs CI=https://github.com/coroke3/flamenode/pull/574/checks (final-head CI required; CURRENT fix, not migrated) |
 | `src/lib/video/videoEditPermissionDisplay.test.mjs` | TEST | CURRENT edit privileges and admin tab display regressions (validation in flight) | MIG-0705 | SAME (CURRENT test) | IN_PROGRESS | PR#566 SHA=5bd6b7d5e51469702af187cea0178854059db713 TEST=node --test --experimental-strip-types src/lib/video/videoEditPermissionDisplay.test.mjs (assert validated admin video public link instead of raw alias; CI pending) |
 
+| `src/lib/utils/remainingTime.ts` | HELPER | shared countdown metric formatting; prevent NaN/Infinity values on CURRENT and Astro public event cards | MIG-0506 | SAME (shared Next and Astro metric helper, parity preserved) | IN_PROGRESS | PR#584 SHA=d3535039a96ebaeaf6e7fda13867e3960d35c9b1 TEST=node --test --experimental-strip-types src/lib/utils/remainingTime.test.mjs CI=pending (non-finite countdown safe null; valid/elapsed parity) |
+| `src/lib/utils/remainingTime.test.mjs` | TEST | NaN and infinite countdown regression plus existing boundary tests | MIG-0506 | SAME (shared countdown unit test) | IN_PROGRESS | PR#584 SHA=d3535039a96ebaeaf6e7fda13867e3960d35c9b1 TEST=node --test --experimental-strip-types src/lib/utils/remainingTime.test.mjs CI=pending (non-finite countdown safe null; valid/elapsed parity) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
