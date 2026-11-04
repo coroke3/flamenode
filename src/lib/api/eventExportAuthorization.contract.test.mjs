@@ -136,10 +136,10 @@ test("realtimeのisolate micro-cacheはD1公開判定の後にだけ読み、ヘ
     route,
     /updateMode === "scheduled" \? "MISS" : "BYPASS"/,
   );
-  assert.match(
-    route,
-    /updateMode === "realtime"\s*\? "no-store"/,
-  );
+  // Realtime AND scheduled responses must be blocked from shared CDN caches.
+  // The origin's internal scheduled Cache API is deliberately unaffected.
+  assert.match(route, /const cacheControl = "no-store"/);
+  assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
   // not_foundとエラーはcacheしない: setはbody確定後の1箇所だけ。
   assert.equal((route.match(/isolateMicroCacheSet\(/g) ?? []).length, 1);
   assert.ok(cacheWrite > route.indexOf("if (body === null)"));
