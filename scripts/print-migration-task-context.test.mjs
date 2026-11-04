@@ -279,6 +279,8 @@ test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows",
 
 test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()=>{
  const rows=[
+   "| ID | Task | State | Depends on |",
+   "| --- | --- | --- | --- |",
    "| MIG-0105 | obsolete gate | SKIPPED | — |",
    "| MIG-0108 | approved alternate | DONE | — |",
    "| MIG-0401 | independent PoC | READY | MIG-0105 |",
