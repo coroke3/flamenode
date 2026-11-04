@@ -301,8 +301,10 @@ export function AdminNotifications({ api = defaultApi }: { api?: AdminNotificati
   const [params, setParams] = useSearchParams();
   const filters = readNotificationFilters(params);
   const [refresh, setRefresh] = React.useState(0);
-  const key = "admin-notifications:" + notificationFilterHref(filters);
-  const state = useApiResult((signal) => api.list(filters, signal), key, refresh);
+  // A failed admin refresh must not keep previously displayed notification payloads
+  // or mutation buttons mounted while the new authoritative read is unavailable.
+  const key = "admin-notifications:" + notificationFilterHref(filters) + ":refresh=" + refresh;
+  const state = useApiResult((signal) => api.list(filters, signal), key);
   const redirect = state.status === "loading" ? null : adminReadRedirect(state);
   React.useEffect(() => {
     if (redirect) window.location.assign(redirect);
