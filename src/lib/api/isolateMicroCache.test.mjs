@@ -10,6 +10,47 @@ import {
   resetIsolateMicroCacheForTests,
 } from "./isolateMicroCache.ts";
 
+import {
+  isolateMicroCacheGet as honoGet,
+  isolateMicroCacheSet as honoSet,
+  resetIsolateMicroCacheForTests as resetHono,
+} from "../../../apps/api/src/routes/live/microCache.ts";
+
+test("時計の巻き戻しではCURRENT/Honoとも旧マイクロキャッシュを破棄する", () => {
+  for (const [name, get, set, reset] of [
+    ["CURRENT", isolateMicroCacheGet, isolateMicroCacheSet, resetIsolateMicroCacheForTests],
+    ["Hono", honoGet, honoSet, resetHono],
+  ]) {
+    reset();
+    set("event", "public-payload", 1_000);
+    assert.equal(get("event", 1_000), "public-payload", name);
+    assert.equal(get("event", 999), null, name + ": clock rollback invalidates");
+    assert.equal(get("event", 1_001), null, name + ": old payload remains invalidated");
+
+    set("event", "new-payload", 2_000);
+    assert.equal(get("event", 16_999), "new-payload", name);
+    assert.equal(get("event", 17_000), null, name + ": standard TTL unchanged");
+    reset();
+  }
+});
+
+test("非有限時刻はCURRENT/Honoとも無期限エントリを作れない", () => {
+  for (const [name, get, set, reset] of [
+    ["CURRENT", isolateMicroCacheGet, isolateMicroCacheSet, resetIsolateMicroCacheForTests],
+    ["Hono", honoGet, honoSet, resetHono],
+  ]) {
+    reset();
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      assert.throws(() => set("poison", "v", invalid), RangeError, name);
+      assert.equal(get("poison", 0), null, name + ": invalid set did not store entry");
+    }
+    set("good", "v", 1_000);
+    assert.equal(get("good", NaN), null, name + ": nonfinite read invalidates");
+    assert.equal(get("good", 1_000), null, name + ": invalidated cache must not reappear");
+    reset();
+  }
+});
+
 test("TTLは15秒で、期限ちょうどから無効になる", () => {
   resetIsolateMicroCacheForTests();
   assert.equal(ISOLATE_MICRO_CACHE_TTL_MS, 15_000);
