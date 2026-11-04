@@ -286,7 +286,7 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    "| MIG-0401 | independent PoC | READY | MIG-0105 |",
  ].join("\n");
  const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789 | ALTERNATIVE=MIG-0108";
- const selected=pickNextTask(rows+"\n"+approval,"");
+ const selected=pickNextTask(rows+"\n\n"+approval,"");
  assert.equal(selected.selected,"MIG-0401");
  assert.deepEqual(selected.candidates,["MIG-0401"]);
  assert.equal(pickNextTask(rows.replace("SKIPPED","DONE"),"").selected,"MIG-0401");
@@ -309,12 +309,12 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    "```md\n"+approval+"\n```",
    "<!--\n"+approval+"\n-->",
  ]) {
-   assert.equal(pickNextTask(rows+"\n"+invalid,"").selected,null,invalid);
+   assert.equal(pickNextTask(rows+"\n\n"+invalid,"").selected,null,invalid);
  }
  for (const invalidState of ["READY","BLOCKED","SKIPPED","IN_PROGRESS"]) {
    const invalidRows = rows.replace("| MIG-0108 | approved alternate | DONE |",
      "| MIG-0108 | approved alternate | " + invalidState + " |");
-   const invalidSelection = pickNextTask(invalidRows+"\n"+approval,"");
+   const invalidSelection = pickNextTask(invalidRows+"\n\n"+approval,"");
    assert.ok(!invalidSelection.candidates.includes("MIG-0401"),
      invalidState+": unfinished alternate cannot unlock its SKIPPED dependent");
  }
@@ -326,7 +326,7 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    "```md\n| MIG-9999 | fake alternative | DONE | — |\n```",
  ]) {
    const withoutRealAlt = rows.replace("| MIG-0108 | approved alternate | DONE | — |\n","");
-   assert.equal(pickNextTask(withoutRealAlt+"\n"+hidden+"\n"+
+   assert.equal(pickNextTask(withoutRealAlt+"\n\n"+hidden+"\n"+
      approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"").selected,null,hidden);
  }
 });
