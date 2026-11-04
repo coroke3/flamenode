@@ -25,10 +25,11 @@ export function snapshotAccessFromEnv(env: Record<string, string | undefined> = 
     throw new Error("Snapshot env incomplete: set FLAMENODE_SNAPSHOT_DIR, _MANIFEST_FILE and _GENERATION together");
   }
   const root = path.resolve(dir);
+  let realRoot: string | null = null;
   return {
     source: {
       async read(key) {
-        // Snapshot keys come from a signed/validated manifest in the normal build path, but
+        // Snapshot keys are validated by the normal build loader, but
         // this filesystem adapter must not allow a malformed key or symlink to escape the root.
         if (!key || path.isAbsolute(key) || key.includes("\\") || key.includes("\0")) return null;
         const file = path.resolve(root, key);
@@ -36,9 +37,9 @@ export function snapshotAccessFromEnv(env: Record<string, string | undefined> = 
 
         // Resolve symlinks before reading: a snapshot entry must never dereference a file
         // outside the snapshot root, even if its lexically normalized path looks safe.
-        const actualRoot = fs.realpathSync(root);
+        realRoot ??= fs.realpathSync(root);
         const actualFile = fs.realpathSync(file);
-        if (!isInsideSnapshotRoot(actualRoot, actualFile) || !fs.statSync(actualFile).isFile()) {
+        if (!isInsideSnapshotRoot(realRoot, actualFile) || !fs.statSync(actualFile).isFile()) {
           return null;
         }
         return new Uint8Array(fs.readFileSync(actualFile));
