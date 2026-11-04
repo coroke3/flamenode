@@ -222,27 +222,30 @@ if (runUnderRootTsx(import.meta.url)) {
     const src = readFileSync(new URL("../src/routes/events/export.ts", import.meta.url), "utf8");
     assert.match(src, /try \{ assertNoForbiddenKeys\(payload\); \}\s*catch \{ return publicJsonResponse\(req, \{ error: "public_payload_unavailable" \}, "no-store", 503\); \}/);
   });
-  test("T08: matching cache metadata never bypasses private DTO validation (v5 and legacy)", async () => {
+  test("T08: matching cache metadata never bypasses private DTO validation in CURRENT/Hono (v5/legacy)", async () => {
     for (const [format, body, schemaVersion] of [
       ["v5", '{"schema_version":5,"auth_user_id":"secret"}', 5],
       ["legacy", '[{"auth_user_id":"secret"}]', 1],
     ]) {
-      reset();
-      const key = "public-event-export:9:export-event:" + format + ":60";
-      const cacheRequest = new Request("https://flamenode.internal/public-json/" + encodeURIComponent(key));
-      await edgeCache.put(cacheRequest, new Response(JSON.stringify({
-        payload: {
-          body,
-          metadata: { marker: "public-export-validated-v1", format, schema_version: schemaVersion },
-        },
-        stored_at: 1700000200,
-      })));
-      const result = await hono("export-event?format=" + format + "&update=scheduled");
-      assert.equal(result.status, 200);
-      assert.equal(result.headers.get("X-FlameNode-Cache"), "MISS");
-      assert.doesNotMatch(await result.text(), /auth_user_id|secret/);
-      await Promise.all(globalThis.__eventExport.pending);
-      assert.equal(d1.stats.writes, 0);
+      for (const [runtime, request] of [["CURRENT", current], ["Hono", hono]]) {
+        reset();
+        const key = "public-event-export:9:export-event:" + format + ":60";
+        const cacheRequest = new Request("https://flamenode.internal/public-json/" + encodeURIComponent(key));
+        await edgeCache.put(cacheRequest, new Response(JSON.stringify({
+          payload: {
+            body,
+            metadata: { marker: "public-export-validated-v1", format, schema_version: schemaVersion },
+          },
+          stored_at: 1700000200,
+        })));
+        const result = await request("export-event?format=" + format + "&update=scheduled");
+        assert.equal(result.status, 200, runtime + " " + format);
+        assert.equal(result.headers.get("X-FlameNode-Cache"), "MISS",
+          runtime + " must reject poisoned cache even with matching metadata");
+        assert.doesNotMatch(await result.text(), /auth_user_id|secret/, runtime + " " + format);
+        await Promise.all(globalThis.__eventExport.pending);
+        assert.equal(d1.stats.writes, 0, runtime + " must not write D1");
+      }
     }
   });
   test("T05: fail closed on D1 error; GET performs no D1 writes", async () => {
