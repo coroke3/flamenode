@@ -86,7 +86,9 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
     if (isImeComposingForm(form)) return;
     const next = new URLSearchParams();
     for (const [key, value] of new FormData(form)) {
-      if (typeof value === "string" && value.trim()) next.set(key, value.trim());
+      if (typeof value !== "string") continue;
+      const normalized = value.trim();
+      if (normalized) next.set(key, key === "q" ? normalized.slice(0, 100) : normalized);
     }
     if (onSearch) {
       onSearch(next);
@@ -189,7 +191,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
           aria-label="type 完全一致" className="fn-input fn-input-sm" style={{ minWidth: 220 }} />
         <input name="event" defaultValue={filters.event} placeholder="event_id 完全一致"
           aria-label="event_id 完全一致" className="fn-input fn-input-sm" style={{ minWidth: 200 }} />
-        <input name="q" defaultValue={filters.q} placeholder="通知本文を検索"
+        <input name="q" defaultValue={filters.q} placeholder="通知本文を検索" maxLength={100}
           aria-label="通知本文を検索" className="fn-input fn-input-sm" style={{ minWidth: 200 }} />
         {/* Three text inputs prevent reliable implicit Enter submission without a submit button. */}
         <button type="submit" className="fn-btn fn-btn-primary fn-btn-sm">検索</button>
