@@ -265,6 +265,58 @@ test("MIG-0734 T02 override and clear never send until the exact token is typed"
   });
 });
 
+test("MIG-0734 T02 external override refresh invalidates old OVERRIDE and CLEAR intent",async()=>{
+  for (const priorToken of ["OVERRIDE","CLEAR"]) {
+    await inDom(async(dom,root)=>{
+      const calls=[];
+      const api={
+        setOverride:async(reason,confirm,features)=>{
+          calls.push({kind:"set",reason,confirm,features});return {ok:true};
+        },
+        clearOverride:async(reason,confirm)=>{
+          calls.push({kind:"clear",reason,confirm});return {ok:true};
+        },
+      };
+      const render=(until,features)=>h(CostGuardOverrideForm,{
+        settings:{...settings,exceptionUntil:until,exceptionFeaturesJson:features},
+        api,onSuccess:()=>{},
+      });
+      await React.act(async()=>root.render(render(4102444800,'["edit_video"]')));
+      const reason=dom.window.document.querySelector('[aria-label="override理由"]');
+      const confirm=dom.window.document.querySelector('[aria-label="確認文字列"]');
+      const checked=dom.window.document.querySelector('input[type="checkbox"]');
+      const activate=byText(dom,"15分有効化"),clear=byText(dom,"即時解除");
+      await type(dom,reason,"旧設定を変更する理由");
+      await type(dom,confirm,priorToken);
+      await React.act(async()=>checked.click());
+      const oldButton=priorToken==="OVERRIDE"?activate:clear;
+      assert.equal(oldButton.disabled,false,priorToken+" old snapshot was confirmed");
+
+      // Another admin has changed both the expiry and protected feature set.
+      await React.act(async()=>root.render(render(4102444860,'["like_or_bookmark"]')));
+      assert.equal(reason.value,"","old rationale must be invalidated");
+      assert.equal(confirm.value,"","old confirmation must be invalidated");
+      assert.equal(checked.checked,false,"old feature selection must be invalidated");
+      assert.equal(activate.disabled,true);
+      assert.equal(clear.disabled,true);
+      await React.act(async()=>oldButton.click());
+      assert.deepEqual(calls,[],"a stale "+priorToken+" cannot mutate a newly refreshed override");
+
+      // A deliberate confirmation against the *new* snapshot still works.
+      await type(dom,reason,"新設定を確認して操作");
+      await type(dom,confirm,priorToken);
+      if(priorToken==="OVERRIDE"){
+        assert.equal(activate.disabled,true,"OVERRIDE needs freshly chosen features");
+        await React.act(async()=>checked.click());
+      }
+      await React.act(async()=>oldButton.click());
+      assert.deepEqual(calls,priorToken==="OVERRIDE"?
+        [{kind:"set",reason:"新設定を確認して操作",confirm:"OVERRIDE",features:["post_video_unslotted"]}]:
+        [{kind:"clear",reason:"新設定を確認して操作",confirm:"CLEAR"}]);
+    });
+  }
+});
+
 test("MIG-0734 T03 disabled-features form sends the rendered value as the CAS token and surfaces a 409",async()=>{
   await inDom(async(dom,root)=>{
     const calls=[];
