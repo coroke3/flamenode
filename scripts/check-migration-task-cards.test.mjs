@@ -456,3 +456,42 @@ test("HTML commented card headings and fields are not executable instructions", 
  assert.deepEqual(inlineCode.errors, []);
  assert.equal(extractWorkOrder(hidden,"MIG-0301"),null);
 });
+
+
+test("a fence inside an HTML comment cannot hide later live cards", () => {
+  const fields = "- 読む: real\n- 変更: real\n- 試験: real\n- DONE: real\n";
+  const real = "### MIG-0301 — real\n" + fields;
+  for (const hidden of [
+    "<!--\n```md\n- 試験: fake\n-->\n",
+    "<!--\n```md\n### MIG-0302 — fake\n" + fields + "-->\n",
+    "<!--\n```md\n```\n-->\n",
+    "<!--\n`\n### MIG-0302 — fake\n-->\n",
+  ]) {
+    const result = collectTaskCards({ "t.md": hidden + real });
+    assert.deepEqual([...result.cards.keys()], ["MIG-0301"], hidden);
+    assert.deepEqual(result.errors, [], hidden);
+    assert.equal(result.cards.get("MIG-0301").heading, "### MIG-0301 — real", hidden);
+  }
+});
+
+test("HTML comment markers in real fenced code do not hide later cards", () => {
+  const fields = "- 読む: real\n- 変更: real\n- 試験: real\n- DONE: real\n";
+  const source = "```md\n<!--\n### MIG-0302 — fake\n```\n### MIG-0301 — real\n" + fields;
+  const result = collectTaskCards({ "t.md": source });
+  assert.deepEqual([...result.cards.keys()], ["MIG-0301"]);
+  assert.deepEqual(result.errors, []);
+});
+
+test("comment-contained fences cannot hide real required fields after closing", () => {
+  const source = [
+    "### MIG-0301 — real",
+    "- 読む: real", "- 変更: real", "- DONE: real",
+    "<!--",
+    "```md",
+    "- 試験: fake",
+    "-->",
+    "- 試験: genuine",
+  ].join("\n");
+  const result = collectTaskCards({ "t.md": source });
+  assert.deepEqual(result.errors, []);
+});
