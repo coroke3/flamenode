@@ -169,7 +169,7 @@ function getMediaCacheKey(
 export function clearPublicMediaAccessCacheForTest(): void {}
 
 /** Called only AFTER the request's fresh D1 visibility check. Cached bytes are not authorization. */
-export async function getCachedPublicMediaResponse(
+async function getCachedPublicMediaResponse(
   request: Request,
   rawKey: string,
 ): Promise<Response | null> {
