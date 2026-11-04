@@ -81,13 +81,26 @@ export function publishedSitemapRows<T extends { id: string }>(
   return rows.filter((row) => publishedIds.has(row.id));
 }
 
-/** Replicates Next 15.5 resolveSitemap for our loc/lastmod/changefreq/priority-only entries. */
+/** XML text nodes must escape URL query separators and markup as well as path data. */
+function escapeXmlText(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default: return "&apos;";
+    }
+  });
+}
+
+/** Replicates Next 15.5 sitemap layout for loc/lastmod/changefreq/priority-only entries. */
 export function serializeSitemap(entries: readonly SitemapEntry[]): string {
   let result = '<?xml version="1.0" encoding="UTF-8"?>\n';
   result += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
   for (const item of entries) {
     result += '<url>\n';
-    result += `<loc>${item.url}</loc>\n`;
+    result += `<loc>${escapeXmlText(item.url)}</loc>\n`;
     result += `<lastmod>${item.lastModified.toISOString()}</lastmod>\n`;
     result += `<changefreq>${item.changeFrequency}</changefreq>\n`;
     result += `<priority>${item.priority}</priority>\n`;
