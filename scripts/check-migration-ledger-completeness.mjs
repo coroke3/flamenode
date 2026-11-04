@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import { parseFileRows, parseMigs } from "./check-migration-file-progress.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const B = "\x60";
 
 // Directories whose tracked files are all required (unless excluded below).
 export const REQUIRED_DIRS = ["app/", "src/lib/", "src/components/", "src/styles/", "public/", "workers/", "cloudflare/"];
@@ -38,21 +37,106 @@ export function isRequiredSource(file) {
   return REQUIRED_ROOT_FILES.includes(file) || REQUIRED_DIRS.some((d) => file.startsWith(d));
 }
 
-const FAMILY_ROW_RE = new RegExp("^\\|\\s*" + B + "([^" + B + "]+)" + B + "\\s*\\|");
 // Family rows live in "## Source families" (after the ledger, so parseFileRows ignores them).
 export function parseFamilyRows(markdown) {
   const text = markdown.replace(/\r\n/g, "\n");
-  const section = text.split("\n## Source families")[1]?.split("\n## ")[0];
   const rows = [], errors = [];
-  if (!section) return { rows, errors: ["FILE_MIGRATION_MATRIX: missing '## Source families' section"] };
-  for (const line of section.split("\n")) {
-    if (!FAMILY_ROW_RE.test(line)) continue;
-    const cells = line.split("|").slice(1, -1).map((x) => x.trim());
-    if (cells.length !== 5) { errors.push("family row has " + cells.length + " columns, expected 5: " + line.slice(0, 90)); continue; }
-    const pattern = cells[0].replaceAll(B, "");
-    if (!pattern.endsWith("/**") || pattern.slice(0, -3).includes("*")) { errors.push("family pattern must be 'dir/**': " + pattern); continue; }
+  // A second family section must not be ignored by the first-match parser.
+  // Only top-level headings count: code-fenced examples are not ledger sections.
+  const headings = [];
+  let fence = null;
+  const allLines = text.split("\n");
+  for (let i = 0; i < allLines.length; i++) {
+    const line = allLines[i];
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char &&
+          marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (marker) { fence = {char: marker[1][0], length: marker[1].length}; continue; }
+    if (/^## Source families(?:[ \t].*)?$/.test(line)) headings.push(i);
+  }
+  if (headings.length !== 1) {
+    return { rows, errors: [headings.length === 0
+      ? "FILE_MIGRATION_MATRIX: missing '## Source families' section"
+      : "FILE_MIGRATION_MATRIX: duplicate '## Source families' sections"] };
+  }
+  const start = headings[0] + 1;
+  const section = allLines.slice(start).join("\n").split("\n## ")[0];
+
+  const lines = section.split("\n");
+  const headerIndex = lines.findIndex((line) => /^\|\s*Family\s*\|/.test(line.trim()));
+  if (headerIndex < 0) return { rows, errors: ["FILE_MIGRATION_MATRIX: missing family table header"] };
+
+  const cellsOf = (line) => line.split("|").slice(1, -1).map((cell) => cell.trim());
+  const header = lines[headerIndex].trim();
+  if (!header.endsWith("|") || cellsOf(header).length !== 5) {
+    errors.push("invalid family table header: " + header.slice(0, 90));
+  }
+
+  const separator = lines[headerIndex + 1]?.trim() ?? "";
+  if (!separator.startsWith("|") || !separator.endsWith("|") ||
+      cellsOf(separator).length !== 5 ||
+      !cellsOf(separator).every((cell) => /^:?-{3,}:?$/.test(cell))) {
+    return { rows, errors: [...errors, "invalid family table separator"] };
+  }
+
+  const allowedStates = new Set([
+    "NOT_STARTED", "IN_PROGRESS", "BRIDGED", "PARITY_VERIFIED",
+    "CUTOVER", "RETIRED", "RETAINED", "BLOCKED",
+  ]);
+  // A known structural boundary, rather than a guessed "prose starts here"
+  // heuristic, makes every malformed family row visible to the validator.
+  const boundaryIndexes = lines.flatMap((line, index) =>
+    /^\*\*Update rule:\*\*(?:\s|$)/.test(line.trim()) ? [index] : []);
+  if (boundaryIndexes.length !== 1 || boundaryIndexes[0] <= headerIndex + 1) {
+    return { rows, errors: [...errors, "expected exactly one Update rule boundary after family table"] };
+  }
+  const tableEnd = boundaryIndexes[0];
+  // The Update rule is a hard end-of-table boundary, not a way to hide
+  // corrupted rows. Reject family-like paths even without pipes/backticks,
+  // and reject mangled multi-column rows even without a recognizable path.
+  const looksLikeFamilyAfterBoundary = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    const pipeCount = (line.match(/\|/g) ?? []).length;
+    return trimmed.startsWith("|") ||
+      /(?:^|[\s|`])(?:app|src|public|workers|cloudflare)\/[^\s|`]*\/\*\*(?=$|[\s|`])/.test(line) ||
+      (pipeCount >= 2 && /\b(?:MIG-\d{4}|HELPER|WORKER_ENTRY|NOT_STARTED|IN_PROGRESS)\b/.test(line));
+  };
+  if (lines.slice(tableEnd + 1).some(looksLikeFamilyAfterBoundary)) {
+    errors.push("family row appears after Update rule boundary");
+  }
+
+  for (const line of lines.slice(headerIndex + 2, tableEnd)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
+      errors.push("malformed family row: " + trimmed.slice(0, 90));
+      continue;
+    }
+    const cells = cellsOf(trimmed);
+    if (cells.length !== 5) {
+      errors.push("family row has " + cells.length + " columns, expected 5: " + trimmed.slice(0, 90));
+      continue;
+    }
+    if (!/^\x60[^\x60]+\x60$/.test(cells[0])) {
+      errors.push("invalid family path cell: " + cells[0]);
+      continue;
+    }
+    const pattern = cells[0].slice(1, -1);
+    if (!pattern.endsWith("/**") || pattern.slice(0, -3).includes("*")) {
+      errors.push("family pattern must be 'dir/**': " + pattern);
+      continue;
+    }
     const prefix = pattern.slice(0, -2);
-    if (REQUIRED_DIRS.includes(prefix) && !SINGLE_OWNER_DIRS.includes(prefix)) { errors.push("family pattern must be below a top-level required directory (would cover everything): " + pattern); continue; }
+    if (REQUIRED_DIRS.includes(prefix) && !SINGLE_OWNER_DIRS.includes(prefix)) {
+      errors.push("family pattern must be below a top-level required directory (would cover everything): " + pattern);
+      continue;
+    }
+    if (!cells[1]) errors.push(pattern + " has empty kind");
+    if (!allowedStates.has(cells[4])) errors.push(pattern + " invalid family state " + cells[4]);
     rows.push({ prefix, pattern, kind: cells[1], owner: cells[2], target: cells[3], state: cells[4] });
   }
   return { rows, errors };

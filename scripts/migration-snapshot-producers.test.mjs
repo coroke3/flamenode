@@ -618,6 +618,69 @@ test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per cre
   await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
 });
 
+test("MIG-0509 regression: batched snapshot budget cannot be disabled by invalid numbers", async () => {
+  // Reject at entry, before touching a D1 reader or opening the local scratch DB.
+  let attemptedReads = 0;
+  const db = { prepare() { attemptedReads++; throw new Error("unexpected read"); } };
+  for (const invalid of [0, -1, 1.5, NaN, Infinity, -Infinity, 201, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(
+      produceSnapshots({ db, mode: "batched", maxRemoteStatements: invalid, generation: "invalid-cap" }),
+      /batched snapshot statement budget must be an integer from 1 to 200/,
+      `invalid budget ${invalid}`,
+    );
+  }
+  assert.equal(attemptedReads, 0, "invalid caps must be rejected before remote D1 activity");
+});
+
+test("MIG-0509 regression: concurrent snapshot generations retain independent frozen clocks", async () => {
+  const previousClock = Date.now;
+  const makeDb = () => {
+    const sqlite = migrated();
+    seed(sqlite);
+    return d1(sqlite, []);
+  };
+  const first = { db: makeDb(), generation: "clock-first", nowSec: NOW, trending: TRENDING };
+  const second = { db: makeDb(), generation: "clock-second", nowSec: NOW + 86400, trending: TRENDING };
+  // Without a producer lock, the second async generator changes Date.now
+  // while the first is suspended, and the first inherits the second clock.
+  const [overlappedFirst, overlappedSecond] = await Promise.all([
+    produceSnapshots(first), produceSnapshots(second),
+  ]);
+  const sequentialFirst = await produceSnapshots({ ...first, db: makeDb() });
+  const sequentialSecond = await produceSnapshots({ ...second, db: makeDb() });
+  assert.deepEqual(overlappedFirst.snapshots, sequentialFirst.snapshots);
+  assert.deepEqual(overlappedSecond.snapshots, sequentialSecond.snapshots);
+  assert.deepEqual(overlappedFirst.manifest, sequentialFirst.manifest);
+  assert.deepEqual(overlappedSecond.manifest, sequentialSecond.manifest);
+  assert.equal(Date.now, previousClock, "global clock must be restored after both runs");
+});
+
+test("MIG-0509 regression: malformed programmatic clocks never touch the database or poison the queue", async () => {
+  const previousClock = Date.now;
+  let reads = 0;
+  const failDb = {
+    prepare() { reads++; throw new Error("intentional generator failure"); },
+  };
+  for (const nowSec of [NaN, Infinity, -Infinity, -1, 0.5, 8_640_000_000_001, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(
+      produceSnapshots({ db: failDb, generation: "invalid-clock", nowSec }),
+      /snapshot nowSec must be a nonnegative integer within JavaScript Date range/,
+      String(nowSec),
+    );
+  }
+  assert.equal(reads, 0, "bad clocks must fail before querying D1");
+  await assert.rejects(
+    produceSnapshots({ db: failDb, generation: "failed-clock", nowSec: NOW }),
+    /intentional generator failure/,
+  );
+  // An exception must release the lock for the next invocation.
+  const sqlite = migrated();
+  seed(sqlite);
+  const succeeding = await produceSnapshots({ db: d1(sqlite, []), generation: "after-failure", nowSec: NOW, trending: TRENDING });
+  assert.ok(succeeding.snapshots.length > 0);
+  assert.equal(Date.now, previousClock, "a failed run cannot leave Date.now overridden");
+});
+
 // A real Astro build against the produced directory. It needs the @flamenode/ui build, so test:unit (which runs
 // before it) skips it unless MIG0509_E2E=1; the CI REQUIRE_BUILT step runs it and fails instead of skipping.
 const skipE2e = fs.existsSync(path.resolve("packages/ui/dist/index.js")) ? (process.env.MIG0509_E2E || process.env.REQUIRE_BUILT ? false : "set MIG0509_E2E=1") : "packages/ui/dist missing: build @flamenode/ui first";
