@@ -220,6 +220,28 @@ test("MIG-0734 T01 maintenance and mode need a reason; failed write shows the se
   });
 });
 
+test("MIG-0734 T01 maintenance cannot submit an invalid SA-016 manual mode",async()=>{
+  await inDom(async(dom,root)=>{
+    const calls=[];
+    const api={
+      setMode:async(mode,reason)=>{calls.push({mode,reason});return {ok:true};},
+      setMaintenance:async()=>({ok:true}),
+    };
+    const duringMaintenance={...settings,mode:"maintenance",isMaintenance:true,reason:"保守中"};
+    await React.act(async()=>root.render(h(CostGuardForm,{settings:duringMaintenance,api,onSuccess:()=>{}})));
+    const update=byText(dom,"モードを更新");
+    assert.equal(update.disabled,true,"maintenance must not be passed to the four-mode write API");
+    assert.match(dom.window.document.querySelector('[role="status"]').textContent,/手動モードを選択/);
+    assert.equal(byText(dom,"OFFにする").disabled,false,"the dedicated maintenance-off path remains available");
+    await React.act(async()=>update.click());
+    assert.deepEqual(calls,[]);
+    await React.act(async()=>byText(dom,"通常").click());
+    assert.equal(update.disabled,false,"explicit valid manual mode should re-enable the operation");
+    await React.act(async()=>update.click());
+    assert.deepEqual(calls,[{mode:"normal",reason:"保守中"}]);
+  });
+});
+
 test("MIG-0734 T02 override and clear never send until the exact token is typed",async()=>{
   await inDom(async(dom,root)=>{
     const calls=[];
