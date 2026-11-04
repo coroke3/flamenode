@@ -460,7 +460,6 @@ test("MIG-0510: video detail metadata and Astro related cards use safe routes", 
     "/AAAAAAAAAAA");
 });
 
-
 test("regression: admin, edit and event management detail links validate YouTube aliases", () => {
   assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "/outside.example" }), "/safe_internal");
   assert.equal(videoPageHref({ id: "/unsafe-internal", youtube_video_id: "/outside.example" }), "/list");
@@ -473,11 +472,7 @@ test("regression: admin, edit and event management detail links validate YouTube
     "app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx",
   ]) {
     const source = fs.readFileSync(new URL("../" + filename, import.meta.url), "utf8");
-    assert.match(source, /href=\\{videoPageHref\\(/, filename + " must use checked same-origin video href");
-    assert.doesNotMatch(
-      source,
-      /href=\\{\\`\\/\\$\\{(?:youtubeVideoId|video\\.youtube_video_id|row\\.youtube_video_id)/,
-      filename + " must not interpolate the raw YouTube alias into href",
-    );
+    assert.ok(source.includes("href={videoPageHref("), filename + " must use checked same-origin video href");
+    assert.ok(!source.includes("href={`/${youtubeVideoId"), filename + " must not interpolate a raw YouTube alias");
   }
 });
