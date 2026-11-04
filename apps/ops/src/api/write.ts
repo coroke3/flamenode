@@ -23,7 +23,14 @@ export async function send<T extends { ok: boolean }>(
       headers,
       ...(body === undefined ? {} : { body: formData ? body : JSON.stringify(body) }),
     });
-    const payload: unknown = await response.json();
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      // A malformed 401 still revokes the session. Preserve failed network
+      // requests as unavailable; only a real HTTP response can prove 401.
+      return response.status === 401 ? { status: "anonymous" } : { status: "unavailable" };
+    }
     if (payload !== null && typeof payload === "object" && !Array.isArray(payload) &&
         typeof (payload as Record<string, unknown>).ok === "boolean") {
       // HTTP failures must never be reported as successful writes, even if a
