@@ -40,6 +40,7 @@ test("MIG-0707 U05c: global CSS loads in CURRENT order before Ops React", async 
     "./styles/current/mobile-hardening.css",
     "./styles/fonts.css",
     "./styles/shared.css",
+    "./styles/admin-shell.css",
   ]);
 });
 

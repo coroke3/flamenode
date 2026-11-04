@@ -1,3 +1,5 @@
+import { publicVideoRevalidationPaths } from "./publicVideoRevalidationPaths.ts";
+
 export function computeVideoRevalidatePaths(args: {
   videoId: string;
   previousYoutubeVideoId: string | null;
@@ -5,14 +7,17 @@ export function computeVideoRevalidatePaths(args: {
   primaryEventId: string | null;
   youtubeChanged: boolean;
 }): string[] {
-  const paths = new Set<string>([
-    "/",
-    "/list",
-    "/dashboard",
-    `/${args.previousYoutubeVideoId ?? args.videoId}`,
-  ]);
-  if (args.youtubeChanged && args.nextYoutubeVideoId) {
-    paths.add(`/${args.nextYoutubeVideoId}`);
+  const paths = new Set<string>(["/", "/list", "/dashboard"]);
+  // Both CURRENT detail aliases can be cached independently. Invalidate the
+  // internal route even when the YouTube alias did not change.
+  for (const path of publicVideoRevalidationPaths(args.videoId, args.previousYoutubeVideoId)) {
+    paths.add(path);
+  }
+  if (args.youtubeChanged) {
+    // Invalidate the new alias as well as the old one on YouTube ID changes.
+    for (const path of publicVideoRevalidationPaths(args.videoId, args.nextYoutubeVideoId)) {
+      paths.add(path);
+    }
   }
   if (args.primaryEventId) {
     paths.add(`/event/${args.primaryEventId}`);

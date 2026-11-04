@@ -168,14 +168,208 @@ export function validateCheckpointPolicy(documents) {
   return errors;
 }
 
+// Markdown HTML comments cannot supply task rows or approval evidence.
+// Preserve line endings/columns while hiding comments, and do not treat comment
+// markers inside fenced or same-line inline code as real HTML comments.
+function statusWithoutHtmlComments(source) {
+  let inComment = false;
+  let fence = null;
+  const lines = [];
+  for (const line of source.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!inComment && fence) {
+      if (marker && marker[1][0] === fence.char &&
+          marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      lines.push(line);
+      continue;
+    }
+    if (!inComment && marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
+      fence = { char: marker[1][0], length: marker[1].length };
+      lines.push(line);
+      continue;
+    }
+    let output = "", i = 0;
+    while (i < line.length) {
+      if (inComment) {
+        const end = line.indexOf("-->", i);
+        if (end < 0) { output += " ".repeat(line.length - i); break; }
+        output += " ".repeat(end + 3 - i);
+        i = end + 3;
+        inComment = false;
+        continue;
+      }
+      if (line[i] === "`") {
+        const length = /^`+/.exec(line.slice(i))[0].length;
+        let cursor = i + length, closing = -1;
+        while (cursor < line.length) {
+          const runStart = line.indexOf("`", cursor);
+          if (runStart < 0) break;
+          const runLength = /^`+/.exec(line.slice(runStart))[0].length;
+          if (runLength === length) { closing = runStart + length; break; }
+          cursor = runStart + runLength;
+        }
+        if (closing >= 0) {
+          output += line.slice(i, closing);
+          i = closing;
+          continue;
+        }
+      }
+      if (line.startsWith("<!--", i)) {
+        output += "    ";
+        i += 4;
+        inComment = true;
+        continue;
+      }
+      output += line[i++];
+    }
+    lines.push(output);
+  }
+  return lines.join("\n");
+}
+
 export function parseTaskRows(statusText) {
   const rows = new Map();
-  for (const line of statusText.split("\n")) {
+  let inTaskTable = false;
+  let inFence = false;
+  for (const [index, line] of statusWithoutHtmlComments(statusText).split("\n").entries()) {
+    const trimmed = line.trim();
+    if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; inTaskTable = false; continue; }
+    if (inFence) continue;
+    // Scope damaged-row detection to STATUS task tables, not incidental MIG prose.
+    if (/^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|/.test(trimmed)) {
+      inTaskTable = true;
+      continue;
+    }
+    if (!trimmed) {
+      inTaskTable = false;
+      continue;
+    }
+    // A heading is an explicit task-table boundary even without a blank line.
+    if (inTaskTable && /^#{1,6}\s/.test(trimmed)) {
+      inTaskTable = false;
+      continue;
+    }
+    const match = line.match(/^\|\s*(MIG-\d{4})\s*\|/);
+    // A broken table row may lose every pipe separator; fail closed while
+    // remaining inside an actual task table. Ignore incidental MIG prose.
+    // Valid standalone rows remain accepted for existing STATUS fixtures.
+    const candidate = match || (inTaskTable
+      ? trimmed.match(/^\|?\s*(MIG-\d{4})\b/) : null);
+    if (!candidate) {
+      // A task-table row may lose all pipes and corrupt its MIG ID at once.
+      // Never mistake an invalid bare MIG token for the start of prose.
+      if (inTaskTable) {
+        const bareId = trimmed.match(/^MIG-[^\s|]+/);
+        if (bareId) throw new Error("malformed task row: " + bareId[0]);
+      }
+      // A data row with an empty or corrupted ID must not silently disappear.
+      // Only the Markdown delimiter line may lack a MIG task ID in this table.
+      if (inTaskTable && trimmed.startsWith("|")) {
+        const firstCell = trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim();
+        if (firstCell && /^:?-{3,}:?$/.test(firstCell)) {
+          // Separator rows must be complete, not just start with "| --- |".
+          // A partial separator can otherwise hide a corrupted task row.
+          const cells = trimmed.split("|");
+          if (!([6, 7].includes(cells.length) && cells[0] === "" &&
+            cells.at(-1) === "" &&
+            cells.slice(1, -1).every((cell) => /^\s*:?-{3,}:?\s*$/.test(cell)))) {
+            throw new Error("malformed task row: separator");
+          }
+        } else {
+          throw new Error("malformed task row: " + (firstCell || "<missing ID>"));
+        }
+      }
+      // Unknown non-empty content inside a task table is not implicit prose:
+      // the row may have lost both its pipe markers and MIG identifier.
+      if (inTaskTable && !trimmed.startsWith("|")) {
+        throw new Error("malformed task row: <missing ID>");
+      }
+      continue;
+    }
     const cells = line.split("|").map((cell) => cell.trim());
-    if (cells.length < 6 || !/^MIG-\d{4}$/.test(cells[1])) continue;
-    rows.set(cells[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
+    // Phase 0 includes Acceptance; later phases contain four data columns.
+    if (!match || ![6, 7].includes(cells.length) || cells[0] !== "" || cells.at(-1) !== "" ||
+        !cells[2] || !cells[3] || !cells[4] || (cells.length === 7 && !cells[5])) {
+      throw new Error("malformed task row: " + candidate[1]);
+    }
+    if (rows.has(match[1])) throw new Error("duplicate task row: " + match[1] + " at STATUS line " + (index + 1));
+    rows.set(match[1], { state: cells[3], dependencies: cells[4], title: cells[2] });
   }
   return rows;
+}
+
+// Whole-STATUS structure guard: every MIG row must sit under a canonical
+// header and a delimiter row of the same width. parseTaskRows stays lenient
+// for single-row fixtures. Fenced code blocks are ignored.
+const CANONICAL_HEADER = /^\|\s*ID\s*\|\s*Task\s*\|\s*State\s*\|\s*Depends on\s*\|(\s*Acceptance\s*\|)?$/;
+const DELIMITER_ROW = /^\|(\s*:?-{3,}:?\s*\|)+$/;
+const cellCount = (row) => row.split("|").length - 2;
+
+export function validateStatusTableStructure(statusText) {
+  const errors = [];
+  let inFence = false;
+  let inTable = false;
+  let expectDelimiter = false;
+  let width = 0;
+  const seenTaskIds = new Set();
+  statusWithoutHtmlComments(statusText).split("\n").forEach((line, index) => {
+    const trimmed = line.trim();
+    const where = "STATUS line " + (index + 1);
+    if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; return; }
+    if (inFence) return;
+    if (!trimmed || /^#{1,6}\s/.test(trimmed)) {
+      if (expectDelimiter) errors.push(where + ": task table header not followed by delimiter row");
+      inTable = false;
+      expectDelimiter = false;
+      return;
+    }
+    // A quoted task table is not rendered as a ledger; never let it vanish.
+    if (/^>\s*\|\s*(ID|MIG-)/i.test(trimmed)) {
+      errors.push(where + ": task table row inside a blockquote");
+      inTable = false;
+      expectDelimiter = false;
+      return;
+    }
+    if (expectDelimiter) {
+      expectDelimiter = false;
+      if (!DELIMITER_ROW.test(trimmed)) {
+        errors.push(where + ": task table header not followed by delimiter row");
+        inTable = false;
+      } else if (cellCount(trimmed) !== width) {
+        errors.push(where + ": delimiter row column count differs from header");
+        inTable = false;
+      }
+      return;
+    }
+    const firstCell = trimmed.startsWith("|") ? trimmed.match(/^\|\s*([^|]*)\|/)?.[1]?.trim() : undefined;
+    if (firstCell !== undefined && /^id$/i.test(firstCell)) {
+      if (CANONICAL_HEADER.test(trimmed)) {
+        inTable = true;
+        expectDelimiter = true;
+        width = cellCount(trimmed);
+      } else {
+        errors.push(where + ": non-canonical task table header");
+        inTable = false;
+      }
+      return;
+    }
+    const visibleTask = inTable ? trimmed.match(/^\|\s*(MIG-\d{4})\s*\|/) : null;
+    if (visibleTask) {
+      if (seenTaskIds.has(visibleTask[1])) errors.push(where + ": duplicate task row: " + visibleTask[1]);
+      seenTaskIds.add(visibleTask[1]);
+    }
+    if (inTable && DELIMITER_ROW.test(trimmed)) {
+      errors.push(where + ": unexpected delimiter row inside task table");
+      return;
+    }
+    if (/^\|\s*MIG-/.test(trimmed) && !inTable) {
+      errors.push(where + ": task row outside a recognized task table: " + trimmed.match(/MIG-[^\s|]*/)[0]);
+    } else if (inTable && trimmed.startsWith("|") && cellCount(trimmed) !== width) {
+      errors.push(where + ": row column count differs from header");
+    }
+  });
+  if (expectDelimiter) errors.push("STATUS: task table header not followed by delimiter row");
+  return errors;
 }
 
 export function parseDecisionRows(decisionsText) {
@@ -212,7 +406,11 @@ export function validateMigrationExecution({
 }) {
   const errors = [];
   if (checkpointDocuments) errors.push(...validateCheckpointPolicy(checkpointDocuments));
-  const tasks = parseTaskRows(statusText);
+  let tasks;
+  try { tasks = parseTaskRows(statusText); }
+  catch (error) { return [...errors, "invalid STATUS task ledger: " + error.message]; }
+  const structureErrors = validateStatusTableStructure(statusText);
+  if (structureErrors.length) return [...errors, ...structureErrors.map((e) => "invalid STATUS task ledger: " + e)];
   if (!tasks.has("MIG-0308")) errors.push("D-01=A requires MIG-0308 packages/db task");
   let decisions;
   try { decisions = parseDecisionRows(decisionsText); }
@@ -225,13 +423,6 @@ export function validateMigrationExecution({
 
   if (!currentTask || !tasks.has(currentTask)) errors.push("current task is not in STATUS table");
   else if (tasks.get(currentTask).state !== currentState) errors.push("current task/header state mismatch");
-  const duplicateIds = new Set();
-  const seenIds = new Set();
-  for (const m of statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)) {
-    if (seenIds.has(m[1])) duplicateIds.add(m[1]);
-    seenIds.add(m[1]);
-  }
-  for (const id of duplicateIds) errors.push("duplicate task row: " + id);
   const dependencyGraph = new Map();
   for (const [id, row] of tasks) {
     if (!STATES.has(row.state)) errors.push(id + " invalid task state: " + row.state);
