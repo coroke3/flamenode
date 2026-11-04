@@ -158,7 +158,7 @@ test("MIG-0734 U01 server markup keeps OVERRIDE/CLEAR/APPLY disabled until token
 
 async function inDom(callback){
   const dom=new JSDOM("<!doctype html><div id='root'></div>",{url:"https://flamenode.test/admin/cost-guard"});
-  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent"];
+  const keys=["window","document","Element","HTMLElement","Node","CustomEvent","navigator","KeyboardEvent","FormData"];
   const prior=new Map(keys.map(k=>[k,Object.getOwnPropertyDescriptor(globalThis,k)]));
   const oldAct=globalThis.IS_REACT_ACT_ENVIRONMENT;
   for(const k of keys)Object.defineProperty(globalThis,k,{configurable:true,writable:true,value:dom.window[k]});
@@ -451,6 +451,39 @@ test("MIG-0734 SPA navigation resets uncontrolled notification filter fields",as
   });
 });
 
+test("MIG-0734 D-17-7 category auto-filter uses SPA URL state and retains draft GET fields",async()=>{
+  await inDom(async(dom,root)=>{
+    const queries=[];
+    const api=createAdminNotificationsApi(async()=>response(500,{}));
+    const data=notificationData({rows:[]},{failed:0,deadLetter:0});
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotificationsView,{
+      data,filters:filtersOf("status=failed&type=old&event=evt-1&q=query&cat=all"),
+      api,onSuccess:()=>{},onSearch:next=>queries.push(next.toString()),
+    }))));
+    const field=name=>dom.window.document.querySelector(`[name="${name}"]`);
+    // Category changes must call useSearchParams instead of AutoSubmitSelect's
+    // navigateGetForm/window.location.assign (which reloads the entire Ops SPA).
+    field("type").value="draft-type";
+    await React.act(async()=>{
+      field("cat").value="x_id";
+      field("cat").dispatchEvent(new dom.window.Event("change",{bubbles:true}));
+    });
+    assert.equal(queries.length,1,"category change must use the SPA query callback");
+    const next=new URLSearchParams(queries[0]);
+    assert.equal(next.get("status"),"failed");
+    assert.equal(next.get("cat"),"x_id");
+    assert.equal(next.get("type"),"draft-type");
+    assert.equal(next.get("event"),"evt-1");
+    assert.equal(next.get("q"),"query");
+
+    // Explicit GET form submits still share exactly the same query contract.
+    const form=dom.window.document.querySelector('form[role="search"]');
+    await React.act(async()=>form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true})));
+    assert.equal(queries.length,2);
+    assert.equal(queries[1],queries[0]);
+  });
+});
+
 test("MIG-0734 notifications view ports CURRENT row content: recipient, summary, labels, tab counts, links",()=>{
   const text=renderNotifications(notificationData());
   assert.match(text,/class="fn-console-title">通知配信状況</);
@@ -531,7 +564,9 @@ test("MIG-0734 screens use the shared D-17-2/3/6 parts instead of private copies
   for(const f of files)assert.match(read("../src/"+f),/from "\.\/(read|write)\.js"/,f);
   for(const f of ["routes/admin/AdminCostGuard.tsx","routes/admin/AdminNotifications.tsx"])assert.match(read("../src/"+f),/useApiResult/,f);
   const notifications=read("../src/routes/admin/AdminNotifications.tsx");
-  for(const part of ["ConsolePageHeader","FnTable","EmptyState","AutoSubmitSelect","OpsLink"])assert.match(notifications,new RegExp(part),part);
+  for(const part of ["ConsolePageHeader","FnTable","EmptyState","OpsLink"])assert.match(notifications,new RegExp(part),part);
+  assert.match(notifications,/submitFilters\(event\.currentTarget\.form\)/);
+  assert.doesNotMatch(notifications,/AutoSubmitSelect/);
   const cost=read("../src/routes/admin/AdminCostGuard.tsx");
   for(const part of ["ConsolePageHeader","FnTable","OpsLink"])assert.match(cost,new RegExp(part),part);
   assert.match(read("../src/routes/admin/CostGuardForm.tsx"),/ConfirmDialog/);
