@@ -610,6 +610,20 @@ test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per cre
   await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
 });
 
+test("MIG-0509 regression: batched snapshot budget cannot be disabled by invalid numbers", async () => {
+  // Reject at entry, before touching a D1 reader or opening the local scratch DB.
+  let attemptedReads = 0;
+  const db = { prepare() { attemptedReads++; throw new Error("unexpected read"); } };
+  for (const invalid of [0, -1, 1.5, NaN, Infinity, -Infinity, 201, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(
+      produceSnapshots({ db, mode: "batched", maxRemoteStatements: invalid, generation: "invalid-cap" }),
+      /batched snapshot statement budget must be an integer from 1 to 200/,
+      `invalid budget ${invalid}`,
+    );
+  }
+  assert.equal(attemptedReads, 0, "invalid caps must be rejected before remote D1 activity");
+});
+
 // A real Astro build against the produced directory. It needs the @flamenode/ui build, so test:unit (which runs
 // before it) skips it unless MIG0509_E2E=1; the CI REQUIRE_BUILT step runs it and fails instead of skipping.
 const skipE2e = fs.existsSync(path.resolve("packages/ui/dist/index.js")) ? (process.env.MIG0509_E2E || process.env.REQUIRE_BUILT ? false : "set MIG0509_E2E=1") : "packages/ui/dist missing: build @flamenode/ui first";

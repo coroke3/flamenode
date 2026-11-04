@@ -7,13 +7,15 @@ import { fileURLToPath } from "node:url";
 const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 
 // Link-like syntax in Markdown code fences is an example, not a dependency.
+// Preserve character offsets, including CRLF, so HTML comment spans can be
+// located in the original Markdown even after code fences are masked.
 // Match CommonMark's 0–3 leading spaces, backtick/tilde fences, and close
 // only with the same marker of at least the opening length.
 function withoutFencedCode(markdown) {
   let fence = null;
   let listIndent = 0;
 
-  return markdown.split(/\r?\n/).map((line) => {
+  return markdown.split(/\n/).map((line) => {
     // A fenced block can be nested in a blockquote or a list item. Strip
     // container prefixes for detecting the marker, but preserve the original
     // line for checking actual links outside code blocks.
@@ -69,18 +71,18 @@ function withoutFencedCode(markdown) {
           marker[1].length >= fence.length && !marker[2].trim()) {
         fence = null;
       }
-      return "";
+      return line.replace(/[^\r]/g, " ");
     }
 
     // Backtick info strings cannot contain backticks; tilde info may.
     if (marker && (marker[1][0] !== "`" || !marker[2].includes("`"))) {
       fence = {char: marker[1][0], length: marker[1].length,
         quoteDepth, listIndent};
-      return "";
+      return line.replace(/[^\r]/g, " ");
     }
     // Four-space / tab-indented code is not a filesystem dependency. Inside
     // list items, indentation is measured relative to that item's content.
-    if (/^(?: {4}|\t)/.test(body)) return "";
+    if (/^(?: {4}|\t)/.test(body)) return line.replace(/[^\r]/g, " ");
     return line;
   }).join("\n");
 }
@@ -116,11 +118,52 @@ function withoutInlineCode(markdown) {
   return result + markdown.slice(cursor);
 }
 
+// Commented-out links are examples, not navigable dependencies. Find each
+// comment opener outside code, then mask that comment with inert non-whitespace text in the ORIGINAL.
+// Whitespace masking can turn a real link after an inline comment into a
+// spurious 4-space-indented code block, silently dropping its validation.
+// Re-scan after each comment: backticks/fences inside HTML comments must not
+// mask real links after the comment has closed.
+function withoutHtmlComments(markdown) {
+  let result = markdown;
+  let cursor = 0;
+  while (cursor < result.length) {
+    const visible = withoutInlineCode(withoutFencedCode(result));
+    const start = visible.indexOf("<!--", cursor);
+    if (start < 0) break;
+    const closing = result.indexOf("-->", start + 4);
+    const end = closing < 0 ? result.length : closing + 3;
+    result = result.slice(0, start) +
+      result.slice(start, end).replace(/[^\r\n]/g, "x") +
+      result.slice(end);
+    cursor = end;
+  }
+  return result;
+}
+
+// A symlinked source or ancestor can hide Markdown from the audit or make
+// enumeration follow files outside the checkout. Never traverse these paths.
+function assertNoSymlinkInDocumentPath(root, filename) {
+  const relative = path.relative(path.resolve(root), path.resolve(root, filename));
+  if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+    throw new Error(`migration document outside repository: ${filename}`);
+  }
+  let current = path.resolve(root);
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (fs.lstatSync(current).isSymbolicLink()) {
+      throw new Error(`symlink in migration documents: ${filename}`);
+    }
+  }
+}
+
 export function listMarkdownFiles(root,rel="docs/migration") {
   const abs=path.join(root,rel);
+  assertNoSymlinkInDocumentPath(root, rel);
   const out=[];
   for(const item of fs.readdirSync(abs,{withFileTypes:true})) {
     const next=path.posix.join(rel,item.name);
+    if (item.isSymbolicLink()) throw new Error(`symlink in migration documents: ${next}`);
     if(item.isDirectory())out.push(...listMarkdownFiles(root,next));
     else if(item.isFile() && item.name.endsWith(".md"))out.push(next);
   }
@@ -204,7 +247,8 @@ export function validateLinks({root,documents}) {
   // resolve to a file outside the checkout. Resolve both ends before accepting.
   const realRoot=fs.realpathSync(root);
   for(const filename of documents) {
-    const content=withoutInlineCode(withoutFencedCode(fs.readFileSync(path.join(root,filename),"utf8")));
+    assertNoSymlinkInDocumentPath(root, filename);
+    const content=withoutInlineCode(withoutFencedCode(withoutHtmlComments(fs.readFileSync(path.join(root,filename),"utf8"))));
     // Check Markdown inline relative paths. Code fences and HTTP links are not file targets.
     for(let target of markdownLinkDestinations(content)) {
       target=target.trim();
