@@ -65,7 +65,10 @@ export function hasValidSkipApprovalRecord(statusText, id) {
   }
   if (records.length !== 1) return false;
   const match = /^SKIP_APPROVAL: (MIG-\d{4}) \| PR#([1-9]\d*) \| APPROVAL=(https:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/([1-9]\d*)#(?:issuecomment-\d+|pullrequestreview-\d+)) \| ALTERNATIVE=(.+)$/.exec(records[0]);
-  if (!match || match[1] !== id || match[2] !== match[6]) return false;
+  // Do not accept a valid-looking review link in a different repository.
+  // Syntax validation is not proof that the review exists or is independent.
+  if (!match || match[1] !== id || match[2] !== match[6] ||
+      match[4] !== "coroke3" || match[5] !== "flamenode") return false;
   const alt = match[7].trim();
   return /^MIG-\d{4}$/.test(alt) ||
     (alt.length >= 12 && !/^(?:none|n\/a|unknown|pending|example|not-approved|未定|なし)$/i.test(alt));
