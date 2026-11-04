@@ -651,8 +651,8 @@ test("MIG-0734 screens use the shared D-17-2/3/6 parts instead of private copies
   for(const part of ["ConsolePageHeader","FnTable","EmptyState","OpsLink"])assert.match(notifications,new RegExp(part),part);
   assert.match(notifications,/submitFilters\(event\.currentTarget\.form\)/);
   // Ignore comments referring to the legacy component: only imports and JSX use matter.
-  assert.doesNotMatch(notifications,/<AutoSubmitSelect\\b/);
-  assert.doesNotMatch(notifications,/import\\s*\\{[^}]*\\bAutoSubmitSelect\\b[^}]*\\}\\s*from/);
+  assert.doesNotMatch(notifications,/<AutoSubmitSelect\b/);
+  assert.doesNotMatch(notifications,/import\s*\{[^}]*\bAutoSubmitSelect\b[^}]*\}\s*from/);
   const cost=read("../src/routes/admin/AdminCostGuard.tsx");
   for(const part of ["ConsolePageHeader","FnTable","OpsLink"])assert.match(cost,new RegExp(part),part);
   assert.match(read("../src/routes/admin/CostGuardForm.tsx"),/ConfirmDialog/);
