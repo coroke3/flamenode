@@ -94,9 +94,18 @@ export function parseFamilyRows(markdown) {
     return { rows, errors: [...errors, "expected exactly one Update rule boundary after family table"] };
   }
   const tableEnd = boundaryIndexes[0];
-  // A misplaced boundary must not hide otherwise well-formed family rows.
-  if (lines.slice(tableEnd + 1).some((line) =>
-    /^\s*\|/.test(line) || /`[^`\n]+\/\*\*`\s*\|/.test(line))) {
+  // The Update rule is a hard end-of-table boundary, not a way to hide
+  // corrupted rows. Reject family-like paths even without pipes/backticks,
+  // and reject mangled multi-column rows even without a recognizable path.
+  const looksLikeFamilyAfterBoundary = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    const pipeCount = (line.match(/\|/g) ?? []).length;
+    return trimmed.startsWith("|") ||
+      /(?:^|[\s|`])(?:app|src|public|workers|cloudflare)\/[^\s|`]*\/\*\*(?=$|[\s|`])/.test(line) ||
+      (pipeCount >= 2 && /\b(?:MIG-\d{4}|HELPER|WORKER_ENTRY|NOT_STARTED|IN_PROGRESS)\b/.test(line));
+  };
+  if (lines.slice(tableEnd + 1).some(looksLikeFamilyAfterBoundary)) {
     errors.push("family row appears after Update rule boundary");
   }
 
