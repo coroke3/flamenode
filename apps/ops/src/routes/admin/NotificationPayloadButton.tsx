@@ -7,6 +7,13 @@ import * as React from "react";
  */
 export function NotificationPayloadButton({ payload }: { payload: string }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+  const closeDialog = React.useCallback(() => {
+    setOpen(false);
+    // Keyboard users must return to the same notification row after inspecting payload.
+    triggerRef.current?.focus();
+  }, []);
   const pretty = React.useMemo(() => {
     try {
       return JSON.stringify(JSON.parse(payload), null, 2);
@@ -17,20 +24,29 @@ export function NotificationPayloadButton({ payload }: { payload: string }): Rea
 
   React.useEffect(() => {
     if (!open) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeDialog();
+      } else if (event.key === "Tab") {
+        // The payload dialog has one interactive control: keep both Tab directions inside it.
+        event.preventDefault();
+        closeRef.current?.focus();
+      }
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
+  }, [open, closeDialog]);
 
   return (
     <>
-      <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setOpen(true)}>
+      <button ref={triggerRef} type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => setOpen(true)}>
         payload
       </button>
       {open ? (
         <div
           role="presentation"
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeDialog(); }}
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex",
             alignItems: "center", justifyContent: "center", zIndex: 100,
@@ -48,7 +64,7 @@ export function NotificationPayloadButton({ payload }: { payload: string }): Rea
           >
             <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <strong>notification payload</strong>
-              <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" autoFocus onClick={() => setOpen(false)}>
+              <button type="button" ref={closeRef} className="fn-btn fn-btn-ghost fn-btn-sm" autoFocus onClick={closeDialog}>
                 閉じる
               </button>
             </header>
