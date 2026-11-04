@@ -189,6 +189,9 @@ test("MIG-0512 regression: 200 static error assets must be non-empty HTML before
   ]) {
     for (const method of ["GET", "HEAD"]) {
       for (const testCase of cases) {
+        // A HEAD response has no body by definition; an absent body alone
+        // cannot identify a corrupt HTML error page on HEAD.
+        if (method === "HEAD" && testCase.name === "missing-body") continue;
         const calls = [];
         const { env } = createEnv({ assets: { fetch: async (req) => {
           calls.push(new URL(req.url).pathname);
