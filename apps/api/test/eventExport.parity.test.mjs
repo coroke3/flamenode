@@ -139,6 +139,10 @@ if (runUnderRootTsx(import.meta.url)) {
       const b = await normalized(await hono(path));
       assert.deepEqual(b, a, path);
       assert.equal(b.status, 200);
+      assert.equal(a.headers["Cache-Control"], "no-store",
+        path + ": CURRENT must not permit CDN to retain event data after privacy changes");
+      assert.equal(b.headers["Cache-Control"], "no-store",
+        path + ": Hono must not permit shared CDN caching");
       assert.doesNotMatch(b.body, /private-video|submitted_by_user_id/);
     }
   });
@@ -160,11 +164,28 @@ if (runUnderRootTsx(import.meta.url)) {
     const first = await hono(path);
     assert.equal(first.status, 200);
     await Promise.all(globalThis.__eventExport.pending);
-    assert.equal((await hono(path)).headers.get("X-FlameNode-Cache"), "HIT");
+    const cacheHit = await hono(path);
+    assert.equal(cacheHit.headers.get("X-FlameNode-Cache"), "HIT",
+      "private Cache API reuse remains enabled inside the origin");
+    assert.equal(cacheHit.headers.get("Cache-Control"), "no-store",
+      "CDN must not reuse cached scheduled export without a fresh D1 gate");
     sqlite.exec("UPDATE events SET visibility_status='private' WHERE id='export-event'");
     const denied = await hono(path);
     assert.equal(denied.status, 404);
     assert.equal(await denied.text(), '{"error":"not_found"}');
+    sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
+
+    reset();
+    const currentFirst = await current(path);
+    assert.equal(currentFirst.status, 200);
+    assert.equal(currentFirst.headers.get("Cache-Control"), "no-store");
+    await Promise.all(globalThis.__eventExport.pending);
+    const currentHit = await current(path);
+    assert.equal(currentHit.headers.get("X-FlameNode-Cache"), "HIT");
+    assert.equal(currentHit.headers.get("Cache-Control"), "no-store");
+    sqlite.exec("UPDATE events SET visibility_status='private' WHERE id='export-event'");
+    const currentDenied = await current(path);
+    assert.equal(currentDenied.status, 404, "CURRENT fresh D1 gate denies cached private event");
     sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
   });
   test("T04: corrupt legacy cache is evicted; MISS regenerates from D1", async () => {
