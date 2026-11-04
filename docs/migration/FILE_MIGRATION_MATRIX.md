@@ -1374,6 +1374,9 @@
 | `src/components/forms/VideoForm.tsx` | HELPER | CURRENT save/submit-success public video URL validated before linking | MIG-0702 | apps/app (future form port; CURRENT bugfix only) | RETAINED | PR#574 SHA=855b11c600b7539a493d5f18c19e16ebf9fa0363 TEST=node --test --experimental-strip-types scripts/migration-public-islands.test.mjs CI=https://github.com/coroke3/flamenode/pull/574/checks (final-head CI required; CURRENT fix, not migrated) |
 | `src/lib/video/videoEditPermissionDisplay.test.mjs` | TEST | CURRENT edit privileges and admin tab display regressions (validation in flight) | MIG-0705 | SAME (CURRENT test) | IN_PROGRESS | PR#566 SHA=5bd6b7d5e51469702af187cea0178854059db713 TEST=node --test --experimental-strip-types src/lib/video/videoEditPermissionDisplay.test.mjs (assert validated admin video public link instead of raw alias; CI pending) |
 
+| `src/lib/utils/sql.ts` | HELPER | shared SQL LIKE/paging helper; bound query-driven page OFFSET to safe integer | MIG-0901 | SAME (CURRENT admin/user profile and target parity use unchanged helper) | IN_PROGRESS | PR#583 SHA=2e4518487e4d2a810b3df52d17709ee308f0f9ee TEST=node --test --experimental-strip-types src/lib/utils/sql.test.mjs CI=pending (unsafe SQL OFFSET bound; normal pagination retained) |
+| `src/lib/utils/sql.test.mjs` | TEST | safe-offset boundary and oversized query regression for shared paging helper | MIG-0901 | SAME (current + target compatibility regression) | IN_PROGRESS | PR#583 SHA=2e4518487e4d2a810b3df52d17709ee308f0f9ee TEST=node --test --experimental-strip-types src/lib/utils/sql.test.mjs CI=pending (unsafe SQL OFFSET bound; normal pagination retained) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -1389,8 +1392,6 @@
 | `docs/migration/cloudflare/BACKGROUND_CPU.md` | MIG-0609 | DONE | LOCAL measurement table (host, sample counts, noise, per-kind p50/p95/max, verdict, cap), fixture definitions, calibration and the G18 hash; every number labelled LOCAL and simulator-inclusive; PR#455 builder-complete 2026-11-01 (MIG-0609 DONE; exact-head CI and independent review recorded on the PR)|
 | `docs/migration/cloudflare/API_CPU_BENCHMARK.md` | MIG-0606 | IN_PROGRESS | method, conditions, noise floor and per-method table (31 methods plus SA-004..008); unmeasured methods say "not yet measured" |
 
-| `src/lib/utils/sql.ts` | HELPER | shared SQL LIKE/paging helper; bound query-driven page OFFSET to safe integer | MIG-0901 | SAME (CURRENT admin/user profile and target parity use unchanged helper) | IN_PROGRESS | PR#583 SHA=2e4518487e4d2a810b3df52d17709ee308f0f9ee TEST=node --test --experimental-strip-types src/lib/utils/sql.test.mjs CI=pending (unsafe SQL OFFSET bound; normal pagination retained) |
-| `src/lib/utils/sql.test.mjs` | TEST | safe-offset boundary and oversized query regression for shared paging helper | MIG-0901 | SAME (current + target compatibility regression) | IN_PROGRESS | PR#583 SHA=2e4518487e4d2a810b3df52d17709ee308f0f9ee TEST=node --test --experimental-strip-types src/lib/utils/sql.test.mjs CI=pending (unsafe SQL OFFSET bound; normal pagination retained) |
 
 ## Source families (MIG-0622 completeness)
 
