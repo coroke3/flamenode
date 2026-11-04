@@ -11,13 +11,19 @@ import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 import { send, type OpsWriteResult } from "./write.js";
 
 export type AdminWriteResult = { ok: boolean; message?: string; anonymous?: boolean };
-export type AdminOpsBody = { ok: boolean; message?: string };
+export type AdminOpsBody = { ok: boolean; message?: string; reason?: string };
 type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: unknown } };
 
 /** Maps a D-17-3 send() result to the `{ok, message}` shape CURRENT's server actions returned. */
 export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteResult {
   if (result.status === "ok") {
-    const { ok, message } = result.data;
+    const { ok, message, reason } = result.data;
+    // The Hono admin write guard returns HTTP 401 with {ok:false,reason:"unauthenticated"}.
+    // D-17-3 send() preserves a JSON {ok:boolean} body even on 401, so detect the
+    // guard reason here instead of treating the expired session as a normal write failure.
+    if (!ok && reason === "unauthenticated") {
+      return { ok: false, message: typeof message === "string" ? message : "ログインしてください。", anonymous: true };
+    }
     return { ok, ...(typeof message === "string" ? { message } : {}) };
   }
   if (result.status === "anonymous") return { ok: false, message: "ログインしてください。", anonymous: true };
