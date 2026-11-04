@@ -194,7 +194,7 @@ export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 
 // Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
 const QUOTE_PREFIX = /^( {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?(?:>[ \t]?)+)(.*)$/;
-function proseLines(text) {
+function fenceVisibleText(text) {
   let fence = null;
   const listStack = [];
   const fencedLines = text.replace(/\r\n/g, "\n").split("\n").map((line) => {
@@ -250,7 +250,36 @@ function proseLines(text) {
     }
     return line;
   });
-  return maskHtmlCommentsOutsideCode(fencedLines.join("\n")).split("\n");
+  return fencedLines.join("\n");
+}
+
+// Detect HTML comment openers only outside real fenced and inline code. Find the
+// matching closing delimiter in the ORIGINAL text, not the fence-masked view:
+// a fake fence *inside a comment* can otherwise hide its own "-->" and every
+// genuine MIG heading after the comment. Re-run the fence mask after each
+// comment so a code example inside HTML cannot modify the parser's fence state.
+function proseLines(text) {
+  let source = text.replace(/\r\n/g, "\n");
+  let offset = 0;
+  while (offset < source.length) {
+    const visible = fenceVisibleText(source);
+    const withoutComments = maskHtmlCommentsOutsideCode(visible);
+    let opener = -1;
+    for (let i = offset; i < visible.length; i++) {
+      if (visible[i] !== withoutComments[i]) {
+        opener = i;
+        break;
+      }
+    }
+    if (opener < 0) break;
+    const closing = source.indexOf("-->", opener + 4);
+    const end = closing < 0 ? source.length : closing + 3;
+    source = source.slice(0, opener) +
+      source.slice(opener, end).replace(/[^\n]/g, " ") +
+      source.slice(end);
+    offset = end;
+  }
+  return fenceVisibleText(source).split("\n");
 }
 
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
