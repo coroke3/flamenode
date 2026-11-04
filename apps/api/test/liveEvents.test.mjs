@@ -55,7 +55,7 @@ beforeEach(() => {
   resetOperationModeCachesForTests();
 });
 
-test("slots: public_name event exposes only public video ids; 5s CDN cache header", async () => {
+test("slots: public_name exposes only public video ids; no-store prevents CDN stale privacy", async () => {
   const { db } = createDb();
   const res = await get("/api/live/events/ev-1/slots", { DB: db });
   assert.equal(res.status, 200);
