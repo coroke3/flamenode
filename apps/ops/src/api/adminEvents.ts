@@ -60,7 +60,12 @@ export async function deleteAdminEventTemplate(
   id: string,
   fetchFn: OpsFetch = defaultFetch,
 ): Promise<TemplateDeleteResult> {
-  if (!id || id.trim() !== id) return { status: "unavailable" };
+  // encodeURIComponent leaves "." and ".." unchanged. The browser resolves
+  // these as parent-directory segments, redirecting a DELETE away from the
+  // template endpoint. Reject them before any network request.
+  if (!id || id.trim() !== id || id === "." || id === "..") {
+    return { status: "unavailable" };
+  }
   try {
     const response = await fetchFn("/api/admin/event-templates/" + encodeURIComponent(id), {
       method: "DELETE",
