@@ -298,6 +298,7 @@ test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()
    approval.replace("PR#404","PR#0"),
    approval.replace("pull/404#","pull/405#"),
    approval.replace("github.com/coroke3","example.test/coroke3"),
+   approval.replace("github.com/coroke3/flamenode","github.com/untrusted/test-repo"),
    "```md\n"+approval+"\n```",
    "<!--\n"+approval+"\n-->",
  ]) {
