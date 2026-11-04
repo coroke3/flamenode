@@ -58,7 +58,7 @@ export function CostGuardForm({ settings, api, onSuccess }: {
           maxLength={500} placeholder="変更理由（normalへの復帰時も必須）" disabled={busy} />
         <button type="button" className="fn-btn fn-btn-primary" disabled={busy || !reason.trim() || !manualModeSelected}
           onClick={() => void run(() => api.setMode(mode, reason))}>モードを更新</button>
-        {!manualModeSelected ? <p role="status" style={{ fontSize: 12 }}>手動モードを選択してください。メンテナンス解除は下の「OFFにする」を使用します。</p> : null}
+        {!manualModeSelected ? <p role="status" style={{ fontSize: 12 }}>手動モードを選択するか、下の「OFFにする」でメンテナンスを解除してください。</p> : null}
       </section>
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700 }}>メンテナンス即時切替</h2>
