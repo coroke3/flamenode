@@ -13,6 +13,7 @@ import {CostGuardOverrideForm} from "../.test-dist/apps/ops/src/routes/admin/Cos
 import {CostGuardDisabledFeaturesForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardDisabledFeaturesForm.js";
 import {NotificationActionButton,NOTIFICATION_CONFIRM} from "../.test-dist/apps/ops/src/routes/admin/NotificationActionButton.js";
 import {NotificationCancelButton} from "../.test-dist/apps/ops/src/routes/admin/NotificationCancelButton.js";
+import {NotificationPayloadButton} from "../.test-dist/apps/ops/src/routes/admin/NotificationPayloadButton.js";
 import {AdminNotificationsView,readNotificationFilters} from "../.test-dist/apps/ops/src/routes/admin/AdminNotifications.js";
 import {parseCostFeatures,WRITE_FEATURE_KEYS,FEATURE_LABELS} from "../.test-dist/apps/ops/src/routes/admin/costGuardFeatures.js";
 import {leaveWhenAnonymous} from "../.test-dist/apps/ops/src/routes/admin/adminWrite.js";
@@ -302,6 +303,34 @@ test("MIG-0734 notification cancel sends the reason (optional) and keeps the dia
     assert.deepEqual(calls,[{id:"n1",reason:"重複"}]);
     assert.match(dom.window.document.querySelector('[role="status"]').textContent,/キャンセルできません/);
     assert.ok(byText(dom,"確定"),"form stays open");
+  });
+});
+
+test("MIG-0734 notification payload dialog traps Tab and restores trigger focus on Escape and close",async()=>{
+  await inDom(async(dom,root)=>{
+    await React.act(async()=>root.render(h(NotificationPayloadButton,{payload:'{"content":"test"}'})));
+    const trigger=byText(dom,"payload");
+    trigger.focus();
+    await React.act(async()=>trigger.click());
+    assert.ok(dom.window.document.querySelector('[role="dialog"][aria-modal="true"]'));
+    const close=byText(dom,"閉じる");
+    assert.equal(dom.window.document.activeElement,close,"dialog close receives initial focus");
+    const tab=new dom.window.KeyboardEvent("keydown",{key:"Tab",bubbles:true,cancelable:true});
+    await React.act(async()=>close.dispatchEvent(tab));
+    assert.equal(tab.defaultPrevented,true,"Tab cannot leave the modal");
+    assert.equal(dom.window.document.activeElement,close);
+    const shiftTab=new dom.window.KeyboardEvent("keydown",{key:"Tab",shiftKey:true,bubbles:true,cancelable:true});
+    await React.act(async()=>close.dispatchEvent(shiftTab));
+    assert.equal(shiftTab.defaultPrevented,true,"Shift+Tab cannot leave the modal");
+    await React.act(async()=>dom.window.document.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown",{key:"Escape",bubbles:true,cancelable:true})
+    ));
+    assert.equal(dom.window.document.querySelector('[role="dialog"]'),null);
+    assert.equal(dom.window.document.activeElement,trigger,"Escape restores the invoking button");
+    await React.act(async()=>trigger.click());
+    await React.act(async()=>byText(dom,"閉じる").click());
+    assert.equal(dom.window.document.querySelector('[role="dialog"]'),null);
+    assert.equal(dom.window.document.activeElement,trigger,"close restores the invoking button");
   });
 });
 
