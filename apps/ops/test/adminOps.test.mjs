@@ -549,6 +549,41 @@ test("MIG-0734 D-17-7 category auto-filter uses SPA URL state and retains draft 
   });
 });
 
+test("MIG-0734 D-17-7 q search URL respects CURRENT 100-character backend limit",async()=>{
+  await inDom(async(dom,root)=>{
+    const queries=[];
+    const api=createAdminNotificationsApi(async()=>response(500,{}));
+    const data=notificationData({rows:[]},{failed:0,deadLetter:0});
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotificationsView,{
+      data,filters:filtersOf("status=failed&type=video"),api,onSuccess:()=>{},
+      onSearch:next=>queries.push(next.toString()),
+    }))));
+    const form=dom.window.document.querySelector('form[role="search"]');
+    const q=form.querySelector('[name="q"]');
+    assert.equal(q.maxLength,100,"prevent typing a search term longer than the API limit");
+    // Even a programmatically populated/previously pasted overlong input must be
+    // normalized before writing SPA history and navigating the search route.
+    q.value="  "+("あ".repeat(120))+"  ";
+    await React.act(async()=>form.querySelector('button[type="submit"]').click());
+    assert.equal(queries.length,1);
+    let params=new URLSearchParams(queries[0]);
+    assert.equal(params.get("q"),"あ".repeat(100));
+    assert.equal(params.get("status"),"failed");
+    assert.equal(params.get("type"),"video");
+    // Auto-submit category changes must obey the same query contract.
+    q.value="  "+("z".repeat(130))+" ";
+    const cat=form.querySelector('[name="cat"]');
+    await React.act(async()=>{
+      cat.value="video";
+      cat.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
+    });
+    assert.equal(queries.length,2);
+    params=new URLSearchParams(queries[1]);
+    assert.equal(params.get("q"),"z".repeat(100));
+    assert.equal(params.get("cat"),"video");
+  });
+});
+
 test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",async()=>{
   await inDom(async(dom,root)=>{
     const queries=[];
