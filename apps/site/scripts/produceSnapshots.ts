@@ -270,7 +270,34 @@ async function allRows(db: D1Like, sql: string, ...values: unknown[]): Promise<R
   return (await stmt.all()).results ?? [];
 }
 
+// CURRENT's static generators call Date.now() directly. A build with --now
+// temporarily overrides that process-global function; concurrent producers
+// must not overlap or a run can stamp another generation's timestamps.
+let snapshotProducerTail: Promise<void> = Promise.resolve();
+
 export async function produceSnapshots(input: ProduceInput): Promise<ProduceResult> {
+  // Programmatic callers bypass the CLI's --now validation. Reject malformed
+  // clocks before entering the queue or touching D1/the temporary SQLite DB.
+  // Date's TimeClip range ends at 8.64e15 ms, below MAX_SAFE_INTEGER.
+  // CURRENT's generators call new Date(nowSec * 1000), not just Date.now().
+  const maxDateUnixSec = 8_640_000_000_000;
+  if (input.nowSec !== undefined &&
+      (!Number.isSafeInteger(input.nowSec) || input.nowSec < 0 || input.nowSec > maxDateUnixSec)) {
+    throw new RangeError("snapshot nowSec must be a nonnegative integer within JavaScript Date range");
+  }
+  const previous = snapshotProducerTail;
+  let release!: () => void;
+  snapshotProducerTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await produceSnapshotsExclusive(input);
+  } finally {
+    // Release even when a generator throws, so subsequent builds cannot hang.
+    release();
+  }
+}
+
+async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceResult> {
   const started = performance.now();
   const counter = { n: 0 };
   const batched = input.mode === "batched";
@@ -426,7 +453,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       },
     };
   } finally {
-    Date.now = realNow;
+    if (input.nowSec !== undefined) Date.now = realNow;
   }
 }
 
