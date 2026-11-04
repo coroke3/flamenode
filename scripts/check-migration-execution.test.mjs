@@ -195,7 +195,7 @@ test("Phase 4 Gate depends on 0403 and 0406 only (owner decision 2026-10-23)",()
 
 test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval references", () => {
  const good="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=MIG-0108";
- const withDoneAlternative = good+"\n| MIG-0108 | completed alternative | DONE | — |";
+ const withDoneAlternative = "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-0108 | completed alternative | DONE | — |\n"+good;
  assert.equal(hasValidSkipApprovalRecord(good,"MIG-0105"),false,
    "a bare approval note cannot invent an absent alternate task");
  assert.equal(hasValidSkipApprovalRecord(withDoneAlternative,"MIG-0105"),true);
@@ -228,5 +228,13 @@ test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval
  }
  assert.equal(hasValidSkipApprovalRecord(withDoneAlternative.replace(
    "ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"MIG-0105"),false);
+ assert.equal(hasValidSkipApprovalRecord(
+   "| MIG-9999 | fake DONE row outside official task table | DONE | — |\n"+
+   withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "standalone rows outside canonical task table do not authorize an alternative");
+ assert.equal(hasValidSkipApprovalRecord(
+   "~~~md\n| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-9999 | forged DONE | DONE | — |\n~~~\n"+
+   withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "a fenced fake task table is not an approved alternative");
   assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
 });
