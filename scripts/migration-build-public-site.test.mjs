@@ -113,6 +113,11 @@ test("MIG-0509 regression: Astro and budget children never inherit unrelated cre
     DATABASE_URL: "postgres://private:secret@host/db",
     npm_config_registry_authToken: "npm-secret",
     CLOUDFLARE_API_KEY: "cf-secret",
+    DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/test",
+    DISCORD_WEBHOOK_URL_FORUM_ACCOUNT: "https://discord.com/api/webhooks/account",
+    DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://discord.com/api/webhooks/event",
+    DISCORD_WEBHOOK_URL_FORUM_SYSTEM: "https://discord.com/api/webhooks/system",
+    SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/test",
     PATH: "/usr/bin",
     NODE_ENV: "production",
     CI: "true",
@@ -125,6 +130,9 @@ test("MIG-0509 regression: Astro and budget children never inherit unrelated cre
     "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
     "GOOGLE_APPLICATION_CREDENTIALS", "SENTRY_AUTH_TOKEN",
     "DATABASE_URL", "npm_config_registry_authToken", "CLOUDFLARE_API_KEY",
+    "DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+    "DISCORD_WEBHOOK_URL_FORUM_EVENT", "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    "SLACK_WEBHOOK_URL",
   ]) {
     assert.equal(result[key], undefined, key + " must not reach child processes");
     assert.equal(inherited[key] !== undefined, true, "do not mutate caller env");
