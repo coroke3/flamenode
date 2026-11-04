@@ -19,6 +19,7 @@ export function CostGuardForm({ settings, api, onSuccess }: {
   const busyRef = React.useRef(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [confirmationSnapshot, setConfirmationSnapshot] = React.useState<string | null>(null);
+  const [confirmationReason, setConfirmationReason] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   // Another admin can change Cost Guard while the maintenance confirmation is open.
   // Bind the confirmation to the observed settings rather than reusing stale intent.
@@ -28,6 +29,7 @@ export function CostGuardForm({ settings, api, onSuccess }: {
   React.useEffect(() => {
     setConfirmOpen(false);
     setConfirmationSnapshot(null);
+    setConfirmationReason(null);
   }, [settingsSnapshot]);
   // A D1 maintenance mode is not a valid SA-016 manual-mode input.
   const manualModeSelected = MODES.some(([value]) => value === mode);
@@ -64,7 +66,16 @@ export function CostGuardForm({ settings, api, onSuccess }: {
               onClick={() => setMode(value)} disabled={busy}>{label}</button>
           ))}
         </div>
-        <input className="fn-input" value={reason} aria-label="変更理由" onChange={(event) => setReason(event.currentTarget.value)}
+        <input className="fn-input" value={reason} aria-label="変更理由" onChange={(event) => {
+          setReason(event.currentTarget.value);
+          // The modal confirms an audited reason. A change to that reason
+          // invalidates the previous confirmation, even without a server refresh.
+          if (confirmOpen) {
+            setConfirmOpen(false);
+            setConfirmationSnapshot(null);
+            setConfirmationReason(null);
+          }
+        }}
           maxLength={500} placeholder="変更理由（normalへの復帰時も必須）" disabled={busy} />
         <button type="button" className="fn-btn fn-btn-primary" disabled={busy || !reason.trim() || !manualModeSelected}
           onClick={() => void run(() => api.setMode(mode, reason))}>モードを更新</button>
@@ -78,6 +89,7 @@ export function CostGuardForm({ settings, api, onSuccess }: {
               maintenance(0);
             } else {
               setConfirmationSnapshot(settingsSnapshot);
+              setConfirmationReason(reason);
               setConfirmOpen(true);
             }
           }}>
@@ -92,16 +104,18 @@ export function CostGuardForm({ settings, api, onSuccess }: {
         confirmLabel="ONにする"
         cancelLabel="キャンセル"
         tone="danger"
-        busy={busy || confirmationSnapshot !== settingsSnapshot}
+        busy={busy || confirmationSnapshot !== settingsSnapshot || confirmationReason !== reason}
         onConfirm={() => {
-          if (confirmationSnapshot !== settingsSnapshot || settings.isMaintenance || !reason.trim()) return;
+          if (confirmationSnapshot !== settingsSnapshot || confirmationReason !== reason || settings.isMaintenance || !reason.trim()) return;
           setConfirmOpen(false);
           setConfirmationSnapshot(null);
+          setConfirmationReason(null);
           maintenance(1);
         }}
         onCancel={() => {
           setConfirmOpen(false);
           setConfirmationSnapshot(null);
+          setConfirmationReason(null);
         }}
       />
     </div>
