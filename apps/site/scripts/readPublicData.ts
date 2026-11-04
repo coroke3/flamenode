@@ -346,6 +346,9 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
  * requests per run; the token is never logged or put in an error message.
  */
 export const MAX_D1_HTTP_STATEMENTS = 19;
+// The batched snapshot producer uses up to 200 D1 reads per build. Keep this
+// explicit override bounded so NaN/Infinity cannot silently disable the budget.
+export const MAX_D1_HTTP_STATEMENTS_OVERRIDE = 200;
 export const D1_HTTP_TIMEOUT_MS = 15_000;
 export const D1_HTTP_ENV = {
   accountId: "CLOUDFLARE_ACCOUNT_ID",
@@ -425,6 +428,9 @@ export function openD1HttpReader(options: {
   }
   const fetchFn = options.fetchFn ?? fetch;
   const max = options.maxStatements ?? MAX_D1_HTTP_STATEMENTS;
+  if (!Number.isSafeInteger(max) || max < 1 || max > MAX_D1_HTTP_STATEMENTS_OVERRIDE) {
+    throw new RangeError(`D1 API statement budget must be an integer from 1 to ${MAX_D1_HTTP_STATEMENTS_OVERRIDE}`);
+  }
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
   let count = 0;
   const statement = (sql: string, params: unknown[] = []): D1PreparedStatementLike => ({
@@ -450,7 +456,16 @@ export function openD1HttpReader(options: {
       } | null;
       const first = body?.result?.[0];
       if (!response.ok || !body?.success || !first?.success || !Array.isArray(first.results)) {
-        const codes = (body?.errors ?? []).map((e) => e.code).filter((c) => c !== undefined).join(",");
+        // Cloudflare errors are untrusted JSON. A malformed error collection
+        // must still report a controlled D1 API failure, not throw TypeError.
+        // Limit work on untrusted error arrays, not just the final message:
+        // a malformed upstream response may contain thousands of entries.
+        const codes = (Array.isArray(body?.errors) ? body.errors : [])
+          .slice(0, 64)
+          .flatMap((error) => error && typeof error === "object" &&
+            typeof error.code === "number" && Number.isSafeInteger(error.code) ? [error.code] : [])
+          .slice(0, 8)
+          .join(",");
         throw new Error(`D1 API query failed (status=${response.status}${codes ? `, codes=${codes}` : ""})`);
       }
       return { results: first.results };

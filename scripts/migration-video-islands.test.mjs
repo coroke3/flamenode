@@ -112,6 +112,50 @@ async function renderScenario(fetcher, check) {
   }
 }
 
+test("regression: viewer overlay expires on a backward clock change in Astro and CURRENT", { skip: skipHydrated }, async () => {
+  const { loadVideoViewerOverlay, invalidateVideoViewerOverlay } =
+    await import("../apps/site/src/lib/viewerOverlay.ts");
+  const currentSource = fs.readFileSync("src/lib/video/videoViewerOverlayClient.ts", "utf8");
+  assert.match(currentSource, /ageMs >= 0/, "CURRENT must also reject negative cache ages");
+
+  const realNow = Date.now;
+  let clock = 1_760_000_000_000;
+  let successfulReads = 0;
+  let failedReads = 0;
+  const okFetcher = async () => {
+    successfulReads += 1;
+    return json(goodOverlay);
+  };
+  const errorFetcher = async () => {
+    failedReads += 1;
+    return json({ error: "unavailable" }, 503);
+  };
+  try {
+    Date.now = () => clock;
+    invalidateVideoViewerOverlay();
+    const first = await loadVideoViewerOverlay("rollback-success", "", okFetcher);
+    assert.equal(first.loggedIn, true);
+    await loadVideoViewerOverlay("rollback-success", "", okFetcher);
+    assert.equal(successfulReads, 1, "unchanged clock reuses the fresh 30s cache");
+
+    clock -= 60_000;
+    await loadVideoViewerOverlay("rollback-success", "", okFetcher);
+    assert.equal(successfulReads, 2, "backward clock must refetch viewer data");
+
+    const failure = await loadVideoViewerOverlay("rollback-failure", "", errorFetcher);
+    assert.equal(failure.authUnavailable, true);
+    await loadVideoViewerOverlay("rollback-failure", "", errorFetcher);
+    assert.equal(failedReads, 1, "unchanged clock reuses the 3s failure cache");
+
+    clock -= 60_000;
+    await loadVideoViewerOverlay("rollback-failure", "", errorFetcher);
+    assert.equal(failedReads, 2, "backward clock must expire the 3s failure cache too");
+  } finally {
+    Date.now = realNow;
+    invalidateVideoViewerOverlay();
+  }
+});
+
 test("T01/T03: optimistic count, server correction and rapid double click use one write", { skip: skipHydrated }, async () => {
   let resolveWrite; let writes = 0;
   const fetcher = async (url, options) => {

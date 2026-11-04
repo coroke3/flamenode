@@ -31,6 +31,21 @@ function extractYoutubeId(input: string | null | undefined): string | null {
   return null;
 }
 
+/** Validated same-origin video route. Keep aligned with CURRENT videoPageHref. */
+const SAFE_INTERNAL_VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export function videoPageHref(video: { id: string; youtube_video_id?: string | null }): string {
+  const youtubeId = extractYoutubeId(video.youtube_video_id);
+  if (youtubeId) return `/${youtubeId}`;
+  return SAFE_INTERNAL_VIDEO_ID.test(video.id) ? `/${video.id}` : "/list";
+}
+
+export function eventVideoPageHref(
+  video: { id: string; youtube_video_id?: string | null }, playlistId: string,
+): string {
+  const href = videoPageHref(video);
+  return href === "/list" ? href : `${href}?playlist=${encodeURIComponent(playlistId)}`;
+}
+
 export function youtubeThumbUrl(id: string | null | undefined, size: "mqdefault" | "hqdefault" = "hqdefault"): string {
   const youtubeId = extractYoutubeId(id);
   if (!youtubeId) return "";

@@ -11,10 +11,27 @@ const allStates = new Set(["READY","IN_PROGRESS","REVIEW","BLOCKED","DONE"]);
 const sha = /^[0-9a-f]{40}$/;
 
 export function readWorkItems(root) {
-  const dir=path.join(root,"docs/migration/work-items");
-  if (!fs.existsSync(dir)) return {};
-  return Object.fromEntries(fs.readdirSync(dir).filter(x=>x.endsWith(".md")&&!["README.md","TEMPLATE.md"].includes(x))
-    .map(x=>[x,fs.readFileSync(path.join(dir,x),"utf8")]));
+  // Git symlinks can redirect a checkpoint or any parent directory outside
+  // this checkout. A missing work-items directory must not become "0 OK".
+  let dir = root;
+  for (const segment of ["docs", "migration", "work-items"]) {
+    dir = path.join(dir, segment);
+    if (!fs.lstatSync(dir).isDirectory()) {
+      throw new Error("work-item directory is not a real directory: " + path.relative(root, dir));
+    }
+  }
+  const checkpointNames = fs.readdirSync(dir)
+    .filter(name => name.endsWith(".md") && !["README.md", "TEMPLATE.md"].includes(name));
+  // README/TEMPLATE may legitimately exist without a checkpoint, but the
+  // active migration ledger must never report "0 OK" after data loss.
+  if (!checkpointNames.length) throw new Error("work-item ledger has no checkpoints");
+  return Object.fromEntries(checkpointNames.map(name => {
+    const file = path.join(dir, name);
+    if (!fs.lstatSync(file).isFile()) {
+      throw new Error("work-item checkpoint is not a regular file: " + path.relative(root, file));
+    }
+    return [name, fs.readFileSync(file, "utf8")];
+  }));
 }
 export function gitCommitExists(root, value) {
   if (!sha.test(value || "")) return false;
@@ -175,6 +192,14 @@ function ownedPathsOverlap(left, right) {
 
 export function validateWorkItems({statusText,entries,commitExists}) {
   const errors=[], ids=new Set([...statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|/gm)].map(m=>m[1])), claimed=new Map(), prs=new Map(), branches=new Map();
+  if (Object.keys(entries).length === 0) errors.push("work-item ledger has no checkpoints");
+  // Phase 0/1 tasks predate checkpoint tracking; every later DONE task must
+  // retain its own auditable work-item, even if files were removed in a PR.
+  for (const [, id, state] of statusText.matchAll(/^\|\s*(MIG-\d{4})\s*\|[^\n]*\|\s*(DONE|READY|IN_PROGRESS|REVIEW|BLOCKED|SKIPPED)\s*\|/gm)) {
+    if (state === "DONE" && Number(id.slice(4)) >= 200 && !Object.hasOwn(entries, id+".md")) {
+      errors.push("missing DONE task checkpoint: " + id + ".md");
+    }
+  }
   for(const [filename,body] of Object.entries(entries)) {
     if(!/^MIG-\d{4}\.md$/.test(filename)){errors.push("invalid filename: "+filename);continue;}
     const id=filename.slice(0,-3), map={};
