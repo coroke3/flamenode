@@ -12,7 +12,7 @@ import {
   statusBadgeClass,
 } from "../../components/notifications/notificationDisplay.js";
 import { ConsolePageHeader } from "../../components/shared/ConsolePageHeader.js";
-import { isImeComposingForm } from "../../components/shared/imeSafeSearch.js";
+import { IME_COMPOSING_FORM_ATTR, isImeComposingForm } from "../../components/shared/imeSafeSearch.js";
 import { EmptyState } from "../../components/shared/EmptyState.js";
 import { FnTable } from "../../components/shared/FnTable.js";
 import { OpsLink as Link } from "../../components/shared/OpsLink.js";
@@ -55,6 +55,30 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
   const unhealthyLeaseCount = counts.unhealthyLease;
   const filterInput = { type: filters.type, event: filters.event, q: filters.q, cat: filters.cat };
   const hasDetailFilter = Boolean(filters.type || filters.event || filters.q || filters.cat !== "all");
+
+  // The form is an ordinary SPA GET form, not ImeSafeGetForm. Maintain the
+  // composition marker that AutoSubmitSelect checks, including the commit-Enter tick.
+  const compositionEndTimer = React.useRef<number | null>(null);
+  React.useEffect(() => () => {
+    if (compositionEndTimer.current !== null) window.clearTimeout(compositionEndTimer.current);
+  }, []);
+  const clearCompositionTimer = (): void => {
+    if (compositionEndTimer.current !== null) {
+      window.clearTimeout(compositionEndTimer.current);
+      compositionEndTimer.current = null;
+    }
+  };
+  const beginComposition = (form: HTMLFormElement): void => {
+    clearCompositionTimer();
+    form.setAttribute(IME_COMPOSING_FORM_ATTR, "");
+  };
+  const finishComposition = (form: HTMLFormElement): void => {
+    clearCompositionTimer();
+    compositionEndTimer.current = window.setTimeout(() => {
+      form.removeAttribute(IME_COMPOSING_FORM_ATTR);
+      compositionEndTimer.current = null;
+    }, 0);
+  };
   // D-17-7: category changes must update React Router query state, not navigateGetForm's
   // document-level location.assign(). Preserve the same GET form field names/normalization.
   const submitFilters = (form: HTMLFormElement): void => {
@@ -134,6 +158,15 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         role="search"
         aria-label="通知の絞り込み"
         style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+        onCompositionStart={(event) => beginComposition(event.currentTarget)}
+        onCompositionEnd={(event) => finishComposition(event.currentTarget)}
+        onKeyDown={(event) => {
+          // Some Windows IMEs emit keyCode 229 without a compositionstart event.
+          if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) {
+            beginComposition(event.currentTarget);
+            finishComposition(event.currentTarget);
+          }
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           submitFilters(event.currentTarget);
