@@ -498,11 +498,18 @@ test("MIG-0734 D-17-7 category auto-filter uses SPA URL state and retains draft 
     assert.equal(next.get("event"),"evt-1");
     assert.equal(next.get("q"),"query");
 
-    // Explicit GET form submits still share exactly the same query contract.
+    // Three text inputs must still be searchable by pointer/touch and keyboard.
+    // Without a submit button browsers cannot reliably implicitly submit on Enter.
     const form=dom.window.document.querySelector('form[role="search"]');
-    await React.act(async()=>form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true})));
-    assert.equal(queries.length,2);
+    const search=form.querySelector('button[type="submit"]');
+    assert.ok(search,"search must have an explicit submit button");
+    assert.equal(search.textContent,"検索");
+    await React.act(async()=>search.click());
+    assert.equal(queries.length,2,"clicking search submits the current GET fields through SPA navigation");
     assert.equal(queries[1],queries[0]);
+    await React.act(async()=>form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true})));
+    assert.equal(queries.length,3,"keyboard form submit uses the same query contract");
+    assert.equal(queries[2],queries[0]);
   });
 });
 
@@ -520,6 +527,8 @@ test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",
     const category=form.querySelector('[name="cat"]');
     const submit=()=>form.dispatchEvent(new dom.window.Event("submit",{bubbles:true,cancelable:true}));
     const compose=name=>input.dispatchEvent(new dom.window.CompositionEvent(name,{bubbles:true}));
+    const searchButton=form.querySelector('button[type="submit"]');
+    assert.ok(searchButton);
     await React.act(async()=>compose("compositionstart"));
     assert.equal(form.hasAttribute("data-fn-ime-composing"),true,"real compositionstart marks the form");
     await React.act(async()=>{
@@ -527,7 +536,8 @@ test("MIG-0734 D-17-7 auto-filter preserves the real IME composition lifecycle",
       category.dispatchEvent(new dom.window.Event("change",{bubbles:true}));
       submit();
     });
-    assert.deepEqual(queries,[],"category and explicit submit must not navigate while composing");
+    await React.act(async()=>searchButton.click());
+    assert.deepEqual(queries,[],"category, form submit and the button must not navigate while composing");
     await React.act(async()=>{
       input.dispatchEvent(new dom.window.KeyboardEvent("keydown",{
         key:"Enter",keyCode:229,isComposing:true,bubbles:true,
