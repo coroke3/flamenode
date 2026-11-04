@@ -105,7 +105,7 @@ test("MIG-0728 U02: dot-segment template IDs cannot escape the DELETE route", as
     requests++;
     return json(200, { ok: true });
   };
-  for (const invalid of [".", "..", "", " ", " x", "x ", "\\uD800", "\\uDC00"]) {
+  for (const invalid of [".", "..", "", " ", " x", "x ", "\uD800", "\uDC00"]) {
     assert.deepEqual(await deleteAdminEventTemplate(invalid, fetchFn), { status: "unavailable" },
       "reject unsafe ID " + JSON.stringify(invalid));
   }
