@@ -235,6 +235,20 @@ test("SKIP_APPROVAL structure rejects placeholder, fenced and commented approval
  assert.equal(hasValidSkipApprovalRecord(
    "~~~md\n| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n| MIG-9999 | forged DONE | DONE | — |\n~~~\n"+
    withDoneAlternative.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
-   "MIG-0105"),false, "a fenced fake task table is not an approved alternative");
+    "MIG-0105"),false, "a fenced fake task table is not an approved alternative");
+ assert.equal(hasValidSkipApprovalRecord(
+   "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n"+
+   "| MIG-0105 | skipped | SKIPPED | — |\n"+
+   "Explanatory text ends the task table.\n"+
+   "| MIG-9999 | invented alternative | DONE | — |\n"+
+   good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "prose cannot extend the canonical task table");
+ assert.equal(hasValidSkipApprovalRecord(
+   "| ID | Task | State | Depends on |\n| --- | --- | --- | --- |\n"+
+   "| MIG-0105 | skipped | SKIPPED | — |\n"+
+   "```md\nexample\n```\n"+
+   "| MIG-9999 | invented alternative | DONE | — |\n"+
+   good.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   "MIG-0105"),false, "fenced examples cannot extend the canonical table");
   assert.equal(hasValidSkipApprovalRecord("SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123 | ALTERNATIVE=Legacy route retired with migration owner signoff","MIG-0105"),true);
 });
