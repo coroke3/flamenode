@@ -161,15 +161,14 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
         onCompositionStart={(event) => beginComposition(event.currentTarget)}
         onCompositionEnd={(event) => finishComposition(event.currentTarget)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter") return;
           const form = event.currentTarget;
           if (event.nativeEvent.isComposing) {
-            // A conversion is still active: only compositionend may schedule removal.
-            // Restarting the timeout here would clear the guard before the IME commits.
+            // IMEs may report key="Process" instead of Enter during conversion.
+            // Only compositionend can schedule clearing an active session.
             if (!isImeComposingForm(form)) beginComposition(form);
           } else if (event.nativeEvent.keyCode === 229 && !isImeComposingForm(form)) {
-            // Windows can send a commit Enter (229) without compositionstart.
-            // Keep the guard for the following implicit-submit tick.
+            // Windows can report a commit key as Process/229 without compositionstart.
+            // Retain the guard for an implicit submit in the same event loop tick.
             beginComposition(form);
             finishComposition(form);
           }
