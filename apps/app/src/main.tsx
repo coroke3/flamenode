@@ -1,5 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import "./styles/current/globals.css";
+import "./styles/current/mobile-hardening.css";
+import "./styles/fonts.css";
+import "./styles/video-card.css";
+import "./styles/dashboard.css";
+import "./styles/settings.css";
+import "./styles/onboarding.css";
+import "./styles/video-members.css";
+import "./styles/forms-a.css";
+import "./styles/shared-social.css";
+import "./styles/cost-guard-banner.css";
 import { App } from "./App.js";
 
 const rootElement = document.getElementById("root");
