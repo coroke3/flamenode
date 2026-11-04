@@ -599,6 +599,11 @@ test("MIG-0734 query_failed partial counts never expose bulk mutation and can re
     "partial-query errors must never render privileged mutation buttons");
   assert.doesNotMatch(html,/配送リース期限超過・欠損|失敗 4 件|現在、失敗・滞留はありません/,
     "incomplete counts must not appear as authoritative status banners");
+  assert.doesNotMatch(html,/最終失敗 \(7\)/,
+    "the failed-status tab must not expose counts from an incomplete read");
+  const healthy=renderNotifications(notificationData({rows:[]},{failed:4,deadLetter:3,unhealthyLease:0}));
+  assert.match(healthy,/最終失敗 \(7\)/,
+    "a successful read must retain the existing status tab counts");
 
   await inDom(async(dom,root)=>{
     let reads=0;
