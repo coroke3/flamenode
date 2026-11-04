@@ -46,7 +46,7 @@ test("public_nameは匿名でも許可しprivate cacheは使わない", () => {
   );
   assert.equal(access.allowed, true);
   if (access.allowed) {
-    assert.match(access.cacheControl, /^public,/);
+    assert.equal(access.cacheControl, "no-store");
   }
 });
 
@@ -196,7 +196,7 @@ test("https外部iconは302、httpは404", async () => {
   });
   assert.equal(https.response.status, 302);
   assert.equal(https.response.headers.get("location"), "https://cdn.example/icon.png");
-  assert.match(https.response.headers.get("cache-control") ?? "", /^public,/);
+  assert.equal(https.response.headers.get("cache-control"), "no-store");
   assert.equal(https.response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(https.state.gets, 0);
 
@@ -252,7 +252,7 @@ test("R2 iconはACL通過後に安全objectだけ返す", async () => {
   assert.equal(state.prepares, 1);
   assert.equal(state.gets, 1);
   assert.equal(response.headers.get("content-type"), "image/webp");
-  assert.match(response.headers.get("cache-control") ?? "", /^public,/);
+  assert.equal(response.headers.get("cache-control"), "no-store");
 });
 
 test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", async () => {
@@ -295,6 +295,7 @@ test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", a
     assert.equal(first.state.prepares, 1);
     assert.equal(first.state.gets, 1);
     assert.equal(second.response.status, 200);
+    assert.equal(second.response.headers.get("cache-control"), "no-store");
     assert.equal(second.state.prepares, 1);
     assert.equal(second.state.gets, 0);
     assert.deepEqual(
