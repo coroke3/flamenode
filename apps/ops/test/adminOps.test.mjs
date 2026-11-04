@@ -506,6 +506,29 @@ test("MIG-0734 U02 notifications four actions use D-17-4 paths and send no body 
   assert.ok(calls.every(v=>v.init.method==="POST"&&v.init.credentials==="same-origin"));
 });
 
+test("MIG-0734 privileged notification actions fail closed for URL dot segments and malformed IDs",async()=>{
+  const sent=[];
+  const api=createAdminNotificationsApi(async(path,init)=>{sent.push({path,init});return response(200,{ok:true});});
+  // encodeURIComponent(".") and encodeURIComponent("..") are unchanged.
+  // A Fetch URL would collapse these segments and target an unintended admin route.
+  for(const id of [".",".."," . "," .. ","","  ","a".repeat(129),"\\uD800"]){
+    for(const action of [
+      ()=>api.retry(id),()=>api.cancel(id,"reason"),()=>api.forceResend(id),
+    ]){
+      assert.deepEqual(await action(),{ok:false,message:"idが不正です。"});
+    }
+  }
+  assert.equal(sent.length,0,"invalid IDs must not create a privileged network request");
+
+  // A slash in a real identifier is still encoded as a single path segment.
+  assert.deepEqual(await api.retry("note/1"),{ok:true});
+  assert.deepEqual(await api.cancel("note/1","確認"),{ok:true});
+  assert.deepEqual(sent.map(call=>new URL(call.path,"https://example.test").pathname),[
+    "/api/admin/notifications/note%2F1/retry",
+    "/api/admin/notifications/note%2F1/cancel",
+  ]);
+});
+
 test("MIG-0734 U01 audit history changed keys remains compatible with CURRENT",()=>{
  assert.deepEqual(changedCostGuardKeys('{"mode":"normal","reason":"before"}','{"mode":"economy","reason":"after"}'),["mode","reason"]);
  assert.deepEqual(changedCostGuardKeys('{"mode":"normal"}','{"mode":"normal"}'),[]);
