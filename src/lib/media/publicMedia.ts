@@ -223,7 +223,6 @@ export async function servePublicMedia(
   env: Pick<FlameNodeEnv, "DB" | "BUCKET">,
   rawKey: string,
   request?: Request,
-  options?: { skipEdgeCacheLookup?: boolean },
 ): Promise<Response> {
   if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
 
