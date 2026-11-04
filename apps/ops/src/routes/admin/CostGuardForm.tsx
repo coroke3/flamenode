@@ -19,6 +19,8 @@ export function CostGuardForm({ settings, api, onSuccess }: {
   const busyRef = React.useRef(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
+  // A D1 maintenance mode is not a valid SA-016 manual-mode input.
+  const manualModeSelected = MODES.some(([value]) => value === mode);
   React.useEffect(() => { setMode(settings.mode); setReason(settings.reason ?? ""); }, [settings.mode, settings.reason]);
 
   const run = async (write: () => ReturnType<AdminCostGuardApi["setMode"]>): Promise<void> => {
@@ -54,8 +56,9 @@ export function CostGuardForm({ settings, api, onSuccess }: {
         </div>
         <input className="fn-input" value={reason} aria-label="変更理由" onChange={(event) => setReason(event.currentTarget.value)}
           maxLength={500} placeholder="変更理由（normalへの復帰時も必須）" disabled={busy} />
-        <button type="button" className="fn-btn fn-btn-primary" disabled={busy || !reason.trim()}
+        <button type="button" className="fn-btn fn-btn-primary" disabled={busy || !reason.trim() || !manualModeSelected}
           onClick={() => void run(() => api.setMode(mode, reason))}>モードを更新</button>
+        {!manualModeSelected ? <p role="status" style={{ fontSize: 12 }}>手動モードを選択してください。メンテナンス解除は下の「OFFにする」を使用します。</p> : null}
       </section>
       <section>
         <h2 style={{ fontSize: 14, fontWeight: 700 }}>メンテナンス即時切替</h2>
