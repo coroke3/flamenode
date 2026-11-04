@@ -276,3 +276,57 @@ test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows",
   for(const later of CRITICAL_PATH.slice(i+1))assert.ok(!ancestors(id).has(later),id+" depends on later "+later);
  });
 });
+
+test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()=>{
+ const rows=[
+   "| ID | Task | State | Depends on |",
+   "| --- | --- | --- | --- |",
+   "| MIG-0105 | obsolete gate | SKIPPED | — |",
+   "| MIG-0108 | approved alternate | DONE | — |",
+   "| MIG-0401 | independent PoC | READY | MIG-0105 |",
+ ].join("\n");
+ const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789 | ALTERNATIVE=MIG-0108";
+ const selected=pickNextTask(rows+"\n\n"+approval,"");
+ assert.equal(selected.selected,"MIG-0401");
+ assert.deepEqual(selected.candidates,["MIG-0401"]);
+ assert.equal(pickNextTask(rows.replace("SKIPPED","DONE"),"").selected,"MIG-0401");
+ assert.equal(pickNextTask(rows,"").selected,null);
+ for(const invalid of [
+   approval.replace("MIG-0105 | PR#","MIG-9999 | PR#"),
+   approval.replace("PR#404","PR#invalid"),
+   approval.replace(" | ALTERNATIVE=MIG-0108",""),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE="),
+   approval.replace("APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789","APPROVAL="),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=not-approved by lead"),
+   approval.replace("PR#404","PR#0"),
+   approval.replace("pull/404#","pull/405#"),
+   approval.replace("github.com/coroke3","example.test/coroke3"),
+   approval.replace("github.com/coroke3/flamenode","github.com/untrusted/test-repo"),
+   "```md\n"+approval+"\n```",
+   "<!--\n"+approval+"\n-->",
+ ]) {
+   assert.equal(pickNextTask(rows+"\n\n"+invalid,"").selected,null,invalid);
+ }
+ for (const invalidState of ["READY","BLOCKED","SKIPPED","IN_PROGRESS"]) {
+   const invalidRows = rows.replace("| MIG-0108 | approved alternate | DONE |",
+     "| MIG-0108 | approved alternate | " + invalidState + " |");
+   const invalidSelection = pickNextTask(invalidRows+"\n\n"+approval,"");
+   assert.ok(!invalidSelection.candidates.includes("MIG-0401"),
+     invalidState+": unfinished alternate cannot unlock its SKIPPED dependent");
+ }
+ assert.throws(() => pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,""),
+   /Duplicate task ID in migration:next: MIG-0108/,
+   "duplicate DONE alternative must fail closed instead of unlocking a dependency");
+ for (const hidden of [
+   "<!--\n| MIG-9999 | fake alternative | DONE | — |\n-->",
+   "```md\n| MIG-9999 | fake alternative | DONE | — |\n```",
+ ]) {
+   const withoutRealAlt = rows.replace("| MIG-0108 | approved alternate | DONE | — |\n","");
+   assert.equal(pickNextTask(withoutRealAlt+"\n\n"+hidden+"\n"+
+     approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"").selected,null,hidden);
+ }
+});

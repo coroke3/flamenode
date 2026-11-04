@@ -108,10 +108,14 @@ export function isTrackedSourceCandidate(p){
   /^(?:apps\/(?:api|app|site|ops)|packages\/(?:contracts|domain|ui|db))\/(?:src\/.*\.(?:ts|tsx|astro)|(?:vite\.config\.ts|astro\.config\.mjs|tsconfig\.json|package\.json|index\.html))$/.test(p) ||
   ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"].includes(p));
 }
+// Keep PR-level evidence checks aligned with the CURRENT directories and root
+// files audited by check-migration-ledger-completeness.mjs. A complete baseline
+// ledger does not prove that changed assets/config have fresh PR evidence.
 function trackedChangeCandidate(p){
- return /^(?:app\/|apps\/|packages\/|src\/lib\/|src\/components\/|workers\/)/.test(p) &&
- !/(?:^|\/)(?:node_modules|dist|\.next)\//.test(p) ||
- ["wrangler.toml","drizzle.config.ts","tsconfig.base.json","package.json","package-lock.json"].includes(p);
+ return /^(?:app\/|apps\/|packages\/|src\/(?:lib|components|styles)\/|public\/|cloudflare\/|workers\/)/.test(p) &&
+ !/(?:^|\/)(?:node_modules|dist|\.next|\.wrangler|\.astro|coverage)\//.test(p) ||
+ ["middleware.ts","next.config.mjs","open-next.config.ts","instrumentation.ts","next-env.d.ts",
+  "wrangler.toml","drizzle.config.ts","tsconfig.json","tsconfig.base.json","package.json","package-lock.json"].includes(p);
 }
 const listChangedFromBase=base=>{
  if(!/^[0-9a-f]{40}$/.test(base))throw new Error("MIGRATION_FILE_BASE_SHA must be 40 hex");
@@ -208,7 +212,10 @@ export function validateFileProgress({matrix,currentRoutes,routeHandlers,serverA
  for(const file of changedPaths.filter(trackedChangeCandidate)){
   const row=rows.get(file);
   if(!row){errors.push("changed migration source missing file progress row: "+file);continue;}
-  if(row.state==="NOT_STARTED")continue;
+  if(row.state==="NOT_STARTED"){
+   errors.push(file+" changed in this PR but file state is NOT_STARTED; update state and add fresh PR evidence");
+   continue;
+  }
   // A changed started file must cite, anywhere in its row, a SHA= that is new versus base
   // and is a commit from this PR's own history.
   const baseShas=new Set(shasOf(baseRows.get(file)));

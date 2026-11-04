@@ -65,3 +65,82 @@ test("MIG-0509 U03: build entry requires remote generation and isolates credenti
   assert.equal(env.FLAMENODE_SNAPSHOT_GENERATION,"generation");
   assert.ok(env.FLAMENODE_RULES_SNAPSHOT_FILE.endsWith("rules-current.json"));
 });
+
+
+test("MIG-0509 regression: each build selects its own rules snapshot, never an inherited one", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "mig0509-rules-isolation-"));
+  try {
+    const snapshotDir = path.join(base, "new-build");
+    fs.mkdirSync(snapshotDir);
+    const previousRules = path.join(base, "previous-rules.json");
+    fs.writeFileSync(previousRules, JSON.stringify({ body: "old build" }));
+    const inherited = {
+      FLAMENODE_RULES_SNAPSHOT_FILE: previousRules,
+      FLAMENODE_SNAPSHOT_DIR: path.join(base, "previous-build"),
+      FLAMENODE_SNAPSHOT_GENERATION: "previous-generation",
+    };
+
+    // No published rules in the new snapshot means CURRENT's built-in terms.
+    // The previous build's valid on-disk file must not override this fallback.
+    const withoutRules = safeBuildEnv(inherited, snapshotDir, "new-generation");
+    assert.equal(withoutRules.FLAMENODE_RULES_SNAPSHOT_FILE, undefined);
+    assert.equal(withoutRules.FLAMENODE_SNAPSHOT_DIR, snapshotDir);
+    assert.equal(withoutRules.FLAMENODE_SNAPSHOT_GENERATION, "new-generation");
+    assert.equal(inherited.FLAMENODE_RULES_SNAPSHOT_FILE, previousRules, "caller env is not mutated");
+
+    // A newly produced rules file must take precedence over the inherited path.
+    const currentRules = path.join(snapshotDir, "rules-current.json");
+    fs.writeFileSync(currentRules, JSON.stringify({ body: "new build" }));
+    const withRules = safeBuildEnv(inherited, snapshotDir, "new-generation");
+    assert.equal(withRules.FLAMENODE_RULES_SNAPSHOT_FILE, currentRules);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+
+test("MIG-0509 regression: Astro and budget children never inherit unrelated credentials", () => {
+  const inherited = {
+    FLAMENODE_D1_READ_TOKEN: "d1-secret",
+    FLAMENODE_R2_READ_TOKEN: "r2-secret",
+    GITHUB_TOKEN: "github-secret",
+    GH_TOKEN: "gh-secret",
+    AWS_ACCESS_KEY_ID: "aws-id",
+    AWS_SECRET_ACCESS_KEY: "aws-secret",
+    AWS_SESSION_TOKEN: "aws-session",
+    GOOGLE_APPLICATION_CREDENTIALS: "/tmp/private-credentials.json",
+    SENTRY_AUTH_TOKEN: "sentry-secret",
+    DATABASE_URL: "postgres://private:secret@host/db",
+    npm_config_registry_authToken: "npm-secret",
+    CLOUDFLARE_API_KEY: "cf-secret",
+    DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/test",
+    DISCORD_WEBHOOK_URL_FORUM_ACCOUNT: "https://discord.com/api/webhooks/account",
+    DISCORD_WEBHOOK_URL_FORUM_EVENT: "https://discord.com/api/webhooks/event",
+    DISCORD_WEBHOOK_URL_FORUM_SYSTEM: "https://discord.com/api/webhooks/system",
+    SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/test",
+    PATH: "/usr/bin",
+    NODE_ENV: "production",
+    CI: "true",
+    OTHER_SAFE: "preserved",
+  };
+  const result = safeBuildEnv(inherited, "/tmp/public-snapshot", "new-generation");
+  for (const key of [
+    "FLAMENODE_D1_READ_TOKEN", "FLAMENODE_R2_READ_TOKEN",
+    "GITHUB_TOKEN", "GH_TOKEN", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "GOOGLE_APPLICATION_CREDENTIALS", "SENTRY_AUTH_TOKEN",
+    "DATABASE_URL", "npm_config_registry_authToken", "CLOUDFLARE_API_KEY",
+    "DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL_FORUM_ACCOUNT",
+    "DISCORD_WEBHOOK_URL_FORUM_EVENT", "DISCORD_WEBHOOK_URL_FORUM_SYSTEM",
+    "SLACK_WEBHOOK_URL",
+  ]) {
+    assert.equal(result[key], undefined, key + " must not reach child processes");
+    assert.equal(inherited[key] !== undefined, true, "do not mutate caller env");
+  }
+  assert.equal(result.PATH, inherited.PATH);
+  assert.equal(result.NODE_ENV, "production");
+  assert.equal(result.CI, "true");
+  assert.equal(result.OTHER_SAFE, "preserved");
+  assert.equal(result.FLAMENODE_SNAPSHOT_DIR, "/tmp/public-snapshot");
+  assert.equal(result.FLAMENODE_SNAPSHOT_GENERATION, "new-generation");
+});

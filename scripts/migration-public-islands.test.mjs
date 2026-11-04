@@ -11,6 +11,9 @@ import {
 } from "../apps/site/src/lib/listFilterCore.ts";
 import { fetchPublicJson } from "../apps/site/src/lib/publicApi.ts";
 import { LIST_PAGE_SIZE } from "../apps/site/src/lib/listQuery.ts";
+import { toTrendingRow } from "../apps/site/src/lib/videoCards.ts";
+import { eventVideoPageHref, videoPageHref } from "../src/lib/youtube/id.ts";
+import { videoPageHref as spaVideoPageHref, eventVideoPageHref as spaEventVideoPageHref } from "../apps/app/src/routes/ui/media.ts";
 
 const dto = (id = "test") => ({
   id, title: "公開作品", youtube_video_id: "AAAAAAAAAAA", display_name: "作者",
@@ -303,4 +306,181 @@ test("UX-DISC-005: the default /list (no fetch) still shows Pagination from the 
       dom.window.close();
     }
   }
+});
+
+
+test("MIG-0510 regression: corrupt public IDs cannot produce cross-origin card links", () => {
+  const query = listQueryFromSearch("?q=valid");
+
+  // An unexpected youtube_video_id from the API must never turn /ID into //host.
+  for (const badYoutube of [
+    "//outside.example", "/outside.example", "https://outside.example/watch?v=AAAAAAAAAAA",
+    "javascript:alert(1)", "\\\\outside.example", "bad-id",
+  ]) {
+    const result = decodePublicList(
+      okPage(query, [{ ...dto("v_safe-1"), youtube_video_id: badYoutube }]), query,
+    );
+    assert.ok(result, "invalid optional YouTube IDs still allow the safe internal video route");
+    assert.equal(result.videos[0].href, "/v_safe-1");
+    assert.equal(new URL(result.videos[0].href, "https://flamenode.net").origin, "https://flamenode.net");
+  }
+
+  const normalized = decodePublicList(
+    okPage(query, [{ ...dto("v_safe-1"), youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }]), query,
+  );
+  assert.equal(normalized?.videos[0].href, "/AAAAAAAAAAA", "valid full YouTube URLs normalize to ID");
+
+  // A broken internal ID fails the list boundary instead of rendering a link.
+  for (const badId of ["//outside.example", "/outside", "..", ".", "bad?query", "", "x".repeat(129)]) {
+    assert.equal(
+      decodePublicList(okPage(query, [{ ...dto(badId), youtube_video_id: null }]), query),
+      null, `unsafe ID must be rejected: ${badId}`,
+    );
+  }
+
+  // The same shared card mapper is used by trending cards without the list DTO boundary.
+  const trending = toTrendingRow({
+    id: "//outside.example", youtube_video_id: "//outside.example",
+    title: "corrupt card", display_name: "example", icon_url: null,
+    primary_event_id: null, primary_event_title: null, views_7d: 0, rank: 1,
+  }, 0);
+  assert.equal(trending.href, "/list", "malformed trending URLs fall back to a same-origin route");
+
+  assert.equal(videoPageHref({ id: "v_ok", youtube_video_id: "/outside.example" }), "/v_ok");
+  assert.equal(videoPageHref({ id: "//outside.example", youtube_video_id: null }), "/list");
+  assert.equal(videoPageHref({ id: "v_ok", youtube_video_id: "AAAAAAAAAAA" }), "/AAAAAAAAAAA");
+  const currentVideoCard = fs.readFileSync("src/components/video/VideoCard.tsx", "utf8");
+  assert.match(currentVideoCard, /href \?\? videoPageHref\(video\)/,
+    "CURRENT Next VideoCard must use the same safe route helper as migrated Astro");
+});
+
+test("MIG-0510: CURRENT event-detail playlist cards never resolve off-origin", () => {
+  const base = "https://flamenode.net";
+  const eventId = "event/ID?bad=1&next=2";
+  for (const youtube_video_id of [
+    "/outside.example", "//outside.example", "javascript:alert(1)",
+    "\\\\outside.example", "https://outside.example/watch?v=AAAAAAAAAAA",
+  ]) {
+    const href = eventVideoPageHref({ id: "safe_internal", youtube_video_id }, eventId);
+    assert.equal(href, "/safe_internal?playlist="+encodeURIComponent(eventId));
+    assert.equal(new URL(href, base).origin, base, youtube_video_id);
+  }
+  assert.equal(eventVideoPageHref({ id: "safe_internal", youtube_video_id: "AAAAAAAAAAA" }, "EV1"), "/AAAAAAAAAAA?playlist=EV1");
+  assert.equal(eventVideoPageHref({ id: "//evil.example", youtube_video_id: null }, "EV1"), "/list");
+
+  // Verify that CURRENT's explicit href override cannot bypass this shared helper.
+  const eventPage = fs.readFileSync("app/(public)/event/[id]/page.tsx", "utf8");
+  assert.match(eventPage, /href=\{eventVideoPageHref\(video, eventId\)\}/);
+  assert.doesNotMatch(eventPage, /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/);
+});
+
+test("MIG-0510: remaining public video navigations use validated paths", () => {
+  // An untrusted video ID must never be interpolated directly after a slash.
+  const list = fs.readFileSync("app/(public)/list/ListIndexView.tsx", "utf8");
+  const rail = fs.readFileSync("src/components/video/PlaylistRail.tsx", "utf8");
+  const users = fs.readFileSync("apps/site/src/lib/userViews.ts", "utf8");
+
+  assert.ok(list.includes("const href = videoPageHref(v);"),
+    "CURRENT /list index mode must use the shared video route helper");
+  assert.ok(rail.includes("playlistId ? eventVideoPageHref(item, playlistId) : videoPageHref(item)"),
+    "CURRENT playlist rail and autoplay must navigate through the same-origin guard");
+  assert.ok(!rail.includes("const target = item.youtube_video_id?.trim() || item.id"),
+    "old unsafe protocol-relative route construction must not be reintroduced");
+  assert.ok(users.includes("href: videoPageHref(video),"),
+    "Astro user-profile works and collab cards must use the same guard");
+
+  const site = "https://flamenode.net";
+  const bad = { id: "safe_internal", youtube_video_id: "/outside.example" };
+  const playlist = "list/123?next=https://outside.example&x=1";
+  assert.equal(videoPageHref(bad), "/safe_internal");
+  assert.equal(eventVideoPageHref(bad, playlist),
+    "/safe_internal?playlist=" + encodeURIComponent(playlist));
+  for (const target of [bad, { id: "//outside.example", youtube_video_id: null }]) {
+    const href = videoPageHref(target);
+    assert.equal(new URL(href, site).origin, site);
+    assert.equal(new URL(eventVideoPageHref(target, playlist), site).origin, site);
+  }
+});
+
+test("MIG-0510: personal SPA video links match CURRENT same-origin route semantics", () => {
+  const site = "https://flamenode.net";
+  const videos = [
+    { id: "internal-1", youtube_video_id: "AAAAAAAAAAA" },
+    { id: "internal-1", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" },
+    { id: "internal-1", youtube_video_id: "/outside.example" },
+    { id: "internal-1", youtube_video_id: "//outside.example" },
+    { id: "//outside.example", youtube_video_id: null },
+    { id: "../path", youtube_video_id: "javascript:alert(1)" },
+  ];
+  for (const item of videos) {
+    assert.equal(spaVideoPageHref(item), videoPageHref(item));
+    assert.equal(spaEventVideoPageHref(item, "lib-like&bad=1"),
+      eventVideoPageHref(item, "lib-like&bad=1"));
+    assert.equal(new URL(spaVideoPageHref(item), site).origin, site);
+    assert.equal(new URL(spaEventVideoPageHref(item, "lib-like&bad=1"), site).origin, site);
+  }
+
+  const sources = [
+    ["apps/app/src/routes/dashboard/Library.tsx",
+      "eventVideoPageHref(firstVideo, playlistId)", "eventVideoPageHref(video, playlistId)"],
+    ["apps/app/src/routes/ui/ChapterItems.tsx", "href={videoPageHref({ id: chapter.video_id"],
+    ["app/(auth)/dashboard/library/page.tsx",
+      "eventVideoPageHref(firstVideo, playlistId)", "eventVideoPageHref(video, playlistId)",
+      "href={videoPageHref({ id: chapter.video_id"],
+    ["app/(auth)/dashboard/page.tsx", "href={videoPageHref({ id: chapter.video_id"],
+    ["src/components/admin/AdminVideoMembersForm.tsx", "href={videoPageHref(video)}"],
+  ];
+  for (const [path, ...safeCalls] of sources) {
+    const source = fs.readFileSync(path, "utf8");
+    for (const call of safeCalls) {
+      assert.ok(source.includes(call), `${path} missing same-origin route: ${call}`);
+    }
+  }
+});
+
+test("MIG-0510: video detail metadata and Astro related cards use safe routes", () => {
+  // Metadata and VideoObject JSON-LD must not advertise an external canonical
+  // when a broken legacy youtube_video_id begins with slash.
+  const nextPage = fs.readFileSync("app/(public)/[id]/page.tsx", "utf8");
+  const astroVideo = fs.readFileSync("apps/site/src/lib/videoPage.ts", "utf8");
+  assert.ok(nextPage.includes("const videoPath = videoPageHref(video);"));
+  assert.ok(nextPage.includes("url: absoluteUrl(videoPageHref(video)),"));
+  assert.ok(astroVideo.includes("const canonicalSlug = youtubeId ?? video.id;"),
+    "Astro canonical slug must use a normalized 11-char YouTube ID, never a raw URL");
+  assert.ok(astroVideo.includes("href: videoPageHref(r),"),
+    "Astro related cards must not interpolate an unchecked ID");
+
+  const site = "https://flamenode.net";
+  for (const bad of ["/evil.example", "//evil.example", "javascript:alert(1)", "https://evil.example/watch?v=AAAAAAAAAAA"]) {
+    const href = videoPageHref({ id: "safe_internal", youtube_video_id: bad });
+    assert.equal(href, "/safe_internal");
+    assert.equal(new URL(href, site).origin, site);
+  }
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }),
+    "/AAAAAAAAAAA");
+});
+
+test("regression: admin, edit and event management detail links validate YouTube aliases", () => {
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "/outside.example" }), "/safe_internal");
+  assert.equal(videoPageHref({ id: "/unsafe-internal", youtube_video_id: "/outside.example" }), "/list");
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "https://youtu.be/AAAAAAAAAAA" }), "/AAAAAAAAAAA");
+
+  for (const filename of [
+    "app/(admin)/admin/youtube-sync/page.tsx",
+    "app/(admin)/admin/videos/[id]/page.tsx",
+    "app/(auth)/dashboard/edit/[id]/page.tsx",
+    "app/(manage)/manage/events/[id]/videos/[videoId]/page.tsx",
+  ]) {
+    const source = fs.readFileSync(new URL("../" + filename, import.meta.url), "utf8");
+    assert.ok(source.includes("href={videoPageHref("), filename + " must use checked same-origin video href");
+    assert.ok(!source.includes("href={`/${youtubeVideoId"), filename + " must not interpolate a raw YouTube alias");
+  }
+  const videoForm = fs.readFileSync(new URL("../src/components/forms/VideoForm.tsx", import.meta.url), "utf8");
+  assert.ok(videoForm.includes('href={videoPageHref({ id: result.videoId ?? "", youtube_video_id: result.youtubeVideoId })}'));
+  assert.ok(!videoForm.includes('href={`/${result.youtubeVideoId'));
+  assert.equal(videoPageHref({ id: "safe_internal", youtube_video_id: "//outside.example" }), "/safe_internal");
+  assert.equal(videoPageHref({ id: "/unsafe", youtube_video_id: "//outside.example" }), "/list");
+  const adminTabs = fs.readFileSync(new URL("../src/components/admin/AdminVideoTabs.tsx", import.meta.url), "utf8");
+  assert.ok(adminTabs.includes("href: videoPageHref({ id: videoId, youtube_video_id: youtubeVideoId })"));
+  assert.ok(!adminTabs.includes("const publicId = encodeURIComponent"));
 });

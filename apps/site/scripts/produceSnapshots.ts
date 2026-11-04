@@ -39,7 +39,7 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
-import { D1_HTTP_ENV, openD1HttpReader } from "./readPublicData.ts";
+import { D1_HTTP_ENV, MAX_D1_HTTP_STATEMENTS_OVERRIDE, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
 import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
@@ -159,13 +159,13 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 }
 
 /** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
-export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
+export const DEFAULT_MAX_REMOTE_STATEMENTS = MAX_D1_HTTP_STATEMENTS_OVERRIDE;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
 function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
   return {
     prepare(sql: string) {
-      if (!/^\s*(SELECT|WITH)\b/i.test(sql) || sql.trim().replace(/;\s*$/, "").includes(";")) {
+      if (!isReadOnlyStatement(sql)) {
         throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
       }
       counter.n += 1;
@@ -270,11 +270,44 @@ async function allRows(db: D1Like, sql: string, ...values: unknown[]): Promise<R
   return (await stmt.all()).results ?? [];
 }
 
+// CURRENT's static generators call Date.now() directly. A build with --now
+// temporarily overrides that process-global function; concurrent producers
+// must not overlap or a run can stamp another generation's timestamps.
+let snapshotProducerTail: Promise<void> = Promise.resolve();
+
 export async function produceSnapshots(input: ProduceInput): Promise<ProduceResult> {
+  // Programmatic callers bypass the CLI's --now validation. Reject malformed
+  // clocks before entering the queue or touching D1/the temporary SQLite DB.
+  // Date's TimeClip range ends at 8.64e15 ms, below MAX_SAFE_INTEGER.
+  // CURRENT's generators call new Date(nowSec * 1000), not just Date.now().
+  const maxDateUnixSec = 8_640_000_000_000;
+  if (input.nowSec !== undefined &&
+      (!Number.isSafeInteger(input.nowSec) || input.nowSec < 0 || input.nowSec > maxDateUnixSec)) {
+    throw new RangeError("snapshot nowSec must be a nonnegative integer within JavaScript Date range");
+  }
+  const previous = snapshotProducerTail;
+  let release!: () => void;
+  snapshotProducerTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await produceSnapshotsExclusive(input);
+  } finally {
+    // Release even when a generator throws, so subsequent builds cannot hang.
+    release();
+  }
+}
+
+async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceResult> {
   const started = performance.now();
   const counter = { n: 0 };
   const batched = input.mode === "batched";
   const maxRemote = input.maxRemoteStatements ?? DEFAULT_MAX_REMOTE_STATEMENTS;
+  // The local overlay also has an independent statement fence. Validate before
+  // opening scratch DBs or executing a remote SELECT; NaN/Infinity would evade
+  // counter.n > maxRemote just as they did in the REST reader.
+  if (batched && (!Number.isSafeInteger(maxRemote) || maxRemote < 1 || maxRemote > DEFAULT_MAX_REMOTE_STATEMENTS)) {
+    throw new RangeError(`batched snapshot statement budget must be an integer from 1 to ${DEFAULT_MAX_REMOTE_STATEMENTS}`);
+  }
   const remote = batched ? limitedDb(input.db, counter, maxRemote) : countingDb(input.db, counter);
   const generatorDb = batched ? overlayDb(remote, input.scratch ?? (await openMigratedScratch())) : remote;
   const { env, objects } = captureEnv(generatorDb);
@@ -420,7 +453,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       },
     };
   } finally {
-    Date.now = realNow;
+    if (input.nowSec !== undefined) Date.now = realNow;
   }
 }
 
