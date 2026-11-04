@@ -2,6 +2,7 @@
 import * as React from "react";
 import type { CostGuardBannerResponse } from "../../api/adminBanner.js";
 import { fetchCostGuardBanner } from "../../api/adminBanner.js";
+import { loadOperationMode } from "../../api/operationMode.js";
 import { useApiResult } from "../../routes/useApiResult.js";
 
 type VisibleMode = Exclude<CostGuardBannerResponse["mode"], "normal">;
@@ -25,21 +26,21 @@ export const COST_GUARD_TONE: Record<VisibleMode, typeof WARNING & { label: stri
 };
 
 export function CostGuardBannerView({
-  mode, reason,
-}: CostGuardBannerResponse): React.ReactElement | null {
+  mode, reason, source = "admin",
+}: CostGuardBannerResponse & { source?: "admin" | "manage" }): React.ReactElement | null {
   if (mode === "normal") return null;
   const tone = COST_GUARD_TONE[mode];
   return (
     <div
       role="status"
       aria-live="polite"
-      className="cost-guard-banner"
+      className={source === "manage" ? "costguard-banner" : "cost-guard-banner"}
       style={{ background: tone.bg, borderBottomColor: tone.border, color: tone.color }}
     >
-      <div className="fn-public-container cost-guard-banner-inner">
+      <div className={source === "manage" ? "fn-public-container costguard-inner" : "fn-public-container cost-guard-banner-inner"}>
         <strong>{tone.label}:</strong>
         <span>{tone.description}</span>
-        {reason ? <em className="cost-guard-banner-reason">(理由: {reason})</em> : null}
+        {reason ? <em className={source === "manage" ? "costguard-reason" : "cost-guard-banner-reason"}>(理由: {reason})</em> : null}
       </div>
     </div>
   );
@@ -51,10 +52,13 @@ const defaultFetch = (input: string, init?: RequestInit): Promise<Response> => f
 export function CostGuardBanner({
   source = "admin", fetchFn = defaultFetch,
 }: {
-  source?: "admin";
+  source?: "admin" | "manage";
   fetchFn?: (input: string, init?: RequestInit) => Promise<Response>;
 }): React.ReactElement | null {
-  const state = useApiResult((signal) => fetchCostGuardBanner(fetchFn, signal), "cost-guard-banner:" + source);
+  const state = useApiResult(
+    (signal) => source === "manage" ? loadOperationMode(fetchFn, signal) : fetchCostGuardBanner(fetchFn, signal),
+    "cost-guard-banner:" + source,
+  );
   if (state.status !== "ok") return null;
-  return <CostGuardBannerView mode={state.data.mode} reason={state.data.reason} />;
+  return <CostGuardBannerView source={source} mode={state.data.mode} reason={state.data.reason} />;
 }
