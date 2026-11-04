@@ -146,7 +146,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
             aria-current={status === key ? "page" : undefined}
           >
             {label}
-            {key === "pending" || key === "processing" || key === "failed"
+            {!data.error && (key === "pending" || key === "processing" || key === "failed")
               ? ` (${key === "failed" ? counts.failed + deadLetterCount : key === "pending" ? counts.pending : counts.processing})`
               : ""}
           </Link>
