@@ -114,6 +114,8 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   let disposed = false;
   let presenceLoaded = false;
   let presenceRunning = false;
+  // A pending presence response can also predate an Active X switch.
+  let presenceRevision = 0;
   let detailsRequested = false;
   let detailsRunning = false;
   // Responses started before an Active X switch must never become current menu data.
@@ -183,10 +185,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   async function loadPresence(): Promise<void> {
     if (presenceLoaded || presenceRunning || disposed) return;
     presenceRunning = true;
+    const revision = presenceRevision;
     set({ loading: true });
     const result = await getJson<AccountPresenceResponse>("/api/account/summary?view=presence");
     presenceRunning = false;
     if (disposed) return;
+    if (revision !== presenceRevision) {
+      // An Active X switch invalidated this response, including logged-out answers.
+      // Re-fetch after the old request releases the running guard.
+      void loadPresence();
+      return;
+    }
     // CURRENT keeps an already shown user when a later check fails (preserveLoggedInOnFailure).
     if (result.status === "failed" || (!result.body.loggedIn && result.body.unavailable)) {
       set({ loading: false, unavailable: true });
@@ -246,6 +255,7 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
 
   // CURRENT: an Active X change invalidates the details and fetches them again.
   const onActiveXChanged = () => {
+    if (!presenceLoaded) presenceRevision += 1;
     detailsRevision += 1;
     detailsRequested = true;
     set({ details: null, detailsUnavailable: false });
