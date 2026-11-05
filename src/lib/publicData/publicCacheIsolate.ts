@@ -99,6 +99,13 @@ export function writePublicJsonIsolateCache(
     PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
     Math.max(1, Math.floor(ttlSeconds)),
   );
+  const expiresAtMs = nowMs + ttlSec * 1000;
+  // Reject timestamps whose expiry overflows the safe integer range; otherwise
+  // a rounded/Infinity deadline could outlive the intended bounded TTL.
+  if (!Number.isSafeInteger(nowMs) || !Number.isSafeInteger(expiresAtMs)) {
+    deleteEntry(r2Key);
+    return;
+  }
   deleteEntry(r2Key);
   while (
     isolateJsonCache.size >= PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES ||
@@ -109,7 +116,7 @@ export function writePublicJsonIsolateCache(
   }
   isolateJsonCache.set(r2Key, {
     value: payload,
-    expiresAtMs: nowMs + ttlSec * 1000,
+    expiresAtMs,
     byteWeight: safeByteWeight,
   });
   isolateJsonCacheBytes += safeByteWeight;
