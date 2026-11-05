@@ -201,7 +201,15 @@ export function profileHeaderSocialLinks(
       const parsed = new URL(link.url);
       const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
       if (host !== "x.com" && host !== "twitter.com") return true;
-      const path = parsed.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
+      const encodedPath = parsed.pathname.replace(/^\/+|\/+$/g, "");
+      // URL.pathname preserves percent escapes. Decode before comparing X handles,
+      // otherwise /%66lamenode and /flamenode are treated as different accounts.
+      let path: string;
+      try {
+        path = decodeURIComponent(encodedPath).toLowerCase();
+      } catch {
+        return true; // Keep malformed links rather than hiding unrelated URLs.
+      }
       return path !== primaryXHandle;
     } catch {
       return true;
