@@ -80,6 +80,31 @@ test("MIG-0718 U01 T02: reject malformed or huge reason before rendering", async
   })).api.getBanner(), { mode: "maintenance", reason: "x".repeat(2048) });
 });
 
+test("MIG-0718 U01 T02: non-JSON Content-Type never drives a banner", async () => {
+  const payload = JSON.stringify({ mode: "maintenance", reason: "proxy text" });
+  for (const contentType of ["text/plain", "text/html", "application/jsonp", "application/x-json"]) {
+    let cancelled = false;
+    const stream = new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode(payload)); },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const response = new Response(stream, {
+      status: 200,
+      headers: { "content-type": contentType },
+    });
+    assert.equal(await client(response).api.getBanner(), null, contentType);
+    assert.equal(cancelled, true, "rejected MIME body must be canceled");
+  }
+  const missingType = new Response(payload, { status: 200 });
+  assert.equal(await client(missingType).api.getBanner(), null);
+  const valid = new Response(payload, {
+    status: 200, headers: { "content-type": "Application/JSON; charset=utf-8" },
+  });
+  assert.deepEqual(await client(valid).api.getBanner(), {
+    mode: "maintenance", reason: "proxy text",
+  });
+});
+
 test("MIG-0718 U01 T03: announced oversized body is rejected before reading", async () => {
   let started = 0;
   const stream = new ReadableStream({
