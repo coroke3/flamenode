@@ -421,6 +421,39 @@ test("T05 index Island: ?q= ?sort= ?page= are applied from /user/index.json like
   }
 });
 
+test("MIG-0504: Astro Island handles duplicate page keys like CURRENT without losing valid pagination", { skip: skipUi }, async () => {
+  const entries = Array.from({ length: 96 }, (_, i) => ({
+    x_id: `user${String(i).padStart(3, "0")}`,
+    x_name: `User ${String(i).padStart(3, "0")}`,
+    icon_url: null, personal_count: 0, collab_count: 0,
+    total_works: 0, sort_score: 96 - i,
+  }));
+  const props = {
+    initial: views.computeUsersIndexView(entries, "", "score", 1),
+    unavailable: false,
+    indexUrl: "/user/index.json",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => entries });
+  const firstCreatorHref = (container) => container.querySelector(".cr-icons a")?.getAttribute("href");
+  try {
+    for (const [query, expected] of [
+      ["?sort=name&page=2&page=3", "/user/user000"],
+      ["?sort=name&page=2&page=2", "/user/user000"],
+      ["?sort=name&page=2", "/user/user048"],
+    ]) {
+      const mounted = await mountIsland(`https://flamenode.net/user${query}`, h(UsersIndexIsland, props));
+      try {
+        assert.equal(firstCreatorHref(mounted.container), expected, query);
+      } finally {
+        await act(async () => mounted.root.unmount());
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function envelope(key, payload, generation = "g1", over = {}) {
   return JSON.stringify({ schemaVersion: 1, generation, key, visibility: "public", sha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), payload, ...over });
 }
