@@ -1383,8 +1383,8 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
-| `packages/server-core/src/auth/redirect.ts` | HELPER | MIG-0802 U01 extracted CURRENT Auth.js redirect callback semantics; configured-origin only | MIG-0802 | SAME (shared Next / PoC helper, no new runtime mount) | IN_PROGRESS | PR#471 TEST=packages/server-core/test/authRedirect.test.mjs + CURRENT authBaseline.characterization.test.mjs CI=pending |
-| `packages/server-core/test/authRedirect.test.mjs` | TEST | MIG-0802 U01 original Auth.js redirect semantics under safe / cross-origin input | MIG-0802 | SAME (nonproduction parity test) | IN_PROGRESS | PR#471 TEST=node --test --experimental-strip-types packages/server-core/test/authRedirect.test.mjs CI=pending |
+| `packages/server-core/src/auth/redirect.ts` | HELPER | MIG-0802 U01 extracted CURRENT Auth.js redirect callback semantics; configured-origin only | MIG-0802 | SAME (shared Next / PoC helper, no new runtime mount) | IN_PROGRESS | PR#471 SHA=f77da83eec9284110179686cbe3cecbed0dd6896 TEST=packages/server-core/test/authRedirect.test.mjs + CURRENT authBaseline.characterization.test.mjs CI=pending |
+| `packages/server-core/test/authRedirect.test.mjs` | TEST | MIG-0802 U01 original Auth.js redirect semantics under safe / cross-origin input | MIG-0802 | SAME (nonproduction parity test) | IN_PROGRESS | PR#471 SHA=f77da83eec9284110179686cbe3cecbed0dd6896 TEST=node --test --experimental-strip-types packages/server-core/test/authRedirect.test.mjs CI=pending |
 
 ## Future files requiring source/target registration
 
