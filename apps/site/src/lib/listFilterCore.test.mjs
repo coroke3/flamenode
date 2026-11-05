@@ -41,3 +41,11 @@ test("RH-032 still rejects non-public rows and mismatched page numbers", () => {
   assert.equal(decodePublicList(payload(1, 25, [dto("one")]), query), null);
   assert.equal(decodePublicList(payload(2, 25, [{ ...dto("one"), status: "private" }]), query), null);
 });
+
+test("RH-032 refuses duplicate public video IDs within the same result page", () => {
+  const first = listQueryFromSearch("");
+  assert.equal(decodePublicList(payload(1, 2, [dto("one"), dto("one")]), first), null);
+  assert.equal(decodePublicList(payload(1, 2, [dto("one"), dto("two")]), first)?.videos.length, 2);
+  const second = listQueryFromSearch("?page=2");
+  assert.equal(decodePublicList(payload(2, 26, [dto("one"), dto("one")]), second), null);
+});
