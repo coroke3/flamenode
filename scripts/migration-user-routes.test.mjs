@@ -255,6 +255,7 @@ test("T05 (G03) /user query keys: q, sort, page match CURRENT for value, empty a
 test("MIG-0504 regression: /user page query requires full decimal number in CURRENT and Astro", () => {
   for (const [raw, expected] of [
     [null, 1], [undefined, 1], ["", 1], ["  ", 1],
+    [["2", "3"], 1], [{ page: "2" }, 1], [2, 1], [true, 1],
     ["1", 1], ["2", 2], [" 2 ", 2], ["0002", 2],
     ["2abc", 1], ["3.5", 1], ["2e2", 1], ["+2", 1],
     ["-2", 1], ["0", 1], ["０２", 1], ["2\\n", 1],
