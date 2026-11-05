@@ -23,8 +23,8 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
       h("summary", null, "絞り込み", " ", h("span", { className: "muted t-sm" }, filterCount ? `${filterCount}件適用中` : "条件なし")),
       h("form", { action: "/list", method: "get", className: "fn-list-toolbar lv-filter-form", role: "search",
         onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => {
-          // Windows IME may report Process/keyCode 229 instead of Enter during conversion.
-          // Do not submit until the composition has been committed.
+          // Suppress Enter used to confirm IME conversion, but never prevent normal
+          // composition/Process keystrokes (that would break Japanese input).
           if (shouldSuppressListSearchKeydown(event.nativeEvent)) {
             event.preventDefault();
           }
