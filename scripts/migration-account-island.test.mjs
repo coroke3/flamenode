@@ -102,6 +102,30 @@ test("network failure and a non-ok status are unavailable too; request is no-sto
   await b.unmount();
 });
 
+test("malformed successful JSON does not leave presence or details loading unresolved", async () => {
+  for (const malformed of [null, [], "unexpected", 123, true]) {
+    const presence = await setup({
+      "/api/account/summary?view=presence": json(malformed),
+    });
+    assert.ok(button(presence.container, "ログイン状態を再確認"), String(malformed));
+    assert.equal(presence.store.getState().loading, false);
+    assert.equal(presence.store.getState().unavailable, true);
+    await presence.unmount();
+
+    const details = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(details.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(details.store.getState().detailsLoading, false, String(malformed));
+    assert.equal(details.store.getState().detailsUnavailable, true, String(malformed));
+    assert.equal(details.store.getState().details, null);
+    assert.ok(button(details.container, "再試行"));
+    await details.unmount();
+  }
+});
+
 test("logged in: presence only until the menu opens; presence never shows management links", async () => {
   let release;
   const gate = new Promise((r) => (release = r));
