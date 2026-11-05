@@ -5,6 +5,7 @@ import {
   resolveYoutubeDailyQuotaUnits,
   youtubeDailyBudgetUnits,
 } from "./quotaPolicy.ts";
+import { reserveYoutubeQuota } from "../../../workers/youtube-sync/quotaBudget.ts";
 
 test("valid decimal daily quotas retain the existing 80% policy", () => {
   for (const [raw, expected] of [
@@ -30,4 +31,22 @@ test("malformed quota env values cannot be partially parsed into larger Worker b
     assert.equal(youtubeDailyBudgetUnits(raw), 8_000, raw);
   }
   assert.equal(resolveYoutubeDailyQuotaUnits("0".repeat(27) + "20000"), 20_000);
+});
+
+
+test("malformed configured quota cannot trigger an 8,001-unit Worker reservation or D1 write", async () => {
+  let prepares = 0;
+  const db = {
+    prepare() {
+      prepares += 1;
+      throw new Error("unexpected D1 statement");
+    },
+  };
+  const result = await reserveYoutubeQuota(
+    { DB: db, YOUTUBE_DAILY_QUOTA_LIMIT: "25000oops" },
+    8_001,
+    1_752_388_800,
+  );
+  assert.equal(result, null);
+  assert.equal(prepares, 0);
 });
