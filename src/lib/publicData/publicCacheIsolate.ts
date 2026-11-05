@@ -55,6 +55,8 @@ export function readPublicJsonIsolateCache(
   r2Key: string,
   nowMs = Date.now(),
 ): unknown | null {
+  // Invalid clocks must never bypass expiry or refresh the LRU entry.
+  if (!Number.isFinite(nowMs)) return null;
   pruneExpiredEntries(nowMs);
   const entry = isolateJsonCache.get(r2Key);
   if (!entry) return null;
@@ -72,6 +74,11 @@ export function writePublicJsonIsolateCache(
   nowMs = Date.now(),
 ): void {
   if (payload == null || isPromiseLike(payload)) return;
+  // NaN comparison is always false; a cached entry with NaN expiration would never expire.
+  if (!Number.isFinite(nowMs)) {
+    deleteEntry(r2Key);
+    return;
+  }
   pruneExpiredEntries(nowMs);
   const safeByteWeight = Math.floor(byteWeight);
   if (
