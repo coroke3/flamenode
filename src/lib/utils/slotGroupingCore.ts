@@ -147,6 +147,29 @@ function buildReservationGroupIndex(rows: SlotBase[]): Map<string, SlotBase[]> {
   return grouped;
 }
 
+/**
+ * Keep the per-slot display annotation in sync with the collapsed group.
+ * A partial/corrupt reservation group must not expose owner-only UI actions.
+ */
+function reservationGroupIntegrityError(
+  groupRows: readonly SlotBase[],
+): SlotIntegrityError | null {
+  const statuses = new Set(groupRows.map((candidate) => candidate.status));
+  if (statuses.size > 1) return "mixed_status";
+
+  const relations = groupRows
+    .map((candidate) => candidate.viewer_relation)
+    .filter((relation): relation is SlotViewerRelation => relation != null);
+  const distinctRelations = new Set(relations);
+  // active + unassigned supports the server's null-adoption behavior.
+  const actorOnly = [...distinctRelations].every(
+    (relation) => relation === "active" || relation === "unassigned",
+  );
+  return distinctRelations.size > 1 && !actorOnly
+    ? "mixed_viewer_relation"
+    : null;
+}
+
 export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] {
   const sorted = sortSlotsChronologically(rows);
   const grouped = buildReservationGroupIndex(rows);
@@ -171,6 +194,7 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
     const last = groupRows.at(-1) ?? first;
     const groupPosition =
       groupRows.findIndex((candidate) => candidate.id === row.id) + 1;
+    const integrity_error = reservationGroupIntegrityError(groupRows);
     return {
       ...row,
       group_id: groupId,
@@ -180,7 +204,10 @@ export function annotateReservationGroups(rows: SlotBase[]): SlotAnnotatedRow[] 
       group_first_slot_id: first.id,
       group_last_slot_id: last.id,
       is_group: groupRows.length > 1,
-      integrity_error: null,
+      // Mixed-status, mixed-account and partially owned groups are not operable.
+      is_owned_by_viewer: integrity_error === null &&
+        groupRows.every((candidate) => candidate.is_owned_by_viewer),
+      integrity_error,
     };
   });
 }
@@ -215,29 +242,7 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
     const hasSubmitted = groupRows.some(
       (candidate) => candidate.status === "submitted",
     );
-    const statuses = new Set(groupRows.map((candidate) => candidate.status));
-    const status = hasSubmitted
-      ? "submitted"
-      : hasReserved
-        ? "reserved"
-        : "available";
-    let integrity_error: SlotIntegrityError | null = null;
-    if (statuses.size > 1) {
-      integrity_error = "mixed_status";
-    } else {
-      const relations = groupRows
-        .map((candidate) => candidate.viewer_relation)
-        .filter((relation): relation is SlotViewerRelation => relation != null);
-      const distinctRelations = new Set(relations);
-      // active+unassigned は Server の null adoption と両立するため integrity エラーにしない。
-      // account_other / none との混在のみ安全側に倒す。
-      const actorOnly = [...distinctRelations].every(
-        (relation) => relation === "active" || relation === "unassigned",
-      );
-      if (distinctRelations.size > 1 && !actorOnly) {
-        integrity_error = "mixed_viewer_relation";
-      }
-    }
+    const integrity_error = reservationGroupIntegrityError(groupRows);
     const resolvedViewerRelation = (() => {
       const relations = groupRows
         .map((candidate) => candidate.viewer_relation)
