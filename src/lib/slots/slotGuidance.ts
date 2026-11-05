@@ -9,13 +9,11 @@ export function resolveSlotIntervalSec(args: {
   partGapSec: number;
 }): number | null {
   const explicit = Number(args.explicitMinutes);
-  const explicitSeconds = Math.round(explicit * 60);
-  if (
-    Number.isFinite(explicit) && explicit > 0 &&
-    Number.isSafeInteger(explicitSeconds) &&
-    explicitSeconds >= 1 && explicitSeconds <= MAX_SLOT_INTERVAL_SECONDS
-  ) {
-    return explicitSeconds;
+  // eventForm.slot_interval_minutes is an integer in [1, 1440].
+  // Never trust a fractional or out-of-contract legacy value merely because
+  // its conversion into seconds happens to round to a positive integer.
+  if (Number.isSafeInteger(explicit) && explicit >= 1 && explicit <= 1440) {
+    return explicit * 60;
   }
 
   const times = args.slots
