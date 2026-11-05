@@ -476,6 +476,33 @@ test("MIG-0734 notification cancel sends the reason (optional) and keeps the dia
   });
 });
 
+test("MIG-0734 notification cancel locks the audited reason during an in-flight write and unlocks on error",async()=>{
+  await inDom(async(dom,root)=>{
+    const calls=[];
+    let finishWrite;
+    const api={cancel:(id,reason)=>{
+      calls.push({id,reason});
+      return new Promise(resolve=>{finishWrite=resolve;});
+    }};
+    await React.act(async()=>root.render(h(NotificationCancelButton,{id:"n1",api,onSuccess:()=>{}})));
+    await React.act(async()=>byText(dom,"キャンセル").click());
+    const reason=dom.window.document.querySelector('[aria-label="キャンセル理由 (任意)"]');
+    await type(dom,reason,"監査理由A");
+    await React.act(async()=>byText(dom,"確定").click());
+    assert.deepEqual(calls,[{id:"n1",reason:"監査理由A"}]);
+    assert.equal(reason.disabled,true,"the displayed audit reason is locked while POST is pending");
+    assert.equal(byText(dom,"確定").disabled,true,"a pending mutation cannot be submitted again");
+    await React.act(async()=>finishWrite({ok:false,message:"キャンセルできません。"}));
+    assert.equal(reason.disabled,false,"failed write must allow editing and retry");
+    assert.equal(reason.value,"監査理由A","the pending write must not silently change the reason");
+    assert.match(dom.window.document.querySelector('[role="status"]').textContent,/キャンセルできません/);
+    await type(dom,reason,"監査理由B");
+    await React.act(async()=>byText(dom,"確定").click());
+    assert.deepEqual(calls,[{id:"n1",reason:"監査理由A"},{id:"n1",reason:"監査理由B"}]);
+    await React.act(async()=>finishWrite({ok:false,message:"再試行に失敗しました。"}));
+  });
+});
+
 test("MIG-0734 notification payload dialog traps Tab and restores trigger focus on Escape and close",async()=>{
   await inDom(async(dom,root)=>{
     await React.act(async()=>root.render(h(NotificationPayloadButton,{payload:'{"content":"test"}'})));

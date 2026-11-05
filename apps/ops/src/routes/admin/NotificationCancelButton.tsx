@@ -51,6 +51,7 @@ export function NotificationCancelButton({ id, api, onSuccess }: {
           <input
             className="fn-input fn-input-sm"
             value={reason}
+            disabled={busy}
             onChange={(e) => setReason(e.target.value)}
             placeholder="理由 (任意)"
             aria-label="キャンセル理由 (任意)"
