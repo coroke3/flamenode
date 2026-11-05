@@ -103,6 +103,27 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("isolate cache は安全整数範囲外の有効期限を保存しない", () => {
+    const payload = { id: "safe" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "overflow-clock.json";
+    for (const clock of [
+      Number.MAX_VALUE,
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER - 999,
+      1234.5,
+    ]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, weight, 1_000_000);
+      writePublicJsonIsolateCache(key, { id: "bad" }, 30, weight, clock);
+      assert.equal(readPublicJsonIsolateCache(key, 1_000_000), null, `clock=${String(clock)}`);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache(key, payload, 1, weight, Number.MAX_SAFE_INTEGER - 1000);
+    assert.deepEqual(readPublicJsonIsolateCache(key, Number.MAX_SAFE_INTEGER - 1), payload);
+    assert.equal(readPublicJsonIsolateCache(key, Number.MAX_SAFE_INTEGER), null);
+  });
+
   test("isolate cache は単一entryのserialized byte上限を超えるpayloadを保持しない", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 3_000_000;
