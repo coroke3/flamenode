@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodePublicList, listQueryFromSearch } from "./listFilterCore.ts";
+import { decodePublicList, listQueryFromSearch, shouldSuppressListSearchKeydown } from "./listFilterCore.ts";
 
 const dto = (id) => ({
   id, title: "公開作品", youtube_video_id: null, display_name: "作者",
@@ -48,4 +48,18 @@ test("RH-032 refuses duplicate public video IDs within the same result page", ()
   assert.equal(decodePublicList(payload(1, 2, [dto("one"), dto("two")]), first)?.videos.length, 2);
   const second = listQueryFromSearch("?page=2");
   assert.equal(decodePublicList(payload(2, 26, [dto("one"), dto("one")]), second), null);
+});
+
+test("list search blocks IME composition, Process and legacy Windows keyCode 229", () => {
+  for (const input of [
+    { key: "Enter", isComposing: true, keyCode: 13 },
+    { key: "Process", isComposing: false, keyCode: 0 },
+    { key: "Unidentified", isComposing: false, keyCode: 229 },
+    { key: "Enter", isComposing: false, keyCode: 229 },
+  ]) assert.equal(shouldSuppressListSearchKeydown(input), true, JSON.stringify(input));
+  for (const input of [
+    { key: "Enter", isComposing: false, keyCode: 13 },
+    { key: "a", isComposing: false, keyCode: 65 },
+    { key: "Tab", isComposing: false, keyCode: 9 },
+  ]) assert.equal(shouldSuppressListSearchKeydown(input), false, JSON.stringify(input));
 });
