@@ -131,7 +131,13 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       const fetcher = options.fetchImpl ?? fetch;
       const response = await fetcher(url, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
       if (response.status === 503 || !response.ok) return { status: "failed" };
-      return { status: "ok", body: (await response.json()) as T };
+      const body: unknown = await response.json();
+      // A 2xx response with JSON null, an array, or a scalar is not a valid
+      // RH-001 summary. Treat it as unavailable instead of dereferencing it.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return { status: "failed" };
+      }
+      return { status: "ok", body: body as T };
     } catch {
       return { status: "failed" };
     } finally {
