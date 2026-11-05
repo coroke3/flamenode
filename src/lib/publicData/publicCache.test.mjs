@@ -95,6 +95,20 @@ test("Cache API retention is always finite with malformed fresh/stale TTL", () =
   }
 });
 
+test("Cache API writer normalizes TTL before isolate and edge-cache writes", () => {
+  const start = source.indexOf("export function writePublicJsonCacheBestEffort(");
+  const end = source.indexOf("// MIG-0614:", start);
+  assert.ok(start >= 0 && end > start);
+  const writer = source.slice(start, end);
+  assert.match(writer, /const safeTtl = publicJsonCacheRetentionTtl\\(ttlSeconds\\)/);
+  assert.match(
+    writer,
+    /writePublicJsonIsolateCache\\(\\s*r2Key,\\s*payload,\\s*safeTtl,/,
+  );
+  assert.match(writer, /`public, max-age=\\$\\{safeTtl\\}`/);
+  assert.doesNotMatch(writer, /Math\\.floor\\(ttlSeconds\\)/);
+});
+
 test("Cache API retention covers the entire configured stale window", () => {
   assert.equal(publicJsonCacheRetentionTtl(60, 600), 600);
   assert.equal(publicJsonCacheRetentionTtl(600, 60), 600);

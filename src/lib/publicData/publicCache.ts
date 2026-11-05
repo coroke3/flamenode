@@ -225,6 +225,8 @@ export function writePublicJsonCacheBestEffort(
   try {
     const serialized = JSON.stringify(payload);
     if (typeof serialized !== "string") return;
+    // Normalize at the write boundary, even for direct callers that bypass the loader.
+    const safeTtl = publicJsonCacheRetentionTtl(ttlSeconds);
     const isolateByteWeight = utf8ByteLengthUpTo(
       serialized,
       PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
@@ -234,7 +236,7 @@ export function writePublicJsonCacheBestEffort(
       writePublicJsonIsolateCache(
         r2Key,
         payload,
-        ttlSeconds,
+        safeTtl,
         isolateByteWeight,
       );
     }
@@ -246,7 +248,6 @@ export function writePublicJsonCacheBestEffort(
     const waitUntil = resolveWaitUntil();
     if (!waitUntil) return;
 
-    const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     // Cache miss/R2 hit時だけ通るbackground write。readerと同じUTF-8 byte上限を
     // allocation-freeに数え、巨大entryをCache APIへ渡さない。
     if (utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)) return;
