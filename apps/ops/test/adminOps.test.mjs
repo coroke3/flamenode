@@ -919,7 +919,7 @@ test("MIG-0734 notifications view ports CURRENT row content: recipient, summary,
   assert.match(text,/evt_abcdef…/);
   assert.match(text,/href="\/admin\/audit\?table=notification_outbox&amp;record=n1"/);
   // Preserve CURRENT's audit tooltip without extending the shared OpsLink API.
-  assert.match(text,/<span title="この通知の監査ログ"><a[^>]*aria-label="この通知の監査ログ"[^>]*>監査<\\/a><\\/span>/);
+  assert.match(text,/<span title="この通知の監査ログ"><a[^>]*aria-label="この通知の監査ログ"[^>]*>監査<\/a><\/span>/);
   assert.match(text,/失敗 1 件 \/ dead_letter 1 件/);
   assert.match(text,/failed を一括リトライ \(上限 10\)/);
   assert.match(text,/再試行/);
