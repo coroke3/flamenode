@@ -312,6 +312,55 @@ test("display name: the X name, but the account name for @handle-only names and 
   assert.equal(resolveDisplayName("  ", null, false), "guest");
 });
 
+test("Active X change during pending presence ignores stale logged-out or 503 responses", async () => {
+  for (const status of [200, 503]) {
+    let releaseOld;
+    let releaseNew;
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise((resolve) => { releaseNew = resolve; });
+    let presenceCalls = 0;
+    const store = createAccountStore({
+      fetchImpl: async (url) => {
+        if (url.includes("view=presence")) {
+          presenceCalls += 1;
+          if (presenceCalls === 1) {
+            await oldGate;
+            return status === 503
+              ? json({ view: "presence", loggedIn: false, unavailable: true }, 503)
+              : json({ view: "presence", loggedIn: false });
+          }
+          if (presenceCalls === 2) {
+            await newGate;
+            return json(presenceIn);
+          }
+          throw new Error("unexpected additional presence fetch");
+        }
+        assert.equal(url, "/api/account/summary");
+        return json(summary());
+      },
+    });
+    store.start();
+    await flush();
+    assert.equal(presenceCalls, 1);
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    releaseOld();
+    await flush();
+    assert.equal(presenceCalls, 2, "stale presence must trigger a fresh request");
+    assert.equal(store.getState().confirmedLoggedOut, false, "old identity cannot log out the new state");
+    assert.equal(store.getState().unavailable, false, "stale 503 must not surface an error");
+    assert.equal(store.getState().user, null);
+    releaseNew();
+    await flush();
+    assert.equal(store.getState().user?.name, presenceIn.displayName);
+    assert.equal(store.getState().confirmedLoggedOut, false);
+    assert.equal(store.getState().loading, false);
+    assert.equal(store.getState().details?.xIds.length, 2, "pending switch requests current details");
+    store.dispose();
+  }
+});
+
 test("Active X change during pending details drops old identity and refetches the new one", async () => {
   for (const oldStatus of [200, 503]) {
     let releaseOld;
