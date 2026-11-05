@@ -167,3 +167,17 @@ test("youtubeEmbedUrl: malformed ID remains one encoded path segment", () => {
   assert.equal(url.hash, "");
   assert.ok(youtubeEmbedUrl("dQw4w9WgXcQ").startsWith("https://www.youtube.com/embed/dQw4w9WgXcQ?"));
 });
+
+test("youtubeEmbedUrl: dot segments and malformed UTF-16 cannot escape the embed path", () => {
+  for (const id of [".", ".."]) {
+    const url = new URL(youtubeEmbedUrl(id));
+    assert.equal(url.pathname, "/embed/_");
+    assert.equal(url.searchParams.get("rel"), "0");
+  }
+  // Malformed surrogate pairs previously risked a URIError during render.
+  const malformed = "\uD800";
+  const watch = new URL(youtubeWatchUrl(malformed));
+  const embed = new URL(youtubeEmbedUrl(malformed));
+  assert.equal(watch.searchParams.get("v"), "\uFFFD");
+  assert.equal(embed.pathname, "/embed/%EF%BF%BD");
+});
