@@ -1381,8 +1381,8 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
-| `src/lib/utils/imageUpload.ts` | HELPER | CURRENT X ID / video creator icon upload PNG container validation (IDAT/IEND, chunk bounds) | MIG-0306 | SAME (CURRENT icon validation; no Hono migration claimed) | RETAINED | PR#598 SHA=c8b9f6433f80f3bc80e8005c90868b71dfdc70da TEST=node --test --experimental-strip-types src/lib/utils/imageUpload.test.mjs (incomplete PNG stream rejected; final HEAD CI required) |
-| `src/lib/utils/imageUpload.test.mjs` | TEST | CURRENT image-format inspection, malformed PNG stream and existing PNG/JPEG/WebP parity regressions | MIG-0306 | SAME (CURRENT unit tests) | RETAINED | PR#598 SHA=a417b7aafbf80cf13fafdc23da24662845df9f6e TEST=node --test --experimental-strip-types src/lib/utils/imageUpload.test.mjs (six malformed PNG cases; final HEAD CI required) |
+| `src/lib/utils/imageUpload.ts` | HELPER | CURRENT X ID / video creator icon upload PNG container validation (IDAT/IEND, chunk bounds) | MIG-0306 | SAME (CURRENT icon validation; no Hono migration claimed) | RETAINED | PR#598 SHA=c8b9f6433f80f3bc80e8005c90868b71dfdc70da TEST=node --test --experimental-strip-types src/lib/utils/imageUpload.test.mjs  CI=https://github.com/coroke3/flamenode/pull/598/checks (final-head verification required) |
+| `src/lib/utils/imageUpload.test.mjs` | TEST | CURRENT image-format inspection, malformed PNG stream and existing PNG/JPEG/WebP parity regressions | MIG-0306 | SAME (CURRENT unit tests) | RETAINED | PR#598 SHA=a417b7aafbf80cf13fafdc23da24662845df9f6e TEST=node --test --experimental-strip-types src/lib/utils/imageUpload.test.mjs  CI=https://github.com/coroke3/flamenode/pull/598/checks (final-head verification required) |
 
 ## Future files requiring source/target registration
 
