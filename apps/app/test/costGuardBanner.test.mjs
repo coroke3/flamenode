@@ -112,6 +112,34 @@ test("MIG-0718 U01 T03: chunked response over 16KiB is not buffered or displayed
   assert.equal(cancelled, true, "unfinished response body must be cancelled");
 });
 
+test("MIG-0718 U01 T03: empty-chunk flooding is bounded and cancels the stream", async () => {
+  let cancelled = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < 40; i += 1) controller.enqueue(new Uint8Array(0));
+      // Never close: a byte-only limit would wait forever after consuming empties.
+    },
+    cancel() { cancelled = true; },
+  });
+  assert.equal(await client(new Response(stream, { status: 200 })).api.getBanner(), null);
+  assert.equal(cancelled, true, "empty chunk flood must cancel unfinished response");
+});
+
+test("MIG-0718 U01 T03: small intermittent empty chunks preserve valid banner payload", async () => {
+  const expected = { mode: "maintenance", reason: "正常" };
+  const bytes = new TextEncoder().encode(JSON.stringify(expected));
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(0));
+      controller.enqueue(bytes.slice(0, 8));
+      controller.enqueue(new Uint8Array(0));
+      controller.enqueue(bytes.slice(8));
+      controller.close();
+    },
+  });
+  assert.deepEqual(await client(new Response(stream, { status: 200 })).api.getBanner(), expected);
+});
+
 test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely", async () => {
   const expected = { mode: "economy", reason: "雪\u26c4" };
   const utf8 = new TextEncoder().encode(JSON.stringify(expected));
