@@ -10,6 +10,16 @@ export const LIST_EVENT_UNAVAILABLE_MESSAGE = "このイベントの作品一覧
 export const LIST_NO_RESULTS_MESSAGE = "条件に合う作品が見つかりませんでした。条件を変えてお試しください。";
 export const LIST_SHORT_SEARCH_MESSAGE = "検索は文字・数字を2文字以上入力してください。";
 
+
+/** Prevent premature GET form submission during Japanese IME composition. */
+export function shouldSuppressListSearchKeydown(event: {
+  key: string;
+  isComposing?: boolean;
+  keyCode?: number;
+}): boolean {
+  return event.isComposing === true || event.keyCode === 229 || event.key === "Process";
+}
+
 export interface PublicVideoList {
   items: PublicVideoDto[];
   total: number;
