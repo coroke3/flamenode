@@ -16,6 +16,15 @@ export function resolveSlotIntervalSec(args: {
     return explicit * 60;
   }
 
+  // The caller converts eventForm.slot_part_gap_minutes (integer 1..1440)
+  // into seconds. An invalid legacy setting must not relax the inference cap.
+  if (
+    !Number.isSafeInteger(args.partGapSec) ||
+    args.partGapSec < 60 ||
+    args.partGapSec > MAX_SLOT_INTERVAL_SECONDS ||
+    args.partGapSec % 60 !== 0
+  ) return null;
+
   const times = args.slots
     .map((slot) => slot.start_time)
     .filter(
