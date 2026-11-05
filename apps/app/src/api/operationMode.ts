@@ -39,6 +39,8 @@ async function readBannerPayload(response: Response, signal?: AbortSignal): Prom
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const parts: string[] = [];
   let size = 0;
+  let chunksRead = 0;
+  let consecutiveEmptyChunks = 0;
   let reachedEnd = false;
   // A mocked/custom stream may ignore fetch's signal; interrupt a pending
   // reader.read() directly when a React view unmounts or changes providers.
@@ -53,6 +55,16 @@ async function readBannerPayload(response: Response, signal?: AbortSignal): Prom
         reachedEnd = true;
         break;
       }
+      // The byte budget alone cannot bound streams that repeatedly emit empty
+      // chunks; cap read/array overhead while permitting 1-byte chunked JSON.
+      chunksRead += 1;
+      if (chunksRead > MAX_BANNER_RESPONSE_BYTES + 32) return null;
+      if (value.byteLength === 0) {
+        consecutiveEmptyChunks += 1;
+        if (consecutiveEmptyChunks > 32) return null;
+        continue;
+      }
+      consecutiveEmptyChunks = 0;
       size += value.byteLength;
       if (size > MAX_BANNER_RESPONSE_BYTES) return null;
       parts.push(decoder.decode(value, { stream: true }));
