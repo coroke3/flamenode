@@ -28,7 +28,9 @@ export function resolveSlotIntervalSec(args: {
   const gaps: number[] = [];
   for (let index = 1; index < times.length; index++) {
     const gap = times[index]! - times[index - 1]!;
-    if (gap > 0 && gap <= args.partGapSec && gap <= MAX_SLOT_INTERVAL_SECONDS) gaps.push(gap);
+    // Slot timestamps represent whole seconds; fractional gaps can round to
+    // a misleading "0秒" recommendation even though they are positive.
+    if (Number.isSafeInteger(gap) && gap >= 1 && gap <= args.partGapSec && gap <= MAX_SLOT_INTERVAL_SECONDS) gaps.push(gap);
   }
   if (gaps.length === 0) return null;
   gaps.sort((a, b) => a - b);
@@ -48,7 +50,7 @@ export function formatDurationJa(seconds: number): string {
 export function buildConsecutiveSlotGuidance(
   intervalSec: number | null,
 ): string {
-  if (intervalSec == null || !Number.isFinite(intervalSec) || intervalSec <= 0 || intervalSec > MAX_SLOT_INTERVAL_SECONDS) {
+  if (intervalSec == null || !Number.isSafeInteger(intervalSec) || intervalSec < 1 || intervalSec > MAX_SLOT_INTERVAL_SECONDS) {
     return "連続枠は、1作品の尺が長い場合に利用してください。複数作品を投稿する場合は、作品ごとに別の枠を確保してください。";
   }
   const threshold = intervalSec * 0.75;
