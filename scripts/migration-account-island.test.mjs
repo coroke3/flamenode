@@ -199,6 +199,60 @@ test("display name: the X name, but the account name for @handle-only names and 
   assert.equal(resolveDisplayName("  ", null, false), "guest");
 });
 
+test("Active X change during pending details drops old identity and refetches the new one", async () => {
+  for (const oldStatus of [200, 503]) {
+    let releaseOld;
+    let releaseNew;
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise((resolve) => { releaseNew = resolve; });
+    let detailsCalls = 0;
+    const store = createAccountStore({
+      fetchImpl: async (url) => {
+        if (url.includes("view=presence")) return json(presenceIn);
+        assert.equal(url, "/api/account/summary");
+        detailsCalls += 1;
+        if (detailsCalls === 1) {
+          await oldGate;
+          return oldStatus === 503
+            ? json({ loggedIn: false, unavailable: true }, 503)
+            : json(summary({ activeXId: "otako", canAccessAdmin: true }));
+        }
+        if (detailsCalls === 2) {
+          await newGate;
+          return json(summary({
+            activeXId: "second",
+            xIds: [entry("otako", "approved", false), entry("second", "approved", true)],
+            canAccessAdmin: false, canAccessManage: true,
+          }));
+        }
+        throw new Error("unexpected additional details fetch");
+      },
+    });
+    store.start();
+    await flush();
+    store.requestDetails();
+    await flush();
+    assert.equal(detailsCalls, 1, "the first details fetch is still pending");
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    await flush();
+    assert.equal(store.getState().details, null, "old details invalidated on switch");
+    releaseOld();
+    await flush();
+    assert.equal(detailsCalls, 2, "the old response must be followed by a fresh request");
+    assert.equal(store.getState().details, null, "old response must not be shown");
+    assert.equal(store.getState().detailsUnavailable, false, "a stale 503 must not become a new-identity error");
+    releaseNew();
+    await flush();
+    assert.equal(store.getState().details?.canAccessAdmin, false);
+    assert.equal(store.getState().details?.canAccessManage, true);
+    assert.equal(store.getState().details?.xIds.find((x) => x.is_active)?.x_user_id, "second");
+    assert.equal(store.getState().detailsLoading, false);
+    store.dispose();
+  }
+});
+
 test("switching: choices are disabled without a switch action; with one it follows the CURRENT event contract", async () => {
   const routes = { "/api/account/summary?view=presence": () => json(presenceIn), "/api/account/summary": () => json(summary()) };
   const off = await setup(routes);
