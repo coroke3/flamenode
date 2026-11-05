@@ -139,6 +139,10 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       }
       const value = body as Record<string, unknown>;
       if (typeof value.loggedIn !== "boolean") return { status: "failed" };
+      // The optional unavailable marker is a literal true, not a general boolean.
+      // Treat malformed logged-out responses as retryable failures instead of
+      // incorrectly confirming logout.
+      if (value.unavailable !== undefined && value.unavailable !== true) return { status: "failed" };
       const presence = url === "/api/account/summary?view=presence";
       if (presence && value.view !== "presence") return { status: "failed" };
       if (!presence && value.loggedIn && (
