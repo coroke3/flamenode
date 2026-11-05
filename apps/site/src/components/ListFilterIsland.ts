@@ -22,7 +22,13 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
     h("details", { className: "lv-filter-panel", open: true },
       h("summary", null, "絞り込み", " ", h("span", { className: "muted t-sm" }, filterCount ? `${filterCount}件適用中` : "条件なし")),
       h("form", { action: "/list", method: "get", className: "fn-list-toolbar lv-filter-form", role: "search",
-        onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); } },
+        onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => {
+          // Windows IME may report Process/keyCode 229 instead of Enter during conversion.
+          // Do not submit until the composition has been committed.
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key === "Process") {
+            event.preventDefault();
+          }
+        } },
         h("label", { className: "fn-list-search" },
           h("span", { className: "fn-sr-only" }, "検索キーワード"),
           h("input", { type: "search", name: "q", defaultValue: query.q, placeholder: "作品を検索（2文字以上）",
