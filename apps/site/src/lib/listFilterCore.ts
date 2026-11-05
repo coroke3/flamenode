@@ -79,6 +79,9 @@ export function decodePublicList(data: unknown, query: ListQuery): { videos: Lis
   const row = data as Record<string, unknown>;
   if (!Array.isArray(row.items) || row.items.length > LIST_PAGE_SIZE ||
       !Number.isSafeInteger(row.total) || (row.total as number) < 0 ||
+      // A nonempty response cannot contain more items than its reported total.
+      // For later pages, those items must fit after all preceding page offsets.
+      (row.items.length > 0 && (row.total as number) < (query.page - 1) * LIST_PAGE_SIZE + row.items.length) ||
       !Number.isSafeInteger(row.page) || row.page !== query.page ||
       row.limit !== LIST_PAGE_SIZE || !row.items.every(isVideo)) return null;
   const videos = (row.items as PublicVideoDto[]).map(v => toListVideo({ ...v, display_name: v.display_name ?? "" }));
