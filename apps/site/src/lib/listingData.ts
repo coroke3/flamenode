@@ -18,6 +18,7 @@ import {
 } from "../../../../src/lib/publicData/staticTrendingCore.ts";
 import { LIST_FIRST_PAGE_KEY, RECOMMEND_KEY, TRENDING_KEY, loadListingPayload } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
+import { LIST_PAGE_SIZE } from "./listQuery.ts";
 
 export class ListingBuildError extends Error {
   readonly code = "LISTING_INVALID";
@@ -41,12 +42,16 @@ export const EMPTY_LISTING: ListingData = { list: null, recommend: null, trendin
 export function projectListFirstPage(payload: unknown): ListFirstPage {
   // A configured snapshot must not silently turn invalid rows or a missing
   // count into an empty listing (Number(null) and Number("") are both zero).
+  // The producer caps raw first-page rows at LIST_PAGE_SIZE; exceeding it is
+  // a broken snapshot, even if normalization would later drop rows.
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new ListingBuildError(LIST_FIRST_PAGE_KEY);
   }
   const row = payload as Record<string, unknown>;
-  if (!Array.isArray(row.videos) || typeof row.total !== "number" ||
-      !Number.isSafeInteger(row.total) || row.total < 0) {
+  if (
+    !Array.isArray(row.videos) || row.videos.length > LIST_PAGE_SIZE ||
+    typeof row.total !== "number" || !Number.isSafeInteger(row.total) || row.total < 0
+  ) {
     throw new ListingBuildError(LIST_FIRST_PAGE_KEY);
   }
   const videos = normalizePublicVideoCardList(row.videos);
