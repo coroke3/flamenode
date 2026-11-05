@@ -519,5 +519,5 @@ test("SlotGrid: 日付列・予約確認・時刻欄は0を有効な開始日時
   assert.match(grid, /const dateLabel = part\.start_time != null\s*\?/);
   assert.match(grid, /if \(slot\.start_time != null\) \{/);
   assert.match(grid, /\{slot\.start_time != null \? \(/);
-  assert.doesNotMatch(grid, /(?:part|slot)\.start_time\s*\?/);
+  assert.doesNotMatch(grid, /(?:part|slot)\.start_time\s*\?(?!\?)/);
 });
