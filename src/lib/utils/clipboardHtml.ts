@@ -5,7 +5,7 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#(x[0-9a-f]+|\\d+);/gi, (_, raw: string) => {
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, raw: string) => {
       const point = /^x/i.test(raw)
         ? Number.parseInt(raw.slice(1), 16)
         : Number(raw);
