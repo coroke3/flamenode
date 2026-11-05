@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/shuffle.ts` | HELPER | CURRENT and Astro top/recommend/nostalgic shelf Fisher-Yates copy; guard invalid random indices | MIG-0506 | SAME (shared CURRENT and Astro helper, public content presentation) | RETAINED | PR#605 SHA=bbaeba27a3f64b6c6e6e72cf4d61732fe53421d1 TEST=node --test --experimental-strip-types src/lib/utils/shuffle.test.mjs CI=https://github.com/coroke3/flamenode/pull/605/checks (invalid random sample cannot append undefined; valid Math.random parity) |
+| `src/lib/utils/shuffle.test.mjs` | TEST | CURRENT/Astro shared shuffle maintains permutation on malformed RNG boundaries | MIG-0506 | SAME (shared utility test) | RETAINED | PR#605 SHA=5f62f78ef67fba7977662160206c4f69adc78c6f TEST=node --test --experimental-strip-types src/lib/utils/shuffle.test.mjs CI=https://github.com/coroke3/flamenode/pull/605/checks |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
