@@ -29,5 +29,5 @@ test("malformed quota env values cannot be partially parsed into larger Worker b
     assert.equal(resolveYoutubeDailyQuotaUnits(raw), YOUTUBE_DEFAULT_DAILY_QUOTA_UNITS, raw);
     assert.equal(youtubeDailyBudgetUnits(raw), 8_000, raw);
   }
-  assert.equal(resolveYoutubeDailyQuotaUnits("0".repeat(28) + "20000"), 20_000);
+  assert.equal(resolveYoutubeDailyQuotaUnits("0".repeat(27) + "20000"), 20_000);
 });
