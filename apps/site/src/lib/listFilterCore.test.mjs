@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { decodePublicList, listQueryFromSearch } from "./listFilterCore.ts";
+
+const dto = (id) => ({
+  id, title: "公開作品", youtube_video_id: null, display_name: "作者",
+  icon_url: null, primary_event_id: null, scheduled_time: null, status: "public",
+});
+const payload = (page, total, items) => ({
+  page, total, items, limit: 24,
+});
+
+test("RH-032 public list rejects more returned items than reported total", () => {
+  const query = listQueryFromSearch("");
+  assert.equal(decodePublicList(payload(1, 0, [dto("one")]), query), null);
+  assert.equal(decodePublicList(payload(1, 1, [dto("one"), dto("two")]), query), null);
+  assert.equal(decodePublicList(payload(1, 1, [dto("one")]), query)?.videos.length, 1);
+  assert.equal(decodePublicList(payload(1, 0, []), query)?.totalPages, 1);
+});
+
+test("RH-032 page offsets must fit in total when page has items", () => {
+  const second = listQueryFromSearch("?page=2");
+  assert.equal(decodePublicList(payload(2, 24, [dto("one")]), second), null);
+  assert.equal(decodePublicList(payload(2, 25, [dto("one")]), second)?.totalPages, 2);
+  assert.equal(decodePublicList(payload(2, 25, [dto("one"), dto("two")]), second), null);
+  assert.equal(decodePublicList(payload(2, 100, []), second)?.videos.length, 0);
+});
+
+test("RH-032 still rejects non-public rows and mismatched page numbers", () => {
+  const query = listQueryFromSearch("?page=2");
+  assert.equal(decodePublicList(payload(1, 25, [dto("one")]), query), null);
+  assert.equal(decodePublicList(payload(2, 25, [{ ...dto("one"), status: "private" }]), query), null);
+});
