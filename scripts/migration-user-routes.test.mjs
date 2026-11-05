@@ -264,7 +264,7 @@ test("MIG-0504 regression: /user page query requires full decimal number in CURR
     assert.equal(parseUsersIndexPage(raw), expected, `shared page parser: ${JSON.stringify(raw)}`);
     assert.equal(views.parseIndexPage(raw), expected, `Astro Island parser: ${JSON.stringify(raw)}`);
   }
-  assert.match(currentIndexSource, /import \\{ parseUsersIndexPage \\} from "@\\/lib\\/publicData\\/usersIndexPage";/,
+  assert.ok(currentIndexSource.includes('import { parseUsersIndexPage } from "@/lib/publicData/usersIndexPage";'),
     "CURRENT must import the exact same shared parser");
   assert.ok(currentIndexSource.includes("const pageNum = parseUsersIndexPage(page);"),
     "CURRENT /user must call the shared parser before loading the v2 index");
