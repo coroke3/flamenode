@@ -198,6 +198,7 @@ test("listing snapshot shape: reject absent, nonarray and coercible total fields
     { videos: [], total: "" }, { videos: [], total: false },
     { videos: [], total: NaN }, { videos: [], total: Infinity },
     { videos: [], total: -1 }, { videos: [], total: 1.5 },
+    { videos: Array(25).fill(null), total: 25 }, // producer caps raw first-page rows at 24
   ];
   for (const data of malformed) {
     assert.throws(() => projectListFirstPage(data), { code: "LISTING_INVALID" },
@@ -208,6 +209,8 @@ test("listing snapshot shape: reject absent, nonarray and coercible total fields
 test("listing snapshot shape: valid empty and mixed-visibility rows retain CURRENT projection", () => {
   assert.deepEqual(projectListFirstPage({ videos: [], total: 0 }), { videos: [], total: 0 });
   const { list } = fixture();
+  assert.equal(projectListFirstPage({ videos: Array(24).fill(list.videos[0]), total: 24 }).videos.length, 24,
+    "producer maximum of 24 rows remains valid");
   const result = projectListFirstPage(list);
   assert.equal(result.total, 1234);
   assert.deepEqual(result.videos.map((video) => video.id), ["v1", "v2"]);
