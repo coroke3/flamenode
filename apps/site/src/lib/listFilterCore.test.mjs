@@ -50,15 +50,17 @@ test("RH-032 refuses duplicate public video IDs within the same result page", ()
   assert.equal(decodePublicList(payload(2, 26, [dto("one"), dto("one")]), second), null);
 });
 
-test("list search blocks IME composition, Process and legacy Windows keyCode 229", () => {
+test("list search suppresses composing Enter without breaking normal IME keystrokes", () => {
   for (const input of [
     { key: "Enter", isComposing: true, keyCode: 13 },
-    { key: "Process", isComposing: false, keyCode: 0 },
-    { key: "Unidentified", isComposing: false, keyCode: 229 },
     { key: "Enter", isComposing: false, keyCode: 229 },
+    { key: "Enter", isComposing: true, keyCode: 229 },
   ]) assert.equal(shouldSuppressListSearchKeydown(input), true, JSON.stringify(input));
   for (const input of [
     { key: "Enter", isComposing: false, keyCode: 13 },
+    { key: "Process", isComposing: true, keyCode: 229 },
+    { key: "Unidentified", isComposing: true, keyCode: 229 },
+    { key: "a", isComposing: true, keyCode: 229 },
     { key: "a", isComposing: false, keyCode: 65 },
     { key: "Tab", isComposing: false, keyCode: 9 },
   ]) assert.equal(shouldSuppressListSearchKeydown(input), false, JSON.stringify(input));
