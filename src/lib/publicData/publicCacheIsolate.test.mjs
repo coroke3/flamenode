@@ -85,6 +85,24 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("fractional-ttl.json", now + 1_000), null);
   });
 
+  test("isolate cache は非有限の時計値で期限切れ検証を迂回させない", () => {
+    const now = 2_500_000;
+    const payload = { id: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("clock.json", payload, 30, weight, now);
+      assert.equal(readPublicJsonIsolateCache("clock.json", invalidClock), null);
+      // An invalid read must not refresh TTL or LRU.
+      assert.equal(readPublicJsonIsolateCache("clock.json", now + 30_000), null);
+
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("clock.json", payload, 30, weight, now);
+      writePublicJsonIsolateCache("clock.json", { id: "bad" }, 30, weight, invalidClock);
+      assert.equal(readPublicJsonIsolateCache("clock.json", now), null);
+    }
+  });
+
   test("isolate cache は単一entryのserialized byte上限を超えるpayloadを保持しない", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 3_000_000;
