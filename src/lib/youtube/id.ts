@@ -86,7 +86,8 @@ export function youtubeThumbUrl(
 
 /** YouTube 動画ページ URL。 */
 export function youtubeWatchUrl(id: string): string {
-  return `https://www.youtube.com/watch?v=${id}`;
+  // An invalid/legacy ID must never become another query parameter or fragment.
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(id)}`;
 }
 
 /** YouTube iframe 埋め込み URL。 */
@@ -109,5 +110,6 @@ export function youtubeEmbedUrl(
   if (opts.autoplay) params.set("autoplay", "1");
   if (opts.mute) params.set("mute", "1");
   if (opts.start && opts.start > 0) params.set("start", String(Math.floor(opts.start)));
-  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+  // Preserve the iframe path and our query options even for corrupted IDs.
+  return `https://www.youtube.com/embed/${encodeURIComponent(id)}?${params.toString()}`;
 }
