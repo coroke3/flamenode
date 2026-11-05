@@ -5,7 +5,16 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+    .replace(/&#(x[0-9a-f]+|\\d+);/gi, (_, raw: string) => {
+      const point = /^x/i.test(raw)
+        ? Number.parseInt(raw.slice(1), 16)
+        : Number(raw);
+      // Numeric HTML references denote Unicode scalar values, not UTF-16
+      // code units. fromCharCode truncates emoji and may introduce NUL.
+      if (!Number.isFinite(point) || point <= 0 || point > 0x10ffff
+        || (point >= 0xd800 && point <= 0xdfff)) return "\uFFFD";
+      return String.fromCodePoint(point);
+    });
 }
 
 function stripHtmlTags(fragment: string): string {
