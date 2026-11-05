@@ -1,13 +1,21 @@
 export type SlotTimeLike = { start_time: number | null };
 
+/** Must match eventForm.slot_interval_minutes maximum (1440 minutes). */
+const MAX_SLOT_INTERVAL_SECONDS = 1440 * 60;
+
 export function resolveSlotIntervalSec(args: {
   explicitMinutes?: number | null;
   slots: readonly SlotTimeLike[];
   partGapSec: number;
 }): number | null {
   const explicit = Number(args.explicitMinutes);
-  if (Number.isFinite(explicit) && explicit > 0) {
-    return Math.round(explicit * 60);
+  const explicitSeconds = Math.round(explicit * 60);
+  if (
+    Number.isFinite(explicit) && explicit > 0 &&
+    Number.isSafeInteger(explicitSeconds) &&
+    explicitSeconds >= 1 && explicitSeconds <= MAX_SLOT_INTERVAL_SECONDS
+  ) {
+    return explicitSeconds;
   }
 
   const times = args.slots
@@ -20,7 +28,7 @@ export function resolveSlotIntervalSec(args: {
   const gaps: number[] = [];
   for (let index = 1; index < times.length; index++) {
     const gap = times[index]! - times[index - 1]!;
-    if (gap > 0 && gap <= args.partGapSec) gaps.push(gap);
+    if (gap > 0 && gap <= args.partGapSec && gap <= MAX_SLOT_INTERVAL_SECONDS) gaps.push(gap);
   }
   if (gaps.length === 0) return null;
   gaps.sort((a, b) => a - b);
@@ -28,6 +36,7 @@ export function resolveSlotIntervalSec(args: {
 }
 
 export function formatDurationJa(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "不明";
   const total = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(total / 60);
   const remain = total % 60;
@@ -39,7 +48,7 @@ export function formatDurationJa(seconds: number): string {
 export function buildConsecutiveSlotGuidance(
   intervalSec: number | null,
 ): string {
-  if (!intervalSec || intervalSec <= 0) {
+  if (intervalSec == null || !Number.isFinite(intervalSec) || intervalSec <= 0 || intervalSec > MAX_SLOT_INTERVAL_SECONDS) {
     return "連続枠は、1作品の尺が長い場合に利用してください。複数作品を投稿する場合は、作品ごとに別の枠を確保してください。";
   }
   const threshold = intervalSec * 0.75;
