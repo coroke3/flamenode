@@ -19,7 +19,7 @@ test("valid explicit interval and inferred slot gap retain their original output
 });
 
 test("overflow, non-finite and sub-second explicit values use a safe inferred interval", () => {
-  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.MAX_VALUE, 1441, -1, 0.001]) {
+  for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.MAX_VALUE, 1441, -1, 0.001, 0.5, 1.5, 30.25, 1439.5]) {
     assert.equal(
       resolveSlotIntervalSec({ explicitMinutes: bad, slots, partGapSec: 900 }),
       120,
@@ -79,4 +79,16 @@ test("corrupted fractional or unsafe timestamps cannot manufacture valid-looking
     ],
     partGapSec: 900,
   }), 120, "valid integer timestamps still determine the gap");
+});
+
+test("explicit minute interval obeys eventForm whole-minute range without rounding", () => {
+  for (const minutes of [1, 2, 30, 1440]) {
+    assert.equal(resolveSlotIntervalSec({ explicitMinutes: minutes, slots: [], partGapSec: 900 }), minutes * 60);
+  }
+  for (const invalid of [0.5, 1.5, 30.25, 1439.5, 1440.001]) {
+    assert.equal(resolveSlotIntervalSec({ explicitMinutes: invalid, slots: [], partGapSec: 900 }), null,
+      "fractional or out-of-range explicitMinutes must not be rounded into a trusted interval: " + invalid);
+    assert.equal(resolveSlotIntervalSec({ explicitMinutes: invalid, slots, partGapSec: 900 }), 120,
+      "invalid explicitMinutes should fall back to valid slot timestamps: " + invalid);
+  }
 });
