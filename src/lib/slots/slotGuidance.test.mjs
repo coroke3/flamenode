@@ -92,3 +92,26 @@ test("explicit minute interval obeys eventForm whole-minute range without roundi
       "invalid explicitMinutes should fall back to valid slot timestamps: " + invalid);
   }
 });
+
+test("corrupted part-gap settings cannot silently widen the interval inference window", () => {
+  const candidateSlots = [{ start_time: 100 }, { start_time: 220 }];
+  for (const partGapSec of [
+    Number.NaN, Infinity, -Infinity, 0, -60, 59, 60.5, 90, 86401, 86460,
+  ]) {
+    assert.equal(resolveSlotIntervalSec({
+      explicitMinutes: null, slots: candidateSlots, partGapSec,
+    }), null, "invalid partGapSec: " + String(partGapSec));
+  }
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null, slots: candidateSlots, partGapSec: 60,
+  }), null, "a valid one-minute cap must still exclude a two-minute slot gap");
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null, slots: candidateSlots, partGapSec: 120,
+  }), 120, "valid two-minute cap preserves exact boundary");
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null, slots: candidateSlots, partGapSec: 86400,
+  }), 120, "valid 1440-minute cap preserves normal inference");
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: 5, slots: candidateSlots, partGapSec: Infinity,
+  }), 300, "valid explicit interval is independent of the inferred gap cap");
+});
