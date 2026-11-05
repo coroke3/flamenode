@@ -41,3 +41,20 @@ test("non-finite or out-of-range guidance never contains NaN or Infinity", () =>
   assert.equal(formatDurationJa(Infinity), "不明");
   assert.equal(formatDurationJa(-90), "0秒");
 });
+
+test("fractional inferred intervals and direct guidance values fail closed", () => {
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null,
+    slots: [{ start_time: 100 }, { start_time: 100.25 }],
+    partGapSec: 900,
+  }), null, "sub-second gaps must not become a misleading zero-second recommendation");
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null,
+    slots: [{ start_time: 100 }, { start_time: 100.25 }, { start_time: 220.25 }],
+    partGapSec: 900,
+  }), 120, "whole-second gaps remain usable when bad fractional gaps are discarded");
+  for (const value of [0.01, 0.5, 1.5, 120.5]) {
+    assert.equal(buildConsecutiveSlotGuidance(value), FALLBACK, String(value));
+  }
+  assert.match(buildConsecutiveSlotGuidance(1), /作品尺が1秒以上/);
+});
