@@ -6,6 +6,7 @@ import { getDatabaseAsync, getEnvAsync } from "@/lib/cloudflare";
 import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { linkDiscordAccountAtomically } from "@/lib/auth/accountLinkAdapter";
 import { configuredHttpOrigin } from "@/lib/auth/origin";
+import { authRedirectTarget } from "@flamenode/server-core/auth/redirect";
 import { logSafeAuthError } from "@/lib/auth/safeLogger";
 import {
   createTraceId,
@@ -86,16 +87,7 @@ export async function buildAuthConfig(): Promise<NextAuthConfig> {
     },
     callbacks: {
       async redirect({ url }) {
-        if (url.startsWith("/")) {
-          return `${authOrigin}${url}`;
-        }
-        try {
-          const target = new URL(url);
-          if (target.origin === authOrigin) return target.href;
-        } catch {
-          /* fall through */
-        }
-        return `${authOrigin}/dashboard`;
+        return authRedirectTarget(url, authOrigin);
       },
       async session({ session, user }) {
         if (session.user && user) {
