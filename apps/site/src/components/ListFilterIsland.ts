@@ -6,7 +6,7 @@ import { LIST_MAX_SEARCH_LENGTH, LIST_PAGE_SIZE, type ListQuery } from "../lib/l
 import {
   LIST_EVENT_UNAVAILABLE_MESSAGE, LIST_NO_RESULTS_MESSAGE, LIST_SHORT_SEARCH_MESSAGE,
   LIST_UNAVAILABLE_MESSAGE, decodePublicList, isDefaultListQuery, listHref,
-  listQueryFromSearch, publicListApiPath,
+  listQueryFromSearch, publicListApiPath, shouldSuppressListSearchKeydown,
 } from "../lib/listFilterCore.ts";
 import { fetchPublicJson } from "../lib/publicApi.ts";
 
@@ -25,7 +25,7 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
         onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => {
           // Windows IME may report Process/keyCode 229 instead of Enter during conversion.
           // Do not submit until the composition has been committed.
-          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.key === "Process") {
+          if (shouldSuppressListSearchKeydown(event.nativeEvent)) {
             event.preventDefault();
           }
         } },
