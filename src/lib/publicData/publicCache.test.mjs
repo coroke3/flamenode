@@ -75,6 +75,26 @@ test("stale envelope はfresh TTLを超えた時だけ bounded stale として�
   assert.equal(publicJsonCacheFreshness(envelope, 99, 30, 120), "expired");
 });
 
+test("Cache API retention is always finite with malformed fresh/stale TTL", () => {
+  for (const [fresh, stale, expected] of [
+    [Number.NaN, 600, 600],
+    [60, Number.NaN, 60],
+    [Number.POSITIVE_INFINITY, 600, 600],
+    [600, Number.NEGATIVE_INFINITY, 600],
+    [Number.MAX_VALUE, 60, 60],
+    [Number.NaN, Number.NaN, 1],
+    [Number.POSITIVE_INFINITY, 0, 1],
+    [Number.NEGATIVE_INFINITY, Number.MAX_VALUE, 1],
+    [-100, 0, 1],
+    [0.9, 0.2, 1],
+    [12.9, 120.8, 120],
+  ]) {
+    const ttl = publicJsonCacheRetentionTtl(fresh, stale);
+    assert.equal(ttl, expected, `fresh=${String(fresh)} stale=${String(stale)}`);
+    assert.ok(Number.isSafeInteger(ttl) && ttl >= 1);
+  }
+});
+
 test("Cache API retention covers the entire configured stale window", () => {
   assert.equal(publicJsonCacheRetentionTtl(60, 600), 600);
   assert.equal(publicJsonCacheRetentionTtl(600, 60), 600);
