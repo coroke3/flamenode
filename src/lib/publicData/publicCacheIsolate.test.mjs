@@ -67,6 +67,24 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("videos/b.json", now), null);
   });
 
+  test("isolate cache は直接渡された無効TTLを保持せず既存entryも破棄する", () => {
+    const now = 1_500_000;
+    const payload = { id: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const ttl of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -1]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("invalid-ttl.json", payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache("invalid-ttl.json", now), payload);
+      writePublicJsonIsolateCache("invalid-ttl.json", { id: "bad" }, ttl, weight, now);
+      assert.equal(readPublicJsonIsolateCache("invalid-ttl.json", now), null, `ttl=${String(ttl)}`);
+      assert.equal(readPublicJsonIsolateCache("invalid-ttl.json", now + 100_000), null);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("fractional-ttl.json", payload, 0.5, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("fractional-ttl.json", now), payload);
+    assert.equal(readPublicJsonIsolateCache("fractional-ttl.json", now + 1_000), null);
+  });
+
   test("isolate cache は単一entryのserialized byte上限を超えるpayloadを保持しない", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 3_000_000;
