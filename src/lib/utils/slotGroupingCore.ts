@@ -242,6 +242,11 @@ export function collapseReservationGroups(rows: SlotBase[]): SlotGroupRow[] {
     const hasSubmitted = groupRows.some(
       (candidate) => candidate.status === "submitted",
     );
+    const status = hasSubmitted
+      ? "submitted"
+      : hasReserved
+        ? "reserved"
+        : "available";
     const integrity_error = reservationGroupIntegrityError(groupRows);
     const resolvedViewerRelation = (() => {
       const relations = groupRows
