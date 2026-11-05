@@ -45,10 +45,14 @@ export async function fetchAdminNotifications(
 
 export function createAdminNotificationsApi(fetchFn: OpsFetch = (url, init) => fetch(url, init)) {
   const path = (id: string, action: "retry" | "cancel" | "force-resend"): string | null => {
+    // Never silently retarget a privileged action: Hono trims IDs, so a row ID
+    // with surrounding whitespace could mutate a different notification.
+    if (typeof id !== "string") return null;
     const normalized = id.trim();
     // encodeURIComponent leaves "." and ".." unchanged; URL normalization would
     // reroute a privileged POST outside /notifications/:id/:action.
-    if (!normalized || normalized.length > 128 || normalized === "." || normalized === "..") return null;
+    if (id !== normalized || !normalized || normalized.length > 128 ||
+        normalized === "." || normalized === "..") return null;
     try {
       return "/api/admin/notifications/" + encodeURIComponent(normalized) + "/" + action;
     } catch {

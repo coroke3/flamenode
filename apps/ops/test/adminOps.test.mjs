@@ -537,7 +537,7 @@ test("MIG-0734 privileged notification actions fail closed for URL dot segments 
   const api=createAdminNotificationsApi(async(path,init)=>{sent.push({path,init});return response(200,{ok:true});});
   // encodeURIComponent(".") and encodeURIComponent("..") are unchanged.
   // A Fetch URL would collapse these segments and target an unintended admin route.
-  for(const id of [".",".."," . "," .. ","","  ","a".repeat(129),String.fromCharCode(0xD800)]){
+  for(const id of [".",".."," . "," .. ","","  "," n1","n1 ","\tn1\n","n1\u00a0", " note/1 ", "a".repeat(129),String.fromCharCode(0xD800),null]){
     for(const action of [
       ()=>api.retry(id),()=>api.cancel(id,"reason"),()=>api.forceResend(id),
     ]){
@@ -545,6 +545,13 @@ test("MIG-0734 privileged notification actions fail closed for URL dot segments 
     }
   }
   assert.equal(sent.length,0,"invalid IDs must not create a privileged network request");
+
+  // The server trims param(":id"); accepting " n1 " would send a mutation
+  // for n1, which is a different outbox row from the one shown to the admin.
+  // Do not normalize privileged row identifiers into another target.
+  assert.deepEqual(await api.retry("n1"),{ok:true});
+  assert.equal(sent[0].path,"/api/admin/notifications/n1/retry");
+  sent.length=0;
 
   // A slash in a real identifier is still encoded as a single path segment.
   assert.deepEqual(await api.retry("note/1"),{ok:true});
