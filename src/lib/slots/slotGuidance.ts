@@ -22,7 +22,10 @@ export function resolveSlotIntervalSec(args: {
     .map((slot) => slot.start_time)
     .filter(
       (value): value is number =>
-        typeof value === "number" && Number.isFinite(value),
+        // Unix slot timestamps must be representable whole seconds; rejecting
+        // fractional/unsafe endpoints also prevents an integer-looking gap
+        // between two corrupted timestamps from being trusted.
+        typeof value === "number" && Number.isSafeInteger(value),
     )
     .sort((a, b) => a - b);
   const gaps: number[] = [];
