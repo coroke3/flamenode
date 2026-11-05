@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/eventOrdering.ts` | HELPER | CURRENT event priority comparator used by public event listings, Astro and Hono; same undated public event timestamps must fall back to event ID | MIG-0506 | SAME (CURRENT helper shared with TARGET consumers) | IN_PROGRESS | PR#596 SHA=3562451410042d2e605efcf801c57d0364ca0e2e TEST=node --test --experimental-strip-types src/lib/utils/pickHeroEvents.test.mjs CI=pending (undated event comparator Infinity-Infinity returns 0 tie then deterministic ID) |
+| `src/lib/utils/pickHeroEvents.test.mjs` | TEST | CURRENT public top hero sorting and shared comparator regression for date-less public events | MIG-0506 | SAME (CURRENT unit test) | IN_PROGRESS | PR#596 SHA=3562451410042d2e605efcf801c57d0364ca0e2e TEST=node --test --experimental-strip-types src/lib/utils/pickHeroEvents.test.mjs CI=pending (non-dated ID tie, dated before undated, existing hero cases) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
