@@ -63,11 +63,11 @@ function compactText(value: string | null | undefined, max = 160): string {
   if (!compacted) return SITE_DESCRIPTION;
   if (compacted.length <= max) return compacted;
   const truncated = compacted.slice(0, Math.max(0, max - 3));
-    // Do not cut between the two UTF-16 code units of an emoji.
-    const safe = /[\uD800-\uDBFF]$/.test(truncated)
-      ? truncated.slice(0, -1)
-      : truncated;
-    return `${safe.trimEnd()}...`;
+  // Avoid splitting UTF-16 surrogate pairs at the truncation boundary.
+  const safe = /[\uD800-\uDBFF]$/.test(truncated)
+    ? truncated.slice(0, -1)
+    : truncated;
+  return `${safe.trimEnd()}...`;
 }
 
 export function buildPageMetadata({
