@@ -5,6 +5,7 @@ import {
   ISOLATE_MICRO_CACHE_MAX_ENTRIES,
   ISOLATE_MICRO_CACHE_MAX_BYTES,
   ISOLATE_MICRO_CACHE_TTL_MS,
+  isolateMicroCacheDelete,
   isolateMicroCacheGet,
   isolateMicroCacheSet,
   isolateMicroCacheSizeForTests,
@@ -100,6 +101,25 @@ test("byte-eviction honors read recency in CURRENT and Hono without extending TT
     assert.equal(get("hot", 1_002), fourMiBInUtf16, name + ": hot key retained");
     assert.equal(get("next", 1_002), fourMiBInUtf16, name + ": recent payload retained");
     assert.equal(get("hot", 16_000), null, name + ": cache reads never extend 15s TTL");
+    reset();
+  }
+});
+
+test("cached visibility invalidation deletes both runtimes", async () => {
+  const hono = await import("../../../apps/api/src/routes/live/microCache.ts");
+  const both = [
+    ["CURRENT", isolateMicroCacheSet, isolateMicroCacheGet,
+      isolateMicroCacheDelete, resetIsolateMicroCacheForTests],
+    ["Hono", hono.isolateMicroCacheSet, hono.isolateMicroCacheGet,
+      hono.isolateMicroCacheDelete, hono.resetIsolateMicroCacheForTests],
+  ];
+  for (const [name, set, get, remove, reset] of both) {
+    reset();
+    set("live:summary:ev-1", "stale", 1000);
+    assert.equal(get("live:summary:ev-1", 1000), "stale", name);
+    remove("live:summary:ev-1");
+    assert.equal(get("live:summary:ev-1", 1000), null, name);
+    remove("live:summary:ev-1"); // idempotent
     reset();
   }
 });

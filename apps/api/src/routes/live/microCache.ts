@@ -65,6 +65,11 @@ export function isolateMicroCacheSet(key: string, value: string, nowMs: number =
   entries.set(key, { value, expiresAt: nowMs + ISOLATE_MICRO_CACHE_TTL_MS });
 }
 
+/** Remove a cached response immediately when its visibility gate rejects access. */
+export function isolateMicroCacheDelete(key: string): void {
+  entries.delete(key);
+}
+
 export function resetIsolateMicroCacheForTests(): void {
   entries.clear();
 }

@@ -3,14 +3,14 @@
  * CURRENT: app/api/live/events/[id]/{slots,submissions,summary}/route.ts ->
  * src/lib/staticRebuild/liveGuard.ts handleLiveApiGet + liveApi.ts.
  * Same contract: gate (id -> DB -> live_api_enabled per request) before the
- * 15s isolate micro-cache; only successful non-null bodies are cached;
- * success `Cache-Control: public, s-maxage=5, stale-while-revalidate=30`;
+ * 15s isolate micro-cache for identity-free summary only; slots/submissions are uncached;
+ * success `Cache-Control: no-store` to prevent CDN retention after privacy changes;
  * every error body is JSON with `Cache-Control: no-store`.
  * Raw D1 (no drizzle): read-only, <= 2 queries per uncached request.
  */
 import { Hono } from "hono";
 import type { AppEnv } from "../../env.ts";
-import { isolateMicroCacheGet, isolateMicroCacheSet } from "./microCache.ts";
+import { isolateMicroCacheDelete, isolateMicroCacheGet, isolateMicroCacheSet } from "./microCache.ts";
 import {
   isLiveApiEnabled,
   resolvePublicOperationMode,
@@ -21,7 +21,9 @@ const MAX_EVENT_ID_LEN = 128;
 /** 1 イベントあたりの live slots 取得上限（D1 負荷・レスポンス肥大化の防止） */
 export const MAX_LIVE_SLOTS = 6000;
 const ACTIVE_GRACE_AFTER_END_SEC = 86400;
-export const LIVE_API_CACHE_CONTROL = "public, s-maxage=5, stale-while-revalidate=30";
+// Live responses may stop being public at any moment. An intermediary
+// stale-while-revalidate cache can outlive the event's public status.
+export const LIVE_API_CACHE_CONTROL = "no-store";
 
 function normalizeEventId(eventId: string): string | null {
   const id = eventId.trim();
@@ -186,13 +188,30 @@ export async function handleLiveApiGet(
         503,
       );
     }
+    // Identity-bearing slots/submissions can change visibility independently
+    // of the parent event. Cache reuse would leak former public video IDs.
+    // Only summary (which contains no identities) may reuse an isolate body.
+    const cacheable = routeName === "summary";
     const microCacheKey = `live:${routeName}:${id}`;
-    let body = isolateMicroCacheGet(microCacheKey);
+    let body = cacheable ? isolateMicroCacheGet(microCacheKey) : null;
+    if (body !== null) {
+      const stillPublic = await db
+        .prepare("SELECT 1 AS visible FROM events WHERE id = ? AND visibility_status = 'public' LIMIT 1")
+        .bind(id)
+        .first<{ visible: number }>();
+      if (!stillPublic) {
+        isolateMicroCacheDelete(microCacheKey);
+        return jsonError("not_found", "イベントが見つかりません。", 404);
+      }
+    }
     if (body === null) {
       const payload = await load(db, id);
-      if (!payload) return jsonError("not_found", "イベントが見つかりません。", 404);
+      if (!payload) {
+        if (cacheable) isolateMicroCacheDelete(microCacheKey);
+        return jsonError("not_found", "イベントが見つかりません。", 404);
+      }
       body = JSON.stringify(payload);
-      isolateMicroCacheSet(microCacheKey, body);
+      if (cacheable) isolateMicroCacheSet(microCacheKey, body);
     }
     return new Response(body, {
       headers: {
