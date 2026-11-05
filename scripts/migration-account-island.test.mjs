@@ -167,6 +167,30 @@ test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authoriz
   }
 });
 
+test("malformed unavailable markers never confirm logout or erase a present user", async () => {
+  for (const unavailable of [false, null, "true", 1, {}]) {
+    const presence = await setup({
+      "/api/account/summary?view=presence": json({ view: "presence", loggedIn: false, unavailable }),
+    });
+    assert.equal(presence.store.getState().unavailable, true);
+    assert.equal(presence.store.getState().confirmedLoggedOut, false);
+    assert.ok(button(presence.container, "ログイン状態を再確認"));
+    await presence.unmount();
+
+    const details = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json({ loggedIn: false, unavailable }),
+    });
+    await click(button(details.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(details.store.getState().detailsUnavailable, true);
+    assert.equal(details.store.getState().confirmedLoggedOut, false);
+    assert.equal(details.store.getState().user?.name, presenceIn.displayName);
+    assert.ok(button(details.container, "再試行"));
+    await details.unmount();
+  }
+});
+
 test("logged in: presence only until the menu opens; presence never shows management links", async () => {
   let release;
   const gate = new Promise((r) => (release = r));
