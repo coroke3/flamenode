@@ -1,4 +1,4 @@
-import { normalizeHttpUrl } from "./url";
+import { normalizeHttpUrl } from "#utils/url";
 
 const MAX_CHANNEL_URL_LENGTH = 500;
 
