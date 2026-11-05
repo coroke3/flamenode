@@ -137,6 +137,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       if (body === null || typeof body !== "object" || Array.isArray(body)) {
         return { status: "failed" };
       }
+      const value = body as Record<string, unknown>;
+      if (typeof value.loggedIn !== "boolean") return { status: "failed" };
+      if (value.loggedIn && (
+        typeof value.displayName !== "string" ||
+        (value.icon !== null && typeof value.icon !== "string") ||
+        (!url.includes("view=presence") && (
+          !Array.isArray(value.xIds) ||
+          typeof value.canAccessAdmin !== "boolean" ||
+          typeof value.canAccessManage !== "boolean"
+        ))
+      )) return { status: "failed" };
       return { status: "ok", body: body as T };
     } catch {
       return { status: "failed" };
