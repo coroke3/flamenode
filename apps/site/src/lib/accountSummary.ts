@@ -116,6 +116,8 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   let presenceRunning = false;
   let detailsRequested = false;
   let detailsRunning = false;
+  // Responses started before an Active X switch must never become current menu data.
+  let detailsRevision = 0;
 
   const set = (patch: Partial<AccountState>) => {
     state = { ...state, ...patch };
@@ -168,10 +170,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   async function loadDetails(): Promise<void> {
     if (!detailsRequested || !presenceLoaded || !state.user || state.details || detailsRunning || disposed) return;
     detailsRunning = true;
+    const revision = detailsRevision;
     set({ detailsLoading: true });
     const result = await getJson<AccountSummaryResponse>("/api/account/summary");
     detailsRunning = false;
     if (disposed) return;
+    if (revision !== detailsRevision) {
+      // The switched identity invalidated this response while it was in flight.
+      // Defer the new request until the old one has released detailsRunning.
+      void loadDetails();
+      return;
+    }
     if (result.status === "failed" || (!result.body.loggedIn && result.body.unavailable)) {
       set({ detailsLoading: false, detailsUnavailable: true });
       return;
@@ -196,6 +205,7 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
 
   // CURRENT: an Active X change invalidates the details and fetches them again.
   const onActiveXChanged = () => {
+    detailsRevision += 1;
     detailsRequested = true;
     set({ details: null, detailsUnavailable: false });
     void loadDetails();
