@@ -269,12 +269,15 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
                       <td style={{ verticalAlign: "top" }}>
                         <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
                           <NotificationPayloadButton payload={row.payload_json} />
-                          <Link
-                            href={`/admin/audit?table=notification_outbox&record=${encodeURIComponent(row.id)}`}
-                            className="fn-btn fn-btn-ghost fn-btn-sm"
-                          >
-                            監査
-                          </Link>
+                          <span title="この通知の監査ログ">
+                            <Link
+                              href={`/admin/audit?table=notification_outbox&record=${encodeURIComponent(row.id)}`}
+                              className="fn-btn fn-btn-ghost fn-btn-sm"
+                              aria-label="この通知の監査ログ"
+                            >
+                              監査
+                            </Link>
+                          </span>
                           {terminalFailure ? (
                             <NotificationActionButton kind="retry" id={row.id} api={api} onSuccess={onSuccess} />
                           ) : null}
