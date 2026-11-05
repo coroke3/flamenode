@@ -126,6 +126,35 @@ test("malformed successful JSON does not leave presence or details loading unres
   }
 });
 
+test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authorized", async () => {
+  for (const malformed of [{}, { loggedIn: "false" }, { loggedIn: true }, { loggedIn: true, displayName: "A" }]) {
+    const v = await setup({ "/api/account/summary?view=presence": json(malformed) });
+    assert.equal(v.store.getState().loading, false);
+    assert.equal(v.store.getState().unavailable, true);
+    assert.equal(v.store.getState().confirmedLoggedOut, false);
+    assert.ok(button(v.container, "ログイン状態を再確認"));
+    await v.unmount();
+  }
+  for (const malformed of [
+    {}, { loggedIn: "true" }, { loggedIn: true },
+    { ...summary(), xIds: null },
+    { ...summary(), canAccessAdmin: undefined },
+    { ...summary(), canAccessManage: "true" },
+  ]) {
+    const v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(v.store.getState().details, null);
+    assert.equal(v.store.getState().detailsLoading, false);
+    assert.equal(v.store.getState().detailsUnavailable, true);
+    assert.ok(button(v.container, "再試行"));
+    await v.unmount();
+  }
+});
+
 test("logged in: presence only until the menu opens; presence never shows management links", async () => {
   let release;
   const gate = new Promise((r) => (release = r));
