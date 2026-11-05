@@ -191,6 +191,30 @@ test("malformed unavailable markers never confirm logout or erase a present user
   }
 });
 
+test("logged-in responses with unavailable:true are rejected instead of being shown as valid", async () => {
+  const presence = await setup({
+    "/api/account/summary?view=presence": json({ ...presenceIn, unavailable: true }),
+  });
+  assert.equal(presence.store.getState().unavailable, true);
+  assert.equal(presence.store.getState().confirmedLoggedOut, false);
+  assert.equal(presence.store.getState().user, null);
+  assert.ok(button(presence.container, "ログイン状態を再確認"));
+  await presence.unmount();
+
+  const details = await setup({
+    "/api/account/summary?view=presence": json(presenceIn),
+    "/api/account/summary": json({ ...summary({ canAccessAdmin: true }), unavailable: true }),
+  });
+  await click(button(details.container, "アカウントメニューを開く"));
+  await flush();
+  assert.equal(details.store.getState().details, null);
+  assert.equal(details.store.getState().detailsUnavailable, true);
+  assert.equal(details.store.getState().confirmedLoggedOut, false);
+  assert.ok(button(details.container, "再試行"));
+  assert.ok(!links(details.container).some(([name]) => name === "運営" || name === "管理"));
+  await details.unmount();
+});
+
 test("logged in: presence only until the menu opens; presence never shows management links", async () => {
   let release;
   const gate = new Promise((r) => (release = r));
