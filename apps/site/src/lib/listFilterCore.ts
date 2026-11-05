@@ -11,13 +11,13 @@ export const LIST_NO_RESULTS_MESSAGE = "条件に合う作品が見つかりま�
 export const LIST_SHORT_SEARCH_MESSAGE = "検索は文字・数字を2文字以上入力してください。";
 
 
-/** Prevent premature GET form submission during Japanese IME composition. */
+/** Suppress only a composing Enter; blocking ordinary IME keystrokes breaks typing. */
 export function shouldSuppressListSearchKeydown(event: {
   key: string;
   isComposing?: boolean;
   keyCode?: number;
 }): boolean {
-  return event.isComposing === true || event.keyCode === 229 || event.key === "Process";
+  return event.key === "Enter" && (event.isComposing === true || event.keyCode === 229);
 }
 
 export interface PublicVideoList {
