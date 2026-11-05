@@ -32,6 +32,7 @@ const { UsersIndexIsland } = uiBuilt ? await import("../apps/site/src/components
 const { SnapshotBuildError } = await import("../apps/site/src/lib/publicDataLoader.ts");
 const { parseSocialLinks } = await import("../src/lib/socialLinks.ts");
 const { clampPaging, totalPagesFor } = await import("../src/lib/utils/sql.ts");
+const { parseUsersIndexPage } = await import("../src/lib/publicData/usersIndexPage.ts");
 const { prepareUsersIndexItems, paginateUsersIndexItems } = await import("../src/lib/publicData/staticUsersIndexCore.ts");
 const { FIXTURE_USER_PROFILES, FIXTURE_USERS_INDEX } = await import("../apps/site/src/lib/userFixtures.ts");
 
@@ -249,6 +250,24 @@ test("T05 (G03) /user query keys: q, sort, page match CURRENT for value, empty a
   assert.equal(views.usersIndexQuery("a b", "works", 2), "q=a+b&sort=works&page=2");
   assert.ok(currentIndexSource.includes('merged.sort !== "score"') && currentIndexSource.includes('merged.page !== "1"'));
   assert.equal(views.USERS_INDEX_PAGE_SIZE, 48);
+});
+
+test("MIG-0504 regression: /user page query requires full decimal number in CURRENT and Astro", () => {
+  for (const [raw, expected] of [
+    [null, 1], [undefined, 1], ["", 1], ["  ", 1],
+    ["1", 1], ["2", 2], [" 2 ", 2], ["0002", 2],
+    ["2abc", 1], ["3.5", 1], ["2e2", 1], ["+2", 1],
+    ["-2", 1], ["0", 1], ["０２", 1], ["2\\n", 1],
+    ["9007199254740992", 1], ["99999999999999999999", 1],
+    ["0".repeat(31) + "2", 2], ["0".repeat(32) + "2", 1],
+  ]) {
+    assert.equal(parseUsersIndexPage(raw), expected, `shared page parser: ${JSON.stringify(raw)}`);
+    assert.equal(views.parseIndexPage(raw), expected, `Astro Island parser: ${JSON.stringify(raw)}`);
+  }
+  assert.match(currentIndexSource, /import \\{ parseUsersIndexPage \\} from "@\\/lib\\/publicData\\/usersIndexPage";/,
+    "CURRENT must import the exact same shared parser");
+  assert.ok(currentIndexSource.includes("const pageNum = parseUsersIndexPage(page);"),
+    "CURRENT /user must call the shared parser before loading the v2 index");
 });
 
 test("T05 (G03) /user/:id query keys: worksPage and collabPage slice like CURRENT (value, empty, unknown)", () => {
