@@ -1,7 +1,6 @@
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
@@ -14,7 +13,10 @@ function decodeHtmlEntities(text: string): string {
       if (!Number.isFinite(point) || point <= 0 || point > 0x10ffff
         || (point >= 0xd800 && point <= 0xdfff)) return "\uFFFD";
       return String.fromCodePoint(point);
-    });
+    })
+    // Decode ampersands last. An escaped numeric reference such as
+    // &amp;#128640; is literal text, not a second entity to evaluate.
+    .replace(/&amp;/g, "&");
 }
 
 function stripHtmlTags(fragment: string): string {

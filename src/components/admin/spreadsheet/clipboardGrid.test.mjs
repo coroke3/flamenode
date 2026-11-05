@@ -50,3 +50,13 @@ test("HTML clipboard fallback retains valid BMP references and named entities", 
   const html = '<table><tr><td>&#12354;</td><td>&#x3042;</td><td>&lt;test&gt; &amp; &quot;ok&quot;</td></tr></table>';
   assert.deepEqual(parseHtmlClipboardTable(html), [["あ", "あ", '<test> & "ok"']]);
 });
+
+test("HTML clipboard fallback does not double-decode escaped entities", () => {
+  const html = '<table><tr><td>&amp;#128640;</td><td>&amp;#x1F680;</td><td>&amp;lt;</td><td>&amp;amp;</td><td>&#128640;</td></tr></table>';
+  assert.deepEqual(parseHtmlClipboardTable(html), [
+    ["&#128640;", "&#x1F680;", "&lt;", "&amp;", "🚀"],
+  ]);
+  assert.deepEqual(parseClipboardContent("", html), [
+    ["&#128640;", "&#x1F680;", "&lt;", "&amp;", "🚀"],
+  ]);
+});
