@@ -104,7 +104,10 @@ export function createOperationModeBannerApi(
           headers: { accept: "application/json" },
           signal,
         });
-        if (signal?.aborted || response.status !== 200) {
+        const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+        // Only the JSON endpoint contract can drive a cost guard notice.
+        // A proxy/error page containing JSON-shaped text must fail closed.
+        if (signal?.aborted || response.status !== 200 || mime !== "application/json") {
           discardResponseBody(response);
           return null;
         }
