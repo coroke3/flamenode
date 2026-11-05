@@ -26,6 +26,16 @@ test("RH-032 page offsets must fit in total when page has items", () => {
   assert.equal(decodePublicList(payload(2, 100, []), second)?.videos.length, 0);
 });
 
+test("RH-032 last projected page boundary admits exactly the remaining items", () => {
+  // CURRENT caps the 5,000-item projection at ceil(5000 / 24) = page 209.
+  const last = listQueryFromSearch("?page=209");
+  const eight = Array.from({ length: 8 }, (_, i) => dto(`last-${i}`));
+  assert.equal(last.page, 209);
+  assert.equal(decodePublicList(payload(209, 5000, eight), last)?.videos.length, 8);
+  assert.equal(decodePublicList(payload(209, 5000, [...eight, dto("overflow")]), last), null);
+  assert.equal(decodePublicList(payload(209, 4999, eight), last), null);
+});
+
 test("RH-032 still rejects non-public rows and mismatched page numbers", () => {
   const query = listQueryFromSearch("?page=2");
   assert.equal(decodePublicList(payload(1, 25, [dto("one")]), query), null);
