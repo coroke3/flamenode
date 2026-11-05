@@ -162,7 +162,7 @@ test("MIG-0718 U01 T03: small intermittent empty chunks preserve valid banner pa
       controller.close();
     },
   });
-  assert.deepEqual(await client(new Response(stream, { status: 200 })).api.getBanner(), expected);
+  assert.deepEqual(await client(new Response(stream, { status: 200, headers: { "content-type": "application/json" } })).api.getBanner(), expected);
 });
 
 test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely", async () => {
@@ -176,7 +176,7 @@ test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely",
       controller.close();
     },
   });
-  assert.deepEqual(await client(new Response(stream, { status: 200 })).api.getBanner(), expected);
+  assert.deepEqual(await client(new Response(stream, { status: 200, headers: { "content-type": "application/json" } })).api.getBanner(), expected);
 });
 
 test("MIG-0718 U01 T03: aborted request ignores a late successful response", async () => {
@@ -328,7 +328,7 @@ test("MIG-0718 U01 T04: mid-stream AbortSignal releases a hanging reader.read", 
     },
     pull() { markReadPending(); },
     cancel() { cancelled = true; },
-  }, { highWaterMark: 0 }), { status: 200 });
+  }, { highWaterMark: 0 }), { status: 200, headers: { "content-type": "application/json" } });
   const pending = client(response).api.getBanner(controller.signal);
   await readingAgain;
   controller.abort();
@@ -379,7 +379,7 @@ test("MIG-0718 U01 T05: abort does not await a hanging stream cancel()", { timeo
       cancelled = true;
       return new Promise(() => {}); // A stalled underlying cancellation hook.
     },
-  }, { highWaterMark: 0 }), { status: 200 });
+  }, { highWaterMark: 0 }), { status: 200, headers: { "content-type": "application/json" } });
   const pending = client(response).api.getBanner(abort.signal);
   await waiting;
   abort.abort();
