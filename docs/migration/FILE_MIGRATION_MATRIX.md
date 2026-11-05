@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/slotGroupingCore.ts` | HELPER | CURRENT slot part/group annotation and collapse; mixed-status/account integrity must fail closed in SlotGrid | MIG-0514 | SAME (CURRENT utility; TARGET migration not claimed) | RETAINED | PR#600 SHA=887be82a85ac738040a6a9861a9d8fa460bf64c3 TEST=node --test --experimental-strip-types src/lib/utils/slotGroupIntegrity.test.mjs CI=https://github.com/coroke3/flamenode/pull/600/checks (annotate/collapse shared integrity policy; CURRENT-only fix) |
+| `src/lib/utils/slotGroupIntegrity.test.mjs` | TEST | CURRENT group annotation mixed state/viewer/ownership regressions against collapse behavior | MIG-0514 | SAME (CURRENT test; TARGET migration not claimed) | RETAINED | PR#600 SHA=887be82a85ac738040a6a9861a9d8fa460bf64c3 TEST=node --test --experimental-strip-types src/lib/utils/slotGroupIntegrity.test.mjs CI=https://github.com/coroke3/flamenode/pull/600/checks (five fail-closed/compatible group scenarios) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
