@@ -52,9 +52,31 @@ test("fractional inferred intervals and direct guidance values fail closed", () 
     explicitMinutes: null,
     slots: [{ start_time: 100 }, { start_time: 100.25 }, { start_time: 220.25 }],
     partGapSec: 900,
-  }), 120, "whole-second gaps remain usable when bad fractional gaps are discarded");
+  }), null, "fractional endpoints must not produce a trusted integer gap");
   for (const value of [0.01, 0.5, 1.5, 120.5]) {
     assert.equal(buildConsecutiveSlotGuidance(value), FALLBACK, String(value));
   }
   assert.match(buildConsecutiveSlotGuidance(1), /作品尺が1秒以上/);
+});
+
+test("corrupted fractional or unsafe timestamps cannot manufacture valid-looking gaps", () => {
+  for (const times of [
+    [100.25, 220.25],
+    [Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER + 121],
+    [-100.5, 19.5],
+  ]) {
+    assert.equal(resolveSlotIntervalSec({
+      explicitMinutes: null,
+      slots: times.map((start_time) => ({ start_time })),
+      partGapSec: 900,
+    }), null, String(times));
+  }
+  assert.equal(resolveSlotIntervalSec({
+    explicitMinutes: null,
+    slots: [
+      { start_time: 100.25 }, { start_time: 100 },
+      { start_time: 220 }, { start_time: 220.25 },
+    ],
+    partGapSec: 900,
+  }), 120, "valid integer timestamps still determine the gap");
 });
