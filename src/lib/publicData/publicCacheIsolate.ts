@@ -82,6 +82,12 @@ export function writePublicJsonIsolateCache(
     deleteEntry(r2Key);
     return;
   }
+  // Direct callers must not create an entry with expiresAtMs=NaN/Infinity:
+  // such an entry would never satisfy the expiry comparison during pruning.
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+    deleteEntry(r2Key);
+    return;
+  }
   const ttlSec = Math.min(
     PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
     Math.max(1, Math.floor(ttlSeconds)),
