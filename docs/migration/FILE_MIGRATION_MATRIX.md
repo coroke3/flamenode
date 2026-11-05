@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/pickupCreators.ts` | HELPER | CURRENT public creator eligibility/sort used for R2 pickup creators projection; finite nonnegative COUNT invariant | MIG-0511 | SAME (CURRENT retained; TARGET consumer unchanged) | RETAINED | PR#601 SHA=f2439852adb425922ff374708e569bcf08ac239b TEST=node --test --experimental-strip-types src/lib/utils/pickupCreators.test.mjs CI=https://github.com/coroke3/flamenode/pull/601/checks (invalid count fails closed; published creator artifacts affected only after reviewed merge/rebuild) |
+| `src/lib/utils/pickupCreators.test.mjs` | TEST | CURRENT creator eligibility and ranking regression incl non-finite/negative/fractional count | MIG-0511 | SAME (CURRENT unit contract) | RETAINED | PR#601 SHA=626dc852e0d966d32e5f957f6f3ae6afbead4450 TEST=node --test --experimental-strip-types src/lib/utils/pickupCreators.test.mjs CI=https://github.com/coroke3/flamenode/pull/601/checks (two new test cases plus original cases) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
