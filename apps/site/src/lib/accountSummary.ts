@@ -139,10 +139,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       }
       const value = body as Record<string, unknown>;
       if (typeof value.loggedIn !== "boolean") return { status: "failed" };
+      const presence = url === "/api/account/summary?view=presence";
+      if (presence && value.view !== "presence") return { status: "failed" };
+      if (!presence && value.loggedIn && (
+        (value.role !== "user" && value.role !== "admin" && value.role !== "moderator") ||
+        (value.activeXId !== null && typeof value.activeXId !== "string") ||
+        (value.degraded !== undefined && value.degraded !== true)
+      )) return { status: "failed" };
       if (value.loggedIn && (
         typeof value.displayName !== "string" ||
         (value.icon !== null && typeof value.icon !== "string") ||
-        (!url.includes("view=presence") && (
+        (!presence && (
           !Array.isArray(value.xIds) ||
           !value.xIds.every((item: unknown) => {
             if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
