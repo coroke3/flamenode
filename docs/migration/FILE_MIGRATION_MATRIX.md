@@ -1382,6 +1382,7 @@
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
 | `scripts/migration-list-discover.test.mjs` | TEST | MIG-0505 /list CURRENT and Astro query parity + malformed page suffix regression | MIG-0505 | SAME (unit and built-site parity test) | IN_PROGRESS | PR#597 SHA=83e5c2f5da77dff287e40a3e08caf63a055fe41e TEST=node --test --experimental-strip-types scripts/migration-list-discover.test.mjs (normal 40-digit bound and 12-digit+malformed suffix) CI=pending |
+| `src/lib/publicData/publicListInput.contract.test.mjs` | TEST | CURRENT /list query parsing bounded 10-base page and normalized URL safety contract | MIG-0505 | SAME (CURRENT contract-only test) | IN_PROGRESS | PR#597 SHA=71d89be2101e92ddd18cc44825474882e84432b0 TEST=node --test --experimental-strip-types src/lib/publicData/publicListInput.contract.test.mjs (entire page string digit validation before 12-digit cap; CI=pending) |
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
