@@ -138,6 +138,10 @@ test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authoriz
   for (const malformed of [
     {}, { loggedIn: "true" }, { loggedIn: true },
     { ...summary(), xIds: null },
+    { ...summary(), xIds: [null] },
+    { ...summary(), xIds: [{}] },
+    { ...summary(), xIds: [{ ...entry("bad", "approved", true), x_name: null }] },
+    { ...summary(), xIds: [{ ...entry("bad", "approved", true), approval_status: "unknown" }] },
     { ...summary(), canAccessAdmin: undefined },
     { ...summary(), canAccessManage: "true" },
   ]) {
