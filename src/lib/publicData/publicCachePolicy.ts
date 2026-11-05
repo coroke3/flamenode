@@ -20,5 +20,12 @@ export function publicJsonCacheRetentionTtl(
   freshTtlSeconds: number,
   staleMaxAgeSeconds = 0,
 ): number {
-  return Math.max(1, Math.floor(freshTtlSeconds), Math.floor(staleMaxAgeSeconds));
+  // Cache-Control max-age must be a finite integer. A bad optional TTL must
+  // not invalidate the other valid window (or create "max-age=Infinity").
+  const bounded = (value: number): number => {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+    const whole = Math.floor(value);
+    return Number.isSafeInteger(whole) ? whole : 0;
+  };
+  return Math.max(1, bounded(freshTtlSeconds), bounded(staleMaxAgeSeconds));
 }
