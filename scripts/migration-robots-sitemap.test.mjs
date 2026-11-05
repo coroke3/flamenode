@@ -7,6 +7,7 @@ import { buildRobotsText, GET, ROBOTS_DISALLOW } from "../apps/site/src/pages/ro
 import { siteOrigin } from "../apps/site/src/lib/pageHead.ts";
 import { buildSitemapEntries, publishedSitemapRows, serializeSitemap } from "../apps/site/src/lib/sitemap.ts";
 import { sitemapVideosOrEmpty } from "../apps/site/src/pages/sitemap.xml.ts";
+import { dedupeSitemapEntries } from "../src/lib/publicData/sitemapDedupe.ts";
 import { SITEMAP_VIDEOS_KEY } from "../apps/site/src/lib/publicDataLoader.ts";
 
 const require = createRequire(import.meta.url);
@@ -62,7 +63,7 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   assert.equal(typeof resolveSitemap, "function", "Next sitemap serializer must exist");
   const entries = buildSitemapEntries({
     origin,
-    videos: [{ id: "video_1", youtube_video_id: "yt-1", scheduled_time: 1_700_000_000 }],
+    videos: [{ id: "video_1", youtube_video_id: "AAAAAAAAAAA", scheduled_time: 1_700_000_000 }],
     events: [{ id: "event 1", end_time: null, start_time: 1_700_000_100 }],
     creators: [{ x_id: "creator_a", updated_at: null }],
     generatedAt: [1_700_000_020],
@@ -70,11 +71,40 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   });
   assert.equal(entries.length, 10, "seven static entries and three dynamic entries");
   assert.deepEqual(entries.map((row) => new URL(row.url).pathname.slice(0, 6)).filter((x) => x === "/event").length, 2);
-  assert.ok(entries.some((row) => row.url === origin + "/yt-1"));
+  assert.ok(entries.some((row) => row.url === origin + "/AAAAAAAAAAA"));
   assert.ok(entries.some((row) => row.url === origin + "/event/event%201"));
   assert.ok(entries.some((row) => row.url === origin + "/user/creator_a"));
   assert.equal(entries.at(-1).lastModified.toISOString(), new Date(1_700_000_020_000).toISOString());
   assert.equal(serializeSitemap(entries), resolveSitemap(entries), "Next 15.5 XML serialization must remain identical");
+});
+
+test("MIG-0621 regression: valid query-string URLs escape ampersands in sitemap XML", () => {
+  const url = new URL("/list?q=film&sort=old", origin).toString();
+  const entries = [{
+    url,
+    lastModified: new Date("2026-11-05T00:00:00.000Z"),
+    changeFrequency: "daily",
+    priority: 0.8,
+  }];
+  const xml = serializeSitemap(entries);
+  assert.ok(xml.includes("<loc>https://flamenode.net/list?q=film&amp;sort=old</loc>"));
+  assert.equal(xml.includes("q=film&sort=old"), false, "raw & makes XML invalid");
+  assert.equal((xml.match(/<loc>/g) ?? []).length, 1);
+});
+
+test("MIG-0621 regression: loc text cannot inject XML nodes", () => {
+  const entries = [{
+    url: `${origin}/list?q=</loc><private>leaked</private>&v="test"'`,
+    lastModified: new Date("2026-11-05T00:00:00.000Z"),
+    changeFrequency: "daily",
+    priority: 0.8,
+  }];
+  const xml = serializeSitemap(entries);
+  assert.ok(xml.includes(
+    "<loc>https://flamenode.net/list?q=&lt;/loc&gt;&lt;private&gt;leaked&lt;/private&gt;&amp;v=&quot;test&quot;&apos;</loc>",
+  ));
+  assert.equal(xml.includes("<private>"), false, "sitemap data must not create additional XML elements");
+  assert.equal((xml.match(/<loc>/g) ?? []).length, 1);
 });
 
 test("MIG-0621: duplicate video aliases and creators never duplicate sitemap locs", () => {
@@ -82,11 +112,11 @@ test("MIG-0621: duplicate video aliases and creators never duplicate sitemap loc
   const entries = buildSitemapEntries({
     origin,
     videos: [
-      { id: "vid_a", youtube_video_id: "shared_alias", scheduled_time: first },
-      { id: "vid_b", youtube_video_id: "shared_alias", scheduled_time: first + 60 },
+      { id: "vid_a", youtube_video_id: "SharedAlias", scheduled_time: first },
+      { id: "vid_b", youtube_video_id: "SharedAlias", scheduled_time: first + 60 },
       { id: "about", youtube_video_id: null, scheduled_time: null },
       { id: "dot", youtube_video_id: ".", scheduled_time: null },
-      { id: "vid_c", youtube_video_id: "unique_alias", scheduled_time: null },
+      { id: "vid_c", youtube_video_id: "UniqueAlias", scheduled_time: null },
     ],
     events: [
       { id: "public-event", start_time: first, end_time: null },
@@ -100,20 +130,20 @@ test("MIG-0621: duplicate video aliases and creators never duplicate sitemap loc
     now: new Date("2026-10-27T00:00:00Z"),
   });
   const urls = entries.map((item) => item.url);
-  assert.equal(entries.length, 11, "7 fixed pages, 2 unique video URLs, 1 event, 1 creator");
+  assert.equal(entries.length, 12, "7 fixed pages, 3 unique video URLs (including invalid alias fallback), 1 event, 1 creator");
   assert.equal(new Set(urls).size, urls.length);
   assert.equal(urls.filter((url) => url === origin + "/").length, 1);
   assert.equal(urls.filter((url) => url === origin + "/about").length, 1);
-  assert.equal(urls.filter((url) => url === origin + "/shared_alias").length, 1);
-  assert.equal(entries.find((item) => item.url === origin + "/shared_alias")?.lastModified.toISOString(),
+  assert.equal(urls.filter((url) => url === origin + "/SharedAlias").length, 1);
+  assert.equal(entries.find((item) => item.url === origin + "/SharedAlias")?.lastModified.toISOString(),
     new Date(first * 1000).toISOString(), "first canonical video entry must retain CURRENT ordering");
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
 
 test("MIG-0621: unpublished video/event detail must never appear in sitemap", () => {
   const videos = [
-    { id: "published", youtube_video_id: "published_yt", scheduled_time: null },
-    { id: "missing_detail", youtube_video_id: "missing_yt", scheduled_time: null },
+    { id: "published", youtube_video_id: "PublishId01", scheduled_time: null },
+    { id: "missing_detail", youtube_video_id: "MissingId01", scheduled_time: null },
   ];
   const events = [
     { id: "published_event", start_time: null, end_time: null },
@@ -128,9 +158,9 @@ test("MIG-0621: unpublished video/event detail must never appear in sitemap", ()
     now: new Date("2026-10-27T00:00:00Z"),
   });
   const urls = entries.map((row) => row.url);
-  assert.ok(urls.includes(origin + "/published_yt"));
+  assert.ok(urls.includes(origin + "/PublishId01"));
   assert.ok(urls.includes(origin + "/event/published_event"));
-  assert.equal(urls.includes(origin + "/missing_yt"), false);
+  assert.equal(urls.includes(origin + "/MissingId01"), false);
   assert.equal(urls.includes(origin + "/event/missing_event"), false);
   assert.equal(serializeSitemap(entries), resolveSitemap(entries));
 });
@@ -251,3 +281,41 @@ test("MIG-0621 U03 T02: built sitemap.xml contains all static URLs exactly once"
   }
 });
 
+
+test("MIG-0621 regression: malformed YouTube IDs never escape the sitemap origin", async () => {
+  const items = [
+    { id: "safe_internal", youtube_video_id: "/outside.example", scheduled_time: null },
+    { id: "safe_url", youtube_video_id: "https://youtu.be/AAAAAAAAAAA", scheduled_time: null },
+    { id: "//outside.example", youtube_video_id: null, scheduled_time: null },
+    { id: "safe_normal", youtube_video_id: "BBBBBBBBBBB", scheduled_time: null },
+  ];
+  const entries = buildSitemapEntries({ origin, videos: items, events: [], creators: [], now: new Date("2026-01-01T00:00:00Z") });
+  const urls = entries.map((item) => item.url);
+  assert.ok(urls.includes(origin + "/safe_internal"), "broken YouTube ID must fall back to internal ID");
+  assert.ok(urls.includes(origin + "/AAAAAAAAAAA"), "a trusted YouTube share link must normalize");
+  assert.ok(urls.includes(origin + "/BBBBBBBBBBB"), "a valid YouTube ID must remain unchanged");
+  assert.equal(urls.filter((url) => url === origin + "/list").length, 1, "unsafe internal ID fallback deduplicates with static /list");
+  for (const url of urls) assert.equal(new URL(url).origin, origin);
+
+  const nextSource = await readFile(new URL("src/lib/publicData/sitemapSources.ts", root), "utf8");
+  const astroSource = await readFile(new URL("apps/site/src/lib/sitemap.ts", root), "utf8");
+  assert.match(nextSource, /entry\(videoPageHref\(video\),/);
+  assert.match(astroSource, /entry\(videoPageHref\(v\),/);
+});
+
+test("MIG-0621 regression: CURRENT sitemap de-duplicates fixed routes and repeated video aliases", async () => {
+  const rows = [
+    { url: origin + "/list", priority: 0.8, marker: "fixed" },
+    { url: origin + "/AAAAAAAAAAA", priority: 0.7, marker: "first-video" },
+    { url: origin + "/AAAAAAAAAAA", priority: 0.7, marker: "duplicate-alias" },
+    { url: origin + "/list", priority: 0.7, marker: "malformed-internal-fallback" },
+    { url: origin + "/BBBBBBBBBBB", priority: 0.7, marker: "second-video" },
+  ];
+  assert.deepEqual(dedupeSitemapEntries(rows).map((r) => r.marker),
+    ["fixed", "first-video", "second-video"],
+    "fixed paths win over invalid legacy aliases, preserving first published canonical order");
+  assert.deepEqual(dedupeSitemapEntries([]), []);
+  const current = await readFile(new URL("app/sitemap.ts", root), "utf8");
+  assert.match(current, /return dedupeSitemapEntries\(\[\.\.\.buildStaticSitemapStaticEntries\(\), \.\.\.dynamicEntries\]\);/,
+    "CURRENT must apply dedupe to static and dynamic sitemap entries together");
+});

@@ -129,3 +129,88 @@ test("実 repo の root は UI / docs を含まず json-generator と src/lib・
   }
   assert.match(computeStaticGeneratorHash(repoRoot), /^[0-9a-f]{64}$/);
 });
+
+test("文字列中のコメント記号で実importを消さず、疑似importは辿らない", () =>
+  withFixture((repoRoot) => {
+    write(
+      repoRoot,
+      "workers/json-generator/queue.ts",
+      [
+        'const opening = "/*";',
+        'import "./real.ts";',
+        'const closing = "*/";',
+        'export const example = \'import "./ghost.ts"\';',
+        'const load = () => import(`./dynamic.ts`);',
+        '// import "./commented.ts";',
+      ].join("\n"),
+    );
+    write(repoRoot, "workers/json-generator/real.ts", "export const version = 1;\n");
+    write(repoRoot, "workers/json-generator/dynamic.ts", "export const lazy = true;\n");
+
+    assert.deepEqual(collectStaticGeneratorFiles(repoRoot, ROOTS), [
+      "workers/json-generator/dynamic.ts",
+      "workers/json-generator/queue.ts",
+      "workers/json-generator/real.ts",
+    ]);
+
+    const before = computeStaticGeneratorHash(repoRoot, ROOTS);
+    write(repoRoot, "workers/json-generator/real.ts", "export const version = 2;\n");
+    assert.notEqual(computeStaticGeneratorHash(repoRoot, ROOTS), before);
+  }));
+
+test("import attributes 付きの dynamic import も依存として辿り、非リテラル引数は無視する", () =>
+  withFixture((repoRoot) => {
+    assert.deepEqual(
+      extractRelativeSpecifiers(
+        [
+          'const a = () => import("./dep.json", { with: { type: "json" } });',
+          "const b = () => import(name);",
+          'const c = () => import(`./${name}.ts`, { with: { type: "json" } });',
+          '// import("./ghost.ts", { with: {} });',
+        ].join("\n"),
+        "queue.ts",
+      ),
+      ["./dep.json"],
+    );
+
+    write(
+      repoRoot,
+      "workers/json-generator/queue.ts",
+      'export const load = () => import("./dep.json", { with: { type: "json" } });\n',
+    );
+    write(repoRoot, "workers/json-generator/dep.json", '{"v":1}\n');
+    assert.deepEqual(collectStaticGeneratorFiles(repoRoot, ROOTS), [
+      "workers/json-generator/dep.json",
+      "workers/json-generator/queue.ts",
+    ]);
+    const before = computeStaticGeneratorHash(repoRoot, ROOTS);
+    write(repoRoot, "workers/json-generator/dep.json", '{"v":2}\n');
+    assert.notEqual(computeStaticGeneratorHash(repoRoot, ROOTS), before);
+  }));
+
+test("TSのジェネリック関数とTSXのJSXを正しい構文モードで解析する", () =>
+  withFixture((repoRoot) => {
+    write(
+      repoRoot,
+      "workers/json-generator/queue.ts",
+      [
+        "const identity = <T>(value: T): T => value;",
+        'import "./typed.ts";',
+        'import "./widget.tsx";',
+      ].join("\n"),
+    );
+    write(repoRoot, "workers/json-generator/typed.ts", "export const typed = true;\n");
+    write(
+      repoRoot,
+      "workers/json-generator/widget.tsx",
+      ['export const widget = () => <div />;', 'import "./tsxDependency.ts";'].join("\n"),
+    );
+    write(repoRoot, "workers/json-generator/tsxDependency.ts", "export const tsxDep = true;\n");
+
+    assert.deepEqual(collectStaticGeneratorFiles(repoRoot, ROOTS), [
+      "workers/json-generator/queue.ts",
+      "workers/json-generator/tsxDependency.ts",
+      "workers/json-generator/typed.ts",
+      "workers/json-generator/widget.tsx",
+    ]);
+  }));

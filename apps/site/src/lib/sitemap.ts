@@ -3,6 +3,7 @@
  * Public-only inputs come from verified build snapshots, never request-time D1.
  */
 import type { SitemapVideoRow } from "./publicDataLoader.ts";
+import { videoPageHref } from "../../../../src/lib/youtube/id.ts";
 
 export type SitemapFrequency = "daily" | "weekly" | "monthly";
 export interface SitemapEntry {
@@ -57,7 +58,7 @@ export function buildSitemapEntries(input: {
     entry("/user", "weekly", 0.6),
     entry("/about", "monthly", 0.4),
     entry("/rules", "monthly", 0.3),
-    ...input.videos.map((v) => entry(`/${encodeURIComponent(v.youtube_video_id ?? v.id)}`, "weekly", 0.7, v.scheduled_time)),
+    ...input.videos.map((v) => entry(videoPageHref(v), "weekly", 0.7, v.scheduled_time)),
     ...input.events.map((e) => entry(`/event/${encodeURIComponent(e.id)}`, "weekly", 0.7, e.end_time ?? e.start_time)),
     ...input.creators.map((u) => entry(`/user/${encodeURIComponent(u.x_id)}`, "weekly", 0.6, u.updated_at)),
   ];
@@ -80,13 +81,26 @@ export function publishedSitemapRows<T extends { id: string }>(
   return rows.filter((row) => publishedIds.has(row.id));
 }
 
-/** Replicates Next 15.5 resolveSitemap for our loc/lastmod/changefreq/priority-only entries. */
+/** XML text nodes must escape URL query separators and markup as well as path data. */
+function escapeXmlText(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default: return "&apos;";
+    }
+  });
+}
+
+/** Replicates Next 15.5 sitemap layout for loc/lastmod/changefreq/priority-only entries. */
 export function serializeSitemap(entries: readonly SitemapEntry[]): string {
   let result = '<?xml version="1.0" encoding="UTF-8"?>\n';
   result += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
   for (const item of entries) {
     result += '<url>\n';
-    result += `<loc>${item.url}</loc>\n`;
+    result += `<loc>${escapeXmlText(item.url)}</loc>\n`;
     result += `<lastmod>${item.lastModified.toISOString()}</lastmod>\n`;
     result += `<changefreq>${item.changeFrequency}</changefreq>\n`;
     result += `<priority>${item.priority}</priority>\n`;

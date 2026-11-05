@@ -586,11 +586,55 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
   it("refuses non-read statements before any request", async () => {
     let requests = 0;
     const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: async () => { requests++; return new Response("{}"); } });
-    for (const sql of ["UPDATE events SET title = 'x'", "DELETE FROM events", "SELECT 1; DROP TABLE events", "PRAGMA table_info(events)", "INSERT INTO events DEFAULT VALUES"]) {
-      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/);
+    const forbidden = [
+      "UPDATE events SET title = 'x'",
+      "DELETE FROM events",
+      "SELECT 1; DROP TABLE events",
+      "PRAGMA table_info(events)",
+      "INSERT INTO events DEFAULT VALUES",
+      // SQLite executes these data-changing WITH statements even though they start with WITH.
+      "WITH c AS (SELECT 1) UPDATE events SET title = 'x'",
+      "WITH c AS (SELECT 1) DELETE FROM events",
+      "WITH c AS (SELECT 1) INSERT INTO events DEFAULT VALUES",
+      "WITH c AS (SELECT 1) REPLACE INTO events (id) VALUES ('x')",
+      "WITH c AS (SELECT 1) SELECT * FROM c; DELETE FROM events",
+      "WITH c AS (SELECT 1) SELECT * FROM c WHERE id IN (SELECT 1); UPDATE events SET title = 'x'",
+      "SELECT 1 /* unterminated",
+      "SELECT 'unterminated",
+    ];
+    for (const sql of forbidden) {
+      assert.equal(MIGRATED.isReadOnlyStatement(sql), false, sql);
+      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/, sql);
     }
-    assert.equal(requests, 0);
-    assert.ok(MIGRATED.isReadOnlyStatement("  WITH a AS (SELECT 1) SELECT * FROM a;"));
+    assert.equal(requests, 0, "no unsafe SQL reaches the D1 HTTP transport");
+    // Literal words and comments are not executable SQL, including quoted reserved identifiers.
+    for (const sql of [
+      "  WITH a AS (SELECT 1) SELECT * FROM a;",
+      "WITH c AS (SELECT 'DELETE' AS operation) SELECT operation FROM c",
+      "SELECT 'UPDATE events; DROP TABLE x' AS operation",
+      'SELECT "UPDATE" FROM "CREATE"',
+      "SELECT 1 /* INSERT INTO ignored */",
+      "SELECT 1; -- UPDATE after terminal semicolon",
+      "SELECT 1 /* -- UPDATE */",
+    ]) {
+      assert.equal(MIGRATED.isReadOnlyStatement(sql), true, sql);
+    }
+  });
+
+  it("rejects NaN, Infinity and oversized D1 read budgets at construction", () => {
+    let calls = 0;
+    const fetchFn = async () => { calls++; throw new Error("unexpected D1 request"); };
+    for (const invalid of [0, -1, 1.5, NaN, Infinity, -Infinity, 201, Number.MAX_SAFE_INTEGER]) {
+      assert.throws(() => MIGRATED.openD1HttpReader({
+        accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn,
+        maxStatements: invalid,
+      }), /D1 API statement budget must be an integer from 1 to 200/, String(invalid));
+    }
+    assert.equal(calls, 0);
+    const valid = MIGRATED.openD1HttpReader({
+      accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn, maxStatements: 200,
+    });
+    assert.equal(valid.statements(), 0, "the batched producer's 200-read cap is valid");
   });
 
   it("caps the number of requests and never puts the token in an error", async () => {
@@ -610,6 +654,33 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
       await assert.rejects(reader.db.prepare("SELECT 1").all(), (error) => {
         assert.match(error.message, /D1 API/);
         assert.ok(!error.message.includes(TOKEN), error.message);
+        return true;
+      });
+    }
+  });
+
+  it("reports malformed Cloudflare D1 error payloads without TypeError or token leakage", async () => {
+    const malformed = [
+      { status: 403, payload: { success: false, errors: { code: 10000, message: TOKEN } }, expected: "status=403" },
+      { status: 502, payload: { success: false, errors: 42 }, expected: "status=502" },
+      { status: 500, payload: { success: false, errors: null }, expected: "status=500" },
+      { status: 429, payload: { success: false, errors: [null, "bad", { code: "sensitive" }, { code: 1100 }] }, expected: "status=429, codes=1100" },
+      { status: 400, payload: { success: false, errors: [{ code: 1.5 }, { code: 1101 }] }, expected: "status=400, codes=1101" },
+      { status: 418, payload: { success: false, errors: Array.from({ length: 10000 }, (_, i) => ({ code: i + 1 })) }, expected: "status=418, codes=1,2,3,4,5,6,7,8" },
+      { status: 503, payload: { success: false, errors: [...Array.from({ length: 64 }, () => ({ code: "invalid" })), { code: 99999 }] }, expected: "status=503" },
+    ];
+    for (const { status, payload, expected } of malformed) {
+      const reader = MIGRATED.openD1HttpReader({
+        accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN,
+        fetchFn: async () => new Response(JSON.stringify(payload), { status }),
+      });
+      await assert.rejects(reader.db.prepare("SELECT 1").all(), (error) => {
+        assert.ok(error instanceof Error);
+        assert.ok(error.message.startsWith("D1 API query failed"), error.message);
+        assert.ok(error.message.includes(expected), error.message);
+        if (status === 418 || status === 503) assert.equal(error.message, `D1 API query failed (${expected})`, "error list processing and output must be bounded");
+        assert.ok(!error.message.includes(TOKEN), "a D1 failure must never echo credentials");
+        assert.ok(!error.message.includes("TypeError"), "malformed API data must not throw TypeError");
         return true;
       });
     }
