@@ -144,6 +144,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
         (value.icon !== null && typeof value.icon !== "string") ||
         (!url.includes("view=presence") && (
           !Array.isArray(value.xIds) ||
+          !value.xIds.every((item: unknown) => {
+            if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
+            const entry = item as Record<string, unknown>;
+            return typeof entry.x_user_id === "string" &&
+              typeof entry.x_name === "string" &&
+              (entry.icon_url === null || typeof entry.icon_url === "string") &&
+              (entry.approval_status === "approved" ||
+               entry.approval_status === "pending" ||
+               entry.approval_status === "rejected") &&
+              typeof entry.is_active === "boolean";
+          }) ||
           typeof value.canAccessAdmin !== "boolean" ||
           typeof value.canAccessManage !== "boolean"
         ))
