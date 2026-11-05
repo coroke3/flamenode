@@ -11,7 +11,13 @@ export function publicJsonCacheFreshness(
   const age = now - envelope.stored_at;
   if (!Number.isFinite(age) || age < 0) return "expired";
   if (age <= Math.max(0, freshTtlSeconds)) return "fresh";
-  if (staleMaxAgeSeconds > 0 && age <= staleMaxAgeSeconds) return "stale";
+  // A malformed infinite stale window must not retain last-known-good data forever.
+  // Infinity for the separate *fresh* TTL is an intentional cache-first default.
+  if (
+    Number.isFinite(staleMaxAgeSeconds) &&
+    staleMaxAgeSeconds > 0 &&
+    age <= staleMaxAgeSeconds
+  ) return "stale";
   return "expired";
 }
 

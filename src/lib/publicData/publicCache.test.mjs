@@ -75,6 +75,17 @@ test("stale envelope はfresh TTLを超えた時だけ bounded stale として�
   assert.equal(publicJsonCacheFreshness(envelope, 99, 30, 120), "expired");
 });
 
+test("stale fallback never accepts non-finite age bounds", () => {
+  const envelope = { stored_at: 100 };
+  assert.equal(publicJsonCacheFreshness(envelope, 131, 30, 120), "stale");
+  assert.equal(publicJsonCacheFreshness(envelope, 131, 30, Number.POSITIVE_INFINITY), "expired");
+  assert.equal(publicJsonCacheFreshness(envelope, 131, 30, Number.NaN), "expired");
+  assert.equal(publicJsonCacheFreshness(envelope, 131, 30, Number.NEGATIVE_INFINITY), "expired");
+  // The cache-first default intentionally uses an unbounded *fresh* window.
+  assert.equal(publicJsonCacheFreshness(envelope, 100_000, Number.POSITIVE_INFINITY), "fresh");
+  assert.equal(publicJsonCacheFreshness(envelope, 110, 30, Number.POSITIVE_INFINITY), "fresh");
+});
+
 test("Cache API retention is always finite with malformed fresh/stale TTL", () => {
   for (const [fresh, stale, expected] of [
     [Number.NaN, 600, 600],
