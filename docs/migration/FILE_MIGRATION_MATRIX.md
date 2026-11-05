@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/stableToken.ts` | HELPER | CURRENT spreadsheet import preview token payload/schema fingerprint canonical SHA-256; ensure cross-runtime key sort independence | MIG-0705 | SAME (CURRENT helper; TARGET API/worker unchanged) | RETAINED | PR#602 SHA=2d735d9edd4e6ce41a81b6dc5a2e517925b3486d TEST=node --test --experimental-strip-types src/lib/utils/stableToken.test.mjs CI=https://github.com/coroke3/flamenode/pull/602/checks (Unicode code-unit property order instead of localeCompare; signed token TTL=300s) |
+| `src/lib/utils/stableToken.test.mjs` | TEST | CURRENT preview token canonical JSON / SHA256 nested key sort parity | MIG-0705 | SAME (CURRENT unit test; TARGET migration not claimed) | RETAINED | PR#602 SHA=a19c0bb3f2b0deff25b79429b832cd7a7a5c8885 TEST=node --test --experimental-strip-types src/lib/utils/stableToken.test.mjs CI=https://github.com/coroke3/flamenode/pull/602/checks (mixed case / non-ASCII fields, order-independent digest) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
