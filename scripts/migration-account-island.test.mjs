@@ -127,7 +127,10 @@ test("malformed successful JSON does not leave presence or details loading unres
 });
 
 test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authorized", async () => {
-  for (const malformed of [{}, { loggedIn: "false" }, { loggedIn: true }, { loggedIn: true, displayName: "A" }]) {
+  for (const malformed of [
+    {}, { loggedIn: "false" }, { loggedIn: true }, { loggedIn: true, displayName: "A" },
+    { ...presenceIn, view: "details" }, { loggedIn: false }, { loggedIn: false, view: null },
+  ]) {
     const v = await setup({ "/api/account/summary?view=presence": json(malformed) });
     assert.equal(v.store.getState().loading, false);
     assert.equal(v.store.getState().unavailable, true);
@@ -144,6 +147,11 @@ test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authoriz
     { ...summary(), xIds: [{ ...entry("bad", "approved", true), approval_status: "unknown" }] },
     { ...summary(), canAccessAdmin: undefined },
     { ...summary(), canAccessManage: "true" },
+    { ...summary(), role: undefined },
+    { ...summary(), role: "superuser" },
+    { ...summary(), activeXId: 42 },
+    { ...summary(), activeXId: undefined },
+    { ...summary(), degraded: false },
   ]) {
     const v = await setup({
       "/api/account/summary?view=presence": json(presenceIn),
