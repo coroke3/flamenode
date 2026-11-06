@@ -34,6 +34,8 @@ export function parseRetryAfterMs(
   now = Date.now(),
 ): number | null {
   if (!value) return null;
+  // An invalid cap must never produce NaN/Infinity or an unbounded delay.
+  if (!Number.isFinite(maxDelayMs)) return null;
   const cap = Math.max(0, Math.floor(maxDelayMs));
   // RFC 9110 delta-seconds is one or more decimal digits. Number() also accepts
   // fractions, exponents, signs, hex and whitespace-only strings.
