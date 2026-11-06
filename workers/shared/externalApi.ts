@@ -58,6 +58,13 @@ export function parseRetryAfterMs(
   const minute = Number(asctime ? match[4] : match[5]);
   const second = Number(asctime ? match[5] : match[6]);
   const months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const givenWeekday = raw.slice(0, raw.indexOf(asctime ? " " : ","));
+  const actualWeekday = weekdays[date.getUTCDay()]!;
+  // Date.parse ignores mismatched weekday tokens. Validate the weekday as
+  // well as the date fields, including the long RFC 850 weekday spelling.
+  const longWeekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  if (givenWeekday !== (rfc850 ? longWeekdays[date.getUTCDay()] : actualWeekday)) return null;
   // Confirm the date was not silently normalized (e.g. February 30).
   if (
     date.getUTCDate() !== day ||
