@@ -935,10 +935,13 @@ test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empt
   }
 });
 
-test("GA4 public allow-list excludes private, deleted, missing and malformed status rows", () => {
+test("GA4 public allow-list requires public status and a displayable title", () => {
   const recent = { items: [
-    { id: " public-id ", status: "public" },
-    { id: "revoked", status: "private" },
+    { id: " public-id ", title: "Public", status: "public" },
+    { id: "no-title", status: "public" },
+    { id: "blank-title", title: "   ", status: "public" },
+    { id: "numeric-title", title: 42, status: "public" },
+    { id: "revoked", title: "Revoked", status: "private" },
     { id: "deleted", status: "deleted" },
     { id: "unmarked" },
     { id: "false-status", status: false },
@@ -951,13 +954,15 @@ test("GA4 public allow-list excludes private, deleted, missing and malformed sta
 
 test("GA4 matched count excludes revoked and malformed input rows", () => {
   const recent = { items: [
-    { id: "visible", status: "public" },
-    { id: "revoked", status: "private" },
+    { id: "visible", title: "Visible", status: "public" },
+    { id: "missing-title", status: "public" },
+    { id: "revoked", title: "Revoked", status: "private" },
     { id: "unmarked" },
   ] };
   const periods = [
     { video_id: "visible", views_30d: 9 },
     { video_id: "revoked", views_30d: 10 },
+    { video_id: "missing-title", views_30d: 12 },
     { video_id: "unmarked", views_30d: 11 },
     { video_id: "visible", views_30d: 0 },
   ];
