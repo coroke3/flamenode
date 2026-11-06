@@ -120,6 +120,17 @@ test("Cache API writer normalizes TTL before isolate and edge-cache writes", () 
   assert.doesNotMatch(writer, /Math\.floor\(ttlSeconds\)/);
 });
 
+test("uncacheable replacement invalidates an old isolate entry", () => {
+  const start = source.indexOf("export function writePublicJsonCacheBestEffort(");
+  const end = source.indexOf("// MIG-0614:", start);
+  assert.ok(start >= 0 && end > start);
+  const writer = source.slice(start, end);
+  // JSON.stringify(undefined) produces no serialized JSON; never keep an earlier snapshot.
+  assert.match(writer, /if \\(typeof serialized !== "string"\\) \\{\\s*if \\(!options\\?\\.bypassIsolate\\) deletePublicJsonIsolateCache\\(r2Key\\);/);
+  // Oversized replacements can be cached in the edge tier but not in the isolate tier.
+  assert.match(writer, /if \\(isolateByteWeight === null\\) \\{\\s*deletePublicJsonIsolateCache\\(r2Key\\);/);
+});
+
 test("Cache API retention covers the entire configured stale window", () => {
   assert.equal(publicJsonCacheRetentionTtl(60, 600), 600);
   assert.equal(publicJsonCacheRetentionTtl(600, 60), 600);
