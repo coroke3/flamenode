@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import {createAdminCostGuardApi} from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
-import {createAdminNotificationsApi,notificationQuery,notificationFilterHref} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
+import {createAdminNotificationsApi,notificationQuery,notificationFilterHref,truncateNotificationSearch} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
 import {CostGuardForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardForm.js";
 import {AdminCostGuard,AdminCostGuardView,changedCostGuardKeys,MODES} from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 import {CostGuardOverrideForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardOverrideForm.js";
@@ -27,6 +27,21 @@ const settings={
   exceptionFeaturesJson:null,disabledFeaturesJson:null,truncated:false,history:[],
 };
 const read=rel=>readFileSync(new URL(rel,import.meta.url),"utf8");
+
+test("fix(notifications): q 100 UTF-16 units never splits an emoji", () => {
+  const split = "A".repeat(99) + "😀";
+  const whole = "A".repeat(98) + "😀";
+  assert.equal(truncateNotificationSearch(split), "A".repeat(99));
+  assert.equal(truncateNotificationSearch(whole), whole);
+  assert.equal(readNotificationFilters(new URLSearchParams({ q: split })).q, "A".repeat(99));
+  assert.equal(readNotificationFilters(new URLSearchParams({ q: whole })).q, whole);
+  const filters = { status: "all", cat: "all", type: "", event: "", q: split };
+  assert.equal(new URLSearchParams(notificationQuery(filters)).get("q"), "A".repeat(99));
+  assert.equal(new URLSearchParams(notificationFilterHref({ ...filters, q: whole }).split("?")[1]).get("q"), whole);
+  assert.ok(!truncateNotificationSearch(split).includes("\uFFFD"));
+  const currentPage = read("../../../app/(admin)/admin/notifications/page.tsx");
+  assert.match(currentPage, /const qFilter = \/\[\\uD800-\\uDBFF\]\$\/.test\(qRaw\)/);
+});
 
 test("MIG-0734 T01 U01 cost writes preserve 5 exact D-17-4 paths and JSON keys",async()=>{
   const calls=[];
