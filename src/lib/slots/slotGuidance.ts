@@ -8,7 +8,9 @@ export function resolveSlotIntervalSec(args: {
   slots: readonly SlotTimeLike[];
   partGapSec: number;
 }): number | null {
-  const explicit = Number(args.explicitMinutes);
+  // Do not coerce malformed runtime inputs: Number(true), Number("5") and
+  // Number([5]) would otherwise be accepted as valid whole-minute intervals.
+  const explicit = typeof args.explicitMinutes === "number" ? args.explicitMinutes : Number.NaN;
   // eventForm.slot_interval_minutes is an integer in [1, 1440].
   // Never trust a fractional or out-of-contract legacy value merely because
   // its conversion into seconds happens to round to a positive integer.
