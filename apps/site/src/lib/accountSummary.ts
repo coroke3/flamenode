@@ -255,14 +255,18 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
 
   // CURRENT: an Active X change invalidates the details and fetches them again.
   const onActiveXChanged = () => {
-    if (!presenceLoaded) presenceRevision += 1;
+    // A confirmed logout is not permanent: another tab or a completed switch
+    // may have established a session after the previous presence/details read.
+    if (!presenceLoaded || !state.user) {
+      presenceLoaded = false;
+      presenceRevision += 1;
+    }
     detailsRevision += 1;
     detailsRequested = true;
     set({ details: null, detailsUnavailable: false });
     void loadDetails();
-    // A previous presence failure leaves no request in flight. A successful
-    // identity switch must be able to recover without a manual retry.
-    // Pending requests are instead invalidated and retried by loadPresence.
+    // Retry failed or logged-out presence reads after identity changes.
+    // A pending presence response is invalidated and then retried on completion.
     if (!presenceLoaded && !presenceRunning) void loadPresence();
   };
 
