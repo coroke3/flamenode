@@ -11,6 +11,7 @@ import {
   getManageStaffXUserIdsFromSnapshot,
 } from "@/lib/auth/manageAuthorization";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
+import { readManageNotificationQueryValue } from "@/lib/manage/notificationQuery";
 import {
   notificationOutbox as notificationOutboxTable,
 } from "@/lib/db/schema";
@@ -50,9 +51,9 @@ function chunkEventIds(ids: readonly string[]): string[][] {
 
 interface Props {
   searchParams?: Promise<{
-    event?: string;
-    notif?: string;
-    status?: string;
+    event?: string | string[];
+    notif?: string | string[];
+    status?: string | string[];
   }>;
 }
 
@@ -64,16 +65,17 @@ export default async function ManageNotificationsPage({
   const user = guard.user;
 
   const sp = (await searchParams) ?? {};
-  const eventFilter = (sp.event ?? "").trim();
+  const eventFilter = readManageNotificationQueryValue(sp.event);
+  const notificationType = readManageNotificationQueryValue(sp.notif);
   const notifFilter: ManageNotificationFilter =
-    sp.notif === "video" ||
-    sp.notif === "x_id" ||
-    sp.notif === "slot" ||
-    sp.notif === "chapter" ||
-    sp.notif === "other"
-      ? sp.notif
+    notificationType === "video" ||
+    notificationType === "x_id" ||
+    notificationType === "slot" ||
+    notificationType === "chapter" ||
+    notificationType === "other"
+      ? notificationType
       : "all";
-  const statusFilter = (sp.status ?? "").trim();
+  const statusFilter = readManageNotificationQueryValue(sp.status);
 
   const db = getDatabase();
   if (!db) notFound();
