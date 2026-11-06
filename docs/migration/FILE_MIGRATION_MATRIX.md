@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `scripts/cloudflare-production.mjs` | CONFIG | MIG-0628 production Workers Build environment preflight (Node 22 runtime) | MIG-0628 | SAME; fail-closed Node runtime version verification | RETAINED | PR#639 SHA=5426dff50fc065392d600a86ac2df26ee8654ce1 TEST=scripts/cloudflare-node-version.test.mjs CI=https://github.com/coroke3/flamenode/pull/639/checks (final HEAD pending) |
+| `scripts/cloudflare-node-version.test.mjs` | TEST | MIG-0628 production Node runtime version boundary regression | MIG-0628 | SAME; validates scripts/cloudflare-production.mjs | RETAINED | PR#639 SHA=b8bb9ae0f87b8a2fddb1a4dac3072739da4649d9 TEST=scripts/cloudflare-node-version.test.mjs CI=https://github.com/coroke3/flamenode/pull/639/checks (final HEAD pending) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
