@@ -18,6 +18,8 @@ export function normalizeHttpUrl(
   try {
     const url = new URL(s);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    // Userinfo must never be serialized into public links or persisted URL fields.
+    if (url.username || url.password) return null;
     return url.toString();
   } catch {
     return null;

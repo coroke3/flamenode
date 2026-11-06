@@ -359,8 +359,30 @@ export const D1_HTTP_ENV = {
 const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
 // A WITH prefix is not proof of a read: SQLite accepts WITH c AS (...) UPDATE/DELETE/INSERT.
 // Block write/DDL/control tokens outside quoted values, identifiers and comments even if
-// a broader-than-intended D1 API token were configured. This reader executes fixed SELECTs.
-const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE)\b/i;
+// a broader-than-intended D1 API token were configured. Also reject known
+// extension function entry points that can have side effects when enabled.
+// This reader executes fixed SELECTs.
+const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
+
+/** Return true when a quoted SQL identifier is immediately invoked as a function. */
+function followedBySqlCall(source: string, from: number): boolean {
+  let i = from;
+  while (i < source.length) {
+    if (/\s/.test(source[i]!)) { i++; continue; }
+    if (source[i] === "-" && source[i + 1] === "-") {
+      while (i < source.length && source[i] !== "\n") i++;
+      continue;
+    }
+    if (source[i] === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) return false;
+      i = end + 2;
+      continue;
+    }
+    return source[i] === "(";
+  }
+  return false;
+}
 
 /** Mask SQL strings, quoted identifiers and comments so literal "UPDATE" text stays readable. */
 function executableSqlOnly(source: string): string | null {
@@ -382,6 +404,7 @@ function executableSqlOnly(source: string): string | null {
     if (char === "'" || char === '"' || char === "`" || char === "[") {
       const closing = char === "[" ? "]" : char;
       i += 1;
+      const identifierStart = i;
       let closed = false;
       while (i < source.length) {
         if (source[i] === closing) {
@@ -394,7 +417,14 @@ function executableSqlOnly(source: string): string | null {
         i += 1;
       }
       if (!closed) return null;
-      code += " ";
+      // SQLite permits quoted function names: "load_extension"('x'),
+      // [writefile]('x', 'y') and backtick forms all invoke functions.
+      // Preserve only a dangerous quoted identifier when it is called;
+      // quoted column names and harmless string literals stay masked.
+      const quotedName = source.slice(identifierStart, i - 1);
+      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile)$/i.test(quotedName)
+        && followedBySqlCall(source, i);
+      code += forbiddenCall ? ` ${quotedName} ` : " ";
       continue;
     }
     code += char;
@@ -437,7 +467,8 @@ export function openD1HttpReader(options: {
     bind: (...next: unknown[]) => statement(sql, next),
     async all<T>() {
       if (!isReadOnlyStatement(sql)) throw new Error("D1 API mode refuses a non-read statement");
-      if (++count > max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      if (count >= max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      count += 1;
       let response: Response;
       try {
         response = await fetchFn(url, {

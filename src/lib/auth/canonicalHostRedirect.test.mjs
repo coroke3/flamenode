@@ -79,6 +79,25 @@ test("x-forwarded-hostの先頭値だけを使う", () => {
   );
 });
 
+test("全127/8 loopbackと末尾ドット付きlocalhostは正規hostへ転送しない", () => {
+  for (const host of ["127.0.0.2", "127.255.255.254", "localhost."]) {
+    assert.equal(resolveCanonicalHostRedirect({
+      configuredOrigin,
+      forwardedHost: host,
+      host,
+      pathname: "/entry",
+      search: "",
+    }), null, host);
+  }
+  assert.equal(resolveCanonicalHostRedirect({
+    configuredOrigin,
+    forwardedHost: "127.evil.example",
+    host: null,
+    pathname: "/entry",
+    search: "",
+  }), "https://flamenode.net/entry");
+});
+
 test("正規host・loopback・不正なoriginではリダイレクトしない", () => {
   for (const input of [
     {

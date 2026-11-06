@@ -251,6 +251,41 @@ test("legacy social URL credentials are rejected despite leading whitespace", ()
   assert.equal(labels.xUsers.find((x) => x.id === "creator_x")?.other_social_links, "X, TikTok");
 });
 
+test("legacy YouTube ID extraction validates the actual URL host", () => {
+  const cases = [
+    ["abcdefghijk", "abcdefghijk"],
+    ["https://youtu.be/abcdefghijk", "abcdefghijk"],
+    ["youtu.be/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtu.be/abcdefghijk?t=5", "abcdefghijk"],
+    ["www.youtu.be/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtube.com/watch?feature=share&v=abcdefghijk", "abcdefghijk"],
+    ["https://m.youtube.com/shorts/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtube.com/embed/abcdefghijk", "abcdefghijk"],
+    ["https://youtube.com.evil.example/watch?v=abcdefghijk", null],
+    ["https://evil.example/youtube.com/watch?v=abcdefghijk", null],
+    ["https://evil.example/?next=https://youtu.be/abcdefghijk", null],
+    ["https://user:secret@youtube.com/watch?v=abcdefghijk", null],
+    ["https://youtube.com/watch?v=abcdefghijkjunk", null],
+    ["https://youtu.be/abcdefghijk/extra", null],
+  ];
+  for (const [ylink, expected] of cases) {
+    const parsed = parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "Import URL origin test",
+      creator: "Creator",
+      eventid: "legacy-origin-test",
+      ylink,
+    }]));
+    const plan = normalizeLegacyFiles([parsed], {
+      eventVisibility: "private",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    });
+    assert.equal(plan.videos.length, 1, `video row should remain importable: ${ylink}`);
+    assert.equal(plan.videos[0].youtube_video_id, expected, ylink);
+    assert.equal(plan.videos[0].source_type, expected ? "youtube" : "external", ylink);
+  }
+});
+
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
   const videoOnlyJson = JSON.stringify([
     {

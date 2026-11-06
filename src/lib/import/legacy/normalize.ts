@@ -309,14 +309,37 @@ function scheduledTime(row: Record<string, unknown>): number | null {
 function extractYoutubeId(raw: string | null): string | null {
   if (!raw) return null;
   const value = raw.trim();
-  if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
-  for (const pattern of [
-    /youtu\.be\/([A-Za-z0-9_-]{11})/,
-    /youtube\.com\/watch\?[^#]*v=([A-Za-z0-9_-]{11})/,
-    /youtube\.com\/(?:embed|shorts|v)\/([A-Za-z0-9_-]{11})/,
-  ]) {
-    const match = value.match(pattern);
-    if (match?.[1]) return match[1];
+  const validId = /^[A-Za-z0-9_-]{11}$/;
+  if (validId.test(value)) return value;
+
+  // Legacy files may contain bare YouTube hosts, but an unrelated origin must
+  // never be treated as YouTube merely because its path contains "youtube.com".
+  const candidate = /^(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)\//i.test(value)
+    ? `https://${value}`
+    : value;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (host === "youtu.be" || host === "www.youtu.be") {
+    return segments.length === 1 && validId.test(segments[0]!) ? segments[0]! : null;
+  }
+  if (host !== "youtube.com" && host !== "www.youtube.com" && host !== "m.youtube.com") {
+    return null;
+  }
+  if (url.pathname === "/watch") {
+    const id = url.searchParams.get("v");
+    return id && validId.test(id) ? id : null;
+  }
+  if (segments.length === 2 && ["embed", "shorts", "v"].includes(segments[0]!)) {
+    return validId.test(segments[1]!) ? segments[1]! : null;
   }
   return null;
 }
