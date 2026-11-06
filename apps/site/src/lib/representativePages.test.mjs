@@ -326,3 +326,17 @@ test("MIG-0510: representative page URLs and playback state reject malformed You
   assert.equal(videoMetadata(missing).canonical, siteOrigin + "/" + video.id);
   assert.equal(videoScreenData(missing).hasYoutube, false);
 });
+
+test("MIG-0403 SEO metadata truncation preserves emoji and CURRENT parity", () => {
+  const prefix = "A".repeat(156);
+  for (const description of [
+    prefix + "🚀" + "x".repeat(12),
+    "A".repeat(155) + "🚀" + "x".repeat(12),
+  ]) {
+    const actual = site.buildPageMetadata({ title: "作品", description, path: "/about" }).description;
+    const expected = current.compactText(description);
+    assert.equal(actual, expected);
+    assert.doesNotMatch(actual, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+    assert.ok(actual.length <= 160);
+  }
+});

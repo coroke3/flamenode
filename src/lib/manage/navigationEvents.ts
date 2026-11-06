@@ -94,14 +94,12 @@ function compareSidebarRows(
 ): number {
   // SQLite DESC places NULL values after non-NULL values.  Mapping NULL to
   // negative infinity reproduces that order without adding a client query.
-  const startDiff =
-    (right.start_time ?? Number.NEGATIVE_INFINITY) -
-    (left.start_time ?? Number.NEGATIVE_INFINITY);
-  if (startDiff !== 0) return startDiff;
-  const createdDiff =
-    (right.created_at ?? Number.NEGATIVE_INFINITY) -
-    (left.created_at ?? Number.NEGATIVE_INFINITY);
-  if (createdDiff !== 0) return createdDiff;
+  const leftStart = left.start_time ?? Number.NEGATIVE_INFINITY;
+  const rightStart = right.start_time ?? Number.NEGATIVE_INFINITY;
+  if (leftStart !== rightStart) return rightStart > leftStart ? 1 : -1;
+  const leftCreated = left.created_at ?? Number.NEGATIVE_INFINITY;
+  const rightCreated = right.created_at ?? Number.NEGATIVE_INFINITY;
+  if (leftCreated !== rightCreated) return rightCreated > leftCreated ? 1 : -1;
   // IDs are ASCII identifiers in the canonical schema. Relational string
   // comparison keeps the same binary tie-break as SQLite ORDER BY id DESC;
   // localeCompare could vary by the server locale.
