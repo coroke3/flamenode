@@ -312,6 +312,40 @@ test("display name: the X name, but the account name for @handle-only names and 
   assert.equal(resolveDisplayName("  ", null, false), "guest");
 });
 
+test("Active X change after failed presence rechecks identity without manual retry", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return presenceCalls === 1
+          ? json({ view: "presence", loggedIn: false, unavailable: true }, 503)
+          : json(presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  assert.equal(store.getState().unavailable, true);
+  assert.equal(store.getState().user, null);
+  assert.equal(presenceCalls, 1);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2, "the successful switch retries presence after a prior 503");
+  assert.equal(detailsCalls, 1, "the full summary is fetched for the current identity");
+  assert.equal(store.getState().unavailable, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  assert.equal(store.getState().loading, false);
+  store.dispose();
+});
+
 test("Active X change during pending presence ignores stale logged-out or 503 responses", async () => {
   for (const status of [200, 503]) {
     let releaseOld;
