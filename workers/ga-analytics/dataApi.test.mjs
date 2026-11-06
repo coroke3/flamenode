@@ -84,6 +84,30 @@ test("aggregateGa4ReportRows maps dateRange names to view periods", () => {
   assert.equal(videoB.views_2d, 0);
 });
 
+test("aggregateGa4ReportRows rejects unsafe sum of individually valid GA4 metrics", () => {
+  const max = Number.MAX_SAFE_INTEGER;
+  const safe = aggregateGa4ReportRows([
+    ga4Row("last_30", "video-a", max - 1),
+    ga4Row("last_30", "video-a", 1),
+  ], dimensionIndices);
+  assert.equal(safe[0].views_30d, max);
+  assert.throws(
+    () => aggregateGa4ReportRows([
+      ga4Row("last_30", "video-a", max),
+      ga4Row("last_30", "video-a", 1),
+    ], dimensionIndices),
+    /ga4_report_aggregate_views_overflow/,
+  );
+  // Also catch an overflow in a short window, not only 30-day counts.
+  assert.throws(
+    () => aggregateGa4ReportRows([
+      ga4Row("last_2_days", "video-b", max),
+      ga4Row("last_2_days", "video-b", 1),
+    ], dimensionIndices),
+    /ga4_report_aggregate_views_overflow/,
+  );
+});
+
 test("fetchVideoViewPeriods aggregates a successful single-page report", async () => {
   const rows = [
     ga4Row("last_2_days", "video-a", 11),
