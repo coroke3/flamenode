@@ -52,6 +52,17 @@ test("formatAuditValue truncates long text and distinguishes null / empty", () =
   assert.equal(formatAuditValue("a".repeat(200), 10), "aaaaaaaaaa…");
 });
 
+test("formatAuditValue does not split emoji at the UTF-16 truncation boundary", () => {
+  const prefix = "a".repeat(9);
+  assert.equal(formatAuditValue(prefix + "😀" + "next", 10), prefix + "…");
+  assert.equal(formatAuditValue("a".repeat(8) + "😀" + "next", 10), "a".repeat(8) + "😀…");
+  const diff = parseAuditDiff(
+    JSON.stringify({ title: "before" }),
+    JSON.stringify({ title: "a".repeat(159) + "😀" + "after" }),
+  );
+  assert.equal(diff.changes[0]?.afterText, "a".repeat(159) + "…");
+});
+
 test("important key and labels are detected", () => {
   assert.equal(labelAuditKey("youtube_video_id"), "YouTube ID");
   assert.equal(isImportantAuditKey("youtube_video_id"), true);
