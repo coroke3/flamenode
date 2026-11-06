@@ -343,6 +343,30 @@ if (runUnderRootTsx(import.meta.url)) {
     }
     reset();
   });
+  test("SEC-575: v5 realtime micro-cache can reuse a snapshot after 2 seconds, but never revoked data", async () => {
+    const path = "export-event?format=v5&update=realtime";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        Date.now = () => 1700000202000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.body, first.body, "micro-cache must reuse the original v5 body across generated_at drift");
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await normalized(await request(path));
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(revoked.body, /public-video|公開作品/);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
+
   test("T07: Cache API HIT is gated and keeps status/ETag/refresh headers", async () => {
     reset();
     const path = "export-event?format=v5&update=scheduled&refresh=1440";

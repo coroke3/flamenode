@@ -415,7 +415,7 @@ export async function GET(
   }
   if (microCacheKey) {
     const coalesced = isolateMicroCacheGet(microCacheKey);
-    if (coalesced === body) {
+    if (coalesced !== null && eventExportBodyMatchesFresh(coalesced, body, format)) {
       return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
     }
   }

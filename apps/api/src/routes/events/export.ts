@@ -184,7 +184,7 @@ eventExportRoutes.get("/:id", async (c) => {
   }
   if (microCacheKey) {
     const coalesced = isolateMicroCacheGet(microCacheKey);
-    if (coalesced === body) return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
+    if (coalesced !== null && eventExportBodyMatchesFresh(coalesced, body, format)) return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
   }
   if (usePayloadCache && host) {
     writePublicJsonCacheBestEffort(key, {
