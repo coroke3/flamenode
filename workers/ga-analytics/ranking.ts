@@ -112,6 +112,7 @@ export function rankTrendingItems(
 ): TrendingItem[] {
   const recentById = buildRecentItemMap(recent);
   const ranked: TrendingItem[] = [];
+  const rankedIds = new Set<string>();
 
   for (const period of periods) {
     // JSON.stringify turns NaN/Infinity into null. Never publish an invalid
@@ -124,6 +125,12 @@ export function rankTrendingItems(
     ) continue;
     const base = recentById.get(period.video_id);
     if (!base) continue;
+    // The Data API aggregates one row per video. If a different caller
+    // supplies duplicates, fail closed instead of publishing duplicate ranks.
+    if (rankedIds.has(base.id)) {
+      throw new Error("ga4_trending_duplicate_video_id");
+    }
+    rankedIds.add(base.id);
     ranked.push({
       ...base,
       views_2d: period.views_2d,
