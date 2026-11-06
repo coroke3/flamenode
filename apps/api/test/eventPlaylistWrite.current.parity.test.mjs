@@ -355,6 +355,28 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(parsePlaylistSettings({ sync_interval_minutes: "0" }).interval, 60);
   });
 
+  test("SA-038 rejects malformed JSON types instead of coercing array/object values", () => {
+    const invalidPlaylist = [
+      ["PL1234567890"], { toString: "PL1234567890" }, null, 1234567890,
+    ];
+    for (const playlist_id of invalidPlaylist) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id, sync_mode: "mirror" }),
+        { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" },
+      );
+    }
+    for (const sync_interval_minutes of [["720"], { value: 720 }, null]) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes }),
+        { ok: false, message: "入力エラー" },
+      );
+    }
+    assert.deepStrictEqual(
+      parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: 720 }),
+      { ok: true, playlistId: "PL1234567890", mode: "mirror", interval: 720 },
+    );
+  });
+
   test("SA-038 playlist parser equals CURRENT src/lib/youtube/playlist.ts on a table of inputs", () => {
     const ids = [
       "", "  ", "PLshort", "PL1234567890", "PL_-abcdefgh", "a".repeat(100), "a".repeat(101), "bad id!!!!!!",
