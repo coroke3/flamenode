@@ -9,7 +9,11 @@ export class ExternalRequestBudget {
   private consumed = 0;
 
   constructor(limit: number) {
-    this.limit = Math.max(0, Math.floor(Number.isFinite(limit) ? limit : 0));
+    // At 2^53 a consumed request can stop incrementing due to IEEE-754
+    // rounding, silently allowing an unbounded number of subrequests.
+    this.limit = Number.isFinite(limit)
+      ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.floor(limit)))
+      : 0;
   }
 
   get used(): number {
@@ -22,7 +26,9 @@ export class ExternalRequestBudget {
 
   consume(count = 1): boolean {
     const normalized = Math.max(1, Math.floor(Number.isFinite(count) ? count : 1));
-    if (this.consumed + normalized > this.limit) return false;
+    // Reject unsafe counts, and compare against remaining capacity before
+    // addition so rounding cannot silently bypass the configured budget.
+    if (!Number.isSafeInteger(normalized) || normalized > this.remaining) return false;
     this.consumed += normalized;
     return true;
   }
