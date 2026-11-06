@@ -1,3 +1,33 @@
+/**
+ * Exact UTF-8 byte count without allocating an encoded copy.
+ * Stop as soon as the encoded value exceeds the allowed byte limit.
+ * TextEncoder encodes unpaired surrogates as U+FFFD (3 bytes).
+ */
+export function utf8ByteLengthUpTo(value: string, limit: number): number | null {
+  if (!Number.isSafeInteger(limit) || limit < 0) return null;
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+    if (bytes > limit) return null;
+  }
+  return bytes;
+}
+
 export type PublicJsonCacheFreshnessEnvelope = {
   stored_at: number;
 };
