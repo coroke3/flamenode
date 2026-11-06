@@ -560,6 +560,46 @@ test("Active X change during pending details drops old identity and refetches th
   }
 });
 
+test("sign-out ignores same-batch duplicate clicks and permits retry after failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveFirst;
+  const first = new Promise((resolve) => { resolveFirst = resolve; });
+  let csrfCalls = 0;
+  globalThis.fetch = async (url) => {
+    assert.equal(url, "/api/auth/csrf");
+    csrfCalls++;
+    if (csrfCalls === 1) return first;
+    return json({}, 503);
+  };
+  let v;
+  try {
+    v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(summary()),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    const signOut = button(v.container, "ログアウト");
+    assert.ok(signOut);
+    await act(async () => {
+      signOut.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      signOut.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(csrfCalls, 1, "double click must not initiate two CSRF requests");
+    await act(async () => { resolveFirst(json({}, 503)); });
+    await flush();
+    assert.ok(text(v.container).includes("ログアウトに失敗しました"));
+    const retry = button(v.container, "ログアウト");
+    assert.ok(retry && !retry.disabled, "a failed sign-out must be retryable");
+    await click(retry);
+    await flush();
+    assert.equal(csrfCalls, 2, "a subsequent user click may retry");
+  } finally {
+    if (v) await v.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Active X switch ignores a second click before React commits pending state", async () => {
   let resolveSwitch;
   const switchResult = new Promise((resolve) => { resolveSwitch = resolve; });
