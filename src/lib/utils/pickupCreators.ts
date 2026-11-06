@@ -6,8 +6,15 @@ export type PickupCreatorCounts = {
   x_name?: string | null;
 };
 
+function finiteCount(value: number | null | undefined): number {
+  // A D1 COUNT is a non-negative integer. Malformed snapshot/test inputs
+  // must not become infinite totals, negative scores or unstable sort keys.
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+}
+
 function counts(row: PickupCreatorCounts): [personal: number, collab: number] {
-  return [Number(row.video_count) || 0, Number(row.collab_count) || 0];
+  return [finiteCount(row.video_count), finiteCount(row.collab_count)];
 }
 
 /** 個人作1件以上、または合作のみで2件以上（参考旧 index.jsx / 設計書）。 */
