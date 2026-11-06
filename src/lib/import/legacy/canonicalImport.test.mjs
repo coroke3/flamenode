@@ -168,6 +168,8 @@ test("legacy YouTube ID extraction validates the actual URL host", () => {
     ["abcdefghijk", "abcdefghijk"],
     ["https://youtu.be/abcdefghijk", "abcdefghijk"],
     ["youtu.be/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtu.be/abcdefghijk?t=5", "abcdefghijk"],
+    ["www.youtu.be/abcdefghijk", "abcdefghijk"],
     ["https://www.youtube.com/watch?feature=share&v=abcdefghijk", "abcdefghijk"],
     ["https://m.youtube.com/shorts/abcdefghijk", "abcdefghijk"],
     ["https://www.youtube.com/embed/abcdefghijk", "abcdefghijk"],
