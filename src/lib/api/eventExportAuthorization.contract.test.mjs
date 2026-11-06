@@ -22,7 +22,7 @@ test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を�
   const d1Gate = route.indexOf("await loadEventExportEvent(db, eventId)");
   const cacheHit = route.indexOf("const response = await cachedResponse(body)");
   assert.ok(d1Gate >= 0 && cacheHit > route.indexOf("body = JSON.stringify(payload)"));
-  assert.match(route, /cached !== freshBody/);
+  assert.match(route, /eventExportBodyMatchesFresh\(cached, freshBody, format\)/);
   assert.doesNotMatch(route, /kv\.get\(accessKey\)/);
   assert.doesNotMatch(route, /kv\.put\(accessKey/);
   assert.match(route, /event\.public_api_enabled === 1/);
