@@ -81,7 +81,7 @@ export function writePublicJsonIsolateCache(
     return;
   }
   // NaN comparison is always false; a cached entry with NaN expiration would never expire.
-  if (!Number.isFinite(nowMs)) {
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
     deleteEntry(r2Key);
     return;
   }
