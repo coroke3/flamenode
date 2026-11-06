@@ -8,6 +8,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
 import { buildPageMetadata } from "@/lib/seo";
+import { parseUsersIndexPage } from "@/lib/publicData/usersIndexPage";
 import {
   loadStaticUsersIndex,
   setPublicRequestRoute,
@@ -59,11 +60,6 @@ function parseUsersIndexSort(value: string | undefined): UsersIndexSort {
   return value === "name" || value === "works" ? value : "score";
 }
 
-function parsePageNumber(value: string | undefined): number {
-  const parsed = Number.parseInt(value ?? "1", 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
-}
-
 function mapIndexEntry(entry: CreatorIndexEntry): CreatorRow {
   return {
     id: entry.x_id,
@@ -85,7 +81,7 @@ export async function UserListPage({
   searchParams: Promise<SearchParams>;
 }): Promise<React.ReactElement> {
   const { q = "", sort = "score", page = "1" } = await searchParams;
-  const pageNum = parsePageNumber(page);
+  const pageNum = parseUsersIndexPage(page);
   const sortKey = parseUsersIndexSort(sort);
   setPublicRequestRoute("/user");
 
