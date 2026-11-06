@@ -101,7 +101,8 @@ export function CostGuardBanner({
     const controller = new AbortController();
     setState({ api, value: null });
     Promise.resolve()
-      .then(() => api.getBanner(controller.signal))
+      // If cleanup ran before this microtask, do not start a stale request.
+      .then(() => controller.signal.aborted ? null : api.getBanner(controller.signal))
       .then(
         (value) => {
           if (!controller.signal.aborted) setState({ api, value });
