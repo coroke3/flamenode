@@ -365,6 +365,12 @@ if (runUnderRootTsx(import.meta.url)) {
         { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" },
       );
     }
+    for (const sync_mode of [["mirror"], { value: "mirror" }, null, 1]) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode }),
+        { ok: false, message: "入力エラー" },
+      );
+    }
     for (const sync_interval_minutes of [["720"], { value: 720 }, null]) {
       assert.deepStrictEqual(
         parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes }),
@@ -384,6 +390,9 @@ if (runUnderRootTsx(import.meta.url)) {
       { playlist_id: { value: "PL1234567890" }, sync_mode: "mirror" },
       { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: ["720"] },
       { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: null },
+      { playlist_id: "PL1234567890", sync_mode: ["mirror"] },
+      { playlist_id: "PL1234567890", sync_mode: null },
+      { playlist_id: "PL1234567890", sync_mode: { value: "mirror" } },
     ];
     for (const body of cases) {
       const db = database();
