@@ -1,5 +1,7 @@
 import "server-only";
 
+import { utf8ByteLengthUpTo } from "./publicCachePolicy";
+
 /**
  * Isolate-local parsed public JSON. Holds plain objects only (no bindings,
  * no Promises) so a warm Worker can skip Cache API / R2 JSON.parse on repeat
@@ -127,15 +129,24 @@ export function writePublicJsonIsolateCache(
     deleteEntry(r2Key);
     return;
   }
-  // Detach direct callers' mutable input from the process-global snapshot.
-  // Production callers supply already JSON-parsed plain data; malformed
-  // values (functions, Proxy, bindings) are uncacheable.
+  // byteWeight is caller-supplied. A small claimed weight must never let
+  // an oversized direct write bypass the per-entry or aggregate heap budget.
+  // Normalize to exactly the JSON representation served by Cache API while
+  // detaching the mutable source from the isolate-global snapshot.
   let snapshot: unknown;
   try {
-    snapshot = structuredClone(payload);
+    const serialized = JSON.stringify(payload);
+    if (
+      typeof serialized !== "string" ||
+      utf8ByteLengthUpTo(serialized, PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES) !== byteWeight
+    ) {
+      deleteEntry(r2Key);
+      return;
+    }
+    snapshot = JSON.parse(serialized);
   } catch {
-    // A malformed replacement still invalidates its old key, without
-    // evicting unrelated entries to make room for an unusable value.
+    // An invalid replacement must evict the old same-key entry without
+    // sacrificing unrelated keys to an uncacheable input.
     deleteEntry(r2Key);
     return;
   }
