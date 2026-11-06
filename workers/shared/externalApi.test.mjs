@@ -116,6 +116,23 @@ test("指数バックオフはprovider指定を優先し上限を超えない", 
   );
 });
 
+test("指数バックオフは非有限の設定とprovider値を有限の待機時間へ正規化する", () => {
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: NaN }), 0);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: Infinity }), 0);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: -Infinity }), 0);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, retryAfterMs: NaN }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, retryAfterMs: Infinity }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, retryAfterMs: -Infinity }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, baseMs: NaN }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, baseMs: Infinity }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, jitterMs: NaN }), 4_000);
+  assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000, jitterMs: Infinity }), 4_000);
+  assert.equal(exponentialBackoffMs(NaN, { maxDelayMs: 10_000 }), 1_000);
+  assert.equal(exponentialBackoffMs(Infinity, { maxDelayMs: 10_000 }), 1_000);
+  assert.equal(exponentialBackoffMs(0, { maxDelayMs: 10_000, retryAfterMs: 750 }), 750);
+  assert.equal(exponentialBackoffMs(1e9, { maxDelayMs: 10_000 }), 10_000);
+});
+
 test("fetchWithTimeoutは呼出し前に予算を消費する", async () => {
   const budget = new ExternalRequestBudget(1);
   const calls = [];
