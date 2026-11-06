@@ -21,7 +21,7 @@ export function escapeLike(raw: string | null | undefined): string {
 /**
  * ページング用に limit / offset を整える。
  *
- * - `page`: 1-based。1 未満や NaN は 1。
+ * - `page`: 1-based。1 未満・NaN・安全な整数範囲外の OFFSET は 1。
  * - `pageSize`: 既定値 + 最大上限。
  *
  * 戻り値の `pageSize` は実際にクエリへ渡す値で、呼び出し側で `.limit()` に使う。
@@ -33,13 +33,20 @@ export function clampPaging(args: {
   defaultPageSize: number;
   maxPageSize: number;
 }): { page: number; pageSize: number; offset: number } {
-  const rawPage = Number(args.page);
-  const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
   const rawSize = Number(args.pageSize);
   const pageSize =
     Number.isFinite(rawSize) && rawSize >= 1
       ? Math.min(Math.floor(rawSize), args.maxPageSize)
       : args.defaultPageSize;
+  const rawPage = Number(args.page);
+  const requestedPage = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
+  // Page is untrusted query input. SQLite/Drizzle cannot safely bind offsets
+  // beyond JS's exact integer range; never pass a rounded/unsafe OFFSET.
+  const page =
+    Number.isSafeInteger(requestedPage) &&
+    (requestedPage - 1) * pageSize <= Number.MAX_SAFE_INTEGER
+      ? requestedPage
+      : 1;
   const offset = (page - 1) * pageSize;
   return { page, pageSize, offset };
 }

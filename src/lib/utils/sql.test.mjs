@@ -27,6 +27,26 @@ test("clampPaging: page / pageSize / offset", () => {
   assert.deepEqual(r4, { page: 1, pageSize: 500, offset: 0 });
 });
 
+test("clampPaging: oversized query page never creates an imprecise SQLite OFFSET", () => {
+  const options = { pageSize: 50, defaultPageSize: 50, maxPageSize: 50 };
+  for (const page of [Number.MAX_SAFE_INTEGER, "9007199254740993", "1e100", Infinity]) {
+    assert.deepEqual(clampPaging({ ...options, page }), { page: 1, pageSize: 50, offset: 0 },
+      `unsafe page input ${String(page)} must not reach SQL OFFSET`);
+  }
+
+  const largestPage = Math.floor(Number.MAX_SAFE_INTEGER / 50) + 1;
+  const valid = clampPaging({ ...options, page: largestPage });
+  assert.deepEqual(valid, { page: largestPage, pageSize: 50, offset: (largestPage - 1) * 50 });
+  assert.equal(Number.isSafeInteger(valid.offset), true, "the largest accepted OFFSET must be exact");
+
+  assert.deepEqual(clampPaging({ ...options, page: largestPage + 1 }), {
+    page: 1, pageSize: 50, offset: 0,
+  }, "page immediately after safe bound must fall back");
+
+  // Keep CURRENT's normal and fractional-page interpretation.
+  assert.deepEqual(clampPaging({ ...options, page: "3.9" }), { page: 3, pageSize: 50, offset: 100 });
+});
+
 test("totalPagesFor", () => {
   assert.equal(totalPagesFor(0, 50), 1);
   assert.equal(totalPagesFor(50, 50), 1);
