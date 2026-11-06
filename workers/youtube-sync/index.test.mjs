@@ -354,6 +354,15 @@ test("YouTube durationを秒へ変換する", () => {
   assert.equal(parseDuration("invalid"), 0);
 });
 
+test("YouTube durationの安全でない整数は同期成功扱いにしない", () => {
+  assert.equal(parseDuration("PT2501999792983H"), 9_007_199_254_738_800);
+  assert.ok(Number.isSafeInteger(parseDuration("PT2501999792983H")));
+  // 2^53 seconds is finite but cannot be represented as a safe integer.
+  assert.ok(Number.isNaN(parseDuration("PT2501999792984H")));
+  assert.ok(Number.isNaN(parseDuration("PT9007199254740991H")));
+  assert.ok(Number.isNaN(parseDuration("PT999999999999999999999999999999999999H")));
+});
+
 test("metadata SQLはcanonical列だけを使う", () => {
   const insertColumns = source.match(
     /INSERT INTO video_youtube_metadata \(([\s\S]*?)\) VALUES/,

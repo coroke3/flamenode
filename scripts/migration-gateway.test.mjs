@@ -12,11 +12,34 @@ import {
   PUBLIC_ASSET_FILES,
   ROUTE_SHARD_COUNT,
   buildRouteShards,
+  isValidResolution,
   revocationKey,
   routeKeyFromPath,
   shardAssetPath,
   shardIndexForKey,
 } from "../apps/site/src/gateway/routeShards.ts";
+
+test("gateway rejects shard destinations whose URL paths normalize after validation", () => {
+  const redirect = (targetPath) => ({ type: "redirect", targetPath, status: 308, reason: "alias" });
+  const canonical = (canonicalPath) => ({
+    type: "canonical", kind: "video", id: "safe_video", canonicalPath,
+  });
+  for (const destination of [
+    "/groups/../admin", "/groups/./video", "/groups/..", "/groups/.",
+    "/groups/%2e%2e/admin", "/groups/%2E/admin", "/groups/%2fadmin",
+    "/groups/%5cadmin",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), false, destination);
+    assert.equal(isValidResolution(canonical(destination)), false, destination);
+  }
+  for (const destination of [
+    "/video-safe", "/user/creator.alpha", "/event#event-group-slug",
+    "/user/%E3%81%82",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), true, destination);
+    assert.equal(isValidResolution(canonical(destination)), true, destination);
+  }
+});
 
 const GENERATION = "gen-2026-10-17-001";
 
@@ -515,10 +538,13 @@ test("T02: missing, corrupt or mismatched route shard fails closed with 503", as
     wrongIndex: good.map((s) => (s.path === shardAssetPath(index) ? { ...s, body: s.body.replace(`"shard":${index}`, `"shard":${(index + 1) % ROUTE_SHARD_COUNT}`) } : s)),
     badEntry: good.map((s) => (s.path === shardAssetPath(index) ? { ...s, body: s.body.replace('"type":"canonical"', '"type":"public"') } : s)),
     offsiteRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"//evil.example"') })),
+    traversalRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"/groups/../video-public-1"') })),
+    encodedTraversalRedirect: good.map((s) => ({ ...s, body: s.body.replace('"targetPath":"/video-public-1"', '"targetPath":"/groups/%2e%2e/video-public-1"') })),
+    traversalCanonical: good.map((s) => ({ ...s, body: s.body.replace('"canonicalPath":"/video-public-1"', '"canonicalPath":"/groups/../video-public-1"') })),
   };
   for (const [name, shards] of Object.entries(variants)) {
     const { env } = createEnv({ manifest, shards, pages: { "/video-public-1/": "<html>v</html>" } });
-    const path = name === "offsiteRedirect" ? "/video-alias-1" : "/video-public-1";
+    const path = /Redirect$/.test(name) ? "/video-alias-1" : "/video-public-1";
     assert.equal((await get(path, env)).status, 503, name);
   }
 });
