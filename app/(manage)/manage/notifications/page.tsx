@@ -65,7 +65,7 @@ export default async function ManageNotificationsPage({
   const user = guard.user;
 
   const sp = (await searchParams) ?? {};
-  const eventFilter = readManageNotificationQueryValue(sp.event);
+  const eventFilter = readManageNotificationQueryValue(sp.event).trim();
   const notificationType = readManageNotificationQueryValue(sp.notif);
   const notifFilter: ManageNotificationFilter =
     notificationType === "video" ||
@@ -75,7 +75,7 @@ export default async function ManageNotificationsPage({
     notificationType === "other"
       ? notificationType
       : "all";
-  const statusFilter = readManageNotificationQueryValue(sp.status);
+  const statusFilter = readManageNotificationQueryValue(sp.status).trim();
 
   const db = getDatabase();
   if (!db) notFound();
