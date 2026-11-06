@@ -462,6 +462,49 @@ test("MIG-0718 U03: merged Personal wrapper mounts banner before main and never 
   assert.equal(seen[0].aborted, true, "unmount must cancel the banner reader");
 });
 
+test("MIG-0718 U03: SPA navigation refreshes mode without carrying old banner across routes", async () => {
+  const { PersonalRoutes } = await import("../.test-dist/apps/app/src/routes/router.js");
+  const { MemoryRouter, useNavigate } = await import("react-router-dom");
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  let navigate;
+  let fetches = 0;
+  const pending = [];
+  function NavigationProbe() {
+    navigate = useNavigate();
+    return null;
+  }
+  const bannerApi = {
+    getBanner: (signal) => {
+      fetches += 1;
+      return new Promise((resolve) => pending.push({ signal, resolve }));
+    },
+  };
+  try {
+    await act(async () => root.render(React.createElement(
+      MemoryRouter, { initialEntries: ["/__mode_a__"] },
+      React.createElement(NavigationProbe),
+      React.createElement(PersonalRoutes, { api: {}, bannerApi }),
+    )));
+    await flush();
+    assert.equal(fetches, 1);
+    await act(async () => pending[0].resolve({ mode: "economy", reason: "first" }));
+    await flush();
+    assert.match(container.textContent, /省コストモード/);
+    await act(async () => navigate("/__mode_b__"));
+    assert.equal(fetches, 2, "navigation should fetch the newest mode");
+    assert.equal(pending[0].signal.aborted, true);
+    assert.doesNotMatch(container.textContent, /省コストモード|first/, "old route must not retain its banner");
+    await act(async () => pending[1].resolve({ mode: "maintenance", reason: "second" }));
+    await flush();
+    assert.match(container.textContent, /メンテナンス中/);
+    assert.match(container.textContent, /second/);
+    assert.doesNotMatch(container.textContent, /first/);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 test("MIG-0718 U03: banner CSS loads and regenerates from CURRENT module", () => {
   const main = readFileSync(new URL("../src/main.tsx", import.meta.url), "utf8");
   const generator = readFileSync(new URL("../scripts/portCssModule.mjs", import.meta.url), "utf8");
