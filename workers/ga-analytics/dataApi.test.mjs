@@ -216,6 +216,29 @@ test("extractGa4PropertyQuota: propertyQuota を安全に抽出する", () => {
   assert.equal(quota.serverErrorsPerProjectPerHour, undefined);
 });
 
+test("extractGa4PropertyQuota rejects unsafe numeric counters without suppressing valid buckets", () => {
+  // Numeric quota fields used a weaker Number.isInteger check than string fields.
+  // Values outside the safe-integer range cannot be logged accurately.
+  const over = Number.MAX_SAFE_INTEGER + 1;
+  const quota = extractGa4PropertyQuota({
+    propertyQuota: {
+      tokensPerHour: { remaining: over, consumed: Number.MAX_SAFE_INTEGER },
+      tokensPerDay: { remaining: -1, consumed: Infinity },
+      concurrentRequests: { remaining: 3 },
+    },
+  });
+  assert.ok(quota);
+  assert.deepEqual(quota.tokensPerHour, { consumed: Number.MAX_SAFE_INTEGER });
+  assert.equal(quota.tokensPerDay, undefined);
+  assert.deepEqual(quota.concurrentRequests, { remaining: 3 });
+  assert.deepEqual(formatGa4QuotaLogFields(quota), {
+    quota_concurrent_requests_remaining: 3,
+  });
+  assert.equal(extractGa4PropertyQuota({
+    propertyQuota: { tokensPerHour: { remaining: over } },
+  }), null);
+});
+
 test("extractGa4PropertyQuota: 欠損・不正は null", () => {
   assert.equal(extractGa4PropertyQuota(null), null);
   assert.equal(extractGa4PropertyQuota({}), null);
