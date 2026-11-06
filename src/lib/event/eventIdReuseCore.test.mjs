@@ -40,3 +40,29 @@ test("a newer cleanup attempt wins over an older failed attempt", () => {
   assert.equal(hasCompletedEventIdRenameCleanup("old-id", rows), true);
   assert.equal(EVENT_ID_RENAME_CLEANUP_TARGETS.length, 11);
 });
+
+test("same-second failed or pending cleanup cannot be hidden by row order", () => {
+  const targets = eventIdRenameCleanupTargets("old-id");
+  const complete = targets.map((target) => ({
+    ...target,
+    status: "done",
+    updatedAt: 100,
+  }));
+
+  for (const status of ["failed", "pending"]) {
+    const conflict = { ...targets[0], status, updatedAt: 100 };
+    for (const rows of [
+      [...complete, conflict],
+      [conflict, ...complete],
+    ]) {
+      assert.equal(hasCompletedEventIdRenameCleanup("old-id", rows), false);
+      assert.equal(
+        hasCompletedEventIdRenameCleanup("old-id", [
+          ...rows,
+          { ...targets[0], status: "done", updatedAt: 101 },
+        ]),
+        true,
+      );
+    }
+  }
+});
