@@ -168,8 +168,9 @@ export function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Li
       if (!isReadOnlyStatement(sql)) {
         throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
       }
+      // A rejected preparation must not count as a statement sent to the DB.
+      if (counter.n >= max) throw new Error(`read-only reader: request budget of ${max} statements exceeded`);
       counter.n += 1;
-      if (counter.n > max) throw new Error(`read-only reader: request budget of ${max} statements exceeded`);
       return db.prepare(sql);
     },
   };
