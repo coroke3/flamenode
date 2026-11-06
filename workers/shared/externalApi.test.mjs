@@ -233,6 +233,33 @@ test("fetchWithTimeoutは事前abort済みならfetchも予算消費もしない
   assert.equal(budget.used, 0);
 });
 
+test("fetchWithTimeoutは32bit上限超えのタイマーを約1msへ縮めない", async () => {
+  const budget = new ExternalRequestBudget(1);
+  const result = await fetchWithTimeout(
+    "https://example.test/oversized-timeout",
+    {},
+    {
+      timeoutMs: 2_147_483_648,
+      budget,
+      budgetErrorCode: "budget",
+      timeoutErrorCode: "timeout",
+      networkErrorCode: "network",
+    },
+    async (_input, init) => {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 30);
+        init.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+      });
+      return new Response("ok");
+    },
+  );
+  assert.equal(result.status, 200);
+  assert.equal(budget.used, 1);
+});
+
 test("fetchWithTimeoutは内部タイマーによる中断だけをtimeoutとして扱う", async () => {
   await assert.rejects(
     fetchWithTimeout(
