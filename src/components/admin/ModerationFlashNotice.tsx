@@ -2,13 +2,10 @@
 
 import * as React from "react";
 import { SaveSuccessNotice } from "@/components/ui/SaveSuccessNotice";
+import { parseModerationSaveNotice, type ModerationSaveNotice } from "./moderationFlashNoticeParse";
 
 const STORAGE_KEY = "flamenode:moderation-save-notice";
-
-export type ModerationSaveNotice = {
-  message: string;
-  pendingPublicReflection?: boolean;
-};
+export type { ModerationSaveNotice } from "./moderationFlashNoticeParse";
 
 export function storeModerationSaveNotice(notice: ModerationSaveNotice): void {
   try {
@@ -22,14 +19,20 @@ export function ModerationFlashNotice(): React.ReactElement | null {
   const [notice, setNotice] = React.useState<ModerationSaveNotice | null>(null);
 
   React.useEffect(() => {
+    let raw: string | null;
     try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      sessionStorage.removeItem(STORAGE_KEY);
-      setNotice(JSON.parse(raw) as ModerationSaveNotice);
+      raw = sessionStorage.getItem(STORAGE_KEY);
     } catch {
-      sessionStorage.removeItem(STORAGE_KEY);
+      // Some browsers can deny access to sessionStorage entirely.
+      return;
     }
+    if (raw === null) return;
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // A failed cleanup must never crash the moderation page.
+    }
+    setNotice(parseModerationSaveNotice(raw));
   }, []);
 
   if (!notice) return null;

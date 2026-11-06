@@ -62,8 +62,10 @@ export function compareEventsByUpcomingPriority<T extends EventStatusInput & { i
   if (groupDiff !== 0) return groupDiff;
   const group = priorityGroup(a, now);
   if (group <= 3) {
-    const startDiff = eventStart(a) - eventStart(b);
-    if (startDiff !== 0) return startDiff;
+    const aStart = eventStart(a);
+    const bStart = eventStart(b);
+    // Both missing dates map to +Infinity; subtracting them would yield NaN.
+    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
   } else {
     const recentDiff = eventRecentTime(b) - eventRecentTime(a);
     if (recentDiff !== 0) return recentDiff;
@@ -76,12 +78,12 @@ export function compareSidebarRows(
   left: { id: string; start_time: number | null; created_at: number | null },
   right: { id: string; start_time: number | null; created_at: number | null },
 ): number {
-  const startDiff =
-    (right.start_time ?? Number.NEGATIVE_INFINITY) - (left.start_time ?? Number.NEGATIVE_INFINITY);
-  if (startDiff !== 0) return startDiff;
-  const createdDiff =
-    (right.created_at ?? Number.NEGATIVE_INFINITY) - (left.created_at ?? Number.NEGATIVE_INFINITY);
-  if (createdDiff !== 0) return createdDiff;
+  const leftStart = left.start_time ?? Number.NEGATIVE_INFINITY;
+  const rightStart = right.start_time ?? Number.NEGATIVE_INFINITY;
+  if (leftStart !== rightStart) return rightStart > leftStart ? 1 : -1;
+  const leftCreated = left.created_at ?? Number.NEGATIVE_INFINITY;
+  const rightCreated = right.created_at ?? Number.NEGATIVE_INFINITY;
+  if (leftCreated !== rightCreated) return rightCreated > leftCreated ? 1 : -1;
   const leftId = String(left.id);
   const rightId = String(right.id);
   return rightId < leftId ? -1 : rightId > leftId ? 1 : 0;
