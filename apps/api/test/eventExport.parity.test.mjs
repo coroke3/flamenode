@@ -188,6 +188,31 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(currentDenied.status, 404, "CURRENT fresh D1 gate denies cached private event");
     sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
   });
+  test("SEC-575: scheduled/realtimeのキャッシュHITでも非公開化作品を再配信しない", async () => {
+    const paths = [
+      "export-event?format=v5&update=scheduled&refresh=1440",
+      "export-event?format=legacy&update=scheduled&refresh=1440",
+      "export-event?format=v5&update=realtime",
+      "export-event?format=legacy&update=realtime",
+    ];
+    for (const request of [current, hono]) {
+      for (const path of paths) {
+        reset();
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        assert.match(await first.text(), /public-video/);
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /public-video|公開作品/, path);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      }
+    }
+    reset();
+  });
+
   test("T04: corrupt legacy cache is evicted; MISS regenerates from D1", async () => {
     reset();
     const key = "public-event-export:9:export-event:legacy:60";

@@ -308,7 +308,9 @@ export async function GET(
     refreshMinutes,
   );
   const usePayloadCache = updateMode === "scheduled";
-  const cachedResponse = async (): Promise<Response | null> => {
+  // Cache is an optimization, not the authority for video/staff visibility.
+  // Require a full fresh snapshot and compare serialized public DTO before HIT.
+  const cachedResponse = async (freshBody: string): Promise<Response | null> => {
     if (!usePayloadCache) return null;
     const cached = await readCachedPayload(
       payloadCacheKey,
@@ -316,7 +318,7 @@ export async function GET(
       format,
       refreshMinutes * 60,
     );
-    return cached === null
+    return cached === null || cached !== freshBody
       ? null
       : exportResponse(
           req,
@@ -349,31 +351,13 @@ export async function GET(
     return notFoundResponse(req);
   }
 
-  if (usePayloadCache) {
-    const response = await cachedResponse();
-    if (response) return response;
-  }
-
+  // A fresh snapshot must validate every private video/staff transition.
   // realtimeはD1公開判定を毎request行った後に限り、同一isolate内の5秒間だけ
   // 直前に組み立て済みのbody(string)を再利用する。Cache-Control/BYPASSは不変。
   const microCacheKey =
     updateMode === "realtime"
       ? `export:${eventId}:${format}:${prefetchedEvent?.updated_at ?? ""}`
       : null;
-  if (microCacheKey) {
-    const coalesced = isolateMicroCacheGet(microCacheKey);
-    if (coalesced !== null) {
-      return exportResponse(
-        req,
-        coalesced,
-        format,
-        updateMode,
-        refreshMinutes,
-        "BYPASS",
-      );
-    }
-  }
-
   const generatedAt = Math.floor(Date.now() / 1000);
   let snapshot: Awaited<ReturnType<typeof loadEventExportSnapshot>>;
   try {
@@ -422,6 +406,17 @@ export async function GET(
 
   if (body === null) {
     return notFoundResponse(req);
+  }
+
+  if (usePayloadCache) {
+    const response = await cachedResponse(body);
+    if (response) return response;
+  }
+  if (microCacheKey) {
+    const coalesced = isolateMicroCacheGet(microCacheKey);
+    if (coalesced === body) {
+      return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
+    }
   }
 
   if (usePayloadCache) {

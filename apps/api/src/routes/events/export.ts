@@ -164,18 +164,9 @@ eventExportRoutes.get("/:id", async (c) => {
     return publicJsonResponse(req, { error: "database_unavailable" }, "no-store", 503);
   }
   if (!isPublicExportEvent(prefetchedEvent)) return notFound(req);
-  if (usePayloadCache) {
-    const cached = await readCachedPayload(key, eventId, format, refreshMinutes * 60, host);
-    if (cached !== null) return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
-  }
-
+  // No cached body may bypass a fresh visibility-checked relation snapshot.
   const microCacheKey = updateMode === "realtime"
     ? `export:${eventId}:${format}:${prefetchedEvent?.updated_at ?? ""}` : null;
-  if (microCacheKey) {
-    const coalesced = isolateMicroCacheGet(microCacheKey);
-    if (coalesced !== null) return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
-  }
-
   const generatedAt = Math.floor(Date.now() / 1000);
   let snapshot: Awaited<ReturnType<typeof loadEventExportSnapshot>>;
   try { snapshot = await loadEventExportSnapshot(db, eventId, prefetchedEvent); }
@@ -187,6 +178,14 @@ eventExportRoutes.get("/:id", async (c) => {
   try { assertNoForbiddenKeys(payload); }
   catch { return publicJsonResponse(req, { error: "public_payload_unavailable" }, "no-store", 503); }
   const body = JSON.stringify(payload);
+  if (usePayloadCache) {
+    const cached = await readCachedPayload(key, eventId, format, refreshMinutes * 60, host);
+    if (cached === body) return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+  }
+  if (microCacheKey) {
+    const coalesced = isolateMicroCacheGet(microCacheKey);
+    if (coalesced === body) return exportResponse(req, coalesced, format, updateMode, refreshMinutes, "BYPASS");
+  }
   if (usePayloadCache && host) {
     writePublicJsonCacheBestEffort(key, {
       payload: { body, metadata: cacheMetadataForFormat(format) }, stored_at: generatedAt,
