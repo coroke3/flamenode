@@ -673,10 +673,16 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
 
   it("caps the number of requests and never puts the token in an error", async () => {
     const ok = async () => new Response(JSON.stringify({ success: true, result: [{ success: true, results: [] }] }));
-    const { db } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: ok, maxStatements: 2 });
+    let requests = 0;
+    const { db, statements } = MIGRATED.openD1HttpReader({ accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN, fetchFn: async (...args) => { requests++; return ok(...args); }, maxStatements: 2 });
     await db.prepare("SELECT 1").all();
     await db.prepare("SELECT 1").all();
-    await assert.rejects(db.prepare("SELECT 1").all(), /exceeded 2 statements/);
+    assert.equal(statements(), 2);
+    for (const denied of ["SELECT 2", "SELECT 3"]) {
+      await assert.rejects(db.prepare(denied).all(), /exceeded 2 statements/);
+      assert.equal(statements(), 2, "rejected D1 HTTP requests must not increment the sent-statement counter");
+      assert.equal(requests, 2, "rejected D1 HTTP requests must not reach fetch");
+    }
 
     const failing = [
       async () => new Response(JSON.stringify({ success: false, errors: [{ code: 10000, message: `Authentication error ${TOKEN}` }] }), { status: 403 }),
