@@ -140,6 +140,7 @@ export function parsePlaylistSettings(value: Record<string, unknown>):
       const host = url.hostname.toLowerCase().replace(/^www\./, "");
       const id = url.searchParams.get("list")?.trim() ?? "";
       if ((url.protocol === "http:" || url.protocol === "https:") &&
+        !url.username && !url.password &&
         (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) &&
         valid.test(id)) playlistId = id;
     } catch { /* invalid URL => validation error */ }
