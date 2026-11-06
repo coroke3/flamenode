@@ -8,7 +8,7 @@ function nonEmpty(value: string | null | undefined): string | undefined {
 }
 
 export function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/\\.$/, "");
+  const normalized = hostname.toLowerCase().replace(/\.$/, "");
   // IPv4 127.0.0.0/8 is entirely loopback, not just 127.0.0.1.
   return (
     normalized === "localhost" ||
