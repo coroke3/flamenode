@@ -67,6 +67,51 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("videos/b.json", now), null);
   });
 
+  test("isolate cache は保存元と読み取り元の可変オブジェクトを共有しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_100_000;
+    const key = "mutable-snapshot.json";
+    const source = { items: [{ title: "original" }], meta: { version: 1 } };
+    const weight = new TextEncoder().encode(JSON.stringify(source)).byteLength;
+    writePublicJsonIsolateCache(key, source, 30, weight, now);
+
+    // A direct write caller must not mutate the process-global cache later.
+    source.items[0].title = "changed by original owner";
+    source.meta.version = 2;
+    const first = readPublicJsonIsolateCache(key, now + 1_000);
+    assert.deepEqual(first, {
+      items: [{ title: "original" }],
+      meta: { version: 1 },
+    });
+
+    // A caller's response transformation must not change subsequent requests.
+    first.items[0].title = "changed by first request";
+    first.items.push({ title: "injected" });
+    first.meta.version = 99;
+    const next = readPublicJsonIsolateCache(key, now + 2_000);
+    assert.deepEqual(next, {
+      items: [{ title: "original" }],
+      meta: { version: 1 },
+    });
+    assert.notStrictEqual(first, next);
+    assert.notStrictEqual(first.items, next.items);
+  });
+
+  test("isolate cache は複製不能な置換値を拒否し無関係のentryを保持する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_175_000;
+    const valid = { value: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(valid)).byteLength;
+    writePublicJsonIsolateCache("untouched.json", valid, 30, weight, now);
+    writePublicJsonIsolateCache("bad.json", valid, 30, weight, now);
+    const uncloneable = { callback: () => 1 };
+    assert.doesNotThrow(() =>
+      writePublicJsonIsolateCache("bad.json", uncloneable, 30, weight, now),
+    );
+    assert.equal(readPublicJsonIsolateCache("bad.json", now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("untouched.json", now), valid);
+  });
+
   test("isolate cache は null・Promise の置換で旧entryを破棄する", () => {
     const now = 1_250_000;
     const payload = { id: "previous" };
