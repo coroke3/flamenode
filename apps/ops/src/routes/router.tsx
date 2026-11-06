@@ -3,6 +3,8 @@ import { Outlet, Route, Routes } from "react-router-dom";
 import type { OpsApi } from "../api/account.js";
 import { CostGuardBanner } from "../components/layout/CostGuardBanner.js";
 import { AdminLayout } from "./admin/AdminLayout.js";
+import { AdminCostGuard } from "./admin/AdminCostGuard.js";
+import { AdminNotifications } from "./admin/AdminNotifications.js";
 import { AdminCompatRedirect } from "./admin/AdminRedirects.js";
 import { AdminTop } from "./admin/AdminTop.js";
 import { PermissionSimulator } from "./admin/PermissionSimulator.js";
@@ -54,6 +56,8 @@ export function OpsRoutes({ api }: { api: OpsApi }): React.ReactElement {
             <Route path="/admin" element={adminFrame}>
               <Route index element={<AdminTop />} />
               <Route path="permissions/simulator" element={<PermissionSimulator />} />
+              <Route path="cost-guard" element={<AdminCostGuard />} />
+              <Route path="notifications" element={<AdminNotifications />} />
               <Route path="history" element={<AdminCompatRedirect />} />
               <Route path="events/new" element={<UnmigratedView />} />
               <Route path="events/templates" element={<UnmigratedView />} />
