@@ -240,7 +240,11 @@ export function writePublicJsonCacheBestEffort(
       if (isolateByteWeight === null) {
         deletePublicJsonIsolateCache(r2Key);
       } else {
-        writePublicJsonIsolateCache(r2Key, payload, safeTtl, isolateByteWeight);
+        // Cache API serves JSON.parse(serialized), not the source object. A
+        // toJSON() method or non-finite number can change that representation.
+        // Cache the same JSON value in the isolate to avoid inconsistent reads.
+        const parsedPayload: unknown = JSON.parse(serialized);
+        writePublicJsonIsolateCache(r2Key, parsedPayload, safeTtl, isolateByteWeight);
       }
     }
 
