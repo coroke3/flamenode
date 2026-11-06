@@ -6,7 +6,7 @@ import { LIST_MAX_SEARCH_LENGTH, LIST_PAGE_SIZE, type ListQuery } from "../lib/l
 import {
   LIST_EVENT_UNAVAILABLE_MESSAGE, LIST_NO_RESULTS_MESSAGE, LIST_SHORT_SEARCH_MESSAGE,
   LIST_UNAVAILABLE_MESSAGE, decodePublicList, isDefaultListQuery, listHref,
-  listQueryFromSearch, publicListApiPath,
+  listQueryFromSearch, publicListApiPath, shouldSuppressListSearchKeydown,
 } from "../lib/listFilterCore.ts";
 import { fetchPublicJson } from "../lib/publicApi.ts";
 
@@ -22,7 +22,13 @@ function Filters({ query }: { query: ListQuery }): React.ReactElement {
     h("details", { className: "lv-filter-panel", open: true },
       h("summary", null, "絞り込み", " ", h("span", { className: "muted t-sm" }, filterCount ? `${filterCount}件適用中` : "条件なし")),
       h("form", { action: "/list", method: "get", className: "fn-list-toolbar lv-filter-form", role: "search",
-        onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => { if (event.key === "Enter" && event.nativeEvent.isComposing) event.preventDefault(); } },
+        onKeyDown: (event: React.KeyboardEvent<HTMLFormElement>) => {
+          // Suppress Enter used to confirm IME conversion, but never prevent normal
+          // composition/Process keystrokes (that would break Japanese input).
+          if (shouldSuppressListSearchKeydown(event.nativeEvent)) {
+            event.preventDefault();
+          }
+        } },
         h("label", { className: "fn-list-search" },
           h("span", { className: "fn-sr-only" }, "検索キーワード"),
           h("input", { type: "search", name: "q", defaultValue: query.q, placeholder: "作品を検索（2文字以上）",

@@ -1066,6 +1066,75 @@ test("MIG-0507: deny:video:<internal id> revokes both the YouTube-id URL and the
   }
 });
 
+test("MIG-0406 regression: corrupt R2 HTML cancels the open body before returning 503", async () => {
+  const decision = {
+    action: "serve", kind: "event", id: "spring-fest-2026",
+    key: "event/spring-fest-2026", generation: GENERATION,
+    canonicalPath: "/event/spring-fest-2026",
+  };
+  const metadata = {
+    kind: decision.kind, id: decision.id, key: decision.key, generation: decision.generation,
+  };
+  for (const [name, override] of [
+    ["wrong-identity", { customMetadata: { ...metadata, id: "other-event" } }],
+    ["wrong-MIME", { httpMetadata: { contentType: "application/json" } }],
+    ["unknown-size", { size: undefined }],
+    ["empty-body", { size: 0 }],
+  ]) {
+    let cancels = 0;
+    const body = new ReadableStream({ cancel() { cancels++; } });
+    const object = {
+      body, size: 18, httpMetadata: { contentType: "text/html" },
+      customMetadata: metadata, ...override,
+    };
+    const result = await loadR2PrebuiltHtml({ get: async () => object }, decision, "GET");
+    assert.equal(result.action, "unavailable", name);
+    assert.equal(result.reason, "corrupt_data", name);
+    assert.equal(cancels, 1, `${name}: unread R2 body must be canceled`);
+  }
+});
+
+test("MIG-0406 regression: stream cancel failure is best-effort; valid GET/HEAD remain unchanged", async () => {
+  const decision = {
+    action: "serve", kind: "event", id: "spring-fest-2026",
+    key: "event/spring-fest-2026", generation: GENERATION,
+    canonicalPath: "/event/spring-fest-2026",
+  };
+  const metadata = {
+    kind: decision.kind, id: decision.id, key: decision.key, generation: decision.generation,
+  };
+  const rejects = new ReadableStream({ cancel() { return Promise.reject(new Error("R2 cancel failed")); } });
+  const corrupt = await loadR2PrebuiltHtml({ get: async () => ({
+    body: rejects, size: 18, httpMetadata: { contentType: "application/json" },
+    customMetadata: metadata,
+  }) }, decision, "GET");
+  assert.equal(corrupt.action, "unavailable");
+  assert.equal(corrupt.reason, "corrupt_data", "a cleanup error must not suppress the original 503");
+
+  let getCancels = 0;
+  const htmlBody = new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode("<html>valid</html>")); controller.close(); },
+    cancel() { getCancels++; },
+  });
+  const ok = await loadR2PrebuiltHtml({ get: async () => ({
+    body: htmlBody, size: 18, httpMetadata: { contentType: "text/html" },
+    customMetadata: metadata,
+  }) }, decision, "GET");
+  assert.equal(ok.action, "serve");
+  assert.equal(await ok.response.text(), "<html>valid</html>");
+  assert.equal(getCancels, 0, "normal GET body must be consumed, not canceled");
+
+  let headCancels = 0;
+  const headBody = new ReadableStream({ cancel() { headCancels++; } });
+  const head = await loadR2PrebuiltHtml({ get: async () => ({
+    body: headBody, size: 18, httpMetadata: { contentType: "text/html" },
+    customMetadata: metadata,
+  }) }, decision, "HEAD");
+  assert.equal(head.action, "serve");
+  assert.equal(head.response.body, null);
+  assert.equal(headCancels, 1, "HEAD must still release the body stream");
+});
+
 test("MIG-0411 T06: rejected and synchronously throwing sends do not suppress the next request", async () => {
   const decision = {
     action: "serve", kind: "event", id: "spring-fest-2026",
