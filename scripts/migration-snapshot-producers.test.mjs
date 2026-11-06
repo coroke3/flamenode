@@ -9,7 +9,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
 import { buildPublicSite, runBuildCommand } from "../apps/site/scripts/buildPublicSite.ts";
-import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, limitedDb, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, limitedDb, overlayDb, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
   loadListingPayload,
@@ -618,6 +618,46 @@ test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per cre
   assert.ok(ok.report.d1Statements < 110, `batched: ${ok.report.d1Statements} statements for 42 creators`);
   void oracleStatements;
   await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
+});
+
+test("MIG-0509: scratch DB routing ignores tracking-table words inside SQL literals and comments", async () => {
+  const remote = [];
+  const local = [];
+  const reader = (calls, source) => ({
+    prepare(sql) {
+      calls.push(sql);
+      return {
+        bind() {
+          return {
+            async all() { return { results: [{ source }] }; },
+          };
+        },
+      };
+    },
+  });
+  const routed = overlayDb(reader(remote, "remote"), reader(local, "local"));
+  for (const sql of [
+    "SELECT 'static_artifacts' AS label",
+    "SELECT id FROM events WHERE title = 'static_rebuild_queue'",
+    "SELECT id FROM events /* FROM static_artifacts */",
+    "SELECT id FROM events -- JOIN static_artifacts\nWHERE id = 1",
+    "SELECT 'it''s FROM static_artifacts' AS literal",
+  ]) {
+    const result = await routed.prepare(sql).bind().all();
+    assert.deepEqual(result.results, [{ source: "remote" }], sql);
+  }
+  for (const sql of [
+    "SELECT id FROM static_artifacts",
+    "SELECT id FROM static_rebuild_queue",
+    "WITH ids AS (SELECT id FROM static_artifacts) SELECT id FROM ids",
+    'SELECT id FROM "static_artifacts"',
+    "UPDATE static_artifacts SET status='ready'",
+  ]) {
+    const result = await routed.prepare(sql).bind().all();
+    assert.deepEqual(result.results, [{ source: "local" }], sql);
+  }
+  assert.equal(remote.length, 5);
+  assert.equal(local.length, 5);
 });
 
 test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite can mutate rows", async () => {
