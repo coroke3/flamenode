@@ -5,12 +5,17 @@ import { verifyProductionEnvironment } from "./cloudflare-production.mjs";
 // An empty fixture intentionally fails other production requirements. Isolate
 // the runtime-version diagnostic instead of manufacturing production secrets.
 function runtimeVersionErrors(runtimeNodeVersion) {
+  let thrown;
   try {
     verifyProductionEnvironment({ env: {}, requireGitHead: false, runtimeNodeVersion });
-    assert.fail("empty environment must not pass production verification");
   } catch (error) {
-    return String(error.message);
+    thrown = error;
   }
+  // The empty environment must fail in the production verifier itself.
+  // An assertion thrown inside the try block must not masquerade as that failure.
+  assert.ok(thrown instanceof Error, "empty environment unexpectedly passed production verification");
+  assert.match(thrown.message, /Production environment verification failed/);
+  return thrown.message;
 }
 
 test("production preflight accepts only complete Node 22 semver triplets", () => {
