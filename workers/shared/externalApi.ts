@@ -48,9 +48,6 @@ export function parseRetryAfterMs(
   const asctime = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([ 0-3]\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(raw);
   const match = imf ?? rfc850 ?? asctime;
   if (!match) return null;
-  const timestamp = Date.parse(raw);
-  if (!Number.isFinite(timestamp)) return null;
-  const date = new Date(timestamp);
   const day = Number(asctime ? match[2] : match[1]);
   const monthName = asctime ? match[1] : match[2];
   const year = Number(asctime ? match[6] : match[3]);
@@ -58,6 +55,26 @@ export function parseRetryAfterMs(
   const minute = Number(asctime ? match[4] : match[5]);
   const second = Number(asctime ? match[5] : match[6]);
   const months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  // RFC 9110 §5.6.7: RFC 850's two-digit year uses a rolling 50-year
+  // future window. Date.parse instead uses a fixed 19xx/20xx cutoff and
+  // rejects valid dates such as Sunday, 06-Nov-50 when today is in 2026.
+  let resolvedYear = year;
+  let timestamp: number;
+  if (rfc850) {
+    const maxFuture = new Date(now);
+    if (!Number.isFinite(maxFuture.getTime())) return null;
+    maxFuture.setUTCFullYear(maxFuture.getUTCFullYear() + 50);
+    resolvedYear = Math.floor(maxFuture.getUTCFullYear() / 100) * 100 + year;
+    timestamp = Date.UTC(resolvedYear, months.indexOf(monthName) / 3, day, hour, minute, second);
+    if (timestamp > maxFuture.getTime()) {
+      resolvedYear -= 100;
+      timestamp = Date.UTC(resolvedYear, months.indexOf(monthName) / 3, day, hour, minute, second);
+    }
+  } else {
+    timestamp = Date.parse(raw);
+  }
+  if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const givenWeekday = raw.slice(0, raw.indexOf(asctime ? " " : ","));
   const actualWeekday = weekdays[date.getUTCDay()]!;
@@ -69,7 +86,7 @@ export function parseRetryAfterMs(
   if (
     date.getUTCDate() !== day ||
     date.getUTCMonth() !== months.indexOf(monthName) / 3 ||
-    (rfc850 ? date.getUTCFullYear() % 100 !== year : date.getUTCFullYear() !== year) ||
+    date.getUTCFullYear() !== resolvedYear ||
     date.getUTCHours() !== hour ||
     date.getUTCMinutes() !== minute ||
     date.getUTCSeconds() !== second
