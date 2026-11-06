@@ -1325,7 +1325,10 @@ export function parseDuration(iso: string): number {
   if (!iso) return 0;
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso);
   if (!match) return 0;
-  return Number.parseInt(match[1] ?? "0", 10) * 3600
-    + Number.parseInt(match[2] ?? "0", 10) * 60
-    + Number.parseInt(match[3] ?? "0", 10);
+  const seconds = Number(match[1] ?? "0") * 3600
+    + Number(match[2] ?? "0") * 60
+    + Number(match[3] ?? "0");
+  // An unsafe integer can be finite but rounded before it reaches D1.
+  // NaN lets buildMetadataWrites reject it as invalid YouTube metadata.
+  return Number.isSafeInteger(seconds) ? seconds : Number.NaN;
 }
