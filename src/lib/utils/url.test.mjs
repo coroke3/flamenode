@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeHttpUrl, safeDecodeURIComponent } from "./url.ts";
+import { normalizeHttpUrl as normalizeSpaHttpUrl } from "../../../apps/app/src/lib/url.ts";
 
 test("null/空文字は null を返す", () => {
   assert.equal(normalizeHttpUrl(null), null);
@@ -27,6 +28,17 @@ test("不正な URL 形式は null を返す", () => {
 
 test("文字数上限オーバーは null を返す", () => {
   assert.equal(normalizeHttpUrl("https://example.com", { maxLength: 10 }), null);
+});
+
+test("credentials embedded in public URLs are rejected in CURRENT and SPA", () => {
+  for (const normalize of [normalizeHttpUrl, normalizeSpaHttpUrl]) {
+    assert.equal(normalize("https://user:secret@example.com/path"), null);
+    assert.equal(normalize("https://user@example.com/"), null);
+    assert.equal(normalize("https://:secret@example.com/"), null);
+    assert.equal(normalize("https://user%40name:password@example.com/"), null);
+    assert.equal(normalize("https://example.com/path"), "https://example.com/path");
+    assert.equal(normalize("http://example.com/"), "http://example.com/");
+  }
 });
 
 test("safeDecodeURIComponent returns null for malformed escapes", () => {
