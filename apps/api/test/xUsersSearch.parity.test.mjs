@@ -470,6 +470,21 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(body.limit, 20);
     assert.equal(body.offset, 0);
 
+    // A valid eight-digit prefix must not disguise malformed trailing input.
+    for (const [query, expectedLimit, expectedOffset] of [
+      ["?q=al&limit=00000001garbage&offset=00005000junk", 20, 0],
+      ["?q=al&limit=999999999&offset=999999999", 20, 0],
+      ["?q=al&limit=00000001&offset=00005000", 1, 5000],
+      ["?q=al&limit=00000001%20&offset=00005000%20", 1, 5000],
+    ]) {
+      const parsed = await request(query);
+      assert.equal(parsed.response.status, 200);
+      assert.equal(parsed.body.limit, expectedLimit, query);
+      assert.equal(parsed.body.offset, expectedOffset, query);
+      verifyPrivate(parsed.response);
+      assert.equal(parsed.stats.writes, 0);
+    }
+
     const over = await request("?q=al&limit=99999999&offset=99999999");
     assert.equal(over.body.limit, 50);
     assert.equal(over.body.offset, 5000);
@@ -552,6 +567,9 @@ if (runUnderRootTsx(import.meta.url)) {
       { path: "?q=al&limit=2&onlyApproved=1", note: "V2" },
       { path: "?q=alice&limit=20&offset=1", note: "V1 fuzzy/pagination compatibility fallback" },
       { path: "?q=alice&limit=0&offset=bad", note: "bounded params" },
+      { path: "?q=al&limit=00000001garbage&offset=00005000junk", note: "invalid suffix after eight-digit prefix" },
+      { path: "?q=al&limit=999999999&offset=999999999", note: "reject nine-digit numeric inputs" },
+      { path: "?q=al&limit=00000001&offset=00005000", note: "accept valid eight-digit bounded params" },
       { path: "?q=%E3%82%82%E3%81%A1", note: "Unicode" },
       { path: "?q=al", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, note: "401" },
       { path: "?q=alice", guard: { ok: false, status: 401, error: "unauthorized" }, anonymous: true, throwDbGetter: true, note: "anonymous 401 even if D1 binding getter throws" },
