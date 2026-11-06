@@ -368,9 +368,9 @@ const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|
 function followedBySqlCall(source: string, from: number): boolean {
   let i = from;
   while (i < source.length) {
-    if (/\\s/.test(source[i]!)) { i++; continue; }
+    if (/\s/.test(source[i]!)) { i++; continue; }
     if (source[i] === "-" && source[i + 1] === "-") {
-      while (i < source.length && source[i] !== "\\n") i++;
+      while (i < source.length && source[i] !== "\n") i++;
       continue;
     }
     if (source[i] === "/" && source[i + 1] === "*") {
