@@ -60,6 +60,20 @@ test("fix(notifications): CURRENT ignores duplicate query keys instead of throwi
   assert.doesNotMatch(source, /\(sp\.(?:type|event|q|cat) \?\? ""\)\.trim\(\)/);
 });
 
+test("fix(notifications): Ops ignores repeated query keys like CURRENT", () => {
+  const keys = ["status", "cat", "type", "event", "q"];
+  const expected = { status: "all", cat: "all", type: "", event: "", q: "" };
+  for (const key of keys) {
+    const params = new URLSearchParams();
+    params.append(key, "failed");
+    params.append(key, "pending");
+    assert.deepEqual(readNotificationFilters(params), expected, key + " duplicate must not select either value");
+  }
+  const unique = new URLSearchParams({ status: "failed", type: "delivery", event: "evt-123", q: "text" });
+  assert.deepEqual(readNotificationFilters(unique), { status: "failed", cat: "all", type: "delivery", event: "evt-123", q: "text" },
+    "single-key filters must retain existing semantics");
+});
+
 test("MIG-0734 T01 U01 cost writes preserve 5 exact D-17-4 paths and JSON keys",async()=>{
   const calls=[];
   const api=createAdminCostGuardApi(async(path,init)=>{calls.push({path,init});return response(200,{ok:true,message:"更新しました。"});});
