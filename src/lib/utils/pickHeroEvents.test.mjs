@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isHeroCandidate, pickHeroEvents } from "./pickHeroEvents.ts";
+import { compareEventsByUpcomingPriority } from "./eventOrdering.ts";
 
 const NOW = 1_700_000_000;
 
@@ -56,6 +57,24 @@ test("pickHeroEventsは1件と2件でも正しく返す", () => {
     NOW,
   );
   assert.equal(two.length, 2);
+});
+
+
+test("公開日未設定のイベントはIDで安定ソートされる", () => {
+  const a = event("a", "a", { start_time: null, end_time: null });
+  const z = event("z", "z", { start_time: null, end_time: null });
+
+  assert.ok(compareEventsByUpcomingPriority(a, z, NOW) < 0);
+  assert.ok(compareEventsByUpcomingPriority(z, a, NOW) > 0);
+  assert.equal(compareEventsByUpcomingPriority(a, a, NOW), 0);
+  assert.deepEqual(pickHeroEvents([z, a], 3, NOW).map((row) => row.id), ["a", "z"]);
+});
+
+test("日付のある公開点イベントは日付のない公開イベントより先になる", () => {
+  const dated = event("dated", "dated", { start_time: NOW + 3600, end_time: null });
+  const undated = event("undated", "undated", { start_time: null, end_time: null });
+  assert.ok(compareEventsByUpcomingPriority(dated, undated, NOW) < 0);
+  assert.ok(compareEventsByUpcomingPriority(undated, dated, NOW) > 0);
 });
 
 test("pickHeroEventsは不正な上限で意図しない件数を表示しない", () => {
