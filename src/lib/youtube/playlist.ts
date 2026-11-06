@@ -20,6 +20,8 @@ export function extractYoutubePlaylistId(raw: string | null | undefined): string
     const url = new URL(value);
     if (
       (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password ||
       !isYoutubeHost(url.hostname)
     ) {
       return null;
