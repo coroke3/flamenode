@@ -89,16 +89,18 @@ export function publicRecentIds(recent: RecentListPayload): Set<string> {
 
 export function countMatchedVideos(
   recent: RecentListPayload,
-  periods: readonly { video_id: string; views_30d: number }[],
+  periods: readonly Pick<VideoViewPeriods, "video_id" | "views_2d" | "views_5d" | "views_7d" | "views_30d">[],
 ): number {
   const recentIds = publicRecentIds(recent);
   const matchedIds = new Set<string>();
   for (const period of periods) {
-    // Report matching VIDEO count, not row count. Invalid values such as
-    // Infinity must not appear as a successful match in operational logs.
+    // Count the same valid public inputs that the ranking boundary admits,
+    // rather than reporting malformed other windows as successful matches.
     if (
-      Number.isSafeInteger(period.views_30d) &&
-      period.views_30d >= 1 &&
+      Number.isSafeInteger(period.views_2d) && period.views_2d >= 0 &&
+      Number.isSafeInteger(period.views_5d) && period.views_5d >= 0 &&
+      Number.isSafeInteger(period.views_7d) && period.views_7d >= 0 &&
+      Number.isSafeInteger(period.views_30d) && period.views_30d >= 1 &&
       recentIds.has(period.video_id)
     ) {
       matchedIds.add(period.video_id);
