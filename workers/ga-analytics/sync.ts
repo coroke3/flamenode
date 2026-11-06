@@ -13,7 +13,7 @@ import {
   fetchVideoViewPeriods,
   formatGa4QuotaLogFields,
 } from "./dataApi.ts";
-import type { Ga4DataApiEnv } from "./dataApi.ts";
+import type { Ga4DataApiEnv, VideoViewPeriods } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
 import { normalizeStaticTrending } from "../../src/lib/publicData/staticTrendingCore.ts";
 import { loadRecentListFromD1 } from "./recentFromD1.ts";
