@@ -127,14 +127,6 @@ export function writePublicJsonIsolateCache(
     deleteEntry(r2Key);
     return;
   }
-  deleteEntry(r2Key);
-  while (
-    isolateJsonCache.size >= PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES ||
-    isolateJsonCacheBytes + byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
-  ) {
-    if (isolateJsonCache.size === 0) return;
-    evictOldestEntry();
-  }
   // Detach direct callers' mutable input from the process-global snapshot.
   // Production callers supply already JSON-parsed plain data; malformed
   // values (functions, Proxy, bindings) are uncacheable.
@@ -142,7 +134,18 @@ export function writePublicJsonIsolateCache(
   try {
     snapshot = structuredClone(payload);
   } catch {
+    // A malformed replacement still invalidates its old key, without
+    // evicting unrelated entries to make room for an unusable value.
+    deleteEntry(r2Key);
     return;
+  }
+  deleteEntry(r2Key);
+  while (
+    isolateJsonCache.size >= PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES ||
+    isolateJsonCacheBytes + byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
+  ) {
+    if (isolateJsonCache.size === 0) return;
+    evictOldestEntry();
   }
   isolateJsonCache.set(r2Key, {
     value: snapshot,
