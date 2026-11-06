@@ -204,12 +204,16 @@ export async function readPublicJsonCache<T>(
     if (!matched) return null;
     const parsed = await readBoundedJsonResponse<T>(matched);
     if (parsed == null) return null;
-    writePublicJsonIsolateCache(
-      r2Key,
-      parsed.value,
-      PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
-      parsed.byteLength,
-    );
+    // bypassIsolate means this read must not repopulate the isolate either.
+    // Otherwise an explicit bypass can seed subsequent non-bypass reads.
+    if (!options?.bypassIsolate) {
+      writePublicJsonIsolateCache(
+        r2Key,
+        parsed.value,
+        PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
+        parsed.byteLength,
+      );
+    }
     return parsed.value;
   } catch {
     return null;
