@@ -265,6 +265,9 @@ export function writePublicJsonCacheBestEffort(
     );
     waitUntil(putPromise.catch(() => undefined));
   } catch {
+    // A throwing serializer or synchronous cache failure must not preserve an
+    // older same-key isolate value as if the attempted replacement succeeded.
+    if (!options?.bypassIsolate) deletePublicJsonIsolateCache(r2Key);
     // Cache API failure must not take down the page.
   }
 }
