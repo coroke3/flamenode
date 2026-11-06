@@ -129,8 +129,11 @@ playlistWriteRoutes.post("/sync", async (c) => {
 export function parsePlaylistSettings(value: Record<string, unknown>):
   | { ok: true; playlistId: string | null; mode: "off" | "append_only" | "mirror"; interval: number }
   | { ok: false; message: string } {
-  // Match EventPlaylistSettingsBodySchema: JSON arrays/objects must not turn
-  // into valid IDs or minute counts through String(value) coercion.
+  // Keep malformed JSON types from coercing into IDs, minutes, or sync=off.
+  // Legacy FormData remains string-only; unknown string modes still map to off.
+  if (value.sync_mode !== undefined && typeof value.sync_mode !== "string") {
+    return { ok: false, message: "入力エラー" };
+  }
   if (value.playlist_id !== undefined && typeof value.playlist_id !== "string") {
     return { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" };
   }
