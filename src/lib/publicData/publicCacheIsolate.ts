@@ -24,8 +24,8 @@ let isolateJsonCacheBytes = 0;
 
 function isPromiseLike(value: unknown): boolean {
   return (
-    typeof value === "object" &&
     value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
     "then" in value &&
     typeof (value as { then: unknown }).then === "function"
   );
