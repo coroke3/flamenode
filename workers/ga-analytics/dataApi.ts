@@ -209,6 +209,12 @@ export function aggregateGa4ReportRows(
     const field = DATE_RANGE_FIELD_MAP[dateRangeRaw];
     const existing = byVideo.get(videoId);
     if (existing) {
+      // Each row is safe in isolation, but summing repeated GA4 rows can
+      // exceed MAX_SAFE_INTEGER. Reject the report instead of publishing an
+      // imprecise metric or silently dropping this video's ranking.
+      if (existing[field] > Number.MAX_SAFE_INTEGER - eventCount) {
+        throw new Error("ga4_report_aggregate_views_overflow");
+      }
       existing[field] += eventCount;
     } else {
       byVideo.set(videoId, {
