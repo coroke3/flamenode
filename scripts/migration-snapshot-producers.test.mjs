@@ -664,6 +664,29 @@ test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite c
   sqlite.close();
 });
 
+test("SEC-558: rejected read-only statements do not inflate the remote statement counter", async () => {
+  const prepared = [];
+  const db = {
+    prepare(sql) {
+      prepared.push(sql);
+      return { bind() { return { async all() { return { results: [] }; } }; } };
+    },
+  };
+  const counter = { n: 0 };
+  const guarded = limitedDb(db, counter, 1);
+  await guarded.prepare("SELECT 1").bind().all();
+  assert.equal(counter.n, 1);
+  assert.deepEqual(prepared, ["SELECT 1"]);
+
+  for (const sql of ["SELECT 2", "SELECT 3"]) {
+    assert.throws(() => guarded.prepare(sql), /request budget of 1 statements exceeded/);
+    assert.equal(counter.n, 1, "budget rejections must not be counted as remote statements");
+    assert.deepEqual(prepared, ["SELECT 1"], "rejected statements must not be prepared on the remote DB");
+  }
+  assert.throws(() => guarded.prepare("DELETE FROM guard_rows"), /only a single SELECT\/WITH/);
+  assert.equal(counter.n, 1, "unsafe statements must also leave the remote statement counter unchanged");
+});
+
 test("MIG-0509 regression: batched snapshot budget cannot be disabled by invalid numbers", async () => {
   // Reject at entry, before touching a D1 reader or opening the local scratch DB.
   let attemptedReads = 0;
