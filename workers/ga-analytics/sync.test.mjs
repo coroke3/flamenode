@@ -969,3 +969,24 @@ test("GA4 matched count excludes revoked and malformed input rows", () => {
   ];
   assert.equal(countMatchedVideos(recent, periods), 1);
 });
+
+test("GA4 matched video count excludes duplicate rows and unsafe 30d views", () => {
+  const recent = { items: [
+    { id: "visible", title: "Visible", status: "public" },
+    { id: "second", title: "Second", status: "public" },
+  ] };
+  assert.equal(countMatchedVideos(recent, [
+    { video_id: "visible", views_30d: 1 },
+    { video_id: "visible", views_30d: 100 },
+    { video_id: "second", views_30d: Infinity },
+    { video_id: "second", views_30d: NaN },
+    { video_id: "second", views_30d: 1.5 },
+    { video_id: "second", views_30d: Number.MAX_SAFE_INTEGER + 1 },
+    { video_id: "second", views_30d: -1 },
+    { video_id: "second", views_30d: 0 },
+  ]), 1);
+  assert.equal(countMatchedVideos(recent, [
+    { video_id: "visible", views_30d: 2 },
+    { video_id: "second", views_30d: 3 },
+  ]), 2);
+});
