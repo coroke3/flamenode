@@ -66,7 +66,7 @@ test("G03/T05: /list keys equal next.config.mjs rewrite keys and CURRENT normali
   assert.deepEqual([...LIST_QUERY_KEYS], keys);
   assert.ok(listSrc.includes("const PAGE_SIZE = 24;") && LIST_PAGE_SIZE === 24);
   assert.ok(listSrc.includes("Math.ceil(5_000 / PAGE_SIZE)") && LIST_MAX_PAGE === 209);
-  for (const lit of ["MAX_SEARCH_LENGTH = 100", "MAX_EVENT_ID_LENGTH = 128", "MIN_SEARCH_CHARS = 2", "rawSort.slice(0, 16)", '"index" ? "index"', '"compact" ? "compact"', "value.trim().slice(0, 12)"]) {
+  for (const lit of ["MAX_SEARCH_LENGTH = 100", "MAX_EVENT_ID_LENGTH = 128", "MIN_SEARCH_CHARS = 2", "rawSort.slice(0, 16)", '"index" ? "index"', '"compact" ? "compact"', "const trimmed = value.trim();", "if (!/^\\d+$/.test(trimmed)) return 1;", "const raw = trimmed.slice(0, 12)"]) {
     assert.ok(listSrc.replace(/\s+/g, " ").includes(lit.replace(/\s+/g, " ")), `CURRENT has ${lit}`);
   }
   assert.match(fs.readFileSync("src/lib/db/listQueries.ts", "utf-8"), /value === "old" \|\| value === "score"\) return value;\s*return "new"/);
@@ -106,6 +106,23 @@ test("G03/T05: every key with value / empty / unknown gives CURRENT's result and
     for (const [k, v] of Object.entries(want)) assert.equal(got[k], v, `${JSON.stringify(input)} -> ${k}`);
   }
   assert.equal(normalizeListQuery({ unknownKey: "x" }).routesToQueryTwin, false, "unknown keys never reach the twin");
+});
+
+test("G03/T05: malformed page suffix cannot become a valid page after truncation", () => {
+  // Both CURRENT and TARGET must validate the entire input before taking the
+  // 12-digit parse bound. Previously the suffix was silently discarded.
+  for (const page of [
+    "000000000002broken",
+    "999999999999?filter",
+    "000000000209xyz",
+    "2".padEnd(12, "0") + "!",
+  ]) {
+    assert.equal(normalizeListQuery({ page }).page, 1, page);
+  }
+  assert.equal(normalizeListQuery({ page: "000000000002" }).page, 2);
+  assert.equal(normalizeListQuery({ page: "9".repeat(40) }).page, LIST_MAX_PAGE);
+  assert.match(listSrc, /const trimmed = value\.trim\(\);[\s\S]*?\/\^\\d\+\$\/\.test\(trimmed\)[\s\S]*?trimmed\.slice\(0, 12\)/,
+    "CURRENT must validate the full trimmed page before truncation");
 });
 
 test("default build (no snapshot): CURRENT empty states and heads, no controls that do nothing", { skip }, () => {
