@@ -312,6 +312,68 @@ test("display name: the X name, but the account name for @handle-only names and 
   assert.equal(resolveDisplayName("  ", null, false), "guest");
 });
 
+test("Active X change rechecks a previously confirmed logged-out presence", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return json(presenceCalls === 1 ? { view: "presence", loggedIn: false } : presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  assert.equal(store.getState().confirmedLoggedOut, true);
+  assert.equal(store.getState().user, null);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2, "the switch must refresh a confirmed logout");
+  assert.equal(detailsCalls, 1);
+  assert.equal(store.getState().confirmedLoggedOut, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  store.dispose();
+});
+
+test("Active X change rechecks presence after a logged-out full-details answer", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return json(presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return detailsCalls === 1 ? json({ loggedIn: false }) : json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  store.requestDetails();
+  await flush();
+  assert.equal(store.getState().confirmedLoggedOut, true);
+  assert.equal(store.getState().user, null);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2);
+  assert.equal(detailsCalls, 2);
+  assert.equal(store.getState().confirmedLoggedOut, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  store.dispose();
+});
+
 test("Active X change after failed presence rechecks identity without manual retry", async () => {
   let presenceCalls = 0;
   let detailsCalls = 0;
