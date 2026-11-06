@@ -4,7 +4,7 @@ import { dbMiddleware } from "../../middleware/db.ts";
 import { checkPublicApiRateLimit, publicJsonBodyResponse, publicJsonResponse } from "@flamenode/server-core/publicData/publicApi";
 import { assertNoForbiddenKeys } from "@flamenode/server-core/publicData/publicDto";
 import { loadEventExportEvent, loadEventExportSnapshot, type EventExportEventRow } from "@flamenode/server-core/eventExport/data";
-import { buildEventExportPayloadForFormat, type EventExportFormat, type EventExportUpdateMode } from "@flamenode/server-core/eventExport/payload";
+import { buildEventExportPayloadForFormat, eventExportBodyMatchesFresh, type EventExportFormat, type EventExportUpdateMode } from "@flamenode/server-core/eventExport/payload";
 import { EVENT_EXPORT_REFRESH_MINUTES, eventExportPayloadCacheKey, isEventExportRefreshMinutes, type EventExportRefreshMinutes } from "@flamenode/server-core/publicCache/eventExportKeys";
 import {
   readPublicJsonCache, writePublicJsonCacheBestEffort, deletePublicJsonCacheBestEffort,
@@ -180,7 +180,7 @@ eventExportRoutes.get("/:id", async (c) => {
   const body = JSON.stringify(payload);
   if (usePayloadCache) {
     const cached = await readCachedPayload(key, eventId, format, refreshMinutes * 60, host);
-    if (cached === body) return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
+    if (cached !== null && eventExportBodyMatchesFresh(cached, body, format)) return exportResponse(req, cached, format, updateMode, refreshMinutes, "HIT");
   }
   if (microCacheKey) {
     const coalesced = isolateMicroCacheGet(microCacheKey);

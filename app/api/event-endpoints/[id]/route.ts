@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/eventExportData";
 import {
   buildEventExportPayloadForFormat,
+  eventExportBodyMatchesFresh,
   type EventExportFormat,
   type EventExportUpdateMode,
 } from "@/lib/api/eventExportPayload";
@@ -318,7 +319,7 @@ export async function GET(
       format,
       refreshMinutes * 60,
     );
-    return cached === null || cached !== freshBody
+    return cached === null || !eventExportBodyMatchesFresh(cached, freshBody, format)
       ? null
       : exportResponse(
           req,
