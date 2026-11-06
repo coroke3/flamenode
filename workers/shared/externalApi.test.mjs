@@ -38,7 +38,7 @@ test("Retry-Afterは秒とHTTP-dateを上限付きで解釈する", () => {
 });
 
 test("Retry-Afterの不正な数値形式はHTTP日付と誤認せず拒否する", () => {
-  for (const invalid of ["", " ", "3.5", "1e3", "0x10", "+3", "-1", "Infinity", "NaN", "3 GMT", "+3 GMT", "2026-02-30 GMT"]) {
+  for (const invalid of ["", " ", "3.5", "1e3", "0x10", "+3", "-1", "Infinity", "NaN", "3 GMT", "+3 GMT", "2026-02-30 GMT", "Mon, 30 Feb 2026 08:49:37 GMT"]) {
     assert.equal(parseRetryAfterMs(invalid, 15_000, 1_000), null, invalid);
   }
   assert.equal(parseRetryAfterMs(" 003 ", 15_000), 3_000);
