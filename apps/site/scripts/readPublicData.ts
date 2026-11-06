@@ -359,8 +359,10 @@ export const D1_HTTP_ENV = {
 const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
 // A WITH prefix is not proof of a read: SQLite accepts WITH c AS (...) UPDATE/DELETE/INSERT.
 // Block write/DDL/control tokens outside quoted values, identifiers and comments even if
-// a broader-than-intended D1 API token were configured. This reader executes fixed SELECTs.
-const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE)\b/i;
+// a broader-than-intended D1 API token were configured. Also reject known
+// extension function entry points that can have side effects when enabled.
+// This reader executes fixed SELECTs.
+const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
 
 /** Mask SQL strings, quoted identifiers and comments so literal "UPDATE" text stays readable. */
 function executableSqlOnly(source: string): string | null {

@@ -621,6 +621,31 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
     }
   });
 
+  it("rejects extension side-effect functions even inside SELECT/CTE before D1 HTTP", async () => {
+    let requests = 0;
+    const { db } = MIGRATED.openD1HttpReader({
+      accountId: ACCOUNT, databaseId: DATABASE, token: TOKEN,
+      fetchFn: async () => { requests++; throw new Error("side-effect query reached D1"); },
+    });
+    for (const sql of [
+      "SELECT load_extension('test')",
+      "SELECT writefile('danger.txt', 'body')",
+      "WITH c AS (SELECT 1) SELECT writefile('danger.txt', 'body') FROM c",
+      "SELECT 1 WHERE EXISTS(SELECT load_extension('test'))",
+      "SELECT LOAD_EXTENSION('test')",
+    ]) {
+      assert.equal(MIGRATED.isReadOnlyStatement(sql), false, sql);
+      await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/, sql);
+    }
+    assert.equal(requests, 0);
+    for (const harmless of [
+      "SELECT 'writefile' AS name",
+      "SELECT 'load_extension' AS name",
+      'SELECT "writefile" FROM "load_extension"',
+      "SELECT 1 /* writefile('x','y') */",
+    ]) assert.equal(MIGRATED.isReadOnlyStatement(harmless), true, harmless);
+  });
+
   it("rejects NaN, Infinity and oversized D1 read budgets at construction", () => {
     let calls = 0;
     const fetchFn = async () => { calls++; throw new Error("unexpected D1 request"); };
