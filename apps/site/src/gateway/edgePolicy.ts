@@ -41,8 +41,13 @@ function isWorkersDevHostname(hostname: string): boolean {
 
 /** CURRENT `isLoopbackHostname` (`src/lib/auth/origin.ts`). */
 function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "[::1]";
+  const normalized = hostname.toLowerCase().replace(/\\.$/, "");
+  // IPv4 127.0.0.0/8 is entirely loopback, not just 127.0.0.1.
+  return (
+    normalized === "localhost" ||
+    normalized.startsWith("127.") ||
+    normalized === "[::1]"
+  );
 }
 
 function parseRequestHost(value: string | null | undefined): URL | null {
