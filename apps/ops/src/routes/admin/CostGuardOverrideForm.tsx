@@ -6,7 +6,7 @@ import { leaveWhenAnonymous } from "./adminWrite.js";
 import { WRITE_FEATURE_KEYS } from "./costGuardFeatures.js";
 
 export function CostGuardOverrideForm({ settings, api, onSuccess }: {
-  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: () => void;
+  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: (message?: string) => void;
 }): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
@@ -41,7 +41,7 @@ export function CostGuardOverrideForm({ settings, api, onSuccess }: {
       if (result.ok) {
         setReason("");
         setConfirm("");
-        onSuccess();
+        onSuccess(result.message ?? "完了しました。");
       }
     } catch {
       setMessage("失敗しました。");

@@ -4,8 +4,8 @@ import type { AdminNotificationsApi } from "../../api/adminNotifications.js";
 import { leaveWhenAnonymous } from "./adminWrite.js";
 
 type Props =
-  | { kind: "retry" | "force-resend"; id: string; api: AdminNotificationsApi; onSuccess: () => void }
-  | { kind: "bulk-retry"; id?: never; api: AdminNotificationsApi; onSuccess: () => void };
+  | { kind: "retry" | "force-resend"; id: string; api: AdminNotificationsApi; onSuccess: (message?: string) => void }
+  | { kind: "bulk-retry"; id?: never; api: AdminNotificationsApi; onSuccess: (message?: string) => void };
 
 // The Hono SA-048 endpoint currently mutates at most 10 rows atomically per call.
 // CURRENT's legacy 50-row label would overstate the migrated API's actual batch size.
@@ -42,8 +42,9 @@ export function NotificationActionButton(props: Props): React.ReactElement {
         setMessage({ text: result.message ?? config.fallbackError, error: true });
         return;
       }
-      if (config.showSuccess && result.message) setMessage({ text: result.message, error: false });
-      props.onSuccess();
+      const notice = config.showSuccess && result.message ? result.message : undefined;
+      if (notice) setMessage({ text: notice, error: false });
+      props.onSuccess(notice);
     } catch {
       setMessage({ text: config.fallbackError, error: true });
     } finally {

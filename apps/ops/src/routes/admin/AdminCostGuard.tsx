@@ -42,7 +42,7 @@ const sectionHeading: React.CSSProperties = {
 
 /** Pure view over the API response, testable without a network. */
 export function AdminCostGuardView({ data, api, onSuccess }: {
-  data: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: () => void;
+  data: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: (message?: string) => void;
 }): React.ReactElement {
   const { mode, isMaintenance, updatedAt, history } = data;
   return (
@@ -149,6 +149,9 @@ const defaultApi = createAdminCostGuardApi();
 
 export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }): React.ReactElement {
   const [refresh, setRefresh] = React.useState(0);
+  // The successful write's message must outlive the fail-closed reload below, which
+  // unmounts the forms (CURRENT router.refresh() kept the client message).
+  const [notice, setNotice] = React.useState<string | null>(null);
   // A failed refresh must never leave privileged controls enabled with stale settings.
   // Treat each refresh as a new read identity instead of retaining last-known data.
   const state = useApiResult((signal) => api.read(signal), "admin-cost-guard:" + refresh);
@@ -169,5 +172,10 @@ export function AdminCostGuard({ api = defaultApi }: { api?: AdminCostGuardApi }
       </div>
     );
   }
-  return <AdminCostGuardView data={state.data} api={api} onSuccess={() => setRefresh((v) => v + 1)} />;
+  return (
+    <>
+      {notice ? <p role="status" style={{ marginTop: 12, fontSize: 12 }}>{notice}</p> : null}
+      <AdminCostGuardView data={state.data} api={api} onSuccess={(message) => { setNotice(message ?? null); setRefresh((v) => v + 1); }} />
+    </>
+  );
 }

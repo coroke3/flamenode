@@ -1058,3 +1058,35 @@ test("MIG-0734 regression: admin retry messaging matches Hono's no-wake behavior
   assert.match(html, /毎時 Recovery Cron/);
   assert.doesNotMatch(html, /Queue wake で即時起動/);
 });
+
+test("MIG-0734 a successful write's message survives the fail-closed authoritative reload (CURRENT router.refresh parity)",async()=>{
+  await inDom(async(dom,root)=>{
+    let reads=0;
+    const costApi={
+      read:async()=>{reads++;return {status:"ok",data:{...settings,reason:"管理者による確認",updatedAt:reads}};},
+      setMode:async()=>({ok:true,message:"モードを更新しました。"}),
+    };
+    await React.act(async()=>root.render(h(AdminCostGuard,{api:costApi})));
+    await React.act(async()=>byText(dom,"モードを更新").click());
+    assert.equal(reads,2,"the write still triggers a fresh read");
+    const statuses=[...dom.window.document.querySelectorAll('[role="status"]')].map(n=>n.textContent);
+    assert.ok(statuses.includes("モードを更新しました。"),"server success message is visible after the reload: "+statuses.join("|"));
+  });
+  await inDom(async(dom,root)=>{
+    globalThis.ResizeObserver=class { observe(){} disconnect(){} };
+    let reads=0;
+    const api={
+      list:async()=>{reads++;return {status:"ok",data:notificationData()};},
+      cancel:async()=>({ok:true}),
+    };
+    await React.act(async()=>root.render(h(MemoryRouter,null,h(AdminNotifications,{api}))));
+    const cancel=buttons(dom).find(b=>b.getAttribute("aria-label")?.endsWith("をキャンセル"));
+    assert.ok(cancel,"a cancellable row exists");
+    await React.act(async()=>cancel.click());
+    await type(dom,dom.window.document.querySelector('input[aria-label="キャンセル理由 (任意)"]'),"重複送信");
+    await React.act(async()=>byText(dom,"確定").click());
+    assert.equal(reads,2,"the cancel triggers a fresh read");
+    const statuses=[...dom.window.document.querySelectorAll('[role="status"]')].map(n=>n.textContent);
+    assert.ok(statuses.includes("キャンセルしました。"),"fallback success message is visible after the reload: "+statuses.join("|"));
+  });
+});

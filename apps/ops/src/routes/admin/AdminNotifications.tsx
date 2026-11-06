@@ -46,7 +46,7 @@ type Data = AdminNotificationsResponse;
 
 /** Pure view over the API response, testable without a network. */
 export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch }: {
-  data: Data; filters: NotificationFilters; api: AdminNotificationsApi; onSuccess: () => void;
+  data: Data; filters: NotificationFilters; api: AdminNotificationsApi; onSuccess: (message?: string) => void;
   onSearch?: (next: URLSearchParams) => void;
 }): React.ReactElement {
   const { counts, rows } = data;
@@ -208,7 +208,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
       {data.error ? (
         <div role="alert" className="fn-alert fn-alert--danger" style={{ marginTop: 20 }}>
           エラー: 通知ログの取得に失敗しました（{data.error}）。{" "}
-          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={onSuccess}>再試行</button>
+          <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm" onClick={() => onSuccess()}>再試行</button>
         </div>
       ) : (
         <section style={{ marginTop: 18 }}>
@@ -305,6 +305,9 @@ export function AdminNotifications({ api = defaultApi }: { api?: AdminNotificati
   const [params, setParams] = useSearchParams();
   const filters = readNotificationFilters(params);
   const [refresh, setRefresh] = React.useState(0);
+  // The successful write's message must outlive the fail-closed reload below, which
+  // unmounts the row buttons (CURRENT router.refresh() kept the client message).
+  const [notice, setNotice] = React.useState<string | null>(null);
   // A failed admin refresh must not keep previously displayed notification payloads
   // or mutation buttons mounted while the new authoritative read is unavailable.
   const key = "admin-notifications:" + notificationFilterHref(filters) + ":refresh=" + refresh;
@@ -326,12 +329,15 @@ export function AdminNotifications({ api = defaultApi }: { api?: AdminNotificati
     );
   }
   return (
-    <AdminNotificationsView
-      data={state.data}
-      filters={filters}
-      api={api}
-      onSuccess={() => setRefresh((v) => v + 1)}
-      onSearch={(next) => setParams(next)}
-    />
+    <>
+      {notice ? <p role="status" style={{ marginTop: 12, fontSize: 12 }}>{notice}</p> : null}
+      <AdminNotificationsView
+        data={state.data}
+        filters={filters}
+        api={api}
+        onSuccess={(message) => { setNotice(message ?? null); setRefresh((v) => v + 1); }}
+        onSearch={(next) => { setNotice(null); setParams(next); }}
+      />
+    </>
   );
 }

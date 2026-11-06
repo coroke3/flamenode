@@ -11,7 +11,7 @@ const MODES = [
 ] as const;
 
 export function CostGuardForm({ settings, api, onSuccess }: {
-  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: () => void;
+  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: (message?: string) => void;
 }): React.ReactElement {
   const [mode, setMode] = React.useState<string>(settings.mode);
   const [reason, setReason] = React.useState(settings.reason ?? "");
@@ -44,7 +44,7 @@ export function CostGuardForm({ settings, api, onSuccess }: {
       const result = await write();
       if (leaveWhenAnonymous(result)) return;
       setMessage(result.message ?? (result.ok ? "更新しました。" : "失敗しました。"));
-      if (result.ok) onSuccess();
+      if (result.ok) onSuccess(result.message ?? "更新しました。");
     } catch {
       setMessage("失敗しました。");
     } finally {

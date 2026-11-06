@@ -6,7 +6,7 @@ import { leaveWhenAnonymous } from "./adminWrite.js";
 import { FEATURE_LABELS, WRITE_FEATURE_KEYS, parseCostFeatures, type WriteFeatureKey } from "./costGuardFeatures.js";
 
 export function CostGuardDisabledFeaturesForm({ settings, api, onSuccess }: {
-  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: () => void;
+  settings: AdminCostGuardResponse; api: AdminCostGuardApi; onSuccess: (message?: string) => void;
 }): React.ReactElement {
   const disabledFeaturesJson = settings.disabledFeaturesJson;
   const [busy, setBusy] = React.useState(false);
@@ -41,7 +41,7 @@ export function CostGuardDisabledFeaturesForm({ settings, api, onSuccess }: {
       if (result.ok) {
         setReason("");
         setConfirm("");
-        onSuccess();
+        onSuccess(result.message ?? "更新しました。");
       }
     } catch {
       setMessage("更新に失敗しました。");

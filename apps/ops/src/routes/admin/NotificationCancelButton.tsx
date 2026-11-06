@@ -4,7 +4,7 @@ import type { AdminNotificationsApi } from "../../api/adminNotifications.js";
 import { leaveWhenAnonymous } from "./adminWrite.js";
 
 export function NotificationCancelButton({ id, api, onSuccess }: {
-  id: string; api: AdminNotificationsApi; onSuccess: () => void;
+  id: string; api: AdminNotificationsApi; onSuccess: (message?: string) => void;
 }): React.ReactElement {
   const [busy, setBusy] = React.useState(false);
   const pending = React.useRef(false);
@@ -24,7 +24,7 @@ export function NotificationCancelButton({ id, api, onSuccess }: {
       if (result.ok) {
         setOpen(false);
         setReason("");
-        onSuccess();
+        onSuccess(result.message ?? "キャンセルしました。");
       }
     } catch {
       setMessage("失敗しました。");
