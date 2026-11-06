@@ -31,7 +31,7 @@ export function notificationFilterHref(filters: NotificationFilters): string {
   if (filters.status !== "all") params.set("status", filters.status);
   if (filters.type) params.set("type", filters.type);
   if (filters.event) params.set("event", filters.event);
-  if (filters.q) params.set("q", filters.q);
+  if (filters.q) params.set("q", truncateNotificationSearch(filters.q));
   if (filters.cat !== "all") params.set("cat", filters.cat);
   const query = params.toString();
   return query ? "/admin/notifications?" + query : "/admin/notifications";
