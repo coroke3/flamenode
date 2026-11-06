@@ -42,6 +42,12 @@ export function checkPublicApiRateLimit(
   endpoint: string,
   now = Math.floor(Date.now() / 1000),
 ): Response | null {
+  // An invalid time can otherwise poison the bucket window and Retry-After
+  // (NaN is never >= 60, and Infinity can persist in the cleanup deadline).
+  // Fail closed without modifying any legitimate client's quota.
+  if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + RATE_LIMIT_WINDOW_SECONDS)) {
+    return rateLimitedResponse(RATE_LIMIT_WINDOW_SECONDS);
+  }
   cleanupRateLimitBuckets(now);
   const key = getClientKey(request, endpoint);
   let bucket = rateLimitBuckets.get(key);
