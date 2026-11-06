@@ -93,7 +93,7 @@ function parsePositiveInt(value: string | undefined): number | null {
 }
 
 function parseNonNegativeInt(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
     return value;
   }
   if (typeof value === "string" && /^\d+$/.test(value)) {
@@ -386,9 +386,18 @@ export async function fetchVideoViewPeriods(
     pageCount += 1;
     const pageQuota = extractGa4PropertyQuota(page);
     if (pageQuota) latestQuota = pageQuota;
-    if (!dimensionIndices) {
-      dimensionIndices = resolveDimensionIndices(page.dimensionHeaders ?? []);
+    // GA4 pages are independent responses. Never interpret a later page
+    // using column positions learned from another response.
+    const pageIndices = resolveDimensionIndices(page.dimensionHeaders ?? []);
+    if (page.metricHeaders?.[0]?.name !== "eventCount") {
+      throw new Error("ga4_report_metric_header_mismatch");
     }
+    if (dimensionIndices &&
+      (pageIndices.dateRange !== dimensionIndices.dateRange ||
+        pageIndices.videoId !== dimensionIndices.videoId)) {
+      throw new Error("ga4_report_dimension_header_mismatch");
+    }
+    dimensionIndices = pageIndices;
     const rows = page.rows ?? [];
     if (rows.length > GA4_REPORT_PAGE_SIZE) {
       throw new Error("ga4_report_page_too_large");
