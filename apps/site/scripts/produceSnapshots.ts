@@ -181,15 +181,53 @@ export function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Li
  * tracking table) run on the local scratch database; every other statement goes to the read-only reader.
  */
 export const LOCAL_TRACKING_TABLES = ["static_artifacts", "static_rebuild_queue"] as const;
-const LOCAL_STATEMENT = new RegExp(
-  `^\\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\\b|\\b(${LOCAL_TRACKING_TABLES.join("|")})\\b`,
-  "i",
-);
+const LOCAL_WRITE_STATEMENT = /^\s*(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\b/i;
+const TRACKING_TABLE_REFERENCE = /\b(?:FROM|JOIN|INTO|UPDATE)\s+["\x60\[]?(?:static_artifacts|static_rebuild_queue)["\x60\]]?(?!\w)/i;
 
-function overlayDb(remote: D1Like, local: D1Like): D1Like {
+/** Ignore comments and quoted string values when selecting the local tracking database. */
+function executableSqlForRouting(sql: string): string {
+  let executable = "";
+  for (let i = 0; i < sql.length;) {
+    if (sql[i] === "'") {
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") { i += 2; continue; }
+          i++;
+          break;
+        }
+        i++;
+      }
+      executable += " ";
+      continue;
+    }
+    if (sql[i] === "-" && sql[i + 1] === "-") {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      executable += " ";
+      continue;
+    }
+    if (sql[i] === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      if (end < 0) return executable;
+      i = end + 2;
+      executable += " ";
+      continue;
+    }
+    executable += sql[i];
+    i++;
+  }
+  return executable;
+}
+
+function isLocalTrackingStatement(sql: string): boolean {
+  const executable = executableSqlForRouting(sql);
+  return LOCAL_WRITE_STATEMENT.test(executable) || TRACKING_TABLE_REFERENCE.test(executable);
+}
+
+export function overlayDb(remote: D1Like, local: D1Like): D1Like {
   return {
     prepare(sql: string) {
-      if (LOCAL_STATEMENT.test(sql)) return local.prepare(sql);
+      if (isLocalTrackingStatement(sql)) return local.prepare(sql);
       const base = remote.prepare(sql);
       let bound: { all(): Promise<{ results?: unknown[] }> } | null = null;
       const statement = {
