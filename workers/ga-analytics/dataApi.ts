@@ -317,10 +317,18 @@ async function runGa4ReportPage(
           (row) => row !== null && typeof row === "object" && !Array.isArray(row) &&
             (row.dimensionValues === undefined ||
               (Array.isArray(row.dimensionValues) &&
-                row.dimensionValues.every((v) => v !== null && typeof v === "object"))) &&
+                row.dimensionValues.every(
+                  (v) => v !== null && typeof v === "object" &&
+                    !Array.isArray(v) &&
+                    (v.value === undefined || typeof v.value === "string"),
+                ))) &&
             (row.metricValues === undefined ||
               (Array.isArray(row.metricValues) &&
-                row.metricValues.every((v) => v !== null && typeof v === "object"))),
+                row.metricValues.every(
+                  (v) => v !== null && typeof v === "object" &&
+                    !Array.isArray(v) &&
+                    (v.value === undefined || typeof v.value === "string"),
+                ))),
         )))
   ) {
     throw new Error("ga4_report_invalid_shape");
