@@ -93,8 +93,9 @@ test("MIG-0734 write guard denials keep CURRENT message (D-17-3 send); 401 witho
   const assigned=[];
   assert.equal(leaveWhenAnonymous(result,url=>assigned.push(url)),true);
   assert.deepEqual(assigned,["/entry"]);
-  // Hono writeGuardDenyBody sends a JSON `ok:false` on 401. D-17-3 send()
-  // accepts this as a result body rather than the anonymous transport variant.
+  // D-17-3 shared send() must treat HTTP 401 as anonymous even when
+  // Hono returns a JSON guard body with ok:false and a custom message.
+  // Never display the stale guard body in place of the 401 transport fallback.
   const guard401={ok:false,reason:"unauthenticated",message:"ログインが必要です。"};
   const expiredCost=createAdminCostGuardApi(async()=>response(401,guard401));
   const expiredCostResult=await expiredCost.setMode("normal","r");
