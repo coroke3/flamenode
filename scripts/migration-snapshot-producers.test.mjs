@@ -658,7 +658,7 @@ test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite c
   assert.equal(counter.n, 0, "rejected SQL must not consume the remote statement budget");
 
   const rows = await guarded.prepare("SELECT id FROM guard_rows").bind().all();
-  assert.deepEqual(rows.results, [{ id: 1 }], "ordinary SELECT remains available");
+  assert.deepEqual(rows.results.map((row) => ({ id: row.id })), [{ id: 1 }], "ordinary SELECT remains available");
   assert.deepEqual(attempted, ["SELECT id FROM guard_rows"]);
   assert.equal(counter.n, 1);
   sqlite.close();
