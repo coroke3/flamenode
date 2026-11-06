@@ -163,10 +163,12 @@ export function publicServiceUnavailableResponse(
   code = "service_temporarily_unavailable",
   retryAfterSeconds = 30,
 ): Response {
-  const retryAfter = boundedPositiveInteger(
-    retryAfterSeconds,
-    30,
-  );
+  // Retry-After delay-seconds must be decimal digits, never an exponent.
+  // Reject unsafe numeric inputs rather than emitting e.g. `1e+30`.
+  const retryAfter = Number.isFinite(retryAfterSeconds) &&
+      retryAfterSeconds > Number.MAX_SAFE_INTEGER
+    ? 30
+    : boundedPositiveInteger(retryAfterSeconds, 30);
   return new Response(JSON.stringify({ error: code }), {
     status: 503,
     headers: {
