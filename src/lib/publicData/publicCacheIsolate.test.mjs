@@ -109,7 +109,7 @@ if (runTestWithTsx(import.meta.url)) {
     const now = 2_500_000;
     const payload = { id: "valid" };
     const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
-    for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1_000_000.5, Number.MAX_SAFE_INTEGER + 1]) {
       resetPublicJsonIsolateCacheForTests();
       writePublicJsonIsolateCache("clock.json", payload, 30, weight, now);
       assert.equal(readPublicJsonIsolateCache("clock.json", invalidClock), null);
