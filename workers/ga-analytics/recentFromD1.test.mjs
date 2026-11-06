@@ -436,3 +436,37 @@ test("MIG-0517: real 5000-row D1 source is accepted, but row 5001 fails closed",
   assert.equal(payload.items.at(-1).id, "v-00000");
   assert.equal(f.getStatementCount(), 2);
 });
+
+test("MIG-0517: malformed scheduled_time values are not coerced to Unix epoch", async () => {
+  const times = [
+    ["empty", ""], ["spaces", "  "], ["boolean", false],
+    ["fractional", 1.5], ["negative", -1],
+    ["unsafe", "9007199254740992"], ["exponent", "1e3"],
+    ["zero", 0], ["legacy", "90"], ["missing", null],
+  ];
+  const db = {
+    prepare() {
+      return {
+        bind() {
+          return {
+            async all() {
+              return { results: times.map(([id, scheduled_time]) => ({
+                id, title: id, scheduled_time, youtube_video_id: null,
+                display_name: "Creator", creator_x_user_id: null,
+                icon_url: null, primary_event_id: null, primary_event_title: null,
+              })) };
+            },
+          };
+        },
+      };
+    },
+  };
+  const result = await loadRecentListFromD1(db);
+  const byId = new Map(result.items.map((item) => [item.id, item.scheduled_time]));
+  for (const id of ["empty", "spaces", "boolean", "fractional", "negative", "unsafe", "exponent", "missing"]) {
+    assert.equal(byId.get(id), null, id);
+  }
+  assert.equal(byId.get("zero"), 0);
+  assert.equal(byId.get("legacy"), 90);
+  assert.equal(result.items[0].id, "legacy", "valid timestamps retain descending order");
+});
