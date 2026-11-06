@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   GA4_TRENDING_OUTPUT_KEY,
+  publicRecentIds,
+  countMatchedVideos,
   syncGa4Trending,
 } from "./sync.ts";
 
@@ -931,4 +933,33 @@ test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empt
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("GA4 public allow-list excludes private, deleted, missing and malformed status rows", () => {
+  const recent = { items: [
+    { id: " public-id ", status: "public" },
+    { id: "revoked", status: "private" },
+    { id: "deleted", status: "deleted" },
+    { id: "unmarked" },
+    { id: "false-status", status: false },
+    { id: "array", status: ["public"] },
+    null,
+  ] };
+  assert.deepEqual([...publicRecentIds(recent)], ["public-id"]);
+  assert.deepEqual([...publicRecentIds({ items: null })], []);
+});
+
+test("GA4 matched count excludes revoked and malformed input rows", () => {
+  const recent = { items: [
+    { id: "visible", status: "public" },
+    { id: "revoked", status: "private" },
+    { id: "unmarked" },
+  ] };
+  const periods = [
+    { video_id: "visible", views_30d: 9 },
+    { video_id: "revoked", views_30d: 10 },
+    { video_id: "unmarked", views_30d: 11 },
+    { video_id: "visible", views_30d: 0 },
+  ];
+  assert.equal(countMatchedVideos(recent, periods), 1);
 });
