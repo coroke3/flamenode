@@ -333,3 +333,20 @@ test("MIG-0712 U01: social links normalize valid entries and never persist unsaf
     { type: "Email", url: "mailto:hello@example.com" },
   ]);
 });
+
+test("MIG-0712 normalized HTTP URLs enforce the serialized bound (CURRENT parity)", async () => {
+  const { normalizeHttpUrl } = await import("../.test-dist/apps/app/src/lib/url.js");
+  const shortRaw = `https://example.com/${"雪".repeat(55)}`;
+  assert.ok(shortRaw.length < 500);
+  assert.ok(new URL(shortRaw).toString().length > 500);
+  assert.equal(normalizeHttpUrl(shortRaw), null);
+
+  const unicode = "https://example.com/雪";
+  const encoded = new URL(unicode).toString();
+  assert.equal(normalizeHttpUrl(unicode, { maxLength: encoded.length - 1 }), null);
+  assert.equal(normalizeHttpUrl(unicode, { maxLength: encoded.length }), encoded);
+
+  const noSlash = "https://example.com";
+  assert.equal(normalizeHttpUrl(noSlash, { maxLength: noSlash.length }), null);
+  assert.equal(normalizeHttpUrl(noSlash), "https://example.com/");
+});
