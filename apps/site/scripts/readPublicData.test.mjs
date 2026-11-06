@@ -633,6 +633,11 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
       "WITH c AS (SELECT 1) SELECT writefile('danger.txt', 'body') FROM c",
       "SELECT 1 WHERE EXISTS(SELECT load_extension('test'))",
       "SELECT LOAD_EXTENSION('test')",
+      'SELECT "load_extension"(\'test\')',
+      "SELECT [writefile]('danger.txt', 'body')",
+      "SELECT `writefile` ('danger.txt', 'body')",
+      "WITH c AS (SELECT 1) SELECT [load_extension] /* c */ ('test') FROM c",
+      "SELECT [writefile] -- comment\n ('danger.txt', 'body')",
     ]) {
       assert.equal(MIGRATED.isReadOnlyStatement(sql), false, sql);
       await assert.rejects(db.prepare(sql).all(), /refuses a non-read statement/, sql);
@@ -642,6 +647,10 @@ describe("readPublicData option A: D1 REST API with a read-only token (no networ
       "SELECT 'writefile' AS name",
       "SELECT 'load_extension' AS name",
       'SELECT "writefile" FROM "load_extension"',
+      'SELECT "writefile" AS harmless_identifier',
+      'SELECT [load_extension] AS harmless_identifier',
+      'SELECT `writefile` AS harmless_identifier',
+      "SELECT 'load_extension' || '(' AS literal_not_a_call",
       "SELECT 1 /* writefile('x','y') */",
     ]) assert.equal(MIGRATED.isReadOnlyStatement(harmless), true, harmless);
   });
