@@ -92,13 +92,19 @@ export function countMatchedVideos(
   periods: readonly { video_id: string; views_30d: number }[],
 ): number {
   const recentIds = publicRecentIds(recent);
-  let matched = 0;
+  const matchedIds = new Set<string>();
   for (const period of periods) {
-    if (period.views_30d >= 1 && recentIds.has(period.video_id)) {
-      matched += 1;
+    // Report matching VIDEO count, not row count. Invalid values such as
+    // Infinity must not appear as a successful match in operational logs.
+    if (
+      Number.isSafeInteger(period.views_30d) &&
+      period.views_30d >= 1 &&
+      recentIds.has(period.video_id)
+    ) {
+      matchedIds.add(period.video_id);
     }
   }
-  return matched;
+  return matchedIds.size;
 }
 
 export interface Ga4TrendingSyncEnv extends Ga4DataApiEnv {
