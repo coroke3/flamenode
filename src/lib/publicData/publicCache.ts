@@ -224,7 +224,10 @@ export function writePublicJsonCacheBestEffort(
 ): void {
   try {
     const serialized = JSON.stringify(payload);
-    if (typeof serialized !== "string") return;
+    if (typeof serialized !== "string") {
+      if (!options?.bypassIsolate) deletePublicJsonIsolateCache(r2Key);
+      return;
+    }
     // Normalize at the write boundary, even for direct callers that bypass the loader.
     const safeTtl = publicJsonCacheRetentionTtl(ttlSeconds);
     const isolateByteWeight = utf8ByteLengthUpTo(
@@ -232,13 +235,13 @@ export function writePublicJsonCacheBestEffort(
       PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
     );
     // 大きいpayloadはCache APIには残せるが、isolateには集約保持しない。
-    if (!options?.bypassIsolate && isolateByteWeight !== null) {
-      writePublicJsonIsolateCache(
-        r2Key,
-        payload,
-        safeTtl,
-        isolateByteWeight,
-      );
+    // A rejected replacement must not leave a previous same-key snapshot readable.
+    if (!options?.bypassIsolate) {
+      if (isolateByteWeight === null) {
+        deletePublicJsonIsolateCache(r2Key);
+      } else {
+        writePublicJsonIsolateCache(r2Key, payload, safeTtl, isolateByteWeight);
+      }
     }
 
     // Cloudflare requires async work that outlives the response to be awaited
