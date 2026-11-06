@@ -50,6 +50,9 @@ export function parseRetryAfterMs(
   const asctime = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([ 0-3]\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(raw);
   const match = imf ?? rfc850 ?? asctime;
   if (!match) return null;
+  // HTTP-date delays are relative to now; an invalid clock must not
+  // propagate NaN or Infinity to the retry scheduler.
+  if (!Number.isFinite(now)) return null;
   const day = Number(asctime ? match[2] : match[1]);
   const monthName = asctime ? match[1] : match[2];
   const year = Number(asctime ? match[6] : match[3]);
