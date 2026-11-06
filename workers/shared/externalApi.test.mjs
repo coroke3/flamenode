@@ -49,6 +49,21 @@ test("Retry-Afterの不正な上限はNaNや無限待機時間を返さない", 
   assert.equal(parseRetryAfterMs("3", -1), 0);
 });
 
+test("Retry-Afterの日時指定は非有限の基準時刻を拒否する", () => {
+  const headers = [
+    "Wed, 21 Oct 2015 07:28:00 GMT",
+    "Wednesday, 21-Oct-15 07:28:00 GMT",
+    "Wed Oct 21 07:28:00 2015",
+  ];
+  for (const now of [NaN, Infinity, -Infinity]) {
+    for (const value of headers) {
+      assert.equal(parseRetryAfterMs(value, 15_000, now), null, `now=${now}, value=${value}`);
+    }
+    // Numeric delta-seconds does not depend on the local clock.
+    assert.equal(parseRetryAfterMs("3", 15_000, now), 3_000);
+  }
+});
+
 test("Retry-Afterの不正な数値形式はHTTP日付と誤認せず拒否する", () => {
   for (const invalid of ["", " ", "3.5", "1e3", "0x10", "+3", "-1", "Infinity", "NaN", "3 GMT", "+3 GMT", "2026-02-30 GMT", "Mon, 30 Feb 2026 08:49:37 GMT", "Mon, 06 Nov 1994 08:49:37 GMT", "Monday, 06-Nov-94 08:49:37 GMT", "Mon Nov  6 08:49:37 1994"]) {
     assert.equal(parseRetryAfterMs(invalid, 15_000, 1_000), null, invalid);
