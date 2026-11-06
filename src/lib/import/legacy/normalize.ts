@@ -287,7 +287,7 @@ function extractYoutubeId(raw: string | null): string | null {
   }
   const host = url.hostname.toLowerCase();
   const segments = url.pathname.split("/").filter(Boolean);
-  if (host === "youtu.be") {
+  if (host === "youtu.be" || host === "www.youtu.be") {
     return segments.length === 1 && validId.test(segments[0]!) ? segments[0]! : null;
   }
   if (host !== "youtube.com" && host !== "www.youtube.com" && host !== "m.youtube.com") {
