@@ -123,6 +123,24 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("isolate cache は小数・負数・unsafe整数の読み取りでLRUを更新しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 2_750_000;
+    const weight = new TextEncoder().encode(JSON.stringify({ id: "value" })).byteLength;
+    for (let i = 0; i < PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES; i += 1) {
+      writePublicJsonIsolateCache(`clock-lru/${i}.json`, { id: "value" }, 30, weight, now);
+    }
+    const oldestKey = "clock-lru/0.json";
+    for (const invalidNow of [now + 0.5, -1, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) {
+      assert.equal(readPublicJsonIsolateCache(oldestKey, invalidNow), null,
+        `invalid read clock ${String(invalidNow)} must be rejected`);
+    }
+    // An invalid read must not promote the oldest entry in the LRU order.
+    writePublicJsonIsolateCache("clock-lru/new.json", { id: "value" }, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(oldestKey, now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("clock-lru/1.json", now), { id: "value" });
+  });
+
   test("isolate cache は安全整数範囲外の有効期限を保存しない", () => {
     const payload = { id: "safe" };
     const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
