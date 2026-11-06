@@ -4,6 +4,7 @@ const MAX_RATE_LIMIT_KEYS = 2048;
 
 // Map 全走査は固定窓ごとに最大1回だけ行う。
 let nextRateLimitCleanupAt = 0;
+let lastRateLimitNow = Number.NEGATIVE_INFINITY;
 
 type RateLimitBucket = { windowStart: number; count: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
@@ -19,6 +20,13 @@ function getClientKey(request: Request, endpoint: string): string {
 }
 
 function cleanupRateLimitBuckets(now: number): void {
+  // A wall-clock rollback must not pin existing clients in an old fixed window
+  // (or keep the 2048-key map full) until the previous clock catches up.
+  if (now < lastRateLimitNow) {
+    rateLimitBuckets.clear();
+    nextRateLimitCleanupAt = 0;
+  }
+  lastRateLimitNow = now;
   if (now < nextRateLimitCleanupAt) return;
   nextRateLimitCleanupAt = now + RATE_LIMIT_WINDOW_SECONDS;
   for (const [key, bucket] of rateLimitBuckets) {
@@ -166,6 +174,7 @@ export function publicServiceUnavailableResponse(
 export function clearPublicApiRateLimitForTests(): void {
   rateLimitBuckets.clear();
   nextRateLimitCleanupAt = 0;
+  lastRateLimitNow = Number.NEGATIVE_INFINITY;
 }
 
 /** 公開作品 API / 一覧ページ用の sort 正規化（未知値は new）。 */
