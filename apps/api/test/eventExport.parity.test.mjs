@@ -217,7 +217,7 @@ if (runUnderRootTsx(import.meta.url)) {
     for (const request of [current, hono]) {
       for (const format of ["v5", "legacy"]) {
         reset();
-        sqlite.exec("INSERT OR REPLACE INTO event_staff (id, event_id, display_name, role, permission_preset, is_public, created_at, updated_at) VALUES ('staff-575', 'export-event', '機密スタッフ', 'editor', 'manager', 1, 1700000000, 1700000000)");
+        sqlite.exec("INSERT OR REPLACE INTO event_staff (id, event_id, x_user_id, display_name, role, permission_preset, is_public, created_at, updated_at) VALUES ('staff-575', 'export-event', 'x-staff-575', '機密スタッフ', 'editor', 'manager', 1, 1700000000, 1700000000)");
         const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
         const first = await request(path);
         assert.equal(first.status, 200);
