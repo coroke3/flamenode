@@ -33,3 +33,27 @@ test("MIG-0713: serialized quoted TSV roundtrips unicode and newlines", () => {
   const rows = [["ひらがな", 'Alice\t"staff"'], ["@xid", "2行\n内容"]];
   assert.deepEqual(parseDelimited(serializeDelimited(rows, "\t"), "\t"), rows);
 });
+
+test("detectDelimiter: quoted separators must not change the CSV/TSV type", () => {
+  const csv = '\uFEFF\n"Research\tOps\tQA",name\n"Team\tA",Alice';
+  assert.equal(detectDelimiter(csv), ",");
+  assert.deepEqual(parseDelimited(csv, detectDelimiter(csv)), [
+    ["Research\tOps\tQA", "name"], ["Team\tA", "Alice"],
+  ]);
+
+  const tsv = '"Staff,Event,Operations"\tname\n"Admin,Owner"\tBob';
+  assert.equal(detectDelimiter(tsv), "\t");
+  assert.deepEqual(parseDelimited(tsv, detectDelimiter(tsv)), [
+    ["Staff,Event,Operations", "name"], ["Admin,Owner", "Bob"],
+  ]);
+});
+
+test("detectDelimiter: multiline fields and escaped quotes stay inside the first record", () => {
+  const csv = '"line 1\nline\t2\t3 ""comma,inside""",name\nvalue,Alice';
+  assert.equal(detectDelimiter(csv), ",");
+  assert.deepEqual(parseDelimited(csv, detectDelimiter(csv)), [
+    ['line 1\nline\t2\t3 "comma,inside"', "name"], ["value", "Alice"],
+  ]);
+  assert.equal(detectDelimiter("\n \nname,role\nBob,admin"), ",");
+  assert.equal(detectDelimiter("\n \nname\trole\nBob\tadmin"), "\t");
+});
