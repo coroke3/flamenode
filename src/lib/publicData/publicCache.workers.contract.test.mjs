@@ -30,6 +30,19 @@ test("Cache API read は isolate 解析キャッシュを先に見る", () => {
   assert.ok(isolateRead > fnStart && matchIndex > isolateRead);
 });
 
+test("Cache API read bypassIsolate は isolate に再登録しない", () => {
+  const start = source.indexOf("export async function readPublicJsonCache");
+  const end = source.indexOf("export function writePublicJsonCacheBestEffort", start);
+  assert.ok(start >= 0 && end > start);
+  const reader = source.slice(start, end);
+  assert.match(reader, /options\?\.bypassIsolate\s*\?\s*null\s*:\s*readPublicJsonIsolateCache\(r2Key\)/);
+  assert.match(
+    reader,
+    /if \(!options\?\.bypassIsolate\) \{\s*writePublicJsonIsolateCache\(\s*r2Key,\s*parsed\.value,/,
+  );
+  assert.match(reader, /return parsed\.value/);
+});
+
 test("Cache API delete は isolate エントリも落とす", async () => {
   // MIG-0614: the delete order lives in packages/server-core; src hands over the isolate map and Cache API.
   const core = await readFile(
