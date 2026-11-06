@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   publicJsonCacheFreshness,
   publicJsonCacheRetentionTtl,
+  utf8ByteLengthUpTo,
 } from "./publicCachePolicy.ts";
 
 const source = await readFile(new URL("./publicCache.ts", import.meta.url), "utf8");
@@ -66,11 +67,8 @@ test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らな
   assert.ok(byteGuardIndex > stringGuardIndex);
   assert.ok(putIndex > byteGuardIndex);
   assert.match(source, /function utf8ByteLengthExceeds/);
-  assert.match(
-    source,
-    /function utf8ByteLengthUpTo\(value: string, limit: number\): number \| null \{[\s\S]*?if \(value\.length <= Math\.floor\(limit \/ 3\)\) return value\.length \* 3;[\s\S]*?let bytes = 0;/,
-  );
-});
+  assert.match(source, /utf8ByteLengthUpTo,/);
+  assert.match(source, /utf8ByteLengthUpTo\(\s*serialized,/);});
 
 test("UTF-16 code unit の3倍をbyte上限の安全な上界として扱える", () => {
   const limit = 60;
@@ -85,6 +83,30 @@ test("UTF-16 code unit の3倍をbyte上限の安全な上界として扱える"
     assert.ok(value.length <= maxCodeUnits);
     assert.ok(new TextEncoder().encode(value).byteLength <= limit);
   }
+});
+
+test("UTF-8容量計算は短いASCIIも実バイト数で計上する", () => {
+  // Regression: 50,000 ASCII code units used to be counted as 150,000 bytes,
+  // rejecting a valid isolate-cache entry (128 KiB limit).
+  const ascii = "a".repeat(50_000);
+  assert.equal(new TextEncoder().encode(ascii).byteLength, 50_000);
+  assert.equal(utf8ByteLengthUpTo(ascii, 131_072), 50_000);
+  assert.equal(utf8ByteLengthUpTo(ascii, 49_999), null);
+
+  for (const value of [
+    "", "A", "é", "漢", "😀", "\uD800", "\uDC00",
+    "aé漢😀\uD800z",
+    "a".repeat(100_000) + "😀",
+  ]) {
+    const actualBytes = new TextEncoder().encode(value).byteLength;
+    assert.equal(utf8ByteLengthUpTo(value, actualBytes), actualBytes,
+      `exact byte count for ${JSON.stringify(value.slice(0, 16))}`);
+    if (actualBytes > 0) {
+      assert.equal(utf8ByteLengthUpTo(value, actualBytes - 1), null);
+    }
+  }
+  assert.equal(utf8ByteLengthUpTo("a", NaN), null);
+  assert.equal(utf8ByteLengthUpTo("a", -1), null);
 });
 
 test("stale envelope はfresh TTLを超えた時だけ bounded stale として扱う", () => {
