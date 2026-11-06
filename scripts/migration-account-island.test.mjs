@@ -195,6 +195,27 @@ test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authoriz
   }
 });
 
+test("presence-view payload on full summary is unavailable, not confirmed logout", async () => {
+  for (const malformed of [
+    { view: "presence", loggedIn: false },
+    { view: "presence", loggedIn: false, unavailable: true },
+    { ...summary(), view: "presence" },
+  ]) {
+    const v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(v.store.getState().confirmedLoggedOut, false);
+    assert.equal(v.store.getState().user?.name, presenceIn.displayName);
+    assert.equal(v.store.getState().details, null);
+    assert.equal(v.store.getState().detailsUnavailable, true);
+    assert.ok(button(v.container, "再試行"));
+    await v.unmount();
+  }
+});
+
 test("malformed unavailable markers never confirm logout or erase a present user", async () => {
   for (const unavailable of [false, null, "true", 1, {}]) {
     const presence = await setup({
