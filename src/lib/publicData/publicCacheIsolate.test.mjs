@@ -67,6 +67,26 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("videos/b.json", now), null);
   });
 
+  test("isolate cache は null・Promise の置換で旧entryを破棄する", () => {
+    const now = 1_250_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "replacement.json";
+    for (const invalid of [null, undefined, Promise.resolve({ id: "next" })]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        "invalid replacement must not expose a prior snapshot");
+    }
+    // Replacements of unrelated keys must not invalidate valid entries.
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("valid.json", payload, 30, weight, now);
+    writePublicJsonIsolateCache("invalid.json", null, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
+  });
+
   test("isolate cache は直接渡された無効TTLを保持せず既存entryも破棄する", () => {
     const now = 1_500_000;
     const payload = { id: "valid" };
