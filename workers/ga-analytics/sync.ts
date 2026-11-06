@@ -79,7 +79,8 @@ export function publicRecentIds(recent: RecentListPayload): Set<string> {
   for (const item of recent.items) {
     if (item && typeof item === "object" && !Array.isArray(item) &&
       "status" in item && item.status === "public" &&
-      "id" in item && typeof item.id === "string" && item.id.trim()) {
+      "id" in item && typeof item.id === "string" && item.id.trim() &&
+      "title" in item && typeof item.title === "string" && item.title.trim()) {
       ids.add(item.id.trim());
     }
   }
