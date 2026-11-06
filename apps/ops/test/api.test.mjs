@@ -111,14 +111,20 @@ test("fix(ops): non-2xx HTTP status must not accept an ok:true write body", asyn
     assert.deepEqual(await send(async () => jsonResponse(status, { ok: true }), "POST", "/api/admin/test"),
       { status: "ok", data: { ok: true } }, `HTTP ${status} should remain successful`);
   }
-  for (const status of [400, 401, 403, 409, 503]) {
-    const body = { ok: false, reason: status === 401 ? "unauthenticated" : "failed", message: "サーバー拒否" };
+  for (const status of [400, 403, 409, 503]) {
+    const body = { ok: false, reason: "failed", message: "サーバー拒否" };
     assert.deepEqual(await send(async () => jsonResponse(status, body), "POST", "/api/admin/test"),
       { status: "ok", data: body }, `HTTP ${status} must preserve real failure details`);
   }
-});
+  const guard = { ok: false, reason: "unauthenticated", message: "ログインが必要です。" };
+  assert.deepEqual(await send(async () => jsonResponse(401, guard), "POST", "/api/admin/test"),
+    { status: "anonymous" }, "401 must override even a valid ok:false guard body");
+  assert.deepEqual(await send(async () => jsonResponse(401, { ok: false }), "POST", "/api/admin/test"),
+    { status: "anonymous" });});
 
 test("MIG-0707 T05: send 401 without ok, invalid JSON and network errors", async () => {
+  assert.deepEqual(await send(async () => new Response("", { status: 401 }), "POST", "/api/ops"),
+    { status: "anonymous" });
   assert.deepEqual(await send(async () => jsonResponse(401, { error: "login" }), "POST", "/api/ops"),
     { status: "anonymous" });
   for (const malformed of ["not-json", ""]) {
