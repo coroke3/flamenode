@@ -33,6 +33,17 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(serializeOptionsJson(["", "  "]), null);
   });
 
+  test("200 UTF-16 unit option limit never splits an emoji", () => {
+    const prefix = "A".repeat(199);
+    const split = normalizeOptionList([prefix + "😀"]);
+    assert.deepEqual(split, [prefix]);
+    assert.doesNotMatch(JSON.stringify(split), /\\\\ud83d/i);
+
+    const whole = "A".repeat(198) + "😀";
+    assert.deepEqual(normalizeOptionList([whole]), [whole]);
+    assert.deepEqual(JSON.parse(serializeOptionsJson([prefix + "😀"])), [prefix]);
+  });
+
   test("radio/select reject values when options are empty", () => {
     const emptyRadio = question({ options: [] });
     const rejected = validateAnswerInput(emptyRadio, ["自由記述"]);
