@@ -2,6 +2,7 @@
 // src/lib/notifications/{types,display,status}.ts (MIG-0719 U03 parity). The CURRENT
 // modules import drizzle and "@/" aliases, so the Ops SPA keeps a dependency-free copy.
 import { isTerminalNotificationFailure } from "@flamenode/domain/admin";
+export { isTerminalNotificationFailure };
 
 /**
  * notification_outbox.type の分類・重要度・表示ラベル。
@@ -21,7 +22,7 @@ export type NotificationCategory =
 
 export type NotificationSeverity = "critical" | "warning" | "info" | "silent";
 
-const TYPE_LABELS: Record<string, string> = {
+export const TYPE_LABELS: Record<string, string> = {
   video_submitted: "作品を受け付けました",
   video_approved: "作品が公開されました",
   video_voided: "作品について確認があります",
@@ -117,7 +118,7 @@ export function getNotificationStatusLabel(status: string | null | undefined): s
   if (!status) return "不明";
   return STATUS_LABELS[status] ?? status;
 }
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   pending: "配信待ち",
   processing: "送信中",
   sent: "送信済み",
@@ -391,3 +392,17 @@ export function notificationDeliveryRoute(type: string): "dm" | "channel" {
 export function notificationDeliveryRouteLabel(type: string): string {
   return notificationDeliveryRoute(type) === "channel" ? "チャンネル（Webhook）" : "DM（Bot）";
 }
+
+// MIG-0734: admin filter labels; MIG-0719 remains canonical owner of shared notification display.
+export const ADMIN_NOTIFICATION_CATEGORY_OPTIONS: ReadonlyArray<{ key: NotificationCategory | "all"; label: string }> = [
+  { key: "all", label: "すべて" },
+  { key: "video", label: "作品" },
+  { key: "slot", label: "枠" },
+  { key: "x_id", label: "X ID" },
+  { key: "chapter", label: "チャプター" },
+  { key: "moderation", label: "モデレーション" },
+  { key: "announcement", label: "お知らせ" },
+  { key: "event", label: "イベント" },
+  { key: "system", label: "システム" },
+  { key: "unknown", label: "その他" },
+];
