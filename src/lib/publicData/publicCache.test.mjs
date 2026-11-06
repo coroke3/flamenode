@@ -127,6 +127,8 @@ test("uncacheable replacement invalidates an old isolate entry", () => {
   const writer = source.slice(start, end);
   // JSON.stringify(undefined) produces no serialized JSON; never keep an earlier snapshot.
   assert.match(writer, /if \(typeof serialized !== "string"\) \{\s*if \(!options\?\.bypassIsolate\) deletePublicJsonIsolateCache\(r2Key\);/);
+  // Throwing JSON.stringify (e.g. a cyclic object) also invalidates the old isolate entry.
+  assert.match(writer, /} catch \\{\\s*\\/\\/ A throwing serializer[\\s\\S]*?if \\(!options\\?\\.bypassIsolate\\) deletePublicJsonIsolateCache\\(r2Key\\);/);
   // Oversized replacements can be cached in the edge tier but not in the isolate tier.
   assert.match(writer, /if \(isolateByteWeight === null\) \{\s*deletePublicJsonIsolateCache\(r2Key\);/);
 });
