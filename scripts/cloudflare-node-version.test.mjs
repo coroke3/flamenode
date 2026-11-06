@@ -21,7 +21,7 @@ test("production preflight accepts only complete Node 22 semver triplets", () =>
   for (const version of [
     "22", "22.13", "22garbage", "22.13.0junk", "22.13.0-rc.1",
     "22.13.0+build", "22..0", "22.01.0", " 22.13.0", "22.13.0 ",
-    "v22.13.0", "23.0.0", "21.9.0", "NaN", "", "22.13.0\n23.0.0",
+    "v22.13.0", "23.0.0", "21.9.0", "NaN", "", "22.13.0\n", "22.13.0\r\n", "22.13.0\n23.0.0",
   ]) {
     assert.match(runtimeVersionErrors(version),
       /Node\.js runtime must be major version 22/, JSON.stringify(version));
