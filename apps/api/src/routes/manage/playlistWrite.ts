@@ -129,6 +129,16 @@ playlistWriteRoutes.post("/sync", async (c) => {
 export function parsePlaylistSettings(value: Record<string, unknown>):
   | { ok: true; playlistId: string | null; mode: "off" | "append_only" | "mirror"; interval: number }
   | { ok: false; message: string } {
+  // Match EventPlaylistSettingsBodySchema: JSON arrays/objects must not turn
+  // into valid IDs or minute counts through String(value) coercion.
+  if (value.playlist_id !== undefined && typeof value.playlist_id !== "string") {
+    return { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" };
+  }
+  if (value.sync_interval_minutes !== undefined &&
+      typeof value.sync_interval_minutes !== "string" &&
+      typeof value.sync_interval_minutes !== "number") {
+    return { ok: false, message: "入力エラー" };
+  }
   const mode = value.sync_mode === "append_only" || value.sync_mode === "mirror"
     ? value.sync_mode : "off";
   const raw = String(value.playlist_id ?? "").trim();
