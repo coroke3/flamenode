@@ -212,9 +212,14 @@ async function loadExistingTrendingItemCount(
     // preserve the artifact if ALL its IDs are still in the current D1
     // allow-list; keeping one old private/deleted row would leak stale data.
     const publicIds = publicRecentIds(recent);
-    return normalized.items.every((item) => publicIds.has(item.id))
-      ? normalized.items.length
-      : 0;
+    const retainedIds = new Set<string>();
+    for (const item of normalized.items) {
+      // The producer emits one ranked row per video. A corrupted old R2
+      // artifact with duplicate IDs must not be retained on GA4 failure.
+      if (!publicIds.has(item.id) || retainedIds.has(item.id)) return 0;
+      retainedIds.add(item.id);
+    }
+    return normalized.items.length;
   } catch {
     return 0;
   }
