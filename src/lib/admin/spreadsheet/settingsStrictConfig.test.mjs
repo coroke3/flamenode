@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { test } from "node:test";
 import { runTestWithTsx } from "../../testing/runTestWithTsx.mjs";
@@ -14,37 +13,45 @@ if (runTestWithTsx(import.meta.url)) {
     },
   });
 
-  const { getSpreadsheetPageSize } = await import("./settings.ts");
-  const target = await readFile(
-    new URL("../../../../apps/api/src/routes/admin/spreadsheet/read.ts", import.meta.url),
-    "utf8",
+  const { getSpreadsheetPageSize: getCurrentPageSize } = await import("./settings.ts");
+  const { getSpreadsheetPageSize: getTargetPageSize } = await import(
+    "../../../../apps/api/src/routes/admin/spreadsheet/read.ts"
   );
 
-  test("CURRENT spreadsheet page size rejects partial and unsafe env numbers", () => {
+  test("spreadsheet page size rejects malformed config in CURRENT and TARGET", () => {
     const previous = process.env.ADMIN_SPREADSHEET_PAGE_SIZE;
     try {
-      for (const raw of ["500oops", "50.5", "1e3", "+50", "-1", "Infinity", "9007199254740992", "１２"]) {
+      for (const raw of [
+        "500oops", "50.5", "1e3", "+50", "-1", "Infinity",
+        "9007199254740992", "１２", "50\n1", " 25 5 ",
+      ]) {
         process.env.ADMIN_SPREADSHEET_PAGE_SIZE = raw;
-        assert.equal(getSpreadsheetPageSize(), 500, raw);
+        assert.equal(getCurrentPageSize(), 500, `CURRENT raw=${JSON.stringify(raw)}`);
+        assert.equal(getTargetPageSize(raw), 50, `TARGET raw=${JSON.stringify(raw)}`);
       }
-      process.env.ADMIN_SPREADSHEET_PAGE_SIZE = " 00075 ";
-      assert.equal(getSpreadsheetPageSize(), 75);
-      process.env.ADMIN_SPREADSHEET_PAGE_SIZE = "9999";
-      assert.equal(getSpreadsheetPageSize(), 5000);
-      process.env.ADMIN_SPREADSHEET_PAGE_SIZE = "1";
-      assert.equal(getSpreadsheetPageSize(), 1);
     } finally {
       if (previous === undefined) delete process.env.ADMIN_SPREADSHEET_PAGE_SIZE;
       else process.env.ADMIN_SPREADSHEET_PAGE_SIZE = previous;
     }
   });
 
-  test("TARGET Hono spreadsheet page size requires the same complete numeric grammar", () => {
-    const fnStart = target.indexOf("export function getSpreadsheetPageSize(");
-    assert.ok(fnStart >= 0, "Hono page-size parser must exist");
-    const functionCode = target.slice(fnStart, target.indexOf("\n}\n", fnStart) + 2);
-    assert.match(functionCode, /\/\^\\d\+\$\/\.test\(trimmed\)/);
-    assert.match(functionCode, /Number\.isSafeInteger\(n\)/);
-    assert.doesNotMatch(functionCode, /Number\.parseInt\(/);
+  test("spreadsheet page size preserves valid decimals and runtime-specific caps", () => {
+    const previous = process.env.ADMIN_SPREADSHEET_PAGE_SIZE;
+    try {
+      for (const [raw, current, target] of [
+        [" 00075 ", 75, 50],
+        ["9999", 5000, 50],
+        ["1", 1, 1],
+        ["0000", 500, 50],
+        ["", 500, 50],
+      ]) {
+        process.env.ADMIN_SPREADSHEET_PAGE_SIZE = raw;
+        assert.equal(getCurrentPageSize(), current, `CURRENT raw=${JSON.stringify(raw)}`);
+        assert.equal(getTargetPageSize(raw), target, `TARGET raw=${JSON.stringify(raw)}`);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.ADMIN_SPREADSHEET_PAGE_SIZE;
+      else process.env.ADMIN_SPREADSHEET_PAGE_SIZE = previous;
+    }
   });
 }
