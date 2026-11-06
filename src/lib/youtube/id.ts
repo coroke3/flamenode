@@ -84,9 +84,19 @@ export function youtubeThumbUrl(
   return `/api/youtube-thumbnail/${youtubeId}/${size}`;
 }
 
+/** Preserve one URL component even if a legacy ID is malformed.
+ * YouTube IDs are ASCII; replacement characters only affect invalid inputs.
+ * A literal dot segment would otherwise be normalized out of an iframe path.
+ */
+function encodeYoutubeIdComponent(id: string): string {
+  const encoded = encodeURIComponent(id.replace(/[\uD800-\uDFFF]/g, "\uFFFD"));
+  return encoded === "." || encoded === ".." ? "_" : encoded;
+}
+
 /** YouTube 動画ページ URL。 */
 export function youtubeWatchUrl(id: string): string {
-  return `https://www.youtube.com/watch?v=${id}`;
+  // An invalid/legacy ID must never become another query parameter or fragment.
+  return `https://www.youtube.com/watch?v=${encodeYoutubeIdComponent(id)}`;
 }
 
 /** YouTube iframe 埋め込み URL。 */
@@ -109,5 +119,6 @@ export function youtubeEmbedUrl(
   if (opts.autoplay) params.set("autoplay", "1");
   if (opts.mute) params.set("mute", "1");
   if (opts.start && opts.start > 0) params.set("start", String(Math.floor(opts.start)));
-  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+  // Preserve the iframe path and our query options even for corrupted IDs.
+  return `https://www.youtube.com/embed/${encodeYoutubeIdComponent(id)}?${params.toString()}`;
 }

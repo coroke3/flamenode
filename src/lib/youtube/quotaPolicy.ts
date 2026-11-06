@@ -6,7 +6,11 @@ const MIN_CONFIGURED_DAILY_QUOTA_UNITS = 100;
 const MAX_CONFIGURED_DAILY_QUOTA_UNITS = 10_000_000;
 
 export function resolveYoutubeDailyQuotaUnits(raw: string | undefined): number {
-  const parsed = Number.parseInt(raw?.trim() ?? "", 10);
+  const value = raw?.trim() ?? "";
+  // parseInt accepts partial values ("20000oops", "20000.5"), potentially
+  // raising the actual Worker quota budget beyond the intended setting.
+  if (!/^[0-9]{1,32}$/.test(value)) return YOUTUBE_DEFAULT_DAILY_QUOTA_UNITS;
+  const parsed = Number(value);
   if (
     Number.isSafeInteger(parsed) &&
     parsed >= MIN_CONFIGURED_DAILY_QUOTA_UNITS &&
