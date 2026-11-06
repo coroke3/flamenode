@@ -61,6 +61,34 @@ async function setup(routes, props = {}) {
   return { fetchImpl, store, ...view };
 }
 
+test("disposed account store cannot restart or register an orphaned Active X listener", async () => {
+  let fetchCalls = 0;
+  let activeXRegistrations = 0;
+  const originalAddEventListener = window.addEventListener;
+  const store = createAccountStore({
+    fetchImpl: async () => {
+      fetchCalls++;
+      return json(presenceIn);
+    },
+  });
+  store.dispose();
+  window.addEventListener = function (type, ...args) {
+    if (type === ACTIVE_X_CHANGED_EVENT) activeXRegistrations++;
+    return originalAddEventListener.call(this, type, ...args);
+  };
+  try {
+    store.start();
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    await flush();
+    assert.equal(activeXRegistrations, 0, "disposed stores must never register global listeners");
+    assert.equal(fetchCalls, 0, "disposed stores must never issue requests");
+  } finally {
+    window.addEventListener = originalAddEventListener;
+  }
+});
+
 test("logged out: join link keeps the current path as ?next; loading shows a status placeholder first", async () => {
   assert.equal(entryHrefFor("/about"), "/entry?next=%2Fabout");
   assert.equal(entryHrefFor("/entry"), "/entry");
