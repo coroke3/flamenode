@@ -216,6 +216,41 @@ test("legacy imported public URLs do not retain embedded credentials", () => {
   assert.equal(plan.xUsers.find((x) => x.id === "creator_x")?.other_social_links, null);
 });
 
+test("legacy social URL credentials are rejected despite leading whitespace", () => {
+  for (const raw of [
+    " https://user:secret@example.com/profile",
+    "\thttps://user:secret@example.com/profile",
+    "\nhttps://user:secret@example.com/profile",
+    "\r\nhttps://user:secret@example.com/profile",
+  ]) {
+    const plan = normalizeLegacyFiles([
+      parseLegacyImportText("video_new.json", JSON.stringify([{
+        title: "Whitespace URL credentials test",
+        creator: "Creator",
+        tlink: "creator_x",
+        eventid: "legacy-credential-whitespace-test",
+        othersns: raw,
+        ylink: "https://youtu.be/abcdefghijk",
+      }])),
+    ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+    assert.equal(plan.videos.length, 1);
+    assert.equal(plan.videos[0].creator_other_social_links, null, JSON.stringify(raw));
+    assert.equal(plan.xUsers.find((x) => x.id === "creator_x")?.other_social_links, null, JSON.stringify(raw));
+  }
+  const labels = normalizeLegacyFiles([
+    parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "Free-text social label",
+      creator: "Creator",
+      tlink: "creator_x",
+      eventid: "legacy-label-test",
+      othersns: "X, TikTok",
+      ylink: "https://youtu.be/abcdefghijk",
+    }])),
+  ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+  assert.equal(labels.videos[0].creator_other_social_links, "X, TikTok");
+  assert.equal(labels.xUsers.find((x) => x.id === "creator_x")?.other_social_links, "X, TikTok");
+});
+
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
   const videoOnlyJson = JSON.stringify([
     {
