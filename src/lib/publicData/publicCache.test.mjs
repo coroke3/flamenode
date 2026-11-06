@@ -114,10 +114,24 @@ test("Cache API writer normalizes TTL before isolate and edge-cache writes", () 
   assert.match(writer, /const safeTtl = publicJsonCacheRetentionTtl\(ttlSeconds\)/);
   assert.match(
     writer,
-    /writePublicJsonIsolateCache\(\s*r2Key,\s*payload,\s*safeTtl,/,
+    /writePublicJsonIsolateCache\(\s*r2Key,\s*parsedPayload,\s*safeTtl,/,
   );
   assert.match(writer, /`public, max-age=\$\{safeTtl\}`/);
   assert.doesNotMatch(writer, /Math\.floor\(ttlSeconds\)/);
+});
+
+test("isolate cache stores exactly the JSON representation served by Cache API", () => {
+  const start = source.indexOf("export function writePublicJsonCacheBestEffort(");
+  const end = source.indexOf("// MIG-0614:", start);
+  const writer = source.slice(start, end);
+  assert.match(writer, /const parsedPayload: unknown = JSON\\.parse\\(serialized\\)/);
+  assert.match(writer, /writePublicJsonIsolateCache\\(r2Key, parsedPayload, safeTtl, isolateByteWeight\\)/);
+  // Source objects can be transformed during serialization; storing the raw
+  // object would produce a different response on a warm-isolate cache hit.
+  const payload = { value: Infinity, nested: { toJSON: () => ({ id: "serialized" }) } };
+  const actual = JSON.parse(JSON.stringify(payload));
+  assert.deepEqual(actual, { value: null, nested: { id: "serialized" } });
+  assert.notDeepEqual(actual, payload);
 });
 
 test("uncacheable replacement invalidates an old isolate entry", () => {
