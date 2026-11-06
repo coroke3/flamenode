@@ -320,6 +320,29 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failureBody, /secret-D1-provider-detail/);
     assert.equal(d1.stats.writes, 0);
   });
+  test("SEC-575: v5 scheduledキャッシュは生成時刻が変わってもCURRENT/HonoでHITする", async () => {
+    const path = "export-event?format=v5&update=scheduled&refresh=1440";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        assert.equal(first.headers["X-FlameNode-Cache"], "MISS");
+        await Promise.all(globalThis.__eventExport.pending);
+        Date.now = () => 1700000320000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.headers["X-FlameNode-Cache"], "HIT");
+        assert.equal(next.body, first.body, "cached generated_at provenance must not change on HIT");
+        assert.equal(next.headers.ETag, first.headers.ETag);
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
   test("T07: Cache API HIT is gated and keeps status/ETag/refresh headers", async () => {
     reset();
     const path = "export-event?format=v5&update=scheduled&refresh=1440";
