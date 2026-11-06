@@ -4,7 +4,7 @@ import type { AdminNotificationsResponse } from "@flamenode/contracts";
 import { useSearchParams } from "react-router-dom";
 import { adminReadRedirect } from "../../api/adminTop.js";
 import {
-  createAdminNotificationsApi, notificationFilterHref, type AdminNotificationsApi, type NotificationFilters,
+  createAdminNotificationsApi, notificationFilterHref, truncateNotificationSearch, type AdminNotificationsApi, type NotificationFilters,
 } from "../../api/adminNotifications.js";
 import { NotificationOutboxSummary } from "../../components/notifications/NotificationOutboxSummary.js";
 import {
@@ -36,7 +36,7 @@ export function readNotificationFilters(params: URLSearchParams): NotificationFi
     cat: ADMIN_NOTIFICATION_CATEGORY_OPTIONS.some((option) => option.key === cat) ? cat : "all",
     type: (params.get("type") ?? "").trim(),
     event: (params.get("event") ?? "").trim(),
-    q: (params.get("q") ?? "").trim().slice(0, 100),
+    q: truncateNotificationSearch(params.get("q") ?? ""),
   };
 }
 
@@ -88,7 +88,7 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
     for (const [key, value] of new FormData(form)) {
       if (typeof value !== "string") continue;
       const normalized = value.trim();
-      if (normalized) next.set(key, key === "q" ? normalized.slice(0, 100) : normalized);
+      if (normalized) next.set(key, key === "q" ? truncateNotificationSearch(normalized) : normalized);
     }
     if (onSearch) {
       onSearch(next);
