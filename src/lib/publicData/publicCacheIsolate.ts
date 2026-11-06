@@ -15,6 +15,7 @@ export const PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC = 30;
 
 type IsolateJsonCacheEntry = {
   value: unknown;
+  createdAtMs: number;
   expiresAtMs: number;
   byteWeight: number;
 };
@@ -44,7 +45,7 @@ function deleteEntry(r2Key: string): void {
 
 function pruneExpiredEntries(nowMs: number): void {
   for (const [r2Key, entry] of isolateJsonCache) {
-    if (entry.expiresAtMs <= nowMs || isPromiseLike(entry.value)) {
+    if (nowMs < entry.createdAtMs || entry.expiresAtMs <= nowMs || isPromiseLike(entry.value)) {
       deleteEntry(r2Key);
     }
   }
@@ -127,6 +128,7 @@ export function writePublicJsonIsolateCache(
   }
   isolateJsonCache.set(r2Key, {
     value: payload,
+    createdAtMs: nowMs,
     expiresAtMs,
     byteWeight,
   });
