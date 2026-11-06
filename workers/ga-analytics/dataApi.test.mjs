@@ -199,6 +199,41 @@ test("fetchVideoViewPeriods paginates while pages are full", async () => {
   assert.equal(periods.find((row) => row.video_id === "video-b")?.views_2d, 7);
 });
 
+test("fetchVideoViewPeriods rejects metric header that is not eventCount", async () => {
+  const invalid = ga4ReportBody([ga4Row("last_30", "video-a", 12)]);
+  invalid.metricHeaders = [{ name: "activeUsers" }];
+  const fetchImpl = async () => new Response(JSON.stringify(invalid), { status: 200 });
+  await assert.rejects(
+    () => fetchVideoViewPeriods(ga4Env(), new ExternalRequestBudget(2), fetchImpl),
+    /ga4_report_metric_header_mismatch/,
+  );
+});
+
+test("fetchVideoViewPeriods rejects dimension header position changes across pages", async () => {
+  const firstRows = Array.from({ length: GA4_REPORT_PAGE_SIZE }, (_, i) =>
+    ga4Row("last_30", `video-${i}`, 1));
+  let calls = 0;
+  const fetchImpl = async (_, init) => {
+    const offset = JSON.parse(String(init.body)).offset;
+    calls += 1;
+    const body = offset === 0
+      ? ga4ReportBody(firstRows)
+      : {
+          ...ga4ReportBody([{
+            dimensionValues: [{ value: "last_30" }, { value: "video-extra" }],
+            metricValues: [{ value: "42" }],
+          }]),
+          dimensionHeaders: [{ name: "dateRange" }, { name: "customEvent:video_id" }],
+        };
+    return new Response(JSON.stringify(body), { status: 200 });
+  };
+  await assert.rejects(
+    () => fetchVideoViewPeriods(ga4Env(), new ExternalRequestBudget(3), fetchImpl),
+    /ga4_report_dimension_header_mismatch/,
+  );
+  assert.equal(calls, 2);
+});
+
 test("extractGa4PropertyQuota: propertyQuota を安全に抽出する", () => {
   const quota = extractGa4PropertyQuota({
     propertyQuota: {
