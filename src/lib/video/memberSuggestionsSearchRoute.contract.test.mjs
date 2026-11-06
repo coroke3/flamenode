@@ -27,7 +27,7 @@ test("limit/offsetは固定長の10進整数だけをbounded値として受け�
   assert.match(route, /\.trim\(\)/);
   assert.match(route, /raw\.length > MAX_NUMERIC_PARAM_LENGTH/);
   assert.doesNotMatch(route, /\.trim\(\)\.slice\(0, MAX_NUMERIC_PARAM_LENGTH\)/);
-  assert.match(route, /if \(!\/\^\\d\+\$\/\.test\(raw\)\) return fallback/);
+  assert.match(route, /raw\.length > MAX_NUMERIC_PARAM_LENGTH \|\| !\/\^\\d\+\$\/\.test\(raw\)/);
   assert.match(route, /Number\.parseInt\(raw, 10\)/);
   assert.match(route, /Number\.isSafeInteger\(parsed\) \|\| parsed < min/);
   assert.match(
