@@ -58,6 +58,44 @@ test("Retry-Afterの不正な数値形式はHTTP日付と誤認せず拒否す�
   }
 });
 
+test("RFC 850の2桁年は基準時刻から将来50年の窓で解決する", () => {
+  const now2026 = Date.parse("Fri, 06 Nov 2026 08:49:33 GMT");
+  // Date.parse historically maps -50 to 1950, but HTTP-date means 2050.
+  assert.equal(
+    parseRetryAfterMs("Sunday, 06-Nov-50 08:49:37 GMT", 10_000, now2026),
+    10_000,
+  );
+  assert.equal(
+    parseRetryAfterMs("Monday, 06-Nov-50 08:49:37 GMT", 10_000, now2026),
+    null,
+    "weekday must be checked against 2050, not Date.parse's 1950",
+  );
+
+  // The same two-digit year changes century at the *exact* 50-year
+  // boundary, including hour/minute/second (not just year arithmetic).
+  assert.equal(
+    parseRetryAfterMs("Friday, 06-Nov-76 08:49:32 GMT", 10_000, now2026),
+    10_000,
+  );
+  assert.equal(
+    parseRetryAfterMs("Friday, 06-Nov-76 08:49:37 GMT", 10_000, now2026),
+    null,
+    "beyond 50 years in the future must resolve to 1976",
+  );
+  assert.equal(
+    parseRetryAfterMs("Saturday, 06-Nov-76 08:49:37 GMT", 10_000, now2026),
+    0,
+    "1976 should remain a valid historical date",
+  );
+
+  const now2090 = Date.parse("Mon, 06 Nov 2090 08:49:33 GMT");
+  assert.equal(
+    parseRetryAfterMs("Wednesday, 06-Nov-15 08:49:37 GMT", 10_000, now2090),
+    10_000,
+    "future-century 2115 must not be forced into 2015",
+  );
+});
+
 test("指数バックオフはprovider指定を優先し上限を超えない", () => {
   assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000 }), 4_000);
   assert.equal(
