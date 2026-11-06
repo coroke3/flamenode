@@ -94,7 +94,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
     for (const [key, value] of new FormData(form)) {
       if (typeof value !== "string") continue;
       const normalized = value.trim();
-      if (normalized) next.set(key, key === "q" ? truncateNotificationSearch(normalized) : normalized);
+      const finalValue = key === "q" ? truncateNotificationSearch(normalized) : normalized;
+      if (finalValue) next.set(key, finalValue);
     }
     if (onSearch) {
       onSearch(next);
