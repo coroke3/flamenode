@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   exponentialBackoffMs,
+  delay,
   ExternalRequestBudget,
   fetchWithTimeout,
   parseRetryAfterMs,
@@ -146,6 +147,18 @@ test("指数バックオフは非有限の設定とprovider値を有限の待機
   assert.equal(exponentialBackoffMs(Infinity, { maxDelayMs: 10_000 }), 1_000);
   assert.equal(exponentialBackoffMs(0, { maxDelayMs: 10_000, retryAfterMs: 750 }), 750);
   assert.equal(exponentialBackoffMs(1e9, { maxDelayMs: 10_000 }), 10_000);
+});
+
+test("retry delayは無効値と32bitタイマー上限超過を即時待機に変換しない", async () => {
+  for (const invalid of [NaN, Infinity, -Infinity, 2_147_483_648, Number.MAX_SAFE_INTEGER]) {
+    await assert.rejects(delay(invalid), {
+      name: "RangeError",
+      message: "Invalid retry delay",
+    }, `invalid delay: ${invalid}`);
+  }
+  await assert.doesNotReject(delay(0));
+  await assert.doesNotReject(delay(-1));
+  await assert.doesNotReject(delay(1));
 });
 
 test("fetchWithTimeoutは呼出し前に予算を消費する", async () => {
