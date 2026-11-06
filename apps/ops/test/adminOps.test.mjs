@@ -43,6 +43,15 @@ test("fix(notifications): q 100 UTF-16 units never splits an emoji", () => {
     "whitespace-only queries must not create a spurious q= filter");
   assert.equal(notificationQuery({ ...filters, q: " ".repeat(101) }), "",
     "API and tab navigation must agree on empty searches");
+  // A lone high surrogate is removed by truncateNotificationSearch().  The API
+  // and the SPA form must not reintroduce a dangling q= parameter afterward.
+  const invalidBoundary = "\uD800";
+  assert.equal(truncateNotificationSearch(invalidBoundary), "");
+  assert.equal(notificationQuery({ ...filters, q: invalidBoundary }), "");
+  assert.equal(notificationFilterHref({ ...filters, q: invalidBoundary }), "/admin/notifications");
+  const opsRoute = read("../src/routes/admin/AdminNotifications.tsx");
+  assert.match(opsRoute, /const finalValue = key === "q" \? truncateNotificationSearch\(normalized\) : normalized/);
+  assert.match(opsRoute, /if \(finalValue\) next\.set\(key, finalValue\)/);
   assert.ok(!truncateNotificationSearch(split).includes("\uFFFD"));
   const currentPage = read("../../../app/(admin)/admin/notifications/page.tsx");
   assert.match(currentPage, /const qFilter = \/\[\\uD800-\\uDBFF\]\$\/.test\(qRaw\)/);
