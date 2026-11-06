@@ -1381,8 +1381,8 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
-| `scripts/smoke-cloudflare.mjs` | HELPER | Production post-deploy smoke retry and degraded-read configuration | MIG-0908 | SAME (deployment smoke retained) | RETAINED | PR#630 SHA=0ee0d11415c21dd04996e34706d81e0f4dc5e8db TEST=scripts/cloudflare-ci.test.mjs CI=https://github.com/coroke3/flamenode/pull/630/checks |
-| `scripts/cloudflare-ci.test.mjs` | TEST | Production smoke retry config numeric validation regression | MIG-0908 | SAME | RETAINED | PR#630 SHA=e84ab03081ebd13d0adfdf3f9857fa4014625c10 TEST=node --test scripts/cloudflare-ci.test.mjs CI=https://github.com/coroke3/flamenode/pull/630/checks |
+| `scripts/smoke-cloudflare.mjs` | HELPER | Production post-deploy smoke retry and degraded-read configuration | MIG-0908 | SAME (deployment smoke retained) | RETAINED | PR#630 SHA=0ee0d11415c21dd04996e34706d81e0f4dc5e8db TEST=scripts/cloudflare-ci.test.mjs ; SHA=3837eab4202208a206b0f34bb60b8cec017a780b (MAX_ATTEMPTS=1000, MAX_DELAY_MS=600000) CI=https://github.com/coroke3/flamenode/pull/630/checks |
+| `scripts/cloudflare-ci.test.mjs` | TEST | Production smoke retry config numeric validation regression | MIG-0908 | SAME | RETAINED | PR#630 SHA=e84ab03081ebd13d0adfdf3f9857fa4014625c10 TEST=node --test scripts/cloudflare-ci.test.mjs ; SHA=d863079c279b58a24614aea34ac4073ab1e69359 (overflow/boundaries) CI=https://github.com/coroke3/flamenode/pull/630/checks |
 
 ## Future files requiring source/target registration
 
