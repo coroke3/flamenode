@@ -40,10 +40,16 @@ export function buildSitemapEntries(input: {
 }): SitemapEntry[] {
   const { origin } = input;
   const now = input.now ?? new Date();
-  const generated = Math.max(0, ...(input.generatedAt ?? []).filter(
-    (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0,
-  ));
-  const fallback = validDate(generated) ?? now;
+  // Compare only timestamps that can be represented as dates. If the
+  // largest source timestamp is corrupt, it must not mask a valid one.
+  let latestGenerated: Date | null = null;
+  for (const unix of input.generatedAt ?? []) {
+    const date = validDate(unix);
+    if (date && (!latestGenerated || date.getTime() > latestGenerated.getTime())) {
+      latestGenerated = date;
+    }
+  }
+  const fallback = latestGenerated ?? now;
   const entry = (path: string, changeFrequency: SitemapFrequency, priority: number, unix?: number | null): SitemapEntry => ({
     url: new URL(path, origin).toString(),
     lastModified: validDate(unix) ?? fallback,
