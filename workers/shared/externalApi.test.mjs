@@ -37,6 +37,19 @@ test("Retry-Afterは秒とHTTP-dateを上限付きで解釈する", () => {
   );
 });
 
+test("Retry-Afterの不正な数値形式はHTTP日付と誤認せず拒否する", () => {
+  for (const invalid of ["", " ", "3.5", "1e3", "0x10", "+3", "-1", "Infinity", "NaN"]) {
+    assert.equal(parseRetryAfterMs(invalid, 15_000, 1_000), null, invalid);
+  }
+  assert.equal(parseRetryAfterMs(" 003 ", 15_000), 3_000);
+  assert.equal(parseRetryAfterMs("0", 15_000), 0);
+  assert.equal(parseRetryAfterMs("999999999999999999999", 15_000), 15_000);
+  assert.equal(
+    parseRetryAfterMs("Wed, 21 Oct 2015 07:28:00 GMT", 15_000, Date.parse("Wed, 21 Oct 2015 07:27:56 GMT")),
+    4_000,
+  );
+});
+
 test("指数バックオフはprovider指定を優先し上限を超えない", () => {
   assert.equal(exponentialBackoffMs(2, { maxDelayMs: 10_000 }), 4_000);
   assert.equal(
