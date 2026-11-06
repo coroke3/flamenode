@@ -23,12 +23,16 @@ const isolateJsonCache = new Map<string, IsolateJsonCacheEntry>();
 let isolateJsonCacheBytes = 0;
 
 function isPromiseLike(value: unknown): boolean {
-  return (
-    value !== null &&
-    (typeof value === "object" || typeof value === "function") &&
-    "then" in value &&
-    typeof (value as { then: unknown }).then === "function"
-  );
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+    return false;
+  }
+  try {
+    return "then" in value && typeof (value as { then: unknown }).then === "function";
+  } catch {
+    // A throwing getter or Proxy trap cannot be inspected safely. Treat it
+    // as uncacheable instead of leaking an exception or preserving an old key.
+    return true;
+  }
 }
 
 function deleteEntry(r2Key: string): void {
