@@ -164,6 +164,26 @@ test("rankTrendingItems rejects a nonpublic duplicate without overwriting its pu
   assert.equal(ranked[0].title, "Public title");
 });
 
+test("rankTrendingItems rejects duplicate public recent IDs instead of overwriting metadata", () => {
+  const period = {
+    video_id: "visible", views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  for (const items of [
+    [recentItem("visible", "Original title"), recentItem("visible", "Conflicting title")],
+    [recentItem("visible", "Same title"), recentItem("visible", "Same title")],
+  ]) {
+    assert.throws(
+      () => rankTrendingItems({ items }, [period]),
+      /ga4_recent_duplicate_public_video_id/,
+    );
+  }
+  // Nonpublic collisions are ignored rather than overriding the public row.
+  assert.deepEqual(rankTrendingItems({ items: [
+    recentItem("visible", "Public title"),
+    { ...recentItem("visible", "Secret title"), status: "private" },
+  ] }, [period]).map((item) => item.title), ["Public title"]);
+});
+
 test("rankTrendingItems rejects non-finite, fractional and unsafe view counts", () => {
   const invalid = [NaN, Infinity, -Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "10", null];
   const fields = ["views_2d", "views_5d", "views_7d", "views_30d"];
