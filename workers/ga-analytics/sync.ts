@@ -13,7 +13,7 @@ import {
   fetchVideoViewPeriods,
   formatGa4QuotaLogFields,
 } from "./dataApi.ts";
-import type { Ga4DataApiEnv } from "./dataApi.ts";
+import type { Ga4DataApiEnv, VideoViewPeriods } from "./dataApi.ts";
 import { rankTrendingItems } from "./ranking.ts";
 import { normalizeStaticTrending } from "../../src/lib/publicData/staticTrendingCore.ts";
 import { loadRecentListFromD1 } from "./recentFromD1.ts";
@@ -73,24 +73,40 @@ export function buildTrendingWindows(now = new Date()): TrendingOutputPayload["w
   };
 }
 
-function countMatchedVideos(
-  recent: RecentListPayload,
-  periods: readonly { video_id: string; views_30d: number }[],
-): number {
-  if (!Array.isArray(recent.items)) return 0;
-  const recentIds = new Set<string>();
+export function publicRecentIds(recent: RecentListPayload): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(recent.items)) return ids;
   for (const item of recent.items) {
-    if (item && typeof item === "object" && typeof item.id === "string" && item.id.trim()) {
-      recentIds.add(item.id.trim());
+    if (item && typeof item === "object" && !Array.isArray(item) &&
+      "status" in item && item.status === "public" &&
+      "id" in item && typeof item.id === "string" && item.id.trim() &&
+      "title" in item && typeof item.title === "string" && item.title.trim()) {
+      ids.add(item.id.trim());
     }
   }
-  let matched = 0;
+  return ids;
+}
+
+export function countMatchedVideos(
+  recent: RecentListPayload,
+  periods: readonly Pick<VideoViewPeriods, "video_id" | "views_2d" | "views_5d" | "views_7d" | "views_30d">[],
+): number {
+  const recentIds = publicRecentIds(recent);
+  const matchedIds = new Set<string>();
   for (const period of periods) {
-    if (period.views_30d >= 1 && recentIds.has(period.video_id)) {
-      matched += 1;
+    // Count the same valid public inputs that the ranking boundary admits,
+    // rather than reporting malformed other windows as successful matches.
+    if (
+      Number.isSafeInteger(period.views_2d) && period.views_2d >= 0 &&
+      Number.isSafeInteger(period.views_5d) && period.views_5d >= 0 &&
+      Number.isSafeInteger(period.views_7d) && period.views_7d >= 0 &&
+      Number.isSafeInteger(period.views_30d) && period.views_30d >= 1 &&
+      recentIds.has(period.video_id)
+    ) {
+      matchedIds.add(period.video_id);
     }
   }
-  return matched;
+  return matchedIds.size;
 }
 
 export interface Ga4TrendingSyncEnv extends Ga4DataApiEnv {
@@ -203,17 +219,15 @@ async function loadExistingTrendingItemCount(
     // A last-success ranking may outlive a video's public visibility. Only
     // preserve the artifact if ALL its IDs are still in the current D1
     // allow-list; keeping one old private/deleted row would leak stale data.
-    if (!Array.isArray(recent.items)) return 0;
-    const publicIds = new Set<string>();
-    for (const item of recent.items) {
-      if (item && typeof item === "object" &&
-        typeof item.id === "string" && item.id.trim()) {
-        publicIds.add(item.id.trim());
-      }
+    const publicIds = publicRecentIds(recent);
+    const retainedIds = new Set<string>();
+    for (const item of normalized.items) {
+      // The producer emits one ranked row per video. A corrupted old R2
+      // artifact with duplicate IDs must not be retained on GA4 failure.
+      if (!publicIds.has(item.id) || retainedIds.has(item.id)) return 0;
+      retainedIds.add(item.id);
     }
-    return normalized.items.every((item) => publicIds.has(item.id))
-      ? normalized.items.length
-      : 0;
+    return normalized.items.length;
   } catch {
     return 0;
   }

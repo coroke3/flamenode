@@ -247,3 +247,11 @@ test("rules T02: an unreadable source fails the build instead of emitting an emp
   await assert.rejects(loadRulesForBuild(rulesSourceFromEnv({ FLAMENODE_RULES_SNAPSHOT_FILE: path.resolve("no-such-rules.json") })));
   assert.equal((await loadRulesForBuild(rulesSourceFromEnv({}))).versionLabel, DEFAULT_TERMS_VERSION_LABEL);
 });
+
+test("pageHead: compactText does not break supplementary Unicode characters", () => {
+  const prefix = "A".repeat(156);
+  const split = compactText(prefix + "🚀" + "x".repeat(12));
+  assert.equal(split, prefix + "...");
+  assert.doesNotMatch(split, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  assert.equal(compactText("A".repeat(155) + "🚀" + "x".repeat(12)), "A".repeat(155) + "🚀...");
+});
