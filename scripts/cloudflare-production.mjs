@@ -312,7 +312,7 @@ export function verifyProductionEnvironment({
   }
   // Node.js reports a dotted numeric version; parseInt alone accepts malformed prefixes.
   const runtimeVersion = String(runtimeNodeVersion);
-  if (!/^22(?:\.(?:0|[1-9]\d*)){2}$/.test(runtimeVersion)) {
+  if (!/^22(?:\.(?:0|[1-9]\d*)){2}(?![\s\S])/.test(runtimeVersion)) {
     errors.push("Node.js runtime must be major version 22 for Workers Builds");
   }
   if (value(env, "CI") !== "true") {
