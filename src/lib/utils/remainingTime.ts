@@ -10,7 +10,9 @@ export interface RemainingTimeMetric {
 export function formatRemainingTimeMetric(
   seconds: number | null | undefined,
 ): RemainingTimeMetric | null {
-  if (seconds == null) return null;
+  // Snapshot and API timestamps may be malformed. Non-finite arithmetic must
+  // never surface "NaN日" / "Infinity日" in the public countdown.
+  if (seconds == null || !Number.isFinite(seconds)) return null;
   if (seconds <= 0) return { value: "0", unit: "分" };
   if (seconds < HOUR_SECONDS) {
     return {

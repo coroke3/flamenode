@@ -1381,6 +1381,9 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/lib/utils/remainingTime.ts` | HELPER | shared countdown metric formatting; prevent NaN/Infinity values on CURRENT and Astro public event cards | MIG-0506 | SAME (shared Next and Astro metric helper, parity preserved) | IN_PROGRESS | PR#584 SHA=d3535039a96ebaeaf6e7fda13867e3960d35c9b1 TEST=node --test --experimental-strip-types src/lib/utils/remainingTime.test.mjs CI=pending (non-finite countdown safe null; valid/elapsed parity) |
+| `src/lib/utils/remainingTime.test.mjs` | TEST | NaN and infinite countdown regression plus existing boundary tests | MIG-0506 | SAME (shared countdown unit test) | IN_PROGRESS | PR#584 SHA=d3535039a96ebaeaf6e7fda13867e3960d35c9b1 TEST=node --test --experimental-strip-types src/lib/utils/remainingTime.test.mjs CI=pending (non-finite countdown safe null; valid/elapsed parity) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
