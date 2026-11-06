@@ -961,13 +961,25 @@ test("GA4 matched count excludes revoked and malformed input rows", () => {
     { id: "unmarked" },
   ] };
   const periods = [
-    { video_id: "visible", views_30d: 9 },
-    { video_id: "revoked", views_30d: 10 },
-    { video_id: "missing-title", views_30d: 12 },
-    { video_id: "unmarked", views_30d: 11 },
-    { video_id: "visible", views_30d: 0 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 9 },
+    { video_id: "revoked", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 10 },
+    { video_id: "missing-title", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 12 },
+    { video_id: "unmarked", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 11 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 0 },
   ];
   assert.equal(countMatchedVideos(recent, periods), 1);
+});
+
+test("GA4 matched count excludes invalid 2d, 5d and 7d inputs like ranking", () => {
+  const recent = { items: [{ id: "public", title: "Public", status: "public" }] };
+  const valid = { video_id: "public", views_2d: 0, views_5d: 1, views_7d: 2, views_30d: 3 };
+  for (const field of ["views_2d", "views_5d", "views_7d"]) {
+    for (const invalid of [NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, undefined]) {
+      assert.equal(countMatchedVideos(recent, [{ ...valid, [field]: invalid }]), 0,
+        `${field}=${String(invalid)} must not count`);
+    }
+  }
+  assert.equal(countMatchedVideos(recent, [valid]), 1);
 });
 
 test("GA4 matched video count excludes duplicate rows and unsafe 30d views", () => {
@@ -976,17 +988,17 @@ test("GA4 matched video count excludes duplicate rows and unsafe 30d views", () 
     { id: "second", title: "Second", status: "public" },
   ] };
   assert.equal(countMatchedVideos(recent, [
-    { video_id: "visible", views_30d: 1 },
-    { video_id: "visible", views_30d: 100 },
-    { video_id: "second", views_30d: Infinity },
-    { video_id: "second", views_30d: NaN },
-    { video_id: "second", views_30d: 1.5 },
-    { video_id: "second", views_30d: Number.MAX_SAFE_INTEGER + 1 },
-    { video_id: "second", views_30d: -1 },
-    { video_id: "second", views_30d: 0 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 1 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 100 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: Infinity },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: NaN },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 1.5 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: Number.MAX_SAFE_INTEGER + 1 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: -1 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 0 },
   ]), 1);
   assert.equal(countMatchedVideos(recent, [
-    { video_id: "visible", views_30d: 2 },
-    { video_id: "second", views_30d: 3 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 3 },
   ]), 2);
 });
