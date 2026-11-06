@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeHttpUrl, safeDecodeURIComponent } from "./url.ts";
 import { normalizeHttpUrl as normalizeSpaHttpUrl } from "../../../apps/app/src/lib/url.ts";
+import { normalizeHttpUrl as normalizeOpsHttpUrl } from "../../../apps/ops/src/components/shared/url.ts";
+import { normalizeYoutubeChannelInput } from "../../../apps/api/src/routes/personal/candidates.ts";
 
 test("null/空文字は null を返す", () => {
   assert.equal(normalizeHttpUrl(null), null);
@@ -31,7 +33,7 @@ test("文字数上限オーバーは null を返す", () => {
 });
 
 test("credentials embedded in public URLs are rejected in CURRENT and SPA", () => {
-  for (const normalize of [normalizeHttpUrl, normalizeSpaHttpUrl]) {
+  for (const normalize of [normalizeHttpUrl, normalizeSpaHttpUrl, normalizeOpsHttpUrl]) {
     assert.equal(normalize("https://user:secret@example.com/path"), null);
     assert.equal(normalize("https://user@example.com/"), null);
     assert.equal(normalize("https://:secret@example.com/"), null);
@@ -39,6 +41,13 @@ test("credentials embedded in public URLs are rejected in CURRENT and SPA", () =
     assert.equal(normalize("https://example.com/path"), "https://example.com/path");
     assert.equal(normalize("http://example.com/"), "http://example.com/");
   }
+});
+
+test("Hono candidate URL normalization also rejects embedded credentials", () => {
+  assert.equal(normalizeYoutubeChannelInput("https://user:secret@example.com/path"), null);
+  assert.equal(normalizeYoutubeChannelInput("https://user:secret@youtube.com/@creator"), null);
+  assert.equal(normalizeYoutubeChannelInput("https://www.youtube.com/@creator"), "https://www.youtube.com/@creator");
+  assert.equal(normalizeYoutubeChannelInput("https://example.com/path"), "https://example.com/path");
 });
 
 test("safeDecodeURIComponent returns null for malformed escapes", () => {
