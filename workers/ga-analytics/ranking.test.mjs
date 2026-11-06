@@ -127,3 +127,39 @@ test("rankTrendingItems excludes views_30d=0 and unknown recent ids", () => {
   const ranked = rankTrendingItems(recent, periods);
   assert.deepEqual(ranked.map((item) => item.id), ["known"]);
 });
+
+test("rankTrendingItems never promotes nonpublic recent rows to public", () => {
+  const recent = {
+    items: [
+      recentItem("visible", "Visible"),
+      { ...recentItem("private", "Private"), status: "private" },
+      { ...recentItem("deleted", "Deleted"), status: "deleted" },
+      { ...recentItem("unmarked", "Unmarked"), status: undefined },
+    ],
+  };
+  const periods = recent.items.map((item) => ({
+    video_id: item.id,
+    views_2d: 10,
+    views_5d: 10,
+    views_7d: 10,
+    views_30d: 10,
+  }));
+  const ranked = rankTrendingItems(recent, periods);
+  assert.deepEqual(ranked.map((item) => item.id), ["visible"]);
+  assert.equal(ranked[0].status, "public");
+  assert.equal(ranked[0].rank, 1);
+});
+
+test("rankTrendingItems rejects a nonpublic duplicate without overwriting its public entry", () => {
+  const recent = {
+    items: [
+      recentItem("visible", "Public title"),
+      { ...recentItem("visible", "Private title"), status: "private" },
+    ],
+  };
+  const ranked = rankTrendingItems(recent, [
+    { video_id: "visible", views_2d: 1, views_5d: 1, views_7d: 1, views_30d: 1 },
+  ]);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].title, "Public title");
+});
