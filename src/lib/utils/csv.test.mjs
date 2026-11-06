@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { parseDelimited } from "./delimited.ts";
+import { parseDelimited, detectDelimiter } from "./delimited.ts";
 
 const parseCsv = (input) => parseDelimited(input, ",");
 
@@ -32,4 +32,28 @@ test("parseCsv: BOM 除去", () => {
     ["a", "b"],
     ["1", "2"],
   ]);
+});
+
+test("detectDelimiter: quoted separators must not change the CSV/TSV type", () => {
+  const csv = '\uFEFF\n"Research\tOps\tQA",name\n"Team\tA",Alice';
+  assert.equal(detectDelimiter(csv), ",");
+  assert.deepEqual(parseDelimited(csv, detectDelimiter(csv)), [
+    ["Research\tOps\tQA", "name"], ["Team\tA", "Alice"],
+  ]);
+
+  const tsv = '"Staff,Event,Operations"\tname\n"Admin,Owner"\tBob';
+  assert.equal(detectDelimiter(tsv), "\t");
+  assert.deepEqual(parseDelimited(tsv, detectDelimiter(tsv)), [
+    ["Staff,Event,Operations", "name"], ["Admin,Owner", "Bob"],
+  ]);
+});
+
+test("detectDelimiter: multiline fields and escaped quotes stay inside the first record", () => {
+  const csv = '"line 1\nline\t2\t3 ""comma,inside""",name\nvalue,Alice';
+  assert.equal(detectDelimiter(csv), ",");
+  assert.deepEqual(parseDelimited(csv, detectDelimiter(csv)), [
+    ['line 1\nline\t2\t3 "comma,inside"', "name"], ["value", "Alice"],
+  ]);
+  assert.equal(detectDelimiter("\n \nname,role\nBob,admin"), ",");
+  assert.equal(detectDelimiter("\n \nname\trole\nBob\tadmin"), "\t");
 });

@@ -62,7 +62,12 @@ function compactText(value: string | null | undefined, max = 160): string {
   const compacted = (value ?? "").replace(/\s+/g, " ").trim();
   if (!compacted) return SITE_DESCRIPTION;
   if (compacted.length <= max) return compacted;
-  return `${compacted.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+  const truncated = compacted.slice(0, Math.max(0, max - 3));
+  // Avoid splitting UTF-16 surrogate pairs at the truncation boundary.
+  const safe = /[\uD800-\uDBFF]$/.test(truncated)
+    ? truncated.slice(0, -1)
+    : truncated;
+  return `${safe.trimEnd()}...`;
 }
 
 export function buildPageMetadata({
