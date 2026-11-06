@@ -73,17 +73,24 @@ export function buildTrendingWindows(now = new Date()): TrendingOutputPayload["w
   };
 }
 
-function countMatchedVideos(
+export function publicRecentIds(recent: RecentListPayload): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(recent.items)) return ids;
+  for (const item of recent.items) {
+    if (item && typeof item === "object" && !Array.isArray(item) &&
+      "status" in item && item.status === "public" &&
+      "id" in item && typeof item.id === "string" && item.id.trim()) {
+      ids.add(item.id.trim());
+    }
+  }
+  return ids;
+}
+
+export function countMatchedVideos(
   recent: RecentListPayload,
   periods: readonly { video_id: string; views_30d: number }[],
 ): number {
-  if (!Array.isArray(recent.items)) return 0;
-  const recentIds = new Set<string>();
-  for (const item of recent.items) {
-    if (item && typeof item === "object" && typeof item.id === "string" && item.id.trim()) {
-      recentIds.add(item.id.trim());
-    }
-  }
+  const recentIds = publicRecentIds(recent);
   let matched = 0;
   for (const period of periods) {
     if (period.views_30d >= 1 && recentIds.has(period.video_id)) {
@@ -203,14 +210,7 @@ async function loadExistingTrendingItemCount(
     // A last-success ranking may outlive a video's public visibility. Only
     // preserve the artifact if ALL its IDs are still in the current D1
     // allow-list; keeping one old private/deleted row would leak stale data.
-    if (!Array.isArray(recent.items)) return 0;
-    const publicIds = new Set<string>();
-    for (const item of recent.items) {
-      if (item && typeof item === "object" &&
-        typeof item.id === "string" && item.id.trim()) {
-        publicIds.add(item.id.trim());
-      }
-    }
+    const publicIds = publicRecentIds(recent);
     return normalized.items.every((item) => publicIds.has(item.id))
       ? normalized.items.length
       : 0;
