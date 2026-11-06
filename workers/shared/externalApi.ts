@@ -161,9 +161,14 @@ export async function fetchWithTimeout(
     callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
   }
 
-  const timeoutMs = Math.max(
-    1,
-    Math.floor(Number.isFinite(options.timeoutMs) ? options.timeoutMs : 1),
+  // Node.js (and compatible runtimes) reduce delays above the signed
+  // 32-bit timer limit to ~1ms, causing premature API timeouts.
+  const timeoutMs = Math.min(
+    2_147_483_647,
+    Math.max(
+      1,
+      Math.floor(Number.isFinite(options.timeoutMs) ? options.timeoutMs : 1),
+    ),
   );
   const timeout = setTimeout(() => abort("timeout"), timeoutMs);
   try {
