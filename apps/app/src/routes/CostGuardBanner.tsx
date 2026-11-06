@@ -90,30 +90,34 @@ export function CostGuardBannerView({
 /** A failed or unmounted request may never change the rendered banner. */
 export function CostGuardBanner({
   api = defaultApi,
+  refreshKey = "",
 }: {
   api?: BannerApi;
+  /** Changes on SPA navigation so the notice reflects the latest operation mode. */
+  refreshKey?: string;
 }): React.ReactElement | null {
-  const [state, setState] = React.useState<{ api: BannerApi; value: BannerSnapshot | null }>({
+  const [state, setState] = React.useState<{ api: BannerApi; refreshKey: string; value: BannerSnapshot | null }>({
     api,
+    refreshKey,
     value: null,
   });
   React.useEffect(() => {
     const controller = new AbortController();
-    setState({ api, value: null });
+    setState({ api, refreshKey, value: null });
     Promise.resolve()
       // If cleanup ran before this microtask, do not start a stale request.
       .then(() => controller.signal.aborted ? null : api.getBanner(controller.signal))
       .then(
         (value) => {
-          if (!controller.signal.aborted) setState({ api, value });
+          if (!controller.signal.aborted) setState({ api, refreshKey, value });
         },
         () => {
-          if (!controller.signal.aborted) setState({ api, value: null });
+          if (!controller.signal.aborted) setState({ api, refreshKey, value: null });
         },
       );
     return () => controller.abort();
-  }, [api]);
+  }, [api, refreshKey]);
 
   // Avoid showing stale mode/reason between changing providers and the new effect.
-  return <CostGuardBannerView snapshot={state.api === api ? state.value : null} />;
+  return <CostGuardBannerView snapshot={state.api === api && state.refreshKey === refreshKey ? state.value : null} />;
 }
