@@ -171,7 +171,9 @@ test("legacy image normalization accepts genuine Drive origins, not lookalike UR
     ["https://drive.google.com.evil.example/file/d/FILEID123456/view", "https://drive.google.com.evil.example/file/d/FILEID123456/view"],
     ["https://evil.example/drive.google.com/file/d/FILEID123456", "https://evil.example/drive.google.com/file/d/FILEID123456"],
     ["https://evil.example/?next=https://drive.google.com/open?id=FILEID123456", "https://evil.example/?next=https://drive.google.com/open?id=FILEID123456"],
-    ["https://user:secret@drive.google.com/file/d/FILEID123456/view", "https://user:secret@drive.google.com/file/d/FILEID123456/view"],
+    ["https://user:secret@drive.google.com/file/d/FILEID123456/view", null],
+    ["https://user:secret@evil.example/path", null],
+    ["https://user@drive.google.com/open?id=FILEID123456", null],
     ["ftp://drive.google.com/file/d/FILEID123456/view", null],
     ["https://drive.google.com/file/d/INVALID%2FID/view", "https://drive.google.com/file/d/INVALID%2FID/view"],
     ["/api/google-drive-image/FILEID123456", "/api/google-drive-image/FILEID123456"],
@@ -190,6 +192,25 @@ test("legacy image normalization accepts genuine Drive origins, not lookalike UR
     assert.equal(plan.events.length, 1, icon);
     assert.equal(plan.events[0].icon_url, expected, icon);
   }
+});
+
+test("legacy imported public URLs do not retain embedded credentials", () => {
+  const plan = normalizeLegacyFiles([
+    parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "URL credentials test",
+      creator: "Creator",
+      tlink: "creator_x",
+      eventid: "legacy-credential-test",
+      ychlink: "https://user:secret@youtube.com/@creator",
+      ymulink: "https://user:secret@example.com/music",
+      icon: "https://user:secret@example.com/icon.png",
+      ylink: "https://youtu.be/abcdefghijk",
+    }])),
+  ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+  assert.equal(plan.videos.length, 1);
+  assert.equal(plan.videos[0].creator_youtube_channel_url, null);
+  assert.equal(plan.videos[0].music_reference_url, null);
+  assert.equal(plan.videos[0].creator_icon_url, null);
 });
 
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
