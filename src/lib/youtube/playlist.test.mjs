@@ -38,6 +38,23 @@ test("extractYoutubePlaylistId rejects missing or malformed IDs", () => {
     extractYoutubePlaylistId("ftp://youtube.com/?list=PL1234567890abcdefghij"),
     null,
   );
+  const id = "PL1234567890abcdefghij";
+  assert.equal(
+    extractYoutubePlaylistId(`https://user:secret@youtube.com/playlist?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://user@www.youtube.com/playlist?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://:secret@youtu.be/watch?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://user%40name:pass@youtube.com/playlist?list=${id}`),
+    null,
+  );
   assert.equal(extractYoutubePlaylistId("bad id"), null);
 });
 
