@@ -4,7 +4,21 @@ const fullFormatter = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo",
 const dateOnlyFormatter = new Intl.DateTimeFormat("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" });
 
 function validUnixSec(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  // Match CURRENT format.ts: API values can arrive as numeric strings,
+  // and callers may pass a Date. Reject empty or non-finite inputs.
+  if (value == null) return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const numeric = Number(trimmed);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
 }
 export function formatUnix(unixSec: unknown, opts: { dateOnly?: boolean } = {}): string {
   const sec = validUnixSec(unixSec);

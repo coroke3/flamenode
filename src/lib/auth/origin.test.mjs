@@ -24,8 +24,12 @@ test("configured origin is canonical and rejects ambiguous URL forms", () => {
 });
 
 test("loopback requires an explicit local-preview allowance", () => {
-  for (const hostname of ["localhost", "127.0.0.1", "[::1]"]) {
+  for (const hostname of ["localhost", "localhost.", "127.0.0.1", "127.0.0.2", "127.255.255.254", "[::1]"]) {
     assert.equal(isLoopbackHostname(hostname), true);
+  }
+  assert.equal(isLoopbackHostname("127.evil.example"), false);
+  for (const host of ["127.0.0.2", "127.255.255.254", "localhost."]) {
+    assert.throws(() => configuredHttpOrigin(`http://${host}:3000`, "SITE"), /SITE_LOCALHOST_FORBIDDEN/, host);
   }
   assert.throws(
     () => configuredHttpOrigin("http://localhost:3000", "SITE"),
