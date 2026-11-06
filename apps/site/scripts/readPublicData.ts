@@ -467,7 +467,8 @@ export function openD1HttpReader(options: {
     bind: (...next: unknown[]) => statement(sql, next),
     async all<T>() {
       if (!isReadOnlyStatement(sql)) throw new Error("D1 API mode refuses a non-read statement");
-      if (++count > max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      if (count >= max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      count += 1;
       let response: Response;
       try {
         response = await fetchFn(url, {
