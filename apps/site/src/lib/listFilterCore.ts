@@ -10,6 +10,16 @@ export const LIST_EVENT_UNAVAILABLE_MESSAGE = "このイベントの作品一覧
 export const LIST_NO_RESULTS_MESSAGE = "条件に合う作品が見つかりませんでした。条件を変えてお試しください。";
 export const LIST_SHORT_SEARCH_MESSAGE = "検索は文字・数字を2文字以上入力してください。";
 
+
+/** Suppress only a composing Enter; blocking ordinary IME keystrokes breaks typing. */
+export function shouldSuppressListSearchKeydown(event: {
+  key: string;
+  isComposing?: boolean;
+  keyCode?: number;
+}): boolean {
+  return event.key === "Enter" && (event.isComposing === true || event.keyCode === 229);
+}
+
 export interface PublicVideoList {
   items: PublicVideoDto[];
   total: number;
@@ -79,8 +89,13 @@ export function decodePublicList(data: unknown, query: ListQuery): { videos: Lis
   const row = data as Record<string, unknown>;
   if (!Array.isArray(row.items) || row.items.length > LIST_PAGE_SIZE ||
       !Number.isSafeInteger(row.total) || (row.total as number) < 0 ||
+      // A nonempty response cannot contain more items than its reported total.
+      // For later pages, those items must fit after all preceding page offsets.
+      (row.items.length > 0 && (row.total as number) < (query.page - 1) * LIST_PAGE_SIZE + row.items.length) ||
       !Number.isSafeInteger(row.page) || row.page !== query.page ||
-      row.limit !== LIST_PAGE_SIZE || !row.items.every(isVideo)) return null;
+      row.limit !== LIST_PAGE_SIZE || !row.items.every(isVideo) ||
+      // Duplicate IDs would produce unstable card keys and inconsistent public rows.
+      new Set((row.items as PublicVideoDto[]).map((item) => item.id)).size !== row.items.length) return null;
   const videos = (row.items as PublicVideoDto[]).map(v => toListVideo({ ...v, display_name: v.display_name ?? "" }));
   return { videos, total: row.total as number, page: query.page, totalPages: Math.max(1, Math.ceil((row.total as number) / LIST_PAGE_SIZE)) };
 }
