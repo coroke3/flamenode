@@ -377,6 +377,29 @@ if (runUnderRootTsx(import.meta.url)) {
     );
   });
 
+  test("SA-038 Hono route rejects malformed JSON before database mutation", async () => {
+    const cases = [
+      { playlist_id: ["PL1234567890"], sync_mode: "mirror" },
+      { playlist_id: null, sync_mode: "mirror" },
+      { playlist_id: { value: "PL1234567890" }, sync_mode: "mirror" },
+      { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: ["720"] },
+      { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: null },
+    ];
+    for (const body of cases) {
+      const db = database();
+      const before = Object.fromEntries(Object.keys(TABLES).map((table) => [table, rows(db, table)]));
+      const beforeAudits = audits(db);
+      const response = await runHono(db, "admin", "PUT", "/api/manage/events/evA/youtube-playlist", body);
+      assert.equal(response.status, 400, JSON.stringify(body));
+      assert.equal(response.body.ok, false, JSON.stringify(body));
+      assert.equal(response.stats.batches, 0, "invalid JSON must not enter an audited write batch");
+      for (const table of Object.keys(TABLES)) {
+        assert.deepStrictEqual(rows(db, table), before[table], `${table}: malformed JSON wrote data`);
+      }
+      assert.deepStrictEqual(audits(db), beforeAudits, "malformed JSON wrote audit rows");
+    }
+  });
+
   test("SA-038 playlist parser equals CURRENT src/lib/youtube/playlist.ts on a table of inputs", () => {
     const ids = [
       "", "  ", "PLshort", "PL1234567890", "PL_-abcdefgh", "a".repeat(100), "a".repeat(101), "bad id!!!!!!",
