@@ -213,11 +213,35 @@ function legacyVideoOtherSocialLinks(row: Record<string, unknown>): string | nul
 
 function normalizeIconUrl(raw: string | null): string | null {
   if (!raw) return null;
-  const match =
-    raw.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ??
-    raw.match(/drive\.google\.com\/(?:open|uc)\?[^#]*[?&]?id=([A-Za-z0-9_-]+)/);
-  if (match?.[1]) return `/api/google-drive-image/${match[1]}`;
   if (raw.startsWith("/api/")) return raw;
+
+  // Legacy imports may omit the scheme for Google Drive links. Parse the
+  // actual origin rather than matching "drive.google.com" inside another URL.
+  const candidate = /^(?:www\.)?drive\.google\.com\//i.test(raw)
+    ? `https://${raw}`
+    : raw;
+  try {
+    const url = new URL(candidate);
+    if (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password &&
+      (url.hostname === "drive.google.com" || url.hostname === "www.drive.google.com")
+    ) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const id =
+        parts[0] === "file" && parts[1] === "d"
+          ? parts[2]
+          : (parts[0] === "open" || parts[0] === "uc")
+            ? url.searchParams.get("id")
+            : null;
+      if (id && /^[A-Za-z0-9_-]+$/.test(id)) {
+        return `/api/google-drive-image/${id}`;
+      }
+    }
+  } catch {
+    // Invalid or non-Drive inputs use the existing HTTP URL fallback.
+  }
   return normalizeUrl(raw);
 }
 
