@@ -217,6 +217,46 @@ test("formatGa4QuotaLogFields: remaining をログ用フィールドへ変換", 
   assert.deepEqual(formatGa4QuotaLogFields(null), {});
 });
 
+test("aggregateGa4ReportRows preserves exact safe-integer totals across duplicate rows", () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER - 1),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  assert.equal(
+    aggregateGa4ReportRows(rows, dimensionIndices)[0]?.views_30d,
+    Number.MAX_SAFE_INTEGER,
+  );
+});
+
+test("aggregateGa4ReportRows rejects unsafe sums instead of rounding counts", () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  assert.throws(
+    () => aggregateGa4ReportRows(rows, dimensionIndices),
+    { message: "ga4_report_event_count_overflow" },
+  );
+});
+
+test("fetchVideoViewPeriods does not return an overflowed report as a successful ranking", async () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  await assert.rejects(
+    () => fetchVideoViewPeriods(
+      ga4Env(),
+      new ExternalRequestBudget(2),
+      async () => new Response(JSON.stringify(ga4ReportBody(rows)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+    { message: "ga4_report_event_count_overflow" },
+  );
+});
+
 test("fetchVideoViewPeriods rejects malformed HTTP 200 JSON shapes deterministically", async () => {
   const malformed = [
     null,

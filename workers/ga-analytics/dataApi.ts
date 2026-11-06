@@ -209,7 +209,13 @@ export function aggregateGa4ReportRows(
     const field = DATE_RANGE_FIELD_MAP[dateRangeRaw];
     const existing = byVideo.get(videoId);
     if (existing) {
-      existing[field] += eventCount;
+      const sum = existing[field] + eventCount;
+      // A per-row metric may be safe while duplicate rows/pages overflow
+      // JavaScript's exact integer range. Never publish rounded view counts.
+      if (!Number.isSafeInteger(sum)) {
+        throw new Error("ga4_report_event_count_overflow");
+      }
+      existing[field] = sum;
     } else {
       byVideo.set(videoId, {
         video_id: videoId,
