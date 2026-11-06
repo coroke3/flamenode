@@ -210,8 +210,16 @@ function normalizeUrl(raw: string | null): string | null {
   }
 }
 
+function normalizeLegacyOtherSocialLinks(raw: string | null): string | null {
+  if (!raw) return null;
+  const normalized = normalizeUrl(raw);
+  // Text labels such as "X, TikTok" are allowed by the legacy format. However,
+  // an HTTP(S) URL that fails validation must not fall back to raw credentials.
+  return normalized ?? (/^https?:\/\//i.test(raw) ? null : raw);
+}
+
 function legacyVideoOtherSocialLinks(row: Record<string, unknown>): string | null {
-  return normalizeUrl(stringValue(row, "othersns")) ?? stringValue(row, "othersns");
+  return normalizeLegacyOtherSocialLinks(stringValue(row, "othersns"));
 }
 
 function normalizeIconUrl(raw: string | null): string | null {
@@ -543,7 +551,7 @@ export function normalizeLegacyFiles(
         putXUser(creatorXId, creatorName, {
           icon_url: normalizeIconUrl(stringValue(row, "icon")),
           youtube_channel_url: normalizeUrl(stringValue(row, "ychlink")),
-          other_social_links: normalizeUrl(stringValue(row, "othersns")) ?? stringValue(row, "othersns"),
+          other_social_links: normalizeLegacyOtherSocialLinks(stringValue(row, "othersns")),
         });
       } else if (stringValue(row, "tlink")) {
         warnings.push(`${source}: tlinkをX IDとして解釈できませんでした。`);
