@@ -221,7 +221,12 @@ if (runUnderRootTsx(import.meta.url)) {
         const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
         const first = await request(path);
         assert.equal(first.status, 200);
-        assert.match(await first.text(), /機密スタッフ/);
+        const firstBody = await first.text();
+        if (format === "v5") {
+          assert.match(firstBody, /機密スタッフ/);
+        } else {
+          assert.doesNotMatch(firstBody, /機密スタッフ/, "legacy export has no staff field");
+        }
         await Promise.all(globalThis.__eventExport.pending);
         sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-575'");
         const revoked = await request(path);
