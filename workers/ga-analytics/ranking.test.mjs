@@ -184,3 +184,18 @@ test("rankTrendingItems rejects non-finite, fractional and unsafe view counts", 
     { ...valid, video_id: "invalid", views_30d: 0 },
   ]), []);
 });
+
+test("rankTrendingItems rejects duplicate valid GA4 video rows before publishing", () => {
+  const recent = { items: [recentItem("known")] };
+  const period = { video_id: "known", views_2d: 3, views_5d: 4, views_7d: 5, views_30d: 6 };
+  assert.throws(
+    () => rankTrendingItems(recent, [period, { ...period, views_2d: 7 }]),
+    /ga4_trending_duplicate_video_id/,
+  );
+  // Unmatched or invalid rows cannot force failure for an otherwise valid report.
+  assert.deepEqual(rankTrendingItems(recent, [
+    period,
+    { ...period, video_id: "not-public" },
+    { ...period, views_30d: NaN },
+  ]).map((item) => item.id), ["known"]);
+});
