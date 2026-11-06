@@ -121,7 +121,9 @@ export async function ListPage({
   const pageNum = parseBoundedPage(rawPage);
   const page = String(pageNum);
   const event = rawEvent.trim().slice(0, MAX_EVENT_ID_LENGTH);
-  const boundedQuery = q.trim().slice(0, MAX_SEARCH_LENGTH);
+  // Keep search URLs and loaders free of a truncated emoji surrogate.
+  const boundedQuery = q.trim().slice(0, MAX_SEARCH_LENGTH)
+    .replace(/[\uD800-\uDBFF]$/, "");
   const hasQuery = boundedQuery.length > 0;
   const searchTooShort =
     hasQuery && compactSearchChars(boundedQuery).length < MIN_SEARCH_CHARS;

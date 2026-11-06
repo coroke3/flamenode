@@ -55,7 +55,9 @@ function boundedPage(value: string): number {
 export function normalizeListQuery(input: ListQueryInput): ListQuery {
   const rawSort = first(input.sort, "new").slice(0, 16);
   const rawView = first(input.view, "grid");
-  const q = first(input.q).trim().slice(0, LIST_MAX_SEARCH_LENGTH);
+  // Preserve CURRENT's 100 UTF-16-unit cap without a dangling surrogate.
+  const q = first(input.q).trim().slice(0, LIST_MAX_SEARCH_LENGTH)
+    .replace(/[\uD800-\uDBFF]$/, "");
   return {
     q,
     sort: rawSort === "old" || rawSort === "score" ? rawSort : "new",

@@ -44,7 +44,9 @@ export async function GET(req: Request): Promise<Response> {
   const limited = checkPublicApiRateLimit(req, "/api/videos");
   if (limited) return limited;
   const url = new URL(req.url);
-  const q = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH);
+  // Preserve the 100 UTF-16-unit limit without cutting a surrogate pair.
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, MAX_SEARCH_LENGTH)
+    .replace(/[\uD800-\uDBFF]$/, "");
   const sort = parsePublicVideoSort(url.searchParams.get("sort")?.slice(0, 16));
   const eventId = (url.searchParams.get("event") ?? "")
     .trim()
