@@ -38,6 +38,7 @@ test("fix(notifications): q 100 UTF-16 units never splits an emoji", () => {
   const filters = { status: "all", cat: "all", type: "", event: "", q: split };
   assert.equal(new URLSearchParams(notificationQuery(filters)).get("q"), "A".repeat(99));
   assert.equal(new URLSearchParams(notificationFilterHref({ ...filters, q: whole }).split("?")[1]).get("q"), whole);
+  assert.equal(new URLSearchParams(notificationFilterHref(filters).split("?")[1]).get("q"), "A".repeat(99));
   assert.ok(!truncateNotificationSearch(split).includes("\uFFFD"));
   const currentPage = read("../../../app/(admin)/admin/notifications/page.tsx");
   assert.match(currentPage, /const qFilter = \/\[\\uD800-\\uDBFF\]\$\/.test\(qRaw\)/);
