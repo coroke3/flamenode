@@ -260,6 +260,10 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
     detailsRequested = true;
     set({ details: null, detailsUnavailable: false });
     void loadDetails();
+    // A previous presence failure leaves no request in flight. A successful
+    // identity switch must be able to recover without a manual retry.
+    // Pending requests are instead invalidated and retried by loadPresence.
+    if (!presenceLoaded && !presenceRunning) void loadPresence();
   };
 
   return {
