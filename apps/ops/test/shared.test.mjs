@@ -85,3 +85,27 @@ test("MIG-0707 T06: Admin tabs preserve hub labels, pathname and aria-current", 
   assert.match(hub, /class="sectabs-tabs" aria-label="監査メニュー"/);
   assert.equal(new JSDOM(hub).window.document.querySelector('a[href="/admin/audit/settings"]')?.getAttribute("aria-current"), "page");
 });
+
+test("Ops SPA: Google image cache rewrites web URLs but not non-HTTP lookalikes", async () => {
+  const { cachedGoogleImageUrl } = await import("../.test-dist/apps/ops/src/components/shared/googleImages.js");
+  const id = "FILEID123456";
+  const expected = `/api/google-drive-image/${id}`;
+  for (const scheme of ["https", "http"]) {
+    for (const source of [
+      `${scheme}://drive.google.com/uc?id=${id}`,
+      `${scheme}://drive.google.com/file/d/${id}/view`,
+      `${scheme}://lh3.googleusercontent.com/d/${id}`,
+    ]) {
+      assert.equal(cachedGoogleImageUrl(source), expected, source);
+    }
+  }
+  for (const scheme of ["ftp", "file"]) {
+    for (const source of [
+      `${scheme}://drive.google.com/uc?id=${id}`,
+      `${scheme}://drive.google.com/file/d/${id}/view`,
+      `${scheme}://lh3.googleusercontent.com/d/${id}`,
+    ]) {
+      assert.equal(cachedGoogleImageUrl(source), source, source);
+    }
+  }
+});
