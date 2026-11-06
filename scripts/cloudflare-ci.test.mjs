@@ -66,6 +66,15 @@ test("smoke retry config requires complete safe decimal integers (not numeric pr
       const result = parse({ [countName]: bad, [delayName]: bad });
       assert.deepEqual(result, { attempts: defaultCount, retryDelayMs: defaultDelay }, bad);
     }
+    // Both settings must be bounded even if the integer is otherwise safe:
+    // setTimeout(Number.MAX_SAFE_INTEGER) becomes an effective 1 ms delay in Node.
+    for (const excessive of ["1001", "9007199254740991"]) {
+      assert.equal(parse({ [countName]: excessive }).attempts, defaultCount, excessive);
+    }
+    for (const excessive of ["600001", "2147483648", "9007199254740991"]) {
+      assert.equal(parse({ [delayName]: excessive }).retryDelayMs, defaultDelay, excessive);
+    }
+    assert.deepEqual(parse({ [countName]: "1000", [delayName]: "600000" }), { attempts: 1000, retryDelayMs: 600000 });
     assert.deepEqual(parse({ [countName]: "0", [delayName]: "0" }), { attempts: defaultCount, retryDelayMs: 0 });
     assert.deepEqual(parse({ [countName]: "2", [delayName]: "1" }, { attempts: 1, retryDelayMs: 5 }), { attempts: 1, retryDelayMs: 5 });
   }
