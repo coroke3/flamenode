@@ -162,7 +162,7 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 export const DEFAULT_MAX_REMOTE_STATEMENTS = MAX_D1_HTTP_STATEMENTS_OVERRIDE;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
-function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
+export function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
   return {
     prepare(sql: string) {
       if (!isReadOnlyStatement(sql)) {
