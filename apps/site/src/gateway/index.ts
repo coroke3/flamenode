@@ -78,15 +78,15 @@ async function errorPage(status: 404 | 503, env: GatewayEnv, url: URL, method: s
   if (env.ASSETS) {
     try {
       const asset = await env.ASSETS.fetch(new Request(new URL(assetPath, url.origin), { method, redirect: "manual" }));
-      // With Static Assets not_found_handling="404-page", /404 serves the
-      // generated 404.html *with status 404*, not 200. Accept that response
-      // only for the explicitly requested error page, when it is HTML and has
-      // a body (HEAD has no body by definition). Never forward a generic 404.
-      const html404 = status === 404 && asset.status === 404 &&
-        /^text\/html(?:\s*;|$)/i.test(asset.headers.get("Content-Type") ?? "") &&
-        asset.headers.get("Content-Length") !== "0" &&
+      // Static Assets may return 200 for /503/ or 404 for the generated
+      // /404 HTML (not_found_handling="404-page"). In both cases, verify the
+      // payload before relabeling it as HTML. A generic 200 text/plain or an
+      // empty asset is not a trustworthy public error page.
+      const validStatus = asset.status === 200 || (status === 404 && asset.status === 404);
+      const validHtml = /^text\/html(?:\s*;|$)/i.test(asset.headers.get("Content-Type") ?? "");
+      const nonempty = asset.headers.get("Content-Length") !== "0" &&
         (method === "HEAD" || asset.body !== null);
-      if (asset.status === 200 || html404) {
+      if (validStatus && validHtml && nonempty) {
         return new Response(method === "HEAD" ? null : asset.body, {
           status,
           headers: {
