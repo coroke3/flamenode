@@ -25,7 +25,9 @@ export class ExternalRequestBudget {
   }
 
   consume(count = 1): boolean {
-    const normalized = Math.max(1, Math.floor(Number.isFinite(count) ? count : 1));
+    // Non-finite explicit counts are invalid; never charge them as one request.
+    if (!Number.isFinite(count)) return false;
+    const normalized = Math.max(1, Math.floor(count));
     // Reject unsafe counts, and compare against remaining capacity before
     // addition so rounding cannot silently bypass the configured budget.
     if (!Number.isSafeInteger(normalized) || normalized > this.remaining) return false;

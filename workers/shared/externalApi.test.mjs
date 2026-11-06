@@ -54,6 +54,19 @@ test("外部API予算は2^53以上の丸め誤差で無制限に消費されな�
   assert.equal(new ExternalRequestBudget(Infinity).limit, 0);
 });
 
+test("外部API予算は非有限の消費件数を拒否し予算を減らさない", () => {
+  const budget = new ExternalRequestBudget(3);
+  for (const count of [NaN, Infinity, -Infinity]) {
+    assert.equal(budget.consume(count), false, `invalid count: ${count}`);
+    assert.equal(budget.used, 0);
+    assert.equal(budget.remaining, 3);
+  }
+  assert.equal(budget.consume(), true);
+  assert.equal(budget.consume(2), true);
+  assert.equal(budget.consume(), false);
+  assert.equal(budget.used, 3);
+});
+
 test("Retry-Afterは秒とHTTP-dateを上限付きで解釈する", () => {
   assert.equal(parseRetryAfterMs("3", 15_000), 3_000);
   assert.equal(parseRetryAfterMs("120", 15_000), 15_000);
