@@ -24,7 +24,9 @@ const MAX_SOCIAL_TYPE_LENGTH = 40;
 const MAX_SOCIAL_URL_LENGTH = 500;
 
 function cleanType(value: unknown): string {
-  const text = String(value ?? "").trim().slice(0, MAX_SOCIAL_TYPE_LENGTH);
+  const truncated = String(value ?? "").trim().slice(0, MAX_SOCIAL_TYPE_LENGTH);
+  // A UTF-16 length cap must not leave the leading half of an emoji behind.
+  const text = /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated;
   const key = text.toLowerCase();
   if (key === "twitter" || key === "x") return "X";
   if (key === "instagram" || key === "insta") return "Instagram";
