@@ -40,7 +40,7 @@ function scheduledUnix(value: unknown): number | null {
   // D1 INTEGER values may be numbers, while legacy adapters may return
   // decimal strings. Avoid Number() coercing empty/boolean values to epoch 0.
   if (typeof value !== "number" && typeof value !== "string") return null;
-  if (typeof value === "string" && !/^\\d+$/.test(value)) return null;
+  if (typeof value === "string" && !/^\d+$/.test(value)) return null;
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
