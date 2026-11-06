@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `workers/ga-analytics/recentFromD1.ts` | HELPER | GA4 trending D1 source timestamps must reject malformed numeric types without producing epoch 0 | MIG-0517 | SAME | RETAINED | BRANCH=fix/ga4-recent-d1-scheduled-time-normalization-20261107 TEST=workers/ga-analytics/recentFromD1.test.mjs CI=latest-HEAD-pending |
+| `workers/ga-analytics/recentFromD1.test.mjs` | TEST | malformed D1 scheduled_time normalization and safe legacy timestamp compatibility | MIG-0517 | SAME | RETAINED | BRANCH=fix/ga4-recent-d1-scheduled-time-normalization-20261107 TEST=workers/ga-analytics/recentFromD1.test.mjs CI=latest-HEAD-pending |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
