@@ -6,6 +6,12 @@ import {
 import { postAdminBody, type AdminWriteResult } from "./adminCostGuard.js";
 import { getJson, type OpsFetch, type OpsResult } from "./read.js";
 
+/** Keep CURRENT's 100 UTF-16-unit limit without emitting an orphan surrogate. */
+export function truncateNotificationSearch(value: string): string {
+  const clipped = value.trim().slice(0, 100);
+  return /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
+}
+
 export type NotificationFilters = { status: string; cat: string; type: string; event: string; q: string };
 
 /** Query for GET /api/admin-read/ops/notifications (status=failed is expanded to the terminal set by the API). */
@@ -15,7 +21,7 @@ export function notificationQuery(filters: NotificationFilters): string {
   if (filters.cat && filters.cat !== "all") params.set("cat", filters.cat);
   if (filters.type.trim()) params.set("type", filters.type.trim());
   if (filters.event.trim()) params.set("event", filters.event.trim());
-  if (filters.q.trim()) params.set("q", filters.q.trim().slice(0, 100));
+  if (filters.q.trim()) params.set("q", truncateNotificationSearch(filters.q));
   return params.toString();
 }
 
