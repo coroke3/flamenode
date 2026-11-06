@@ -201,7 +201,10 @@ function normalizeUrl(raw: string | null): string | null {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    // Never persist URL userinfo in imported public-facing metadata.
+    if (url.username || url.password) return null;
+    return url.toString();
   } catch {
     return null;
   }
@@ -222,6 +225,8 @@ function normalizeIconUrl(raw: string | null): string | null {
     : raw;
   try {
     const url = new URL(candidate);
+    // Reject credentials before falling back to normal HTTP URL handling.
+    if (url.username || url.password) return null;
     if (
       (url.protocol === "http:" || url.protocol === "https:") &&
       !url.username &&
