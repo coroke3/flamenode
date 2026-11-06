@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { readManageNotificationQueryValue } from "./notificationQuery.ts";
 
 test("manage notifications query parser preserves normal scalar filters", () => {
-  assert.equal(readManageNotificationQueryValue("  failed  "), "failed");
-  assert.equal(readManageNotificationQueryValue(" event-1 "), "event-1");
+  assert.equal(readManageNotificationQueryValue("  failed  "), "  failed  ");
+  assert.equal(readManageNotificationQueryValue(" event-1 "), " event-1 ");
+  assert.equal(readManageNotificationQueryValue(" video "), " video ", "notif filter must retain its original exact-match policy");
   assert.equal(readManageNotificationQueryValue("video"), "video");
   assert.equal(readManageNotificationQueryValue(""), "");
 });
@@ -28,6 +29,9 @@ test("CURRENT manage notifications page normalizes all three query keys", () => 
     assert.ok(source.includes(`readManageNotificationQueryValue(sp.${key})`), key + " normalized before use");
   }
   assert.ok(source.includes('import { readManageNotificationQueryValue } from "@/lib/manage/notificationQuery";'));
+  assert.ok(source.includes("readManageNotificationQueryValue(sp.event).trim()"));
+  assert.ok(source.includes("readManageNotificationQueryValue(sp.status).trim()"));
+  assert.ok(source.includes("const notificationType = readManageNotificationQueryValue(sp.notif);"));
   assert.ok(!source.includes('(sp.event ?? "").trim()'));
   assert.ok(!source.includes('(sp.status ?? "").trim()'));
 });
