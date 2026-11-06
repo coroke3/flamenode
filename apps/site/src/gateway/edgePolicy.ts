@@ -45,7 +45,7 @@ function isLoopbackHostname(hostname: string): boolean {
   // IPv4 127.0.0.0/8 is entirely loopback, not just 127.0.0.1.
   return (
     normalized === "localhost" ||
-    normalized.startsWith("127.") ||
+    /^127(?:\.\d{1,3}){3}$/.test(normalized) ||
     normalized === "[::1]"
   );
 }
