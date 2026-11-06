@@ -182,7 +182,9 @@ async function readBoundedJsonResponse<T>(
   const bytes = await readResponseBodyBounded(response, PUBLIC_JSON_CACHE_MAX_BYTES);
   if (!bytes) return null;
   try {
-    const value = JSON.parse(new TextDecoder().decode(bytes)) as T;
+    // Reject malformed UTF-8 instead of silently replacing corrupt bytes
+    // with U+FFFD and accepting a different JSON payload as valid cache data.
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as T;
     if (value == null) return null;
     return { value, byteLength: bytes.byteLength };
   } catch {
