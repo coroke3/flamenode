@@ -37,7 +37,7 @@ if (runTestWithTsx(import.meta.url)) {
     const prefix = "A".repeat(199);
     const split = normalizeOptionList([prefix + "😀"]);
     assert.deepEqual(split, [prefix]);
-    assert.doesNotMatch(JSON.stringify(split), /\\\\ud83d/i);
+    assert.equal(split[0].length, 199, "the UTF-16 length remains bounded");
 
     const whole = "A".repeat(198) + "😀";
     assert.deepEqual(normalizeOptionList([whole]), [whole]);
