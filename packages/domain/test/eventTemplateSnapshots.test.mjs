@@ -108,3 +108,20 @@ test("create form resets times, forces private, and omits stage permission quest
   assert.deepEqual(initial.custom_questions[0].options, ["A", "B"]);
   assert.equal(initial.custom_questions[0].clientId, "q_1");
 });
+
+test("malformed array-like required fields cannot become template requirements", () => {
+  const snapshot = snapshotFromEvent(event);
+  const malformed = parseEventTemplateSnapshot(JSON.stringify({
+    ...snapshot,
+    required_video_fields_json: { 0: "music", length: 1 },
+  }));
+  assert.ok(malformed);
+  assert.equal(malformed.required_video_fields_json, null);
+
+  const valid = parseEventTemplateSnapshot(JSON.stringify({
+    ...snapshot,
+    required_video_fields_json: JSON.stringify(["music"]),
+  }));
+  assert.ok(valid);
+  assert.equal(valid.required_video_fields_json, '["music"]');
+});

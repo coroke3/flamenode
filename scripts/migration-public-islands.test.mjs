@@ -108,6 +108,33 @@ test("T03: public JSON transport uses same-origin/no-store; 503, bad JSON or net
     "percent-encoded search query is not a path escape");
 });
 
+test("T03: public API accepts only an exact JSON media type, not a substring", async () => {
+  const body = JSON.stringify({ items: [] });
+  for (const [contentType, allowed] of [
+    ["application/json", true],
+    ["application/json; charset=utf-8", true],
+    ["APPLICATION/JSON; CHARSET=UTF-8", true],
+    [" application/json ; charset=utf-8", true],
+    ["application/jsonp", false],
+    ["text/plain; note=application/json", false],
+    ["text/html; comment=application/json", false],
+    ["application/problem+json", false],
+  ]) {
+    const result = await fetchPublicJson("/api/videos", {}, async () =>
+      new Response(body, { status: 200, headers: { "Content-Type": contentType } }));
+    assert.deepEqual(
+      result,
+      allowed ? { ok: true, status: 200, data: { items: [] } } : { ok: false, status: 0 },
+      contentType,
+    );
+  }
+  assert.deepEqual(
+    await fetchPublicJson("/api/videos", {}, async () => new Response(body, { status: 200 })),
+    { ok: false, status: 0 },
+    "missing JSON content type is not enough even when the body parses",
+  );
+});
+
 test("T02/T04: top GET search works without JS; /list static fallback keeps legal controls absent", () => {
   const topPath = "apps/site/dist/index.html", listPath = "apps/site/dist/list/index.html";
   const source = fs.readFileSync("packages/ui/src/screens/TopView.tsx", "utf8");
