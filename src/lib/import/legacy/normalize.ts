@@ -212,10 +212,14 @@ function normalizeUrl(raw: string | null): string | null {
 
 function normalizeLegacyOtherSocialLinks(raw: string | null): string | null {
   if (!raw) return null;
-  const normalized = normalizeUrl(raw);
+  // URL parsing trims surrounding ASCII whitespace. Use the same trimmed value
+  // for rejection detection so credentials cannot escape through a leading
+  // space, tab, or newline and then be persisted as a free-text label.
+  const candidate = raw.trim();
+  const normalized = normalizeUrl(candidate);
   // Text labels such as "X, TikTok" are allowed by the legacy format. However,
   // an HTTP(S) URL that fails validation must not fall back to raw credentials.
-  return normalized ?? (/^https?:\/\//i.test(raw) ? null : raw);
+  return normalized ?? (/^https?:\/\//i.test(candidate) ? null : raw);
 }
 
 function legacyVideoOtherSocialLinks(row: Record<string, unknown>): string | null {
