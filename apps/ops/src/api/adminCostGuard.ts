@@ -1,7 +1,8 @@
 // MIG-0734 U03: request bodies are built through the shared @flamenode/contracts body schemas (SA-016..020).
 // Reads go through D-17-2 getJson (401 -> anonymous, 403 -> forbidden + allow-listed redirect, 404/501 mapped);
-// writes go through D-17-3 send (a body with a boolean `ok` is returned verbatim, so CURRENT's write-guard
-// message such as cost_guard_blocked / maintenance_mode / banned / invalid_origin reaches the screen).
+// writes go through D-17-3 send: HTTP 401 always maps to anonymous before parsing JSON;
+// other valid {ok:boolean} response bodies preserve CURRENT write-guard messages such as
+// cost_guard_blocked / maintenance_mode / banned / invalid_origin.
 import {
   AdminCostGuardResponseSchema, CostGuardClearBodySchema, CostGuardDisabledBodySchema,
   CostGuardMaintenanceBodySchema, CostGuardModeBodySchema, CostGuardOverrideBodySchema,
@@ -18,9 +19,9 @@ type BodySchema = { safeParse: (value: unknown) => { success: boolean; data?: un
 export function toWriteResult(result: OpsWriteResult<AdminOpsBody>): AdminWriteResult {
   if (result.status === "ok") {
     const { ok, message, reason } = result.data;
-    // The Hono admin write guard returns HTTP 401 with {ok:false,reason:"unauthenticated"}.
-    // D-17-3 send() preserves a JSON {ok:boolean} body even on 401, so detect the
-    // guard reason here instead of treating the expired session as a normal write failure.
+    // D-17-3 send() handles HTTP 401 before JSON parsing. For non-401
+    // well-formed error bodies, retain the reason-based anonymous fallback
+    // for API compatibility without exposing private mutation controls.
     if (!ok && reason === "unauthenticated") {
       return { ok: false, message: typeof message === "string" ? message : "ログインしてください。", anonymous: true };
     }
