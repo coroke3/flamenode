@@ -621,3 +621,29 @@ export function buildEventExportPayloadForFormat(
     ? buildLegacyEventExportPayload(snapshot)
     : buildEventExportPayload(snapshot, generatedAt, updateMode);
 }
+
+/** Compare a fresh public DTO with a scheduled cached DTO.
+ * Generation timestamps are provenance, not data visibility or revision.
+ * Every other field must match exactly; never trust cached metadata alone.
+ */
+export function eventExportBodyMatchesFresh(cached: string, fresh: string, format: EventExportFormat): boolean {
+  if (cached === fresh) return true;
+  if (format !== "v5") return false;
+  try {
+    const a: unknown = JSON.parse(cached);
+    const b: unknown = JSON.parse(fresh);
+    if (!a || typeof a !== "object" || Array.isArray(a) || !b || typeof b !== "object" || Array.isArray(b)) return false;
+    const left = a as Record<string, unknown>;
+    const right = b as Record<string, unknown>;
+    if (left.schema_version !== 5 || right.schema_version !== 5) return false;
+    if (typeof left.generated_at !== "string" || !Number.isSafeInteger(left.generated_at_unix)) return false;
+    if (typeof right.generated_at !== "string" || !Number.isSafeInteger(right.generated_at_unix)) return false;
+    delete left.generated_at;
+    delete left.generated_at_unix;
+    delete right.generated_at;
+    delete right.generated_at_unix;
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}

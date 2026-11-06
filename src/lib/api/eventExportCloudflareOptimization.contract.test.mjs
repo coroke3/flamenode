@@ -33,8 +33,9 @@ test("event exportのCache API HITはmetadataを信用せずDTO検証を必ず�
 
 test("scheduled exportはCache API HITでもD1公開可否確認を先に維持する", () => {
   const authIndex = route.indexOf("prefetchedEvent = await loadEventExportEvent");
-  const cacheIndex = route.indexOf("const response = await cachedResponse()");
-  assert.ok(authIndex >= 0 && cacheIndex > authIndex);
+  const cacheIndex = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(authIndex >= 0 && cacheIndex > route.indexOf("body = JSON.stringify(payload)"));
+  assert.match(route, /eventExportBodyMatchesFresh\(cached, freshBody, format\)/);
 });
 
 test("web WorkerはSmart Placementを有効化し静的assetはWorkerを迂回する", () => {

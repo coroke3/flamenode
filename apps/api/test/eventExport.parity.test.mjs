@@ -188,6 +188,60 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(currentDenied.status, 404, "CURRENT fresh D1 gate denies cached private event");
     sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
   });
+  test("SEC-575: scheduled/realtimeのキャッシュHITでも非公開化作品を再配信しない", async () => {
+    const paths = [
+      "export-event?format=v5&update=scheduled&refresh=1440",
+      "export-event?format=legacy&update=scheduled&refresh=1440",
+      "export-event?format=v5&update=realtime",
+      "export-event?format=legacy&update=realtime",
+    ];
+    for (const request of [current, hono]) {
+      for (const path of paths) {
+        reset();
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        assert.match(await first.text(), /public-video/);
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /public-video|公開作品/, path);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      }
+    }
+    reset();
+  });
+
+  test("SEC-575: スタッフ公開フラグ解除とイベント再公開後に旧キャッシュを再配信しない", async () => {
+    for (const request of [current, hono]) {
+      for (const format of ["v5", "legacy"]) {
+        reset();
+        sqlite.exec("INSERT OR REPLACE INTO event_staff (id, event_id, x_user_id, display_name, is_public, created_at, updated_at) VALUES ('staff-575', 'export-event', 'x-staff-575', '機密スタッフ', 1, 1700000000, 1700000000)");
+        const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        const firstBody = await first.text();
+        if (format === "v5") {
+          assert.match(firstBody, /機密スタッフ/);
+        } else {
+          assert.doesNotMatch(firstBody, /機密スタッフ/, "legacy export has no staff field");
+        }
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-575'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /機密スタッフ/);
+        sqlite.exec("UPDATE events SET visibility_status='private' WHERE id='export-event'");
+        assert.equal((await request(path)).status, 404);
+        sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
+        assert.doesNotMatch(await (await request(path)).text(), /機密スタッフ/);
+        sqlite.exec("DELETE FROM event_staff WHERE id='staff-575'");
+      }
+    }
+    reset();
+  });
+
   test("T04: corrupt legacy cache is evicted; MISS regenerates from D1", async () => {
     reset();
     const key = "public-event-export:9:export-event:legacy:60";
@@ -271,6 +325,53 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.doesNotMatch(failureBody, /secret-D1-provider-detail/);
     assert.equal(d1.stats.writes, 0);
   });
+  test("SEC-575: v5 scheduledキャッシュは生成時刻が変わってもCURRENT/HonoでHITする", async () => {
+    const path = "export-event?format=v5&update=scheduled&refresh=1440";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        assert.equal(first.headers["X-FlameNode-Cache"], "MISS");
+        await Promise.all(globalThis.__eventExport.pending);
+        Date.now = () => 1700000320000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.headers["X-FlameNode-Cache"], "HIT");
+        assert.equal(next.body, first.body, "cached generated_at provenance must not change on HIT");
+        assert.equal(next.headers.ETag, first.headers.ETag);
+        assert.equal(d1.stats.writes, 0);
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
+  test("SEC-575: v5 realtime micro-cache can reuse a snapshot after 2 seconds, but never revoked data", async () => {
+    const path = "export-event?format=v5&update=realtime";
+    for (const request of [current, hono]) {
+      reset();
+      Date.now = () => 1700000200000;
+      try {
+        const first = await normalized(await request(path));
+        assert.equal(first.status, 200);
+        Date.now = () => 1700000202000;
+        const next = await normalized(await request(path));
+        assert.equal(next.status, 200);
+        assert.equal(next.body, first.body, "micro-cache must reuse the original v5 body across generated_at drift");
+        sqlite.exec("UPDATE videos SET visibility_status='private' WHERE id='public-video'");
+        const revoked = await normalized(await request(path));
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(revoked.body, /public-video|公開作品/);
+        sqlite.exec("UPDATE videos SET visibility_status='public' WHERE id='public-video'");
+      } finally {
+        Date.now = () => 1700000200000;
+      }
+    }
+    reset();
+  });
+
   test("T07: Cache API HIT is gated and keeps status/ETag/refresh headers", async () => {
     reset();
     const path = "export-event?format=v5&update=scheduled&refresh=1440";

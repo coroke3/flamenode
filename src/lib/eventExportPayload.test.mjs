@@ -5,6 +5,7 @@ import {
   buildEventExportPayload,
   buildEventExportPayloadForFormat,
   buildLegacyEventExportPayload,
+  eventExportBodyMatchesFresh,
 } from "./api/eventExportPayload.ts";
 import { findForbiddenPublicKeys } from "./api/publicDto.ts";
 
@@ -350,8 +351,8 @@ test("イベントAPIはformatなし/v5をv5、legacyを旧形式として受け
   assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
 
   const authCheck = route.indexOf("loadEventExportEvent(db, eventId)");
-  const cacheHitCheck = route.indexOf("const response = await cachedResponse()");
-  assert.ok(authCheck >= 0 && cacheHitCheck > authCheck, "D1公開可否確認をKV HITより先に行う");
+  const cacheHitCheck = route.indexOf("const response = await cachedResponse(body)");
+  assert.ok(authCheck >= 0 && cacheHitCheck > route.indexOf("body = JSON.stringify(payload)"), "D1公開関係行の再生成後にのみCache APIを照合");
 });
 
 test("管理画面はv5を既定にし旧形式互換を明示選択できる", async () => {
@@ -536,3 +537,18 @@ test("イベント公開APIは範囲外Unix時刻をnullまたは空文字へ閉
   assert.equal(legacy.data, "");
   assert.equal(legacy.time, "");
 });
+
+test("SEC-575: v5 cached payload tolerates generation timestamp only, never changed public data", () => {
+  const earlier = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_100, "scheduled"));
+  const later = JSON.stringify(buildEventExportPayload(snapshot, 1_700_000_200, "scheduled"));
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "v5"), true);
+  const changed = JSON.parse(later);
+  changed.event.title = "private revoked content";
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(changed), "v5"), false);
+  changed.event.title = snapshot.event.title;
+  changed.event.public_staff = [];
+  assert.equal(eventExportBodyMatchesFresh(earlier, JSON.stringify(changed), "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh('not-json', later, "v5"), false);
+  assert.equal(eventExportBodyMatchesFresh(earlier, later, "legacy"), false);
+});
+
