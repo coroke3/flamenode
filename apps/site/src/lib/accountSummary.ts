@@ -277,7 +277,9 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       return () => listeners.delete(listener);
     },
     start() {
-      if (started) return;
+      // A disposed store is terminal. Do not reattach its global listener:
+      // loadPresence() would no-op while the listener remains registered.
+      if (started || disposed) return;
       started = true;
       window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
       void loadPresence();
