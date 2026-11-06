@@ -60,6 +60,9 @@ function normalizeUnix(value: unknown): number | null {
 function normalizeRecentItem(value: unknown): TrendingItem | null {
   if (!value || typeof value !== "object") return null;
   const row = value as RecentRow;
+  // Do not relabel malformed or nonpublic source rows as public. The D1
+  // reader normally enforces visibility; the ranking boundary must too.
+  if (row.status !== "public") return null;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
   if (!id || !title) return null;
