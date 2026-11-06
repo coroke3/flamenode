@@ -343,6 +343,18 @@ if (runUnderRootTsx(import.meta.url)) {
     assertSameState(r.curDb, r.honoDb, "unknown event");
   });
 
+  test("SA-038 blank intervals default to 720 minutes in both implementations", () => {
+    for (const raw of ["", "  ", "\t"]) {
+      assert.equal(playlistLib.parsePlaylistSyncInterval(raw), 720);
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: raw }),
+        { ok: true, playlistId: "PL1234567890", mode: "mirror", interval: 720 },
+      );
+    }
+    assert.equal(playlistLib.parsePlaylistSyncInterval("0"), 60);
+    assert.equal(parsePlaylistSettings({ sync_interval_minutes: "0" }).interval, 60);
+  });
+
   test("SA-038 playlist parser equals CURRENT src/lib/youtube/playlist.ts on a table of inputs", () => {
     const ids = [
       "", "  ", "PLshort", "PL1234567890", "PL_-abcdefgh", "a".repeat(100), "a".repeat(101), "bad id!!!!!!",
@@ -354,7 +366,7 @@ if (runUnderRootTsx(import.meta.url)) {
       " PL1234567890 ", "https://www.youtube.com/playlist?list=%20PL1234567890%20",
     ];
     const modes = [undefined, "", "off", "append_only", "mirror", "MIRROR", "constructor"];
-    const intervals = [undefined, "", "0", "59", "60", "61", "720", "10080", "10081", "1.5", "abc", "-5", "1e3", " 90 "];
+    const intervals = [undefined, "", "   ", "0", "59", "60", "61", "720", "10080", "10081", "1.5", "abc", "-5", "1e3", " 90 "];
     for (const id of ids) {
       for (const mode of modes) {
         for (const interval of intervals) {
