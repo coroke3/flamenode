@@ -98,10 +98,10 @@ test("MIG-0734 write guard denials keep CURRENT message (D-17-3 send); 401 witho
   const guard401={ok:false,reason:"unauthenticated",message:"ログインが必要です。"};
   const expiredCost=createAdminCostGuardApi(async()=>response(401,guard401));
   const expiredCostResult=await expiredCost.setMode("normal","r");
-  assert.deepEqual(expiredCostResult,{ok:false,message:guard401.message,anonymous:true});
+  assert.deepEqual(expiredCostResult,{ok:false,message:"ログインしてください。",anonymous:true});
   const expiredNotifications=createAdminNotificationsApi(async()=>response(401,guard401));
   const expiredNotificationResult=await expiredNotifications.retry("n1");
-  assert.deepEqual(expiredNotificationResult,{ok:false,message:guard401.message,anonymous:true});
+  assert.deepEqual(expiredNotificationResult,{ok:false,message:"ログインしてください。",anonymous:true});
   assert.equal(leaveWhenAnonymous(expiredNotificationResult,url=>assigned.push(url)),true);
   assert.deepEqual(assigned,["/entry","/entry"]);
   assert.equal(leaveWhenAnonymous({ok:false,message:"x"},url=>assigned.push(url)),false);
