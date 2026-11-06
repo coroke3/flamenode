@@ -94,7 +94,7 @@ test("event card: pill tone, status label and range follow CURRENT PublicEventCa
 });
 
 test("CURRENT page.tsx limits, section texts and order are the ones the model uses", async () => {
-  for (const s of ["TOP_SHELF_DISPLAY_LIMIT = 8", "FlameNodeで注目", "今週のピックアップ", "新着アップロード", "懐かしの映像", "最近のイベント", "おすすめできる作品がまだありません。", "公開作品がまだありません。", "対象になる作品がまだありません。", "公開中のイベントがまだありません。", "body.length > 180", 'moreHref="/list?sort=old"', 'moreLabel="過去の作品を見る"', "!trendingLoaded.tooOldForHome"]) assert.ok(page.includes(s), s);
+  for (const s of ["TOP_SHELF_DISPLAY_LIMIT = 8", "FlameNodeで注目", "今週のピックアップ", "新着アップロード", "懐かしの映像", "最近のイベント", "おすすめできる作品がまだありません。", "公開作品がまだありません。", "対象になる作品がまだありません。", "公開中のイベントがまだありません。", "truncateAnnouncementBody(item.body)", 'moreHref="/list?sort=old"', 'moreLabel="過去の作品を見る"', "!trendingLoaded.tooOldForHome"]) assert.ok(page.includes(s), s);
   const order = ["sec-trending", "sec-recommend", "sec-latest", "懐かしの映像", "sec-events"].map((s) => page.indexOf(s));
   assert.deepEqual([...order].sort((a, b) => a - b), order, "CURRENT section order");
   const { normalizeStaticTop } = await import("../src/lib/publicData/staticTopCore.ts");
@@ -104,6 +104,11 @@ test("CURRENT page.tsx limits, section texts and order are the ones the model us
   assert.equal(view.shelves[0].items.some((i) => i.id === "v99"), false, "non-public row never shown");
   assert.equal(view.announcements.length, 3);
   assert.equal(view.announcements[0].body.length, 182, "179 chars + '...'  (CURRENT slice(0, 179))");
+  const emojiPayload = topPayload();
+  emojiPayload.announcements[0].body = "a".repeat(178) + "😀" + "x".repeat(8);
+  const emojiView = buildTopView(normalizeStaticTop(emojiPayload), [], nowSec, () => 0.5);
+  assert.equal(emojiView.announcements[0].body, "a".repeat(178) + "...",
+    "Astro top announcement truncation must not split a UTF-16 surrogate pair");
 });
 
 test("default build (no snapshot): CURRENT empty shelves, head and JSON-LD, no do-nothing controls", { skip }, () => {

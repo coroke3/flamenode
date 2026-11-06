@@ -270,6 +270,29 @@ if (runUnderRootTsx(import.meta.url)) {
     for (const a of sample) for (const b of sample) assert.equal(order.compareEventsByUpcomingPriority(a, b, NOW), compareEventsByUpcomingPriority(a, b, NOW));
   });
 
+  test("T-order: undated public events and NULL sidebar timestamps have deterministic tie-breakers", () => {
+    const undatedA = { id: "a", visibility_status: "public", start_time: null, end_time: null };
+    const undatedZ = { ...undatedA, id: "z" };
+    assert.ok(order.compareEventsByUpcomingPriority(undatedA, undatedZ, NOW) < 0);
+    assert.ok(order.compareEventsByUpcomingPriority(undatedZ, undatedA, NOW) > 0);
+    assert.equal(order.compareEventsByUpcomingPriority(undatedA, undatedA, NOW), 0);
+    assert.equal(
+      order.compareEventsByUpcomingPriority(undatedA, undatedZ, NOW),
+      compareEventsByUpcomingPriority(undatedA, undatedZ, NOW),
+    );
+
+    const oldest = { id: "old", start_time: null, created_at: NOW - 10 };
+    const newest = { id: "new", start_time: null, created_at: NOW + 10 };
+    assert.ok(order.compareSidebarRows(newest, oldest) < 0, "created_at DESC on NULL start_time");
+    assert.ok(order.compareSidebarRows(oldest, newest) > 0, "reverse created_at order");
+    const timed = { id: "timed", start_time: NOW + 20, created_at: null };
+    assert.ok(order.compareSidebarRows(timed, newest) < 0, "non-NULL start_time first");
+    const a = { id: "a", start_time: null, created_at: null };
+    const z = { id: "z", start_time: null, created_at: null };
+    assert.ok(order.compareSidebarRows(z, a) < 0, "id DESC for two NULL dates");
+    assert.equal(order.compareSidebarRows(a, a), 0);
+  });
+
   // ---------------- navigation ----------------
   test("T-nav: events, pending counts and access equal CURRENT for every user", async () => {
     for (const name of WITH_ACCESS) {
