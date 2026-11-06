@@ -110,7 +110,8 @@ export default async function AdminNotificationsPage({
   const status = parseStatus(sp.status);
   const typeFilter = (sp.type ?? "").trim();
   const eventFilter = (sp.event ?? "").trim();
-  const qFilter = (sp.q ?? "").trim().slice(0, 100);
+  const qRaw = (sp.q ?? "").trim().slice(0, 100);
+  const qFilter = /[\uD800-\uDBFF]$/.test(qRaw) ? qRaw.slice(0, -1) : qRaw;
   const catFilter: NotificationCategory | "all" = (() => {
     const value = (sp.cat ?? "").trim();
     const allowed = ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((option) => option.key);
