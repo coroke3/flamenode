@@ -48,6 +48,18 @@ test("fix(notifications): q 100 UTF-16 units never splits an emoji", () => {
   assert.match(currentPage, /const qFilter = \/\[\\uD800-\\uDBFF\]\$\/.test\(qRaw\)/);
 });
 
+test("fix(notifications): CURRENT ignores duplicate query keys instead of throwing on .trim()", () => {
+  const source = read("../../../app/(admin)/admin/notifications/page.tsx");
+  // Next.js represents ?q=first&q=second (and other duplicate keys) as string[].
+  assert.match(source, /function singleQueryValue\(value: string \| string\[\] \| undefined\): string/);
+  assert.match(source, /typeof value === "string" \? value : ""/);
+  for (const key of ["status", "type", "event", "q", "cat"]) {
+    assert.match(source, new RegExp(key + "\\?: string \\| string\\[\\]"), key + " supports duplicate values at runtime");
+    assert.match(source, new RegExp("singleQueryValue\\(sp\\." + key + "\\)"), key + " must normalize before use");
+  }
+  assert.doesNotMatch(source, /\(sp\.(?:type|event|q|cat) \?\? ""\)\.trim\(\)/);
+});
+
 test("MIG-0734 T01 U01 cost writes preserve 5 exact D-17-4 paths and JSON keys",async()=>{
   const calls=[];
   const api=createAdminCostGuardApi(async(path,init)=>{calls.push({path,init});return response(200,{ok:true,message:"更新しました。"});});
