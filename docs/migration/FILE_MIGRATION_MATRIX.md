@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `src/lib/video/memberChaptersJson.ts` | HELPER | CURRENT member-chapter JSON read/write; malformed stored time/order must not corrupt display sorting | MIG-0651 | SAME | RETAINED | PR#644 SHA=6588f84e1c7c2cb6140c545e1ee8c36f13e6b50c TEST=src/lib/video/memberChaptersJson.test.mjs CI=https://github.com/coroke3/flamenode/pull/644/checks (latest HEAD pending) |
+| `src/lib/video/memberChaptersJson.test.mjs` | TEST | malformed time/order numeric regression, legacy compatibility, serialize round trip | MIG-0651 | SAME | RETAINED | PR#644 SHA=80e65c4e6fcce905c07d8191937892061da534ec TEST=src/lib/video/memberChaptersJson.test.mjs CI=https://github.com/coroke3/flamenode/pull/644/checks (latest HEAD pending) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
