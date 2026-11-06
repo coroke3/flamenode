@@ -163,3 +163,24 @@ test("rankTrendingItems rejects a nonpublic duplicate without overwriting its pu
   assert.equal(ranked.length, 1);
   assert.equal(ranked[0].title, "Public title");
 });
+
+test("rankTrendingItems rejects non-finite, fractional and unsafe view counts", () => {
+  const invalid = [NaN, Infinity, -Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "10", null];
+  const fields = ["views_2d", "views_5d", "views_7d", "views_30d"];
+  const recent = { items: [recentItem("safe"), recentItem("invalid")] };
+  const valid = {
+    video_id: "safe", views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  for (const field of fields) {
+    for (const value of invalid) {
+      const ranked = rankTrendingItems(recent, [
+        valid,
+        { ...valid, video_id: "invalid", [field]: value },
+      ]);
+      assert.deepEqual(ranked.map((row) => row.id), ["safe"], `${field}=${String(value)}`);
+    }
+  }
+  assert.deepEqual(rankTrendingItems(recent, [
+    { ...valid, video_id: "invalid", views_30d: 0 },
+  ]), []);
+});
