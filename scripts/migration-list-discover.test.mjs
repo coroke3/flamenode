@@ -11,7 +11,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { JSDOM } from "jsdom";
 import { LIST_QUERY_KEYS, LIST_PAGE_SIZE, LIST_MAX_PAGE, normalizeListQuery } from "../apps/site/src/lib/listQuery.ts";
-import { loadListingForBuild } from "../apps/site/src/lib/listingData.ts";
+import { loadListingForBuild, projectListFirstPage } from "../apps/site/src/lib/listingData.ts";
 import { writeSnapshot, writeFixtureSnapshot, fixture } from "./fixtures/listingSnapshotFixture.mjs";
 import { formatUnix } from "../src/lib/utils/format.ts";
 
@@ -203,6 +203,49 @@ test("snapshot build: rendered HTML follows CURRENT rows, links, ordering and pu
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test("listing snapshot shape: reject absent, nonarray and coercible total fields", () => {
+  const malformed = [
+    null, undefined, [], "", 0, {},
+    { videos: null, total: 0 }, { videos: {}, total: 0 },
+    { total: 0 }, { videos: [] },
+    { videos: [], total: null }, { videos: [], total: "0" },
+    { videos: [], total: "" }, { videos: [], total: false },
+    { videos: [], total: NaN }, { videos: [], total: Infinity },
+    { videos: [], total: -1 }, { videos: [], total: 1.5 },
+    { videos: Array(25).fill(null), total: 25 }, // producer caps raw first-page rows at 24
+  ];
+  for (const data of malformed) {
+    assert.throws(() => projectListFirstPage(data), { code: "LISTING_INVALID" },
+      `malformed snapshot must not become an empty list: ${JSON.stringify(data)}`);
+  }
+});
+
+test("listing snapshot shape: valid empty and mixed-visibility rows retain CURRENT projection", () => {
+  assert.deepEqual(projectListFirstPage({ videos: [], total: 0 }), { videos: [], total: 0 });
+  const { list } = fixture();
+  assert.equal(projectListFirstPage({ videos: Array(24).fill(list.videos[0]), total: 24 }).videos.length, 24,
+    "producer maximum of 24 rows remains valid");
+  const result = projectListFirstPage(list);
+  assert.equal(result.total, 1234);
+  assert.deepEqual(result.videos.map((video) => video.id), ["v1", "v2"]);
+  assert.throws(() => projectListFirstPage({ videos: list.videos, total: 1 }), { code: "LISTING_INVALID" });
+});
+
+test("configured listing snapshot with malformed shape rejects rather than publishing zero works", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fn-listing-invalid-shape-"));
+  try {
+    const good = fixture();
+    for (const invalidList of [{ videos: null, total: 0 }, { videos: [], total: null }]) {
+      const env = writeSnapshot(dir, { ...good, list: invalidList });
+      await assert.rejects(loadListingForBuild(env), { code: "LISTING_INVALID" });
+    }
+    const ok = await loadListingForBuild(writeSnapshot(dir, { ...good, list: { videos: [], total: 0 } }));
+    assert.deepEqual(ok.list, { videos: [], total: 0 });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
