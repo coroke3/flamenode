@@ -133,11 +133,8 @@ export function parseUsersIndexSort(value: string | null | undefined): CreatorsS
   return value === "name" || value === "works" ? value : "score";
 }
 
-/** CURRENT `parsePageNumber`. */
-export function parseIndexPage(value: string | null | undefined): number {
-  const parsed = Number.parseInt(value ?? "1", 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
-}
+/** Exact same input contract as CURRENT /user; no duplicated prefix parser. */
+export { parseUsersIndexPage as parseIndexPage } from "../../../../src/lib/publicData/usersIndexPage.ts";
 
 export interface UsersIndexView {
   creators: CreatorsIndexEntry[];

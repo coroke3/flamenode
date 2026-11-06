@@ -178,10 +178,18 @@ export function parseRequiredVideoFields(
 export function serializeRequiredVideoFields(
   raw: unknown,
 ): string | null {
+  // Array.from also accepts non-iterable array-like objects. A malformed
+  // template JSON object must not silently enable required video fields.
+  const iterable =
+    raw != null &&
+    typeof raw === "object" &&
+    typeof (raw as Iterable<unknown>)[Symbol.iterator] === "function";
   const fields = parseRequiredVideoFields(
-    Array.isArray(raw) || typeof raw === "string" ? raw : Array.from(
-      (raw as Iterable<unknown> | null | undefined) ?? [],
-    ),
+    Array.isArray(raw) || typeof raw === "string"
+      ? raw
+      : iterable
+        ? Array.from(raw as Iterable<unknown>)
+        : [],
   );
   return fields.length > 0 ? JSON.stringify(fields) : null;
 }
