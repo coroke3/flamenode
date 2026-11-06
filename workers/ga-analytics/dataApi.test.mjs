@@ -96,7 +96,7 @@ test("aggregateGa4ReportRows rejects unsafe sum of individually valid GA4 metric
       ga4Row("last_30", "video-a", max),
       ga4Row("last_30", "video-a", 1),
     ], dimensionIndices),
-    /ga4_report_aggregate_views_overflow/,
+    /ga4_report_event_count_overflow/,
   );
   // Also catch an overflow in a short window, not only 30-day counts.
   assert.throws(
@@ -104,7 +104,7 @@ test("aggregateGa4ReportRows rejects unsafe sum of individually valid GA4 metric
       ga4Row("last_2_days", "video-b", max),
       ga4Row("last_2_days", "video-b", 1),
     ], dimensionIndices),
-    /ga4_report_aggregate_views_overflow/,
+    /ga4_report_event_count_overflow/,
   );
 });
 
@@ -297,4 +297,94 @@ test("formatGa4QuotaLogFields: remaining をログ用フィールドへ変換", 
     },
   );
   assert.deepEqual(formatGa4QuotaLogFields(null), {});
+});
+
+test("aggregateGa4ReportRows preserves exact safe-integer totals across duplicate rows", () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER - 1),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  assert.equal(
+    aggregateGa4ReportRows(rows, dimensionIndices)[0]?.views_30d,
+    Number.MAX_SAFE_INTEGER,
+  );
+});
+
+test("aggregateGa4ReportRows rejects unsafe sums instead of rounding counts", () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  assert.throws(
+    () => aggregateGa4ReportRows(rows, dimensionIndices),
+    { message: "ga4_report_event_count_overflow" },
+  );
+});
+
+test("fetchVideoViewPeriods does not return an overflowed report as a successful ranking", async () => {
+  const rows = [
+    ga4Row("last_30", "video-a", Number.MAX_SAFE_INTEGER),
+    ga4Row("last_30", "video-a", 1),
+  ];
+  await assert.rejects(
+    () => fetchVideoViewPeriods(
+      ga4Env(),
+      new ExternalRequestBudget(2),
+      async () => new Response(JSON.stringify(ga4ReportBody(rows)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ),
+    { message: "ga4_report_event_count_overflow" },
+  );
+});
+
+test("fetchVideoViewPeriods rejects malformed HTTP 200 JSON shapes deterministically", async () => {
+  const malformed = [
+    null,
+    [],
+    42,
+    true,
+    { dimensionHeaders: "invalid", rows: [] },
+    { dimensionHeaders: [null], rows: [] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: {} },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [null] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [{ dimensionValues: "wrong" }] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [{ metricValues: [null] }] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: 123 }, { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: "video-a" }, { value: "last_30" }], metricValues: [{ value: 5 }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [[], { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
+  ];
+  for (const payload of malformed) {
+    await assert.rejects(
+      () => fetchVideoViewPeriods(
+        ga4Env(),
+        new ExternalRequestBudget(2),
+        async () => new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+      { message: "ga4_report_invalid_shape" },
+      `payload=${JSON.stringify(payload)}`,
+    );
+  }
+});
+
+test("fetchVideoViewPeriods preserves a valid empty report", async () => {
+  const result = await fetchVideoViewPeriods(
+    ga4Env(),
+    new ExternalRequestBudget(2),
+    async () => new Response(JSON.stringify(ga4ReportBody([])), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  assert.deepEqual(result.periods, []);
 });

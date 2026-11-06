@@ -26,7 +26,12 @@ export function compactText(value: string | null | undefined, max = 160): string
   const compacted = (value ?? "").replace(/\s+/g, " ").trim();
   if (!compacted || looksLikeMojibake(compacted)) return DEFAULT_SITE_DESCRIPTION;
   if (compacted.length <= max) return compacted;
-  return `${compacted.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
+  const truncated = compacted.slice(0, Math.max(0, max - 3));
+  // Avoid splitting UTF-16 surrogate pairs at the truncation boundary.
+  const safe = /[\uD800-\uDBFF]$/.test(truncated)
+    ? truncated.slice(0, -1)
+    : truncated;
+  return `${safe.trimEnd()}...`;
 }
 
 export const BRAND_ICON_PATH = "/brand/flamenode-icon-512.png";

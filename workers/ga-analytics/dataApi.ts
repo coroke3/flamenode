@@ -209,13 +209,13 @@ export function aggregateGa4ReportRows(
     const field = DATE_RANGE_FIELD_MAP[dateRangeRaw];
     const existing = byVideo.get(videoId);
     if (existing) {
-      // Each row is safe in isolation, but summing repeated GA4 rows can
-      // exceed MAX_SAFE_INTEGER. Reject the report instead of publishing an
-      // imprecise metric or silently dropping this video's ranking.
-      if (existing[field] > Number.MAX_SAFE_INTEGER - eventCount) {
-        throw new Error("ga4_report_aggregate_views_overflow");
+      const sum = existing[field] + eventCount;
+      // A per-row metric may be safe while duplicate rows/pages overflow
+      // JavaScript's exact integer range. Never publish rounded view counts.
+      if (!Number.isSafeInteger(sum)) {
+        throw new Error("ga4_report_event_count_overflow");
       }
-      existing[field] += eventCount;
+      existing[field] = sum;
     } else {
       byVideo.set(videoId, {
         video_id: videoId,
@@ -305,6 +305,40 @@ async function runGa4ReportPage(
     throw new Error("ga4_report_invalid_json");
   }
   signal?.throwIfAborted();
+  // HTTP 200 does not guarantee a valid GA4 response shape. A malformed
+  // payload must fail closed before its fields are used for pagination.
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    (body.dimensionHeaders !== undefined &&
+      (!Array.isArray(body.dimensionHeaders) ||
+        !body.dimensionHeaders.every(
+          (header) => header !== null && typeof header === "object" &&
+            typeof header.name === "string",
+        ))) ||
+    (body.rows !== undefined &&
+      (!Array.isArray(body.rows) ||
+        !body.rows.every(
+          (row) => row !== null && typeof row === "object" && !Array.isArray(row) &&
+            (row.dimensionValues === undefined ||
+              (Array.isArray(row.dimensionValues) &&
+                row.dimensionValues.every(
+                  (v) => v !== null && typeof v === "object" &&
+                    !Array.isArray(v) &&
+                    (v.value === undefined || typeof v.value === "string"),
+                ))) &&
+            (row.metricValues === undefined ||
+              (Array.isArray(row.metricValues) &&
+                row.metricValues.every(
+                  (v) => v !== null && typeof v === "object" &&
+                    !Array.isArray(v) &&
+                    (v.value === undefined || typeof v.value === "string"),
+                ))),
+        )))
+  ) {
+    throw new Error("ga4_report_invalid_shape");
+  }
   return body;
 }
 
