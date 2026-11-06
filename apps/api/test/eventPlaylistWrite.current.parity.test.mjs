@@ -364,6 +364,10 @@ if (runUnderRootTsx(import.meta.url)) {
       "https://evil.example/?list=PL1234567890", "ftp://youtube.com/playlist?list=PL1234567890",
       "https://youtube.com/playlist", "https://youtube.com/playlist?list=short", "javascript:alert(1)",
       " PL1234567890 ", "https://www.youtube.com/playlist?list=%20PL1234567890%20",
+      "https://user:secret@youtube.com/playlist?list=PL1234567890",
+      "https://user@www.youtube.com/playlist?list=PL1234567890",
+      "https://:secret@youtu.be/watch?list=PL1234567890",
+      "https://user%40name:pass@youtube.com/playlist?list=PL1234567890",
     ];
     const modes = [undefined, "", "off", "append_only", "mirror", "MIRROR", "constructor"];
     const intervals = [undefined, "", "   ", "0", "59", "60", "61", "720", "10080", "10081", "1.5", "abc", "-5", "1e3", " 90 "];
