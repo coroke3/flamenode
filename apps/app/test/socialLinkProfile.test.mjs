@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { profileHeaderSocialLinks } from "../.test-dist/apps/app/src/lib/socialLinks.js";
+import { profileHeaderSocialLinks, serializeSocialLinks, validateSocialLinksJson } from "../.test-dist/apps/app/src/lib/socialLinks.js";
 
 test("MIG-0712: encoded primary X paths are removed on both supported hosts", () => {
   const links = [
@@ -22,4 +22,23 @@ test("MIG-0712: malformed escapes, unrelated paths and spoofed hosts remain", ()
   ];
   assert.deepEqual(profileHeaderSocialLinks(links, "flamenode"), links);
   assert.deepEqual(profileHeaderSocialLinks(links, ""), links);
+});
+
+test("social link type truncation does not split emoji surrogate pairs", () => {
+  const prefix = "T".repeat(39);
+  const type = prefix + "😀";
+  const entry = { type, url: "https://example.com/" };
+  const expected = [{ type: prefix, url: "https://example.com/" }];
+  const serialized = serializeSocialLinks([entry]);
+  assert.ok(serialized);
+  assert.deepEqual(JSON.parse(serialized), expected);
+  assert.doesNotMatch(serialized, /\\u[dD]83[dD]/, "must not persist an orphan high surrogate");
+
+  const checked = validateSocialLinksJson(JSON.stringify([entry]));
+  assert.equal(checked.ok, true);
+  assert.deepEqual(JSON.parse(checked.value), expected);
+
+  // A complete emoji at the boundary must remain intact.
+  const exact = serializeSocialLinks([{ type: "T".repeat(38) + "😀", url: "https://example.com/" }]);
+  assert.equal(JSON.parse(exact)[0].type, "T".repeat(38) + "😀");
 });

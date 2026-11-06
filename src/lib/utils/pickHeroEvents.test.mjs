@@ -57,3 +57,19 @@ test("pickHeroEventsは1件と2件でも正しく返す", () => {
   );
   assert.equal(two.length, 2);
 });
+
+test("pickHeroEventsは不正な上限で意図しない件数を表示しない", () => {
+  const events = [
+    event("e1", "e1", { start_time: NOW + 1000 }),
+    event("e2", "e2", { start_time: NOW + 2000 }),
+    event("e3", "e3", { start_time: NOW + 3000 }),
+  ];
+
+  for (const limit of [-1, -0.5, 0, NaN, Infinity, -Infinity]) {
+    assert.deepEqual(pickHeroEvents(events, limit, NOW), [], String(limit));
+  }
+  // JavaScript's existing fractional slice behavior is retained for valid caps.
+  assert.deepEqual(pickHeroEvents(events, 1.5, NOW).map((row) => row.id), ["e1"]);
+  assert.deepEqual(pickHeroEvents(events, 3, NOW).map((row) => row.id), ["e1", "e2", "e3"]);
+  assert.equal(events.length, 3);
+});

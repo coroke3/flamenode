@@ -22,6 +22,7 @@ const MAX_RATE_LIMIT_KEYS = 2048;
 type RateLimitBucket = { windowStart: number; count: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
 let nextRateLimitCleanupAt = 0;
+let lastRateLimitNow = Number.NEGATIVE_INFINITY;
 
 function rateLimitedResponse(retryAfter: number): Response {
   return new Response(JSON.stringify({ error: "rate_limited" }), {
@@ -35,6 +36,16 @@ function rateLimitedResponse(retryAfter: number): Response {
 }
 
 function checkRateLimit(request: Request, now = Math.floor(Date.now() / 1000)): Response | null {
+  // Invalid timestamps must not poison shared isolate rate-limit windows.
+  if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + RATE_LIMIT_WINDOW_SECONDS)) {
+    return rateLimitedResponse(RATE_LIMIT_WINDOW_SECONDS);
+  }
+  // Wall-clock rollback must not leave 429 buckets or a full key map stranded.
+  if (now < lastRateLimitNow) {
+    rateLimitBuckets.clear();
+    nextRateLimitCleanupAt = 0;
+  }
+  lastRateLimitNow = now;
   if (now >= nextRateLimitCleanupAt) {
     nextRateLimitCleanupAt = now + RATE_LIMIT_WINDOW_SECONDS;
     for (const [key, bucket] of rateLimitBuckets) {
@@ -61,6 +72,7 @@ function checkRateLimit(request: Request, now = Math.floor(Date.now() / 1000)): 
 export function clearSoftwareSuggestionRateLimitForTests(): void {
   rateLimitBuckets.clear();
   nextRateLimitCleanupAt = 0;
+  lastRateLimitNow = Number.NEGATIVE_INFINITY;
 }
 
 /** CURRENT parseBoundedPositiveInt: 0 / non-numeric -> fallback, negative -> 1, over max -> max. */

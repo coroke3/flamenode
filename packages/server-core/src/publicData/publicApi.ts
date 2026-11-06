@@ -4,6 +4,7 @@ const MAX_RATE_LIMIT_KEYS = 2048;
 
 // Map 全走査は固定窓ごとに最大1回だけ行う。
 let nextRateLimitCleanupAt = 0;
+let lastRateLimitNow = Number.NEGATIVE_INFINITY;
 
 type RateLimitBucket = { windowStart: number; count: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
@@ -19,6 +20,13 @@ function getClientKey(request: Request, endpoint: string): string {
 }
 
 function cleanupRateLimitBuckets(now: number): void {
+  // A wall-clock rollback must not pin existing clients in an old fixed window
+  // (or keep the 2048-key map full) until the previous clock catches up.
+  if (now < lastRateLimitNow) {
+    rateLimitBuckets.clear();
+    nextRateLimitCleanupAt = 0;
+  }
+  lastRateLimitNow = now;
   if (now < nextRateLimitCleanupAt) return;
   nextRateLimitCleanupAt = now + RATE_LIMIT_WINDOW_SECONDS;
   for (const [key, bucket] of rateLimitBuckets) {
@@ -34,6 +42,12 @@ export function checkPublicApiRateLimit(
   endpoint: string,
   now = Math.floor(Date.now() / 1000),
 ): Response | null {
+  // An invalid time can otherwise poison the bucket window and Retry-After
+  // (NaN is never >= 60, and Infinity can persist in the cleanup deadline).
+  // Fail closed without modifying any legitimate client's quota.
+  if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + RATE_LIMIT_WINDOW_SECONDS)) {
+    return rateLimitedResponse(RATE_LIMIT_WINDOW_SECONDS);
+  }
   cleanupRateLimitBuckets(now);
   const key = getClientKey(request, endpoint);
   let bucket = rateLimitBuckets.get(key);
@@ -149,10 +163,12 @@ export function publicServiceUnavailableResponse(
   code = "service_temporarily_unavailable",
   retryAfterSeconds = 30,
 ): Response {
-  const retryAfter = boundedPositiveInteger(
-    retryAfterSeconds,
-    30,
-  );
+  // Retry-After delay-seconds must be decimal digits, never an exponent.
+  // Reject unsafe numeric inputs rather than emitting e.g. `1e+30`.
+  const retryAfter = Number.isFinite(retryAfterSeconds) &&
+      retryAfterSeconds > Number.MAX_SAFE_INTEGER
+    ? 30
+    : boundedPositiveInteger(retryAfterSeconds, 30);
   return new Response(JSON.stringify({ error: code }), {
     status: 503,
     headers: {
@@ -166,6 +182,7 @@ export function publicServiceUnavailableResponse(
 export function clearPublicApiRateLimitForTests(): void {
   rateLimitBuckets.clear();
   nextRateLimitCleanupAt = 0;
+  lastRateLimitNow = Number.NEGATIVE_INFINITY;
 }
 
 /** 公開作品 API / 一覧ページ用の sort 正規化（未知値は new）。 */

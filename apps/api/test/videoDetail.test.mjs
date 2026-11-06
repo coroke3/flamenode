@@ -111,3 +111,56 @@ test("If-None-Match returns bodyless 304; 429 after 60 requests per client", asy
   assert.equal(last.headers.get("Cache-Control"), "no-store");
   assert.deepEqual(await last.json(), { error: "rate_limited" });
 });
+
+test("video detail limiter recovers from wall-clock rollback without stranding 429 clients", async () => {
+  const { db } = createDb();
+  const originalNow = Date.now;
+  let nowSeconds = 20_000;
+  Date.now = () => nowSeconds * 1000;
+  try {
+    for (let i = 0; i < 60; i++) {
+      assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+    }
+    const blocked = await get("/api/videos/vid2", { DB: db });
+    assert.equal(blocked.status, 429);
+    assert.equal(blocked.headers.get("Retry-After"), "60");
+
+    nowSeconds = 19_000;
+    assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+    for (let i = 1; i < 60; i++) {
+      assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+    }
+    const stillLimited = await get("/api/videos/vid2", { DB: db });
+    assert.equal(stillLimited.status, 429);
+    assert.equal(stillLimited.headers.get("Retry-After"), "60");
+
+    nowSeconds += 60;
+    assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("video detail limiter rejects unsafe wall-clock values without corrupting existing quota", async () => {
+  const { db } = createDb();
+  const originalNow = Date.now;
+  let currentMs = 25_000_000;
+  Date.now = () => currentMs;
+  try {
+    for (let i = 0; i < 59; i++) {
+      assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+    }
+    for (const bad of [NaN, Infinity, -1000, Number.MAX_SAFE_INTEGER * 1000]) {
+      currentMs = bad;
+      const denied = await get("/api/videos/vid2", { DB: db });
+      assert.equal(denied.status, 429);
+      assert.equal(denied.headers.get("Retry-After"), "60");
+      assert.equal(denied.headers.get("Cache-Control"), "no-store");
+    }
+    currentMs = 25_000_000;
+    assert.equal((await get("/api/videos/vid2", { DB: db })).status, 200);
+    assert.equal((await get("/api/videos/vid2", { DB: db })).status, 429);
+  } finally {
+    Date.now = originalNow;
+  }
+});
