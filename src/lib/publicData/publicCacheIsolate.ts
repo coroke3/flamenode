@@ -86,11 +86,12 @@ export function writePublicJsonIsolateCache(
     return;
   }
   pruneExpiredEntries(nowMs);
-  const safeByteWeight = Math.floor(byteWeight);
+  // Byte accounting must use an exact non-negative integer, not a rounded
+  // caller-supplied weight that can undercount per-entry and total budgets.
   if (
-    !Number.isSafeInteger(safeByteWeight) ||
-    safeByteWeight <= 0 ||
-    safeByteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES
+    !Number.isSafeInteger(byteWeight) ||
+    byteWeight <= 0 ||
+    byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES
   ) {
     deleteEntry(r2Key);
     return;
@@ -115,7 +116,7 @@ export function writePublicJsonIsolateCache(
   deleteEntry(r2Key);
   while (
     isolateJsonCache.size >= PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES ||
-    isolateJsonCacheBytes + safeByteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
+    isolateJsonCacheBytes + byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
   ) {
     if (isolateJsonCache.size === 0) return;
     evictOldestEntry();
@@ -123,9 +124,9 @@ export function writePublicJsonIsolateCache(
   isolateJsonCache.set(r2Key, {
     value: payload,
     expiresAtMs,
-    byteWeight: safeByteWeight,
+    byteWeight,
   });
-  isolateJsonCacheBytes += safeByteWeight;
+  isolateJsonCacheBytes += byteWeight;
 }
 
 export function deletePublicJsonIsolateCache(r2Key: string): void {
