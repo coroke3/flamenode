@@ -11,18 +11,23 @@ const DEFAULT_PROPAGATION_ATTEMPTS = 60;
 const DEFAULT_PROPAGATION_RETRY_DELAY_MS = 2_000;
 const DEFAULT_DEEP_HEALTH_ATTEMPTS = 3;
 
-/** Reject numeric prefixes, decimals and unsafe integers in smoke retry settings. */
-function smokeInteger(raw, fallback, min) {
+// Cap retry work and delays so malformed configuration cannot stall deployment
+// checks or overflow Node.js setTimeout (which turns oversized delays into 1 ms).
+const MAX_SMOKE_ATTEMPTS = 1_000;
+const MAX_SMOKE_DELAY_MS = 600_000;
+
+/** Reject prefixes, decimals, unsafe or operationally excessive retry settings. */
+function smokeInteger(raw, fallback, min, max) {
   const value = raw?.trim();
   if (!value || !/^[0-9]+$/.test(value)) return fallback;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= min ? parsed : fallback;
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 export function propagationRequestOptions(env = process.env, requestOptions = {}) {
   return {
-    attempts: smokeInteger(env.SMOKE_PROPAGATION_ATTEMPTS, DEFAULT_PROPAGATION_ATTEMPTS, 1),
-    retryDelayMs: smokeInteger(env.SMOKE_PROPAGATION_DELAY_MS, DEFAULT_PROPAGATION_RETRY_DELAY_MS, 0),
+    attempts: smokeInteger(env.SMOKE_PROPAGATION_ATTEMPTS, DEFAULT_PROPAGATION_ATTEMPTS, 1, MAX_SMOKE_ATTEMPTS),
+    retryDelayMs: smokeInteger(env.SMOKE_PROPAGATION_DELAY_MS, DEFAULT_PROPAGATION_RETRY_DELAY_MS, 0, MAX_SMOKE_DELAY_MS),
     ...requestOptions,
   };
 }
@@ -126,8 +131,8 @@ const DEFAULT_DEGRADED_RETRY_DELAY_MS = 2_000;
 
 export function degradedRetryOptions(env = process.env, requestOptions = {}) {
   return {
-    attempts: smokeInteger(env.SMOKE_DEGRADED_ATTEMPTS, DEFAULT_DEGRADED_ATTEMPTS, 1),
-    retryDelayMs: smokeInteger(env.SMOKE_DEGRADED_DELAY_MS, DEFAULT_DEGRADED_RETRY_DELAY_MS, 0),
+    attempts: smokeInteger(env.SMOKE_DEGRADED_ATTEMPTS, DEFAULT_DEGRADED_ATTEMPTS, 1, MAX_SMOKE_ATTEMPTS),
+    retryDelayMs: smokeInteger(env.SMOKE_DEGRADED_DELAY_MS, DEFAULT_DEGRADED_RETRY_DELAY_MS, 0, MAX_SMOKE_DELAY_MS),
     ...requestOptions,
   };
 }
