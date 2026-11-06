@@ -173,3 +173,35 @@ test("rate limiter resets old windows and full key budget on wall-clock rollback
   clearPublicApiRateLimitForTests();
   assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime - 100), null);
 });
+
+test("rate limiter rejects invalid clocks without poisoning other clients or retry headers", () => {
+  clearPublicApiRateLimitForTests();
+  const client = request("valid-clock");
+  const now = 25_000;
+  for (let i = 0; i < 59; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, now), null);
+  }
+  for (const invalid of [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    -1,
+    1_000.5,
+    Number.MAX_SAFE_INTEGER,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    const blocked = checkPublicApiRateLimit(client, endpoint, invalid);
+    assert.equal(blocked?.status, 429, `invalid clock ${String(invalid)}`);
+    assert.equal(blocked?.headers.get("Retry-After"), "60");
+    assert.equal(blocked?.headers.get("Cache-Control"), "no-store");
+  }
+  // Bad clocks must not increment quota, reset the window, or clear the map.
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now), null);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now + 60), null);
+
+  // An invalid first invocation must not initialize a corrupt cleanup deadline.
+  clearPublicApiRateLimitForTests();
+  assert.equal(checkPublicApiRateLimit(request("first"), endpoint, NaN)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(request("first"), endpoint, 1), null);
+});
