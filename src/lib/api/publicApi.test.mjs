@@ -144,3 +144,32 @@ test("rate limiter cleans expired buckets and bounds key cardinality", () => {
     null,
   );
 });
+
+test("rate limiter resets old windows and full key budget on wall-clock rollback", () => {
+  clearPublicApiRateLimitForTests();
+  const oldTime = 20_000;
+  const earlierTime = 19_000;
+  const client = request("clock-rollback");
+  for (let i = 0; i < 60; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, oldTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(client, endpoint, oldTime)?.status, 429);
+  // Without a reset, oldTime - earlierTime is negative and the bucket remains
+  // blocked for far longer than one 60-second fixed window.
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime), null);
+  for (let i = 1; i < 60; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime + 60), null);
+
+  clearPublicApiRateLimitForTests();
+  for (let i = 0; i < 2048; i++) {
+    assert.equal(checkPublicApiRateLimit(request(`roll-${i}`), endpoint, oldTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(request("over-cap"), endpoint, oldTime)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(request("new-after-rollback"), endpoint, earlierTime), null);
+  // Reset helper must clear the saved clock between tests too.
+  clearPublicApiRateLimitForTests();
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime - 100), null);
+});
