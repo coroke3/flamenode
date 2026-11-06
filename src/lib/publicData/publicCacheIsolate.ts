@@ -55,8 +55,9 @@ export function readPublicJsonIsolateCache(
   r2Key: string,
   nowMs = Date.now(),
 ): unknown | null {
-  // Invalid clocks must never bypass expiry or refresh the LRU entry.
-  if (!Number.isFinite(nowMs)) return null;
+  // Only non-negative whole-millisecond timestamps are valid. A fractional,
+  // negative or unsafe clock must not read data or refresh its LRU position.
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) return null;
   pruneExpiredEntries(nowMs);
   const entry = isolateJsonCache.get(r2Key);
   if (!entry) return null;
