@@ -323,6 +323,44 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache(key, now), null);
   });
 
+  test("isolate cache は過少申告されたbyteWeightで容量上限を迂回しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 3_650_000;
+    const valid = { id: "safe" };
+    const validWeight = new TextEncoder().encode(JSON.stringify(valid)).byteLength;
+    writePublicJsonIsolateCache("unrelated.json", valid, 30, validWeight, now);
+    writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+
+    // Before this fix, an oversized JSON object could be retained with a
+    // forged one-byte weight, violating both heap limits.
+    const large = { content: "x".repeat(PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES) };
+    writePublicJsonIsolateCache("replacement.json", large, 30, 1, now);
+    assert.equal(readPublicJsonIsolateCache("replacement.json", now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), valid);
+
+    // Both undercounting and overcounting must reject stale replacements.
+    for (const wrongWeight of [1, validWeight + 1]) {
+      writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+      writePublicJsonIsolateCache("replacement.json", valid, 30, wrongWeight, now);
+      assert.equal(readPublicJsonIsolateCache("replacement.json", now), null);
+    }
+    writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("replacement.json", now), valid);
+  });
+
+  test("isolate cache は非JSONの直接入力をJSONとして正規化して保存する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 3_700_000;
+    const input = { when: new Date("2026-11-06T00:00:00.000Z"), value: Infinity };
+    const json = JSON.stringify(input);
+    const weight = new TextEncoder().encode(json).byteLength;
+    writePublicJsonIsolateCache("json-normalization.json", input, 30, weight, now);
+    const result = readPublicJsonIsolateCache("json-normalization.json", now);
+    assert.deepEqual(result, JSON.parse(json));
+    assert.equal(typeof result.when, "string");
+    assert.equal(result.value, null);
+  });
+
   test("isolate cache はaggregate byte budgetを超えるとLRU evictionする", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 4_000_000;
