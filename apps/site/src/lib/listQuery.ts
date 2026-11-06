@@ -44,8 +44,9 @@ function compactSearchChars(value: string): string {
 }
 
 function boundedPage(value: string): number {
-  const raw = value.trim().slice(0, 12);
-  if (!/^\d+$/.test(raw)) return 1;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return 1;
+  const raw = trimmed.slice(0, 12);
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
   return Math.min(parsed, LIST_MAX_PAGE);
