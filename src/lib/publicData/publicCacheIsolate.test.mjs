@@ -181,6 +181,26 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("large.json", now), null);
   });
 
+  test("isolate cache は小数byteWeightを切り捨てず拒否する", () => {
+    const now = 3_500_000;
+    const key = "fractional-weight.json";
+    const payload = { id: "valid" };
+    const exactBytes = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const invalidWeight of [0.5, 1.5, exactBytes + 0.5, PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES + 0.5, NaN, Infinity]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, exactBytes, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      writePublicJsonIsolateCache(key, { id: "replacement" }, 30, invalidWeight, now);
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        `invalid weight ${String(invalidWeight)} must evict the old entry`);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("unrelated.json", payload, 30, exactBytes, now);
+    writePublicJsonIsolateCache(key, payload, 30, 1.5, now);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), payload);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+  });
+
   test("isolate cache はaggregate byte budgetを超えるとLRU evictionする", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 4_000_000;
