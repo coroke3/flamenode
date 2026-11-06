@@ -26,9 +26,29 @@ test("public cache は JSON parse 前にstreamを16MiBで制限する", () => {
   assert.match(source, /const reader = body\.getReader\(\)/);
   assert.match(source, /if \(total > maxBytes\)/);
   assert.match(source, /await reader\.cancel\(\)\.catch\(\(\) => undefined\)/);
-  assert.match(source, /JSON\.parse\(new TextDecoder\(\)\.decode\(bytes\)\)/);
+  assert.match(source, /JSON\.parse\(new TextDecoder\("utf-8", \{ fatal: true \}\)\.decode\(bytes\)\)/);
   assert.doesNotMatch(source, /await matched\.json\(\)/);
   assert.doesNotMatch(source, /response\.arrayBuffer\(\)/);
+});
+
+test("破損UTF-8は置換文字に修復してキャッシュJSONとして受理しない", () => {
+  // An invalid byte inside a quoted JSON string is replaced by U+FFFD by
+  // the default TextDecoder; the resulting object is *not* the stored bytes.
+  const corrupt = Uint8Array.from([
+    ...new TextEncoder().encode('{"name":"'),
+    0xff,
+    ...new TextEncoder().encode('"}'),
+  ]);
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(corrupt)), { name: "�" });
+  assert.throws(
+    () => new TextDecoder("utf-8", { fatal: true }).decode(corrupt),
+    TypeError,
+  );
+  const valid = new TextEncoder().encode('{"name":"正常"}');
+  assert.deepEqual(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(valid)), {
+    name: "正常",
+  });
+  assert.match(source, /new TextDecoder\("utf-8", \{ fatal: true \}\)\.decode\(bytes\)/);
 });
 
 test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らない", () => {
