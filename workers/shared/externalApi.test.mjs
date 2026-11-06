@@ -29,6 +29,31 @@ test("外部API予算は上限を超えて消費しない", () => {
   assert.equal(budget.remaining, 0);
 });
 
+test("外部API予算は2^53以上の丸め誤差で無制限に消費されない", () => {
+  const budget = new ExternalRequestBudget(2 ** 53);
+  assert.equal(budget.limit, Number.MAX_SAFE_INTEGER);
+  assert.equal(budget.consume(Number.MAX_SAFE_INTEGER), true);
+  assert.equal(budget.used, Number.MAX_SAFE_INTEGER);
+  assert.equal(budget.remaining, 0);
+  assert.equal(budget.consume(), false);
+  assert.equal(budget.used, Number.MAX_SAFE_INTEGER);
+
+  const huge = new ExternalRequestBudget(Number.MAX_VALUE);
+  assert.equal(huge.limit, Number.MAX_SAFE_INTEGER);
+  assert.equal(huge.consume(Number.MAX_VALUE), false);
+  assert.equal(huge.used, 0);
+  assert.equal(huge.consume(2 ** 53), false);
+  assert.equal(huge.consume(1), true);
+  assert.equal(huge.remaining, Number.MAX_SAFE_INTEGER - 1);
+
+  const ordinary = new ExternalRequestBudget(2.9);
+  assert.equal(ordinary.limit, 2);
+  assert.equal(ordinary.consume(1.9), true);
+  assert.equal(ordinary.consume(1), true);
+  assert.equal(ordinary.consume(), false);
+  assert.equal(new ExternalRequestBudget(Infinity).limit, 0);
+});
+
 test("Retry-Afterは秒とHTTP-dateを上限付きで解釈する", () => {
   assert.equal(parseRetryAfterMs("3", 15_000), 3_000);
   assert.equal(parseRetryAfterMs("120", 15_000), 15_000);
