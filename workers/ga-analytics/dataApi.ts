@@ -93,7 +93,7 @@ function parsePositiveInt(value: string | undefined): number | null {
 }
 
 function parseNonNegativeInt(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
     return value;
   }
   if (typeof value === "string" && /^\d+$/.test(value)) {
