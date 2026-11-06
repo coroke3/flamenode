@@ -14,8 +14,11 @@ export function getSpreadsheetPageSize(): number {
   const raw = process.env.ADMIN_SPREADSHEET_PAGE_SIZE?.trim();
   if (!raw) return SPREADSHEET_PAGE_SIZE_FALLBACK;
 
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < SPREADSHEET_PAGE_SIZE_MIN) {
+  // Reject partial parses (e.g. "500oops", "50.5", "1e3") rather than
+  // silently applying a different page-size budget than configured.
+  if (!/^\d+$/.test(raw)) return SPREADSHEET_PAGE_SIZE_FALLBACK;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n < SPREADSHEET_PAGE_SIZE_MIN) {
     return SPREADSHEET_PAGE_SIZE_FALLBACK;
   }
   return Math.min(n, SPREADSHEET_PAGE_SIZE_CAP);
