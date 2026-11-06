@@ -124,6 +124,11 @@ export function exponentialBackoffMs(
 }
 
 export async function delay(ms: number): Promise<void> {
+  // An invalid or oversized duration must not silently become a ~1ms timer,
+  // which would turn a rate-limited retry loop into a request burst.
+  if (!Number.isFinite(ms) || ms > 2_147_483_647) {
+    throw new RangeError("Invalid retry delay");
+  }
   if (ms <= 0) return;
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
