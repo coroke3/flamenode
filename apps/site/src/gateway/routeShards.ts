@@ -175,8 +175,14 @@ const KINDS: ReadonlySet<string> = new Set(["video", "user", "event"]);
 const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 307, 308]);
 
 function isSameSitePath(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("/") && !value.startsWith("//") &&
-    !CONTROL_OR_SPACE.test(value) && !value.includes("\\");
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//") ||
+      CONTROL_OR_SPACE.test(value) || value.includes("\\")) return false;
+  // A shard may be stale or corrupted. Do not trust paths that a URL parser
+  // would normalize to a different route after validation.
+  const pathname = value.split(/[?#]/, 1)[0];
+  if (/%2e|%2f|%5c/i.test(pathname) ||
+      /(?:^|\/)\.{1,2}(?:\/|$)/.test(pathname)) return false;
+  return true;
 }
 
 export function isValidResolution(value: unknown): value is RouteResolution {
