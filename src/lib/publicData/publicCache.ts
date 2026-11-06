@@ -17,6 +17,7 @@ import {
 import {
   publicJsonCacheFreshness,
   publicJsonCacheRetentionTtl,
+  utf8ByteLengthUpTo,
 } from "./publicCachePolicy";
 
 export { publicJsonCacheFreshness, publicJsonCacheRetentionTtl } from "./publicCachePolicy";
@@ -94,38 +95,6 @@ async function cancelResponseBodyBestEffort(response: Response): Promise<void> {
   } catch {
     // Cache entry is ignored regardless of cleanup result.
   }
-}
-
-function utf8ByteLengthUpTo(value: string, limit: number): number | null {
-  // A UTF-16 code unit needs at most three UTF-8 bytes (a valid surrogate
-  // pair needs four bytes for two code units). Keep the conservative upper
-  // bound when it is already within the requested limit; otherwise scan only
-  // until the limit is exceeded.
-  if (value.length <= Math.floor(limit / 3)) return value.length * 3;
-
-  let bytes = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x7f) {
-      bytes += 1;
-    } else if (code <= 0x7ff) {
-      bytes += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        bytes += 4;
-        index += 1;
-      } else {
-        // TextEncoder replaces an unpaired surrogate with U+FFFD (3 bytes).
-        bytes += 3;
-      }
-    } else {
-      // BMP characters and lone low surrogates both encode to at most 3 bytes.
-      bytes += 3;
-    }
-    if (bytes > limit) return null;
-  }
-  return bytes;
 }
 
 function utf8ByteLengthExceeds(value: string, limit: number): boolean {
