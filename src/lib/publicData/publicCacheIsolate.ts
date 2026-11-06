@@ -73,7 +73,12 @@ export function writePublicJsonIsolateCache(
   byteWeight: number,
   nowMs = Date.now(),
 ): void {
-  if (payload == null || isPromiseLike(payload)) return;
+  // A rejected replacement must not leave the previous value readable.
+  // In particular, an invalidated snapshot may now be null or async.
+  if (payload == null || isPromiseLike(payload)) {
+    deleteEntry(r2Key);
+    return;
+  }
   // NaN comparison is always false; a cached entry with NaN expiration would never expire.
   if (!Number.isFinite(nowMs)) {
     deleteEntry(r2Key);
