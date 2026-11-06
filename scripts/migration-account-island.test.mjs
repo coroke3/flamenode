@@ -560,6 +560,44 @@ test("Active X change during pending details drops old identity and refetches th
   }
 });
 
+test("Active X switch ignores a second click before React commits pending state", async () => {
+  let resolveSwitch;
+  const switchResult = new Promise((resolve) => { resolveSwitch = resolve; });
+  const switchCalls = [];
+  const changes = [];
+  const onChanged = (event) => changes.push(event.detail);
+  window.addEventListener(ACTIVE_X_CHANGED_EVENT, onChanged);
+  const v = await setup({
+    "/api/account/summary?view=presence": json(presenceIn),
+    "/api/account/summary": json(summary()),
+  }, {
+    switchActiveX: async (id) => {
+      switchCalls.push(id);
+      return switchResult;
+    },
+  });
+  try {
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    const choice = button(v.container, "セカンド");
+    assert.ok(choice);
+    await act(async () => {
+      choice.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      // The second handler runs before the pending=true render is committed.
+      choice.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.deepEqual(switchCalls, ["second"], "same-batch clicks must send only one switch");
+    assert.deepEqual(changes, [], "switch-change event fires only after success");
+    await act(async () => { resolveSwitch({ ok: true }); });
+    await flush();
+    assert.equal(changes.length, 1, "one successful switch emits exactly one change");
+    assert.equal(changes[0].toXId, "second");
+  } finally {
+    window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onChanged);
+    await v.unmount();
+  }
+});
+
 test("switching: choices are disabled without a switch action; with one it follows the CURRENT event contract", async () => {
   const routes = { "/api/account/summary?view=presence": () => json(presenceIn), "/api/account/summary": () => json(summary()) };
   const off = await setup(routes);
