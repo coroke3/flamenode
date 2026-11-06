@@ -163,6 +163,35 @@ test("JSON/CSVを同じcanonical planへ変換する", () => {
   assert.equal(plan.videoChapters[0].chapter_time, 0);
 });
 
+test("legacy image normalization accepts genuine Drive origins, not lookalike URLs", () => {
+  const cases = [
+    ["https://drive.google.com/file/d/FILEID123456/view", "/api/google-drive-image/FILEID123456"],
+    ["https://www.drive.google.com/open?id=FILEID123456", "/api/google-drive-image/FILEID123456"],
+    ["drive.google.com/uc?export=download&id=FILEID123456", "/api/google-drive-image/FILEID123456"],
+    ["https://drive.google.com.evil.example/file/d/FILEID123456/view", "https://drive.google.com.evil.example/file/d/FILEID123456/view"],
+    ["https://evil.example/drive.google.com/file/d/FILEID123456", "https://evil.example/drive.google.com/file/d/FILEID123456"],
+    ["https://evil.example/?next=https://drive.google.com/open?id=FILEID123456", "https://evil.example/?next=https://drive.google.com/open?id=FILEID123456"],
+    ["https://user:secret@drive.google.com/file/d/FILEID123456/view", "https://user:secret@drive.google.com/file/d/FILEID123456/view"],
+    ["ftp://drive.google.com/file/d/FILEID123456/view", null],
+    ["https://drive.google.com/file/d/INVALID%2FID/view", "https://drive.google.com/file/d/INVALID%2FID/view"],
+    ["/api/google-drive-image/FILEID123456", "/api/google-drive-image/FILEID123456"],
+  ];
+  for (const [icon, expected] of cases) {
+    const source = parseLegacyImportText("eventinfo.json", JSON.stringify([{
+      eventid: "legacy-image-test",
+      eventname: "Legacy image",
+      icon,
+    }]));
+    const plan = normalizeLegacyFiles([source], {
+      eventVisibility: "private",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    });
+    assert.equal(plan.events.length, 1, icon);
+    assert.equal(plan.events[0].icon_url, expected, icon);
+  }
+});
+
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
   const videoOnlyJson = JSON.stringify([
     {
