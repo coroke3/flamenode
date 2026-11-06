@@ -299,6 +299,32 @@ async function runGa4ReportPage(
     throw new Error("ga4_report_invalid_json");
   }
   signal?.throwIfAborted();
+  // HTTP 200 does not guarantee a valid GA4 response shape. A malformed
+  // payload must fail closed before its fields are used for pagination.
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    (body.dimensionHeaders !== undefined &&
+      (!Array.isArray(body.dimensionHeaders) ||
+        !body.dimensionHeaders.every(
+          (header) => header !== null && typeof header === "object" &&
+            typeof header.name === "string",
+        ))) ||
+    (body.rows !== undefined &&
+      (!Array.isArray(body.rows) ||
+        !body.rows.every(
+          (row) => row !== null && typeof row === "object" && !Array.isArray(row) &&
+            (row.dimensionValues === undefined ||
+              (Array.isArray(row.dimensionValues) &&
+                row.dimensionValues.every((v) => v !== null && typeof v === "object"))) &&
+            (row.metricValues === undefined ||
+              (Array.isArray(row.metricValues) &&
+                row.metricValues.every((v) => v !== null && typeof v === "object"))),
+        )))
+  ) {
+    throw new Error("ga4_report_invalid_shape");
+  }
   return body;
 }
 
