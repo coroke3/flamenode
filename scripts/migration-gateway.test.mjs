@@ -12,11 +12,34 @@ import {
   PUBLIC_ASSET_FILES,
   ROUTE_SHARD_COUNT,
   buildRouteShards,
+  isValidResolution,
   revocationKey,
   routeKeyFromPath,
   shardAssetPath,
   shardIndexForKey,
 } from "../apps/site/src/gateway/routeShards.ts";
+
+test("gateway rejects shard destinations whose URL paths normalize after validation", () => {
+  const redirect = (targetPath) => ({ type: "redirect", targetPath, status: 308, reason: "alias" });
+  const canonical = (canonicalPath) => ({
+    type: "canonical", kind: "video", id: "safe_video", canonicalPath,
+  });
+  for (const destination of [
+    "/groups/../admin", "/groups/./video", "/groups/..", "/groups/.",
+    "/groups/%2e%2e/admin", "/groups/%2E/admin", "/groups/%2fadmin",
+    "/groups/%5cadmin",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), false, destination);
+    assert.equal(isValidResolution(canonical(destination)), false, destination);
+  }
+  for (const destination of [
+    "/video-safe", "/user/creator.alpha", "/event#event-group-slug",
+    "/user/%E3%81%82",
+  ]) {
+    assert.equal(isValidResolution(redirect(destination)), true, destination);
+    assert.equal(isValidResolution(canonical(destination)), true, destination);
+  }
+});
 
 const GENERATION = "gen-2026-10-17-001";
 
