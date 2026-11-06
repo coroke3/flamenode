@@ -203,6 +203,7 @@ test("legacy imported public URLs do not retain embedded credentials", () => {
       eventid: "legacy-credential-test",
       ychlink: "https://user:secret@youtube.com/@creator",
       ymulink: "https://user:secret@example.com/music",
+      othersns: "https://user:secret@example.com/profile",
       icon: "https://user:secret@example.com/icon.png",
       ylink: "https://youtu.be/abcdefghijk",
     }])),
@@ -211,6 +212,8 @@ test("legacy imported public URLs do not retain embedded credentials", () => {
   assert.equal(plan.videos[0].creator_youtube_channel_url, null);
   assert.equal(plan.videos[0].music_reference_url, null);
   assert.equal(plan.videos[0].creator_icon_url, null);
+  assert.equal(plan.videos[0].creator_other_social_links, null);
+  assert.equal(plan.xUsers.find((x) => x.id === "creator_x")?.other_social_links, null);
 });
 
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
