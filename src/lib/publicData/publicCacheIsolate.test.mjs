@@ -106,6 +106,41 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
   });
 
+  test("isolate cache はthen getterやProxy trapの例外を外へ漏らさない", () => {
+    const now = 1_450_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const getterThrows = Object.defineProperty({}, "then", {
+      get() { throw new Error("getter failed"); },
+    });
+    const inTrapThrows = new Proxy({}, {
+      has(_target, prop) {
+        if (prop === "then") throw new Error("has trap failed");
+        return false;
+      },
+    });
+    const functionGetterThrows = Object.defineProperty(() => undefined, "then", {
+      get() { throw new Error("function getter failed"); },
+    });
+    for (const [i, invalid] of [getterThrows, inTrapThrows, functionGetterThrows].entries()) {
+      resetPublicJsonIsolateCacheForTests();
+      const key = `then-throws/${i}.json`;
+      writePublicJsonIsolateCache("unrelated.json", payload, 30, weight, now);
+      writePublicJsonIsolateCache(key, payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      assert.doesNotThrow(() => {
+        writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      });
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        "rejected replacement must evict the old same-key entry");
+      assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), payload);
+      assert.doesNotThrow(() => {
+        writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      });
+      assert.equal(readPublicJsonIsolateCache(key, now), null);
+    }
+  });
+
   test("isolate cache は直接渡された無効TTLを保持せず既存entryも破棄する", () => {
     const now = 1_500_000;
     const payload = { id: "valid" };
