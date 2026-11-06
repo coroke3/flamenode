@@ -53,8 +53,11 @@ function Avatar({ src, className }: { src: string | null | undefined; className:
 function SignOutButton({ className }: { className: string }): React.ReactElement {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Prevent a second sign-out before React commits the disabled state.
+  const signingOutRef = React.useRef(false);
   const click = async () => {
-    if (pending) return;
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
     setError(null);
     setPending(true);
     try {
@@ -67,6 +70,7 @@ function SignOutButton({ className }: { className: string }): React.ReactElement
     } catch {
       setError("ログアウトに失敗しました。再読み込みしてもう一度お試しください。");
     } finally {
+      signingOutRef.current = false;
       setPending(false);
     }
   };
