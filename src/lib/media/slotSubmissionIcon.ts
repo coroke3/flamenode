@@ -235,7 +235,12 @@ export async function serveSlotSubmissionIconRow(
   if (cache && cacheKey) {
     try {
       const hit = await cache.match(cacheKey);
-      if (hit) return hit;
+      if (hit) {
+        // The Cache API holds only bytes. Do not forward its legacy public TTL.
+        const headers = new Headers(hit.headers);
+        headers.set("cache-control", cacheControl);
+        return new Response(hit.body, { status: hit.status, headers });
+      }
     } catch {
       // cache match failed (best effort)
     }
@@ -264,7 +269,9 @@ export async function serveSlotSubmissionIconRow(
   const response = new Response(obj.body, { headers });
   if (cache && cacheKey) {
     try {
-      await cachePublicResponse(cache, cacheKey, response.clone());
+      const cacheCopy = response.clone();
+      cacheCopy.headers.set("cache-control", "public, max-age=0, s-maxage=604800");
+      await cachePublicResponse(cache, cacheKey, cacheCopy);
     } catch {
       // cache put failed (best effort)
     }

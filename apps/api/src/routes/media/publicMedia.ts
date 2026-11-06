@@ -14,10 +14,12 @@ function safePublicErrorSummary(error: unknown): string {
 
 export const MAX_PUBLIC_MEDIA_BYTES = 5 * 1024 * 1024;
 /**
- * 公開メディア画像はエッジおよびブラウザで効率的にキャッシュし、D1/R2リクエストを抑制する。
+ * URL may stop being public when its owner/event/video is unpublished.
+ * Browsers and shared CDNs must revalidate at the origin on every request.
  */
-export const PUBLIC_MEDIA_CACHE_CONTROL =
-  "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400";
+export const PUBLIC_MEDIA_CACHE_CONTROL = "no-store";
+/** Cache API stores bytes only; every origin hit still performs a fresh D1 ACL check. */
+const PUBLIC_MEDIA_INTERNAL_CACHE_CONTROL = "public, max-age=0, s-maxage=604800";
 
 const PUBLIC_MEDIA_NAMESPACES = [
   "video-icons",
@@ -160,48 +162,14 @@ function getMediaCacheKey(
   }
 }
 
-type MediaAccessCacheEntry = {
-  allowed: boolean;
-  expiresAt: number;
-};
+/**
+ * Compatibility test hook. There is deliberately no isolate ACL cache:
+ * a public -> private transition must be visible to the next origin request.
+ */
+export function clearPublicMediaAccessCacheForTest(): void {}
 
-const ACCESS_CHECK_CACHE_MAX_ENTRIES = 2_000;
-const ACCESS_CHECK_CACHE_TTL_MS = 10 * 60 * 1_000;
-const ACCESS_CHECK_NEGATIVE_CACHE_TTL_MS = 60 * 1_000;
-
-const globalState = globalThis as typeof globalThis & {
-  __flamenodePublicMediaAccessCache?: Map<string, MediaAccessCacheEntry>;
-};
-const accessCache =
-  globalState.__flamenodePublicMediaAccessCache ?? new Map<string, MediaAccessCacheEntry>();
-globalState.__flamenodePublicMediaAccessCache = accessCache;
-
-export function clearPublicMediaAccessCacheForTest(): void {
-  accessCache.clear();
-}
-
-function getCachedAccess(rawKey: string, now: number): boolean | null {
-  const entry = accessCache.get(rawKey);
-  if (!entry) return null;
-  if (entry.expiresAt <= now) {
-    accessCache.delete(rawKey);
-    return null;
-  }
-  return entry.allowed;
-}
-
-function setCachedAccess(rawKey: string, allowed: boolean, now: number): void {
-  while (accessCache.size >= ACCESS_CHECK_CACHE_MAX_ENTRIES) {
-    const firstKey = accessCache.keys().next().value;
-    if (!firstKey) break;
-    accessCache.delete(firstKey);
-  }
-  const ttl = allowed ? ACCESS_CHECK_CACHE_TTL_MS : ACCESS_CHECK_NEGATIVE_CACHE_TTL_MS;
-  accessCache.set(rawKey, { allowed, expiresAt: now + ttl });
-}
-
-/** Cache API hitはCloudflare binding取得やD1/R2照合より前に返す。 */
-export async function getCachedPublicMediaResponse(
+/** Called only AFTER the request's fresh D1 visibility check. Cached bytes are not authorization. */
+async function getCachedPublicMediaResponse(
   request: Request,
   rawKey: string,
 ): Promise<Response | null> {
@@ -226,12 +194,13 @@ export async function getCachedPublicMediaResponse(
         );
       })
     ) {
-      return new Response(null, {
-        status: 304,
-        headers: new Headers(cached.headers),
-      });
+      const headers = new Headers(cached.headers);
+      headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
+      return new Response(null, { status: 304, headers });
     }
-    return cached;
+    const headers = new Headers(cached.headers);
+    headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
+    return new Response(cached.body, { status: cached.status, headers });
   } catch {
     // Cache miss / lookup error, continue to D1/R2 on the origin path.
     return null;
@@ -242,7 +211,7 @@ export async function servePublicMedia(
   env: PublicMediaEnv,
   rawKey: string,
   request?: Request,
-  options?: { skipEdgeCacheLookup?: boolean; waitUntil?: (promise: Promise<unknown>) => void },
+  options?: { waitUntil?: (promise: Promise<unknown>) => void },
 ): Promise<Response> {
   if (!isValidPublicMediaKey(rawKey)) return new Response("Not found", { status: 404 });
 
@@ -252,33 +221,27 @@ export async function servePublicMedia(
   const cache = getEdgeCache();
   const cacheKey = getMediaCacheKey(request, rawKey);
 
-  if (request && !options?.skipEdgeCacheLookup) {
+  // Access status is mutable. A cached 200 or 304 may NEVER bypass this read.
+  const publicUrl = `/api/media/${rawKey}`;
+  let allowed: { allowed: number } | null;
+  try {
+    allowed = await env.DB.prepare(PUBLIC_MEDIA_ACCESS_SQL)
+      .bind(rawKey, namespace, publicUrl)
+      .first<{ allowed: number }>();
+  } catch (error) {
+    console.error(
+      "[public-media] D1 access check failed",
+      safePublicErrorSummary(error),
+    );
+    return mediaUnavailableResponse("Media access check unavailable");
+  }
+  if (allowed?.allowed !== 1) return new Response("Not found", { status: 404 });
+
+  // Reuse immutable image bytes without reusing the cached ACL or public HTTP headers.
+  if (request) {
     const cached = await getCachedPublicMediaResponse(request, rawKey);
     if (cached) return cached;
   }
-
-  const now = Date.now();
-  let isAllowed = getCachedAccess(rawKey, now);
-
-  if (isAllowed === null) {
-    const publicUrl = `/api/media/${rawKey}`;
-    let allowed: { allowed: number } | null = null;
-    try {
-      allowed = await env.DB.prepare(PUBLIC_MEDIA_ACCESS_SQL)
-        .bind(rawKey, namespace, publicUrl)
-        .first<{ allowed: number }>();
-    } catch (error) {
-      console.error(
-        "[public-media] D1 access check failed",
-        safePublicErrorSummary(error),
-      );
-      return mediaUnavailableResponse("Media access check unavailable");
-    }
-    isAllowed = allowed?.allowed === 1;
-    setCachedAccess(rawKey, isAllowed, now);
-  }
-
-  if (!isAllowed) return new Response("Not found", { status: 404 });
 
   let obj: R2ObjectBody | null;
   try {
@@ -320,7 +283,9 @@ export async function servePublicMedia(
   if (cache && cacheKey) {
     try {
       const waitUntil = options?.waitUntil;
-      const putPromise = cache.put(cacheKey, response.clone()).catch(() => undefined);
+      const cacheCopy = response.clone();
+      cacheCopy.headers.set("cache-control", PUBLIC_MEDIA_INTERNAL_CACHE_CONTROL);
+      const putPromise = cache.put(cacheKey, cacheCopy).catch(() => undefined);
       if (waitUntil) {
         waitUntil(putPromise);
       } else {

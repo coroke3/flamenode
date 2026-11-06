@@ -4,11 +4,9 @@ import { test } from "node:test";
 
 const source = await readFile(new URL("./[...key]/route.ts", import.meta.url), "utf8");
 
-test("public media Cache API hit precedes binding lookup and skips a second lookup", () => {
+test("public media never returns cached bytes before binding and D1 authorization", () => {
   assert.match(source, /isValidPublicMediaKey\(rawKey\)/);
-  assert.ok(
-    source.indexOf("getCachedPublicMediaResponse(request, rawKey)") <
-      source.indexOf("getEnv()"),
-  );
-  assert.match(source, /skipEdgeCacheLookup: true/);
+  assert.doesNotMatch(source, /getCachedPublicMediaResponse/);
+  assert.match(source, /getEnv\(\)/);
+  assert.match(source, /servePublicMedia\(env, rawKey, request\)/);
 });
