@@ -1381,6 +1381,10 @@
 
 | `scripts/migration-public-snapshot.test.mjs` | TEST | MIG-0403 public snapshot DTO visibility, strict URL projection and invalid/valid URL regressions | MIG-0403 | SAME (build-time snapshot projection contract) | IN_PROGRESS | PR#585 SHA=b4f80d808fce0b3d0b2d36f1c8476302714ecc35 TEST=node --test --experimental-strip-types scripts/migration-public-snapshot.test.mjs CI=pending (same-origin local URL parsing; control-char offsite regression) |
 
+| `src/components/admin/ModerationFlashNotice.tsx` | HELPER | CURRENT moderation save flash UI: storage read/write handling | MIG-0731 | SAME (CURRENT retained until Ops cutover) | RETAINED | PR#628 SHA=12c1f168a1501da1bdb887c443b907d45e464e12 TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
+| `src/components/admin/moderationFlashNoticeParse.ts` | HELPER | CURRENT moderation sessionStorage notice validation (React-safe data) | MIG-0731 | SAME (CURRENT retained until Ops cutover) | RETAINED | PR#628 SHA=8ba217f2a2d2863a8d43b36c2d6e3734f8eaf494 TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
+| `src/components/admin/moderationFlashNoticeParse.test.mjs` | TEST | CURRENT moderation save flash malformed storage regression | MIG-0731 | SAME | RETAINED | PR#628 SHA=a6379940820fa0f1cc16b1355dfc2dcd462b284b TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -1417,9 +1421,6 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `app/(auth)/dashboard/**` | HELPER | MIG-0701 | dashboard CSS | NOT_STARTED |
 | `app/(auth)/entry/**` | HELPER | MIG-0703 | entry CSS | NOT_STARTED |
 | `app/(auth)/onboarding/**` | HELPER | MIG-0701 | onboarding forms/CSS (reads: MIG-0611) | NOT_STARTED |
-| `src/components/admin/ModerationFlashNotice.tsx` | HELPER | CURRENT moderation save flash UI: storage read/write handling | MIG-0731 | SAME (CURRENT retained until Ops cutover) | RETAINED | PR#628 SHA=12c1f168a1501da1bdb887c443b907d45e464e12 TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
-| `src/components/admin/moderationFlashNoticeParse.ts` | HELPER | CURRENT moderation sessionStorage notice validation (React-safe data) | MIG-0731 | SAME (CURRENT retained until Ops cutover) | RETAINED | PR#628 SHA=8ba217f2a2d2863a8d43b36c2d6e3734f8eaf494 TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
-| `src/components/admin/moderationFlashNoticeParse.test.mjs` | TEST | CURRENT moderation save flash malformed storage regression | MIG-0731 | SAME | RETAINED | PR#628 SHA=a6379940820fa0f1cc16b1355dfc2dcd462b284b TEST=node --test --experimental-strip-types src/components/admin/moderationFlashNoticeParse.test.mjs CI=https://github.com/coroke3/flamenode/pull/628/checks |
 | `src/components/admin/**` | HELPER | MIG-0705 | admin components move to apps/ops | NOT_STARTED |
 | `src/components/auth/**` | HELPER | MIG-0802 | sign-out button (Auth.js) | NOT_STARTED |
 | `src/components/event/**` | HELPER | MIG-0502 | event components to @flamenode/ui / apps/site | NOT_STARTED |
