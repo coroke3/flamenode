@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `workers/ga-analytics/dataApi.ts` | HELPER | GA4 runReport aggregated per-video views must remain exact safe integers | MIG-0627 | SAME | RETAINED | PR#646 SHA=5a098f18bc2438cd0fa19a2b3bbb8b149c55137d TEST=workers/ga-analytics/dataApi.test.mjs CI=https://github.com/coroke3/flamenode/pull/646/checks (latest HEAD pending) |
+| `workers/ga-analytics/dataApi.test.mjs` | TEST | GA4 duplicate row aggregate safe integer boundary and fail-closed overflow | MIG-0627 | SAME | RETAINED | PR#646 SHA=1fb83d5c2b10f36a447458c5858117862e128bca TEST=workers/ga-analytics/dataApi.test.mjs CI=https://github.com/coroke3/flamenode/pull/646/checks (latest HEAD pending) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
