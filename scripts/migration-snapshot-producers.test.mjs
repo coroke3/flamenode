@@ -9,7 +9,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { rebuildTarget } from "../workers/json-generator/rebuild.ts";
 import { buildPublicSite, runBuildCommand } from "../apps/site/scripts/buildPublicSite.ts";
-import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
+import { produceSnapshots, main as snapshotMain, parseSnapshotCliArgs, writeSnapshotDir, wrapSnapshot, sitemapVideoMatchesDetail, limitedDb, LIST_FIRST_PAGE_SIZE, MAX_SNAPSHOT_BYTES } from "../apps/site/scripts/produceSnapshots.ts";
 import {
   loadAboutStatsSnapshot,
   loadListingPayload,
@@ -618,6 +618,50 @@ test("C' budget: statements grow with creators / creatorsPerQuery, not 3 per cre
   assert.ok(ok.report.d1Statements < 110, `batched: ${ok.report.d1Statements} statements for 42 creators`);
   void oracleStatements;
   await assert.rejects(produceSnapshots({ db: readOnly(sqlite, []), mode: "batched", maxRemoteStatements: 10, generation: "g", nowSec: NOW }), /request budget of 10/);
+});
+
+test("SEC-558: snapshot producer read-only fence rejects CTE DML before SQLite can mutate rows", async () => {
+  const sqlite = new DatabaseSync(":memory:");
+  sqlite.exec("CREATE TABLE guard_rows (id INTEGER PRIMARY KEY); INSERT INTO guard_rows (id) VALUES (1)");
+  const counter = { n: 0 };
+  const attempted = [];
+  const source = {
+    prepare(sql) {
+      attempted.push(sql);
+      return {
+        bind(...values) {
+          return {
+            async all() { return { results: sqlite.prepare(sql).all(...values) }; },
+            async first() { return sqlite.prepare(sql).get(...values) ?? null; },
+          };
+        },
+      };
+    },
+  };
+  const guarded = limitedDb(source, counter, 20);
+  const unsafe = [
+    "WITH marker AS (SELECT 1) DELETE FROM guard_rows WHERE id=1 RETURNING id",
+    "WITH marker AS (SELECT 1) UPDATE guard_rows SET id=2 RETURNING id",
+    "WITH marker AS (SELECT 1) INSERT INTO guard_rows (id) VALUES (2) RETURNING id",
+    "PRAGMA user_version",
+    "SELECT 1; DELETE FROM guard_rows",
+    "SELECT load_extension('not-installed')",
+    'SELECT "load_extension"("not-installed")',
+    "SELECT writefile('x', 'y')",
+  ];
+  for (const sql of unsafe) {
+    assert.throws(() => guarded.prepare(sql), /only a single SELECT\/WITH/ , sql);
+  }
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM guard_rows").get().n, 1,
+    "rejected SQL must leave the real SQLite table unchanged");
+  assert.deepEqual(attempted, [], "no rejected SQL may reach the wrapped database");
+  assert.equal(counter.n, 0, "rejected SQL must not consume the remote statement budget");
+
+  const rows = await guarded.prepare("SELECT id FROM guard_rows").bind().all();
+  assert.deepEqual(rows.results, [{ id: 1 }], "ordinary SELECT remains available");
+  assert.deepEqual(attempted, ["SELECT id FROM guard_rows"]);
+  assert.equal(counter.n, 1);
+  sqlite.close();
 });
 
 test("MIG-0509 regression: batched snapshot budget cannot be disabled by invalid numbers", async () => {
