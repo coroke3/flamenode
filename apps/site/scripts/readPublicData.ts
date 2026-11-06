@@ -364,6 +364,26 @@ const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
 // This reader executes fixed SELECTs.
 const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
 
+/** Return true when a quoted SQL identifier is immediately invoked as a function. */
+function followedBySqlCall(source: string, from: number): boolean {
+  let i = from;
+  while (i < source.length) {
+    if (/\\s/.test(source[i]!)) { i++; continue; }
+    if (source[i] === "-" && source[i + 1] === "-") {
+      while (i < source.length && source[i] !== "\\n") i++;
+      continue;
+    }
+    if (source[i] === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) return false;
+      i = end + 2;
+      continue;
+    }
+    return source[i] === "(";
+  }
+  return false;
+}
+
 /** Mask SQL strings, quoted identifiers and comments so literal "UPDATE" text stays readable. */
 function executableSqlOnly(source: string): string | null {
   let code = "";
@@ -384,6 +404,7 @@ function executableSqlOnly(source: string): string | null {
     if (char === "'" || char === '"' || char === "`" || char === "[") {
       const closing = char === "[" ? "]" : char;
       i += 1;
+      const identifierStart = i;
       let closed = false;
       while (i < source.length) {
         if (source[i] === closing) {
@@ -396,7 +417,14 @@ function executableSqlOnly(source: string): string | null {
         i += 1;
       }
       if (!closed) return null;
-      code += " ";
+      // SQLite permits quoted function names: "load_extension"('x'),
+      // [writefile]('x', 'y') and backtick forms all invoke functions.
+      // Preserve only a dangerous quoted identifier when it is called;
+      // quoted column names and harmless string literals stay masked.
+      const quotedName = source.slice(identifierStart, i - 1);
+      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile)$/i.test(quotedName)
+        && followedBySqlCall(source, i);
+      code += forbiddenCall ? ` ${quotedName} ` : " ";
       continue;
     }
     code += char;
