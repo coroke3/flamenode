@@ -21,7 +21,8 @@ export function notificationQuery(filters: NotificationFilters): string {
   if (filters.cat && filters.cat !== "all") params.set("cat", filters.cat);
   if (filters.type.trim()) params.set("type", filters.type.trim());
   if (filters.event.trim()) params.set("event", filters.event.trim());
-  if (filters.q.trim()) params.set("q", truncateNotificationSearch(filters.q));
+  const q = truncateNotificationSearch(filters.q);
+  if (q) params.set("q", q);
   return params.toString();
 }
 
