@@ -205,3 +205,17 @@ test("rate limiter rejects invalid clocks without poisoning other clients or ret
   assert.equal(checkPublicApiRateLimit(request("first"), endpoint, NaN)?.status, 429);
   assert.equal(checkPublicApiRateLimit(request("first"), endpoint, 1), null);
 });
+
+test("503 Retry-After remains a valid decimal delay-seconds for unsafe inputs", () => {
+  for (const invalid of [Number.MAX_SAFE_INTEGER + 1, 1e30, Number.MAX_VALUE]) {
+    const response = publicServiceUnavailableResponse("database_unavailable", invalid);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Retry-After"), "30");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  // Existing valid, fractional and negative input behavior is retained.
+  assert.equal(publicServiceUnavailableResponse("db", 90).headers.get("Retry-After"), "90");
+  assert.equal(publicServiceUnavailableResponse("db", 2.9).headers.get("Retry-After"), "2");
+  assert.equal(publicServiceUnavailableResponse("db", -10).headers.get("Retry-After"), "1");
+  assert.equal(publicServiceUnavailableResponse("db", Number.MAX_SAFE_INTEGER).headers.get("Retry-After"), String(Number.MAX_SAFE_INTEGER));
+});
