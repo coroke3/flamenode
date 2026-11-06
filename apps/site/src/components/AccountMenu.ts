@@ -84,10 +84,14 @@ function useActiveXSwitcher(entries: readonly XIdEntry[], switchActiveX: SwitchA
   const [activeId, setActiveId] = React.useState<string | null>(normalized.find((e) => e.is_active)?.x_user_id ?? null);
   const [error, setError] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
+  // React state updates are not synchronous. Guard a second click in the
+  // same event batch before it can dispatch another switch request.
+  const switchingRef = React.useRef(false);
   React.useEffect(() => {
     setActiveId(normalized.find((e) => e.is_active)?.x_user_id ?? null);
   }, [normalized]);
   const switchTo = async (entry: XIdEntry) => {
+    if (switchingRef.current) return;
     setError(null);
     if (entry.x_user_id === activeId) return onSuccess();
     if (entry.approval_status !== "approved") {
@@ -98,6 +102,7 @@ function useActiveXSwitcher(entries: readonly XIdEntry[], switchActiveX: SwitchA
     const fromXId = activeId;
     const toXId = entry.x_user_id;
     if (!dispatchBeforeActiveXSwitch({ fromXId, toXId })) return;
+    switchingRef.current = true;
     setActiveId(toXId);
     setPending(true);
     try {
@@ -113,6 +118,7 @@ function useActiveXSwitcher(entries: readonly XIdEntry[], switchActiveX: SwitchA
       setActiveId(fromXId);
       setError("X ID の切り替えに失敗しました。");
     } finally {
+      switchingRef.current = false;
       setPending(false);
     }
   };
