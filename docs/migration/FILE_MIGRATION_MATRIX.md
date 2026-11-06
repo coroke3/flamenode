@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `workers/ga-analytics/dataApi.ts` | HELPER | GA4 Data API runReport response type validation before pagination/aggregation | MIG-0627 | SAME | RETAINED | PR#645 SHA=df0d798636643e2540eb31a38293a562a84377db TEST=workers/ga-analytics/dataApi.test.mjs CI=https://github.com/coroke3/flamenode/pull/645/checks (latest HEAD pending) |
+| `workers/ga-analytics/dataApi.test.mjs` | TEST | GA4 HTTP 200 invalid shape and valid empty report regression | MIG-0627 | SAME | RETAINED | PR#645 SHA=197debc70a54b1ffd7b0f318608fcbd55e1b8073 TEST=workers/ga-analytics/dataApi.test.mjs CI=https://github.com/coroke3/flamenode/pull/645/checks (latest HEAD pending) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
