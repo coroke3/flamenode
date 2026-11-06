@@ -116,3 +116,14 @@ test("必須メッセージと要約は日本語ラベルを使う", () => {
     "使用楽曲、YouTube URL",
   );
 });
+
+test("配列風オブジェクトを必須項目として受理せず、Setを維持する", () => {
+  assert.equal(
+    serializeRequiredVideoFields({ 0: "music", length: 1 }),
+    null,
+  );
+  assert.equal(
+    serializeRequiredVideoFields(new Set(["youtube_url", "music"])),
+    JSON.stringify(["music", "youtube_url"]),
+  );
+});
