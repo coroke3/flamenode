@@ -41,11 +41,32 @@ export function parseRetryAfterMs(
   if (/^\d+$/.test(raw)) {
     return Math.min(Number(raw) * 1_000, cap);
   }
-  // HTTP-date uses GMT; do not reinterpret malformed numeric values as dates
-  // (Date.parse("+3") can otherwise succeed on some runtimes).
-  if (!/\bGMT$/i.test(raw)) return null;
+  // Date.parse accepts malformed pseudo-dates like "3 GMT" and rolls Feb 30
+  // into March. Limit inputs to the RFC 9110 HTTP-date wire formats.
+  const imf = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(raw);
+  const rfc850 = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d{2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(raw);
+  const asctime = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([ 0-3]\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(raw);
+  const match = imf ?? rfc850 ?? asctime;
+  if (!match) return null;
   const timestamp = Date.parse(raw);
   if (!Number.isFinite(timestamp)) return null;
+  const date = new Date(timestamp);
+  const day = Number(asctime ? match[2] : match[1]);
+  const monthName = asctime ? match[1] : match[2];
+  const year = Number(asctime ? match[6] : match[3]);
+  const hour = Number(asctime ? match[3] : match[4]);
+  const minute = Number(asctime ? match[4] : match[5]);
+  const second = Number(asctime ? match[5] : match[6]);
+  const months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  // Confirm the date was not silently normalized (e.g. February 30).
+  if (
+    date.getUTCDate() !== day ||
+    date.getUTCMonth() !== months.indexOf(monthName) / 3 ||
+    (rfc850 ? date.getUTCFullYear() % 100 !== year : date.getUTCFullYear() !== year) ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second
+  ) return null;
   return Math.min(Math.max(0, timestamp - now), cap);
 }
 
