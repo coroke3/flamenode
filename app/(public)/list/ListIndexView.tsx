@@ -92,8 +92,9 @@ function listEmptyMessage(
 function parseBoundedPage(value: string): number {
   // URL由来の巨大な数値文字列をparseIntへそのまま渡さない。
   // duplicate/不正値は1へ戻し、Infinity/過大offsetがdegraded D1へ流れることも防ぐ。
-  const raw = value.trim().slice(0, 12);
-  if (!/^\d+$/.test(raw)) return 1;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return 1;
+  const raw = trimmed.slice(0, 12);
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
   return Math.min(parsed, MAX_PAGE);
