@@ -1,4 +1,4 @@
-// MIG-0701 U03: /onboarding states in CURRENT priority order; read-only (no forms, no completion write).
+// MIG-0701 U03 read-only state priority preserved; MIG-0710 U02 adds only the terms acceptance form.
 import assert from "node:assert/strict";
 import test from "node:test";
 import { act } from "react";
@@ -20,7 +20,12 @@ test("terms pending: summary list, default terms when the API has no rules, full
   assert.match(m.container.querySelector("article").getAttribute("aria-label"), /利用規約全文/);
   assert.match(m.container.querySelector("article").textContent, /FlameNode 利用規約/);
   assert.match(m.container.textContent, /利用規約全文を閉じる/);
-  noWrites(m);
+  const form = m.container.querySelector("form");
+  assert.ok(form, "MIG-0710 U02: terms form is now present");
+  const checkbox = form.querySelector('input[type="checkbox"]');
+  assert.ok(checkbox);
+  assert.equal(checkbox.checked, false);
+  assert.equal(form.querySelector('button[type="submit"]').disabled, true);
   await m.unmount();
 });
 

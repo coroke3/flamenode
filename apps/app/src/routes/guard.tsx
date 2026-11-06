@@ -117,23 +117,27 @@ export function useApiResult<T>(
   api: PersonalApi,
   key: string,
   load: (api: PersonalApi, signal: AbortSignal) => Promise<ApiResult<T>>,
+  refreshKey = 0,
 ): DataState<T> {
   const [state, setState] = React.useState<DataState<T>>(LOADING);
   const loadRef = React.useRef(load);
   loadRef.current = load;
+  const shownKey = React.useRef<string | null>(null);
   React.useEffect(() => {
     const ctrl = new AbortController();
-    setState(LOADING);
+    const silent = shownKey.current === key;
+    shownKey.current = key;
+    if (!silent) setState(LOADING);
     loadRef.current(api, ctrl.signal).then(
       (r) => {
-        if (!ctrl.signal.aborted) setState(r);
+        if (!ctrl.signal.aborted && (!silent || r.status === "ok")) setState(r);
       },
       () => {
-        if (!ctrl.signal.aborted) setState({ status: "unavailable" });
+        if (!ctrl.signal.aborted && !silent) setState({ status: "unavailable" });
       },
     );
     return () => ctrl.abort();
-  }, [api, key]);
+  }, [api, key, refreshKey]);
   return state;
 }
 
