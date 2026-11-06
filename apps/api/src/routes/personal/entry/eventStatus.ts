@@ -65,8 +65,10 @@ export function compareEventsByUpcomingPriority(a: EventStatusInput, b: EventSta
   if (groupDiff !== 0) return groupDiff;
   const group = priorityGroup(a, now);
   if (group <= 3) {
-    const startDiff = eventStart(a) - eventStart(b);
-    if (startDiff !== 0) return startDiff;
+    const aStart = eventStart(a);
+    const bStart = eventStart(b);
+    // Both missing dates map to +Infinity; subtracting them would yield NaN.
+    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
   } else {
     const recentDiff = eventRecentTime(b) - eventRecentTime(a);
     if (recentDiff !== 0) return recentDiff;
