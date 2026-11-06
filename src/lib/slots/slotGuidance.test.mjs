@@ -30,6 +30,17 @@ test("overflow, non-finite and sub-second explicit values use a safe inferred in
   assert.equal(resolveSlotIntervalSec({ explicitMinutes: null, slots: [{ start_time: 0 }, { start_time: 100_000 }], partGapSec: Infinity }), null);
 });
 
+test("explicit interval does not coerce runtime strings, booleans or arrays", () => {
+  // The function is also reached through runtime data, not just checked TypeScript.
+  for (const value of ["5", "1", true, false, [5], { valueOf: () => 5 }]) {
+    assert.equal(resolveSlotIntervalSec({ explicitMinutes: value, slots, partGapSec: 900 }), 120,
+      "malformed explicit input must fall back to timestamps: " + String(value));
+    assert.equal(resolveSlotIntervalSec({ explicitMinutes: value, slots: [], partGapSec: 900 }), null,
+      "malformed explicit input without an inferable gap must fail closed");
+  }
+  assert.equal(resolveSlotIntervalSec({ explicitMinutes: 5, slots, partGapSec: 900 }), 300);
+});
+
 test("non-finite or out-of-range guidance never contains NaN or Infinity", () => {
   for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.MAX_VALUE, 86401, 0, -1]) {
     const result = buildConsecutiveSlotGuidance(bad);
