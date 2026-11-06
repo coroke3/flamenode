@@ -213,6 +213,30 @@ if (runUnderRootTsx(import.meta.url)) {
     reset();
   });
 
+  test("SEC-575: スタッフ公開フラグ解除とイベント再公開後に旧キャッシュを再配信しない", async () => {
+    for (const request of [current, hono]) {
+      for (const format of ["v5", "legacy"]) {
+        reset();
+        sqlite.exec("INSERT OR REPLACE INTO event_staff (id, event_id, display_name, role, permission_preset, is_public, created_at, updated_at) VALUES ('staff-575', 'export-event', '機密スタッフ', 'editor', 'manager', 1, 1700000000, 1700000000)");
+        const path = `export-event?format=${format}&update=scheduled&refresh=1440`;
+        const first = await request(path);
+        assert.equal(first.status, 200);
+        assert.match(await first.text(), /機密スタッフ/);
+        await Promise.all(globalThis.__eventExport.pending);
+        sqlite.exec("UPDATE event_staff SET is_public=0 WHERE id='staff-575'");
+        const revoked = await request(path);
+        assert.equal(revoked.status, 200);
+        assert.doesNotMatch(await revoked.text(), /機密スタッフ/);
+        sqlite.exec("UPDATE events SET visibility_status='private' WHERE id='export-event'");
+        assert.equal((await request(path)).status, 404);
+        sqlite.exec("UPDATE events SET visibility_status='public' WHERE id='export-event'");
+        assert.doesNotMatch(await (await request(path)).text(), /機密スタッフ/);
+        sqlite.exec("DELETE FROM event_staff WHERE id='staff-575'");
+      }
+    }
+    reset();
+  });
+
   test("T04: corrupt legacy cache is evicted; MISS regenerates from D1", async () => {
     reset();
     const key = "public-event-export:9:export-event:legacy:60";
