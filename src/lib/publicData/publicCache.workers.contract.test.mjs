@@ -7,8 +7,9 @@ const source = await readFile(new URL("./publicCache.ts", import.meta.url), "utf
 test("public cache best-effort writeはwaitUntil無しでCache API I/Oを開始しない", () => {
   const fnStart = source.indexOf("export function writePublicJsonCacheBestEffort");
   const isolateWriteIndex = source.indexOf("writePublicJsonIsolateCache(", fnStart);
+  // Reject oversized isolate entries before the write, while allowing edge caching.
   const isolateByteGuardIndex = source.indexOf(
-    "isolateByteWeight !== null",
+    "if (isolateByteWeight === null)",
     fnStart,
   );
   const waitUntilIndex = source.indexOf("const waitUntil = resolveWaitUntil()", fnStart);
@@ -27,6 +28,19 @@ test("Cache API read は isolate 解析キャッシュを先に見る", () => {
   const isolateRead = source.indexOf("readPublicJsonIsolateCache(r2Key)", fnStart);
   const matchIndex = source.indexOf("cache.match(", fnStart);
   assert.ok(isolateRead > fnStart && matchIndex > isolateRead);
+});
+
+test("Cache API read bypassIsolate は isolate に再登録しない", () => {
+  const start = source.indexOf("export async function readPublicJsonCache");
+  const end = source.indexOf("export function writePublicJsonCacheBestEffort", start);
+  assert.ok(start >= 0 && end > start);
+  const reader = source.slice(start, end);
+  assert.match(reader, /options\?\.bypassIsolate\s*\?\s*null\s*:\s*readPublicJsonIsolateCache\(r2Key\)/);
+  assert.match(
+    reader,
+    /if \(!options\?\.bypassIsolate\) \{\s*writePublicJsonIsolateCache\(\s*r2Key,\s*parsed\.value,/,
+  );
+  assert.match(reader, /return parsed\.value/);
 });
 
 test("Cache API delete は isolate エントリも落とす", async () => {
