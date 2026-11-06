@@ -105,13 +105,19 @@ export function exponentialBackoffMs(
     jitterMs?: number;
   },
 ): number {
-  const maxDelay = Math.max(0, Math.floor(options.maxDelayMs));
-  if (options.retryAfterMs != null) {
+  // Keep malformed configuration/provider values from producing NaN or
+  // unbounded sleep durations. Ignore a non-finite provider override.
+  const maxDelay = Number.isFinite(options.maxDelayMs)
+    ? Math.max(0, Math.floor(options.maxDelayMs)) : 0;
+  if (options.retryAfterMs != null && Number.isFinite(options.retryAfterMs)) {
     return Math.min(maxDelay, Math.max(0, Math.floor(options.retryAfterMs)));
   }
-  const base = Math.max(1, Math.floor(options.baseMs ?? 1_000));
-  const jitter = Math.max(0, Math.floor(options.jitterMs ?? 0));
-  return Math.min(maxDelay, base * 2 ** Math.max(0, attempt) + jitter);
+  const base = Number.isFinite(options.baseMs ?? 1_000)
+    ? Math.max(1, Math.floor(options.baseMs ?? 1_000)) : 1_000;
+  const jitter = Number.isFinite(options.jitterMs ?? 0)
+    ? Math.max(0, Math.floor(options.jitterMs ?? 0)) : 0;
+  const boundedAttempt = Number.isFinite(attempt) ? Math.max(0, Math.floor(attempt)) : 0;
+  return Math.min(maxDelay, base * 2 ** boundedAttempt + jitter);
 }
 
 export async function delay(ms: number): Promise<void> {
