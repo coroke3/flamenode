@@ -146,7 +146,9 @@ export function parsePlaylistSettings(value: Record<string, unknown>):
   }
   if (raw && !playlistId) return { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" };
   if (mode !== "off" && !playlistId) return { ok: false, message: "同期を有効にするには再生リストURLまたはIDが必要です。" };
-  const inputInterval = Number(String(value.sync_interval_minutes ?? "720"));
+  const intervalRaw = String(value.sync_interval_minutes ?? "720");
+  // Match CURRENT: a blank field uses the default, while explicit 0 clamps to 60.
+  const inputInterval = intervalRaw.trim() ? Number(intervalRaw) : NaN;
   const interval = Number.isInteger(inputInterval)
     ? Math.min(10080, Math.max(60, inputInterval)) : 720;
   return { ok: true, playlistId, mode, interval };
