@@ -177,6 +177,29 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("isolate cache は保存時刻より過去への時計巻き戻りで古いentryを破棄する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 2_600_000;
+    const payload = { id: "fresh" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "clock-rollback.json";
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+    // Valid integer clock values before the write must not extend the TTL.
+    assert.equal(readPublicJsonIsolateCache(key, now - 1), null);
+    // The entry must have been evicted, not merely hidden for one read.
+    assert.equal(readPublicJsonIsolateCache(key, now + 1), null);
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now + 29_999), payload);
+    assert.equal(readPublicJsonIsolateCache(key, now + 30_000), null);
+
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("unrelated.json", payload, 30, weight, now - 100);
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now - 50), null);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now - 50), payload);
+  });
+
   test("isolate cache は小数・負数・unsafe整数の読み取りでLRUを更新しない", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 2_750_000;
