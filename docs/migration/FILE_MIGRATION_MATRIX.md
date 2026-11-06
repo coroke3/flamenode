@@ -23,6 +23,8 @@
 
 | CURRENT path (exact) | Kind | Route / RH / SA linkage | First owner MIG | Target / bridge (candidate unless proven) | File state | PR / tests / evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| `workers/ga-analytics/auth.ts` | HELPER | GA4 OAuth access-token exchange response validation (Worker retained) | MIG-0627 | SAME (worker OAuth token exchange) | RETAINED | PR#643 SHA=c94847449080d32caf1fe26dc711c1d67dd495fe TEST=workers/ga-analytics/auth.test.mjs CI=https://github.com/coroke3/flamenode/pull/643/checks (latest HEAD pending; null/invalid response handling) |
+| `workers/ga-analytics/auth.test.mjs` | TEST | GA4 OAuth response JSON type and missing-token regression | MIG-0627 | SAME | RETAINED | PR#643 SHA=0e3b2b57e632fc766147dc68dc86257c81cdfb95 TEST=workers/ga-analytics/auth.test.mjs CI=https://github.com/coroke3/flamenode/pull/643/checks (latest HEAD pending) |
 | `app/(admin)/admin/announcements/[id]/edit/page.tsx` | PAGE | /admin/announcements/[id]/edit (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/[id]/edit; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/new/page.tsx` | PAGE | /admin/announcements/new (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements/new; exact component TBD) | NOT_STARTED | — |
 | `app/(admin)/admin/announcements/page.tsx` | PAGE | /admin/announcements (VISUAL_SCREEN) | MIG-0705 | apps/ops (route=/admin/announcements; exact component TBD) | NOT_STARTED | — |
