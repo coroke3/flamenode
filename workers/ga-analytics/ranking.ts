@@ -114,7 +114,14 @@ export function rankTrendingItems(
   const ranked: TrendingItem[] = [];
 
   for (const period of periods) {
-    if (period.views_30d < 1) continue;
+    // JSON.stringify turns NaN/Infinity into null. Never publish an invalid
+    // metric that would make the whole R2 ranking unreadable to consumers.
+    if (
+      !Number.isSafeInteger(period.views_2d) || period.views_2d < 0 ||
+      !Number.isSafeInteger(period.views_5d) || period.views_5d < 0 ||
+      !Number.isSafeInteger(period.views_7d) || period.views_7d < 0 ||
+      !Number.isSafeInteger(period.views_30d) || period.views_30d < 1
+    ) continue;
     const base = recentById.get(period.video_id);
     if (!base) continue;
     ranked.push({
