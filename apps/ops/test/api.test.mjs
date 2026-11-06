@@ -120,7 +120,8 @@ test("fix(ops): non-2xx HTTP status must not accept an ok:true write body", asyn
   assert.deepEqual(await send(async () => jsonResponse(401, guard), "POST", "/api/admin/test"),
     { status: "anonymous" }, "401 must override even a valid ok:false guard body");
   assert.deepEqual(await send(async () => jsonResponse(401, { ok: false }), "POST", "/api/admin/test"),
-    { status: "anonymous" });});
+    { status: "anonymous" });
+});
 
 test("MIG-0707 T05: send 401 without ok, invalid JSON and network errors", async () => {
   assert.deepEqual(await send(async () => new Response("", { status: 401 }), "POST", "/api/ops"),
