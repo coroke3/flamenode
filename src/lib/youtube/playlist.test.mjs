@@ -49,4 +49,9 @@ test("playlist sync mode and interval are bounded", () => {
   assert.equal(parsePlaylistSyncInterval("720"), 720);
   assert.equal(parsePlaylistSyncInterval("20000"), 10080);
   assert.equal(parsePlaylistSyncInterval("invalid"), 720);
+  assert.equal(parsePlaylistSyncInterval(""), 720);
+  assert.equal(parsePlaylistSyncInterval("   "), 720);
+  assert.equal(parsePlaylistSyncInterval(null), 720);
+  assert.equal(parsePlaylistSyncInterval(undefined), 720);
+  assert.equal(parsePlaylistSyncInterval("0"), 60);
 });
