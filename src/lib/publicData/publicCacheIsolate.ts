@@ -69,7 +69,16 @@ export function readPublicJsonIsolateCache(
   deleteEntry(r2Key);
   isolateJsonCache.set(r2Key, entry);
   isolateJsonCacheBytes += entry.byteWeight;
-  return entry.value;
+  try {
+    // An isolate serves concurrent requests. Never expose its mutable JSON
+    // snapshot to a caller that can change the next request's cache hit.
+    return structuredClone(entry.value);
+  } catch {
+    // Cached data must remain best-effort even if an unexpected value cannot
+    // be cloned; do not repeatedly serve the same unusable entry.
+    deleteEntry(r2Key);
+    return null;
+  }
 }
 
 export function writePublicJsonIsolateCache(
@@ -126,8 +135,17 @@ export function writePublicJsonIsolateCache(
     if (isolateJsonCache.size === 0) return;
     evictOldestEntry();
   }
+  // Detach direct callers' mutable input from the process-global snapshot.
+  // Production callers supply already JSON-parsed plain data; malformed
+  // values (functions, Proxy, bindings) are uncacheable.
+  let snapshot: unknown;
+  try {
+    snapshot = structuredClone(payload);
+  } catch {
+    return;
+  }
   isolateJsonCache.set(r2Key, {
-    value: payload,
+    value: snapshot,
     createdAtMs: nowMs,
     expiresAtMs,
     byteWeight,
