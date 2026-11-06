@@ -148,7 +148,12 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
         return { status: "failed" };
       }
       const presence = url === "/api/account/summary?view=presence";
-      if (presence && value.view !== "presence") return { status: "failed" };
+      // RH-001 has a view marker only on the lightweight presence endpoint.
+      // A presence-shaped logged-out payload on the full endpoint must not
+      // silently sign the header out when the server returns the wrong view.
+      if (presence ? value.view !== "presence" : value.view !== undefined) {
+        return { status: "failed" };
+      }
       if (!presence && value.loggedIn && (
         (value.role !== "user" && value.role !== "admin" && value.role !== "moderator") ||
         (value.activeXId !== null && typeof value.activeXId !== "string") ||
