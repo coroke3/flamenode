@@ -1,5 +1,4 @@
 import type { eventCustomQuestions } from "@/lib/db/schema";
-import { MAX_GENERAL_CUSTOM_QUESTIONS } from "@/lib/event/eventLimits";
 import type { EventGeneralCustomQuestionDraft } from "@/lib/event/generalCustomQuestionDraft";
 import { generateId } from "@/lib/utils/id";
 import { isStagePermissionQuestionKey } from "@/lib/video/formSettings";
@@ -12,16 +11,7 @@ import {
 
 export type PlannedCustomQuestion = typeof eventCustomQuestions.$inferInsert;
 
-export function resolveGeneralCustomQuestionCap(args: {
-  existingCount: number;
-  templateCount: number;
-}): number {
-  return Math.max(
-    MAX_GENERAL_CUSTOM_QUESTIONS,
-    args.existingCount,
-    args.templateCount,
-  );
-}
+export { resolveGeneralCustomQuestionCap } from "@flamenode/domain/event";
 
 export function plannedGeneralQuestionsFromDrafts(args: {
   eventId: string;

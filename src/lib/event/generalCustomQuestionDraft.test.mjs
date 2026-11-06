@@ -14,6 +14,10 @@ const limitsSource = await readFile(
   new URL("../../../packages/domain/src/event/limits.ts", import.meta.url),
   "utf8",
 );
+const capSource = await readFile(
+  new URL("../../../packages/domain/src/event/generalQuestionCap.ts", import.meta.url),
+  "utf8",
+);
 
 test("empty draft factory avoids stage_permission keys and defaults to textarea", () => {
   assert.match(draftSource, /question_key: `q_\$\{suffix\}`/);
@@ -38,5 +42,6 @@ test("planned rows require options for choice types and keep review visibility",
 
 test("cap never goes below MAX_GENERAL_CUSTOM_QUESTIONS", () => {
   assert.match(limitsSource, /MAX_GENERAL_CUSTOM_QUESTIONS = 4/);
-  assert.match(planSource, /Math\.max\(\s*MAX_GENERAL_CUSTOM_QUESTIONS/);
+  assert.match(capSource, /Math\.max\(\s*MAX_GENERAL_CUSTOM_QUESTIONS/);
+  assert.match(planSource, /export \{ resolveGeneralCustomQuestionCap \} from "@flamenode\/domain\/event"/);
 });
