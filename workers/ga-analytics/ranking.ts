@@ -93,7 +93,13 @@ function buildRecentItemMap(recent: RecentListPayload): Map<string, TrendingItem
   if (!Array.isArray(recent.items)) return map;
   for (const item of recent.items) {
     const normalized = normalizeRecentItem(item);
-    if (normalized) map.set(normalized.id, normalized);
+    if (!normalized) continue;
+    // The D1 source is unique by id. Reject malformed duplicate public rows
+    // rather than silently publishing the later row's metadata.
+    if (map.has(normalized.id)) {
+      throw new Error("ga4_recent_duplicate_public_video_id");
+    }
+    map.set(normalized.id, normalized);
   }
   return map;
 }
