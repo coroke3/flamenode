@@ -44,7 +44,7 @@ import {
   checkOpenNextOutput,
   writeBuildManifest,
 } from "./check-open-next-output.mjs";
-import { runSmoke, smokeEnvironment } from "./smoke-cloudflare.mjs";
+import { degradedRetryOptions, propagationRequestOptions, runSmoke, smokeEnvironment } from "./smoke-cloudflare.mjs";
 import {
   computeStaticGeneratorHash,
   STATIC_GENERATOR_ROOTS,
@@ -53,6 +53,32 @@ import {
   isWorkersCi,
   rejectBareWorkersCiWranglerDeploy,
 } from "./cloudflare-production.mjs";
+
+test("smoke retry config requires complete safe decimal integers (not numeric prefixes)", () => {
+  const functions = [
+    [propagationRequestOptions, "SMOKE_PROPAGATION_ATTEMPTS", "SMOKE_PROPAGATION_DELAY_MS", 60, 2000],
+    [degradedRetryOptions, "SMOKE_DEGRADED_ATTEMPTS", "SMOKE_DEGRADED_DELAY_MS", 60, 2000],
+  ];
+  for (const [parse, countName, delayName, defaultCount, defaultDelay] of functions) {
+    assert.deepEqual(parse({ [countName]: "3", [delayName]: "0" }), { attempts: 3, retryDelayMs: 0 });
+    assert.deepEqual(parse({ [countName]: " 03 ", [delayName]: " 25 " }), { attempts: 3, retryDelayMs: 25 });
+    for (const bad of ["3abc", "0.5", "1e3", "0x10", "-1", "+3", "9007199254740993", "Infinity", ""]) {
+      const result = parse({ [countName]: bad, [delayName]: bad });
+      assert.deepEqual(result, { attempts: defaultCount, retryDelayMs: defaultDelay }, bad);
+    }
+    // Both settings must be bounded even if the integer is otherwise safe:
+    // setTimeout(Number.MAX_SAFE_INTEGER) becomes an effective 1 ms delay in Node.
+    for (const excessive of ["1001", "9007199254740991"]) {
+      assert.equal(parse({ [countName]: excessive }).attempts, defaultCount, excessive);
+    }
+    for (const excessive of ["600001", "2147483648", "9007199254740991"]) {
+      assert.equal(parse({ [delayName]: excessive }).retryDelayMs, defaultDelay, excessive);
+    }
+    assert.deepEqual(parse({ [countName]: "1000", [delayName]: "600000" }), { attempts: 1000, retryDelayMs: 600000 });
+    assert.deepEqual(parse({ [countName]: "0", [delayName]: "0" }), { attempts: defaultCount, retryDelayMs: 0 });
+    assert.deepEqual(parse({ [countName]: "2", [delayName]: "1" }, { attempts: 1, retryDelayMs: 5 }), { attempts: 1, retryDelayMs: 5 });
+  }
+});
 
 const root = path.resolve(import.meta.dirname, "..");
 const COMMIT = "1234567890abcdef1234567890abcdef12345678";
