@@ -263,6 +263,25 @@ test("MIG-0718 U02 T02: late async response from previous API never overwrites n
   await m.unmount();
 });
 
+test("MIG-0718 U02: unmount before the queued microtask never invokes banner API", async () => {
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  let called = 0;
+  const api = {
+    getBanner() {
+      called++;
+      throw new Error("stale fetch must not be started");
+    },
+  };
+  // Synchronous act flushes mount/effect, but the Promise.resolve().then()
+  // callback remains queued until after cleanup has aborted the signal.
+  act(() => root.render(React.createElement(CostGuardBanner, { api })));
+  act(() => root.unmount());
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(called, 0, "unmount must prevent a subsequently queued API call");
+});
+
 test("MIG-0718 U02 T02: abort on unmount; no non-normal response after cleanup", async () => {
   let resolvePending, signal;
   const api = { getBanner: (s) => {
