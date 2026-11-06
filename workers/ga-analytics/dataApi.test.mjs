@@ -229,6 +229,15 @@ test("fetchVideoViewPeriods rejects malformed HTTP 200 JSON shapes deterministic
     { dimensionHeaders: [{ name: "dateRange" }], rows: [null] },
     { dimensionHeaders: [{ name: "dateRange" }], rows: [{ dimensionValues: "wrong" }] },
     { dimensionHeaders: [{ name: "dateRange" }], rows: [{ metricValues: [null] }] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: 123 }, { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: "video-a" }, { value: "last_30" }], metricValues: [{ value: 5 }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [[], { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
   ];
   for (const payload of malformed) {
     await assert.rejects(
