@@ -68,9 +68,10 @@ test("public cache write は非JSON値とUTF-8 byte上限超過entryを作らな
   assert.ok(putIndex > byteGuardIndex);
   assert.match(source, /function utf8ByteLengthExceeds/);
   assert.match(source, /utf8ByteLengthUpTo,/);
-  assert.match(source, /utf8ByteLengthUpTo\(\s*serialized,/);});
+  assert.match(source, /utf8ByteLengthUpTo\(\s*serialized,/);
+});
 
-test("UTF-16 code unit の3倍をbyte上限の安全な上界として扱える", () => {
+test("UTF-16 code unit の3倍はUTF-8バイト数の安全な上界である", () => {
   const limit = 60;
   const maxCodeUnits = Math.floor(limit / 3);
   const values = [
