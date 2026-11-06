@@ -60,6 +60,9 @@ function normalizeUnix(value: unknown): number | null {
 function normalizeRecentItem(value: unknown): TrendingItem | null {
   if (!value || typeof value !== "object") return null;
   const row = value as RecentRow;
+  // Do not relabel malformed or nonpublic source rows as public. The D1
+  // reader normally enforces visibility; the ranking boundary must too.
+  if (row.status !== "public") return null;
   const id = normalizeString(row.id);
   const title = normalizeString(row.title);
   if (!id || !title) return null;
@@ -90,7 +93,13 @@ function buildRecentItemMap(recent: RecentListPayload): Map<string, TrendingItem
   if (!Array.isArray(recent.items)) return map;
   for (const item of recent.items) {
     const normalized = normalizeRecentItem(item);
-    if (normalized) map.set(normalized.id, normalized);
+    if (!normalized) continue;
+    // The D1 source is unique by id. Reject malformed duplicate public rows
+    // rather than silently publishing the later row's metadata.
+    if (map.has(normalized.id)) {
+      throw new Error("ga4_recent_duplicate_public_video_id");
+    }
+    map.set(normalized.id, normalized);
   }
   return map;
 }
@@ -109,11 +118,25 @@ export function rankTrendingItems(
 ): TrendingItem[] {
   const recentById = buildRecentItemMap(recent);
   const ranked: TrendingItem[] = [];
+  const rankedIds = new Set<string>();
 
   for (const period of periods) {
-    if (period.views_30d < 1) continue;
+    // JSON.stringify turns NaN/Infinity into null. Never publish an invalid
+    // metric that would make the whole R2 ranking unreadable to consumers.
+    if (
+      !Number.isSafeInteger(period.views_2d) || period.views_2d < 0 ||
+      !Number.isSafeInteger(period.views_5d) || period.views_5d < 0 ||
+      !Number.isSafeInteger(period.views_7d) || period.views_7d < 0 ||
+      !Number.isSafeInteger(period.views_30d) || period.views_30d < 1
+    ) continue;
     const base = recentById.get(period.video_id);
     if (!base) continue;
+    // The Data API aggregates one row per video. If a different caller
+    // supplies duplicates, fail closed instead of publishing duplicate ranks.
+    if (rankedIds.has(base.id)) {
+      throw new Error("ga4_trending_duplicate_video_id");
+    }
+    rankedIds.add(base.id);
     ranked.push({
       ...base,
       views_2d: period.views_2d,
