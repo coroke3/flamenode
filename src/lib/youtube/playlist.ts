@@ -36,6 +36,8 @@ export function parsePlaylistSyncMode(raw: string | null | undefined): PlaylistS
 }
 
 export function parsePlaylistSyncInterval(raw: string | null | undefined): number {
+  // An empty form field is omitted input, not a request for the 60-minute minimum.
+  if (raw == null || raw.trim() === "") return 720;
   const value = Number(raw);
   if (!Number.isInteger(value)) return 720;
   return Math.min(10080, Math.max(60, value));
