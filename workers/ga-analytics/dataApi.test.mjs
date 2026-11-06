@@ -216,3 +216,53 @@ test("formatGa4QuotaLogFields: remaining をログ用フィールドへ変換", 
   );
   assert.deepEqual(formatGa4QuotaLogFields(null), {});
 });
+
+test("fetchVideoViewPeriods rejects malformed HTTP 200 JSON shapes deterministically", async () => {
+  const malformed = [
+    null,
+    [],
+    42,
+    true,
+    { dimensionHeaders: "invalid", rows: [] },
+    { dimensionHeaders: [null], rows: [] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: {} },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [null] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [{ dimensionValues: "wrong" }] },
+    { dimensionHeaders: [{ name: "dateRange" }], rows: [{ metricValues: [null] }] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: 123 }, { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [{ value: "video-a" }, { value: "last_30" }], metricValues: [{ value: 5 }] },
+    ] },
+    { dimensionHeaders: ga4ReportBody([]).dimensionHeaders, rows: [
+      { dimensionValues: [[], { value: "last_30" }], metricValues: [{ value: "5" }] },
+    ] },
+  ];
+  for (const payload of malformed) {
+    await assert.rejects(
+      () => fetchVideoViewPeriods(
+        ga4Env(),
+        new ExternalRequestBudget(2),
+        async () => new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+      { message: "ga4_report_invalid_shape" },
+      `payload=${JSON.stringify(payload)}`,
+    );
+  }
+});
+
+test("fetchVideoViewPeriods preserves a valid empty report", async () => {
+  const result = await fetchVideoViewPeriods(
+    ga4Env(),
+    new ExternalRequestBudget(2),
+    async () => new Response(JSON.stringify(ga4ReportBody([])), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+  );
+  assert.deepEqual(result.periods, []);
+});
