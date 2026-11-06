@@ -87,6 +87,25 @@ if (runTestWithTsx(import.meta.url)) {
     assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
   });
 
+  test("isolate cache は関数型thenableも保存せず旧entryを破棄する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_375_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "callable-thenable.json";
+    const thenable = Object.assign(() => undefined, {
+      then: (resolve) => resolve({ id: "async" }),
+    });
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+    writePublicJsonIsolateCache(key, thenable, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+    writePublicJsonIsolateCache(key, thenable, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+    writePublicJsonIsolateCache("valid.json", payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
+  });
+
   test("isolate cache は直接渡された無効TTLを保持せず既存entryも破棄する", () => {
     const now = 1_500_000;
     const payload = { id: "valid" };
