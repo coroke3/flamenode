@@ -35,11 +35,16 @@ export function parseRetryAfterMs(
 ): number | null {
   if (!value) return null;
   const cap = Math.max(0, Math.floor(maxDelayMs));
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
-    return Math.min(seconds * 1_000, cap);
+  // RFC 9110 delta-seconds is one or more decimal digits. Number() also accepts
+  // fractions, exponents, signs, hex and whitespace-only strings.
+  const raw = value.trim();
+  if (/^\\d+$/.test(raw)) {
+    return Math.min(Number(raw) * 1_000, cap);
   }
-  const timestamp = Date.parse(value);
+  // HTTP-date uses GMT; do not reinterpret malformed numeric values as dates
+  // (Date.parse("+3") can otherwise succeed on some runtimes).
+  if (!/\\bGMT$/i.test(raw)) return null;
+  const timestamp = Date.parse(raw);
   if (!Number.isFinite(timestamp)) return null;
   return Math.min(Math.max(0, timestamp - now), cap);
 }
