@@ -902,6 +902,7 @@ test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empt
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, title: undefined }] },
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, views_2d: undefined }] },
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, video_id: "different-id" }] },
+      { schema_version: 1, generated_at: 1_700_000_000, items: [validItem, { ...validItem, rank: 2 }] },
     ]) {
       const prior = JSON.stringify(previous);
       let reads = 0;
