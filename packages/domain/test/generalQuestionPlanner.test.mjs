@@ -86,6 +86,21 @@ test("MIG-0652 U01: 50 option cap, truncation/dedupe, and scalar limits", () => 
   assert.equal(result.rows[1].options_json,null);
 });
 
+test("MIG-0652 U01: 200 UTF-16 unit cap removes orphan high surrogate exactly as CURRENT", () => {
+  const splitEmoji = "a".repeat(199) + "😀"; // 201 units: slice(0,200) cuts emoji.
+  const intactEmoji = "b".repeat(198) + "😀"; // Exactly 200 units.
+  const { result } = plan([draft({
+    type: "checkbox",
+    options: [splitEmoji, splitEmoji, intactEmoji],
+  })]);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(JSON.parse(result.rows[0].options_json), [
+    "a".repeat(199),
+    intactEmoji,
+  ]);
+});
+
 test("MIG-0652 U01: CURRENT wrapper remains ID-injected Drizzle adapter", async () => {
   const source=await readFile(new URL("../../../src/lib/event/generalCustomQuestionPlan.ts",import.meta.url),"utf8");
   assert.ok(source.includes("plannedGeneralQuestionsFromDraftsCore"));
