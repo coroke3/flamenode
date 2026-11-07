@@ -130,14 +130,10 @@ test("MIG-0722 U02a: malformed video ID cannot crash the slot list or hide other
   const html = render(React.createElement(SlotList, {
     eventId: "ev id",
     slots: [
-      slot("broken-high", { video_id: "\\uD800" }),
-      slot("broken-low", { video_id: "\\uDC00" }),
+      slot("broken-high", { video_id: "\uD800" }),
+      slot("broken-low", { video_id: "\uDC00" }),
       slot("good", { video_id: "video/a?&" }),
-    ].map(row => ({
-      ...row,
-      video_id: row.video_id === "\\uD800" ? "\uD800"
-        : row.video_id === "\\uDC00" ? "\uDC00" : row.video_id,
-    })),
+    ],
     partGapMinutes: 15,
     parts: [],
   }));
