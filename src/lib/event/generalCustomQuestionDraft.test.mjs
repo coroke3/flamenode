@@ -25,10 +25,10 @@ const draftDomainSource = await readFile(
 );
 
 test("MIG-0652 U01: custom-question projection uses a domain bridge", () => {
-  assert.match(draftSource, /export \\{ customQuestionToDraft \\} from "@flamenode\\/domain\\/event"/);
-  assert.doesNotMatch(draftSource, /export function customQuestionToDraft\\(/);
-  assert.match(draftDomainSource, /export function customQuestionToDraft\\(/);
-  assert.doesNotMatch(draftDomainSource, /from ["']@\\//);
+  assert.ok(draftSource.includes('export { customQuestionToDraft } from "@flamenode/domain/event";'));
+  assert.ok(!draftSource.includes("export function customQuestionToDraft("));
+  assert.ok(draftDomainSource.includes("export function customQuestionToDraft("));
+  assert.ok(!draftDomainSource.includes('from "@/'));
 });
 
 test("empty draft factory avoids stage_permission keys and defaults to textarea", () => {
