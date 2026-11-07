@@ -51,11 +51,11 @@ function fakeR2(initial = null) {
 
 test("MIG-0652 U02 T01: absent BUCKET and unconditional writes fail closed", async () => {
   const host = createEventVisibilityFenceHost({});
-  await assert.rejects(host.manifest.read(), /public_visibility_manifest_bucket_missing/);
-  await assert.rejects(host.manifest.write(manifest(), { ifMatchEtag: null }), /public_visibility_manifest_bucket_missing/);
+  await assert.rejects(async () => host.manifest.read(), /public_visibility_manifest_bucket_missing/);
+  await assert.rejects(async () => host.manifest.write(manifest(), { ifMatchEtag: null }), /public_visibility_manifest_bucket_missing/);
   const r2 = fakeR2();
   const safe = createEventVisibilityFenceHost({ BUCKET: r2 });
-  await assert.rejects(safe.manifest.write(manifest()), /public_visibility_manifest_cas_required/);
+  await assert.rejects(async () => safe.manifest.write(manifest()), /public_visibility_manifest_cas_required/);
   assert.equal(r2.calls.length, 0);
 });
 
