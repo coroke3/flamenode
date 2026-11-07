@@ -20,12 +20,12 @@ import {
   compensateEventVisibilityFenceOnD1Failure,
 } from "@flamenode/server-core/visibility/eventTransition";
 import { buildEventChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
-import type { AppEnv } from "../../env.ts";
-import { BODY_TOO_LARGE_MESSAGE, auditPreloaded, readAdminJsonBody } from "../admin/body.ts";
-import { costGuardMiddleware } from "../../middleware/costGuard.ts";
-import { createEventVisibilityFenceHost } from "../../visibility/eventTransitionHost.ts";
-import { runEventWriteBehindVisibilityFence } from "../../visibility/eventPrecommitGuard.ts";
-import { createEventPostCommitCacheHost } from "../../visibility/eventPostCommitHost.ts";
+import type { AppEnv } from "../env.ts";
+import { BODY_TOO_LARGE_MESSAGE, auditPreloaded, readAdminJsonBody } from "../routes/admin/body.ts";
+import { costGuardMiddleware } from "../middleware/costGuard.ts";
+import { createEventVisibilityFenceHost } from "../visibility/eventTransitionHost.ts";
+import { runEventWriteBehindVisibilityFence } from "../visibility/eventPrecommitGuard.ts";
+import { createEventPostCommitCacheHost } from "../visibility/eventPostCommitHost.ts";
 
 const NO_STORE = "private, no-store";
 const ARCHIVE_PRECOMMIT_FAILURE = "イベント非公開化の安全な反映準備に失敗しました。";
