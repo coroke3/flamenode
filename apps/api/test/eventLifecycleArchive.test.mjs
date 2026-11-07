@@ -52,7 +52,7 @@ test("MIG-0652 U04 SA-024 T06: unmounted router cannot write without parent sess
     body: JSON.stringify({ event_id: "e1", confirm: "e1" }),
   });
   assert.equal(response.status, 403);
-  assert.equal(response.headers.get("cache-control"), null);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.deepEqual(await response.json(), {
     ok: false, message: "操作する権限がありません。",
   });

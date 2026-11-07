@@ -60,6 +60,7 @@ export const eventLifecycleRoutes = new Hono<AppEnv>();
 // Defence-in-depth: if accidentally mounted without the admin parent, do not
 // allow an anonymous or non-admin session to reach a state-changing handler.
 eventLifecycleRoutes.use("*", async (c, next) => {
+  c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user || user.role !== "admin" || !c.get("db")) {
     return c.json({ ok: false, message: "操作する権限がありません。" }, 403);
