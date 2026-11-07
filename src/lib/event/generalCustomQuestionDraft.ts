@@ -1,7 +1,6 @@
 import {
   parseQuestionType,
   normalizeOptionList,
-  type CustomQuestion,
   type CustomQuestionType,
 } from "@/lib/video/customQuestions";
 import { isStagePermissionQuestionKey } from "@/lib/video/formSettings";
@@ -51,21 +50,7 @@ export function createEmptyGeneralCustomQuestion(
   };
 }
 
-export function customQuestionToDraft(
-  question: CustomQuestion,
-): EventGeneralCustomQuestionDraft {
-  return {
-    clientId: question.id,
-    question_key: question.question_key,
-    label: question.label,
-    description: question.description ?? "",
-    type: question.type,
-    required: question.required,
-    options: question.options,
-    placeholder: question.placeholder ?? "",
-    enabled: question.is_active,
-  };
-}
+export { customQuestionToDraft } from "@flamenode/domain/event";
 
 function boolFormValue(value: FormDataEntryValue | undefined): boolean {
   return String(value ?? "") === "1";
