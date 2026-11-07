@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   eventLifecycleRoutes,
   validateEventArchiveRequest,
-} from "../src/routes/events/lifecycle.ts";
+} from "../src/eventLifecycle/archiveRoute.ts";
 
 const accepted = (id, body) => validateEventArchiveRequest(id, body);
 
@@ -59,7 +59,7 @@ test("MIG-0652 U04 SA-024 T06: unmounted router cannot write without parent sess
 });
 
 test("MIG-0652 U04 SA-024 T07: code preserves R2 block -> audited D1 -> cache order", async () => {
-  const source = await readFile(new URL("../src/routes/events/lifecycle.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/eventLifecycle/archiveRoute.ts", import.meta.url), "utf8");
   assert.ok(source.includes('eventLifecycleRoutes.delete("/:eventId"'));
   assert.ok(source.includes('costGuardMiddleware("manage_event_archive")'));
   assert.ok(source.includes("planEventVisibilityTransition({"));
