@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeOptionalEventId } from "@flamenode/domain/event";
 import {
   MAX_SLOTS_PER_VIDEO,
   MIN_SLOTS_PER_VIDEO,
@@ -16,14 +17,8 @@ import {
   normalizeYoutubeDescriptionTemplate,
 } from "@/lib/event/youtubeDescriptionTemplate";
 
-/** URL / route-safe event IDs used for newly-created events and admin rename. */
-export const EVENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-
-function normalizeOptionalEventId(value: unknown): unknown {
-  // EventForm intentionally leaves ID blank to request an auto-generated ID.
-  // Treat the browser's empty string as omitted instead of failing `.min(1)`.
-  return typeof value === "string" && value.trim() === "" ? undefined : value;
-}
+// Retain the CURRENT create/rename import surface while sharing the exact ID rule.
+export { EVENT_ID_PATTERN } from "@flamenode/domain/event";
 
 export const eventSchema = z.object({
   id: z.preprocess(

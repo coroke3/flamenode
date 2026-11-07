@@ -7,3 +7,4 @@ export * from "./dateValidation.ts";
 export * from "./generalQuestionCap.ts";
 export * from "./generalQuestionDraft.ts";
 export * from "./parts.ts";
+export * from "./eventIdInput.ts";
