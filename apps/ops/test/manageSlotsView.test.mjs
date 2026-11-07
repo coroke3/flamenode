@@ -125,3 +125,23 @@ test("MIG-0722 U02a: mounted page starts with a loading guard and no cached priv
   assert.match(html, /aria-busy="true"/);
   assert.doesNotMatch(html, /Example|User|管理者/);
 });
+
+test("MIG-0722 U02a: malformed video ID cannot crash the slot list or hide other valid links", () => {
+  const html = render(React.createElement(SlotList, {
+    eventId: "ev id",
+    slots: [
+      slot("broken-high", { video_id: "\\uD800" }),
+      slot("broken-low", { video_id: "\\uDC00" }),
+      slot("good", { video_id: "video/a?&" }),
+    ].map(row => ({
+      ...row,
+      video_id: row.video_id === "\\uD800" ? "\uD800"
+        : row.video_id === "\\uDC00" ? "\uDC00" : row.video_id,
+    })),
+    partGapMinutes: 15,
+    parts: [],
+  }));
+  assert.equal((html.match(/作品を見る/g) ?? []).length, 1);
+  assert.match(html, /\/manage\/events\/ev%20id\/videos\/video%2Fa%3F%26/);
+  assert.match(html, /枠の状態と取得者を表示しています/);
+});
