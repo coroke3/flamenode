@@ -6,3 +6,4 @@ export * from "./staffInput.ts";
 export * from "./dateValidation.ts";
 export * from "./generalQuestionCap.ts";
 export * from "./generalQuestionDraft.ts";
+export * from "./parts.ts";
