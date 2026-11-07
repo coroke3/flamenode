@@ -47,8 +47,18 @@ export function SlotList({ eventId, slots, partGapMinutes, parts }: {
           <th scope="col">日時 / 部</th><th scope="col">取得者</th>
           <th scope="col">状態</th><th scope="col">作品</th>
         </tr></thead>
-        <tbody>{slots.map(slot => (
-          <tr key={slot.id}>
+        <tbody>{slots.map(slot => {
+          // API contracts allow arbitrary video_id strings; malformed UTF-16
+          // must not crash the whole manager view while building one link.
+          let videoHref: string | null = null;
+          if (slot.video_id) {
+            try {
+              videoHref = `/manage/events/${encodeURIComponent(eventId)}/videos/${encodeURIComponent(slot.video_id)}`;
+            } catch {
+              // Keep the row visible without an invalid navigation link.
+            }
+          }
+          return <tr key={slot.id}>
             <td className="manage-slot-datetime">
               <span className="manage-slot-datetime-main">{slotTimeLabel(slot)}</span>
               <span className="manage-slot-datetime-part">{labels.get(slot.id) ?? "—"}</span>
@@ -73,12 +83,10 @@ export function SlotList({ eventId, slots, partGapMinutes, parts }: {
                 : slot.status === "reserved" ? "fn-badge-warning"
                 : "fn-badge-accent"
             )}>{slotStatusLabel(slot.status)}</span></td>
-            <td>{slot.video_id
-              ? <Link to={`/manage/events/${encodeURIComponent(eventId)}/videos/${encodeURIComponent(slot.video_id)}`}>
-                  作品を見る
-                </Link> : "—"}</td>
-          </tr>
-        ))}</tbody>
+            <td>{videoHref
+              ? <Link to={videoHref}>作品を見る</Link> : "—"}</td>
+          </tr>;
+        })}</tbody>
       </table>
     </div>
   </div>;
