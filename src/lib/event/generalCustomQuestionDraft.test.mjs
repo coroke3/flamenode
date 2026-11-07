@@ -10,6 +10,10 @@ const planSource = await readFile(
   new URL("./generalCustomQuestionPlan.ts", import.meta.url),
   "utf8",
 );
+const planDomainSource = await readFile(
+  new URL("../../../packages/domain/src/event/generalQuestionPlanner.ts", import.meta.url),
+  "utf8",
+);
 const limitsSource = await readFile(
   new URL("../../../packages/domain/src/event/limits.ts", import.meta.url),
   "utf8",
@@ -45,11 +49,14 @@ test("form reader drops stage keys and parses newline options", () => {
   assert.match(draftSource, /parseQuestionType/);
 });
 
-test("planned rows require options for choice types and keep review visibility", () => {
-  assert.match(planSource, /questionTypeNeedsOptions\(type\) && !optionsJson/);
-  assert.match(planSource, /visibility: "review"/);
-  assert.match(planSource, /isStagePermissionQuestionKey\(key\)/);
-  assert.match(planSource, /serializeOptionsJson/);
+test("planned rows retain CURRENT validation via a domain planner", () => {
+  assert.ok(planSource.includes("plannedGeneralQuestionsFromDraftsCore"));
+  assert.ok(planSource.includes('generateId("ecq")'));
+  assert.ok(planDomainSource.includes("questionTypeNeedsOptions(type) && !optionsJson"));
+  assert.ok(planDomainSource.includes('visibility: "review"'));
+  assert.ok(planDomainSource.includes("isStagePermissionQuestionKey(key)"));
+  assert.ok(planDomainSource.includes("serializeOptionsJson"));
+  assert.ok(!planDomainSource.includes('from "@/'));
 });
 
 test("cap never goes below MAX_GENERAL_CUSTOM_QUESTIONS", () => {
