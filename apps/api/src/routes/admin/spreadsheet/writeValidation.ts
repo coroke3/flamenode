@@ -239,7 +239,7 @@ export function buildSpreadsheetUpdateSql(
     statement: "UPDATE " + spreadsheetTableIdentifier(ctx) + " SET " +
       setColumns.map(column => quoteSpreadsheetIdentifier(column) + " = ?").join(", ") +
       " WHERE " + key.statement + " AND " + snapshot.statement,
-    binds: [...setColumns.map(column => values[column] === "" ? null : values[column]), ...key.binds, ...snapshot.binds],
+    binds: [...setColumns.map(column => values[column] === "" ? null : (values[column] ?? null)), ...key.binds, ...snapshot.binds],
     after,
   };
 }
