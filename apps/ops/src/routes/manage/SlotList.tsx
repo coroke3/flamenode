@@ -60,7 +60,11 @@ export function validateSlotListOperation(
     if (!slot) return false;
     if (operation.kind === "delete") return slot.status === "available";
     if (operation.kind === "release") return slot.status === "reserved";
-    return canManageSubmittedSlots && slot.status === "submitted";
+    if (operation.kind === "force-release-submitted" ||
+        operation.kind === "release-submitted-video") {
+      return canManageSubmittedSlots && slot.status === "submitted";
+    }
+    return false;
   }
   if (operation.slotIds.length < 1 || operation.slotIds.length > MAX_ATOMIC_SELECTION ||
       new Set(operation.slotIds).size !== operation.slotIds.length) return false;

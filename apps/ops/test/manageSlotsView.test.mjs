@@ -160,6 +160,8 @@ test("MIG-0722 U02b-2: command planner validates event, visible slot status, per
   assert.equal(check({ kind: "delete", slotId: "foreign" }), false);
   assert.equal(check({ kind: "delete", slotId: "not-found" }), false);
   assert.equal(check({ kind: "delete", slotId: "unknown" }), false);
+  assert.equal(check({ kind: "unknown-action", slotId: "submitted" }, true), false);
+  assert.equal(check({ kind: "unknown-action", slotIds: ["available"] }), false);
   for (const kind of ["force-release-submitted", "release-submitted-video"]) {
     assert.equal(check({ kind, slotId: "submitted" }), false);
     assert.equal(check({ kind, slotId: "submitted" }, true), true);
