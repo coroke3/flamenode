@@ -640,3 +640,37 @@ test("MIG-0652 U04 SQLite T23: pre-existing same-target R2 fence is preserved an
   assert.equal(f.read("static_rebuild_queue").length, 0);
 });
 
+test("MIG-0652 U04 SQLite T24: simultaneous first manifest creation for SAME event rejects competing token without D1 mutation", async () => {
+  const rival = {
+    entity_type: "event",
+    entity_id: EVENT,
+    fence_token: "vf-first-archive-concurrent",
+    blocked_at: 1000,
+    reason: "other_inflight_archive",
+  };
+  // Archive starts from a missing manifest. Another archive for the SAME event
+  // wins R2 create-if-absent immediately before this request's first PUT.
+  const f = setup({ r2Options: { concurrentFirstPutEntry: rival } });
+  assert.equal(f.bucket.manifest, null);
+  const priorError = console.error;
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally { console.error = priorError; }
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const denied = await response.json();
+  assert.equal(denied.ok, false);
+  assert.ok(!JSON.stringify(denied).includes(rival.fence_token), "do not leak the winning writer's token");
+  assert.equal(f.timeline.filter((op) => op === "r2.concurrent-write").length, 1);
+  assert.ok(f.timeline.filter((op) => op === "r2.put").length >= 1, "our create-if-absent must lose the R2 CAS");
+  assert.ok(!f.timeline.includes("d1.batch"), "losing R2 CAS must never begin an atomic D1 write");
+  assert.equal(f.d1.stats.batches, 0);
+  const finalManifest = f.bucket.manifest;
+  assert.equal(finalManifest?.revision, 1);
+  assert.deepEqual(finalManifest?.entities, [rival], "the winning same-event token must remain intact");
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+});
+
