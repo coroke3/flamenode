@@ -117,8 +117,47 @@ function realAuthHarness() {
     audits: sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
     queue: sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,
   });
-  return { sqlite, stats, post, effects, token };
+  return { db, sqlite, stats, post, effects, token };
 }
+
+test("MIG-0656 U03g-3: signed-in requests with unconfigured site Origin fail before D1", async () => {
+  const h = realAuthHarness();
+  try {
+    const app = new Hono();
+    app.route("/api/manage", manageRoutes);
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const before = h.stats.prepares;
+      const res = await app.request(SITE + path, {
+        method: "POST",
+        headers: { Origin: SITE, Cookie: "__Secure-authjs.session-token=" + h.token },
+      }, { DB: h.db, NEXT_PUBLIC_SITE_URL: "" });
+      assert.equal(res.status, 503, path);
+      assert.equal((await res.json()).reason, "origin_verification_unavailable");
+      assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+      assert.equal(h.stats.prepares, before, path + ": unavailable site must not touch D1");
+    }
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
+});
+
+test("MIG-0656 U03g-3: signed-in requests with a missing D1 binding return 503, never 401", async () => {
+  const h = realAuthHarness();
+  try {
+    const app = new Hono();
+    app.route("/api/manage", manageRoutes);
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const res = await app.request(SITE + path, {
+        method: "POST",
+        headers: { Origin: SITE, Cookie: "__Secure-authjs.session-token=" + h.token },
+      }, { NEXT_PUBLIC_SITE_URL: SITE });
+      assert.equal(res.status, 503, path);
+      assert.deepEqual(await res.json(), { error: "database_unavailable" });
+      assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+    }
+    assert.equal(h.stats.prepares, 0);
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
+});
 
 test("MIG-0656 U03g-2: hostile Origin with a valid Auth.js cookie aborts before the session D1 lookup", async () => {
   const h = realAuthHarness();
