@@ -26,7 +26,7 @@ export function readAuditActorFilter(actor: AdminAuditQueryParam, operator: Admi
 export function readAuditLimit(raw: AdminAuditQueryParam): number {
   const numeric = Number(readAuditQueryValue(raw));
   return Number.isFinite(numeric) && numeric > 0
-    ? Math.min(Math.floor(numeric), MAX_AUDIT_LIMIT)
+    ? Math.max(1, Math.min(Math.floor(numeric), MAX_AUDIT_LIMIT))
     : DEFAULT_AUDIT_LIMIT;
 }
 
