@@ -743,3 +743,37 @@ test("P2 changing videoId invalidates the previous video's editor while retainin
       "a new video starts with the public new-post default");
   });
 });
+
+
+test("P2 changing only public/private visibility is an unsaved chapter edit", async () => {
+  const { videoChapterDraftIsDirty } = await import("../apps/site/src/components/VideoChapterIsland.ts");
+  const base = { time: "1:05", label: "chapter", note: "", csv: "", visibility: "private" };
+  assert.equal(videoChapterDraftIsDirty("1:05", "chapter", "", "", base, "private"), false);
+  assert.equal(videoChapterDraftIsDirty("1:05", "chapter", "", "", base, "public"), true);
+  assert.equal(videoChapterDraftIsDirty("1:05", "chapter", "", "", { ...base, visibility: "public" }, "private"), true);
+});
+
+test("P2 visibility-only change warns before Active X switch and can cancel", async () => {
+  await withChapterDom(async (doc, root) => {
+    await React.act(async () => root.render(React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters: [PRIVATE_CHAPTER],
+    })));
+    await clickButton(doc, "編集");
+    const checkbox = doc.querySelector("form input[type=checkbox]");
+    assert.equal(checkbox.checked, false);
+    let prompts = 0;
+    doc.defaultView.confirm = () => { prompts += 1; return false; };
+    await React.act(async () => {
+      checkbox.click();
+    });
+    assert.equal(doc.querySelector("form input[type=checkbox]").checked, true);
+    const event = new doc.defaultView.CustomEvent("flamenode:before-active-x-switch", {
+      cancelable: true,
+      detail: { fromXId: "approved", toXId: "other" },
+    });
+    await React.act(async () => doc.defaultView.dispatchEvent(event));
+    assert.equal(prompts, 1, "visibility-only modification must be recognized as dirty");
+    assert.equal(event.defaultPrevented, true, "cancelled switch must preserve the editor");
+    assert.ok(doc.querySelector("form"));
+  });
+});
