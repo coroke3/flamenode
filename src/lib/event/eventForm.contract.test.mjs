@@ -10,7 +10,8 @@ test("blank create-event IDs are omitted for server-side auto-generation", () =>
   const source = readRepoFile("src/lib/event/eventForm.ts");
   const domainSource = readRepoFile("packages/domain/src/event/eventIdInput.ts");
 
-  assert.ok(source.includes('import { normalizeOptionalEventId } from "@flamenode/domain/event";'));
+  // Additional domain exports may be co-imported as MIG-0652 progresses.
+  assert.match(source, /import\\s*\\{[^}]*\\bnormalizeOptionalEventId\\b[^}]*\\}\\s*from\\s*"@flamenode\\/domain\\/event"/s);
   assert.match(source, /id: z\.preprocess\(/);
   assert.match(domainSource, /function normalizeOptionalEventId\(value: unknown\)/);
   assert.match(domainSource, /typeof value === "string" && value\.trim\(\) === ""/);
