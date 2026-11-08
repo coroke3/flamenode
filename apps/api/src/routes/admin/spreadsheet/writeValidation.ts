@@ -201,8 +201,13 @@ function spreadsheetPkCondition(ctx: SpreadsheetSqlTableContext, pk: Record<stri
 function spreadsheetSnapshotCondition(ctx: SpreadsheetSqlTableContext, before: Record<string, unknown>): SpreadsheetSqlPlan {
   const binds: (string | number | null)[] = [];
   const clauses = ctx.columns.map(column => {
+    // A partial/undefined before-image must not silently become SQL NULL.
+    // Full-row CAS requires a fresh DB snapshot containing every column.
+    if (!Object.prototype.hasOwnProperty.call(before, column.name)) throw new Error("invalid_snapshot");
     const raw = before[column.name];
-    if (raw != null && typeof raw !== "string" && typeof raw !== "number") throw new Error("invalid_snapshot");
+    if (raw === undefined || (raw != null && typeof raw !== "string" && typeof raw !== "number")) {
+      throw new Error("invalid_snapshot");
+    }
     binds.push(raw ?? null);
     return quoteSpreadsheetIdentifier(column.name) + " IS ?";
   });
