@@ -355,7 +355,13 @@ test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a
   assert.equal(scenarios.at(-1).id, "BASELINE");
   assert.match(rh13[0].kinds.limit(0, "test").path, /format=legacy&update=scheduled&refresh=1440/, "the mounted upper-bound probe is a scheduled legacy export");
   assert.match(rh13[0].kinds.normal(0, "test").path, /format=v5&update=scheduled&refresh=15/);
-  assert.ok(rh13[0].kinds.limit(0, "test").setup?.length >= 3, "the upper-bound fixture must create event, videos and members");
+  // RH-013 intentionally seeds its 50,000 member rows once per process. Earlier tests
+  // may consume that one-time setup; assert its source contract, not a stale setup array.
+  const source = fs.readFileSync(fileURLToPath(new URL("./benchmark-api-cpu.mjs", import.meta.url)), "utf8");
+  assert.match(source, /const RH013_VIDEOS = 500;/);
+  assert.match(source, /const RH013_MEMBERS_PER_VIDEO = 100;/);
+  assert.match(source, /params: \[RH013_VIDEOS - 1, RH013_EVENT_ID\]/);
+  assert.match(source, /params: \[Math\.max\(RH013_VIDEOS, RH013_MEMBERS_PER_VIDEO\) - 1, RH013_VIDEOS, RH013_MEMBERS_PER_VIDEO\]/);
   assert.equal(buildPendingScenarios().length, 0);
   assert.equal(buildScenarios({ adminToken: "t" }, { includePending: true }).filter((x) => x.id === "RH-013").length, 1);
   assert.equal(parseArgs(["--include-pending"]).includePending, true);
