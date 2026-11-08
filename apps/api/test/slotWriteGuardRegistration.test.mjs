@@ -120,6 +120,21 @@ function realAuthHarness() {
   return { sqlite, stats, post, effects, token };
 }
 
+test("MIG-0656 U03g-2: hostile Origin with a valid Auth.js cookie aborts before the session D1 lookup", async () => {
+  const h = realAuthHarness();
+  try {
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const before = h.stats.prepares;
+      const res = await h.post(path, { headers: { Origin: "https://evil.example" } });
+      assert.equal(res.status, 403, path);
+      assert.equal((await res.json()).reason, "invalid_origin");
+      assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+      assert.equal(h.stats.prepares, before, path + ": session D1 must not be consulted");
+    }
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
+});
+
 test("MIG-0656 U03g: real Auth.js session + accepted TOS passes both guards but does not mount writes", async () => {
   const h = realAuthHarness();
   try {
