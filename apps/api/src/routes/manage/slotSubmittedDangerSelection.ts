@@ -19,7 +19,7 @@ import type { SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
 export type SubmittedDangerKind = "force-release" | "keep-reservation";
 export type SubmittedVideoBefore = {
   id: string;
-  scheduling_type: string;
+  scheduling_type: string | null;
   updated_at: number;
 };
 export type SubmittedDangerSelection =
