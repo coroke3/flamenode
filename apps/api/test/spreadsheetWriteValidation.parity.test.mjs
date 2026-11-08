@@ -74,3 +74,36 @@ test("checks keys in insertion order, preserving CURRENT first-error semantics",
   fails(ctx, { bogus: "1", icon_url: "ftp://example.com" }, "unknown_column");
   fails(ctx, { icon_url: "ftp://example.com", bogus: "1" }, "invalid_url");
 });
+
+
+test("CURRENT SQLite default resolution preserves numeric, escaped string, null and unsupported codes", async () => {
+  const { resolveSpreadsheetDefaultValue } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: null }), null);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: " NULL " }), null);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: "(-2.5)" }), -2.5);
+  assert.equal(resolveSpreadsheetDefaultValue({ defaultValue: "'it''s fine'" }), "it's fine");
+  assert.match(resolveSpreadsheetDefaultValue({ defaultValue: "CURRENT_TIMESTAMP" }), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.ok(Math.abs(resolveSpreadsheetDefaultValue({ defaultValue: "(unixepoch())" }) - Math.floor(Date.now()/1000)) <= 1);
+  assert.throws(() => resolveSpreadsheetDefaultValue({ defaultValue: "randomblob(16)" }), /unsupported_default/);
+});
+
+test("CURRENT INSERT normalization fills defaults, omits generated columns and rejects missing required columns", async () => {
+  const { prepareCompleteInsertRow } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const base = context("events");
+  const ctx = {
+    ...base,
+    columns: [
+      { name: "title", type: "TEXT", notNull: true },
+      { name: "count", type: "INTEGER", notNull: false, defaultValue: "42" },
+      { name: "comment", type: "TEXT", notNull: false },
+      { name: "generated_id", type: "TEXT", notNull: false, generated: true },
+    ],
+    columnNames: ["title", "count", "comment", "generated_id"],
+  };
+  const input = { title: "event" };
+  assert.deepEqual(prepareCompleteInsertRow(ctx, input), { title: "event", count: 42, comment: null });
+  assert.deepEqual(input, { title: "event" });
+  assert.deepEqual(prepareCompleteInsertRow(ctx, { title: "event", count: "" }), { title: "event", count: null, comment: null });
+  fails(ctx, { title: null }, "not_null_violation");
+  assert.throws(() => prepareCompleteInsertRow(ctx, {}), /missing_required_column/);
+});
