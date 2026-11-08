@@ -467,6 +467,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.loggedIn, true);
     assert.equal(json.isTosAccepted, false);
     assert.equal(json.viewerCanEditChapters, false);
+    assert.ok(json.privateChapters.length > 0, "permission test must include private chapter rows");
     assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false),
       "TOS revocation must deny all per-chapter edit permissions too");
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
