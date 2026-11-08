@@ -643,3 +643,72 @@ export function buildSpreadsheetPreviewNonceConsumeSql(
     },
   };
 }
+
+
+/**
+ * CURRENT query.ts#fetchExistingRowsByImportPk, bounded to U02's 7-row
+ * apply limit and a single request-budgeted D1 SELECT. UNMOUNTED.
+ *
+ * The caller MUST validate the signed preview and guard authorization before
+ * invoking this function, and subtract this SELECT from S3's total budget.
+ */
+export async function fetchSpreadsheetExistingImportRows(
+  db: {
+    prepare(sql: string): {
+      bind(...values: (string | number | null)[]): {
+        all<T>(): Promise<{ results?: T[] }>;
+      };
+    };
+  },
+  ctx: SpreadsheetSqlTableContext,
+  prepared: SpreadsheetImportRowValidation,
+  remainingReadBudget: number,
+): Promise<Map<string, Record<string, unknown>>> {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (prepared.errors.length > 0) throw new Error("invalid_row");
+  if (prepared.preparedRows.length < 1 || prepared.preparedRows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
+    throw new Error("batch_too_large");
+  }
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 1 ||
+      remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
+  const seen = new Set<string>();
+  const keys: Record<string, string>[] = [];
+  for (const entry of prepared.preparedRows) {
+    const pk = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, entry.pk);
+    const fingerprint = Object.entries(pk).sort(([a], [b]) => a.localeCompare(b))
+      .map(([, value]) => value).join("\0");
+    if (seen.has(fingerprint)) throw new Error("duplicate_primary_key");
+    seen.add(fingerprint);
+    keys.push(pk);
+  }
+  // One statement; all requested primary-key components are positional binds.
+  const binds: string[] = [];
+  const clauses = keys.map(pk => {
+    const cond = spreadsheetPkCondition(ctx, pk);
+    binds.push(...cond.binds as string[]);
+    return "(" + cond.statement + ")";
+  });
+  const sql = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) + " WHERE " + clauses.join(" OR ");
+  const result = await db.prepare(sql).bind(...binds).all<Record<string, unknown>>();
+  const out = new Map<string, Record<string, unknown>>();
+  for (const row of result.results ?? []) {
+    const rawPk: Record<string, string> = {};
+    for (const key of ctx.primaryKeys) {
+      const value = row[key];
+      if (value == null || String(value).trim() === "") throw new Error("invalid_snapshot");
+      rawPk[key] = String(value);
+    }
+    const fingerprint = Object.entries(rawPk).sort(([a], [b]) => a.localeCompare(b))
+      .map(([, value]) => value).join("\0");
+    if (!seen.has(fingerprint) || out.has(fingerprint)) throw new Error("invalid_snapshot");
+    for (const column of ctx.columns) {
+      if (!Object.prototype.hasOwnProperty.call(row, column.name) || row[column.name] === undefined) {
+        throw new Error("invalid_snapshot");
+      }
+    }
+    out.set(fingerprint, row);
+  }
+  return out;
+}
