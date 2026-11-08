@@ -454,3 +454,28 @@ test("SQLite executes bound INSERT/UPDATE/DELETE with optimistic CAS and does no
     db.close();
   }
 });
+
+
+test("unmounted audited SQL plans preserve CURRENT audit envelopes for CREATE UPDATE DELETE", async () => {
+  const { buildSpreadsheetAuditedInsert, buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete, spreadsheetRecordIdFromPk } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("slots", true), columns, columnNames: ["id", "title"], primaryKeys: ["id"] };
+  const expected = { table_name: "slots", target_id: "slot-1", actor_user_id: "operator-1", retention_class: "long_audit", strict: true, context: "admin_spreadsheet" };
+  const inserted = buildSpreadsheetAuditedInsert(ctx, { id: "slot-1", title: "hello" }, "operator-1");
+  assert.deepEqual(inserted.audit, { ...expected, operation: "CREATE", before: null, after: { id: "slot-1", title: "hello" } });
+  assert.match(inserted.statement, /^INSERT INTO /);
+  const before = { id: "slot-1", title: "hello" };
+  const updated = buildSpreadsheetAuditedUpdate(ctx, { id: "slot-1" }, before, { title: "" }, "operator-1");
+  assert.deepEqual(updated.audit, { ...expected, operation: "UPDATE", before, after: { id: "slot-1", title: null } });
+  assert.match(updated.statement, /^UPDATE /);
+  assert.deepEqual(before, { id: "slot-1", title: "hello" });
+  const deleted = buildSpreadsheetAuditedDelete(ctx, { id: "slot-1" }, before, "operator-1");
+  assert.deepEqual(deleted.audit, { ...expected, operation: "DELETE", before, after: null });
+  assert.match(deleted.statement, /^DELETE /);
+  assert.equal(spreadsheetRecordIdFromPk({ video_id: "v1", event_id: "e1" }), "e1:v1");
+  assert.throws(() => buildSpreadsheetAuditedInsert(ctx, { id: "slot-1" }, "  "), /missing_operator/);
+});
