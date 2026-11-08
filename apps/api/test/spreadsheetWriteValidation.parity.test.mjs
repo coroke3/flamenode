@@ -107,3 +107,17 @@ test("CURRENT INSERT normalization fills defaults, omits generated columns and r
   fails(ctx, { title: null }, "not_null_violation");
   assert.throws(() => prepareCompleteInsertRow(ctx, {}), /missing_required_column/);
 });
+
+
+test("CURRENT primary-key normalization enforces missing-key and nonblank contracts", async () => {
+  const { normalizeSpreadsheetPrimaryKey, primaryKeyFromSpreadsheetRow } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  assert.throws(() => normalizeSpreadsheetPrimaryKey([], {}), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id"], {}), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id"], { id: "  " }), /missing_primary_key/);
+  assert.throws(() => normalizeSpreadsheetPrimaryKey(["id", "locale"], { id: "a" }), /missing_primary_key/);
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(["id", "locale"], { locale: "ja", id: "a", extra: "ignored" }), { id: "a", locale: "ja" });
+  assert.deepEqual(normalizeSpreadsheetPrimaryKey(["id"], { id: " a " }), { id: " a " });
+  assert.deepEqual(primaryKeyFromSpreadsheetRow({ id: "1", locale: "ja" }, ["locale", "id"]), { locale: "ja", id: "1" });
+  assert.throws(() => primaryKeyFromSpreadsheetRow({ id: null }, ["id"]), /missing_primary_key/);
+  assert.throws(() => primaryKeyFromSpreadsheetRow({}, ["id"]), /missing_primary_key/);
+});
