@@ -61,7 +61,10 @@ export function EntryIndexView({
   const [pagingBusy, setPagingBusy] = React.useState(false);
   const pagingBusyRef = React.useRef(false);
   const [pagingFailed, setPagingFailed] = React.useState(false);
-  const [continuationAccess, setContinuationAccess] = React.useState<"anonymous" | "banned" | null>(null);
+  const [continuationAccess, setContinuationAccess] = React.useState<{
+    userId: string;
+    status: "anonymous" | "banned";
+  } | null>(null);
   const pageAbort = React.useRef<AbortController | null>(null);
 
   // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
@@ -103,7 +106,7 @@ export function EntryIndexView({
         if (controller.signal.aborted) return;
         // A revoked session must not leave the previous account's private slot list on screen.
         if (response.status === "anonymous" || response.status === "banned") {
-          setContinuationAccess(response.status);
+          setContinuationAccess({ userId: data.user.id, status: response.status });
           setExtraPages([]);
           return;
         }
@@ -127,8 +130,10 @@ export function EntryIndexView({
       }
     });
   };
-  if (continuationAccess === "banned") return <BannedNotice />;
-  if (continuationAccess === "anonymous") return <LoginRequired next="/entry" />;
+  // A previous account's late 401/403 must not gate another account before effect cleanup.
+  const currentAccess = continuationAccess?.userId === data?.user.id ? continuationAccess.status : null;
+  if (currentAccess === "banned") return <BannedNotice />;
+  if (currentAccess === "anonymous") return <LoginRequired next="/entry" />;
 
   const loggedIn = data !== null;
   const onboardingNext = onboardingHref(next);
