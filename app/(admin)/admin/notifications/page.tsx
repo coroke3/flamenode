@@ -52,12 +52,17 @@ type Counts = {
 
 interface Props {
   searchParams?: Promise<{
-    status?: string;
-    type?: string;
-    event?: string;
-    q?: string;
-    cat?: string;
+    status?: string | string[];
+    type?: string | string[];
+    event?: string | string[];
+    q?: string | string[];
+    cat?: string | string[];
   }>;
+}
+
+/** Next searchParams returns arrays for duplicated query keys; ignore ambiguous filters. */
+function singleQueryValue(value: string | string[] | undefined): string {
+  return typeof value === "string" ? value : "";
 }
 
 function parseStatus(value: string | undefined): StatusFilter {
@@ -107,12 +112,13 @@ export default async function AdminNotificationsPage({
   if (!user || user.role !== "admin") notFound();
 
   const sp = (await searchParams) ?? {};
-  const status = parseStatus(sp.status);
-  const typeFilter = (sp.type ?? "").trim();
-  const eventFilter = (sp.event ?? "").trim();
-  const qFilter = (sp.q ?? "").trim().slice(0, 100);
+  const status = parseStatus(singleQueryValue(sp.status));
+  const typeFilter = singleQueryValue(sp.type).trim();
+  const eventFilter = singleQueryValue(sp.event).trim();
+  const qRaw = singleQueryValue(sp.q).trim().slice(0, 100);
+  const qFilter = /[\uD800-\uDBFF]$/.test(qRaw) ? qRaw.slice(0, -1) : qRaw;
   const catFilter: NotificationCategory | "all" = (() => {
-    const value = (sp.cat ?? "").trim();
+    const value = singleQueryValue(sp.cat).trim();
     const allowed = ADMIN_NOTIFICATION_CATEGORY_OPTIONS.map((option) => option.key);
     return allowed.includes(value as NotificationCategory | "all")
       ? (value as NotificationCategory | "all")

@@ -36,6 +36,7 @@ import {
 } from "@/lib/seo";
 import { shuffledCopy } from "@/lib/utils/shuffle";
 import { loadStaticTrending } from "@/lib/publicData/trendingLoader";
+import { truncateAnnouncementBody } from "@/lib/utils/truncateAnnouncementBody";
 
 /** 各棚の SSR 枚数。Workers Free の HTTP 10ms に収める。 */
 const TOP_SHELF_DISPLAY_LIMIT = 8;
@@ -138,9 +139,7 @@ export default async function TopPage(): Promise<React.ReactElement> {
               <article key={item.id} className={styles.announcement}>
                 <strong>{item.title}</strong>
                 <p className="fn-muted fn-text-sm">
-                  {item.body.length > 180
-                    ? `${item.body.slice(0, 179)}...`
-                    : item.body}
+                  {truncateAnnouncementBody(item.body)}
                 </p>
               </article>
             ))}

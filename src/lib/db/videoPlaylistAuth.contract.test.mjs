@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { eventVideoPageHref } from "../youtube/id.ts";
 
 const [eventPage, videoPage, videoQueries, videoOverlay] = await Promise.all([
   readFile(
@@ -15,14 +16,17 @@ const [eventPage, videoPage, videoQueries, videoOverlay] = await Promise.all([
   readFile(new URL("../video/videoViewerOverlay.ts", import.meta.url), "utf8"),
 ]);
 
-test("event cards preserve the public event playlist", () => {
-  assert.match(
-    eventPage,
-    /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/,
+test("event cards preserve the public event playlist on a validated same-origin route", () => {
+  assert.match(eventPage, /import \{ eventVideoPageHref \} from "@\/lib\/youtube\/id"/);
+  assert.match(eventPage, /href=\{eventVideoPageHref\(video, eventId\)\}/);
+  assert.doesNotMatch(eventPage, /const target = video\.youtube_video_id\?\.trim\(\) \|\| video\.id/);
+  assert.equal(
+    eventVideoPageHref({ id: "video_internal", youtube_video_id: "AAAAAAAAAAA" }, "ev/test"),
+    "/AAAAAAAAAAA?playlist=ev%2Ftest",
   );
-  assert.match(
-    eventPage,
-    /href=\{`\/\$\{target\}\?playlist=\$\{encodeURIComponent\(eventId\)\}`\}/,
+  assert.equal(
+    eventVideoPageHref({ id: "video_internal", youtube_video_id: "/outside.example" }, "ev/test"),
+    "/video_internal?playlist=ev%2Ftest",
   );
 });
 

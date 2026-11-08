@@ -1,5 +1,6 @@
 
 import type { MetadataRoute } from "next";
+import { dedupeSitemapEntries } from "@/lib/publicData/sitemapDedupe";
 import {
   buildStaticSitemapEntries,
   buildStaticSitemapStaticEntries,
@@ -11,5 +12,5 @@ export const revalidate = 3600;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const dynamicEntries = await buildStaticSitemapEntries();
-  return [...buildStaticSitemapStaticEntries(), ...dynamicEntries];
+  return dedupeSitemapEntries([...buildStaticSitemapStaticEntries(), ...dynamicEntries]);
 }

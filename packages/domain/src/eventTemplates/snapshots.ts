@@ -52,7 +52,9 @@ function parseOptionsJson(raw: string | null | undefined): string[] {
     const out: string[] = [];
     for (const item of parsed) {
       if (typeof item !== "string") continue;
-      const trimmed = item.trim().slice(0, 200);
+      const clipped = item.trim().slice(0, 200);
+      // Do not persist an orphan high surrogate when the UTF-16 limit cuts an emoji.
+      const trimmed = /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
       if (!trimmed || seen.has(trimmed)) continue;
       seen.add(trimmed);
       out.push(trimmed);
