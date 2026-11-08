@@ -553,7 +553,9 @@ export const ROUTE_INVENTORY = [
   ["SA-053", "POST", "/api/admin/terms/:id/publish", "w", { params: termsParams, setup: termsSetup("draft") }],
   ["SA-054", "POST", "/api/admin/terms/:id/reaccept-broadcast", "w", { params: termsParams, setup: termsSetup("published") }],
   ["SA-055", "POST", "/api/admin/terms/:id/archive", "w", { params: termsParams, setup: termsSetup("draft") }],
-  ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: notificationSetup("failed") }],
+  ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: (kind, i, tag) => kind === "limit"
+    ? Array.from({ length: 10 }, (_, n) => notificationRow(`${benchNotificationId(i, tag)}-${n}`, "failed"))
+    : notificationSetup("failed")(kind, i, tag) }],
   ["SA-045", "POST", "/api/admin/notifications/:id/retry", "w", { params: notificationParams, setup: notificationSetup("failed") }],
   ["SA-046", "POST", "/api/admin/notifications/:id/cancel", "w", { params: notificationParams, setup: notificationSetup("pending") }],
   ["SA-047", "POST", "/api/admin/notifications/:id/force-resend", "w", { params: notificationParams, setup: notificationSetup("sent") }],
