@@ -455,7 +455,7 @@ const termsSetup = (status) => (kind, i, tag) => [termsRow(benchTermsId(i, tag),
 // MIG-0639 / SA-099..100: owned X-ID request rows on local D1 only.
 const benchXRequestId = (i, tag) => `bench-xreq-${tag}-${i}`;
 const xMergeParentRow = (i, tag) => ({
-  sql: "INSERT OR REPLACE INTO x_identity_requests (id,request_type,requested_by_auth_user_id,requested_x_id,source_x_user_id,target_x_user_id,restore_snapshot_json,revert_deadline_at,status,requested_at,updated_at) VALUES (?, 'merge', 'bench-admin', NULL, 'bench-x', 'bench-x', '{\"v\":1}', 4102444800, 'done', 50, 60)",
+  sql: "INSERT OR REPLACE INTO x_identity_requests (id,request_type,requested_by_auth_user_id,requested_x_id,source_x_user_id,target_x_user_id,restore_snapshot_json,revert_deadline_at,status,requested_at,updated_at) VALUES (?, 'merge', 'bench-admin', NULL, 'bench-x-source', 'bench-x', '{\"v\":1}', 4102444800, 'done', 50, 60)",
   params: [benchXRequestId(i, tag)],
 });
 const xRequestRow = (i, tag) => ({
