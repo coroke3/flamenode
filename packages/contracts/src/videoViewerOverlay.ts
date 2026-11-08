@@ -31,6 +31,9 @@ export const VideoViewerOverlayResponseSchema = z.object({
   likeActive: z.boolean(),
   bookmarkActive: z.boolean(),
   viewerXApproved: z.boolean(),
+  // Additive RH-031 capability: legacy CURRENT payloads omit this field.
+  // Consumers must treat absence as false; never infer chapter-admin from viewerXApproved.
+  viewerCanEditChapters: z.boolean().optional(),
   privateChapters: z.array(VideoViewerOverlayChapterSchema),
   playlistLabel: z.string(),
   playlistItems: z.array(VideoViewerOverlayPlaylistItemSchema),
