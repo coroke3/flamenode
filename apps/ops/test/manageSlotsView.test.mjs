@@ -4,7 +4,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { groupDisplaySlots, partLabels } from "../.test-dist/apps/ops/src/routes/manage/slotParts.js";
-import { SlotList, slotStatusLabel, slotTimeLabel } from "../.test-dist/apps/ops/src/routes/manage/SlotList.js";
+import { SlotList, slotStatusLabel, slotTimeLabel, validateSlotListOperation } from "../.test-dist/apps/ops/src/routes/manage/SlotList.js";
 import { EventSlots, EventSlotsView } from "../.test-dist/apps/ops/src/routes/manage/EventSlots.js";
 
 const slot = (id, opts = {}) => ({
@@ -140,4 +140,75 @@ test("MIG-0722 U02a: malformed video ID cannot crash the slot list or hide other
   assert.equal((html.match(/作品を見る/g) ?? []).length, 1);
   assert.match(html, /\/manage\/events\/ev%20id\/videos\/video%2Fa%3F%26/);
   assert.match(html, /枠の状態と取得者を表示しています/);
+});
+
+test("MIG-0722 U02b-2: command planner validates event, visible slot status, permissions and atomic cap", () => {
+  const rows = [
+    slot("available", { event_id: "ev1", status: "available" }),
+    slot("reserved", { event_id: "ev1", status: "reserved" }),
+    slot("submitted", { event_id: "ev1", status: "submitted" }),
+    slot("foreign", { event_id: "ev2", status: "available" }),
+    slot("unknown", { event_id: "ev1", status: "unknown" }),
+  ];
+  const check = (operation, submitted = false) =>
+    validateSlotListOperation(rows, "ev1", operation, submitted);
+  assert.equal(check({ kind: "delete", slotId: "available" }), true);
+  assert.equal(check({ kind: "release", slotId: "reserved" }), true);
+  assert.equal(check({ kind: "release", slotId: "available" }), false);
+  assert.equal(check({ kind: "delete", slotId: "reserved" }), false);
+  assert.equal(check({ kind: "delete", slotId: "foreign" }), false);
+  assert.equal(check({ kind: "delete", slotId: "not-found" }), false);
+  assert.equal(check({ kind: "delete", slotId: "unknown" }), false);
+  for (const kind of ["force-release-submitted", "release-submitted-video"]) {
+    assert.equal(check({ kind, slotId: "submitted" }), false);
+    assert.equal(check({ kind, slotId: "submitted" }, true), true);
+    assert.equal(check({ kind, slotId: "reserved" }, true), false);
+  }
+  assert.equal(check({ kind: "batch-delete", slotIds: ["available"] }), true);
+  assert.equal(check({ kind: "batch-release", slotIds: ["reserved"] }), true);
+  assert.equal(check({ kind: "batch-delete", slotIds: ["reserved"] }), false);
+  assert.equal(check({ kind: "batch-release", slotIds: ["available"] }), false);
+  assert.equal(check({ kind: "batch-delete", slotIds: [] }), false);
+  assert.equal(check({ kind: "batch-delete", slotIds: ["available", "available"] }), false);
+  assert.equal(check({ kind: "batch-delete", slotIds: ["available", "foreign"] }), false);
+  assert.equal(check({ kind: "batch-label", slotIds: ["available", "reserved", "submitted"], label: "New" }), true);
+  assert.equal(check({ kind: "batch-label", slotIds: ["available", "reserved", "submitted", "foreign"], label: "New" }), false);
+  assert.equal(check({ kind: "batch-label", slotIds: ["available"], label: " " }), false);
+  assert.equal(check({ kind: "batch-label", slotIds: ["available"], label: "x".repeat(200) }), true);
+  assert.equal(check({ kind: "batch-label", slotIds: ["available"], label: "x".repeat(201) }), false);
+});
+
+test("MIG-0722 U02b-2: injected handler alone enables selection and confirmations; SSR makes no writes", () => {
+  let writes = 0;
+  const onAction = async () => { writes++; return { ok: true }; };
+  const sample = data();
+  const safe = render(React.createElement(SlotList, {
+    eventId: "ev id", slots: sample.slots,
+    partGapMinutes: 15, parts: sample.event.parts,
+    onAction,
+  }));
+  assert.match(safe, /すべて選択/);
+  assert.match(safe, /枠一覧（横スクロール可能）/);
+  assert.match(safe, /操作/);
+  assert.match(safe, /解放/);
+  assert.match(safe, /削除/);
+  assert.doesNotMatch(safe, /強制解放|作品のみ解放|枠操作の確認/);
+  assert.equal(writes, 0);
+  const admin = render(React.createElement(SlotList, {
+    eventId: "ev id", slots: sample.slots,
+    partGapMinutes: 15, parts: sample.event.parts,
+    onAction, canManageSubmittedSlots: true,
+  }));
+  assert.match(admin, /強制解放/);
+  assert.match(admin, /作品のみ解放/);
+  assert.equal(writes, 0);
+  const foreign = render(React.createElement(SlotList, {
+    eventId: "ev id", slots: [
+      slot("foreign", { event_id: "other", status: "available" }),
+      slot("unknown", { status: "mystery" }),
+    ],
+    partGapMinutes: 15, parts: [], onAction,
+  }));
+  assert.doesNotMatch(foreign, /強制解放|作品のみ解放/);
+  assert.equal(writes, 0);
 });
