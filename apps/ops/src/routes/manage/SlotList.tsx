@@ -151,13 +151,13 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
       {limited && <p role="status">一括操作は最大3件ずつ選択してください。</p>}
       {selectedAvailable.length > 0 && <button type="button"
         className="fn-btn fn-btn-ghost fn-btn-sm"
-        disabled={busy || selectedAvailable.length > MAX_ATOMIC_SELECTION}
+        disabled={busy || limited || selectedAvailable.length > MAX_ATOMIC_SELECTION}
         onClick={() => confirm({ kind: "batch-delete", slotIds: selectedAvailable })}>
         空き枠を削除 ({selectedAvailable.length})
       </button>}
       {selectedReserved.length > 0 && <button type="button"
         className="fn-btn fn-btn-ghost fn-btn-sm"
-        disabled={busy || selectedReserved.length > MAX_ATOMIC_SELECTION}
+        disabled={busy || limited || selectedReserved.length > MAX_ATOMIC_SELECTION}
         onClick={() => confirm({ kind: "batch-release", slotIds: selectedReserved })}>
         予約枠を解放 ({selectedReserved.length})
       </button>}
@@ -243,7 +243,8 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
                   onClick={() => confirm({ kind: "release-submitted-video", slotId: slot.id })}>
                   作品のみ解放
                 </button>}
-              {(slot.status !== "submitted" || canManageSubmittedSlots) &&
+              {(slot.status === "available" || slot.status === "reserved" ||
+                (slot.status === "submitted" && canManageSubmittedSlots)) &&
                 <button type="button" className="fn-btn fn-btn-ghost fn-btn-sm"
                   disabled={busy || slot.event_id !== eventId}
                   onClick={() => confirm({
