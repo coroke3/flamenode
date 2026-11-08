@@ -275,3 +275,42 @@ test("MIG-0722 U02b-2: actual UI confirms before callback, cancels and blocks >3
     assert.equal(calls.length, 1, "disabled batch controls must not invoke writes");
   });
 });
+
+test("MIG-0722 U02b-2: filter and event changes discard stale selections and pending destructive actions", async () => {
+  await withSlotDom(async (dom, root) => {
+    let writes = 0;
+    const onAction = async () => { writes++; return { ok: true }; };
+    const a = slot("a", { event_id: "ev id", status: "available" });
+    const b = slot("b", { event_id: "ev id", status: "reserved" });
+    const renderList = (eventId, rows) => React.createElement(MemoryRouter, null,
+      React.createElement(SlotList, {
+        eventId, slots: rows, partGapMinutes: 15, parts: [], onAction,
+      }));
+    await React.act(async () => root.render(renderList("ev id", [a, b])));
+    const checkbox = dom.window.document.querySelector('input[aria-label="枠 a を選択"]');
+    assert.ok(checkbox);
+    await React.act(async () => checkbox.click());
+    assert.match(dom.window.document.body.textContent, /1件選択中/);
+    const deleteButton = [...dom.window.document.querySelectorAll("button")]
+      .find(button => button.textContent.trim() === "削除");
+    await React.act(async () => deleteButton.click());
+    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+
+    // Simulate a status filter response reusing the same mounted component.
+    await React.act(async () => root.render(renderList("ev id", [b])));
+    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+    assert.doesNotMatch(dom.window.document.body.textContent, /1件選択中/);
+    await React.act(async () => root.render(renderList("ev id", [a, b])));
+    const fresh = dom.window.document.querySelector('input[aria-label="枠 a を選択"]');
+    assert.equal(fresh.checked, false, "previously selected row must stay unselected");
+
+    await React.act(async () => fresh.click());
+    assert.match(dom.window.document.body.textContent, /1件選択中/);
+    await React.act(async () => root.render(renderList("another-event", [
+      slot("a", { event_id: "another-event" }),
+    ])));
+    const other = dom.window.document.querySelector('input[aria-label="枠 a を選択"]');
+    assert.equal(other.checked, false, "even matching row IDs do not carry selection across events");
+    assert.equal(writes, 0);
+  });
+});
