@@ -404,17 +404,21 @@ test("MIG-0639 SA-045..055 and SA-100..101: each local write fixture executes on
 test("MIG-0639: new write scenarios return their declared normal status on local Hono + migrated D1", async () => {
   const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((sc) => [sc.id, sc]));
   const ids = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-049", "SA-051", "SA-052", "SA-053", "SA-054", "SA-055", "SA-099", "SA-100", "SA-101"];
+  const failures = [];
   for (const id of ids) {
     const target = await createInprocTarget({ adminToken: "t" });
     try {
       const spec = scenarios.get(id).kinds.normal(7, "smoke" + id);
       if (spec.setup) await target.exec(spec.setup);
       const result = await target.run(spec);
-      assert.ok(spec.expect.includes(result.status), id + " expected " + spec.expect.join("/") + " but got " + result.status + " on local migrated D1");
+      if (!spec.expect.includes(result.status)) failures.push(id + ": expected " + spec.expect.join("/") + " but got " + result.status);
+    } catch (error) {
+      failures.push(id + ": " + (error instanceof Error ? error.message : String(error)));
     } finally {
       await target.close();
     }
   }
+  assert.deepEqual(failures, [], "all mounted write benchmarks must follow actual route behavior");
 });
 
 test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
