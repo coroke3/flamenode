@@ -230,6 +230,29 @@ test("SA-056/057 U03f: post-read new submitted video ref aborts before slot DML"
     assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
   }finally{s.sqlite.close();}
 });
+test("SA-056/057 U03f: stale video title without updated_at bump fails full 30-field CAS",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    let injected=false;
+    const s=setup({kind,onFirst:(sql,sqlite)=>{
+      if(!injected && sql.includes("AS refs_json")){
+        injected=true;
+        sqlite.prepare("UPDATE videos SET title=? WHERE id=?")
+          .run("Concurrent title without timestamp update","vid");
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true);
+      assert.equal(res.status,409,await res.clone().text());
+      assert.equal(s.row("videos","vid").title,"Concurrent title without timestamp update");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.row("slots","s0").status,"submitted");
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-056/057 U03f: missing strict audit table rolls back slot, video, Outbox, Queue",async()=>{
   const s=setup();
   try{
