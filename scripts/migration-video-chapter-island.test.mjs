@@ -590,3 +590,10 @@ test("MIG-0518 authorized manager edits only complete private chapter DTOs", asy
     note: "保存済み本文", visibility: "private", canManage: true,
   }], "public chapters must not be edited with a missing note field");
 });
+
+
+test("MIG-0518 bulk chapter UI does not claim video-owner-only access", () => {
+  const source = fs.readFileSync(new URL("../apps/site/src/components/VideoChapterIsland.ts", import.meta.url), "utf8");
+  assert.match(source, /CSV で一括登録（チャプター管理権限が必要）/);
+  assert.doesNotMatch(source, /CSV で一括登録 \(動画オーナーのみ\)/);
+});
