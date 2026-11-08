@@ -441,6 +441,26 @@ test("MIG-0639: all 13 new write routes reject invalid inputs with their declare
   assert.deepEqual(failures, [], "every invalid write scenario must exercise a real Hono rejection outcome");
 });
 
+test("MIG-0639: 13 newly mounted write routes respect declared limit-case responses", async () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((sc) => [sc.id, sc]));
+  const ids = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-049", "SA-051", "SA-052", "SA-053", "SA-054", "SA-055", "SA-099", "SA-100", "SA-101"];
+  const failures = [];
+  for (const id of ids) {
+    const target = await createInprocTarget({ adminToken: "t" });
+    try {
+      const spec = scenarios.get(id).kinds.limit(9, "limit" + id);
+      if (spec.setup) await target.exec(spec.setup);
+      const result = await target.run(spec);
+      if (!spec.expect.includes(result.status)) failures.push(id + ": expected " + spec.expect.join("/") + ", got " + result.status);
+    } catch (error) {
+      failures.push(id + ": " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      await target.close();
+    }
+  }
+  assert.deepEqual(failures, [], "limit-case CPU probes must actually exercise accepted bounded inputs");
+});
+
 test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
   const scenarios = buildScenarios({ adminToken: "t" });
   const rh13 = scenarios.filter((x) => x.id === "RH-013");
