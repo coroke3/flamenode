@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import { manageRoutes } from "../src/routes/manage/index.ts";
+import { createAdminD1, seedBase } from "./helpers/sqliteD1.mjs";
 
 const SITE = "https://app.flamenode.example";
 const CANDIDATES = [
@@ -84,4 +85,92 @@ test("MIG-0656 U02c-1b: candidate route implementation is still unmounted", () =
   assert.doesNotMatch(content,/import\s+.*slotSubmittedDanger(?:Routes)?/);
   assert.match(content,/const scopedWritePaths = \[\.\.\.playlistWritePaths, \.\.\.slotWritePaths, \.\.\.submittedDangerWritePaths\]/);
   assert.equal((content.match(/for \(const path of scopedWritePaths\)/g)||[]).length,2);
+});
+
+
+const SUBMITTED_DANGER_PATHS = CANDIDATES.slice(-2).map(([, path]) => path);
+
+/**
+ * Drive the actual manageRoutes parent stack with a real secure Auth.js
+ * database-session cookie and the SQLite-backed D1 adapter. Keep business
+ * handlers UNMOUNTED: successful guard passage must end in 404, not writes.
+ */
+function realAuthHarness() {
+  const { db, sqlite, stats } = createAdminD1();
+  seedBase(sqlite);
+  sqlite.exec('CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER)');
+  const token = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  sqlite.prepare('INSERT INTO "session" ("sessionToken", "userId", "expires") VALUES (?, ?, ?)')
+    .run(token, "admin-1", Date.now() + 60_000);
+  const app = new Hono();
+  app.route("/api/manage", manageRoutes);
+  const post = (path, override = {}) => app.request(SITE + path, {
+    method: "POST",
+    headers: {
+      Origin: SITE,
+      Cookie: "__Secure-authjs.session-token=" + token,
+      ...(override.headers ?? {}),
+    },
+  }, { DB: db, NEXT_PUBLIC_SITE_URL: SITE });
+  const effects = () => ({
+    batches: stats.batches,
+    audits: sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n,
+    queue: sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n,
+  });
+  return { sqlite, stats, post, effects, token };
+}
+
+test("MIG-0656 U03g: real Auth.js session + accepted TOS passes both guards but does not mount writes", async () => {
+  const h = realAuthHarness();
+  try {
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const res = await h.post(path);
+      assert.equal(res.status, 404, path + ": successful parent guards end at unmounted route");
+      assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+    }
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
+});
+
+test("MIG-0656 U03g: real Auth.js session enforces CURRENT TOS and latest major consent", async () => {
+  const h = realAuthHarness();
+  try {
+    h.sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run("admin-1");
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const res = await h.post(path);
+      assert.equal(res.status, 403, path);
+      assert.equal((await res.json()).reason, "tos_required");
+    }
+    h.sqlite.prepare('UPDATE "user" SET is_tos_accepted=1 WHERE id=?').run("admin-1");
+    h.sqlite.prepare('INSERT INTO terms_versions (id, severity, published_at, updated_at) VALUES (?,?,?,?)')
+      .run("current-major", "major", 1000, 1000);
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      const res = await h.post(path);
+      assert.equal(res.status, 403, path);
+      assert.equal((await res.json()).reason, "tos_reaccept_required");
+    }
+    h.sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=? WHERE id=?')
+      .run("current-major", "admin-1");
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      assert.equal((await h.post(path)).status, 404, path);
+    }
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
+});
+
+test("MIG-0656 U03g: real banned/expired sessions cannot reach either unmounted write", async () => {
+  const h = realAuthHarness();
+  try {
+    h.sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run("admin-1");
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      assert.equal((await h.post(path)).status, 403, path);
+    }
+    h.sqlite.prepare('UPDATE "user" SET is_banned=0 WHERE id=?').run("admin-1");
+    h.sqlite.prepare('UPDATE "session" SET expires=? WHERE sessionToken=?')
+      .run(Date.now() - 60_000, h.token);
+    for (const path of SUBMITTED_DANGER_PATHS) {
+      assert.equal((await h.post(path)).status, 401, path);
+    }
+    assert.deepEqual(h.effects(), { batches: 0, audits: 0, queue: 0 });
+  } finally { h.sqlite.close(); }
 });
