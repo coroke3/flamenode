@@ -764,3 +764,50 @@ test("U02 CURRENT import applies 500-row preview ceiling and 2M-char payload lim
   assert.equal(parsed.rows.length, 500);
   assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "id\n" + rows.concat({id:"overflow"}).map(row => row.id).join("\n") }), /too_many_rows/);
 });
+
+
+test("U02 upsert existing-row lookup binds composite PKs in one D1 SELECT and rejects unexpected rows", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { prepareSpreadsheetImportMutationRows, fetchSpreadsheetExistingImportRows, planSpreadsheetImportMutations } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("video_events", true), columns,
+    columnNames: columns.map(c => c.name), primaryKeys: ["video_id", "event_id"] };
+  const rows = [{ video_id: "v1", event_id: "e1", notes: "changed" },
+    { video_id: "v2", event_id: "e2", notes: "insert" }];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE video_events (video_id TEXT, event_id TEXT, notes TEXT, PRIMARY KEY (video_id, event_id))');
+    sqlite.prepare('INSERT INTO video_events VALUES (?, ?, ?)').run("v1", "e1", "before");
+    let reads = 0;
+    let statement = "", values = [];
+    const db = { prepare(sql) { reads++; statement = sql; return { bind(...binds) {
+      values = binds;
+      return { async all() { return { results: sqlite.prepare(sql).all(...binds) }; } };
+    } }; } };
+    const existing = await fetchSpreadsheetExistingImportRows(db, ctx, prepared, 1);
+    assert.equal(reads, 1);
+    assert.equal(statement, 'SELECT * FROM "video_events" WHERE ("video_id" = ? AND "event_id" = ?) OR ("video_id" = ? AND "event_id" = ?)');
+    assert.deepEqual(values, ["v1", "e1", "v2", "e2"]);
+    assert.deepEqual([...existing.keys()], ["e1\0v1"]);
+    const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "operator");
+    assert.deepEqual({ inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped },
+      { inserted: 1, updated: 1, skipped: 0 });
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, prepared, 0), /batch_too_large/);
+    assert.equal(reads, 1);
+    const extraDb = { prepare() { return { bind() { return { async all() { return { results: [
+      { video_id: "different", event_id: "id", notes: "wrong" },
+    ] }; } }; } }; } };
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(extraDb, ctx, prepared, 1), /invalid_snapshot/);
+    await assert.rejects(() => fetchSpreadsheetExistingImportRows(db, ctx, { ...prepared, errors: [
+      { index: 0, message: "invalid_row" },
+    ] }, 1), /invalid_row/);
+  } finally {
+    sqlite.close();
+  }
+});
