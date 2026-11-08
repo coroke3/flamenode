@@ -307,3 +307,33 @@ test("MIG-0652 U04 SQLite T15: failed R2 confirmation triggers compensation with
   assert.ok(f.timeline.filter((op) => op === "r2.put").length >= 2, "compensation should CAS-release the uncommitted manifest entry");
   assert.ok(!f.timeline.includes("d1.batch"));
 });
+
+
+test("MIG-0652 U04 SQLite T16: postcommit cache outage never rolls back an archived event or its visibility fence", async () => {
+  const f = setup();
+  const oldCache = globalThis.caches;
+  const oldWarn = console.warn;
+  const warnings = [];
+  globalThis.caches = { default: { delete: async () => { throw new Error("simulated cache outage"); } } };
+  console.warn = (...parts) => warnings.push(parts.join(" "));
+  let response;
+  try {
+    response = await f.request();
+  } finally {
+    globalThis.caches = oldCache;
+    console.warn = oldWarn;
+  }
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  const fence = f.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+  assert.ok(fence?.fence_token);
+  assert.equal(f.bucket.manifest.entities.find((e) => e.entity_id === EVENT).fence_token, fence.fence_token);
+  assert.equal(f.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+  assert.ok(f.read("static_rebuild_queue").some((entry) => entry.reason === "event_private"));
+  assert.ok(warnings.some((line) => line.includes("cache_api_delete_failed")));
+  assert.ok(!warnings.some((line) => line.includes("simulated cache outage")), "provider error must stay redacted");
+  assert.ok(!f.timeline.slice(f.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
+    "postcommit cache failure must never compensate a committed visibility fence");
+});
