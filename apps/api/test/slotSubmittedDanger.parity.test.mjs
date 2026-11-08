@@ -181,10 +181,14 @@ test("SA-056/057 U03j: static rebuild queue reason and requester match CURRENT p
       const rows=s.sqlite.prepare(
         "SELECT target_type, reason, requested_by_user_id FROM static_rebuild_queue",
       ).all();
-      assert.equal(rows.length,3);
+      assert.deepEqual(rows.map(row=>row.target_type).sort(),
+        ["event_slots","event_release","top_slot_stats"].sort());
       for(const row of rows){
         assert.equal(row.reason,reason,kind+" "+row.target_type);
-        assert.equal(row.requested_by_user_id,ADMIN.id);
+        // CURRENT buildSlotChangeQueueBatch: the two event-specific intents
+        // record the initiator, but the global top_slot_stats intent does not.
+        assert.equal(row.requested_by_user_id,
+          row.target_type==="top_slot_stats"?null:ADMIN.id);
       }
       assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
       assert.equal(s.stats.batches,1);
