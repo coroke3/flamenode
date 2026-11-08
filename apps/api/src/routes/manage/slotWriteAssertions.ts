@@ -57,6 +57,7 @@ export function buildSlotReservedReleasePrecondition(
     reserved_x_id_snapshot: row.reserved_x_id_snapshot,
   })));
 
+  // JS trim determines active groups; SQLite trim differs for Unicode whitespace.
   // Compare both the complete live raw group membership and every selected
   // row's full CAS-sensitive fields. Reject phantoms, moves and stale rows
   // BEFORE the mutation, not only after a read outside the D1 batch.
@@ -80,9 +81,7 @@ export function buildSlotReservedReleasePrecondition(
         AND (
           s.id IN (SELECT id FROM expected)
           OR s.reservation_group_id IN (
-            SELECT reservation_group_id FROM expected
-            WHERE reservation_group_id IS NOT NULL
-              AND trim(reservation_group_id) <> ''
+            SELECT value FROM json_each(${JSON.stringify([...byGroup.keys()])})
           )
         )
     )

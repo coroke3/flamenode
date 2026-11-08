@@ -23,7 +23,7 @@ function setup(rows) {
 
 function check(db, expectedRows, eventId = "event_1") {
   const compiled = dialect.sqlToQuery(buildSlotReservedReleasePrecondition(eventId, expectedRows));
-  assert.ok(compiled.params.length <= 4, "one JSON snapshot, event ID and count");
+  assert.ok(compiled.params.length <= 5, "JSON snapshot, event ID, raw group IDs and counts");
   return Object.values(db.prepare(compiled.sql).get(...compiled.params))[0];
 }
 
@@ -73,4 +73,14 @@ test("MIG-0656 U02b-2: unsafe snapshots are rejected before a D1 batch", () => {
     ["a","b","c","d"].map(id=>row(id)),
   ]) assert.throws(()=>buildSlotReservedReleasePrecondition("event_1",rows));
   assert.throws(()=>buildSlotReservedReleasePrecondition(" ",[a]));
+});
+test("MIG-0656 U02b-2a: Unicode whitespace-only group IDs retain CURRENT solo semantics", () => {
+  for (const blank of ["\u3000", "\u00a0", "\t", " \t "]) {
+    const a = row("a", blank), b = row("b", blank);
+    const db = setup([a,b]);
+    try {
+      assert.equal(check(db,[a]),1, "JS trim treats group as solo: "+JSON.stringify(blank));
+      assert.equal(check(db,[b]),1);
+    } finally { db.close(); }
+  }
 });
