@@ -15,6 +15,7 @@
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { resolveSlotReservationSubject } from "@flamenode/domain/slots/reservationGroups";
 import type { SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
+import type { SubmittedVideoAuditBefore } from "./slotSubmittedVideoAudit.ts";
 
 export type SubmittedDangerKind = "force-release" | "keep-reservation";
 export type SubmittedVideoBefore = {
@@ -29,6 +30,8 @@ export type SubmittedDangerSelection =
       groupId: string | null;
       videoId: string | null;
       videoBefore: SubmittedVideoBefore | null;
+      /** Validated complete videos before-image, required for strict video audits. */
+      videoAuditBefore?: SubmittedVideoAuditBefore | null;
       shouldDetachVideoSchedulingAtRead: boolean;
       /** Fully validated read-time submitted references; MUST be CAS checked inside batch. */
       submittedVideoRefIds: string[];
@@ -62,6 +65,7 @@ export function selectSubmittedDangerSnapshot(input: {
   groupedRows: readonly SlotLabelWriteRow[];
   /** Not looked up when anchor.video_id is blank for SA-056. */
   videoBefore: SubmittedVideoBefore | null;
+  videoAuditBefore?: SubmittedVideoAuditBefore | null;
   /** Up to 21 rows with matching video_id and status submitted. */
   submittedVideoRefs: readonly { id: string }[];
 }): SubmittedDangerSelection {
@@ -127,7 +131,8 @@ export function selectSubmittedDangerSnapshot(input: {
     }
     return {
       ok: true, rows, groupId, videoId: null,
-      videoBefore: null, shouldDetachVideoSchedulingAtRead: false,
+      videoBefore: null, videoAuditBefore: null,
+      shouldDetachVideoSchedulingAtRead: false,
       submittedVideoRefIds: [],
     };
   }
@@ -152,6 +157,7 @@ export function selectSubmittedDangerSnapshot(input: {
   const selectedIds = new Set(rows.map(row => row.id));
   return {
     ok: true, rows, groupId, videoId, videoBefore: video,
+    videoAuditBefore: input.videoAuditBefore ?? null,
     submittedVideoRefIds: refs.map(ref => ref.id),
     shouldDetachVideoSchedulingAtRead:
       video.scheduling_type === "slotted" &&
