@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import styles from "./PlaylistRail.module.css";
 import { Icon } from "@/components/ui/Icon";
-import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
+import { eventVideoPageHref, extractYoutubeId, videoPageHref, youtubeThumbUrl } from "@/lib/youtube/id";
 import { cn } from "@/lib/utils/cn";
 import { uniqueBy } from "@/lib/utils/unique";
 
@@ -129,12 +129,8 @@ export function PlaylistRail({
   const prevItem = currentIndex > 0 ? orderedItems[currentIndex - 1] : null;
 
   const makeHref = React.useCallback(
-    (item: PlaylistEntry) => {
-      const target = item.youtube_video_id?.trim() || item.id;
-      return playlistId
-        ? `/${target}?playlist=${encodeURIComponent(playlistId)}`
-        : `/${target}`;
-    },
+    (item: PlaylistEntry) =>
+      playlistId ? eventVideoPageHref(item, playlistId) : videoPageHref(item),
     [playlistId],
   );
 
