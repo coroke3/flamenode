@@ -13,6 +13,7 @@
  * reference set, per-slot CAS, strict audit, Queue and Outbox are pending.
  */
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
+import { SUBMITTED_VIDEO_AUDIT_JSON_FIELDS, parseSubmittedVideoAuditBefore } from "./slotSubmittedVideoAudit.ts";
 import { canUpdateEventLabels, type SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
 import {
   selectSubmittedDangerSnapshot,
@@ -56,14 +57,16 @@ export const SLOT_SUBMITTED_DANGER_RAW_GROUP_SQL = [
 ].join("\n");
 
 /**
- * Two binds: JS-trimmed anchor video_id twice. Unlike SQLite trim(),
+ * Two binds: JS-trimmed anchor video_id twice. Full videos 30-column
+ * strict-audit before-image and submitted reference IDs share this query.
+ * Unlike SQLite trim(),
  * JavaScript trim() recognizes Unicode blank legacy values.
  * If no video ID, this read is skipped for SA-056 and SA-057 fails closed.
  */
 export const SLOT_SUBMITTED_DANGER_VIDEO_REFS_SQL = [
   "SELECT",
-  "(SELECT json_object('id',v.id,'scheduling_type',v.scheduling_type,",
-  " 'updated_at',v.updated_at) FROM videos v WHERE v.id = ? LIMIT 1) AS video_json,",
+  "(SELECT json_object(" + SUBMITTED_VIDEO_AUDIT_JSON_FIELDS + ")",
+  " FROM videos v WHERE v.id = ? LIMIT 1) AS video_json,",
   "(SELECT json_group_array(json_object('id',s.id)) FROM (",
   " SELECT s.id FROM slots s WHERE s.video_id = ? AND s.status = 'submitted'",
   " LIMIT " + (MAX_SLOTS_PER_VIDEO + 1),
@@ -172,18 +175,14 @@ export function decodeSubmittedDangerReads(input: {
   const videoValue = videoId ? parseJson(input.videoRead?.video_json ?? null) : null;
   const refValue = videoId ? parseJson(input.videoRead?.refs_json ?? null) : [];
   let videoBefore: SubmittedVideoBefore | null = null;
+  let videoAuditBefore = null;
   if (videoValue !== null) {
-    if (typeof videoValue !== "object" || Array.isArray(videoValue)) {
-      return { ok: false, message: CHANGED };
-    }
-    const v = videoValue as Record<string, unknown>;
-    if (typeof v.id !== "string" ||
-        (v.scheduling_type !== null && typeof v.scheduling_type !== "string") ||
-        !Number.isSafeInteger(v.updated_at)) {
-      return { ok: false, message: CHANGED };
-    }
+    videoAuditBefore = parseSubmittedVideoAuditBefore(videoValue);
+    if (!videoAuditBefore) return { ok: false, message: CHANGED };
     videoBefore = {
-      id: v.id, scheduling_type: v.scheduling_type, updated_at: v.updated_at as number,
+      id: videoAuditBefore.id,
+      scheduling_type: videoAuditBefore.scheduling_type,
+      updated_at: videoAuditBefore.updated_at,
     };
   }
   if (videoId && (!Array.isArray(refValue) ||
@@ -195,7 +194,7 @@ export function decodeSubmittedDangerReads(input: {
   return selectSubmittedDangerSnapshot({
     kind: input.kind, eventId, slotId, anchor,
     groupedRows: grouped ? groupValue as SlotLabelWriteRow[] : [],
-    videoBefore, submittedVideoRefs: videoId
+    videoBefore, videoAuditBefore, submittedVideoRefs: videoId
       ? refValue as {id: string}[] : [],
   });
 }
