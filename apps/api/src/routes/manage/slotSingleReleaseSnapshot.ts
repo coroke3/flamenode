@@ -67,8 +67,8 @@ function isRow(value: unknown, eventId: string): value is SlotLabelWriteRow {
     typeof row.status === "string" &&
     (row.reservation_group_id === null ||
       typeof row.reservation_group_id === "string") &&
-    Number.isSafeInteger(row.version) && (row.version ?? -1) >= 0 &&
-    Number.isSafeInteger(row.updated_at);
+    typeof row.version === "number" && Number.isSafeInteger(row.version) && row.version >= 0 &&
+    typeof row.updated_at === "number" && Number.isSafeInteger(row.updated_at);
 }
 
 /**
