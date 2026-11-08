@@ -1499,6 +1499,8 @@
 | `src/lib/utils/adminQueryPages.contract.test.mjs` | TEST | CURRENT admin spreadsheet and permissions simulator repeated URL query normalization (CURRENT only) | MIG-0705 | SAME (CURRENT regression test, no TARGET changes) | IN_PROGRESS | PR#657 SHA=83468d3128cd70191156bf73a7b9326323467a53 TEST=node --test --experimental-strip-types src/lib/utils/adminQueryPages.contract.test.mjs (exact-HEAD CI pending) |
 | `src/components/forms/videoPermissionRoute.contract.test.mjs` | TEST | CURRENT video edit-permissions routing, repeated privileged query and TARGET single-value compatibility | MIG-0703 | SAME (CURRENT contract regression; no TARGET code modification) | IN_PROGRESS | PR#658 SHA=40f3fb9f8bd831c8de51861f449be25a1e45f959 TEST=node --test --experimental-strip-types src/components/forms/videoPermissionRoute.contract.test.mjs (exact-HEAD CI pending) |
 
+| `scripts/publicListUtf16Boundary.test.mjs` | TEST | PUBLIC /list and RH-032 UTF-16 search boundary regression | MIG-0505 | SAME (CURRENT Next/Hono/Astro source contract) | RETAINED | PR#654 SHA=d4659b5c17ffbc9a091691e9dc72bd25c641e689 TEST=node --test --experimental-strip-types scripts/publicListUtf16Boundary.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/42287437696 (previous HEAD: docs-evidence gate failure; rerun on corrected HEAD pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
@@ -1594,7 +1596,6 @@ Excluded on purpose: test files (`*.test.*`, `*.spec.*`, `__tests__/`), test fix
 | `workers/youtube-playlist-sync/**` | WORKER_ENTRY | MIG-0901 | playlist sync | NOT_STARTED |
 | `workers/youtube-sync/**` | WORKER_ENTRY | MIG-0610 | youtube sync quota/scheduling | NOT_STARTED |
 
-| `scripts/publicListUtf16Boundary.test.mjs` | TEST | PUBLIC /list and RH-032 UTF-16 search boundary regression | MIG-0505 | SAME (CURRENT Next/Hono/Astro source contract) | RETAINED | PR#654 SHA=d4659b5c17ffbc9a091691e9dc72bd25c641e689 TEST=node --test --experimental-strip-types scripts/publicListUtf16Boundary.test.mjs CI=https://github.com/coroke3/flamenode/actions/runs/42287437696 (previous HEAD: docs-evidence gate failure; rerun on corrected HEAD pending) |
 
 **Update rule:** Every file created, moved, removed, or modified as part of a migration MIG must either have an updated row above or an added one in this matrix, with exact new path, owner, state, and evidence. The one-MIG PR must show a per-file before/after list. Never mark `PARITY_VERIFIED` on the basis of only TypeScript compile or an AI assertion.
 
