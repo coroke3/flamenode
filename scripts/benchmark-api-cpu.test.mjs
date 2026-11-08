@@ -382,6 +382,25 @@ test("MIG-0639: shared fixtures and per-sample setup rows insert on the migrated
   }
 });
 
+test("MIG-0639 SA-045..055 and SA-100..101: each local write fixture executes on migrated D1 schema", async () => {
+  const db = await migratedDb();
+  try {
+    run(db, SEED("t"));
+    const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((sc) => [sc.id, sc]));
+    const fixtureIds = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-052", "SA-053", "SA-054", "SA-055", "SA-100", "SA-101"];
+    for (const id of fixtureIds) {
+      const spec = scenarios.get(id).kinds.normal(2, "sqlite");
+      assert.ok(spec.setup?.length, id + " must have a local seed");
+      assert.doesNotThrow(() => run(db, spec.setup), id + " fixture must match migrated schema");
+    }
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM notification_outbox WHERE id='bench-notif-sqlite-2'"), 1);
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM terms_versions WHERE id='bench-terms-sqlite-2'"), 1);
+    assert.equal(count(db, "SELECT COUNT(*) AS n FROM x_identity_requests WHERE id='bench-xreq-sqlite-2'"), 1);
+  } finally {
+    db.close();
+  }
+});
+
 test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
   const scenarios = buildScenarios({ adminToken: "t" });
   const rh13 = scenarios.filter((x) => x.id === "RH-013");
