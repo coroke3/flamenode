@@ -4,9 +4,42 @@
  * Read inside SA-056/057's THIRD existing D1 SELECT, no additional I/O.
  * Reject absent, shortened and wrongly typed snapshots before any D1 batch.
  */
-import type { videos } from "@flamenode/db";
-
-export type SubmittedVideoAuditBefore = typeof videos.$inferSelect;
+/** Explicit local mirror of canonical videos 30-column read shape.
+ * apps/api/src/routes may NOT import @flamenode/db directly (CI boundary).
+ * Keep this type and the runtime column list in sync with canonical.ts.
+ */
+export type SubmittedVideoAuditBefore = {
+  id: string;
+  primary_event_id: string | null;
+  creator_x_user_id: string | null;
+  submitted_by_user_id: string;
+  collaboration_type: string;
+  part: string | null;
+  source_type: string;
+  creator_display_name: string;
+  creator_display_name_yomi: string | null;
+  creator_icon_url: string | null;
+  creator_youtube_channel_url: string | null;
+  creator_profile_text: string | null;
+  creator_other_social_links: string | null;
+  title: string;
+  music: string | null;
+  credit: string | null;
+  music_reference_url: string | null;
+  closing_comment: string | null;
+  youtube_video_id: string | null;
+  intro_comment: string | null;
+  highlights: string | null;
+  production_story: string | null;
+  visibility_status: string;
+  scheduling_type: string | null;
+  scheduled_time: number | null;
+  app_like_count: number;
+  score: number;
+  score_updated_at: number | null;
+  created_at: number;
+  updated_at: number;
+};
 
 export const SUBMITTED_VIDEO_AUDIT_COLUMNS = [
   "id", "primary_event_id", "creator_x_user_id",
