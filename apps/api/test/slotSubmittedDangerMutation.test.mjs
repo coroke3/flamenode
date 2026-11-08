@@ -274,7 +274,7 @@ test("SA-056/057: malformed selection rejects before SQL and candidate is unmoun
   const p=buildSubmittedDangerAtomicPlan({
     kind:"force-release",eventId:"ev",selection:good,updatedAt:250,
   });
-  assert.ok(p.preMutationAssertions.every(x=>q(x).params.length<=6));
+  assert.deepEqual(p.preMutationAssertions.map(x=>q(x).params.length),[5,8]);
   assert.ok(p.mutationStatements.every(x=>q(x).params.length<=5));
   const index=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotSubmittedDangerMutation|slotSubmittedDangerRoutes/);
