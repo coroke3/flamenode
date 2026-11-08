@@ -13,6 +13,8 @@ function normalizeHttpUrl(raw: string | null | undefined, maxLength = 500): stri
   try {
     const url = new URL(s);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    // Reject userinfo so normalized URLs never expose embedded credentials.
+    if (url.username || url.password) return null;
     return url.toString();
   } catch {
     return null;

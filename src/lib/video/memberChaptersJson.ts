@@ -31,15 +31,24 @@ export function parseMemberChaptersJson(
     for (const [index, item] of parsed.entries()) {
       if (typeof item !== "object" || item === null) continue;
       const o = item as Record<string, unknown>;
-      const timeSeconds = Number(o.time_seconds ?? o.time ?? o.chapter_time);
-      if (!Number.isFinite(timeSeconds)) continue;
+      const rawTime = o.time_seconds ?? o.time ?? o.chapter_time;
+      // Accept legacy numeric strings, but never treat empty or boolean values as a chapter at 0s.
+      if (typeof rawTime !== "number" && typeof rawTime !== "string") continue;
+      if (typeof rawTime === "string" && !rawTime.trim()) continue;
+      const timeSeconds = Number(rawTime);
+      if (!Number.isSafeInteger(timeSeconds) || timeSeconds < 0) continue;
       const label = String(o.label ?? o.chapter_label ?? "").trim();
       if (!label) continue;
+      const rawOrder = o.order_index ?? o.sort_order ?? index;
+      const parsedOrder = Number(rawOrder);
+      const orderIndex = Number.isSafeInteger(parsedOrder) && parsedOrder >= 0
+        ? parsedOrder
+        : index;
       out.push({
         time_seconds: timeSeconds,
         label,
         note: String(o.note ?? "").trim(),
-        order_index: Number(o.order_index ?? o.sort_order ?? index) || index,
+        order_index: orderIndex,
       });
     }
     return out.sort((a, b) => a.order_index - b.order_index);

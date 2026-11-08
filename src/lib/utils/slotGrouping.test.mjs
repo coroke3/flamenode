@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { formatSlotPartLabel } from "./slotGrouping.ts";
+import { formatUnix } from "./format.ts";
 import {
   sortSlotsChronologically,
   areSlotsInSamePart,
@@ -493,4 +496,28 @@ test("collapseReservationGroups: available mixed with reserved/submitted is inte
     );
     assert.equal(output[0]?.integrity_error, "mixed_status");
   }
+});
+
+
+test("formatSlotPartLabel: Unix時刻0は時刻なし枠ではなく日時として表示する", () => {
+  const part = {
+    index: 1,
+    rows: [{ start_time: 0 }, { start_time: 60 }],
+    start_time: 0,
+    last_start_time: 60,
+    is_timeless: false,
+  };
+  const expected = `${formatUnix(0, { dateOnly: true })}  第1部  ${formatUnix(0, { timeOnly: true })} - ${formatUnix(60, { timeOnly: true })}`;
+  assert.equal(formatSlotPartLabel(part), expected);
+  assert.equal(formatSlotPartLabel(part, "short"), "第1部");
+  assert.equal(formatSlotPartLabel(part, "full", ["準備"]), expected.replace("第1部", "準備"));
+  assert.equal(formatSlotPartLabel({ ...part, start_time: null, is_timeless: true }), "時間なし枠");
+});
+
+test("SlotGrid: 日付列・予約確認・時刻欄は0を有効な開始日時として扱う", async () => {
+  const grid = await readFile(new URL("../../components/event/SlotGrid.tsx", import.meta.url), "utf8");
+  assert.match(grid, /const dateLabel = part\.start_time != null\s*\?/);
+  assert.match(grid, /if \(slot\.start_time != null\) \{/);
+  assert.match(grid, /\{slot\.start_time != null \? \(/);
+  assert.doesNotMatch(grid, /(?:part|slot)\.start_time\s*\?(?!\?)/);
 });

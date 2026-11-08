@@ -97,6 +97,39 @@ test("MIG-0403 U01: unsafe URLs, malformed IDs and wrong types are dropped",asyn
  const event=await loadAs({kind:"event",id:"e",title:"E",imageUrl:"vbscript:x",entryAction:"delete"});
  assert.deepEqual(event,{kind:"event",id:"e",title:"E"});
 });
+test("MIG-0403 regression: URL-parser control characters cannot turn snapshot paths into offsite links",async()=>{
+ const unsafe=[
+  "/\t/evil.example/icon.png",
+  "/\r/evil.example/icon.png",
+  "/\n/evil.example/icon.png",
+  "/\\evil.example/icon.png",
+  "//evil.example/icon.png",
+  "/safe/\t/evil.example/icon.png",
+ ];
+ for(const url of unsafe){
+  const event=await loadAs({kind:"event",id:"event_url",title:"Event",iconUrl:url,imageUrl:url});
+  assert.equal(event.iconUrl,undefined,JSON.stringify(url));
+  assert.equal(event.imageUrl,undefined,JSON.stringify(url));
+ }
+});
+
+test("MIG-0403 regression: ordinary site-relative paths and HTTPS sources retain their original values",async()=>{
+ const user=await loadAs({
+  kind:"user",id:"user_icon",title:"User",
+  iconUrl:"/brand/icon.png?size=128&theme=dark",
+  youtubeChannelUrl:"https://www.youtube.com/@creator",
+ });
+ assert.equal(user.iconUrl,"/brand/icon.png?size=128&theme=dark");
+ assert.equal(user.youtubeChannelUrl,"https://www.youtube.com/@creator");
+ const event=await loadAs({
+  kind:"event",id:"event_icon",title:"Event",
+  iconUrl:"/images/event-cover.png",
+  imageUrl:"https://images.example.com/banner.jpg",
+ });
+ assert.equal(event.iconUrl,"/images/event-cover.png");
+ assert.equal(event.imageUrl,"https://images.example.com/banner.jpg");
+});
+
 test("MIG-0403 U01: long text is clamped and an oversized title is rejected",async()=>{
  const snapshot=await loadAs({kind:"video",id:"v",title:"V",introComment:"a".repeat(6000),creatorName:"n".repeat(150)});
  assert.equal(snapshot.introComment.length,5000);assert.equal(snapshot.creatorName.length,100);

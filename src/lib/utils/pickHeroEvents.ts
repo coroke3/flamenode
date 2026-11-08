@@ -47,6 +47,10 @@ export function pickHeroEvents(
   limit = MAX_HERO_EVENTS,
   now: number = Math.floor(Date.now() / 1000),
 ): HeroEventRow[] {
+  // Array#slice accepts negative/Infinity endpoints; neither is a valid card cap.
+  // Fail closed rather than selecting most of the events or an unbounded list.
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+
   return [...activeEvents]
     .filter((event) => isHeroCandidate(event, now))
     .sort((a, b) => {
