@@ -304,3 +304,25 @@ export function assertSpreadsheetForeignKeyLookup(
     throw new Error("foreign_key_violation");
   }
 }
+
+
+/**
+ * D1 read-only FK preflight. A caller must execute this AFTER the admin write
+ * guard and BEFORE planning the mutation+audit+Queue atomic D1 batch.
+ */
+export async function validateSpreadsheetForeignKeys(
+  db: {
+    prepare(sql: string): {
+      bind(...values: (string | number | null)[]): {
+        all<T>(): Promise<{ results?: T[] }>;
+      };
+    };
+  },
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  rows: readonly Record<string, string | null>[],
+): Promise<void> {
+  for (const lookup of buildSpreadsheetForeignKeyLookups(foreignKeys, rows)) {
+    const result = await db.prepare(lookup.statement).bind(...lookup.binds).all<{ value: string | number | null }>();
+    assertSpreadsheetForeignKeyLookup(lookup, result.results ?? []);
+  }
+}
