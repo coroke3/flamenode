@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
+import { D1_MAX_BATCH_QUERIES } from "@flamenode/server-core/audit/mutateBudget";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { eventLifecycleRoutes } from "../src/eventLifecycle/archiveRoute.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
@@ -877,5 +878,43 @@ test("MIG-0652 U04 SQLite T29: URL-decoded legacy ID cannot be forged by an enco
   assert.equal(f.read("audit_logs").length, 0);
   assert.equal(f.read("public_visibility_fences").length, 0);
   assert.equal(f.read("static_rebuild_queue").length, 0);
+});
+
+test("MIG-0652 U04 SQLite T30: audited archive stays within D1 Free invocation query budget under real auth guards", async () => {
+  // Count every prepared SQL statement actually executed by the in-memory D1
+  // wrapper, including the real Auth.js lookup, identity/write/cost guards,
+  // event/queue pre-reads and each atomic batch statement. Setup SQL runs
+  // against SQLite directly and is intentionally not charged to a request.
+  // This is a deterministic query-count regression, NOT workerd/D1 billing.
+  assert.equal(D1_MAX_BATCH_QUERIES, 50, "update this test if D1 policy changes");
+  for (const variant of [
+    { name: "public to private", status: "public", r2: true },
+    { name: "already private idempotent archive", status: "private", r2: false },
+  ]) {
+    const f = setup({
+      status: variant.status, r2: variant.r2,
+      enforceOrigin: true, enforceSession: true, enforceWriteGuard: true,
+    });
+    const previousCaches = globalThis.caches;
+    globalThis.caches = { default: { delete: async () => true } };
+    let response;
+    try { response = await f.request(); } finally { globalThis.caches = previousCaches; }
+    assert.equal(response.status, 200, variant.name);
+    assert.deepEqual(await response.json(), { ok: true, pendingPublicReflection: true }, variant.name);
+    assert.equal(f.d1.stats.batches, 1, variant.name);
+    assert.ok(
+      f.d1.stats.statements <= D1_MAX_BATCH_QUERIES,
+      variant.name + " executed " + f.d1.stats.statements + " logical D1 queries, above " + D1_MAX_BATCH_QUERIES,
+    );
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+    assert.equal(f.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+    assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+    if (variant.status === "public") {
+      assert.ok(f.bucket.manifest?.entities.some((row) => row.entity_id === EVENT));
+      assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+    } else {
+      assert.deepEqual(f.timeline, ["d1.batch"], "same-status private archival must not need R2");
+    }
+  }
 });
 
