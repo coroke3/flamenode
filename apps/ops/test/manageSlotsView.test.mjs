@@ -120,6 +120,52 @@ test("MIG-0722 U02a: filter nav, counts, encoded URLs, 500 cap and XSS-safe titl
   assert.doesNotMatch(noSlots, /最大500件まで表示しています/);
 });
 
+test("MIG-0722 U02b-6: EventSlotsView composes injected forms and actions only with complete callbacks", () => {
+  let invoked = 0;
+  const writeActions = {
+    onGenerate: async () => { invoked++; return { ok: true }; },
+    onClearAvailable: async () => { invoked++; return { ok: true }; },
+    onAction: async () => { invoked++; return { ok: true }; },
+    canManageSubmittedSlots: true,
+  };
+  const current = data();
+  const noWrites = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: current,
+  }));
+  assert.doesNotMatch(noWrites, /一括生成|空き枠を全削除|すべて選択/);
+  assert.match(noWrites, /編集・削除機能は移行中/);
+
+  const partial = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: current,
+    writeActions: { onAction: writeActions.onAction },
+  }));
+  assert.doesNotMatch(partial, /一括生成|空き枠を全削除|すべて選択/);
+
+  const injected = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: current, writeActions,
+  }));
+  assert.match(injected, /枠を追加・一括編集/);
+  assert.match(injected, /一括生成/);
+  assert.match(injected, /空き枠を全削除/);
+  assert.match(injected, /すべて選択/);
+  assert.match(injected, /削除/);
+  assert.doesNotMatch(injected, /強制解放|作品のみ解放/,
+    "an injected flag cannot override server-reported isAdmin=false");
+  const admin = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: data({ isAdmin: true }), writeActions,
+  }));
+  assert.match(admin, /強制解放/);
+  assert.match(admin, /作品のみ解放/);
+  const empty = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: data({
+      slots: [], total: 0, counts: { available: 0, reserved: 0, submitted: 0 },
+    }), writeActions,
+  }));
+  assert.match(empty, /枠がまだないため、一括生成フォーム/);
+  assert.doesNotMatch(empty, /枠の追加機能は移行中/);
+  assert.equal(invoked, 0, "SSR is not permitted to invoke any injected write");
+});
+
 test("MIG-0722 U02a: mounted page starts with a loading guard and no cached private rows in SSR", () => {
   const html = render(React.createElement(EventSlots, { eventId: "ev id" }));
   assert.match(html, /枠を読み込み中/);
