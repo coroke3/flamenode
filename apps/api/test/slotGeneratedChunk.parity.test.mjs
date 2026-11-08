@@ -90,6 +90,29 @@ test("SA-058 U03p: bounded 3-slot count generation is audited and queued atomica
       .every(row=>row.reason==="slot_admin_generate"));
   }finally{s.sqlite.close();}
 });
+test("SA-058 U03u: CostGuard changes between chunks block the next generated write",async()=>{
+  for(const block of [
+    {column:"operation_mode",value:"read_only",reason:"maintenance_mode"},
+    {column:"disabled_features_json",value:'["manage_slot_create"]',reason:"cost_guard_blocked"},
+  ]){
+    const s=setup();
+    try{
+      const first=await s.post(countInput(3,1));
+      assert.equal(first.status,200,await first.clone().text());
+      assert.equal(s.stats.batches,1);
+      s.sqlite.prepare("UPDATE system_settings SET "+block.column+"=? WHERE id='default'").run(block.value);
+      const denied=await s.post(countInput(3,4));
+      assert.equal(denied.status,503,await denied.clone().text());
+      assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await denied.json()).reason,block.reason);
+      assert.deepEqual(s.slots().map(r=>r.sort_order),[1,2,3]);
+      assert.equal(s.n("audit_logs"),3);
+      assert.equal(s.n("static_rebuild_queue"),3);
+      assert.equal(s.stats.batches,1,"second request must not attempt D1 mutation");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03p: time mode 2-slot insert and repeated count chunk fail closed",async()=>{
   const s=setup();
   try{
