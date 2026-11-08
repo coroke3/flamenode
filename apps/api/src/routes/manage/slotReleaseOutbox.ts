@@ -44,8 +44,12 @@ export function buildSlotReleaseOutboxStatements(input: {
   siteOrigin: string;
   createdAt: number;
   makeId?: () => string;
+  /** Default SA-063 limit is 3; SA-060 opts into its 20-row single-group limit. */
+  maxRows?: 3 | 20;
 }): SlotReleaseNotificationPlan {
-  if (!input.eventId.trim() || input.rows.length < 1 || input.rows.length > 3 ||
+  const maxRows = input.maxRows ?? 3;
+  if ((maxRows !== 3 && maxRows !== 20) ||
+      !input.eventId.trim() || input.rows.length < 1 || input.rows.length > maxRows ||
       !Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
     throw new Error("slot_release_notification_invalid_input");
   }
