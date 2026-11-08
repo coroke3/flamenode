@@ -9,6 +9,7 @@ import { slotBatchReservedReleaseRoutes } from "../src/routes/manage/slotBatchRe
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ORIGIN="https://app.flamenode.example";
+const SESSION_TOKEN="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const ADMIN={id:"admin-1",role:"admin",is_banned:0};
 const STAFF={id:"staff-1",role:"user",is_banned:0};
 const cols=["id","event_id","reserved_by_user_id","x_user_id",
@@ -31,6 +32,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst,mutate}={}) {
     "VALUES ('recipient-1','Recipient','user',0,1,1);",
     'CREATE TABLE event_staff (event_id TEXT,x_user_id TEXT,permission_preset TEXT,',
     'custom_permission_keys_json TEXT);',
+    'CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER);',
     'CREATE TABLE slots (id TEXT PRIMARY KEY,event_id TEXT,reserved_by_user_id TEXT,',
     'x_user_id TEXT,reserved_x_id_snapshot TEXT,display_name TEXT,slot_label TEXT,',
     'start_time INTEGER,sort_order INTEGER,reservation_group_id TEXT,video_id TEXT,',
@@ -53,6 +55,8 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst,mutate}={}) {
   if(actor && actor.id!=="admin-1")sqlite.prepare(
     'INSERT INTO "user"(id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)'
   ).run(actor.id,"Staff",actor.role);
+  if(actor)sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
   if(staff && actor){
     sqlite.prepare("INSERT INTO x_users (id,approval_status) VALUES (?,?)").run("x1","approved");
     sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(actor.id,"x1");
@@ -63,6 +67,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst,mutate}={}) {
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
+    c.set("sessionState",actor?"user":"none");
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -72,7 +77,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst,mutate}={}) {
   app.route("/api/manage/events/:id/slots",slotBatchReservedReleaseRoutes);
   const post=(body={slot_ids:["a"]},eventId="ev-1")=>app.request(
     ORIGIN+"/api/manage/events/"+eventId+"/slots/batch-release",{
-      method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json"},
+      method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json",Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN},
       body:JSON.stringify(body),
     },{DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN}
   );
@@ -183,4 +188,40 @@ test("SA-063 U02c-3: CostGuard blocks and production router does not mount this 
   assert.equal(s.count("notification_outbox"),0);
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotBatchReservedReleaseRoutes|slotBatchReservedRelease\.ts/);
+});
+
+test("SA-063 U04g: mid-request session, scope and CostGuard revocation aborts release/audit/Queue/DM",async()=>{
+  for(const kind of ["session-deleted","session-expired","session-reassigned",
+    "staff-revoked","tos-revoked","role-changed","banned","read-only","event-deleted"]){
+    let injected=false;
+    const staff=kind==="staff-revoked";
+    const s=setup({actor:staff?STAFF:ADMIN,staff,onFirst:(query,sqlite)=>{
+      if(injected||!query.includes("AS grouped_slots_json"))return;
+      injected=true;
+      if(kind==="session-deleted")sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+      if(kind==="session-expired")sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+        .run(Date.now()-60_000,SESSION_TOKEN);
+      if(kind==="session-reassigned")sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+        .run("other-user",SESSION_TOKEN);
+      if(kind==="staff-revoked")sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+      if(kind==="tos-revoked")sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(ADMIN.id);
+      if(kind==="role-changed")sqlite.prepare('UPDATE "user" SET role=\'user\' WHERE id=?').run(ADMIN.id);
+      if(kind==="banned")sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(ADMIN.id);
+      if(kind==="read-only")sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      if(kind==="event-deleted")sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+    }});
+    try{
+      const response=await s.post();
+      assert.equal(injected,true,"post-read injection "+kind);
+      assert.equal(response.status,409,kind+" "+await response.clone().text());
+      assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.getSlot("a").status,"reserved");
+      assert.equal(s.getSlot("b").status,"reserved");
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.count("notification_outbox"),0);
+      assert.equal(s.stats.batches,1,"one rolled-back atomic D1 batch");
+      assert.ok(s.stats.reads<=2,"bounded CostGuard + scoped snapshot only");
+    }finally{s.sqlite.close();}
+  }
 });

@@ -5,6 +5,7 @@
  * static rebuild queue. This module has no authorization or side effects.
  */
 import { parseSlotRows, type SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
+import { SLOT_CHUNK_COST_GUARD_SELECT } from "./slotChunkCostGuard.ts";
 import {
   planBatchReservedRelease, type SlotWriteSelectionResult,
 } from "./slotWriteSelection.ts";
@@ -37,6 +38,7 @@ export const SLOT_BATCH_RELEASE_SNAPSHOT_SQL = [
   " WHERE es.event_id = ? AND l.auth_user_id = ?",
   " AND x.approval_status = 'approved' LIMIT 101",
   ") staff) AS staff_json,",
+  SLOT_CHUNK_COST_GUARD_SELECT + ",",
   "(SELECT json_group_array(json_object(" + FIELDS + ")) FROM (",
   " SELECT s.* FROM slots s WHERE s.event_id = ?",
   " AND s.id IN (SELECT value FROM json_each(?)) LIMIT 4",
@@ -55,6 +57,7 @@ export const SLOT_BATCH_RELEASE_SNAPSHOT_SQL = [
 export type SlotBatchReleaseRead = {
   exists_id: string | null;
   staff_json: string | null;
+  cost_guard_json: string | null;
   slots_json: string | null;
   grouped_slots_json: string | null;
 };

@@ -10,9 +10,12 @@ import { SlotBatchIdsBodySchema } from "@flamenode/contracts";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
-import { canUpdateEventLabels } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkSessionAssertion, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import {
   SLOT_BATCH_RELEASE_SNAPSHOT_SQL,
   selectBatchReservedReleaseSnapshot,
@@ -43,13 +46,19 @@ slotBatchReservedReleaseRoutes.post("/batch-release", async (c) => {
   if (body.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
   const validated = SlotBatchIdsBodySchema.safeParse(body.value);
   if (!validated.success) return c.json({ ok: false, message: "入力エラー" }, 400);
+  // Require the real upstream Auth.js identity, not only a test stub user.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
   }
 
   try {
-    // S3: parent writeGuard actor/TOS + this CostGuard + ONE scoped snapshot.
+    // S3: parent writeGuard actor/TOS + this CostGuard + ONE scoped snapshot;
+    // the same atomic batch rechecks session, scope and policy after this read.
     const values = JSON.stringify(validated.data.slot_ids);
     const read = await c.env.DB.prepare(SLOT_BATCH_RELEASE_SNAPSHOT_SQL)
       .bind(eventId, eventId, user.id, eventId, values, eventId, eventId, values)
@@ -59,6 +68,8 @@ slotBatchReservedReleaseRoutes.post("/batch-release", async (c) => {
     if (!canUpdateEventLabels(user.role, read.staff_json) || !read.exists_id) {
       return c.json({ ok: false, message: "Not Found" }, 404);
     }
+    const guard = verifySlotChunkCostGuard(read.cost_guard_json, "manage_slot_update");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
     const selection = selectBatchReservedReleaseSnapshot(
       eventId, validated.data.slot_ids, read,
     );
@@ -90,7 +101,12 @@ slotBatchReservedReleaseRoutes.post("/batch-release", async (c) => {
       strict: true,
     }));
     await mutateWithAudit(db, {
-      preMutationAssertions: plan.preMutationAssertions.map((statement) => db.run(statement)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
+        ...plan.preMutationAssertions.map((statement) => db.run(statement)),
+      ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],
       expectedMutationChanges: [plan.expectedMutationChanges, ...queue.expectedChanges],
       audits,
