@@ -228,3 +228,38 @@ test("MIG-0652 U04 SQLite T11: non-admin and maintenance denials cannot mutate D
     assert.deepEqual(f.timeline, []);
   }
 });
+
+test("MIG-0652 U04 SQLite T12: already-private archive skips R2 precommit but retains audited D1/queue", async () => {
+  const f = setup({ status: "private", r2: false });
+  const oldCache = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let response;
+  try { response = await f.request(); } finally { globalThis.caches = oldCache; }
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).ok, true);
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.equal(f.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'").length, 0);
+  assert.equal(f.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+  assert.ok(f.read("static_rebuild_queue").length > 0);
+  assert.deepEqual(f.timeline, ["d1.batch"], "no new R2 visibility fence for a no-op transition");
+});
+
+test("MIG-0652 U04 SQLite T13: forged confirmation and absent event cannot mutate D1/R2", async () => {
+  for (const options of [
+    { eventId: EVENT, body: { event_id: EVENT, confirm: "unrelated" }, expected: 400 },
+    { eventId: "other_event", body: { event_id: "other_event", confirm: "other_event" }, expected: 404 },
+    { eventId: EVENT, body: { event_id: "other_event", confirm: EVENT }, expected: 400 },
+  ]) {
+    const f = setup();
+    const response = await f.request(options.eventId, options.body);
+    assert.equal(response.status, options.expected, JSON.stringify(options));
+    assert.equal((await response.json()).ok, false);
+    assert.equal(f.d1.stats.batches, 0);
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+    assert.deepEqual(f.timeline, [], "invalid request must not touch R2 or run a D1 batch");
+  }
+});
+
