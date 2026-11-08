@@ -146,3 +146,14 @@ test("sitemap builds from static R2 indexes without D1", async () => {
   // static pages only.
   assert.match(source, /export const revalidate = 3600;/);
 });
+
+test("compactText does not split an emoji surrogate pair at the 160-unit boundary", () => {
+  const prefix = "A".repeat(156);
+  const split = compactText(prefix + "🚀" + "x".repeat(12));
+  assert.equal(split, prefix + "...");
+  assert.doesNotMatch(split, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+
+  const fits = compactText("A".repeat(155) + "🚀" + "x".repeat(12));
+  assert.equal(fits, "A".repeat(155) + "🚀...");
+  assert.equal(fits.length, 160);
+});

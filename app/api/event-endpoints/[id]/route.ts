@@ -138,10 +138,10 @@ async function exportResponse(
   refreshMinutes: EventExportRefreshMinutes,
   cacheState: "HIT" | "MISS" | "BYPASS",
 ): Promise<Response> {
-  const cacheControl =
-    updateMode === "realtime"
-      ? "no-store"
-      : "public, max-age=60, s-maxage=60, stale-while-revalidate=60";
+  // The internal Cache API remains available for scheduled exports, but a
+  // public CDN cache cannot re-check the D1 visibility gate after a private
+  // transition. All public export responses therefore require no-store.
+  const cacheControl = "no-store";
   const response = await publicJsonBodyResponse(req, body, cacheControl);
   response.headers.set(
     "X-FlameNode-Schema-Version",
@@ -196,12 +196,13 @@ async function readCachedPayload(
   const metadata = envelope.payload.metadata;
   if (!cached) return null;
 
-  // New cache entries are validated before write and carry an immutable format
-  // marker in the envelope. Avoid JSON.parse + recursive leak scanning on every
-  // hot cache hit; entries without the marker still take the safe fallback.
-  if (isTrustedCacheMetadata(metadata, format)) return cached;
-
+  // Cache API entries are serialized, untrusted data: a matching metadata
+  // marker is not a proof of the body's contents. Validate even on a HIT.
+  // This matches the Hono route's fail-closed handling of cache corruption.
   try {
+    if (metadata != null && !isTrustedCacheMetadata(metadata, format)) {
+      throw new Error("stale_cache_metadata");
+    }
     const parsed = JSON.parse(cached) as unknown;
     if (format === "legacy") {
       if (!Array.isArray(parsed)) throw new Error("stale_legacy_schema");
@@ -214,8 +215,8 @@ async function readCachedPayload(
         throw new Error("stale_schema");
       }
     }
-    // Old/manual cache entries have no trusted metadata. Validate them fully
-    // before returning so a stale key can never bypass the public DTO fence.
+    // Metadata can be copied or forged. All cached bodies must pass the public
+    // DTO boundary, regardless of when the entry was written.
     assertNoForbiddenKeys(parsed);
     return cached;
   } catch (error) {
