@@ -95,9 +95,14 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   ]);
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [label, setLabel] = React.useState("");
-  const [pending, setPending] = React.useState<SlotListOperation | null>(null);
+  const [pending, setPending] = React.useState<{ operation: SlotListOperation;
+    eventId: string; slots: readonly ManageSlotRow[];
+    onAction: typeof onAction } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
+  // Always compare against the latest render, not the stale async callback closure.
+  const contextRef = React.useRef({ eventId, slots, onAction });
+  contextRef.current = { eventId, slots, onAction };
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   // A filter/event refresh invalidates both the previous row selection and
@@ -109,7 +114,7 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setLabel("");
     setError(null);
     setNotice(null);
-  }, [eventId, slots]);
+  }, [eventId, slots, onAction]);
   const visibleIds = slots.filter(row => row.event_id === eventId).map(row => row.id);
   const visibleSelected = visibleIds.filter(id => selected.has(id));
   const selectedAvailable = slots.filter(row => selected.has(row.id) &&
@@ -125,17 +130,24 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     }
     setError(null);
     setNotice(null);
-    setPending(op);
+    setPending({ operation: op, eventId, slots, onAction });
   };
   const runConfirmed = async () => {
     if (busyRef.current || !pending || !onAction) return;
-    // Between confirmation and execution, the view may have changed.
-    if (!validateSlotListOperation(slots, eventId, pending, canManageSubmittedSlots)) {
+    // A new event, filter snapshot or handler must never inherit a pending
+    // confirmation, even if row IDs and statuses happen to match.
+    if (pending.eventId !== eventId || pending.slots !== slots ||
+        pending.onAction !== onAction ||
+        !validateSlotListOperation(slots, eventId, pending.operation, canManageSubmittedSlots)) {
       setPending(null);
       setError("枠の状態が変わりました。再読み込みしてください。");
       return;
     }
-    const operation = pending;
+    const operation = pending.operation;
+    const started = { eventId, slots, onAction };
+    const stillCurrent = () => contextRef.current.eventId === started.eventId &&
+      contextRef.current.slots === started.slots &&
+      contextRef.current.onAction === started.onAction;
     busyRef.current = true;
     setBusy(true);
     setPending(null);
@@ -143,6 +155,7 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setNotice(null);
     try {
       const result = await onAction(operation);
+      if (!stillCurrent()) return;
       if (!result.ok) setError(result.message ?? "枠の操作に失敗しました。");
       else {
         setSelected(new Set());
@@ -151,7 +164,7 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
         onChanged?.();
       }
     } catch {
-      setError("枠操作中に通信エラーが発生しました。");
+      if (stillCurrent()) setError("枠操作中に通信エラーが発生しました。");
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -281,9 +294,9 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     </div>
     {onAction && pending && <div role="group" aria-label="枠操作の確認"
       className="manage-slot-confirm">
-      <p>{pending.kind === "release-submitted-video"
+      <p>{pending.operation.kind === "release-submitted-video"
         ? "作品の提出だけを解除します。予約状態は維持されます。"
-        : pending.kind === "force-release-submitted"
+        : pending.operation.kind === "force-release-submitted"
           ? "提出済み枠を強制解放します。作品自体は削除されません。"
           : "選択した枠の変更を実行します。よろしいですか？"}</p>
       <button type="button" className="fn-btn fn-btn-ghost" disabled={busy}
