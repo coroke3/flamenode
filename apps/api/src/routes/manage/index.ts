@@ -36,7 +36,13 @@ manageRoutes.use("*", async (c, next) => {
 // SA-060/062/063/064 remain UNMOUNTED; middleware entries are preparation only.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
 const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/batch-release", "/events/:id/slots/labels", "/events/:id/slots/:slotId/release"];
-const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths];
+// SA-056/057 are prepared for the same Origin-first / session / writeGuard / DB
+// stack. The submitted-danger Hono candidate remains deliberately UNMOUNTED.
+const submittedDangerWritePaths = [
+  "/events/:id/slots/:slotId/force-release-submitted",
+  "/events/:id/slots/:slotId/release-submitted-video",
+];
+const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths, ...submittedDangerWritePaths];
 // Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
 const singleSlotDeletePath = "/events/:id/slots/:slotId";
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
