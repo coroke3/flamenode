@@ -1,10 +1,12 @@
-import { normalizeHttpUrl } from "./url";
+import { normalizeHttpUrl } from "#utils/url";
+
+const MAX_CHANNEL_URL_LENGTH = 500;
 
 /** YouTube チャンネル URL を正規化する。チャンネル形式でなければ null。 */
 export function normalizeYoutubeChannelUrl(
   raw: string | null | undefined,
 ): string | null {
-  const http = normalizeHttpUrl(raw, { maxLength: 500 });
+  const http = normalizeHttpUrl(raw, { maxLength: MAX_CHANNEL_URL_LENGTH });
   if (!http) return null;
 
   try {
@@ -16,19 +18,23 @@ export function normalizeYoutubeChannelUrl(
     if (segments.length === 0) return null;
 
     const head = segments[0]!;
+    let channelPath: string;
     if (head.startsWith("@")) {
-      return `https://www.youtube.com/${head}`;
-    }
-    if (
-      head === "channel" ||
-      head === "c" ||
-      head === "user"
-    ) {
+      // A bare "@" is not a channel handle.
+      if (head.length === 1) return null;
+      channelPath = head;
+    } else if (head === "channel" || head === "c" || head === "user") {
       const id = segments[1];
       if (!id) return null;
-      return `https://www.youtube.com/${head}/${id}`;
+      channelPath = `${head}/${id}`;
+    } else {
+      return null;
     }
-    return null;
+
+    // Canonicalization expands http://youtube.com into https://www.youtube.com.
+    // Enforce the same storage limit on the final URL, not just on the input.
+    const canonical = `https://www.youtube.com/${channelPath}`;
+    return canonical.length <= MAX_CHANNEL_URL_LENGTH ? canonical : null;
   } catch {
     return null;
   }
