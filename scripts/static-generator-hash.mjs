@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 /** content-jobs が静的 rebuild のために import する json-generator module（repo 相対）。 */
 export const STATIC_GENERATOR_ROOTS = [
@@ -25,28 +26,43 @@ export const STATIC_GENERATOR_ROOTS = [
 const CODE_EXTENSIONS = [".ts", ".tsx", ".mts", ".mjs", ".js", ".cjs"];
 const TEST_FILE_PATTERN = /\.test\.[^/]+$/;
 
-function stripComments(source) {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^[ \t]*\/\/.*$/gm, "");
-}
-
-/** `import ... from "x"`, `export ... from "x"`, `import "x"`, `import("x")` の相対 specifier。 */
-export function extractRelativeSpecifiers(source) {
-  const code = stripComments(source);
+/**
+ * Parse real module references instead of matching import-like text in comments
+ * or string literals. A false-negative here can suppress a needed global rebuild.
+ */
+export function extractRelativeSpecifiers(source, fileName = "static-generator-source.ts") {
+  const scriptKind = path.extname(fileName) === ".tsx" ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  const file = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
   const specifiers = new Set();
-  const patterns = [
-    /\b(?:import|export)\b[^;'"`]*?\bfrom\s*["']([^"']+)["']/g,
-    /\bimport\s*["']([^"']+)["']/g,
-    /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of code.matchAll(pattern)) {
-      if (match[1].startsWith("./") || match[1].startsWith("../")) {
-        specifiers.add(match[1]);
-      }
+  const add = (module) => {
+    if (
+      module &&
+      ts.isStringLiteralLike(module) &&
+      (module.text.startsWith("./") || module.text.startsWith("../"))
+    ) {
+      specifiers.add(module.text);
     }
-  }
+  };
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      add(node.moduleSpecifier);
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length >= 1
+    ) {
+      add(node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return [...specifiers];
 }
 
@@ -95,7 +111,7 @@ export function collectStaticGeneratorFiles(
     visited.add(current);
     if (!CODE_EXTENSIONS.includes(path.extname(current))) continue;
     const source = fs.readFileSync(current, "utf8");
-    for (const specifier of extractRelativeSpecifiers(source)) {
+    for (const specifier of extractRelativeSpecifiers(source, current)) {
       const resolved = resolveSpecifier(current, specifier);
       if (!resolved) {
         throw new Error(
