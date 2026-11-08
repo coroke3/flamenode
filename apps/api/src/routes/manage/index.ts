@@ -18,8 +18,9 @@ import { manageStaffRoutes } from "./staff.ts";
 import { manageXLinkRequestRoutes } from "./xlink.ts";
 
 // MIG-0624: authenticated, read-only Manage screens API. Every response (success, 401, 403, 404, 503)
-// is `Cache-Control: private, no-store`. GET does not write; writes (MIG-0655 playlist PUT/POST only)
-// go through the onlyMutating Origin -> session -> writeGuard -> db stack below (D-15-10).
+// is `Cache-Control: private, no-store`. GET does not write. Scoped playlist writes
+// and PREPARED (still unmounted) slot writes use onlyMutating Origin -> session
+// -> writeGuard -> db stack in D-15-10 order.
 // Status mapping of CURRENT redirects/notFound: not logged in -> 401, banned -> 403 (requireAuth),
 // neither admin nor event staff (layout redirect to /dashboard) -> 403 { reason: "manage_access_required" },
 // notFound() -> 404.
@@ -31,20 +32,24 @@ manageRoutes.use("*", async (c, next) => {
   await next();
   c.header("Cache-Control", NO_STORE);
 });
-// MIG-0655: playlist writes verify Origin BEFORE reading the Auth.js session.
+// D-15-10: only predeclared write paths verify Origin BEFORE the Auth.js session.
+// SA-062/064 remain UNMOUNTED; these middleware entries are preparation only.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
+const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/labels"];
+const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths];
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
   allowLocalPreview: () => c.env.FLAMENODE_LOCAL_PREVIEW === "1",
 });
-for (const path of playlistWritePaths) {
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) => originGuardMiddleware(originOptions(c))(c, next)));
 }
 manageRoutes.use("*", sessionMiddleware());
 manageRoutes.use("*", requireAuth());
-// The existing read-only /manage API remains unchanged. Only these mutating
-// playlist paths use the CURRENT writeGuard(identity/TOS) -> DB adapter.
-for (const path of playlistWritePaths) {
+// The existing read-only /manage API remains unchanged. Only explicit mutating
+// paths use the CURRENT writeGuard(identity/TOS) -> DB adapter. Slot routes
+// are not mounted until full independent review and D1/browser parity.
+for (const path of scopedWritePaths) {
   manageRoutes.use(path, onlyMutating((c, next) =>
     writeGuardMiddleware({ ...originOptions(c), requiredRole: null })(c, next)));
   manageRoutes.use(path, onlyMutating(dbMiddleware));
