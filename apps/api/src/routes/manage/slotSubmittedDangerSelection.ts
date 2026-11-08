@@ -109,7 +109,9 @@ export function selectSubmittedDangerSnapshot(input: {
 
   if (kind === "keep-reservation") {
     // Reuse CURRENT SA-057's strict reservation subject validator.
-    const resolved = resolveSlotReservationSubject(rows);
+    const resolved = resolveSlotReservationSubject(
+      rows.map(row => ({ ...row, status: "submitted" as const })),
+    );
     if (!resolved.ok || resolved.subject.reservedByUserId !==
         anchor.reserved_by_user_id?.trim()) {
       return { ok: false, message: "提出グループの予約情報が不整合なため中止しました。" };
