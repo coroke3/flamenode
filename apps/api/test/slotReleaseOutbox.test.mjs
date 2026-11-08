@@ -29,7 +29,7 @@ function setup(){
     "WHERE dedupe_key IS NOT NULL AND status IN ('pending','processing','sent');",
     "CREATE TABLE slots(id TEXT PRIMARY KEY,event_id TEXT,status TEXT,version INTEGER,",
     "updated_at INTEGER,reserved_x_id_snapshot TEXT,reserved_by_user_id TEXT,",
-    "x_user_id TEXT,reservation_group_id TEXT);",
+    "x_user_id TEXT,reservation_group_id TEXT,display_name TEXT,video_id TEXT);",
   ].join(" "));
   return db;
 }
@@ -120,13 +120,14 @@ test("SA-063 U02c-2b: invalid origin or mixed owners fails closed",()=>{
 test("SA-063 U02c-2b: notification and CAS rollback if strict audit fails",()=>{
   const db=setup(),original=row("a");
   try{
-    db.prepare("INSERT INTO slots VALUES (?,?,?,?,?,?,?,?,?)").run(
-      "a","ev-1","reserved",3,100,"x1","u1","x1",null);
+    db.prepare("INSERT INTO slots VALUES (?,?,?,?,?,?,?,?,?,?,?)").run(
+      "a","ev-1","reserved",3,100,"x1","u1","x1",null,"Alice",null);
     const plan=buildSlotBatchAtomicPlan({
       kind:"release-reserved",eventId:"ev-1",rows:[original],updatedAt:200,
     });
     const outbox=buildSlotReleaseOutboxStatements(opts([original]));
     let reachedAuditFailure=false;
+    let observedError=null;
     db.exec("BEGIN");
     try{
       for(const assertion of plan.preMutationAssertions){
@@ -138,10 +139,12 @@ test("SA-063 U02c-2b: notification and CAS rollback if strict audit fails",()=>{
       reachedAuditFailure=true;
       db.prepare("INSERT INTO audit_logs_missing VALUES (1)").run();
       db.exec("COMMIT");
-    }catch{
+    }catch(error){
+      observedError=error;
       db.exec("ROLLBACK");
     }
     assert.equal(reachedAuditFailure,true,"precondition, CAS and outbox must succeed before audit fails");
+    assert.match(String(observedError),/no such table: audit_logs_missing/);
     assert.equal(db.prepare("SELECT status FROM slots WHERE id='a'").get().status,"reserved");
     assert.equal(db.prepare("SELECT COUNT(*) n FROM notification_outbox").get().n,0);
   }finally{db.close();}
