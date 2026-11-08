@@ -29,10 +29,12 @@ function database(rows) {
     "CREATE TABLE event_staff(event_id TEXT, x_user_id TEXT, permission_preset TEXT, custom_permission_keys_json TEXT);",
     "CREATE TABLE x_user_account_links(auth_user_id TEXT, x_user_id TEXT);",
     "CREATE TABLE x_users(id TEXT PRIMARY KEY, approval_status TEXT);",
+    "CREATE TABLE system_settings (id TEXT PRIMARY KEY, operation_mode TEXT, disabled_features_json TEXT, cost_guard_exception_until INTEGER, cost_guard_exception_features_json TEXT);",
     "CREATE TABLE slots (" + columns.map(k => k === "id" ? "id TEXT PRIMARY KEY" :
       ["start_time","sort_order","updated_at","version"].includes(k)
         ? k + " INTEGER" : k + " TEXT").join(",") + ");",
     "INSERT INTO events VALUES('ev');",
+    "INSERT INTO system_settings VALUES('default','normal',NULL,NULL,NULL);",
     "INSERT INTO x_users VALUES('x1','approved');",
     "INSERT INTO x_user_account_links VALUES('staff','x1');",
     "INSERT INTO event_staff VALUES('ev','x1','slot_manager',NULL);",
@@ -52,6 +54,7 @@ test("SA-059: one bound D1 query scans at most 4 available rows, emits 3 and has
   try {
     const read = snapshot(db);
     assert.equal(read.exists_id, "ev");
+    assert.equal(JSON.parse(read.cost_guard_json).operation_mode, "normal");
     assert.equal(canUpdateEventLabels("user", read.staff_json), true);
     const selection = selectAvailableDeleteChunk("ev", read);
     assert.equal(selection.ok, true);
@@ -110,5 +113,6 @@ test("SA-059: no route is mounted, and selection has no mutation side effects", 
   assert.doesNotMatch(index,/slotAvailableDeleteChunkSnapshot/);
   assert.equal((SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL.match(/\?/g)||[]).length,4);
   assert.match(SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL,/ORDER BY s\.id ASC LIMIT 4/);
+  assert.match(SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL,/AS cost_guard_json/);
   assert.doesNotMatch(SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL,/\bUPDATE\b|\bDELETE\b|\bINSERT\b/i);
 });
