@@ -339,3 +339,45 @@ test("FK preflight requires request-wide remaining S3 read budget before touchin
   assert.equal(called, 0);
   await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, [{ event_id: null }], 0));
 });
+
+
+test("CURRENT UPDATE/DELETE snapshot pre-read binds PK, requires one S3 read and complete row", async () => {
+  const { fetchSpreadsheetRawSnapshot } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"],
+    columns,
+    columnNames: ["id", "title"],
+  };
+  const statements = [], binds = [];
+  let returned = { id: "s-1", title: null };
+  const db = {
+    prepare(sql) {
+      statements.push(sql);
+      return { bind(...values) {
+        binds.push(values);
+        return { async first() { return returned; } };
+      } };
+    },
+  };
+  const got = await fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1);
+  assert.deepEqual(got, { id: "s-1", title: null });
+  assert.deepEqual(statements, ['SELECT * FROM "slots" WHERE "id" = ? LIMIT 1']);
+  assert.deepEqual(binds, [["s-1"]]);
+  for (const budget of [0, -1, 4, 0.5, undefined]) {
+    await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, budget), /batch_too_large/);
+  }
+  assert.equal(statements.length, 1);
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, {}, 1), /missing_primary_key/);
+  returned = null;
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /row_not_found/);
+  returned = { id: "s-1" };
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /invalid_snapshot/);
+  returned = { id: "s-1", title: undefined };
+  await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /invalid_snapshot/);
+});
