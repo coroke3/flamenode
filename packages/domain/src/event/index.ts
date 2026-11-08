@@ -11,3 +11,4 @@ export * from "./eventIdInput.ts";
 export * from "./generalQuestionPlanner.ts";
 export * from "./stagePermissionForm.ts";
 export * from "./generalQuestionForm.ts";
+export * from "./basicUpdateFields.ts";
