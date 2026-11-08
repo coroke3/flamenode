@@ -8,6 +8,7 @@ import { manageRoutes } from "../src/routes/manage/index.ts";
 const SITE = "https://app.flamenode.example";
 const CANDIDATES = [
   ["POST", "/api/manage/events/ev-1/slots/batch-delete"],
+  ["POST", "/api/manage/events/ev-1/slots/batch-release"],
   ["PATCH", "/api/manage/events/ev-1/slots/labels"],
 ];
 
@@ -30,7 +31,7 @@ const make = () => {
   return { perform, getDbPrepares: () => dbPrepares };
 };
 
-test("MIG-0656 U02c-1b: D-15-10 two slot write paths use Origin before any session/D1 lookup", async () => {
+test("MIG-0656 U02c-1b: D-15-10 three slot write paths use Origin before any session/D1 lookup", async () => {
   const t = make();
   for (const [method,path] of CANDIDATES) {
     for (const origin of ["https://evil.example", null]) {
@@ -55,11 +56,11 @@ test("MIG-0656 U02c-1b: missing site origin fails closed before D1", async () =>
 
 test("MIG-0656 U02c-1b: candidate route implementation is still unmounted", () => {
   assert.match(content,/const slotWritePaths = \[/);
-  for (const suffix of ["/events/:id/slots/batch-delete","/events/:id/slots/labels"]) {
+  for (const suffix of ["/events/:id/slots/batch-delete","/events/:id/slots/batch-release","/events/:id/slots/labels"]) {
     assert.ok(content.includes(suffix));
   }
-  assert.doesNotMatch(content,/import\s+.*slotBatch(?:AvailableDelete|LabelWrite)/);
-  assert.doesNotMatch(content,/\.route\([^)]*slotBatch(?:AvailableDelete|LabelWrite)Routes/);
+  assert.doesNotMatch(content,/import\s+.*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)/);
+  assert.doesNotMatch(content,/\.route\([^)]*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)Routes/);
   assert.match(content,/const scopedWritePaths = \[\.\.\.playlistWritePaths, \.\.\.slotWritePaths\]/);
   assert.equal((content.match(/for \(const path of scopedWritePaths\)/g)||[]).length,2);
 });

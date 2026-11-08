@@ -33,9 +33,9 @@ manageRoutes.use("*", async (c, next) => {
   c.header("Cache-Control", NO_STORE);
 });
 // D-15-10: only predeclared write paths verify Origin BEFORE the Auth.js session.
-// SA-062/064 remain UNMOUNTED; these middleware entries are preparation only.
+// SA-062/063/064 remain UNMOUNTED; middleware entries are preparation only.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
-const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/labels"];
+const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/batch-release", "/events/:id/slots/labels"];
 const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths];
 const originOptions = (c: import("hono").Context<AppEnv>) => ({
   loadSiteUrl: () => c.env.NEXT_PUBLIC_SITE_URL ?? null,
