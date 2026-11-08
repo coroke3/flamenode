@@ -132,6 +132,21 @@ test("MIG-0652 U02: canonical parts cap and truncation preserve CURRENT semantic
   assert.equal(build({ data: data({ parts_text: " A \nA" }) }).parts_json, '["A"]');
 });
 
+test("MIG-0652 U02: all 31 CURRENT createEvent row columns stay in sync with the domain core", async () => {
+  const current = await readFile(new URL("../../../src/lib/actions/event-admin.ts", import.meta.url), "utf8");
+  const core = await readFile(new URL("../src/event/createFields.ts", import.meta.url), "utf8");
+  const currentRow = current.match(/  const createdRow = \{([\s\S]*?)\n  \} satisfies typeof events\.\$inferInsert;/);
+  const coreRow = core.match(/  return \{([\s\S]*?)\n  \};/);
+  assert.ok(currentRow, "CURRENT createEvent row definition must be located");
+  assert.ok(coreRow, "domain create-row projection must be located");
+  const keys = (source) => [...source.matchAll(/^    ([a-z][a-z0-9_]*)(?::|,)/gm)].map((match) => match[1]);
+  const currentKeys = keys(currentRow[1]);
+  const coreKeys = keys(coreRow[1]);
+  assert.equal(currentKeys.length, 31, "CURRENT's event create-row columns changed: review the migration");
+  assert.deepEqual(coreKeys, currentKeys, "the staged domain core must track every CURRENT create column");
+  assert.deepEqual(Object.keys(build()), currentKeys, "the domain projection result must track CURRENT's columns");
+});
+
 test("MIG-0652 U02: staged core is DB-independent; CURRENT create route stays unchanged pending handler parity", async () => {
   const core = await readFile(new URL("../src/event/createFields.ts", import.meta.url), "utf8");
   const current = await readFile(new URL("../../../src/lib/actions/event-admin.ts", import.meta.url), "utf8");
