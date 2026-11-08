@@ -454,6 +454,10 @@ const termsSetup = (status) => (kind, i, tag) => [termsRow(benchTermsId(i, tag),
 
 // MIG-0639 / SA-099..100: owned X-ID request rows on local D1 only.
 const benchXRequestId = (i, tag) => `bench-xreq-${tag}-${i}`;
+const xMergeParentRow = (i, tag) => ({
+  sql: "INSERT OR REPLACE INTO x_identity_requests (id,request_type,requested_by_auth_user_id,requested_x_id,source_x_user_id,target_x_user_id,restore_snapshot_json,revert_deadline_at,status,requested_at,updated_at) VALUES (?, 'merge', 'bench-admin', NULL, 'bench-x', 'bench-x', '{\"v\":1}', 4102444800, 'done', 50, 60)",
+  params: [benchXRequestId(i, tag)],
+});
 const xRequestRow = (i, tag) => ({
   sql: "INSERT OR REPLACE INTO x_identity_requests (id, request_type, requested_by_auth_user_id, requested_x_id, status, requested_at, updated_at) VALUES (?, 'new_link', 'bench-admin', ?, 'pending', 10, 10)",
   params: [benchXRequestId(i, tag), `bench-new-${tag}-${i}`],
@@ -536,6 +540,7 @@ export const ROUTE_INVENTORY = [
   // SA-049 / SA-051..055: exact handler names and contracts per MIG-0642 parity suite
   ["SA-099", "POST", "/api/xid/requests", "w"],
   ["SA-100", "POST", "/api/xid/requests/:id/cancel", "w", { params: (kind, i, tag) => ({ id: benchXRequestId(i, tag) }), setup: (kind, i, tag) => [xRequestRow(i, tag)] }],
+  ["SA-101", "POST", "/api/xid/merge-revert-requests", "w", { setup: (kind, i, tag) => [xMergeParentRow(i, tag)] }],
   ["SA-049", "PUT", "/api/admin/permissions/editable-fields", "w"],
   ["SA-051", "POST", "/api/admin/terms", "w"],
   ["SA-052", "PATCH", "/api/admin/terms/:id", "w", { params: termsParams, setup: termsSetup("draft") }],
@@ -627,8 +632,9 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
-  "POST /api/xid/requests": (kind, i, tag) => ({ x_id: kind === "limit" ? `benchnew${tag}${i}` : `benchnew${tag}${i}`, request_type: "link" }),
+  "POST /api/xid/requests": (kind, i, tag) => ({ x_id: `benchnew${tag}${i}`, request_type: "link" }),
   "POST /api/xid/requests/:id/cancel": () => undefined,
+  "POST /api/xid/merge-revert-requests": (kind, i, tag) => ({ parent_request_id: benchXRequestId(i, tag) }),
   "PUT /api/admin/permissions/editable-fields": (kind) => ({ default_editable_fields: kind === "limit" ? ["title", "description"] : [], upcoming_editable_fields: kind === "limit" ? ["title"] : [] }),
   "POST /api/admin/terms": (kind, i, tag) => ({ id: benchTermsId(i, tag), version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v1", body_markdown: kind === "limit" ? "x".repeat(2000) : "benchmark body", severity: "major" }),
   "PATCH /api/admin/terms/:id": (kind) => ({ version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v2", body_markdown: kind === "limit" ? "x".repeat(2000) : "updated benchmark body", severity: "major" }),
@@ -710,6 +716,7 @@ export function buildRouteScenarios() {
 const ROUTE_EXPECT = {
   "POST /api/xid/requests": { normal: [200], limit: [200], invalid: [400] },
   "POST /api/xid/requests/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/xid/merge-revert-requests": { normal: [200], limit: [200], invalid: [400] },
   "PUT /api/admin/permissions/editable-fields": { normal: [200], limit: [200], invalid: [200] },
   "POST /api/admin/terms": { normal: [200], limit: [200], invalid: [400] },
   "PATCH /api/admin/terms/:id": { normal: [200], limit: [200], invalid: [400] },
