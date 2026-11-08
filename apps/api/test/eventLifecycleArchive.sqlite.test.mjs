@@ -801,3 +801,81 @@ test("MIG-0652 U04 SQLite T27: archived legacy dotted ID succeeds with real admi
   assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
 });
 
+test("MIG-0652 U04 SQLite T28: percent-encoded Unicode, spaces, slash and literal percent IDs archive the intended existing row", async () => {
+  // CURRENT accepts historic event IDs outside the new create/rename pattern.
+  // A Hono URI parameter must be decoded EXACTLY ONCE before matching its
+  // JSON body, R2 blocked entity, audited D1 row and cache eviction identity.
+  const legacyIds = [
+    "旧イベント 2020",
+    "legacy/a",
+    "literal%2Fid",
+    "x".repeat(65),
+  ];
+  for (const eventId of legacyIds) {
+    const f = setup({
+      eventId,
+      enforceOrigin: true, enforceSession: true, enforceWriteGuard: true,
+    });
+    const evicted = [];
+    const priorCache = globalThis.caches;
+    globalThis.caches = { default: { delete: async (key) => {
+      evicted.push(String(key));
+      return true;
+    } } };
+    let response;
+    try { response = await f.request(); } finally { globalThis.caches = priorCache; }
+    assert.equal(response.status, 200, "transport failed for " + JSON.stringify(eventId));
+    assert.deepEqual(await response.json(), { ok: true, pendingPublicReflection: true });
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(f.d1.stats.batches, 1, eventId);
+    assert.equal(
+      f.sqlite.prepare("SELECT visibility_status FROM events WHERE id = ?").get(eventId)?.visibility_status,
+      "private", eventId,
+    );
+    const fence = f.sqlite.prepare(
+      "SELECT fence_token FROM public_visibility_fences WHERE entity_type = 'event' AND entity_id = ?",
+    ).get(eventId);
+    assert.ok(fence?.fence_token, eventId + " D1 fence");
+    assert.equal(
+      f.bucket.manifest?.entities.find((x) => x.entity_type === "event" && x.entity_id === eventId)?.fence_token,
+      fence.fence_token,
+      "R2 fence must target the decoded original event ID",
+    );
+    assert.equal(
+      f.sqlite.prepare("SELECT count(*) AS n FROM audit_logs WHERE table_name = 'events' AND target_id = ?").get(eventId).n,
+      1, eventId + " audit",
+    );
+    assert.ok(f.read("static_rebuild_queue").some((x) => x.reason === "event_private"));
+    assert.ok(
+      evicted.some((url) => url.endsWith(encodeURIComponent("events/" + eventId + ".json"))),
+      eventId + " must evict its exactly-once-encoded public cache key",
+    );
+    assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+  }
+});
+
+test("MIG-0652 U04 SQLite T29: URL-decoded legacy ID cannot be forged by an encoded-looking JSON body", async () => {
+  const eventId = "legacy/a";
+  const f = setup({
+    eventId,
+    enforceOrigin: true, enforceSession: true, enforceWriteGuard: true,
+  });
+  const response = await f.request(eventId, {
+    event_id: "legacy%2Fa",
+    confirm: "legacy%2Fa",
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    ok: false, message: "イベントIDが一致しません。",
+  });
+  assert.equal(f.d1.stats.batches, 0);
+  assert.deepEqual(f.timeline, []);
+  assert.equal(
+    f.sqlite.prepare("SELECT visibility_status FROM events WHERE id = ?").get(eventId)?.visibility_status,
+    "public",
+  );
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+});
+
