@@ -479,3 +479,33 @@ test("unmounted audited SQL plans preserve CURRENT audit envelopes for CREATE UP
   assert.equal(spreadsheetRecordIdFromPk({ video_id: "v1", event_id: "e1" }), "e1:v1");
   assert.throws(() => buildSpreadsheetAuditedInsert(ctx, { id: "slot-1" }, "  "), /missing_operator/);
 });
+
+
+test("UPDATE/DELETE audited CAS planners reject mismatched snapshot primary keys", async () => {
+  const { buildSpreadsheetAuditedUpdate, buildSpreadsheetAuditedDelete } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  const requested = { video_id: "v1", event_id: "e1" };
+  const before = { video_id: "v1", event_id: "e1", notes: null };
+  assert.equal(buildSpreadsheetAuditedUpdate(ctx, requested, before, { notes: "new" }, "actor").audit.target_id, "e1:v1");
+  assert.equal(buildSpreadsheetAuditedDelete(ctx, requested, before, "actor").audit.target_id, "e1:v1");
+  for (const wrong of [
+    { ...before, video_id: "v2" },
+    { ...before, event_id: "e2" },
+    { ...before, event_id: null },
+    { video_id: "v1", notes: null },
+  ]) {
+    assert.throws(() => buildSpreadsheetAuditedUpdate(ctx, requested, wrong, { notes: "new" }, "actor"), /invalid_snapshot/);
+    assert.throws(() => buildSpreadsheetAuditedDelete(ctx, requested, wrong, "actor"), /invalid_snapshot/);
+  }
+});
