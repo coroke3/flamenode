@@ -381,3 +381,34 @@ test("CURRENT UPDATE/DELETE snapshot pre-read binds PK, requires one S3 read and
   returned = { id: "s-1", title: undefined };
   await assert.rejects(() => fetchSpreadsheetRawSnapshot(db, ctx, { id: "s-1" }, 1), /invalid_snapshot/);
 });
+
+
+test("unmounted INSERT and UPDATE SQL planners reject readonly tables before planning mutations", async () => {
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("system_settings", true),
+    primaryKeys: ["id"],
+    columnNames: ["id", "title"],
+    columns,
+  };
+  assert.equal(ctx.def.mode, "readonly");
+  assert.throws(
+    () => buildSpreadsheetInsertSql(ctx, { id: "x", title: "new" }),
+    error => error?.message === "table_readonly",
+  );
+  assert.throws(
+    () => buildSpreadsheetUpdateSql(ctx, { id: "x" }, { id: "x", title: "old" }, { title: "new" }),
+    error => error?.message === "table_readonly",
+  );
+  // Empty input must not bypass the table-level guard.
+  assert.throws(() => buildSpreadsheetInsertSql(ctx, {}), /table_readonly/);
+  assert.throws(
+    () => buildSpreadsheetUpdateSql(ctx, { id: "x" }, { id: "x", title: "old" }, {}),
+    /table_readonly/,
+  );
+});
