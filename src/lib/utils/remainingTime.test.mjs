@@ -7,6 +7,12 @@ test("formatRemainingTimeMetric returns null for missing countdowns", () => {
   assert.equal(formatRemainingTimeMetric(undefined), null);
 });
 
+test("formatRemainingTimeMetric omits non-finite countdowns instead of displaying NaN/Infinity", () => {
+  for (const seconds of [Number.NaN, Infinity, -Infinity]) {
+    assert.equal(formatRemainingTimeMetric(seconds), null, String(seconds));
+  }
+});
+
 test("formatRemainingTimeMetric uses minutes below one hour", () => {
   assert.deepEqual(formatRemainingTimeMetric(1), { value: "1", unit: "分" });
   assert.deepEqual(formatRemainingTimeMetric(59), { value: "1", unit: "分" });

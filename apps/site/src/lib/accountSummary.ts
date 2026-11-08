@@ -114,8 +114,12 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   let disposed = false;
   let presenceLoaded = false;
   let presenceRunning = false;
+  // A pending presence response can also predate an Active X switch.
+  let presenceRevision = 0;
   let detailsRequested = false;
   let detailsRunning = false;
+  // Responses started before an Active X switch must never become current menu data.
+  let detailsRevision = 0;
 
   const set = (patch: Partial<AccountState>) => {
     state = { ...state, ...patch };
@@ -129,7 +133,53 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       const fetcher = options.fetchImpl ?? fetch;
       const response = await fetcher(url, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
       if (response.status === 503 || !response.ok) return { status: "failed" };
-      return { status: "ok", body: (await response.json()) as T };
+      const body: unknown = await response.json();
+      // A 2xx response with JSON null, an array, or a scalar is not a valid
+      // RH-001 summary. Treat it as unavailable instead of dereferencing it.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return { status: "failed" };
+      }
+      const value = body as Record<string, unknown>;
+      if (typeof value.loggedIn !== "boolean") return { status: "failed" };
+      // The optional unavailable marker is a literal true, not a general boolean.
+      // Treat malformed logged-out responses as retryable failures instead of
+      // incorrectly confirming logout.
+      if (value.unavailable !== undefined && (value.unavailable !== true || value.loggedIn)) {
+        return { status: "failed" };
+      }
+      const presence = url === "/api/account/summary?view=presence";
+      // RH-001 has a view marker only on the lightweight presence endpoint.
+      // A presence-shaped logged-out payload on the full endpoint must not
+      // silently sign the header out when the server returns the wrong view.
+      if (presence ? value.view !== "presence" : value.view !== undefined) {
+        return { status: "failed" };
+      }
+      if (!presence && value.loggedIn && (
+        (value.role !== "user" && value.role !== "admin" && value.role !== "moderator") ||
+        (value.activeXId !== null && typeof value.activeXId !== "string") ||
+        (value.degraded !== undefined && value.degraded !== true)
+      )) return { status: "failed" };
+      if (value.loggedIn && (
+        typeof value.displayName !== "string" ||
+        (value.icon !== null && typeof value.icon !== "string") ||
+        (!presence && (
+          !Array.isArray(value.xIds) ||
+          !value.xIds.every((item: unknown) => {
+            if (item === null || typeof item !== "object" || Array.isArray(item)) return false;
+            const entry = item as Record<string, unknown>;
+            return typeof entry.x_user_id === "string" &&
+              typeof entry.x_name === "string" &&
+              (entry.icon_url === null || typeof entry.icon_url === "string") &&
+              (entry.approval_status === "approved" ||
+               entry.approval_status === "pending" ||
+               entry.approval_status === "rejected") &&
+              typeof entry.is_active === "boolean";
+          }) ||
+          typeof value.canAccessAdmin !== "boolean" ||
+          typeof value.canAccessManage !== "boolean"
+        ))
+      )) return { status: "failed" };
+      return { status: "ok", body: body as T };
     } catch {
       return { status: "failed" };
     } finally {
@@ -140,10 +190,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   async function loadPresence(): Promise<void> {
     if (presenceLoaded || presenceRunning || disposed) return;
     presenceRunning = true;
+    const revision = presenceRevision;
     set({ loading: true });
     const result = await getJson<AccountPresenceResponse>("/api/account/summary?view=presence");
     presenceRunning = false;
     if (disposed) return;
+    if (revision !== presenceRevision) {
+      // An Active X switch invalidated this response, including logged-out answers.
+      // Re-fetch after the old request releases the running guard.
+      void loadPresence();
+      return;
+    }
     // CURRENT keeps an already shown user when a later check fails (preserveLoggedInOnFailure).
     if (result.status === "failed" || (!result.body.loggedIn && result.body.unavailable)) {
       set({ loading: false, unavailable: true });
@@ -168,10 +225,17 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
   async function loadDetails(): Promise<void> {
     if (!detailsRequested || !presenceLoaded || !state.user || state.details || detailsRunning || disposed) return;
     detailsRunning = true;
+    const revision = detailsRevision;
     set({ detailsLoading: true });
     const result = await getJson<AccountSummaryResponse>("/api/account/summary");
     detailsRunning = false;
     if (disposed) return;
+    if (revision !== detailsRevision) {
+      // The switched identity invalidated this response while it was in flight.
+      // Defer the new request until the old one has released detailsRunning.
+      void loadDetails();
+      return;
+    }
     if (result.status === "failed" || (!result.body.loggedIn && result.body.unavailable)) {
       set({ detailsLoading: false, detailsUnavailable: true });
       return;
@@ -196,9 +260,19 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
 
   // CURRENT: an Active X change invalidates the details and fetches them again.
   const onActiveXChanged = () => {
+    // A confirmed logout is not permanent: another tab or a completed switch
+    // may have established a session after the previous presence/details read.
+    if (!presenceLoaded || !state.user) {
+      presenceLoaded = false;
+      presenceRevision += 1;
+    }
+    detailsRevision += 1;
     detailsRequested = true;
     set({ details: null, detailsUnavailable: false });
     void loadDetails();
+    // Retry failed or logged-out presence reads after identity changes.
+    // A pending presence response is invalidated and then retried on completion.
+    if (!presenceLoaded && !presenceRunning) void loadPresence();
   };
 
   return {
@@ -208,7 +282,9 @@ export function createAccountStore(options: AccountStoreOptions = {}): AccountSt
       return () => listeners.delete(listener);
     },
     start() {
-      if (started) return;
+      // A disposed store is terminal. Do not reattach its global listener:
+      // loadPresence() would no-op while the listener remains registered.
+      if (started || disposed) return;
       started = true;
       window.addEventListener(ACTIVE_X_CHANGED_EVENT, onActiveXChanged);
       void loadPresence();
