@@ -78,7 +78,7 @@ eventLifecycleRoutes.delete("/:eventId", costGuardMiddleware("manage_event_archi
     return c.json({ ok: false, message: "入力エラー" }, 400);
   }
 
-  const parsed = validateEventArchiveRequest(c.req.param("eventId"), incoming.value);
+  const parsed = validateEventArchiveRequest(c.req.param("eventId") ?? "", incoming.value);
   if (!parsed.ok) return c.json({ ok: false, message: parsed.message }, 400);
 
   const eventId = parsed.eventId;
