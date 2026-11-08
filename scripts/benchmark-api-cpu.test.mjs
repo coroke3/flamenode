@@ -137,6 +137,7 @@ const MAIN_HONO_METHODS = new Set([
   "GET /api/manage/events/:id/videos/:videoId", "GET /api/manage/events/:id/videos", "GET /api/manage/events/:id/youtube-playlist",
   "POST /api/manage/events/:id/youtube-playlist/sync", "PUT /api/manage/events/:id/youtube-playlist", "GET /api/manage/events/:id/audience",
   "GET /api/manage/events/:id", "GET /api/manage/notifications", "GET /api/manage/x-link-requests", "GET /api/manage",
+  "POST /api/xid/requests", "POST /api/xid/requests/:id/cancel", "POST /api/xid/merge-revert-requests",
   "PUT /api/admin/permissions/editable-fields", "POST /api/admin/terms",
   "PATCH /api/admin/terms/:id", "POST /api/admin/terms/:id/publish",
   "POST /api/admin/terms/:id/reaccept-broadcast", "POST /api/admin/terms/:id/archive",
@@ -165,7 +166,7 @@ test("MIG-0639 T01: every main Hono method has exactly one scenario (named or in
   assert.equal(new Set(titles).size, titles.length, "no method has two scenarios");
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !titles.includes(m)), [], "methods without a scenario");
   assert.deepEqual(titles.filter((t) => !MAIN_HONO_METHODS.has(t)), [], "scenarios for methods that are not mounted");
-  assert.equal(MAIN_HONO_METHODS.size, 127);
+  assert.equal(MAIN_HONO_METHODS.size, 130);
 });
 
 test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/app.ts", async () => {
@@ -173,6 +174,22 @@ test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/ap
   const mounted = new Set(app.routes.filter((r) => r.method !== "ALL").map((r) => `${r.method} ${r.path}`));
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !mounted.has(m)), [], "listed but no longer mounted");
   assert.deepEqual([...mounted].filter((m) => !MAIN_HONO_METHODS.has(m)), [], "mounted but not benchmarked (add a scenario)");
+});
+
+test("MIG-0639 SA-099..101: X ID request and revert local fixtures are bounded", () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((x) => [x.id, x]));
+  const req = scenarios.get("SA-099").kinds.normal(1, "xid");
+  assert.deepEqual(JSON.parse(req.body), { x_id: "benchnewxid1", request_type: "link" });
+  assert.deepEqual(req.expect, [200]);
+  const cancel = scenarios.get("SA-100").kinds.normal(1, "xid");
+  assert.ok(cancel.path.endsWith("/bench-xreq-xid-1/cancel"));
+  assert.match(cancel.setup[0].sql, /INSERT OR REPLACE INTO x_identity_requests/);
+  assert.deepEqual(cancel.expect, [200]);
+  const revert = scenarios.get("SA-101").kinds.normal(1, "xid");
+  assert.deepEqual(JSON.parse(revert.body), { parent_request_id: "bench-xreq-xid-1" });
+  assert.match(revert.setup[0].sql, /restore_snapshot_json,revert_deadline_at/);
+  assert.deepEqual(revert.expect, [200]);
+  assert.deepEqual(scenarios.get("SA-101").kinds.invalid(1, "xid").expect, [400]);
 });
 
 test("MIG-0639 SA-049,051..055: terms and editable-field writes use documented local fixtures", () => {
