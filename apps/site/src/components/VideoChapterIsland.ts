@@ -147,7 +147,11 @@ export function VideoChapterIsland({
     setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
   }, [activeXId, canPost]);
 
-  const ready = mounted && Boolean(activeXId?.trim()) && canPost;
+  // Render-time guard: do not briefly show the previous identity's draft before
+  // the passive effect clears state after a prop-driven Active X switch.
+  const accessStable = accessRef.current.activeXId === activeXId &&
+    accessRef.current.canPost === canPost;
+  const ready = mounted && accessStable && Boolean(activeXId?.trim()) && canPost;
   const start = (): number | null => {
     if (pending.current) return null;
     pending.current = true;
