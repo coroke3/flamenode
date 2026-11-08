@@ -75,7 +75,7 @@ export function buildSubmittedDangerAtomicPlan(input: {
     ids.add(row.id);
   }
   if (kind === "keep-reservation" &&
-      (!anchor.reserved_by_user_id?.trim() || !anchor.x_user_id?.trim())) {
+      !anchor.reserved_by_user_id?.trim()) {
     throw Error("slot_submitted_danger_invalid_subject");
   }
 
