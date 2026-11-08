@@ -17,7 +17,7 @@ if (runTestWithTsx(import.meta.url)) {
   });
 
   process.env.NEXT_PUBLIC_SITE_URL = "https://example.test";
-  const { buildSlotSubmissionReleasedNotification } = await import("./slot.ts");
+  const { buildSlotForceReleasedNotification, buildSlotSubmissionReleasedNotification } = await import("./slot.ts");
 
   test("提出解除通知は予約維持と再提出導線を明示する", () => {
     const payload = buildSlotSubmissionReleasedNotification({
@@ -31,4 +31,39 @@ if (runTestWithTsx(import.meta.url)) {
     assert.match(payload.content, /提出グループ: group-1/);
     assert.match(payload.content, /event-1/);
   });
+  test("枠解放・提出解除DMのlegacy予約グループIDを本文だけエスケープする", () => {
+    const groupId = "legacy@everyone<@123456789>";
+    const cases = [
+      ["予約グループ", buildSlotForceReleasedNotification],
+      ["提出グループ", buildSlotSubmissionReleasedNotification],
+    ];
+    for (const [prefix, build] of cases) {
+      const payload = build({
+        eventId: "event-1",
+        eventTitle: "イベント",
+        slotIds: ["slot-1", "slot-2"],
+        reservationGroupId: groupId,
+      });
+      assert.ok(payload.content.includes(prefix + ": legacy@\u200beveryone"));
+      assert.ok(payload.content.includes("\\<@\u200b123456789\\>"));
+      assert.ok(!payload.content.includes(prefix + ": " + groupId));
+      assert.equal(payload.event_id, "event-1");
+      assert.equal(payload.url.includes("/event/event-1"), true);
+    }
+  });
+
+  test("通常のグループID表示は変更しない", () => {
+    for (const build of [
+      buildSlotForceReleasedNotification,
+      buildSlotSubmissionReleasedNotification,
+    ]) {
+      const payload = build({
+        eventId: "event-1",
+        slotIds: ["slot-1"],
+        reservationGroupId: "sgrp_safe-123",
+      });
+      assert.match(payload.content, /グループ: sgrp_safe-123/);
+    }
+  });
+
 }
