@@ -335,6 +335,10 @@ export async function validateSpreadsheetForeignKeys(
   rows: readonly Record<string, string | null>[],
   remainingReadBudget: number,
 ): Promise<void> {
+  // Reject omitted runtime arguments even though the TS signature requires them.
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 0 || remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
   for (const lookup of buildSpreadsheetForeignKeyLookups(foreignKeys, rows, remainingReadBudget)) {
     const result = await db.prepare(lookup.statement).bind(...lookup.binds).all<{ value: string | number | null }>();
     assertSpreadsheetForeignKeyLookup(lookup, result.results ?? []);
