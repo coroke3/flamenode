@@ -16,3 +16,4 @@ export * from "./publishUpdateFields.ts";
 export * from "./questionsUpdateFields.ts";
 export * from "./slotsUpdateFields.ts";
 export * from "./createFields.ts";
+export * from "./createQuestionPlan.ts";
