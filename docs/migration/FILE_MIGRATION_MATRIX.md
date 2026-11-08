@@ -1509,6 +1509,9 @@
 
 | `apps/api/test/slotWriteGuardRegistration.test.mjs` | TEST | MIG-0656 U02c-1b D-15-10 pre-mount Origin-before-session + fail-closed guard registration | MIG-0656 | SAME (SA-062/064 remain unmounted; zero D1 read for cross-origin) | IN_PROGRESS | PR#514 SHA=660ac3cf683bce8c62a1b4bef0f9b9ac5000871c TEST=node --test --experimental-strip-types apps/api/test/slotWriteGuardRegistration.test.mjs (new exact-head CI pending) |
 
+| `apps/api/src/routes/manage/slotWriteGroupSnapshot.ts` | HELPER | MIG-0656 U02c-2a raw group-member bounded one-read SQL + SA-063 pure whole-group selector | MIG-0656 | SAME (offline; no permissions/write handler/mount) | IN_PROGRESS | PR#514 SHA=efea93d782dfbcb90492d2ded79fd9165972cc4a TEST=apps/api/test/slotWriteGroupSnapshot.test.mjs (SQLite, fresh CI pending) |
+| `apps/api/test/slotWriteGroupSnapshot.test.mjs` | TEST | MIG-0656 U02c-2a group completeness/Unicode whitespace/cross-event/status/owner/column drift | MIG-0656 | SAME (read-only fixture) | IN_PROGRESS | PR#514 SHA=efea93d782dfbcb90492d2ded79fd9165972cc4a TEST=node --test --experimental-strip-types apps/api/test/slotWriteGroupSnapshot.test.mjs (CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
