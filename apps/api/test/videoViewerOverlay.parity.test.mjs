@@ -415,6 +415,22 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(ids.includes("chap-priv-staff"));
   });
 
+  test("RH-031 chapter management capability fails closed when terms are not accepted", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // An event manager would normally obtain this capability. With revoked TOS,
+    // the API must not allow the viewer client to render privileged controls.
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 0 WHERE "id" = ?').run("u_staff");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isTosAccepted, false);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
   test("T06: RH-031 banned user returns isBanned: true and only the viewer read", async () => {
     const { env, d1 } = setupTestEnv();
     d1.stats.statements = 0;
