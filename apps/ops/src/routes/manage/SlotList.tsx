@@ -68,6 +68,9 @@ export function validateSlotListOperation(
   if (selected.some(row => !row)) return false;
   if (operation.kind === "batch-delete") return selected.every(row => row?.status === "available");
   if (operation.kind === "batch-release") return selected.every(row => row?.status === "reserved");
+  // Explicitly narrow the operation variant: unknown future action kinds
+  // must not be mistaken for a label update or crash at runtime.
+  if (operation.kind !== "batch-label") return false;
   return operation.label.trim().length >= 1 && operation.label.trim().length <= 200;
 }
 
