@@ -59,6 +59,19 @@ test("SA-063 U02c-2b: grouped slots create one DM with CURRENT dedupe and payloa
     assert.match(payload.content,/予約グループ: g/);
   } finally {db.close();}
 });
+test("SA-063 U02c-2b: CURRENT groups raw IDs with identical trimmed keys into one notification",()=>{
+  const db=setup();
+  try{
+    const value=buildSlotReleaseOutboxStatements(opts([
+      row("a","g  "),row("b","g"),
+    ]));
+    assert.equal(value.statements.length,1);
+    assert.deepEqual(value.dedupeKeys,["slot_force_released:ev-1:a:g:3"]);
+    assert.equal(run(db,value.statements[0]),1);
+    const payload=JSON.parse(db.prepare("SELECT payload_json FROM notification_outbox").get().payload_json);
+    assert.match(payload.content,/対象枠数: 2/);
+  }finally{db.close();}
+});
 test("SA-063 U02c-2b: two solo reservations create separate dedupe keys",()=>{
   const db=setup();
   try{
@@ -113,6 +126,7 @@ test("SA-063 U02c-2b: notification and CAS rollback if strict audit fails",()=>{
       kind:"release-reserved",eventId:"ev-1",rows:[original],updatedAt:200,
     });
     const outbox=buildSlotReleaseOutboxStatements(opts([original]));
+    let reachedAuditFailure=false;
     db.exec("BEGIN");
     try{
       for(const assertion of plan.preMutationAssertions){
@@ -121,11 +135,13 @@ test("SA-063 U02c-2b: notification and CAS rollback if strict audit fails",()=>{
       }
       assert.equal(run(db,plan.mutationStatement),1);
       assert.equal(run(db,outbox.statements[0]),1);
+      reachedAuditFailure=true;
       db.prepare("INSERT INTO audit_logs_missing VALUES (1)").run();
       db.exec("COMMIT");
     }catch{
       db.exec("ROLLBACK");
     }
+    assert.equal(reachedAuditFailure,true,"precondition, CAS and outbox must succeed before audit fails");
     assert.equal(db.prepare("SELECT status FROM slots WHERE id='a'").get().status,"reserved");
     assert.equal(db.prepare("SELECT COUNT(*) n FROM notification_outbox").get().n,0);
   }finally{db.close();}

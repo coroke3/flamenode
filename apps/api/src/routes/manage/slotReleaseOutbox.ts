@@ -1,7 +1,8 @@
 /**
  * MIG-0656 U02c-2b: unmounted SA-063 notification effect builder.
  * No pre-read: opt-out, recipient existence and dedupe are checked inside
- * the audited D1 batch. All returned SQL belongs in postAuditStatements.
+ * the audited D1 batch. In Hono wrap returned SQL with db.run() before
+ * adding to mutateWithAudit postAuditStatements.
  * Zero immediate Queue wake under D-0603-1 and D-13-41.
  */
 import { sql, type SQL } from "@flamenode/server-core/sql";
@@ -58,7 +59,7 @@ export function buildSlotReleaseOutboxStatements(input: {
     }
     seen.add(row.id);
     const groupKey = row.reservation_group_id?.trim()
-      ? "group:" + row.reservation_group_id : "solo:" + row.id;
+      ? "group:" + row.reservation_group_id.trim() : "solo:" + row.id;
     const existing = groups.get(groupKey) ?? [];
     existing.push(row);
     groups.set(groupKey, existing);
