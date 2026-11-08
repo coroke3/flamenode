@@ -7,6 +7,14 @@ export type OpsResult<T> =
   | { status: "unsupported" }
   | { status: "unavailable" };
 
+/** A 403 body cannot choose an arbitrary URL for a privileged Ops navigation. */
+const FORBIDDEN_REDIRECTS = new Set([
+  "/dashboard",
+  "/entry",
+  "/onboarding",
+  "/entry?error=auth_temporarily_unavailable",
+]);
+
 export type OpsFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export async function getJson<T>(
@@ -26,21 +34,28 @@ export async function getJson<T>(
     if (response.status === 401) return { status: "anonymous" };
     if (response.status === 404) return { status: "notFound" };
     if (response.status === 501) return { status: "unsupported" };
-    if (response.status !== 200 && response.status !== 403) {
-      return { status: "unavailable" };
+    // Authorization failure is authoritative even when its optional JSON body is
+    // truncated or malformed. Turning a 403 into "unavailable" would allow the
+    // same-key refresh cache to keep displaying previously private content.
+    if (response.status === 403) {
+      let body: unknown = null;
+      try { body = await response.json(); } catch { /* optional error body */ }
+      if (signal?.aborted) return { status: "unavailable" };
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return { status: "forbidden" };
+      }
+      const payload = body as Record<string, unknown>;
+      return {
+        status: "forbidden",
+        ...(typeof payload.redirect === "string" && FORBIDDEN_REDIRECTS.has(payload.redirect)
+          ? { redirect: payload.redirect } : {}),
+        ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
+      };
     }
+    if (response.status !== 200) return { status: "unavailable" };
     const body: unknown = await response.json();
     if (signal?.aborted) return { status: "unavailable" };
-    if (response.status === 200) return { status: "ok", data: body as T };
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      return { status: "unavailable" };
-    }
-    const payload = body as Record<string, unknown>;
-    return {
-      status: "forbidden",
-      ...(typeof payload.redirect === "string" ? { redirect: payload.redirect } : {}),
-      ...(typeof payload.reason === "string" ? { reason: payload.reason } : {}),
-    };
+    return { status: "ok", data: body as T };
   } catch {
     return { status: "unavailable" };
   }

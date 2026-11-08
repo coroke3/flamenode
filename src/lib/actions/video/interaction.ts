@@ -14,6 +14,7 @@ import { compositeAuditTargetId } from "@/lib/video/atomicWritePlanCore";
 import type { VideoActionResult } from "@/lib/video/types";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { nextVideoAppLikeCount } from "@flamenode/domain/video";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 
 type InteractionKind = "like" | "bookmark";
 type RequestedState = boolean | "toggle";
@@ -34,7 +35,9 @@ async function revalidateVideoInteractionPaths(
       {
         name: "revalidate_video",
         run: async () => {
-          revalidatePath(`/${youtubeVideoId ?? videoId}`);
+          for (const publicPath of publicVideoRevalidationPaths(videoId, youtubeVideoId)) {
+            revalidatePath(publicPath);
+          }
         },
       },
       {

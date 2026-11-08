@@ -32,6 +32,7 @@ const { UsersIndexIsland } = uiBuilt ? await import("../apps/site/src/components
 const { SnapshotBuildError } = await import("../apps/site/src/lib/publicDataLoader.ts");
 const { parseSocialLinks } = await import("../src/lib/socialLinks.ts");
 const { clampPaging, totalPagesFor } = await import("../src/lib/utils/sql.ts");
+const { parseUsersIndexPage } = await import("../src/lib/publicData/usersIndexPage.ts");
 const { prepareUsersIndexItems, paginateUsersIndexItems } = await import("../src/lib/publicData/staticUsersIndexCore.ts");
 const { FIXTURE_USER_PROFILES, FIXTURE_USERS_INDEX } = await import("../apps/site/src/lib/userFixtures.ts");
 
@@ -107,6 +108,21 @@ test("U02 body: every CURRENT profile entry point is in the static HTML (texts, 
   assert.equal(main.querySelector('a[href^="mailto:"]').getAttribute("target"), null, "mailto opens in place");
   // The header X link already is the primary X ID: the duplicate X profile link is dropped (CURRENT).
   assert.equal(links.filter((l) => l === "https://x.com/miku_producer").length, 1);
+});
+
+// Source contract only: jsdom has no layout, so this checks the back link exists and the offset rule is present.
+// The geometry (link below the 52px fixed header at 390px) is checked by the U03 screenshots recorded in MIG-0504.md.
+test("MIG-0504 mobile profile back link exists and the 52px fixed-header offset rule is in the route source", { skip }, () => {
+  const doc = loadHtml("user/miku_producer/index.html");
+  const back = doc.querySelector('main.cr-wrap > a[href="/user"]');
+  assert.ok(back, "the profile needs a mock-compatible back-to-creators link");
+  assert.match(text(back), /クリエイター一覧/);
+  // Astro may bundle global CSS into an external asset; read the route source for the scoped rule.
+  const styles = fs.readFileSync("apps/site/src/pages/user/[id]/index.astro", "utf8");
+  assert.match(styles, /@media\s*\(max-width:\s*640px\)/,
+    "a mobile-specific fixed-header offset must be in the route source");
+  assert.match(styles, /\.p-root\s+\.cr-wrap\s*\{\s*padding-top:\s*calc\(52px\s*\+\s*24px\)\s*!important;/,
+    "mobile back navigation must clear the 52px fixed header without altering desktop");
 });
 
 test("T02: private and voided works never reach the profile or portfolio HTML; banned users have no page", { skip }, () => {
@@ -236,6 +252,25 @@ test("T05 (G03) /user query keys: q, sort, page match CURRENT for value, empty a
   assert.equal(views.USERS_INDEX_PAGE_SIZE, 48);
 });
 
+test("MIG-0504 regression: /user page query requires full decimal number in CURRENT and Astro", () => {
+  for (const [raw, expected] of [
+    [null, 1], [undefined, 1], ["", 1], ["  ", 1],
+    [["2", "3"], 1], [{ page: "2" }, 1], [2, 1], [true, 1],
+    ["1", 1], ["2", 2], [" 2 ", 2], ["0002", 2],
+    ["2abc", 1], ["3.5", 1], ["2e2", 1], ["+2", 1],
+    ["-2", 1], ["0", 1], ["０２", 1], ["2\\n", 1],
+    ["9007199254740992", 1], ["99999999999999999999", 1],
+    ["0".repeat(31) + "2", 2], ["0".repeat(32) + "2", 1],
+  ]) {
+    assert.equal(parseUsersIndexPage(raw), expected, `shared page parser: ${JSON.stringify(raw)}`);
+    assert.equal(views.parseIndexPage(raw), expected, `Astro Island parser: ${JSON.stringify(raw)}`);
+  }
+  assert.ok(currentIndexSource.includes('import { parseUsersIndexPage } from "@/lib/publicData/usersIndexPage";'),
+    "CURRENT must import the exact same shared parser");
+  assert.ok(currentIndexSource.includes("const pageNum = parseUsersIndexPage(page);"),
+    "CURRENT /user must call the shared parser before loading the v2 index");
+});
+
 test("T05 (G03) /user/:id query keys: worksPage and collabPage slice like CURRENT (value, empty, unknown)", () => {
   const all = [...Array(40)].map((_, i) => `作品 w${String(i + 1).padStart(2, "0")}`);
   const pages = views.buildSectionPages(
@@ -257,6 +292,52 @@ test("T05 (G03) /user/:id query keys: worksPage and collabPage slice like CURREN
   assert.equal(views.profilePageHref("long_list", "collabPage", 2), "/user/long_list?collabPage=2");
   assert.ok(currentProfileSource.includes('usp.set("worksPage"') && currentProfileSource.includes('usp.set("collabPage"'));
   assert.equal(clampPaging({ page: "", pageSize: 8, defaultPageSize: 8, maxPageSize: 8 }).page, 1);
+});
+
+test("T03: unknown and merged X IDs are 404 in CURRENT, not legacy redirects", { skip }, () => {
+  // The static artifact contract matches CURRENT: unknown/non-published X IDs have no emitted page.
+  // CURRENT UserProfilePage calls notFound() on the missing-profile path and never redirects an old ID.
+  assert.ok(currentProfileSource.includes("normalizeXId((await params).id)"));
+  assert.ok(currentProfileSource.includes("if (shouldPublicPageNotFound(staticLoaded.state))"));
+  assert.ok(currentProfileSource.includes("notFound();"));
+  for (const id of ["missing_user", "merged_old_id", "suspended_user"]) {
+    assert.equal(fs.existsSync(path.join(DIST, "user", id, "index.html")), false, id);
+    assert.equal(fs.existsSync(path.join(DIST, "user", id, "portfolio", "index.html")), false, id);
+  }
+  // Mixed case and @ prefixes are a gateway concern, covered by
+  // scripts/migration-gateway.test.mjs ("user slugs follow CURRENT normalizeXId").
+});
+
+test("G-size: profile Island props stay under 256 KiB at 15+15 display pages", () => {
+  const card = (i) => ({
+    id: "w" + i,
+    title: "あ".repeat(100),
+    youtube_video_id: "AAAAAAAAAAA",
+    display_name: "い".repeat(30),
+  });
+  const section = {
+    total: 120, pageSize: 24,
+    items: Array.from({ length: 24 }, (_, i) => card(i)),
+  };
+  const extra = new Map(Array.from({ length: 4 }, (_, index) => {
+    const page = index + 2;
+    return [page, {
+      page, total: 120, pageSize: 24, generatedAt: null,
+      items: Array.from({ length: 24 }, (_, i) => card((page - 1) * 24 + i)),
+    }];
+  }));
+  const works = views.buildSectionPages(section, extra, 8, 24);
+  const collabs = views.buildSectionPages(section, extra, 8, 24);
+  for (const [name, value] of [["works", works], ["collabs", collabs]]) {
+    assert.equal(value.pages.length, 15, name + " must expose all 15 display pages");
+    value.pages.forEach((page, index) => {
+      assert.ok(Array.isArray(page), name + " page " + (index + 1) + " is missing");
+      assert.equal(page.length, 8, name + " page " + (index + 1));
+    });
+  }
+  const bytes = Buffer.byteLength(JSON.stringify({ works, collabs }), "utf8");
+  console.log("MIG-0504 G-size 15+15 display pages: " + bytes + "/262144 bytes");
+  assert.ok(bytes <= 262144, "serialized profile Island sections exceed the 256 KiB cap: " + bytes);
 });
 
 async function mountIsland(url, element) {
@@ -337,6 +418,39 @@ test("T05 index Island: ?q= ?sort= ?page= are applied from /user/index.json like
     await act(async () => m.root.unmount());
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("MIG-0504: Astro Island handles duplicate page keys like CURRENT without losing valid pagination", { skip: skipUi }, async () => {
+  const entries = Array.from({ length: 96 }, (_, i) => ({
+    x_id: `user${String(i).padStart(3, "0")}`,
+    x_name: `User ${String(i).padStart(3, "0")}`,
+    icon_url: null, personal_count: 0, collab_count: 0,
+    total_works: 0, sort_score: 96 - i,
+  }));
+  const props = {
+    initial: views.computeUsersIndexView(entries, "", "score", 1),
+    unavailable: false,
+    indexUrl: "/user/index.json",
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: true, json: async () => entries });
+  const firstCreatorHref = (container) => container.querySelector(".cr-icons a")?.getAttribute("href");
+  try {
+    for (const [query, expected] of [
+      ["?sort=name&page=2&page=3", "/user/user000"],
+      ["?sort=name&page=2&page=2", "/user/user000"],
+      ["?sort=name&page=2", "/user/user048"],
+    ]) {
+      const mounted = await mountIsland(`https://flamenode.net/user${query}`, h(UsersIndexIsland, props));
+      try {
+        assert.equal(firstCreatorHref(mounted.container), expected, query);
+      } finally {
+        await act(async () => mounted.root.unmount());
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

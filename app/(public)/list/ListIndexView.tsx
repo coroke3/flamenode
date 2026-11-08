@@ -11,7 +11,7 @@ import { AutoSubmitSelect } from "@/components/forms/AutoSubmitSelect";
 import { ImeSafeGetForm } from "@/components/forms/ImeSafeGetForm";
 import { formatUnix } from "@/lib/utils/format";
 import { buildPageMetadata } from "@/lib/seo";
-import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
+import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "@/lib/youtube/id";
 import { parsePublicVideoSort } from "@/lib/db/listQueries";
 import {
   loadStaticRecentVideosPage,
@@ -92,8 +92,9 @@ function listEmptyMessage(
 function parseBoundedPage(value: string): number {
   // URL由来の巨大な数値文字列をparseIntへそのまま渡さない。
   // duplicate/不正値は1へ戻し、Infinity/過大offsetがdegraded D1へ流れることも防ぐ。
-  const raw = value.trim().slice(0, 12);
-  if (!/^\d+$/.test(raw)) return 1;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return 1;
+  const raw = trimmed.slice(0, 12);
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1) return 1;
   return Math.min(parsed, MAX_PAGE);
@@ -387,7 +388,7 @@ export async function ListPage({
                 <tbody>
                   {videos.map((v, index) => {
                     const youtubeVideoId = v.youtube_video_id?.trim() || null;
-                    const href = `/${youtubeVideoId ?? v.id}`;
+                    const href = videoPageHref(v);
                     const youtubeId = extractYoutubeId(youtubeVideoId);
                     return (
                       <tr key={`${v.id}-index-${index}`}>
