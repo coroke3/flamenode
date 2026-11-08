@@ -387,12 +387,30 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
-    assert.equal(json.viewerCanEditChapters, true, "admin chapter management");
+    assert.equal(json.viewerCanEditChapters, false, "admin without TOS consent must not gain chapter management");
     // Carol sees both alice's and staff's private chapters (member excluded)
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
     assert.ok(ids.includes("chap-priv-alice"));
     assert.ok(ids.includes("chap-priv-staff"));
+  });
+
+  test("RH-031 consenting admin obtains server-calculated chapter management", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // The shared personalSeed baseline deliberately leaves carol unconsented;
+    // assert the positive admin capability only after explicit TOS acceptance.
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 1, "accepted_terms_version_id" = ? WHERE "id" = ?')
+      .run("T2", "u_carol");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-carol" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isTosAccepted, true);
+    assert.equal(json.termsReacceptRequired, false);
+    assert.equal(json.viewerCanEditChapters, true);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
   test("T06: RH-031 event staff with video.chapter_admin sees all private chapters", async () => {
