@@ -299,10 +299,11 @@ SELECT
               'visibility', 'private',
               'note', c."note",
               'author_name', c."author_name",
-              'author_icon', c."author_icon"
+              'author_icon', c."author_icon",
+              'chapter_owner_x_id', c."x_user_id"
            )), '[]')
            FROM (
-             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", u."x_name" AS "author_name", u."icon_url" AS "author_icon"
+             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id", u."x_name" AS "author_name", u."icon_url" AS "author_icon"
                FROM "video_chapters" ch
                LEFT JOIN "x_users" u ON u."id" = ch."x_user_id"
               WHERE ch."video_id" = ?
@@ -367,9 +368,16 @@ SELECT
           lib_playlist_json?: string | null;
         }>();
 
-      const privateChapters = parseJsonArray<VideoViewerOverlayDto["privateChapters"][number]>(
-        row2?.chapters_json,
-      );
+      // Keep raw owner IDs server-side; never expose cross-user X IDs in RH-031.
+      // Edit/delete accepts owner of the *active* X identity or operator rights.
+      const privateChapters = parseJsonArray<
+        VideoViewerOverlayDto["privateChapters"][number] & { chapter_owner_x_id: string | null }
+      >(row2?.chapters_json).map(({ chapter_owner_x_id, ...chapter }) => ({
+        ...chapter,
+        viewerCanManage: isTosAccepted && !termsReacceptRequired &&
+          (viewerCanEditChapters || Boolean(viewerXApproved && activeXId &&
+            chapter_owner_x_id === activeXId)),
+      }));
       const interactions = parseJsonArray<string>(row2?.interactions_json);
       const likeActive = interactions.includes("like");
       const bookmarkActive = interactions.includes("bookmark");
