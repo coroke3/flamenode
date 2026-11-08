@@ -141,20 +141,7 @@ test("MIG-0656 U02b-3a: SQLite manual transaction rolls back partial CAS changes
     db.exec("BEGIN");
     assert.equal(db.prepare(compiled.sql).run(...compiled.params).changes, 1);
     assert.throws(() => db.prepare(
-      "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '
-  const a=makeRow("a");
-  for(const input of [
-    {kind:"delete-available",eventId:"event_1",rows:[]},
-    {kind:"delete-available",eventId:"event_1",rows:[a,a]},
-    {kind:"delete-available",eventId:"event_1",rows:[makeRow("wrong",{event_id:"foreign"})]},
-    {kind:"delete-available",eventId:"event_1",rows:["a","b","c","d"].map(id=>makeRow(id))},
-    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1,label:" "},
-    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1,label:"x".repeat(201)},
-    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1.5,label:"ok"},
-    {kind:"release-reserved",eventId:"event_1",rows:[makeRow("a",{version:NaN})],updatedAt:10},
-    {kind:"release-reserved",eventId:"event_1",rows:[a]},
-  ]) assert.throws(()=>buildSlotBatchCasMutation(input));
-});) END"
+      "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '$') END"
     ).get(plan.expectedMutationChanges), "simulated exact change-count assertion");
     db.exec("ROLLBACK");
     assert.equal(read(db, "a").status, "available", "partial delete is not committed");
