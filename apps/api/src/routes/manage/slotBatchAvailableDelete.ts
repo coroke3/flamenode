@@ -5,8 +5,9 @@
  * This feature enforces CostGuard manage_slot_delete, event.slots approved
  * linked staff, and a 3-row authoritative CAS snapshot. Strict per-row
  * DELETE audits, slot projections and exact changes commit in the same
- * mutateWithAudit D1 batch. Do not mount before post-commit wake parity and
- * independent review.
+ * mutateWithAudit D1 batch. D-0603-1/D-13-41 intentionally specify
+ * no immediate Queue wake. Do not mount before parent middleware integration,
+ * D1 parity and independent review.
  */
 import { Hono } from "hono";
 import { SlotBatchIdsBodySchema } from "@flamenode/contracts";
@@ -27,7 +28,7 @@ const WRITE_FAILED = "枠の削除に失敗しました。再読み込み後に�
 /** This router is intentionally NOT registered with manageRoutes. */
 export const slotBatchAvailableDeleteRoutes = new Hono<AppEnv>();
 slotBatchAvailableDeleteRoutes.use("*", costGuardMiddleware("manage_slot_delete"));
-slotBatchAvailableDeleteRoutes.delete("/batch-available", async (c) => {
+slotBatchAvailableDeleteRoutes.post("/batch-delete", async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

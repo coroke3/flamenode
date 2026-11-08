@@ -56,8 +56,8 @@ function setup({actor=admin,staff=false,settings="normal",onFirst}={}) {
   });
   app.route("/api/manage/events/:id/slots",slotBatchAvailableDeleteRoutes);
   const del=(body={slot_ids:["a","b"]},eventId="ev-1")=>app.request(
-    ORIGIN+"/api/manage/events/"+eventId+"/slots/batch-available",{
-      method:"DELETE",
+    ORIGIN+"/api/manage/events/"+eventId+"/slots/batch-delete",{
+      method:"POST",
       headers:{Origin:ORIGIN,"Content-Type":"application/json"},
       body:JSON.stringify(body)
     },{DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN}

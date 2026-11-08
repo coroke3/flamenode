@@ -5,7 +5,8 @@
  * this path before mount. This module enforces manage_slot_update CostGuard,
  * approved linked event.slots permission, bounded JSON, 3-row CAS, strict
  * before/after audit and the durable slot-change projection queue in one D1
- * batch. Queue wake, full middleware replay and human review still gate mount.
+ * batch. Under D-0603-1/D-13-41, wake=0 by design; parent middleware replay,
+ * actual D1 parity and human review still gate mount.
  */
 import { Hono } from "hono";
 import { SlotBatchLabelsBodySchema } from "@flamenode/contracts";
@@ -30,7 +31,7 @@ const WRITE_FAILED = "枠の更新に失敗しました。再読み込み後に�
  */
 export const slotBatchLabelWriteRoutes = new Hono<AppEnv>();
 slotBatchLabelWriteRoutes.use("*", costGuardMiddleware("manage_slot_update"));
-slotBatchLabelWriteRoutes.put("/batch-labels", async (c) => {
+slotBatchLabelWriteRoutes.patch("/labels", async (c) => {
   c.header("Cache-Control", NO_STORE);
   const user = c.get("user");
   if (!user) return c.json({ ok: false, message: "ログインが必要です。" }, 401);

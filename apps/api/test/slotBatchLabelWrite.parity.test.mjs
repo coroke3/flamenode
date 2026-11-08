@@ -60,19 +60,19 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
     await next();
   });
   app.route("/api/manage/events/:id/slots", slotBatchLabelWriteRoutes);
-  const put = (body = { slot_ids:["a","b"], label: "new label" }, eventId = "ev-1") =>
-    app.request(ORIGIN + "/api/manage/events/" + eventId + "/slots/batch-labels", {
-      method: "PUT", headers: { Origin:ORIGIN, "Content-Type":"application/json" },
+  const patch = (body = { slot_ids:["a","b"], label: "new label" }, eventId = "ev-1") =>
+    app.request(ORIGIN + "/api/manage/events/" + eventId + "/slots/labels", {
+      method: "PATCH", headers: { Origin:ORIGIN, "Content-Type":"application/json" },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: ORIGIN });
   const count = (table) => sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n;
   const slot = (id) => sqlite.prepare("SELECT * FROM slots WHERE id=?").get(id);
-  return { sqlite, stats, put, count, slot };
+  return { sqlite, stats, patch, count, slot };
 }
 
 test("SA-064 U02c-0: 2-row label edit writes one audited D1 batch and full queue fanout", async () => {
   const s = setup();
-  const response = await s.put({slot_ids:["a","b","a"],label:" 新しいラベル "});
+  const response = await s.patch({slot_ids:["a","b","a"],label:" 新しいラベル "});
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(response.headers.get("Cache-Control"),"private, no-store");
   assert.deepEqual(await response.json(), {
@@ -97,14 +97,14 @@ test("SA-064 U02c-0: 2-row label edit writes one audited D1 batch and full queue
 
 test("SA-064 U02c-0: role and approved linked event.slots permission are fail closed", async () => {
   const denied=setup({actor:user});
-  const no=await denied.put();
+  const no=await denied.patch();
   assert.equal(no.status,404,await no.clone().text());
   assert.equal(denied.count("audit_logs"),0);
   const allowed=setup({actor:user,staff:true});
-  assert.equal((await allowed.put()).status,200);
+  assert.equal((await allowed.patch()).status,200);
   assert.equal(allowed.count("audit_logs"),2);
   const anonymous=setup({actor:null});
-  assert.equal((await anonymous.put()).status,401);
+  assert.equal((await anonymous.patch()).status,401);
   assert.equal(anonymous.count("audit_logs"),0);
 });
 
@@ -122,12 +122,12 @@ test("SA-064 U02c-0a: admin bypasses 101-staff sentinel; non-admin refuses trunc
   };
   const privileged = setup();
   fill(privileged, "admin-1");
-  const adminRes = await privileged.put();
+  const adminRes = await privileged.patch();
   assert.equal(adminRes.status, 200, await adminRes.clone().text());
   assert.equal(privileged.count("audit_logs"), 2);
   const ordinary = setup({actor:user});
   fill(ordinary, "u-1");
-  const denied = await ordinary.put();
+  const denied = await ordinary.patch();
   assert.equal(denied.status, 503, await denied.clone().text());
   assert.equal(ordinary.count("audit_logs"), 0);
   assert.equal(ordinary.count("static_rebuild_queue"), 0);
@@ -142,7 +142,7 @@ test("SA-064 U02c-0: malformed input, too many IDs, missing event do not write",
     [{slot_ids:["a"],label:"valid"},"other",404],
     [{slot_ids:["not-a-slot"],label:"valid"},"ev-1",409],
   ]) {
-    const response=await s.put(body,id);
+    const response=await s.patch(body,id);
     assert.equal(response.status,expected,await response.clone().text());
   }
   assert.equal(s.count("audit_logs"),0);
@@ -152,7 +152,7 @@ test("SA-064 U02c-0: malformed input, too many IDs, missing event do not write",
 test("SA-064 U02c-0: D1 strict-audit failure atomically rolls back slots and queue", async () => {
   const s=setup();
   s.sqlite.exec("DROP TABLE audit_logs");
-  const r=await s.put();
+  const r=await s.patch();
   assert.equal(r.status,503,await r.clone().text());
   assert.equal(s.slot("a").slot_label,"old");
   assert.equal(s.slot("b").slot_label,"old");
@@ -167,7 +167,7 @@ test("SA-064 U02c-0: stale CAS read rolls back all changes", async () => {
       sqlite.prepare("UPDATE slots SET version=version+1 WHERE id='b'").run();
     }
   }});
-  const r=await s.put();
+  const r=await s.patch();
   assert.equal(r.status,409,await r.clone().text());
   assert.equal(s.slot("a").slot_label,"old");
   assert.equal(s.slot("b").slot_label,"old");
@@ -177,7 +177,7 @@ test("SA-064 U02c-0: stale CAS read rolls back all changes", async () => {
 
 test("SA-064 U02c-0: CostGuard maintenance rejects before slot snapshot or DML", async () => {
   const s=setup({settings:"maintenance"});
-  const response=await s.put();
+  const response=await s.patch();
   assert.equal(response.status,503);
   assert.equal(s.count("audit_logs"),0);
   assert.equal(s.count("static_rebuild_queue"),0);
