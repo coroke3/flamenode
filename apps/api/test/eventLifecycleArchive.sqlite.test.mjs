@@ -8,6 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { eventLifecycleRoutes } from "../src/eventLifecycle/archiveRoute.ts";
+import { originGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 
 const ADMIN = { id: "u_admin", role: "admin", name: "Admin", is_banned: 0 };
 const SITE = "https://app.flamenode.example";
@@ -104,7 +105,7 @@ function createR2(timeline, { rejectPut = false, hideFirstVerification = false }
   };
 }
 
-function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {} } = {}) {
+function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false } = {}) {
   const sqlite = createSqlite();
   const timestamp = Math.floor(Date.now() / 1000) - 100;
   insert(sqlite, "user", {
@@ -135,6 +136,13 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
   const d1 = createAtomicD1(sqlite, timeline, beforeBatch);
   const bucket = createR2(timeline, r2Options);
   const app = new Hono();
+  if (enforceOrigin) {
+    // Real admin-origin middleware, mounted BEFORE the synthetic session/DB.
+    app.use("*", originGuardMiddleware({
+      loadSiteUrl: () => SITE,
+      allowLocalPreview: () => false,
+    }));
+  }
   app.use("*", async (c, next) => {
     c.set("user", { ...ADMIN, role });
     c.set("db", drizzle(d1, { schema }));
@@ -152,9 +160,9 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
     NEXT_PUBLIC_SITE_URL: SITE,
     ...(r2 ? { BUCKET: bucket } : {}),
   };
-  const request = (eventId = EVENT, body = { event_id: EVENT, confirm: EVENT }) =>
+  const request = (eventId = EVENT, body = { event_id: EVENT, confirm: EVENT }, origin = SITE) =>
     app.request("https://app.flamenode.example/api/admin/events/" + eventId, {
-      method: "DELETE", headers: { "content-type": "application/json", Origin: SITE },
+      method: "DELETE", headers: { "content-type": "application/json", ...(origin === null ? {} : { Origin: origin }) },
       body: JSON.stringify(body),
     }, env);
   const read = (table, where = "") =>
@@ -365,3 +373,20 @@ test("MIG-0652 U04 SQLite T17: strict audit INSERT failure rolls back event, fen
   assert.ok(f.timeline.slice(f.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
     "a failed atomic audit commit must release only its own R2 precommit fence");
 });
+
+test("MIG-0652 U04 SQLite T18: parent origin guard rejects forged or missing Origin before any D1/R2 read", async () => {
+  for (const origin of ["https://attacker.example", null]) {
+    const f = setup({ enforceOrigin: true });
+    const response = await f.request(EVENT, { event_id: EVENT, confirm: EVENT }, origin);
+    assert.equal(response.status, 403, String(origin));
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await response.json(), { ok: false, reason: "invalid_origin" });
+    assert.equal(f.d1.stats.statements, 0, "Origin rejection must not read D1");
+    assert.equal(f.d1.stats.batches, 0, "Origin rejection must not write D1");
+    assert.deepEqual(f.timeline, [], "Origin rejection must not contact R2");
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+  }
+});
+
