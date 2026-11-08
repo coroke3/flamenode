@@ -272,3 +272,20 @@ test("D1 FK preflight checks every bound chunk and fails closed on missing refer
   await assert.rejects(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: "x" }]), /db_unavailable/);
   await assert.doesNotReject(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: null }]));
 });
+
+
+test("FK preflight fails closed above S3's three-query ceiling before opening D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys, SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const rows = n => Array.from({ length: n }, (_, i) => ({ event_id: "event-" + i }));
+  assert.equal(SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES, 3);
+  assert.equal(buildSpreadsheetForeignKeyLookups(fk, rows(297)).length, 3);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(298)), /batch_too_large/);
+  let prepared = 0;
+  const db = { prepare() { prepared++; throw Error("should not reach D1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(298)), /batch_too_large/);
+  assert.equal(prepared, 0);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups([...fk, ...fk, ...fk, ...fk],
+    [{ event_id: "event-0" }]), /batch_too_large/);
+});
