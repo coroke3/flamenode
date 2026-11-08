@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { buildQuestionsEventUpdateFields } from "@flamenode/domain/event";
+import { serializeRequiredVideoFieldsFromForm } from "@flamenode/domain/video";
 
 const data = (overrides = {}) => ({
   allow_user_video_edits: 1,
@@ -47,6 +48,24 @@ test("MIG-0652 U01: nullable serializer explicitly clears prior required video f
   assert.equal(result.required_video_fields_json, null);
   // Only undefined means the form did not submit this field.
   assert.equal(build({provided: undefined, previousRequired: '["title"]'}).required_video_fields_json, '["title"]');
+});
+
+test("MIG-0652 U01: real CURRENT form serializer preserves omissions and clears explicit empty selections", () => {
+  const absent = new FormData();
+  assert.equal(serializeRequiredVideoFieldsFromForm(absent), undefined);
+  assert.equal(build({provided: serializeRequiredVideoFieldsFromForm(absent)}).required_video_fields_json, '["title"]');
+
+  const explicitClear = new FormData();
+  explicitClear.set("required_video_fields_present", "1");
+  explicitClear.set("required_video_fields_json", "[]");
+  assert.equal(serializeRequiredVideoFieldsFromForm(explicitClear), null);
+  assert.equal(build({provided: serializeRequiredVideoFieldsFromForm(explicitClear)}).required_video_fields_json, null);
+
+  const ignored = new FormData();
+  ignored.set("required_video_fields_present", "true");
+  ignored.set("required_video_fields_json", "[]");
+  assert.equal(serializeRequiredVideoFieldsFromForm(ignored), undefined);
+  assert.equal(build({provided: serializeRequiredVideoFieldsFromForm(ignored)}).required_video_fields_json, '["title"]');
 });
 
 test("MIG-0652 U01: optional editor and review settings retain old values on null/undefined", () => {
