@@ -1525,7 +1525,7 @@
 | `apps/api/test/slotSingleReleaseMutation.test.mjs` | TEST | SA-060 20/21-row, raw group, stale snapshot CAS, rollback SQLite regression | MIG-0656 | SAME (node:sqlite offline tests; actual D1/browser parity pending) | IN_PROGRESS | PR#514 SHA=f3fae8a6c894da11abf5fb9e5f00eee17d07b822 TEST=node --test --experimental-strip-types apps/api/test/slotSingleReleaseMutation.test.mjs (exact-head CI pending) |
 
 | `apps/api/src/routes/manage/slotSingleReleaseOutbox.ts` | HELPER | SA-060 one notification for a single complete raw group of <=20 slots; SA-063 3-row default retained | MIG-0656 | SAME (UNMOUNTED candidate; post-audit statement only, zero immediate wake) | IN_PROGRESS | PR#514 SHA=2622332a4e521bc1620ad301fa369434b9c1ea59 TEST=apps/api/test/slotSingleReleaseOutbox.test.mjs (exact-head CI pending) |
-| `apps/api/test/slotSingleReleaseOutbox.test.mjs` | TEST | SA-060 20-row one-DM/21-denied, dedupe, opt-out, invalid origin, strict-audit rollback | MIG-0656 | SAME (offline SQLite, not real D1/browser) | IN_PROGRESS | PR#514 SHA=27053243347be2244bd2321be6d0745295f15b97 TEST=node --test --experimental-strip-types apps/api/test/slotSingleReleaseOutbox.test.mjs (exact-head CI pending) |
+| `apps/api/test/slotSingleReleaseOutbox.test.mjs` | TEST | SA-060 20-row one-DM/21-denied, dedupe, opt-out, invalid origin, strict-audit rollback | MIG-0656 | SAME (offline SQLite, not real D1/browser) | IN_PROGRESS | PR#514 SHA=6bd6e9aed34ed5456ac002cabba52f6cc5d5521f TEST=node --test --experimental-strip-types apps/api/test/slotSingleReleaseOutbox.test.mjs (SQLite fixture quote fix; exact-head CI pending) |
 
 ## Future files requiring source/target registration
 
