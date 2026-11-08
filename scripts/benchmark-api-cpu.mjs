@@ -645,10 +645,10 @@ const WRITE_BODIES = {
   "POST /api/xid/requests/:id/cancel": () => undefined,
   "POST /api/xid/merge-revert-requests": (kind, i, tag) => ({ parent_request_id: benchXRequestId(i, tag) }),
   "PUT /api/admin/permissions/editable-fields": (kind) => ({ default_editable_fields: kind === "limit" ? ["title", "description"] : [], upcoming_editable_fields: kind === "limit" ? ["title"] : [] }),
-  "POST /api/admin/terms": (kind, i, tag) => ({ id: benchTermsId(i, tag), version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v1", body_markdown: kind === "limit" ? "x".repeat(2000) : "benchmark body", severity: "major" }),
-  "PATCH /api/admin/terms/:id": (kind) => ({ version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v2", body_markdown: kind === "limit" ? "x".repeat(2000) : "updated benchmark body", severity: "major" }),
+  "POST /api/admin/terms": (kind, i, tag) => ({ id: benchTermsId(i, tag), version_label: kind === "limit" ? "v".repeat(80) : "benchmark-v1", body_markdown: kind === "limit" ? "x".repeat(40000) : "benchmark body", severity: "major" }),
+  "PATCH /api/admin/terms/:id": (kind) => ({ version_label: kind === "limit" ? "v".repeat(80) : "benchmark-v2", body_markdown: kind === "limit" ? "x".repeat(40000) : "updated benchmark body", severity: "major" }),
   "POST /api/admin/terms/:id/publish": () => ({}),
-  "POST /api/admin/terms/:id/reaccept-broadcast": (kind) => ({ confirm: "TERMS", content: kind === "limit" ? "n".repeat(80) : "benchmark" }),
+  "POST /api/admin/terms/:id/reaccept-broadcast": (kind) => ({ confirm: "TERMS", content: kind === "limit" ? "n".repeat(1000) : "benchmark" }),
   "POST /api/admin/terms/:id/archive": () => ({}),
 
   "POST /api/admin/notifications/retry-failed": () => ({}),
