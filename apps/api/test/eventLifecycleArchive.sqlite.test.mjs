@@ -452,3 +452,46 @@ test("MIG-0652 U04 SQLite T19: real parent write identity guard denies banned, T
   assert.ok(allowed.bucket.manifest?.entities.some((row) => row.entity_id === EVENT));
 });
 
+test("MIG-0652 U04 SQLite T20: Auth.js session -> Origin -> write identity -> archived event", async () => {
+  const body = { event_id: EVENT, confirm: EVENT };
+  for (const variant of [
+    { name: "missing", cookie: null, expired: false, expectedReads: 0 },
+    { name: "forged", cookie: "__Secure-authjs.session-token=forged", expired: false, expectedReads: 1 },
+    { name: "expired", cookie: VALID_SESSION_COOKIE, expired: true, expectedReads: 1 },
+  ]) {
+    const f = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true, sessionExpired: variant.expired });
+    const response = await f.request(EVENT, body, SITE, variant.cookie);
+    assert.equal(response.status, 401, variant.name);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(await response.json(), { ok: false, reason: "unauthenticated", message: "ログインが必要です。" });
+    assert.equal(f.d1.stats.statements, variant.expectedReads, variant.name + ": only the indexed session lookup may run");
+    assert.equal(f.d1.stats.batches, 0);
+    assert.deepEqual(f.timeline, [], variant.name + ": no R2 mutation");
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+  }
+
+  const forgedOrigin = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true });
+  const rejected = await forgedOrigin.request(EVENT, body, "https://evil.example", VALID_SESSION_COOKIE);
+  assert.equal(rejected.status, 403);
+  assert.equal((await rejected.json()).reason, "invalid_origin");
+  assert.equal(forgedOrigin.d1.stats.statements, 0, "Origin must precede real session lookup");
+  assert.deepEqual(forgedOrigin.timeline, []);
+
+  const allowed = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true });
+  const oldCache = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let success;
+  try { success = await allowed.request(); } finally { globalThis.caches = oldCache; }
+  assert.equal(success.status, 200, "valid Auth.js session admin may archive");
+  assert.equal((await success.json()).ok, true);
+  assert.equal(allowed.d1.stats.batches, 1);
+  assert.equal(allowed.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.equal(allowed.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+  assert.ok(allowed.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+  const fence = allowed.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+  assert.ok(fence?.fence_token);
+  assert.equal(allowed.bucket.manifest?.entities.find((row) => row.entity_id === EVENT)?.fence_token, fence.fence_token);
+});
+
