@@ -67,11 +67,12 @@ function createAtomicD1(sqlite, timeline, beforeBatch = null) {
   };
 }
 
-function createR2(timeline, { rejectPut = false, hideFirstVerification = false, seedManifest = null } = {}) {
+function createR2(timeline, { rejectPut = false, hideFirstVerification = false, seedManifest = null, concurrentFirstPutEntry = null } = {}) {
   let body = seedManifest === null ? null : JSON.stringify(seedManifest);
   let etag = seedManifest === null ? null : "etag-seed";
   let version = 0;
   let verificationHidden = false;
+  let injectedConcurrentPut = false;
   const key = "visibility/blocked-entities.v1.json";
   return {
     get manifest() { return body === null ? null : JSON.parse(body); },
@@ -93,6 +94,20 @@ function createR2(timeline, { rejectPut = false, hideFirstVerification = false, 
     async put(path, next, options) {
       assert.equal(path, key);
       timeline.push("r2.put");
+      if (concurrentFirstPutEntry && !injectedConcurrentPut) {
+        // Simulate a different writer winning creation before our CAS checks.
+        // This is the same stored R2 manifest (not a second fake object).
+        injectedConcurrentPut = true;
+        const current = body === null
+          ? { schema_version: 1, revision: 0, generated_at: 1000, entities: [] }
+          : JSON.parse(body);
+        body = JSON.stringify({
+          ...current, revision: current.revision + 1,
+          entities: [...current.entities, concurrentFirstPutEntry],
+        });
+        etag = "etag-" + ++version;
+        timeline.push("r2.concurrent-write");
+      }
       if (rejectPut) return null;
       const condition = options?.onlyIf;
       if (condition instanceof Headers) {
@@ -557,5 +572,44 @@ test("MIG-0652 U04 SQLite T21: existing unrelated visibility fences survive both
   assert.deepEqual(failure.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
   assert.ok(failure.timeline.slice(failure.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
     "compensation must CAS-remove only its own uncommitted fence");
+});
+
+test("MIG-0652 U04 SQLite T22: racing R2 first-manifest writers preserve both blocked entities via CAS retry", async () => {
+  const competitor = {
+    entity_type: "video",
+    entity_id: "vidConcurrent",
+    fence_token: "vf-other-writer",
+    blocked_at: 1000,
+    reason: "concurrent_independent_archive",
+  };
+  const f = setup({ r2Options: { concurrentFirstPutEntry: competitor } });
+  assert.equal(f.bucket.manifest, null, "both writers must begin from a missing manifest");
+  const oldCache = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let response;
+  try { response = await f.request(); } finally { globalThis.caches = oldCache; }
+  assert.equal(response.status, 200, "archive should retry its conditional R2 create");
+  assert.equal((await response.json()).ok, true);
+  assert.deepEqual(
+    f.bucket.manifest?.entities.find((row) => row.entity_type === "video" && row.entity_id === competitor.entity_id),
+    competitor,
+    "the winning concurrent writer must never be overwritten",
+  );
+  const targetFence = f.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+  assert.ok(targetFence?.fence_token);
+  assert.equal(
+    f.bucket.manifest?.entities.find((row) => row.entity_type === "event" && row.entity_id === EVENT)?.fence_token,
+    targetFence.fence_token,
+  );
+  assert.equal(f.bucket.manifest?.entities.length, 2);
+  assert.equal(f.bucket.manifest?.revision, 2, "initial rival write then the archived event CAS retry");
+  assert.equal(f.timeline.filter((op) => op === "r2.concurrent-write").length, 1);
+  assert.equal(f.timeline.filter((op) => op === "r2.put").length, 2, "failed create-if-absent + retry");
+  assert.ok(f.timeline.lastIndexOf("r2.get") < f.timeline.indexOf("d1.batch"),
+    "both block entries must be independently read back before committing D1");
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.equal(f.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+  assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
 });
 
