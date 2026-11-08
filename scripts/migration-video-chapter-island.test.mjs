@@ -538,3 +538,55 @@ test("P2 Active X switch resets a private edit to the public default", async () 
     assert.equal(doc.querySelector("input[type=checkbox]").checked, true);
   });
 });
+
+
+test("MIG-0518 chapter management stays disabled without the trusted RH-031 claim", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const overlay = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: true, activeXId: "x-approved", privateChapters: [
+      { id: "private-1", chapter_time: 65, chapter_label: "非公開", note: "必ず残す", visibility: "private" },
+    ],
+  };
+  const denied = chapterManagementForOverlay([], overlay, false);
+  assert.deepEqual(denied, { canBulk: false, editableChapters: [] });
+  for (const bad of [
+    { viewerCanEditChapters: false },
+    { viewerCanEditChapters: true, authUnavailable: true },
+    { viewerCanEditChapters: true, isBanned: true },
+    { viewerCanEditChapters: true, termsReacceptRequired: true },
+    { viewerCanEditChapters: true, isTosAccepted: false },
+    { viewerCanEditChapters: true, viewerXApproved: false },
+    { viewerCanEditChapters: true, activeXId: null },
+  ]) {
+    const result = chapterManagementForOverlay([], { ...overlay, ...bad }, false);
+    assert.deepEqual(result, { canBulk: false, editableChapters: [] }, JSON.stringify(bad));
+  }
+  assert.deepEqual(chapterManagementForOverlay([], { ...overlay, viewerCanEditChapters: true }, true),
+    { canBulk: false, editableChapters: [] }, "loading must not expose management");
+});
+
+test("MIG-0518 authorized manager edits only complete private chapter DTOs", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const overlay = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: true, activeXId: "x-approved",
+    viewerCanEditChapters: true,
+    privateChapters: [
+      { id: "private-1", chapter_time: 65, chapter_label: "秘密", note: "保存済み本文", visibility: "private" },
+      { id: "public-duplicate", chapter_time: 10, chapter_label: "重複", note: "本文", visibility: "private" },
+    ],
+  };
+  const publicChapters = [
+    { id: "public-1", timeLabel: "00:12", label: "公開コメント", kind: "comment" },
+    { id: "public-duplicate", timeLabel: "00:10", label: "公開側が優先", kind: "comment" },
+  ];
+  const result = chapterManagementForOverlay(publicChapters, overlay, false);
+  assert.equal(result.canBulk, true);
+  assert.deepEqual(result.editableChapters, [{
+    id: "private-1", chapter_time: "1:05", chapter_label: "秘密",
+    note: "保存済み本文", visibility: "private", canManage: true,
+  }], "public chapters must not be edited with a missing note field");
+});
