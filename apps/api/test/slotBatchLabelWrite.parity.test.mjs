@@ -108,6 +108,31 @@ test("SA-064 U02c-0: role and approved linked event.slots permission are fail cl
   assert.equal(anonymous.count("audit_logs"),0);
 });
 
+test("SA-064 U02c-0a: admin bypasses 101-staff sentinel; non-admin refuses truncated grants", async () => {
+  const fill = (s, userId) => {
+    const x = s.sqlite.prepare("INSERT INTO x_users (id, approval_status) VALUES (?, 'approved')");
+    const link = s.sqlite.prepare("INSERT INTO x_user_account_links VALUES (?, ?)");
+    const staff = s.sqlite.prepare("INSERT INTO event_staff VALUES (?, ?, ?, ?)");
+    for (let i = 0; i < 101; i += 1) {
+      const id = "oversize-x-" + i;
+      x.run(id);
+      link.run(userId, id);
+      staff.run("ev-1", id, "slot_manager", null);
+    }
+  };
+  const privileged = setup();
+  fill(privileged, "admin-1");
+  const adminRes = await privileged.put();
+  assert.equal(adminRes.status, 200, await adminRes.clone().text());
+  assert.equal(privileged.count("audit_logs"), 2);
+  const ordinary = setup({actor:user});
+  fill(ordinary, "u-1");
+  const denied = await ordinary.put();
+  assert.equal(denied.status, 503, await denied.clone().text());
+  assert.equal(ordinary.count("audit_logs"), 0);
+  assert.equal(ordinary.count("static_rebuild_queue"), 0);
+});
+
 test("SA-064 U02c-0: malformed input, too many IDs, missing event do not write", async () => {
   const s=setup();
   for(const [body,id,expected] of [

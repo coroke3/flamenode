@@ -91,11 +91,13 @@ function canUpdateEventLabels(
   role: string | null | undefined,
   rawGrants: string | null,
 ): boolean {
+  // CURRENT's admin snapshot short-circuits staff enumeration. A privileged
+  // admin must not be denied by the 101-row staff sentinel.
+  if (role === "admin") return true;
   const parsed: unknown = JSON.parse(rawGrants ?? "[]");
   if (!Array.isArray(parsed) || parsed.length > 100) {
     throw new Error("slot_label_staff_rows_truncated");
   }
-  if (role === "admin") return true;
   return parsed.some((item) => item && typeof item === "object" &&
     resolveStaffPermissionKeys(item as StaffPermissionRow).has("event.slots"));
 }
