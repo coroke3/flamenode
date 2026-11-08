@@ -194,13 +194,13 @@ test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted 
   assert.equal(JSON.parse(scenarios.get("SA-046").kinds.limit(1, "safe").body).reason.length, 500);
   for (const id of ["SA-052", "SA-053", "SA-054", "SA-055"]) {
     const normal = scenarios.get(id).kinds.normal(1, "safe");
-    assert.equal(normal.setup.length, 1);
-    assert.match(normal.setup[0].sql, /terms_versions/);
+    assert.ok(normal.setup.some((row) => /terms_versions/.test(row.sql)), id + " needs a terms fixture");
+    if (id === "SA-054") assert.equal(normal.setup.length, 2, "published major version and actor acceptance");
   }
   assert.equal(JSON.parse(scenarios.get("SA-054").kinds.normal(1, "safe").body).confirm, "TERMS");
   assert.equal(JSON.parse(scenarios.get("SA-051").kinds.limit(1, "safe").body).body_markdown.length, 2000);
   for (const id of ["SA-100", "SA-101"]) {
-    assert.match(scenarios.get(id).kinds.normal(1, "safe").setup[0].sql, /x_identity_requests/);
+    assert.ok(scenarios.get(id).kinds.normal(1, "safe").setup.some((row) => /x_identity_requests/.test(row.sql)), id + " needs a request fixture");
   }
   assert.equal(JSON.parse(scenarios.get("SA-101").kinds.normal(1, "safe").body).parent_request_id, "bench-xreq-safe-1");
 });
