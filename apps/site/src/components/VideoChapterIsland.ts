@@ -58,6 +58,7 @@ export interface VideoChapterDraftBaseline {
   label: string;
   note: string;
   csv: string;
+  visibility?: "public" | "private";
 }
 
 /** Compare against the prefilled player/editor values, not empty strings. */
@@ -67,11 +68,13 @@ export function videoChapterDraftIsDirty(
   note: string,
   csv: string,
   baseline: VideoChapterDraftBaseline = { time: "", label: "", note: "", csv: "" },
+  visibility: "public" | "private" = "public",
 ): boolean {
   return time.trim() !== baseline.time.trim() ||
     label.trim() !== baseline.label.trim() ||
     note.trim() !== baseline.note.trim() ||
-    csv.trim() !== baseline.csv.trim();
+    csv.trim() !== baseline.csv.trim() ||
+    visibility !== (baseline.visibility ?? "public");
 }
 
 export function VideoChapterIsland({
@@ -102,15 +105,15 @@ export function VideoChapterIsland({
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const pending = React.useRef(false);
   const epoch = React.useRef(0);
-  const draftRef = React.useRef({ time, label, note, bulkCsv });
+  const draftRef = React.useRef({ time, label, note, bulkCsv, visibility });
   const draftBaseline = React.useRef<VideoChapterDraftBaseline>({ time: "", label: "", note: "", csv: "" });
-  draftRef.current = { time, label, note, bulkCsv };
+  draftRef.current = { time, label, note, bulkCsv, visibility };
 
   React.useEffect(() => { setMounted(true); }, []);
   React.useEffect(() => {
     const before = (event: Event) => {
       const d = draftRef.current;
-      if (!videoChapterDraftIsDirty(d.time, d.label, d.note, d.bulkCsv, draftBaseline.current)) return;
+      if (!videoChapterDraftIsDirty(d.time, d.label, d.note, d.bulkCsv, draftBaseline.current, d.visibility)) return;
       if (!window.confirm("入力中のチャプター情報があります。Active X ID を切り替えると内容が失われます。切り替えますか？")) {
         event.preventDefault();
       }
@@ -329,7 +332,7 @@ export function VideoChapterIsland({
           type: "button", disabled: busy,
           onClick: () => {
             setEditingId(chapter.id);
-            draftBaseline.current = { time: chapter.chapter_time, label: chapter.chapter_label, note: chapter.note ?? "", csv: "" };
+            draftBaseline.current = { time: chapter.chapter_time, label: chapter.chapter_label, note: chapter.note ?? "", csv: "", visibility: chapter.visibility };
             setComposerOpen(true);
             setTime(chapter.chapter_time);
             setLabel(chapter.chapter_label);
