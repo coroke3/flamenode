@@ -10,7 +10,7 @@ import {
   type EventFormData,
 } from "@/lib/event/eventForm";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
-import { buildBasicEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
+import { buildBasicEventUpdateFields, buildPublishEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
@@ -46,13 +46,10 @@ export function buildEventUpdatePayload(args: {
 
   if (permissions.publish) {
     const visibilityStatus = resolveSubmittedEventVisibility(data);
-    Object.assign(updatePayload, {
-      visibility_status: visibilityStatus,
-      entry_start_time: parseDateInput(data.entry_start_time),
-      entry_end_time: parseDateInput(data.entry_end_time),
-      allow_user_video_event_links: data.allow_user_video_event_links,
-      allow_unslotted_posts: data.allow_unslotted_posts,
-    });
+    Object.assign(updatePayload, buildPublishEventUpdateFields({
+      data,
+      visibilityStatus,
+    }));
     updatedSections.push("publish");
     changedByPermission.publish = EVENT_SECTION_PERMISSION_KEYS.publish;
   }
