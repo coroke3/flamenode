@@ -314,3 +314,43 @@ test("MIG-0722 U02b-2: filter and event changes discard stale selections and pen
     assert.equal(writes, 0);
   });
 });
+
+test("MIG-0722 U02b: old in-flight slot mutation must not display on a different event", async () => {
+  for (const outcome of ["success", "reject"]) {
+    await withSlotDom(async (dom, root) => {
+      let settle;
+      const calls = [];
+      let changed = 0;
+      const onAction = op => {
+        calls.push(op);
+        return new Promise((resolve, reject) => {
+          settle = outcome === "success" ? resolve : reject;
+        });
+      };
+      const view = (eventId, rows) => React.createElement(MemoryRouter, null,
+        React.createElement(SlotList, {
+          eventId, slots: rows, partGapMinutes: 15, parts: [], onAction,
+          onChanged: () => { changed++; },
+        }));
+      const first = [slot("shared", { event_id: "old-event", status: "available" })];
+      await React.act(async () => root.render(view("old-event", first)));
+      const findButton = label => [...dom.window.document.querySelectorAll("button")]
+        .find(button => button.textContent.trim() === label);
+      await React.act(async () => findButton("削除").click());
+      assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+      await React.act(async () => findButton("実行する").click());
+      assert.deepEqual(calls, [{ kind: "delete", slotId: "shared" }]);
+      assert.equal(changed, 0);
+      const second = [slot("shared", { event_id: "new-event", status: "available" })];
+      await React.act(async () => root.render(view("new-event", second)));
+      assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+      await React.act(async () => {
+        if (outcome === "success") settle({ ok: true, message: "OLD-SUCCESS" });
+        else settle(new Error("OLD-ERROR"));
+      });
+      assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS|通信エラー/);
+      assert.equal(changed, 0, "stale response cannot refresh another event");
+      assert.ok(findButton("削除"), "new event controls remain available");
+    });
+  }
+});
