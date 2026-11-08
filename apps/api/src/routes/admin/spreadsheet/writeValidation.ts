@@ -148,7 +148,7 @@ export function primaryKeyFromSpreadsheetRow(
  * No SQL, authorization, audit or Queue side effects occur here.
  */
 export function prepareSpreadsheetUpdate(
-  ctx: SpreadsheetWriteValidationContext & { columns: readonly (SpreadsheetWriteValidationContext["columns"][number] & { pk: number })[] },
+  ctx: SpreadsheetSqlTableContext,
   before: Record<string, unknown>,
   values: Record<string, string | null>,
 ): { setColumns: string[]; after: Record<string, unknown> } {
