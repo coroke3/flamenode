@@ -100,6 +100,16 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   const busyRef = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  // A filter/event refresh invalidates both the previous row selection and
+  // any pending destructive confirmation. Old row IDs must not resurface
+  // when the user returns to a previously selected status filter.
+  React.useEffect(() => {
+    setSelected(new Set());
+    setPending(null);
+    setLabel("");
+    setError(null);
+    setNotice(null);
+  }, [eventId, slots]);
   const visibleIds = slots.filter(row => row.event_id === eventId).map(row => row.id);
   const visibleSelected = visibleIds.filter(id => selected.has(id));
   const selectedAvailable = slots.filter(row => selected.has(row.id) &&
@@ -241,7 +251,8 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
             <td><span className={"fn-badge " + (
               slot.status === "available" ? "fn-badge-soft"
                 : slot.status === "reserved" ? "fn-badge-warning"
-                : "fn-badge-accent"
+                : slot.status === "submitted" ? "fn-badge-accent"
+                : "fn-badge-soft"
             )}>{slotStatusLabel(slot.status)}</span></td>
             <td>{videoHref
               ? <Link to={videoHref}>作品を見る</Link> : "—"}</td>
