@@ -1,8 +1,10 @@
 // MIG-0711 U03: /entry UI sections, read-only route, and status/error preservation.
 import assert from "node:assert/strict";
-import { act } from "react";
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import test from "node:test";
-import { entryIndex, fakeApi, mount, onboardingState, user } from "./helpers.mjs";
+import { dom, entryIndex, fakeApi, mount, onboardingState, user } from "./helpers.mjs";
 
 const entryData = (over = {}) =>
   entryIndex({
@@ -214,4 +216,38 @@ test("continuation access denial is scoped to the account that initiated the rea
       "missing user must not adopt a previous authenticated account's denial");
   }
   assert.equal(continuationAccessForUser(null, "account-a"), null);
+});
+
+
+test("continuation: new first-page snapshot for the same account cannot reuse stale paged events", async () => {
+  const { EntryIndexView } = await import("../.test-dist/apps/app/src/routes/entry/EntryIndex.js");
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const oldFirst = entryData({ truncated: true, nextOffset: 100 });
+  const newFirst = entryData({
+    events: [{ id: "event-new", title: "新しい受付データ", entry_end_time: null, slots_available: 1 }],
+    truncated: false, nextOffset: null,
+  });
+  const api = fakeApi({ getEntryIndex: () => ({
+    status: "ok",
+    data: entryData({
+      events: [{ id: "event-stale", title: "古い追加ページ", entry_end_time: null, slots_available: 2 }],
+      truncated: false, nextOffset: null,
+    }),
+  }) });
+  const render = (data) => React.createElement(MemoryRouter, null,
+    React.createElement(EntryIndexView, { api, data, next: "/entry", authError: null }));
+  try {
+    await act(async () => root.render(render(oldFirst)));
+    const button = [...container.querySelectorAll("button")].find(b => b.textContent.includes("イベントをさらに表示"));
+    assert.ok(button);
+    await act(async () => button.click());
+    assert.match(container.textContent, /古い追加ページ/);
+    await act(async () => root.render(render(newFirst)));
+    assert.match(container.textContent, /新しい受付データ/);
+    assert.doesNotMatch(container.textContent, /古い追加ページ|受付中イベント/,
+      "new read snapshot must never combine previous same-user pages");
+  } finally {
+    await act(async () => root.unmount());
+  }
 });
