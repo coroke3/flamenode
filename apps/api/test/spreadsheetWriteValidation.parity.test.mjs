@@ -569,7 +569,7 @@ test("CURRENT import preflight preserves row indices, duplicate PK errors and ap
     { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
     { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
     { name: "notes", type: "TEXT", notNull: false, pk: 0 },
-    { name: "visibility_status", type: "TEXT", notNull: false, pk: 0 },
+    { name: "access_token", type: "TEXT", notNull: false, pk: 0 },
   ];
   const ctx = {
     def: resolveSpreadsheetTableDef("video_events", true),
@@ -584,7 +584,7 @@ test("CURRENT import preflight preserves row indices, duplicate PK errors and ap
     { video_id: "v1", event_id: "e1", notes: "duplicate" },
     { video_id: "v1", event_id: "e2", notes: null },
     { video_id: "v1", notes: "missing pk" },
-    { video_id: "v2", event_id: "e1", visibility_status: "public" },
+    { video_id: "v2", event_id: "e1", access_token: "secret" },
     { video_id: "v3", event_id: "e1", invalid: "unknown" },
     { video_id: "v4", event_id: "e1", notes: "valid" },
   ];
