@@ -675,7 +675,9 @@ test("U02 preview token binds operator, table, schema and payload and rejects ex
   const alteredPayload = await buildSpreadsheetImportPreviewBinding({ ...input, rows: [{ ...input.rows[0], notes: "altered" }] });
   assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, alteredPayload, { now: 1800000001 }), null);
   assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, binding, { now: claims.expiresAt }), null);
-  const corrupted = token.slice(0, -1) + (token.endsWith("A") ? "B" : "A");
+  const parts = token.split(".");
+  parts[3] = (parts[3][0] === "A" ? "B" : "A") + parts[3].slice(1);
+  const corrupted = parts.join(".");
   assert.equal(await verifySpreadsheetImportPreviewToken(corrupted, secret, binding, { now: 1800000001 }), null);
   assert.throws(() => requireSpreadsheetImportPreviewSecret("short"), /preview_unavailable/);
   await assert.rejects(() => issueSpreadsheetImportPreviewToken(binding, secret, { now: 1800000000, nonce: "invalid" }), /preview_unavailable/);
