@@ -168,6 +168,56 @@ test("SA-059 U03q: revoking staff or X approval between chunks stops continuatio
   }finally{s.sqlite.close();}
 });
 
+test("SA-059 U03t: new major terms and revoked consent/mirror after snapshot block DELETE",async()=>{
+  for(const mode of ["new-major","consent-revoked","accepted-mirror-cleared","new-major-supersedes"]){
+    let changed=false;
+    const s=setup({onFirst:(sql,sqlite)=>{
+      if(changed||!sql.includes("AS rows_json"))return;
+      changed=true;
+      if(mode==="consent-revoked"){
+        sqlite.prepare("DELETE FROM user_tos_consents WHERE user_id=?").run(ADMIN.id);
+      }else if(mode==="accepted-mirror-cleared"){
+        sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=NULL WHERE id=?').run(ADMIN.id);
+      }else if(mode==="new-major-supersedes"){
+        sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v2","major",200,200);
+      }else{
+        sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v1","major",100,100);
+      }
+    }});
+    try{
+      if(mode!=="new-major"){
+        s.sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v1","major",100,100);
+      }
+      if(mode==="consent-revoked"){
+        s.sqlite.prepare("INSERT INTO user_tos_consents VALUES (?,?,?)")
+          .run("consent-v1",ADMIN.id,"terms-v1");
+      }else if(mode!=="new-major"){
+        s.sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=? WHERE id=?')
+          .run("terms-v1",ADMIN.id);
+      }
+      const res=await s.post();
+      assert.equal(changed,true,mode+" injection reached");
+      assert.equal(res.status,409,mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"]);
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+  const valid=setup();
+  try{
+    valid.sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)")
+      .run("terms-v1","major",100,100);
+    valid.sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=? WHERE id=?')
+      .run("terms-v1",ADMIN.id);
+    const ok=await valid.post();
+    assert.equal(ok.status,200,await ok.clone().text());
+    assert.deepEqual(valid.idsLeft(),["d","e","f"]);
+    assert.equal(valid.count("audit_logs"),3);
+  }finally{valid.sqlite.close();}
+});
+
 test("SA-059 U03s: admin demotion, user ban or TOS reversal after snapshot rejects DELETE",async()=>{
   for(const mode of ["admin-demoted","admin-banned","admin-tos-revoked","staff-banned"]){
     let changed=false;

@@ -207,6 +207,56 @@ test("SA-058 U03q: staff privilege and approved-X revocation between chunks fail
   }finally{s.sqlite.close();}
 });
 
+test("SA-058 U03t: new published major terms or revoked acceptance after pre-read blocks INSERT",async()=>{
+  for(const mode of ["new-major","consent-revoked","accepted-mirror-cleared","new-major-supersedes"]){
+    let changed=false;
+    const s=setup({onFirst:(sql,sqlite)=>{
+      if(changed||!sql.includes("AS staff_json"))return;
+      changed=true;
+      if(mode==="consent-revoked"){
+        sqlite.prepare("DELETE FROM user_tos_consents WHERE user_id=?").run(ADMIN.id);
+      }else if(mode==="accepted-mirror-cleared"){
+        sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=NULL WHERE id=?').run(ADMIN.id);
+      }else if(mode==="new-major-supersedes"){
+        sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v2","major",200,200);
+      }else{
+        sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v1","major",100,100);
+      }
+    }});
+    try{
+      if(mode!=="new-major"){
+        s.sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)").run("terms-v1","major",100,100);
+      }
+      if(mode==="consent-revoked"){
+        s.sqlite.prepare("INSERT INTO user_tos_consents VALUES (?,?,?)")
+          .run("consent-v1",ADMIN.id,"terms-v1");
+      }else if(mode!=="new-major"){
+        s.sqlite.prepare('UPDATE "user" SET accepted_terms_version_id=? WHERE id=?')
+          .run("terms-v1",ADMIN.id);
+      }
+      const res=await s.post(countInput(3,1));
+      assert.equal(changed,true,mode+" injection reached");
+      assert.equal(res.status,409,mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+  const valid=setup();
+  try{
+    valid.sqlite.prepare("INSERT INTO terms_versions VALUES (?,?,?,?)")
+      .run("terms-v1","major",100,100);
+    valid.sqlite.prepare("INSERT INTO user_tos_consents VALUES (?,?,?)")
+      .run("consent-v1",ADMIN.id,"terms-v1");
+    const ok=await valid.post(countInput(1,1));
+    assert.equal(ok.status,200,await ok.clone().text());
+    assert.equal(valid.n("slots"),1);
+    assert.equal(valid.n("audit_logs"),1);
+  }finally{valid.sqlite.close();}
+});
+
 test("SA-058 U03s: admin role downgrade, account ban or TOS reversal after scope read rejects INSERT",async()=>{
   for(const mode of ["admin-demoted","admin-banned","admin-tos-revoked","staff-banned"]){
     let changed=false;
