@@ -11,6 +11,7 @@ const CANDIDATES = [
   ["POST", "/api/manage/events/ev-1/slots/batch-release"],
   ["PATCH", "/api/manage/events/ev-1/slots/labels"],
   ["DELETE", "/api/manage/events/ev-1/slots/a"],
+  ["POST", "/api/manage/events/ev-1/slots/a/release"],
 ];
 
 const content = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
@@ -32,7 +33,7 @@ const make = () => {
   return { perform, getDbPrepares: () => dbPrepares };
 };
 
-test("MIG-0656 U02c-1b: D-15-10 four slot write methods use Origin before any session/D1 lookup", async () => {
+test("MIG-0656 U02c-1b: D-15-10 five slot write methods use Origin before any session/D1 lookup", async () => {
   const t = make();
   for (const [method,path] of CANDIDATES) {
     for (const origin of ["https://evil.example", null]) {
@@ -58,11 +59,12 @@ test("MIG-0656 U02c-1b: missing site origin fails closed before D1", async () =>
 test("MIG-0656 U02c-1b: candidate route implementation is still unmounted", () => {
   assert.match(content,/const slotWritePaths = \[/);
   assert.ok(content.includes("const singleSlotDeletePath = \"/events/:id/slots/:slotId\""));
-  for (const suffix of ["/events/:id/slots/batch-delete","/events/:id/slots/batch-release","/events/:id/slots/labels"]) {
+  for (const suffix of ["/events/:id/slots/batch-delete","/events/:id/slots/batch-release","/events/:id/slots/labels","/events/:id/slots/:slotId/release"]) {
     assert.ok(content.includes(suffix));
   }
   assert.doesNotMatch(content,/import\s+.*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)/);
   assert.doesNotMatch(content,/\.route\([^)]*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)Routes/);
+  assert.doesNotMatch(content,/slotSingleReleaseRoutes|slotSingleRelease\.ts/);
   assert.match(content,/const scopedWritePaths = \[\.\.\.playlistWritePaths, \.\.\.slotWritePaths\]/);
   assert.equal((content.match(/for \(const path of scopedWritePaths\)/g)||[]).length,2);
 });
