@@ -54,21 +54,27 @@ function parsePng(bytes: Uint8Array): { width: number; height: number; animated:
   if (!isValidDimension(width) || !isValidDimension(height)) return null;
 
   let animated = false;
+  let hasImageData = false;
   let offset = 8;
   while (offset + 12 <= bytes.length) {
     const chunkLength = readUint32BE(bytes, offset);
     const chunkType = readFourCC(bytes, offset + 4);
-    if (chunkType === "acTL") {
-      animated = true;
-      break;
-    }
-    if (chunkType === "IEND") break;
     const chunkTotal = 12 + chunkLength;
-    if (chunkLength < 0 || chunkTotal <= 0 || offset + chunkTotal > bytes.length) break;
+    // A valid header alone is not a complete PNG image. Never accept a
+    // truncated chunk or a stream without both image data and final IEND.
+    if (chunkTotal > bytes.length - offset) return null;
+    if (chunkType === "IHDR" && offset !== 8) return null;
+    if (chunkType === "acTL") animated = true;
+    if (chunkType === "IDAT" && chunkLength > 0) hasImageData = true;
+    if (chunkType === "IEND") {
+      if (chunkLength !== 0 || !hasImageData || offset + chunkTotal !== bytes.length) {
+        return null;
+      }
+      return { width, height, animated };
+    }
     offset += chunkTotal;
   }
-
-  return { width, height, animated };
+  return null;
 }
 
 function isJpegSofMarker(marker: number): boolean {
