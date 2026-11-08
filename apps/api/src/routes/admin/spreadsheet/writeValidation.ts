@@ -198,6 +198,19 @@ function spreadsheetPkCondition(ctx: SpreadsheetSqlTableContext, pk: Record<stri
     binds: ctx.primaryKeys.map(k => normalized[k]),
   };
 }
+/** A caller-provided before-image must belong to the exact requested row. */
+function assertSpreadsheetSnapshotPrimaryKey(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+): void {
+  const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
+  for (const key of ctx.primaryKeys) {
+    const value = before[key];
+    if (value == null || String(value) !== normalized[key]) throw new Error("invalid_snapshot");
+  }
+}
+
 function spreadsheetSnapshotCondition(ctx: SpreadsheetSqlTableContext, before: Record<string, unknown>): SpreadsheetSqlPlan {
   const binds: (string | number | null)[] = [];
   const clauses = ctx.columns.map(column => {
@@ -239,6 +252,7 @@ export function buildSpreadsheetUpdateSql(
   values: Record<string, string | null>,
 ): SpreadsheetSqlPlan & { after: Record<string, unknown> } {
   if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  assertSpreadsheetSnapshotPrimaryKey(ctx, pk, before);
   const { setColumns, after } = prepareSpreadsheetUpdate(ctx, before, values);
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
@@ -257,6 +271,7 @@ export function buildSpreadsheetDeleteSql(
 ): SpreadsheetSqlPlan {
   if (ctx.def.mode !== "editable") throw new Error("table_readonly");
   if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) throw new Error("physical_delete_requires_visibility_status");
+  assertSpreadsheetSnapshotPrimaryKey(ctx, pk, before);
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
   return {
