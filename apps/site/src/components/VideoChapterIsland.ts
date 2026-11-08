@@ -147,6 +147,22 @@ export function VideoChapterIsland({
     setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
   }, [activeXId, canPost]);
 
+  // Bulk permission can disappear independently of chapter posting access.
+  // Discard an in-flight bulk response once that trusted capability is revoked.
+  const bulkAccessRef = React.useRef(canBulk);
+  React.useEffect(() => {
+    const previous = bulkAccessRef.current;
+    bulkAccessRef.current = canBulk;
+    if (!previous || canBulk) return;
+    epoch.current += 1;
+    pending.current = false;
+    setBusy(false);
+    setBulkCsv("");
+    setBulkErrors([]);
+    setMessage("");
+    setError("");
+  }, [canBulk]);
+
   // Per-row authorization can be revoked while the viewer still has posting access.
   // Close any open editor rather than retaining a stale edit target or draft.
   const editingAuthorized = !editingId || chapters.some((chapter) =>
