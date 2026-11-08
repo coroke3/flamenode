@@ -177,7 +177,8 @@ export function decodeSubmittedDangerReads(input: {
       return { ok: false, message: CHANGED };
     }
     const v = videoValue as Record<string, unknown>;
-    if (typeof v.id !== "string" || typeof v.scheduling_type !== "string" ||
+    if (typeof v.id !== "string" ||
+        (v.scheduling_type !== null && typeof v.scheduling_type !== "string") ||
         !Number.isSafeInteger(v.updated_at)) {
       return { ok: false, message: CHANGED };
     }
