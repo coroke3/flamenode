@@ -15,3 +15,4 @@ export * from "./basicUpdateFields.ts";
 export * from "./publishUpdateFields.ts";
 export * from "./questionsUpdateFields.ts";
 export * from "./slotsUpdateFields.ts";
+export * from "./createFields.ts";
