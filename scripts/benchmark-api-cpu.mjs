@@ -613,23 +613,11 @@ const WRITE_BODIES = {
   "POST /api/videos/:videoId/interaction": (k, i) => ({ kind: i % 2 ? "like" : "bookmark" }),
 };
 
-/**
- * Scenarios for methods that are NOT mounted on main yet (so they cannot be measured, and are excluded unless
- * --include-pending). RH-013 belongs to MIG-0632 (PR #457); the owner-authorized single harness owner is MIG-0639,
- * so the upper-bound input (1 event, 500 videos x 100 members) lives here and MIG-0632 only moves the entry into
- * ROUTE_INVENTORY when it mounts the route. The mounted-routes test fails the day that happens.
+/** The previously pending RH-013 route is now mounted and has a named bounded scenario.
+ * Keep this extension point for future unmounted routes; do not duplicate RH-013.
  */
 export function buildPendingScenarios() {
-  const ip = (kind, i) => ({ "cf-connecting-ip": BENCH_IP(kind, i) });
-  return [{
-    id: "RH-013", title: "GET /api/event-endpoints/:id", runtimeClass: "S2", pending: "MIG-0632",
-    prepareKind: prep({ [RELEASE_KEY]: releaseArtifact(1, 1) }, { [RELEASE_KEY]: releaseArtifact(500, 100) }),
-    kinds: {
-      normal: (i) => ({ method: "GET", path: "/api/event-endpoints/bench-evt", headers: ip("normal", i), expect: [200] }),
-      limit: (i) => ({ method: "GET", path: "/api/event-endpoints/bench-evt", headers: ip("limit", i), expect: [200] }),
-      invalid: (i) => ({ method: "GET", path: `/api/event-endpoints/${"e".repeat(129)}`, headers: ip("invalid", i), expect: [404] }),
-    },
-  }];
+  return [];
 }
 
 export function buildRouteScenarios() {
