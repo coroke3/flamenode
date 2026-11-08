@@ -34,13 +34,13 @@ export function slotSubmissionReleasedPayload(
   const slotsUrl = new URL("/event/" + encodeURIComponent(eventId) + "/slots",base).href;
   const eventName = escapeDiscordMention("イベント");
   const count = ids.length > 1 ? String(ids.length) + "枠" : "1枠";
-  const content = [
+  // Group ID is an opaque persisted value, not guaranteed display-safe for Discord.\n  // Escape visible content only, leaving raw grouping/dedupe/CAS values untouched.\n  const content = [
     "【FlameNode】枠の作品提出が解除されました\n" +
       "運営操作により、イベント「" + eventName + "」の" + count +
       "から提出作品が解除されました。\n" +
       "予約枠自体は引き続き確保されています。別の作品を再提出できます。",
     "状態\n対象枠数: " + ids.length +
-      (groupId ? "\n提出グループ: " + groupId : ""),
+      (groupId ? "\n提出グループ: " + escapeDiscordMention(groupId) : ""),
     "次にできること\nイベントの枠一覧を開く\n" + slotsUrl +
       "\nイベントページを開く\n" + eventUrl,
   ].join("\n\n");

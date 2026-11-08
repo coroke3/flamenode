@@ -156,3 +156,20 @@ test("SA-063 U02c-2b: payload uses only configured public origin",()=>{
   assert.match(payload.content,/対象枠数: 2/);
   assert.match(payload.content,/イベントページを開く\nhttps:\/\/flamenode.example\/event\/ev-1/);
 });
+
+test("MIG-0656 U04u: legacy group IDs are escaped in Discord display, but raw dedupe stays stable",()=>{
+  const raw="legacy@everyone<@123456789>";
+  const expected="legacy@\u200beveryone\\<@\u200b123456789\\>";
+  const db=setup();
+  try{
+    const out=buildSlotReleaseOutboxStatements(opts([row("a",raw),row("b",raw)]));
+    assert.deepEqual(out.dedupeKeys,["slot_force_released:ev-1:a:"+raw+":3"]);
+    assert.equal(out.statements.length,1);
+    assert.equal(run(db,out.statements[0]),1);
+    const payload=JSON.parse(db.prepare("SELECT payload_json FROM notification_outbox").get().payload_json);
+    assert.ok(payload.content.includes("予約グループ: "+expected));
+    assert.equal(payload.content.includes(raw),false,"must not emit a mention-capable ID");
+    assert.equal(payload.event_id,"ev-1");
+    assert.equal(payload.url,"https://flamenode.example/event/ev-1");
+  }finally{db.close();}
+});

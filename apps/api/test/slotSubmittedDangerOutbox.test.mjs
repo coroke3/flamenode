@@ -182,3 +182,31 @@ test("SA-056/057: SQL builder never mounts a Hono route",async()=>{
   const s=await readFile(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(s,/slotSubmittedDangerOutbox|slotSubmittedDangerRoutes/);
 });
+
+test("MIG-0656 U04u: SA-056/057 legacy group IDs escape mentions only in DM payload",()=>{
+  const raw="legacy@everyone<@123456789>";
+  const expected="legacy@\u200beveryone\\<@\u200b123456789\\>";
+  const db=setup();
+  try{
+    let n=0;
+    for(const kind of ["force-release","keep-reservation"]){
+      const group=[slot("a",{reservation_group_id:raw}),slot("b",{reservation_group_id:raw})];
+      const out=buildSubmittedDangerOutboxStatements(options(kind,group,"a",()=> "danger-"+(++n)));
+      assert.deepEqual(out.dedupeKeys,[
+        (kind==="force-release"?"slot_force_released":"slot_submission_released")+
+          ":ev:a:"+raw+":3:submitted",
+      ]);
+      assert.equal(out.statements.length,1);
+      assert.equal(exec(db,out.statements[0]),1);
+    }
+    const rows=db.prepare("SELECT type,payload_json FROM notification_outbox ORDER BY type").all();
+    assert.equal(rows.length,2);
+    for(const row of rows){
+      const payload=JSON.parse(row.payload_json);
+      assert.ok(payload.content.includes(
+        (row.type==="slot_force_released"?"予約グループ: ":"提出グループ: ")+expected));
+      assert.equal(payload.content.includes(raw),false,"group mention must not be emitted");
+      assert.equal(payload.event_id,"ev");
+    }
+  }finally{db.close();}
+});

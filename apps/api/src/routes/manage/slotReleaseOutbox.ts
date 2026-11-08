@@ -25,12 +25,12 @@ export function slotReleaseNotificationPayload(
   const url = new URL("/event/" + encodeURIComponent(eventId), base).href;
   const name = escapeDiscordMention("イベント");
   const countLabel = ids.length > 1 ? "予約枠 " + ids.length + " 件" : "予約枠 1 件";
-  const paragraphs = [
+  // Persisted legacy/imported group IDs are opaque; escape only DM display,\n  // never group keys, dedupe identities, CAS snapshots or SQL predicates.\n  const paragraphs = [
     "【FlameNode】予約枠が解放されました\n" +
       "運営操作により、イベント「" + name + "」の " + countLabel + " が解放されました。\n" +
       "枠は他の参加者が確保できる状態に戻っています。",
     "■ 状況\n対象枠数: " + ids.length +
-      (groupId ? "\n予約グループ: " + groupId : ""),
+      (groupId ? "\n予約グループ: " + escapeDiscordMention(groupId) : ""),
     "■ 次に行うこと\n" +
       "再度参加する場合は、イベントページから空き枠を確保し直してください。\n" +
       "イベントページを開く\n" + url,
