@@ -3,7 +3,8 @@
  *
  * Parsing/sanitization of required video fields and stage questions happens
  * in the existing CURRENT adapter. This core owns only the field projection
- * and the difference between an omitted and explicit empty form answer.
+ * and the difference between omitted (undefined) and explicit clear (null).
+ * The real serializer returns string | null | undefined.
  */
 export type QuestionsEventUpdateInput = {
   allow_user_video_edits: number;
@@ -14,7 +15,7 @@ export type QuestionsEventUpdateInput = {
 
 export function buildQuestionsEventUpdateFields(input: {
   data: QuestionsEventUpdateInput;
-  requiredVideoFieldsJson: string | undefined;
+  requiredVideoFieldsJson: string | null | undefined;
   previousRequiredVideoFieldsJson: string | null;
   previousEditableFields: string | null;
   previousReviewSettings: string | null;
