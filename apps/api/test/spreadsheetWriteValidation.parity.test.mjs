@@ -682,3 +682,39 @@ test("U02 preview token binds operator, table, schema and payload and rejects ex
   assert.throws(() => requireSpreadsheetImportPreviewSecret("short"), /preview_unavailable/);
   await assert.rejects(() => issueSpreadsheetImportPreviewToken(binding, secret, { now: 1800000000, nonce: "invalid" }), /preview_unavailable/);
 });
+
+
+test("U02 nonce SQL enforces one-time, exact preview claims and expiry on real SQLite", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { buildSpreadsheetPreviewNonceConsumeSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const claims = {
+    version: 1,
+    nonce: "12345678-1234-4234-8234-123456789abc",
+    operatorUserId: "user-1", table: "video_events", mode: "insert",
+    columns: ["video_id"], primaryKeys: ["video_id"],
+    payloadHash: "a".repeat(64), schemaFingerprint: "b".repeat(64),
+    issuedAt: 1000, expiresAt: 1300,
+  };
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec('CREATE TABLE spreadsheet_import_runs (nonce TEXT PRIMARY KEY, operator_user_id TEXT NOT NULL, table_name TEXT NOT NULL, mode TEXT NOT NULL, payload_hash TEXT NOT NULL, schema_fingerprint TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER, created_at INTEGER NOT NULL)');
+    db.prepare('INSERT INTO spreadsheet_import_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      claims.nonce, claims.operatorUserId, claims.table, claims.mode, claims.payloadHash,
+      claims.schemaFingerprint, claims.expiresAt, null, claims.issuedAt);
+    const wrong = buildSpreadsheetPreviewNonceConsumeSql({ ...claims, payloadHash: "c".repeat(64) }, 1100);
+    assert.equal(db.prepare(wrong.statement).run(...wrong.binds).changes, 0);
+    const expired = buildSpreadsheetPreviewNonceConsumeSql(claims, 1301);
+    assert.equal(db.prepare(expired.statement).run(...expired.binds).changes, 0);
+    const plan = buildSpreadsheetPreviewNonceConsumeSql(claims, 1100);
+    assert.equal(plan.audit.operation, "UPDATE");
+    assert.equal(plan.audit.before.consumed_at, null);
+    assert.equal(plan.audit.after.consumed_at, 1100);
+    assert.equal(db.prepare(plan.statement).run(...plan.binds).changes, 1);
+    assert.equal(db.prepare(plan.statement).run(...plan.binds).changes, 0);
+    assert.equal(db.prepare('SELECT consumed_at FROM spreadsheet_import_runs').get().consumed_at, 1100);
+    assert.throws(() => buildSpreadsheetPreviewNonceConsumeSql(claims, 999), /preview_required/);
+  } finally {
+    db.close();
+  }
+});
