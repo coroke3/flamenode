@@ -300,6 +300,43 @@ test("SA-059 U03s: admin demotion, user ban or TOS reversal after snapshot rejec
   }
 });
 
+test("SA-059 U03x: CostGuard revocation after middleware SELECT but before scoped SELECT denies without a D1 batch",async()=>{
+  const scenarios=[
+    {kind:"read-only",reason:"maintenance_mode"},
+    {kind:"disabled",reason:"cost_guard_blocked"},
+    {kind:"missing-settings",reason:"cost_guard_blocked"},
+  ];
+  for(const scenario of scenarios){
+    let flipped=false;
+    const s=setup({onFirst:(query,sqlite)=>{
+      // The FIRST CostGuard SELECT returns the previously approved policy;
+      // mutate immediately after that result, before the event/slot scope read.
+      if(flipped || !query.includes("FROM system_settings WHERE id")) return;
+      flipped=true;
+      if(scenario.kind==="read-only"){
+        sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      }else if(scenario.kind==="disabled"){
+        sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+          .run(JSON.stringify(["manage_slot_delete"]));
+      }else{
+        sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+      }
+    }});
+    try{
+      const denied=await s.post();
+      assert.equal(flipped,true,scenario.kind+" transition was injected");
+      assert.equal(denied.status,503,scenario.kind+" "+await denied.clone().text());
+      assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await denied.json()).reason,scenario.reason);
+      assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"]);
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,0,"scope gate must deny before constructing atomic D1 batch");
+      assert.equal(s.stats.reads,2,"existing parent CostGuard + scoped read only");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-059 U03w: CostGuard change after snapshot SELECT rolls back DELETE, audits and queue",async()=>{
   for(const kind of ["read-only","disabled-feature","deleted-settings","expired-exception"]){
     let changed=false;
