@@ -139,3 +139,30 @@ export function primaryKeyFromSpreadsheetRow(
   }
   return normalizeSpreadsheetPrimaryKey(primaryKeys, raw);
 }
+
+
+/**
+ * CURRENT query.ts#buildUpdateMutation pure portion: editable non-PK column
+ * selection and optimistic after-image construction.
+ * No SQL, authorization, audit or Queue side effects occur here.
+ */
+export function prepareSpreadsheetUpdate(
+  ctx: SpreadsheetWriteValidationContext & { columns: readonly (SpreadsheetWriteValidationContext["columns"][number] & { pk: number })[] },
+  before: Record<string, unknown>,
+  values: Record<string, string | null>,
+): { setColumns: string[]; after: Record<string, unknown> } {
+  validateSpreadsheetInputValues(ctx, values);
+  const setColumns = ctx.columns
+    .filter((column) =>
+      column.pk === 0 &&
+      isSpreadsheetColumnEditable(ctx.def, column.name) &&
+      values[column.name] !== undefined,
+    )
+    .map((column) => column.name);
+  if (setColumns.length === 0) throw new Error("empty_row");
+  const after = { ...before };
+  for (const column of setColumns) {
+    after[column] = values[column] === "" ? null : values[column];
+  }
+  return { setColumns, after };
+}
