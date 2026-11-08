@@ -33,9 +33,9 @@ manageRoutes.use("*", async (c, next) => {
   c.header("Cache-Control", NO_STORE);
 });
 // D-15-10: only predeclared write paths verify Origin BEFORE the Auth.js session.
-// SA-062/063/064 remain UNMOUNTED; middleware entries are preparation only.
+// SA-060/062/063/064 remain UNMOUNTED; middleware entries are preparation only.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
-const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/batch-release", "/events/:id/slots/labels"];
+const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/batch-release", "/events/:id/slots/labels", "/events/:id/slots/:slotId/release"];
 const scopedWritePaths = [...playlistWritePaths, ...slotWritePaths];
 // Dynamic :slotId path overlaps /batch-delete etc. Apply ONLY to DELETE.
 const singleSlotDeletePath = "/events/:id/slots/:slotId";
