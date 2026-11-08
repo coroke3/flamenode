@@ -297,3 +297,39 @@ test("MIG-0656 U04r: post-scope linked-X revocation and major-TOS publication ro
     }
   }
 });
+
+test("MIG-0656 U04t: CostGuard change between middleware and SA-061/062 scope prevents delete",async()=>{
+  for(const method of ["single","batch"]){
+    for(const policy of ["read-only","disabled-feature","missing-settings"]){
+      let injected=false;
+      const s=setup({onFirst:(sql,sqlite)=>{
+        if(injected||!sql.includes("FROM system_settings WHERE id"))return;
+        injected=true;
+        if(policy==="read-only")
+          sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(policy==="disabled-feature")
+          sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+            .run(JSON.stringify(["manage_slot_delete"]));
+        if(policy==="missing-settings")
+          sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+      }});
+      try{
+        const r=method==="single"?await s.deleteOne("a"):await s.del();
+        assert.equal(injected,true,method+" "+policy+" race injected");
+        assert.equal(r.status,503,method+" "+policy+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        assert.equal((await r.json()).reason,
+          policy==="read-only"?"maintenance_mode":"cost_guard_blocked");
+        for(const id of ["a","b"]){
+          const row=s.slot(id);
+          assert.equal(row.status,"available");
+          assert.equal(row.version,1);
+        }
+        assert.equal(s.count("audit_logs"),0);
+        assert.equal(s.count("static_rebuild_queue"),0);
+        assert.equal(s.stats.reads,2,"only middleware and scope read");
+        assert.equal(s.stats.batches,0,"no D1 mutation batch when scoped policy denies");
+      }finally{s.sqlite.close();}
+    }
+  }
+});

@@ -261,3 +261,36 @@ test("MIG-0656 U04r: post-scope linked-X revocation and major-TOS publication ro
     }finally{s.sqlite.close();}
   }
 });
+
+test("MIG-0656 U04t: CostGuard change between middleware and label scope denies before mutation",async()=>{
+  for(const policy of ["read-only","disabled-feature","missing-settings"]){
+    let injected=false;
+    const s=setup({onFirst:(sql,sqlite)=>{
+      if(injected||!sql.includes("FROM system_settings WHERE id"))return;
+      injected=true;
+      if(policy==="read-only")
+        sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      if(policy==="disabled-feature")
+        sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+          .run(JSON.stringify(["manage_slot_update"]));
+      if(policy==="missing-settings")
+        sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+    }});
+    try{
+      const r=await s.patch();
+      assert.equal(injected,true,policy+" middleware-to-scope policy race");
+      assert.equal(r.status,503,policy+" "+await r.clone().text());
+      assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await r.json()).reason,
+        policy==="read-only"?"maintenance_mode":"cost_guard_blocked");
+      assert.equal(s.slot("a").slot_label,"old");
+      assert.equal(s.slot("b").slot_label,"old");
+      assert.equal(s.slot("a").version,1);
+      assert.equal(s.slot("b").version,1);
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.reads,2,"only original middleware and scope SELECTs");
+      assert.equal(s.stats.batches,0,"no D1 mutation batch when scoped policy already denies");
+    }finally{s.sqlite.close();}
+  }
+});
