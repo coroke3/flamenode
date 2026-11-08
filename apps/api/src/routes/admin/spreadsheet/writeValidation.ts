@@ -266,6 +266,9 @@ export interface SpreadsheetForeignKey {
   referencedTable: string;
   referencedColumn: string;
 }
+/** S3 permits at most three D1 pre-read statements total. This cap only bounds FK lookups;
+ * the caller must still include its other pre-reads in the request-wide budget. */
+export const SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES = 3;
 export interface SpreadsheetForeignKeyLookup extends SpreadsheetSqlPlan {
   values: readonly string[];
 }
@@ -284,6 +287,7 @@ export function buildSpreadsheetForeignKeyLookups(
     for (let start = 0; start < values.length; start += 99) {
       const chunk = values.slice(start, start + 99);
       const placeholders = chunk.map(() => "?").join(", ");
+      if (lookups.length >= SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) throw new Error("batch_too_large");
       lookups.push({
         statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" + placeholders + ")",
         binds: chunk,
