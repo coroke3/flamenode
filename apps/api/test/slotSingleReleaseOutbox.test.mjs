@@ -16,7 +16,7 @@ const row = (id, extras = {}) => ({
   sort_order: 0, video_id: null, ...extras,
 });
 const group = count => Array.from({ length: count }, (_, i) => row("slot-" + i));
-const options = (rows, makeId = () => "dm-" + Math.random().toString().slice(2)) => ({
+const options = (rows, makeId = () => "dm-default") => ({
   eventId: "ev", rows, createdAt: 201, siteOrigin: "https://flamenode.example",
   makeId,
 });
@@ -27,7 +27,7 @@ function setup(rows = []) {
   const db = new DatabaseSync(":memory:");
   db.exec([
     'CREATE TABLE "user"(id TEXT PRIMARY KEY,is_notification_enabled INTEGER);',
-    'INSERT INTO "user" VALUES ("u1",1),("u2",0);',
+    `INSERT INTO "user" VALUES ('u1',1),('u2',0);`,
     "CREATE TABLE notification_outbox(",
     "id TEXT PRIMARY KEY,recipient_user_id TEXT,type TEXT,payload_json TEXT,",
     "delivery_route TEXT,correlation_id TEXT,status TEXT,attempt_count INTEGER,",
