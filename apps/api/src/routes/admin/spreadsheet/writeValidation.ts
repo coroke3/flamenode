@@ -254,7 +254,7 @@ export function buildSpreadsheetDeleteSql(
   before: Record<string, unknown>,
 ): SpreadsheetSqlPlan {
   if (ctx.def.mode !== "editable") throw new Error("table_readonly");
-  if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) throw new Error("physical_delete_forbidden");
+  if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) throw new Error("physical_delete_requires_visibility_status");
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
   return {
