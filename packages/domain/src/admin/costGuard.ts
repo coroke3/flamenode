@@ -2,6 +2,7 @@ export const WRITE_FEATURE_KEYS = [
   "post_video_unslotted", "post_video_slotted", "edit_video",
   "like_or_bookmark", "chapter_comment", "reserve_slot", "release_slot",
   "xid_links",
+  "personal_terms_accept",
   "split_slot_group", "extend_slot_group", "merge_slot_groups",
   "admin_user_role", "admin_user_ban", "admin_user_notifications",
   "admin_user_event_create", "admin_event_create", "admin_x_icon_refresh", "admin_terms_create",

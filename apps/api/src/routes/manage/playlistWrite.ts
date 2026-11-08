@@ -129,6 +129,19 @@ playlistWriteRoutes.post("/sync", async (c) => {
 export function parsePlaylistSettings(value: Record<string, unknown>):
   | { ok: true; playlistId: string | null; mode: "off" | "append_only" | "mirror"; interval: number }
   | { ok: false; message: string } {
+  // Keep malformed JSON types from coercing into IDs, minutes, or sync=off.
+  // Legacy FormData remains string-only; unknown string modes still map to off.
+  if (value.sync_mode !== undefined && typeof value.sync_mode !== "string") {
+    return { ok: false, message: "入力エラー" };
+  }
+  if (value.playlist_id !== undefined && typeof value.playlist_id !== "string") {
+    return { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" };
+  }
+  if (value.sync_interval_minutes !== undefined &&
+      typeof value.sync_interval_minutes !== "string" &&
+      typeof value.sync_interval_minutes !== "number") {
+    return { ok: false, message: "入力エラー" };
+  }
   const mode = value.sync_mode === "append_only" || value.sync_mode === "mirror"
     ? value.sync_mode : "off";
   const raw = String(value.playlist_id ?? "").trim();
@@ -140,13 +153,16 @@ export function parsePlaylistSettings(value: Record<string, unknown>):
       const host = url.hostname.toLowerCase().replace(/^www\./, "");
       const id = url.searchParams.get("list")?.trim() ?? "";
       if ((url.protocol === "http:" || url.protocol === "https:") &&
+        !url.username && !url.password &&
         (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) &&
         valid.test(id)) playlistId = id;
     } catch { /* invalid URL => validation error */ }
   }
   if (raw && !playlistId) return { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" };
   if (mode !== "off" && !playlistId) return { ok: false, message: "同期を有効にするには再生リストURLまたはIDが必要です。" };
-  const inputInterval = Number(String(value.sync_interval_minutes ?? "720"));
+  const intervalRaw = String(value.sync_interval_minutes ?? "720");
+  // Match CURRENT: a blank field uses the default, while explicit 0 clamps to 60.
+  const inputInterval = intervalRaw.trim() ? Number(intervalRaw) : NaN;
   const interval = Number.isInteger(inputInterval)
     ? Math.min(10080, Math.max(60, inputInterval)) : 720;
   return { ok: true, playlistId, mode, interval };
