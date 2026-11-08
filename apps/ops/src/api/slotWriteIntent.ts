@@ -72,6 +72,19 @@ export function planSlotGenerate(
   eventId: string, request: SlotGenerateRequest,
 ): SlotWriteIntent | null {
   if (!validId(eventId) || !request || typeof request !== "object") return null;
+  // CURRENT's batchSchema validates shared fields even for inactive modes.
+  // Reject malformed extra fields rather than silently accepting them.
+  // MIG-0656 must also enforce this at the authoritative Hono boundary.
+  const shared = request as unknown as Record<string, unknown>;
+  if ((shared.count !== undefined && !validInteger(shared.count, 1, 100)) ||
+      (shared.start_index !== undefined && !validInteger(shared.start_index, 0, 9999)) ||
+      (shared.interval_minutes !== undefined &&
+        !validInteger(shared.interval_minutes, 1, 1440)) ||
+      (shared.label_prefix != null &&
+        (typeof shared.label_prefix !== "string" ||
+          shared.label_prefix.trim().length > 40)) ||
+      (shared.start_at != null && typeof shared.start_at !== "string") ||
+      (shared.end_at != null && typeof shared.end_at !== "string")) return null;
   if (request.mode === "time") {
     const start = jstMinute(request.start_at);
     const end = jstMinute(request.end_at);

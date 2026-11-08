@@ -86,3 +86,30 @@ test("MIG-0722 U03a: generation is bounded and rejects numeric coercion and inva
     JSON.stringify(bad));
   assert.equal(planSlotGenerate(eventId, { mode: "unknown" }), null);
 });
+
+test("MIG-0722 U03a-2: inactive mode fields still enforce CURRENT shared constraints", () => {
+  const time = {
+    mode: "time", start_at: "2026-11-08T10:00",
+    end_at: "2026-11-08T10:30", interval_minutes: 5,
+  };
+  for (const extra of [
+    { count: 0 }, { count: 101 }, { count: "3" },
+    { start_index: -1 }, { start_index: 10000 }, { start_index: "1" },
+    { label_prefix: "x".repeat(41) }, { label_prefix: 7 },
+  ]) assert.equal(planSlotGenerate("ev1", { ...time, ...extra }), null,
+    "invalid count-mode field must fail in time mode: " + JSON.stringify(extra));
+  const count = { mode: "count", count: 3, start_index: 1, label_prefix: "No." };
+  for (const extra of [
+    { interval_minutes: 0 }, { interval_minutes: 1441 },
+    { interval_minutes: "5" }, { interval_minutes: 2.5 },
+    { start_at: 123 }, { end_at: {} },
+  ]) assert.equal(planSlotGenerate("ev1", { ...count, ...extra }), null,
+    "invalid time-mode field must fail in count mode: " + JSON.stringify(extra));
+  // CURRENT accepts valid shared fields even when their branch does not use them.
+  assert.deepEqual(planSlotGenerate("ev1", { ...time,
+    count: 100, start_index: 9999, label_prefix: null,
+  }), { action: "generateSlotsBatch", eventId: "ev1", body: time });
+  assert.deepEqual(planSlotGenerate("ev1", { ...count,
+    interval_minutes: 5, start_at: "unused", end_at: null,
+  }), { action: "generateSlotsBatch", eventId: "ev1", body: count });
+});
