@@ -37,10 +37,12 @@ function isConfirmedInternalVideoId(id: string): boolean {
 type RateLimitBucket = { windowStart: number; count: number };
 const rateLimitBuckets = new Map<string, RateLimitBucket>();
 let nextRateLimitCleanupAt = 0;
+let lastRateLimitNow = Number.NEGATIVE_INFINITY;
 
 export function clearVideoDetailRateLimitForTests(): void {
   rateLimitBuckets.clear();
   nextRateLimitCleanupAt = 0;
+  lastRateLimitNow = Number.NEGATIVE_INFINITY;
 }
 
 function rateLimitedResponse(retryAfter: number): Response {
@@ -58,6 +60,16 @@ function checkRateLimit(
   request: Request,
   now = Math.floor(Date.now() / 1000),
 ): Response | null {
+  // Do not poison the quota state with non-finite or unsafe timestamps.
+  if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + RATE_LIMIT_WINDOW_SECONDS)) {
+    return rateLimitedResponse(RATE_LIMIT_WINDOW_SECONDS);
+  }
+  // A wall-clock rollback must not strand blocked clients or a full key map.
+  if (now < lastRateLimitNow) {
+    rateLimitBuckets.clear();
+    nextRateLimitCleanupAt = 0;
+  }
+  lastRateLimitNow = now;
   if (now >= nextRateLimitCleanupAt) {
     nextRateLimitCleanupAt = now + RATE_LIMIT_WINDOW_SECONDS;
     for (const [key, bucket] of rateLimitBuckets) {

@@ -21,6 +21,7 @@ import { creatorIconExpr, creatorNameExpr } from "@/lib/db/displayExpr";
 import { Icon } from "@/components/ui/Icon";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
 import { formatRelative } from "@/lib/utils/format";
+import { eventVideoPageHref, videoPageHref } from "@/lib/youtube/id";
 
 export const metadata: Metadata = { title: "ライブラリ" };
 export const dynamic = "force-dynamic";
@@ -235,7 +236,7 @@ export default async function DashboardLibraryPage({
   const playlistLabel = tab === "like" ? "いいねした作品" : "セーブした作品";
   const firstVideo = videos[0];
   const firstVideoHref = (tab === "like" || tab === "bookmark") && firstVideo
-    ? `/${firstVideo.youtube_video_id?.trim() || firstVideo.id}?playlist=${playlistId}`
+    ? eventVideoPageHref(firstVideo, playlistId)
     : null;
   const title =
     tab === "mine"
@@ -355,7 +356,7 @@ export default async function DashboardLibraryPage({
               {chapters.map((chapter) => (
                 <Link
                   key={chapter.id}
-                  href={`/${chapter.youtube_video_id?.trim() || chapter.video_id}`}
+                  href={videoPageHref({ id: chapter.video_id, youtube_video_id: chapter.youtube_video_id })}
                   className="fn-card fn-stack-item"
                 >
                   <div className="fn-stack-item-head">
@@ -381,7 +382,7 @@ export default async function DashboardLibraryPage({
                     href={
                       tab === "mine" || tab === "collab"
                         ? `/dashboard/edit/${video.id}`
-                        : `/${video.youtube_video_id?.trim() || video.id}?playlist=${playlistId}`
+                        : eventVideoPageHref(video, playlistId)
                     }
                   />
                 </div>

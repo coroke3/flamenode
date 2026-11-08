@@ -11,11 +11,14 @@ import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { sendYoutubeSyncPendingWakeBestEffort } from "@/lib/queues/youtubeSyncWake";
 import type { QueueWakeKind } from "@/lib/queues/wakeBudget";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 
 function revalidateYoutubeSyncPaths(videoId: string, youtubeVideoId: string | null): void {
   revalidatePath("/admin/youtube-sync");
   revalidatePath(`/admin/videos/${videoId}`);
-  revalidatePath(`/${youtubeVideoId ?? videoId}`);
+  for (const publicPath of publicVideoRevalidationPaths(videoId, youtubeVideoId)) {
+    revalidatePath(publicPath);
+  }
 }
 
 async function revalidateYoutubeSyncPathsBestEffort(

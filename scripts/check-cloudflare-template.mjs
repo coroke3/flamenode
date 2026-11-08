@@ -16,7 +16,7 @@ const LEGACY_CRON_PATTERNS = [
   /\*\/15\s+\*\s+\*\s+\*\s+\*/,
   /7,22,37,52\s+\*\s+\*\s+\*\s+\*/,
 ];
-const TOML_SCAN_EXCLUDED_DIRECTORIES = new Set([
+const TOML_SCAN_SKIPPED_NAMES = new Set([
   ".cloudflare",
   ".git",
   ".next",
@@ -94,8 +94,34 @@ function rejectPattern(errors, text, relative, pattern, description) {
   if (pattern.test(text)) errors.push(`${relative}: ${description}`);
 }
 
+function firstSymlinkInPath(filePath, root) {
+  // lstat on the leaf misses symlinked parent directories. Check the audited
+  // root itself and every component below it before any required
+  // configuration is read. Ancestors above the root are the caller's
+  // environment (for example /var -> /private/var on macOS) and are not part
+  // of the audited tree, so they are not inspected.
+  const resolvedRoot = path.resolve(root);
+  const relative = path.relative(resolvedRoot, path.resolve(filePath));
+  const parts = relative === "" ? [] : relative.split(path.sep);
+  let current = resolvedRoot;
+  for (let index = -1; index < parts.length; index += 1) {
+    if (index >= 0) current = path.join(current, parts[index]);
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) return current;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      return null;
+    }
+  }
+  return null;
+}
+
 function readFile(root, relative, errors) {
   const full = path.join(root, relative);
+  if (firstSymlinkInPath(full, root)) {
+    errors.push(`${relative}: required config file must not be a symlink`);
+    return "";
+  }
   if (!fs.existsSync(full) || !fs.statSync(full).isFile()) {
     errors.push(`${relative}: required file is missing`);
     return "";
@@ -114,14 +140,31 @@ function checkPlaceholderIds(errors, text, relative) {
   }
 }
 
-function trackedTomlFiles(root) {
+function trackedTomlFiles(root, errors) {
   const files = [];
   const pending = [root];
   while (pending.length > 0) {
     const current = pending.pop();
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-      if (entry.isDirectory() && TOML_SCAN_EXCLUDED_DIRECTORIES.has(entry.name)) continue;
+      if (TOML_SCAN_SKIPPED_NAMES.has(entry.name)) continue;
       const fullPath = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) {
+        // Dirent.isFile/isDirectory are both false for symlinks. Without this
+        // guard a linked TOML or linked directory is silently omitted from the
+        // placeholder-ID audit. Never follow links (cycles/out-of-tree reads).
+        let linkedDirectory = false;
+        try {
+          linkedDirectory = fs.statSync(fullPath).isDirectory();
+        } catch {
+          // Dangling/inaccessible links have unknown contents: fail closed.
+          linkedDirectory = true;
+        }
+        if (linkedDirectory || entry.name.toLowerCase().endsWith(".toml")) {
+          const relative = path.relative(root, fullPath).replaceAll("\\", "/");
+          errors.push(`${relative}: symlink escapes tracked TOML audit`);
+        }
+        continue;
+      }
       if (entry.isDirectory()) pending.push(fullPath);
       else if (entry.isFile() && entry.name.toLowerCase().endsWith(".toml")) files.push(fullPath);
     }
@@ -130,7 +173,7 @@ function trackedTomlFiles(root) {
 }
 
 function checkAllTrackedTomlIds(errors, root) {
-  for (const filePath of trackedTomlFiles(root)) {
+  for (const filePath of trackedTomlFiles(root, errors)) {
     const relative = path.relative(root, filePath).replaceAll("\\", "/");
     checkPlaceholderIds(errors, fs.readFileSync(filePath, "utf8"), relative);
   }
@@ -238,6 +281,11 @@ function workerTemplateDirectories(root) {
 
 export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   const errors = [];
+  // The caller can supply a linked repository root. Never audit or read
+  // an outside tree while reporting it as the checked-in configuration.
+  if (firstSymlinkInPath(root, root)) {
+    return ["root: symbolic link is forbidden in the Cloudflare template audit"];
+  }
   const rootToml = readFile(root, "wrangler.toml", errors);
   requirePattern(errors, rootToml, "wrangler.toml", /^name\s*=\s*"flamenode-web"\s*$/m, "Worker name must be flamenode-web");
   requirePattern(errors, rootToml, "wrangler.toml", /^main\s*=\s*"\.open-next\/worker\.js"\s*$/m, "main must be .open-next/worker.js");
@@ -327,7 +375,9 @@ export function checkCloudflareTemplate({ root = process.cwd() } = {}) {
   requirePattern(errors, openNext, "open-next.config.ts", /defineCloudflareConfig/, "defineCloudflareConfig is required");
 
   const nextConfigPath = path.join(root, "next.config.mjs");
-  if (fs.existsSync(nextConfigPath)) {
+  if (firstSymlinkInPath(nextConfigPath, root)) {
+    errors.push("next.config.mjs: config file must not be a symlink");
+  } else if (fs.existsSync(nextConfigPath)) {
     rejectPattern(errors, fs.readFileSync(nextConfigPath, "utf8"), "next.config.mjs", /@cloudflare\/next-on-pages|setupDevPlatform/, "legacy next-on-pages development setup is forbidden");
   }
 

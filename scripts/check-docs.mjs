@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { proseOutsideFencedCode } from "./markdown-link-prose.mjs";
 
 const root = process.cwd();
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -84,7 +85,7 @@ function isHistorical(relative, text) {
   );
 }
 function checkLinks(relative, text) {
-  for (const match of text.matchAll(localLinkPattern)) {
+  for (const match of proseOutsideFencedCode(text).matchAll(localLinkPattern)) {
     const target = match[1].trim().split(/[?#]/, 1)[0];
     if (
       !target ||

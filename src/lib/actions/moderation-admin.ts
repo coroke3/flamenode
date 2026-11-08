@@ -35,6 +35,7 @@ import {
 } from "@/lib/video/videoVisibilityTransition";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
 import { validateVideoPublicEligibility } from "@/lib/video/videoPublicEligibility";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 
 export interface ModerationAdminResult extends PendingPublicReflection {
   ok: boolean;
@@ -78,7 +79,9 @@ function revalidateModeration(video: typeof videos.$inferSelect, changed: boolea
   revalidatePath("/admin");
   if (changed) {
     revalidatePath("/admin/videos");
-    revalidatePath(`/${video.youtube_video_id ?? video.id}`);
+    for (const publicPath of publicVideoRevalidationPaths(video.id, video.youtube_video_id)) {
+      revalidatePath(publicPath);
+    }
     revalidatePath("/list");
   }
 }
