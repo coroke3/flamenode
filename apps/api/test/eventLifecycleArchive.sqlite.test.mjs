@@ -156,7 +156,7 @@ test("MIG-0652 U04 SQLite T08: public event archive atomically writes event, fen
   globalThis.caches = { default: { delete: async () => true } };
   let response;
   try { response = await f.request(); } finally { globalThis.caches = oldCache; }
-  assert.equal(response.status, 200, await response.text());
+  assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.equal((await response.clone().json()).ok, true);
   assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
@@ -200,7 +200,7 @@ test("MIG-0652 U04 SQLite T10: stale updated_at causes full D1 rollback and R2 c
   console.error = () => {};
   let response;
   try { response = await f.request(); } finally { console.error = oldError; }
-  assert.equal(response.status, 500, await response.text());
+  assert.equal(response.status, 500);
   assert.equal((await response.clone().json()).ok, false);
   assert.equal(f.d1.stats.batches, 1);
   assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
