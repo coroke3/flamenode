@@ -78,6 +78,174 @@ describe("check-server-core-boundaries", () => {
     );
   });
 
+
+  it("T03a detects bracket and globalThis process.env access", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-access.ts": [
+          'const a = process["env"].ONE;',
+          "const b = process['env']?.TWO;",
+          'const c = process[`env`].THREE;',
+          "const d = globalThis.process.env.FOUR;",
+          'const e = globalThis["process"]["env"].FIVE;',
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5]);
+      },
+    );
+  });
+
+  it("T03aa detects parenthesized, non-null, as/satisfies and static globalThis host access", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-wrapped.ts": [
+          "const a = (process).env.ONE;",
+          'const b = (process)["env"].TWO;',
+          "const c = process!.env.THREE;",
+          "const d = (globalThis.process).env.FOUR;",
+          "const e = (globalThis[\"process\"]).env.FIVE;",
+          'const f = (globalThis)["process"].env.SIX;',
+          "const g = (process as any).env.SEVEN;",
+          "const h = (globalThis as any).process.env.EIGHT;",
+          "const i = (process satisfies typeof process).env.NINE;",
+          'const j = process[("env")].TEN;',
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      },
+    );
+  });
+
+  it("T03ab detects destructuring of process.env", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-destructure.ts": [
+          "const { env } = process;",
+          "const { env: a } = globalThis.process;",
+          'const { ["env"]: b } = process;',
+          "const { env: c } = (process as any);",
+          "let d; ({ env: d } = process);",
+          "let e; ({ env: e } = globalThis.process);",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6]);
+      },
+    );
+  });
+
+  it("T03ac detects nested, parameter-default and alternate-root env access", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-more.ts": [
+          'const { process: { env } } = globalThis;',
+          'const { ["process"]: { env: a } } = globalThis;',
+          "let b; ({ process: { env: b } } = globalThis);",
+          "export function f({ env } = process) { return env; }",
+          "export const g = ({ env: e } = globalThis.process) => e;",
+          "const h = global.process.env.K;",
+          "const i = self.process.env.K;",
+          "const j = (0, process).env.K;",
+          "const k = globalThis.globalThis.process.env.K;",
+          "const { global: { process: { env: l } } } = globalThis;",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      },
+    );
+  });
+
+  it("T03ad rejects importing the process module", () => {
+    withFixture(
+      {
+        "packages/server-core/src/p1.ts": 'import { env } from "node:process";',
+        "packages/server-core/src/p2.ts": 'import * as p from "process";',
+        "packages/server-core/src/p3.ts": 'const e = require("process").env;',
+        "packages/server-core/src/p4.ts": 'export const e = (await import("node:process")).env;',
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process module");
+        assert.deepEqual(errors.map((error) => error.file).sort(), [
+          "packages/server-core/src/p1.ts",
+          "packages/server-core/src/p2.ts",
+          "packages/server-core/src/p3.ts",
+          "packages/server-core/src/p4.ts",
+        ]);
+      },
+    );
+  });
+
+  it("T03ae catches logical/conditional fallbacks and assignment-nested defaults", () => {
+    withFixture(
+      {
+        "packages/server-core/src/ambient-fallback.ts": [
+          "const a = (globalThis.process ?? {}).env;",
+          "const b = (process || {}).env;",
+          "const c = (globalThis.process && {}).env;",
+          "const { env = {} } = process ?? {};",
+          "const { env } = process || {};",
+          "const { env } = (ok ? process : {});",
+          'const d = (typeof process === "object" ? process : undefined)?.env;',
+          "const { process: { env: e } = {} } = globalThis;",
+          "let f; ({ process: { env: f } = {} } = globalThis);",
+          "let g; ({ process: { env: g } = {} } = globalThis.globalThis);",
+          "const h = (ok ? globalThis : {}).process.env;",
+          "const i = (ok ? globalThis.process : other).env;",
+          "const j = (other ?? globalThis.process).env;",
+        ].join("\n"),
+      },
+      (rootDir) => {
+        const errors = check(rootDir).errors.filter((error) => error.rule === "process.env");
+        assert.deepEqual(errors.map((error) => error.line), Array.from({ length: 13 }, (_, i) => i + 1));
+      },
+    );
+  });
+
+  it("T03af does not confuse unrelated fallback objects with ambient process", () => {
+    withFixture(
+      {
+        "packages/server-core/src/other-fallback.ts": [
+          "const a = (other ?? {}).env;",
+          "const b = (other || {}).env;",
+          "const c = (ok ? other : {}).env;",
+          "const { env } = other || {};",
+          "const { env } = (ok ? other : {});",
+          "const { process: { env } } = otherGlobal;",
+        ].join("\n"),
+      },
+      (rootDir) => assert.deepEqual(check(rootDir).errors, []),
+    );
+  });
+
+  it("T03b ignores unrelated computed properties, comments, and string literals", () => {
+    withFixture(
+      {
+        "packages/server-core/src/safe-access.ts": [
+          'const argv = process["argv"];',
+          "const versions = globalThis.process.versions;",
+          "const unrelated = other.process.env;",
+          "const { argv } = process;",
+          "const { env } = other;",
+          "const { versions: v } = globalThis.process;",
+          "const { process: { argv: a2 } } = globalThis;",
+          "export function f2({ argv } = process) { return argv; }",
+          "const { env: e2 } = globalThis;",
+          "const m = self.other.process.env;",
+          'const text = "process[env] and globalThis.process.env";',
+          "// process['env'] is prohibited",
+        ].join("\n"),
+      },
+      (rootDir) => assert.deepEqual(check(rootDir).errors, []),
+    );
+  });
+
   it("T04 detects packages/domain and packages/db importing server-core", () => {
     withFixture(
       {
