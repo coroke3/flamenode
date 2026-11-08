@@ -10,3 +10,4 @@ export * from "./parts.ts";
 export * from "./eventIdInput.ts";
 export * from "./generalQuestionPlanner.ts";
 export * from "./stagePermissionForm.ts";
+export * from "./generalQuestionForm.ts";
