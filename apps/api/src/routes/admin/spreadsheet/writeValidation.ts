@@ -19,6 +19,8 @@ export interface SpreadsheetWriteValidationContext {
     type: string;
     notNull: boolean;
     enumValues?: readonly string[];
+    defaultValue?: string | null;
+    generated?: boolean;
   }[];
 }
 
@@ -58,4 +60,51 @@ export function validateSpreadsheetInputValues(
       throw new Error("invalid_number");
     }
   }
+}
+
+
+/** CURRENT validation.ts#resolveSpreadsheetDefaultValue parity for SQLite defaults. */
+export function resolveSpreadsheetDefaultValue(
+  column: { defaultValue?: string | null },
+): string | number | null {
+  const raw = column.defaultValue?.trim();
+  if (!raw || /^null$/i.test(raw)) return null;
+  const unwrapped = raw.replace(/^\((.*)\)$/, "$1").trim();
+  if (/^unixepoch\(\)$/i.test(unwrapped)) return Math.floor(Date.now() / 1000);
+  if (/^current_timestamp$/i.test(unwrapped)) {
+    return new Date().toISOString().replace("T", " ").slice(0, 19);
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(unwrapped)) return Number(unwrapped);
+  if (unwrapped.startsWith("'") && unwrapped.endsWith("'")) {
+    return unwrapped.slice(1, -1).replace(/''/g, "'");
+  }
+  throw new Error("unsupported_default");
+}
+
+/**
+ * CURRENT query.ts#prepareCompleteInsertRow parity.
+ * This is a pure row builder only: guarded Hono INSERT/audit/Queue integration
+ * remains unimplemented and must not be inferred from this export.
+ */
+export function prepareCompleteInsertRow(
+  ctx: SpreadsheetWriteValidationContext,
+  rowInput: Record<string, string | null>,
+): Record<string, string | number | null> {
+  const row = rowInput;
+  validateSpreadsheetInputValues(ctx, row);
+  const complete: Record<string, string | number | null> = {};
+  for (const column of ctx.columns) {
+    if (column.generated) continue;
+    if (row[column.name] !== undefined) {
+      if (row[column.name] == null && column.notNull) throw new Error("not_null_violation");
+      complete[column.name] = row[column.name] === "" ? null : row[column.name]!;
+    } else if (column.defaultValue != null) {
+      complete[column.name] = resolveSpreadsheetDefaultValue(column);
+    } else if (column.notNull) {
+      throw new Error("missing_required_column");
+    } else {
+      complete[column.name] = null;
+    }
+  }
+  return complete;
 }
