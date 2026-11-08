@@ -597,3 +597,35 @@ test("MIG-0518 bulk chapter UI does not claim video-owner-only access", () => {
   assert.match(source, /CSV で一括登録（チャプター管理権限が必要）/);
   assert.doesNotMatch(source, /CSV で一括登録 \(動画オーナーのみ\)/);
 });
+
+
+test("P2 overlay auth revocation resets an open chapter editor without an Active X window event", async () => {
+  await withChapterDom(async (doc, root) => {
+    const render = (props) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true,
+      chapters: [PRIVATE_CHAPTER], ...props,
+    });
+    await React.act(async () => root.render(render({})));
+    await clickButton(doc, "編集");
+    assert.ok(doc.querySelector("form"), "editor should be opened before revocation");
+    await React.act(async () => root.render(render({ canPost: false })));
+    assert.equal(doc.querySelector("form"), null, "permission loss must hide and reset editor");
+    await React.act(async () => root.render(render({ canPost: true })));
+    assert.equal(doc.querySelector("form"), null, "regrant must not restore another viewer's draft");
+  });
+});
+
+test("P2 changing Active X prop clears unsent chapter edits without window events", async () => {
+  await withChapterDom(async (doc, root) => {
+    const render = (activeXId) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId, canPost: true, chapters: [PRIVATE_CHAPTER],
+    });
+    await React.act(async () => root.render(render("approved")));
+    await clickButton(doc, "編集");
+    assert.ok(doc.querySelector("form"));
+    await React.act(async () => root.render(render("another-approved")));
+    assert.equal(doc.querySelector("form"), null);
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true, "new identity starts with public visibility");
+  });
+});
