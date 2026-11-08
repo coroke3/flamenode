@@ -23,7 +23,8 @@ test("MIG-0652 U01: browser empty-string preprocessing preserves non-empty value
 
 test("MIG-0652 U01: legacy EventForm delegates both ID policies to shared domain", async () => {
   const source = await readFile(new URL("../../../src/lib/event/eventForm.ts", import.meta.url), "utf8");
-  assert.ok(source.includes('import { normalizeOptionalEventId } from "@flamenode/domain/event";'));
+  // Additional domain helpers may be co-imported; keep asserting the same ID policy.
+  assert.match(source, /import\s*\{[^}]*\bnormalizeOptionalEventId\b[^}]*\}\s*from\s*"@flamenode\/domain\/event"/s);
   assert.ok(source.includes('export { EVENT_ID_PATTERN } from "@flamenode/domain/event";'));
   assert.ok(source.includes("id: z.preprocess("));
   assert.ok(!source.includes("export const EVENT_ID_PATTERN ="));
