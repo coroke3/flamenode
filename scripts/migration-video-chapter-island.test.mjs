@@ -696,3 +696,27 @@ test("P2 removal of an edited chapter invalidates its editor before any update",
     assert.equal(doc.querySelector("form"), null, "removed row must not remain editable");
   });
 });
+
+
+test("P2 revoking bulk capability clears its pending CSV without revoking normal chapter posting", async () => {
+  await withChapterDom(async (doc, root) => {
+    const render = (canBulk) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, canBulk,
+    });
+    await React.act(async () => root.render(render(true)));
+    const textarea = doc.querySelector("details textarea");
+    assert.ok(textarea, "bulk CSV editor is initially available");
+    const setter = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLTextAreaElement.prototype, "value").set;
+    await React.act(async () => {
+      setter.call(textarea, "0:10,secret");
+      textarea.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+    });
+    assert.equal(doc.querySelector("details textarea").value, "0:10,secret");
+    await React.act(async () => root.render(render(false)));
+    assert.equal(doc.querySelector("details textarea"), null, "revoked bulk editor is hidden");
+    assert.ok([...doc.querySelectorAll("button")].some((button) =>
+      button.textContent === "現在位置にコメントする"), "ordinary posting stays available");
+    await React.act(async () => root.render(render(true)));
+    assert.equal(doc.querySelector("details textarea").value, "", "prior CSV must not survive a permission loss");
+  });
+});
