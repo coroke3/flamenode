@@ -131,6 +131,34 @@ test("SA-059 U03u: CostGuard changes between chunks block the next delete",async
   }
 });
 
+test("SA-059 U03v: CostGuard exception expiry and malformed configuration block follow-up available-slot delete",async()=>{
+  const scenarios=[{"initial":"read_only","column":"cost_guard_exception_until","reason":"maintenance_mode"},{"initial":"normal","column":"disabled_features_json","reason":"cost_guard_blocked"},{"initial":"normal","column":"cost_guard_exception_features_json","reason":"cost_guard_blocked"}];
+  for(const scenario of scenarios){
+    const s=setup({mode:scenario.initial});
+    try{
+      const now=Math.floor(Date.now()/1000);
+      if(scenario.initial==="read_only"){
+        s.sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=?, cost_guard_exception_features_json=? WHERE id='default'")
+          .run(now+600,JSON.stringify(["manage_slot_delete"]));
+      }
+      const first=await s.post();
+      assert.equal(first.status,200,scenario.column+" first "+await first.clone().text());
+      assert.deepEqual(s.idsLeft(),["d","e","f"]);
+      assert.equal(s.stats.batches,1);
+      const invalidValue=scenario.column==="cost_guard_exception_until"?now-1:"{invalid-json";
+      s.sqlite.prepare("UPDATE system_settings SET "+scenario.column+"=? WHERE id='default'").run(invalidValue);
+      const denied=await s.post();
+      assert.equal(denied.status,503,scenario.column+" "+await denied.clone().text());
+      assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await denied.json()).reason,scenario.reason);
+      assert.deepEqual(s.idsLeft(),["d","e","f"]);
+      assert.equal(s.count("audit_logs"),3);
+      assert.equal(s.count("static_rebuild_queue"),3);
+      assert.equal(s.stats.batches,1,"denied next request must never mutate");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-059 U03n: authority, tenant and CostGuard fail before any write",async()=>{
   for(const opts of [
     {actor:VIEWER,status:404},

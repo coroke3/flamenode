@@ -113,6 +113,34 @@ test("SA-058 U03u: CostGuard changes between chunks block the next generated wri
   }
 });
 
+test("SA-058 U03v: CostGuard exception expiry and malformed configuration block follow-up generated slot",async()=>{
+  const scenarios=[{"initial":"read_only","column":"cost_guard_exception_until","reason":"maintenance_mode"},{"initial":"normal","column":"disabled_features_json","reason":"cost_guard_blocked"},{"initial":"normal","column":"cost_guard_exception_features_json","reason":"cost_guard_blocked"}];
+  for(const scenario of scenarios){
+    const s=setup({mode:scenario.initial});
+    try{
+      const now=Math.floor(Date.now()/1000);
+      if(scenario.initial==="read_only"){
+        s.sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=?, cost_guard_exception_features_json=? WHERE id='default'")
+          .run(now+600,JSON.stringify(["manage_slot_create"]));
+      }
+      const first=await s.post(countInput(3,1));
+      assert.equal(first.status,200,scenario.column+" first "+await first.clone().text());
+      assert.deepEqual(s.slots().map(x=>x.sort_order),[1,2,3]);
+      assert.equal(s.stats.batches,1);
+      const invalidValue=scenario.column==="cost_guard_exception_until"?now-1:"{invalid-json";
+      s.sqlite.prepare("UPDATE system_settings SET "+scenario.column+"=? WHERE id='default'").run(invalidValue);
+      const denied=await s.post(countInput(3,4));
+      assert.equal(denied.status,503,scenario.column+" "+await denied.clone().text());
+      assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await denied.json()).reason,scenario.reason);
+      assert.deepEqual(s.slots().map(x=>x.sort_order),[1,2,3]);
+      assert.equal(s.n("audit_logs"),3);
+      assert.equal(s.n("static_rebuild_queue"),3);
+      assert.equal(s.stats.batches,1,"denied next request must never mutate");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03p: time mode 2-slot insert and repeated count chunk fail closed",async()=>{
   const s=setup();
   try{
