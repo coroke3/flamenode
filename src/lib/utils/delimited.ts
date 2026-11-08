@@ -97,11 +97,38 @@ export function parseDelimited(
   return rows;
 }
 
-/** 先頭行から CSV / TSV を推定 */
+/** Detect CSV/TSV separators in the first non-blank logical record.
+ * Separators inside quoted fields (including multiline fields) are data.
+ */
 export function detectDelimiter(text: string): DelimiterChar {
-  const line = stripBom(text).split(/\r?\n/).find((l) => l.trim().length > 0) ?? "";
-  const tabs = (line.match(/\t/g) ?? []).length;
-  const commas = (line.match(/,/g) ?? []).length;
+  const input = stripBom(text);
+  let tabs = 0;
+  let commas = 0;
+  let inQuotes = false;
+  let hasContent = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+    if (ch === '"') {
+      if (inQuotes && input[i + 1] === '"') {
+        i += 1; // Escaped quote belongs to this field.
+      } else {
+        inQuotes = !inQuotes;
+      }
+      hasContent = true;
+      continue;
+    }
+    if (inQuotes) continue;
+    if (ch === "\r" || ch === "\n") {
+      if (hasContent) break;
+      tabs = 0;
+      commas = 0;
+      continue; // Skip leading empty/whitespace-only records.
+    }
+    if (ch === "\t") tabs += 1;
+    else if (ch === ",") commas += 1;
+    if (ch.trim().length > 0) hasContent = true;
+  }
   return tabs > commas ? "\t" : ",";
 }
 

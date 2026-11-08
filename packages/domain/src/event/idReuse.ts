@@ -57,7 +57,17 @@ export function hasCompletedEventIdRenameCleanup(
   for (const row of rows) {
     const key = `${row.targetType}:${row.targetId}`;
     const current = latest.get(key);
-    if (!current || row.updatedAt > current.updatedAt) latest.set(key, row);
+    // Timestamps have second precision: conflicting attempts in the same second
+    // have no reliable order. Fail closed until a later timestamp is done.
+    if (
+      !current ||
+      row.updatedAt > current.updatedAt ||
+      (row.updatedAt === current.updatedAt &&
+        current.status === "done" &&
+        row.status !== "done")
+    ) {
+      latest.set(key, row);
+    }
   }
   return eventIdRenameCleanupTargets(eventId).every((target) => {
     const row = latest.get(`${target.targetType}:${target.targetId}`);

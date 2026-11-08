@@ -97,5 +97,6 @@ test("MIG-0701 U04 T07: main imports CSS in CURRENT order", async () => {
     "./styles/current/globals.css", "./styles/current/mobile-hardening.css",
     "./styles/fonts.css", "./styles/video-card.css", "./styles/dashboard.css",
     "./styles/settings.css", "./styles/onboarding.css", "./styles/video-members.css", "./styles/forms-a.css", "./styles/shared-social.css",
+    "./styles/cost-guard-banner.css",
   ]);
 });

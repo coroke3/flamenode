@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { app } from "../src/app.ts";
+import { clearSoftwareSuggestionRateLimitForTests } from "../src/routes/softwareSuggestions.ts";
 
 function createTestD1() {
   const sqlite = new DatabaseSync(":memory:");
@@ -160,4 +161,62 @@ test("GET /api/software/suggestions treats limit=0 as the default and negative a
   const resNegative = await app.request("/api/software/suggestions?limit=-5", { method: "GET" }, { DB: fakeDb });
   assert.equal(resNegative.status, 200);
   assert.equal((await resNegative.json()).length, 1);
+});
+
+test("software suggestions limiter resets fixed window after a backwards wall-clock jump", async () => {
+  clearSoftwareSuggestionRateLimitForTests();
+  const originalNow = Date.now;
+  let seconds = 20_000;
+  Date.now = () => seconds * 1000;
+  const db = createTestD1();
+  const get = () => app.request("/api/software/suggestions", {
+    method: "GET",
+    headers: { "CF-Connecting-IP": "suggestions-rollback" },
+  }, { DB: db });
+  try {
+    for (let i = 0; i < 60; i++) assert.equal((await get()).status, 200);
+    const limited = await get();
+    assert.equal(limited.status, 429);
+    assert.equal(limited.headers.get("Retry-After"), "60");
+
+    seconds = 19_000;
+    for (let i = 0; i < 60; i++) assert.equal((await get()).status, 200);
+    const limitedAgain = await get();
+    assert.equal(limitedAgain.status, 429);
+    assert.equal(limitedAgain.headers.get("Retry-After"), "60");
+
+    seconds += 60;
+    assert.equal((await get()).status, 200);
+  } finally {
+    Date.now = originalNow;
+    clearSoftwareSuggestionRateLimitForTests();
+  }
+});
+
+test("software suggestions limiter fails closed on invalid clocks without corrupting normal quota", async () => {
+  clearSoftwareSuggestionRateLimitForTests();
+  const originalNow = Date.now;
+  let nowMillis = 25_000_000;
+  Date.now = () => nowMillis;
+  const db = createTestD1();
+  const get = () => app.request("/api/software/suggestions", {
+    method: "GET",
+    headers: { "CF-Connecting-IP": "suggestions-invalid-clock" },
+  }, { DB: db });
+  try {
+    for (let i = 0; i < 59; i++) assert.equal((await get()).status, 200);
+    for (const invalid of [NaN, Infinity, -1000, Number.MAX_SAFE_INTEGER * 1000]) {
+      nowMillis = invalid;
+      const blocked = await get();
+      assert.equal(blocked.status, 429);
+      assert.equal(blocked.headers.get("Retry-After"), "60");
+      assert.equal(blocked.headers.get("Cache-Control"), "no-store");
+    }
+    nowMillis = 25_000_000;
+    assert.equal((await get()).status, 200);
+    assert.equal((await get()).status, 429);
+  } finally {
+    Date.now = originalNow;
+    clearSoftwareSuggestionRateLimitForTests();
+  }
 });
