@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
-import { buildSlotBatchCasMutation } from "../src/routes/manage/slotWriteMutations.ts";
+import { buildSlotBatchCasMutation, buildSlotBatchAtomicPlan } from "../src/routes/manage/slotWriteMutations.ts";
 import { buildSlotReservedReleasePrecondition } from "../src/routes/manage/slotWriteAssertions.ts";
 
 const dialect = new SQLiteSyncDialect();
@@ -85,7 +85,8 @@ test("MIG-0656 U02b-3: SQL CAS detects changed snapshots and rejects out-of-even
   try {
     db.prepare("UPDATE slots SET reserved_x_id_snapshot='changed' WHERE id='a'").run();
     assert.equal(run(db,{kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:111,label:"ok"}),0);
-    assert.equal(run(db,{kind:"delete-available",eventId:"event_1",rows:[other]}),0);
+    assert.throws(() => run(db,{kind:"delete-available",eventId:"event_1",rows:[other]}),
+      /slot_batch_mutation_invalid_snapshot/, "foreign event identity is rejected before SQL generation");
   } finally { db.close(); }
 });
 
@@ -103,6 +104,84 @@ test("MIG-0656 U02b-3: same-transaction membership assertion prevents partial gr
     assert.equal(read(db,"a").status,"reserved");
     assert.equal(read(db,"b").status,"reserved");
     assert.equal(read(db,"c").status,"reserved");
+  } finally { db.close(); }
+});
+
+
+test("MIG-0656 U02b-3a: atomic plan always attaches group check + exact affected-row count", () => {
+  const a = makeRow("a", { status: "reserved", reservation_group_id: "g" });
+  const b = makeRow("b", { status: "reserved", reservation_group_id: "g" });
+  const release = buildSlotBatchAtomicPlan({
+    kind: "release-reserved", eventId: "event_1", rows: [a, b], updatedAt: 200,
+  });
+  assert.equal(release.expectedMutationChanges, 2);
+  assert.equal(release.preMutationAssertions.length, 1);
+  assert.ok(dialect.sqlToQuery(release.preMutationAssertions[0]).sql.includes("json_each"));
+  assert.ok(dialect.sqlToQuery(release.mutationStatement).sql.includes("status = 'reserved'"));
+
+  for (const kind of ["delete-available", "update-labels"]) {
+    const plan = buildSlotBatchAtomicPlan({
+      kind, eventId: "event_1", rows: [a],
+      updatedAt: 200, ...(kind === "update-labels" ? { label: "name" } : {}),
+    });
+    assert.equal(plan.preMutationAssertions.length, 0);
+    assert.equal(plan.expectedMutationChanges, 1);
+  }
+});
+
+test("MIG-0656 U02b-3a: SQLite manual transaction rolls back partial CAS changes", () => {
+  const a = makeRow("a");
+  const b = makeRow("b", { status: "reserved" });
+  const db = setup([a, b]);
+  try {
+    const plan = buildSlotBatchAtomicPlan({
+      kind: "delete-available", eventId: "event_1", rows: [a, b],
+    });
+    const compiled = dialect.sqlToQuery(plan.mutationStatement);
+    db.exec("BEGIN");
+    assert.equal(db.prepare(compiled.sql).run(...compiled.params).changes, 1);
+    assert.throws(() => db.prepare(
+      "SELECT CASE WHEN changes() = ? THEN 1 ELSE json_extract('not-valid-json', '
+  const a=makeRow("a");
+  for(const input of [
+    {kind:"delete-available",eventId:"event_1",rows:[]},
+    {kind:"delete-available",eventId:"event_1",rows:[a,a]},
+    {kind:"delete-available",eventId:"event_1",rows:[makeRow("wrong",{event_id:"foreign"})]},
+    {kind:"delete-available",eventId:"event_1",rows:["a","b","c","d"].map(id=>makeRow(id))},
+    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1,label:" "},
+    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1,label:"x".repeat(201)},
+    {kind:"update-labels",eventId:"event_1",rows:[a],updatedAt:1.5,label:"ok"},
+    {kind:"release-reserved",eventId:"event_1",rows:[makeRow("a",{version:NaN})],updatedAt:10},
+    {kind:"release-reserved",eventId:"event_1",rows:[a]},
+  ]) assert.throws(()=>buildSlotBatchCasMutation(input));
+});) END"
+    ).get(plan.expectedMutationChanges), "simulated exact change-count assertion");
+    db.exec("ROLLBACK");
+    assert.equal(read(db, "a").status, "available", "partial delete is not committed");
+    assert.equal(read(db, "b").status, "reserved");
+  } finally { db.close(); }
+});
+
+test("MIG-0656 U02b-3a: same-transaction group check prevents any release on a new group member", () => {
+  const a = makeRow("a", { status: "reserved", reservation_group_id: "g" });
+  const b = makeRow("b", { status: "reserved", reservation_group_id: "g" });
+  const c = makeRow("c", { status: "reserved", reservation_group_id: "g" });
+  const db = setup([a, b, c]);
+  try {
+    const plan = buildSlotBatchAtomicPlan({
+      kind: "release-reserved", eventId: "event_1", rows: [a, b], updatedAt: 200,
+    });
+    db.exec("BEGIN");
+    assert.throws(() => {
+      for (const assertion of plan.preMutationAssertions) {
+        const compiled = dialect.sqlToQuery(assertion);
+        db.prepare(compiled.sql).get(...compiled.params);
+      }
+      const compiled = dialect.sqlToQuery(plan.mutationStatement);
+      db.prepare(compiled.sql).run(...compiled.params);
+    }, "phantom stops mutation before any change");
+    db.exec("ROLLBACK");
+    for (const id of ["a", "b", "c"]) assert.equal(read(db, id).status, "reserved");
   } finally { db.close(); }
 });
 

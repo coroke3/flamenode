@@ -8,6 +8,7 @@
  */
 import { sql, type SQL } from "@flamenode/server-core/sql";
 import { MAX_ATOMIC_SLOT_WRITE_ROWS } from "./slotWriteSelection.ts";
+import { buildSlotReservedReleasePrecondition, type SlotReleaseSnapshotRow } from "./slotWriteAssertions.ts";
 
 export type SlotBatchCasRow = {
   id: string;
@@ -102,4 +103,36 @@ export function buildSlotBatchCasMutation(input: SlotBatchMutationInput): SQL {
     WHERE event_id = ${eventId} AND status = 'reserved'
       AND ${predicate}
   `;
+}
+
+/**
+ * U02b-3a: atomic batch assembly contract for the future authenticated route.
+ * Never call buildSlotBatchCasMutation alone in a handler; this plan binds the
+ * mandatory group-membership assertion and exact affected-row expectation.
+ * mutateWithAudit MUST still supply strict before/after audits + queue and
+ * notification effects. This is offline-only, not an API endpoint.
+ */
+export type SlotBatchAtomicPlanInput =
+  | (Omit<SlotBatchMutationInput, "kind" | "rows"> & {
+      kind: "release-reserved";
+      rows: readonly SlotReleaseSnapshotRow[];
+    })
+  | (Omit<SlotBatchMutationInput, "kind" | "rows"> & {
+      kind: "delete-available" | "update-labels";
+      rows: readonly SlotBatchCasRow[];
+    });
+
+export function buildSlotBatchAtomicPlan(input: SlotBatchAtomicPlanInput): {
+  mutationStatement: SQL;
+  preMutationAssertions: SQL[];
+  expectedMutationChanges: number;
+} {
+  const mutationStatement = buildSlotBatchCasMutation(input);
+  return {
+    mutationStatement,
+    preMutationAssertions: input.kind === "release-reserved"
+      ? [buildSlotReservedReleasePrecondition(input.eventId, input.rows)]
+      : [],
+    expectedMutationChanges: input.rows.length,
+  };
 }
