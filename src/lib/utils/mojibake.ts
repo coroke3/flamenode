@@ -34,7 +34,8 @@ export function looksLikeMojibake(s: string | null | undefined): boolean {
   if (DETECTION_TOKENS.some((token) => s.includes(token))) return true;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
-    if ((c >= 0x00 && c <= 0x08) || (c >= 0x0b && c <= 0x1f)) return true;
+    // DEL and C1 controls are not printable metadata either.
+    if ((c <= 0x08) || (c >= 0x0b && c <= 0x1f) || (c >= 0x7f && c <= 0x9f)) return true;
   }
   return false;
 }

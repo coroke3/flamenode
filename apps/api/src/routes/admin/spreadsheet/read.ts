@@ -68,8 +68,10 @@ async function enabledGuard(c: Context<AppEnv>, next: Next): Promise<Response | 
 export function getSpreadsheetPageSize(raw: string | undefined): number {
   const trimmed = raw?.trim();
   if (!trimmed) return MAX_SPREADSHEET_PAGE_ROWS;
-  const n = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(n) || n < SPREADSHEET_PAGE_SIZE_MIN) return MAX_SPREADSHEET_PAGE_ROWS;
+  // Keep the CURRENT numeric grammar strict while retaining the S2 cap.
+  if (!/^\d+$/.test(trimmed)) return MAX_SPREADSHEET_PAGE_ROWS;
+  const n = Number(trimmed);
+  if (!Number.isSafeInteger(n) || n < SPREADSHEET_PAGE_SIZE_MIN) return MAX_SPREADSHEET_PAGE_ROWS;
   return Math.min(n, MAX_SPREADSHEET_PAGE_ROWS);
 }
 

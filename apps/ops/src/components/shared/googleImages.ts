@@ -15,6 +15,9 @@ export function extractGoogleDriveImageId(
 
   try {
     const url = new URL(raw);
+    // Only web Google Drive URLs may be rewritten into our trusted cache route.
+    // URL.hostname also resolves for ftp:/file: schemes, so host alone is insufficient.
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     const host = url.hostname.replace(/^www\./, "");
     const byQuery = url.searchParams.get("id");
     if (

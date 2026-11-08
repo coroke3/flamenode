@@ -114,7 +114,11 @@ export function formatAuditValue(value: unknown, limit = DEFAULT_LIMIT): string 
             return String(value);
           }
         })();
-  return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  if (text.length <= limit) return text;
+  const clipped = text.slice(0, limit);
+  // UTF-16 slicing must not leave half an emoji in the audit display.
+  const safe = /[\uD800-\uDBFF]$/.test(clipped) ? clipped.slice(0, -1) : clipped;
+  return `${safe}…`;
 }
 
 export function parseAuditDiff(

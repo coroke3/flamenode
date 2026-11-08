@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ privileged?: string }>;
+  searchParams?: Promise<{ privileged?: string | string[] }>;
 }
 
 type PrivilegeMode = "normal" | "admin" | "event";
@@ -41,7 +41,8 @@ export default async function EditVideoPermissionsPage({
 }: Props): Promise<React.ReactElement> {
   const { id } = await params;
   const sp = (await searchParams) ?? {};
-  const rawRequestedMode = sp.privileged?.trim();
+  // Next.js returns string[] for repeated query keys. Match TARGET: accept only a single value.
+  const rawRequestedMode = (typeof sp.privileged === "string" ? sp.privileged : undefined)?.trim();
   const hasExplicitPrivilegeMode = Boolean(rawRequestedMode);
   const requestedMode = normalizePrivilegeMode(rawRequestedMode);
   const guard = await requireSession({

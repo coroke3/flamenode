@@ -82,6 +82,9 @@ export function formatRelative(unixSec: unknown): string {
 }
 
 export function formatDuration(sec: number): string {
+  // Upstream media metadata may be missing or invalid; never render NaN/Infinity
+  // as a timestamp. Keep the same zero display used for elapsed/negative values.
+  if (!Number.isFinite(sec)) return "0:00";
   const total = Math.max(0, Math.floor(sec));
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -92,7 +95,8 @@ export function formatDuration(sec: number): string {
 }
 
 export function formatCount(n: number | null | undefined): string {
-  if (n == null) return "0";
+  // Invalid telemetry/aggregates should not leak "NaNM" or "InfinityM" into UI.
+  if (n == null || !Number.isFinite(n)) return "0";
   if (n < 1000) return String(n);
   if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
   if (n < 1000000) return `${Math.floor(n / 1000)}k`;

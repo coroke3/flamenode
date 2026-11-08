@@ -19,8 +19,9 @@ test("公開作品一覧は重複searchParamsを文字列へscalar化する", ()
 test("公開作品一覧はpageを有限・projection上限付きの完全な10進整数へ正規化する", () => {
   assert.match(page, /const MAX_PAGE = Math\.ceil\(5_000 \/ PAGE_SIZE\)/);
   assert.match(page, /multi-million-row OFFSET scans/);
-  assert.match(page, /const raw = value\.trim\(\)\.slice\(0, 12\)/);
-  assert.match(page, /if \(!\/\^\\d\+\$\/\.test\(raw\)\) return 1/);
+  assert.match(page, /const trimmed = value\.trim\(\)/);
+  assert.match(page, /if \(!\/\^\\d\+\$\/\.test\(trimmed\)\) return 1/);
+  assert.match(page, /const raw = trimmed\.slice\(0, 12\)/);
   assert.match(page, /Number\.parseInt\(raw, 10\)/);
   assert.match(page, /Number\.isSafeInteger\(parsed\)/);
   assert.match(page, /Math\.min\(parsed, MAX_PAGE\)/);
