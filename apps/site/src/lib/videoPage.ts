@@ -13,7 +13,7 @@ import { normalizeStaticVideoDetail } from "../../../../src/lib/publicData/stati
 import { computeEventStatus, eventStatusLabel, isAcceptingEntries } from "../../../../src/lib/utils/eventStatusCore.ts";
 import { formatChapterTime } from "../../../../src/lib/utils/chapterTime.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
-import { extractYoutubeId, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { buildRouteMap } from "./routeMap.ts";
 import { buildPageHead, compactText, siteOrigin, type PageHead } from "./pageHead.ts";
 import { loadVideoDetailPayload, videoDetailKeys } from "./publicDataLoader.ts";
@@ -55,7 +55,7 @@ export function buildVideoPages(
   const { video } = vm;
   const youtubeVideoId = video.youtube_video_id?.trim() || null;
   const youtubeId = extractYoutubeId(youtubeVideoId);
-  const canonicalSlug = youtubeVideoId ?? video.id;
+  const canonicalSlug = youtubeId ?? video.id;
   const creatorId = video.creator_x_user_id ?? "anonymous";
   const creatorName = video.creator_display_name?.trim() || "作者未設定";
   const creatorHref = creatorId !== "anonymous" && ((video.creator_has_public_profile ?? false) || hasProjectedPublicProfile({ xUserId: creatorId, iconMap })) ? `/user/${creatorId}` : null;
@@ -112,7 +112,7 @@ export function buildVideoPages(
     })),
     chapters: chapters.map((c) => ({ id: c.id, timeLabel: formatChapterTime(c.t), label: c.label, authorName: c.author, kind: c.kind })),
     related: vm.relatedVideos.map((r) => ({
-      href: `/${r.youtube_video_id?.trim() || r.id}`,
+      href: videoPageHref(r),
       title: r.title,
       creatorName: r.display_name,
       thumbnailUrl: youtubeThumbUrl(r.youtube_video_id, "mqdefault") || null,
