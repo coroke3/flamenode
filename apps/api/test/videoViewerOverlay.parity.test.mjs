@@ -337,6 +337,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, false);
+    assert.equal(json.viewerCanEditChapters, false);
     assert.equal(json.isBanned, false);
     assert.equal(json.likeActive, false);
     assert.equal(json.bookmarkActive, false);
@@ -362,6 +363,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.likeActive, true);
     assert.equal(json.bookmarkActive, true);
     assert.equal(json.viewerXApproved, true);
+    assert.equal(json.viewerCanEditChapters, false, "approved X alone does not grant management");
 
     // Alice sees only her own private chapter, not staff's, not member's
     assert.equal(json.privateChapters.length, 1);
@@ -385,6 +387,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
+    assert.equal(json.viewerCanEditChapters, true, "admin chapter management");
     // Carol sees both alice's and staff's private chapters (member excluded)
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
@@ -404,6 +407,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
+    assert.equal(json.viewerCanEditChapters, true, "event staff chapter management");
     // Staff user has manager preset on evt-1 -> canAdministerChapters allows seeing all private chapters
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
@@ -423,6 +427,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(json.loggedIn, true);
     assert.equal(json.isBanned, true);
+    assert.equal(json.viewerCanEditChapters, false);
     assert.equal(json.likeActive, false);
     assert.equal(json.bookmarkActive, false);
     assert.deepEqual(json.privateChapters, []);
@@ -536,7 +541,10 @@ if (runUnderRootTsx(import.meta.url)) {
         const label = `${user ?? "anon"} ${query || "(no playlist)"}`;
         assert.equal(got.status, cur.status, label);
         assert.equal(got.cache, cur.cache, label);
-        assert.deepEqual(got.body, cur.body, label);
+        const { viewerCanEditChapters, ...honoLegacyDto } = got.body;
+        assert.equal(typeof viewerCanEditChapters, "boolean", `${label}: capability must be explicit`);
+        // Compare all preexisting CURRENT fields without the additive Hono capability.
+        assert.deepEqual(honoLegacyDto, cur.body, label);
         assert.equal(VideoViewerOverlayResponseSchema.safeParse(got.body).success, true, label);
         // T08: session + 2 statements at most, never a write
         assert.ok(got.statements <= 3, `${label}: ${got.statements} statements`);
