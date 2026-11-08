@@ -27,7 +27,8 @@ const slot = (id, changes = {}) => ({
 });
 
 function setup({ actor = ADMIN, staff = false, count = 20,
-  mode = "normal", onFirst, mutate } = {}) {
+  mode = "normal", onFirst, mutate, parentSessionState,
+  cookieToken = SESSION_TOKEN } = {}) {
   const { db, sqlite, stats } = createAdminD1({ onFirst });
   seedBase(sqlite, { settings: mode });
   seedEvent(sqlite);
@@ -74,7 +75,7 @@ function setup({ actor = ADMIN, staff = false, count = 20,
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", actor);
-    c.set("sessionState",actor?"user":"none");
+    c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db", drizzle(c.env.DB, { schema }));
     if (actor) {
       c.set("actorSnapshotJsonById", {
@@ -87,7 +88,8 @@ function setup({ actor = ADMIN, staff = false, count = 20,
   app.route("/api/manage/events/:id/slots", slotSingleReleaseRoutes);
   const post = (id = "s0", eventId = "ev-1") => app.request(
     ORIGIN + "/api/manage/events/" + eventId + "/slots/" + id + "/release",
-    { method: "POST", headers: { Origin: ORIGIN, Cookie: "__Secure-authjs.session-token=" + SESSION_TOKEN } },
+    { method: "POST", headers: { Origin: ORIGIN,
+      Cookie: cookieToken ? "__Secure-authjs.session-token=" + cookieToken : "" } },
     { DB: db, NEXT_PUBLIC_SITE_URL: ORIGIN },
   );
   const countRows = table => sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n;
@@ -307,6 +309,32 @@ test("MIG-0656 U04m: linked-X approval loss and newly published major TOS reject
       assert.equal(s.countRows("notification_outbox"),0);
       assert.equal(s.stats.batches,1,"in-transaction authorization refusal");
       assert.ok(s.stats.reads<=2,"no extra preread");
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("MIG-0656 U04q: SA-060 denies absent parent, missing cookie and forged session token",async()=>{
+  for(const mode of ["parent-absent","cookie-absent","cookie-forged"]){
+    const s=setup({count:2,
+      parentSessionState:mode==="parent-absent"?"none":"user",
+      cookieToken:mode==="cookie-absent"?null:
+        mode==="cookie-forged"?"ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee":SESSION_TOKEN,
+    });
+    try{
+      const res=await s.post();
+      assert.equal(res.status,mode==="cookie-forged"?409:503,
+        mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      for(const id of ["s0","s1"]){
+        const row=s.getSlot(id);
+        assert.equal(row.status,"reserved");
+        assert.equal(row.version,1);
+      }
+      assert.equal(s.countRows("audit_logs"),0);
+      assert.equal(s.countRows("notification_outbox"),0);
+      assert.equal(s.countRows("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,mode==="cookie-forged"?1:0);
+      assert.ok(s.stats.reads<=2,"no extra scoped SELECT");
     }finally{s.sqlite.close();}
   }
 });
