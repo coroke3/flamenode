@@ -718,3 +718,49 @@ test("U02 nonce SQL enforces one-time, exact preview claims and expiry on real S
     db.close();
   }
 });
+
+
+test("U02 CURRENT CSV/TSV import parses quoted cells, headers, unknown columns and NULL values", async () => {
+  const { prepareSpreadsheetImportRows, assertSpreadsheetImportColumns } =
+    await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const columnNames = ["video_id", "event_id", "notes"];
+  const csv = 'VIDEO_ID,event_id,notes\nv1,e1,"hello, ""world"""\nv2,e2,NULL\n';
+  const parsed = prepareSpreadsheetImportRows({ text: csv, columnNames, hasHeader: true, delimiter: "auto" });
+  assert.deepEqual(parsed.mappedColumns, columnNames);
+  assert.deepEqual(parsed.rows, [
+    { video_id: "v1", event_id: "e1", notes: 'hello, "world"' },
+    { video_id: "v2", event_id: "e2", notes: null },
+  ]);
+  assert.deepEqual(parsed.invalidColumns, []);
+  assert.doesNotThrow(() => assertSpreadsheetImportColumns({
+    mappedColumns: parsed.mappedColumns, invalidColumns: [], columnNames, readonlyColumns: [],
+  }));
+  const tsv = prepareSpreadsheetImportRows({
+    text: "video_id\tevent_id\tnotes\nv3\te3\ttext",
+    columnNames, hasHeader: true, delimiter: "auto",
+  });
+  assert.deepEqual(tsv.rows, [{ video_id: "v3", event_id: "e3", notes: "text" }]);
+  const invalid = prepareSpreadsheetImportRows({
+    text: "video_id,unknown\nv1,oops", columnNames, hasHeader: true, delimiter: "csv",
+  });
+  assert.deepEqual(invalid.invalidColumns, ["unknown"]);
+  assert.throws(() => assertSpreadsheetImportColumns({
+    mappedColumns: invalid.mappedColumns, invalidColumns: invalid.invalidColumns, columnNames, readonlyColumns: [],
+  }), /unknown_column:unknown/);
+  assert.throws(() => assertSpreadsheetImportColumns({
+    mappedColumns: ["notes"], invalidColumns: [], columnNames, readonlyColumns: ["notes"],
+  }), /column_not_editable:notes/);
+});
+
+test("U02 CURRENT import applies 500-row preview ceiling and 2M-char payload limit", async () => {
+  const { prepareSpreadsheetImportRows } = await import("../src/routes/admin/spreadsheet/importPrepCore.ts");
+  const base = { columnNames: ["id"], hasHeader: true, delimiter: "csv" };
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "" }), /no_rows/);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "x".repeat(2_000_001) }), /payload_too_large/);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, rows: Array.from({length: 501}, () => ({id:"x"})) }), /too_many_rows/);
+  const rows = Array.from({ length: 500 }, (_, i) => ({ id: "id-" + i }));
+  assert.equal(prepareSpreadsheetImportRows({ ...base, rows }).rows.length, 500);
+  const parsed = prepareSpreadsheetImportRows({ ...base, text: "id\n" + rows.map(row => row.id).join("\n") });
+  assert.equal(parsed.rows.length, 500);
+  assert.throws(() => prepareSpreadsheetImportRows({ ...base, text: "id\n" + rows.concat({id:"overflow"}).map(row => row.id).join("\n") }), /too_many_rows/);
+});
