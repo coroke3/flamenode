@@ -918,3 +918,45 @@ test("MIG-0652 U04 SQLite T30: audited archive stays within D1 Free invocation q
   }
 });
 
+test("MIG-0652 U04 SQLite T31: already-private concurrent revision change rejects stale archive without a visibility fence", async () => {
+  // A no-op visibility transition has no R2 fence. Its D1 revision CAS must
+  // still reject a concurrent writer, preserving that writer's revision and
+  // suppressing strict audit, rebuild queue and post-commit cache effects.
+  const f = setup({
+    status: "private", r2: false,
+    enforceOrigin: true, enforceSession: true, enforceWriteGuard: true,
+    beforeBatch: (sqlite) => sqlite.prepare(
+      "UPDATE events SET updated_at = updated_at + 5 WHERE id = ?",
+    ).run(EVENT),
+  });
+  const evicted = [];
+  const previousCaches = globalThis.caches;
+  const previousError = console.error;
+  globalThis.caches = { default: { delete: async (url) => {
+    evicted.push(url);
+    return true;
+  } } };
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally {
+    globalThis.caches = previousCaches;
+    console.error = previousError;
+  }
+
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    message: "イベント非公開化に失敗しました。状態を再取得してもう一度お試しください。",
+  });
+  assert.equal(f.d1.stats.batches, 1);
+  assert.deepEqual(f.timeline, ["d1.batch"], "already-private CAS must not call R2");
+  const event = f.sqlite.prepare(
+    "SELECT visibility_status, updated_at FROM events WHERE id = ?",
+  ).get(EVENT);
+  assert.equal(event.visibility_status, "private");
+  assert.equal(event.updated_at, f.timestamp + 5, "must preserve the concurrent revision");
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+  assert.deepEqual(evicted, [], "failed D1 commit must not evict public caches");
+});
