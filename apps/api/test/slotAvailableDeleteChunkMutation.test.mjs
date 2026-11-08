@@ -120,6 +120,34 @@ test("SA-059 reservation race rejects even with an unchanged version",()=>{
   }finally{db.close();}
 });
 
+test("SA-059 U03m: replaying a committed snapshot fails without deleting the next chunk",()=>{
+  // The same stale chunk MUST NOT silently advance into the next three slots
+  // after a lost HTTP response. Fresh selection is a distinct command.
+  const {db}=setup(["a","b","c","d","e","f"].map(id=>slot(id)));
+  try{
+    const selected=read(db);
+    assert.equal(selected.ok,true);
+    if(!selected.ok)throw Error("bad initial read");
+    assert.deepEqual(selected.rows.map(row=>row.id),["a","b","c"]);
+    assert.equal(selected.hasMore,true);
+    const {changed}=commitChunk(db,selected);
+    assert.equal(changed,3);
+    assert.equal(count(db),3);
+    assert.throws(()=>commitChunk(db,selected),/exact_changed_rows_mismatch/);
+    assert.equal(count(db),3,"a stale replay cannot delete next three rows");
+    const stillPresent=db.prepare("SELECT id FROM slots ORDER BY id").all()
+      .map(row=>row.id);
+    assert.deepEqual(stillPresent,["d","e","f"]);
+    const next=read(db);
+    assert.equal(next.ok,true);
+    if(!next.ok)throw Error("bad continuation read");
+    assert.equal(next.hasMore,false);
+    assert.deepEqual(next.rows.map(row=>row.id),["d","e","f"]);
+    assert.equal(commitChunk(db,next).changed,3);
+    assert.equal(count(db),0);
+  }finally{db.close();}
+});
+
 test("SA-059 read-time hasMore is NOT an authoritative completion signal",()=>{
   const {db,write}=setup([slot("a")]);
   try{

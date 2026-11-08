@@ -118,6 +118,38 @@ test("SA-058 collision created AFTER candidate validation but BEFORE same-batch 
   }finally{db.close();}
 });
 
+test("SA-058 U03m: lost response replay cannot duplicate a committed chunk, even with fresh IDs",()=>{
+  // Chunk-level fail-closed property ONLY: there is no approved resume token.
+  for(const mode of ["count","time"]){
+    const {db}=setup();
+    try{
+      const first=materialize(mode,3);
+      const initial=buildGeneratedSlotChunkAtomicPlan({eventId:"ev",mode,rows:first});
+      assert.equal(execute(db,initial),3);
+      assert.equal(count(db),3);
+      // The client does not know the original HTTP 200 was committed.
+      // Regenerating UUIDs must not bypass the persisted order/time collision.
+      const retry=materialize(mode,3).map((row,i)=>({
+        ...row,id:"new-retry-"+mode+"-"+i,updated_at:301,
+      }));
+      const repeated=buildGeneratedSlotChunkAtomicPlan({eventId:"ev",mode,rows:retry});
+      assert.throws(()=>execute(db,repeated),
+        /malformed JSON|invalid-generated-slot-collision/i);
+      assert.equal(count(db),3,mode+": replay must not insert any extra rows");
+      for(const row of first)assert.deepEqual(read(db,row.id),
+        Object.fromEntries(cols.map(k=>[k,row[k]])),mode+" "+row.id);
+      for(const row of retry)assert.equal(read(db,row.id),undefined);
+      // This is a new, NONOVERLAPPING chunk, not a retry or proof of
+      // completion of the original potentially 100-row user request.
+      const next=materialize(mode,2,3);
+      assert.equal(execute(db,buildGeneratedSlotChunkAtomicPlan({
+        eventId:"ev",mode,rows:next,
+      })),2);
+      assert.equal(count(db),5);
+    }finally{db.close();}
+  }
+});
+
 test("SA-058 previous successful chunks are separately committed, no all-100 claim",()=>{
   const {db}=setup();
   try {
