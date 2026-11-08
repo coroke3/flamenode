@@ -529,3 +529,34 @@ test("FK planner stops scanning on first over-budget distinct input without DB a
   assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, duplicateRows, 1)[0].binds, ["same"]);
   assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }], 0), []);
 });
+
+
+test("FK preflight executes bound SELECT on SQLite, accepting existing and rejecting missing references", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const sqlite = new DatabaseSync(":memory:");
+  try {
+    sqlite.exec('CREATE TABLE events (id TEXT PRIMARY KEY NOT NULL)');
+    sqlite.prepare('INSERT INTO events (id) VALUES (?)').run("e-1");
+    sqlite.prepare('INSERT INTO events (id) VALUES (?)').run("e-2");
+    const db = {
+      prepare(sql) {
+        return {
+          bind(...values) {
+            return { async all() { return { results: sqlite.prepare(sql).all(...values) }; } };
+          },
+        };
+      },
+    };
+    const foreignKeys = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+    await assert.doesNotReject(() =>
+      validateSpreadsheetForeignKeys(db, foreignKeys, [{ event_id: "e-1" }, { event_id: "e-2" }, { event_id: "e-1" }], 1));
+    await assert.rejects(() =>
+      validateSpreadsheetForeignKeys(db, foreignKeys, [{ event_id: "e-1" }, { event_id: "missing" }], 1),
+      /foreign_key_violation/);
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM events').get().n, 2);
+  } finally {
+    sqlite.close();
+  }
+});
