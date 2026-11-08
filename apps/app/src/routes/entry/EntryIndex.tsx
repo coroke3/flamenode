@@ -64,26 +64,34 @@ export function EntryIndexView({
   authError: string | null;
 }): React.ReactElement {
   const [signInPending, setSignInPending] = React.useState(false);
-  const [extraPages, setExtraPages] = React.useState<EntryIndexResponse[]>([]);
+  // Page offsets are valid only for the exact first-page snapshot, not merely a user ID.
+  const [extraPageState, setExtraPageState] = React.useState<{
+    owner: EntryIndexResponse;
+    pages: EntryIndexResponse[];
+  } | null>(null);
   const [pagingBusy, setPagingBusy] = React.useState(false);
   const pagingBusyRef = React.useRef(false);
   const [pagingFailed, setPagingFailed] = React.useState(false);
   const [continuationAccess, setContinuationAccess] = React.useState<ContinuationAccess>(null);
   const pageAbort = React.useRef<AbortController | null>(null);
+  const currentFirstPage = React.useRef(data);
+  currentFirstPage.current = data;
 
   // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
   React.useEffect(() => {
     pageAbort.current?.abort();
     pagingBusyRef.current = false;
-    setExtraPages([]);
+    setExtraPageState(null);
     setPagingFailed(false);
     setContinuationAccess(null);
     setPagingBusy(false);
     return () => pageAbort.current?.abort();
-  }, [data?.user.id]);
+  }, [data]);
 
   // A stale continuation cannot drive the new account's list or offset, even before effect cleanup.
-  const matchingPages = data ? extraPages.filter((page) => page.user.id === data.user.id) : [];
+  const matchingPages = data && extraPageState?.owner === data
+    ? extraPageState.pages.filter((page) => page.user.id === data.user.id)
+    : [];
   // CURRENT sorts accepting events by entry deadline. Across paged API reads, restore that global order.
   // The read DTO does not include start_time, so equal deadlines retain the API's stable page order.
   const events = data
@@ -107,7 +115,7 @@ export function EntryIndexView({
     setPagingFailed(false);
     void api.getEntryIndex(controller.signal, nextOffset).then(
       (response) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || currentFirstPage.current !== data) return;
         // A revoked session must not leave the previous account's private slot list on screen.
         if (response.status === "anonymous" || response.status === "banned") {
           setContinuationAccess({ userId: data.user.id, status: response.status });
@@ -122,13 +130,16 @@ export function EntryIndexView({
           setPagingFailed(true);
           return;
         }
-        setExtraPages((pages) => [...pages, response.data]);
+        setExtraPageState((state) => ({
+          owner: data,
+          pages: [...(state?.owner === data ? state.pages : []), response.data],
+        }));
       },
       () => {
-        if (!controller.signal.aborted) setPagingFailed(true);
+        if (!controller.signal.aborted && currentFirstPage.current === data) setPagingFailed(true);
       },
     ).finally(() => {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && currentFirstPage.current === data) {
         pagingBusyRef.current = false;
         setPagingBusy(false);
       }
