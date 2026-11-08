@@ -606,3 +606,41 @@ test("CURRENT import preflight preserves row indices, duplicate PK errors and ap
   assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 501}, (_,i) => ({video_id:"v"+i,event_id:"e"}))), /too_many_rows/);
   assert.throws(() => prepareSpreadsheetImportMutationRows({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, rows), /table_readonly/);
 });
+
+
+test("CURRENT import upsert planner counts INSERT UPDATE and skip without D1 effects", async () => {
+  const { prepareSpreadsheetImportMutationRows, planSpreadsheetImportMutations } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  const rows = [
+    { video_id: "v1", event_id: "e1", notes: "new" },
+    { video_id: "v2", event_id: "e1" },
+    { video_id: "v3", event_id: "e1", notes: "inserted" },
+  ];
+  const prepared = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(prepared.errors, []);
+  const existing = new Map([
+    [prepared.preparedRows[0].fingerprint, { video_id: "v1", event_id: "e1", notes: "old" }],
+    [prepared.preparedRows[1].fingerprint, { video_id: "v2", event_id: "e1", notes: "unchanged" }],
+  ]);
+  const planned = planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, "actor-1");
+  assert.deepEqual({ inserted: planned.inserted, updated: planned.updated, skipped: planned.skipped }, { inserted: 1, updated: 1, skipped: 1 });
+  assert.deepEqual(planned.mutations.map(x => x.audit.operation), ["UPDATE", "CREATE"]);
+  assert.deepEqual(planned.mutations[0].audit.after, { video_id: "v1", event_id: "e1", notes: "new" });
+  assert.deepEqual(planned.mutations[1].audit.after, { video_id: "v3", event_id: "e1", notes: "inserted" });
+  assert.equal(planSpreadsheetImportMutations(ctx, prepared, "insert", null, "actor-1").inserted, 3);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, prepared, "upsert", null, "actor-1"), /invalid_snapshot/);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, prepared, "upsert", existing, ""), /missing_operator/);
+  assert.throws(() => planSpreadsheetImportMutations(ctx, { ...prepared, errors: [{ index: 1, message: "duplicate_primary_key" }] }, "insert", null, "actor-1"), /invalid_row/);
+  assert.deepEqual(rows[0], { video_id: "v1", event_id: "e1", notes: "new" });
+});
