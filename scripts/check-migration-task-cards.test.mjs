@@ -58,6 +58,121 @@ test("missing task, duplicate task, orphan task all fail", () => {
   assert.match(validateTaskCards({...base,fileContents:orphan}).join(" "),/no STATUS task/);
 });
 
+test("fenced sample headings cannot create orphan or duplicate executable MIG cards", () => {
+  const example = [
+    "~~~markdown",
+    "### MIG-0399 — example only",
+    "- 読む: example",
+    "- 変更: example",
+    "- 試験: example",
+    "- DONE: example",
+    "~~~",
+    "````md",
+    "### MIG-0301 — duplicate example of an existing card",
+    "```js",
+    "### MIG-0308 — not a real heading",
+    "```",
+    "````",
+  ].join("\n");
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+  const onlyExample = collectTaskCards({ "fake.md": example });
+  assert.equal(onlyExample.cards.size, 0);
+  assert.match(onlyExample.errors.join("\n"), /fake\.md: no MIG cards/);
+});
+
+test("a blank ### heading followed by a MIG ID on the next line is not a task card", () => {
+  const example = [
+    "###",
+    "MIG-0399 — plain prose, not a heading",
+    "- 読む: a sample",
+    "- 変更: a sample",
+    "- 試験: a sample",
+    "- DONE: a sample",
+  ].join("\n");
+  const alone = collectTaskCards({ "example.md": example });
+  assert.equal(alone.cards.size, 0);
+  assert.match(alone.errors.join("\n"), /example\.md: no MIG cards/);
+
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"] + "\n" + example + "\n",
+  };
+  assert.equal(collectTaskCards(doc).cards.size, 5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
+test("required task-card fields inside fenced code do not satisfy an executable card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "")
+      + "\n```bash\n# Sample only\n- 試験: echo passing\n```\n",
+  };
+  const errors=validateTaskCards({ ...base, fileContents:doc });
+  assert.match(errors.join("\n"), /MIG-0308: missing card field 試験:/);
+});
+
+test("list-contained fenced code cannot supply missing task-card fields", () => {
+  for (const opening of ["- ```md", "1. ~~~markdown"]) {
+    const continuation = opening.startsWith("1.") ? "   " : "  ";
+    const closing = opening.includes("`") ? "  ```" : "   ~~~";
+    const doc = { ...cards,
+      "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+        .replace("- 試験: zero diff", "- test instructions are missing")
+        + "\n" + opening + "\n" + continuation + "- 試験: fake inside code\n" + closing + "\n",
+    };
+    assert.match(
+      validateTaskCards({ ...base, fileContents: doc }).join("\n"),
+      /MIG-0308: missing card field 試験:/,
+      opening,
+    );
+  }
+});
+
+test("an unclosed list fence stops masking on dedent", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "- test instructions are missing")
+      + "\n- ```md\n  - 試験: fake inside code\n- 試験: real prose after dedent\n",
+  };
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
+test("required fields cannot leak from the next prose heading into an incomplete card", () => {
+  const incomplete = cards["docs/migration/TASK_CARDS_2_3.md"].replace(
+    "- 試験: zero diff", "- no test instructions",
+  );
+  for (const heading of ["# Appendix", "## Supplemental notes", "### Non-task heading"]) {
+    const doc = { ...cards,
+      "docs/migration/TASK_CARDS_2_3.md": incomplete + "\n" + heading + "\n- 試験: belongs to the next section\n",
+    };
+    assert.match(
+      validateTaskCards({ ...base, fileContents: doc }).join("\n"),
+      /MIG-0308: missing card field 試験:/,
+      heading,
+    );
+  }
+});
+
+test("h4 subsections remain part of the containing MIG task card", () => {
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": cards["docs/migration/TASK_CARDS_2_3.md"]
+      .replace("- 試験: zero diff", "#### Verification details\n- 試験: zero diff"),
+  };
+  assert.deepEqual(validateTaskCards({ ...base, fileContents: doc }), []);
+});
+
+test("CRLF task card offsets stay aligned after masking fenced examples", () => {
+  const extra = "\n```md\n### MIG-0399 example\n- 読む: not a card\n```\n";
+  const doc = { ...cards,
+    "docs/migration/TASK_CARDS_2_3.md": (cards["docs/migration/TASK_CARDS_2_3.md"]+extra).replace(/\n/g,"\r\n"),
+  };
+  assert.equal(collectTaskCards(doc).cards.size,5);
+  assert.deepEqual(validateTaskCards({ ...base, fileContents:doc }), []);
+});
+
 test("incomplete card cannot pass merely by presence of MIG heading", () => {
   const incomplete={...cards,"docs/migration/TASK_CARDS_2_3.md":cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff","- test omitted")};
   assert.match(validateTaskCards({...base,fileContents:incomplete}).join(" "),/missing card field 試験:/);
@@ -258,4 +373,125 @@ test("duplicate metadata, sections and empty recipes fail closed", () => {
 test("spec read errors cannot silently hide invalid work orders", () => {
   assert.throws(() => readSpecs(() => { throw Object.assign(new Error("access denied"), { code: "EACCES" }); }), /access denied/);
   assert.ok(Object.values(readSpecs(() => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); })).every(value => value === undefined));
+});
+
+test("blockquote-contained fences cannot supply missing task-card fields", () => {
+  for (const [opening, closing] of [["> ```md", "> ```"], ["- > ```md", "  > ```"], ["> > ~~~md", "> > ~~~"]]) {
+    const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "- test instructions are missing");
+    const fenced = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "\n" + opening + "\n> - 試験: fake inside code\n" + closing + "\n" };
+    assert.match(validateTaskCards({ ...base, fileContents: fenced }).join("\n"), /MIG-0308: missing card field 試験:/, opening);
+    const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": fenced["docs/migration/TASK_CARDS_2_3.md"] + "- 試験: real after closing fence\n" };
+    assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /missing card field 試験:/, opening);
+  }
+});
+
+test("required field markers in inline code or prose do not satisfy the card", () => {
+  const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "");
+  for (const mention of ["注記: `試験:` は後で書く", "- 注記 試験: 参照", "> 試験: quoted note"]) {
+    const doc = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing.replace("### MIG-0308 — DB\n", "### MIG-0308 — DB\n" + mention + "\n") };
+    assert.match(validateTaskCards({ ...base, fileContents: doc }).join("\n"), /MIG-0308: missing card field 試験:/, mention);
+  }
+  for (const field of ["- 試験: zero diff", "- **試験:** zero diff", "1. 試験: zero diff"]) {
+    const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + field + "\n" };
+    assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /MIG-0308: missing card field 試験:/, field);
+  }
+});
+
+test("HTML comments, indented code and deeply nested list fences cannot supply fields", () => {
+  const missing = cards["docs/migration/TASK_CARDS_2_3.md"].replace("- 試験: zero diff", "");
+  for (const fake of ["<!--\n- 試験: fake\n-->\n", "\n    試験: fake indented code\n", "- outer\n    - ```md\n      - 試験: fake\n      ```\n"]) {
+    const doc = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + fake };
+    assert.match(validateTaskCards({ ...base, fileContents: doc }).join("\n"), /MIG-0308: missing card field 試験:/, fake);
+  }
+  const real = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "- **試験**: real\n" };
+  assert.doesNotMatch(validateTaskCards({ ...base, fileContents: real }).join("\n"), /missing card field 試験:/);
+  const nested = { ...cards, "docs/migration/TASK_CARDS_2_3.md": missing + "- outer\n    - 試験: nested real\n" };
+  assert.doesNotMatch(validateTaskCards({ ...base, fileContents: nested }).join("\n"), /missing card field 試験:/);
+});
+
+test("card text for task context extends to the next MIG card, not the next h2", () => {
+  const f = { "t.md": "### MIG-0301 — a\n- 読む: r\n- 変更: c\n- 試験: t\n- DONE: d\n## Section\nkeep me\n### MIG-0302 — b\n" };
+  assert.match(collectTaskCards(f).cards.get("MIG-0301").text, /keep me/);
+});
+
+
+test("continuation fences and deeply-indented list code cannot supply required fields", () => {
+ const base = "### MIG-0301 — real card\n- 読む: input\n- 変更: code\n- DONE: verified\n";
+ const fakeCases = [
+  "- item\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- item\n    ```md\n    - 試験: fake code\n    ```\n",
+  "10. item\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- outer\n  - inner\n\n    ```md\n    - 試験: fake code\n    ```\n",
+  "- item\n\n      - 試験: fake indented code\n",
+  "- item\n        - 試験: fake indented code\n",
+ ];
+ for (const example of fakeCases) {
+  const result = collectTaskCards({ "test.md": base + example });
+  assert.match(result.errors.join("\n"), /MIG-0301: missing card field 試験:/, example);
+ }
+ const genuine = ["- 試験: plain real", "- item\n    - 試験: nested real", "- outer\n  - inner\n      - 試験: nested real"];
+ for (const example of genuine) {
+  const result = collectTaskCards({ "test.md": base + example + "\n" });
+  assert.doesNotMatch(result.errors.join("\n"), /missing card field 試験:/, example);
+ }
+ const after = collectTaskCards({ "test.md": base + "- item\n\n    ```md\n    - 試験: fake\n    ```\n- 試験: genuine\n" });
+ assert.deepEqual(after.errors, []);
+});
+
+test("HTML commented card headings and fields are not executable instructions", () => {
+ const fields = "- 読む: yes\n- 変更: yes\n- 試験: yes\n- DONE: yes\n";
+ const hidden = "<!--\n### MIG-0301 — example\n" + fields + "-->\n";
+ const only = collectTaskCards({ "comment.md": hidden });
+ assert.equal(only.cards.size, 0);
+ assert.match(only.errors.join("\n"), /comment\.md: no MIG cards/);
+ const inline = collectTaskCards({ "comment.md": "<!-- ### MIG-0301 — example\n"+fields+"-->\n" });
+ assert.equal(inline.cards.size, 0);
+ const unfinished = collectTaskCards({ "comment.md": "<!--\n### MIG-0301 — example\n"+fields });
+ assert.equal(unfinished.cards.size, 0);
+ const valid = collectTaskCards({ "comment.md": hidden + "### MIG-0301 — real\n" + fields });
+ assert.equal(valid.cards.size, 1);
+ assert.deepEqual(valid.errors, []);
+ const inlineCode = collectTaskCards({ "comment.md": "`<!--`\n### MIG-0301 — real\n"+fields });
+ assert.equal(inlineCode.cards.size, 1);
+ assert.deepEqual(inlineCode.errors, []);
+ assert.equal(extractWorkOrder(hidden,"MIG-0301"),null);
+});
+
+
+test("a fence inside an HTML comment cannot hide later live cards", () => {
+  const fields = "- 読む: real\n- 変更: real\n- 試験: real\n- DONE: real\n";
+  const real = "### MIG-0301 — real\n" + fields;
+  for (const hidden of [
+    "<!--\n```md\n- 試験: fake\n-->\n",
+    "<!--\n```md\n### MIG-0302 — fake\n" + fields + "-->\n",
+    "<!--\n```md\n```\n-->\n",
+    "<!--\n`\n### MIG-0302 — fake\n-->\n",
+  ]) {
+    const result = collectTaskCards({ "t.md": hidden + real });
+    assert.deepEqual([...result.cards.keys()], ["MIG-0301"], hidden);
+    assert.deepEqual(result.errors, [], hidden);
+    assert.equal(result.cards.get("MIG-0301").heading, "### MIG-0301 — real", hidden);
+  }
+});
+
+test("HTML comment markers in real fenced code do not hide later cards", () => {
+  const fields = "- 読む: real\n- 変更: real\n- 試験: real\n- DONE: real\n";
+  const source = "```md\n<!--\n### MIG-0302 — fake\n```\n### MIG-0301 — real\n" + fields;
+  const result = collectTaskCards({ "t.md": source });
+  assert.deepEqual([...result.cards.keys()], ["MIG-0301"]);
+  assert.deepEqual(result.errors, []);
+});
+
+test("comment-contained fences cannot hide real required fields after closing", () => {
+  const source = [
+    "### MIG-0301 — real",
+    "- 読む: real", "- 変更: real", "- DONE: real",
+    "<!--",
+    "```md",
+    "- 試験: fake",
+    "-->",
+    "- 試験: genuine",
+  ].join("\n");
+  const result = collectTaskCards({ "t.md": source });
+  assert.deepEqual(result.errors, []);
 });

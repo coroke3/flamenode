@@ -367,7 +367,6 @@ export function sessionMiddleware(options?: SessionMiddlewareOptions) {
     const cookieHeader = c.req.header("cookie");
     const secure = new URL(c.req.url).protocol === "https:";
     const token = extractSessionToken(cookieHeader, { secure });
-    const db = c.env?.DB;
 
     if (!token) {
       c.set("user", null);
@@ -378,8 +377,20 @@ export function sessionMiddleware(options?: SessionMiddlewareOptions) {
     }
     c.header?.("Cache-Control", PRIVATE_NO_STORE);
 
+    let db: D1DatabaseLike | undefined;
+    let bindingGetterFailed = false;
+    try {
+      db = c.env?.DB;
+    } catch {
+      // The getter may contain provider-sensitive metadata; never log its error.
+      bindingGetterFailed = true;
+    }
     if (!db) {
-      console.error("[auth:session] D1_BINDING_MISSING");
+      console.error(
+        bindingGetterFailed
+          ? "[auth:session] D1_BINDING_FAILED"
+          : "[auth:session] D1_BINDING_MISSING",
+      );
       c.set("user", null);
       c.set("session", null);
       c.set("sessionState", "unavailable" satisfies SessionState);

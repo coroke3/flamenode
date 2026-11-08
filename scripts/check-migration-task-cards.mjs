@@ -10,7 +10,7 @@ export const TASK_CARD_FILES = Object.freeze([
   "docs/migration/TASK_CARDS_6_7.md",
   "docs/migration/TASK_CARDS_8_9.md",
 ]);
-export const REQUIRED_CARD_FIELDS = Object.freeze(["読む:", "変更", "試験:", "DONE:"]);
+export const REQUIRED_CARD_FIELDS = Object.freeze(["読む:", "変更:", "試験:", "DONE:"]);
 
 export function parseTrackedMigrationTasks(status) {
   const tasks = new Map();
@@ -24,19 +24,122 @@ export function parseTrackedMigrationTasks(status) {
   return tasks;
 }
 
+// A required field is an instruction line ("- 試験: ...", "1. **試験:** ...", or a bare
+// "試験: ..." line start). Inline code, descriptive prose ("注記: `試験:` ...") and
+// blockquote text mention the marker without instructing anything.
+function hasCardField(proseText, marker) {
+  const name = marker.replace(/:$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const list = "(?:[-*+]|\\d{1,9}[.)])[ \\t]+";
+  const field = "(?:\\*\\*)?" + name + "(?::(?:\\*\\*)?|\\*\\*:)";
+  // A list item may be nested at any depth; a bare field line is at most 3 spaces
+  // indented (4+ spaces is an indented code block).
+  return new RegExp("^(?:[ \\t]*" + list + field + "|[ ]{0,3}" + field + ")", "m").test(maskNonInstructions(proseText));
+}
+
+// CommonMark nested list items are positioned at their parent's content
+// column. An additional 4 columns is code, not another list instruction.
+function listItemColumn(line) {
+  const m = /^( *)(?:[-+*]|\d{1,9}[.)])[ \t]+/.exec(line);
+  return m ? { marker: m[1].length, content: m[0].length } : null;
+}
+function listCodeLine(line, stack) {
+  if (!line.trim()) return false;
+  const indent = line.match(/^ */)?.[0].length ?? 0;
+  while (stack.length && indent < stack.at(-1).content) stack.pop();
+  if (stack.length && indent >= stack.at(-1).content + 4) return true;
+  const item = listItemColumn(line);
+  if (item && (stack.length || item.marker <= 3)) stack.push(item);
+  return false;
+}
+
+// Preserve offsets and line breaks while hiding HTML comments. Inline code
+// spans and previously masked fences cannot create fake comment boundaries.
+function maskHtmlCommentsOutsideCode(source) {
+  let output = "", inComment = false, inline = 0;
+  const hasClosingTicks = (start, length) => {
+    let cursor = start;
+    while (cursor < source.length) {
+      const pos = source.indexOf("`", cursor);
+      if (pos < 0) return false;
+      let end = pos;
+      while (source[end] === "`") end++;
+      if (end - pos === length) return true;
+      cursor = end;
+    }
+    return false;
+  };
+  for (let i = 0; i < source.length;) {
+    if (inComment) {
+      if (source.startsWith("-->", i)) { output += "   "; i += 3; inComment = false; }
+      else { output += source[i] === "\n" ? "\n" : " "; i++; }
+      continue;
+    }
+    if (source[i] === "`") {
+      let end = i + 1;
+      while (source[end] === "`") end++;
+      const count = end - i;
+      if (inline === count) inline = 0;
+      else if (!inline && hasClosingTicks(end, count)) inline = count;
+      output += source.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (!inline && source.startsWith("<!--", i)) {
+      output += "    "; i += 4; inComment = true;
+      continue;
+    }
+    output += source[i++];
+  }
+  return output;
+}
+
+// HTML comments and top-level indented code blocks are not instructions.
+function maskNonInstructions(text) {
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  const lines = text.replace(/<!--[\s\S]*?(?:-->|$)/g, blank).split("\n");
+  let prevBlank = true, inCode = false;
+  const listStack = [];
+  return lines.map((line) => {
+    if (!line.trim()) { prevBlank = true; return line; }
+    const indented = /^(?: {4}|\t)/.test(line);
+    const nestedCode = listCodeLine(line, listStack);
+    const out = nestedCode || (indented && !listStack.length && (prevBlank || inCode))
+      ? blank(line) : line;
+    inCode = out !== line;
+    prevBlank = false;
+    return out;
+  }).join("\n");
+}
+
 export function collectTaskCards(fileContents) {
   const cards = new Map();
   const errors = [];
   for (const [path, content] of Object.entries(fileContents)) {
-    const matches = [...content.matchAll(/^###\s+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
+    // A fenced Markdown example is neither an executable MIG card nor proof
+    // that required instructions exist. Preserve offsets while masking fences.
+    const normalized = content.replace(/\r\n/g, "\n");
+    const prose = proseLines(normalized).join("\n");
+    // Only horizontal whitespace may separate ### and the ID; \s also spans
+    // newlines and incorrectly turns an empty heading + a following ID into a card.
+    const matches = [...prose.matchAll(/^###[ \t]+(MIG-0[2-9]\d\d)\b[^\n]*$/gm)];
     if (!matches.length) errors.push(path + ": no MIG cards");
     for (let i = 0; i < matches.length; i++) {
-      const [heading, id] = matches[i];
-      const text = content.slice(matches[i].index + heading.length, matches[i + 1]?.index ?? content.length);
+      const [, id] = matches[i];
+      const heading = normalized.slice(matches[i].index, matches[i].index + matches[i][0].length);
+      // A card ends at the next h1–h3 prose heading, not merely at the next
+      // MIG card. Otherwise instructions in a later section can falsely satisfy
+      // required fields missing from this card. Fenced headings are masked.
+      const start = matches[i].index + matches[i][0].length;
+      const nextHeading = prose.slice(start).search(/^#{1,3}[ \t]+[^\n]*$/m);
+      const end = nextHeading < 0 ? prose.length : start + nextHeading;
+      // Printed task context keeps the pre-existing span (up to the next MIG card);
+      // only required-field detection is bounded by the h1–h3 heading.
+      const text = normalized.slice(start, matches[i + 1]?.index ?? normalized.length);
+      const proseText = prose.slice(start, end);
       if (cards.has(id)) errors.push(id + ": duplicate card in " + path + " and " + cards.get(id).path);
       else cards.set(id,{path,heading,text});
       for(const marker of REQUIRED_CARD_FIELDS) {
-        if(!text.includes(marker)) errors.push(id + ": missing card field " + marker);
+        if(!hasCardField(proseText, marker)) errors.push(id + ": missing card field " + marker);
       }
     }
   }
@@ -90,20 +193,93 @@ export const WORK_ORDER_SECTIONS = Object.freeze(["Source snapshot", "Owned path
 export const specFileFor = (id) => SPEC_FILES[id.slice(4, 6)] ?? null;
 
 // Only prose can declare readiness. Examples inside backtick/tilde fences are never policy.
-function proseLines(text) {
+const QUOTE_PREFIX = /^( {0,3}(?:(?:[-+*]|\d{1,9}[.)])[ \t]+)?(?:>[ \t]?)+)(.*)$/;
+function fenceVisibleText(text) {
   let fence = null;
-  return text.replace(/\r\n/g, "\n").split("\n").map((line) => {
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  const listStack = [];
+  const fencedLines = text.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    // CommonMark list items can start fences as "- ```md" or "1. ~~~md".
+    // Their contents are indented relative to the list marker.
+    const listOpening = line.match(/^ *(?:[-+*]|\d{1,9}[.)])[ \t]+(`{3,}|~{3,})(.*)$/);
+    const ordinaryOpening = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence?.quote) {
+      const q = line.match(QUOTE_PREFIX);
+      if (!q) fence = null; // a non-quote line ends the quoted fence; fall through as prose
+      else {
+        const closing = q[2].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (closing && closing[1][0] === fence.char && closing[1].length >= fence.length && !closing[2].trim()) fence = null;
+        return " ".repeat(line.length);
+      }
+    }
     if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      const indent = line.match(/^ */)[0].length;
+      const closing = line.slice(indent).match(/^(`{3,}|~{3,})(.*)$/);
+      const isClosing = closing && indent <= fence.indent + 3 &&
+        closing[1][0] === fence.char && closing[1].length >= fence.length && !closing[2].trim();
+      if (isClosing) {
+        fence = null;
+      } else if (fence.indent > 0 && line.trim() && indent < fence.indent) {
+        // An unclosed list fence ends on dedent; do not hide subsequent prose.
+        fence = null;
+        return line;
+      }
       return " ".repeat(line.length);
     }
+    // Fences inside blockquotes ("> ```md", "- > ```md") are code too.
+    const quoted = line.match(QUOTE_PREFIX);
+    const quoteOpening = quoted?.[2].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (quoteOpening) {
+      fence = { char: quoteOpening[1][0], length: quoteOpening[1].length, indent: 0, quote: true };
+      return " ".repeat(line.length);
+    }
+    if (listCodeLine(line, listStack)) return " ".repeat(line.length);
+    // A list-item continuation fence can open without another list marker.
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    const parent = listStack.at(-1);
+    const continuation = parent && indent >= parent.content && indent <= parent.content + 3
+      ? line.slice(indent).match(/^(`{3,}|~{3,})(.*)$/)
+      : null;
+    const marker = listOpening || continuation || ordinaryOpening;
     if (marker) {
-      fence = { char: marker[1][0], length: marker[1].length };
+      fence = {
+        char: marker[1][0],
+        length: marker[1].length,
+        indent: listOpening ? line.indexOf(marker[1]) : continuation ? indent : 0,
+      };
       return " ".repeat(line.length);
     }
     return line;
   });
+  return fencedLines.join("\n");
+}
+
+// Detect HTML comment openers only outside real fenced and inline code. Find the
+// matching closing delimiter in the ORIGINAL text, not the fence-masked view:
+// a fake fence *inside a comment* can otherwise hide its own "-->" and every
+// genuine MIG heading after the comment. Re-run the fence mask after each
+// comment so a code example inside HTML cannot modify the parser's fence state.
+function proseLines(text) {
+  let source = text.replace(/\r\n/g, "\n");
+  let offset = 0;
+  while (offset < source.length) {
+    const visible = fenceVisibleText(source);
+    const withoutComments = maskHtmlCommentsOutsideCode(visible);
+    let opener = -1;
+    for (let i = offset; i < visible.length; i++) {
+      if (visible[i] !== withoutComments[i]) {
+        opener = i;
+        break;
+      }
+    }
+    if (opener < 0) break;
+    const closing = source.indexOf("-->", opener + 4);
+    const end = closing < 0 ? source.length : closing + 3;
+    source = source.slice(0, opener) +
+      source.slice(opener, end).replace(/[^\n]/g, " ") +
+      source.slice(end);
+    offset = end;
+  }
+  return fenceVisibleText(source).split("\n");
 }
 
 // Section runs from its `### MIG-XXXX` heading to the next h1–h3 heading outside fenced code.
