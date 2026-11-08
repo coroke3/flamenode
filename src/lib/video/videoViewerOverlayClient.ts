@@ -182,10 +182,14 @@ async function fetchOverlay(
   const key = overlayKey(videoId, playlist);
   const now = Date.now();
   const existing = cache.get(key);
+  // The wall clock can jump backward (manual/NTP change). A negative age
+  // must expire private viewer data, not extend its cache lifetime indefinitely.
+  const ageMs = existing?.fetchedAt == null ? null : now - existing.fetchedAt;
   if (
     existing?.value &&
-    existing.fetchedAt != null &&
-    now - existing.fetchedAt <= (existing.ttlMs ?? CACHE_TTL_MS)
+    ageMs != null &&
+    ageMs >= 0 &&
+    ageMs <= (existing.ttlMs ?? CACHE_TTL_MS)
   ) {
     setCacheEntry(key, existing);
     return existing.value;

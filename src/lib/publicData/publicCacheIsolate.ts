@@ -1,5 +1,7 @@
 import "server-only";
 
+import { utf8ByteLengthUpTo } from "./publicCachePolicy";
+
 /**
  * Isolate-local parsed public JSON. Holds plain objects only (no bindings,
  * no Promises) so a warm Worker can skip Cache API / R2 JSON.parse on repeat
@@ -15,6 +17,7 @@ export const PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC = 30;
 
 type IsolateJsonCacheEntry = {
   value: unknown;
+  createdAtMs: number;
   expiresAtMs: number;
   byteWeight: number;
 };
@@ -23,12 +26,16 @@ const isolateJsonCache = new Map<string, IsolateJsonCacheEntry>();
 let isolateJsonCacheBytes = 0;
 
 function isPromiseLike(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "then" in value &&
-    typeof (value as { then: unknown }).then === "function"
-  );
+  if (value === null || (typeof value !== "object" && typeof value !== "function")) {
+    return false;
+  }
+  try {
+    return "then" in value && typeof (value as { then: unknown }).then === "function";
+  } catch {
+    // A throwing getter or Proxy trap cannot be inspected safely. Treat it
+    // as uncacheable instead of leaking an exception or preserving an old key.
+    return true;
+  }
 }
 
 function deleteEntry(r2Key: string): void {
@@ -40,7 +47,7 @@ function deleteEntry(r2Key: string): void {
 
 function pruneExpiredEntries(nowMs: number): void {
   for (const [r2Key, entry] of isolateJsonCache) {
-    if (entry.expiresAtMs <= nowMs || isPromiseLike(entry.value)) {
+    if (nowMs < entry.createdAtMs || entry.expiresAtMs <= nowMs || isPromiseLike(entry.value)) {
       deleteEntry(r2Key);
     }
   }
@@ -55,13 +62,25 @@ export function readPublicJsonIsolateCache(
   r2Key: string,
   nowMs = Date.now(),
 ): unknown | null {
+  // Only non-negative whole-millisecond timestamps are valid. A fractional,
+  // negative or unsafe clock must not read data or refresh its LRU position.
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) return null;
   pruneExpiredEntries(nowMs);
   const entry = isolateJsonCache.get(r2Key);
   if (!entry) return null;
   deleteEntry(r2Key);
   isolateJsonCache.set(r2Key, entry);
   isolateJsonCacheBytes += entry.byteWeight;
-  return entry.value;
+  try {
+    // An isolate serves concurrent requests. Never expose its mutable JSON
+    // snapshot to a caller that can change the next request's cache hit.
+    return structuredClone(entry.value);
+  } catch {
+    // Cached data must remain best-effort even if an unexpected value cannot
+    // be cloned; do not repeatedly serve the same unusable entry.
+    deleteEntry(r2Key);
+    return null;
+  }
 }
 
 export function writePublicJsonIsolateCache(
@@ -71,14 +90,31 @@ export function writePublicJsonIsolateCache(
   byteWeight: number,
   nowMs = Date.now(),
 ): void {
-  if (payload == null || isPromiseLike(payload)) return;
+  // A rejected replacement must not leave the previous value readable.
+  // In particular, an invalidated snapshot may now be null or async.
+  if (payload == null || isPromiseLike(payload)) {
+    deleteEntry(r2Key);
+    return;
+  }
+  // NaN comparison is always false; a cached entry with NaN expiration would never expire.
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
+    deleteEntry(r2Key);
+    return;
+  }
   pruneExpiredEntries(nowMs);
-  const safeByteWeight = Math.floor(byteWeight);
+  // Byte accounting must use an exact non-negative integer, not a rounded
+  // caller-supplied weight that can undercount per-entry and total budgets.
   if (
-    !Number.isSafeInteger(safeByteWeight) ||
-    safeByteWeight <= 0 ||
-    safeByteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES
+    !Number.isSafeInteger(byteWeight) ||
+    byteWeight <= 0 ||
+    byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES
   ) {
+    deleteEntry(r2Key);
+    return;
+  }
+  // Direct callers must not create an entry with expiresAtMs=NaN/Infinity:
+  // such an entry would never satisfy the expiry comparison during pruning.
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
     deleteEntry(r2Key);
     return;
   }
@@ -86,20 +122,49 @@ export function writePublicJsonIsolateCache(
     PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
     Math.max(1, Math.floor(ttlSeconds)),
   );
+  const expiresAtMs = nowMs + ttlSec * 1000;
+  // Reject timestamps whose expiry overflows the safe integer range; otherwise
+  // a rounded/Infinity deadline could outlive the intended bounded TTL.
+  if (!Number.isSafeInteger(nowMs) || !Number.isSafeInteger(expiresAtMs)) {
+    deleteEntry(r2Key);
+    return;
+  }
+  // byteWeight is caller-supplied. A small claimed weight must never let
+  // an oversized direct write bypass the per-entry or aggregate heap budget.
+  // Normalize to exactly the JSON representation served by Cache API while
+  // detaching the mutable source from the isolate-global snapshot.
+  let snapshot: unknown;
+  try {
+    const serialized = JSON.stringify(payload);
+    if (
+      typeof serialized !== "string" ||
+      utf8ByteLengthUpTo(serialized, PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES) !== byteWeight
+    ) {
+      deleteEntry(r2Key);
+      return;
+    }
+    snapshot = JSON.parse(serialized);
+  } catch {
+    // An invalid replacement must evict the old same-key entry without
+    // sacrificing unrelated keys to an uncacheable input.
+    deleteEntry(r2Key);
+    return;
+  }
   deleteEntry(r2Key);
   while (
     isolateJsonCache.size >= PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES ||
-    isolateJsonCacheBytes + safeByteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
+    isolateJsonCacheBytes + byteWeight > PUBLIC_JSON_ISOLATE_CACHE_MAX_BYTES
   ) {
     if (isolateJsonCache.size === 0) return;
     evictOldestEntry();
   }
   isolateJsonCache.set(r2Key, {
-    value: payload,
-    expiresAtMs: nowMs + ttlSec * 1000,
-    byteWeight: safeByteWeight,
+    value: snapshot,
+    createdAtMs: nowMs,
+    expiresAtMs,
+    byteWeight,
   });
-  isolateJsonCacheBytes += safeByteWeight;
+  isolateJsonCacheBytes += byteWeight;
 }
 
 export function deletePublicJsonIsolateCache(r2Key: string): void {

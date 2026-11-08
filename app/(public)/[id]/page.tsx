@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { buildAccentVars } from "@/lib/theme/accent";
 import styles from "./page.module.css";
-import { extractYoutubeId, youtubeThumbUrl } from "@/lib/youtube/id";
+import { extractYoutubeId, videoPageHref, youtubeThumbUrl } from "@/lib/youtube/id";
 import { YoutubePlayer } from "@/components/video/YoutubePlayer";
 import { VideoViewTracker } from "@/components/video/VideoViewTracker";
 import { FixedVideoPlayerFrame } from "@/components/video/FixedVideoPlayerFrame";
@@ -81,7 +81,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (staticLoaded.data) {
     const { video } = staticLoaded.data;
     const youtubeVideoId = video.youtube_video_id?.trim() || null;
-    const videoPath = `/${youtubeVideoId ?? video.id}`;
+    const videoPath = videoPageHref(video);
     const description = compactText(
       video.intro_comment ||
         video.highlights ||
@@ -252,7 +252,7 @@ function StaticVideoDetailView({
         video.closing_comment ||
         (video.music ? `使用楽曲: ${video.music}` : null),
     ),
-    url: absoluteUrl(`/${youtubeVideoId ?? video.id}`),
+    url: absoluteUrl(videoPageHref(video)),
     thumbnailUrl: youtubeId
       ? [absoluteUrl(youtubeThumbUrl(youtubeId, "maxresdefault"))]
       : undefined,

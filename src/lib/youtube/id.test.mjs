@@ -135,3 +135,49 @@ test("youtubeEmbedUrl: start <= 0 は無視", () => {
   const url = youtubeEmbedUrl("abc", { start: 0 });
   assert.ok(!url.includes("start="));
 });
+
+test("youtubeWatchUrl: malformed ID cannot inject a list parameter or fragment", () => {
+  const rawId = "dQw4w9WgXcQ&list=private#fragment";
+  const url = new URL(youtubeWatchUrl(rawId));
+  assert.equal(url.origin, "https://www.youtube.com");
+  assert.equal(url.pathname, "/watch");
+  assert.equal(url.searchParams.get("v"), rawId);
+  assert.equal(url.searchParams.has("list"), false);
+  assert.equal(url.hash, "");
+  assert.equal(
+    youtubeWatchUrl("dQw4w9WgXcQ"),
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  );
+});
+
+test("youtubeEmbedUrl: malformed ID remains one encoded path segment", () => {
+  const rawId = "../other?v=override#fragment";
+  const url = new URL(youtubeEmbedUrl(rawId, {
+    start: 30,
+    enableJsApi: true,
+    origin: "https://flamenode.net",
+  }));
+  assert.equal(url.origin, "https://www.youtube.com");
+  assert.equal(url.pathname, "/embed/..%2Fother%3Fv%3Doverride%23fragment");
+  assert.equal(url.searchParams.get("rel"), "0");
+  assert.equal(url.searchParams.get("start"), "30");
+  assert.equal(url.searchParams.get("enablejsapi"), "1");
+  assert.equal(url.searchParams.get("origin"), "https://flamenode.net");
+  assert.equal(url.searchParams.has("v"), false);
+  assert.equal(url.hash, "");
+  assert.ok(youtubeEmbedUrl("dQw4w9WgXcQ").startsWith("https://www.youtube.com/embed/dQw4w9WgXcQ?"));
+});
+
+test("youtubeEmbedUrl: dot segments and malformed UTF-16 cannot escape the embed path", () => {
+  for (const id of [".", ".."]) {
+    const url = new URL(youtubeEmbedUrl(id));
+    assert.equal(url.pathname, "/embed/_");
+    assert.equal(url.searchParams.get("rel"), "0");
+  }
+  // Malformed surrogate pairs previously risked a URIError during render.
+  const malformed = "\uD800";
+  const watch = new URL(youtubeWatchUrl(malformed));
+  const embed = new URL(youtubeEmbedUrl(malformed));
+  assert.equal(watch.searchParams.get("v"), "\uFFFD");
+  assert.equal(embed.pathname, "/embed/%EF%BF%BD");
+});
