@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, judge, parseArgs, percentile, renderMarkdown, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, judge, parseArgs, percentile, renderMarkdown, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("percentile uses nearest rank on an ascending array", () => {
@@ -398,6 +398,22 @@ test("MIG-0639 SA-045..055 and SA-100..101: each local write fixture executes on
     assert.equal(count(db, "SELECT COUNT(*) AS n FROM x_identity_requests WHERE id='bench-xreq-sqlite-2'"), 1);
   } finally {
     db.close();
+  }
+});
+
+test("MIG-0639: new write scenarios return their declared normal status on local Hono + migrated D1", async () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((sc) => [sc.id, sc]));
+  const ids = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-049", "SA-051", "SA-052", "SA-053", "SA-054", "SA-055", "SA-099", "SA-100", "SA-101"];
+  for (const id of ids) {
+    const target = await createInprocTarget({ adminToken: "t" });
+    try {
+      const spec = scenarios.get(id).kinds.normal(7, "smoke" + id);
+      if (spec.setup) await target.exec(spec.setup);
+      const result = await target.run(spec);
+      assert.ok(spec.expect.includes(result.status), id + " expected " + spec.expect.join("/") + " but got " + result.status + " on local migrated D1");
+    } finally {
+      await target.close();
+    }
   }
 });
 
