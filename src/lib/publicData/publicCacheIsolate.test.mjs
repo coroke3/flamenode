@@ -67,6 +67,223 @@ if (runTestWithTsx(import.meta.url)) {
     assert.equal(readPublicJsonIsolateCache("videos/b.json", now), null);
   });
 
+  test("isolate cache は保存元と読み取り元の可変オブジェクトを共有しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_100_000;
+    const key = "mutable-snapshot.json";
+    const source = { items: [{ title: "original" }], meta: { version: 1 } };
+    const weight = new TextEncoder().encode(JSON.stringify(source)).byteLength;
+    writePublicJsonIsolateCache(key, source, 30, weight, now);
+
+    // A direct write caller must not mutate the process-global cache later.
+    source.items[0].title = "changed by original owner";
+    source.meta.version = 2;
+    const first = readPublicJsonIsolateCache(key, now + 1_000);
+    assert.deepEqual(first, {
+      items: [{ title: "original" }],
+      meta: { version: 1 },
+    });
+
+    // A caller's response transformation must not change subsequent requests.
+    first.items[0].title = "changed by first request";
+    first.items.push({ title: "injected" });
+    first.meta.version = 99;
+    const next = readPublicJsonIsolateCache(key, now + 2_000);
+    assert.deepEqual(next, {
+      items: [{ title: "original" }],
+      meta: { version: 1 },
+    });
+    assert.notStrictEqual(first, next);
+    assert.notStrictEqual(first.items, next.items);
+  });
+
+  test("isolate cache は複製不能な置換値を拒否し無関係のentryを保持する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_175_000;
+    const valid = { value: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(valid)).byteLength;
+    writePublicJsonIsolateCache("untouched.json", valid, 30, weight, now);
+    writePublicJsonIsolateCache("bad.json", valid, 30, weight, now);
+    const uncloneable = { callback: () => 1 };
+    assert.doesNotThrow(() =>
+      writePublicJsonIsolateCache("bad.json", uncloneable, 30, weight, now),
+    );
+    assert.equal(readPublicJsonIsolateCache("bad.json", now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("untouched.json", now), valid);
+  });
+
+  test("isolate cache は null・Promise の置換で旧entryを破棄する", () => {
+    const now = 1_250_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "replacement.json";
+    for (const invalid of [null, undefined, Promise.resolve({ id: "next" })]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        "invalid replacement must not expose a prior snapshot");
+    }
+    // Replacements of unrelated keys must not invalidate valid entries.
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("valid.json", payload, 30, weight, now);
+    writePublicJsonIsolateCache("invalid.json", null, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
+  });
+
+  test("isolate cache は関数型thenableも保存せず旧entryを破棄する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 1_375_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "callable-thenable.json";
+    const thenable = Object.assign(() => undefined, {
+      then: (resolve) => resolve({ id: "async" }),
+    });
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+    writePublicJsonIsolateCache(key, thenable, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+    writePublicJsonIsolateCache(key, thenable, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+    writePublicJsonIsolateCache("valid.json", payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("valid.json", now), payload);
+  });
+
+  test("isolate cache はthen getterやProxy trapの例外を外へ漏らさない", () => {
+    const now = 1_450_000;
+    const payload = { id: "previous" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const getterThrows = Object.defineProperty({}, "then", {
+      get() { throw new Error("getter failed"); },
+    });
+    const inTrapThrows = new Proxy({}, {
+      has(_target, prop) {
+        if (prop === "then") throw new Error("has trap failed");
+        return false;
+      },
+    });
+    const functionGetterThrows = Object.defineProperty(() => undefined, "then", {
+      get() { throw new Error("function getter failed"); },
+    });
+    for (const [i, invalid] of [getterThrows, inTrapThrows, functionGetterThrows].entries()) {
+      resetPublicJsonIsolateCacheForTests();
+      const key = `then-throws/${i}.json`;
+      writePublicJsonIsolateCache("unrelated.json", payload, 30, weight, now);
+      writePublicJsonIsolateCache(key, payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      assert.doesNotThrow(() => {
+        writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      });
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        "rejected replacement must evict the old same-key entry");
+      assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), payload);
+      assert.doesNotThrow(() => {
+        writePublicJsonIsolateCache(key, invalid, 30, weight, now);
+      });
+      assert.equal(readPublicJsonIsolateCache(key, now), null);
+    }
+  });
+
+  test("isolate cache は直接渡された無効TTLを保持せず既存entryも破棄する", () => {
+    const now = 1_500_000;
+    const payload = { id: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const ttl of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 0, -1]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("invalid-ttl.json", payload, 30, weight, now);
+      assert.deepEqual(readPublicJsonIsolateCache("invalid-ttl.json", now), payload);
+      writePublicJsonIsolateCache("invalid-ttl.json", { id: "bad" }, ttl, weight, now);
+      assert.equal(readPublicJsonIsolateCache("invalid-ttl.json", now), null, `ttl=${String(ttl)}`);
+      assert.equal(readPublicJsonIsolateCache("invalid-ttl.json", now + 100_000), null);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("fractional-ttl.json", payload, 0.5, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("fractional-ttl.json", now), payload);
+    assert.equal(readPublicJsonIsolateCache("fractional-ttl.json", now + 1_000), null);
+  });
+
+  test("isolate cache は非有限の時計値で期限切れ検証を迂回させない", () => {
+    const now = 2_500_000;
+    const payload = { id: "valid" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const invalidClock of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1_000_000.5, Number.MAX_SAFE_INTEGER + 1]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("clock.json", payload, 30, weight, now);
+      assert.equal(readPublicJsonIsolateCache("clock.json", invalidClock), null);
+      // An invalid read must not refresh TTL or LRU.
+      assert.equal(readPublicJsonIsolateCache("clock.json", now + 30_000), null);
+
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache("clock.json", payload, 30, weight, now);
+      writePublicJsonIsolateCache("clock.json", { id: "bad" }, 30, weight, invalidClock);
+      assert.equal(readPublicJsonIsolateCache("clock.json", now), null);
+    }
+  });
+
+  test("isolate cache は保存時刻より過去への時計巻き戻りで古いentryを破棄する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 2_600_000;
+    const payload = { id: "fresh" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "clock-rollback.json";
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+    // Valid integer clock values before the write must not extend the TTL.
+    assert.equal(readPublicJsonIsolateCache(key, now - 1), null);
+    // The entry must have been evicted, not merely hidden for one read.
+    assert.equal(readPublicJsonIsolateCache(key, now + 1), null);
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.deepEqual(readPublicJsonIsolateCache(key, now + 29_999), payload);
+    assert.equal(readPublicJsonIsolateCache(key, now + 30_000), null);
+
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("unrelated.json", payload, 30, weight, now - 100);
+    writePublicJsonIsolateCache(key, payload, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(key, now - 50), null);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now - 50), payload);
+  });
+
+  test("isolate cache は小数・負数・unsafe整数の読み取りでLRUを更新しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 2_750_000;
+    const weight = new TextEncoder().encode(JSON.stringify({ id: "value" })).byteLength;
+    for (let i = 0; i < PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRIES; i += 1) {
+      writePublicJsonIsolateCache(`clock-lru/${i}.json`, { id: "value" }, 30, weight, now);
+    }
+    const oldestKey = "clock-lru/0.json";
+    for (const invalidNow of [now + 0.5, -1, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) {
+      assert.equal(readPublicJsonIsolateCache(oldestKey, invalidNow), null,
+        `invalid read clock ${String(invalidNow)} must be rejected`);
+    }
+    // An invalid read must not promote the oldest entry in the LRU order.
+    writePublicJsonIsolateCache("clock-lru/new.json", { id: "value" }, 30, weight, now);
+    assert.equal(readPublicJsonIsolateCache(oldestKey, now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("clock-lru/1.json", now), { id: "value" });
+  });
+
+  test("isolate cache は安全整数範囲外の有効期限を保存しない", () => {
+    const payload = { id: "safe" };
+    const weight = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    const key = "overflow-clock.json";
+    for (const clock of [
+      Number.MAX_VALUE,
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER - 999,
+      1234.5,
+    ]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, weight, 1_000_000);
+      writePublicJsonIsolateCache(key, { id: "bad" }, 30, weight, clock);
+      assert.equal(readPublicJsonIsolateCache(key, 1_000_000), null, `clock=${String(clock)}`);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache(key, payload, 1, weight, Number.MAX_SAFE_INTEGER - 1000);
+    assert.deepEqual(readPublicJsonIsolateCache(key, Number.MAX_SAFE_INTEGER - 1), payload);
+    assert.equal(readPublicJsonIsolateCache(key, Number.MAX_SAFE_INTEGER), null);
+  });
+
   test("isolate cache は単一entryのserialized byte上限を超えるpayloadを保持しない", () => {
     resetPublicJsonIsolateCacheForTests();
     const now = 3_000_000;
@@ -84,6 +301,64 @@ if (runTestWithTsx(import.meta.url)) {
       now,
     );
     assert.equal(readPublicJsonIsolateCache("large.json", now), null);
+  });
+
+  test("isolate cache は小数byteWeightを切り捨てず拒否する", () => {
+    const now = 3_500_000;
+    const key = "fractional-weight.json";
+    const payload = { id: "valid" };
+    const exactBytes = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+    for (const invalidWeight of [0.5, 1.5, exactBytes + 0.5, PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES + 0.5, NaN, Infinity]) {
+      resetPublicJsonIsolateCacheForTests();
+      writePublicJsonIsolateCache(key, payload, 30, exactBytes, now);
+      assert.deepEqual(readPublicJsonIsolateCache(key, now), payload);
+      writePublicJsonIsolateCache(key, { id: "replacement" }, 30, invalidWeight, now);
+      assert.equal(readPublicJsonIsolateCache(key, now), null,
+        `invalid weight ${String(invalidWeight)} must evict the old entry`);
+    }
+    resetPublicJsonIsolateCacheForTests();
+    writePublicJsonIsolateCache("unrelated.json", payload, 30, exactBytes, now);
+    writePublicJsonIsolateCache(key, payload, 30, 1.5, now);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), payload);
+    assert.equal(readPublicJsonIsolateCache(key, now), null);
+  });
+
+  test("isolate cache は過少申告されたbyteWeightで容量上限を迂回しない", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 3_650_000;
+    const valid = { id: "safe" };
+    const validWeight = new TextEncoder().encode(JSON.stringify(valid)).byteLength;
+    writePublicJsonIsolateCache("unrelated.json", valid, 30, validWeight, now);
+    writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+
+    // Before this fix, an oversized JSON object could be retained with a
+    // forged one-byte weight, violating both heap limits.
+    const large = { content: "x".repeat(PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES) };
+    writePublicJsonIsolateCache("replacement.json", large, 30, 1, now);
+    assert.equal(readPublicJsonIsolateCache("replacement.json", now), null);
+    assert.deepEqual(readPublicJsonIsolateCache("unrelated.json", now), valid);
+
+    // Both undercounting and overcounting must reject stale replacements.
+    for (const wrongWeight of [1, validWeight + 1]) {
+      writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+      writePublicJsonIsolateCache("replacement.json", valid, 30, wrongWeight, now);
+      assert.equal(readPublicJsonIsolateCache("replacement.json", now), null);
+    }
+    writePublicJsonIsolateCache("replacement.json", valid, 30, validWeight, now);
+    assert.deepEqual(readPublicJsonIsolateCache("replacement.json", now), valid);
+  });
+
+  test("isolate cache は非JSONの直接入力をJSONとして正規化して保存する", () => {
+    resetPublicJsonIsolateCacheForTests();
+    const now = 3_700_000;
+    const input = { when: new Date("2026-11-06T00:00:00.000Z"), value: Infinity };
+    const json = JSON.stringify(input);
+    const weight = new TextEncoder().encode(json).byteLength;
+    writePublicJsonIsolateCache("json-normalization.json", input, 30, weight, now);
+    const result = readPublicJsonIsolateCache("json-normalization.json", now);
+    assert.deepEqual(result, JSON.parse(json));
+    assert.equal(typeof result.when, "string");
+    assert.equal(result.value, null);
   });
 
   test("isolate cache はaggregate byte budgetを超えるとLRU evictionする", () => {

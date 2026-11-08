@@ -91,7 +91,7 @@ test("scenarios cover the measurable endpoints, three request kinds each, with e
   const scenarios = buildScenarios({ adminToken: "t" });
   assert.deepEqual(
     scenarios.filter((s) => !s.baseline).map((s) => s.id),
-    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "S4"],
+    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "RH-013", "S4"],
   );
   for (const sc of scenarios) {
     assert.deepEqual(Object.keys(sc.kinds), ["normal", "limit", "invalid"], sc.id);

@@ -346,6 +346,9 @@ export async function openLocalSqliteD1(file: string): Promise<{ db: D1Like; clo
  * requests per run; the token is never logged or put in an error message.
  */
 export const MAX_D1_HTTP_STATEMENTS = 19;
+// The batched snapshot producer uses up to 200 D1 reads per build. Keep this
+// explicit override bounded so NaN/Infinity cannot silently disable the budget.
+export const MAX_D1_HTTP_STATEMENTS_OVERRIDE = 200;
 export const D1_HTTP_TIMEOUT_MS = 15_000;
 export const D1_HTTP_ENV = {
   accountId: "CLOUDFLARE_ACCOUNT_ID",
@@ -354,11 +357,90 @@ export const D1_HTTP_ENV = {
 } as const;
 
 const READ_ONLY_SQL = /^\s*(SELECT|WITH)\b/i;
+// A WITH prefix is not proof of a read: SQLite accepts WITH c AS (...) UPDATE/DELETE/INSERT.
+// Block write/DDL/control tokens outside quoted values, identifiers and comments even if
+// a broader-than-intended D1 API token were configured. Also reject known
+// extension function entry points that can have side effects when enabled.
+// This reader executes fixed SELECTs.
+const FORBIDDEN_SQL_WORD = /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|ATTACH|DETACH|PRAGMA|VACUUM|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|REINDEX|ANALYZE|LOAD_EXTENSION|WRITEFILE)\b/i;
+
+/** Return true when a quoted SQL identifier is immediately invoked as a function. */
+function followedBySqlCall(source: string, from: number): boolean {
+  let i = from;
+  while (i < source.length) {
+    if (/\s/.test(source[i]!)) { i++; continue; }
+    if (source[i] === "-" && source[i + 1] === "-") {
+      while (i < source.length && source[i] !== "\n") i++;
+      continue;
+    }
+    if (source[i] === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) return false;
+      i = end + 2;
+      continue;
+    }
+    return source[i] === "(";
+  }
+  return false;
+}
+
+/** Mask SQL strings, quoted identifiers and comments so literal "UPDATE" text stays readable. */
+function executableSqlOnly(source: string): string | null {
+  let code = "";
+  for (let i = 0; i < source.length;) {
+    const char = source[i]!;
+    if (char === "-" && source[i + 1] === "-") {
+      while (i < source.length && source[i] !== "\n") i++;
+      code += " ";
+      continue;
+    }
+    if (char === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end < 0) return null;
+      i = end + 2;
+      code += " ";
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`" || char === "[") {
+      const closing = char === "[" ? "]" : char;
+      i += 1;
+      const identifierStart = i;
+      let closed = false;
+      while (i < source.length) {
+        if (source[i] === closing) {
+          // SQL escapes quotes by doubling them (including backticks and brackets).
+          if (source[i + 1] === closing) { i += 2; continue; }
+          closed = true;
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      if (!closed) return null;
+      // SQLite permits quoted function names: "load_extension"('x'),
+      // [writefile]('x', 'y') and backtick forms all invoke functions.
+      // Preserve only a dangerous quoted identifier when it is called;
+      // quoted column names and harmless string literals stay masked.
+      const quotedName = source.slice(identifierStart, i - 1);
+      const forbiddenCall = char !== "'" && /^(?:load_extension|writefile)$/i.test(quotedName)
+        && followedBySqlCall(source, i);
+      code += forbiddenCall ? ` ${quotedName} ` : " ";
+      continue;
+    }
+    code += char;
+    i += 1;
+  }
+  return code;
+}
+
 const D1_ID = /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isReadOnlyStatement(sql: string): boolean {
-  // One statement only: no `;` except a trailing one.
-  return READ_ONLY_SQL.test(sql) && !/;\s*\S/.test(sql);
+  const executable = executableSqlOnly(sql)?.trim();
+  if (!executable || !READ_ONLY_SQL.test(executable)) return false;
+  // A single optional terminal semicolon is allowed; comments/literals were masked.
+  const withoutFinalSemicolon = executable.endsWith(";") ? executable.slice(0, -1) : executable;
+  return !withoutFinalSemicolon.includes(";") && !FORBIDDEN_SQL_WORD.test(withoutFinalSemicolon);
 }
 
 export function openD1HttpReader(options: {
@@ -376,13 +458,17 @@ export function openD1HttpReader(options: {
   }
   const fetchFn = options.fetchFn ?? fetch;
   const max = options.maxStatements ?? MAX_D1_HTTP_STATEMENTS;
+  if (!Number.isSafeInteger(max) || max < 1 || max > MAX_D1_HTTP_STATEMENTS_OVERRIDE) {
+    throw new RangeError(`D1 API statement budget must be an integer from 1 to ${MAX_D1_HTTP_STATEMENTS_OVERRIDE}`);
+  }
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`;
   let count = 0;
   const statement = (sql: string, params: unknown[] = []): D1PreparedStatementLike => ({
     bind: (...next: unknown[]) => statement(sql, next),
     async all<T>() {
       if (!isReadOnlyStatement(sql)) throw new Error("D1 API mode refuses a non-read statement");
-      if (++count > max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      if (count >= max) throw new Error(`D1 API mode exceeded ${max} statements`);
+      count += 1;
       let response: Response;
       try {
         response = await fetchFn(url, {
@@ -401,7 +487,16 @@ export function openD1HttpReader(options: {
       } | null;
       const first = body?.result?.[0];
       if (!response.ok || !body?.success || !first?.success || !Array.isArray(first.results)) {
-        const codes = (body?.errors ?? []).map((e) => e.code).filter((c) => c !== undefined).join(",");
+        // Cloudflare errors are untrusted JSON. A malformed error collection
+        // must still report a controlled D1 API failure, not throw TypeError.
+        // Limit work on untrusted error arrays, not just the final message:
+        // a malformed upstream response may contain thousands of entries.
+        const codes = (Array.isArray(body?.errors) ? body.errors : [])
+          .slice(0, 64)
+          .flatMap((error) => error && typeof error === "object" &&
+            typeof error.code === "number" && Number.isSafeInteger(error.code) ? [error.code] : [])
+          .slice(0, 8)
+          .join(",");
         throw new Error(`D1 API query failed (status=${response.status}${codes ? `, codes=${codes}` : ""})`);
       }
       return { results: first.results };

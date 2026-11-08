@@ -201,23 +201,64 @@ function normalizeUrl(raw: string | null): string | null {
   if (!raw) return null;
   try {
     const url = new URL(raw);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    // Never persist URL userinfo in imported public-facing metadata.
+    if (url.username || url.password) return null;
+    return url.toString();
   } catch {
     return null;
   }
 }
 
+function normalizeLegacyOtherSocialLinks(raw: string | null): string | null {
+  if (!raw) return null;
+  // URL parsing trims surrounding ASCII whitespace. Use the same trimmed value
+  // for rejection detection so credentials cannot escape through a leading
+  // space, tab, or newline and then be persisted as a free-text label.
+  const candidate = raw.trim();
+  const normalized = normalizeUrl(candidate);
+  // Text labels such as "X, TikTok" are allowed by the legacy format. However,
+  // an HTTP(S) URL that fails validation must not fall back to raw credentials.
+  return normalized ?? (/^https?:\/\//i.test(candidate) ? null : raw);
+}
+
 function legacyVideoOtherSocialLinks(row: Record<string, unknown>): string | null {
-  return normalizeUrl(stringValue(row, "othersns")) ?? stringValue(row, "othersns");
+  return normalizeLegacyOtherSocialLinks(stringValue(row, "othersns"));
 }
 
 function normalizeIconUrl(raw: string | null): string | null {
   if (!raw) return null;
-  const match =
-    raw.match(/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]+)/) ??
-    raw.match(/drive\.google\.com\/(?:open|uc)\?[^#]*[?&]?id=([A-Za-z0-9_-]+)/);
-  if (match?.[1]) return `/api/google-drive-image/${match[1]}`;
   if (raw.startsWith("/api/")) return raw;
+
+  // Legacy imports may omit the scheme for Google Drive links. Parse the
+  // actual origin rather than matching "drive.google.com" inside another URL.
+  const candidate = /^(?:www\.)?drive\.google\.com\//i.test(raw)
+    ? `https://${raw}`
+    : raw;
+  try {
+    const url = new URL(candidate);
+    // Reject credentials before falling back to normal HTTP URL handling.
+    if (url.username || url.password) return null;
+    if (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password &&
+      (url.hostname === "drive.google.com" || url.hostname === "www.drive.google.com")
+    ) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const id =
+        parts[0] === "file" && parts[1] === "d"
+          ? parts[2]
+          : (parts[0] === "open" || parts[0] === "uc")
+            ? url.searchParams.get("id")
+            : null;
+      if (id && /^[A-Za-z0-9_-]+$/.test(id)) {
+        return `/api/google-drive-image/${id}`;
+      }
+    }
+  } catch {
+    // Invalid or non-Drive inputs use the existing HTTP URL fallback.
+  }
   return normalizeUrl(raw);
 }
 
@@ -268,14 +309,37 @@ function scheduledTime(row: Record<string, unknown>): number | null {
 function extractYoutubeId(raw: string | null): string | null {
   if (!raw) return null;
   const value = raw.trim();
-  if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
-  for (const pattern of [
-    /youtu\.be\/([A-Za-z0-9_-]{11})/,
-    /youtube\.com\/watch\?[^#]*v=([A-Za-z0-9_-]{11})/,
-    /youtube\.com\/(?:embed|shorts|v)\/([A-Za-z0-9_-]{11})/,
-  ]) {
-    const match = value.match(pattern);
-    if (match?.[1]) return match[1];
+  const validId = /^[A-Za-z0-9_-]{11}$/;
+  if (validId.test(value)) return value;
+
+  // Legacy files may contain bare YouTube hosts, but an unrelated origin must
+  // never be treated as YouTube merely because its path contains "youtube.com".
+  const candidate = /^(?:(?:www|m)\.)?(?:youtube\.com|youtu\.be)\//i.test(value)
+    ? `https://${value}`
+    : value;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (host === "youtu.be" || host === "www.youtu.be") {
+    return segments.length === 1 && validId.test(segments[0]!) ? segments[0]! : null;
+  }
+  if (host !== "youtube.com" && host !== "www.youtube.com" && host !== "m.youtube.com") {
+    return null;
+  }
+  if (url.pathname === "/watch") {
+    const id = url.searchParams.get("v");
+    return id && validId.test(id) ? id : null;
+  }
+  if (segments.length === 2 && ["embed", "shorts", "v"].includes(segments[0]!)) {
+    return validId.test(segments[1]!) ? segments[1]! : null;
   }
   return null;
 }
@@ -514,7 +578,7 @@ export function normalizeLegacyFiles(
         putXUser(creatorXId, creatorName, {
           icon_url: normalizeIconUrl(stringValue(row, "icon")),
           youtube_channel_url: normalizeUrl(stringValue(row, "ychlink")),
-          other_social_links: normalizeUrl(stringValue(row, "othersns")) ?? stringValue(row, "othersns"),
+          other_social_links: normalizeLegacyOtherSocialLinks(stringValue(row, "othersns")),
         });
       } else if (stringValue(row, "tlink")) {
         warnings.push(`${source}: tlinkをX IDとして解釈できませんでした。`);

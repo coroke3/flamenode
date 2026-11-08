@@ -127,3 +127,95 @@ test("rankTrendingItems excludes views_30d=0 and unknown recent ids", () => {
   const ranked = rankTrendingItems(recent, periods);
   assert.deepEqual(ranked.map((item) => item.id), ["known"]);
 });
+
+test("rankTrendingItems never promotes nonpublic recent rows to public", () => {
+  const recent = {
+    items: [
+      recentItem("visible", "Visible"),
+      { ...recentItem("private", "Private"), status: "private" },
+      { ...recentItem("deleted", "Deleted"), status: "deleted" },
+      { ...recentItem("unmarked", "Unmarked"), status: undefined },
+    ],
+  };
+  const periods = recent.items.map((item) => ({
+    video_id: item.id,
+    views_2d: 10,
+    views_5d: 10,
+    views_7d: 10,
+    views_30d: 10,
+  }));
+  const ranked = rankTrendingItems(recent, periods);
+  assert.deepEqual(ranked.map((item) => item.id), ["visible"]);
+  assert.equal(ranked[0].status, "public");
+  assert.equal(ranked[0].rank, 1);
+});
+
+test("rankTrendingItems rejects a nonpublic duplicate without overwriting its public entry", () => {
+  const recent = {
+    items: [
+      recentItem("visible", "Public title"),
+      { ...recentItem("visible", "Private title"), status: "private" },
+    ],
+  };
+  const ranked = rankTrendingItems(recent, [
+    { video_id: "visible", views_2d: 1, views_5d: 1, views_7d: 1, views_30d: 1 },
+  ]);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].title, "Public title");
+});
+
+test("rankTrendingItems rejects duplicate public recent IDs instead of overwriting metadata", () => {
+  const period = {
+    video_id: "visible", views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  for (const items of [
+    [recentItem("visible", "Original title"), recentItem("visible", "Conflicting title")],
+    [recentItem("visible", "Same title"), recentItem("visible", "Same title")],
+  ]) {
+    assert.throws(
+      () => rankTrendingItems({ items }, [period]),
+      /ga4_recent_duplicate_public_video_id/,
+    );
+  }
+  // Nonpublic collisions are ignored rather than overriding the public row.
+  assert.deepEqual(rankTrendingItems({ items: [
+    recentItem("visible", "Public title"),
+    { ...recentItem("visible", "Secret title"), status: "private" },
+  ] }, [period]).map((item) => item.title), ["Public title"]);
+});
+
+test("rankTrendingItems rejects non-finite, fractional and unsafe view counts", () => {
+  const invalid = [NaN, Infinity, -Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "10", null];
+  const fields = ["views_2d", "views_5d", "views_7d", "views_30d"];
+  const recent = { items: [recentItem("safe"), recentItem("invalid")] };
+  const valid = {
+    video_id: "safe", views_2d: 1, views_5d: 2, views_7d: 3, views_30d: 4,
+  };
+  for (const field of fields) {
+    for (const value of invalid) {
+      const ranked = rankTrendingItems(recent, [
+        valid,
+        { ...valid, video_id: "invalid", [field]: value },
+      ]);
+      assert.deepEqual(ranked.map((row) => row.id), ["safe"], `${field}=${String(value)}`);
+    }
+  }
+  assert.deepEqual(rankTrendingItems(recent, [
+    { ...valid, video_id: "invalid", views_30d: 0 },
+  ]), []);
+});
+
+test("rankTrendingItems rejects duplicate valid GA4 video rows before publishing", () => {
+  const recent = { items: [recentItem("known")] };
+  const period = { video_id: "known", views_2d: 3, views_5d: 4, views_7d: 5, views_30d: 6 };
+  assert.throws(
+    () => rankTrendingItems(recent, [period, { ...period, views_2d: 7 }]),
+    /ga4_trending_duplicate_video_id/,
+  );
+  // Unmatched or invalid rows cannot force failure for an otherwise valid report.
+  assert.deepEqual(rankTrendingItems(recent, [
+    period,
+    { ...period, video_id: "not-public" },
+    { ...period, views_30d: NaN },
+  ]).map((item) => item.id), ["known"]);
+});

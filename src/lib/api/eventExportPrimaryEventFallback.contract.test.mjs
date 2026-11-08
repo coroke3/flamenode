@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(new URL("./eventExportData.ts", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../packages/server-core/src/eventExport/data.ts", import.meta.url), "utf8");
 
 test("公開event exportはvideo_events欠落時もprimary_event_idで作品を落とさない", () => {
   assert.match(source, /\.from\(videos\)[\s\S]*?\.leftJoin\([\s\S]*?videoEvents/);

@@ -4,8 +4,8 @@ import { ScreenIcon } from "./parts.js";
 
 /*
  * `/rules` from the registered mock `docs/migration/mock/static/Rules.html` (`split`, `prose`, aside).
- * Texts follow CURRENT `app/(public)/rules/page.tsx`. Display only: the consent form (SA-075) and the
- * `?error=` notice need the MIG-0605 API, so the caller passes them as `consent` when it has them.
+ * Texts follow CURRENT `app/(public)/rules/page.tsx`. The consent mount is an inert
+ * placeholder: only the browser's MIG-0519 Island creates an actionable form.
  */
 export type LegalBlock =
   | { type: "heading2"; text: string }
@@ -18,8 +18,10 @@ export interface RulesViewProps {
   /** CURRENT `formatUnix(updatedAt, { dateOnly: true })`, shown as ` (更新: …)`. */
   updatedLabel?: string | null;
   blocks: readonly LegalBlock[];
-  /** Consent panel Island (MIG-0605). Omitted until the API exists. */
+  /** A caller may supply its own consent panel. */
   consent?: React.ReactNode;
+  /** Render an empty browser-only mount; never emit an inert form in SSG HTML. */
+  showConsentMount?: boolean;
   className?: string;
 }
 
@@ -38,7 +40,7 @@ function Block({ block }: { block: LegalBlock }): React.ReactElement {
   return <p>{block.text}</p>;
 }
 
-export function RulesView({ versionLabel, updatedLabel, blocks, consent, className }: RulesViewProps): React.ReactElement {
+export function RulesView({ versionLabel, updatedLabel, blocks, consent, showConsentMount, className }: RulesViewProps): React.ReactElement {
   return (
     <div className={cx("p-root fn-screen", className)}>
       <main className="wrap split rl-wrap">
@@ -54,7 +56,7 @@ export function RulesView({ versionLabel, updatedLabel, blocks, consent, classNa
           ))}
         </article>
         <aside className="side stack rl-side">
-          {consent}
+          {consent ?? (showConsentMount ? <div id="rules-consent-mount" /> : null)}
           <section id="event-host" aria-labelledby="rl-host">
             <h2 id="rl-host" className="t-h3">
               <ScreenIcon name="calendar" /> イベント開催相談
