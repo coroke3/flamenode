@@ -29,6 +29,7 @@ import type {
   StaticEventIndexEvent,
 } from "@/lib/publicData/loader";
 import { buildPageMetadata } from "@/lib/seo";
+import { readSingleSearchParam } from "@/lib/utils/singleSearchParam";
 
 export const metadata: Metadata = buildPageMetadata({
   path: "/event",
@@ -37,9 +38,9 @@ export const metadata: Metadata = buildPageMetadata({
     "FlameNodeで開催中・開催予定・アーカイブ済みの映像イベントを探せます。",
 });
 interface SearchParams {
-  q?: string;
-  status?: string;
-  sort?: string;
+  q?: string | string[];
+  status?: string | string[];
+  sort?: string | string[];
 }
 
 type EventListEvent = StaticEventIndexEvent & {
@@ -82,13 +83,13 @@ const EVENT_FILTER_STATUSES = [
 type EventFilterStatus = (typeof EVENT_FILTER_STATUSES)[number]["value"];
 type EventFilterSort = "priority" | "deadline" | "start" | "new";
 
-function parseEventFilterStatus(value: string | undefined): EventFilterStatus {
+function parseEventFilterStatus(value: unknown): EventFilterStatus {
   return EVENT_FILTER_STATUSES.some((status) => status.value === value)
     ? (value as EventFilterStatus)
     : "all";
 }
 
-function parseEventFilterSort(value: string | undefined): EventFilterSort {
+function parseEventFilterSort(value: unknown): EventFilterSort {
   return value === "deadline" || value === "start" || value === "new"
     ? value
     : "priority";
@@ -169,7 +170,7 @@ export async function EventListPage({
   searchParams: Promise<SearchParams>;
 }): Promise<React.ReactElement> {
   const rawParams = await searchParams;
-  const q = rawParams.q?.trim() ?? "";
+  const q = readSingleSearchParam(rawParams.q).trim();
   const query = q.toLocaleLowerCase();
   const status = parseEventFilterStatus(rawParams.status);
   const sort = parseEventFilterSort(rawParams.sort);

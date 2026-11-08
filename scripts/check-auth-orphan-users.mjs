@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync } from "node:child_process";
+import { assertRemoteD1Configured, runRemoteD1File } from "./remote-d1-utils.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -29,16 +29,13 @@ function runLocal(databasePath) {
 }
 
 function runRemote() {
-  const output = execSync(
-    `npx wrangler d1 execute flamenode_db --remote --json --file=${sqlPath}`,
-    { encoding: "utf8" },
-  );
-  const parsed = JSON.parse(output);
-  const results = parsed?.[0]?.results ?? parsed?.results ?? null;
-  if (!Array.isArray(results)) {
-    throw new Error("Unexpected wrangler d1 execute output.");
-  }
-  return results;
+  // Reuse the read-only, argument-vector Wrangler runner. Never pass a
+  // workspace-dependent SQL path through a shell command.
+  assertRemoteD1Configured("check:auth-orphan-users", root);
+  return runRemoteD1File(sqlPath, {
+    scriptName: "check:auth-orphan-users",
+    root,
+  });
 }
 
 function printOrphans(orphans) {

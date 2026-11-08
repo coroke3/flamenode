@@ -1,5 +1,5 @@
 // MIG-0501 coverage-gap units (G05 head extras, G06 WebSite JSON-LD, G07 GA4, G08 theme/fonts, G10 404/503,
-// G23 text row, about-stats snapshot; /maintenance is MIG-0619-owned (PublicPage, no JS) so G10/G23 text rows only cross-check it) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
+// G23 text row, about-stats snapshot; /maintenance now uses PublicLayout (D-13-27)) compared with CURRENT app/layout.tsx, app/(public)/layout.tsx,
 // not-found/error/maintenance pages and @next/third-parties.
 // Run `npm run build -w @flamenode/ui && npm run build -w @flamenode/site` first.
 import assert from "node:assert/strict";
@@ -32,7 +32,7 @@ const seo = fs.readFileSync("src/lib/seo.ts", "utf-8");
 test("G08: theme bootstrap is CURRENT's script verbatim and runs before the first stylesheet/body", { skip }, () => {
   const current = rootLayout.match(/const themeBootstrapCode = `([^`]*)`;/)[1];
   assert.equal(THEME_BOOTSTRAP_CODE, current);
-  for (const route of ["about/index.html", "rules/index.html", "404.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html", "maintenance/index.html"]) {
     const text = html(route);
     const at = text.indexOf(current);
     assert.ok(at > 0, `${route}: bootstrap inlined`);
@@ -65,6 +65,114 @@ test("G08: font file and @font-face match CURRENT FlameNodeSans.otf", { skip }, 
   assert.ok(doc.querySelector('link[rel="preload"][as="font"][href="/fonts/FlameNodeSans.otf"]'));
 });
 
+test("G05: brand assets are CURRENT public files byte for byte", { skip }, () => {
+  const assets = [
+    "brand/flamenode-apple-touch-icon.png",
+    "brand/flamenode-favicon.svg",
+    "brand/flamenode-icon-192.png",
+    "brand/flamenode-icon-32.png",
+    "brand/flamenode-icon-512.png",
+    "brand/flamenode-icon-maskable-512.png",
+    "brand/flamenode-mark.png",
+    "brand/flamenode-mark.svg",
+    "brand/flamenode-social-card.png",
+    "brand/flamenode-wordmark.svg",
+    "favicon.ico",
+    "manifest.webmanifest",
+    "logo.png",
+  ];
+  assert.equal(assets.length, 13);
+  for (const relative of assets) {
+    const current = path.join("public", relative);
+    const builtAsset = path.join(DIST, relative);
+    assert.ok(fs.existsSync(builtAsset), `Missing built public asset: ${relative}`);
+    assert.ok(fs.readFileSync(current).equals(fs.readFileSync(builtAsset)),
+      `Built public asset differs from CURRENT: ${relative}`);
+  }
+});
+
+test("G05: all fixed-page heads, structured-data and webmanifest brand URLs resolve to real built assets", { skip }, () => {
+  const pages = ["about/index.html", "rules/index.html", "maintenance/index.html", "404.html", "503/index.html"];
+  for (const page of pages) {
+    const doc = dom(page);
+    const baseUrl = doc.querySelector('link[rel="canonical"]')?.getAttribute("href");
+    assert.ok(baseUrl, `${page}: canonical is required for same-site URL resolution`);
+    const referenced = new Set();
+    // Fixed error/maintenance pages must load the same font and compiled styles
+    // as /about; checking only the HTML would miss a missing CSS/font asset.
+    const font = doc.querySelector('link[rel="preload"][as="font"][href="/fonts/FlameNodeSans.otf"]');
+    assert.ok(font, `${page}: missing shared public font preload`);
+    const styleLinks = [...doc.querySelectorAll('link[rel="stylesheet"][href]')];
+    // External CSS alone is not evidence that the local Astro stylesheet was emitted.
+    const localStyleUrls = styleLinks.map((link) => new URL(link.getAttribute("href"), baseUrl))
+      .filter((url) => url.origin === new URL(baseUrl).origin);
+    assert.ok(localStyleUrls.length > 0, `${page}: missing local Astro CSS stylesheet`);
+    for (const url of localStyleUrls) {
+      assert.match(url.pathname, /^\/_astro\/[\w.-]+\.css$/, `${page}: unexpected local CSS path: ${url.pathname}`);
+      const assetFile = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(assetFile) && fs.statSync(assetFile).size > 0,
+        `${page}: missing or empty bundled CSS: ${url.pathname}`);
+    }
+    // A rendered header with missing client chunks looks correct but has broken
+    // navigation, theme and account controls after hydration.
+    const headerIslands = [...doc.querySelectorAll('astro-island[client="load"]')];
+    assert.equal(headerIslands.length, 1, `${page}: expected one hydrated public header`);
+    for (const [attribute, raw] of ["component-url", "renderer-url"].map((key) => [key, headerIslands[0].getAttribute(key)])) {
+      assert.ok(raw, `${page}: missing Astro Island ${attribute}`);
+      const url = new URL(raw, baseUrl);
+      assert.equal(url.origin, new URL(baseUrl).origin, `${page}: cross-origin Island ${attribute}`);
+      assert.match(url.pathname, /^\/_astro\/[\w.-]+\.js$/, `${page}: unexpected Island ${attribute} path: ${url.pathname}`);
+      const assetFile = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(assetFile) && fs.statSync(assetFile).size > 0,
+        `${page}: missing or empty Island ${attribute}: ${url.pathname}`);
+    }
+    referenced.add(font.getAttribute("href"));
+    for (const selector of ['link[rel="manifest"]', 'link[rel="icon"][type="image/svg+xml"]', 'link[rel="apple-touch-icon"]']) {
+      assert.ok(doc.querySelector(selector), `${page}: missing required icon or PWA manifest link ${selector}`);
+    }
+
+    for (const link of doc.querySelectorAll('link[rel="manifest"], link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')) {
+      const href = link.getAttribute("href");
+      assert.ok(href, "head asset href must exist");
+      referenced.add(href);
+    }
+    const socialImage = doc.querySelector('meta[property="og:image"]')?.getAttribute("content");
+    assert.ok(socialImage, "social preview image must be configured");
+    referenced.add(socialImage);
+
+    const organization = JSON.parse(doc.querySelector('script#flamenode-site-structured-data')?.textContent ?? "null")
+      ?.["@graph"]?.find((entry) => entry?.["@type"] === "Organization");
+    assert.ok(organization?.logo?.url, "organization logo needs a public URL");
+    referenced.add(organization.logo.url);
+    referenced.add(organization.logo.contentUrl);
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(DIST, "manifest.webmanifest"), "utf8"));
+    assert.equal(manifest.start_url, "/");
+    assert.equal(manifest.scope, "/");
+    assert.ok(Array.isArray(manifest.icons) && manifest.icons.length > 0, "manifest icons required");
+    for (const requiredIcon of ["/brand/flamenode-icon-192.png", "/brand/flamenode-icon-512.png", "/brand/flamenode-icon-maskable-512.png"]) {
+      assert.ok(manifest.icons.some((icon) => icon.src === requiredIcon), `${page}: missing PWA icon ${requiredIcon}`);
+    }
+    for (const icon of manifest.icons) {
+      assert.ok(icon.src && icon.sizes && icon.type === "image/png", "manifest icon needs src, size and type");
+      referenced.add(icon.src);
+    }
+
+    for (const raw of referenced) {
+      const url = new URL(raw, baseUrl);
+      assert.equal(url.origin, new URL(baseUrl).origin, `Brand asset must stay on this site: ${raw}`);
+      assert.ok(url.pathname.startsWith("/brand/") ||
+        url.pathname === "/fonts/FlameNodeSans.otf" ||
+        url.pathname === "/favicon.ico" || url.pathname === "/manifest.webmanifest",
+        `Unexpected head/manifest asset path: ${url.pathname}`);
+      const builtAsset = path.join(DIST, url.pathname.slice(1));
+      assert.ok(fs.existsSync(builtAsset), `${page}: missing head/manifest brand asset: ${url.pathname}`);
+      assert.ok(fs.statSync(builtAsset).isFile(), `${page}: not a file: ${url.pathname}`);
+      assert.ok(fs.statSync(builtAsset).size > 0, `${page}: empty head/manifest brand asset: ${url.pathname}`);
+    }
+  }
+});
+
 test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is emitted on every page", { skip }, () => {
   const ld = buildSiteJsonLd("https://flamenode.net");
   assert.equal(ld["@graph"][1]["@type"], "WebSite");
@@ -74,7 +182,7 @@ test("G06: WebSite/Organization JSON-LD equals CURRENT buildSiteJsonLd and is em
   }
   assert.ok(seo.includes('"映像作品とクリエイター、イベントをつなぐ動画プラットフォーム。"'));
   assert.ok(rootLayout.includes('id="flamenode-site-structured-data"'));
-  for (const route of ["about/index.html", "rules/index.html", "404.html", "503/index.html"]) {
+  for (const route of ["about/index.html", "rules/index.html", "404.html", "503/index.html", "maintenance/index.html"]) {
     const script = dom(route).querySelector('script#flamenode-site-structured-data[type="application/ld+json"]');
     assert.deepEqual(JSON.parse(script.textContent), JSON.parse(serializeJsonLd(ld)));
   }
@@ -103,6 +211,28 @@ test("G05: root-layout head extras (manifest, icons, apple, robots, locale, them
     assert.ok(rootLayout.includes(lit), `app/layout.tsx has ${lit}`);
   }
   assert.equal(buildPageHead({ path: "/x", title: "t", noIndex: true }).noindex, true);
+});
+
+test("G07: invalid analytics ids never reach inline JavaScript or the loader URL", () => {
+  for (const raw of [
+    "G-ABC'123",
+    "G-ABC\\nDEF",
+    "G-ABC</script><script>alert(1)</script>",
+    "G-ABC?debug=1",
+    "G-ABC/extra",
+    "G-ABC&x=1",
+    "G-" + "X".repeat(80),
+  ]) {
+    assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: raw }), null, raw);
+  }
+  assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: " G-ABC123 " }), "G-ABC123");
+  assert.equal(gaMeasurementId({ PUBLIC_GA_MEASUREMENT_ID: "GT-ABC123" }), "GT-ABC123");
+  assert.equal(gaMeasurementId({ NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-LEGACY" }), "G-LEGACY");
+  // Invalid primary input must not silently switch to a different analytics property.
+  assert.equal(gaMeasurementId({
+    PUBLIC_GA_MEASUREMENT_ID: "G-BAD'ID",
+    NEXT_PUBLIC_GA_MEASUREMENT_ID: "G-OTHER",
+  }), null);
 });
 
 test("G07: GA4 tag is absent without the env and identical to @next/third-parties when set", { skip: skip || skipUi }, () => {
