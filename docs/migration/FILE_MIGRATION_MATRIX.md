@@ -1539,6 +1539,9 @@
 | `apps/api/src/routes/manage/slotGeneratedChunkMutation.ts` | HELPER | SA-058 bounded 3-row JSON1 INSERT and same-batch collision assertions per time/count mode, no HTTP exposure | MIG-0656 | SAME (UNMOUNTED; CURRENT 100-row multi-chunk protocol unapproved; strict INSERT audit/Queue parent pending) | IN_PROGRESS | PR#514 SHA=addfaedaca603b164c665aba6616a9eb88be8829 TEST=apps/api/test/slotGeneratedChunkMutation.test.mjs (exact-head CI pending) |
 | `apps/api/test/slotGeneratedChunkMutation.test.mjs` | TEST | SA-058 3-row count/time INSERT, duplicate sort/time collisions, post-read phantom, wrong defaults and multi-chunk partial progress | MIG-0656 | SAME (offline node:sqlite 8 tests; real D1+parent Hono parity pending) | IN_PROGRESS | PR#514 SHA=abc31592723ba78e84e1bdb7e7f56966a1ba662a TEST=node --test --experimental-strip-types apps/api/test/slotGeneratedChunkMutation.test.mjs (exact-head CI pending) |
 
+| `apps/api/src/routes/manage/slotSubmittedDangerSelection.ts` | HELPER | SA-056/057 read-only submitted slot raw-group/owner/video/reference validation, max20 rows; no mutation/route | MIG-0656 | SAME (UNMOUNTED; exact D1 CAS for video/ref and Auth.js/CURRENT browser parity pending) | IN_PROGRESS | PR#514 SHA=61e36d98107234971a58c4af37823acbe97fcbb7 TEST=apps/api/test/slotSubmittedDangerSelection.test.mjs (exact-head CI pending) |
+| `apps/api/test/slotSubmittedDangerSelection.test.mjs` | TEST | SA-056/057 20/21 raw group, mixed owner/video, reservation subject, missing video, refs, Unicode blank solo, no mount | MIG-0656 | SAME (offline pure-function 9 regressions; Hono/D1 safety integration pending) | IN_PROGRESS | PR#514 SHA=20da250bd01f2c8be410e7fbf6933dd268a76f57 TEST=node --test --experimental-strip-types apps/api/test/slotSubmittedDangerSelection.test.mjs (exact-head CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
