@@ -560,3 +560,49 @@ test("FK preflight executes bound SELECT on SQLite, accepting existing and rejec
     sqlite.close();
   }
 });
+
+
+test("CURRENT import preflight preserves row indices, duplicate PK errors and apply batch cap", async () => {
+  const { prepareSpreadsheetImportMutationRows, SPREADSHEET_IMPORT_APPLY_MAX_ROWS, SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+    { name: "visibility_status", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    columns,
+    columnNames: columns.map(c => c.name),
+    primaryKeys: ["video_id", "event_id"],
+  };
+  assert.equal(SPREADSHEET_IMPORT_APPLY_MAX_ROWS, 7);
+  assert.equal(SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS, 500);
+  const rows = [
+    { video_id: "v1", event_id: "e1", notes: "a" },
+    { video_id: "v1", event_id: "e1", notes: "duplicate" },
+    { video_id: "v1", event_id: "e2", notes: null },
+    { video_id: "v1", notes: "missing pk" },
+    { video_id: "v2", event_id: "e1", visibility_status: "public" },
+    { video_id: "v3", event_id: "e1", invalid: "unknown" },
+    { video_id: "v4", event_id: "e1", notes: "valid" },
+  ];
+  const result = prepareSpreadsheetImportMutationRows(ctx, rows);
+  assert.deepEqual(result.errors, [
+    { index: 1, message: "duplicate_primary_key" },
+    { index: 3, message: "missing_primary_key" },
+    { index: 4, message: "column_not_editable" },
+    { index: 5, message: "unknown_column" },
+  ]);
+  assert.deepEqual(result.preparedRows.map(r => r.pk), [
+    { video_id: "v1", event_id: "e1" },
+    { video_id: "v1", event_id: "e2" },
+    { video_id: "v4", event_id: "e1" },
+  ]);
+  assert.equal(result.preparedRows[0].fingerprint, "e1\0v1");
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, []), /batch_too_large/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 8}, (_,i) => ({video_id: "v"+i, event_id:"e"}))), /batch_too_large/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows(ctx, Array.from({length: 501}, (_,i) => ({video_id:"v"+i,event_id:"e"}))), /too_many_rows/);
+  assert.throws(() => prepareSpreadsheetImportMutationRows({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, rows), /table_readonly/);
+});
