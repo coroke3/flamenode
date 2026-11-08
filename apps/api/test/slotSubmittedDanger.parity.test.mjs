@@ -40,7 +40,7 @@ const video=(patch={})=>({
   created_at:50,updated_at:400,...patch,
 });
 function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
-  mode="normal",onFirst,mutate,seedVideo=true}={}){
+  mode="normal",onFirst,mutate,seedVideo=true,parentSessionState,cookieToken=SESSION_TOKEN}={}){
   const submittedReads=[];
   const {db,sqlite,stats}=createAdminD1({
     onFirst:(sql,sqlite)=>{
@@ -97,7 +97,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
-    c.set("sessionState",actor?"user":"none");
+    c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -109,7 +109,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   const post=(slotId="s0",eventId="ev-1",op=kind)=>app.request(
     ORIGIN+"/api/manage/events/"+eventId+"/slots/"+slotId+"/"+
       (op==="force-release"?"force-release-submitted":"release-submitted-video"),
-    {method:"POST",headers:{Origin:ORIGIN,Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN}},
+    {method:"POST",headers:{Origin:ORIGIN,Cookie:cookieToken?"__Secure-authjs.session-token="+cookieToken:""}},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );
   const row=(table,id)=>sqlite.prepare("SELECT * FROM "+table+" WHERE id=?").get(id);
@@ -477,9 +477,10 @@ test("SA-056/057 U03f: no accidental managed route mount or immediate Queue wake
 test("SA-056/057 U04i: post-anchor authorization/session/policy revocation aborts both dangerous writes",async()=>{
   for(const kind of ["force-release","keep-reservation"]){
     for(const change of ["session-deleted","session-expired","session-reassigned",
-      "staff-revoked","tos-revoked","role-changed","banned","read-only","event-deleted"]){
+      "staff-revoked","x-approval-revoked","tos-revoked","major-terms-published",
+      "role-changed","banned","read-only","event-deleted"]){
       let injected=false;
-      const staff=change==="staff-revoked";
+      const staff=change==="staff-revoked"||change==="x-approval-revoked";
       const s=setup({kind,count:2,actor:staff?STAFF:ADMIN,staff,onFirst:(sql,sqlite)=>{
         if(injected||!sql.includes("AS anchor_json"))return;
         injected=true;
@@ -489,6 +490,10 @@ test("SA-056/057 U04i: post-anchor authorization/session/policy revocation abort
         if(change==="session-reassigned")sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
           .run("other-user",SESSION_TOKEN);
         if(change==="staff-revoked")sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+        if(change==="x-approval-revoked")sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+        if(change==="major-terms-published")sqlite.prepare(
+          "INSERT INTO terms_versions(id,severity,published_at,updated_at) VALUES (?,?,?,?)"
+        ).run("major-new","major",Math.floor(Date.now()/1000),Math.floor(Date.now()/1000));
         if(change==="tos-revoked")sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(ADMIN.id);
         if(change==="role-changed")sqlite.prepare("UPDATE \"user\" SET role='user' WHERE id=?").run(ADMIN.id);
         if(change==="banned")sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(ADMIN.id);
@@ -510,6 +515,30 @@ test("SA-056/057 U04i: post-anchor authorization/session/policy revocation abort
         assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
         assert.equal(s.stats.batches,1,"one rolled-back atomic D1 batch");
         assert.ok(s.stats.reads<=4,"one CostGuard + three bounded scoped SELECTs");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U04j: artificial parent session absence or forged cookie cannot mutate submitted slots",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const mode of ["parent-absent","cookie-absent","cookie-forged"]){
+      const s=setup({
+        kind,
+        parentSessionState: mode==="parent-absent"?"none":"user",
+        cookieToken: mode==="cookie-absent"?null:
+          mode==="cookie-forged"?"ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee":SESSION_TOKEN,
+      });
+      try{
+        const res=await s.post();
+        assert.equal(res.status,mode==="cookie-forged"?409:503,
+          kind+" "+mode+" "+await res.clone().text());
+        assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+        assert.equal(s.row("slots","s0").status,"submitted");
+        assert.equal(s.row("slots","s1").status,"submitted");
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,mode==="cookie-forged"?1:0);
       }finally{s.sqlite.close();}
     }
   }
