@@ -62,9 +62,14 @@ function setup({actor=admin,staff=false,settings="normal",onFirst}={}) {
       body:JSON.stringify(body)
     },{DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN}
   );
+  const deleteOne=(id="a",eventId="ev-1")=>app.request(
+    ORIGIN+"/api/manage/events/"+eventId+"/slots/"+id,{
+      method:"DELETE",headers:{Origin:ORIGIN},
+    },{DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN}
+  );
   const count=(table)=>sqlite.prepare("SELECT COUNT(*) AS n FROM "+table).get().n;
   const slot=(id)=>sqlite.prepare("SELECT * FROM slots WHERE id=?").get(id);
-  return {sqlite,stats,del,count,slot};
+  return {sqlite,stats,del,deleteOne,count,slot};
 }
 
 test("SA-062 U02c-1: delete two slots with strict audits and 3 projection targets in one D1 batch",async()=>{
@@ -149,4 +154,70 @@ test("SA-062 U02c-1: CostGuard blocks deletion and this candidate is NOT mounted
   assert.equal(s.count("audit_logs"),0);
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotBatchAvailableDeleteRoutes|slotBatchAvailableDelete\.ts/);
+});
+
+test("SA-061 U02c-4: single available delete with strict audit and 3 projections",async()=>{
+  const s=setup(),r=await s.deleteOne("a");
+  assert.equal(r.status,200,await r.clone().text());
+  assert.deepEqual(await r.json(),{
+    ok:true,created:1,message:"1件の枠を削除しました。",pendingPublicReflection:true,
+  });
+  assert.equal(s.slot("a"),undefined);
+  assert.ok(s.slot("b"));
+  assert.equal(s.slot("reserved").status,"reserved");
+  assert.equal(s.count("audit_logs"),1);
+  assert.equal(s.count("static_rebuild_queue"),3);
+  const audit=s.sqlite.prepare("SELECT operation,retention_class,before_json FROM audit_logs").get();
+  assert.equal(audit.operation,"DELETE");
+  assert.equal(audit.retention_class,"normal");
+  assert.equal(JSON.parse(audit.before_json).id,"a");
+  assert.equal(s.stats.batches,1);
+});
+test("SA-061 U02c-4: reserved, submitted, missing, foreign and invalid IDs fail closed",async()=>{
+  const s=setup();
+  for(const [id,event,status] of [
+    ["reserved","ev-1",409],["submitted","ev-1",409],
+    ["missing","ev-1",409],["a","other",404],
+    ["bad id","ev-1",400]
+  ]){
+    const r=await s.deleteOne(id,event);
+    assert.equal(r.status,status,id+" "+await r.clone().text());
+  }
+  assert.equal(s.count("slots"),4);
+  assert.equal(s.count("audit_logs"),0);
+  assert.equal(s.count("static_rebuild_queue"),0);
+});
+test("SA-061 U02c-4: staff privileges, identity and maintenance guards",async()=>{
+  const denied=setup({actor:user});
+  assert.equal((await denied.deleteOne()).status,404);
+  const approved=setup({actor:user,staff:true});
+  assert.equal((await approved.deleteOne()).status,200);
+  assert.equal(approved.count("audit_logs"),1);
+  const anon=setup({actor:null});
+  assert.equal((await anon.deleteOne()).status,401);
+  const maintenance=setup({settings:"maintenance"});
+  assert.equal((await maintenance.deleteOne()).status,503);
+  assert.equal(maintenance.count("audit_logs"),0);
+});
+test("SA-061 U02c-4: postread status race aborts CAS delete, audit and queue",async()=>{
+  let raced=false;
+  const s=setup({onFirst:(sql,sqlite)=>{
+    if(!raced&&sql.includes("AS slots_json")){
+      raced=true;
+      sqlite.prepare("UPDATE slots SET status='reserved' WHERE id='a'").run();
+    }
+  }});
+  const r=await s.deleteOne();
+  assert.equal(raced,true);
+  assert.equal(r.status,409,await r.clone().text());
+  assert.equal(s.slot("a").status,"reserved");
+  assert.equal(s.count("audit_logs"),0);
+  assert.equal(s.count("static_rebuild_queue"),0);
+});
+test("SA-061 U02c-4: audit error rolls back single deletion and queue",async()=>{
+  const s=setup();
+  s.sqlite.exec("DROP TABLE audit_logs");
+  assert.equal((await s.deleteOne()).status,503);
+  assert.ok(s.slot("a"));
+  assert.equal(s.count("static_rebuild_queue"),0);
 });
