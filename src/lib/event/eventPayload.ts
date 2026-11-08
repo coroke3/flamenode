@@ -4,13 +4,12 @@ import {
   type EventEditSection,
 } from "@/lib/admin/eventSectionFields";
 import {
-  buildPartsJson,
   buildVideoFormSettingsJson,
   resolveSubmittedEventVisibility,
   type EventFormData,
 } from "@/lib/event/eventForm";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
-import { buildBasicEventUpdateFields, buildPublishEventUpdateFields, buildQuestionsEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
+import { buildBasicEventUpdateFields, buildPublishEventUpdateFields, buildQuestionsEventUpdateFields, buildSlotsEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
@@ -69,16 +68,7 @@ export function buildEventUpdatePayload(args: {
   }
 
   if (permissions.slots) {
-    Object.assign(updatePayload, {
-      max_slots_per_video: data.max_slots_per_video,
-      max_slot_reservation_groups_per_xid:
-        data.max_slot_reservation_groups_per_xid,
-      slot_interval_minutes: data.slot_interval_minutes ?? null,
-      slot_part_gap_minutes: data.slot_part_gap_minutes,
-      slot_type: data.slot_type,
-      slot_visibility_mode: data.slot_visibility_mode,
-      parts_json: buildPartsJson(data.parts_text),
-    });
+    Object.assign(updatePayload, buildSlotsEventUpdateFields(data));
     updatedSections.push("slots");
     changedByPermission.slots = EVENT_SECTION_PERMISSION_KEYS.slots;
   }
