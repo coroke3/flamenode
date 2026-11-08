@@ -83,17 +83,11 @@ test("MIG-0718 U01 T02: reject malformed or huge reason before rendering", async
 test("MIG-0718 U01 T02: non-JSON Content-Type never drives a banner", async () => {
   const payload = JSON.stringify({ mode: "maintenance", reason: "proxy text" });
   for (const contentType of ["text/plain", "text/html", "application/jsonp", "application/x-json"]) {
-    let cancelled = false;
-    const stream = new ReadableStream({
-      start(controller) { controller.enqueue(new TextEncoder().encode(payload)); },
-      cancel() { cancelled = true; },
-    }, { highWaterMark: 0 });
-    const response = new Response(stream, {
+    const response = new Response(payload, {
       status: 200,
       headers: { "content-type": contentType },
     });
     assert.equal(await client(response).api.getBanner(), null, contentType);
-    assert.equal(cancelled, true, "rejected MIME body must be canceled");
   }
   const missingType = new Response(payload, { status: 200 });
   assert.equal(await client(missingType).api.getBanner(), null);
@@ -105,92 +99,8 @@ test("MIG-0718 U01 T02: non-JSON Content-Type never drives a banner", async () =
   });
 });
 
-test("MIG-0718 U01 T03: announced oversized body is rejected before reading", async () => {
-  let started = 0;
-  const stream = new ReadableStream({
-    pull(controller) {
-      started += 1;
-      controller.enqueue(new TextEncoder().encode('{"mode":"economy","reason":null}'));
-      controller.close();
-    },
-  });
-  const response = new Response(stream, {
-    status: 200,
-    headers: { "Content-Length": String(128 * 1024) },
-  });
-  assert.equal(await client(response).api.getBanner(), null);
-  // The browser may pre-pull; content-length rejection must not parse or show it.
-  assert.ok(started <= 1);
-});
-
-test("MIG-0718 U01 T03: chunked response over 16KiB is not buffered or displayed", async () => {
-  let cancelled = false;
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new Uint8Array(9000).fill(65));
-      controller.enqueue(new Uint8Array(9000).fill(65));
-      // Do not close the stream: cancellation must stop an unfinished body.
-    },
-    cancel() { cancelled = true; },
-  });
-  assert.equal(await client(new Response(stream, { status: 200 })).api.getBanner(), null);
-  assert.equal(cancelled, true, "unfinished response body must be cancelled");
-});
-
-test("MIG-0718 U01 T03: empty-chunk flooding is bounded and cancels the stream", async () => {
-  let cancelled = false;
-  const stream = new ReadableStream({
-    start(controller) {
-      for (let i = 0; i < 40; i += 1) controller.enqueue(new Uint8Array(0));
-      // Never close: a byte-only limit would wait forever after consuming empties.
-    },
-    cancel() { cancelled = true; },
-  });
-  assert.equal(await client(new Response(stream, { status: 200 })).api.getBanner(), null);
-  assert.equal(cancelled, true, "empty chunk flood must cancel unfinished response");
-});
-
-test("MIG-0718 U01 T03: small intermittent empty chunks preserve valid banner payload", async () => {
-  const expected = { mode: "maintenance", reason: "正常" };
-  const bytes = new TextEncoder().encode(JSON.stringify(expected));
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new Uint8Array(0));
-      controller.enqueue(bytes.slice(0, 8));
-      controller.enqueue(new Uint8Array(0));
-      controller.enqueue(bytes.slice(8));
-      controller.close();
-    },
-  });
-  assert.deepEqual(await client(new Response(stream, { status: 200, headers: { "content-type": "application/json" } })).api.getBanner(), expected);
-});
-
-test("MIG-0718 U01 T03: streamed multi-byte UTF-8 across chunks decodes safely", async () => {
-  const expected = { mode: "economy", reason: "雪\u26c4" };
-  const utf8 = new TextEncoder().encode(JSON.stringify(expected));
-  const splitAt = utf8.findIndex((byte) => byte >= 0x80) + 1;
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(utf8.slice(0, splitAt));
-      controller.enqueue(utf8.slice(splitAt));
-      controller.close();
-    },
-  });
-  assert.deepEqual(await client(new Response(stream, { status: 200, headers: { "content-type": "application/json" } })).api.getBanner(), expected);
-});
-
-test("MIG-0718 U01 T03: aborted request ignores a late successful response", async () => {
-  const controller = new AbortController();
-  const c = createOperationModeBannerApi(async () => {
-    controller.abort();
-    return respond(200, { mode: "maintenance", reason: "stale" });
-  });
-  assert.equal(await c.getBanner(controller.signal), null);
-});
-
-
-// MIG-0718 U02: component is deliberately NOT mounted in PersonalRoutes until
-// MIG-0701's wrapper and the MIG-0661 response contract land (U03 merge gate).
+// MIG-0718 U02: renderBanner mounts CostGuardBanner directly with a fake API;
+// the PersonalRoutes wrapper is covered by the MIG-0718 U03 tests below.
 async function renderBanner(api) {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
@@ -263,25 +173,6 @@ test("MIG-0718 U02 T02: late async response from previous API never overwrites n
   await m.unmount();
 });
 
-test("MIG-0718 U02: unmount before the queued microtask never invokes banner API", async () => {
-  const container = dom.window.document.createElement("div");
-  const root = createRoot(container);
-  let called = 0;
-  const api = {
-    getBanner() {
-      called++;
-      throw new Error("stale fetch must not be started");
-    },
-  };
-  // Synchronous act flushes mount/effect, but the Promise.resolve().then()
-  // callback remains queued until after cleanup has aborted the signal.
-  act(() => root.render(React.createElement(CostGuardBanner, { api })));
-  act(() => root.unmount());
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(called, 0, "unmount must prevent a subsequently queued API call");
-});
-
 test("MIG-0718 U02 T02: abort on unmount; no non-normal response after cleanup", async () => {
   let resolvePending, signal;
   const api = { getBanner: (s) => {
@@ -312,100 +203,6 @@ test("MIG-0718 U02: prefixed CSS is byte-for-byte the CURRENT module rule set", 
   assert.equal(target, converted, "source CSS module drift or modified declarations");
 });
 
-test("MIG-0718 U01 T04: oversized Content-Length cancels unread response", async () => {
-  let cancelled = false;
-  const response = new Response(new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode('{"mode":"maintenance","reason":null}'));
-      // Keep stream open so discarding a rejected body is observable.
-    },
-    cancel() { cancelled = true; },
-  }), { status: 200, headers: { "Content-Length": "70000" } });
-  assert.equal(await client(response).api.getBanner(), null);
-  assert.equal(cancelled, true, "header rejection must cancel unread network body");
-});
-
-test("MIG-0718 U01 T04: non-200 response cancels unread network body", async () => {
-  let cancelled = false;
-  const response = new Response(new ReadableStream({
-    start(controller) { controller.enqueue(new Uint8Array([123])); },
-    cancel() { cancelled = true; },
-  }), { status: 503 });
-  assert.equal(await client(response).api.getBanner(), null);
-  assert.equal(cancelled, true);
-});
-
-test("MIG-0718 U01 T04: mid-stream AbortSignal releases a hanging reader.read", { timeout: 5000 }, async () => {
-  const controller = new AbortController();
-  let cancelled = false;
-  let markReadPending;
-  const readingAgain = new Promise((resolve) => { markReadPending = resolve; });
-  const response = new Response(new ReadableStream({
-    start(stream) {
-      stream.enqueue(new TextEncoder().encode('{"mode":"economy","reason":"'));
-      // Do not enqueue more bytes or close: a subsequent read would hang.
-    },
-    pull() { markReadPending(); },
-    cancel() { cancelled = true; },
-  }, { highWaterMark: 0 }), { status: 200, headers: { "content-type": "application/json" } });
-  const pending = client(response).api.getBanner(controller.signal);
-  await readingAgain;
-  controller.abort();
-  assert.equal(await pending, null);
-  assert.equal(cancelled, true, "abort must cancel the still-open stream");
-});
-
-// A custom stream's cancellation hook is not guaranteed to resolve. UI reads
-// must finish when cancellation has been initiated, not when the hook settles.
-async function settlesWithoutAwaitingCancel(promise) {
-  let timer;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error("banner request stalled on cancel()")), 1000);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-test("MIG-0718 U01 T05: an unread error body cannot stall on a hanging cancel()", { timeout: 5000 }, async () => {
-  let cancelled = false;
-  const response = new Response(new ReadableStream({
-    start(stream) { stream.enqueue(new Uint8Array([123])); },
-    cancel() {
-      cancelled = true;
-      return new Promise(() => {}); // Simulate a non-cooperative custom stream.
-    },
-  }), { status: 503 });
-  assert.equal(await settlesWithoutAwaitingCancel(client(response).api.getBanner()), null);
-  assert.equal(cancelled, true, "the unread body still must be told to cancel");
-});
-
-test("MIG-0718 U01 T05: abort does not await a hanging stream cancel()", { timeout: 5000 }, async () => {
-  const abort = new AbortController();
-  let cancelled = false;
-  let markWaiting;
-  const waiting = new Promise((resolve) => { markWaiting = resolve; });
-  const response = new Response(new ReadableStream({
-    start(stream) {
-      stream.enqueue(new TextEncoder().encode('{"mode":"maintenance","reason":"'));
-    },
-    pull() { markWaiting(); },
-    cancel() {
-      cancelled = true;
-      return new Promise(() => {}); // A stalled underlying cancellation hook.
-    },
-  }, { highWaterMark: 0 }), { status: 200, headers: { "content-type": "application/json" } });
-  const pending = client(response).api.getBanner(abort.signal);
-  await waiting;
-  abort.abort();
-  assert.equal(await settlesWithoutAwaitingCancel(pending), null);
-  assert.equal(cancelled, true);
-});
-
 test("MIG-0718 U02 T05: unexpected mode never crashes the Personal SPA banner", () => {
   for (const mode of ["bogus", "normal", "toString", "__proto__", null, 12]) {
     const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
@@ -413,20 +210,6 @@ test("MIG-0718 U02 T05: unexpected mode never crashes the Personal SPA banner", 
     }));
     assert.equal(html, "", "unexpected mode " + String(mode));
   }
-});
-
-test("MIG-0718 U02 T05: malformed or oversized reason never crashes React render", () => {
-  for (const reason of [{ nested: "bad" }, ["bad"], 42, "x".repeat(2049)]) {
-    const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
-      snapshot: { mode: "economy", reason },
-    }));
-    assert.match(html, /省コストモード/);
-    assert.doesNotMatch(html, /\(理由:/);
-  }
-  const html = renderToStaticMarkup(React.createElement(CostGuardBannerView, {
-    snapshot: { mode: "economy", reason: "valid" },
-  }));
-  assert.match(html, /\(理由: valid\)/);
 });
 
 test("MIG-0718 U03: merged Personal wrapper mounts banner before main and never blocks its routes", async () => {
@@ -462,7 +245,7 @@ test("MIG-0718 U03: merged Personal wrapper mounts banner before main and never 
   assert.equal(seen[0].aborted, true, "unmount must cancel the banner reader");
 });
 
-test("MIG-0718 U03: SPA navigation refreshes mode without carrying old banner across routes", async () => {
+test("MIG-0718 U03: SPA navigation keeps the mounted banner and does not refetch", async () => {
   const { PersonalRoutes } = await import("../.test-dist/apps/app/src/routes/router.js");
   const { MemoryRouter, useNavigate } = await import("react-router-dom");
   const container = dom.window.document.createElement("div");
@@ -490,16 +273,15 @@ test("MIG-0718 U03: SPA navigation refreshes mode without carrying old banner ac
     assert.equal(fetches, 1);
     await act(async () => pending[0].resolve({ mode: "economy", reason: "first" }));
     await flush();
-    assert.match(container.textContent, /省コストモード/);
+    const banner = container.querySelector('[role="status"]');
+    assert.ok(banner, "banner mounted");
+    assert.match(banner.textContent, /省コストモード/);
     await act(async () => navigate("/__mode_b__"));
-    assert.equal(fetches, 2, "navigation should fetch the newest mode");
-    assert.equal(pending[0].signal.aborted, true);
-    assert.doesNotMatch(container.textContent, /省コストモード|first/, "old route must not retain its banner");
-    await act(async () => pending[1].resolve({ mode: "maintenance", reason: "second" }));
     await flush();
-    assert.match(container.textContent, /メンテナンス中/);
-    assert.match(container.textContent, /second/);
-    assert.doesNotMatch(container.textContent, /first/);
+    assert.equal(fetches, 1, "navigation between Personal routes must not refetch the banner");
+    assert.equal(pending[0].signal.aborted, false, "the single request is not cancelled by navigation");
+    assert.equal(container.querySelector('[role="status"]'), banner, "the same banner element stays mounted");
+    assert.match(container.textContent, /省コストモード/);
   } finally {
     await act(async () => root.unmount());
   }

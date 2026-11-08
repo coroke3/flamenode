@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import type { PersonalApi } from "../api/personal.js";
 import { AuthErrorView } from "./guard.js";
 import { Dashboard } from "./dashboard/Dashboard.js";
@@ -36,10 +36,9 @@ export function PersonalRoutes({ api, bannerApi }: {
   api: PersonalApi;
   bannerApi?: ReturnType<typeof createOperationModeBannerApi>;
 }): React.ReactElement {
-  const location = useLocation();
   return (
     <div data-fn-surface="personal" className="fn-personal-shell fn-app">
-      <CostGuardBanner api={bannerApi} refreshKey={location.key} />
+      <CostGuardBanner api={bannerApi} />
       <main className="fn-main flex-1 w-full">
         <RouteErrorBoundary>
           <Routes>
