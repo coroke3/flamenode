@@ -73,3 +73,40 @@ test("MIG-0656 U01: URL-only writes do not invent a dangerous confirmation field
     "forceReleaseSubmittedSlot", "releaseSubmittedVideoKeepReservation",
   ]) assert.equal(SlotAdminWriteBodySchemas[action].safeParse({}).success, true, action);
 });
+
+test("MIG-0656 U01b: rejects malformed inactive-mode fields that CURRENT validates", () => {
+  const time = { mode: "time", start_at: "2026-11-08T10:00",
+    end_at: "2026-11-08T10:30", interval_minutes: 5 };
+  for (const extra of [
+    { count: 0 }, { count: 101 }, { count: "3" }, { count: true },
+    { start_index: -1 }, { start_index: 10000 }, { start_index: "1" },
+    { label_prefix: "x".repeat(41) }, { label_prefix: 3 },
+  ]) assert.equal(SlotGenerateBodySchema.safeParse({ ...time, ...extra }).success, false,
+    "time rejects invalid count-mode fields: " + JSON.stringify(extra));
+  const count = { mode: "count", count: 3, start_index: 1, label_prefix: "No." };
+  for (const extra of [
+    { interval_minutes: 0 }, { interval_minutes: 1441 },
+    { interval_minutes: "5" }, { interval_minutes: 1.5 },
+    { start_at: 42 }, { end_at: {} },
+  ]) assert.equal(SlotGenerateBodySchema.safeParse({ ...count, ...extra }).success, false,
+    "count rejects invalid time-mode fields: " + JSON.stringify(extra));
+});
+
+test("MIG-0656 U01b: valid inactive-mode fields are checked but omitted from output", () => {
+  assert.deepEqual(SlotGenerateBodySchema.parse({
+    mode: "time", start_at: "2026-11-08T10:00",
+    end_at: "2026-11-08T10:30", count: 100,
+    start_index: 9999, label_prefix: "  No.  ",
+  }), {
+    mode: "time", start_at: "2026-11-08T10:00",
+    end_at: "2026-11-08T10:30", interval_minutes: 5,
+  });
+  assert.deepEqual(SlotGenerateBodySchema.parse({
+    mode: "count", count: 3, start_index: 1, label_prefix: "No.",
+    interval_minutes: 5, start_at: "ignored", end_at: null,
+  }), { mode: "count", count: 3, start_index: 1, label_prefix: "No." });
+  // Unknown keys are stripped, just as CURRENT's default z.object does.
+  assert.deepEqual(SlotGenerateBodySchema.parse({
+    mode: "count", count: 1, another_unrecognized_key: "discard",
+  }), { mode: "count", count: 1, start_index: 1 });
+});
