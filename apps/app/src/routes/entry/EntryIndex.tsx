@@ -119,7 +119,7 @@ export function EntryIndexView({
         // A revoked session must not leave the previous account's private slot list on screen.
         if (response.status === "anonymous" || response.status === "banned") {
           setContinuationAccess({ userId: data.user.id, status: response.status });
-          setExtraPages([]);
+          setExtraPageState(null);
           return;
         }
         if (
