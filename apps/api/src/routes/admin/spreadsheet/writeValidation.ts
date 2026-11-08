@@ -217,6 +217,7 @@ export function buildSpreadsheetInsertSql(
   ctx: SpreadsheetSqlTableContext,
   rowInput: Record<string, string | null>,
 ): SpreadsheetSqlPlan & { row: Record<string, string | number | null> } {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
   const row = prepareCompleteInsertRow(ctx, rowInput);
   normalizeSpreadsheetPrimaryKey(
     ctx.primaryKeys,
@@ -237,6 +238,7 @@ export function buildSpreadsheetUpdateSql(
   before: Record<string, unknown>,
   values: Record<string, string | null>,
 ): SpreadsheetSqlPlan & { after: Record<string, unknown> } {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
   const { setColumns, after } = prepareSpreadsheetUpdate(ctx, before, values);
   const key = spreadsheetPkCondition(ctx, pk);
   const snapshot = spreadsheetSnapshotCondition(ctx, before);
