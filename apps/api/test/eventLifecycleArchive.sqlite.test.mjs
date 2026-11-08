@@ -104,14 +104,19 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
     id: "u_admin", name: "Admin", discord_id: "d-admin", role,
     created_at: timestamp, is_banned: 0, is_tos_accepted: 1,
   });
-  insert(sqlite, "system_settings", {
-    id: "default", operation_mode: mode,
-    audit_normal_retention_days: 30,
-    audit_restorable_retention_days: 180,
-    audit_long_retention_days: 365,
-    audit_max_payload_bytes: 120000,
-    audit_compact_after_days: 30,
-  });
+  // The real migrations already seed the singleton default settings row.
+  // Updating it avoids a duplicate primary key and exercises the actual schema.
+  const settingsUpdated = sqlite.prepare(`
+    UPDATE system_settings
+    SET operation_mode = ?,
+        audit_normal_retention_days = ?,
+        audit_restorable_retention_days = ?,
+        audit_long_retention_days = ?,
+        audit_max_payload_bytes = ?,
+        audit_compact_after_days = ?
+    WHERE id = 'default'
+  `).run(mode, 30, 180, 365, 120000, 30);
+  assert.equal(settingsUpdated.changes, 1, "migrations must seed default system_settings");
   insert(sqlite, "events", {
     id: EVENT, title: "Event before archive",
     visibility_status: status, created_at: timestamp,
