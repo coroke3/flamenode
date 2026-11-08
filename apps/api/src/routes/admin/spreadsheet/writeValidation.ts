@@ -108,3 +108,34 @@ export function prepareCompleteInsertRow(
   }
   return complete;
 }
+
+
+/** CURRENT validation.ts#getPrimaryKeyIssue and normalizePrimaryKeyRecord parity. */
+export function normalizeSpreadsheetPrimaryKey(
+  primaryKeys: readonly string[],
+  pk: Record<string, string>,
+): Record<string, string> {
+  if (primaryKeys.length === 0) throw new Error("missing_primary_key");
+  for (const key of primaryKeys) {
+    const value = pk[key];
+    if (value === undefined || String(value).trim() === "") {
+      throw new Error("missing_primary_key");
+    }
+  }
+  const normalized: Record<string, string> = {};
+  for (const key of primaryKeys) normalized[key] = String(pk[key]);
+  return normalized;
+}
+
+/** CURRENT validation.ts#primaryKeyFromRowValues parity. */
+export function primaryKeyFromSpreadsheetRow(
+  row: Record<string, string | null>,
+  primaryKeys: readonly string[],
+): Record<string, string> {
+  const raw: Record<string, string> = {};
+  for (const key of primaryKeys) {
+    const value = row[key];
+    raw[key] = value == null ? "" : String(value);
+  }
+  return normalizeSpreadsheetPrimaryKey(primaryKeys, raw);
+}
