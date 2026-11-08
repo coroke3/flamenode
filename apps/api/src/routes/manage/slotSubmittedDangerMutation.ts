@@ -11,6 +11,10 @@
 import { sql, type SQL } from "@flamenode/server-core/sql";
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import type { SubmittedDangerKind, SubmittedDangerSelection } from "./slotSubmittedDangerSelection.ts";
+import {
+  SUBMITTED_VIDEO_AUDIT_COLUMNS,
+  parseSubmittedVideoAuditBefore,
+} from "./slotSubmittedVideoAudit.ts";
 
 export type SubmittedDangerAtomicPlan = {
   preMutationAssertions: SQL[];
@@ -149,6 +153,29 @@ export function buildSubmittedDangerAtomicPlan(input: {
   if (videoId) {
     const before = selection.videoBefore!;
     const expectedRefs = JSON.stringify(refIds);
+    // The video long-audit before-image must be rechecked field by field.
+    // A legacy producer can alter a descriptive field without incrementing
+    // updated_at. A stale 30-column image would otherwise poison strict audit.
+    const complete = selection.videoAuditBefore;
+    if (complete && (!parseSubmittedVideoAuditBefore(complete) ||
+        complete.id !== videoId ||
+        complete.updated_at !== before.updated_at ||
+        complete.scheduling_type !== before.scheduling_type)) {
+      throw Error("slot_submitted_danger_invalid_complete_video");
+    }
+    const completeJson = complete ? JSON.stringify(complete) : null;
+    // Column identifiers and json_extract paths are derived solely from the
+    // hard-coded canonical 30-field list, never from caller input.
+    const completeCas = completeJson ? sql`
+      AND (SELECT COUNT(*) FROM videos AS v WHERE v.id = ${videoId}
+        AND ${sql.join(
+          SUBMITTED_VIDEO_AUDIT_COLUMNS.map(name => sql`
+            ${sql.raw('v."' + name + '"')}
+              IS json_extract(${completeJson}, ${sql.raw("'$." + name + "'")})
+          `),
+          sql` AND `,
+        )}) = 1
+    ` : sql``;
     // A video can have submitted rows outside this event; compare all of them
     // without limiting the SQL query. The 21-sentinel was validated on read.
     const refs = sql`
@@ -156,6 +183,7 @@ export function buildSubmittedDangerAtomicPlan(input: {
         (SELECT COUNT(*) FROM videos
           WHERE id = ${videoId} AND updated_at = ${before.updated_at}
             AND scheduling_type IS ${before.scheduling_type}) = 1
+        ${completeCas}
         AND (SELECT COUNT(*) FROM slots
           WHERE video_id = ${videoId} AND status = 'submitted') = ${refIds.length}
         AND (SELECT COUNT(*) FROM slots AS s
