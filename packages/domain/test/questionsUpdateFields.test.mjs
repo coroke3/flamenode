@@ -42,6 +42,13 @@ test("MIG-0652 U01: explicit empty required-fields JSON replaces instead of pres
   assert.equal(build({ provided: undefined, previousRequired: null }).required_video_fields_json, null);
 });
 
+test("MIG-0652 U01: nullable serializer explicitly clears prior required video fields", () => {
+  const result = build({provided: null, previousRequired: '["title"]'});
+  assert.equal(result.required_video_fields_json, null);
+  // Only undefined means the form did not submit this field.
+  assert.equal(build({provided: undefined, previousRequired: '["title"]'}).required_video_fields_json, '["title"]');
+});
+
 test("MIG-0652 U01: optional editor and review settings retain old values on null/undefined", () => {
   const result = build({ fields: data({
     user_video_edit_permission_keys_json: null,
