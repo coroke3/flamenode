@@ -613,3 +613,30 @@ test("MIG-0652 U04 SQLite T22: racing R2 first-manifest writers preserve both bl
   assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
 });
 
+test("MIG-0652 U04 SQLite T23: pre-existing same-target R2 fence is preserved and archive fails closed", async () => {
+  const competing = {
+    entity_type: "event", entity_id: EVENT,
+    fence_token: "vf-inflight-other-writer", blocked_at: 1000, reason: "first_writer_precommit",
+  };
+  const seedManifest = {
+    schema_version: 1, revision: 7, generated_at: 1000, entities: [competing],
+  };
+  const f = setup({ r2Options: { seedManifest } });
+  const oldError = console.error;
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally { console.error = oldError; }
+  assert.equal(response.status, 503, "second archive must not overwrite a still-blocked public artifact");
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  const denied = await response.json();
+  assert.equal(denied.ok, false);
+  assert.ok(!JSON.stringify(denied).includes("vf-inflight-other-writer"), "do not leak the first writer token");
+  assert.deepEqual(f.bucket.manifest, seedManifest, "the first writer's token and revision remain unchanged");
+  assert.equal(f.timeline.filter((op) => op === "r2.put").length, 0);
+  assert.equal(f.d1.stats.batches, 0, "the second archive cannot begin D1 mutation");
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+});
+

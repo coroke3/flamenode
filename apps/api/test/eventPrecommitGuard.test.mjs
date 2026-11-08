@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runEventWriteBehindVisibilityFence } from "../src/visibility/eventPrecommitGuard.ts";
 
-function fixture({ readError = null, verifyError = null } = {}) {
+function fixture({ readError = null, verifyError = null, initialManifest = null } = {}) {
   const calls = [];
-  let current = { schema_version: 1, revision: 0, generated_at: 0, entities: [] };
-  let etag = null;
+  let current = initialManifest ?? { schema_version: 1, revision: 0, generated_at: 0, entities: [] };
+  let etag = initialManifest ? "etag-existing" : null;
   let reads = 0;
   const visibilityHost = {
     manifest: {
@@ -146,3 +146,30 @@ test("MIG-0652 U02 precommit T07: no-token D1 failure does not compensate a none
   assert.deepEqual(f.calls, []);
   assert.equal(compensations, 0);
 });
+
+test("MIG-0652 U02 precommit T08: prior same-target fence token is immutable under competing archive", async () => {
+  const original = {
+    entity_type: "event", entity_id: "same-event",
+    fence_token: "vf-first-writer", blocked_at: 1000, reason: "inflight_first_archive",
+  };
+  const f = fixture({
+    initialManifest: { schema_version: 1, revision: 7, generated_at: 1000, entities: [original] },
+  });
+  let commits = 0;
+  await assert.rejects(
+    runEventWriteBehindVisibilityFence({
+      eventId: "same-event",
+      fenceToken: "vf-second-writer",
+      reason: "event_private",
+      visibilityHost: f.visibilityHost,
+      commit: async () => { commits++; },
+      compensateOnFailure: async () => { f.calls.push("compensate"); },
+    }),
+    /public_visibility_fence_token_mismatch/,
+  );
+  assert.equal(commits, 0, "the second operation cannot reach D1");
+  assert.deepEqual(f.calls, ["r2.read", "compensate"]);
+  assert.equal(f.manifest.revision, 7);
+  assert.deepEqual(f.manifest.entities, [original]);
+});
+

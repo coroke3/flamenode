@@ -30,6 +30,28 @@ export async function runEventWriteBehindVisibilityFence<T>(args: {
     return args.commit();
   }
 
+  const fenceToken = args.fenceToken;
+
+  // Do not replace a different in-flight fence for the SAME event. Otherwise
+  // compensation after our D1 failure could erase the first writer's block.
+  // The shared CAS mutator also rejects tokens introduced after this first read.
+  const guardedHost: VisibilityFenceHost = {
+    manifest: {
+      read: async () => {
+        const snapshot = await args.visibilityHost.manifest.read();
+        if (snapshot.manifest.entities.some((entry) =>
+          entry.entity_type === "event" &&
+          entry.entity_id === args.eventId &&
+          entry.fence_token !== fenceToken
+        )) {
+          throw new Error("public_visibility_fence_token_mismatch");
+        }
+        return snapshot;
+      },
+      write: (manifest, options) => args.visibilityHost.manifest.write(manifest, options),
+    },
+  };
+
   const compensateBestEffort = async (): Promise<void> => {
     try {
       await args.compensateOnFailure();
@@ -43,10 +65,10 @@ export async function runEventWriteBehindVisibilityFence<T>(args: {
     await preCommitEventVisibilityTransition(
       {
         eventId: args.eventId,
-        fenceToken: args.fenceToken,
+        fenceToken,
         reason: args.reason ?? null,
       },
-      args.visibilityHost,
+      guardedHost,
     );
   } catch (error) {
     // A PUT may have succeeded before its verification read failed.
