@@ -246,3 +246,37 @@ test("MIG-0722 U01: at 500-row cap, reject counts smaller than delivered rows", 
   };
   assert.deepEqual(await listSlots("ev1", "all", fetchFn), { status: "unavailable" });
 });
+
+test("MIG-0722 U01: inconsistent or unsafe status counts cannot be displayed", async () => {
+  const badCounts = [
+    { available: 0 }, // total=1 but status sum=0
+    { available: 1, reserved: 1 }, // status sum exceeds total
+    { available: -1, reserved: 2 }, // negative count
+    { available: 0.5, reserved: 0.5 }, // fractional counts
+    { available: Number.MAX_SAFE_INTEGER + 1 }, // non-safe integer
+  ];
+  for (const counts of badCounts) {
+    let calls = 0;
+    const result = await listSlots("ev1", "all", async () => {
+      calls++;
+      return json(200, page(0, [slot(0)], { total: 1, counts }));
+    });
+    assert.deepEqual(result, { status: "unavailable" }, JSON.stringify(counts));
+    assert.equal(calls, 1, "reject the inconsistent first snapshot");
+  }
+  const valid = await listSlots("ev1", "all", async () =>
+    json(200, page(0, [slot(0)], { total: 1, counts: { available: 1, reserved: 0 } })));
+  assert.equal(valid.status, "ok");
+});
+
+test("MIG-0722 U01: cancelled fetch cannot return successful final-page data", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const result = await listSlots("ev1", "all", async () => {
+    calls++;
+    controller.abort();
+    return json(200, page(0, [], { total: 0, counts: {} }));
+  }, controller.signal);
+  assert.deepEqual(result, { status: "unavailable" });
+  assert.equal(calls, 1);
+});
