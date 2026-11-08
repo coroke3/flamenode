@@ -15,6 +15,7 @@
 import { MAX_SLOTS_PER_VIDEO } from "@flamenode/domain/slots/limits";
 import { SUBMITTED_VIDEO_AUDIT_JSON_FIELDS, parseSubmittedVideoAuditBefore } from "./slotSubmittedVideoAudit.ts";
 import { canUpdateEventLabels, type SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
+import { SLOT_CHUNK_COST_GUARD_SELECT } from "./slotChunkCostGuard.ts";
 import {
   selectSubmittedDangerSnapshot,
   type SubmittedDangerKind,
@@ -45,7 +46,8 @@ export const SLOT_SUBMITTED_DANGER_ANCHOR_SQL = [
   " WHERE es.event_id = ? AND l.auth_user_id = ?",
   " AND x.approval_status = 'approved' LIMIT 101",
   ") staff) AS staff_json,",
-  "(SELECT json_object(" + FIELDS + ") FROM slots s",
+  SLOT_CHUNK_COST_GUARD_SELECT + ",",
+  "(SELECT json_object(" + FIELDS + ") FROM slots s
   " WHERE s.event_id = ? AND s.id = ? LIMIT 1) AS anchor_json",
 ].join("\n");
 
@@ -76,6 +78,7 @@ export const SLOT_SUBMITTED_DANGER_VIDEO_REFS_SQL = [
 export type SubmittedDangerAnchorRead = {
   exists_id: string | null;
   staff_json: string | null;
+  cost_guard_json: string | null;
   anchor_json: string | null;
 };
 export type SubmittedDangerGroupRead = { group_json: string | null };

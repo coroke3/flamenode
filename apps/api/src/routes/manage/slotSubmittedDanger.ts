@@ -15,7 +15,11 @@ import { Hono, type Context } from "hono";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
+import { buildSlotChunkSessionAssertion, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import { auditPreloaded } from "../admin/body.ts";
 import { isWriteConflict } from "../events/templates.ts";
 import {
@@ -52,6 +56,12 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
   if (!ID_PATTERN.test(eventId) || !ID_PATTERN.test(slotId)) {
     return c.json({ ok: false, message: "イベントIDまたは枠IDが不正です。" }, 400);
   }
+  // Validate the parent Auth.js identity, not merely a synthetic route user.
+  // The opaque token is only bound into the in-batch SQL assertion.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
@@ -73,6 +83,11 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
         authorized.message === "Not Found" ? 404 : 409,
       );
     }
+
+    // The same scoped read projects CostGuard; reject a denial appearing
+    // after parent middleware, before any expensive group/video work.
+    const guard = verifySlotChunkCostGuard(first.cost_guard_json, "manage_slot_update");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
 
     // Read #2, only when JS-trim classifies a nonempty group. Always bind
     // the untouched stored key: SQL trim() differs for Unicode whitespace.
@@ -124,7 +139,12 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
     // Changes and the audit/outbox/queue are inseparable: all statements
     // are compiled and committed via one mutateWithAudit D1 batch.
     await mutateWithAudit(db, {
-      preMutationAssertions: plan.preMutationAssertions.map((item) => db.run(item)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: first.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
+        ...plan.preMutationAssertions.map((item) => db.run(item)),
+      ],
       mutationStatements: [
         ...plan.mutationStatements.map((item) => db.run(item)),
         ...queue.statements,

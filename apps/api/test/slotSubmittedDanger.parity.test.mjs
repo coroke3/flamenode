@@ -10,6 +10,7 @@ import { SUBMITTED_VIDEO_AUDIT_COLUMNS } from "../src/routes/manage/slotSubmitte
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ORIGIN="https://app.flamenode.example";
+const SESSION_TOKEN="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const ADMIN={id:"admin-1",role:"admin",is_banned:0};
 const STAFF={id:"staff-1",role:"user",is_banned:0};
 const cols=[
@@ -57,6 +58,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
     "VALUES ('recipient-1','Recipient','user',0,1,1);",
     "CREATE TABLE event_staff (event_id TEXT,x_user_id TEXT,permission_preset TEXT,",
     "custom_permission_keys_json TEXT);",
+    'CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER);',
     "CREATE TABLE videos(" + SUBMITTED_VIDEO_AUDIT_COLUMNS.map(k=>
       k==="id" ? "id TEXT PRIMARY KEY" :
       ["scheduled_time","app_like_count","score_updated_at","created_at","updated_at"]
@@ -83,6 +85,8 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
     sqlite.prepare('INSERT INTO "user"(id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)')
       .run(actor.id,"Staff",actor.role);
   }
+  if(actor) sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
   if(staff && actor){
     sqlite.prepare("INSERT INTO x_users(id,approval_status) VALUES (?,?)").run("x1","approved");
     sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(actor.id,"x1");
@@ -93,6 +97,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
+    c.set("sessionState",actor?"user":"none");
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -104,7 +109,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   const post=(slotId="s0",eventId="ev-1",op=kind)=>app.request(
     ORIGIN+"/api/manage/events/"+eventId+"/slots/"+slotId+"/"+
       (op==="force-release"?"force-release-submitted":"release-submitted-video"),
-    {method:"POST",headers:{Origin:ORIGIN}},
+    {method:"POST",headers:{Origin:ORIGIN,Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN}},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );
   const row=(table,id)=>sqlite.prepare("SELECT * FROM "+table+" WHERE id=?").get(id);
@@ -467,4 +472,45 @@ test("SA-056/057 U03f: no accidental managed route mount or immediate Queue wake
   assert.match(handler,/mutateWithAudit\(db,/);
   assert.match(handler,/preMutationAssertions:/);
   assert.match(handler,/postAuditStatements:/);
+});
+
+test("SA-056/057 U04i: post-anchor authorization/session/policy revocation aborts both dangerous writes",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const change of ["session-deleted","session-expired","session-reassigned",
+      "staff-revoked","tos-revoked","role-changed","banned","read-only","event-deleted"]){
+      let injected=false;
+      const staff=change==="staff-revoked";
+      const s=setup({kind,count:2,actor:staff?STAFF:ADMIN,staff,onFirst:(sql,sqlite)=>{
+        if(injected||!sql.includes("AS anchor_json"))return;
+        injected=true;
+        if(change==="session-deleted")sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+        if(change==="session-expired")sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+          .run(Date.now()-60000,SESSION_TOKEN);
+        if(change==="session-reassigned")sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+          .run("other-user",SESSION_TOKEN);
+        if(change==="staff-revoked")sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+        if(change==="tos-revoked")sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(ADMIN.id);
+        if(change==="role-changed")sqlite.prepare("UPDATE \"user\" SET role='user' WHERE id=?").run(ADMIN.id);
+        if(change==="banned")sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(ADMIN.id);
+        if(change==="read-only")sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(change==="event-deleted")sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+      }});
+      try{
+        const r=await s.post();
+        assert.equal(injected,true,kind+" "+change+" injected after first SELECT");
+        assert.equal(r.status,409,kind+" "+change+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        for(const id of ["s0","s1"]){
+          const row=s.row("slots",id);
+          assert.equal(row.status,"submitted");
+          assert.equal(row.video_id,"vid");
+          assert.equal(row.version,1);
+        }
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,1,"one rolled-back atomic D1 batch");
+        assert.ok(s.stats.reads<=4,"one CostGuard + three bounded scoped SELECTs");
+      }finally{s.sqlite.close();}
+    }
+  }
 });
