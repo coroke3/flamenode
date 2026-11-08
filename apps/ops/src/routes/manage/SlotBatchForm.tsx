@@ -115,6 +115,10 @@ export function SlotBatchForm({
     setError(null);
     setNotice(null);
   }, [eventId]);
+  React.useEffect(() => () => {
+    // Invalidate in-flight callbacks after this form leaves the component tree.
+    contextRef.current = { ...contextRef.current };
+  }, []);
 
   const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
     // React state may not commit between two rapid submits; claim the lock

@@ -242,3 +242,46 @@ test("MIG-0722 U02b-5: A-B-A context generation rejects original batch result", 
     dom.window.close();
   }
 });
+
+test("MIG-0722 U02b-7: unmount invalidates pending slot batch result", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/manage/events/A/slots",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+  const previous = new Map(keys.map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    let settle, refreshed = 0;
+    const onGenerate = () => new Promise(resolve => { settle = resolve; });
+    await React.act(async () => root.render(React.createElement(SlotBatchForm, {
+      eventId: "A", totalSlots: 0, onGenerate,
+      onClearAvailable: async () => ({ ok: true }),
+      onChanged: () => { refreshed++; },
+    })));
+    const form = dom.window.document.querySelector("form");
+    form.querySelector('[name="start_at"]').value = "2026-11-08T10:00";
+    form.querySelector('[name="end_at"]').value = "2026-11-08T10:30";
+    await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", {
+      bubbles: true, cancelable: true,
+    })));
+    assert.equal(typeof settle, "function", "write callback started");
+    await React.act(async () => root.render(React.createElement("p", null, "離脱済み")));
+    await React.act(async () => settle({ ok: true, message: "OLD-SUCCESS" }));
+    assert.equal(refreshed, 0, "unmounted batch form must not refresh");
+    assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS/);
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+    dom.window.close();
+  }
+});

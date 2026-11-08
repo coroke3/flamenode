@@ -121,6 +121,10 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setError(null);
     setNotice(null);
   }, [eventId, slots, onAction]);
+  React.useEffect(() => () => {
+    // Even a matching A context after remount cannot accept pre-unmount results.
+    contextRef.current = { ...contextRef.current };
+  }, []);
   const visibleIds = slots.filter(row => row.event_id === eventId).map(row => row.id);
   const visibleSelected = visibleIds.filter(id => selected.has(id));
   const selectedAvailable = slots.filter(row => selected.has(row.id) &&

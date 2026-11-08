@@ -430,3 +430,26 @@ test("MIG-0722 U02b-5: A-B-A slot context generation rejects original mutation r
     assert.equal(writes, 1);
   });
 });
+
+test("MIG-0722 U02b-7: unmount invalidates pending slot action response", async () => {
+  await withSlotDom(async (dom, root) => {
+    let settle;
+    let refreshed = 0;
+    const onAction = () => new Promise(resolve => { settle = resolve; });
+    const rows = [slot("a", { event_id: "ev id", status: "available" })];
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null,
+      React.createElement(SlotList, {
+        eventId: "ev id", slots: rows, partGapMinutes: 15, parts: [], onAction,
+        onChanged: () => { refreshed++; },
+      }))));
+    const click = label => [...dom.window.document.querySelectorAll("button")]
+      .find(button => button.textContent.trim() === label).click();
+    await React.act(async () => click("削除"));
+    await React.act(async () => click("実行する"));
+    assert.equal(typeof settle, "function", "write callback started");
+    await React.act(async () => root.render(React.createElement("p", null, "離脱済み")));
+    await React.act(async () => settle({ ok: true, message: "OLD-SUCCESS" }));
+    assert.equal(refreshed, 0, "unmounted view must not refresh");
+    assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS/);
+  });
+});
