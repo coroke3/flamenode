@@ -4,7 +4,7 @@ import type { AdminNotificationsResponse } from "@flamenode/contracts";
 import { useSearchParams } from "react-router-dom";
 import { adminReadRedirect } from "../../api/adminTop.js";
 import {
-  createAdminNotificationsApi, notificationFilterHref, type AdminNotificationsApi, type NotificationFilters,
+  createAdminNotificationsApi, notificationFilterHref, truncateNotificationSearch, type AdminNotificationsApi, type NotificationFilters,
 } from "../../api/adminNotifications.js";
 import { NotificationOutboxSummary } from "../../components/notifications/NotificationOutboxSummary.js";
 import {
@@ -27,16 +27,22 @@ const STATUS_TABS = [
   ["sent", "送信済み"], ["failed", "最終失敗"], ["cancelled", "キャンセル"],
 ] as const;
 
+/** CURRENT ignores duplicated Next.js searchParams keys; mirror that behavior in the SPA. */
+function singleNotificationQueryValue(params: URLSearchParams, key: string): string {
+  const values = params.getAll(key);
+  return values.length === 1 ? values[0] : "";
+}
+
 /** CURRENT parseStatus + sp.type/event/q/cat normalisation (q is cut at 100 chars). */
 export function readNotificationFilters(params: URLSearchParams): NotificationFilters {
-  const status = params.get("status") ?? "all";
-  const cat = (params.get("cat") ?? "").trim();
+  const status = singleNotificationQueryValue(params, "status") || "all";
+  const cat = singleNotificationQueryValue(params, "cat").trim();
   return {
     status: STATUS_TABS.some((row) => row[0] === status) ? status : "all",
     cat: ADMIN_NOTIFICATION_CATEGORY_OPTIONS.some((option) => option.key === cat) ? cat : "all",
-    type: (params.get("type") ?? "").trim(),
-    event: (params.get("event") ?? "").trim(),
-    q: (params.get("q") ?? "").trim().slice(0, 100),
+    type: singleNotificationQueryValue(params, "type").trim(),
+    event: singleNotificationQueryValue(params, "event").trim(),
+    q: truncateNotificationSearch(singleNotificationQueryValue(params, "q")),
   };
 }
 
@@ -88,7 +94,8 @@ export function AdminNotificationsView({ data, filters, api, onSuccess, onSearch
     for (const [key, value] of new FormData(form)) {
       if (typeof value !== "string") continue;
       const normalized = value.trim();
-      if (normalized) next.set(key, key === "q" ? normalized.slice(0, 100) : normalized);
+      const finalValue = key === "q" ? truncateNotificationSearch(normalized) : normalized;
+      if (finalValue) next.set(key, finalValue);
     }
     if (onSearch) {
       onSearch(next);
