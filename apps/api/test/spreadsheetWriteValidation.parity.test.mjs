@@ -235,3 +235,40 @@ test("unmounted FK lookup plans preserve CURRENT dedup, 99-value chunks and boun
     /unknown_column/,
   );
 });
+
+
+test("D1 FK preflight checks every bound chunk and fails closed on missing references", async () => {
+  const { validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const sqls = [];
+  const seen = [];
+  const db = {
+    prepare(sql) {
+      sqls.push(sql);
+      return {
+        bind(...values) {
+          seen.push(values);
+          return { async all() { return { results: values.map(value => ({ value })) }; } };
+        },
+      };
+    },
+  };
+  const rows = Array.from({ length: 101 }, (_, i) => ({ event_id: "event-" + i }));
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, rows));
+  assert.equal(sqls.length, 2);
+  assert.deepEqual(seen.map(a => a.length), [99, 2]);
+  const missingDb = {
+    prepare() {
+      return { bind() { return { async all() { return { results: [] }; } }; } };
+    },
+  };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(missingDb, fk, [{ event_id: "missing" }]), /foreign_key_violation/);
+  const failingDb = {
+    prepare() {
+      return { bind() { return { async all() { throw new Error("db_unavailable"); } }; } };
+    },
+  };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: "x" }]), /db_unavailable/);
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: null }]));
+});
