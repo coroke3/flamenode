@@ -31,6 +31,7 @@ import { EventRecruitCard } from "@/components/layout/EventRecruitCard";
 import { SectionHeader } from "@/components/layout/SectionHeader";
 import { UserAvatar } from "@/components/user/UserAvatar";
 import { VideoCard, type VideoCardData } from "@/components/video/VideoCard";
+import { eventVideoPageHref } from "@/lib/youtube/id";
 import { formatCount, formatPublicationDateTime } from "@/lib/utils/format";
 import { absoluteUrl, buildPageMetadata, compactText } from "@/lib/seo";
 import { buildAccentVars } from "@/lib/theme/accent";
@@ -479,12 +480,11 @@ function VideoSection({
       ) : (
         <div className="fn-video-grid">
           {rows.map((video) => {
-            const target = video.youtube_video_id?.trim() || video.id;
             return (
               <VideoCard
                 key={video.id}
                 video={video}
-                href={`/${target}?playlist=${encodeURIComponent(eventId)}`}
+                href={eventVideoPageHref(video, eventId)}
                 secondaryMeta={
                   showPublicationTime
                     ? formatPublicationDateTime(video.scheduled_time)

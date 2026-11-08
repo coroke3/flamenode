@@ -96,8 +96,8 @@ test("scenarios cover the measurable endpoints, three request kinds each, with e
   const scenarios = buildScenarios({ adminToken: "t" });
   const ids = scenarios.filter((s) => !s.baseline).map((s) => s.id);
   assert.deepEqual(
-    ids.slice(0, 13),
-    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "RH-020", "RH-021", "RH-022", "S4"],
+    ids.slice(0, 14),
+    ["RH-018", "RH-017", "RH-026", "RH-029", "SA-004", "SA-005", "SA-006", "SA-007", "SA-008", "RH-013", "RH-020", "RH-021", "RH-022", "S4"],
   );
   assert.equal(scenarios.at(-1).id, "BASELINE", "BASELINE stays last so its noise floor is read from the same run");
   assert.equal(new Set(ids).size, ids.length, "scenario ids are unique");

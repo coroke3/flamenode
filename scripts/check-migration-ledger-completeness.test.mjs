@@ -90,3 +90,133 @@ test("nested families with one owner and adjacent prefixes do not false-positive
     "src/lib/videos/file.ts",
   ]), []);
 });
+
+
+test("family table rejects corrupted path delimiters instead of silently omitting a row", () => {
+  const family = "src/lib/video/private/**";
+  const valid = matrix([], [family]);
+  const originalCell = "| " + B + family + B + " |";
+  assert.deepEqual(parseFamilyRows(valid).errors, []);
+  for (const damaged of [
+    valid.replace(originalCell, B + family + B + " |"), // no opening pipe
+    valid.replace(originalCell, family + " |"), // no pipe or backticks
+    valid.replace(originalCell, "| " + family + " |"), // missing backticks
+    valid.replace(originalCell, "| " + B + family + " |"), // unmatched backtick
+    valid.replace("| NOT_STARTED |", "| NOT_STARTED"), // missing trailing pipe
+  ]) {
+    assert.match(parseFamilyRows(damaged).errors.join("\n"), /malformed family row|invalid family path cell/);
+  }
+});
+
+test("family table rejects malformed separator, missing cells, and unknown state", () => {
+  const family = "src/lib/video/**";
+  const valid = matrix([], [family]);
+  const familyHeader = "| Family | Kind | Owner | Disp | State |";
+  const familySeparator = "| --- | --- | --- | --- | --- |";
+  assert.match(parseFamilyRows(valid.replace(
+    familyHeader + "\n" + familySeparator,
+    familyHeader + "\n| -- | --- | --- | --- | --- |",
+  )).errors.join("\n"), /invalid family table separator/);
+  assert.match(parseFamilyRows(valid.replace(
+    familyRow(family), "| " + B + family + B + " | HELPER | MIG-0501 | NOT_STARTED |",
+  )).errors.join("\n"), /4 columns, expected 5/);
+  assert.match(parseFamilyRows(valid.replace("| NOT_STARTED |", "| NOT_STRTED |")).errors.join("\n"), /invalid family state/);
+  assert.match(parseFamilyRows(valid.replace(familyHeader, "| Broken | Kind | Owner | Disp | State |")).errors.join("\n"), /missing family table header/);
+});
+
+test("malformed overlapping family cannot suppress ambiguous owner detection silently", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const valid = matrix([], [parent, child]).replace(familyRow(child), familyRow(child, "MIG-0619"));
+  const broken = valid.replace("| " + B + child + B + " |", "| " + child + " |");
+  const errors = validateLedgerCompleteness({
+    matrix: broken, status, trackedFiles: ["src/lib/video/private/secret.ts"],
+  });
+  assert.match(errors.join("\n"), /invalid family path cell/);
+});
+
+test("P2 regression: arbitrary damaged row prefix fails closed instead of hiding another owner", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const valid = matrix([], [parent, child])
+    .replace(familyRow(child), familyRow(child, "MIG-0619"));
+  const path = "src/lib/video/private/secret.ts";
+  assert.match(
+    validateLedgerCompleteness({ matrix: valid, status, trackedFiles: [path] }).join("\n"),
+    /ambiguous family ownership/,
+  );
+  for (const prefix of ["x ", "invalid-prefix ", "# "]) {
+    const damaged = valid.replace(familyRow(child, "MIG-0619"), prefix + familyRow(child, "MIG-0619"));
+    const errors = validateLedgerCompleteness({ matrix: damaged, status, trackedFiles: [path] });
+    assert.match(errors.join("\n"), /malformed family row/, prefix);
+  }
+});
+
+test("P2 regression: malformed row cannot stop validation of later family rows", () => {
+  const before = "src/lib/video/private/**";
+  const after = "src/lib/account/**";
+  const damaged = matrix([], [before, after])
+    .replace(familyRow(before), "x " + familyRow(before));
+  const parsed = parseFamilyRows(damaged);
+  assert.match(parsed.errors.join("\n"), /malformed family row/);
+  assert.deepEqual(parsed.rows.map((r) => r.pattern), [after]);
+});
+
+test("P2 regression: family table requires one boundary and rejects moved boundaries", () => {
+  const family = "src/lib/video/**";
+  const valid = matrix([], [family]);
+  assert.deepEqual(parseFamilyRows(valid).errors, []);
+  assert.match(
+    parseFamilyRows(valid.replace("**Update rule:** x", "")).errors.join("\n"),
+    /exactly one Update rule boundary/,
+  );
+  assert.match(
+    parseFamilyRows(valid.replace("**Update rule:** x", "**Update rule:** x\n**Update rule:** again")).errors.join("\n"),
+    /exactly one Update rule boundary/,
+  );
+  const early = valid.replace(familyRow(family), "**Update rule:** x\n" + familyRow(family))
+    .replace(/\n\*\*Update rule:\*\* x$/, "");
+  assert.match(parseFamilyRows(early).errors.join("\n"), /family row appears after Update rule boundary/);
+});
+
+
+test("P2: duplicate Source families sections fail closed instead of using only the first",()=>{
+ const original=matrix([],["src/lib/video/**"]);
+ const duplicate=original+"\n## Source families (second copy)\n"+
+  "| Family | Kind | Owner | Disp | State |\n| --- | --- | --- | --- | --- |\n"+
+  familyRow("src/lib/private/**","MIG-0619")+"\n**Update rule:** second\n";
+ assert.match(parseFamilyRows(duplicate).errors.join("\n"),/duplicate '## Source families' sections/);
+ assert.match(validateLedgerCompleteness({matrix:duplicate,status,trackedFiles:["src/lib/private/secret.ts"]}).join("\n"),/duplicate '## Source families' sections/);
+ const without=original.replace("## Source families (MIG-0622 completeness)","## Wrong section");
+ assert.match(parseFamilyRows(without).errors.join("\n"),/missing '## Source families'/);
+ // An example heading in a fenced code block is not a second real ledger.
+ const example=original+"\n```md\n## Source families (example only)\n```\n";
+ assert.deepEqual(parseFamilyRows(example).errors,[]);
+});
+
+test("P2: moved Update rule cannot hide malformed owner rows after the boundary", () => {
+  const parent = "src/lib/video/**";
+  const child = "src/lib/video/private/**";
+  const file = "src/lib/video/private/secret.ts";
+  const original = matrix([], [parent, child])
+    .replace(familyRow(child), familyRow(child, "MIG-0619"));
+  assert.match(
+    validateLedgerCompleteness({ matrix: original, status, trackedFiles: [file] }).join("\n"),
+    /ambiguous family ownership/,
+  );
+  const damagedRows = [
+    "x | src/lib/video/private/** | HELPER | MIG-0619 | note | NOT_STARTED |",
+    "x src/lib/video/private/** HELPER MIG-0619 note NOT_STARTED",
+    "x | damaged path | HELPER | MIG-0619 | note | NOT_STARTED |",
+    "| src/lib/video/private/** | HELPER | MIG-0619 | note | NOT_STARTED |",
+  ];
+  for (const row of damagedRows) {
+    const moved = original
+      .replace(familyRow(child, "MIG-0619"), "**Update rule:** moved\n" + row)
+      .replace(/\n\*\*Update rule:\*\* x$/, "");
+    const parsed = parseFamilyRows(moved);
+    assert.match(parsed.errors.join("\n"), /family row appears after Update rule boundary/, row);
+    const errors = validateLedgerCompleteness({ matrix: moved, status, trackedFiles: [file] });
+    assert.match(errors.join("\n"), /family row appears after Update rule boundary/, row);
+  }
+});

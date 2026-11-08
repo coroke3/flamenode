@@ -181,6 +181,29 @@ function adminHeaders() {
 const json = (v) => JSON.stringify(v);
 const annBody = (extra = {}) => ({ title: "Bench", body: "Bench body", severity: "info", target_audience: "all", is_published: 1, ...extra });
 
+const RH013_EVENT_ID = "bench-export-event";
+const RH013_VIDEOS = 500;
+const RH013_MEMBERS_PER_VIDEO = 100;
+let rh013Seeded = false;
+let rh013IpSeq = 0;
+const rh013Ip = () => { rh013IpSeq += 1; return { "cf-connecting-ip": `10.13.${(rh013IpSeq >> 8) & 255}.${rh013IpSeq & 255}` }; };
+/** Seed once per process: returns [] after the first call (the event persists in the target DB). */
+function rh013Seed() {
+  if (rh013Seeded) return [];
+  rh013Seeded = true;
+  return [
+    { sql: `INSERT OR REPLACE INTO events (id, title, event_type, visibility_status, start_time, end_time, created_at, updated_at, max_slots_per_video, public_api_enabled) VALUES (?, 'bench export event', 'event', 'public', 1000, 2000, 10, 20, 1, 1)`, params: [RH013_EVENT_ID] },
+    {
+      sql: `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT OR REPLACE INTO videos (id, title, submitted_by_user_id, creator_display_name, primary_event_id, visibility_status, scheduled_time) SELECT 'bench-export-v' || i, 'bench export video ' || i, 'bench-admin', 'creator', ?, 'public', 1500 + i FROM n`,
+      params: [RH013_VIDEOS - 1, RH013_EVENT_ID],
+    },
+    {
+      sql: `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?) INSERT OR REPLACE INTO video_members (id, video_id, x_user_id, name, role, order_index, is_public_member) SELECT 'bench-export-m' || v.i || '-' || m.i, 'bench-export-v' || v.i, NULL, 'member ' || m.i, 'editor', m.i, 1 FROM (SELECT i FROM n WHERE i < ?) v CROSS JOIN (SELECT i FROM n WHERE i < ?) m`,
+      params: [Math.max(RH013_VIDEOS, RH013_MEMBERS_PER_VIDEO) - 1, RH013_VIDEOS, RH013_MEMBERS_PER_VIDEO],
+    },
+  ];
+}
+
 export function buildScenarios(ctx, { includePending = false } = {}) {
   const stats = (padBytes) => {
     const base = { schema_version: 1, generated_at: 1_700_000_000, stats: { public_videos: 3000, creators: 800, public_events: 20 } };
@@ -299,6 +322,20 @@ export function buildScenarios(ctx, { includePending = false } = {}) {
           return { setup: [eventRow(id)], method: "PATCH", path: `/api/admin/api-endpoints/${id}`, headers: adminHeaders(), body: json({ public_api_enabled: "1" }), expect: [200] };
         },
         invalid: (i, tag) => ({ method: "PATCH", path: `/api/admin/api-endpoints/missing-${tag}-${i}`, headers: adminHeaders(), body: json({ public_api_enabled: "1" }), expect: [404] }),
+      },
+    },
+    {
+      // MIG-0632 U04. Upper bound: event 1 x 500 public videos x 100 public members each.
+      // scheduled + clearCache => the payload Cache API entry never hits, so every sample
+      // runs the full D1 gate + snapshot + payload build path (the realtime isolate micro
+      // cache would otherwise turn warm samples into cheap hits). Seeding is idempotent and
+      // done once per target through a single recursive-CTE statement per table.
+      id: "RH-013", title: "GET /api/event-endpoints/:id (500 videos x 100 members)", runtimeClass: "S2",
+      kinds: {
+        // distinct client IP per request: the route has a 60/min per-IP isolate rate guard
+        normal: () => ({ setup: rh013Seed(), method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=v5&update=scheduled&refresh=15`, headers: rh013Ip(), clearCache: true, expect: [200] }),
+        limit: () => ({ setup: rh013Seed(), method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=legacy&update=scheduled&refresh=1440`, headers: rh013Ip(), clearCache: true, expect: [200] }),
+        invalid: () => ({ method: "GET", path: `/api/event-endpoints/${RH013_EVENT_ID}?format=xxx`, headers: rh013Ip(), expect: [400] }),
       },
     },
     {
@@ -787,6 +824,12 @@ export async function createInprocTarget(plan) {
     _sql: sql, _params: params,
     first: async () => keep(sqlite.prepare(sql).get(...params) ?? null),
     all: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
+    // D1 .raw() (array rows) is what Drizzle's typed select() uses (RH-013).
+    raw: async () => {
+      const prepared = sqlite.prepare(sql);
+      prepared.setReturnArrays(true);
+      try { return keep(prepared.all(...params).map((row) => [...row])); } finally { prepared.setReturnArrays(false); }
+    },
     run: async () => keep({ results: sqlite.prepare(sql).all(...params) }),
     // drizzle's D1 driver reads rows as arrays through raw().
     raw: async () => { const st = sqlite.prepare(sql); st.setReturnArrays(true); try { return keep(st.all(...params)); } finally { st.setReturnArrays(false); } },

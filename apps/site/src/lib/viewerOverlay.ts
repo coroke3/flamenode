@@ -43,7 +43,11 @@ export async function loadVideoViewerOverlay(
   const cacheKey = key(videoId, playlist);
   const now = Date.now();
   const cached = cache.get(cacheKey);
-  if (cached?.value && cached.at != null && now - cached.at <= (cached.value.authUnavailable ? FAILURE_TTL : FRESH_TTL)) {
+  // A device clock rollback must invalidate private viewer data rather than
+  // keeping it fresh indefinitely while the wall clock catches up.
+  const ageMs = cached?.at == null ? null : now - cached.at;
+  if (cached?.value && ageMs != null && ageMs >= 0 &&
+      ageMs <= (cached.value.authUnavailable ? FAILURE_TTL : FRESH_TTL)) {
     remember(cacheKey, cached); return cached.value;
   }
   if (cached?.request) { remember(cacheKey, cached); return cached.request; }
