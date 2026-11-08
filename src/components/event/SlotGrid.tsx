@@ -384,7 +384,7 @@ export function SlotGrid({
 
     for (const part of slotParts) {
       const partLabel = formatSlotPartLabel(part, "short", parts);
-      const dateLabel = part.start_time
+      const dateLabel = part.start_time != null
         ? formatUnix(part.start_time, { dateOnly: true })
         : null;
       // Keep one column per calendar date. When a day has multiple parts,
@@ -418,7 +418,7 @@ export function SlotGrid({
       sort_order?: number | null;
     },
   ): string => {
-    if (slot.start_time) {
+    if (slot.start_time != null) {
       return `${formatUnix(slot.start_time, { dateOnly: true })} ${formatUnix(slot.start_time, { timeOnly: true })}`;
     }
     return slot.slot_label ?? `#${slot.sort_order ?? "?"}`;
@@ -934,7 +934,7 @@ export function SlotGrid({
                       onClick={() => previewSlot(slot.id)}
                     >
                       <td className={styles.cellTime}>
-                        {slot.start_time ? (
+                        {slot.start_time != null ? (
                           <span className={styles.timeStack}>
                             <span>{formatUnix(slot.start_time, { dateOnly: true })}</span>
                             <strong>

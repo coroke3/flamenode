@@ -24,10 +24,15 @@ export function checkCloudflareConfig({
       "CF_IDS_JSON is retired; configure the named Workers Builds variables consumed by the production generator",
     );
   }
-  if (fs.existsSync(path.join(root, "cloudflare", "ids.json"))) {
-    errors.push(
-      "cloudflare/ids.json is retired; production resource IDs must remain in Workers Builds variables only",
-    );
+  // A dangling symlink is still a checked-in retired config, even when existsSync is false.
+  try {
+    if (fs.lstatSync(path.join(root, "cloudflare", "ids.json"), { throwIfNoEntry: false })) {
+      errors.push(
+        "cloudflare/ids.json is retired; production resource IDs must remain in Workers Builds variables only",
+      );
+    }
+  } catch {
+    errors.push("cloudflare/ids.json cannot be inspected; refusing production validation");
   }
 
   try {

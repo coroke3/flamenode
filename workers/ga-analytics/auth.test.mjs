@@ -89,3 +89,26 @@ test("GA4 access token はKV読取完了境界のabortを握り潰さない", as
     (error) => error === reason,
   );
 });
+
+test("GA4 OAuth: 200応答のnull/配列/プリミティブはトークン欠落エラーになる", async () => {
+  const privateKey = await testPrivateKeyPem();
+  const env = {
+    KV: { async get() { return null; }, async put() { assert.fail("invalid token must not be cached"); } },
+    GA4_SERVICE_ACCOUNT_EMAIL: "svc@example.com",
+    GA4_SERVICE_ACCOUNT_PRIVATE_KEY: privateKey,
+  };
+  for (const payload of [null, [], 42, true, {}]) {
+    await assert.rejects(
+      () => getGa4AccessToken(
+        env,
+        new ExternalRequestBudget(1),
+        async () => new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+      { message: "ga4_oauth_access_token_missing" },
+      `payload=${JSON.stringify(payload)}`,
+    );
+  }
+});

@@ -7,6 +7,7 @@ import styles from "./VideoForm.module.css";
 import { Icon } from "@/components/ui/Icon";
 import {
   extractYoutubeId,
+  videoPageHref,
   youtubeThumbUrl,
   youtubeWatchUrl,
 } from "@/lib/youtube/id";
@@ -3308,7 +3309,7 @@ export function VideoForm({
           <div className={styles.resultActions}>
             {(result.youtubeVideoId || result.videoId) ? (
               <Link
-                href={`/${result.youtubeVideoId ?? result.videoId}`}
+                href={videoPageHref({ id: result.videoId ?? "", youtube_video_id: result.youtubeVideoId })}
                 className="fn-btn fn-btn-primary fn-btn-sm"
               >
                 <Icon name="external" size={12} aria-hidden /> 公開ページを見る

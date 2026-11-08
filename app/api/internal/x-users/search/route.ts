@@ -35,8 +35,10 @@ function parseBoundedDecimalParam(
   min: number,
   max: number,
 ): number {
-  const raw = (value ?? "").trim().slice(0, MAX_NUMERIC_PARAM_LENGTH);
-  if (!/^\d+$/.test(raw)) return fallback;
+  const raw = (value ?? "").trim();
+  // Validate the entire parameter before parsing; truncating first accepted
+  // a valid 8-digit prefix followed by arbitrary garbage as a valid number.
+  if (raw.length > MAX_NUMERIC_PARAM_LENGTH || !/^\d+$/.test(raw)) return fallback;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isSafeInteger(parsed) || parsed < min) return fallback;
   return Math.min(parsed, max);

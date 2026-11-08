@@ -344,7 +344,10 @@ test("イベントAPIはformatなし/v5をv5、legacyを旧形式として受け
   assert.match(route, /X-FlameNode-Schema-Version/);
   assert.match(route, /format === "legacy" \? "1" : "5"/);
   assert.match(route, /format === "legacy" \? "legacy" : "flamenode-event-export"/);
-  assert.match(route, /s-maxage=60/);
+  // The event may turn private after a response is generated. The origin
+  // still caches scheduled payloads, but shared intermediaries cannot.
+  assert.match(route, /const cacheControl = "no-store"/);
+  assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
 
   const authCheck = route.indexOf("loadEventExportEvent(db, eventId)");
   const cacheHitCheck = route.indexOf("const response = await cachedResponse()");
@@ -363,18 +366,20 @@ test("管理画面はv5を既定にし旧形式互換を明示選択できる", 
   assert.match(builder, /params\.set\("format", "legacy"\)/);
 });
 
-test("scheduled KV cacheはv5とlegacyで衝突せず無効化時に両方消す", async () => {
+test("scheduled Cache APIはv5とlegacyを分離しcoreのキーversionを共有する", async () => {
   const cacheSource = await readFile(
     new URL("./api/eventExportCache.ts", import.meta.url),
     "utf8",
   );
-  assert.match(cacheSource, /EventExportCacheFormat = "v5" \| "legacy"/);
-  assert.match(
-    cacheSource,
-    /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/,
+  const coreKeysSource = await readFile(
+    new URL("../../packages/server-core/src/publicCache/eventExportKeys.ts", import.meta.url),
+    "utf8",
   );
+  assert.match(cacheSource, /@flamenode\/server-core\/publicCache\/eventExportKeys/);
+  assert.match(cacheSource, /eventExportPayloadCacheKey\(\s*eventId,\s*format,\s*refreshMinutes/);
   assert.match(cacheSource, /\["v5", "legacy"\] as const/);
-  assert.match(cacheSource, /EVENT_EXPORT_CACHE_VERSION = 9/);
+  assert.match(coreKeysSource, /EventExportCacheFormat = "v5" \| "legacy"/);
+  assert.match(coreKeysSource, /EVENT_EXPORT_CACHE_VERSION = 9/);
 });
 
 test("custom answer valueはanswer_textを優先してJSON形式も安全に復元する", () => {
