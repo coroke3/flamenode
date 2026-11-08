@@ -225,3 +225,34 @@ test("SA-063 U04g: mid-request session, scope and CostGuard revocation aborts re
     }finally{s.sqlite.close();}
   }
 });
+
+test("MIG-0656 U04m: linked-X approval loss and newly published major TOS reject SA-063 release atomically",async()=>{
+  for(const change of ["x-approval-revoked","major-terms-published"]){
+    let injected=false;
+    const staff=change==="x-approval-revoked";
+    const s=setup({actor:staff?STAFF:ADMIN,staff,onFirst:(sql,sqlite)=>{
+      if(injected||!sql.includes("AS grouped_slots_json"))return;
+      injected=true;
+      if(change==="x-approval-revoked"){
+        sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+      }else{
+        // The persisted mirror and explicit consent are both absent.
+        sqlite.prepare("INSERT INTO terms_versions(id,severity,published_at,updated_at) VALUES (?,?,?,?)")
+          .run("major-new","major",Math.floor(Date.now()/1000),Math.floor(Date.now()/1000));
+      }
+    }});
+    try{
+      const response=await s.post();
+      assert.equal(injected,true,"post-snapshot change "+change);
+      assert.equal(response.status,409,change+" "+await response.clone().text());
+      assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.getSlot("a").status,"reserved");
+      assert.equal(s.getSlot("b").status,"reserved");
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.count("notification_outbox"),0);
+      assert.equal(s.stats.batches,1,"in-transaction authorization refusal");
+      assert.ok(s.stats.reads<=2,"no extra preread");
+    }finally{s.sqlite.close();}
+  }
+});
