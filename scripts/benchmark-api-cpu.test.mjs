@@ -146,7 +146,7 @@ const MAIN_HONO_METHODS = new Set([
   "POST /api/admin/users/:userId/can-create-events", "POST /api/admin/x-users/:xUserId/icon-refresh",
   "POST /api/admin/event-templates", "DELETE /api/admin/event-templates/:id",
   "GET /api/live/events/:id/slots", "GET /api/live/events/:id/submissions", "GET /api/live/events/:id/summary",
-  "GET /api/events/:id/slots/viewer-overlay", "GET /api/events", "GET /api/event-endpoints/:id/release",
+  "GET /api/events/:id/slots/viewer-overlay", "GET /api/events", "GET /api/event-endpoints/:id", "GET /api/event-endpoints/:id/release",
   "GET /api/videos", "GET /api/videos/:id/viewer-overlay", "GET /api/videos/:id",
   "POST /api/videos/:videoId/chapters", "POST /api/videos/:videoId/chapters/bulk", "PUT /api/videos/chapters/:chapterId",
   "DELETE /api/videos/chapters/:chapterId", "POST /api/videos/:videoId/interaction", "GET /api/account/summary",
@@ -160,7 +160,7 @@ test("MIG-0639 T01: every main Hono method has exactly one scenario (named or in
   assert.equal(new Set(titles).size, titles.length, "no method has two scenarios");
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !titles.includes(m)), [], "methods without a scenario");
   assert.deepEqual(titles.filter((t) => !MAIN_HONO_METHODS.has(t)), [], "scenarios for methods that are not mounted");
-  assert.equal(MAIN_HONO_METHODS.size, 116);
+  assert.equal(MAIN_HONO_METHODS.size, 117);
 });
 
 test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/app.ts", async () => {
@@ -347,17 +347,18 @@ test("MIG-0639: shared fixtures and per-sample setup rows insert on the migrated
   }
 });
 
-test("MIG-0639 / PR #457: RH-013 upper bound is owned here, excluded until MIG-0632 mounts the route", async () => {
-  assert.equal(buildScenarios({ adminToken: "t" }).some((x) => x.id === "RH-013"), false, "not measured while unmounted");
-  const withPending = buildScenarios({ adminToken: "t" }, { includePending: true });
-  const rh13 = withPending.find((x) => x.id === "RH-013");
-  assert.equal(rh13.pending, "MIG-0632");
-  assert.equal(withPending.at(-1).id, "BASELINE");
-  assert.equal(JSON.parse(rh13.prepareKind.limit.r2Objects["events/bench-evt/release.v1.json"]).videos.length, 500);
-  assert.equal(buildPendingScenarios().length, 1);
+test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
+  const scenarios = buildScenarios({ adminToken: "t" });
+  const rh13 = scenarios.filter((x) => x.id === "RH-013");
+  assert.equal(rh13.length, 1, "exactly one mounted RH-013 scenario");
+  assert.equal(rh13[0].pending, undefined);
+  assert.equal(scenarios.at(-1).id, "BASELINE");
+  assert.equal(JSON.parse(rh13[0].prepareKind.limit.r2Objects["events/bench-evt/release.v1.json"]).videos.length, 500);
+  assert.equal(buildPendingScenarios().length, 0);
+  assert.equal(buildScenarios({ adminToken: "t" }, { includePending: true }).filter((x) => x.id === "RH-013").length, 1);
   assert.equal(parseArgs(["--include-pending"]).includePending, true);
   assert.equal(parseArgs([]).includePending, false);
   const { app } = await import("../apps/api/src/app.ts");
-  assert.equal(app.routes.some((r) => r.method === "GET" && r.path === "/api/event-endpoints/:id"), false,
-    "RH-013 is now mounted: move its entry from buildPendingScenarios() into ROUTE_INVENTORY and update MAIN_HONO_METHODS");
+  assert.equal(app.routes.some((r) => r.method === "GET" && r.path === "/api/event-endpoints/:id"), true,
+    "RH-013 must remain mounted before its CPU scenario is eligible");
 });
