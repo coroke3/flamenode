@@ -63,6 +63,40 @@ test("T01: real 19,999 / 20,000 / 20,001 file trees against the default Free lim
   }
 });
 
+test("T02: symlinked output files, directories and root fail closed", (t) => {
+  const dir = createMockDist(2);
+  const rootLink = dir + "-root-link";
+  try {
+    try {
+      fs.symlinkSync(path.join(dir, "asset-0.html"), path.join(dir, "linked-file.html"), "file");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes(error.code)) {
+        t.skip("symlinks are not permitted on this platform");
+        return;
+      }
+      throw error;
+    }
+    assert.throws(() => analyzeDistFiles(dir), /Symbolic link in build output: linked-file\.html/);
+    fs.rmSync(path.join(dir, "linked-file.html"));
+
+    fs.symlinkSync(path.join(dir, "nested"), path.join(dir, "linked-dir"), "dir");
+    assert.throws(() => analyzeDistFiles(dir), /Symbolic link in build output: linked-dir/);
+    fs.rmSync(path.join(dir, "linked-dir"));
+
+    fs.symlinkSync(path.join(dir, "missing.html"), path.join(dir, "dangling.html"), "file");
+    assert.throws(() => analyzeDistFiles(dir), /Symbolic link in build output: dangling\.html/);
+    fs.rmSync(path.join(dir, "dangling.html"));
+
+    fs.symlinkSync(dir, rootLink, "dir");
+    assert.throws(() => analyzeDistFiles(rootLink), /Build output directory is a symbolic link/);
+    // Regular builds still count the exact number of deployable files.
+    assert.equal(analyzeDistFiles(dir).totalFiles, 2);
+  } finally {
+    fs.rmSync(rootLink, { force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("warning starts at 18,000 files", () => {
   const dir = createMockDist(10);
   try {
