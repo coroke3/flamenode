@@ -35,7 +35,17 @@ manageRoutes.use("*", async (c, next) => {
 // D-15-10: only predeclared write paths verify Origin BEFORE the Auth.js session.
 // SA-060/062/063/064 remain UNMOUNTED; middleware entries are preparation only.
 const playlistWritePaths = ["/events/:id/youtube-playlist", "/events/:id/youtube-playlist/sync"];
-const slotWritePaths = ["/events/:id/slots/batch-delete", "/events/:id/slots/batch-release", "/events/:id/slots/labels", "/events/:id/slots/:slotId/release"];
+// SA-058/059 chunk candidates: pre-register D-15-10 Origin -> Auth.js ->
+// identity/TOS write guard -> DB middleware, but do NOT mount either handler.
+// Parent-only registration must precede any independent D1/browser review.
+const slotWritePaths = [
+  "/events/:id/slots/batch-delete",
+  "/events/:id/slots/batch-release",
+  "/events/:id/slots/labels",
+  "/events/:id/slots/:slotId/release",
+  "/events/:id/slots/generate-chunk",
+  "/events/:id/slots/delete-available-chunk",
+];
 // SA-056/057 are prepared for the same Origin-first / session / writeGuard / DB
 // stack. The submitted-danger Hono candidate remains deliberately UNMOUNTED.
 const submittedDangerWritePaths = [
