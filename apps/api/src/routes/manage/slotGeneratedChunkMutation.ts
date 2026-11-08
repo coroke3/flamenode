@@ -40,6 +40,8 @@ function validateChunk(
     throw new Error("slot_generate_chunk_invalid_selection");
   }
   const ids = new Set<string>(), indexes = new Set<number>();
+  const orders = new Set<number>();
+  const timestamp = rows[0]?.updated_at;
   for (const row of rows) {
     if (!row || typeof row.id !== "string" || !row.id.trim() ||
         row.id !== row.id.trim() || ids.has(row.id) ||
@@ -50,7 +52,9 @@ function validateChunk(
         (row.start_time !== null && !Number.isSafeInteger(row.start_time)) ||
         (mode === "time" && row.start_time === null) ||
         (mode === "count" && row.start_time !== null) ||
-        (row.slot_label !== null && typeof row.slot_label !== "string") ||
+        (mode === "time" && row.slot_label !== null) ||
+        (mode === "count" && (typeof row.slot_label !== "string" || !row.slot_label.trim())) ||
+        row.updated_at !== timestamp || orders.has(row.sort_order) ||
         row.reserved_by_user_id !== null || row.x_user_id !== null ||
         row.reserved_x_id_snapshot !== null || row.display_name !== null ||
         row.reservation_group_id !== null || row.video_id !== null) {
@@ -59,6 +63,7 @@ function validateChunk(
     const key = mode === "time" ? row.start_time! : row.sort_order;
     if (indexes.has(key)) throw new Error("slot_generate_chunk_duplicate_time_or_order");
     indexes.add(key);
+    orders.add(row.sort_order);
     ids.add(row.id);
   }
 }
