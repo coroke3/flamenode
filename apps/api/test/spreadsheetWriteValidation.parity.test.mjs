@@ -176,3 +176,37 @@ test("unmounted SQL planners bind every value and enforce optimistic snapshots",
   assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, {id:"row-1"}, before), /table_readonly/);
   assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, { ...before, count: { unexpected: true } }, {title:"changed"}), /invalid_snapshot/);
 });
+
+
+test("unmounted SQL CAS plan preserves composite key order and nullable snapshot columns", async () => {
+  const { buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+    { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("video_events", true),
+    primaryKeys: ["video_id", "event_id"],
+    columns,
+    columnNames: columns.map(column => column.name),
+  };
+  const before = { video_id: "v1", event_id: "e1", notes: null };
+  const pk = { event_id: "e1", video_id: "v1" };
+  const updated = buildSpreadsheetUpdateSql(ctx, pk, before, { notes: "new" });
+  assert.equal(
+    updated.statement,
+    'UPDATE "video_events" SET "notes" = ? WHERE "video_id" = ? AND "event_id" = ? AND "video_id" IS ? AND "event_id" IS ? AND "notes" IS ?',
+  );
+  assert.deepEqual(updated.binds, ["new", "v1", "e1", "v1", "e1", null]);
+  assert.deepEqual(updated.after, { video_id: "v1", event_id: "e1", notes: "new" });
+  const deleted = buildSpreadsheetDeleteSql(ctx, pk, before);
+  assert.deepEqual(deleted.binds, ["v1", "e1", "v1", "e1", null]);
+  assert.equal(deleted.statement.includes('"notes" IS ?'), true);
+  assert.deepEqual(before, { video_id: "v1", event_id: "e1", notes: null });
+  assert.throws(
+    () => buildSpreadsheetDeleteSql(ctx, { event_id: "e1" }, before),
+    /missing_primary_key/,
+  );
+});
