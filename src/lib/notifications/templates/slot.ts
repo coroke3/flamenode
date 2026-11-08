@@ -92,7 +92,7 @@ export function buildSlotForceReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `予約グループ: ${args.reservationGroupId}`
+          ? `予約グループ: ${escapeDiscordMention(args.reservationGroupId)}`
           : null,
       ],
     },
@@ -134,7 +134,7 @@ export function buildSlotSubmissionReleasedNotification(args: {
       lines: [
         `対象枠数: ${args.slotIds.length}`,
         args.reservationGroupId
-          ? `提出グループ: ${args.reservationGroupId}`
+          ? `提出グループ: ${escapeDiscordMention(args.reservationGroupId)}`
           : null,
       ],
     },
