@@ -33,6 +33,9 @@ function setup(rows=[slot("s0"),slot("s1")], options={}){
     "CREATE TABLE event_staff(event_id TEXT,x_user_id TEXT,permission_preset TEXT,custom_permission_keys_json TEXT);",
     "CREATE TABLE x_user_account_links(auth_user_id TEXT,x_user_id TEXT);",
     "CREATE TABLE x_users(id TEXT PRIMARY KEY,approval_status TEXT);",
+    "CREATE TABLE system_settings (id TEXT PRIMARY KEY,operation_mode TEXT,disabled_features_json TEXT,",
+    "cost_guard_exception_until INTEGER,cost_guard_exception_features_json TEXT);",
+    "INSERT INTO system_settings (id,operation_mode) VALUES (\u0027default\u0027,\u0027normal\u0027);",
     "INSERT INTO x_users VALUES('x1','approved');",
     "INSERT INTO x_user_account_links VALUES('staff','x1');",
     "INSERT INTO event_staff VALUES('ev','x1','slot_manager',NULL);",
@@ -85,6 +88,36 @@ function read(db,{slotId="s0",eventId="ev",actorId="staff",role="user",kind="kee
   });
   return {authorized,selection,reads:1+Number(groupRead!==null)+Number(videoRead!==null)};
 }
+
+test("MIG-0656 U04n: scoped anchor SELECT includes CostGuard policy without a fourth read",()=>{
+  const db=setup();
+  try{
+    const original=db.prepare(SLOT_SUBMITTED_DANGER_ANCHOR_SQL)
+      .get("ev","ev","staff","ev","s0");
+    const policy=JSON.parse(original.cost_guard_json);
+    assert.deepEqual(policy,{
+      operation_mode:"normal",
+      disabled_features_json:null,
+      cost_guard_exception_until:null,
+      cost_guard_exception_features_json:null,
+    });
+    assert.equal(original.exists_id,"ev");
+    assert.equal(typeof original.staff_json,"string");
+    assert.equal(typeof original.anchor_json,"string");
+    db.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+      .run(JSON.stringify(["manage_slot_update"]));
+    const disabled=db.prepare(SLOT_SUBMITTED_DANGER_ANCHOR_SQL)
+      .get("ev","ev","staff","ev","s0");
+    assert.deepEqual(JSON.parse(disabled.cost_guard_json).disabled_features_json,
+      JSON.stringify(["manage_slot_update"]));
+    db.prepare("DELETE FROM system_settings WHERE id='default'").run();
+    const missing=db.prepare(SLOT_SUBMITTED_DANGER_ANCHOR_SQL)
+      .get("ev","ev","staff","ev","s0");
+    assert.equal(missing.cost_guard_json,null,
+      "missing settings must not reuse earlier policy or fabricate allow");
+  }finally{db.close();}
+});
+
 test("SA-056/057: three bound SELECTs give complete raw 20-member group and video references",()=>{
   const db=setup(Array.from({length:20},(_,i)=>slot("s"+i)));
   try{
