@@ -25,7 +25,9 @@ export function slotReleaseNotificationPayload(
   const url = new URL("/event/" + encodeURIComponent(eventId), base).href;
   const name = escapeDiscordMention("イベント");
   const countLabel = ids.length > 1 ? "予約枠 " + ids.length + " 件" : "予約枠 1 件";
-  // Persisted legacy/imported group IDs are opaque; escape only DM display,\n  // never group keys, dedupe identities, CAS snapshots or SQL predicates.\n  const paragraphs = [
+  // Persisted legacy/imported group IDs are opaque; escape only DM display,
+  // never group keys, dedupe identities, CAS snapshots or SQL predicates.
+  const paragraphs = [
     "【FlameNode】予約枠が解放されました\n" +
       "運営操作により、イベント「" + name + "」の " + countLabel + " が解放されました。\n" +
       "枠は他の参加者が確保できる状態に戻っています。",
