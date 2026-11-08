@@ -110,7 +110,11 @@ async function submittedDanger(c: Context<AppEnv>, kind: SubmittedDangerKind) {
       kind, selection, plan, actorUserId: user.id, updatedAt: now,
     });
     const queue = await buildSlotChangeQueueBatch(db, {
-      eventId, reason: "slot_admin_release", requestedByUserId: user.id,
+      eventId,
+      reason: kind === "force-release"
+        ? "slot_admin_force_release_submitted"
+        : "slot_admin_release_submitted_video",
+      requestedByUserId: user.id,
     });
     const notifications = buildSubmittedDangerOutboxStatements({
       kind, eventId, slotId, selection,
