@@ -12,6 +12,8 @@ export const VideoViewerOverlayChapterSchema = z.object({
   note: z.string().nullable(),
   author_name: z.string().nullable(),
   author_icon: z.string().nullable(),
+  // Additive Hono-only server-computed per-chapter capability; missing means deny.
+  viewerCanManage: z.boolean().optional(),
 });
 
 export const VideoViewerOverlayPlaylistItemSchema = z.object({
