@@ -6,28 +6,35 @@ import type { VideoViewerOverlayDto } from "@flamenode/contracts";
 import { formatChapterTime } from "../../../../packages/domain/src/video/chapterTime.ts";
 
 /**
- * MIG-0518: consume the server-calculated RH-031 chapter-admin claim only.
+ * MIG-0518: consume server-calculated RH-031 admin and per-row management claims.
  * MIG-0634 follow-up #662 introduces the optional field. Until the contract
- * lands and the parsed overlay actually contains true, all writes stay disabled.
+ * lands and the parsed overlay contains explicit true claims, management stays disabled.
  */
 export function chapterManagementForOverlay(
   publicChapters: readonly PublicVideoChapter[],
   overlay: VideoViewerOverlayDto,
   loading: boolean,
 ): { canBulk: boolean; editableChapters: EditableChapter[] } {
-  const claim = (overlay as VideoViewerOverlayDto & { viewerCanEditChapters?: boolean }).viewerCanEditChapters;
-  const authorized = !loading && claim === true && overlay.loggedIn &&
+  const perRowOverlay = overlay as VideoViewerOverlayDto & {
+    viewerCanEditChapters?: boolean;
+    privateChapters: Array<VideoViewerOverlayDto["privateChapters"][number] & {
+      viewerCanManage?: boolean;
+    }>;
+  };
+  const authorized = !loading && overlay.loggedIn &&
     !overlay.authUnavailable && !overlay.isBanned &&
     overlay.isTosAccepted && !overlay.termsReacceptRequired &&
     overlay.viewerXApproved && Boolean(overlay.activeXId?.trim());
   if (!authorized) return { canBulk: false, editableChapters: [] };
 
-  // The SSG public-chapter DTO has no note or visibility facts. Never submit
-  // an edit with an invented empty note: it would erase existing CURRENT data.
-  // Only RH-031 private rows provide the complete edit fields.
-  const ids = new Set(publicChapters.map((chapter) => chapter.id));
-  const editableChapters: EditableChapter[] = overlay.privateChapters
-    .filter((chapter) => !ids.has(chapter.id))
+  // Administrators can bulk-create. Ordinary chapter owners can only edit/delete
+  // their *own* private rows, based on the server's per-row authorization bit.
+  const canBulk = perRowOverlay.viewerCanEditChapters === true;
+  // Public SSG chapters lack note/visibility fields, so editing them would
+  // silently erase stored note content. Do not infer permission from author name.
+  const publicIds = new Set(publicChapters.map((chapter) => chapter.id));
+  const editableChapters: EditableChapter[] = perRowOverlay.privateChapters
+    .filter((chapter) => chapter.viewerCanManage === true && !publicIds.has(chapter.id))
     .map((chapter) => ({
       id: chapter.id,
       chapter_time: formatChapterTime(chapter.chapter_time),
@@ -36,7 +43,7 @@ export function chapterManagementForOverlay(
       visibility: "private",
       canManage: true,
     }));
-  return { canBulk: true, editableChapters };
+  return { canBulk, editableChapters };
 }
 
 /** MIG-0518 U01: share MIG-0513's RH-031 cache/invalidations and query key. */
