@@ -210,3 +210,28 @@ test("unmounted SQL CAS plan preserves composite key order and nullable snapshot
     /missing_primary_key/,
   );
 });
+
+
+test("unmounted FK lookup plans preserve CURRENT dedup, 99-value chunks and bound values", async () => {
+  const { buildSpreadsheetForeignKeyLookups, assertSpreadsheetForeignKeyLookup } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const hostile = "x'); DELETE FROM events; --";
+  const rows = [{ event_id: null }, { event_id: "" }, { event_id: hostile }, { event_id: hostile },
+    ...Array.from({ length: 100 }, (_, i) => ({ event_id: "event-" + i }))];
+  const plans = buildSpreadsheetForeignKeyLookups(fk, rows);
+  assert.equal(plans.length, 2);
+  assert.equal(plans[0].binds.length, 99);
+  assert.equal(plans[1].binds.length, 2);
+  assert.equal(plans[0].binds[0], hostile);
+  assert.equal(plans[0].statement.includes(hostile), false);
+  assert.equal(plans[0].statement, 'SELECT "id" AS value FROM "events" WHERE "id" IN (' + Array(99).fill("?").join(", ") + ')');
+  assert.doesNotThrow(() => assertSpreadsheetForeignKeyLookup(plans[1], plans[1].values.map(value => ({ value }))));
+  assert.throws(() => assertSpreadsheetForeignKeyLookup(plans[0], [{ value: hostile }]), /foreign_key_violation/);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }, {event_id:""}]), []);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups([], [{ event_id:"a" }]), []);
+  assert.throws(
+    () => buildSpreadsheetForeignKeyLookups([{ column:"event_id", referencedTable:"events; DROP TABLE videos", referencedColumn:"id" }], [{event_id:"a"}]),
+    /unknown_column/,
+  );
+});
