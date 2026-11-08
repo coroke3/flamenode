@@ -384,3 +384,91 @@ export async function fetchSpreadsheetRawSnapshot(
   }
   return row;
 }
+
+
+/** CURRENT query.ts#recordIdFromPk and mutation audit envelope.
+ * This prepares metadata only; callers MUST write the mutation, strict audit and
+ * rebuild Queue in one atomic D1 transaction with exact-row assertions.
+ */
+export interface SpreadsheetAuditEntry {
+  table_name: string;
+  target_id: string;
+  operation: "CREATE" | "UPDATE" | "DELETE";
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  actor_user_id: string;
+  retention_class: "long_audit";
+  strict: true;
+  context: "admin_spreadsheet";
+}
+export interface SpreadsheetAuditedSqlPlan extends SpreadsheetSqlPlan {
+  audit: SpreadsheetAuditEntry;
+}
+export function spreadsheetRecordIdFromPk(pk: Record<string, string>): string {
+  return Object.entries(pk)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, value]) => value)
+    .join(":");
+}
+function spreadsheetAuditEntry(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  operation: SpreadsheetAuditEntry["operation"],
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+  operatorId: string,
+): SpreadsheetAuditEntry {
+  const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
+  if (!operatorId.trim()) throw new Error("missing_operator");
+  return {
+    table_name: ctx.def.table,
+    target_id: spreadsheetRecordIdFromPk(normalized),
+    operation,
+    before,
+    after,
+    actor_user_id: operatorId,
+    retention_class: "long_audit",
+    strict: true,
+    context: "admin_spreadsheet",
+  };
+}
+export function buildSpreadsheetAuditedInsert(
+  ctx: SpreadsheetSqlTableContext,
+  row: Record<string, string | null>,
+  operatorId: string,
+): SpreadsheetAuditedSqlPlan {
+  const planned = buildSpreadsheetInsertSql(ctx, row);
+  const pk = Object.fromEntries(ctx.primaryKeys.map(key => [key, String(planned.row[key] ?? "")]));
+  return {
+    statement: planned.statement,
+    binds: planned.binds,
+    audit: spreadsheetAuditEntry(ctx, pk, "CREATE", null, planned.row, operatorId),
+  };
+}
+export function buildSpreadsheetAuditedUpdate(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+  values: Record<string, string | null>,
+  operatorId: string,
+): SpreadsheetAuditedSqlPlan {
+  const planned = buildSpreadsheetUpdateSql(ctx, pk, before, values);
+  return {
+    statement: planned.statement,
+    binds: planned.binds,
+    audit: spreadsheetAuditEntry(ctx, pk, "UPDATE", before, planned.after, operatorId),
+  };
+}
+export function buildSpreadsheetAuditedDelete(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+  operatorId: string,
+): SpreadsheetAuditedSqlPlan {
+  const planned = buildSpreadsheetDeleteSql(ctx, pk, before);
+  return {
+    statement: planned.statement,
+    binds: planned.binds,
+    audit: spreadsheetAuditEntry(ctx, pk, "DELETE", before, null, operatorId),
+  };
+}
