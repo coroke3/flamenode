@@ -467,6 +467,8 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.loggedIn, true);
     assert.equal(json.isTosAccepted, false);
     assert.equal(json.viewerCanEditChapters, false);
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "TOS revocation must deny all per-chapter edit permissions too");
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
@@ -501,6 +503,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.likeActive, false);
     assert.equal(json.bookmarkActive, false);
     assert.deepEqual(json.privateChapters, []);
+    assert.equal(json.viewerCanEditChapters, false, "banned user has no bulk-management capability");
 
     // Session + the viewer read (CURRENT reports the banned viewer's terms state and active X):
     // no chapter / interaction read.
