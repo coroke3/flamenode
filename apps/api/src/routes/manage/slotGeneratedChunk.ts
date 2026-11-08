@@ -16,9 +16,11 @@ import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
 import { canUpdateEventLabels, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { SLOT_CHUNK_COST_GUARD_SELECT, verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
 import { planGeneratedSlots, materializeGeneratedSlotRows } from "./slotWritePlanning.ts";
 import { buildGeneratedSlotChunkAtomicPlan, MAX_GENERATE_SLOT_CHUNK_ROWS } from "./slotGeneratedChunkMutation.ts";
 import { isWriteConflict } from "../events/templates.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 
 const NO_STORE = "private, no-store";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -39,10 +41,11 @@ SELECT
     WHERE es.event_id = ? AND l.auth_user_id = ?
       AND x.approval_status = 'approved'
     LIMIT 101
-  ) staff) AS staff_json
+  ) staff) AS staff_json,
+  ${SLOT_CHUNK_COST_GUARD_SELECT}
 `;
 
-type ScopeRead = { exists_id: string | null; staff_json: string | null };
+type ScopeRead = { exists_id: string | null; staff_json: string | null; cost_guard_json: string | null };
 
 /** Deliberately NOT imported or mounted in manage/index.ts. */
 export const slotGeneratedChunkRoutes = new Hono<AppEnv>();
@@ -77,6 +80,8 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
     if (!canUpdateEventLabels(user.role, scope.staff_json) || !scope.exists_id) {
       return c.json({ ok: false, message: "Not Found" }, 404);
     }
+    const guard = verifySlotChunkCostGuard(scope.cost_guard_json, "manage_slot_create");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
     const now = Math.floor(Date.now() / 1000);
     const rows = materializeGeneratedSlotRows(
       eventId, generated.candidates, now, () => generateId("slot"),
@@ -90,6 +95,7 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
     await mutateWithAudit(db, {
       preMutationAssertions: [
         db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: scope.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
         ...plan.preMutationAssertions.map((item) => db.run(item)),
       ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],

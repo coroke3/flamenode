@@ -338,6 +338,32 @@ test("SA-058 U03s: admin role downgrade, account ban or TOS reversal after scope
   }
 });
 
+test("SA-058 U03w: CostGuard change after scope SELECT rolls back INSERT, audits and queue",async()=>{
+  for(const kind of ["read-only","disabled-feature","deleted-settings","expired-exception"]){
+    let changed=false;
+    const s=setup({mode:kind==="expired-exception"?"read_only":"normal",onFirst:(query,sqlite)=>{
+      if(changed||!query.includes("AS staff_json"))return;
+      changed=true;
+      if(kind==="read-only") sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      if(kind==="disabled-feature") sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'").run(JSON.stringify(["manage_slot_create"]));
+      if(kind==="deleted-settings") sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+      if(kind==="expired-exception") sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=? WHERE id='default'").run(Math.floor(Date.now()/1000)-1);
+    }});
+    try{
+      if(kind==="expired-exception") s.sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=?,cost_guard_exception_features_json=? WHERE id='default'").run(Math.floor(Date.now()/1000)+600,JSON.stringify(["manage_slot_create"]));
+      const res=await s.post(countInput(3,1));
+      assert.equal(changed,true,kind);
+      assert.equal(res.status,409,kind+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1);
+      assert.ok(s.stats.reads<=2,"no additional preread");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03r: staff approval or permission revoked AFTER pre-read aborts atomic INSERT",async()=>{
   for(const revoked of ["permission","x-approval","event-deleted"]){
     let injected=false;

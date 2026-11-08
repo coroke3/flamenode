@@ -24,6 +24,8 @@ import {
 } from "./slotAvailableDeleteChunkSnapshot.ts";
 import { buildAvailableDeleteChunkAtomicPlan } from "./slotAvailableDeleteChunkMutation.ts";
 import { isWriteConflict } from "../events/templates.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
+import { verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
 
 const NO_STORE = "private, no-store";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -55,6 +57,8 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
     if (!canUpdateEventLabels(user.role, read.staff_json) || !read.exists_id) {
       return c.json({ ok: false, message: "Not Found" }, 404);
     }
+    const guard = verifySlotChunkCostGuard(read.cost_guard_json, "manage_slot_delete");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
     const selection = selectAvailableDeleteChunk(eventId, read);
     if (!selection.ok) {
       return c.json({ ok: false, message: selection.message }, 409);
@@ -70,6 +74,7 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
     await mutateWithAudit(db, {
       preMutationAssertions: [
         db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
         ...plan.preMutationAssertions.map((statement) => db.run(statement)),
       ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],

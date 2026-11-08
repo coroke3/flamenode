@@ -7,6 +7,7 @@
  * without silently treating the first 3 slots as the complete operation.
  */
 import type { SlotLabelWriteRow } from "./slotWriteScopedRead.ts";
+import { SLOT_CHUNK_COST_GUARD_SELECT } from "./slotChunkCostGuard.ts";
 
 export const ALL_AVAILABLE_DELETE_MAX_ROWS = 3;
 const FIELDS = [
@@ -30,6 +31,7 @@ export const SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL = [
   " WHERE es.event_id = ? AND l.auth_user_id = ?",
   " AND x.approval_status = 'approved' LIMIT 101",
   ") staff) AS staff_json,",
+  SLOT_CHUNK_COST_GUARD_SELECT + ",",
   "(SELECT json_group_array(json_object(" + FIELDS + ")) FROM (",
   " SELECT s.* FROM slots s WHERE s.event_id = ? AND s.status = 'available'",
   " ORDER BY s.id ASC LIMIT " + (ALL_AVAILABLE_DELETE_MAX_ROWS + 1),
@@ -39,6 +41,7 @@ export const SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL = [
 export type AvailableDeleteChunkRead = {
   exists_id: string | null;
   staff_json: string | null;
+  cost_guard_json: string | null;
   rows_json: string | null;
 };
 export type AvailableDeleteChunkSelection =
