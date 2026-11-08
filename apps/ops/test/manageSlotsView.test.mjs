@@ -354,3 +354,33 @@ test("MIG-0722 U02b: old in-flight slot mutation must not display on a different
     });
   }
 });
+
+test("MIG-0722 U02b-5: A-B-A slot context generation rejects original mutation result", async () => {
+  await withSlotDom(async (dom, root) => {
+    const rowsA = [slot("shared", { event_id: "A", status: "available" })];
+    const rowsB = [slot("shared", { event_id: "B", status: "available" })];
+    let settle;
+    let writes = 0, refreshes = 0;
+    const onAction = () => {
+      writes++;
+      return new Promise(resolve => { settle = resolve; });
+    };
+    const onChanged = () => { refreshes++; };
+    const renderList = (eventId, rows) => React.createElement(MemoryRouter, null,
+      React.createElement(SlotList, {
+        eventId, slots: rows, partGapMinutes: 15, parts: [], onAction, onChanged,
+      }));
+    const button = label => [...dom.window.document.querySelectorAll("button")]
+      .find(el => el.textContent.trim() === label);
+    await React.act(async () => root.render(renderList("A", rowsA)));
+    await React.act(async () => button("削除").click());
+    await React.act(async () => button("実行する").click());
+    assert.equal(writes, 1);
+    await React.act(async () => root.render(renderList("B", rowsB)));
+    await React.act(async () => root.render(renderList("A", rowsA)));
+    await React.act(async () => settle({ ok: true, message: "STALE-A" }));
+    assert.equal(refreshes, 0);
+    assert.doesNotMatch(dom.window.document.body.textContent, /STALE-A/);
+    assert.equal(writes, 1);
+  });
+});

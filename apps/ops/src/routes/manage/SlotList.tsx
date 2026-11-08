@@ -97,12 +97,18 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   const [label, setLabel] = React.useState("");
   const [pending, setPending] = React.useState<{ operation: SlotListOperation;
     eventId: string; slots: readonly ManageSlotRow[];
-    onAction: typeof onAction } | null>(null);
+    onAction: typeof onAction;
+    context: { eventId: string; slots: readonly ManageSlotRow[]; onAction: typeof onAction } } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   // Always compare against the latest render, not the stale async callback closure.
   const contextRef = React.useRef({ eventId, slots, onAction });
-  contextRef.current = { eventId, slots, onAction };
+  // Capture context generations, not just values: reject A -> B -> A stale writes.
+  if (contextRef.current.eventId !== eventId ||
+      contextRef.current.slots !== slots ||
+      contextRef.current.onAction !== onAction) {
+    contextRef.current = { eventId, slots, onAction };
+  }
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   // A filter/event refresh invalidates both the previous row selection and
@@ -130,13 +136,14 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     }
     setError(null);
     setNotice(null);
-    setPending({ operation: op, eventId, slots, onAction });
+    setPending({ operation: op, eventId, slots, onAction, context: contextRef.current });
   };
   const runConfirmed = async () => {
     if (busyRef.current || !pending || !onAction) return;
     // A new event, filter snapshot or handler must never inherit a pending
     // confirmation, even if row IDs and statuses happen to match.
-    if (pending.eventId !== eventId || pending.slots !== slots ||
+    if (pending.context !== contextRef.current ||
+        pending.eventId !== eventId || pending.slots !== slots ||
         pending.onAction !== onAction ||
         !validateSlotListOperation(slots, eventId, pending.operation, canManageSubmittedSlots)) {
       setPending(null);
@@ -144,10 +151,8 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
       return;
     }
     const operation = pending.operation;
-    const started = { eventId, slots, onAction };
-    const stillCurrent = () => contextRef.current.eventId === started.eventId &&
-      contextRef.current.slots === started.slots &&
-      contextRef.current.onAction === started.onAction;
+    const started = contextRef.current;
+    const stillCurrent = () => contextRef.current === started;
     busyRef.current = true;
     setBusy(true);
     setPending(null);

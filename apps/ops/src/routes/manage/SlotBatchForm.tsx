@@ -103,7 +103,13 @@ export function SlotBatchForm({
   const [notice, setNotice] = React.useState<string | null>(null);
   // Drop stale writes and confirmations after switching management events.
   const contextRef = React.useRef({ eventId, onGenerate, onClearAvailable, onChanged });
-  contextRef.current = { eventId, onGenerate, onClearAvailable, onChanged };
+  // A -> B -> A still invalidates A's in-flight result, even with the same callbacks.
+  if (contextRef.current.eventId !== eventId ||
+      contextRef.current.onGenerate !== onGenerate ||
+      contextRef.current.onClearAvailable !== onClearAvailable ||
+      contextRef.current.onChanged !== onChanged) {
+    contextRef.current = { eventId, onGenerate, onClearAvailable, onChanged };
+  }
   React.useEffect(() => {
     setConfirmClearFor(null);
     setError(null);
@@ -116,10 +122,7 @@ export function SlotBatchForm({
     if (busyRef.current) return;
     busyRef.current = true;
     const started = contextRef.current;
-    const stillCurrent = () => contextRef.current.eventId === started.eventId &&
-      contextRef.current.onGenerate === started.onGenerate &&
-      contextRef.current.onClearAvailable === started.onClearAvailable &&
-      contextRef.current.onChanged === started.onChanged;
+    const stillCurrent = () => contextRef.current === started;
     setBusy(true);
     setError(null);
     setNotice(null);
