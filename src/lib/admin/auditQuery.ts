@@ -11,9 +11,9 @@ export function readAuditQueryValue(raw: AdminAuditQueryParam): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+/** CURRENT normalizeViewMode compared the raw value without trimming whitespace. */
 export function readAuditViewMode(raw: AdminAuditQueryParam): AuditViewMode {
-  const view = readAuditQueryValue(raw);
-  return view === "timeline" || view === "cards" ? view : "table";
+  return raw === "timeline" || raw === "cards" ? raw : "table";
 }
 
 export function readAuditLimit(raw: AdminAuditQueryParam): number {
