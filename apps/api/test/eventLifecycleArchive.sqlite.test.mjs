@@ -1006,3 +1006,88 @@ test("MIG-0652 U04 SQLite T32: real-session operation-mode and feature guard pro
     }
   }
 });
+
+test("MIG-0652 U04 SQLite T33: time-bound CostGuard exception is feature-scoped and invalid settings fail closed", async () => {
+  // A valid unexpired exception is the only way to bypass read-only mode or
+  // a feature disable. Invalid JSON, unknown keys and expired exceptions
+  // must never reach R2 or the audited D1 mutation batch.
+  const now = Math.floor(Date.now() / 1000);
+  for (const variant of [
+    {
+      label: "active targeted exception overrides read-only",
+      mode: "read_only", exceptionUntil: now + 600,
+      exceptionFeatures: '["manage_event_archive"]',
+      disabled: "[]", allowed: true,
+    },
+    {
+      label: "active targeted exception overrides feature disable",
+      mode: "economy", exceptionUntil: now + 600,
+      exceptionFeatures: '["manage_event_archive"]',
+      disabled: '["manage_event_archive"]', allowed: true,
+    },
+    {
+      label: "expired exception does not override read-only",
+      mode: "read_only", exceptionUntil: now - 600,
+      exceptionFeatures: '["manage_event_archive"]',
+      disabled: "[]", reason: "maintenance_mode",
+    },
+    {
+      label: "exception for another feature does not override read-only",
+      mode: "read_only", exceptionUntil: now + 600,
+      exceptionFeatures: '["manage_event_update"]',
+      disabled: "[]", reason: "maintenance_mode",
+    },
+    {
+      label: "malformed disabled features fail closed",
+      mode: "normal", exceptionUntil: null,
+      exceptionFeatures: "[]", disabled: "{", reason: "cost_guard_blocked",
+    },
+    {
+      label: "malformed exception features fail closed",
+      mode: "normal", exceptionUntil: null,
+      exceptionFeatures: "{", disabled: "[]", reason: "cost_guard_blocked",
+    },
+    {
+      label: "unknown exception feature fails closed",
+      mode: "normal", exceptionUntil: now + 600,
+      exceptionFeatures: '["unknown_migration_feature"]',
+      disabled: "[]", reason: "cost_guard_blocked",
+    },
+  ]) {
+    const f = setup({
+      mode: variant.mode, enforceOrigin: true,
+      enforceSession: true, enforceWriteGuard: true,
+    });
+    f.sqlite.prepare(
+      "UPDATE system_settings SET disabled_features_json = ?, " +
+      "cost_guard_exception_until = ?, cost_guard_exception_features_json = ? " +
+      "WHERE id = 'default'",
+    ).run(variant.disabled, variant.exceptionUntil, variant.exceptionFeatures);
+    const previousCaches = globalThis.caches;
+    globalThis.caches = { default: { delete: async () => true } };
+    let response;
+    try { response = await f.request(); } finally { globalThis.caches = previousCaches; }
+    const body = await response.json();
+    assert.equal(response.headers.get("cache-control"), "private, no-store", variant.label);
+    if (variant.allowed) {
+      assert.equal(response.status, 200, variant.label);
+      assert.deepEqual(body, { ok: true, pendingPublicReflection: true }, variant.label);
+      assert.equal(f.d1.stats.batches, 1, variant.label);
+      assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+      assert.equal(f.read("audit_logs").length, 1);
+      assert.ok(f.read("public_visibility_fences").length > 0);
+      assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+      assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"], variant.label);
+    } else {
+      assert.equal(response.status, 503, variant.label);
+      assert.equal(body.ok, false, variant.label);
+      assert.equal(body.reason, variant.reason, variant.label);
+      assert.equal(f.d1.stats.batches, 0, variant.label);
+      assert.deepEqual(f.timeline, [], variant.label + ": denied before R2 or D1 batch");
+      assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+      assert.equal(f.read("audit_logs").length, 0);
+      assert.equal(f.read("public_visibility_fences").length, 0);
+      assert.equal(f.read("static_rebuild_queue").length, 0);
+    }
+  }
+});
