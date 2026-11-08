@@ -1494,6 +1494,9 @@
 | `apps/api/src/routes/manage/slotWriteSelection.ts` | HELPER | MIG-0656 U02b-1 pure SA-062..064 target selection, raw reservation_group closure, CAS-snapshot guard | MIG-0656 | SAME (unmounted; no D1 or authorization, caller must query full group with LIMIT 4) | IN_PROGRESS | PR#514 SHA=c7cd44c28db395b669db3da13d21320d52beaaee TEST=apps/api/test/slotWriteSelection.test.mjs (exact-head CI pending) |
 | `apps/api/test/slotWriteSelection.test.mjs` | TEST | MIG-0656 U02b-1 event/ID/status/3-limit/group consistency regression | MIG-0656 | SAME (offline tests; no real D1) | IN_PROGRESS | PR#514 SHA=c7cd44c28db395b669db3da13d21320d52beaaee TEST=node --test --experimental-strip-types apps/api/test/slotWriteSelection.test.mjs (CI pending) |
 
+| `apps/api/src/routes/manage/slotWriteAssertions.ts` | HELPER | MIG-0656 U02b-2 atomically verify full reserved group membership and CAS snapshot | MIG-0656 | SAME (unmounted; preMutationAssertions for future D1 batch) | IN_PROGRESS | PR#514 SHA=41e1a8aaa144dd2787d5bf56cea45c2708656da3 TEST=apps/api/test/slotWriteAssertions.test.mjs (SQLite JSON1, phantom/stale row, exact-head CI pending) |
+| `apps/api/test/slotWriteAssertions.test.mjs` | TEST | MIG-0656 U02b-2 real SQLite grouped release precondition regressions | MIG-0656 | SAME (offline Node SQLite; no remote I/O) | IN_PROGRESS | PR#514 SHA=41e1a8aaa144dd2787d5bf56cea45c2708656da3 TEST=node --test --experimental-strip-types apps/api/test/slotWriteAssertions.test.mjs (CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
