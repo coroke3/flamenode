@@ -280,7 +280,11 @@ export interface SpreadsheetForeignKeyLookup extends SpreadsheetSqlPlan {
 export function buildSpreadsheetForeignKeyLookups(
   foreignKeys: readonly SpreadsheetForeignKey[],
   rows: readonly Record<string, string | null>[],
+  remainingReadBudget = SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES,
 ): SpreadsheetForeignKeyLookup[] {
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 0 || remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
   const lookups: SpreadsheetForeignKeyLookup[] = [];
   for (const foreignKey of foreignKeys) {
     // SQL identifiers originate from PRAGMA foreign_key_list, never request JSON.
@@ -292,7 +296,7 @@ export function buildSpreadsheetForeignKeyLookups(
     for (let start = 0; start < values.length; start += 99) {
       const chunk = values.slice(start, start + 99);
       const placeholders = chunk.map(() => "?").join(", ");
-      if (lookups.length >= SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) throw new Error("batch_too_large");
+      if (lookups.length >= remainingReadBudget) throw new Error("batch_too_large");
       lookups.push({
         statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" + placeholders + ")",
         binds: chunk,
@@ -329,8 +333,9 @@ export async function validateSpreadsheetForeignKeys(
   },
   foreignKeys: readonly SpreadsheetForeignKey[],
   rows: readonly Record<string, string | null>[],
+  remainingReadBudget: number,
 ): Promise<void> {
-  for (const lookup of buildSpreadsheetForeignKeyLookups(foreignKeys, rows)) {
+  for (const lookup of buildSpreadsheetForeignKeyLookups(foreignKeys, rows, remainingReadBudget)) {
     const result = await db.prepare(lookup.statement).bind(...lookup.binds).all<{ value: string | number | null }>();
     assertSpreadsheetForeignKeyLookup(lookup, result.results ?? []);
   }
