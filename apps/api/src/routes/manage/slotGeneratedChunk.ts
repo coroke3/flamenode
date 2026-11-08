@@ -3,7 +3,8 @@
  * NOT an entire 100-row operation, a resume-token protocol or a ready API.
  * Future parent must supply Origin -> Auth.js session -> TOS/writeGuard -> DB;
  * candidate enforces CostGuard + scoped event.slots permission.
- * One preread plus one strict-audited D1 batch containing the collision
+ * One preread plus one strict-audited D1 batch that revalidates the scope,
+ * then executes the collision
  * assertion, <=3 INSERTs and static projections; no direct Queue wake.
  */
 import { Hono } from "hono";
@@ -14,7 +15,7 @@ import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/
 import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
-import { canUpdateEventLabels } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
 import { planGeneratedSlots, materializeGeneratedSlotRows } from "./slotWritePlanning.ts";
 import { buildGeneratedSlotChunkAtomicPlan, MAX_GENERATE_SLOT_CHUNK_ROWS } from "./slotGeneratedChunkMutation.ts";
 import { isWriteConflict } from "../events/templates.ts";
@@ -87,7 +88,10 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
       eventId, reason: "slot_admin_generate", requestedByUserId: user.id,
     });
     await mutateWithAudit(db, {
-      preMutationAssertions: plan.preMutationAssertions.map((item) => db.run(item)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, staffJson: scope.staff_json })),
+        ...plan.preMutationAssertions.map((item) => db.run(item)),
+      ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],
       expectedMutationChanges: [plan.expectedMutationChanges, ...queue.expectedChanges],
       audits: rows.map((row) => ({

@@ -168,6 +168,33 @@ test("SA-059 U03q: revoking staff or X approval between chunks stops continuatio
   }finally{s.sqlite.close();}
 });
 
+test("SA-059 U03r: permission, linked-X approval or event removed AFTER snapshot blocks DELETE",async()=>{
+  for(const revoked of ["permission","x-approval","event-deleted"]){
+    let injected=false;
+    const s=setup({actor:VIEWER,staff:true,onFirst:(query,sqlite)=>{
+      if(injected||!query.includes("AS rows_json"))return;
+      injected=true;
+      if(revoked==="permission"){
+        sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+      }else if(revoked==="x-approval"){
+        sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+      }else{
+        sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true,revoked+" read-time race injected");
+      assert.equal(res.status,409,revoked+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"]);
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"scope rejection occurs inside D1 batch");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-059 U03n: concurrent reservation with unchanged version aborts entire batch",async()=>{
   let injected=false;
   const s=setup({onFirst:(sql,sqlite)=>{

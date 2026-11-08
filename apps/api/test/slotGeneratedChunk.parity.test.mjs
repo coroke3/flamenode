@@ -207,6 +207,33 @@ test("SA-058 U03q: staff privilege and approved-X revocation between chunks fail
   }finally{s.sqlite.close();}
 });
 
+test("SA-058 U03r: staff approval or permission revoked AFTER pre-read aborts atomic INSERT",async()=>{
+  for(const revoked of ["permission","x-approval","event-deleted"]){
+    let injected=false;
+    const s=setup({actor:VIEWER,staff:true,onFirst:(query,sqlite)=>{
+      if(injected||!query.includes("AS staff_json"))return;
+      injected=true;
+      if(revoked==="permission"){
+        sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+      }else if(revoked==="x-approval"){
+        sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+      }else{
+        sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+      }
+    }});
+    try{
+      const res=await s.post(countInput(3,1));
+      assert.equal(injected,true,revoked+" read-time race injected");
+      assert.equal(res.status,409,revoked+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"scope rejection occurs inside D1 batch");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03p: strict audit and Queue failures each roll back all new rows",async()=>{
   for(const table of ["audit_logs","static_rebuild_queue"]){
     const s=setup();

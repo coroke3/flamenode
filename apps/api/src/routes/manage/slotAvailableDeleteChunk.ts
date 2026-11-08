@@ -6,7 +6,8 @@
  * The future mounted parent MUST apply Origin -> Auth.js -> TOS/writeGuard ->
  * DB before this CostGuard and event.slots-scoped permission check.
  *
- * One scoped D1 preread and one atomic mutateWithAudit D1 batch. No writes
+ * One scoped D1 preread and one atomic mutateWithAudit D1 batch with
+ * a pre-mutation scope recheck (pre-read TOCTOU revocation protection). No writes
  * happen in a read phase or outside the strict audit/Queue transaction.
  */
 import { Hono } from "hono";
@@ -15,7 +16,7 @@ import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/
 import type { AppEnv } from "../../env.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded } from "../admin/body.ts";
-import { canUpdateEventLabels } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
 import {
   SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL,
   selectAvailableDeleteChunk,
@@ -67,7 +68,10 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
       eventId, reason: "slot_admin_delete_available", requestedByUserId: user.id,
     });
     await mutateWithAudit(db, {
-      preMutationAssertions: plan.preMutationAssertions.map((sql) => db.run(sql)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, staffJson: read.staff_json })),
+        ...plan.preMutationAssertions.map((statement) => db.run(statement)),
+      ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],
       expectedMutationChanges: [plan.expectedMutationChanges, ...queue.expectedChanges],
       audits: selection.rows.map((row) => ({

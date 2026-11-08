@@ -3,6 +3,7 @@
  * MUST enforce Origin, session/TOS write guard and DB adapter before mounting.
  */
 import { resolveStaffPermissionKeys, type StaffPermissionRow } from "./access.ts";
+import { sql, type SQL } from "@flamenode/server-core/sql";
 
 const SLOT_COLUMNS = [
   "id", "event_id", "reserved_by_user_id", "x_user_id",
@@ -82,3 +83,42 @@ export function canUpdateEventLabels(
     resolveStaffPermissionKeys(item as StaffPermissionRow).has("event.slots"));
 }
 
+
+/**
+ * MIG-0656 U03r: lock down the scoped authorization snapshot in the SAME
+ * D1 atomic batch as the slot mutation. A permission preset downgrade, linked
+ * X-account approval loss or event deletion after the earlier Hono pre-read
+ * must fail closed BEFORE any slot/strict-audit/Queue statement executes.
+ *
+ * This checks the *exact* effective approved-staff row JSON from the SELECT
+ * (including the 101-row sentinel) rather than reimplementing custom/alias
+ * permission evaluation in SQL. SQLite IS is NULL-safe.
+ * The actor's session/TOS and CostGuard gates remain the parent's responsibility.
+ */
+export function buildSlotChunkScopeAssertion(input: {
+  eventId: string; actorUserId: string; staffJson: string | null;
+}): SQL {
+  const { eventId, actorUserId, staffJson } = input;
+  if (!eventId || !actorUserId || typeof staffJson !== "string") {
+    throw new Error("slot_chunk_invalid_scope_assertion");
+  }
+  return sql`
+    SELECT CASE WHEN
+      EXISTS(SELECT 1 FROM events WHERE id = ${eventId})
+      AND (
+        SELECT json_group_array(json_object(
+          'permission_preset', staff.permission_preset,
+          'custom_permission_keys_json', staff.custom_permission_keys_json
+        )) FROM (
+          SELECT es.permission_preset, es.custom_permission_keys_json
+          FROM event_staff es
+          JOIN x_user_account_links l ON l.x_user_id = es.x_user_id
+          JOIN x_users x ON x.id = l.x_user_id
+          WHERE es.event_id = ${eventId} AND l.auth_user_id = ${actorUserId}
+            AND x.approval_status = 'approved'
+          LIMIT 101
+        ) staff
+      ) IS ${staffJson}
+      THEN 1 ELSE json_extract('slot-chunk-scope-changed', '$') END
+  `;
+}
