@@ -307,13 +307,20 @@ export function buildSpreadsheetForeignKeyLookups(
     // SQL identifiers originate from PRAGMA foreign_key_list, never request JSON.
     const reference = quoteSpreadsheetIdentifier(foreignKey.referencedColumn);
     const table = quoteSpreadsheetIdentifier(foreignKey.referencedTable);
-    const values = [...new Set(rows
-      .map(row => row[foreignKey.column])
-      .filter((value): value is string => value != null && value !== ""))];
+    // Collect at most the remaining statement capacity; reject on the first
+    // distinct value above that ceiling instead of materializing all inputs.
+    const remainingValues = (remainingReadBudget - lookups.length) * 99;
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const value = row[foreignKey.column];
+      if (value == null || value === "" || seen.has(value)) continue;
+      if (seen.size >= remainingValues) throw new Error("batch_too_large");
+      seen.add(value);
+    }
+    const values = [...seen];
     for (let start = 0; start < values.length; start += 99) {
       const chunk = values.slice(start, start + 99);
       const placeholders = chunk.map(() => "?").join(", ");
-      if (lookups.length >= remainingReadBudget) throw new Error("batch_too_large");
       lookups.push({
         statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" + placeholders + ")",
         binds: chunk,
