@@ -256,3 +256,32 @@ test("continuation: new first-page snapshot for the same account cannot reuse st
     await act(async () => root.unmount());
   }
 });
+
+
+test("continuation: stale 403 cannot gate refreshed same-account first page", async () => {
+  const { EntryIndexView } = await import("../.test-dist/apps/app/src/routes/entry/EntryIndex.js");
+  const container = dom.window.document.createElement("div");
+  const root = createRoot(container);
+  const oldFirst = entryData({ truncated: true, nextOffset: 100 });
+  const newFirst = entryData({
+    events: [{ id: "event-new", title: "新しい受付画面", entry_end_time: null, slots_available: 2 }],
+    truncated: false, nextOffset: null,
+  });
+  const api = fakeApi({ getEntryIndex: () => ({ status: "banned" }) });
+  const render = (data) => React.createElement(MemoryRouter, null,
+    React.createElement(EntryIndexView, { api, data, next: "/entry", authError: null }));
+  try {
+    await act(async () => root.render(render(oldFirst)));
+    const button = [...container.querySelectorAll("button")].find(
+      b => b.textContent.includes("イベントをさらに表示"));
+    assert.ok(button);
+    await act(async () => button.click());
+    assert.match(container.textContent, /利用が停止されています/);
+    await act(async () => root.render(render(newFirst)));
+    assert.match(container.textContent, /新しい受付画面/,
+      "a fresh same-user first page must not inherit the old read's banned state");
+    assert.doesNotMatch(container.textContent, /利用が停止されています/);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
