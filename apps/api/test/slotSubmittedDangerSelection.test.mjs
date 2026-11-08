@@ -85,6 +85,9 @@ test("SA-056/057: other submitted video references preserve video scheduling",()
   assert.equal(manual.ok,true);
   if(!manual.ok)throw Error("expected selection");
   assert.equal(manual.shouldDetachVideoSchedulingAtRead,false);
+  const unset=select({videoBefore:{...video,scheduling_type:null}});
+  assert.equal(unset.ok,true,"legacy nullable video schedule must remain actionable");
+  if(unset.ok)assert.equal(unset.shouldDetachVideoSchedulingAtRead,false);
 });
 
 test("SA-056/057: ref overflow, incomplete reference set and missing video fail closed",()=>{
