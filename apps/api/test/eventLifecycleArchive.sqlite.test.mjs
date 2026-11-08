@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { eventLifecycleRoutes } from "../src/eventLifecycle/archiveRoute.ts";
-import { originGuardMiddleware } from "../src/middleware/writeOrigin.ts";
+import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
 
 const ADMIN = { id: "u_admin", role: "admin", name: "Admin", is_banned: 0 };
 const SITE = "https://app.flamenode.example";
@@ -105,12 +105,12 @@ function createR2(timeline, { rejectPut = false, hideFirstVerification = false }
   };
 }
 
-function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false } = {}) {
+function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false, enforceWriteGuard = false, isBanned = 0, tosAccepted = 1 } = {}) {
   const sqlite = createSqlite();
   const timestamp = Math.floor(Date.now() / 1000) - 100;
   insert(sqlite, "user", {
     id: "u_admin", name: "Admin", discord_id: "d-admin", role,
-    created_at: timestamp, is_banned: 0, is_tos_accepted: 1,
+    created_at: timestamp, is_banned: isBanned, is_tos_accepted: tosAccepted,
   });
   // The real migrations already seed the singleton default settings row.
   // Updating it avoids a duplicate primary key and exercises the actual schema.
@@ -144,16 +144,31 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
     }));
   }
   app.use("*", async (c, next) => {
-    c.set("user", { ...ADMIN, role });
-    c.set("db", drizzle(d1, { schema }));
-    c.set("actorSnapshotJsonById", {
-      u_admin: JSON.stringify({
-        discord_id: "d-admin", discord_name: "Admin",
-        x_user_id: null, x_name: null, icon_url: null,
-      }),
-    });
+    // Test-only session identity. A real session provider is deliberately not faked.
+    c.set("user", { ...ADMIN, role, is_banned: isBanned });
+    if (!enforceWriteGuard) {
+      c.set("db", drizzle(d1, { schema }));
+      c.set("actorSnapshotJsonById", {
+        u_admin: JSON.stringify({
+          discord_id: "d-admin", discord_name: "Admin",
+          x_user_id: null, x_name: null, icon_url: null,
+        }),
+      });
+    }
     await next();
   });
+  if (enforceWriteGuard) {
+    // Mirror admin parent ordering: session -> real write identity guard -> DB adapter.
+    // writeGuardMiddleware preloads the actor snapshot for the strict audit.
+    app.use("*", writeGuardMiddleware({
+      loadSiteUrl: () => SITE,
+      allowLocalPreview: () => false,
+    }));
+    app.use("*", async (c, next) => {
+      c.set("db", drizzle(d1, { schema }));
+      await next();
+    });
+  }
   app.route("/api/admin/events", eventLifecycleRoutes);
   const env = {
     DB: d1,
@@ -388,5 +403,40 @@ test("MIG-0652 U04 SQLite T18: parent origin guard rejects forged or missing Ori
     assert.equal(f.read("audit_logs").length, 0);
     assert.equal(f.read("static_rebuild_queue").length, 0);
   }
+});
+
+
+test("MIG-0652 U04 SQLite T19: real parent write identity guard denies banned, TOS and nonadmin before R2 or D1 mutations", async () => {
+  for (const options of [
+    { isBanned: 1, expectedReason: "banned" },
+    { tosAccepted: 0, expectedReason: "tos_required" },
+    { role: "moderator", expectedReason: "forbidden" },
+  ]) {
+    const f = setup({ ...options, enforceWriteGuard: true });
+    const response = await f.request();
+    assert.equal(response.status, 403, JSON.stringify(options));
+    const body = await response.json();
+    assert.equal(body.ok, false);
+    assert.equal(body.reason, options.expectedReason);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(f.d1.stats.batches, 0, "guard denial must not start a D1 write batch");
+    assert.deepEqual(f.timeline, [], "guard denial must not touch R2");
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+  }
+
+  const allowed = setup({ enforceWriteGuard: true });
+  const oldCache = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let response;
+  try { response = await allowed.request(); } finally { globalThis.caches = oldCache; }
+  assert.equal(response.status, 200, "valid admin must reach the archive via the real write guard");
+  assert.equal((await response.json()).ok, true);
+  assert.equal(allowed.d1.stats.batches, 1);
+  assert.equal(allowed.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.equal(allowed.read("audit_logs", "WHERE target_id = '" + EVENT + "'").length, 1);
+  assert.ok(allowed.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+  assert.ok(allowed.bucket.manifest?.entities.some((row) => row.entity_id === EVENT));
 });
 
