@@ -121,3 +121,27 @@ test("CURRENT primary-key normalization enforces missing-key and nonblank contra
   assert.throws(() => primaryKeyFromSpreadsheetRow({ id: null }, ["id"]), /missing_primary_key/);
   assert.throws(() => primaryKeyFromSpreadsheetRow({}, ["id"]), /missing_primary_key/);
 });
+
+
+test("CURRENT UPDATE chooses editable non-PK columns in schema order and builds after image", async () => {
+  const { prepareSpreadsheetUpdate } = await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const base = context("events");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    { name: "access_token", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = { ...base, columns, columnNames: columns.map((c) => c.name) };
+  const before = { id: "abc", title: "old", count: 10, access_token: "hidden" };
+  const values = { count: "2", title: "" };
+  const result = prepareSpreadsheetUpdate(ctx, before, values);
+  assert.deepEqual(result.setColumns, ["title", "count"]);
+  assert.deepEqual(result.after, { id: "abc", title: null, count: "2", access_token: "hidden" });
+  assert.equal(before.title, "old");
+  assert.deepEqual(values, { count: "2", title: "" });
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, {}), /empty_row/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { id: "new" }), /empty_row/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { access_token: "x" }), /column_not_editable/);
+  assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { invalid: "x" }), /unknown_column/);
+});
