@@ -181,6 +181,20 @@ test("SA-056/057: malformed JSON, missing video and stale group references fail 
     }),"vid");
   }finally{db.close();}
 });
+test("SA-056/057: nullable video scheduling_type retains CURRENT no-detach semantics",()=>{
+  const db=setup();
+  try{
+    db.prepare("UPDATE videos SET scheduling_type = NULL WHERE id = ?").run("vid");
+    for(const kind of ["force-release","keep-reservation"]){
+      const selected=read(db,{kind});
+      assert.equal(selected.selection.ok,true,JSON.stringify(selected.selection));
+      assert.equal(selected.selection.videoBefore.scheduling_type,null);
+      assert.equal(selected.selection.shouldDetachVideoSchedulingAtRead,false);
+      assert.equal(selected.reads,3);
+    }
+  }finally{db.close();}
+});
+
 test("SA-056/057: only three read-only bounded SQL statements and never mounted",async()=>{
   const clauses=[
     [SLOT_SUBMITTED_DANGER_ANCHOR_SQL,5],
