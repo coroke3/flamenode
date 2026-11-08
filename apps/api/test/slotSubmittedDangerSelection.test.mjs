@@ -14,7 +14,7 @@ const slot=(id,patch={})=>({
   video_id:"v1",status:"submitted",updated_at:100,version:1,...patch,
 });
 function input(kind="keep-reservation",rows=[slot("a"),slot("b")]){
-  return {kind,eventId:"ev",slotId:"a",anchor:rows[0],
+  return {kind,eventId:"ev",slotId:rows[0].id,anchor:rows[0],
     groupedRows:rows,videoBefore:video,
     submittedVideoRefs:rows.map(row=>({id:row.id}))};
 }
@@ -103,7 +103,7 @@ test("SA-056/057: Unicode whitespace raw group must be treated as solo",()=>{
       ...input(kind,[anchor]),groupedRows:[anchor,slot("b",{reservation_group_id:"\u3000"})],
       submittedVideoRefs:[{id:"a"}],
     });
-    assert.equal(result.ok,kind==="force-release");
+    assert.equal(result.ok,true);
     if(result.ok){
       assert.equal(result.rows.length,1);
       assert.equal(result.groupId,null);
