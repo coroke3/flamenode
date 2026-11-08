@@ -412,3 +412,45 @@ test("unmounted INSERT and UPDATE SQL planners reject readonly tables before pla
     /table_readonly/,
   );
 });
+
+
+test("SQLite executes bound INSERT/UPDATE/DELETE with optimistic CAS and does not execute user SQL", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("CREATE TABLE slots (id TEXT PRIMARY KEY NOT NULL, title TEXT, count INTEGER)");
+    const columns = [
+      { name: "id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "title", type: "TEXT", notNull: false, pk: 0 },
+      { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+    ];
+    const ctx = {
+      def: resolveSpreadsheetTableDef("slots", true),
+      primaryKeys: ["id"],
+      columns,
+      columnNames: columns.map(c => c.name),
+    };
+    const hostile = "'); DROP TABLE slots; --";
+    const inserted = buildSpreadsheetInsertSql(ctx, { id: "slot-1", title: hostile, count: "3" });
+    assert.equal(db.prepare(inserted.statement).run(...inserted.binds).changes, 1);
+    let before = db.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    assert.equal(before.title, hostile);
+    assert.equal(before.count, 3);
+    const update = buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "" });
+    assert.equal(db.prepare(update.statement).run(...update.binds).changes, 1);
+    assert.equal(db.prepare('SELECT title FROM slots WHERE id = ?').get("slot-1").title, null);
+    // Simulate a concurrent writer between SELECT and UPDATE: optimistic CAS must reject it.
+    db.prepare('UPDATE slots SET count = ? WHERE id = ?').run(4, "slot-1");
+    const stale = buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "stale-write" });
+    assert.equal(db.prepare(stale.statement).run(...stale.binds).changes, 0);
+    assert.equal(db.prepare('SELECT count FROM slots WHERE id = ?').get("slot-1").count, 4);
+    before = db.prepare('SELECT * FROM slots WHERE id = ?').get("slot-1");
+    const removed = buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, before);
+    assert.equal(db.prepare(removed.statement).run(...removed.binds).changes, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS total FROM slots').get().total, 0);
+  } finally {
+    db.close();
+  }
+});
