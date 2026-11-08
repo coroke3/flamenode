@@ -1518,6 +1518,9 @@
 | `apps/api/src/routes/manage/slotBatchReservedRelease.ts` | HELPER | MIG-0656 U02c-3 UNMOUNTED SA-063 release handler with CostGuard+event.slots, same-batch group CAS, strict long audits, Outbox, Queue | MIG-0656 | SAME (D-15-10 path prepared but route NOT mounted; no direct wake) | IN_PROGRESS | PR#514 SHA=80c7d47c070f5c08566293989023ad6c89f7c71f TEST=apps/api/test/slotBatchReservedRelease.parity.test.mjs (Hono+SQLite, CI pending) |
 | `apps/api/test/slotBatchReservedRelease.parity.test.mjs` | TEST | MIG-0656 U02c-3 grouped release, permissions, rollback, phantom member, Outbox/Queue atomicity | MIG-0656 | SAME (offline unmounted route fixture) | IN_PROGRESS | PR#514 SHA=80c7d47c070f5c08566293989023ad6c89f7c71f TEST=node --test --experimental-strip-types apps/api/test/slotBatchReservedRelease.parity.test.mjs (CI pending) |
 
+| `apps/api/src/routes/manage/slotSingleReleaseSnapshot.ts` | HELPER | SA-060 raw-group snapshot for single-slot release (max 20, UNMOUNTED, no writes) | MIG-0656 | SAME (Hono read candidate only; later mutation/guard pending) | IN_PROGRESS | PR#514 SHA=ba50b137ebb7793a88bd01f507ff44ea8760d19a TEST=apps/api/test/slotSingleReleaseSnapshot.test.mjs (exact-head CI pending) |
+| `apps/api/test/slotSingleReleaseSnapshot.test.mjs` | TEST | SA-060 20/21-row, Unicode raw group, authorization-neutral read and snapshot parity | MIG-0656 | SAME (offline node:sqlite, no parent Hono route mount) | IN_PROGRESS | PR#514 SHA=557a6df544bfc9dbd0c47ba92410c97e6b71970f TEST=node --test --experimental-strip-types apps/api/test/slotSingleReleaseSnapshot.test.mjs (exact-head CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
