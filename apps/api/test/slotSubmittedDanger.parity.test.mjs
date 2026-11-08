@@ -169,6 +169,32 @@ test("SA-057 U03f: reservation remains while video detaches, long audits and sec
     assert.equal(s.stats.batches,1);
   }finally{s.sqlite.close();}
 });
+test("SA-056/057 U03l: completed operation replay and opposite operation create no duplicate effects",async()=>{
+  // A lost success response must not permit a duplicate admin mutation/DM.
+  // Replays return an explicit stale/conflict response, not a second success.
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind});
+    try{
+      const first=await s.post("s0","ev-1",kind);
+      assert.equal(first.status,200,kind+" initial "+await first.clone().text());
+      assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+      assert.equal(s.stats.batches,1);
+      const before=s.row("slots","s0");
+      const other=kind==="force-release"?"keep-reservation":"force-release";
+      for(const operation of [kind,other]){
+        const replay=await s.post("s0","ev-1",operation);
+        assert.equal(replay.status,409,
+          kind+" then "+operation+" "+await replay.clone().text());
+        assert.equal(replay.headers.get("Cache-Control"),"private, no-store");
+        assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+        assert.equal(s.stats.batches,1,"no second D1 mutation batch");
+        assert.deepEqual(s.row("slots","s0"),before);
+        assert.equal(s.row("videos","vid").scheduling_type,"manual");
+      }
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-056/057 U03j: static rebuild queue reason and requester match CURRENT per operation",async()=>{
   for(const [kind,reason] of [
     ["force-release","slot_admin_force_release_submitted"],
