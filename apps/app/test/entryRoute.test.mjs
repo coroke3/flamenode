@@ -206,16 +206,21 @@ test("continuation: session expiry or ban immediately removes authenticated even
 });
 
 
-test("continuation access denial is scoped to the account that initiated the read", async () => {
-  const { continuationAccessForUser } = await import("../.test-dist/apps/app/src/routes/entry/EntryIndex.js");
+test("continuation denial cannot outlive the exact first-page snapshot", async () => {
+  const { continuationAccessForSnapshot } = await import("../.test-dist/apps/app/src/routes/entry/EntryIndex.js");
+  const first = entryData({ user: user({ id: "account-a" }) });
+  const refreshed = entryData({ user: user({ id: "account-a" }) });
+  const other = entryData({ user: user({ id: "account-b" }) });
   for (const status of ["anonymous", "banned"]) {
-    assert.equal(continuationAccessForUser({ userId: "account-a", status }, "account-a"), status);
-    assert.equal(continuationAccessForUser({ userId: "account-a", status }, "account-b"), null,
-      "stale auth denial must not hide a different account's entry page");
-    assert.equal(continuationAccessForUser({ userId: "account-a", status }, null), null,
-      "missing user must not adopt a previous authenticated account's denial");
+    const denied = { firstPage: first, status };
+    assert.equal(continuationAccessForSnapshot(denied, first), status);
+    assert.equal(continuationAccessForSnapshot(denied, other), null,
+      "stale 401/403 cannot gate another account");
+    assert.equal(continuationAccessForSnapshot(denied, refreshed), null,
+      "stale 401/403 cannot gate a refreshed first-page snapshot for the same account");
+    assert.equal(continuationAccessForSnapshot(denied, null), null);
   }
-  assert.equal(continuationAccessForUser(null, "account-a"), null);
+  assert.equal(continuationAccessForSnapshot(null, first), null);
 });
 
 
