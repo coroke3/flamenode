@@ -21,7 +21,7 @@ import {
 } from "../../../../src/lib/publicData/staticUsersIndexCore.ts";
 import { normalizePublicIconUrl, resolveProjectedIcon, type PublicXIconEntry } from "../../../../src/lib/publicData/publicIconProjection.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
-import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatSocialLinkLabel, parseSocialLinks, profileHeaderSocialLinks } from "../../../../src/lib/socialLinks.ts";
 import { normalizePortfolioContact } from "../../../../src/lib/profileContact.ts";
 import { totalPagesFor } from "../../../../src/lib/utils/sql.ts";
@@ -39,7 +39,7 @@ export const PORTFOLIO_WORK_LIMIT = 36;
 /** CURRENT `VideoCard`: link is the YouTube ID or the internal ID, thumbnail via the thumbnail API. */
 export function toScreenVideoCard(video: VideoCardData): ScreenVideoCard {
   return {
-    href: `/${video.youtube_video_id?.trim() || video.id}`,
+    href: videoPageHref(video),
     title: video.title,
     thumbnailUrl: youtubeThumbUrl(video.youtube_video_id, "mqdefault") || null,
     creatorName: video.display_name,
@@ -133,11 +133,8 @@ export function parseUsersIndexSort(value: string | null | undefined): CreatorsS
   return value === "name" || value === "works" ? value : "score";
 }
 
-/** CURRENT `parsePageNumber`. */
-export function parseIndexPage(value: string | null | undefined): number {
-  const parsed = Number.parseInt(value ?? "1", 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
-}
+/** Exact same input contract as CURRENT /user; no duplicated prefix parser. */
+export { parseUsersIndexPage as parseIndexPage } from "../../../../src/lib/publicData/usersIndexPage.ts";
 
 export interface UsersIndexView {
   creators: CreatorsIndexEntry[];
