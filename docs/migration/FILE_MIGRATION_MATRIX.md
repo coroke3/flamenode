@@ -1533,6 +1533,9 @@
 | `apps/api/src/routes/manage/slotAvailableDeleteChunkSnapshot.ts` | HELPER | SA-059 read-only one D1 4-row sentinel and 3-row candidate; NO all-row delete/HTTP mount | MIG-0656 | SAME (UNMOUNTED, S3 3-read/one-batch protocol unresolved) | IN_PROGRESS | PR#514 SHA=ba42eaa565032a1968516eb945ac6175bd92f591 TEST=apps/api/test/slotAvailableDeleteChunkSnapshot.test.mjs (CI pending) |
 | `apps/api/test/slotAvailableDeleteChunkSnapshot.test.mjs` | TEST | SA-059 0/1/3/4-row selection, tenant+staff, malformed JSON, bounded SQL, no route mount | MIG-0656 | SAME (node:sqlite offline tests; full CURRENT multi-chunk behavior is NOT implemented) | IN_PROGRESS | PR#514 SHA=7e3157d22e1575b06c38c2bf9a3c0c80dd0f17c3 TEST=node --test --experimental-strip-types apps/api/test/slotAvailableDeleteChunkSnapshot.test.mjs (exact-head CI pending) |
 
+| `apps/api/src/routes/manage/slotAvailableDeleteChunkMutation.ts` | HELPER | SA-059 <=3 selected available slots mapped to existing SA-061/062 exact CAS delete; no HTTP mount, no all-row completion claim | MIG-0656 | SAME (UNMOUNTED; audit/Queue parent and S3 multi-request UX protocol pending) | IN_PROGRESS | PR#514 SHA=3f37ac2deaa3c4c9957cfaa39ae998c53a34ce8e TEST=apps/api/test/slotAvailableDeleteChunkMutation.test.mjs (CI pending) |
+| `apps/api/test/slotAvailableDeleteChunkMutation.test.mjs` | TEST | SA-059 11 slots 3/3/3/2 offline CAS, read-after-version/status conflicts rollback, concurrent insertion, malformed selections, no route | MIG-0656 | SAME (offline node:sqlite only; actual D1/browser/strict audits pending) | IN_PROGRESS | PR#514 SHA=64892e2cb2ec0aabb62219a4874b5048d95d85f7 TEST=node --test --experimental-strip-types apps/api/test/slotAvailableDeleteChunkMutation.test.mjs (CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
