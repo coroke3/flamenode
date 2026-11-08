@@ -344,7 +344,10 @@ test("イベントAPIはformatなし/v5をv5、legacyを旧形式として受け
   assert.match(route, /X-FlameNode-Schema-Version/);
   assert.match(route, /format === "legacy" \? "1" : "5"/);
   assert.match(route, /format === "legacy" \? "legacy" : "flamenode-event-export"/);
-  assert.match(route, /s-maxage=60/);
+  // The event may turn private after a response is generated. The origin
+  // still caches scheduled payloads, but shared intermediaries cannot.
+  assert.match(route, /const cacheControl = "no-store"/);
+  assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
 
   const authCheck = route.indexOf("loadEventExportEvent(db, eventId)");
   const cacheHitCheck = route.indexOf("const response = await cachedResponse()");

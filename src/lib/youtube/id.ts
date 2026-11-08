@@ -51,6 +51,29 @@ export function extractYoutubeId(input: string | null | undefined): string | nul
   return null;
 }
 
+/**
+ * Same-origin video detail route for CURRENT Next and Astro cards.
+ *
+ * Even if a legacy/corrupt youtube_video_id begins with "/", it must not
+ * create a protocol-relative //host link when prepended to a slash.
+ * Valid internal IDs use the same safe alphabet as public video snapshots.
+ */
+const SAFE_INTERNAL_VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
+export function videoPageHref(video: { id: string; youtube_video_id?: string | null }): string {
+  const youtubeId = extractYoutubeId(video.youtube_video_id);
+  if (youtubeId) return `/${youtubeId}`;
+  return SAFE_INTERNAL_VIDEO_ID.test(video.id) ? `/${video.id}` : "/list";
+}
+
+/** Keep event playlist links on the same origin even with corrupted video IDs. */
+export function eventVideoPageHref(
+  video: { id: string; youtube_video_id?: string | null },
+  eventId: string,
+): string {
+  const href = videoPageHref(video);
+  return href === "/list" ? href : `${href}?playlist=${encodeURIComponent(eventId)}`;
+}
+
 /** YouTube サムネイル URL (高画質)。 */
 export function youtubeThumbUrl(
   id: string | null | undefined,
@@ -61,9 +84,19 @@ export function youtubeThumbUrl(
   return `/api/youtube-thumbnail/${youtubeId}/${size}`;
 }
 
+/** Preserve one URL component even if a legacy ID is malformed.
+ * YouTube IDs are ASCII; replacement characters only affect invalid inputs.
+ * A literal dot segment would otherwise be normalized out of an iframe path.
+ */
+function encodeYoutubeIdComponent(id: string): string {
+  const encoded = encodeURIComponent(id.replace(/[\uD800-\uDFFF]/g, "\uFFFD"));
+  return encoded === "." || encoded === ".." ? "_" : encoded;
+}
+
 /** YouTube 動画ページ URL。 */
 export function youtubeWatchUrl(id: string): string {
-  return `https://www.youtube.com/watch?v=${id}`;
+  // An invalid/legacy ID must never become another query parameter or fragment.
+  return `https://www.youtube.com/watch?v=${encodeYoutubeIdComponent(id)}`;
 }
 
 /** YouTube iframe 埋め込み URL。 */
@@ -86,5 +119,6 @@ export function youtubeEmbedUrl(
   if (opts.autoplay) params.set("autoplay", "1");
   if (opts.mute) params.set("mute", "1");
   if (opts.start && opts.start > 0) params.set("start", String(Math.floor(opts.start)));
-  return `https://www.youtube.com/embed/${id}?${params.toString()}`;
+  // Preserve the iframe path and our query options even for corrupted IDs.
+  return `https://www.youtube.com/embed/${encodeYoutubeIdComponent(id)}?${params.toString()}`;
 }

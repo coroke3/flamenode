@@ -550,6 +550,8 @@ Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All r
 | SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
 | SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
 
+Callers (MIG-0734, PR #470): SA-016..020 from `apps/ops/src/api/adminCostGuard.ts` via `apps/ops/src/routes/admin/AdminCostGuard.tsx` (`/admin/cost-guard`); bodies parsed with `CostGuard*BodySchema`.
+
 T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
 
 ## MIG-0642 — Hono Admin Ops mutation mapping B (D-17-4)
@@ -571,6 +573,8 @@ Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notificat
 
 T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
 
+Callers (MIG-0734, PR #470): SA-045..048 from `apps/ops/src/api/adminNotifications.ts` via `apps/ops/src/routes/admin/AdminNotifications.tsx` (`/admin/notifications`); SA-046 body parsed with `AdminNotificationCancelBodySchema`, the other three (retry, force-resend, retry-failed) send no body; writes go through `api/write.ts` `send` so CURRENT write-guard messages and a 401 -> /entry are preserved.
+
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 
 | RH | CURRENT | TARGET Hono | 契約 / 制約 | State |
@@ -584,7 +588,7 @@ DTO provider: `@flamenode/server-core/publicData/publicEventStaff`、既存 Next
 
 | ID | CURRENT | TARGET | Auth and cache safety | Work status |
 | --- | --- | --- | --- | --- |
-| RH-013 | GET `/api/event-endpoints/[id]`, format v5/new/default or legacy/old/v1; realtime/scheduled; refresh 15/60/360/1440 | Implemented `apps/api/src/routes/events/export.ts` (not production routed); pure D1 reader `@flamenode/server-core/eventExport/data`, pure payload now `@flamenode/server-core/eventExport/payload`, cache identity now `@flamenode/server-core/publicCache/eventExportKeys` | Cache HIT **must** follow per-request D1 public+public_api_enabled gate; unknown/stale cache must be validated with forbidden-key check or evicted; 404 on private; 503 on failed data/leak gate; scheduled Cache API, realtime isolate micro-cache; CORS and X-FlameNode-* headers unchanged | DONE (PR#457; Hono route, data/cache core, CURRENT parity tests and D-12 measurement recorded; D-12 over-budget exception below; no cutover) |
+| RH-013 | GET `/api/event-endpoints/[id]`, format v5/new/default or legacy/old/v1; realtime/scheduled; refresh 15/60/360/1440 | Implemented `apps/api/src/routes/events/export.ts` (not production routed); pure D1 reader `@flamenode/server-core/eventExport/data`, pure payload now `@flamenode/server-core/eventExport/payload`, cache identity now `@flamenode/server-core/publicCache/eventExportKeys` | Cache HIT **must** follow per-request D1 public+public_api_enabled gate; unknown/stale cache must be validated with forbidden-key check or evicted; 404 on private; 503 on failed data/leak gate; scheduled Cache API retained inside origin, realtime isolate micro-cache; both modes use `Cache-Control: no-store` to prevent CDN reuse after event becomes private; CORS and X-FlameNode-* headers unchanged | DONE (PR#457; Hono route, data/cache core, CURRENT parity tests and D-12 measurement recorded; D-12 over-budget exception below; no cutover) |
 
 D-12 measurement (MIG-0632 U04, local only, NOT a production value): upper-bound fixture = event 1 x 500 public videos x 100 public members each (seeded by `scripts/benchmark-api-cpu.mjs` scenario `RH-013`, scheduled + cleared Cache API so every sample runs the D1 gate, snapshot and payload build; distinct client IP per request because of the 60/min guard). Response size: v5 = 4,445,432 bytes (about 4.24 MiB), legacy = 972,781 bytes; both exceed the 64 KiB budget. D1 statements: 8 per cold build (gate + snapshot reads, no writes). Local workerd (`--mode wrangler --d1 replay`, V8 sampling profiler, D1 stubbed with recorded results, 50 samples/kind): v5 p50 101.96 ms, max 162.30 ms; legacy p50 27.53 ms, max 45.89 ms; invalid-option 400 max 7.66 ms (harness noise floor about 9 ms). Node proxy (`--mode inproc`, wall time, not authoritative): v5 max 213 ms, legacy max 148 ms. Verdict: FAIL against the 7 ms warm CPU budget and the 64 KiB size budget at the upper bound. CURRENT `app/api/event-endpoints/[id]/route.ts` returns the same payload (byte-parity tests), so this is an inherited CURRENT limitation, not a regression.
 

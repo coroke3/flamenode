@@ -25,7 +25,9 @@ const MAX_SOCIAL_TYPE_LENGTH = 40;
 const MAX_SOCIAL_URL_LENGTH = 500;
 
 function cleanType(value: unknown): string {
-  const text = String(value ?? "").trim().slice(0, MAX_SOCIAL_TYPE_LENGTH);
+  const truncated = String(value ?? "").trim().slice(0, MAX_SOCIAL_TYPE_LENGTH);
+  // A UTF-16 length cap must not leave the leading half of an emoji behind.
+  const text = /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated;
   const key = text.toLowerCase();
   if (key === "twitter" || key === "x") return "X";
   if (key === "instagram" || key === "insta") return "Instagram";
@@ -202,7 +204,15 @@ export function profileHeaderSocialLinks(
       const parsed = new URL(link.url);
       const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
       if (host !== "x.com" && host !== "twitter.com") return true;
-      const path = parsed.pathname.replace(/^\/+|\/+$/g, "").toLowerCase();
+      const encodedPath = parsed.pathname.replace(/^\/+|\/+$/g, "");
+      // URL.pathname preserves percent escapes. Decode before comparing X handles,
+      // otherwise /%66lamenode and /flamenode are treated as different accounts.
+      let path: string;
+      try {
+        path = decodeURIComponent(encodedPath).toLowerCase();
+      } catch {
+        return true; // Keep malformed links rather than hiding unrelated URLs.
+      }
       return path !== primaryXHandle;
     } catch {
       return true;

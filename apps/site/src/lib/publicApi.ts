@@ -28,7 +28,10 @@ export async function fetchPublicJson<T>(
       cache: "no-store",
     });
     if (!response.ok) return { ok: false, status: response.status };
-    if (!(response.headers.get("Content-Type") ?? "").toLowerCase().includes("application/json")) {
+    // Only the JSON media type is valid. A substring match also accepted
+    // application/jsonp and text/plain; note=application/json.
+    const contentType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType !== "application/json") {
       return { ok: false, status: 0 };
     }
     const data: T = await response.json();
