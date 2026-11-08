@@ -38,7 +38,12 @@ function parseJstMinute(value: string): number | null {
   const [year, month, day, hour, minute] = match.slice(1).map(Number);
   if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31 ||
       hour > 23 || minute > 59) return null;
-  const utc = Date.UTC(year, month - 1, day, hour, minute) - 9 * 60 * 60 * 1000;
+  // Date.UTC(y, ...) converts years 0–99 to 1900–1999. Preserve the
+  // literal year, including values below 100, before adjusting from JST.
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  calendar.setUTCHours(hour, minute, 0, 0);
+  const utc = calendar.getTime() - 9 * 60 * 60 * 1000;
   if (!Number.isFinite(utc)) return null;
   const roundTrip = new Date(utc + 9 * 60 * 60 * 1000);
   if (roundTrip.getUTCFullYear() !== year || roundTrip.getUTCMonth() + 1 !== month ||
@@ -178,8 +183,8 @@ export function SlotBatchForm({
           onClick={() => setConfirmClear(true)} disabled={busy}>空き枠を全削除</button>
       </div>
     </form>
-    {confirmClear && <div role="alertdialog" aria-modal="true"
-      aria-label="空き枠を全削除しますか？" className="manage-slot-confirm">
+    {confirmClear && <div role="group"
+      aria-label="空き枠の全削除確認" className="manage-slot-confirm">
       <p>空き枠（available）を全て削除します。予約・提出済みの枠は対象外です。</p>
       <button type="button" className="fn-btn fn-btn-ghost"
         onClick={() => setConfirmClear(false)} disabled={busy}>キャンセル</button>
@@ -198,6 +203,6 @@ export function SlotBatchForm({
           <summary>枠を追加・一括編集</summary>
           <div className="manage-collapsible-body">{form}</div>
         </details>
-      : <>{<p className="fn-console-note">枠がまだないため、一括生成フォームを表示しています。</p>}{form}</>}
+       : <><p className="fn-console-note">枠がまだないため、一括生成フォームを表示しています。</p>{form}</>}
   </section>;
 }
