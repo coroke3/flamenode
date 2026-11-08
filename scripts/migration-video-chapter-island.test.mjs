@@ -795,11 +795,14 @@ test("P2 late chapter-create response cannot display success or refresh the next
     await React.act(async () => root.render(render("video-a")));
     await clickButton(doc, "現在位置にコメントする");
     const label = doc.querySelector("form input[maxlength='120']");
-    assert.ok(label, "new post composer must be available");
-    const setLabel = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, "value").set;
+    const time = doc.querySelector("form input[placeholder='mm:ss']");
+    assert.ok(label && time, "new post composer must be available");
+    const setInput = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, "value").set;
     await React.act(async () => {
-      setLabel.call(label, "Pending chapter");
+      setInput.call(label, "Pending chapter");
       label.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+      setInput.call(time, "0:10");
+      time.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
     });
     await React.act(async () => {
       doc.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
