@@ -509,3 +509,23 @@ test("UPDATE/DELETE audited CAS planners reject mismatched snapshot primary keys
     assert.throws(() => buildSpreadsheetAuditedDelete(ctx, requested, wrong, "actor"), /invalid_snapshot/);
   }
 });
+
+
+test("FK planner stops scanning on first over-budget distinct input without DB access", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  let reads = 0;
+  const rows = [{ event_id: null }, ...Array.from({ length: 99 }, (_, i) => ({ event_id: "e-" + i }))];
+  const poison = new Proxy({}, { get() { reads++; throw new Error("scanned_past_budget"); } });
+  rows.push({ event_id: "over-budget" }, poison);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows, 1), /batch_too_large/);
+  assert.equal(reads, 0);
+  let prepared = 0;
+  const db = { prepare() { prepared++; throw new Error("unexpected_d1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows, 1), /batch_too_large/);
+  assert.equal(prepared, 0);
+  const duplicateRows = Array.from({ length: 1000 }, () => ({ event_id: "same" }));
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, duplicateRows, 1)[0].binds, ["same"]);
+  assert.deepEqual(buildSpreadsheetForeignKeyLookups(fk, [{ event_id: null }], 0), []);
+});
