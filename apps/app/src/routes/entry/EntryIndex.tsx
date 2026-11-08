@@ -30,6 +30,13 @@ export function authErrorMessage(code: string | null): string | null {
   return code ? AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default : null;
 }
 
+export type ContinuationAccess = { userId: string; status: "anonymous" | "banned" } | null;
+
+/** Ignore access results belonging to an account other than the one rendered now. */
+export function continuationAccessForUser(access: ContinuationAccess, userId: string | null): "anonymous" | "banned" | null {
+  return userId !== null && access?.userId === userId ? access.status : null;
+}
+
 /** The /entry endpoint returns 401 to guests; this route is itself the login entrance. */
 export function EntryIndex({ api }: { api: PersonalApi }): React.ReactElement {
   useDocumentTitle("エントリー / 投稿");
@@ -61,10 +68,7 @@ export function EntryIndexView({
   const [pagingBusy, setPagingBusy] = React.useState(false);
   const pagingBusyRef = React.useRef(false);
   const [pagingFailed, setPagingFailed] = React.useState(false);
-  const [continuationAccess, setContinuationAccess] = React.useState<{
-    userId: string;
-    status: "anonymous" | "banned";
-  } | null>(null);
+  const [continuationAccess, setContinuationAccess] = React.useState<ContinuationAccess>(null);
   const pageAbort = React.useRef<AbortController | null>(null);
 
   // Abort an in-flight continuation when the page/account changes. Never merge another user's rows.
@@ -131,7 +135,7 @@ export function EntryIndexView({
     });
   };
   // A previous account's late 401/403 must not gate another account before effect cleanup.
-  const currentAccess = continuationAccess?.userId === data?.user.id ? continuationAccess.status : null;
+  const currentAccess = continuationAccessForUser(continuationAccess, data?.user.id ?? null);
   if (currentAccess === "banned") return <BannedNotice />;
   if (currentAccess === "anonymous") return <LoginRequired next="/entry" />;
 
