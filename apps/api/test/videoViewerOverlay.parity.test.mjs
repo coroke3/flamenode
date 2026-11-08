@@ -376,6 +376,23 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, `Expected statements <= 3, got ${d1.stats.statements}`);
   });
 
+  test("RH-031 switching to a second approved X revokes edit of the first identity's chapter", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // alice owns both approved X IDs, but the chapter belongs only to alice_x.
+    // A linked account is not an ownership grant for the currently selected X.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?').run("alice_y", "u_alice");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.activeXId, "alice_y");
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.ok(json.privateChapters.some((chapter) => chapter.id === "chap-priv-alice"));
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false));
+    assert.ok(json.privateChapters.every((chapter) => !("chapter_owner_x_id" in chapter)));
+  });
+
   test("T06: RH-031 admin user sees all private chapters", async () => {
     const { env, d1 } = setupTestEnv();
     d1.stats.statements = 0;
