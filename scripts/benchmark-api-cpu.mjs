@@ -433,6 +433,16 @@ const prep = (normal, limit, invalid = normal) => ({ normal: { r2Objects: normal
 const tplRow = (id) => ({ sql: `INSERT INTO event_templates (id, name, settings_json, created_by_user_id, created_at, updated_at) VALUES (?, 'bench tpl', '{}', 'bench-admin', 10, 10)`, params: [id] });
 const chapterRow = (id) => ({ sql: `INSERT INTO video_chapters (id, video_id, chapter_time, chapter_label, visibility, created_at, updated_at) VALUES (?, 'bench-vid', 7, 'bench', 'public', 10, 10)`, params: [id] });
 
+// MIG-0639 / SA-045..048: deterministic local-only notification rows.
+// Each request gets its own outbox ID so retry/cancel/force writes cannot consume a later sample.
+const benchNotificationId = (i, tag) => `bench-notif-${tag}-${i}`;
+const notificationRow = (id, status = "failed") => ({
+  sql: "INSERT OR REPLACE INTO notification_outbox (id,recipient_user_id,type,payload_json,delivery_route,status,attempt_count,created_at) VALUES (?, 'bench-admin', 'video_approved', '{\"content\":\"bench\"}', 'dm', ?, 5, 100)",
+  params: [id, status],
+});
+const notificationParams = (kind, i, tag) => ({ id: benchNotificationId(i, tag) });
+const notificationSetup = (status) => (kind, i, tag) => [notificationRow(benchNotificationId(i, tag), status)];
+
 export const ROUTE_INVENTORY = [
   // [id, method, path, access, options]
   ["MIG-0661", "GET", "/api/operation-mode/banner", "p"],
@@ -506,6 +516,11 @@ export const ROUTE_INVENTORY = [
   ["RH-003", "GET", "/api/admin/spreadsheet/data", "a", { nq: "?table=events&page=1&limit=50", setup: (k) => (k === "limit" ? [spreadsheetRows(60)] : undefined) }],
   ["RH-007", "GET", "/api/admin/spreadsheet/export", "a", { nq: "?table=events&format=csv", setup: (k) => (k === "limit" ? [spreadsheetRows(120)] : undefined) }],
   ["RH-009", "GET", "/api/admin/spreadsheet/tables", "a"],
+  // SA-045..048: verified handler contracts from apps/api/src/routes/admin/notifications.ts
+  ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: notificationSetup("failed") }],
+  ["SA-045", "POST", "/api/admin/notifications/:id/retry", "w", { params: notificationParams, setup: notificationSetup("failed") }],
+  ["SA-046", "POST", "/api/admin/notifications/:id/cancel", "w", { params: notificationParams, setup: notificationSetup("pending") }],
+  ["SA-047", "POST", "/api/admin/notifications/:id/force-resend", "w", { params: notificationParams, setup: notificationSetup("sent") }],
   ["HONO-ADM-01", "GET", "/api/admin/event-templates", "a"],
   ["SA-009", "POST", "/api/admin/audit/settings", "w"],
   ["SA-010", "POST", "/api/admin/audit/dry-run", "w"],
@@ -587,6 +602,10 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
+  "POST /api/admin/notifications/retry-failed": () => ({}),
+  "POST /api/admin/notifications/:id/retry": () => ({}),
+  "POST /api/admin/notifications/:id/cancel": (kind) => ({ reason: kind === "limit" ? "r".repeat(500) : "bench" }),
+  "POST /api/admin/notifications/:id/force-resend": () => ({}),
   "POST /api/personal/terms/accept": () => ({}),
   "POST /api/personal/onboarding/terms": () => ({}),
   "POST /api/personal/onboarding/complete": () => ({}),
@@ -655,6 +674,10 @@ export function buildRouteScenarios() {
 // Statuses a healthy run must return, pinned from an in-process probe of the main-branch app on the shared
 // fixture (MIG-0639). A different status means the fixture or the route changed and the CPU number is void.
 const ROUTE_EXPECT = {
+  "POST /api/admin/notifications/retry-failed": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/notifications/:id/retry": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/notifications/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/notifications/:id/force-resend": { normal: [200], limit: [200], invalid: [404] },
   "GET /api/operation-mode/banner": { normal: [200], limit: [200], invalid: [200] },
   "OPTIONS /api/public/events/:id/staff": { normal: [204], limit: [204], invalid: [403] },
   "GET /api/public/events/:id/staff": { normal: [200], limit: [200], invalid: [404] },
