@@ -7,6 +7,7 @@
 import {
   getSpreadsheetColumnPolicy,
   isSpreadsheetColumnEditable,
+  isSpreadsheetPhysicalDeleteBlocked,
   SPREADSHEET_DEFAULT_MAX_CELL_CHARS,
   type SpreadsheetTableDef,
 } from "./registry.ts";
@@ -165,4 +166,95 @@ export function prepareSpreadsheetUpdate(
     after[column] = values[column] === "" ? null : values[column];
   }
   return { setColumns, after };
+}
+
+
+/**
+ * MIG-0638 U01b: unmounted D1 mutation SQL plans.
+ * Bound parameters, rather than interpolation, represent all row values.
+ * Callers MUST still enforce write authorization and use a single atomic
+ * audit/queue transaction with an exactly-one-row CAS assertion.
+ */
+export interface SpreadsheetSqlPlan {
+  statement: string;
+  binds: readonly (string | number | null)[];
+}
+export interface SpreadsheetSqlTableContext extends SpreadsheetWriteValidationContext {
+  primaryKeys: readonly string[];
+  columns: readonly (SpreadsheetWriteValidationContext["columns"][number] & { pk: number })[];
+}
+function quoteSpreadsheetIdentifier(name: string): string {
+  // Column/table identifiers originate from the checked DB catalog, never request input.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error("unknown_column");
+  return '"' + name.replace(/"/g, '""') + '"';
+}
+function spreadsheetTableIdentifier(ctx: SpreadsheetSqlTableContext): string {
+  return quoteSpreadsheetIdentifier(ctx.def.table);
+}
+function spreadsheetPkCondition(ctx: SpreadsheetSqlTableContext, pk: Record<string, string>): SpreadsheetSqlPlan {
+  const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
+  return {
+    statement: ctx.primaryKeys.map(k => quoteSpreadsheetIdentifier(k) + " = ?").join(" AND "),
+    binds: ctx.primaryKeys.map(k => normalized[k]),
+  };
+}
+function spreadsheetSnapshotCondition(ctx: SpreadsheetSqlTableContext, before: Record<string, unknown>): SpreadsheetSqlPlan {
+  const binds: (string | number | null)[] = [];
+  const clauses = ctx.columns.map(column => {
+    const raw = before[column.name];
+    if (raw != null && typeof raw !== "string" && typeof raw !== "number") throw new Error("invalid_snapshot");
+    binds.push(raw ?? null);
+    return quoteSpreadsheetIdentifier(column.name) + " IS ?";
+  });
+  return { statement: clauses.join(" AND "), binds };
+}
+export function buildSpreadsheetInsertSql(
+  ctx: SpreadsheetSqlTableContext,
+  rowInput: Record<string, string | null>,
+): SpreadsheetSqlPlan & { row: Record<string, string | number | null> } {
+  const row = prepareCompleteInsertRow(ctx, rowInput);
+  normalizeSpreadsheetPrimaryKey(
+    ctx.primaryKeys,
+    Object.fromEntries(ctx.primaryKeys.map(key => [key, String(row[key] ?? "")])),
+  );
+  const keys = Object.keys(row);
+  if (keys.length === 0) throw new Error("empty_row");
+  return {
+    statement: "INSERT INTO " + spreadsheetTableIdentifier(ctx) +
+      " (" + keys.map(quoteSpreadsheetIdentifier).join(", ") + ") VALUES (" + keys.map(() => "?").join(", ") + ")",
+    binds: keys.map(key => row[key]),
+    row,
+  };
+}
+export function buildSpreadsheetUpdateSql(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+  values: Record<string, string | null>,
+): SpreadsheetSqlPlan & { after: Record<string, unknown> } {
+  const { setColumns, after } = prepareSpreadsheetUpdate(ctx, before, values);
+  const key = spreadsheetPkCondition(ctx, pk);
+  const snapshot = spreadsheetSnapshotCondition(ctx, before);
+  return {
+    statement: "UPDATE " + spreadsheetTableIdentifier(ctx) + " SET " +
+      setColumns.map(column => quoteSpreadsheetIdentifier(column) + " = ?").join(", ") +
+      " WHERE " + key.statement + " AND " + snapshot.statement,
+    binds: [...setColumns.map(column => values[column] === "" ? null : values[column]), ...key.binds, ...snapshot.binds],
+    after,
+  };
+}
+export function buildSpreadsheetDeleteSql(
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  before: Record<string, unknown>,
+): SpreadsheetSqlPlan {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (isSpreadsheetPhysicalDeleteBlocked(ctx.def.table)) throw new Error("physical_delete_forbidden");
+  const key = spreadsheetPkCondition(ctx, pk);
+  const snapshot = spreadsheetSnapshotCondition(ctx, before);
+  return {
+    statement: "DELETE FROM " + spreadsheetTableIdentifier(ctx) +
+      " WHERE " + key.statement + " AND " + snapshot.statement,
+    binds: [...key.binds, ...snapshot.binds],
+  };
 }
