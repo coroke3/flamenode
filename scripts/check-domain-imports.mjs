@@ -61,13 +61,16 @@ export const FORBIDDEN_RULES = [
   },
 ];
 
-export function collectSourceFiles(dir, result = []) {
+export function collectSourceFiles(dir, result = [], symlinks = []) {
   if (!fs.existsSync(dir)) return result;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (["node_modules", ".next", ".git", "dist"].includes(entry.name)) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      collectSourceFiles(full, result);
+    if (entry.isSymbolicLink()) {
+      // Do not follow linked files or directories into unreviewed source trees.
+      symlinks.push(full);
+    } else if (entry.isDirectory()) {
+      collectSourceFiles(full, result, symlinks);
     } else if (entry.isFile() && /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/.test(entry.name)) {
       result.push(full);
     }
@@ -93,10 +96,27 @@ export function validateDomainImports(options = {}) {
   ];
 
   const errors = [];
+  const symlinks = [];
   let filesCheckedCount = 0;
 
   for (const targetDir of targetDirs) {
-    for (const file of collectSourceFiles(targetDir)) {
+    // Check the whole package path. A linked src/ or package ancestor can
+    // otherwise make every shipped source file disappear from this audit.
+    const relative = path.relative(rootDir, targetDir);
+    let current = rootDir;
+    let linkedAncestor = null;
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      if (fs.lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        linkedAncestor = current;
+        break;
+      }
+    }
+    if (linkedAncestor) {
+      symlinks.push(linkedAncestor);
+      continue;
+    }
+    for (const file of collectSourceFiles(targetDir, [], symlinks)) {
       filesCheckedCount += 1;
       const content = fs.readFileSync(file, "utf8");
       for (const { specifier, line } of extractImportSpecifiers(content)) {
@@ -115,6 +135,15 @@ export function validateDomainImports(options = {}) {
     }
   }
 
+  for (const link of new Set(symlinks)) {
+    errors.push({
+      file: path.relative(rootDir, link).replace(/\\/g, "/"),
+      line: 0,
+      specifier: "",
+      rule: "symlink",
+      message: "Symlinked package source paths are forbidden: cannot verify import boundaries",
+    });
+  }
   return { ok: errors.length === 0, errors, filesCheckedCount };
 }
 

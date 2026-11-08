@@ -6,6 +6,7 @@
 > Platform boundary: [`TOPOLOGY.md`](TOPOLOGY.md)
 > Evidence: Workers Observability invocation logs + CURRENT code/tests + Cloudflare Worker settings
 > Production mutation: none
+> Background LOCAL measurements: [`BACKGROUND_CPU.md`](BACKGROUND_CPU.md) (MIG-0609; no production changes)
 
 MIG-0006で、4 CURRENT WorkersのCPU/resource failureと代表request pathを実環境からread-only計測した。ここでの数値はmigrationの比較baselineであり、将来のSLO達成値ではない。
 

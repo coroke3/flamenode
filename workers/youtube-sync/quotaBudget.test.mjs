@@ -78,6 +78,17 @@ test("日次予算を超える予約はD1を呼ばず拒否する", async () => 
   assert.equal(db.calls.length, 0);
 });
 
+test("不正な数値接頭辞を持つquota設定は日次デフォルトを超える予約を拒否する", async () => {
+  const db = createDb();
+  const reservation = await reserveYoutubeQuota(
+    { DB: db, YOUTUBE_DAILY_QUOTA_LIMIT: "25000oops" },
+    8_001,
+    1_752_388_800,
+  );
+  assert.equal(reservation, null);
+  assert.equal(db.calls.length, 0, "malformed quota must not raise the 80% reservation cap");
+});
+
 test("未使用予約だけを同じquota日へ返却する", async () => {
   const db = createDb();
   await refundYoutubeQuota(

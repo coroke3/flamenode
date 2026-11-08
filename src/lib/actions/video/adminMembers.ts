@@ -23,6 +23,7 @@ import { markPendingPublicReflection } from "@/lib/staticRebuild/publicReflectio
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { loadVideoRebuildEventIds } from "@/lib/video/videoVisibilityStatusAction";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 
 function formDataBoolean(formData: FormData, name: string): boolean {
   return formData
@@ -38,7 +39,9 @@ function revalidateVideoMembersAdminPaths(input: {
   revalidatePath(`/admin/videos/${input.videoId}`);
   revalidatePath(`/admin/videos/${input.videoId}/members`);
   revalidatePath(`/dashboard/edit/${input.videoId}`);
-  revalidatePath(`/${input.youtubeVideoId ?? input.videoId}`);
+  for (const publicPath of publicVideoRevalidationPaths(input.videoId, input.youtubeVideoId)) {
+    revalidatePath(publicPath);
+  }
   revalidatePath("/list");
   if (input.primaryEventId) {
     revalidatePath(`/event/${input.primaryEventId}`);
