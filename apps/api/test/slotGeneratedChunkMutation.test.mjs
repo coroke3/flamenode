@@ -150,6 +150,10 @@ test("SA-058 invalid modes, row defaults, duplicates and >3 reject before SQL",(
     {eventId:"ev",mode:"count",rows:[{...one,updated_at:1.1}]},
     {eventId:"ev",mode:"count",rows:[{...one,sort_order:NaN}]},
     {eventId:"ev",mode:"count",rows:[{...one,slot_label:123}]},
+    {eventId:"ev",mode:"count",rows:[{...one,slot_label:null}]},
+    {eventId:"ev",mode:"time",rows:[{...materialize("time",1)[0],slot_label:"incorrect"}]},
+    {eventId:"ev",mode:"count",rows:[one,{...good[1],updated_at:301}]},
+    {eventId:"ev",mode:"time",rows:[materialize("time",2)[0],{...materialize("time",2)[1],sort_order:0}]},
     {eventId:"ev",mode:"unknown",rows:good},
   ];
   for(const input of invalid)assert.throws(
