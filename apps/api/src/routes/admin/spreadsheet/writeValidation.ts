@@ -600,3 +600,46 @@ export function planSpreadsheetImportMutations(
   }
   return { mutations, inserted, updated, skipped };
 }
+
+
+/** CURRENT buildPreviewRunConsumptionMutation parity, UNMOUNTED.
+ * The exact-one affected-row assertion and this SQL + data writes + strict audit
+ * MUST run in the same atomic D1 batch; a zero-change replay must abort all.
+ */
+export function buildSpreadsheetPreviewNonceConsumeSql(
+  claims: import("./importPreviewToken.ts").SpreadsheetImportPreviewClaims,
+  consumedAt: number,
+): SpreadsheetAuditedSqlPlan {
+  if (!Number.isSafeInteger(consumedAt) || consumedAt < claims.issuedAt) throw new Error("preview_required");
+  const before = {
+    nonce: claims.nonce,
+    operator_user_id: claims.operatorUserId,
+    table_name: claims.table,
+    mode: claims.mode,
+    payload_hash: claims.payloadHash,
+    schema_fingerprint: claims.schemaFingerprint,
+    expires_at: claims.expiresAt,
+    consumed_at: null,
+    created_at: claims.issuedAt,
+  };
+  const after = { ...before, consumed_at: consumedAt };
+  return {
+    statement: 'UPDATE "spreadsheet_import_runs" SET "consumed_at" = ?' +
+      ' WHERE "nonce" = ? AND "operator_user_id" = ? AND "table_name" = ? AND "mode" = ?' +
+      ' AND "payload_hash" = ? AND "schema_fingerprint" = ?' +
+      ' AND "expires_at" = ? AND "created_at" = ? AND "consumed_at" IS NULL AND "expires_at" >= ?',
+    binds: [consumedAt, claims.nonce, claims.operatorUserId, claims.table, claims.mode,
+      claims.payloadHash, claims.schemaFingerprint, claims.expiresAt, claims.issuedAt, consumedAt],
+    audit: {
+      table_name: "spreadsheet_import_runs",
+      target_id: claims.nonce,
+      operation: "UPDATE",
+      before,
+      after,
+      actor_user_id: claims.operatorUserId,
+      retention_class: "long_audit",
+      strict: true,
+      context: "admin_spreadsheet",
+    },
+  };
+}
