@@ -1091,3 +1091,58 @@ test("MIG-0652 U04 SQLite T33: time-bound CostGuard exception is feature-scoped 
     }
   }
 });
+
+test("MIG-0652 U04 SQLite T34: repeat archive keeps R2 fence stable while each D1 revision is audited", async () => {
+  // CURRENT deleteEvent supports repeating an already-private archive.
+  // The first public -> private request needs an R2 visibility fence; the
+  // second private -> private request must not manufacture another R2 fence,
+  // but must still use CAS and an audited atomic D1 update.
+  const f = setup({
+    enforceOrigin: true, enforceSession: true, enforceWriteGuard: true,
+  });
+  const oldCaches = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  try {
+    const first = await f.request();
+    assert.equal(first.status, 200);
+    assert.deepEqual(await first.json(), { ok: true, pendingPublicReflection: true });
+    assert.equal(f.d1.stats.batches, 1);
+    const firstEvent = f.read("events", "WHERE id = '" + EVENT + "'")[0];
+    assert.equal(firstEvent.visibility_status, "private");
+    const firstRevision = firstEvent.updated_at;
+    const firstManifest = JSON.stringify(f.bucket.manifest);
+    const initialFence = f.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+    assert.ok(initialFence.fence_token);
+    const firstTimelineLength = f.timeline.length;
+    const firstAudits = f.read("audit_logs", "WHERE table_name = 'events' AND target_id = '" + EVENT + "'");
+    assert.equal(firstAudits.length, 1);
+
+    const second = await f.request();
+    assert.equal(second.status, 200);
+    assert.deepEqual(await second.json(), { ok: true, pendingPublicReflection: true });
+    assert.equal(f.d1.stats.batches, 2);
+    const secondEvent = f.read("events", "WHERE id = '" + EVENT + "'")[0];
+    assert.equal(secondEvent.visibility_status, "private");
+    assert.ok(secondEvent.updated_at > firstRevision, "retry must advance the CAS revision");
+    assert.deepEqual(f.timeline.slice(firstTimelineLength), ["d1.batch"],
+      "already-private retry must not write or read a new R2 visibility fence");
+    assert.equal(JSON.stringify(f.bucket.manifest), firstManifest,
+      "original public-side blocking manifest must remain intact");
+    const afterFence = f.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+    assert.equal(afterFence.fence_token, initialFence.fence_token);
+    assert.equal(afterFence.state, initialFence.state);
+    const audits = f.read("audit_logs", "WHERE table_name = 'events' AND target_id = '" + EVENT + "'");
+    assert.equal(audits.length, 2, "each successful CAS needs its own strict audit row");
+    assert.ok(audits.some((row) => {
+      const before = JSON.parse(row.before_json);
+      const after = JSON.parse(row.after_json);
+      return before.visibility_status === "private" &&
+        after.visibility_status === "private" &&
+        before.updated_at === firstRevision &&
+        after.updated_at === secondEvent.updated_at;
+    }), "second revision must audit the true prior private row");
+    assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+  } finally {
+    globalThis.caches = oldCaches;
+  }
+});
