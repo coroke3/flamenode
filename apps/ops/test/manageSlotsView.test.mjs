@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
+import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { groupDisplaySlots, partLabels } from "../.test-dist/apps/ops/src/routes/manage/slotParts.js";
@@ -211,4 +212,66 @@ test("MIG-0722 U02b-2: injected handler alone enables selection and confirmation
   }));
   assert.doesNotMatch(foreign, /強制解放|作品のみ解放/);
   assert.equal(writes, 0);
+});
+
+async function withSlotDom(callback) {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/manage/events/ev%20id/slots",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try { await callback(dom, root); }
+  finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+    dom.window.close();
+  }
+}
+
+test("MIG-0722 U02b-2: actual UI confirms before callback, cancels and blocks >3 selection", async () => {
+  await withSlotDom(async (dom, root) => {
+    const calls = [];
+    const rows = [0, 1, 2, 3].map(index =>
+      slot("a" + index, { status: "available", event_id: "ev id" }));
+    const onAction = async operation => {
+      calls.push(operation);
+      return { ok: true, message: "変更完了" };
+    };
+    const view = React.createElement(MemoryRouter, null, React.createElement(SlotList, {
+      eventId: "ev id", slots: rows, partGapMinutes: 15, parts: [], onAction,
+    }));
+    await React.act(async () => root.render(view));
+    const findButton = text => [...dom.window.document.querySelectorAll("button")]
+      .find(button => button.textContent.trim() === text);
+    await React.act(async () => findButton("削除").click());
+    assert.equal(calls.length, 0, "clicking a destructive row operation must only open confirmation");
+    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+    await React.act(async () => findButton("キャンセル").click());
+    assert.equal(calls.length, 0);
+    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null);
+    await React.act(async () => findButton("削除").click());
+    await React.act(async () => findButton("実行する").click());
+    assert.deepEqual(calls, [{ kind: "delete", slotId: "a0" }]);
+    assert.match(dom.window.document.body.textContent, /変更完了/);
+
+    const selectAll = dom.window.document.querySelector('input[aria-label="すべて選択"]');
+    await React.act(async () => {
+      selectAll.checked = true;
+      selectAll.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    });
+    assert.ok(findButton("空き枠を削除 (4)").disabled, "max-3 atomic boundary must disable bulk operation");
+    assert.ok(findButton("ラベル変更").disabled);
+    assert.equal(calls.length, 1, "disabled batch controls must not invoke writes");
+  });
 });
