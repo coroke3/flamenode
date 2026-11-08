@@ -75,8 +75,16 @@ function requestRebuild(
     generation: decision.generation,
     reason,
   };
-  // A failed send must not change the answer, which is already a 503.
-  return queue.send(message).then(() => undefined, () => undefined);
+  // Neither a synchronous throw nor an async rejection should suppress a later retry.
+  // A newer in-flight attempt must retain its own deduplication marker.
+  return Promise.resolve()
+    .then(() => queue.send(message))
+    .then(
+      () => undefined,
+      () => {
+        if (recentRebuilds.get(decision.key) === now) recentRebuilds.delete(decision.key);
+      },
+    );
 }
 
 export async function loadR2PrebuiltHtml(
@@ -100,6 +108,17 @@ export async function loadR2PrebuiltHtml(
   }
   // The route data says the page is public, so a missing page is a build gap, not a 404.
   if (!object) return fail("html_missing");
+  // R2 GET may already have opened a body stream. Never leave it unread when
+  // identity/size/MIME validation rejects the object (or a 503 is returned).
+  // A failed cancellation must not turn the stable 503 + rebuild into a throw.
+  const rejectCorruptObject = async (): Promise<R2HtmlResult> => {
+    try {
+      await object.body?.cancel?.();
+    } catch {
+      // Best-effort resource cleanup; corruption remains a retryable build gap.
+    }
+    return fail("corrupt_data");
+  };
   // Identity, not generation: the object must be this entity's page at this route key.
   // Unpublish and slug changes are fenced earlier (KV deny:, consumer delete, another route key),
   // and the route generation moves with almost every data build, so it is diagnostic only.
@@ -111,12 +130,12 @@ export async function loadR2PrebuiltHtml(
     typeof meta.id !== "string" ||
     meta.id !== canonicalEntityId(decision.kind, decision.id)
   ) {
-    return fail("corrupt_data");
+    return rejectCorruptObject();
   }
   const contentType = object.httpMetadata?.contentType ?? "";
   if (!object.body || !Number.isFinite(object.size) || (object.size ?? 0) <= 0 ||
       !/^text\/html(?:\s*;|$)/i.test(contentType)) {
-    return fail("corrupt_data");
+    return rejectCorruptObject();
   }
   // An older generation is still this page: serve it and ask for one (deduplicated) rebuild.
   const rebuild = meta.generation !== decision.generation

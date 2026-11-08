@@ -39,3 +39,11 @@ const jsonLd = buildPersonJsonLd(profile);
   <script slot="head" is:inline type="application/ld+json" set:html={serializeJsonLd(jsonLd)}></script>
   <CreatorProfileIsland client:load header={header} works={works} collabs={collabs} />
 </PublicLayout>
+
+<!-- MIG-0504 mobile profile header: the 52px fixed nav leaves document flow.
+     The mock's back-to-creators link must not be covered by that nav. -->
+<style is:global>
+  @media (max-width: 640px) {
+    .p-root .cr-wrap { padding-top: calc(52px + 24px) !important; }
+  }
+</style>

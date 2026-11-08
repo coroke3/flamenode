@@ -16,3 +16,10 @@ const unavailable = data.index === null;
 <PublicLayout head={head} currentPath="/user">
   <UsersIndexIsland client:load initial={initial} unavailable={unavailable} indexUrl="/user/index.json" />
 </PublicLayout>
+
+<!-- On ≤640px the shared header is fixed (52px) and leaves normal flow. Restore the mock's 32px heading gap. -->
+<style is:global>
+  @media (max-width: 640px) {
+    .p-root .cri-wrap { padding-top: calc(52px + 32px); }
+  }
+</style>
