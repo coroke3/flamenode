@@ -199,6 +199,12 @@ test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted 
   }
   assert.equal(JSON.parse(scenarios.get("SA-054").kinds.normal(1, "safe").body).confirm, "TERMS");
   assert.equal(JSON.parse(scenarios.get("SA-051").kinds.limit(1, "safe").body).body_markdown.length, 2000);
+  const xRequestLimit = JSON.parse(scenarios.get("SA-099").kinds.limit(1, "safe").body).x_id;
+  const xRequestNormal = JSON.parse(scenarios.get("SA-099").kinds.normal(1, "safe").body).x_id;
+  assert.match(xRequestLimit, /^[a-z0-9_]{20}$/i, "SA-099 limit must reach the accepted 20-character X handle boundary");
+  assert.ok(xRequestNormal.length < 20, "SA-099 normal case must be distinguishable from limit");
+  assert.notEqual(xRequestLimit, JSON.parse(scenarios.get("SA-099").kinds.limit(2, "safe").body).x_id, "each sample must use its own handle");
+
   for (const id of ["SA-100", "SA-101"]) {
     assert.ok(scenarios.get(id).kinds.normal(1, "safe").setup.some((row) => /x_identity_requests/.test(row.sql)), id + " needs a request fixture");
   }
