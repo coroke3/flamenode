@@ -6,7 +6,7 @@ import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import {createAdminCostGuardApi} from "../.test-dist/apps/ops/src/api/adminCostGuard.js";
-import {createAdminNotificationsApi,notificationQuery,notificationFilterHref} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
+import {createAdminNotificationsApi,notificationQuery,notificationFilterHref,truncateNotificationSearch} from "../.test-dist/apps/ops/src/api/adminNotifications.js";
 import {CostGuardForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardForm.js";
 import {AdminCostGuard,AdminCostGuardView,changedCostGuardKeys,MODES} from "../.test-dist/apps/ops/src/routes/admin/AdminCostGuard.js";
 import {CostGuardOverrideForm} from "../.test-dist/apps/ops/src/routes/admin/CostGuardOverrideForm.js";
@@ -27,6 +27,61 @@ const settings={
   exceptionFeaturesJson:null,disabledFeaturesJson:null,truncated:false,history:[],
 };
 const read=rel=>readFileSync(new URL(rel,import.meta.url),"utf8");
+
+test("fix(notifications): q 100 UTF-16 units never splits an emoji", () => {
+  const split = "A".repeat(99) + "😀";
+  const whole = "A".repeat(98) + "😀";
+  assert.equal(truncateNotificationSearch(split), "A".repeat(99));
+  assert.equal(truncateNotificationSearch(whole), whole);
+  assert.equal(readNotificationFilters(new URLSearchParams({ q: split })).q, "A".repeat(99));
+  assert.equal(readNotificationFilters(new URLSearchParams({ q: whole })).q, whole);
+  const filters = { status: "all", cat: "all", type: "", event: "", q: split };
+  assert.equal(new URLSearchParams(notificationQuery(filters)).get("q"), "A".repeat(99));
+  assert.equal(new URLSearchParams(notificationFilterHref({ ...filters, q: whole }).split("?")[1]).get("q"), whole);
+  assert.equal(new URLSearchParams(notificationFilterHref(filters).split("?")[1]).get("q"), "A".repeat(99));
+  assert.equal(notificationFilterHref({ ...filters, q: " ".repeat(101) }), "/admin/notifications",
+    "whitespace-only queries must not create a spurious q= filter");
+  assert.equal(notificationQuery({ ...filters, q: " ".repeat(101) }), "",
+    "API and tab navigation must agree on empty searches");
+  // A lone high surrogate is removed by truncateNotificationSearch().  The API
+  // and the SPA form must not reintroduce a dangling q= parameter afterward.
+  const invalidBoundary = "\uD800";
+  assert.equal(truncateNotificationSearch(invalidBoundary), "");
+  assert.equal(notificationQuery({ ...filters, q: invalidBoundary }), "");
+  assert.equal(notificationFilterHref({ ...filters, q: invalidBoundary }), "/admin/notifications");
+  const opsRoute = read("../src/routes/admin/AdminNotifications.tsx");
+  assert.match(opsRoute, /const finalValue = key === "q" \? truncateNotificationSearch\(normalized\) : normalized/);
+  assert.match(opsRoute, /if \(finalValue\) next\.set\(key, finalValue\)/);
+  assert.ok(!truncateNotificationSearch(split).includes("\uFFFD"));
+  const currentPage = read("../../../app/(admin)/admin/notifications/page.tsx");
+  assert.match(currentPage, /const qFilter = \/\[\\uD800-\\uDBFF\]\$\/.test\(qRaw\)/);
+});
+
+test("fix(notifications): CURRENT ignores duplicate query keys instead of throwing on .trim()", () => {
+  const source = read("../../../app/(admin)/admin/notifications/page.tsx");
+  // Next.js represents ?q=first&q=second (and other duplicate keys) as string[].
+  assert.match(source, /function singleQueryValue\(value: string \| string\[\] \| undefined\): string/);
+  assert.match(source, /typeof value === "string" \? value : ""/);
+  for (const key of ["status", "type", "event", "q", "cat"]) {
+    assert.match(source, new RegExp(key + "\\?: string \\| string\\[\\]"), key + " supports duplicate values at runtime");
+    assert.match(source, new RegExp("singleQueryValue\\(sp\\." + key + "\\)"), key + " must normalize before use");
+  }
+  assert.doesNotMatch(source, /\(sp\.(?:type|event|q|cat) \?\? ""\)\.trim\(\)/);
+});
+
+test("fix(notifications): Ops ignores repeated query keys like CURRENT", () => {
+  const keys = ["status", "cat", "type", "event", "q"];
+  const expected = { status: "all", cat: "all", type: "", event: "", q: "" };
+  for (const key of keys) {
+    const params = new URLSearchParams();
+    params.append(key, "failed");
+    params.append(key, "pending");
+    assert.deepEqual(readNotificationFilters(params), expected, key + " duplicate must not select either value");
+  }
+  const unique = new URLSearchParams({ status: "failed", type: "delivery", event: "evt-123", q: "text" });
+  assert.deepEqual(readNotificationFilters(unique), { status: "failed", cat: "all", type: "delivery", event: "evt-123", q: "text" },
+    "single-key filters must retain existing semantics");
+});
 
 test("MIG-0734 T01 U01 cost writes preserve 5 exact D-17-4 paths and JSON keys",async()=>{
   const calls=[];
