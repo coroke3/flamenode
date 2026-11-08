@@ -36,7 +36,7 @@ import { VideoForm } from "@/components/forms/VideoForm";
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoEditPermissionOverview } from "@/components/video/permission/VideoEditPermissionOverview";
 import { Icon } from "@/components/ui/Icon";
-import { youtubeWatchUrl } from "@/lib/youtube/id";
+import { videoPageHref, youtubeWatchUrl } from "@/lib/youtube/id";
 import { getUsedSoftwareSuggestions } from "@/lib/db/videoFormSuggestions";
 import { getVideoSoftwareLabel } from "@/lib/db/software";
 import { getXIconCandidates } from "@/lib/db/xIconResolution";
@@ -593,7 +593,7 @@ export default async function EditVideoPage({
               ダッシュボードへ
             </Link>
             <Link
-              href={`/${youtubeVideoId ?? video.id}`}
+              href={videoPageHref(video)}
               className="fn-btn fn-btn-primary"
             >
               公開ページを見る
@@ -663,7 +663,7 @@ export default async function EditVideoPage({
           </a>
         ) : null}
         <Link
-          href={`/${youtubeVideoId ?? video.id}`}
+          href={videoPageHref(video)}
           className="fn-btn fn-btn-ghost fn-btn-sm"
         >
           <Icon name="external" size={12} aria-hidden />
