@@ -28,10 +28,11 @@ test("CURRENT audit: repeated query keys cannot throw or become comma-separated 
   }
 });
 
-test("CURRENT audit: limit preserves existing finite positive floor and cap", () => {
+test("CURRENT audit: limit is always within 1–100 after flooring", () => {
   for (const [raw, expected] of [
     [undefined, 50], ["", 50], ["0", 50], ["-1", 50],
     [" 25.9 ", 25], ["100", 100], ["101", 100],
+    ["0.1", 1], ["0.999", 1], ["1e-99", 1], ["1", 1], ["1.999", 1],
     ["NaN", 50], ["Infinity", 50], ["1e309", 50],
     [["10", "80"], 50],
   ]) {
