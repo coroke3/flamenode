@@ -5,6 +5,7 @@ import { healthRoutes } from "./routes/health.ts";
 import { personalRoutes } from "./routes/personal/index.ts";
 import { manageRoutes } from "./routes/manage/index.ts";
 import { publicAboutStatsRoutes } from "./routes/publicAboutStats.ts";
+import { publicEventStaffRoutes } from "./routes/public/eventStaff.ts";
 import { softwareSuggestionsRoutes } from "./routes/softwareSuggestions.ts";
 import { createAdminRoutes } from "./routes/admin/index.ts";
 import { liveEventRoutes } from "./routes/live/events.ts";
@@ -12,9 +13,14 @@ import { adminEventRoutes } from "./routes/events/index.ts";
 import { slotViewerOverlayRoutes } from "./routes/events/viewerOverlay.ts";
 import { publicListRoutes } from "./routes/events/publicList.ts";
 import { publicReleaseRoutes } from "./routes/events/publicRelease.ts";
+import { eventExportRoutes } from "./routes/events/export.ts";
 import { videosRoutes } from "./routes/videos/index.ts";
 import { accountSummaryRoutes } from "./routes/account/summary.ts";
 import { googleDriveImageRoutes, youtubeThumbnailRoutes } from "./routes/media/proxies.ts";
+import { mediaRoutes } from "./routes/media/mediaRoutes.ts";
+import { xUsersSearchRoutes } from "./routes/internal/xUsersSearch.ts";
+import { operationModeBannerRoutes } from "./routes/operationModeBanner.ts";
+import { xidRoutes } from "./routes/xid/index.ts";
 
 import { createSpreadsheetReadRoutes } from "./routes/admin/spreadsheet/read.ts";
 
@@ -22,7 +28,11 @@ export const app = new Hono<AppEnv>();
 
 // URL + method match CURRENT app/api/** (FILE_MIGRATION_MATRIX RH-017/018/026/029).
 app.route("/api/health", healthRoutes);
+// MIG-0661: public read-only banner, no D1/session.
+app.route("/api/operation-mode/banner", operationModeBannerRoutes);
 app.route("/api/public/about-stats", publicAboutStatsRoutes);
+// MIG-0647 (RH-027/028): public staff allowlist with manifest double-read fence.
+app.route("/api/public/events", publicEventStaffRoutes);
 app.route("/api/software/suggestions", softwareSuggestionsRoutes);
 // MIG-0611: authenticated read-only Personal screens API (no CURRENT /api/* equivalent).
 app.route("/api/personal", personalRoutes);
@@ -41,9 +51,17 @@ app.route("/api/events", slotViewerOverlayRoutes);
 app.route("/api/events", publicListRoutes);
 // MIG-0631 (RH-012): GET /api/event-endpoints/:id/release
 app.route("/api/event-endpoints", publicReleaseRoutes);
+// MIG-0632 RH-013: public event export, authorization checked fresh before every cache HIT.
+app.route("/api/event-endpoints", eventExportRoutes);
 app.route("/api/videos", videosRoutes);
 // MIG-0605 U01 (RH-001): GET /api/account/summary
 app.route("/api/account/summary", accountSummaryRoutes);
 // MIG-0605 U03 (part): RH-016, RH-033
 app.route("/api/google-drive-image", googleDriveImageRoutes);
 app.route("/api/youtube-thumbnail", youtubeThumbnailRoutes);
+// MIG-0646: ordered RH-023..025 GET dispatch (signed/private routes before wildcard).
+app.route("/api/media", mediaRoutes);
+// MIG-0648 RH-019: authenticated R2-only member suggestions, no candidate D1 fallback.
+app.route("/api/internal/x-users/search", xUsersSearchRoutes);
+// MIG-0659 (SA-099..101, D-15-8): POST-only X ID request / cancel / merge-revert write API.
+app.route("/api/xid", xidRoutes);

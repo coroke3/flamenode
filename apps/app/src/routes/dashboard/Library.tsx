@@ -6,6 +6,7 @@ import { ResultView, useApiResult } from "../guard.js";
 import { AppLink, useDocumentTitle } from "../ui/AppLink.js";
 import { ChapterItems } from "../ui/ChapterItems.js";
 import { Icon } from "../ui/Icon.js";
+import { eventVideoPageHref } from "../ui/media.js";
 import { VideoCard } from "../ui/VideoCard.js";
 
 /** CURRENT parseTab (library/page.tsx). The API applies the same rule; this only drives the degraded view. */
@@ -123,7 +124,7 @@ export function LibraryView({ data }: { data: LibraryResponse }): React.ReactEle
   const firstVideo = videos[0];
   const firstVideoHref =
     (tab === "like" || tab === "bookmark") && firstVideo
-      ? `/${firstVideo.youtube_video_id?.trim() || firstVideo.id}?playlist=${playlistId}`
+      ? eventVideoPageHref(firstVideo, playlistId)
       : null;
   const emptyMessage =
     tab === "mine" && !activeApprovedXId
@@ -182,7 +183,7 @@ export function LibraryView({ data }: { data: LibraryResponse }): React.ReactEle
                     href={
                       tab === "mine" || tab === "collab"
                         ? `/dashboard/edit/${video.id}`
-                        : `/${video.youtube_video_id?.trim() || video.id}?playlist=${playlistId}`
+                        : eventVideoPageHref(video, playlistId)
                     }
                   />
                 </div>
