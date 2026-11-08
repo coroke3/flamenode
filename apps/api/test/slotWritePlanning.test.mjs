@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseJstDatetimeLocalStrict } from "@flamenode/domain/datetime";
-import { planGeneratedSlots } from "../src/routes/manage/slotWritePlanning.ts";
+import { planGeneratedSlots, materializeGeneratedSlotRows } from "../src/routes/manage/slotWritePlanning.ts";
 
 test("MIG-0656 U02a: time mode preserves CURRENT complete-interval timestamps and orders", () => {
   const first = parseJstDatetimeLocalStrict("2026-11-08T10:00:30");
@@ -77,4 +77,46 @@ test("MIG-0656 U02a: count defaults, prefix trim, start-index zero and upper bou
   for (const count of [0, 101, "3", null]) {
     assert.equal(planGeneratedSlots({ mode: "count", count }).ok, false);
   }
+});
+
+test("MIG-0656 U02b-0: CURRENT SA-058 generated row defaults and stable ordering", () => {
+  const plan = planGeneratedSlots({ mode: "count", count: 2, label_prefix: "番号", start_index: 9 });
+  assert.equal(plan.ok, true);
+  const ids = ["slot_01", "slot_02"];
+  const rows = materializeGeneratedSlotRows(" event_01 ", plan.candidates, 1794067200, () => ids.shift());
+  assert.deepEqual(rows, [
+    { id: "slot_01", event_id: "event_01", reserved_by_user_id: null,
+      x_user_id: null, reserved_x_id_snapshot: null, display_name: null,
+      slot_label: "番号9", start_time: null, sort_order: 9,
+      reservation_group_id: null, video_id: null, status: "available",
+      updated_at: 1794067200, version: 1 },
+    { id: "slot_02", event_id: "event_01", reserved_by_user_id: null,
+      x_user_id: null, reserved_x_id_snapshot: null, display_name: null,
+      slot_label: "番号10", start_time: null, sort_order: 10,
+      reservation_group_id: null, video_id: null, status: "available",
+      updated_at: 1794067200, version: 1 },
+  ]);
+  const timePlan = planGeneratedSlots({ mode: "time", start_at: "1970-01-01T09:00",
+    end_at: "1970-01-01T09:05", interval_minutes: 5 });
+  assert.equal(timePlan.ok, true);
+  const [first] = materializeGeneratedSlotRows("event_01", timePlan.candidates, 1, () => "slot_epoch");
+  assert.equal(first.start_time, 0);
+  assert.equal(first.sort_order, 0);
+  assert.equal(first.slot_label, null);
+});
+
+test("MIG-0656 U02b-0: internal row materialization fails closed before D1 writes", () => {
+  const candidate = { start_time: null, sort_order: 1, slot_label: "No.1" };
+  const build = (eventId, rows, updatedAt, nextId) =>
+    materializeGeneratedSlotRows(eventId, rows, updatedAt, nextId);
+  for (const [eventId, rows, updatedAt] of [
+    [" ", [candidate], 1], ["event", [], 1],
+    ["event", Array.from({ length: 101 }, () => candidate), 1],
+    ["event", [candidate], 1.25],
+    ["event", [{ ...candidate, sort_order: -1 }], 1],
+    ["event", [{ ...candidate, start_time: NaN }], 1],
+  ]) assert.throws(() => build(eventId, rows, updatedAt, () => "slot_1"));
+  assert.throws(() => build("event", [candidate, candidate], 1, () => "slot_duplicate"),
+    /duplicate generated slot ID/);
+  assert.throws(() => build("event", [candidate], 1, () => " "));
 });
