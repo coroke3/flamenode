@@ -103,7 +103,9 @@ test("CURRENT INSERT normalization fills defaults, omits generated columns and r
   const input = { title: "event" };
   assert.deepEqual(prepareCompleteInsertRow(ctx, input), { title: "event", count: 42, comment: null });
   assert.deepEqual(input, { title: "event" });
-  assert.deepEqual(prepareCompleteInsertRow(ctx, { title: "event", count: "" }), { title: "event", count: null, comment: null });
+  assert.deepEqual(prepareCompleteInsertRow(ctx, { title: "event", count: null }), { title: "event", count: null, comment: null });
+  // CURRENT validateSpreadsheetInputValues rejects empty INTEGER before INSERT can map it to NULL.
+  assert.throws(() => prepareCompleteInsertRow(ctx, { title: "event", count: "" }), /invalid_integer/);
   fails(ctx, { title: null }, "not_null_violation");
   assert.throws(() => prepareCompleteInsertRow(ctx, {}), /missing_required_column/);
 });
