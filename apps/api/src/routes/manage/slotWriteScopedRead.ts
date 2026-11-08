@@ -4,6 +4,7 @@
  */
 import { resolveStaffPermissionKeys, type StaffPermissionRow } from "./access.ts";
 import { sql, type SQL } from "@flamenode/server-core/sql";
+import { SLOT_CHUNK_COST_GUARD_SELECT } from "./slotChunkCostGuard.ts";
 
 const SLOT_COLUMNS = [
   "id", "event_id", "reserved_by_user_id", "x_user_id",
@@ -56,7 +57,8 @@ export const SLOT_BATCH_WRITE_SNAPSHOT_SQL = `
       WHERE s.event_id = ? AND s.id IN
         (SELECT value FROM json_each(?))
       LIMIT 4
-    ) s) AS slots_json
+    ) s) AS slots_json,
+    ${SLOT_CHUNK_COST_GUARD_SELECT}
 `;
 
 export function parseSlotRows(value: string | null): SlotLabelWriteRow[] {

@@ -9,6 +9,7 @@ import { slotBatchLabelWriteRoutes } from "../src/routes/manage/slotBatchLabelWr
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ORIGIN = "https://app.flamenode.example";
+const SESSION_TOKEN = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const admin = { id: "admin-1", role: "admin", is_banned: 0 };
 const user = { id: "u-1", role: "user", is_banned: 0 };
 const columns = [
@@ -29,6 +30,7 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
   sqlite.exec(`
     CREATE TABLE event_staff (event_id TEXT, x_user_id TEXT,
       permission_preset TEXT, custom_permission_keys_json TEXT);
+    CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER);
     CREATE TABLE slots (
       id TEXT PRIMARY KEY, event_id TEXT, reserved_by_user_id TEXT,
       x_user_id TEXT, reserved_x_id_snapshot TEXT, display_name TEXT,
@@ -45,6 +47,8 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
     sqlite.prepare('INSERT INTO "user" (id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)')
       .run(actor.id, "Staff", actor.role);
   }
+  if (actor) sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
   if (staff && actor) {
     sqlite.prepare("INSERT INTO x_users (id,approval_status) VALUES (?,?)").run("x1","approved");
     sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(actor.id,"x1");
@@ -54,6 +58,7 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", actor);
+    c.set("sessionState", actor ? "user" : "none");
     c.set("db", drizzle(c.env.DB, { schema }));
     if (actor) c.set("actorSnapshotJsonById",
       { [actor.id]: JSON.stringify({id:actor.id,role:actor.role}) });
@@ -62,7 +67,7 @@ function setup({ actor = admin, staff = false, settings = "normal", onFirst = un
   app.route("/api/manage/events/:id/slots", slotBatchLabelWriteRoutes);
   const patch = (body = { slot_ids:["a","b"], label: "new label" }, eventId = "ev-1") =>
     app.request(ORIGIN + "/api/manage/events/" + eventId + "/slots/labels", {
-      method: "PATCH", headers: { Origin:ORIGIN, "Content-Type":"application/json" },
+      method: "PATCH", headers: { Origin:ORIGIN, "Content-Type":"application/json", Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN },
       body: JSON.stringify(body),
     }, { DB: db, NEXT_PUBLIC_SITE_URL: ORIGIN });
   const count = (table) => sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n;
@@ -181,6 +186,44 @@ test("SA-064 U02c-0: CostGuard maintenance rejects before slot snapshot or DML",
   assert.equal(response.status,503);
   assert.equal(s.count("audit_logs"),0);
   assert.equal(s.count("static_rebuild_queue"),0);
+});
+
+
+test("SA-064 U04e: session, staff grant, TOS and CostGuard revocations after scope SELECT abort the atomic label batch", async () => {
+  for (const kind of ["session-deleted","session-expired","session-reassigned",
+    "staff-revoked","tos-revoked","role-changed","banned","cost-guard-read-only","event-deleted"]) {
+    let changed = false;
+    const staff = kind === "staff-revoked";
+    const s = setup({actor:staff ? user : admin, staff, onFirst:(sql,sqlite)=>{
+      // This hook executes after the original authorized SELECT returns its
+      // old snapshot. The next query is the SAME transactional D1 batch.
+      if (changed || !sql.includes("AS slots_json")) return;
+      changed = true;
+      if (kind === "session-deleted") sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+      if (kind === "session-expired") sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+        .run(Date.now()-60_000,SESSION_TOKEN);
+      if (kind === "session-reassigned") sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+        .run("other-user",SESSION_TOKEN);
+      if (kind === "staff-revoked") sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+      if (kind === "tos-revoked") sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run("admin-1");
+      if (kind === "role-changed") sqlite.prepare('UPDATE "user" SET role=\'user\' WHERE id=?').run("admin-1");
+      if (kind === "banned") sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run("admin-1");
+      if (kind === "cost-guard-read-only") sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      if (kind === "event-deleted") sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+    }});
+    try {
+      const response = await s.patch();
+      assert.equal(changed,true,"after-scope race hook "+kind);
+      assert.equal(response.status,409,kind+" "+await response.clone().text());
+      assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.slot("a").slot_label,"old");
+      assert.equal(s.slot("b").slot_label,"old");
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"one rolled-back D1 batch "+kind);
+      assert.ok(s.stats.reads<=2,"no new pre-read "+kind);
+    } finally {s.sqlite.close();}
+  }
 });
 
 test("SA-064 U02c-0: the write candidate is deliberately NOT mounted in manage index", () => {
