@@ -30,11 +30,11 @@ export function authErrorMessage(code: string | null): string | null {
   return code ? AUTH_ERROR_MESSAGES[code] ?? AUTH_ERROR_MESSAGES.Default : null;
 }
 
-export type ContinuationAccess = { userId: string; status: "anonymous" | "banned" } | null;
+export type ContinuationAccess = { firstPage: EntryIndexResponse; status: "anonymous" | "banned" } | null;
 
-/** Ignore access results belonging to an account other than the one rendered now. */
-export function continuationAccessForUser(access: ContinuationAccess, userId: string | null): "anonymous" | "banned" | null {
-  return userId !== null && access?.userId === userId ? access.status : null;
+/** Apply a continuation denial only to the exact first-page read that started it. */
+export function continuationAccessForSnapshot(access: ContinuationAccess, firstPage: EntryIndexResponse | null): "anonymous" | "banned" | null {
+  return firstPage !== null && access?.firstPage === firstPage ? access.status : null;
 }
 
 /** The /entry endpoint returns 401 to guests; this route is itself the login entrance. */
@@ -118,7 +118,7 @@ export function EntryIndexView({
         if (controller.signal.aborted || currentFirstPage.current !== data) return;
         // A revoked session must not leave the previous account's private slot list on screen.
         if (response.status === "anonymous" || response.status === "banned") {
-          setContinuationAccess({ userId: data.user.id, status: response.status });
+          setContinuationAccess({ firstPage: data, status: response.status });
           setExtraPageState(null);
           return;
         }
@@ -145,8 +145,8 @@ export function EntryIndexView({
       }
     });
   };
-  // A previous account's late 401/403 must not gate another account before effect cleanup.
-  const currentAccess = continuationAccessForUser(continuationAccess, data?.user.id ?? null);
+  // A stale 401/403 may belong to an older read, even when user.id stays the same.
+  const currentAccess = continuationAccessForSnapshot(continuationAccess, data);
   if (currentAccess === "banned") return <BannedNotice />;
   if (currentAccess === "anonymous") return <LoginRequired next="/entry" />;
 
