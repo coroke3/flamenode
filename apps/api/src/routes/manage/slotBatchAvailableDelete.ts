@@ -14,9 +14,12 @@ import { SlotBatchIdsBodySchema } from "@flamenode/contracts";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
-import { SLOT_BATCH_WRITE_SNAPSHOT_SQL, parseSlotRows, canUpdateEventLabels } from "./slotWriteScopedRead.ts";
+import { SLOT_BATCH_WRITE_SNAPSHOT_SQL, parseSlotRows, canUpdateEventLabels, buildSlotChunkScopeAssertion, buildSlotChunkSessionAssertion } from "./slotWriteScopedRead.ts";
+import { verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import { selectSlotBatchRows } from "./slotWriteSelection.ts";
 import { buildSlotBatchAtomicPlan } from "./slotWriteMutations.ts";
 import { isWriteConflict } from "../events/templates.ts";
@@ -31,6 +34,12 @@ async function runAvailableDeletion(
 ) {
   const user = c.get("user");
   if (!user) return c.json({ok:false,message:"ログインが必要です。"},401);
+  // A candidate must never assume that an unguarded artificial mount has a
+  // real parent Auth.js session. Recheck this persisted token in D1.batch.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
@@ -38,7 +47,7 @@ async function runAvailableDeletion(
   try {
     const read = await c.env.DB.prepare(SLOT_BATCH_WRITE_SNAPSHOT_SQL)
       .bind(eventId, eventId, user.id, eventId, JSON.stringify(slotIds))
-      .first<{ exists_id: string | null; staff_json: string | null; slots_json: string | null }>();
+      .first<{ exists_id: string | null; staff_json: string | null; slots_json: string | null; cost_guard_json: string | null }>();
     if (!read) return c.json({ ok: false, message: WRITE_FAILED }, 503);
     // No event-existence oracle: permission checked first, including staff
     // 101-row fail-closed sentinel; admins bypass the staff-grant limit.
@@ -46,6 +55,8 @@ async function runAvailableDeletion(
       return c.json({ ok: false, message: "Not Found" }, 404);
     }
     if (!read.exists_id) return c.json({ ok: false, message: "Not Found" }, 404);
+    const guard = verifySlotChunkCostGuard(read.cost_guard_json, "manage_slot_delete");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
     const selection = selectSlotBatchRows(
       eventId, slotIds, parseSlotRows(read.slots_json), "delete-available",
     );
@@ -59,7 +70,12 @@ async function runAvailableDeletion(
     await mutateWithAudit(db, {
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],
       expectedMutationChanges: [plan.expectedMutationChanges, ...queue.expectedChanges],
-      preMutationAssertions: plan.preMutationAssertions.map((assertion) => db.run(assertion)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
+        ...plan.preMutationAssertions.map((assertion) => db.run(assertion)),
+      ],
       audits: selection.rows.map((row) => ({
         table_name: "slots" as const,
         target_id: row.id,
