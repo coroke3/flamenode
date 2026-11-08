@@ -2,6 +2,7 @@
 // This deliberately mounts only the private test router, NOT the production app.
 // Full CURRENT-vs-Hono and admin parent-stack parity remain T01-T06 work.
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
@@ -712,5 +713,63 @@ test("MIG-0652 U04 SQLite T25: real session guard rejects malformed JSON, non-ob
     assert.equal(f.read("audit_logs").length, 0);
     assert.equal(f.read("static_rebuild_queue").length, 0);
   }
+});
+
+test("MIG-0652 U04 SQLite T26: CURRENT source-anchored archive result contract on real admin stack", async () => {
+  // CURRENT's Server Action is not directly executable in this Hono integration
+  // harness (Next/Cloudflare bootstrap). Anchor shared observable contracts to
+  // its actual source, then exercise the candidate route via real Auth.js guards.
+  // This deliberately does NOT claim a full runtime CURRENT-vs-Hono replay.
+  const currentSource = await readFile(
+    new URL("../../../src/lib/actions/event-admin.ts", import.meta.url), "utf8",
+  );
+  const actionStart = currentSource.indexOf("export async function deleteEvent(");
+  assert.ok(actionStart >= 0, "CURRENT deleteEvent must remain discoverable");
+  const currentAction = currentSource.slice(actionStart);
+  for (const message of [
+    "event_id が必要です。",
+    "確認のため、イベント ID と同じ文字列を入力してください。",
+    "イベントが見つかりません。",
+  ]) {
+    assert.ok(currentAction.includes(JSON.stringify(message)), "CURRENT archive must retain: " + message);
+  }
+  assert.match(
+    currentAction,
+    /return markPendingPublicReflection\(\{ ok: true \}, queue\.statements\.length > 0\);/,
+    "CURRENT must return the queued-public-reflection contract",
+  );
+
+  for (const variant of [
+    { name: "missing ID", path: EVENT, body: { confirm: EVENT }, status: 400, message: "event_id が必要です。" },
+    { name: "confirmation mismatch", path: EVENT, body: { event_id: EVENT, confirm: "another" }, status: 400, message: "確認のため、イベント ID と同じ文字列を入力してください。" },
+    { name: "nonexistent event", path: "nonexistent_event", body: { event_id: "nonexistent_event", confirm: "nonexistent_event" }, status: 404, message: "イベントが見つかりません。" },
+  ]) {
+    const f = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true });
+    const response = await f.request(variant.path, variant.body);
+    assert.equal(response.status, variant.status, variant.name);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", variant.name);
+    assert.deepEqual(await response.json(), { ok: false, message: variant.message }, variant.name);
+    assert.equal(f.d1.stats.batches, 0, variant.name + " cannot mutate");
+    assert.deepEqual(f.timeline, [], variant.name + " cannot write R2");
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+  }
+
+  const f = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true });
+  const oldCaches = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let success;
+  try { success = await f.request(); } finally { globalThis.caches = oldCaches; }
+  assert.equal(success.status, 200);
+  assert.equal(success.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(
+    await success.json(),
+    { ok: true, pendingPublicReflection: true },
+    "Hono must match CURRENT's successful queued-reflection response keys",
+  );
+  assert.equal(f.d1.stats.batches, 1);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.ok(f.read("static_rebuild_queue").length > 0);
 });
 
