@@ -10,9 +10,7 @@
     "./id": "./src/id.ts",
     "./sql": "./src/sql.ts",
     "./observability/flowTrace": "./src/observability/flowTrace.ts",
-    "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
     "./video/memberSetSnapshot": "./src/video/memberSetSnapshot.ts",
-    "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts",
     "./memberSuggestion/core": "./src/memberSuggestion/core.ts",
     "./memberSuggestion/rank": "./src/memberSuggestion/rank.ts",
     "./memberSuggestion/search": "./src/memberSuggestion/search.ts",
@@ -66,6 +64,12 @@
     "./visibility/xUserTransition": "./src/visibility/xUserTransition.ts",
     "./moderation/openCases": "./src/moderation/openCases.ts",
     "./publicCache/delete": "./src/publicCache/delete.ts",
+    "./xid/pendingInsert": "./src/xid/pendingInsert.ts",
+    "./xid/requests": "./src/xid/requests.ts",
+    "./publicCache/eventExportKeys": "./src/publicCache/eventExportKeys.ts",
+    "./eventExport/payload": "./src/eventExport/payload.ts",
+    "./eventExport/data": "./src/eventExport/data.ts",
+    "./publicCache/readWrite": "./src/publicCache/readWrite.ts",
     "./xid/merge": "./src/xid/merge.ts",
     "./xid/mergeBudget": "./src/xid/mergeBudget.ts",
     "./xid/mergeCore": "./src/xid/mergeCore.ts",
@@ -102,7 +106,9 @@
     "./publicData/randomVideoPoolCore": "./src/publicData/randomVideoPoolCore.ts",
     "./publicData/staticRecommendCore": "./src/publicData/staticRecommendCore.ts",
     "./publicData/staticYoutubeRelatedBlocklistCore": "./src/publicData/staticYoutubeRelatedBlocklistCore.ts",
-    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts"
+    "./video/youtubeDuplicate": "./src/video/youtubeDuplicate.ts",
+    "./video/rebuildEventIds": "./src/video/rebuildEventIds.ts",
+    "./video/memberAggregationFanOut": "./src/video/memberAggregationFanOut.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -860,9 +860,9 @@ Phase 5 共通契約のとおり。
 - producer 済み: `scripts/migration-snapshot-producers.test.mjs:130-142`, `:334`。
 - mock: `docs/migration/mock/screenshots/Videos.*`（`/list`）, `Recommend.*`, `Trending.*`。
 #### Owned paths
-- 新規: `+scripts/fixtures/listingSnapshotFixture.mjs`
-- 変更: `scripts/migration-list-discover.test.mjs`, `docs/migration/work-items/MIG-0505.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（4行）
-- 触らない: `apps/site/src/pages/list.astro`（ListFilterIsland は MIG-0510）, `app/(public)/list/**`, `app/api/videos/**`
+- 新規: `+scripts/fixtures/listingSnapshotFixture.mjs`, `scripts/fixtures/listingScreenshotCapture.mjs` と `.test.mjs`（U02 証跡の収集 helper。owner authorization 2026-11-01 で拡張を承認）
+- 変更: `scripts/migration-list-discover.test.mjs`, `docs/migration/work-items/MIG-0505.md`, `docs/migration/FILE_MIGRATION_MATRIX.md`（4行）, `.github/workflows/migration-docs-check.yml`（migration-list-discover step の REQUIRE_BUILT 行に capture test を追加）, `apps/site/src/pages/{list,recommend,trending}.astro`（<=640px の固定ヘッダ分 padding-top のみ。MIG-0502/0504 と同じ page-scoped 方式。shell owner が引き取るまで）
+- 触らない（ただし上記 padding-top を除く）: `apps/site/src/pages/list.astro`（ListFilterIsland は MIG-0510）, `app/(public)/list/**`, `app/api/videos/**`
 #### Micro-units
 - **U01 fixture の切り出し**: `scripts/migration-list-discover.test.mjs:110-138` の `envelope`, `row`, `writeSnapshot`, `fixture` をそのまま `scripts/fixtures/listingSnapshotFixture.mjs` へ移して export する。`export function writeFixtureSnapshot(dir) { return writeSnapshot(dir, fixture()); }` を足す。test は import に替える。挙動は変えない。
 ```bash
@@ -871,9 +871,9 @@ REQUIRE_BUILT=1 node --test --test-concurrency=1 --experimental-strip-types scri
   期待: 移す前と同じ件数が pass、0 skipped。
 - **U02 画面確認（gap 5）**: fixture の snapshot env で build し、`list/`, `recommend/`, `trending/` を撮る。mock: Videos / Recommend / Trending。
 ```bash
-SNAP=$(mktemp -d); OUT=$(mktemp -d); SHOTS=$(mktemp -d)
-node --experimental-strip-types -e 'import("./scripts/fixtures/listingSnapshotFixture.mjs").then((m) => { const e = m.writeFixtureSnapshot(process.argv[1]); console.log(Object.entries(e).map(([k, v]) => k + "=" + v).join(" ")); })' "$SNAP" > "$SNAP/env.txt"
-(cd apps/site && env $(cat "$SNAP/env.txt") node ../../node_modules/astro/astro.js build --outDir "$OUT")
+set -e; W=$(mktemp -d); SNAP=$W/snap; OUT=$W/out; SHOTS=$W/shots; mkdir "$SNAP" "$OUT" "$SHOTS"
+node --experimental-strip-types -e 'import("./scripts/fixtures/listingSnapshotFixture.mjs").then((m) => { const e = m.writeFixtureSnapshot(process.argv[1]); console.log(Object.entries(e).map(([k, v]) => k + "=" + v).join(" ")); })' "$SNAP" > "$W/env.txt"   # env.txt は SNAP の外へ（writeFixtureSnapshot は空 dir を要求する）。set -e を先頭に置く
+(cd apps/site && env $(cat "$W/env.txt") node ../../node_modules/astro/astro.js build --outDir "$OUT")
 python3 -m http.server 4329 --bind 127.0.0.1 --directory "$OUT" >/dev/null 2>&1 & SERVER=$!
 sleep 1
 for r in list recommend trending; do
@@ -906,7 +906,7 @@ npm run check:project-docs
 `FILE_MIGRATION_MATRIX.md`: `app/(public)/recommend/page.tsx`, `app/(public)/trending/page.tsx` → `PARITY_VERIFIED`（target の `+` を外す）。`app/(public)/list/page.tsx`, `app/(public)/list/~query/page.tsx` → `IN_PROGRESS`（ListFilterIsland は MIG-0510）。`PERF_HOTPATH_MATRIX.md` の `/list` 行は変えない。
 #### DONE checklist
 - [ ] T01〜T04 pass
-- [ ] request 時に D1 を読まない（`list.astro` に変更なし）
+- [ ] request 時に D1 を読まない（`list.astro` の変更は <=640px の padding-top CSS のみ。データ経路は不変）
 - [ ] work item の key 表の owner が MIG-0510
 #### STOP
 - 検索・filter・page 送りを足す必要が出たら止める（MIG-0510）。
@@ -1356,7 +1356,7 @@ PR を revert。fetch の分岐だけなので data の戻しは無い。
 - 触らない: `app/**`, `src/components/**`, `apps/api/**`, MIG-0518 の `VideoChapterIsland.ts` / `VideoUtilityDockIsland.ts`
 #### Micro-units
 - **U01 client**: `videoInteraction.ts` に `toggleInteraction(videoId, kind, signal?)` を作る。`fetch("/api/videos/" + encodeURIComponent(videoId) + "/interaction", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ kind }) })`。JSON に boolean `ok` があれば status に関係なくそれを返し、それ以外（network 失敗・JSON でない）は throw（CURRENT の catch と同じ扱いにするため）。
-- **U02 Island**: `VideoInteractionIsland.ts` = CURRENT `VideoInteractionActions` + `InteractionButton` を React のまま移植（文言・class・`aria-*`・`disabledReason` の分岐・`inferActionLabel` を変えない）。`next/link` は `<a>`（site の adapter）、`useVideoViewerOverlay` は `viewerOverlay.ts`、`toggleVideoInteraction(fd)` は U01、`notifyVideoViewerOverlayChanged` は `viewerOverlay.ts` の同名関数。`currentPath` は `location.pathname + location.search`。
+- **U02 Island**: `VideoInteractionIsland.ts` = CURRENT `VideoInteractionActions` + `InteractionButton` を React のまま移植（文言・class・`aria-*`・`disabledReason` の分岐・`inferActionLabel` を変えない）。`next/link` は `<a>`（site の adapter）、`useVideoViewerOverlay` は `viewerOverlay.ts`、`toggleVideoInteraction(fd)` は U01、`notifyVideoViewerOverlayChanged` は `viewerOverlay.ts` の同名関数。`currentPath` は `location.pathname` のみ（CURRENT は `/${rawId}` でクエリ無し。Decision adopted by owner authorization 2026-11-01: CURRENT parity、MIG-0513 PR#452）。
 - **U03 mount**: `VideoPageIsland.ts` で like 数（静的 HTML の `appLikeCount`）を props にして mount。JS なしでは control を出さない（T04）。
 - **U04 merge 直前**（D-16-1 の 5）: MIG-0640 の `packages/contracts/src/videoInteraction.ts` の schema を import し、provisional の型を消し、test の fixture を schema の `parse` に通す。
 #### Test cases

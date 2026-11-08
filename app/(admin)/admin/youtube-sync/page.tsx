@@ -15,6 +15,7 @@ import { queueYoutubeMetadataResync } from "@/lib/actions/youtube-sync-admin";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminVideoManagementTabs } from "@/components/admin/AdminVideoManagementTabs";
 import { Icon } from "@/components/ui/Icon";
+import { videoPageHref } from "@/lib/youtube/id";
 import {
   formatCount,
   formatDuration as formatDurationSec,
@@ -315,7 +316,7 @@ export default async function AdminYoutubeSyncPage({
                         管理
                       </Link>
                       <Link
-                        href={`/${youtubeVideoId ?? row.video_id}`}
+                        href={videoPageHref({ id: row.video_id, youtube_video_id: row.youtube_video_id })}
                         className="fn-btn fn-btn-ghost fn-btn-sm"
                         target="_blank"
                         rel="noopener noreferrer"

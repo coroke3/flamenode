@@ -19,6 +19,7 @@ import {
 import { runPostCommitBestEffort } from "@/lib/audit/postCommit";
 import { createTraceId } from "@/lib/observability/flowTrace";
 import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 import {
   executeVideoVisibilityStatusMutation,
   loadVideoRebuildEventIds,
@@ -51,7 +52,9 @@ function revalidateManageVideoPaths(
   revalidatePath(`/manage/events/${eventId}/videos/${videoId}`);
   revalidatePath(`/manage/events/${eventId}`);
   revalidatePath("/manage");
-  revalidatePath(`/${youtubeVideoId ?? videoId}`);
+  for (const publicPath of publicVideoRevalidationPaths(videoId, youtubeVideoId)) {
+    revalidatePath(publicPath);
+  }
   revalidatePath("/list");
 }
 

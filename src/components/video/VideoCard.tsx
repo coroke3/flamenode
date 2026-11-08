@@ -1,7 +1,7 @@
 import * as React from "react";
 import Link from "next/link";
 import styles from "./VideoCard.module.css";
-import { youtubeThumbUrl } from "@/lib/youtube/id";
+import { videoPageHref, youtubeThumbUrl } from "@/lib/youtube/id";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/utils/cn";
 import { cachedGoogleImageUrl } from "@/lib/media/googleImages";
@@ -33,7 +33,7 @@ export function VideoCard({
   href,
   secondaryMeta,
 }: VideoCardProps): React.ReactElement {
-  const link = href ?? `/${video.youtube_video_id?.trim() || video.id}`;
+  const link = href ?? videoPageHref(video);
   const thumb = youtubeThumbUrl(video.youtube_video_id, "mqdefault");
   const creatorIcon = cachedGoogleImageUrl(video.icon_url);
 
