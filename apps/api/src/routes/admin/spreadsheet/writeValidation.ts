@@ -494,3 +494,51 @@ export function buildSpreadsheetAuditedDelete(
     audit: spreadsheetAuditEntry(ctx, pk, "DELETE", before, null, operatorId),
   };
 }
+
+
+/**
+ * MIG-0638 U02: CURRENT applySpreadsheetImport pure row preflight.
+ * This does not verify preview tokens, read FK targets/existing rows,
+ * consume nonces or run any D1 transaction.
+ */
+export const SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS = 500;
+export const SPREADSHEET_IMPORT_APPLY_MAX_ROWS = 7;
+export interface PreparedSpreadsheetImportRow {
+  row: Record<string, string | null>;
+  pk: Record<string, string>;
+  fingerprint: string;
+}
+export interface SpreadsheetImportRowValidation {
+  preparedRows: PreparedSpreadsheetImportRow[];
+  errors: Array<{ index: number; message: string }>;
+}
+export function prepareSpreadsheetImportMutationRows(
+  ctx: SpreadsheetSqlTableContext,
+  rows: readonly Record<string, string | null>[],
+): SpreadsheetImportRowValidation {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (rows.length > SPREADSHEET_IMPORT_PREVIEW_MAX_ROWS) throw new Error("too_many_rows");
+  if (rows.length < 1 || rows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) throw new Error("batch_too_large");
+  const errors: SpreadsheetImportRowValidation["errors"] = [];
+  const preparedRows: PreparedSpreadsheetImportRow[] = [];
+  const seenPks = new Set<string>();
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]!;
+    try {
+      for (const key of Object.keys(row)) {
+        if (!ctx.columnNames.includes(key)) throw new Error("unknown_column");
+        if (!isSpreadsheetColumnEditable(ctx.def, key)) throw new Error("column_not_editable");
+      }
+      const pk = primaryKeyFromSpreadsheetRow(row, ctx.primaryKeys);
+      const fingerprint = Object.entries(pk).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v).join("\0");
+      if (seenPks.has(fingerprint)) throw new Error("duplicate_primary_key");
+      seenPks.add(fingerprint);
+      if (Object.keys(row).length === 0) throw new Error("empty_row");
+      validateSpreadsheetInputValues(ctx, row);
+      preparedRows.push({ row, pk, fingerprint });
+    } catch (error) {
+      errors.push({ index, message: error instanceof Error ? error.message : "invalid_row" });
+    }
+  }
+  return { preparedRows, errors };
+}
