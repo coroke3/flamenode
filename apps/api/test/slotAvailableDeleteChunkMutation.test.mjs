@@ -32,6 +32,9 @@ function setup(rows) {
     "CREATE TABLE event_staff(event_id TEXT,x_user_id TEXT,permission_preset TEXT,custom_permission_keys_json TEXT);",
     "CREATE TABLE x_user_account_links(auth_user_id TEXT,x_user_id TEXT);",
     "CREATE TABLE x_users(id TEXT PRIMARY KEY,approval_status TEXT);",
+    // The U03w bounded snapshot now reads the CostGuard policy in this same SELECT.
+    "CREATE TABLE system_settings(id TEXT PRIMARY KEY,operation_mode TEXT,disabled_features_json TEXT,cost_guard_exception_until INTEGER,cost_guard_exception_features_json TEXT);",
+    "INSERT INTO system_settings VALUES('default','normal',NULL,NULL,NULL);",
     "CREATE TABLE slots(" + cols.map(c => c==="id" ? "id TEXT PRIMARY KEY" :
       ["start_time","sort_order","updated_at","version"].includes(c) ?
         c+" INTEGER" : c+" TEXT").join(",") + ");",
