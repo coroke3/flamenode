@@ -23,12 +23,25 @@ export async function send<T extends { ok: boolean }>(
       headers,
       ...(body === undefined ? {} : { body: formData ? body : JSON.stringify(body) }),
     });
-    const payload: unknown = await response.json();
+    // HTTP 401 takes precedence over all JSON payloads, even {ok:false}.
+    if (response.status === 401) return { status: "anonymous" };
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      return { status: "unavailable" };
+    }
     if (payload !== null && typeof payload === "object" && !Array.isArray(payload) &&
         typeof (payload as Record<string, unknown>).ok === "boolean") {
+      // HTTP failures must never be reported as successful writes, even if a
+      // proxy or malformed upstream response contains {ok:true}. Preserve
+      // {ok:false} error bodies for non-401 callers that display the
+      // server's actual failure message.
+      if (!response.ok && (payload as { ok: boolean }).ok) {
+        return { status: "unavailable" };
+      }
       return { status: "ok", data: payload as T };
     }
-    if (response.status === 401) return { status: "anonymous" };
     return { status: "unavailable" };
   } catch {
     return { status: "unavailable" };

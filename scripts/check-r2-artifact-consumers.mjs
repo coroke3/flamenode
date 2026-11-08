@@ -3,7 +3,7 @@
  * MIG-0649: conservative fail-closed inventory for literal R2 artifact keys.
  * Static source audit only: no R2 reads and no consumer changes.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -203,11 +203,20 @@ export function readInventoryKeys(markdown) {
 }
 
 function visit(root, sub = "") {
+  // A symlinked root or nested entry can hide source files from Dirent's
+  // isDirectory()/isFile() checks. Never follow external or cyclic links.
+  if (lstatSync(join(root, sub)).isSymbolicLink()) {
+    throw new Error("MIG-0649: symlink in audited source tree: " + sub.replaceAll("\\", "/"));
+  }
   const files = [];
   for (const entry of readdirSync(join(root, sub), { withFileTypes: true })) {
+    if (EXCLUDED_DIRS.has(entry.name)) continue;
     const path = join(sub, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error("MIG-0649: symlink in audited source tree: " + path.replaceAll("\\", "/"));
+    }
     if (entry.isDirectory()) {
-      if (!EXCLUDED_DIRS.has(entry.name)) files.push(...visit(root, path));
+      files.push(...visit(root, path));
     } else if (entry.isFile() && SOURCE_EXTENSIONS.test(entry.name) &&
       !TEST_FILES.test(path.replaceAll("\\", "/"))) {
       files.push(path);

@@ -174,3 +174,27 @@ test("dashboard issues exactly one read request and no session read", async () =
   assert.deepEqual(api.calls.map((c) => c[0]), ["getDashboard"]);
   await m.unmount();
 });
+
+test("Personal SPA: Google image cache rewrites web URLs but not non-HTTP lookalikes", async () => {
+  const { cachedGoogleImageUrl } = await import("../.test-dist/apps/app/src/routes/ui/media.js");
+  const id = "FILEID123456";
+  const expected = `/api/google-drive-image/${id}`;
+  for (const scheme of ["https", "http"]) {
+    for (const source of [
+      `${scheme}://drive.google.com/uc?id=${id}`,
+      `${scheme}://drive.google.com/file/d/${id}/view`,
+      `${scheme}://lh3.googleusercontent.com/d/${id}`,
+    ]) {
+      assert.equal(cachedGoogleImageUrl(source), expected, source);
+    }
+  }
+  for (const scheme of ["ftp", "file"]) {
+    for (const source of [
+      `${scheme}://drive.google.com/uc?id=${id}`,
+      `${scheme}://drive.google.com/file/d/${id}/view`,
+      `${scheme}://lh3.googleusercontent.com/d/${id}`,
+    ]) {
+      assert.equal(cachedGoogleImageUrl(source), source, source);
+    }
+  }
+});

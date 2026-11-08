@@ -144,3 +144,78 @@ test("rate limiter cleans expired buckets and bounds key cardinality", () => {
     null,
   );
 });
+
+test("rate limiter resets old windows and full key budget on wall-clock rollback", () => {
+  clearPublicApiRateLimitForTests();
+  const oldTime = 20_000;
+  const earlierTime = 19_000;
+  const client = request("clock-rollback");
+  for (let i = 0; i < 60; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, oldTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(client, endpoint, oldTime)?.status, 429);
+  // Without a reset, oldTime - earlierTime is negative and the bucket remains
+  // blocked for far longer than one 60-second fixed window.
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime), null);
+  for (let i = 1; i < 60; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime + 60), null);
+
+  clearPublicApiRateLimitForTests();
+  for (let i = 0; i < 2048; i++) {
+    assert.equal(checkPublicApiRateLimit(request(`roll-${i}`), endpoint, oldTime), null);
+  }
+  assert.equal(checkPublicApiRateLimit(request("over-cap"), endpoint, oldTime)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(request("new-after-rollback"), endpoint, earlierTime), null);
+  // Reset helper must clear the saved clock between tests too.
+  clearPublicApiRateLimitForTests();
+  assert.equal(checkPublicApiRateLimit(client, endpoint, earlierTime - 100), null);
+});
+
+test("rate limiter rejects invalid clocks without poisoning other clients or retry headers", () => {
+  clearPublicApiRateLimitForTests();
+  const client = request("valid-clock");
+  const now = 25_000;
+  for (let i = 0; i < 59; i++) {
+    assert.equal(checkPublicApiRateLimit(client, endpoint, now), null);
+  }
+  for (const invalid of [
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.NEGATIVE_INFINITY,
+    -1,
+    1_000.5,
+    Number.MAX_SAFE_INTEGER,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    const blocked = checkPublicApiRateLimit(client, endpoint, invalid);
+    assert.equal(blocked?.status, 429, `invalid clock ${String(invalid)}`);
+    assert.equal(blocked?.headers.get("Retry-After"), "60");
+    assert.equal(blocked?.headers.get("Cache-Control"), "no-store");
+  }
+  // Bad clocks must not increment quota, reset the window, or clear the map.
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now), null);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(client, endpoint, now + 60), null);
+
+  // An invalid first invocation must not initialize a corrupt cleanup deadline.
+  clearPublicApiRateLimitForTests();
+  assert.equal(checkPublicApiRateLimit(request("first"), endpoint, NaN)?.status, 429);
+  assert.equal(checkPublicApiRateLimit(request("first"), endpoint, 1), null);
+});
+
+test("503 Retry-After remains a valid decimal delay-seconds for unsafe inputs", () => {
+  for (const invalid of [Number.MAX_SAFE_INTEGER + 1, 1e30, Number.MAX_VALUE]) {
+    const response = publicServiceUnavailableResponse("database_unavailable", invalid);
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("Retry-After"), "30");
+    assert.equal(response.headers.get("Cache-Control"), "no-store");
+  }
+  // Existing valid, fractional and negative input behavior is retained.
+  assert.equal(publicServiceUnavailableResponse("db", 90).headers.get("Retry-After"), "90");
+  assert.equal(publicServiceUnavailableResponse("db", 2.9).headers.get("Retry-After"), "2");
+  assert.equal(publicServiceUnavailableResponse("db", -10).headers.get("Retry-After"), "1");
+  assert.equal(publicServiceUnavailableResponse("db", Number.MAX_SAFE_INTEGER).headers.get("Retry-After"), String(Number.MAX_SAFE_INTEGER));
+});

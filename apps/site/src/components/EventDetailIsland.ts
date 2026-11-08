@@ -1,12 +1,12 @@
 import React from "react";
 import { EventDetailView } from "@flamenode/ui";
-import type { StaticEventDetail } from "../../../../src/lib/publicData/staticEventDetailCore.ts";
+import type { EventIslandDetail } from "../lib/eventDetail.ts";
 import { buildEventDetailData, type LiveSlotStatus } from "../lib/eventDetail.ts";
 import { fetchLiveSlots } from "../lib/liveSlots.ts";
 import { IslandWrapper } from "./IslandWrapper.ts";
 
 export interface EventDetailIslandProps {
-  detail: StaticEventDetail;
+  detail: EventIslandDetail;
   /** Build time (unix seconds): the server HTML and the first client render use it. */
   builtAt: number;
 }

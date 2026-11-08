@@ -10,6 +10,7 @@
  */
 import type { CreatorProfileData, EventDetailData, VideoDetailData } from "@flamenode/ui";
 import { buildPageMetadata, type PageMetadata } from "./pageMetadata.ts";
+import { extractYoutubeId, videoPageHref } from "../../../../src/lib/youtube/id.ts";
 import type { EventPublicSnapshot, UserPublicSnapshot, VideoPublicSnapshot } from "./publicDataLoader.ts";
 
 /** CURRENT `UserProfilePage.tsx` WORKS_PAGE_SIZE / COLLAB_PAGE_SIZE. */
@@ -30,11 +31,13 @@ function youtubeThumbPath(youtubeVideoId: string, size: "hqdefault" | "maxresdef
 
 /** CURRENT `/[id]` serves the internal ID and the YouTube ID alias (UX-VID-001/002). */
 export function videoPaths(video: VideoPublicSnapshot): string[] {
-  return video.youtubeVideoId && video.youtubeVideoId !== video.id ? [video.id, video.youtubeVideoId] : [video.id];
+  const normalizedYoutubeId = extractYoutubeId(video.youtubeVideoId);
+  return normalizedYoutubeId && normalizedYoutubeId !== video.id ? [video.id, normalizedYoutubeId] : [video.id];
 }
 
 /** CURRENT `app/(public)/[id]/page.tsx` generateMetadata. */
 export function videoMetadata(video: VideoPublicSnapshot): PageMetadata {
+  const normalizedYoutubeId = extractYoutubeId(video.youtubeVideoId);
   const description =
     video.introComment ||
     video.highlights ||
@@ -45,14 +48,15 @@ export function videoMetadata(video: VideoPublicSnapshot): PageMetadata {
     title: `${video.title} - ${video.creatorName ?? "unknown"}`,
     description,
     // Canonical is the YouTube ID path when there is one, for both URLs.
-    path: `/${video.youtubeVideoId ?? video.id}`,
-    image: video.youtubeVideoId ? youtubeThumbPath(video.youtubeVideoId, "maxresdefault") : video.creatorIconUrl,
+    path: videoPageHref({ id: video.id, youtube_video_id: video.youtubeVideoId }),
+    image: normalizedYoutubeId ? youtubeThumbPath(normalizedYoutubeId, "maxresdefault") : video.creatorIconUrl,
     ogType: "video.other",
   });
 }
 
 /** CURRENT `StaticVideoDetailView` author block and player poster. */
 export function videoScreenData(video: VideoPublicSnapshot): VideoDetailData {
+  const normalizedYoutubeId = extractYoutubeId(video.youtubeVideoId);
   const xUserId = video.creatorXUserId ?? null;
   return {
     id: video.id,
@@ -65,8 +69,8 @@ export function videoScreenData(video: VideoPublicSnapshot): VideoDetailData {
       youtubeChannelUrl: video.creatorYoutubeChannelUrl ?? null,
     },
     publishedLabel: video.scheduledTime ? dateOnlyJst.format(new Date(video.scheduledTime * 1000)) : null,
-    thumbnailUrl: video.youtubeVideoId ? youtubeThumbPath(video.youtubeVideoId, "hqdefault") : null,
-    hasYoutube: Boolean(video.youtubeVideoId),
+    thumbnailUrl: normalizedYoutubeId ? youtubeThumbPath(normalizedYoutubeId, "hqdefault") : null,
+    hasYoutube: Boolean(normalizedYoutubeId),
     music: video.music ?? null,
     credit: video.credit ?? null,
     introComment: video.introComment ?? null,
