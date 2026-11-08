@@ -10,7 +10,6 @@
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { events } from "@flamenode/db/schema";
-import { EVENT_ID_PATTERN } from "@flamenode/domain/event";
 import {
   mutateWithAudit,
   planD1AuditMutationBudget,
@@ -40,7 +39,15 @@ export function validateEventArchiveRequest(
   eventId: string,
   body: Record<string, unknown>,
 ): { ok: true; eventId: string } | { ok: false; message: string } {
-  if (!eventId || !EVENT_ID_PATTERN.test(eventId)) {
+  // CURRENT deleteEvent accepts any nonempty trimmed *existing* ID.
+  // EVENT_ID_PATTERN applies to create/rename, NOT to imported legacy rows.
+  // The URL segment remains authoritative and must match both JSON fields.
+  // Reject controls/edge whitespace that cannot safely round-trip in a URL.
+  if (
+    !eventId ||
+    eventId.trim() !== eventId ||
+    /[\u0000-\u001f\u007f]/.test(eventId)
+  ) {
     return { ok: false, message: "イベントIDが不正です。" };
   }
   const rawId = typeof body.event_id === "string" ? body.event_id.trim() : "";

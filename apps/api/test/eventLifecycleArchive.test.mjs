@@ -14,8 +14,8 @@ test("MIG-0652 U04 SA-024 T01: valid route/form confirmation preserves ID", () =
   }), { ok: true, eventId: "event_01" });
 });
 
-test("MIG-0652 U04 SA-024 T02: missing and malformed URL IDs fail closed", () => {
-  for (const id of ["", "a/b", "space id", "x".repeat(65), "🐱"]) {
+test("MIG-0652 U04 SA-024 T02: empty, edge-whitespace and control URL IDs fail closed", () => {
+  for (const id of ["", " ", "\t", " event", "event ", "x\nid", "x\u007f"]) {
     assert.deepEqual(accepted(id, { event_id: id, confirm: id }), {
       ok: false, message: "イベントIDが不正です。",
     });
@@ -74,3 +74,22 @@ test("MIG-0652 U04 SA-024 T07: code preserves R2 block -> audited D1 -> cache or
   const index = await readFile(new URL("../src/routes/events/index.ts", import.meta.url), "utf8");
   assert.ok(!index.includes('from "./lifecycle.ts"')); // unmounted: don't activate partial parity
 });
+
+test("MIG-0652 U04 SA-024 T08: legacy EXISTING IDs are not restricted by create/rename ID pattern", () => {
+  // CURRENT deleteEvent trims a stored event_id and confirms exact equality;
+  // IDs imported before EVENT_ID_PATTERN must still be archivable.
+  for (const id of ["legacy.event.2019", "旧イベント_2020", "an event with spaces", "a/b", "x".repeat(65)]) {
+    assert.deepEqual(accepted(id, { event_id: " " + id + " ", confirm: id }), {
+      ok: true, eventId: id,
+    });
+    assert.deepEqual(accepted(id, { event_id: id, confirm: "different" }), {
+      ok: false, message: "確認のため、イベント ID と同じ文字列を入力してください。",
+    });
+    assert.deepEqual(accepted(id, { event_id: id + "_other", confirm: id + "_other" }), {
+      ok: false, message: "イベントIDが一致しません。",
+    });
+  }
+  // The route is still a single URL segment: '/' IDs require a separate
+  // encoded-path end-to-end test before migration parity can be signed off.
+});
+

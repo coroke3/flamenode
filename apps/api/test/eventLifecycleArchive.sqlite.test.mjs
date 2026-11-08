@@ -124,7 +124,7 @@ function createR2(timeline, { rejectPut = false, hideFirstVerification = false, 
   };
 }
 
-function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false, enforceWriteGuard = false, enforceSession = false, sessionExpired = false, isBanned = 0, tosAccepted = 1 } = {}) {
+function setup({ status = "public", eventId = EVENT, r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false, enforceWriteGuard = false, enforceSession = false, sessionExpired = false, isBanned = 0, tosAccepted = 1 } = {}) {
   const sqlite = createSqlite();
   const timestamp = Math.floor(Date.now() / 1000) - 100;
   insert(sqlite, "user", {
@@ -149,7 +149,7 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
   `).run(mode, 30, 180, 365, 120000, 30);
   assert.equal(settingsUpdated.changes, 1, "migrations must seed default system_settings");
   insert(sqlite, "events", {
-    id: EVENT, title: "Event before archive",
+    id: eventId, title: "Event before archive",
     visibility_status: status, created_at: timestamp,
     updated_at: timestamp,
     start_time: timestamp - 3600, end_time: timestamp + 3600,
@@ -203,8 +203,8 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
     NEXT_PUBLIC_SITE_URL: SITE,
     ...(r2 ? { BUCKET: bucket } : {}),
   };
-  const request = (eventId = EVENT, body = { event_id: EVENT, confirm: EVENT }, origin = SITE, cookie = enforceSession ? VALID_SESSION_COOKIE : null) =>
-    app.request("https://app.flamenode.example/api/admin/events/" + eventId, {
+  const request = (requestedId = eventId, body = { event_id: eventId, confirm: eventId }, origin = SITE, cookie = enforceSession ? VALID_SESSION_COOKIE : null) =>
+    app.request("https://app.flamenode.example/api/admin/events/" + encodeURIComponent(requestedId), {
       method: "DELETE", headers: { "content-type": "application/json", ...(origin === null ? {} : { Origin: origin }), ...(cookie === null ? {} : { Cookie: cookie }) },
       body: JSON.stringify(body),
     }, env);
@@ -771,5 +771,33 @@ test("MIG-0652 U04 SQLite T26: CURRENT source-anchored archive result contract o
   assert.equal(f.d1.stats.batches, 1);
   assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
   assert.ok(f.read("static_rebuild_queue").length > 0);
+});
+
+test("MIG-0652 U04 SQLite T27: archived legacy dotted ID succeeds with real admin identity, R2 CAS, audit and queue", async () => {
+  const legacyId = "legacy.event.2019";
+  // A real imported event may predate the route-safe create/rename ID rule.
+  const f = setup({
+    eventId: legacyId, enforceOrigin: true, enforceSession: true,
+    enforceWriteGuard: true,
+  });
+  const priorCaches = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let response;
+  try { response = await f.request(); } finally { globalThis.caches = priorCaches; }
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), { ok: true, pendingPublicReflection: true });
+  const changed = f.read("events", "WHERE id = '" + legacyId + "'")[0];
+  assert.equal(changed.visibility_status, "private");
+  assert.equal(f.d1.stats.batches, 1);
+  const fence = f.read("public_visibility_fences", "WHERE entity_id = '" + legacyId + "'")[0];
+  assert.ok(fence?.fence_token);
+  assert.equal(
+    f.bucket.manifest.entities.find((entry) => entry.entity_type === "event" && entry.entity_id === legacyId)?.fence_token,
+    fence.fence_token,
+  );
+  assert.equal(f.read("audit_logs", "WHERE table_name = 'events' AND target_id = '" + legacyId + "'").length, 1);
+  assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+  assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
 });
 
