@@ -353,7 +353,9 @@ test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a
   assert.equal(rh13.length, 1, "exactly one mounted RH-013 scenario");
   assert.equal(rh13[0].pending, undefined);
   assert.equal(scenarios.at(-1).id, "BASELINE");
-  assert.equal(JSON.parse(rh13[0].prepareKind.limit.r2Objects["events/bench-evt/release.v1.json"]).videos.length, 500);
+  assert.match(rh13[0].kinds.limit(0, "test").path, /format=legacy&update=scheduled&refresh=1440/, "the mounted upper-bound probe is a scheduled legacy export");
+  assert.match(rh13[0].kinds.normal(0, "test").path, /format=v5&update=scheduled&refresh=15/);
+  assert.ok(rh13[0].kinds.limit(0, "test").setup?.length >= 3, "the upper-bound fixture must create event, videos and members");
   assert.equal(buildPendingScenarios().length, 0);
   assert.equal(buildScenarios({ adminToken: "t" }, { includePending: true }).filter((x) => x.id === "RH-013").length, 1);
   assert.equal(parseArgs(["--include-pending"]).includePending, true);
