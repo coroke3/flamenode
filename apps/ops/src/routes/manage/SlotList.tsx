@@ -52,7 +52,9 @@ export function validateSlotListOperation(
   canManageSubmittedSlots = false,
 ): boolean {
   // Only rows from the currently visible authorized event may be acted on.
-  const byId = new Map(slots.filter(row => row.event_id === eventId).map(row => [row.id, row]));
+  const byId = new Map<string, ManageSlotRow>(
+    slots.filter(row => row.event_id === eventId).map(row => [row.id, row]),
+  );
   if ("slotId" in operation) {
     const slot = byId.get(operation.slotId);
     if (!slot) return false;
