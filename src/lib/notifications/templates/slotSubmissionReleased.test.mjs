@@ -52,6 +52,31 @@ if (runTestWithTsx(import.meta.url)) {
     }
   });
 
+  test("枠解放・提出解除DMは@here、role/user形式のメンションも無害化する", () => {
+    const groupIds = [
+      "@here",
+      "<@&123456789>",
+      "<@!123456789>",
+      "<@123456789>",
+      "@everyone @here",
+    ];
+    for (const build of [
+      buildSlotForceReleasedNotification,
+      buildSlotSubmissionReleasedNotification,
+    ]) {
+      for (const reservationGroupId of groupIds) {
+        const payload = build({
+          eventId: "event-1",
+          slotIds: ["slot-1"],
+          reservationGroupId,
+        });
+        assert.ok(!payload.content.includes(reservationGroupId), reservationGroupId);
+        assert.ok(payload.content.includes("@\u200b") || payload.content.includes("\\<"), reservationGroupId);
+        assert.equal(payload.event_id, "event-1");
+      }
+    }
+  });
+
   test("通常のグループID表示は変更しない", () => {
     for (const build of [
       buildSlotForceReleasedNotification,
