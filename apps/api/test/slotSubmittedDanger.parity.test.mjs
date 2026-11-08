@@ -169,6 +169,29 @@ test("SA-057 U03f: reservation remains while video detaches, long audits and sec
     assert.equal(s.stats.batches,1);
   }finally{s.sqlite.close();}
 });
+test("SA-056/057 U03j: static rebuild queue reason and requester match CURRENT per operation",async()=>{
+  for(const [kind,reason] of [
+    ["force-release","slot_admin_force_release_submitted"],
+    ["keep-reservation","slot_admin_release_submitted_video"],
+  ]){
+    const s=setup({kind});
+    try{
+      const res=await s.post();
+      assert.equal(res.status,200,kind+" "+await res.clone().text());
+      const rows=s.sqlite.prepare(
+        "SELECT target_type, reason, requested_by_user_id FROM static_rebuild_queue",
+      ).all();
+      assert.equal(rows.length,3);
+      for(const row of rows){
+        assert.equal(row.reason,reason,kind+" "+row.target_type);
+        assert.equal(row.requested_by_user_id,ADMIN.id);
+      }
+      assert.deepEqual(countEffects(s),{audits:3,outbox:1,queue:3});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-056/057 U03i: JS-trim Unicode group classification preserves exact RAW group key",async()=>{
   // JS trim() treats U+3000 as blank; SQLite trim() does not. A blank-only
   // legacy key is a solo reservation even if another row has the same bytes.
