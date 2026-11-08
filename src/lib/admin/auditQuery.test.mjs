@@ -11,7 +11,10 @@ test("CURRENT audit: single-valued filters retain trim and view compatibility", 
   assert.equal(readAuditQueryValue(" events "), "events");
   assert.equal(readAuditQueryValue(""), "");
   assert.equal(readAuditQueryValue(undefined), "");
-  assert.equal(readAuditViewMode(" timeline "), "timeline");
+  assert.equal(readAuditViewMode("timeline"), "timeline");
+  assert.equal(readAuditViewMode(" timeline "), "table");
+  assert.equal(readAuditViewMode("cards "), "table");
+  assert.equal(readAuditViewMode(["cards"]), "table");
   assert.equal(readAuditViewMode("cards"), "cards");
   assert.equal(readAuditViewMode("unknown"), "table");
 });
