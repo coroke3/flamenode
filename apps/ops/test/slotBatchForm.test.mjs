@@ -154,7 +154,8 @@ test("MIG-0722 U02b-4: stale batch result after event change is ignored on succe
         writes++;
         return new Promise((resolve, reject) => { settle = rejected ? reject : resolve; });
       };
-      const onClearAvailable = async () => ({ ok: true });
+      let clears = 0;
+      const onClearAvailable = async () => { clears++; return { ok: true }; };
       const onChanged = () => { refreshed++; };
       const view = eventId => React.createElement(SlotBatchForm, {
         eventId, totalSlots: 0, onGenerate, onClearAvailable, onChanged,
@@ -180,6 +181,7 @@ test("MIG-0722 U02b-4: stale batch result after event change is ignored on succe
       assert.ok(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'));
       await React.act(async () => root.render(view("third-event")));
       assert.equal(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'), null);
+      assert.equal(clears, 0, "event transition must not execute an old clear confirmation");
     } finally {
       await React.act(async () => root.unmount());
       for (const [key, descriptor] of old) {
