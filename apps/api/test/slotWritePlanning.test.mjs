@@ -64,9 +64,13 @@ test("MIG-0656 U02a: count defaults, prefix trim, start-index zero and upper bou
   ] });
   assert.deepEqual(planGeneratedSlots({ mode: "count", count: 2,
     start_index: 9999, label_prefix: " 第 " }), { ok: true, candidates: [
-    { start_time: null, sort_order: 9999, slot_label: "第 9999" },
-    { start_time: null, sort_order: 10000, slot_label: "第 10000" },
+    { start_time: null, sort_order: 9999, slot_label: "第9999" },
+    { start_time: null, sort_order: 10000, slot_label: "第10000" },
   ] });
+  assert.deepEqual(planGeneratedSlots({ mode: "count", count: 1, label_prefix: "  第 一  " }),
+    { ok: true, candidates: [
+      { start_time: null, sort_order: 1, slot_label: "第 一1" },
+    ] }, "only surrounding whitespace is removed; embedded whitespace is preserved");
   const max = planGeneratedSlots({ mode: "count", count: 100 });
   assert.equal(max.ok, true);
   assert.equal(max.candidates.length, 100);
