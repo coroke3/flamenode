@@ -47,7 +47,7 @@ export const SLOT_SUBMITTED_DANGER_ANCHOR_SQL = [
   " AND x.approval_status = 'approved' LIMIT 101",
   ") staff) AS staff_json,",
   SLOT_CHUNK_COST_GUARD_SELECT + ",",
-  "(SELECT json_object(" + FIELDS + ") FROM slots s
+  "(SELECT json_object(" + FIELDS + ") FROM slots s",
   " WHERE s.event_id = ? AND s.id = ? LIMIT 1) AS anchor_json",
 ].join("\n");
 
