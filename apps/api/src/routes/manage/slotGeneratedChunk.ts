@@ -89,7 +89,7 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
     });
     await mutateWithAudit(db, {
       preMutationAssertions: [
-        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, staffJson: scope.staff_json })),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: scope.staff_json })),
         ...plan.preMutationAssertions.map((item) => db.run(item)),
       ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],

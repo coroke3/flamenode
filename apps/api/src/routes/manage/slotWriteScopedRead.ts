@@ -89,6 +89,9 @@ export function canUpdateEventLabels(
  * D1 atomic batch as the slot mutation. A permission preset downgrade, linked
  * X-account approval loss or event deletion after the earlier Hono pre-read
  * must fail closed BEFORE any slot/strict-audit/Queue statement executes.
+ * It also verifies the actor's persisted user role, non-banned state, and
+ * initial TOS acceptance. Latest-major-terms and live Auth.js expiry are
+ * independent parent writeGuard concerns; this is NOT a substitute for them.
  *
  * This checks the *exact* effective approved-staff row JSON from the SELECT
  * (including the 101-row sentinel) rather than reimplementing custom/alias
@@ -96,15 +99,22 @@ export function canUpdateEventLabels(
  * The actor's session/TOS and CostGuard gates remain the parent's responsibility.
  */
 export function buildSlotChunkScopeAssertion(input: {
-  eventId: string; actorUserId: string; staffJson: string | null;
+  eventId: string; actorUserId: string; actorRole: string; staffJson: string | null;
 }): SQL {
-  const { eventId, actorUserId, staffJson } = input;
-  if (!eventId || !actorUserId || typeof staffJson !== "string") {
+  const { eventId, actorUserId, actorRole, staffJson } = input;
+  if (!eventId || !actorUserId ||
+      (actorRole !== "admin" && actorRole !== "user" && actorRole !== "moderator") ||
+      typeof staffJson !== "string") {
     throw new Error("slot_chunk_invalid_scope_assertion");
   }
   return sql`
     SELECT CASE WHEN
       EXISTS(SELECT 1 FROM events WHERE id = ${eventId})
+      AND EXISTS(
+        SELECT 1 FROM "user" u WHERE u.id = ${actorUserId}
+          AND u.role IS ${actorRole}
+          AND u.is_banned IS 0 AND u.is_tos_accepted IS 1
+      )
       AND (
         SELECT json_group_array(json_object(
           'permission_preset', staff.permission_preset,

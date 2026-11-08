@@ -207,6 +207,36 @@ test("SA-058 U03q: staff privilege and approved-X revocation between chunks fail
   }finally{s.sqlite.close();}
 });
 
+test("SA-058 U03s: admin role downgrade, account ban or TOS reversal after scope read rejects INSERT",async()=>{
+  for(const mode of ["admin-demoted","admin-banned","admin-tos-revoked","staff-banned"]){
+    let changed=false;
+    const isStaff=mode==="staff-banned";
+    const actor=isStaff?VIEWER:ADMIN;
+    const s=setup({actor,staff:isStaff,onFirst:(sql,sqlite)=>{
+      if(changed||!sql.includes("AS staff_json"))return;
+      changed=true;
+      const id=actor.id;
+      if(mode==="admin-demoted"){
+        sqlite.prepare('UPDATE "user" SET role=? WHERE id=?').run("user",id);
+      }else if(mode==="admin-tos-revoked"){
+        sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(id);
+      }else{
+        sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(id);
+      }
+    }});
+    try{
+      const res=await s.post(countInput(3,1));
+      assert.equal(changed,true,mode+" race not injected");
+      assert.equal(res.status,409,mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"recheck fails inside same D1 batch");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03r: staff approval or permission revoked AFTER pre-read aborts atomic INSERT",async()=>{
   for(const revoked of ["permission","x-approval","event-deleted"]){
     let injected=false;

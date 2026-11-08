@@ -69,7 +69,7 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
     });
     await mutateWithAudit(db, {
       preMutationAssertions: [
-        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, staffJson: read.staff_json })),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
         ...plan.preMutationAssertions.map((statement) => db.run(statement)),
       ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],

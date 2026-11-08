@@ -168,6 +168,36 @@ test("SA-059 U03q: revoking staff or X approval between chunks stops continuatio
   }finally{s.sqlite.close();}
 });
 
+test("SA-059 U03s: admin demotion, user ban or TOS reversal after snapshot rejects DELETE",async()=>{
+  for(const mode of ["admin-demoted","admin-banned","admin-tos-revoked","staff-banned"]){
+    let changed=false;
+    const isStaff=mode==="staff-banned";
+    const actor=isStaff?VIEWER:ADMIN;
+    const s=setup({actor,staff:isStaff,onFirst:(sql,sqlite)=>{
+      if(changed||!sql.includes("AS rows_json"))return;
+      changed=true;
+      const id=actor.id;
+      if(mode==="admin-demoted"){
+        sqlite.prepare('UPDATE "user" SET role=? WHERE id=?').run("user",id);
+      }else if(mode==="admin-tos-revoked"){
+        sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(id);
+      }else{
+        sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(id);
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(changed,true,mode+" race not injected");
+      assert.equal(res.status,409,mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"]);
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"recheck fails inside same D1 batch");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-059 U03r: permission, linked-X approval or event removed AFTER snapshot blocks DELETE",async()=>{
   for(const revoked of ["permission","x-approval","event-deleted"]){
     let injected=false;
