@@ -40,7 +40,15 @@ const video=(patch={})=>({
 });
 function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   mode="normal",onFirst,mutate,seedVideo=true}={}){
-  const {db,sqlite,stats}=createAdminD1({onFirst});
+  const submittedReads=[];
+  const {db,sqlite,stats}=createAdminD1({
+    onFirst:(sql,sqlite)=>{
+      if (/AS (anchor_json|group_json|video_json|refs_json)\b/.test(sql)) {
+        submittedReads.push(sql);
+      }
+      onFirst?.(sql,sqlite);
+    },
+  });
   seedBase(sqlite,{settings:mode});
   seedEvent(sqlite);
   sqlite.exec([
@@ -101,7 +109,7 @@ function setup({kind="force-release",count=2,actor=ADMIN,staff=false,
   );
   const row=(table,id)=>sqlite.prepare("SELECT * FROM "+table+" WHERE id=?").get(id);
   const countRows=table=>sqlite.prepare("SELECT COUNT(*) AS n FROM "+table).get().n;
-  return {sqlite,stats,post,row,countRows,write,insertVideo};
+  return {sqlite,stats,submittedReads,post,row,countRows,write,insertVideo};
 }
 const countEffects=s=>({
   audits:s.countRows("audit_logs"),outbox:s.countRows("notification_outbox"),
@@ -126,7 +134,7 @@ test("SA-056 U03f: 20 submitted slots -> available, complete video strict audit,
     assert.equal(s.row("videos","vid").scheduling_type,"manual");
     assert.deepEqual(countEffects(s),{audits:21,outbox:1,queue:3});
     assert.equal(s.stats.batches,1);
-    assert.equal(s.stats.reads<=3,true);
+    assert.equal(s.submittedReads.length,3,"only 3 scoped SA-056 prereads");
     const videoAudit=s.sqlite.prepare("SELECT * FROM audit_logs WHERE table_name='videos'").get();
     assert.equal(videoAudit.retention_class,"long_audit");
     const before=JSON.parse(videoAudit.before_json),after=JSON.parse(videoAudit.after_json);
@@ -183,7 +191,7 @@ test("SA-056/057 U03f: linked approved staff allowed; denied staff cannot inspec
     assert.equal((await denied.post("s0","missing")).status,404);
     assert.deepEqual(countEffects(denied),{audits:0,outbox:0,queue:0});
     assert.equal(denied.stats.batches,0);
-    assert.equal(denied.stats.reads,2);
+    assert.equal(denied.submittedReads.length,2,"one scoped event/anchor read per denied request");
   }finally{denied.sqlite.close();}
   const allowed=setup({actor:STAFF,staff:true});
   try{
