@@ -12,9 +12,12 @@ import { Hono } from "hono";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded } from "../admin/body.ts";
-import { canUpdateEventLabels } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkSessionAssertion, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
+import { writeGuardDenyResponse } from "../../middleware/writeOrigin.ts";
 import {
   SLOT_SINGLE_RELEASE_SNAPSHOT_SQL,
   selectSingleReservedReleaseSnapshot,
@@ -40,6 +43,12 @@ slotSingleReleaseRoutes.post("/:slotId/release", async (c) => {
   if (!ID_PATTERN.test(eventId) || !ID_PATTERN.test(slotId)) {
     return c.json({ ok: false, message: "イベントIDまたは枠IDが不正です。" }, 400);
   }
+  // An offline candidate must never trust a synthetic user without the parent
+  // Auth.js session identity. The token is bound only to the D1 assertion.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
@@ -55,6 +64,8 @@ slotSingleReleaseRoutes.post("/:slotId/release", async (c) => {
     if (!canUpdateEventLabels(user.role, read.staff_json) || !read.exists_id) {
       return c.json({ ok: false, message: "Not Found" }, 404);
     }
+    const guard = verifySlotChunkCostGuard(read.cost_guard_json, "manage_slot_update");
+    if (!guard.approved) return writeGuardDenyResponse(c, guard.reason, 503);
     const selection = selectSingleReservedReleaseSnapshot(eventId, slotId, read);
     if (!selection.ok) {
       return c.json({ ok: false, message: selection.message }, 409);
@@ -86,7 +97,12 @@ slotSingleReleaseRoutes.post("/:slotId/release", async (c) => {
       strict: true,
     }));
     await mutateWithAudit(db, {
-      preMutationAssertions: plan.preMutationAssertions.map((item) => db.run(item)),
+      preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
+        db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
+        db.run(buildSlotChunkCostGuardAssertion(guard)),
+        ...plan.preMutationAssertions.map((item) => db.run(item)),
+      ],
       mutationStatements: [db.run(plan.mutationStatement), ...queue.statements],
       expectedMutationChanges: [plan.expectedMutationChanges, ...queue.expectedChanges],
       audits,

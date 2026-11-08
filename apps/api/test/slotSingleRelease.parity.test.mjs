@@ -9,6 +9,7 @@ import { slotSingleReleaseRoutes } from "../src/routes/manage/slotSingleRelease.
 import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 
 const ORIGIN = "https://app.flamenode.example";
+const SESSION_TOKEN = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const ADMIN = { id: "admin-1", role: "admin", is_banned: 0 };
 const STAFF = { id: "staff-1", role: "user", is_banned: 0 };
 const columns = [
@@ -36,6 +37,7 @@ function setup({ actor = ADMIN, staff = false, count = 20,
     "VALUES ('recipient-1','Recipient','user',0,1,1);",
     'CREATE TABLE event_staff (event_id TEXT,x_user_id TEXT,permission_preset TEXT,',
     'custom_permission_keys_json TEXT);',
+    'CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY, "userId" TEXT, "expires" INTEGER);',
     'CREATE TABLE slots (id TEXT PRIMARY KEY,event_id TEXT,reserved_by_user_id TEXT,',
     'x_user_id TEXT,reserved_x_id_snapshot TEXT,display_name TEXT,slot_label TEXT,',
     'start_time INTEGER,sort_order INTEGER,reservation_group_id TEXT,video_id TEXT,',
@@ -58,6 +60,8 @@ function setup({ actor = ADMIN, staff = false, count = 20,
       'INSERT INTO "user"(id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)',
     ).run(actor.id, "Staff", actor.role);
   }
+  if (actor) sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
   if (staff && actor) {
     sqlite.prepare("INSERT INTO x_users (id,approval_status) VALUES (?,?)")
       .run("x1", "approved");
@@ -70,6 +74,7 @@ function setup({ actor = ADMIN, staff = false, count = 20,
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", actor);
+    c.set("sessionState",actor?"user":"none");
     c.set("db", drizzle(c.env.DB, { schema }));
     if (actor) {
       c.set("actorSnapshotJsonById", {
@@ -82,7 +87,7 @@ function setup({ actor = ADMIN, staff = false, count = 20,
   app.route("/api/manage/events/:id/slots", slotSingleReleaseRoutes);
   const post = (id = "s0", eventId = "ev-1") => app.request(
     ORIGIN + "/api/manage/events/" + eventId + "/slots/" + id + "/release",
-    { method: "POST", headers: { Origin: ORIGIN } },
+    { method: "POST", headers: { Origin: ORIGIN, Cookie: "__Secure-authjs.session-token=" + SESSION_TOKEN } },
     { DB: db, NEXT_PUBLIC_SITE_URL: ORIGIN },
   );
   const countRows = table => sqlite.prepare("SELECT COUNT(*) AS n FROM " + table).get().n;
@@ -237,4 +242,40 @@ test("SA-060 U02c-5e: unauthorized actor sees no event existence, invalid IDs an
   assert.equal((await admin.post("invalid!")).status, 400);
   assert.equal(admin.countRows("audit_logs"), 0);
   assert.equal(admin.countRows("static_rebuild_queue"), 0);
+});
+
+test("SA-060 U04h: post-read session, staff, actor, CostGuard and event revocations roll back release",async()=>{
+  for(const kind of ["session-deleted","session-expired","session-reassigned",
+    "staff-revoked","tos-revoked","role-changed","banned","read-only","event-deleted"]){
+    let injected=false;
+    const staff=kind==="staff-revoked";
+    const s=setup({actor:staff?STAFF:ADMIN,staff,count:2,onFirst:(query,sqlite)=>{
+      if(injected||!query.includes("AS group_json"))return;
+      injected=true;
+      if(kind==="session-deleted")sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+      if(kind==="session-expired")sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+        .run(Date.now()-60000,SESSION_TOKEN);
+      if(kind==="session-reassigned")sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+        .run("other-user",SESSION_TOKEN);
+      if(kind==="staff-revoked")sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+      if(kind==="tos-revoked")sqlite.prepare('UPDATE "user" SET is_tos_accepted=0 WHERE id=?').run(ADMIN.id);
+      if(kind==="role-changed")sqlite.prepare("UPDATE \"user\" SET role='user' WHERE id=?").run(ADMIN.id);
+      if(kind==="banned")sqlite.prepare('UPDATE "user" SET is_banned=1 WHERE id=?').run(ADMIN.id);
+      if(kind==="read-only")sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+      if(kind==="event-deleted")sqlite.prepare("DELETE FROM events WHERE id='ev-1'").run();
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true,"injected post-read "+kind);
+      assert.equal(res.status,409,kind+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.getSlot("s0").status,"reserved");
+      assert.equal(s.getSlot("s1").status,"reserved");
+      assert.equal(s.countRows("audit_logs"),0);
+      assert.equal(s.countRows("static_rebuild_queue"),0);
+      assert.equal(s.countRows("notification_outbox"),0);
+      assert.equal(s.stats.batches,1,"one failed atomic D1 batch");
+      assert.ok(s.stats.reads<=2,"no extra scoped read");
+    }finally{s.sqlite.close();}
+  }
 });
