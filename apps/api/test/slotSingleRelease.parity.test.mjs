@@ -189,3 +189,52 @@ test("SA-060 U02c-5d: CostGuard denies writes and candidate is not mounted", asy
   const index = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
   assert.doesNotMatch(index, /slotSingleReleaseRoutes|slotSingleRelease\.ts/);
 });
+
+test("SA-060 U02c-5e: stale CAS after scoped SELECT cannot partially release the group", async () => {
+  let changed = false;
+  const s = setup({ count: 2, onFirst: (sql, db) => {
+    if (!changed && sql.includes("AS group_json")) {
+      changed = true;
+      db.prepare("UPDATE slots SET version = version + 1 WHERE id = ?").run("s1");
+    }
+  } });
+  const res = await s.post();
+  assert.equal(changed, true);
+  assert.equal(res.status, 409, await res.clone().text());
+  assert.equal(s.getSlot("s0").status, "reserved");
+  assert.equal(s.getSlot("s1").status, "reserved");
+  assert.equal(s.countRows("audit_logs"), 0);
+  assert.equal(s.countRows("static_rebuild_queue"), 0);
+  assert.equal(s.countRows("notification_outbox"), 0);
+});
+
+test("SA-060 U02c-5e: solo with a Unicode-whitespace raw group releases only its own row", async () => {
+  const s = setup({ count: 2 });
+  s.sqlite.prepare("UPDATE slots SET reservation_group_id = ? WHERE id IN (?,?)")
+    .run("\u3000", "solo", "s0");
+  const res = await s.post("solo");
+  assert.equal(res.status, 200, await res.clone().text());
+  assert.deepEqual(await res.json(), {
+    ok: true, message: "1件の予約枠を解放しました。", pendingPublicReflection: true,
+  });
+  assert.equal(s.getSlot("solo").status, "available");
+  assert.equal(s.getSlot("s0").status, "reserved");
+  assert.equal(s.countRows("audit_logs"), 1);
+  assert.equal(s.countRows("notification_outbox"), 0, "owner-less solo must not enqueue a DM");
+  assert.equal(s.countRows("static_rebuild_queue"), 3);
+});
+
+test("SA-060 U02c-5e: unauthorized actor sees no event existence, invalid IDs and missing slots fail closed", async () => {
+  const denied = setup({ actor: STAFF, count: 2 });
+  const real = await denied.post("s0", "ev-1");
+  const nonexistent = await denied.post("s0", "missing");
+  assert.equal(real.status, 404);
+  assert.equal(nonexistent.status, 404);
+  assert.equal(denied.countRows("audit_logs"), 0);
+  const admin = setup({ count: 2 });
+  assert.equal((await admin.post("missing")).status, 409);
+  assert.equal((await admin.post("s0", "missing")).status, 404);
+  assert.equal((await admin.post("invalid!")).status, 400);
+  assert.equal(admin.countRows("audit_logs"), 0);
+  assert.equal(admin.countRows("static_rebuild_queue"), 0);
+});
