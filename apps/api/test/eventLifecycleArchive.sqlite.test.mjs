@@ -960,3 +960,49 @@ test("MIG-0652 U04 SQLite T31: already-private concurrent revision change reject
   assert.equal(f.read("static_rebuild_queue").length, 0);
   assert.deepEqual(evicted, [], "failed D1 commit must not evict public caches");
 });
+
+test("MIG-0652 U04 SQLite T32: real-session operation-mode and feature guard protects archive before R2/D1", async () => {
+  // These decisions are made by the real shared CostGuard implementation,
+  // exercised in the actual Origin -> Auth.js -> write-identity -> feature path.
+  // An economy-mode admin can archive unless this exact feature is disabled.
+  for (const variant of [
+    { label: "read-only mode", mode: "read_only", disabled: null, status: 503, reason: "maintenance_mode" },
+    { label: "static-only mode", mode: "static_only", disabled: null, status: 503, reason: "maintenance_mode" },
+    { label: "economy allowed", mode: "economy", disabled: null, status: 200, reason: null },
+    { label: "economy feature disabled", mode: "economy", disabled: ["manage_event_archive"], status: 503, reason: "cost_guard_blocked" },
+  ]) {
+    const f = setup({
+      mode: variant.mode, enforceOrigin: true,
+      enforceSession: true, enforceWriteGuard: true,
+    });
+    if (variant.disabled) {
+      f.sqlite.prepare(
+        "UPDATE system_settings SET disabled_features_json = ? WHERE id = 'default'",
+      ).run(JSON.stringify(variant.disabled));
+    }
+    const previousCaches = globalThis.caches;
+    globalThis.caches = { default: { delete: async () => true } };
+    let response;
+    try { response = await f.request(); } finally { globalThis.caches = previousCaches; }
+    assert.equal(response.status, variant.status, variant.label);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", variant.label);
+    const body = await response.json();
+    if (variant.status === 200) {
+      assert.deepEqual(body, { ok: true, pendingPublicReflection: true }, variant.label);
+      assert.equal(f.d1.stats.batches, 1, variant.label);
+      assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+      assert.equal(f.read("audit_logs").length, 1);
+      assert.ok(f.read("static_rebuild_queue").some((row) => row.reason === "event_private"));
+      assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+    } else {
+      assert.equal(body.ok, false, variant.label);
+      assert.equal(body.reason, variant.reason, variant.label);
+      assert.equal(f.d1.stats.batches, 0, variant.label);
+      assert.deepEqual(f.timeline, [], variant.label + " must never reach R2 or D1 batch");
+      assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+      assert.equal(f.read("audit_logs").length, 0);
+      assert.equal(f.read("public_visibility_fences").length, 0);
+      assert.equal(f.read("static_rebuild_queue").length, 0);
+    }
+  }
+});
