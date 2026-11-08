@@ -10,7 +10,7 @@ import {
   type EventFormData,
 } from "@/lib/event/eventForm";
 import { serializeRequiredVideoFieldsFromForm } from "@/lib/video/requiredVideoFields";
-import { buildBasicEventUpdateFields, buildPublishEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
+import { buildBasicEventUpdateFields, buildPublishEventUpdateFields, buildQuestionsEventUpdateFields, parseDateInput, type EventEditPermissions } from "@flamenode/domain/event";
 
 export type EventUpdatePayload = Partial<typeof events.$inferInsert>;
 
@@ -57,17 +57,13 @@ export function buildEventUpdatePayload(args: {
   if (permissions.questions) {
     videoFormSettingsJson = buildVideoFormSettingsJson(formData);
     const requiredVideoFieldsJson = serializeRequiredVideoFieldsFromForm(formData);
-    Object.assign(updatePayload, {
-      allow_user_video_edits: data.allow_user_video_edits,
-      user_video_edit_permission_keys_json:
-        data.user_video_edit_permission_keys_json ?? null,
-      required_video_fields_json:
-        requiredVideoFieldsJson === undefined
-          ? before.required_video_fields_json
-          : requiredVideoFieldsJson,
-      editable_fields: data.editable_fields ?? before.editable_fields,
-      review_settings: data.review_settings ?? before.review_settings,
-    });
+    Object.assign(updatePayload, buildQuestionsEventUpdateFields({
+      data,
+      requiredVideoFieldsJson,
+      previousRequiredVideoFieldsJson: before.required_video_fields_json,
+      previousEditableFields: before.editable_fields,
+      previousReviewSettings: before.review_settings,
+    }));
     updatedSections.push("questions");
     changedByPermission.questions = EVENT_SECTION_PERMISSION_KEYS.questions;
   }
