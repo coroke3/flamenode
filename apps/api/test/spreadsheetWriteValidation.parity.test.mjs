@@ -644,3 +644,39 @@ test("CURRENT import upsert planner counts INSERT UPDATE and skip without D1 eff
   assert.throws(() => planSpreadsheetImportMutations(ctx, { ...prepared, errors: [{ index: 1, message: "duplicate_primary_key" }] }, "insert", null, "actor-1"), /invalid_row/);
   assert.deepEqual(rows[0], { video_id: "v1", event_id: "e1", notes: "new" });
 });
+
+
+test("U02 preview token binds operator, table, schema and payload and rejects expiry or tampering", async () => {
+  const { buildSpreadsheetImportPreviewBinding, issueSpreadsheetImportPreviewToken, verifySpreadsheetImportPreviewToken,
+    requireSpreadsheetImportPreviewSecret, SPREADSHEET_IMPORT_PREVIEW_TTL_SECONDS } =
+    await import("../src/routes/admin/spreadsheet/importPreviewToken.ts");
+  const secret = "this-is-a-valid-test-preview-secret-of-40-chars";
+  const input = {
+    operatorUserId: "operator-1",
+    table: "video_events",
+    mode: "upsert",
+    columns: ["video_id", "event_id", "notes"],
+    primaryKeys: ["video_id", "event_id"],
+    schemaColumns: [
+      { name: "video_id", type: "TEXT", notNull: true, pk: 1 },
+      { name: "event_id", type: "TEXT", notNull: true, pk: 2 },
+      { name: "notes", type: "TEXT", notNull: false, pk: 0 },
+    ],
+    rows: [{ video_id: "v-1", event_id: "e-1", notes: "old" }],
+  };
+  const binding = await buildSpreadsheetImportPreviewBinding(input);
+  const { token, claims } = await issueSpreadsheetImportPreviewToken(binding, secret, {
+    now: 1800000000, nonce: "12345678-1234-4234-8234-123456789abc",
+  });
+  assert.equal(claims.expiresAt - claims.issuedAt, SPREADSHEET_IMPORT_PREVIEW_TTL_SECONDS);
+  assert.equal((await verifySpreadsheetImportPreviewToken(token, secret, binding, { now: 1800000001 }))?.nonce, claims.nonce);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, { ...binding, operatorUserId: "operator-2" }, { now: 1800000001 }), null);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, { ...binding, mode: "insert" }, { now: 1800000001 }), null);
+  const alteredPayload = await buildSpreadsheetImportPreviewBinding({ ...input, rows: [{ ...input.rows[0], notes: "altered" }] });
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, alteredPayload, { now: 1800000001 }), null);
+  assert.equal(await verifySpreadsheetImportPreviewToken(token, secret, binding, { now: claims.expiresAt }), null);
+  const corrupted = token.slice(0, -1) + (token.endsWith("A") ? "B" : "A");
+  assert.equal(await verifySpreadsheetImportPreviewToken(corrupted, secret, binding, { now: 1800000001 }), null);
+  assert.throws(() => requireSpreadsheetImportPreviewSecret("short"), /preview_unavailable/);
+  await assert.rejects(() => issueSpreadsheetImportPreviewToken(binding, secret, { now: 1800000000, nonce: "invalid" }), /preview_unavailable/);
+});
