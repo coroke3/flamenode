@@ -97,6 +97,44 @@ test("duplicate open PRs for one MIG are rejected before task selection",()=>{
  assert.deepEqual([...parseOwnedTasks([{number:481,headRefName:"migration/mig-0723-staff-view"},{number:489,headRefName:"chore/migration-docs"}])],[["MIG-0723",481]]);
 });
 
+
+test("incomplete open PR records fail closed instead of silently releasing MIG ownership",()=>{
+ const malformed=[
+  null,
+  "unexpected",
+  {number:1},
+  {number:2,headRefName:null},
+  {number:3,headRefName:""},
+  {number:4,headRefName:"   "},
+  {number:5,headRefName:" migration/mig-0651-submit"},
+  {number:6,headRefName:"migration/mig-0651-submit "},
+  {number:7,headRefName:"\tmigration/mig-0651-submit"},
+  {number:8,headRefName:"migration/mig-0651-submit\n"},
+  {number:null,headRefName:"migration/mig-0651-submit"},
+  {number:"0",headRefName:"migration/mig-0651-submit"},
+  {number:"not-an-id",headRefName:"migration/mig-0651-submit"},
+  {number:" ?(migration/mig-0651-submit)",headRefName:"migration/mig-0651-submit"},
+  {number:"?(migration/mig-0652-other)",headRefName:"migration/mig-0651-submit"},
+  {number:"9007199254740992",headRefName:"migration/mig-0651-submit"},
+  {headRefName:"migration/mig-0651-submit"},
+  Object.assign(Object.create({headRefName:"migration/mig-0651-submit"}),{number:9}),
+  Object.assign(Object.create({number:9}),{headRefName:"migration/mig-0651-submit"}),
+  Object.assign([],{number:9,headRefName:"migration/mig-0651-submit"}),
+ ];
+ for(const record of malformed){
+  assert.throws(()=>parseOwnedTasks([record]),/Invalid open PR record at index 0/);
+  assert.throws(()=>parseOpenPrSnapshot([record]),/Invalid open PR record at index 0/);
+ }
+ assert.throws(()=>parseOwnedTasks(null),/Invalid open PR owner snapshot/);
+ const valid=[
+  {number:481,headRefName:"migration/mig-0723-staff-view"},
+  {number:482,headRefName:"fix/standalone"},
+  {number:"483",headRefName:"fix/another-standalone"},
+  {number:"?(migration/mig-0651-submit)",headRefName:"migration/mig-0651-submit"},
+ ];
+ assert.deepEqual([...parseOwnedTasks(valid)],[["MIG-0723",481],["MIG-0651","?(migration/mig-0651-submit)"]]);
+});
+
 test("100-open-PR owner snapshot fails closed instead of losing the next page",()=>{
  const prs=Array.from({length:100},(_,index)=>({
   number:index+1,
@@ -237,4 +275,58 @@ test("CRITICAL_PATH lists Phase 4 Gate prerequisites in an order STATUS allows",
   assert.ok(gate.has(id),id+" is not a Phase 4 Gate prerequisite");
   for(const later of CRITICAL_PATH.slice(i+1))assert.ok(!ancestors(id).has(later),id+" depends on later "+later);
  });
+});
+
+test("migration:next unlocks only dependencies with a recorded SKIP_APPROVAL",()=>{
+ const rows=[
+   "| ID | Task | State | Depends on |",
+   "| --- | --- | --- | --- |",
+   "| MIG-0105 | obsolete gate | SKIPPED | — |",
+   "| MIG-0108 | approved alternate | DONE | — |",
+   "| MIG-0401 | independent PoC | READY | MIG-0105 |",
+ ].join("\n");
+ const approval="SKIP_APPROVAL: MIG-0105 | PR#404 | APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789 | ALTERNATIVE=MIG-0108";
+ const selected=pickNextTask(rows+"\n\n"+approval,"");
+ assert.equal(selected.selected,"MIG-0401");
+ assert.deepEqual(selected.candidates,["MIG-0401"]);
+ assert.equal(pickNextTask(rows.replace("SKIPPED","DONE"),"").selected,"MIG-0401");
+ assert.equal(pickNextTask(rows,"").selected,null);
+ for(const invalid of [
+   approval.replace("MIG-0105 | PR#","MIG-9999 | PR#"),
+   approval.replace("PR#404","PR#invalid"),
+   approval.replace(" | ALTERNATIVE=MIG-0108",""),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE="),
+   approval.replace("APPROVAL=https://github.com/coroke3/flamenode/pull/404#issuecomment-123456789","APPROVAL="),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=none"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-0105"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=pending independent review"),
+   approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=not-approved by lead"),
+   approval.replace("PR#404","PR#0"),
+   approval.replace("pull/404#","pull/405#"),
+   approval.replace("github.com/coroke3","example.test/coroke3"),
+   approval.replace("github.com/coroke3/flamenode","github.com/untrusted/test-repo"),
+   "```md\n"+approval+"\n```",
+   "<!--\n"+approval+"\n-->",
+ ]) {
+   assert.equal(pickNextTask(rows+"\n\n"+invalid,"").selected,null,invalid);
+ }
+ for (const invalidState of ["READY","BLOCKED","SKIPPED","IN_PROGRESS"]) {
+   const invalidRows = rows.replace("| MIG-0108 | approved alternate | DONE |",
+     "| MIG-0108 | approved alternate | " + invalidState + " |");
+   const invalidSelection = pickNextTask(invalidRows+"\n\n"+approval,"");
+   assert.ok(!invalidSelection.candidates.includes("MIG-0401"),
+     invalidState+": unfinished alternate cannot unlock its SKIPPED dependent");
+ }
+ assert.throws(() => pickNextTask(rows+"\n| MIG-0108 | duplicate alternate | DONE | — |\n"+approval,""),
+   /Duplicate task ID in migration:next: MIG-0108/,
+   "duplicate DONE alternative must fail closed instead of unlocking a dependency");
+ for (const hidden of [
+   "<!--\n| MIG-9999 | fake alternative | DONE | — |\n-->",
+   "```md\n| MIG-9999 | fake alternative | DONE | — |\n```",
+ ]) {
+   const withoutRealAlt = rows.replace("| MIG-0108 | approved alternate | DONE | — |\n","");
+   assert.equal(pickNextTask(withoutRealAlt+"\n\n"+hidden+"\n"+
+     approval.replace("ALTERNATIVE=MIG-0108","ALTERNATIVE=MIG-9999"),"").selected,null,hidden);
+ }
 });

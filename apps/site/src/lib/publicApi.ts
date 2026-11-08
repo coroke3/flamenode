@@ -1,0 +1,42 @@
+/** Public same-origin JSON transport for Phase 5 browser Islands (MIG-0510 U03).
+ * A 503 or non-JSON response must not be mistaken for an empty public dataset.
+ */
+export type PublicJsonResult<T> =
+  | { ok: true; data: T; status: number }
+  | { ok: false; status: number };
+
+export async function fetchPublicJson<T>(
+  path: string,
+  init: RequestInit = {},
+  fetcher: typeof fetch = fetch,
+): Promise<PublicJsonResult<T>> {
+  // The browser resolves dot segments before routing. Validate the path portion only,
+  // so query values may still contain percent-encoded search text.
+  const pathname = path.split(/[?#]/, 1)[0];
+  if (!path.startsWith("/api/") || path.startsWith("//") || path.includes("\\") ||
+      /[\u0000-\u001f\u007f]/.test(path) || path.includes("://") ||
+      /(?:^|\/)\.{1,2}(?:\/|$)/.test(pathname) || /%(?:2e|2f|5c)/i.test(pathname)) {
+    return { ok: false, status: 0 };
+  }
+  try {
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    const response = await fetcher(path, {
+      ...init,
+      headers,
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!response.ok) return { ok: false, status: response.status };
+    // Only the JSON media type is valid. A substring match also accepted
+    // application/jsonp and text/plain; note=application/json.
+    const contentType = response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType !== "application/json") {
+      return { ok: false, status: 0 };
+    }
+    const data: T = await response.json();
+    return { ok: true, data, status: response.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
