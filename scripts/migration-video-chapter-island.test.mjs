@@ -720,3 +720,26 @@ test("P2 revoking bulk capability clears its pending CSV without revoking normal
     assert.equal(doc.querySelector("details textarea").value, "", "prior CSV must not survive a permission loss");
   });
 });
+
+
+test("P2 changing videoId invalidates the previous video's editor while retaining new-post access", async () => {
+  await withChapterDom(async (doc, root) => {
+    let writes = 0;
+    globalThis.fetch = async () => {
+      writes += 1;
+      return { ok: true, status: 200, json: async () => ({ ok: true, chapterId: "ch1" }) };
+    };
+    const render = (videoId) => React.createElement(VideoChapterIsland, {
+      videoId, activeXId: "approved", canPost: true, chapters: [PRIVATE_CHAPTER],
+    });
+    await React.act(async () => root.render(render("video-a")));
+    await clickButton(doc, "編集");
+    assert.ok(doc.querySelector("form"), "first video opens an editor");
+    await React.act(async () => root.render(render("video-b")));
+    assert.equal(doc.querySelector("form"), null, "video transition clears old edit state");
+    assert.equal(writes, 0, "no stale write is issued for a previous video's chapter");
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true,
+      "a new video starts with the public new-post default");
+  });
+});
