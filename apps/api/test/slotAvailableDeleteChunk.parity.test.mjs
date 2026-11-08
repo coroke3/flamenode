@@ -169,6 +169,45 @@ test("SA-059 U03n: strict audit table failure rolls back slot deletion and rebui
   }finally{s.sqlite.close();}
 });
 
+test("SA-059 U03o: static rebuild queue write failure rolls back DELETE and audits",async()=>{
+  const s=setup();
+  try{
+    // buildSlotChangeQueueBatch plans SQL in memory; the table is required
+    // only when mutateWithAudit executes DELETE + Queue + audit together.
+    s.sqlite.exec("DROP TABLE static_rebuild_queue");
+    const res=await s.post();
+    assert.equal(res.status,503,await res.clone().text());
+    assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+    assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"]);
+    assert.equal(s.count("audit_logs"),0);
+    assert.equal(s.stats.batches,1,"failed Queue INSERT must abort one D1 batch");
+  }finally{s.sqlite.close();}
+});
+
+test("SA-059 U03o: mixed reserved/submitted slots are never deleted",async()=>{
+  const s=setup({ids:["a","b"]});
+  try{
+    s.add(row("reserved","reserved"));
+    s.add(row("submitted","submitted"));
+    const res=await s.post();
+    assert.equal(res.status,200,await res.clone().text());
+    assert.deepEqual(await res.json(),{
+      ok:true,deletedThisChunk:2,moreAtSnapshot:false,
+      completionVerified:false,pendingPublicReflection:true,
+    });
+    assert.deepEqual(s.idsLeft(),["reserved","submitted"]);
+    assert.equal(s.slot("reserved").status,"reserved");
+    assert.equal(s.slot("submitted").status,"submitted");
+    assert.equal(s.count("audit_logs"),2);
+    assert.equal(s.count("static_rebuild_queue"),3);
+    assert.equal(s.stats.batches,1);
+    const again=await s.post();
+    assert.equal(again.status,409,await again.clone().text());
+    assert.deepEqual(s.idsLeft(),["reserved","submitted"]);
+    assert.equal(s.stats.batches,1);
+  }finally{s.sqlite.close();}
+});
+
 test("SA-059 U03n: read-time 3-row sentinel is not a completion proof under concurrent insert",async()=>{
   let added=false;
   const s=setup({ids:["a"],onFirst:(sql,sqlite)=>{
