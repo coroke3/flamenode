@@ -337,3 +337,31 @@ test("MIG-0652 U04 SQLite T16: postcommit cache outage never rolls back an archi
   assert.ok(!f.timeline.slice(f.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
     "postcommit cache failure must never compensate a committed visibility fence");
 });
+
+
+test("MIG-0652 U04 SQLite T17: strict audit INSERT failure rolls back event, fence and queue then compensates R2", async () => {
+  const f = setup({
+    beforeBatch: (sqlite) => sqlite.exec(
+      "CREATE TRIGGER reject_archive_audit BEFORE INSERT ON audit_logs " +
+      "BEGIN SELECT RAISE(ABORT, 'forced audit insert failure'); END;",
+    ),
+  });
+  const oldError = console.error;
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally { console.error = oldError; }
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.ok, false);
+  assert.ok(!body.message.includes("forced audit insert failure"), "raw database details must not reach clients");
+  assert.equal(f.d1.stats.batches, 1, "strict audit must be inside the same atomic D1 batch");
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+  assert.equal(f.bucket.manifest?.entities.some((e) => e.entity_id === EVENT), false);
+  assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+  assert.ok(f.timeline.indexOf("d1.batch") > 2);
+  assert.ok(f.timeline.slice(f.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
+    "a failed atomic audit commit must release only its own R2 precommit fence");
+});
