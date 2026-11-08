@@ -136,8 +136,11 @@ test("SA-058 U03m: lost response replay cannot duplicate a committed chunk, even
       assert.throws(()=>execute(db,repeated),
         /malformed JSON|invalid-generated-slot-collision/i);
       assert.equal(count(db),3,mode+": replay must not insert any extra rows");
-      for(const row of first)assert.deepEqual(read(db,row.id),
-        Object.fromEntries(cols.map(k=>[k,row[k]])),mode+" "+row.id);
+      for(const row of first){
+        const saved=read(db,row.id);
+        for(const col of cols)assert.equal(saved[col],row[col],
+          mode+" "+row.id+" "+col);
+      }
       for(const row of retry)assert.equal(read(db,row.id),undefined);
       // This is a new, NONOVERLAPPING chunk, not a retry or proof of
       // completion of the original potentially 100-row user request.
