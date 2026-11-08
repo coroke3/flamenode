@@ -230,3 +230,34 @@ test("SA-064 U02c-0: the write candidate is deliberately NOT mounted in manage i
   const source=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(source,/slotBatchLabelWriteRoutes|slotBatchLabelWrite\.ts/);
 });
+
+test("MIG-0656 U04r: post-scope linked-X revocation and major-TOS publication roll back SA-064",async()=>{
+  for(const kind of ["x-approval-revoked","major-terms-published"]){
+    const staff=kind==="x-approval-revoked";
+    let injected=false;
+    const s=setup({actor:staff?user:admin,staff,onFirst:(sql,sqlite)=>{
+      if(injected||!sql.includes("AS slots_json"))return;
+      injected=true;
+      if(kind==="x-approval-revoked"){
+        sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+      }else{
+        sqlite.prepare("INSERT INTO terms_versions(id,severity,published_at,updated_at) VALUES (?,?,?,?)")
+          .run("major-new","major",Math.floor(Date.now()/1000),Math.floor(Date.now()/1000));
+      }
+    }});
+    try{
+      const r=await s.patch();
+      assert.equal(injected,true,kind+" injected after scoped snapshot");
+      assert.equal(r.status,409,kind+" "+await r.clone().text());
+      assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+      for(const id of ["a","b"]){
+        assert.equal(s.slot(id).slot_label,"old");
+        assert.equal(s.slot(id).version,1);
+      }
+      assert.equal(s.count("audit_logs"),0);
+      assert.equal(s.count("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"authorization change must abort atomic D1 batch");
+      assert.ok(s.stats.reads<=2,"no additional scoped prereads");
+    }finally{s.sqlite.close();}
+  }
+});

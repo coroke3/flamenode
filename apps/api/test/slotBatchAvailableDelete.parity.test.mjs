@@ -264,3 +264,36 @@ test("SA-061/062 U04f: revoked parent authorization after scope read rolls back 
   }
 });
 
+
+test("MIG-0656 U04r: post-scope linked-X revocation and major-TOS publication roll back SA-061/062",async()=>{
+  for(const method of ["single","batch"]){
+    for(const kind of ["x-approval-revoked","major-terms-published"]){
+      const staff=kind==="x-approval-revoked";
+      let injected=false;
+      const s=setup({actor:staff?user:admin,staff,onFirst:(sql,sqlite)=>{
+        if(injected||!sql.includes("AS slots_json"))return;
+        injected=true;
+        if(kind==="x-approval-revoked"){
+          sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+        }else{
+          sqlite.prepare("INSERT INTO terms_versions(id,severity,published_at,updated_at) VALUES (?,?,?,?)")
+            .run("major-new","major",Math.floor(Date.now()/1000),Math.floor(Date.now()/1000));
+        }
+      }});
+      try{
+        const r=method==="single"?await s.deleteOne("a"):await s.del();
+        assert.equal(injected,true,method+" "+kind+" injected");
+        assert.equal(r.status,409,method+" "+kind+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        for(const id of ["a","b"]){
+          assert.equal(s.slot(id).status,"available");
+          assert.equal(s.slot(id).version,1);
+        }
+        assert.equal(s.count("audit_logs"),0);
+        assert.equal(s.count("static_rebuild_queue"),0);
+        assert.equal(s.stats.batches,1,"one rolled-back D1 batch");
+        assert.ok(s.stats.reads<=2,"no additional scoped prereads");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
