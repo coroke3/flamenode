@@ -777,3 +777,47 @@ test("P2 visibility-only change warns before Active X switch and can cancel", as
     assert.ok(doc.querySelector("form"));
   });
 });
+
+
+test("P2 late chapter-create response cannot display success or refresh the next video", async () => {
+  await withChapterDom(async (doc, root) => {
+    let resolveResponse;
+    let requests = 0;
+    let refreshes = 0;
+    globalThis.fetch = async () => {
+      requests += 1;
+      return await new Promise((resolve) => { resolveResponse = resolve; });
+    };
+    const render = (videoId) => React.createElement(VideoChapterIsland, {
+      videoId, activeXId: "approved", canPost: true,
+      onChanged: () => { refreshes += 1; },
+    });
+    await React.act(async () => root.render(render("video-a")));
+    await clickButton(doc, "現在位置にコメントする");
+    const label = doc.querySelector("form input[maxlength='120']");
+    assert.ok(label, "new post composer must be available");
+    const setLabel = Object.getOwnPropertyDescriptor(doc.defaultView.HTMLInputElement.prototype, "value").set;
+    await React.act(async () => {
+      setLabel.call(label, "Pending chapter");
+      label.dispatchEvent(new doc.defaultView.Event("input", { bubbles: true }));
+    });
+    await React.act(async () => {
+      doc.querySelector("form").dispatchEvent(new doc.defaultView.Event("submit", {
+        bubbles: true, cancelable: true,
+      }));
+    });
+    assert.equal(requests, 1, "a chapter create request must be pending");
+    await React.act(async () => root.render(render("video-b")));
+    assert.equal(doc.querySelector("form"), null, "new video starts without the old draft");
+    await React.act(async () => {
+      resolveResponse({ ok: true, status: 200, json: async () => ({
+        ok: true, chapterId: "old-video-chapter",
+      }) });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(refreshes, 0, "the previous video's response must not refresh the new video");
+    assert.equal(doc.querySelector('[role="status"]'), null,
+      "the previous video's success message must not be shown");
+  });
+});
