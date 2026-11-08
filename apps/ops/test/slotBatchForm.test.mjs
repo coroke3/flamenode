@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
+import { JSDOM } from "jsdom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SlotBatchForm, parseSlotGenerateForm } from "../.test-dist/apps/ops/src/routes/manage/SlotBatchForm.js";
 
@@ -76,4 +77,58 @@ test("MIG-0722 U02b-1: unmounted JSX preserves CURRENT labels without invoking w
   const empty = renderToStaticMarkup(React.createElement(SlotBatchForm, { ...props, totalSlots: 0 }));
   assert.match(empty, /枠がまだないため/);
   assert.doesNotMatch(empty, /<details/);
+});
+
+
+test("MIG-0722 U02b-1: synchronous lock prevents duplicate rapid form submissions", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+    url: "https://flamenode.test/manage/events/ev1/slots",
+  });
+  const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+  const previous = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const prevAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  for (const key of keys) Object.defineProperty(globalThis, key, {
+    configurable: true, writable: true, value: dom.window[key],
+  });
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(dom.window.document.getElementById("root"));
+  try {
+    let completes;
+    const calls = [];
+    const onGenerate = body => {
+      calls.push(body);
+      return new Promise(resolve => { completes = resolve; });
+    };
+    await React.act(async () => root.render(React.createElement(SlotBatchForm, {
+      eventId: "ev1", totalSlots: 0, onGenerate,
+      onClearAvailable: async () => ({ ok: true }),
+    })));
+    const form = dom.window.document.querySelector("form");
+    form.querySelector('[name="start_at"]').value = "2026-11-08T10:00";
+    form.querySelector('[name="end_at"]').value = "2026-11-08T10:30";
+    // Dispatch both submits in one event loop before any React re-render.
+    await React.act(async () => {
+      const submit = () => form.dispatchEvent(new dom.window.Event("submit", {
+        bubbles: true, cancelable: true,
+      }));
+      submit();
+      submit();
+    });
+    assert.equal(calls.length, 1, "no duplicate Hono callback can be sent");
+    assert.deepEqual(calls[0], {
+      mode: "time", start_at: "2026-11-08T10:00",
+      end_at: "2026-11-08T10:30", interval_minutes: 5,
+    });
+    await React.act(async () => completes({ ok: true, message: "生成完了" }));
+    assert.match(dom.window.document.body.textContent, /生成完了/);
+  } finally {
+    await React.act(async () => root.unmount());
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+    globalThis.IS_REACT_ACT_ENVIRONMENT = prevAct;
+    dom.window.close();
+  }
 });

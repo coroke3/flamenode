@@ -97,12 +97,16 @@ export function SlotBatchForm({
   const [mode, setMode] = React.useState<"time" | "count">("time");
   const [interval, setInterval] = React.useState("5");
   const [busy, setBusy] = React.useState(false);
+  const busyRef = React.useRef(false);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
 
   const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
-    if (busy) return;
+    // React state may not commit between two rapid submits; claim the lock
+    // synchronously so one user gesture cannot dispatch duplicate writes.
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -119,12 +123,14 @@ export function SlotBatchForm({
     } catch {
       setError("枠操作中に通信エラーが発生しました。");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
 
   const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busyRef.current) return;
     const parsed = parseSlotGenerateForm(new FormData(event.currentTarget), mode);
     if (!parsed.ok) {
       setError(parsed.message);
@@ -190,7 +196,7 @@ export function SlotBatchForm({
         onClick={() => setConfirmClear(false)} disabled={busy}>キャンセル</button>
       <button type="button" className="fn-btn fn-btn-primary"
         onClick={() => {
-          if (busy) return;
+          if (busyRef.current) return;
           setConfirmClear(false);
           void perform(onClearAvailable, "空き枠を削除しました。");
         }} disabled={busy}>全削除する</button>
