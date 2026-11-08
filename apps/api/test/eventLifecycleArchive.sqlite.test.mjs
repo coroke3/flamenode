@@ -9,10 +9,13 @@ import * as schema from "@flamenode/db/schema";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { eventLifecycleRoutes } from "../src/eventLifecycle/archiveRoute.ts";
 import { originGuardMiddleware, writeGuardMiddleware } from "../src/middleware/writeOrigin.ts";
+import { sessionMiddleware } from "../src/auth/session.ts";
 
 const ADMIN = { id: "u_admin", role: "admin", name: "Admin", is_banned: 0 };
 const SITE = "https://app.flamenode.example";
 const EVENT = "evArchive";
+const SESSION_TOKEN = "11111111-1111-4111-8111-111111111111";
+const VALID_SESSION_COOKIE = "__Secure-authjs.session-token=" + SESSION_TOKEN;
 
 function createAtomicD1(sqlite, timeline, beforeBatch = null) {
   const stats = { batches: 0, statements: 0 };
@@ -105,13 +108,17 @@ function createR2(timeline, { rejectPut = false, hideFirstVerification = false }
   };
 }
 
-function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false, enforceWriteGuard = false, isBanned = 0, tosAccepted = 1 } = {}) {
+function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {}, enforceOrigin = false, enforceWriteGuard = false, enforceSession = false, sessionExpired = false, isBanned = 0, tosAccepted = 1 } = {}) {
   const sqlite = createSqlite();
   const timestamp = Math.floor(Date.now() / 1000) - 100;
   insert(sqlite, "user", {
     id: "u_admin", name: "Admin", discord_id: "d-admin", role,
     created_at: timestamp, is_banned: isBanned, is_tos_accepted: tosAccepted,
   });
+  if (enforceSession) {
+    insert(sqlite, "session", { sessionToken: SESSION_TOKEN, userId: ADMIN.id,
+      expires: Date.now() + (sessionExpired ? -60_000 : 60_000) });
+  }
   // The real migrations already seed the singleton default settings row.
   // Updating it avoids a duplicate primary key and exercises the actual schema.
   const settingsUpdated = sqlite.prepare(`
@@ -143,20 +150,25 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
       allowLocalPreview: () => false,
     }));
   }
-  app.use("*", async (c, next) => {
-    // Test-only session identity. A real session provider is deliberately not faked.
-    c.set("user", { ...ADMIN, role, is_banned: isBanned });
-    if (!enforceWriteGuard) {
-      c.set("db", drizzle(d1, { schema }));
-      c.set("actorSnapshotJsonById", {
-        u_admin: JSON.stringify({
-          discord_id: "d-admin", discord_name: "Admin",
-          x_user_id: null, x_name: null, icon_url: null,
-        }),
-      });
-    }
-    await next();
-  });
+  if (enforceSession) {
+    // Real Auth.js session resolution, no synthetic user injected.
+    app.use("*", sessionMiddleware());
+  } else {
+    app.use("*", async (c, next) => {
+      // Test-only session identity. A real session provider is deliberately not faked.
+      c.set("user", { ...ADMIN, role, is_banned: isBanned });
+      if (!enforceWriteGuard) {
+        c.set("db", drizzle(d1, { schema }));
+        c.set("actorSnapshotJsonById", {
+          u_admin: JSON.stringify({
+            discord_id: "d-admin", discord_name: "Admin",
+            x_user_id: null, x_name: null, icon_url: null,
+          }),
+        });
+      }
+      await next();
+    });
+  }
   if (enforceWriteGuard) {
     // Mirror admin parent ordering: session -> real write identity guard -> DB adapter.
     // writeGuardMiddleware preloads the actor snapshot for the strict audit.
@@ -175,9 +187,9 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
     NEXT_PUBLIC_SITE_URL: SITE,
     ...(r2 ? { BUCKET: bucket } : {}),
   };
-  const request = (eventId = EVENT, body = { event_id: EVENT, confirm: EVENT }, origin = SITE) =>
+  const request = (eventId = EVENT, body = { event_id: EVENT, confirm: EVENT }, origin = SITE, cookie = enforceSession ? VALID_SESSION_COOKIE : null) =>
     app.request("https://app.flamenode.example/api/admin/events/" + eventId, {
-      method: "DELETE", headers: { "content-type": "application/json", ...(origin === null ? {} : { Origin: origin }) },
+      method: "DELETE", headers: { "content-type": "application/json", ...(origin === null ? {} : { Origin: origin }), ...(cookie === null ? {} : { Cookie: cookie }) },
       body: JSON.stringify(body),
     }, env);
   const read = (table, where = "") =>
