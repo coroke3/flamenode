@@ -197,6 +197,35 @@ test("inspectSupportedImageUpload rejects broken PNG without IHDR dimensions", (
   assert.equal(inspectSupportedImageUpload(broken.buffer), null);
 });
 
+test("inspectSupportedImageUpload rejects PNG without complete image data and IEND", () => {
+  const valid = buildPng({ width: 128, height: 128 });
+  // IHDR is complete and declares valid dimensions, but is not a PNG image.
+  const headerOnly = valid.slice(0, 33);
+  const idatLength = new DataView(valid.buffer).getUint32(33);
+  const endOfIdat = 33 + 12 + idatLength;
+  const noImageData = new Uint8Array([
+    ...valid.subarray(0, 33),
+    ...valid.subarray(endOfIdat),
+  ]);
+  const noEnd = valid.slice(0, -12);
+  const truncatedEnd = valid.slice(0, -1);
+  const trailingByte = new Uint8Array([...valid, 0]);
+  const overflowedIdat = valid.slice();
+  overflowedIdat[36] = 0xff; // IDAT length field exceeds the remaining bytes.
+
+  for (const [name, broken] of [
+    ["IHDR only", headerOnly],
+    ["missing IDAT", noImageData],
+    ["missing IEND", noEnd],
+    ["truncated IEND", truncatedEnd],
+    ["trailing bytes", trailingByte],
+    ["oversized IDAT chunk", overflowedIdat],
+  ]) {
+    assert.equal(inspectSupportedImageUpload(broken.buffer), null, name);
+    assert.equal(validateIconImageUpload({ buffer: broken.buffer }).ok, false, name);
+  }
+});
+
 test("inspectSupportedImageUpload accepts lossy VP8 WebP from canvas-like offsets", () => {
   const lossy = buildWebpLossy({ width: 256, height: 256 });
   assert.deepEqual(inspectSupportedImageUpload(lossy.buffer), {

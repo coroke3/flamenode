@@ -2,6 +2,7 @@ import * as React from "react";
 import type { ChapterItem } from "@flamenode/contracts";
 import { AppLink } from "./AppLink.js";
 import { formatRelative } from "./format.js";
+import { videoPageHref } from "./media.js";
 
 /** Chapter comment rows, identical markup in CURRENT dashboard/page.tsx and dashboard/library/page.tsx. */
 export function ChapterItems({ chapters }: { chapters: readonly ChapterItem[] }): React.ReactElement {
@@ -10,7 +11,7 @@ export function ChapterItems({ chapters }: { chapters: readonly ChapterItem[] })
       {chapters.map((chapter) => (
         <AppLink
           key={chapter.id}
-          href={`/${chapter.youtube_video_id?.trim() || chapter.video_id}`}
+          href={videoPageHref({ id: chapter.video_id, youtube_video_id: chapter.youtube_video_id })}
           className="fn-card fn-stack-item"
         >
           <div className="fn-stack-item-head">
