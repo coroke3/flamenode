@@ -338,6 +338,40 @@ test("SA-058 U03s: admin role downgrade, account ban or TOS reversal after scope
   }
 });
 
+test("SA-058 U03z: expiring exception after middleware read denies before scoped write",async()=>{
+  for(const mode of ["read_only","disabled_feature"]){
+    let expired=false;
+    const feature="manage_slot_create";
+    const s=setup({mode:mode==="read_only"?"read_only":"normal",onFirst:(sql,sqlite)=>{
+      // The initial middleware CostGuard already received its ALLOW row.
+      // Expire the same exception BEFORE the event/staff/slots scope read.
+      if(expired || !sql.includes("FROM system_settings WHERE id"))return;
+      expired=true;
+      sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=? WHERE id='default'")
+        .run(Math.floor(Date.now()/1000)-1);
+    }});
+    try{
+      const now=Math.floor(Date.now()/1000);
+      s.sqlite.prepare(
+        "UPDATE system_settings SET cost_guard_exception_until=?,"+
+        "cost_guard_exception_features_json=?,disabled_features_json=? WHERE id='default'"
+      ).run(now+600,JSON.stringify([feature]),
+        mode==="disabled_feature"?JSON.stringify([feature]):null);
+      const denied=await s.post(countInput(3,1));
+      assert.equal(expired,true,"the middleware->scope expiry hook must execute");
+      assert.equal(denied.status,503,mode+" "+await denied.clone().text());
+      assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+      assert.equal((await denied.json()).reason,
+        mode==="read_only"?"maintenance_mode":"cost_guard_blocked");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,0,"deny before any D1 mutation batch");
+      assert.equal(s.stats.reads,2,"middleware CostGuard and scope SELECT only");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03x: CostGuard revocation after middleware SELECT but before scoped SELECT denies without a D1 batch",async()=>{
   const scenarios=[
     {kind:"read-only",reason:"maintenance_mode"},
