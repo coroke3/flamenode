@@ -132,3 +132,62 @@ test("MIG-0722 U02b-1: synchronous lock prevents duplicate rapid form submission
     dom.window.close();
   }
 });
+
+test("MIG-0722 U02b-4: stale batch result after event change is ignored on success and error", async () => {
+  for (const rejected of [false, true]) {
+    const dom = new JSDOM("<!doctype html><div id='root'></div>", {
+      url: "https://flamenode.test/manage/events/old/slots",
+    });
+    const keys = ["window", "document", "Element", "HTMLElement", "Node", "navigator", "FormData"];
+    const old = new Map(keys.map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+    const priorAct = globalThis.IS_REACT_ACT_ENVIRONMENT;
+    for (const k of keys) Object.defineProperty(globalThis, k, {
+      configurable: true, writable: true, value: dom.window[k],
+    });
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    const { createRoot } = await import("react-dom/client");
+    const root = createRoot(dom.window.document.getElementById("root"));
+    try {
+      let settle;
+      let writes = 0, refreshed = 0;
+      const onGenerate = () => {
+        writes++;
+        return new Promise((resolve, reject) => { settle = rejected ? reject : resolve; });
+      };
+      const onClearAvailable = async () => ({ ok: true });
+      const onChanged = () => { refreshed++; };
+      const view = eventId => React.createElement(SlotBatchForm, {
+        eventId, totalSlots: 0, onGenerate, onClearAvailable, onChanged,
+      });
+      await React.act(async () => root.render(view("old-event")));
+      const form = dom.window.document.querySelector("form");
+      form.querySelector('[name="start_at"]').value = "2026-11-08T10:00";
+      form.querySelector('[name="end_at"]').value = "2026-11-08T10:30";
+      await React.act(async () => form.dispatchEvent(new dom.window.Event("submit", {
+        bubbles: true, cancelable: true,
+      })));
+      assert.equal(writes, 1);
+      await React.act(async () => root.render(view("new-event")));
+      await React.act(async () => {
+        if (rejected) settle(new Error("OLD-ERROR"));
+        else settle({ ok: true, message: "OLD-SUCCESS" });
+      });
+      assert.equal(refreshed, 0, "old write cannot refresh the new event");
+      assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS|通信エラー/);
+      const clear = [...dom.window.document.querySelectorAll("button")]
+        .find(button => button.textContent.trim() === "空き枠を全削除");
+      await React.act(async () => clear.click());
+      assert.ok(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'));
+      await React.act(async () => root.render(view("third-event")));
+      assert.equal(dom.window.document.querySelector('[aria-label="空き枠の全削除確認"]'), null);
+    } finally {
+      await React.act(async () => root.unmount());
+      for (const [key, descriptor] of old) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+      globalThis.IS_REACT_ACT_ENVIRONMENT = priorAct;
+      dom.window.close();
+    }
+  }
+});

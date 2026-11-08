@@ -101,17 +101,31 @@ export function SlotBatchForm({
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  // Drop stale writes and confirmations after switching management events.
+  const contextRef = React.useRef({ eventId, onGenerate, onClearAvailable, onChanged });
+  contextRef.current = { eventId, onGenerate, onClearAvailable, onChanged };
+  React.useEffect(() => {
+    setConfirmClear(false);
+    setError(null);
+    setNotice(null);
+  }, [eventId]);
 
   const perform = async (action: () => Promise<SlotMutationResult>, success: string) => {
     // React state may not commit between two rapid submits; claim the lock
     // synchronously so one user gesture cannot dispatch duplicate writes.
     if (busyRef.current) return;
     busyRef.current = true;
+    const started = contextRef.current;
+    const stillCurrent = () => contextRef.current.eventId === started.eventId &&
+      contextRef.current.onGenerate === started.onGenerate &&
+      contextRef.current.onClearAvailable === started.onClearAvailable &&
+      contextRef.current.onChanged === started.onChanged;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
       const result = await action();
+      if (!stillCurrent()) return;
       if (!result.ok) {
         setError(result.message || "枠操作に失敗しました。");
       } else {
@@ -121,7 +135,7 @@ export function SlotBatchForm({
         onChanged?.();
       }
     } catch {
-      setError("枠操作中に通信エラーが発生しました。");
+      if (stillCurrent()) setError("枠操作中に通信エラーが発生しました。");
     } finally {
       busyRef.current = false;
       setBusy(false);
