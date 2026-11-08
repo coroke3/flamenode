@@ -198,7 +198,13 @@ test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted 
     if (id === "SA-054") assert.equal(normal.setup.length, 2, "published major version and actor acceptance");
   }
   assert.equal(JSON.parse(scenarios.get("SA-054").kinds.normal(1, "safe").body).confirm, "TERMS");
-  assert.equal(JSON.parse(scenarios.get("SA-051").kinds.limit(1, "safe").body).body_markdown.length, 2000);
+  const createTermsLimit = JSON.parse(scenarios.get("SA-051").kinds.limit(1, "safe").body);
+  const updateTermsLimit = JSON.parse(scenarios.get("SA-052").kinds.limit(1, "safe").body);
+  assert.equal(createTermsLimit.version_label.length, 80, "terms version max per draftSchema");
+  assert.equal(createTermsLimit.body_markdown.length, 40000, "terms markdown max per draftSchema");
+  assert.equal(updateTermsLimit.version_label.length, 80);
+  assert.equal(updateTermsLimit.body_markdown.length, 40000);
+  assert.equal(JSON.parse(scenarios.get("SA-054").kinds.limit(1, "safe").body).content.length, 1000, "reaccept broadcast content cap");
   const xRequestLimit = JSON.parse(scenarios.get("SA-099").kinds.limit(1, "safe").body).x_id;
   const xRequestNormal = JSON.parse(scenarios.get("SA-099").kinds.normal(1, "safe").body).x_id;
   assert.match(xRequestLimit, /^[a-z0-9_]{20}$/i, "SA-099 limit must reach the accepted 20-character X handle boundary");
