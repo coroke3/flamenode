@@ -145,3 +145,34 @@ test("CURRENT UPDATE chooses editable non-PK columns in schema order and builds 
   assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { access_token: "x" }), /column_not_editable/);
   assert.throws(() => prepareSpreadsheetUpdate(ctx, before, { invalid: "x" }), /unknown_column/);
 });
+
+
+test("unmounted SQL planners bind every value and enforce optimistic snapshots", async () => {
+  const { buildSpreadsheetInsertSql, buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+    { name: "count", type: "INTEGER", notNull: false, pk: 0 },
+  ];
+  const ctx = { def: resolveSpreadsheetTableDef("slots", true), primaryKeys: ["id"], columns, columnNames: columns.map(x => x.name) };
+  const before = { id: "row-1", title: "previous", count: 3 };
+  const hostile = "'); DROP TABLE slots; --";
+  const ins = buildSpreadsheetInsertSql(ctx, { id: "row-2", title: hostile, count: "5" });
+  assert.match(ins.statement, /^INSERT INTO "slots" \("id", "title", "count"\) VALUES \(\?, \?, \?\)$/);
+  assert.deepEqual(ins.binds, ["row-2", hostile, "5"]);
+  assert.ok(!ins.statement.includes(hostile));
+  const update = buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, before, { title: hostile });
+  assert.match(update.statement, /^UPDATE "slots" SET "title" = \? WHERE "id" = \? AND "id" IS \? AND "title" IS \? AND "count" IS \?$/);
+  assert.deepEqual(update.binds, [hostile, "row-1", "row-1", "previous", 3]);
+  assert.deepEqual(update.after, { id: "row-1", title: hostile, count: 3 });
+  const deletion = buildSpreadsheetDeleteSql(ctx, { id: "row-1" }, before);
+  assert.match(deletion.statement, /^DELETE FROM "slots" WHERE "id" = \? AND "id" IS \? AND "title" IS \? AND "count" IS \?$/);
+  assert.deepEqual(deletion.binds, ["row-1", "row-1", "previous", 3]);
+  assert.deepEqual(before, { id: "row-1", title: "previous", count: 3 });
+  assert.throws(() => buildSpreadsheetInsertSql(ctx, { title: "missing-id" }), /missing_required_column/);
+  assert.throws(() => buildSpreadsheetUpdateSql(ctx, {}, before, { title: "changed" }), /missing_primary_key/);
+  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("videos", true) }, {id:"row-1"}, before), /physical_delete_forbidden/);
+  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, {id:"row-1"}, before), /table_readonly/);
+  assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, { ...before, count: { unexpected: true } }, {title:"changed"}), /invalid_snapshot/);
+});
