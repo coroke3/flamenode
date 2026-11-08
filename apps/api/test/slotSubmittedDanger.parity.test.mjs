@@ -543,3 +543,79 @@ test("SA-056/057 U04j: artificial parent session absence or forged cookie cannot
     }
   }
 });
+
+test("SA-056/057 U04l: CostGuard revocation between middleware and scoped snapshot denies before D1 batch",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const policy of ["read-only","disabled-feature","deleted-settings"]){
+      let switched=false;
+      const s=setup({kind,onFirst:(sql,sqlite)=>{
+        // D1 first() has materialized the allowed middleware settings row,
+        // but the bound event/staff/anchor SELECT has not yet started.
+        if(switched||!sql.includes("FROM system_settings WHERE id"))return;
+        switched=true;
+        if(policy==="read-only")
+          sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(policy==="disabled-feature")
+          sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+            .run(JSON.stringify(["manage_slot_update"]));
+        if(policy==="deleted-settings")
+          sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+      }});
+      try{
+        const r=await s.post();
+        assert.equal(switched,true,kind+" "+policy+" post-middleware injection");
+        assert.equal(r.status,503,kind+" "+policy+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        const json=await r.json();
+        assert.equal(json.reason,policy==="read-only"?"maintenance_mode":"cost_guard_blocked");
+        for(const id of ["s0","s1"])assert.equal(s.row("slots",id).status,"submitted");
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,0,"scoped CostGuard prevents mutation preparation");
+        assert.equal(s.submittedReads.length,1,"only scoped anchor read");
+        assert.equal(s.stats.reads,2,"only parent CostGuard + scope SELECT");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U04l: post-anchor CostGuard revocation rolls back slot, video, strict audits and Outbox",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const policy of ["read-only","disabled-feature","deleted-settings","expired-exception"]){
+      let switched=false;
+      const s=setup({kind,mode:policy==="expired-exception"?"read_only":"normal",onFirst:(sql,sqlite)=>{
+        if(switched||!sql.includes("AS anchor_json"))return;
+        switched=true;
+        if(policy==="read-only")
+          sqlite.prepare("UPDATE system_settings SET operation_mode='read_only' WHERE id='default'").run();
+        if(policy==="disabled-feature")
+          sqlite.prepare("UPDATE system_settings SET disabled_features_json=? WHERE id='default'")
+            .run(JSON.stringify(["manage_slot_update"]));
+        if(policy==="deleted-settings")
+          sqlite.prepare("DELETE FROM system_settings WHERE id='default'").run();
+        if(policy==="expired-exception")
+          sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=? WHERE id='default'")
+            .run(Math.floor(Date.now()/1000)-1);
+      }});
+      try{
+        if(policy==="expired-exception")
+          s.sqlite.prepare("UPDATE system_settings SET cost_guard_exception_until=?,cost_guard_exception_features_json=? WHERE id='default'")
+            .run(Math.floor(Date.now()/1000)+600,JSON.stringify(["manage_slot_update"]));
+        const r=await s.post();
+        assert.equal(switched,true,kind+" "+policy+" post-anchor injection");
+        assert.equal(r.status,409,kind+" "+policy+" "+await r.clone().text());
+        assert.equal(r.headers.get("Cache-Control"),"private, no-store");
+        for(const id of ["s0","s1"]){
+          const row=s.row("slots",id);
+          assert.equal(row.status,"submitted");
+          assert.equal(row.video_id,"vid");
+          assert.equal(row.version,1);
+        }
+        assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+        assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+        assert.equal(s.stats.batches,1,"atomic policy assertion rejects after read");
+        assert.ok(s.stats.reads<=4,"CostGuard plus three scoped reads only");
+      }finally{s.sqlite.close();}
+    }
+  }
+});
