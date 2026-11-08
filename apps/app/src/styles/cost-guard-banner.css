@@ -1,0 +1,17 @@
+.cgb-banner {
+  border-bottom: 1px solid;
+  font-size: 12px;
+}
+
+.cgb-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.cgb-reason {
+  font-style: normal;
+}

@@ -5,3 +5,4 @@ export * from "./audit.ts";
 export * from "./xidMerges.ts";
 
 export * from "./ops.ts";
+export * from "./termsNotifications.ts";
