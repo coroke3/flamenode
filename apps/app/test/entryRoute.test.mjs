@@ -202,3 +202,16 @@ test("continuation: session expiry or ban immediately removes authenticated even
     }
   }
 });
+
+
+test("continuation access denial is scoped to the account that initiated the read", async () => {
+  const { continuationAccessForUser } = await import("../.test-dist/apps/app/src/routes/entry/EntryIndex.js");
+  for (const status of ["anonymous", "banned"]) {
+    assert.equal(continuationAccessForUser({ userId: "account-a", status }, "account-a"), status);
+    assert.equal(continuationAccessForUser({ userId: "account-a", status }, "account-b"), null,
+      "stale auth denial must not hide a different account's entry page");
+    assert.equal(continuationAccessForUser({ userId: "account-a", status }, null), null,
+      "missing user must not adopt a previous authenticated account's denial");
+  }
+  assert.equal(continuationAccessForUser(null, "account-a"), null);
+});
