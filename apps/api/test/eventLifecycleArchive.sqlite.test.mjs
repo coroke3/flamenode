@@ -67,9 +67,9 @@ function createAtomicD1(sqlite, timeline, beforeBatch = null) {
   };
 }
 
-function createR2(timeline, { rejectPut = false, hideFirstVerification = false } = {}) {
-  let body = null;
-  let etag = null;
+function createR2(timeline, { rejectPut = false, hideFirstVerification = false, seedManifest = null } = {}) {
+  let body = seedManifest === null ? null : JSON.stringify(seedManifest);
+  let etag = seedManifest === null ? null : "etag-seed";
   let version = 0;
   let verificationHidden = false;
   const key = "visibility/blocked-entities.v1.json";
@@ -493,5 +493,69 @@ test("MIG-0652 U04 SQLite T20: Auth.js session -> Origin -> write identity -> ar
   const fence = allowed.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
   assert.ok(fence?.fence_token);
   assert.equal(allowed.bucket.manifest?.entities.find((row) => row.entity_id === EVENT)?.fence_token, fence.fence_token);
+});
+
+test("MIG-0652 U04 SQLite T21: existing unrelated visibility fences survive both successful archive and failed D1 compensation", async () => {
+  const foreignEntities = [
+    { entity_type: "event", entity_id: "evUnrelated", fence_token: "vf-foreign-event", blocked_at: 1000, reason: "unrelated" },
+    { entity_type: "video", entity_id: "videoUnrelated", fence_token: "vf-foreign-video", blocked_at: 1001, reason: "unrelated" },
+  ];
+  const seedManifest = {
+    schema_version: 1, revision: 9, generated_at: 1001,
+    entities: foreignEntities,
+  };
+  const retained = (bucket) => {
+    assert.ok(bucket.manifest, "seeded manifest must not disappear");
+    for (const row of foreignEntities) {
+      assert.deepEqual(
+        bucket.manifest.entities.find((entry) => entry.entity_type === row.entity_type && entry.entity_id === row.entity_id),
+        row,
+        "archive must preserve the full unrelated R2 entry, including its fencing token",
+      );
+    }
+  };
+
+  const success = setup({ r2Options: { seedManifest } });
+  const oldCache = globalThis.caches;
+  globalThis.caches = { default: { delete: async () => true } };
+  let okResponse;
+  try { okResponse = await success.request(); } finally { globalThis.caches = oldCache; }
+  assert.equal(okResponse.status, 200);
+  assert.equal((await okResponse.json()).ok, true);
+  retained(success.bucket);
+  const ownFence = success.read("public_visibility_fences", "WHERE entity_id = '" + EVENT + "'")[0];
+  assert.ok(ownFence?.fence_token);
+  assert.equal(
+    success.bucket.manifest.entities.find((row) => row.entity_type === "event" && row.entity_id === EVENT)?.fence_token,
+    ownFence.fence_token,
+  );
+  assert.equal(success.bucket.manifest.entities.length, foreignEntities.length + 1);
+  assert.equal(success.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "private");
+  assert.equal(success.d1.stats.batches, 1);
+
+  const failure = setup({
+    r2Options: { seedManifest },
+    beforeBatch: (sqlite) => sqlite.exec(
+      "CREATE TRIGGER reject_archive_audit_21 BEFORE INSERT ON audit_logs " +
+      "BEGIN SELECT RAISE(ABORT, 'T21 audit failure'); END;",
+    ),
+  });
+  const oldError = console.error;
+  console.error = () => {};
+  let failedResponse;
+  try { failedResponse = await failure.request(); } finally { console.error = oldError; }
+  assert.equal(failedResponse.status, 500);
+  assert.equal((await failedResponse.json()).ok, false);
+  assert.equal(failure.d1.stats.batches, 1);
+  retained(failure.bucket);
+  assert.equal(failure.bucket.manifest.entities.length, foreignEntities.length);
+  assert.equal(failure.bucket.manifest.entities.some((row) => row.entity_type === "event" && row.entity_id === EVENT), false);
+  assert.equal(failure.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(failure.read("public_visibility_fences").length, 0);
+  assert.equal(failure.read("audit_logs").length, 0);
+  assert.equal(failure.read("static_rebuild_queue").length, 0);
+  assert.deepEqual(failure.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+  assert.ok(failure.timeline.slice(failure.timeline.indexOf("d1.batch") + 1).includes("r2.put"),
+    "compensation must CAS-remove only its own uncommitted fence");
 });
 
