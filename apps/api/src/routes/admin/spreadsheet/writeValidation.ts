@@ -258,3 +258,49 @@ export function buildSpreadsheetDeleteSql(
     binds: [...key.binds, ...snapshot.binds],
   };
 }
+
+
+/** CURRENT query.ts foreign-key validation: plan 99-bound-value D1 lookups. */
+export interface SpreadsheetForeignKey {
+  column: string;
+  referencedTable: string;
+  referencedColumn: string;
+}
+export interface SpreadsheetForeignKeyLookup extends SpreadsheetSqlPlan {
+  values: readonly string[];
+}
+export function buildSpreadsheetForeignKeyLookups(
+  foreignKeys: readonly SpreadsheetForeignKey[],
+  rows: readonly Record<string, string | null>[],
+): SpreadsheetForeignKeyLookup[] {
+  const lookups: SpreadsheetForeignKeyLookup[] = [];
+  for (const foreignKey of foreignKeys) {
+    // SQL identifiers originate from PRAGMA foreign_key_list, never request JSON.
+    const reference = quoteSpreadsheetIdentifier(foreignKey.referencedColumn);
+    const table = quoteSpreadsheetIdentifier(foreignKey.referencedTable);
+    const values = [...new Set(rows
+      .map(row => row[foreignKey.column])
+      .filter((value): value is string => value != null && value !== ""))];
+    for (let start = 0; start < values.length; start += 99) {
+      const chunk = values.slice(start, start + 99);
+      const placeholders = chunk.map(() => "?").join(", ");
+      lookups.push({
+        statement: "SELECT " + reference + " AS value FROM " + table + " WHERE " + reference + " IN (" + placeholders + ")",
+        binds: chunk,
+        values: chunk,
+      });
+    }
+  }
+  return lookups;
+}
+
+/** Reject any missing FK in a lookup's result, before a write is submitted. */
+export function assertSpreadsheetForeignKeyLookup(
+  lookup: SpreadsheetForeignKeyLookup,
+  returned: readonly { value: string | number | null }[],
+): void {
+  const found = new Set(returned.map(row => String(row.value)));
+  if (lookup.values.some(value => !found.has(String(value)))) {
+    throw new Error("foreign_key_violation");
+  }
+}
