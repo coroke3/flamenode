@@ -149,8 +149,14 @@ test("MIG-0722 U02b-6: EventSlotsView composes injected forms and actions only w
   assert.match(injected, /空き枠を全削除/);
   assert.match(injected, /すべて選択/);
   assert.match(injected, /削除/);
-  assert.doesNotMatch(injected, /強制解放|作品のみ解放/,
-    "an injected flag cannot override server-reported isAdmin=false");
+  assert.match(injected, /強制解放|作品のみ解放/,
+    "CURRENT grants submitted-slot actions to authorized event.slots staff, not only admins");
+  const noSubmittedPermission = render(React.createElement(EventSlotsView, {
+    eventId: "ev id", status: "all", data: current,
+    writeActions: { ...writeActions, canManageSubmittedSlots: false },
+  }));
+  assert.doesNotMatch(noSubmittedPermission, /強制解放|作品のみ解放/,
+    "submitted actions require an explicit injected write capability");
   const admin = render(React.createElement(EventSlotsView, {
     eventId: "ev id", status: "all", data: data({ isAdmin: true }), writeActions,
   }));
@@ -499,5 +505,46 @@ test("MIG-0722 U02b-8: permission-loss refetch hides previous private slots and 
     await React.act(async () => replyRevoked(new Response(null, { status: 403 })));
     assert.match(dom.window.document.body.textContent, /権限がありません/);
     assert.doesNotMatch(dom.window.document.body.textContent, /User <name>|すべて選択|一括生成/);
+  });
+});
+
+test("MIG-0722 U02b-9: submitted-slot capability revocation invalidates pending and in-flight results", async () => {
+  await withSlotDom(async (dom, root) => {
+    const slots = [slot("submitted", { status: "submitted", event_id: "ev id" })];
+    const calls = [];
+    let settle, changed = 0;
+    const onAction = op => {
+      calls.push(op);
+      return new Promise(resolve => { settle = resolve; });
+    };
+    const onChanged = () => { changed++; };
+    const view = permitted => React.createElement(MemoryRouter, null,
+      React.createElement(SlotList, {
+        eventId: "ev id", slots, partGapMinutes: 15, parts: [], onAction, onChanged,
+        canManageSubmittedSlots: permitted,
+      }));
+    const button = label => [...dom.window.document.querySelectorAll("button")]
+      .find(element => element.textContent.trim() === label);
+
+    await React.act(async () => root.render(view(true)));
+    assert.ok(button("強制解放"), "authorized event.slots staff has submitted actions");
+    await React.act(async () => button("強制解放").click());
+    assert.ok(dom.window.document.querySelector('[aria-label="枠操作の確認"]'));
+    await React.act(async () => root.render(view(false)));
+    assert.equal(dom.window.document.querySelector('[aria-label="枠操作の確認"]'), null,
+      "revoking permission invalidates an unconfirmed destructive action");
+    assert.equal(button("強制解放"), undefined);
+    assert.equal(calls.length, 0, "unconfirmed operation was never issued");
+
+    await React.act(async () => root.render(view(true)));
+    await React.act(async () => button("強制解放").click());
+    await React.act(async () => button("実行する").click());
+    assert.deepEqual(calls, [{ kind: "force-release-submitted", slotId: "submitted" }]);
+    assert.equal(typeof settle, "function");
+    await React.act(async () => root.render(view(false)));
+    await React.act(async () => settle({ ok: true, message: "OLD-PERMISSION-SUCCESS" }));
+    assert.equal(changed, 0, "stale callback must not refresh a revoked context");
+    assert.doesNotMatch(dom.window.document.body.textContent, /OLD-PERMISSION-SUCCESS/);
+    assert.equal(button("強制解放"), undefined);
   });
 });

@@ -98,16 +98,18 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
   const [pending, setPending] = React.useState<{ operation: SlotListOperation;
     eventId: string; slots: readonly ManageSlotRow[];
     onAction: typeof onAction;
-    context: { eventId: string; slots: readonly ManageSlotRow[]; onAction: typeof onAction } } | null>(null);
+    context: { eventId: string; slots: readonly ManageSlotRow[];
+      onAction: typeof onAction; canManageSubmittedSlots: boolean } } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const busyRef = React.useRef(false);
   // Always compare against the latest render, not the stale async callback closure.
-  const contextRef = React.useRef({ eventId, slots, onAction });
+  const contextRef = React.useRef({ eventId, slots, onAction, canManageSubmittedSlots });
   // Capture context generations, not just values: reject A -> B -> A stale writes.
   if (contextRef.current.eventId !== eventId ||
       contextRef.current.slots !== slots ||
-      contextRef.current.onAction !== onAction) {
-    contextRef.current = { eventId, slots, onAction };
+      contextRef.current.onAction !== onAction ||
+      contextRef.current.canManageSubmittedSlots !== canManageSubmittedSlots) {
+    contextRef.current = { eventId, slots, onAction, canManageSubmittedSlots };
   }
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
@@ -120,7 +122,7 @@ export function SlotList({ eventId, slots, partGapMinutes, parts, onAction,
     setLabel("");
     setError(null);
     setNotice(null);
-  }, [eventId, slots, onAction]);
+  }, [eventId, slots, onAction, canManageSubmittedSlots]);
   React.useEffect(() => () => {
     // Even a matching A context after remount cannot accept pre-unmount results.
     contextRef.current = { ...contextRef.current };

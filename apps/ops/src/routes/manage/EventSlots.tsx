@@ -36,6 +36,9 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged 
     typeof writeActions.onGenerate === "function" &&
     typeof writeActions.onClearAvailable === "function" &&
     typeof writeActions.onAction === "function" ? writeActions : null;
+  // CURRENT permits global admins AND event.slots staff to use submitted-slot
+  // operations. Authorized GET grants event access; every future Hono write
+  // still requires independent server-side authorization and audit.
   const selected = normalizeSlotFilter(status);
   const url = "/manage/events/" + encodeURIComponent(eventId);
   return <div className="fn-public-container fn-page">
@@ -62,7 +65,7 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged 
       <SlotList eventId={eventId} slots={data.slots}
         partGapMinutes={data.event.slot_part_gap_minutes} parts={data.event.parts}
         onAction={writes?.onAction} onChanged={onChanged}
-        canManageSubmittedSlots={Boolean(data.isAdmin && writes?.canManageSubmittedSlots)} />
+        canManageSubmittedSlots={Boolean(writes?.canManageSubmittedSlots)} />
       {data.atLimit && <p role="status">最大500件まで表示しています。条件を絞り込んでください。</p>}
       {data.total === 0 && !writes && <p>枠の追加機能は移行中です。</p>}
     </section>
