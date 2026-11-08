@@ -63,10 +63,11 @@ function createAtomicD1(sqlite, timeline, beforeBatch = null) {
   };
 }
 
-function createR2(timeline) {
+function createR2(timeline, { rejectPut = false, hideFirstVerification = false } = {}) {
   let body = null;
   let etag = null;
   let version = 0;
+  let verificationHidden = false;
   const key = "visibility/blocked-entities.v1.json";
   return {
     get manifest() { return body === null ? null : JSON.parse(body); },
@@ -74,6 +75,11 @@ function createR2(timeline) {
       assert.equal(path, key);
       timeline.push("r2.get");
       if (body === null) return null;
+      if (hideFirstVerification && !verificationHidden) {
+        verificationHidden = true;
+        // Simulate a stale confirmation read immediately after a successful PUT.
+        return null;
+      }
       return {
         size: Buffer.byteLength(body),
         etag,
@@ -83,6 +89,7 @@ function createR2(timeline) {
     async put(path, next, options) {
       assert.equal(path, key);
       timeline.push("r2.put");
+      if (rejectPut) return null;
       const condition = options?.onlyIf;
       if (condition instanceof Headers) {
         assert.equal(condition.get("If-None-Match"), "*");
@@ -97,7 +104,7 @@ function createR2(timeline) {
   };
 }
 
-function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal" } = {}) {
+function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode = "normal", r2Options = {} } = {}) {
   const sqlite = createSqlite();
   const timestamp = Math.floor(Date.now() / 1000) - 100;
   insert(sqlite, "user", {
@@ -126,7 +133,7 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
   });
   const timeline = [];
   const d1 = createAtomicD1(sqlite, timeline, beforeBatch);
-  const bucket = createR2(timeline);
+  const bucket = createR2(timeline, r2Options);
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", { ...ADMIN, role });
@@ -263,3 +270,40 @@ test("MIG-0652 U04 SQLite T13: forged confirmation and absent event cannot mutat
   }
 });
 
+
+test("MIG-0652 U04 SQLite T14: R2 CAS rejection refuses archive before D1 and leaves no fence", async () => {
+  const f = setup({ r2Options: { rejectPut: true } });
+  const oldError = console.error;
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally { console.error = oldError; }
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).ok, false);
+  assert.equal(f.d1.stats.batches, 0);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+  assert.equal(f.bucket.manifest, null);
+  assert.ok(f.timeline.includes("r2.put"), "CAS must have been attempted");
+  assert.ok(!f.timeline.includes("d1.batch"));
+});
+
+test("MIG-0652 U04 SQLite T15: failed R2 confirmation triggers compensation without D1 mutation", async () => {
+  const f = setup({ r2Options: { hideFirstVerification: true } });
+  const oldError = console.error;
+  console.error = () => {};
+  let response;
+  try { response = await f.request(); } finally { console.error = oldError; }
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).ok, false);
+  assert.equal(f.d1.stats.batches, 0);
+  assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+  assert.equal(f.read("audit_logs").length, 0);
+  assert.equal(f.read("static_rebuild_queue").length, 0);
+  assert.equal(f.read("public_visibility_fences").length, 0);
+  assert.equal(f.bucket.manifest?.entities.some((e) => e.entity_id === EVENT), false);
+  assert.deepEqual(f.timeline.slice(0, 3), ["r2.get", "r2.put", "r2.get"]);
+  assert.ok(f.timeline.filter((op) => op === "r2.put").length >= 2, "compensation should CAS-release the uncommitted manifest entry");
+  assert.ok(!f.timeline.includes("d1.batch"));
+});
