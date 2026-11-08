@@ -21,6 +21,7 @@ import { parseAuditDiff } from "@/lib/audit/diff";
 import {
   buildAuditViewHref,
   MAX_AUDIT_LIMIT,
+  readAuditActorFilter,
   readAuditLimit,
   readAuditQueryValue,
   readAuditViewMode,
@@ -85,7 +86,7 @@ export default async function AdminAuditPage({
   const viewMode = readAuditViewMode(sp.view);
   const tableFilter = readAuditQueryValue(sp.table);
   const operationFilter = readAuditQueryValue(sp.operation).toUpperCase();
-  const actorFilter = readAuditQueryValue(sp.actor ?? sp.operator);
+  const actorFilter = readAuditActorFilter(sp.actor, sp.operator);
   const recordFilter = readAuditQueryValue(sp.record);
   const restoreStatusFilter = readAuditQueryValue(sp.restore_status);
   const sinceFilter = readAuditQueryValue(sp.since);
