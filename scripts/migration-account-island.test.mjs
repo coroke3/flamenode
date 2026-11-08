@@ -61,6 +61,34 @@ async function setup(routes, props = {}) {
   return { fetchImpl, store, ...view };
 }
 
+test("disposed account store cannot restart or register an orphaned Active X listener", async () => {
+  let fetchCalls = 0;
+  let activeXRegistrations = 0;
+  const originalAddEventListener = window.addEventListener;
+  const store = createAccountStore({
+    fetchImpl: async () => {
+      fetchCalls++;
+      return json(presenceIn);
+    },
+  });
+  store.dispose();
+  window.addEventListener = function (type, ...args) {
+    if (type === ACTIVE_X_CHANGED_EVENT) activeXRegistrations++;
+    return originalAddEventListener.call(this, type, ...args);
+  };
+  try {
+    store.start();
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    await flush();
+    assert.equal(activeXRegistrations, 0, "disposed stores must never register global listeners");
+    assert.equal(fetchCalls, 0, "disposed stores must never issue requests");
+  } finally {
+    window.addEventListener = originalAddEventListener;
+  }
+});
+
 test("logged out: join link keeps the current path as ?next; loading shows a status placeholder first", async () => {
   assert.equal(entryHrefFor("/about"), "/entry?next=%2Fabout");
   assert.equal(entryHrefFor("/entry"), "/entry");
@@ -100,6 +128,140 @@ test("network failure and a non-ok status are unavailable too; request is no-sto
   const b = await setup({ "/api/account/summary?view=presence": () => json({}, 500) });
   assert.ok(button(b.container, "ログイン状態を再確認"));
   await b.unmount();
+});
+
+test("malformed successful JSON does not leave presence or details loading unresolved", async () => {
+  for (const malformed of [null, [], "unexpected", 123, true]) {
+    const presence = await setup({
+      "/api/account/summary?view=presence": json(malformed),
+    });
+    assert.ok(button(presence.container, "ログイン状態を再確認"), String(malformed));
+    assert.equal(presence.store.getState().loading, false);
+    assert.equal(presence.store.getState().unavailable, true);
+    await presence.unmount();
+
+    const details = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(details.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(details.store.getState().detailsLoading, false, String(malformed));
+    assert.equal(details.store.getState().detailsUnavailable, true, String(malformed));
+    assert.equal(details.store.getState().details, null);
+    assert.ok(button(details.container, "再試行"));
+    await details.unmount();
+  }
+});
+
+test("incomplete 2xx RH-001 objects remain retryable, not logged-out or authorized", async () => {
+  for (const malformed of [
+    {}, { loggedIn: "false" }, { loggedIn: true }, { loggedIn: true, displayName: "A" },
+    { ...presenceIn, view: "details" }, { loggedIn: false }, { loggedIn: false, view: null },
+  ]) {
+    const v = await setup({ "/api/account/summary?view=presence": json(malformed) });
+    assert.equal(v.store.getState().loading, false);
+    assert.equal(v.store.getState().unavailable, true);
+    assert.equal(v.store.getState().confirmedLoggedOut, false);
+    assert.ok(button(v.container, "ログイン状態を再確認"));
+    await v.unmount();
+  }
+  for (const malformed of [
+    {}, { loggedIn: "true" }, { loggedIn: true },
+    { ...summary(), xIds: null },
+    { ...summary(), xIds: [null] },
+    { ...summary(), xIds: [{}] },
+    { ...summary(), xIds: [{ ...entry("bad", "approved", true), x_name: null }] },
+    { ...summary(), xIds: [{ ...entry("bad", "approved", true), approval_status: "unknown" }] },
+    { ...summary(), canAccessAdmin: undefined },
+    { ...summary(), canAccessManage: "true" },
+    { ...summary(), role: undefined },
+    { ...summary(), role: "superuser" },
+    { ...summary(), activeXId: 42 },
+    { ...summary(), activeXId: undefined },
+    { ...summary(), degraded: false },
+  ]) {
+    const v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(v.store.getState().details, null);
+    assert.equal(v.store.getState().detailsLoading, false);
+    assert.equal(v.store.getState().detailsUnavailable, true);
+    assert.ok(button(v.container, "再試行"));
+    await v.unmount();
+  }
+});
+
+test("presence-view payload on full summary is unavailable, not confirmed logout", async () => {
+  for (const malformed of [
+    { view: "presence", loggedIn: false },
+    { view: "presence", loggedIn: false, unavailable: true },
+    { ...summary(), view: "presence" },
+  ]) {
+    const v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(malformed),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(v.store.getState().confirmedLoggedOut, false);
+    assert.equal(v.store.getState().user?.name, presenceIn.displayName);
+    assert.equal(v.store.getState().details, null);
+    assert.equal(v.store.getState().detailsUnavailable, true);
+    assert.ok(button(v.container, "再試行"));
+    await v.unmount();
+  }
+});
+
+test("malformed unavailable markers never confirm logout or erase a present user", async () => {
+  for (const unavailable of [false, null, "true", 1, {}]) {
+    const presence = await setup({
+      "/api/account/summary?view=presence": json({ view: "presence", loggedIn: false, unavailable }),
+    });
+    assert.equal(presence.store.getState().unavailable, true);
+    assert.equal(presence.store.getState().confirmedLoggedOut, false);
+    assert.ok(button(presence.container, "ログイン状態を再確認"));
+    await presence.unmount();
+
+    const details = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json({ loggedIn: false, unavailable }),
+    });
+    await click(button(details.container, "アカウントメニューを開く"));
+    await flush();
+    assert.equal(details.store.getState().detailsUnavailable, true);
+    assert.equal(details.store.getState().confirmedLoggedOut, false);
+    assert.equal(details.store.getState().user?.name, presenceIn.displayName);
+    assert.ok(button(details.container, "再試行"));
+    await details.unmount();
+  }
+});
+
+test("logged-in responses with unavailable:true are rejected instead of being shown as valid", async () => {
+  const presence = await setup({
+    "/api/account/summary?view=presence": json({ ...presenceIn, unavailable: true }),
+  });
+  assert.equal(presence.store.getState().unavailable, true);
+  assert.equal(presence.store.getState().confirmedLoggedOut, false);
+  assert.equal(presence.store.getState().user, null);
+  assert.ok(button(presence.container, "ログイン状態を再確認"));
+  await presence.unmount();
+
+  const details = await setup({
+    "/api/account/summary?view=presence": json(presenceIn),
+    "/api/account/summary": json({ ...summary({ canAccessAdmin: true }), unavailable: true }),
+  });
+  await click(button(details.container, "アカウントメニューを開く"));
+  await flush();
+  assert.equal(details.store.getState().details, null);
+  assert.equal(details.store.getState().detailsUnavailable, true);
+  assert.equal(details.store.getState().confirmedLoggedOut, false);
+  assert.ok(button(details.container, "再試行"));
+  assert.ok(!links(details.container).some(([name]) => name === "運営" || name === "管理"));
+  await details.unmount();
 });
 
 test("logged in: presence only until the menu opens; presence never shows management links", async () => {
@@ -197,6 +359,283 @@ test("display name: the X name, but the account name for @handle-only names and 
   assert.equal(resolveDisplayName("おたこ", entry("otako", "approved", true, "@Otako"), false), "おたこ");
   assert.equal(resolveDisplayName("おたこ", entry("otako", "approved", true, "おたこX"), true), "おたこ");
   assert.equal(resolveDisplayName("  ", null, false), "guest");
+});
+
+test("Active X change rechecks a previously confirmed logged-out presence", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return json(presenceCalls === 1 ? { view: "presence", loggedIn: false } : presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  assert.equal(store.getState().confirmedLoggedOut, true);
+  assert.equal(store.getState().user, null);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2, "the switch must refresh a confirmed logout");
+  assert.equal(detailsCalls, 1);
+  assert.equal(store.getState().confirmedLoggedOut, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  store.dispose();
+});
+
+test("Active X change rechecks presence after a logged-out full-details answer", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return json(presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return detailsCalls === 1 ? json({ loggedIn: false }) : json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  store.requestDetails();
+  await flush();
+  assert.equal(store.getState().confirmedLoggedOut, true);
+  assert.equal(store.getState().user, null);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2);
+  assert.equal(detailsCalls, 2);
+  assert.equal(store.getState().confirmedLoggedOut, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  store.dispose();
+});
+
+test("Active X change after failed presence rechecks identity without manual retry", async () => {
+  let presenceCalls = 0;
+  let detailsCalls = 0;
+  const store = createAccountStore({
+    fetchImpl: async (url) => {
+      if (url === "/api/account/summary?view=presence") {
+        presenceCalls++;
+        return presenceCalls === 1
+          ? json({ view: "presence", loggedIn: false, unavailable: true }, 503)
+          : json(presenceIn);
+      }
+      assert.equal(url, "/api/account/summary");
+      detailsCalls++;
+      return json(summary());
+    },
+  });
+  store.start();
+  await flush();
+  assert.equal(store.getState().unavailable, true);
+  assert.equal(store.getState().user, null);
+  assert.equal(presenceCalls, 1);
+  window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+    detail: { fromXId: "otako", toXId: "second" },
+  }));
+  await flush();
+  assert.equal(presenceCalls, 2, "the successful switch retries presence after a prior 503");
+  assert.equal(detailsCalls, 1, "the full summary is fetched for the current identity");
+  assert.equal(store.getState().unavailable, false);
+  assert.equal(store.getState().user?.name, presenceIn.displayName);
+  assert.equal(store.getState().details?.xIds.length, 2);
+  assert.equal(store.getState().loading, false);
+  store.dispose();
+});
+
+test("Active X change during pending presence ignores stale logged-out or 503 responses", async () => {
+  for (const status of [200, 503]) {
+    let releaseOld;
+    let releaseNew;
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise((resolve) => { releaseNew = resolve; });
+    let presenceCalls = 0;
+    const store = createAccountStore({
+      fetchImpl: async (url) => {
+        if (url.includes("view=presence")) {
+          presenceCalls += 1;
+          if (presenceCalls === 1) {
+            await oldGate;
+            return status === 503
+              ? json({ view: "presence", loggedIn: false, unavailable: true }, 503)
+              : json({ view: "presence", loggedIn: false });
+          }
+          if (presenceCalls === 2) {
+            await newGate;
+            return json(presenceIn);
+          }
+          throw new Error("unexpected additional presence fetch");
+        }
+        assert.equal(url, "/api/account/summary");
+        return json(summary());
+      },
+    });
+    store.start();
+    await flush();
+    assert.equal(presenceCalls, 1);
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    releaseOld();
+    await flush();
+    assert.equal(presenceCalls, 2, "stale presence must trigger a fresh request");
+    assert.equal(store.getState().confirmedLoggedOut, false, "old identity cannot log out the new state");
+    assert.equal(store.getState().unavailable, false, "stale 503 must not surface an error");
+    assert.equal(store.getState().user, null);
+    releaseNew();
+    await flush();
+    assert.equal(store.getState().user?.name, presenceIn.displayName);
+    assert.equal(store.getState().confirmedLoggedOut, false);
+    assert.equal(store.getState().loading, false);
+    assert.equal(store.getState().details?.xIds.length, 2, "pending switch requests current details");
+    store.dispose();
+  }
+});
+
+test("Active X change during pending details drops old identity and refetches the new one", async () => {
+  for (const oldStatus of [200, 503]) {
+    let releaseOld;
+    let releaseNew;
+    const oldGate = new Promise((resolve) => { releaseOld = resolve; });
+    const newGate = new Promise((resolve) => { releaseNew = resolve; });
+    let detailsCalls = 0;
+    const store = createAccountStore({
+      fetchImpl: async (url) => {
+        if (url.includes("view=presence")) return json(presenceIn);
+        assert.equal(url, "/api/account/summary");
+        detailsCalls += 1;
+        if (detailsCalls === 1) {
+          await oldGate;
+          return oldStatus === 503
+            ? json({ loggedIn: false, unavailable: true }, 503)
+            : json(summary({ activeXId: "otako", canAccessAdmin: true }));
+        }
+        if (detailsCalls === 2) {
+          await newGate;
+          return json(summary({
+            activeXId: "second",
+            xIds: [entry("otako", "approved", false), entry("second", "approved", true)],
+            canAccessAdmin: false, canAccessManage: true,
+          }));
+        }
+        throw new Error("unexpected additional details fetch");
+      },
+    });
+    store.start();
+    await flush();
+    store.requestDetails();
+    await flush();
+    assert.equal(detailsCalls, 1, "the first details fetch is still pending");
+    window.dispatchEvent(new window.CustomEvent(ACTIVE_X_CHANGED_EVENT, {
+      detail: { fromXId: "otako", toXId: "second" },
+    }));
+    await flush();
+    assert.equal(store.getState().details, null, "old details invalidated on switch");
+    releaseOld();
+    await flush();
+    assert.equal(detailsCalls, 2, "the old response must be followed by a fresh request");
+    assert.equal(store.getState().details, null, "old response must not be shown");
+    assert.equal(store.getState().detailsUnavailable, false, "a stale 503 must not become a new-identity error");
+    releaseNew();
+    await flush();
+    assert.equal(store.getState().details?.canAccessAdmin, false);
+    assert.equal(store.getState().details?.canAccessManage, true);
+    assert.equal(store.getState().details?.xIds.find((x) => x.is_active)?.x_user_id, "second");
+    assert.equal(store.getState().detailsLoading, false);
+    store.dispose();
+  }
+});
+
+test("sign-out ignores same-batch duplicate clicks and permits retry after failure", async () => {
+  const originalFetch = globalThis.fetch;
+  let resolveFirst;
+  const first = new Promise((resolve) => { resolveFirst = resolve; });
+  let csrfCalls = 0;
+  globalThis.fetch = async (url) => {
+    assert.equal(url, "/api/auth/csrf");
+    csrfCalls++;
+    if (csrfCalls === 1) return first;
+    return json({}, 503);
+  };
+  let v;
+  try {
+    v = await setup({
+      "/api/account/summary?view=presence": json(presenceIn),
+      "/api/account/summary": json(summary()),
+    });
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    const signOut = button(v.container, "ログアウト");
+    assert.ok(signOut);
+    await act(async () => {
+      signOut.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      signOut.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.equal(csrfCalls, 1, "double click must not initiate two CSRF requests");
+    await act(async () => { resolveFirst(json({}, 503)); });
+    await flush();
+    assert.ok(text(v.container).includes("ログアウトに失敗しました"));
+    const retry = button(v.container, "ログアウト");
+    assert.ok(retry && !retry.disabled, "a failed sign-out must be retryable");
+    await click(retry);
+    await flush();
+    assert.equal(csrfCalls, 2, "a subsequent user click may retry");
+  } finally {
+    if (v) await v.unmount();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Active X switch ignores a second click before React commits pending state", async () => {
+  let resolveSwitch;
+  const switchResult = new Promise((resolve) => { resolveSwitch = resolve; });
+  const switchCalls = [];
+  const changes = [];
+  const onChanged = (event) => changes.push(event.detail);
+  window.addEventListener(ACTIVE_X_CHANGED_EVENT, onChanged);
+  const v = await setup({
+    "/api/account/summary?view=presence": json(presenceIn),
+    "/api/account/summary": json(summary()),
+  }, {
+    switchActiveX: async (id) => {
+      switchCalls.push(id);
+      return switchResult;
+    },
+  });
+  try {
+    await click(button(v.container, "アカウントメニューを開く"));
+    await flush();
+    const choice = button(v.container, "セカンド");
+    assert.ok(choice);
+    await act(async () => {
+      choice.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      // The second handler runs before the pending=true render is committed.
+      choice.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    });
+    assert.deepEqual(switchCalls, ["second"], "same-batch clicks must send only one switch");
+    assert.deepEqual(changes, [], "switch-change event fires only after success");
+    await act(async () => { resolveSwitch({ ok: true }); });
+    await flush();
+    assert.equal(changes.length, 1, "one successful switch emits exactly one change");
+    assert.equal(changes[0].toXId, "second");
+  } finally {
+    window.removeEventListener(ACTIVE_X_CHANGED_EVENT, onChanged);
+    await v.unmount();
+  }
 });
 
 test("switching: choices are disabled without a switch action; with one it follows the CURRENT event contract", async () => {

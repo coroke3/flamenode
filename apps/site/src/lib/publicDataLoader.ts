@@ -136,12 +136,22 @@ function text(value: unknown, max: number): string | undefined {
   return typeof value === "string" && value.trim() ? value.slice(0, max) : undefined;
 }
 
-/** http(s) URL or same-site path only; `javascript:`, `data:`, `//host` and `/\\host` are dropped. */
+/** http(s) URL or same-site path only; never let URL-parser normalization turn a path into an external host. */
 function publicUrl(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const url = value.trim();
   if (!url || url.length > 2048) return undefined;
-  if (url.startsWith("/")) return url.startsWith("//") || url.startsWith("/\\") ? undefined : url;
+  if (url.startsWith("/")) {
+    // WHATWG URL strips embedded tabs/CR/LF, so "/\\t/evil.example" resolves
+    // to "//evil.example" unless forbidden characters are rejected first.
+    if (/[\\\u0000-\u0020\u007f]/.test(url)) return undefined;
+    try {
+      const base = "https://snapshot.invalid";
+      return new URL(url, base).origin === base ? url : undefined;
+    } catch {
+      return undefined;
+    }
+  }
   try {
     const { protocol } = new URL(url);
     return protocol === "https:" || protocol === "http:" ? url : undefined;

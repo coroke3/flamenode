@@ -550,6 +550,8 @@ Implementation: PR #472, `apps/api/src/routes/admin/{costGuard,users}.ts`. All r
 | SA-080 | POST `/api/admin/users/:userId/can-create-events` | 0/1 edit + strict audit |
 | SA-081 | POST `/api/admin/x-users/:xUserId/icon-refresh` | most recent individual/collab nonvoided creator icon; strict audit + 2 static rebuild queue targets (zero wake) |
 
+Callers (MIG-0734, PR #470): SA-016..020 from `apps/ops/src/api/adminCostGuard.ts` via `apps/ops/src/routes/admin/AdminCostGuard.tsx` (`/admin/cost-guard`); bodies parsed with `CostGuard*BodySchema`.
+
 T01–T05: `apps/api/test/adminOps.parity.test.mjs` (CI expected); error statuses 400 invalid input, 403 policy, 409 stale CAS, 413 oversized JSON. The normal Hono route never performs a live production KV/R2/Queue operation in tests.
 
 ## MIG-0642 — Hono Admin Ops mutation mapping B (D-17-4)
@@ -570,6 +572,8 @@ Implementation: PR #461, `apps/api/src/routes/admin/{terms,permissions,notificat
 | SA-055 | POST `/api/admin/terms/:id/archive` | `admin_terms_archive` | CAS archive; rebuild row only if it was published |
 
 T01–T04: `apps/api/test/adminTermsNotifications.parity.test.mjs`; U01 source contract: `scripts/migration-admin-writes-b-inventory.test.mjs`. No production KV / R2 / Queue / D1 operation.
+
+Callers (MIG-0734, PR #470): SA-045..048 from `apps/ops/src/api/adminNotifications.ts` via `apps/ops/src/routes/admin/AdminNotifications.tsx` (`/admin/notifications`); SA-046 body parsed with `AdminNotificationCancelBodySchema`, the other three (retry, force-resend, retry-failed) send no body; writes go through `api/write.ts` `send` so CURRENT write-guard messages and a 401 -> /entry are preserved.
 
 ## MIG-0647 — RH-027 / RH-028 公開イベントスタッフ API（PR #437）
 

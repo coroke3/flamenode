@@ -24,8 +24,10 @@ test("query budget超過はpartial順位を返さず絞り込みを要求する"
 
 test("limit/offsetは固定長の10進整数だけをbounded値として受け、limit=0は既定値へ戻す", () => {
   assert.match(route, /const MAX_NUMERIC_PARAM_LENGTH = 8/);
-  assert.match(route, /\.trim\(\)\.slice\(0, MAX_NUMERIC_PARAM_LENGTH\)/);
-  assert.match(route, /if \(!\/\^\\d\+\$\/\.test\(raw\)\) return fallback/);
+  assert.match(route, /\.trim\(\)/);
+  assert.match(route, /raw\.length > MAX_NUMERIC_PARAM_LENGTH/);
+  assert.doesNotMatch(route, /\.trim\(\)\.slice\(0, MAX_NUMERIC_PARAM_LENGTH\)/);
+  assert.match(route, /raw\.length > MAX_NUMERIC_PARAM_LENGTH \|\| !\/\^\\d\+\$\/\.test\(raw\)/);
   assert.match(route, /Number\.parseInt\(raw, 10\)/);
   assert.match(route, /Number\.isSafeInteger\(parsed\) \|\| parsed < min/);
   assert.match(

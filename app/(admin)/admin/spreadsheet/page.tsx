@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/auth/currentUser";
 import { isAdminSpreadsheetEnabled } from "@/lib/admin/spreadsheet/guard";
 import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/ConsolePageHeader";
 import { AdminSpreadsheetClient } from "@/components/admin/spreadsheet/AdminSpreadsheetClient";
+import { firstSearchParamValue, type SearchParamValue } from "#utils/next";
 
 export const metadata: Metadata = { title: "DB スプレッドシート" };
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function AdminSpreadsheetPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ table?: string }>;
+  searchParams?: Promise<{ table?: SearchParamValue }>;
 }): Promise<React.ReactElement> {
   const user = await getCurrentUser();
   if (!user || user.role !== "admin") notFound();
@@ -49,7 +50,7 @@ export default async function AdminSpreadsheetPage({
   }
 
   const sp = (await searchParams) ?? {};
-  const initialTable = (sp.table ?? "").trim() || undefined;
+  const initialTable = firstSearchParamValue(sp.table) || undefined;
 
   return (
     <div style={{ paddingBottom: 48 }}>

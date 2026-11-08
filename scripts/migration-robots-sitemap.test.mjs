@@ -78,6 +78,61 @@ test("MIG-0621 U03 T05: sitemap XML is byte-identical to Next resolveSitemap", (
   assert.equal(serializeSitemap(entries), resolveSitemap(entries), "Next 15.5 XML serialization must remain identical");
 });
 
+test("MIG-0621: invalid newest source timestamp does not erase valid sitemap lastmod", () => {
+  const now = new Date("2026-11-05T00:00:00.000Z");
+  const valid = 1_700_000_000;
+  const input = {
+    origin, videos: [], events: [], creators: [],
+    now,
+  };
+  const entries = buildSitemapEntries({
+    ...input,
+    generatedAt: [valid - 60, Number.MAX_SAFE_INTEGER, valid, NaN, null, -1],
+  });
+  assert.equal(
+    entries.find((item) => item.url === origin + "/")?.lastModified.toISOString(),
+    new Date(valid * 1000).toISOString(),
+    "ignore an out-of-range timestamp even when it is numerically the largest",
+  );
+  assert.equal(serializeSitemap(entries), resolveSitemap(entries),
+    "the corrected dates retain Next's XML serialization contract");
+
+  const invalidOnly = buildSitemapEntries({
+    ...input, generatedAt: [NaN, Infinity, Number.MAX_SAFE_INTEGER, null, -1],
+  });
+  assert.equal(invalidOnly[0].lastModified.toISOString(), now.toISOString(),
+    "use build time only when no generated timestamp is valid");
+});
+
+test("MIG-0621 regression: valid query-string URLs escape ampersands in sitemap XML", () => {
+  const url = new URL("/list?q=film&sort=old", origin).toString();
+  const entries = [{
+    url,
+    lastModified: new Date("2026-11-05T00:00:00.000Z"),
+    changeFrequency: "daily",
+    priority: 0.8,
+  }];
+  const xml = serializeSitemap(entries);
+  assert.ok(xml.includes("<loc>https://flamenode.net/list?q=film&amp;sort=old</loc>"));
+  assert.equal(xml.includes("q=film&sort=old"), false, "raw & makes XML invalid");
+  assert.equal((xml.match(/<loc>/g) ?? []).length, 1);
+});
+
+test("MIG-0621 regression: loc text cannot inject XML nodes", () => {
+  const entries = [{
+    url: `${origin}/list?q=</loc><private>leaked</private>&v="test"'`,
+    lastModified: new Date("2026-11-05T00:00:00.000Z"),
+    changeFrequency: "daily",
+    priority: 0.8,
+  }];
+  const xml = serializeSitemap(entries);
+  assert.ok(xml.includes(
+    "<loc>https://flamenode.net/list?q=&lt;/loc&gt;&lt;private&gt;leaked&lt;/private&gt;&amp;v=&quot;test&quot;&apos;</loc>",
+  ));
+  assert.equal(xml.includes("<private>"), false, "sitemap data must not create additional XML elements");
+  assert.equal((xml.match(/<loc>/g) ?? []).length, 1);
+});
+
 test("MIG-0621: duplicate video aliases and creators never duplicate sitemap locs", () => {
   const first = 1_700_000_000;
   const entries = buildSitemapEntries({
