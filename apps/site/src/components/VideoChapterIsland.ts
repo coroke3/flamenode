@@ -292,7 +292,7 @@ export function VideoChapterIsland({
       ),
     ),
     canBulk ? h("details", null,
-      h("summary", null, "CSV で一括登録 (動画オーナーのみ)"),
+      h("summary", null, "CSV で一括登録（チャプター管理権限が必要）"),
       h("form", { onSubmit: onBulk },
         h("label", null, "CSV", h("textarea", {
           value: bulkCsv, maxLength: 64 * 1024, disabled: busy,
