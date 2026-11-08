@@ -137,6 +137,9 @@ const MAIN_HONO_METHODS = new Set([
   "GET /api/manage/events/:id/videos/:videoId", "GET /api/manage/events/:id/videos", "GET /api/manage/events/:id/youtube-playlist",
   "POST /api/manage/events/:id/youtube-playlist/sync", "PUT /api/manage/events/:id/youtube-playlist", "GET /api/manage/events/:id/audience",
   "GET /api/manage/events/:id", "GET /api/manage/notifications", "GET /api/manage/x-link-requests", "GET /api/manage",
+  "PUT /api/admin/permissions/editable-fields", "POST /api/admin/terms",
+  "PATCH /api/admin/terms/:id", "POST /api/admin/terms/:id/publish",
+  "POST /api/admin/terms/:id/reaccept-broadcast", "POST /api/admin/terms/:id/archive",
   "POST /api/admin/notifications/retry-failed", "POST /api/admin/notifications/:id/retry",
   "POST /api/admin/notifications/:id/cancel", "POST /api/admin/notifications/:id/force-resend",
   "GET /api/admin/spreadsheet/data", "GET /api/admin/spreadsheet/export", "GET /api/admin/spreadsheet/tables", "GET /api/admin/event-templates",
@@ -162,7 +165,7 @@ test("MIG-0639 T01: every main Hono method has exactly one scenario (named or in
   assert.equal(new Set(titles).size, titles.length, "no method has two scenarios");
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !titles.includes(m)), [], "methods without a scenario");
   assert.deepEqual(titles.filter((t) => !MAIN_HONO_METHODS.has(t)), [], "scenarios for methods that are not mounted");
-  assert.equal(MAIN_HONO_METHODS.size, 121);
+  assert.equal(MAIN_HONO_METHODS.size, 127);
 });
 
 test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/app.ts", async () => {
@@ -170,6 +173,22 @@ test("MIG-0639 T01: the method list equals the routes mounted in apps/api/src/ap
   const mounted = new Set(app.routes.filter((r) => r.method !== "ALL").map((r) => `${r.method} ${r.path}`));
   assert.deepEqual([...MAIN_HONO_METHODS].filter((m) => !mounted.has(m)), [], "listed but no longer mounted");
   assert.deepEqual([...mounted].filter((m) => !MAIN_HONO_METHODS.has(m)), [], "mounted but not benchmarked (add a scenario)");
+});
+
+test("MIG-0639 SA-049,051..055: terms and editable-field writes use documented local fixtures", () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((x) => [x.id, x]));
+  for (const id of ["SA-052", "SA-053", "SA-054", "SA-055"]) {
+    const normal = scenarios.get(id).kinds.normal(1, "term");
+    assert.ok(normal.path.includes("bench-terms-term-1"));
+    assert.equal(normal.setup.length, 1);
+    assert.match(normal.setup[0].sql, /INSERT OR REPLACE INTO terms_versions/);
+    assert.deepEqual(normal.expect, [200]);
+  }
+  assert.deepEqual(JSON.parse(scenarios.get("SA-054").kinds.normal(1, "term").body).confirm, "TERMS");
+  assert.equal(JSON.parse(scenarios.get("SA-051").kinds.limit(1, "term").body).body_markdown.length, 2000);
+  assert.deepEqual(JSON.parse(scenarios.get("SA-049").kinds.normal(1, "term").body), {
+    default_editable_fields: [], upcoming_editable_fields: [],
+  });
 });
 
 test("MIG-0639 SA-045..048: notification writes use real row fixtures and bounded cancel reason", () => {
