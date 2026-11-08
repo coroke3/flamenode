@@ -16,7 +16,8 @@ const keys=["id","event_id","reserved_by_user_id","x_user_id","reserved_x_id_sna
   "display_name","slot_label","start_time","sort_order","reservation_group_id","video_id",
   "status","updated_at","version"];
 const countInput=(count=3,start=1)=>({mode:"count",count,start_index:start});
-function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
+function setup({actor=ADMIN,staff=false,mode="normal",onFirst,
+  parentSessionState,cookieToken=SESSION_TOKEN}={}){
   const {db,sqlite,stats}=createAdminD1({onFirst});
   seedBase(sqlite,{settings:mode});
   seedEvent(sqlite);
@@ -42,7 +43,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
-    c.set("sessionState",actor?"user":"none");
+    c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -52,7 +53,8 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
   app.route("/api/manage/events/:id/slots",slotGeneratedChunkRoutes);
   const post=(body=countInput(),event="ev-1")=>app.request(
     ORIGIN+"/api/manage/events/"+event+"/slots/generate-chunk",
-    {method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json",Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN},
+    {method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json",
+      Cookie:cookieToken?"__Secure-authjs.session-token="+cookieToken:""},
       body:JSON.stringify(body)},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );
@@ -509,4 +511,26 @@ test("SA-058 U04c: session invalidation after scoped read rolls back one atomic 
 test("SA-058 U03p: all generated writes remain UNMOUNTED on the production parent",()=>{
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotGeneratedChunkRoutes|slotGeneratedChunk\.ts/);
+});
+
+test("MIG-0656 U04s: SA-058 refuses absent parent Auth.js, missing cookie and forged token",async()=>{
+  for(const mode of ["parent-absent","cookie-absent","cookie-forged"]){
+    const s=setup({
+      parentSessionState:mode==="parent-absent"?"none":"user",
+      cookieToken:mode==="cookie-absent"?null:
+        mode==="cookie-forged"?"ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee":SESSION_TOKEN,
+    });
+    try{
+      const res=await s.post(countInput(3,1));
+      assert.equal(res.status,mode==="cookie-forged"?409:503,
+        mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0,"no generated rows");
+      assert.equal(s.n("audit_logs"),0,"strict audit remains absent");
+      assert.equal(s.n("static_rebuild_queue"),0,"no projection intents");
+      assert.equal(s.stats.batches,mode==="cookie-forged"?1:0,
+        "forged token must be rejected inside one D1 batch");
+      assert.ok(s.stats.reads<=2,"no extra D1 preread");
+    }finally{s.sqlite.close();}
+  }
 });

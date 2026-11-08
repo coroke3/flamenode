@@ -22,7 +22,7 @@ const row=(id,status="available")=>({
   status,updated_at:100,version:1,
 });
 function setup({ids=["a","b","c","d","e","f"],actor=ADMIN,staff=false,
-  mode="normal",onFirst}={}){
+  mode="normal",onFirst,parentSessionState,cookieToken=SESSION_TOKEN}={}){
   const {db,sqlite,stats}=createAdminD1({onFirst});
   seedBase(sqlite,{settings:mode});
   seedEvent(sqlite);
@@ -51,7 +51,7 @@ function setup({ids=["a","b","c","d","e","f"],actor=ADMIN,staff=false,
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
-    c.set("sessionState",actor?"user":"none");
+    c.set("sessionState",parentSessionState ?? (actor?"user":"none"));
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -62,7 +62,8 @@ function setup({ids=["a","b","c","d","e","f"],actor=ADMIN,staff=false,
   app.route("/api/manage/events/:id/slots",slotAvailableDeleteChunkRoutes);
   const post=(event="ev-1")=>app.request(
     ORIGIN+"/api/manage/events/"+event+"/slots/delete-available-chunk",
-    {method:"POST",headers:{Origin:ORIGIN,Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN}},
+    {method:"POST",headers:{Origin:ORIGIN,
+      Cookie:cookieToken?"__Secure-authjs.session-token="+cookieToken:""}},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );
   const slot=(id)=>sqlite.prepare("SELECT * FROM slots WHERE id=?").get(id);
@@ -550,4 +551,26 @@ test("SA-059 U04c: session invalidation after scoped read rolls back one atomic 
 test("SA-059 U03n: candidate route stays UNMOUNTED in production parent",()=>{
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotAvailableDeleteChunkRoutes|slotAvailableDeleteChunk\.ts/);
+});
+
+test("MIG-0656 U04s: SA-059 refuses absent parent Auth.js, missing cookie and forged token",async()=>{
+  for(const mode of ["parent-absent","cookie-absent","cookie-forged"]){
+    const s=setup({
+      parentSessionState:mode==="parent-absent"?"none":"user",
+      cookieToken:mode==="cookie-absent"?null:
+        mode==="cookie-forged"?"ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee":SESSION_TOKEN,
+    });
+    try{
+      const res=await s.post();
+      assert.equal(res.status,mode==="cookie-forged"?409:503,
+        mode+" "+await res.clone().text());
+      assert.equal(res.headers.get("Cache-Control"),"private, no-store");
+      assert.deepEqual(s.idsLeft(),["a","b","c","d","e","f"],"no slot deleted");
+      assert.equal(s.count("audit_logs"),0,"strict audit remains absent");
+      assert.equal(s.count("static_rebuild_queue"),0,"no projection intents");
+      assert.equal(s.stats.batches,mode==="cookie-forged"?1:0,
+        "forged token must be rejected inside one D1 batch");
+      assert.ok(s.stats.reads<=2,"no extra D1 preread");
+    }finally{s.sqlite.close();}
+  }
 });
