@@ -10,7 +10,7 @@ const [route, eventAction, cache, eventExportData, videoVisibilityTransition] =
   ),
   readFile(new URL("../actions/event-admin.ts", import.meta.url), "utf8"),
   readFile(new URL("./eventExportCache.ts", import.meta.url), "utf8"),
-  readFile(new URL("./eventExportData.ts", import.meta.url), "utf8"),
+  readFile(new URL("../../../packages/server-core/src/eventExport/data.ts", import.meta.url), "utf8"),
   readFile(
     // MIG-0615: the planner lives in packages/server-core.
     new URL("../../../packages/server-core/src/visibility/videoTransition.ts", import.meta.url),
@@ -30,6 +30,10 @@ test("scheduled payload cache HIT前にもD1の公開可否とpayload境界を�
     route,
     /async function readCachedPayload[\s\S]*assertNoForbiddenKeys\(parsed\)/,
   );
+  // A metadata marker is serialized Cache API data, not authority to skip
+  // the DTO leak check. Hono already validates every cached body.
+  assert.doesNotMatch(route, /if \(isTrustedCacheMetadata\(metadata, format\)\) return cached/);
+  assert.match(route, /metadata != null && !isTrustedCacheMetadata\(metadata, format\)/);
   assert.doesNotMatch(route, /export const runtime = "edge"/);
 });
 
@@ -136,10 +140,10 @@ test("realtimeのisolate micro-cacheはD1公開判定の後にだけ読み、ヘ
     route,
     /updateMode === "scheduled" \? "MISS" : "BYPASS"/,
   );
-  assert.match(
-    route,
-    /updateMode === "realtime"\s*\? "no-store"/,
-  );
+  // Realtime AND scheduled responses must be blocked from shared CDN caches.
+  // The origin's internal scheduled Cache API is deliberately unaffected.
+  assert.match(route, /const cacheControl = "no-store"/);
+  assert.doesNotMatch(route, /s-maxage=60|stale-while-revalidate=60/);
   // not_foundとエラーはcacheしない: setはbody確定後の1箇所だけ。
   assert.equal((route.match(/isolateMicroCacheSet\(/g) ?? []).length, 1);
   assert.ok(cacheWrite > route.indexOf("if (body === null)"));

@@ -757,8 +757,14 @@ if (runUnderRootTsx(import.meta.url)) {
       assert.equal(r.stats.statements, 2);
       return r.body;
     };
-    for (const raw of [undefined, "20000", "50", "abc", "10000001"]) {
+    for (const raw of [undefined, "20000", "50", "abc", "10000001", "20000oops", "20000.5", "2e4", "20000\n1", "00020000", "999999999999999999999999999999999"]) {
       assert.deepEqual(await fetchQuota({ YOUTUBE_DAILY_QUOTA_LIMIT: raw }), await refQuota(raw), String(raw));
+    }
+    // The admin read-only summary must not report an inflated budget for malformed settings.
+    for (const raw of ["20000oops", "20000.5", "2e4"]) {
+      const data = await fetchQuota({ YOUTUBE_DAILY_QUOTA_LIMIT: raw });
+      assert.equal(data.configuredUnits, 10_000, raw);
+      assert.equal(data.budgetUnits, 8_000, raw);
     }
     const day = policy.youtubeQuotaDay(new Date());
     ins("external_api_quota_usage", { provider: "youtube", quota_day: day, used_units: 1234, limit_units: 8000, updated_at: T0 });

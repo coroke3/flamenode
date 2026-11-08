@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
-import { buildSharedCss, MODULES } from "../scripts/portCssModule.mjs";
+import { buildSharedCss, buildManageCss, MODULES } from "../scripts/portCssModule.mjs";
 
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root));
@@ -40,16 +40,20 @@ test("MIG-0707 U05c: global CSS loads in CURRENT order before Ops React", async 
     "./styles/current/mobile-hardening.css",
     "./styles/fonts.css",
     "./styles/shared.css",
+    "./styles/admin-shell.css",
+    "./styles/manage-shell.css",
   ]);
 });
 
 test("MIG-0707 U05c: shared CSS remains generated from CURRENT modules", async () => {
   const built = (await read("apps/ops/src/styles/shared.css")).toString("utf8");
   assert.equal(built, buildSharedCss(), "regenerate with node apps/ops/scripts/portCssModule.mjs");
-  assert.ok(built.startsWith("/* MIG-0724: Ops shared CSS loads video-review styling without Node.js ESM CSS imports. */\n@import \"./video-review.css\";\n\n"), "MIG-0724 review CSS import must be generated");
+  assert.ok(built.startsWith("/* MIG-0724: Ops shared CSS loads video-review styling without Node.js ESM CSS imports. */\n@import \"./video-review.css\";\n\n"), "review CSS import must be generated");
   const reviewCss = (await read("apps/ops/src/styles/video-review.css")).toString("utf8");
   assert.match(reviewCss, /\.video-review-detail-panel\s*\{/);
-  assert.equal(MODULES.length, 3);
+  assert.equal(MODULES.length, 5);
+  const manage = (await read("apps/ops/src/styles/manage-shell.css")).toString("utf8");
+  assert.equal(manage, buildManageCss());
   assert.match(built, /\.empty-tone-warning \.empty-icon/);
   assert.match(built, /\.confirm-dialog/);
   assert.match(built, /\.sectabs-tabs/);

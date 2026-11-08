@@ -85,6 +85,23 @@ test("snapshot parser keeps legacy defaults, normalizes questions and clamps cou
   assert.equal(parsed.custom_question_definitions[0].visibility, "review");
 });
 
+test("event template question options keep whole emoji at the UTF-16 boundary", () => {
+  const prefix = "A".repeat(199);
+  const split = snapshotFromEvent(event, [{
+    ...questions[0],
+    options_json: JSON.stringify([prefix + "😀"]),
+  }]);
+  const splitForm = snapshotToFormInitial(split);
+  assert.deepEqual(splitForm.custom_questions[0].options, [prefix]);
+
+  const whole = "A".repeat(198) + "😀";
+  const retained = snapshotFromEvent(event, [{
+    ...questions[0],
+    options_json: JSON.stringify([whole]),
+  }]);
+  assert.deepEqual(snapshotToFormInitial(retained).custom_questions[0].options, [whole]);
+});
+
 test("invalid snapshot never leaks unsupported types or malformed JSON", () => {
   assert.equal(parseEventTemplateSnapshot("{"), null);
   assert.equal(parseEventTemplateSnapshot("[]"), null);
@@ -107,4 +124,21 @@ test("create form resets times, forces private, and omits stage permission quest
   assert.equal(initial.custom_questions.length, 1);
   assert.deepEqual(initial.custom_questions[0].options, ["A", "B"]);
   assert.equal(initial.custom_questions[0].clientId, "q_1");
+});
+
+test("malformed array-like required fields cannot become template requirements", () => {
+  const snapshot = snapshotFromEvent(event);
+  const malformed = parseEventTemplateSnapshot(JSON.stringify({
+    ...snapshot,
+    required_video_fields_json: { 0: "music", length: 1 },
+  }));
+  assert.ok(malformed);
+  assert.equal(malformed.required_video_fields_json, null);
+
+  const valid = parseEventTemplateSnapshot(JSON.stringify({
+    ...snapshot,
+    required_video_fields_json: JSON.stringify(["music"]),
+  }));
+  assert.ok(valid);
+  assert.equal(valid.required_video_fields_json, '["music"]');
 });

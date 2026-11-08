@@ -1,4 +1,4 @@
-import { formatUnix } from "@/lib/utils/format";
+import { formatUnix } from "./format.ts";
 import {
   annotateReservationGroups,
   buildSlotParts,
@@ -8,7 +8,7 @@ import {
   type SlotBase,
   type SlotGroupRow,
   type SlotPart,
-} from "./slotGroupingCore";
+} from "./slotGroupingCore.ts";
 
 export type { SlotAnnotatedRow, SlotBase, SlotGroupRow, SlotPart };
 export {
@@ -32,7 +32,7 @@ export function formatSlotPartLabel(
 ): string {
   if (part.is_timeless) return "時間なし枠";
   const base = resolveSlotPartDisplayLabel(part.index, configuredParts);
-  if (mode === "short" || !part.start_time) return base;
+  if (mode === "short" || part.start_time == null) return base;
   const end = part.last_start_time;
   const date = formatUnix(part.start_time, { dateOnly: true });
   const start = formatUnix(part.start_time, { timeOnly: true });
