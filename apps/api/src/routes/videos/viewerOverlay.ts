@@ -64,6 +64,7 @@ function emptyOverlay(args?: {
     likeActive: false,
     bookmarkActive: false,
     viewerXApproved: false,
+    viewerCanEditChapters: false,
     privateChapters: [],
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
@@ -392,6 +393,8 @@ SELECT
         likeActive,
         bookmarkActive,
         viewerXApproved,
+        // Server-side capability only; do not derive from the viewer X approval bit.
+        viewerCanEditChapters: viewerCanEditChapters && isTosAccepted && !termsReacceptRequired,
         privateChapters,
         ...finalPlaylist,
       };
