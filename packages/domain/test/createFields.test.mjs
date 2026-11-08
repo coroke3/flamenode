@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import { buildEventCreateFields } from "@flamenode/domain/event";
+import { buildEventCreateFields, buildEventCreateOwnerStaffRow } from "@flamenode/domain/event";
 import { serializeRequiredVideoFieldsFromForm } from "@flamenode/domain/video";
 
 const data = (changes = {}) => ({
@@ -155,4 +155,50 @@ test("MIG-0652 U02: staged core is DB-independent; CURRENT create route stays un
   assert.match(current, /export async function createEvent\(/);
   assert.match(current, /const createdRow = \{/);
   assert.match(current, /return fromForm !== undefined\s*\?\s*fromForm\s*:\s*templateSnapshot\?\.required_video_fields_json \?\? null/);
+});
+
+test("MIG-0652 U02 owner row: verified Active-X identity maps exactly to CURRENT owner staff", () => {
+  const row = buildEventCreateOwnerStaffRow({
+    staffId: "es_created", eventId: "ev_created",
+    actorUserId: "auth_admin",
+    verifiedOwnerIdentity: { x_user_id: "x_approved", display_name: "Approved Creator" },
+    now: 1794115200,
+  });
+  assert.deepEqual(row, {
+    id: "es_created",
+    event_id: "ev_created",
+    x_user_id: "x_approved",
+    display_name: "Approved Creator",
+    permission_preset: "owner",
+    custom_permission_keys_json: null,
+    is_public: 1,
+    public_role_label: "主催",
+    approved_by_auth_user_id: "auth_admin",
+    approved_at: 1794115200,
+    created_at: 1794115200,
+    updated_at: 1794115200,
+  });
+  assert.notEqual(row.id, row.event_id, "host-supplied staff ID remains distinct from event ID");
+});
+
+test("MIG-0652 U02 owner row: fields and order match CURRENT, DB approval check remains in caller", async () => {
+  const current = await readFile(new URL("../../../src/lib/actions/event-admin.ts", import.meta.url), "utf8");
+  const domain = await readFile(new URL("../src/event/createFields.ts", import.meta.url), "utf8");
+  const legacy = current.match(/  const ownerRow = \{([\s\S]*?)\n  \} satisfies typeof eventStaff\.\$inferInsert;/);
+  const projection = domain.match(/export function buildEventCreateOwnerStaffRow\([\s\S]*?\n  return \{([\s\S]*?)\n  \};/);
+  assert.ok(legacy, "CURRENT createEvent ownerRow must be discoverable");
+  assert.ok(projection, "shared owner projection must be discoverable");
+  const fields = (body) => [...body.matchAll(/^    ([a-z][a-z0-9_]*)(?::|,)/gm)].map((match) => match[1]);
+  const currentFields = fields(legacy[1]);
+  assert.equal(currentFields.length, 12);
+  assert.deepEqual(fields(projection[1]), currentFields);
+  assert.deepEqual(Object.keys(buildEventCreateOwnerStaffRow({
+    staffId: "es1", eventId: "ev1", actorUserId: "u1",
+    verifiedOwnerIdentity: { x_user_id: "x1", display_name: "Creator" }, now: 1,
+  })), currentFields);
+  assert.match(current, /if \(!activeXUserId\)/);
+  assert.match(current, /xUserAccountLinks\.auth_user_id, actorUserId/);
+  assert.match(current, /xUsers\.approval_status, "approved"/);
+  assert.match(current, /if \(!ownerIdentity\)/);
+  assert.doesNotMatch(domain, /from ["']@\//);
 });

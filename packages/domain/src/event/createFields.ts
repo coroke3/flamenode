@@ -79,3 +79,35 @@ export function buildEventCreateFields(input: {
     updated_at: now,
   };
 }
+
+/**
+ * MIG-0652 U02 — a verified Active-X identity becomes the initial event owner.
+ *
+ * The adapter must first enforce CURRENT's active_x_user_id membership AND
+ * approved x_user_account_links join. This pure projection does NOT validate
+ * account ownership and cannot replace that DB check.
+ * The staff ID comes from the host's existing generateId("es") helper.
+ */
+export function buildEventCreateOwnerStaffRow(input: {
+  staffId: string;
+  eventId: string;
+  actorUserId: string;
+  verifiedOwnerIdentity: { x_user_id: string; display_name: string };
+  now: number;
+}) {
+  const { staffId, eventId, actorUserId, verifiedOwnerIdentity, now } = input;
+  return {
+    id: staffId,
+    event_id: eventId,
+    x_user_id: verifiedOwnerIdentity.x_user_id,
+    display_name: verifiedOwnerIdentity.display_name,
+    permission_preset: "owner" as const,
+    custom_permission_keys_json: null,
+    is_public: 1 as const,
+    public_role_label: "主催",
+    approved_by_auth_user_id: actorUserId,
+    approved_at: now,
+    created_at: now,
+    updated_at: now,
+  };
+}
