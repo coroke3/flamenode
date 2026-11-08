@@ -132,6 +132,21 @@ export function VideoChapterIsland({
     };
   }, []);
 
+  // Authentication can change via overlay revalidation without a window event.
+  // Invalidate stale editor drafts and in-flight responses on identity/permission changes.
+  const accessRef = React.useRef({ activeXId, canPost });
+  React.useEffect(() => {
+    const prev = accessRef.current;
+    accessRef.current = { activeXId, canPost };
+    if (prev.activeXId === activeXId && prev.canPost === canPost) return;
+    epoch.current += 1;
+    pending.current = false;
+    setBusy(false);
+    setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
+    draftBaseline.current = { time: "", label: "", note: "", csv: "" };
+    setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
+  }, [activeXId, canPost]);
+
   const ready = mounted && Boolean(activeXId?.trim()) && canPost;
   const start = (): number | null => {
     if (pending.current) return null;
