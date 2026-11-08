@@ -289,3 +289,31 @@ test("FK preflight fails closed above S3's three-query ceiling before opening D1
   assert.throws(() => buildSpreadsheetForeignKeyLookups([...fk, ...fk, ...fk, ...fk],
     [{ event_id: "event-0" }]), /batch_too_large/);
 });
+
+
+test("optimistic CAS rejects incomplete or undefined before-images rather than substituting NULL", async () => {
+  const { buildSpreadsheetUpdateSql, buildSpreadsheetDeleteSql } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const columns = [
+    { name: "id", type: "TEXT", notNull: true, pk: 1 },
+    { name: "title", type: "TEXT", notNull: false, pk: 0 },
+  ];
+  const ctx = {
+    def: resolveSpreadsheetTableDef("slots", true),
+    primaryKeys: ["id"],
+    columns,
+    columnNames: ["id", "title"],
+  };
+  for (const before of [
+    { id: "slot-1" },
+    { id: "slot-1", title: undefined },
+    { id: "slot-1", title: false },
+  ]) {
+    assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "slot-1" }, before, { title: "new" }), /invalid_snapshot/);
+    assert.throws(() => buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, before), /invalid_snapshot/);
+  }
+  assert.deepEqual(
+    buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, { id: "slot-1", title: null }).binds,
+    ["slot-1", "slot-1", null],
+  );
+});
