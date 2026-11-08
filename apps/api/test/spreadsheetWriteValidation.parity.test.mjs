@@ -172,7 +172,7 @@ test("unmounted SQL planners bind every value and enforce optimistic snapshots",
   assert.deepEqual(before, { id: "row-1", title: "previous", count: 3 });
   assert.throws(() => buildSpreadsheetInsertSql(ctx, { title: "missing-id" }), /missing_required_column/);
   assert.throws(() => buildSpreadsheetUpdateSql(ctx, {}, before, { title: "changed" }), /missing_primary_key/);
-  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("videos", true) }, {id:"row-1"}, before), /physical_delete_forbidden/);
+  assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("videos", true) }, {id:"row-1"}, before), /physical_delete_requires_visibility_status/);
   assert.throws(() => buildSpreadsheetDeleteSql({ ...ctx, def: resolveSpreadsheetTableDef("system_settings", true) }, {id:"row-1"}, before), /table_readonly/);
   assert.throws(() => buildSpreadsheetUpdateSql(ctx, { id: "row-1" }, { ...before, count: { unexpected: true } }, {title:"changed"}), /invalid_snapshot/);
 });
