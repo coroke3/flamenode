@@ -20,3 +20,19 @@ test("shuffledCopyは空配列と1要素でも新しい配列を返す", () => {
   assert.deepEqual(shuffledCopy(single), ["only"]);
   assert.notEqual(shuffledCopy(single), single);
 });
+
+test("shuffledCopyは範囲外・非有限の乱数でも配列の長さと要素を保持する", () => {
+  const source = ["a", "b", "c", "d"];
+  for (const sample of [-1, -0.1, 1, 1.25, NaN, Infinity, -Infinity]) {
+    const actual = shuffledCopy(source, () => sample);
+    assert.equal(actual.length, source.length, String(sample));
+    assert.deepEqual([...actual].sort(), [...source].sort(), String(sample));
+    assert.ok(actual.every((item) => typeof item === "string"), String(sample));
+  }
+  assert.deepEqual(source, ["a", "b", "c", "d"]);
+});
+
+test("shuffledCopyは正常な小数乱数の既存Fisher-Yates結果を維持する", () => {
+  const source = ["a", "b", "c", "d"];
+  assert.deepEqual(shuffledCopy(source, () => 0.5), ["a", "d", "b", "c"]);
+});

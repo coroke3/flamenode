@@ -8,6 +8,8 @@ import { Settings } from "./dashboard/Settings.js";
 import { YoutubePlaylists } from "./dashboard/YoutubePlaylists.js";
 import { Onboarding } from "./onboarding.js";
 import { EntryIndex } from "./entry/EntryIndex.js";
+import { CostGuardBanner } from "./CostGuardBanner.js";
+import type { createOperationModeBannerApi } from "../api/operationMode.js";
 
 /** Routes owned by MIG-0701 (CURRENT_ROUTES.md Personal). Other Personal routes are later MIG tasks. */
 export const PERSONAL_READ_PATHS = [
@@ -32,9 +34,13 @@ export class RouteErrorBoundary extends React.Component<{ children: React.ReactN
   }
 }
 
-export function PersonalRoutes({ api }: { api: PersonalApi }): React.ReactElement {
+export function PersonalRoutes({ api, bannerApi }: {
+  api: PersonalApi;
+  bannerApi?: ReturnType<typeof createOperationModeBannerApi>;
+}): React.ReactElement {
   return (
     <div data-fn-surface="personal" className="fn-personal-shell fn-app">
+      <CostGuardBanner api={bannerApi} />
       <main className="fn-main flex-1 w-full">
         <RouteErrorBoundary>
           <Routes>

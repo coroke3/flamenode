@@ -163,6 +163,129 @@ test("JSON/CSVを同じcanonical planへ変換する", () => {
   assert.equal(plan.videoChapters[0].chapter_time, 0);
 });
 
+test("legacy image normalization accepts genuine Drive origins, not lookalike URLs", () => {
+  const cases = [
+    ["https://drive.google.com/file/d/FILEID123456/view", "/api/google-drive-image/FILEID123456"],
+    ["https://www.drive.google.com/open?id=FILEID123456", "/api/google-drive-image/FILEID123456"],
+    ["drive.google.com/uc?export=download&id=FILEID123456", "/api/google-drive-image/FILEID123456"],
+    ["https://drive.google.com.evil.example/file/d/FILEID123456/view", "https://drive.google.com.evil.example/file/d/FILEID123456/view"],
+    ["https://evil.example/drive.google.com/file/d/FILEID123456", "https://evil.example/drive.google.com/file/d/FILEID123456"],
+    ["https://evil.example/?next=https://drive.google.com/open?id=FILEID123456", "https://evil.example/?next=https://drive.google.com/open?id=FILEID123456"],
+    ["https://user:secret@drive.google.com/file/d/FILEID123456/view", null],
+    ["https://user:secret@evil.example/path", null],
+    ["https://user@drive.google.com/open?id=FILEID123456", null],
+    ["ftp://drive.google.com/file/d/FILEID123456/view", null],
+    ["https://drive.google.com/file/d/INVALID%2FID/view", "https://drive.google.com/file/d/INVALID%2FID/view"],
+    ["/api/google-drive-image/FILEID123456", "/api/google-drive-image/FILEID123456"],
+  ];
+  for (const [icon, expected] of cases) {
+    const source = parseLegacyImportText("eventinfo.json", JSON.stringify([{
+      eventid: "legacy-image-test",
+      eventname: "Legacy image",
+      icon,
+    }]));
+    const plan = normalizeLegacyFiles([source], {
+      eventVisibility: "private",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    });
+    assert.equal(plan.events.length, 1, icon);
+    assert.equal(plan.events[0].icon_url, expected, icon);
+  }
+});
+
+test("legacy imported public URLs do not retain embedded credentials", () => {
+  const plan = normalizeLegacyFiles([
+    parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "URL credentials test",
+      creator: "Creator",
+      tlink: "creator_x",
+      eventid: "legacy-credential-test",
+      ychlink: "https://user:secret@youtube.com/@creator",
+      ymulink: "https://user:secret@example.com/music",
+      othersns: "https://user:secret@example.com/profile",
+      icon: "https://user:secret@example.com/icon.png",
+      ylink: "https://youtu.be/abcdefghijk",
+    }])),
+  ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+  assert.equal(plan.videos.length, 1);
+  assert.equal(plan.videos[0].creator_youtube_channel_url, null);
+  assert.equal(plan.videos[0].music_reference_url, null);
+  assert.equal(plan.videos[0].creator_icon_url, null);
+  assert.equal(plan.videos[0].creator_other_social_links, null);
+  assert.equal(plan.xUsers.find((x) => x.id === "creator_x")?.other_social_links, null);
+});
+
+test("legacy social URL credentials are rejected despite leading whitespace", () => {
+  for (const raw of [
+    " https://user:secret@example.com/profile",
+    "\thttps://user:secret@example.com/profile",
+    "\nhttps://user:secret@example.com/profile",
+    "\r\nhttps://user:secret@example.com/profile",
+  ]) {
+    const plan = normalizeLegacyFiles([
+      parseLegacyImportText("video_new.json", JSON.stringify([{
+        title: "Whitespace URL credentials test",
+        creator: "Creator",
+        tlink: "creator_x",
+        eventid: "legacy-credential-whitespace-test",
+        othersns: raw,
+        ylink: "https://youtu.be/abcdefghijk",
+      }])),
+    ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+    assert.equal(plan.videos.length, 1);
+    assert.equal(plan.videos[0].creator_other_social_links, null, JSON.stringify(raw));
+    assert.equal(plan.xUsers.find((x) => x.id === "creator_x")?.other_social_links, null, JSON.stringify(raw));
+  }
+  const labels = normalizeLegacyFiles([
+    parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "Free-text social label",
+      creator: "Creator",
+      tlink: "creator_x",
+      eventid: "legacy-label-test",
+      othersns: "X, TikTok",
+      ylink: "https://youtu.be/abcdefghijk",
+    }])),
+  ], { eventVisibility: "private", videoVisibility: "private", now: 1_700_000_000 });
+  assert.equal(labels.videos[0].creator_other_social_links, "X, TikTok");
+  assert.equal(labels.xUsers.find((x) => x.id === "creator_x")?.other_social_links, "X, TikTok");
+});
+
+test("legacy YouTube ID extraction validates the actual URL host", () => {
+  const cases = [
+    ["abcdefghijk", "abcdefghijk"],
+    ["https://youtu.be/abcdefghijk", "abcdefghijk"],
+    ["youtu.be/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtu.be/abcdefghijk?t=5", "abcdefghijk"],
+    ["www.youtu.be/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtube.com/watch?feature=share&v=abcdefghijk", "abcdefghijk"],
+    ["https://m.youtube.com/shorts/abcdefghijk", "abcdefghijk"],
+    ["https://www.youtube.com/embed/abcdefghijk", "abcdefghijk"],
+    ["https://youtube.com.evil.example/watch?v=abcdefghijk", null],
+    ["https://evil.example/youtube.com/watch?v=abcdefghijk", null],
+    ["https://evil.example/?next=https://youtu.be/abcdefghijk", null],
+    ["https://user:secret@youtube.com/watch?v=abcdefghijk", null],
+    ["https://youtube.com/watch?v=abcdefghijkjunk", null],
+    ["https://youtu.be/abcdefghijk/extra", null],
+  ];
+  for (const [ylink, expected] of cases) {
+    const parsed = parseLegacyImportText("video_new.json", JSON.stringify([{
+      title: "Import URL origin test",
+      creator: "Creator",
+      eventid: "legacy-origin-test",
+      ylink,
+    }]));
+    const plan = normalizeLegacyFiles([parsed], {
+      eventVisibility: "private",
+      videoVisibility: "private",
+      now: 1_700_000_000,
+    });
+    assert.equal(plan.videos.length, 1, `video row should remain importable: ${ylink}`);
+    assert.equal(plan.videos[0].youtube_video_id, expected, ylink);
+    assert.equal(plan.videos[0].source_type, expected ? "youtube" : "external", ylink);
+  }
+});
+
 test("video_new.jsonのみでも参照eventidからイベントを自動作成する", () => {
   const videoOnlyJson = JSON.stringify([
     {

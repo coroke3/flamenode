@@ -9,13 +9,12 @@
  * forbidden-key sanitizing and LIMITs are CURRENT's, not a copy. The bucket is captured, never uploaded.
  *
  * Safety: CURRENT's generators also write tracking rows (static_artifacts, static_rebuild_queue). The CLI
- * therefore only accepts a local file (a sqlite copy or a `wrangler d1 export` SQL dump) that it loads into a scratch
- * in-memory database; it never talks to Cloudflare. Production D1 access (read-only REST token, MIG-0409
- * `--d1-api`) is not used here: this producer runs about 6 statements per creator, far above that reader's
- * 19-request cap. How the build obtains the local copy is the MIG-0509 decision (see the work item).
+ * therefore routes those writes to a migrated in-memory scratch database. --d1-api uses the bounded
+ * read-only REST reader with batched/set-based SQL (max 200 SELECT statements); it never sends writes to D1.
+ * Local --sqlite and --sql-dump fixtures remain supported, with explicit --batched parity mode.
  *
  * CLI: node --experimental-strip-types apps/site/scripts/produceSnapshots.ts
- *        (--sqlite FILE | --sql-dump FILE) --out DIR --generation ID [--trending-file FILE] [--now SEC]
+ *        (--sqlite FILE | --sql-dump FILE | --d1-api) --out DIR --generation ID [--trending-file FILE] [--now SEC]
  */
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -40,6 +39,8 @@ import {
 } from "../src/lib/publicDataLoader.ts";
 import { eventReleaseObjectKey } from "../../../src/lib/publicData/staticEventDetailCore.ts";
 import { mirrorTables } from "./mirrorTables.ts";
+import { D1_HTTP_ENV, MAX_D1_HTTP_STATEMENTS_OVERRIDE, isReadOnlyStatement, openD1HttpReader } from "./readPublicData.ts";
+import { DEFAULT_R2_BUILD_BUCKET, readR2Json } from "./readR2Object.ts";
 
 const EVENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
@@ -158,17 +159,18 @@ function countingDb(db: D1Like, counter: { n: number }): D1Like {
 }
 
 /** Fixed part of a batched run is about 45 statements; creators add about 3 per `creatorsPerQuery` plus profile chunks. */
-export const DEFAULT_MAX_REMOTE_STATEMENTS = 200;
+export const DEFAULT_MAX_REMOTE_STATEMENTS = MAX_D1_HTTP_STATEMENTS_OVERRIDE;
 
 /** Counts statements sent to the read-only reader, refuses anything that is not a single SELECT/WITH and enforces the cap. */
-function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
+export function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
   return {
     prepare(sql: string) {
-      if (!/^\s*(SELECT|WITH)\b/i.test(sql) || sql.trim().replace(/;\s*$/, "").includes(";")) {
+      if (!isReadOnlyStatement(sql)) {
         throw new Error("read-only reader: only a single SELECT/WITH may reach the database");
       }
+      // A rejected preparation must not count as a statement sent to the DB.
+      if (counter.n >= max) throw new Error(`read-only reader: request budget of ${max} statements exceeded`);
       counter.n += 1;
-      if (counter.n > max) throw new Error(`read-only reader: request budget of ${max} statements exceeded`);
       return db.prepare(sql);
     },
   };
@@ -179,15 +181,53 @@ function limitedDb(db: D1Like, counter: { n: number }, max: number): D1Like {
  * tracking table) run on the local scratch database; every other statement goes to the read-only reader.
  */
 export const LOCAL_TRACKING_TABLES = ["static_artifacts", "static_rebuild_queue"] as const;
-const LOCAL_STATEMENT = new RegExp(
-  `^\\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\\b|\\b(${LOCAL_TRACKING_TABLES.join("|")})\\b`,
-  "i",
-);
+const LOCAL_WRITE_STATEMENT = /^\s*(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK)\b/i;
+const TRACKING_TABLE_REFERENCE = /\b(?:FROM|JOIN|INTO|UPDATE)\s+["\x60\[]?(?:static_artifacts|static_rebuild_queue)["\x60\]]?(?!\w)/i;
 
-function overlayDb(remote: D1Like, local: D1Like): D1Like {
+/** Ignore comments and quoted string values when selecting the local tracking database. */
+function executableSqlForRouting(sql: string): string {
+  let executable = "";
+  for (let i = 0; i < sql.length;) {
+    if (sql[i] === "'") {
+      i++;
+      while (i < sql.length) {
+        if (sql[i] === "'") {
+          if (sql[i + 1] === "'") { i += 2; continue; }
+          i++;
+          break;
+        }
+        i++;
+      }
+      executable += " ";
+      continue;
+    }
+    if (sql[i] === "-" && sql[i + 1] === "-") {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      executable += " ";
+      continue;
+    }
+    if (sql[i] === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      if (end < 0) return executable;
+      i = end + 2;
+      executable += " ";
+      continue;
+    }
+    executable += sql[i];
+    i++;
+  }
+  return executable;
+}
+
+function isLocalTrackingStatement(sql: string): boolean {
+  const executable = executableSqlForRouting(sql);
+  return LOCAL_WRITE_STATEMENT.test(executable) || TRACKING_TABLE_REFERENCE.test(executable);
+}
+
+export function overlayDb(remote: D1Like, local: D1Like): D1Like {
   return {
     prepare(sql: string) {
-      if (LOCAL_STATEMENT.test(sql)) return local.prepare(sql);
+      if (isLocalTrackingStatement(sql)) return local.prepare(sql);
       const base = remote.prepare(sql);
       let bound: { all(): Promise<{ results?: unknown[] }> } | null = null;
       const statement = {
@@ -269,11 +309,44 @@ async function allRows(db: D1Like, sql: string, ...values: unknown[]): Promise<R
   return (await stmt.all()).results ?? [];
 }
 
+// CURRENT's static generators call Date.now() directly. A build with --now
+// temporarily overrides that process-global function; concurrent producers
+// must not overlap or a run can stamp another generation's timestamps.
+let snapshotProducerTail: Promise<void> = Promise.resolve();
+
 export async function produceSnapshots(input: ProduceInput): Promise<ProduceResult> {
+  // Programmatic callers bypass the CLI's --now validation. Reject malformed
+  // clocks before entering the queue or touching D1/the temporary SQLite DB.
+  // Date's TimeClip range ends at 8.64e15 ms, below MAX_SAFE_INTEGER.
+  // CURRENT's generators call new Date(nowSec * 1000), not just Date.now().
+  const maxDateUnixSec = 8_640_000_000_000;
+  if (input.nowSec !== undefined &&
+      (!Number.isSafeInteger(input.nowSec) || input.nowSec < 0 || input.nowSec > maxDateUnixSec)) {
+    throw new RangeError("snapshot nowSec must be a nonnegative integer within JavaScript Date range");
+  }
+  const previous = snapshotProducerTail;
+  let release!: () => void;
+  snapshotProducerTail = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    return await produceSnapshotsExclusive(input);
+  } finally {
+    // Release even when a generator throws, so subsequent builds cannot hang.
+    release();
+  }
+}
+
+async function produceSnapshotsExclusive(input: ProduceInput): Promise<ProduceResult> {
   const started = performance.now();
   const counter = { n: 0 };
   const batched = input.mode === "batched";
   const maxRemote = input.maxRemoteStatements ?? DEFAULT_MAX_REMOTE_STATEMENTS;
+  // The local overlay also has an independent statement fence. Validate before
+  // opening scratch DBs or executing a remote SELECT; NaN/Infinity would evade
+  // counter.n > maxRemote just as they did in the REST reader.
+  if (batched && (!Number.isSafeInteger(maxRemote) || maxRemote < 1 || maxRemote > DEFAULT_MAX_REMOTE_STATEMENTS)) {
+    throw new RangeError(`batched snapshot statement budget must be an integer from 1 to ${DEFAULT_MAX_REMOTE_STATEMENTS}`);
+  }
   const remote = batched ? limitedDb(input.db, counter, maxRemote) : countingDb(input.db, counter);
   const generatorDb = batched ? overlayDb(remote, input.scratch ?? (await openMigratedScratch())) : remote;
   const { env, objects } = captureEnv(generatorDb);
@@ -419,7 +492,7 @@ export async function produceSnapshots(input: ProduceInput): Promise<ProduceResu
       },
     };
   } finally {
-    Date.now = realNow;
+    if (input.nowSec !== undefined) Date.now = realNow;
   }
 }
 
@@ -448,6 +521,9 @@ export function writeSnapshotDir(outDir: string, result: ProduceResult): Record<
 async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promise<D1Like> {
   const { DatabaseSync } = await import("node:sqlite");
   const scratch = new DatabaseSync(":memory:");
+  // Copy SQLite tables in schema order before enabling FK checks; SQLite's sqlite_master order
+  // is not a topological dependency order. The source snapshot is read-only throughout.
+  scratch.exec("PRAGMA foreign_keys = OFF");
   if (args.sqlite) {
     // Copy through the backup-free route: attach read-only and copy tables is overkill; load the file bytes.
     const source = new DatabaseSync(args.sqlite, { readOnly: true });
@@ -467,6 +543,9 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   } else {
     throw new Error("--sqlite FILE or --sql-dump FILE is required (no Cloudflare access from this producer)");
   }
+  const broken = scratch.prepare("PRAGMA foreign_key_check").all();
+  if (broken.length) throw new Error("Local SQLite snapshot has broken foreign keys");
+  scratch.exec("PRAGMA foreign_keys = ON");
   return {
     prepare(sql: string) {
       let params: unknown[] = [];
@@ -481,30 +560,78 @@ async function openScratchDb(args: { sqlite?: string; sqlDump?: string }): Promi
   };
 }
 
-function argValue(argv: string[], name: string): string | undefined {
-  const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+export interface SnapshotCliOptions {
+  env?: Record<string, string | undefined>;
+  fetchFn?: typeof fetch;
+  quiet?: boolean;
+}
+type SnapshotCliArgs = {
+  out: string; generation: string;
+  sqlite?: string; sqlDump?: string; d1Api: boolean; batched: boolean;
+  trendingFile?: string; trendingR2: boolean; now?: number;
+};
+const CLI_USAGE = "expected exactly one of --sqlite FILE, --sql-dump FILE, --d1-api, plus --out DIR --generation ID";
+export function parseSnapshotCliArgs(argv: readonly string[]): SnapshotCliArgs {
+  const values = new Map<string,string>();
+  let d1Api = false, batched = false, trendingR2 = false;
+  const known = new Set(["--out","--generation","--sqlite","--sql-dump","--trending-file","--now"]);
+  for (let i = 0; i < argv.length; i++) {
+    const key = argv[i];
+    if (key === "--d1-api" || key === "--batched" || key === "--trending-r2") {
+      if ((key === "--d1-api" && d1Api) || (key === "--batched" && batched) || (key === "--trending-r2" && trendingR2)) throw new Error(CLI_USAGE);
+      if (key === "--d1-api") d1Api = true; else if(key === "--trending-r2") trendingR2 = true; else batched = true;
+      continue;
+    }
+    if (!known.has(key) || values.has(key) || !argv[i+1] || argv[i+1].startsWith("--")) throw new Error(CLI_USAGE);
+    values.set(key,argv[++i]);
+  }
+  if (trendingR2 && values.has("--trending-file")) throw new Error(CLI_USAGE);
+  const sqlite = values.get("--sqlite"), sqlDump = values.get("--sql-dump");
+  const sourceCount = Number(d1Api)+Number(Boolean(sqlite))+Number(Boolean(sqlDump));
+  if (sourceCount !== 1 || !values.get("--out") || !values.get("--generation")) throw new Error(CLI_USAGE);
+  const nowRaw = values.get("--now");
+  const now = nowRaw === undefined ? undefined : Number(nowRaw);
+  if (now !== undefined && (!Number.isSafeInteger(now)||now<0)) throw new Error(CLI_USAGE);
+  return {
+    out:values.get("--out")!,generation:values.get("--generation")!,
+    sqlite,sqlDump,d1Api,batched:batched||d1Api,trendingFile:values.get("--trending-file"),trendingR2,now,
+  };
 }
 
-export async function main(argv: string[]): Promise<void> {
-  const out = argValue(argv, "--out");
-  const generation = argValue(argv, "--generation");
-  if (!out || !generation) throw new Error("--out DIR and --generation ID are required");
-  const db = await openScratchDb({ sqlite: argValue(argv, "--sqlite"), sqlDump: argValue(argv, "--sql-dump") });
-  const trendingFile = argValue(argv, "--trending-file");
-  const nowArg = argValue(argv, "--now");
+export async function main(argv: string[], options: SnapshotCliOptions = {}): Promise<ProduceResult> {
+  const args = parseSnapshotCliArgs(argv);
+  const env = options.env ?? process.env;
+  const db = args.d1Api
+    ? openD1HttpReader({
+        accountId: env[D1_HTTP_ENV.accountId]?.trim() ?? "",
+        databaseId: env[D1_HTTP_ENV.databaseId]?.trim() ?? "",
+        token: env[D1_HTTP_ENV.token]?.trim() ?? "",
+        fetchFn: options.fetchFn,
+        maxStatements: DEFAULT_MAX_REMOTE_STATEMENTS,
+      }).db
+    : await openScratchDb({sqlite: args.sqlite,sqlDump: args.sqlDump});
+  const trending = args.trendingR2
+    ? await readR2Json({accountId:env.CLOUDFLARE_ACCOUNT_ID?.trim()??"",
+      bucket:env.FLAMENODE_R2_BUCKET?.trim()||DEFAULT_R2_BUILD_BUCKET,
+      key:"analytics/trending.json",token:env.FLAMENODE_R2_READ_TOKEN?.trim()??"",
+      fetchFn:options.fetchFn})
+    : args.trendingFile ? JSON.parse(fs.readFileSync(args.trendingFile,"utf8")) : undefined;
   const result = await produceSnapshots({
     db,
-    mode: argv.includes("--batched") ? "batched" : "oracle",
-    generation,
-    nowSec: nowArg ? Number(nowArg) : undefined,
-    trending: trendingFile ? JSON.parse(fs.readFileSync(trendingFile, "utf-8")) : undefined,
+    mode:args.batched ? "batched" : "oracle",
+    maxRemoteStatements:DEFAULT_MAX_REMOTE_STATEMENTS,
+    generation:args.generation,
+    nowSec:args.now,
+    trending:trending===null?undefined:trending,
   });
-  const env = writeSnapshotDir(out, result);
-  console.log(JSON.stringify({ report: result.report, env }, null, 2));
-  if (result.report.trending === "missing") {
-    console.warn("[snapshots] trending was not produced (no --trending-file): the /trending and / builds fail closed until it is supplied");
+  const buildEnv = writeSnapshotDir(args.out, result);
+  if (!options.quiet) {
+    console.log(JSON.stringify({ report: result.report, env: buildEnv }, null, 2));
+    if (result.report.trending === "missing") {
+      console.warn("[snapshots] trending was not produced: the /trending and / builds fail closed until it is supplied");
+    }
   }
+  return result;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

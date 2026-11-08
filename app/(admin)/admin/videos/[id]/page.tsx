@@ -17,6 +17,7 @@ import { ConsolePageHeader as AdminPageHeader } from "@/components/layout/Consol
 import { AdminVideoTabs } from "@/components/admin/AdminVideoTabs";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
+import { videoPageHref } from "@/lib/youtube/id";
 import { CreateModerationCaseForm } from "@/components/admin/CreateModerationCaseForm";
 import {
   firstSearchParamValue,
@@ -43,7 +44,6 @@ export default async function AdminVideoDetailPage({
 
   const video = await fetchVideoReviewDetail(db, id);
   if (!video) notFound();
-  const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const moderationCases = await db
     .select({
@@ -113,7 +113,7 @@ export default async function AdminVideoDetailPage({
         footerLinks={
           <>
             <Link
-              href={`/${youtubeVideoId ?? video.id}`}
+              href={videoPageHref(video)}
               className="fn-btn fn-btn-ghost"
               target="_blank"
               rel="noopener noreferrer"

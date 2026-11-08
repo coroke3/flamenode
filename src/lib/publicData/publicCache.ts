@@ -17,6 +17,7 @@ import {
 import {
   publicJsonCacheFreshness,
   publicJsonCacheRetentionTtl,
+  utf8ByteLengthUpTo,
 } from "./publicCachePolicy";
 
 export { publicJsonCacheFreshness, publicJsonCacheRetentionTtl } from "./publicCachePolicy";
@@ -96,38 +97,6 @@ async function cancelResponseBodyBestEffort(response: Response): Promise<void> {
   }
 }
 
-function utf8ByteLengthUpTo(value: string, limit: number): number | null {
-  // A UTF-16 code unit needs at most three UTF-8 bytes (a valid surrogate
-  // pair needs four bytes for two code units). Keep the conservative upper
-  // bound when it is already within the requested limit; otherwise scan only
-  // until the limit is exceeded.
-  if (value.length <= Math.floor(limit / 3)) return value.length * 3;
-
-  let bytes = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x7f) {
-      bytes += 1;
-    } else if (code <= 0x7ff) {
-      bytes += 2;
-    } else if (code >= 0xd800 && code <= 0xdbff) {
-      const next = value.charCodeAt(index + 1);
-      if (next >= 0xdc00 && next <= 0xdfff) {
-        bytes += 4;
-        index += 1;
-      } else {
-        // TextEncoder replaces an unpaired surrogate with U+FFFD (3 bytes).
-        bytes += 3;
-      }
-    } else {
-      // BMP characters and lone low surrogates both encode to at most 3 bytes.
-      bytes += 3;
-    }
-    if (bytes > limit) return null;
-  }
-  return bytes;
-}
-
 function utf8ByteLengthExceeds(value: string, limit: number): boolean {
   return utf8ByteLengthUpTo(value, limit) === null;
 }
@@ -182,7 +151,9 @@ async function readBoundedJsonResponse<T>(
   const bytes = await readResponseBodyBounded(response, PUBLIC_JSON_CACHE_MAX_BYTES);
   if (!bytes) return null;
   try {
-    const value = JSON.parse(new TextDecoder().decode(bytes)) as T;
+    // Reject malformed UTF-8 instead of silently replacing corrupt bytes
+    // with U+FFFD and accepting a different JSON payload as valid cache data.
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as T;
     if (value == null) return null;
     return { value, byteLength: bytes.byteLength };
   } catch {
@@ -204,12 +175,16 @@ export async function readPublicJsonCache<T>(
     if (!matched) return null;
     const parsed = await readBoundedJsonResponse<T>(matched);
     if (parsed == null) return null;
-    writePublicJsonIsolateCache(
-      r2Key,
-      parsed.value,
-      PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
-      parsed.byteLength,
-    );
+    // bypassIsolate means this read must not repopulate the isolate either.
+    // Otherwise an explicit bypass can seed subsequent non-bypass reads.
+    if (!options?.bypassIsolate) {
+      writePublicJsonIsolateCache(
+        r2Key,
+        parsed.value,
+        PUBLIC_JSON_ISOLATE_CACHE_MAX_TTL_SEC,
+        parsed.byteLength,
+      );
+    }
     return parsed.value;
   } catch {
     return null;
@@ -224,19 +199,28 @@ export function writePublicJsonCacheBestEffort(
 ): void {
   try {
     const serialized = JSON.stringify(payload);
-    if (typeof serialized !== "string") return;
+    if (typeof serialized !== "string") {
+      if (!options?.bypassIsolate) deletePublicJsonIsolateCache(r2Key);
+      return;
+    }
+    // Normalize at the write boundary, even for direct callers that bypass the loader.
+    const safeTtl = publicJsonCacheRetentionTtl(ttlSeconds);
     const isolateByteWeight = utf8ByteLengthUpTo(
       serialized,
       PUBLIC_JSON_ISOLATE_CACHE_MAX_ENTRY_BYTES,
     );
     // 大きいpayloadはCache APIには残せるが、isolateには集約保持しない。
-    if (!options?.bypassIsolate && isolateByteWeight !== null) {
-      writePublicJsonIsolateCache(
-        r2Key,
-        payload,
-        ttlSeconds,
-        isolateByteWeight,
-      );
+    // A rejected replacement must not leave a previous same-key snapshot readable.
+    if (!options?.bypassIsolate) {
+      if (isolateByteWeight === null) {
+        deletePublicJsonIsolateCache(r2Key);
+      } else {
+        // Cache API serves JSON.parse(serialized), not the source object. A
+        // toJSON() method or non-finite number can change that representation.
+        // Cache the same JSON value in the isolate to avoid inconsistent reads.
+        const parsedPayload: unknown = JSON.parse(serialized);
+        writePublicJsonIsolateCache(r2Key, parsedPayload, safeTtl, isolateByteWeight);
+      }
     }
 
     // Cloudflare requires async work that outlives the response to be awaited
@@ -246,7 +230,6 @@ export function writePublicJsonCacheBestEffort(
     const waitUntil = resolveWaitUntil();
     if (!waitUntil) return;
 
-    const safeTtl = Math.max(1, Math.floor(ttlSeconds));
     // Cache miss/R2 hit時だけ通るbackground write。readerと同じUTF-8 byte上限を
     // allocation-freeに数え、巨大entryをCache APIへ渡さない。
     if (utf8ByteLengthExceeds(serialized, PUBLIC_JSON_CACHE_MAX_BYTES)) return;
@@ -261,6 +244,9 @@ export function writePublicJsonCacheBestEffort(
     );
     waitUntil(putPromise.catch(() => undefined));
   } catch {
+    // A throwing serializer or synchronous cache failure must not preserve an
+    // older same-key isolate value as if the attempted replacement succeeded.
+    if (!options?.bypassIsolate) deletePublicJsonIsolateCache(r2Key);
     // Cache API failure must not take down the page.
   }
 }
