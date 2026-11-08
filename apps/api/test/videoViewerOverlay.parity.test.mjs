@@ -431,6 +431,21 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
+  test("RH-031 chapter management capability fails closed without a working DB binding", async () => {
+    const { env } = setupTestEnv();
+    // Session resolution and viewer permissions must not fall back to privileged
+    // defaults when the signed-in request cannot read D1.
+    env.DB = undefined;
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.authUnavailable, true);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
   test("T06: RH-031 banned user returns isBanned: true and only the viewer read", async () => {
     const { env, d1 } = setupTestEnv();
     d1.stats.statements = 0;
