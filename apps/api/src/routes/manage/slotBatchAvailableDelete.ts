@@ -47,7 +47,7 @@ async function runAvailableDeletion(
     }
     if (!read.exists_id) return c.json({ ok: false, message: "Not Found" }, 404);
     const selection = selectSlotBatchRows(
-      eventId, validated.data.slot_ids, parseSlotRows(read.slots_json), "delete-available",
+      eventId, slotIds, parseSlotRows(read.slots_json), "delete-available",
     );
     if (!selection.ok) return c.json({ ok: false, message: selection.message }, 409);
     const plan = buildSlotBatchAtomicPlan({
