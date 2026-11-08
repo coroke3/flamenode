@@ -266,10 +266,8 @@ test("MIG-0722 U02b-2: actual UI confirms before callback, cancels and blocks >3
     assert.match(dom.window.document.body.textContent, /変更完了/);
 
     const selectAll = dom.window.document.querySelector('input[aria-label="すべて選択"]');
-    await React.act(async () => {
-      selectAll.checked = true;
-      selectAll.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
-    });
+    await React.act(async () => selectAll.click());
+    assert.equal(selectAll.checked, true);
     assert.ok(findButton("空き枠を削除 (4)").disabled, "max-3 atomic boundary must disable bulk operation");
     assert.ok(findButton("ラベル変更").disabled);
     assert.equal(calls.length, 1, "disabled batch controls must not invoke writes");
