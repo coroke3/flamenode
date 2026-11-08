@@ -16,6 +16,13 @@ export function readAuditViewMode(raw: AdminAuditQueryParam): AuditViewMode {
   return raw === "timeline" || raw === "cards" ? raw : "table";
 }
 
+/** Legacy operator alias is used only when actor is absent or invalidly repeated. */
+export function readAuditActorFilter(actor: AdminAuditQueryParam, operator: AdminAuditQueryParam): string {
+  return Array.isArray(actor)
+    ? readAuditQueryValue(operator)
+    : readAuditQueryValue(actor ?? operator);
+}
+
 export function readAuditLimit(raw: AdminAuditQueryParam): number {
   const numeric = Number(readAuditQueryValue(raw));
   return Number.isFinite(numeric) && numeric > 0
