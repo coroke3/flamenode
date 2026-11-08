@@ -443,6 +443,15 @@ const notificationRow = (id, status = "failed") => ({
 const notificationParams = (kind, i, tag) => ({ id: benchNotificationId(i, tag) });
 const notificationSetup = (status) => (kind, i, tag) => [notificationRow(benchNotificationId(i, tag), status)];
 
+// MIG-0639 / SA-049,051..055: local drafts/published terms, isolated across samples.
+const benchTermsId = (i, tag) => `bench-terms-${tag}-${i}`;
+const termsParams = (kind, i, tag) => ({ id: benchTermsId(i, tag) });
+const termsRow = (id, status) => ({
+  sql: "INSERT OR REPLACE INTO terms_versions (id,version_label,body_markdown,status,severity,published_at,created_by_user_id,created_at,updated_at) VALUES (?, 'bench-v1', 'bench body', ?, 'major', ?, 'bench-admin', 100, 100)",
+  params: [id, status, status === "published" ? 900 : null],
+});
+const termsSetup = (status) => (kind, i, tag) => [termsRow(benchTermsId(i, tag), status)];
+
 export const ROUTE_INVENTORY = [
   // [id, method, path, access, options]
   ["MIG-0661", "GET", "/api/operation-mode/banner", "p"],
@@ -517,6 +526,13 @@ export const ROUTE_INVENTORY = [
   ["RH-007", "GET", "/api/admin/spreadsheet/export", "a", { nq: "?table=events&format=csv", setup: (k) => (k === "limit" ? [spreadsheetRows(120)] : undefined) }],
   ["RH-009", "GET", "/api/admin/spreadsheet/tables", "a"],
   // SA-045..048: verified handler contracts from apps/api/src/routes/admin/notifications.ts
+  // SA-049 / SA-051..055: exact handler names and contracts per MIG-0642 parity suite
+  ["SA-049", "PUT", "/api/admin/permissions/editable-fields", "w"],
+  ["SA-051", "POST", "/api/admin/terms", "w"],
+  ["SA-052", "PATCH", "/api/admin/terms/:id", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-053", "POST", "/api/admin/terms/:id/publish", "w", { params: termsParams, setup: termsSetup("draft") }],
+  ["SA-054", "POST", "/api/admin/terms/:id/reaccept-broadcast", "w", { params: termsParams, setup: termsSetup("published") }],
+  ["SA-055", "POST", "/api/admin/terms/:id/archive", "w", { params: termsParams, setup: termsSetup("draft") }],
   ["SA-048", "POST", "/api/admin/notifications/retry-failed", "w", { setup: notificationSetup("failed") }],
   ["SA-045", "POST", "/api/admin/notifications/:id/retry", "w", { params: notificationParams, setup: notificationSetup("failed") }],
   ["SA-046", "POST", "/api/admin/notifications/:id/cancel", "w", { params: notificationParams, setup: notificationSetup("pending") }],
@@ -602,6 +618,13 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
+  "PUT /api/admin/permissions/editable-fields": (kind) => ({ default_editable_fields: kind === "limit" ? ["title", "description"] : [], upcoming_editable_fields: kind === "limit" ? ["title"] : [] }),
+  "POST /api/admin/terms": (kind, i, tag) => ({ id: benchTermsId(i, tag), version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v1", body_markdown: kind === "limit" ? "x".repeat(2000) : "benchmark body", severity: "major" }),
+  "PATCH /api/admin/terms/:id": (kind) => ({ version_label: kind === "limit" ? "v".repeat(60) : "benchmark-v2", body_markdown: kind === "limit" ? "x".repeat(2000) : "updated benchmark body", severity: "major" }),
+  "POST /api/admin/terms/:id/publish": () => ({}),
+  "POST /api/admin/terms/:id/reaccept-broadcast": (kind) => ({ confirm: "TERMS", content: kind === "limit" ? "n".repeat(80) : "benchmark" }),
+  "POST /api/admin/terms/:id/archive": () => ({}),
+
   "POST /api/admin/notifications/retry-failed": () => ({}),
   "POST /api/admin/notifications/:id/retry": () => ({}),
   "POST /api/admin/notifications/:id/cancel": (kind) => ({ reason: kind === "limit" ? "r".repeat(500) : "bench" }),
@@ -674,6 +697,13 @@ export function buildRouteScenarios() {
 // Statuses a healthy run must return, pinned from an in-process probe of the main-branch app on the shared
 // fixture (MIG-0639). A different status means the fixture or the route changed and the CPU number is void.
 const ROUTE_EXPECT = {
+  "PUT /api/admin/permissions/editable-fields": { normal: [200], limit: [200], invalid: [200] },
+  "POST /api/admin/terms": { normal: [200], limit: [200], invalid: [400] },
+  "PATCH /api/admin/terms/:id": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/terms/:id/publish": { normal: [200], limit: [200], invalid: [404] },
+  "POST /api/admin/terms/:id/reaccept-broadcast": { normal: [200], limit: [200], invalid: [400] },
+  "POST /api/admin/terms/:id/archive": { normal: [200], limit: [200], invalid: [404] },
+
   "POST /api/admin/notifications/retry-failed": { normal: [200], limit: [200], invalid: [200] },
   "POST /api/admin/notifications/:id/retry": { normal: [200], limit: [200], invalid: [404] },
   "POST /api/admin/notifications/:id/cancel": { normal: [200], limit: [200], invalid: [404] },
