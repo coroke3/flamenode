@@ -1552,6 +1552,9 @@
 | `apps/api/src/routes/manage/slotSubmittedDangerAudit.ts` | HELPER | SA-056/057 per-slot strict long before/after, conditional complete video audit; rejects missing complete before image | MIG-0656 | SAME (UNMOUNTED; requires same-batch CAS, Outbox and Queue Hono parent) | IN_PROGRESS | PR#514 SHA=6eb43ff5ab8368b56053637d2f155bb906d52c51 TEST=apps/api/test/slotSubmittedDangerAudit.test.mjs (exact-head CI pending) |
 | `apps/api/test/slotSubmittedDangerAudit.test.mjs` | TEST | SA-056/057 30 canonical video fields, 20+video strict audits, SA-057 reserved preservation, malformed before and no mount, 8 offline regressions | MIG-0656 | SAME (offline unit assertions, no real mutateWithAudit D1/browser) | IN_PROGRESS | PR#514 SHA=7c649aafe2885f177a4616c8321b06a2a622373c TEST=node --test --experimental-strip-types apps/api/test/slotSubmittedDangerAudit.test.mjs (CI pending) |
 
+| `apps/api/src/routes/manage/slotSubmittedDangerOutbox.ts` | HELPER | SA-056/057 at-most-one DM Outbox with distinct CURRENT types and requested-anchor version-scoped :submitted dedupe; same audited D1 batch, no pre-read/wake | MIG-0656 | SAME (UNMOUNTED; parent Hono+strict CAS/audit/Queue integration pending) | IN_PROGRESS | PR#514 SHA=6065d7816afe8be6eaf16be9b38572da589da5a8 TEST=apps/api/test/slotSubmittedDangerOutbox.test.mjs (exact-head CI pending) |
+| `apps/api/test/slotSubmittedDangerOutbox.test.mjs` | TEST | SA-056/057 2 types, anchor ID/version dedupe, raw/Unicode group, opt-out and missing user, active dedupe retry, invalid site origins, rolled-back Outbox, no mount | MIG-0656 | SAME (offline node:sqlite nine tests; no full Hono or real D1/browser) | IN_PROGRESS | PR#514 SHA=3b75822ff9f91b1c4f0b5f60381b4024752ed8f5 TEST=node --test --experimental-strip-types apps/api/test/slotSubmittedDangerOutbox.test.mjs (exact-head CI pending) |
+
 ## Future files requiring source/target registration
 
 | Planned path or family | Owning MIG | Status | Required connection |
