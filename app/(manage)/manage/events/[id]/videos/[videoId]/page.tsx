@@ -21,6 +21,7 @@ import { ManageEventPageShell } from "@/components/manage/ManageEventPageShell";
 import { manageEventAccentStyle } from "@/lib/utils/eventAccent";
 import { VideoReviewDetailPanel } from "@/components/admin/VideoReviewDetailPanel";
 import { fetchEventVideoReviewDetail } from "@/lib/admin/videoReviewDetail";
+import { videoPageHref } from "@/lib/youtube/id";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +60,6 @@ export default async function ManageEventVideoDetailPage({
 
   const video = await fetchEventVideoReviewDetail(db, id, videoId);
   if (!video) notFound();
-  const youtubeVideoId = video.youtube_video_id?.trim() || null;
 
   const isAdmin = user.role === "admin";
   const canReview = canEditEventFromSnapshot(
@@ -117,7 +117,7 @@ export default async function ManageEventVideoDetailPage({
               <Icon name="edit" size={11} aria-hidden /> 作品内容を確認
             </Link>
             <Link
-              href={`/${youtubeVideoId ?? video.id}`}
+              href={videoPageHref(video)}
               className="fn-btn fn-btn-ghost fn-btn-sm"
             >
               公開ページ

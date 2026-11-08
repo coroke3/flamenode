@@ -38,6 +38,23 @@ test("extractYoutubePlaylistId rejects missing or malformed IDs", () => {
     extractYoutubePlaylistId("ftp://youtube.com/?list=PL1234567890abcdefghij"),
     null,
   );
+  const id = "PL1234567890abcdefghij";
+  assert.equal(
+    extractYoutubePlaylistId(`https://user:secret@youtube.com/playlist?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://user@www.youtube.com/playlist?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://:secret@youtu.be/watch?list=${id}`),
+    null,
+  );
+  assert.equal(
+    extractYoutubePlaylistId(`https://user%40name:pass@youtube.com/playlist?list=${id}`),
+    null,
+  );
   assert.equal(extractYoutubePlaylistId("bad id"), null);
 });
 
@@ -49,4 +66,9 @@ test("playlist sync mode and interval are bounded", () => {
   assert.equal(parsePlaylistSyncInterval("720"), 720);
   assert.equal(parsePlaylistSyncInterval("20000"), 10080);
   assert.equal(parsePlaylistSyncInterval("invalid"), 720);
+  assert.equal(parsePlaylistSyncInterval(""), 720);
+  assert.equal(parsePlaylistSyncInterval("   "), 720);
+  assert.equal(parsePlaylistSyncInterval(null), 720);
+  assert.equal(parsePlaylistSyncInterval(undefined), 720);
+  assert.equal(parsePlaylistSyncInterval("0"), 60);
 });

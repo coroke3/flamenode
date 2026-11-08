@@ -343,6 +343,72 @@ if (runUnderRootTsx(import.meta.url)) {
     assertSameState(r.curDb, r.honoDb, "unknown event");
   });
 
+  test("SA-038 blank intervals default to 720 minutes in both implementations", () => {
+    for (const raw of ["", "  ", "\t"]) {
+      assert.equal(playlistLib.parsePlaylistSyncInterval(raw), 720);
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: raw }),
+        { ok: true, playlistId: "PL1234567890", mode: "mirror", interval: 720 },
+      );
+    }
+    assert.equal(playlistLib.parsePlaylistSyncInterval("0"), 60);
+    assert.equal(parsePlaylistSettings({ sync_interval_minutes: "0" }).interval, 60);
+  });
+
+  test("SA-038 rejects malformed JSON types instead of coercing array/object values", () => {
+    const invalidPlaylist = [
+      ["PL1234567890"], { toString: "PL1234567890" }, null, 1234567890,
+    ];
+    for (const playlist_id of invalidPlaylist) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id, sync_mode: "mirror" }),
+        { ok: false, message: "YouTube再生リストのURLまたはIDが正しくありません。" },
+      );
+    }
+    for (const sync_mode of [["mirror"], { value: "mirror" }, null, 1]) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode }),
+        { ok: false, message: "入力エラー" },
+      );
+    }
+    for (const sync_interval_minutes of [["720"], { value: 720 }, null]) {
+      assert.deepStrictEqual(
+        parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes }),
+        { ok: false, message: "入力エラー" },
+      );
+    }
+    assert.deepStrictEqual(
+      parsePlaylistSettings({ playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: 720 }),
+      { ok: true, playlistId: "PL1234567890", mode: "mirror", interval: 720 },
+    );
+  });
+
+  test("SA-038 Hono route rejects malformed JSON before database mutation", async () => {
+    const cases = [
+      { playlist_id: ["PL1234567890"], sync_mode: "mirror" },
+      { playlist_id: null, sync_mode: "mirror" },
+      { playlist_id: { value: "PL1234567890" }, sync_mode: "mirror" },
+      { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: ["720"] },
+      { playlist_id: "PL1234567890", sync_mode: "mirror", sync_interval_minutes: null },
+      { playlist_id: "PL1234567890", sync_mode: ["mirror"] },
+      { playlist_id: "PL1234567890", sync_mode: null },
+      { playlist_id: "PL1234567890", sync_mode: { value: "mirror" } },
+    ];
+    for (const body of cases) {
+      const db = database();
+      const before = Object.fromEntries(Object.keys(TABLES).map((table) => [table, rows(db, table)]));
+      const beforeAudits = audits(db);
+      const response = await runHono(db, "admin", "PUT", "/api/manage/events/evA/youtube-playlist", body);
+      assert.equal(response.status, 400, JSON.stringify(body));
+      assert.equal(response.body.ok, false, JSON.stringify(body));
+      assert.equal(response.stats.batches, 0, "invalid JSON must not enter an audited write batch");
+      for (const table of Object.keys(TABLES)) {
+        assert.deepStrictEqual(rows(db, table), before[table], `${table}: malformed JSON wrote data`);
+      }
+      assert.deepStrictEqual(audits(db), beforeAudits, "malformed JSON wrote audit rows");
+    }
+  });
+
   test("SA-038 playlist parser equals CURRENT src/lib/youtube/playlist.ts on a table of inputs", () => {
     const ids = [
       "", "  ", "PLshort", "PL1234567890", "PL_-abcdefgh", "a".repeat(100), "a".repeat(101), "bad id!!!!!!",
@@ -352,9 +418,13 @@ if (runUnderRootTsx(import.meta.url)) {
       "https://evil.example/?list=PL1234567890", "ftp://youtube.com/playlist?list=PL1234567890",
       "https://youtube.com/playlist", "https://youtube.com/playlist?list=short", "javascript:alert(1)",
       " PL1234567890 ", "https://www.youtube.com/playlist?list=%20PL1234567890%20",
+      "https://user:secret@youtube.com/playlist?list=PL1234567890",
+      "https://user@www.youtube.com/playlist?list=PL1234567890",
+      "https://:secret@youtu.be/watch?list=PL1234567890",
+      "https://user%40name:pass@youtube.com/playlist?list=PL1234567890",
     ];
     const modes = [undefined, "", "off", "append_only", "mirror", "MIRROR", "constructor"];
-    const intervals = [undefined, "", "0", "59", "60", "61", "720", "10080", "10081", "1.5", "abc", "-5", "1e3", " 90 "];
+    const intervals = [undefined, "", "   ", "0", "59", "60", "61", "720", "10080", "10081", "1.5", "abc", "-5", "1e3", " 90 "];
     for (const id of ids) {
       for (const mode of modes) {
         for (const interval of intervals) {
