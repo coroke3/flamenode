@@ -638,7 +638,10 @@ const publicEventRows = (count) => numberedRows(
 const REASON = (k) => (k === "limit" ? "r".repeat(500) : "bench");
 /** Request bodies for the write inventory. `limit` fills the bounded text fields to their caps. */
 const WRITE_BODIES = {
-  "POST /api/xid/requests": (kind, i, tag) => ({ x_id: `bn${String(tag).replace(/[^a-z0-9]/gi, "").slice(-6)}${i.toString(36)}`, request_type: "link" }),
+  "POST /api/xid/requests": (kind, i, tag) => {
+    const unique = `bn${String(tag).replace(/[^a-z0-9]/gi, "").slice(-6)}${i.toString(36)}`;
+    return { x_id: kind === "limit" ? unique.padEnd(20, "x").slice(0, 20) : unique, request_type: "link" };
+  },
   "POST /api/xid/requests/:id/cancel": () => undefined,
   "POST /api/xid/merge-revert-requests": (kind, i, tag) => ({ parent_request_id: benchXRequestId(i, tag) }),
   "PUT /api/admin/permissions/editable-fields": (kind) => ({ default_editable_fields: kind === "limit" ? ["title", "description"] : [], upcoming_editable_fields: kind === "limit" ? ["title"] : [] }),
