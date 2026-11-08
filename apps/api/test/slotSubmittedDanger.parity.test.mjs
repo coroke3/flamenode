@@ -261,6 +261,53 @@ test("SA-056/057 U03f: stale video title without updated_at bump fails full 30-f
   }
 });
 
+test("SA-056/057 U03h: concurrent slot label change without version bump aborts strict batch",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    let injected=false;
+    const s=setup({kind,onFirst:(sql,sqlite)=>{
+      if(!injected && sql.includes("AS refs_json")){
+        injected=true;
+        // Simulate a legacy writer that fails to increment version/updated_at.
+        sqlite.prepare("UPDATE slots SET slot_label=? WHERE id=?")
+          .run("Concurrent edit without version bump","s1");
+      }
+    }});
+    try{
+      const res=await s.post();
+      assert.equal(injected,true);
+      assert.equal(res.status,409,await res.clone().text());
+      assert.equal(s.row("slots","s0").status,"submitted");
+      assert.equal(s.row("slots","s1").status,"submitted");
+      assert.equal(s.row("slots","s1").slot_label,"Concurrent edit without version bump");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.deepEqual(countEffects(s),{audits:0,outbox:0,queue:0});
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
+test("SA-056/057 U03h: notification Outbox write failure rolls back slot, video, strict audit and queue",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind});
+    try{
+      // Keep D1 reads and queue planning available, but fail the final
+      // post-audit Outbox INSERT inside the SAME transactional D1 batch.
+      s.sqlite.exec("DROP TABLE notification_outbox");
+      const res=await s.post();
+      assert.equal(res.status,503,await res.clone().text());
+      for(const id of ["s0","s1"]){
+        assert.equal(s.row("slots",id).status,"submitted");
+        assert.equal(s.row("slots",id).video_id,"vid");
+        assert.equal(s.row("slots",id).version,1);
+      }
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.equal(s.countRows("audit_logs"),0);
+      assert.equal(s.countRows("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-056/057 U03f: missing strict audit table rolls back slot, video, Outbox, Queue",async()=>{
   const s=setup();
   try{
