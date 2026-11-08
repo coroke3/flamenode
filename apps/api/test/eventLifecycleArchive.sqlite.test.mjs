@@ -207,9 +207,19 @@ function setup({ status = "public", r2 = true, beforeBatch, role = "admin", mode
       method: "DELETE", headers: { "content-type": "application/json", ...(origin === null ? {} : { Origin: origin }), ...(cookie === null ? {} : { Cookie: cookie }) },
       body: JSON.stringify(body),
     }, env);
+  const requestRaw = (rawBody, cookie = enforceSession ? VALID_SESSION_COOKIE : null) =>
+    app.request(SITE + "/api/admin/events/" + EVENT, {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        Origin: SITE,
+        ...(cookie === null ? {} : { Cookie: cookie }),
+      },
+      body: rawBody,
+    }, env);
   const read = (table, where = "") =>
     sqlite.prepare("SELECT * FROM " + table + " " + where).all();
-  return { sqlite, d1, timeline, bucket, request, read, timestamp };
+  return { sqlite, d1, timeline, bucket, request, requestRaw, read, timestamp };
 }
 
 test("MIG-0652 U04 SQLite T08: public event archive atomically writes event, fence, audit, rebuild queue only after R2 confirmation", async () => {
@@ -672,5 +682,35 @@ test("MIG-0652 U04 SQLite T24: simultaneous first manifest creation for SAME eve
   assert.equal(f.read("public_visibility_fences").length, 0);
   assert.equal(f.read("audit_logs").length, 0);
   assert.equal(f.read("static_rebuild_queue").length, 0);
+});
+
+test("MIG-0652 U04 SQLite T25: real session guard rejects malformed JSON, non-object JSON and oversized UTF-8 before archive", async () => {
+  const oversizedJson = JSON.stringify({
+    event_id: EVENT, confirm: EVENT,
+    // The HTTP 64KiB ceiling is for UTF-8 bytes, NOT JavaScript string length.
+    padding: "日".repeat(22_000),
+  });
+  assert.ok(Buffer.byteLength(oversizedJson, "utf8") > 65_536);
+  for (const variant of [
+    { name: "malformed", raw: '{"event_id":', status: 400, message: "入力エラー" },
+    { name: "array", raw: '["evArchive"]', status: 400, message: "入力エラー" },
+    { name: "null", raw: "null", status: 400, message: "入力エラー" },
+    { name: "primitive", raw: '"evArchive"', status: 400, message: "入力エラー" },
+    { name: "oversized utf8", raw: oversizedJson, status: 413, message: "リクエストが大きすぎます。" },
+  ]) {
+    // Exact production middleware order: Origin -> Auth.js session -> admin
+    // writeGuard -> cost guard -> archive; only the test router is mounted.
+    const f = setup({ enforceOrigin: true, enforceSession: true, enforceWriteGuard: true });
+    const response = await f.requestRaw(variant.raw);
+    assert.equal(response.status, variant.status, variant.name);
+    assert.equal(response.headers.get("cache-control"), "private, no-store", variant.name);
+    assert.deepEqual(await response.json(), { ok: false, message: variant.message }, variant.name);
+    assert.equal(f.d1.stats.batches, 0, variant.name + ": no atomic mutation");
+    assert.deepEqual(f.timeline, [], variant.name + ": no R2 access");
+    assert.equal(f.read("events", "WHERE id = '" + EVENT + "'")[0].visibility_status, "public");
+    assert.equal(f.read("public_visibility_fences").length, 0);
+    assert.equal(f.read("audit_logs").length, 0);
+    assert.equal(f.read("static_rebuild_queue").length, 0);
+  }
 });
 
