@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
+import {readWorkItems,validateWorkItems,gitCommitExists,fetchMissingSourceHistory,validateWithHistory} from "./check-migration-work-items.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,6 +25,200 @@ test("duplicate paths are rejected",()=>{
  const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":another}}).join(" "),/already claimed/);
 });
+test("directory ownership conflicts with nested file locks in either order",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const directory of ["src/**","src/","./src/**","src/./**","src\\**"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+directory);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":another};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,directory);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":another,"MIG-0301.md":first}}).join("\n"),/already claimed/,directory);
+ }
+});
+
+test("equivalent spellings cannot bypass the work-item path lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const alias of ["./src/a.ts","src\\a.ts","src/x/../a.ts","src//a.ts"]) {
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+alias);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":second}}).join("\n"),/already claimed/,alias);
+ }
+});
+
+test("sibling paths and similarly prefixed filenames remain independent",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const other of ["src/a.tsx","src/ab.ts","src2/a.ts","tests/a.ts"]) {
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+other);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active,"MIG-0302.md":second}}),[],other);
+ }
+});
+
+test("root, traversal and absolute path claims fail closed without rejecting legacy globs",()=>{
+ for(const bad of ["./**","../src/a.ts","src/../../secret.ts","/src/a.ts","C:\\src\\a.ts","..","src/../**"]) {
+  const entry=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+bad);
+  const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":entry}});
+  assert.match(errors.join("\n"),/invalid owned path/,bad);
+ }
+});
+
+test("trailing slash on recursive ownership cannot bypass a file lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for (const glob of ["src/**","src/**/","src/**//","./src/**/","src\\**\\"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+glob);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts");
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,glob);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\n"),/already claimed/,glob);
+ }
+});
+
+test("filename and intermediate glob claims overlap their concrete files",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [glob,file] of [
+  ["src/event*.ts","src/eventCreate.ts"],
+  ["src/*.ts","src/a.ts"],
+  ["src/**/foo.ts","src/a/foo.ts"],
+  ["src/**/foo.ts","src/foo.ts"],
+  ["src/**/*.test.mjs","src/unit/a.test.mjs"],
+  ["src/event*.ts","src/eventCreate*.ts"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+glob);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+file);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/,glob+" vs "+file);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\n"),/already claimed/,glob+" vs "+file);
+ }
+});
+
+test("multiple zero-depth recursive segments cannot evade an ownership lock",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const file of ["src/nested/file.ts","src/a/nested/file.ts","src/nested/b/file.ts","src/a/nested/b/file.ts"]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/**/nested/**/file.ts");
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+file);
+  const entries={"MIG-0301.md":first,"MIG-0302.md":second};
+  assert.match(validateWorkItems({statusText:status,entries}).join("\\n"),/already claimed/,file);
+  assert.match(validateWorkItems({statusText:status,entries:{"MIG-0302.md":second,"MIG-0301.md":first}}).join("\\n"),/already claimed/,file);
+ }
+});
+
+test("stacked or nonterminal ownership notes cannot evade locks",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const fake of [
+  "src/a.ts (reason A) (reason B)",
+  "src/a.ts (reason(one))",
+  "src/a.ts (MIG-0302 files(x))",
+  "src/a.ts (reason(one)) (reason B)",
+  "src/a.ts (MIG-0302 files(x))///.",
+  "src/*.ts (embedded(note))",
+  "src/a.ts (MIG-0301 files) (reason B)",
+  "src/a.ts (reason A) (MIG-0301 files)",
+  "src/a.ts (MIG-0302 files) (unknown)",
+  "src/a.ts (MIG-0302 files) (unknown)/.",
+  "src/a.ts (reason A) (reason B)////",
+  "src/a.ts (reason A)/child.ts",
+  "src/a.ts (reason A)(reason B)",
+ ]) {
+  const owner=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+fake);
+  const other=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/*.ts");
+  for(const entries of [
+   {"MIG-0301.md":owner,"MIG-0302.md":other},
+   {"MIG-0302.md":other,"MIG-0301.md":owner},
+  ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),
+    /ambiguous owned path annotations/,fake);
+ }
+ // A single trailing note remains compatible, even after path normalization,
+ // but arbitrary wording must never suppress a real file/glob collision.
+ const withNote=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts (reason A)/.");
+ const exact=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: src/a.ts");
+ for(const entries of [
+  {"MIG-0301.md":withNote,"MIG-0302.md":exact},
+  {"MIG-0302.md":exact,"MIG-0301.md":withNote},
+ ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/already claimed/);
+});
+
+test("whitespace-aliased ownership notes fail closed in either writer order",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const claim of [
+  "src/a.ts  (reason)",
+  "src/a.ts   (MIG-0302 files)",
+  "src/a.ts\t(reason)",
+  "src/a.ts\t(MIG-0302 files)/.",
+  "src/a.ts \t(reason)",
+  "src/a.ts\u00a0(reason)",
+  "src/a.ts\u202f(MIG-0302 files)",
+  "src/*.ts  (reason)",
+  "src/a.ts (one) (two)",
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+claim);
+  for(const otherPath of ["src/a.ts","src/*.ts"]) {
+   const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+otherPath);
+   for(const entries of [
+    {"MIG-0301.md":first,"MIG-0302.md":second},
+    {"MIG-0302.md":second,"MIG-0301.md":first},
+   ]) assert.match(validateWorkItems({statusText:status,entries}).join("\n"),/ambiguous owned path annotations/,claim+" vs "+otherPath);
+  }
+ }
+ for(const allowed of ["src/a.ts (reason)", "src/a.ts (MIG-0301 files)", "src/a.ts (MIG-0301 mount lines only)"]) {
+  const own=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+allowed);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":own}}),[],allowed);
+ }
+});
+
+test("arbitrary suffix notes cannot bypass concrete or glob ownership",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [firstPath,secondPath] of [
+  ["src/a.ts (ignore collision)","src/a.ts"],
+  ["src/a.ts (owner A)","src/a.ts (owner B)"],
+  ["src/** (unverified subset)","src/a.ts"],
+  ["src/a.ts","src/** (says it is safe)"],
+  ["src/a.ts (ignore collision)","src/*.ts"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+firstPath);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+secondPath);
+  for(const entries of [
+   {"MIG-0301.md":first,"MIG-0302.md":second},
+   {"MIG-0302.md":second,"MIG-0301.md":first}
+  ]) assert.match(validateWorkItems({statusText:status,entries}).join("\\n"),/already claimed/,firstPath+" vs "+secondPath);
+ }
+});
+
+test("scoped ownership annotations cannot impersonate another MIG task",()=>{
+ for(const annotation of [
+  "src/** (MIG-0302 files)",
+  "src/** (MIG-0302 files)/",
+  "src/** (MIG-0302 files)/.",
+  "src/** (MIG-0302 files)////",
+  "src/a.ts (MIG-0302 mount lines only)",
+  "src/a.ts (MIG-0302 spreadsheet vars only)",
+ ]) {
+  const forged=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+annotation);
+  const errors=validateWorkItems({statusText:status,entries:{"MIG-0301.md":forged}});
+  assert.match(errors.join("\n"),/scoped owned path .* names MIG-0302 instead of MIG-0301/,annotation);
+ }
+ for(const own of [
+  "src/** (MIG-0301 files)",
+  "src/a.ts (MIG-0301 mount lines only)",
+  "src/a.ts (MIG-0301 spreadsheet vars only)"
+ ]) {
+  const item=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+own);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":item}}),[],own);
+ }
+});
+
+test("disjoint globs, sibling paths and annotated ownership scopes stay independent",()=>{
+ const another=active.replaceAll("MIG-0301","MIG-0302").replaceAll("mig-0301","mig-0302").replace("PR: #123","PR: #124");
+ for(const [firstPath,secondPath] of [
+  ["src/event*.ts","src/video*.ts"],
+  ["src/*.ts","src/a.tsx"],
+  ["src/events*.test.mjs","src/videos*.test.mjs"],
+  ["src/**/foo.ts","test/a/foo.ts"],
+  ["apps/api/src/app.ts (MIG-0301 mount lines only)","apps/api/src/app.ts (MIG-0302 mount lines only)"],
+  ["apps/api/test/** (MIG-0301 files)","apps/api/test/events*.test.mjs"]
+ ]) {
+  const first=active.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+firstPath);
+  const second=another.replace("Owned paths: src/a.ts; src/b.ts","Owned paths: "+secondPath);
+  assert.deepEqual(validateWorkItems({statusText:status,entries:{"MIG-0301.md":first,"MIG-0302.md":second}}),[],firstPath+" vs "+secondPath);
+ }
+});
+
 test("REVIEW requires evidence",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0301.md":active.replace("State: IN_PROGRESS","State: REVIEW")}}).join(" "),/Evidence required/));
 test("unknown MIG rejected",()=>assert.match(validateWorkItems({statusText:status,entries:{"MIG-0999.md":ready}}).join(" "),/absent from STATUS/));
 
@@ -143,4 +337,92 @@ test("failed history retrieval never masks structural errors or nonexistent comm
  });
  assert.match(errors.join("\n"),/could not fetch required PR history/);
  assert.match(errors.join("\n"),/source SHA is not an available Git commit/);
+});
+
+test("work-item reader accepts regular checkpoints and excludes template files", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-regular-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  fs.writeFileSync(path.join(dir,"MIG-0301.md"),ready);
+  fs.writeFileSync(path.join(dir,"README.md"),"instructions");
+  assert.deepEqual(readWorkItems(root),{"MIG-0301.md":ready});
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("missing checkpoint directory is not silently accepted as zero checkpoints", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-missing-"));
+ try {
+  assert.throws(()=>readWorkItems(root),{code:"ENOENT"});
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("symlinked checkpoint and dangling checkpoint are rejected", {skip:process.platform==="win32"}, () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-file-link-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  const outside=path.join(root,"other.md");
+  fs.writeFileSync(outside,ready);
+  for (const target of [outside,path.join(root,"absent.md")]) {
+   const link=path.join(dir,"MIG-0301.md");
+   fs.symlinkSync(target,link,"file");
+   assert.throws(()=>readWorkItems(root),/checkpoint is not a regular file/);
+   fs.unlinkSync(link);
+  }
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("symlinked parent directories cannot redirect checkpoint validation", {skip:process.platform==="win32"}, () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-parent-link-"));
+ try {
+  const external=path.join(root,"external");
+  fs.mkdirSync(path.join(external,"migration","work-items"),{recursive:true});
+  fs.writeFileSync(path.join(external,"migration","work-items","MIG-0301.md"),ready);
+  fs.symlinkSync(external,path.join(root,"docs"),"dir");
+  assert.throws(()=>readWorkItems(root),/directory is not a real directory: docs/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("directory named like a checkpoint is rejected instead of skipped", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-not-file-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(path.join(dir,"MIG-0301.md"),{recursive:true});
+  assert.throws(()=>readWorkItems(root),/checkpoint is not a regular file/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+
+test("work-item checkpoint reader rejects an empty directory and templates only", () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"flamenode-workitems-empty-"));
+ try {
+  const dir=path.join(root,"docs","migration","work-items");
+  fs.mkdirSync(dir,{recursive:true});
+  assert.throws(()=>readWorkItems(root),/ledger has no checkpoints/);
+  fs.writeFileSync(path.join(dir,"README.md"),"guide");
+  fs.writeFileSync(path.join(dir,"TEMPLATE.md"),"template");
+  assert.throws(()=>readWorkItems(root),/ledger has no checkpoints/);
+  assert.match(validateWorkItems({statusText:status,entries:{}}).join("\n"),/ledger has no checkpoints/);
+ } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test("DONE task checkpoints from Phase 2 onward cannot disappear silently", () => {
+ const completed=status+"| MIG-0200 | migrated | DONE | — |\n";
+ const missing=validateWorkItems({statusText:completed,entries:{"MIG-0301.md":ready}});
+ assert.match(missing.join("\n"),/missing DONE task checkpoint: MIG-0200\.md/);
+ const done=ready.replaceAll("MIG-0301","MIG-0200")
+  .replace("State: READY","State: DONE")
+  .replace("Owner: none","Owner: builder")
+  .replace("Branch: none","Branch: migration/mig-0200-completed")
+  .replace("PR: none","PR: #123")
+  .replace("Head: none","Head: "+"a".repeat(40))
+  .replace("Owned paths: none","Owned paths: src/completed.ts")
+  .replace("Current unit: none","Current unit: U01")
+  .replace("Validation: not run","Validation: CI success")
+  .replace("Evidence: none","Evidence: final review");
+ assert.deepEqual(validateWorkItems({statusText:completed,entries:{"MIG-0301.md":ready,"MIG-0200.md":done}}),[]);
+ // Phase 0/1 predates per-task checkpoints and must remain exempt.
+ const historic=status+"| MIG-0108 | old gate | DONE | — |\n";
+ assert.deepEqual(validateWorkItems({statusText:historic,entries:{"MIG-0301.md":ready}}),[]);
 });

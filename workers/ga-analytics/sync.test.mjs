@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   GA4_TRENDING_OUTPUT_KEY,
+  publicRecentIds,
+  countMatchedVideos,
   syncGa4Trending,
 } from "./sync.ts";
 
@@ -900,6 +902,7 @@ test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empt
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, title: undefined }] },
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, views_2d: undefined }] },
       { schema_version: 1, generated_at: 1_700_000_000, items: [{ ...validItem, video_id: "different-id" }] },
+      { schema_version: 1, generated_at: 1_700_000_000, items: [validItem, { ...validItem, rank: 2 }] },
     ]) {
       const prior = JSON.stringify(previous);
       let reads = 0;
@@ -931,4 +934,71 @@ test("MIG-0517: invalid old R2 schema or reader-rejected items cannot block empt
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("GA4 public allow-list requires public status and a displayable title", () => {
+  const recent = { items: [
+    { id: " public-id ", title: "Public", status: "public" },
+    { id: "no-title", status: "public" },
+    { id: "blank-title", title: "   ", status: "public" },
+    { id: "numeric-title", title: 42, status: "public" },
+    { id: "revoked", title: "Revoked", status: "private" },
+    { id: "deleted", status: "deleted" },
+    { id: "unmarked" },
+    { id: "false-status", status: false },
+    { id: "array", status: ["public"] },
+    null,
+  ] };
+  assert.deepEqual([...publicRecentIds(recent)], ["public-id"]);
+  assert.deepEqual([...publicRecentIds({ items: null })], []);
+});
+
+test("GA4 matched count excludes revoked and malformed input rows", () => {
+  const recent = { items: [
+    { id: "visible", title: "Visible", status: "public" },
+    { id: "missing-title", status: "public" },
+    { id: "revoked", title: "Revoked", status: "private" },
+    { id: "unmarked" },
+  ] };
+  const periods = [
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 9 },
+    { video_id: "revoked", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 10 },
+    { video_id: "missing-title", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 12 },
+    { video_id: "unmarked", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 11 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 0 },
+  ];
+  assert.equal(countMatchedVideos(recent, periods), 1);
+});
+
+test("GA4 matched count excludes invalid 2d, 5d and 7d inputs like ranking", () => {
+  const recent = { items: [{ id: "public", title: "Public", status: "public" }] };
+  const valid = { video_id: "public", views_2d: 0, views_5d: 1, views_7d: 2, views_30d: 3 };
+  for (const field of ["views_2d", "views_5d", "views_7d"]) {
+    for (const invalid of [NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, undefined]) {
+      assert.equal(countMatchedVideos(recent, [{ ...valid, [field]: invalid }]), 0,
+        `${field}=${String(invalid)} must not count`);
+    }
+  }
+  assert.equal(countMatchedVideos(recent, [valid]), 1);
+});
+
+test("GA4 matched video count excludes duplicate rows and unsafe 30d views", () => {
+  const recent = { items: [
+    { id: "visible", title: "Visible", status: "public" },
+    { id: "second", title: "Second", status: "public" },
+  ] };
+  assert.equal(countMatchedVideos(recent, [
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 1 },
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 100 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: Infinity },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: NaN },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 1.5 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: Number.MAX_SAFE_INTEGER + 1 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: -1 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 0 },
+  ]), 1);
+  assert.equal(countMatchedVideos(recent, [
+    { video_id: "visible", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 2 },
+    { video_id: "second", views_2d: 0, views_5d: 0, views_7d: 0, views_30d: 3 },
+  ]), 2);
 });

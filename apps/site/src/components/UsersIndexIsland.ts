@@ -37,7 +37,10 @@ export function UsersIndexIsland({ initial, unavailable, indexUrl }: UsersIndexI
     const query = new URLSearchParams(window.location.search);
     const q = query.get("q") ?? "";
     const sort = parseUsersIndexSort(query.get("sort"));
-    const page = parseIndexPage(query.get("page"));
+    // Next exposes repeated ?page= keys as a string[]; URLSearchParams.get()
+    // would silently keep the first and diverge from CURRENT's page-1 fallback.
+    const pageValues = query.getAll("page");
+    const page = parseIndexPage(pageValues.length > 1 ? pageValues : pageValues[0]);
     if (!q && sort === "score" && page === 1) return;
     let cancelled = false;
     fetch(indexUrl)
