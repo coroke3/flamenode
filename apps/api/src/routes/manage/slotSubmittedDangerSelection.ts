@@ -30,6 +30,8 @@ export type SubmittedDangerSelection =
       videoId: string | null;
       videoBefore: SubmittedVideoBefore | null;
       shouldDetachVideoSchedulingAtRead: boolean;
+      /** Fully validated read-time submitted references; MUST be CAS checked inside batch. */
+      submittedVideoRefIds: string[];
     }
   | { ok: false; message: string };
 
@@ -126,6 +128,7 @@ export function selectSubmittedDangerSnapshot(input: {
     return {
       ok: true, rows, groupId, videoId: null,
       videoBefore: null, shouldDetachVideoSchedulingAtRead: false,
+      submittedVideoRefIds: [],
     };
   }
   const video = input.videoBefore;
@@ -149,6 +152,7 @@ export function selectSubmittedDangerSnapshot(input: {
   const selectedIds = new Set(rows.map(row => row.id));
   return {
     ok: true, rows, groupId, videoId, videoBefore: video,
+    submittedVideoRefIds: refs.map(ref => ref.id),
     shouldDetachVideoSchedulingAtRead:
       video.scheduling_type === "slotted" &&
       refs.every(ref => selectedIds.has(ref.id)),
