@@ -344,3 +344,41 @@ export async function validateSpreadsheetForeignKeys(
     assertSpreadsheetForeignKeyLookup(lookup, result.results ?? []);
   }
 }
+
+
+/**
+ * CURRENT query.ts#fetchRowByPkRaw equivalent. Only a bound SELECT and no
+ * caching: the caller must fetch a fresh row after the write guard.
+ * One D1 pre-read is consumed; the route must deduct it from S3's total.
+ */
+export async function fetchSpreadsheetRawSnapshot(
+  db: {
+    prepare(sql: string): {
+      bind(...values: (string | number | null)[]): {
+        first<T>(): Promise<T | null>;
+      };
+    };
+  },
+  ctx: SpreadsheetSqlTableContext,
+  pk: Record<string, string>,
+  remainingReadBudget: number,
+): Promise<Record<string, unknown>> {
+  if (!Number.isInteger(remainingReadBudget) || remainingReadBudget < 1 ||
+      remainingReadBudget > SPREADSHEET_FK_PREFLIGHT_MAX_QUERIES) {
+    throw new Error("batch_too_large");
+  }
+  const normalized = normalizeSpreadsheetPrimaryKey(ctx.primaryKeys, pk);
+  validateSpreadsheetInputValues(ctx, normalized);
+  const key = spreadsheetPkCondition(ctx, normalized);
+  const statement = "SELECT * FROM " + spreadsheetTableIdentifier(ctx) +
+    " WHERE " + key.statement + " LIMIT 1";
+  const row = await db.prepare(statement).bind(...key.binds).first<Record<string, unknown>>();
+  if (!row) throw new Error("row_not_found");
+  // Never allow an incomplete pre-read to be reinterpreted as a NULL in CAS.
+  for (const column of ctx.columns) {
+    if (!Object.prototype.hasOwnProperty.call(row, column.name) || row[column.name] === undefined) {
+      throw new Error("invalid_snapshot");
+    }
+  }
+  return row;
+}
