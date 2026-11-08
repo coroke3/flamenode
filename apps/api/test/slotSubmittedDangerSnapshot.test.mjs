@@ -13,6 +13,7 @@ import {
   submittedDangerVideoReadId,
   decodeSubmittedDangerReads,
 } from "../src/routes/manage/slotSubmittedDangerSnapshot.ts";
+import { SUBMITTED_VIDEO_AUDIT_COLUMNS } from "../src/routes/manage/slotSubmittedVideoAudit.ts";
 const cols=[
   "id","event_id","reserved_by_user_id","x_user_id",
   "reserved_x_id_snapshot","display_name","slot_label","start_time",
@@ -35,12 +36,32 @@ function setup(rows=[slot("s0"),slot("s1")], options={}){
     "INSERT INTO x_users VALUES('x1','approved');",
     "INSERT INTO x_user_account_links VALUES('staff','x1');",
     "INSERT INTO event_staff VALUES('ev','x1','slot_manager',NULL);",
-    "CREATE TABLE videos(id TEXT PRIMARY KEY,scheduling_type TEXT,updated_at INTEGER);",
+    "CREATE TABLE videos(" + SUBMITTED_VIDEO_AUDIT_COLUMNS.map(k =>
+      k==="id" ? "id TEXT PRIMARY KEY" :
+      ["created_at","updated_at","app_like_count","scheduled_time","score_updated_at"].includes(k)
+        ? k+" INTEGER" : k==="score" ? "score REAL" : k+" TEXT"
+    ).join(",") + ");",
     "CREATE TABLE slots(" + cols.map(k=>k==="id"?"id TEXT PRIMARY KEY":
       ["start_time","sort_order","updated_at","version"].includes(k)
         ?k+" INTEGER":k+" TEXT").join(",") + ");",
   ].join(" "));
-  db.prepare("INSERT INTO videos VALUES(?,?,?)").run("vid",options.schedulingType??"slotted",400);
+  const video={
+    id:"vid",primary_event_id:"ev",creator_x_user_id:"x1",
+    submitted_by_user_id:"owner",collaboration_type:"individual",
+    part:null,source_type:"manual",creator_display_name:"Creator",
+    creator_display_name_yomi:null,creator_icon_url:null,
+    creator_youtube_channel_url:null,creator_profile_text:"profile",
+    creator_other_social_links:null,title:"Full video before-image",
+    music:null,credit:null,music_reference_url:null,closing_comment:null,
+    youtube_video_id:null,intro_comment:null,highlights:null,
+    production_story:null,visibility_status:"pending",
+    scheduling_type:options.schedulingType??"slotted",
+    scheduled_time:null,app_like_count:2,score:1.5,
+    score_updated_at:null,created_at:200,updated_at:400,
+  };
+  db.prepare("INSERT INTO videos VALUES (" +
+    SUBMITTED_VIDEO_AUDIT_COLUMNS.map(()=>"?").join(",") + ")")
+    .run(...SUBMITTED_VIDEO_AUDIT_COLUMNS.map(k=>video[k]));
   const insert=db.prepare("INSERT INTO slots VALUES("+cols.map(()=>"?").join(",")+")");
   for(const row of rows)insert.run(...cols.map(k=>row[k]));
   return db;
@@ -75,6 +96,11 @@ test("SA-056/057: three bound SELECTs give complete raw 20-member group and vide
       assert.equal(result.selection.rows.length,20);
       assert.equal(result.selection.groupId,"raw");
       assert.equal(result.selection.videoId,"vid");
+      assert.equal(Object.keys(result.selection.videoAuditBefore).length,30);
+      assert.equal(result.selection.videoAuditBefore.title,"Full video before-image");
+      assert.equal(result.selection.videoAuditBefore.creator_profile_text,"profile");
+      assert.equal(result.selection.videoAuditBefore.score,1.5);
+      assert.equal(result.selection.videoAuditBefore.updated_at,400);
       assert.equal(result.selection.shouldDetachVideoSchedulingAtRead,true);
     }
   }finally{db.close();}
@@ -166,6 +192,13 @@ test("SA-056/057: malformed JSON, missing video and stale group references fail 
       {groupRead:group,videoRead:{video_json:video.video_json,refs_json:"bad"}},
       {groupRead:group,videoRead:{video_json:video.video_json,refs_json:JSON.stringify([{id:"s0"}])}},
       {groupRead:group,videoRead:{video_json:null,refs_json:video.refs_json}},
+      {groupRead:group,videoRead:{video_json:JSON.stringify({
+        ...JSON.parse(video.video_json),music:99,
+      }),refs_json:video.refs_json}},
+      {groupRead:group,videoRead:{video_json:JSON.stringify(
+        Object.fromEntries(Object.entries(JSON.parse(video.video_json))
+          .filter(([name])=>name!=="title")),
+      ),refs_json:video.refs_json}},
     ]){
       const selection=decodeSubmittedDangerReads({
         kind:"keep-reservation",eventId:"ev",slotId:"s0",
