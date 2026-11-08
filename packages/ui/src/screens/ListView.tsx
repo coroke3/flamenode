@@ -27,10 +27,12 @@ export interface ListViewProps {
   view?: ListViewMode;
   /** CURRENT `listEmptyMessage`, chosen by the caller. */
   emptyMessage: string;
+  /** Slot right below the header (MIG-0510 filter Island mounts here; CURRENT keeps the header first). */
+  toolbar?: React.ReactNode;
   className?: string;
 }
 
-export function ListView({ videos, total, view = "grid", emptyMessage, className }: ListViewProps): React.ReactElement {
+export function ListView({ videos, total, view = "grid", emptyMessage, toolbar, className }: ListViewProps): React.ReactElement {
   return (
     <div className={cx("p-root fn-screen", className)}>
       <main className="wrap lv-wrap">
@@ -41,6 +43,8 @@ export function ListView({ videos, total, view = "grid", emptyMessage, className
           </div>
           <span className="t-sm muted t-num">{`${total.toLocaleString("en-US")} works`}</span>
         </header>
+
+        {toolbar}
 
         {videos.length === 0 ? (
           <p className="muted lv-empty" role="status">

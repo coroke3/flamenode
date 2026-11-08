@@ -147,7 +147,7 @@ async function exchangeJwtForAccessToken(
     throw new Error("ga4_oauth_invalid_json");
   }
   signal?.throwIfAborted();
-  if (typeof body.access_token !== "string" || !body.access_token) {
+  if (body === null || typeof body !== "object" || Array.isArray(body) || typeof body.access_token !== "string" || !body.access_token) {
     throw new Error("ga4_oauth_access_token_missing");
   }
   const expiresIn = Number(body.expires_in);

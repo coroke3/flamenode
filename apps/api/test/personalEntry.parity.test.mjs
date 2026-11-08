@@ -568,6 +568,13 @@ if (runUnderRootTsx(import.meta.url)) {
     for (let i = 0; i < events.length - 1; i += 37) {
       assert.equal(Math.sign(apiCompare(events[i], events[i + 1], NOW)), Math.sign(compareEventsByUpcomingPriority(events[i], events[i + 1], NOW)));
     }
+
+    const undatedA = { id: "a", visibility_status: "public", start_time: null, end_time: null };
+    const undatedZ = { ...undatedA, id: "z" };
+    assert.ok(apiCompare(undatedA, undatedZ, NOW) < 0, "undated public events use ID ascending");
+    assert.ok(apiCompare(undatedZ, undatedA, NOW) > 0);
+    assert.equal(apiCompare(undatedA, undatedA, NOW), 0);
+    assert.equal(apiCompare(undatedA, undatedZ, NOW), compareEventsByUpcomingPriority(undatedA, undatedZ, NOW));
   });
 
   // ---------------- MIG-0623 S2 bounds: paging, byte cut, SQL part index ----------------

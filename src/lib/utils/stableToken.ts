@@ -3,7 +3,9 @@ function stableValue(value: unknown): unknown {
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
-        .sort(([a], [b]) => a.localeCompare(b))
+        // A hash must not depend on the host's default locale / ICU collation.
+        // Compare UTF-16 code units so Next, Hono and Workers serialize alike.
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([key, child]) => [key, stableValue(child)]),
     );
   }

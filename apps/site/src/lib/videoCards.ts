@@ -5,11 +5,11 @@
 import type { VideoCardData } from "../../../../src/components/video/VideoCard.tsx";
 import type { TrendingItem } from "../../../../src/lib/publicData/staticTrendingCore.ts";
 import { cachedGoogleImageUrl } from "../../../../src/lib/media/googleImages.ts";
-import { youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
+import { videoPageHref, youtubeThumbUrl } from "../../../../src/lib/youtube/id.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
 import type { ListVideo, TrendingRow } from "@flamenode/ui";
 
-const href = (v: Pick<VideoCardData, "id" | "youtube_video_id">): string => `/${v.youtube_video_id?.trim() || v.id}`;
+const href = (v: Pick<VideoCardData, "id" | "youtube_video_id">): string => videoPageHref(v);
 const thumb = (v: Pick<VideoCardData, "youtube_video_id">): string | null => youtubeThumbUrl(v.youtube_video_id, "mqdefault") || null;
 
 export function toListVideo(v: VideoCardData & { primary_event_title?: string | null }): ListVideo {

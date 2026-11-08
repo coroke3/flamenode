@@ -41,10 +41,10 @@ test("viewer overlay一時障害は正常cacheより短く保持する", () => {
   assert.match(client, /const CACHE_TTL_MS = 30_000/);
   assert.match(client, /const FAILURE_CACHE_TTL_MS = 3_000/);
   assert.match(client, /ttlMs\?: number/);
-  assert.match(
-    client,
-    /now - existing\.fetchedAt <= \(existing\.ttlMs \?\? CACHE_TTL_MS\)/,
-  );
+  // The cache must preserve TTL while refusing a negative age on clock rollback.
+  assert.ok(client.includes("ageMs >= 0"), "negative cache ages must fail closed");
+  assert.ok(client.includes("ageMs <= (existing.ttlMs ?? CACHE_TTL_MS)"),
+    "the per-result 3s/30s TTL must still be honored");
   assert.match(
     client,
     /ttlMs: value\.authUnavailable \? FAILURE_CACHE_TTL_MS : CACHE_TTL_MS/,

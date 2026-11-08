@@ -54,7 +54,15 @@ function normalizeTrackedText(body) {
 function checkAppliedMigrationChanges(migrationFiles) {
   const explicitBase = process.env.DB_HISTORY_BASE_REF?.trim();
   const baseRef = explicitBase || "origin/main";
-  if (git(["rev-parse", "--verify", baseRef]) === null) return;
+  // An explicitly selected comparison base is a safety requirement, not an
+  // optional optimization: a typo must not disable applied-migration checks.
+  // An implicit origin/main may be absent in a local checkout without remotes.
+  if (git(["rev-parse", "--verify", "--end-of-options", `${baseRef}^{commit}`]) === null) {
+    if (explicitBase) {
+      errors.push("DB_HISTORY_BASE_REF: 指定したcommitを解決できません。適用済みmigrationの比較を省略できません。");
+    }
+    return;
+  }
 
   for (const migrationName of migrationFiles) {
     const baseBody = git(["show", `${baseRef}:migrations/${migrationName}`]);
