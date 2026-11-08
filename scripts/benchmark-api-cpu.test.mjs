@@ -421,6 +421,26 @@ test("MIG-0639: new write scenarios return their declared normal status on local
   assert.deepEqual(failures, [], "all mounted write benchmarks must follow actual route behavior");
 });
 
+test("MIG-0639: all 13 new write routes reject invalid inputs with their declared local Hono statuses", async () => {
+  const scenarios = new Map(buildScenarios({ adminToken: "t" }).map((sc) => [sc.id, sc]));
+  const ids = ["SA-045", "SA-046", "SA-047", "SA-048", "SA-049", "SA-051", "SA-052", "SA-053", "SA-054", "SA-055", "SA-099", "SA-100", "SA-101"];
+  const failures = [];
+  for (const id of ids) {
+    const target = await createInprocTarget({ adminToken: "t" });
+    try {
+      const spec = scenarios.get(id).kinds.invalid(8, "bad" + id);
+      assert.equal(spec.setup, undefined, id + " invalid request must not seed a legitimate target");
+      const result = await target.run(spec);
+      if (!spec.expect.includes(result.status)) failures.push(id + ": expected " + spec.expect.join("/") + ", got " + result.status);
+    } catch (error) {
+      failures.push(id + ": " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      await target.close();
+    }
+  }
+  assert.deepEqual(failures, [], "every invalid write scenario must exercise a real Hono rejection outcome");
+});
+
 test("MIG-0639 / PR #457: mounted RH-013 has one bounded named scenario, never a duplicate pending entry", async () => {
   const scenarios = buildScenarios({ adminToken: "t" });
   const rh13 = scenarios.filter((x) => x.id === "RH-013");
