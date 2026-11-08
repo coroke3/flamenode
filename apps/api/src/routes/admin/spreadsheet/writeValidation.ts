@@ -542,3 +542,61 @@ export function prepareSpreadsheetImportMutationRows(
   }
   return { preparedRows, errors };
 }
+
+
+export interface SpreadsheetImportMutationPlan {
+  mutations: SpreadsheetAuditedSqlPlan[];
+  inserted: number;
+  updated: number;
+  skipped: number;
+}
+/**
+ * CURRENT planUpsertSpreadsheetRow + applySpreadsheetImport planning stage.
+ * The caller MUST first verify preview token/nonce and preflight foreign keys,
+ * then provide DB-derived, PK-keyed current rows; this function executes no D1.
+ */
+export function planSpreadsheetImportMutations(
+  ctx: SpreadsheetSqlTableContext,
+  prepared: SpreadsheetImportRowValidation,
+  mode: "insert" | "upsert",
+  existingRowsByPk: ReadonlyMap<string, Record<string, unknown>> | null,
+  operatorId: string,
+): SpreadsheetImportMutationPlan {
+  if (ctx.def.mode !== "editable") throw new Error("table_readonly");
+  if (prepared.errors.length > 0) throw new Error("invalid_row");
+  if (prepared.preparedRows.length < 1 || prepared.preparedRows.length > SPREADSHEET_IMPORT_APPLY_MAX_ROWS) {
+    throw new Error("batch_too_large");
+  }
+  if (mode !== "insert" && mode !== "upsert") throw new Error("invalid_row");
+  if (mode === "upsert" && !existingRowsByPk) throw new Error("invalid_snapshot");
+  if (!operatorId.trim()) throw new Error("missing_operator");
+  const mutations: SpreadsheetAuditedSqlPlan[] = [];
+  let inserted = 0;
+  let updated = 0;
+  let skipped = 0;
+  for (const preparedRow of prepared.preparedRows) {
+    if (mode === "insert") {
+      mutations.push(buildSpreadsheetAuditedInsert(ctx, preparedRow.row, operatorId));
+      inserted++;
+      continue;
+    }
+    const existing = existingRowsByPk?.get(preparedRow.fingerprint) ?? null;
+    if (!existing) {
+      mutations.push(buildSpreadsheetAuditedInsert(ctx, preparedRow.row, operatorId));
+      inserted++;
+      continue;
+    }
+    const editableColumns = ctx.columns.filter(column =>
+      column.pk === 0 &&
+      isSpreadsheetColumnEditable(ctx.def, column.name) &&
+      preparedRow.row[column.name] !== undefined,
+    );
+    if (editableColumns.length === 0) {
+      skipped++;
+      continue;
+    }
+    mutations.push(buildSpreadsheetAuditedUpdate(ctx, preparedRow.pk, existing, preparedRow.row, operatorId));
+    updated++;
+  }
+  return { mutations, inserted, updated, skipped };
+}
