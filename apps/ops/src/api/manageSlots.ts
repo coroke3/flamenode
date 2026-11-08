@@ -49,10 +49,20 @@ export async function listSlots(
     const path = "/api/manage/events/" + encodedEventId +
       "/slots?status=" + filter + "&offset=" + offset;
     const result = await getJson<unknown>(fetchFn, path, signal);
+    // A custom fetch may resolve after cancellation; never return stale rows.
+    if (signal?.aborted) return { status: "unavailable" };
     if (result.status !== "ok") return result;
     const parsed = ManageSlotsResponseSchema.safeParse(result.data);
     if (!parsed.success) return { status: "unavailable" };
     const data = parsed.data;
+    // The API derives total from the three status counts. A conflicting or
+    // unsafe snapshot must not be shown as authoritative management totals.
+    const countValues = Object.values(data.counts);
+    if (!Number.isSafeInteger(data.total) || data.total < 0 ||
+        countValues.some(count => !Number.isSafeInteger(count) || count < 0) ||
+        countValues.reduce((sum, count) => sum + count, 0) !== data.total) {
+      return { status: "unavailable" };
+    }
     if (data.event.id !== eventId || data.offset !== offset || data.pageSize !== PAGE_SIZE ||
         data.statusFilter !== filter || data.slots.length > PAGE_SIZE ||
         data.slots.some(slot => slot.event_id !== eventId || (filter !== "all" && slot.status !== filter))) {
