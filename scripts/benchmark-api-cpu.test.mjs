@@ -192,6 +192,10 @@ test("MIG-0639 SA-045..048, SA-049, SA-051..055, SA-099..101: all newly mounted 
     assert.match(normal.setup[0].sql, /notification_outbox/);
   }
   assert.equal(JSON.parse(scenarios.get("SA-046").kinds.limit(1, "safe").body).reason.length, 500);
+  const retryBulk = scenarios.get("SA-048").kinds.limit(1, "safe");
+  assert.equal(retryBulk.setup.length, 10, "SA-048 limit must seed BULK_RETRY_MAX failures");
+  assert.equal(new Set(retryBulk.setup.map((row) => row.params[0])).size, 10, "bulk retry rows must have unique IDs");
+
   for (const id of ["SA-052", "SA-053", "SA-054", "SA-055"]) {
     const normal = scenarios.get(id).kinds.normal(1, "safe");
     assert.ok(normal.setup.some((row) => /terms_versions/.test(row.sql)), id + " needs a terms fixture");
