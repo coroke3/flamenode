@@ -15,6 +15,7 @@ import {
 import { resolveVoidModerationCaseType } from "@/lib/moderation/voidCaseType";
 import type { PendingPublicReflection } from "@/lib/staticRebuild/publicReflectionNotice";
 import { attachApproveAndNextHref } from "@/lib/admin/videoReviewQueueOrder";
+import { publicVideoRevalidationPaths } from "@/lib/video/publicVideoRevalidationPaths";
 import {
   handleVideoVisibilityMutationFailure,
   planVideoVisibilityTransition,
@@ -38,7 +39,9 @@ function revalidateVideoStatusPaths(videoId: string, youtubeVideoId: string | nu
   revalidatePath(`/admin/videos/${videoId}`);
   revalidatePath("/admin/videos");
   revalidatePath("/admin");
-  revalidatePath(`/${youtubeVideoId ?? videoId}`);
+  for (const publicPath of publicVideoRevalidationPaths(videoId, youtubeVideoId)) {
+    revalidatePath(publicPath);
+  }
   revalidatePath("/list");
 }
 

@@ -80,6 +80,15 @@ test("formatRelative: 2日前", () => {
   assert.match(formatRelative(now - 2 * 86400), /日前$/);
 });
 
+test("formatDuration: NaN and infinities render zero instead of malformed time", () => {
+  for (const value of [Number.NaN, Infinity, -Infinity]) {
+    assert.equal(formatDuration(value), "0:00", String(value));
+  }
+  assert.equal(formatDuration(0), "0:00");
+  assert.equal(formatDuration(59.9), "0:59");
+  assert.equal(formatDuration(3600), "1:00:00");
+});
+
 test("formatDuration: 秒のみ", () => {
   assert.equal(formatDuration(45), "0:45");
 });
@@ -94,6 +103,15 @@ test("formatDuration: 時:分:秒 (1時間超え)", () => {
 
 test("formatDuration: 負の値は 0", () => {
   assert.equal(formatDuration(-5), "0:00");
+});
+
+test("formatCount: NaN and infinities render zero instead of malformed counts", () => {
+  for (const value of [Number.NaN, Infinity, -Infinity]) {
+    assert.equal(formatCount(value), "0", String(value));
+  }
+  assert.equal(formatCount(999), "999");
+  assert.equal(formatCount(1000), "1.0k");
+  assert.equal(formatCount(1000000), "1.0M");
 });
 
 test("formatCount: 1000未満は数字", () => {
