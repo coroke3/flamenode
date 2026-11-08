@@ -43,10 +43,13 @@ test("empty draft factory avoids stage_permission keys and defaults to textarea"
   assert.doesNotMatch(draftSource, /question_key: `stage_permission/);
 });
 
-test("form reader drops stage keys and parses newline options", () => {
-  assert.match(draftSource, /isStagePermissionQuestionKey\(question_key\)/);
-  assert.match(draftSource, /normalizeOptionList/);
-  assert.match(draftSource, /parseQuestionType/);
+test("form reader delegates to domain with CURRENT stage, type and option adapters", () => {
+  assert.match(draftSource, /readGeneralCustomQuestionsFromFormDataCore\(formData, \{/);
+  assert.match(draftSource, /generalCustomQuestionsPresentCore\(formData\)/);
+  assert.match(draftSource, /isStagePermissionQuestionKey,/);
+  assert.match(draftSource, /normalizeOptionList,/);
+  assert.match(draftSource, /parseQuestionType,/);
+  assert.doesNotMatch(draftSource, /formData\.getAll\("general_custom_question_key"\)/);
 });
 
 test("planned rows retain CURRENT validation via a domain planner", () => {
