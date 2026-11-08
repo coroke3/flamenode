@@ -12,6 +12,8 @@ const CANDIDATES = [
   ["PATCH", "/api/manage/events/ev-1/slots/labels"],
   ["DELETE", "/api/manage/events/ev-1/slots/a"],
   ["POST", "/api/manage/events/ev-1/slots/a/release"],
+  ["POST", "/api/manage/events/ev-1/slots/a/force-release-submitted"],
+  ["POST", "/api/manage/events/ev-1/slots/a/release-submitted-video"],
 ];
 
 const content = readFileSync(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
@@ -33,7 +35,7 @@ const make = () => {
   return { perform, getDbPrepares: () => dbPrepares };
 };
 
-test("MIG-0656 U02c-1b: D-15-10 five slot write methods use Origin before any session/D1 lookup", async () => {
+test("MIG-0656 U02c-1b: D-15-10 seven slot write methods use Origin before any session/D1 lookup", async () => {
   const t = make();
   for (const [method,path] of CANDIDATES) {
     for (const origin of ["https://evil.example", null]) {
@@ -44,6 +46,16 @@ test("MIG-0656 U02c-1b: D-15-10 five slot write methods use Origin before any se
     }
   }
   assert.equal(t.getDbPrepares(),0);
+});
+
+test("MIG-0656 U03g: valid Origin without Auth.js session rejects before any D1 read", async () => {
+  const t = make();
+  for (const [method, path] of CANDIDATES) {
+    const res = await t.perform(method, path, SITE);
+    assert.equal(res.status, 401, method + " " + path);
+    assert.equal(res.headers.get("Cache-Control"), "private, no-store");
+  }
+  assert.equal(t.getDbPrepares(), 0);
 });
 
 test("MIG-0656 U02c-1b: missing site origin fails closed before D1", async () => {
@@ -65,6 +77,11 @@ test("MIG-0656 U02c-1b: candidate route implementation is still unmounted", () =
   assert.doesNotMatch(content,/import\s+.*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)/);
   assert.doesNotMatch(content,/\.route\([^)]*slotBatch(?:AvailableDelete|LabelWrite|ReservedRelease)Routes/);
   assert.doesNotMatch(content,/slotSingleReleaseRoutes|slotSingleRelease\.ts/);
-  assert.match(content,/const scopedWritePaths = \[\.\.\.playlistWritePaths, \.\.\.slotWritePaths\]/);
+  for (const suffix of ["/events/:id/slots/:slotId/force-release-submitted", "/events/:id/slots/:slotId/release-submitted-video"]) {
+    assert.ok(content.includes(suffix));
+  }
+  assert.doesNotMatch(content,/\.route\([^)]*slotSubmittedDangerRoutes/);
+  assert.doesNotMatch(content,/import\s+.*slotSubmittedDanger(?:Routes)?/);
+  assert.match(content,/const scopedWritePaths = \[\.\.\.playlistWritePaths, \.\.\.slotWritePaths, \.\.\.submittedDangerWritePaths\]/);
   assert.equal((content.match(/for \(const path of scopedWritePaths\)/g)||[]).length,2);
 });
