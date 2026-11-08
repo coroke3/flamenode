@@ -27,6 +27,7 @@ import { pickHeroEvents, isHeroCandidate } from "../../../../src/lib/utils/pickH
 import { formatRemainingTimeMetric } from "../../../../src/lib/utils/remainingTime.ts";
 import { shuffledCopy } from "../../../../src/lib/utils/shuffle.ts";
 import { formatUnix } from "../../../../src/lib/utils/format.ts";
+import { truncateAnnouncementBody } from "../../../../src/lib/utils/truncateAnnouncementBody.ts";
 import { TOP_KEY, TRENDING_KEY, loadListingPayload } from "./publicDataLoader.ts";
 import { snapshotAccessFromEnv } from "./snapshotEnv.ts";
 import { toListVideo, toTrendingRow } from "./videoCards.ts";
@@ -140,8 +141,6 @@ export function toEventCard(event: StaticTopEvent, now: number): TopEventCard {
   };
 }
 
-const announcementBody = (body: string): string => (body.length > 180 ? `${body.slice(0, 179)}...` : body);
-
 const isPublicRow = (v: { status?: string | null }): boolean => v.status === "public";
 
 export function buildTopView(
@@ -187,7 +186,7 @@ export function buildTopView(
     { id: "nostalgic", eyebrow: "ARCHIVE", title: "懐かしの映像", description: "公開から3年以上たった作品を、アーカイブから再発見。", moreHref: "/list?sort=old", moreLabel: "過去の作品を見る", items: nostalgic.map(toListVideo), emptyMessage: "対象になる作品がまだありません。" },
   );
 
-  const announcements: TopAnnouncement[] = (d?.announcements ?? []).map((a) => ({ id: a.id, title: a.title, body: announcementBody(a.body) }));
+  const announcements: TopAnnouncement[] = (d?.announcements ?? []).map((a) => ({ id: a.id, title: a.title, body: truncateAnnouncementBody(a.body) }));
   return {
     stats: { publicVideos: stats.publicVideos, creators: stats.creators, activeEvents: stats.activeEvents },
     primary: primaryEvent ? toRecruit(primaryEvent, topSlotStats.get(primaryEvent.id), now) : null,

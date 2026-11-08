@@ -1,10 +1,10 @@
 # Google Analytics（GA4）運用
 
 > Status: Active
-> Last verified: 2026-08-02
+> Last verified: 2026-10-28 (MIG-0517 code review; production remains CURRENT until deployed)
 > Verified against: `workers/ga-analytics/`, `src/components/video/VideoViewTracker.tsx`, `src/lib/publicData/trendingLoader.ts`, `app/(public)/layout.tsx`
 
-FlameNode は GA4 で作品視聴イベントを計測し、Worker が R2 に急上昇ランキング JSON を書き込む。公開 Web は R2 のみを読み、D1 や `static_rebuild_queue` には依存しない。
+FlameNode は GA4 で作品視聴イベントを計測し、Worker が R2 に急上昇ランキング JSON を書き込む。公開 Web は R2 のみを読み、D1 や `static_rebuild_queue` には依存しない。**同期 Worker の入力**は現在 R2 の `list/recent.json` だが、MIG-0517（PR #442）では D1 の公開作品を直接読むように変更する。PR の merge だけでは本番デプロイ済みとはみなさない。
 
 ## 構成
 
@@ -12,7 +12,7 @@ FlameNode は GA4 で作品視聴イベントを計測し、Worker が R2 に急
 | --- | --- |
 | Web（`@next/third-parties/google`） | ページビュー計測。`NEXT_PUBLIC_GA_MEASUREMENT_ID` が設定されているときだけ有効 |
 | `VideoViewTracker` | 動画詳細で 10 秒以上の視聴を `flamenode_video_view` として 1 回送信 |
-| `workers/ga-analytics` | GA4 Data API で期間別視聴数を取得し、`analytics/trending.json` を R2 へ PUT |
+| `workers/ga-analytics` | CURRENT: R2 `list/recent.json` から公開作品を取得。MIG-0517 TARGET: D1 から上限付き SELECT 1 文で公開作品を取得。どちらも GA4 Data API を集計し、`analytics/trending.json` を R2 へ PUT |
 | `sync-jobs` Worker | 毎時 `:07`（UTC）の Cron 枠で `ga4-trending-sync` を YouTube metadata より先に実行。YouTube 失敗と独立（`rethrow: false`）。再生リスト同期（`:52`）とは別枠 |
 
 ## Web 側の設定
@@ -70,7 +70,7 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID="G-XXXXXXXXXX"
 
 ### 同期フロー
 
-1. R2 から `list/recent.json` を読む（公開作品メタの正本）
+1. CURRENT（PR #442 の本番デプロイ前）は R2 `list/recent.json` から公開作品を読む。MIG-0517 TARGET（本番デプロイ後）は D1 の `videos` を公開条件で1回の上限付き SELECT（最大5,001件を取得して5,000件超は失敗）し、既存 generator と同じ `scheduled_time DESC`・ID タイブレークで並べる。非公開・まとめ作品は除外し、非公開イベント情報は付与しない。公開作品0件でも空の有効な `trending.json`（`items: []`、`schema_version: 1`）を PUT する（CURRENT も空リストで空を書く）
 2. GA4 Data API `runReport` で 2 / 5 / 7 / 30 日の `flamenode_video_view` を `video_id` 別に集計。リクエストの dimension は `customEvent:video_id` のみ指定し、複数の名前付き date range に対して Data API がレスポンスへ自動追加する `dateRange` 列を使用する（`dateRange` 自体を dimension 指定すると 400）
 3. `rankTrendingItems` で決定的にソート（`views_2d` → `views_5d` → `views_7d` → `views_30d` → `video_id`）し、`rank` / `video_id` を付与
 4. R2 `analytics/trending.json` へ PUT（スキーマ version 1、最大 200 件）
@@ -93,7 +93,7 @@ R2 JSON 例:
 }
 ```
 
-**fail-closed**: GA4 失敗・`list/recent.json` 欠損時は R2 を上書きしない。前回成功分が残る。
+**fail-closed**: CURRENT は GA4 失敗・`list/recent.json` 欠損時、MIG-0517 TARGET は GA4 失敗・D1 読取失敗・5,000件超・公開作品0件時に `analytics/trending.json` を上書きしない。前回成功分が残る。D1 は読み取り専用。MIG-0517 の実運用 CPU 予算は非本番測定が必要。
 
 **windows メタデータ**: JSON の `windows` 日付は同期時刻の UTC 日付を参考値として出力する。GA4 `runReport` の集計境界はプロパティのタイムゾーン設定に従う。
 
@@ -130,12 +130,12 @@ R2 miss や JSON 不正時は `data=null`。トップ全体や他セクション
 
 ## 検査・障害時
 
-- Worker 契約: `workers/ga-analytics/*.test.mjs`
+- Worker 契約: `workers/ga-analytics/*.test.mjs`。MIG-0517 の D1 取得の境界・非公開除外は `recentFromD1.test.mjs`
 - 正規化・stale: `src/lib/publicData/staticTrendingCore.test.mjs`
 - ローダー（D1 非参照）: `src/lib/publicData/trendingLoader.test.mjs`
 - UI 契約: `npm run check:ui-acceptance`
 
-同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は `result: "skipped"` となり、表示は前回 JSON または空状態になる。`ENABLED=1` だが secrets / R2 / KV が欠落している場合は `result: "failed"`, `error_name: "config_missing"` で R2 は更新しない。
+同期失敗時は Cloudflare Workers ログの `ga4-trending-sync` 構造化イベントを確認（`service` / `job` / `enabled` / `result` / `generated_at` / `ga_rows` / `matched_videos` / `ranked_videos` / `r2_written` / `duration_ms` / `external_api_calls` など。secret は含まれない）。`GA4_SYNC_ENABLED` が `0` の場合は `result: "skipped"` となり、表示は前回 JSON または空状態になる。`ENABLED=1` だが secrets / R2 / KV（MIG-0517 デプロイ後は D1 も）が欠落している場合は `result: "failed"`, `error_name: "config_missing"` で R2 は更新しない。
 
 複数 named dateRange の `runReport` では、GA4 が返す `rowCount` が「主ディメンション件数」になり、`rows` が `video_id × dateRange` に展開されることがある。同期実装は `rowCount` と `rows.length` の一致を要求せず、ページが満杯のあいだだけ offset で継続する。
 
