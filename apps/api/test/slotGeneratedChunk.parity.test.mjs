@@ -11,6 +11,7 @@ import { createAdminD1, seedBase, seedEvent } from "./helpers/sqliteD1.mjs";
 const ORIGIN="https://app.flamenode.example";
 const ADMIN={id:"admin-1",role:"admin",is_banned:0};
 const VIEWER={id:"viewer",role:"user",is_banned:0};
+const SESSION_TOKEN="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const keys=["id","event_id","reserved_by_user_id","x_user_id","reserved_x_id_snapshot",
   "display_name","slot_label","start_time","sort_order","reservation_group_id","video_id",
   "status","updated_at","version"];
@@ -21,6 +22,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
   seedEvent(sqlite);
   sqlite.exec([
     "CREATE TABLE event_staff(event_id TEXT,x_user_id TEXT,permission_preset TEXT,custom_permission_keys_json TEXT);",
+    'CREATE TABLE "session" ("sessionToken" TEXT PRIMARY KEY,"userId" TEXT,"expires" INTEGER);',
     "CREATE TABLE slots("+keys.map(k=>k==="id"?"id TEXT PRIMARY KEY":
       ["start_time","sort_order","updated_at","version"].includes(k)?
       k+" INTEGER":k+" TEXT").join(",")+");",
@@ -29,6 +31,8 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
     sqlite.prepare('INSERT INTO "user"(id,name,role,is_banned,is_tos_accepted) VALUES (?,?,?,0,1)')
       .run(actor.id,"Viewer",actor.role);
   }
+  if(actor) sqlite.prepare('INSERT INTO "session" ("sessionToken","userId","expires") VALUES (?,?,?)')
+    .run(SESSION_TOKEN,actor.id,Date.now()+600_000);
   if(staff&&actor){
     sqlite.prepare("INSERT INTO x_users(id,approval_status) VALUES (?,?)").run("x1","approved");
     sqlite.prepare("INSERT INTO x_user_account_links VALUES (?,?)").run(actor.id,"x1");
@@ -38,6 +42,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
   const app=new Hono();
   app.use("*",async(c,next)=>{
     c.set("user",actor);
+    c.set("sessionState",actor?"user":"none");
     c.set("db",drizzle(c.env.DB,{schema}));
     if(actor)c.set("actorSnapshotJsonById",{
       [actor.id]:JSON.stringify({id:actor.id,role:actor.role}),
@@ -47,7 +52,7 @@ function setup({actor=ADMIN,staff=false,mode="normal",onFirst}={}){
   app.route("/api/manage/events/:id/slots",slotGeneratedChunkRoutes);
   const post=(body=countInput(),event="ev-1")=>app.request(
     ORIGIN+"/api/manage/events/"+event+"/slots/generate-chunk",
-    {method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json"},
+    {method:"POST",headers:{Origin:ORIGIN,"Content-Type":"application/json",Cookie:"__Secure-authjs.session-token="+SESSION_TOKEN},
       body:JSON.stringify(body)},
     {DB:db,NEXT_PUBLIC_SITE_URL:ORIGIN},
   );
@@ -475,6 +480,32 @@ test("SA-058 U03p: strict audit and Queue failures each roll back all new rows",
     }finally{s.sqlite.close();}
   }
 });
+test("SA-058 U04c: session invalidation after scoped read rolls back one atomic chunk",async()=>{
+  for(const invalidation of ["deleted","expired","reassigned"]){
+    let injected=false;
+    const s=setup({onFirst:(query,sqlite)=>{
+      if(injected||!query.includes("AS staff_json"))return;
+      injected=true;
+      if(invalidation==="deleted") sqlite.prepare('DELETE FROM "session" WHERE "sessionToken"=?').run(SESSION_TOKEN);
+      if(invalidation==="expired") sqlite.prepare('UPDATE "session" SET "expires"=? WHERE "sessionToken"=?')
+        .run(Date.now()-60_000,SESSION_TOKEN);
+      if(invalidation==="reassigned") sqlite.prepare('UPDATE "session" SET "userId"=? WHERE "sessionToken"=?')
+        .run("other-user",SESSION_TOKEN);
+    }});
+    try{
+      const response=await s.post(countInput(3,1));
+      assert.equal(injected,true,invalidation+" post-scope read invalidation injected");
+      assert.equal(response.status,409,invalidation+" "+await response.clone().text());
+      assert.equal(response.headers.get("Cache-Control"),"private, no-store");
+      assert.equal(s.n("slots"),0);
+      assert.equal(s.n("audit_logs"),0);
+      assert.equal(s.n("static_rebuild_queue"),0);
+      assert.equal(s.stats.batches,1,"session assertion fails within existing single D1 batch");
+      assert.ok(s.stats.reads<=2,"no extra D1 pre-read");
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-058 U03p: all generated writes remain UNMOUNTED on the production parent",()=>{
   const index=readFileSync(new URL("../src/routes/manage/index.ts",import.meta.url),"utf8");
   assert.doesNotMatch(index,/slotGeneratedChunkRoutes|slotGeneratedChunk\.ts/);

@@ -13,9 +13,10 @@ import { generateId } from "@flamenode/server-core/id";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded, BODY_TOO_LARGE_MESSAGE, readAdminJsonBody } from "../admin/body.ts";
-import { canUpdateEventLabels, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkScopeAssertion, buildSlotChunkSessionAssertion } from "./slotWriteScopedRead.ts";
 import { SLOT_CHUNK_COST_GUARD_SELECT, verifySlotChunkCostGuard, buildSlotChunkCostGuardAssertion } from "./slotChunkCostGuard.ts";
 import { planGeneratedSlots, materializeGeneratedSlotRows } from "./slotWritePlanning.ts";
 import { buildGeneratedSlotChunkAtomicPlan, MAX_GENERATE_SLOT_CHUNK_ROWS } from "./slotGeneratedChunkMutation.ts";
@@ -69,6 +70,12 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
     // Do NOT silently insert the first three of an up-to-100 row request.
     return c.json({ ok: false, message: "1リクエストで生成できる枠は3件までです。" }, 409);
   }
+  // The real parent resolves this Auth.js cookie into sessionState=user before
+  // reaching the candidate. Fail closed if the parent gate is missing.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
@@ -94,6 +101,7 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
     });
     await mutateWithAudit(db, {
       preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
         db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: scope.staff_json })),
         db.run(buildSlotChunkCostGuardAssertion(guard)),
         ...plan.preMutationAssertions.map((item) => db.run(item)),

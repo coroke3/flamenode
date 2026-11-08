@@ -14,9 +14,10 @@ import { Hono } from "hono";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
 import type { AppEnv } from "../../env.ts";
+import { extractSessionToken } from "../../auth/session.ts";
 import { costGuardMiddleware } from "../../middleware/costGuard.ts";
 import { auditPreloaded } from "../admin/body.ts";
-import { canUpdateEventLabels, buildSlotChunkScopeAssertion } from "./slotWriteScopedRead.ts";
+import { canUpdateEventLabels, buildSlotChunkScopeAssertion, buildSlotChunkSessionAssertion } from "./slotWriteScopedRead.ts";
 import {
   SLOT_AVAILABLE_DELETE_CHUNK_SNAPSHOT_SQL,
   selectAvailableDeleteChunk,
@@ -42,6 +43,12 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
   if (!ID_PATTERN.test(eventId)) {
     return c.json({ ok: false, message: "イベントIDが不正です。" }, 400);
   }
+  // The real parent resolves this Auth.js cookie into sessionState=user before
+  // reaching the candidate. Fail closed if the parent gate is missing.
+  const sessionToken = c.get("sessionState") === "user"
+    ? extractSessionToken(c.req.header("cookie"), { secure: new URL(c.req.url).protocol === "https:" })
+    : null;
+  if (!sessionToken) return c.json({ ok: false, message: WRITE_FAILED }, 503);
   const db = c.get("db");
   if (!db || !c.get("auditSettings") || !c.get("actorSnapshotJsonById")) {
     return c.json({ ok: false, message: WRITE_FAILED }, 503);
@@ -73,6 +80,7 @@ slotAvailableDeleteChunkRoutes.post("/delete-available-chunk", async (c) => {
     });
     await mutateWithAudit(db, {
       preMutationAssertions: [
+        db.run(buildSlotChunkSessionAssertion(user.id, sessionToken)),
         db.run(buildSlotChunkScopeAssertion({ eventId, actorUserId: user.id, actorRole: user.role, staffJson: read.staff_json })),
         db.run(buildSlotChunkCostGuardAssertion(guard)),
         ...plan.preMutationAssertions.map((statement) => db.run(statement)),

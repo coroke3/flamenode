@@ -173,3 +173,24 @@ export function buildSlotChunkScopeAssertion(input: {
       THEN 1 ELSE json_extract('slot-chunk-scope-changed', '$') END
   `;
 }
+
+/**
+ * MIG-0656 U04c: reject Auth.js session invalidation/expiry BETWEEN the
+ * original parent middleware read and the atomic D1 slot/audit/Queue batch.
+ * This assertion is part of the existing batch; it is not an extra preread.
+ * Only a bound token is used; never write a session token to logs or audit.
+ */
+export function buildSlotChunkSessionAssertion(actorUserId: string, sessionToken: string | null): SQL {
+  if (!actorUserId || typeof sessionToken !== "string" ||
+      sessionToken.length === 0 || sessionToken.length > 4096) {
+    throw new Error("slot_chunk_invalid_session_assertion");
+  }
+  return sql`
+    SELECT CASE WHEN EXISTS (
+      SELECT 1 FROM "session" s
+      WHERE s."sessionToken" = ${sessionToken}
+        AND s."userId" = ${actorUserId}
+        AND s."expires" > CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
+    ) THEN 1 ELSE json_extract('slot-chunk-session-revoked', '$') END
+  `;
+}
