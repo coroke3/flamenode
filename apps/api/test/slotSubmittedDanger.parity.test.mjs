@@ -169,6 +169,61 @@ test("SA-057 U03f: reservation remains while video detaches, long audits and sec
     assert.equal(s.stats.batches,1);
   }finally{s.sqlite.close();}
 });
+test("SA-056/057 U03i: JS-trim Unicode group classification preserves exact RAW group key",async()=>{
+  // JS trim() treats U+3000 as blank; SQLite trim() does not. A blank-only
+  // legacy key is a solo reservation even if another row has the same bytes.
+  for(const kind of ["force-release","keep-reservation"]){
+    for(const rawGroup of ["\u3000","\u3000g\u3000"]){
+      const grouped=rawGroup.trim().length>0;
+      const s=setup({kind,mutate:({sqlite})=>
+        sqlite.prepare("UPDATE slots SET reservation_group_id=?").run(rawGroup),
+      });
+      try{
+        const res=await s.post("s0");
+        assert.equal(res.status,200,kind+" "+JSON.stringify(rawGroup)+" "+await res.clone().text());
+        const first=s.row("slots","s0"), second=s.row("slots","s1");
+        assert.equal(first.status,kind==="force-release"?"available":"reserved");
+        assert.equal(second.status,grouped
+          ?(kind==="force-release"?"available":"reserved"):"submitted");
+        assert.equal(second.reservation_group_id,grouped
+          ?(kind==="force-release"?null:rawGroup):rawGroup);
+        assert.equal(s.row("videos","vid").scheduling_type,grouped?"manual":"slotted");
+        assert.deepEqual(countEffects(s),{
+          audits:grouped?3:1,outbox:1,queue:3,
+        });
+        assert.equal(s.stats.batches,1);
+        assert.equal(s.submittedReads.length,grouped?3:2);
+        const dm=s.sqlite.prepare("SELECT dedupe_key FROM notification_outbox").get();
+        assert.ok(dm.dedupe_key.includes(grouped?":g:":":solo:"),dm.dedupe_key);
+      }finally{s.sqlite.close();}
+    }
+  }
+});
+
+test("SA-056/057 U03i: force release permits a submitted solo slot without video; keep-reservation denies",async()=>{
+  for(const kind of ["force-release","keep-reservation"]){
+    const s=setup({kind,count:1,mutate:({sqlite})=>
+      sqlite.prepare("UPDATE slots SET video_id=NULL,reservation_group_id=?")
+        .run("\u3000"),
+    });
+    try{
+      const res=await s.post("s0");
+      assert.equal(res.status,kind==="force-release"?200:409,
+        kind+" "+await res.clone().text());
+      assert.equal(s.row("slots","s0").status,
+        kind==="force-release"?"available":"submitted");
+      assert.equal(s.row("videos","vid").scheduling_type,"slotted");
+      assert.deepEqual(countEffects(s),{
+        audits:kind==="force-release"?1:0,
+        outbox:kind==="force-release"?1:0,
+        queue:kind==="force-release"?3:0,
+      });
+      assert.equal(s.stats.batches,kind==="force-release"?1:0);
+      assert.equal(s.submittedReads.length,1);
+    }finally{s.sqlite.close();}
+  }
+});
+
 test("SA-056/057 U03f: other submitted reference blocks manual schedule but not this group",async()=>{
   for(const kind of ["force-release","keep-reservation"]){
     const s=setup({kind,mutate:({write})=>write(slot("outside",{
