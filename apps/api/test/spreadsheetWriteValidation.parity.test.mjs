@@ -255,7 +255,7 @@ test("D1 FK preflight checks every bound chunk and fails closed on missing refer
     },
   };
   const rows = Array.from({ length: 101 }, (_, i) => ({ event_id: "event-" + i }));
-  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, rows));
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, rows, 3));
   assert.equal(sqls.length, 2);
   assert.deepEqual(seen.map(a => a.length), [99, 2]);
   const missingDb = {
@@ -263,14 +263,14 @@ test("D1 FK preflight checks every bound chunk and fails closed on missing refer
       return { bind() { return { async all() { return { results: [] }; } }; } };
     },
   };
-  await assert.rejects(() => validateSpreadsheetForeignKeys(missingDb, fk, [{ event_id: "missing" }]), /foreign_key_violation/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(missingDb, fk, [{ event_id: "missing" }], 3), /foreign_key_violation/);
   const failingDb = {
     prepare() {
       return { bind() { return { async all() { throw new Error("db_unavailable"); } }; } };
     },
   };
-  await assert.rejects(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: "x" }]), /db_unavailable/);
-  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: null }]));
+  await assert.rejects(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: "x" }], 3), /db_unavailable/);
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(failingDb, fk, [{ event_id: null }], 3));
 });
 
 
@@ -284,7 +284,7 @@ test("FK preflight fails closed above S3's three-query ceiling before opening D1
   assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(298)), /batch_too_large/);
   let prepared = 0;
   const db = { prepare() { prepared++; throw Error("should not reach D1"); } };
-  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(298)), /batch_too_large/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(298), 3), /batch_too_large/);
   assert.equal(prepared, 0);
   assert.throws(() => buildSpreadsheetForeignKeyLookups([...fk, ...fk, ...fk, ...fk],
     [{ event_id: "event-0" }]), /batch_too_large/);
@@ -316,4 +316,26 @@ test("optimistic CAS rejects incomplete or undefined before-images rather than s
     buildSpreadsheetDeleteSql(ctx, { id: "slot-1" }, { id: "slot-1", title: null }).binds,
     ["slot-1", "slot-1", null],
   );
+});
+
+
+test("FK preflight requires request-wide remaining S3 read budget before touching D1", async () => {
+  const { buildSpreadsheetForeignKeyLookups, validateSpreadsheetForeignKeys } =
+    await import("../src/routes/admin/spreadsheet/writeValidation.ts");
+  const fk = [{ column: "event_id", referencedTable: "events", referencedColumn: "id" }];
+  const rows = n => Array.from({ length: n }, (_, i) => ({ event_id: "e-" + i }));
+  assert.equal(buildSpreadsheetForeignKeyLookups(fk, rows(99), 1).length, 1);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(100), 1), /batch_too_large/);
+  assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(1), 0), /batch_too_large/);
+  for (const budget of [-1, 4, NaN, 1.5, undefined]) {
+    if (budget === undefined) continue; // planner supports explicit no-budget legacy characterization; execution does not.
+    assert.throws(() => buildSpreadsheetForeignKeyLookups(fk, rows(1), budget), /batch_too_large/);
+  }
+  let called = 0;
+  const db = { prepare() { called++; throw Error("unexpected D1"); } };
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(1), 0), /batch_too_large/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(100), 1), /batch_too_large/);
+  await assert.rejects(() => validateSpreadsheetForeignKeys(db, fk, rows(1), undefined), /batch_too_large/);
+  assert.equal(called, 0);
+  await assert.doesNotReject(() => validateSpreadsheetForeignKeys(db, fk, [{ event_id: null }], 0));
 });
