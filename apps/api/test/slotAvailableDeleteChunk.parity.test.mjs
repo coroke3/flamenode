@@ -137,6 +137,37 @@ test("SA-059 U03n: authority, tenant and CostGuard fail before any write",async(
   }finally{foreign.sqlite.close();}
 });
 
+test("SA-059 U03q: revoking staff or X approval between chunks stops continuation",async()=>{
+  const s=setup({actor:VIEWER,staff:true});
+  try{
+    const first=await s.post();
+    assert.equal(first.status,200,await first.clone().text());
+    assert.deepEqual(s.idsLeft(),["d","e","f"]);
+    assert.equal(s.count("audit_logs"),3);
+    assert.equal(s.stats.batches,1);
+    s.sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+    const denied=await s.post();
+    assert.equal(denied.status,404,await denied.clone().text());
+    assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+    assert.deepEqual(s.idsLeft(),["d","e","f"]);
+    assert.equal(s.count("audit_logs"),3);
+    assert.equal(s.stats.batches,1);
+    s.sqlite.prepare("UPDATE event_staff SET permission_preset='slot_manager' WHERE event_id='ev-1'").run();
+    s.sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+    const unapproved=await s.post();
+    assert.equal(unapproved.status,404,await unapproved.clone().text());
+    assert.deepEqual(s.idsLeft(),["d","e","f"]);
+    assert.equal(s.count("audit_logs"),3);
+    assert.equal(s.stats.batches,1);
+    s.sqlite.prepare("UPDATE x_users SET approval_status='approved' WHERE id='x1'").run();
+    const continued=await s.post();
+    assert.equal(continued.status,200,await continued.clone().text());
+    assert.deepEqual(s.idsLeft(),[]);
+    assert.equal(s.count("audit_logs"),6);
+    assert.equal(s.stats.batches,2);
+  }finally{s.sqlite.close();}
+});
+
 test("SA-059 U03n: concurrent reservation with unchanged version aborts entire batch",async()=>{
   let injected=false;
   const s=setup({onFirst:(sql,sqlite)=>{

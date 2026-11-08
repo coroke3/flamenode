@@ -173,6 +173,40 @@ test("SA-058 U03p: anonymous/unauthorized/maintenance actors cannot generate",as
     assert.equal(s.n("slots"),3);
   }finally{s.sqlite.close();}
 });
+test("SA-058 U03q: staff privilege and approved-X revocation between chunks fails closed",async()=>{
+  const s=setup({actor:VIEWER,staff:true});
+  try{
+    const first=await s.post(countInput(2,1));
+    assert.equal(first.status,200,await first.clone().text());
+    assert.equal(s.n("slots"),2);
+    assert.equal(s.n("audit_logs"),2);
+    assert.equal(s.stats.batches,1);
+    // Staff preset can change independently of the active auth session.
+    s.sqlite.prepare("UPDATE event_staff SET permission_preset='reviewer' WHERE event_id='ev-1'").run();
+    const denied=await s.post(countInput(2,3));
+    assert.equal(denied.status,404,await denied.clone().text());
+    assert.equal(denied.headers.get("Cache-Control"),"private, no-store");
+    assert.equal(s.stats.batches,1);
+    assert.equal(s.n("slots"),2);
+    assert.equal(s.n("audit_logs"),2);
+    // Reinstating the preset must not bypass approved X account linkage.
+    s.sqlite.prepare("UPDATE event_staff SET permission_preset='slot_manager' WHERE event_id='ev-1'").run();
+    s.sqlite.prepare("UPDATE x_users SET approval_status='pending' WHERE id='x1'").run();
+    const unapproved=await s.post(countInput(2,3));
+    assert.equal(unapproved.status,404,await unapproved.clone().text());
+    assert.equal(s.stats.batches,1);
+    assert.equal(s.n("slots"),2);
+    assert.equal(s.n("audit_logs"),2);
+    // This is a fresh authorized request, NOT idempotent resume of the first.
+    s.sqlite.prepare("UPDATE x_users SET approval_status='approved' WHERE id='x1'").run();
+    const next=await s.post(countInput(2,3));
+    assert.equal(next.status,200,await next.clone().text());
+    assert.equal(s.n("slots"),4);
+    assert.equal(s.n("audit_logs"),4);
+    assert.equal(s.stats.batches,2);
+  }finally{s.sqlite.close();}
+});
+
 test("SA-058 U03p: strict audit and Queue failures each roll back all new rows",async()=>{
   for(const table of ["audit_logs","static_rebuild_queue"]){
     const s=setup();
