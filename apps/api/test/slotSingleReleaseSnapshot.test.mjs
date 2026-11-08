@@ -30,6 +30,9 @@ function setup(rows) {
     "CREATE TABLE event_staff (event_id TEXT,x_user_id TEXT,permission_preset TEXT,custom_permission_keys_json TEXT);",
     "CREATE TABLE x_user_account_links (auth_user_id TEXT,x_user_id TEXT);",
     "CREATE TABLE x_users (id TEXT,approval_status TEXT);",
+    "CREATE TABLE system_settings (id TEXT PRIMARY KEY,operation_mode TEXT,disabled_features_json TEXT,",
+    "cost_guard_exception_until INTEGER,cost_guard_exception_features_json TEXT);",
+    "INSERT INTO system_settings (id,operation_mode) VALUES ('default','normal');",
     "CREATE TABLE slots (" + columns.map(name =>
       name + (name === "id" ? " TEXT PRIMARY KEY" :
         ["sort_order", "start_time", "updated_at", "version"].includes(name)
@@ -54,6 +57,7 @@ test("SA-060: one bound read permits complete 20-slot reservation groups", () =>
     assert.equal(selection.rows.length, 20);
     assert.ok(selection.rows.some(row => row.id === "s19"));
     assert.equal(db.read().exists_id, "ev");
+    assert.equal(JSON.parse(db.read().cost_guard_json).operation_mode, "normal");
   } finally { db.close(); }
 });
 test("SA-060: 21-member group is rejected rather than silently truncated", () => {

@@ -20,6 +20,9 @@ function setup(rows) {
     "CREATE TABLE event_staff(event_id TEXT,x_user_id TEXT,permission_preset TEXT,custom_permission_keys_json TEXT);",
     "CREATE TABLE x_user_account_links(auth_user_id TEXT,x_user_id TEXT);",
     "CREATE TABLE x_users(id TEXT,approval_status TEXT);",
+    "CREATE TABLE system_settings (id TEXT PRIMARY KEY,operation_mode TEXT,disabled_features_json TEXT,",
+    "cost_guard_exception_until INTEGER,cost_guard_exception_features_json TEXT);",
+    "INSERT INTO system_settings (id,operation_mode) VALUES ('default','normal');",
     "CREATE TABLE slots(id TEXT PRIMARY KEY,event_id TEXT,reserved_by_user_id TEXT,x_user_id TEXT,",
     "reserved_x_id_snapshot TEXT,display_name TEXT,slot_label TEXT,start_time INTEGER,",
     "sort_order INTEGER,reservation_group_id TEXT,video_id TEXT,status TEXT,updated_at INTEGER,version INTEGER);",
@@ -44,6 +47,7 @@ test("SA-063 U02c-2a: one read expands raw whitespace-preserved group",()=>{
   try{
     const r=read(db,["a"]);
     assert.equal(r.exists_id,"e1");
+    assert.equal(JSON.parse(r.cost_guard_json).operation_mode,"normal");
     assert.equal(JSON.parse(r.slots_json).length,1);
     assert.equal(JSON.parse(r.grouped_slots_json).length,2);
     const v=selectBatchReservedReleaseSnapshot("e1",["a"],r);
