@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAuditViewHref,
+  readAuditActorFilter,
   readAuditLimit,
   readAuditQueryValue,
   readAuditViewMode,
@@ -65,4 +66,13 @@ test("CURRENT audit: bookmarked operator alias stays a normal single-value query
   assert.equal(url.searchParams.get("operator"), "old-id");
   assert.equal(url.searchParams.get("record"), "v1");
   assert.equal(url.searchParams.get("view"), "cards");
+});
+
+test("CURRENT audit: duplicate actor falls back to single-valued legacy operator without widening the audit query", () => {
+  assert.equal(readAuditActorFilter(["a", "b"], "legacy-id"), "legacy-id");
+  assert.equal(readAuditActorFilter(["a", "b"], ["one", "two"]), "");
+  assert.equal(readAuditActorFilter("modern-id", "legacy-id"), "modern-id");
+  assert.equal(readAuditActorFilter("", "legacy-id"), "");
+  assert.equal(readAuditActorFilter(undefined, "legacy-id"), "legacy-id");
+  assert.equal(readAuditActorFilter(["a", "b"], undefined), "");
 });
