@@ -147,6 +147,21 @@ export function VideoChapterIsland({
     setEditingId(null); setComposerOpen(false); setMessage(""); setError(""); setBulkErrors([]);
   }, [activeXId, canPost]);
 
+  // Per-row authorization can be revoked while the viewer still has posting access.
+  // Close any open editor rather than retaining a stale edit target or draft.
+  const editingAuthorized = !editingId || chapters.some((chapter) =>
+    chapter.id === editingId && chapter.canManage);
+  React.useEffect(() => {
+    if (editingAuthorized) return;
+    epoch.current += 1;
+    pending.current = false;
+    setBusy(false);
+    setEditingId(null); setComposerOpen(false);
+    setTime(""); setLabel(""); setNote(""); setBulkCsv(""); setVisibility("public");
+    draftBaseline.current = { time: "", label: "", note: "", csv: "" };
+    setMessage(""); setError(""); setBulkErrors([]);
+  }, [editingAuthorized]);
+
   // Render-time guard: do not briefly show the previous identity's draft before
   // the passive effect clears state after a prop-driven Active X switch.
   const accessStable = accessRef.current.activeXId === activeXId &&
@@ -169,6 +184,7 @@ export function VideoChapterIsland({
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!ready) return;
+    if (!editingAuthorized) { setError("編集権限を確認できません。再読み込みしてください。"); return; }
     if (!label.trim()) { setError("タイトルを入力してください。"); return; }
     const parsedTime = validateChapterTime(time);
     if (!parsedTime.ok) { setError(parsedTime.message); return; }
@@ -218,7 +234,8 @@ export function VideoChapterIsland({
     }
   };
   const onDelete = async (id: string) => {
-    if (!ready || pending.current || !window.confirm("このチャプターを削除しますか？")) return;
+    if (!ready || pending.current || !chapters.some((chapter) => chapter.id === id && chapter.canManage) ||
+        !window.confirm("このチャプターを削除しますか？")) return;
     const generation = start();
     if (generation === null) return;
     try {
@@ -254,7 +271,7 @@ export function VideoChapterIsland({
     }, "現在位置にコメントする") : null,
     error ? h("p", { role: "alert" }, error) : null,
     message ? h("p", { role: "status" }, message) : null,
-    composerOpen ? h("form", { onSubmit },
+    composerOpen && editingAuthorized ? h("form", { onSubmit },
       h("label", null, "時刻", h("input", {
         type: "text", value: time, maxLength: 32, required: true,
         placeholder: "mm:ss", disabled: busy, onChange: (e: React.ChangeEvent<HTMLInputElement>) => setTime(e.target.value),
