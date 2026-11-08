@@ -368,6 +368,8 @@ if (runUnderRootTsx(import.meta.url)) {
     // Alice sees only her own private chapter, not staff's, not member's
     assert.equal(json.privateChapters.length, 1);
     assert.equal(json.privateChapters[0].id, "chap-priv-alice");
+    assert.equal(json.privateChapters[0].viewerCanManage, true, "active X chapter owner can edit without admin role");
+    assert.equal("chapter_owner_x_id" in json.privateChapters[0], false, "raw owner X ID must not leak");
     assert.equal(json.privateChapters[0].author_name, "X alice_x");
 
     // T08: Authenticated takes <= session (1) + 2 D1 statements (total <= 3)
@@ -388,6 +390,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
     assert.equal(json.viewerCanEditChapters, false, "admin without TOS consent must not gain chapter management");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false), "unconsented admin cannot manage individual chapters");
     // Carol sees both alice's and staff's private chapters (member excluded)
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
@@ -426,6 +429,7 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
     assert.equal(json.viewerCanEditChapters, true, "event staff chapter management");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === true), "staff may manage authorized private chapters");
     // Staff user has manager preset on evt-1 -> canAdministerChapters allows seeing all private chapters
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
@@ -592,8 +596,13 @@ if (runUnderRootTsx(import.meta.url)) {
         assert.equal(got.cache, cur.cache, label);
         const { viewerCanEditChapters, ...honoLegacyDto } = got.body;
         assert.equal(typeof viewerCanEditChapters, "boolean", `${label}: capability must be explicit`);
-        // Compare all preexisting CURRENT fields without the additive Hono capability.
-        assert.deepEqual(honoLegacyDto, cur.body, label);
+        // Compare all CURRENT fields, stripping only Hono's additive capability bits.
+        const legacyPrivate = honoLegacyDto.privateChapters.map(({ viewerCanManage, ...chapter }) => {
+          assert.equal(typeof viewerCanManage, "boolean", `${label}: per-chapter permission explicit`);
+          assert.equal("chapter_owner_x_id" in chapter, false, `${label}: owner ID must not leak`);
+          return chapter;
+        });
+        assert.deepEqual({ ...honoLegacyDto, privateChapters: legacyPrivate }, cur.body, label);
         assert.equal(VideoViewerOverlayResponseSchema.safeParse(got.body).success, true, label);
         // T08: session + 2 statements at most, never a write
         assert.ok(got.statements <= 3, `${label}: ${got.statements} statements`);
