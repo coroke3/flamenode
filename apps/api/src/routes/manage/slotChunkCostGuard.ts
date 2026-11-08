@@ -72,9 +72,17 @@ export function verifySlotChunkCostGuard(
   if (decision.blocked) {
     return deny(decision.reason === "mode" ? "maintenance_mode" : "cost_guard_blocked");
   }
-  // The shared evaluator has already validated the exception list and its keys.
+  // Only a policy exception needed for THIS authorization requires a
+  // deadline assertion in the atomic batch. Under normal/economy mode with
+  // this feature otherwise enabled, expiry must not reject a valid write.
+  // Reuse the domain evaluator, rather than approximating its fallback rule.
+  const fallback = evaluateCostGuardCore({
+    feature, operationMode, disabledFeaturesJson,
+    exceptionUntil: null, exceptionFeaturesJson, now,
+  });
   const exceptions = parseWriteFeatureList(exceptionFeaturesJson);
-  const exceptionDeadline = exceptions.ok && exceptions.features.includes(feature) &&
+  const exceptionDeadline = fallback.blocked && exceptions.ok &&
+    exceptions.features.includes(feature) &&
     exceptionUntil !== null && exceptionUntil > now ? exceptionUntil : null;
   return { approved: true, snapshotJson: rawJson, exceptionDeadline };
 }

@@ -11,6 +11,11 @@ import {
 import {
   buildAvailableDeleteChunkAtomicPlan,
 } from "../src/routes/manage/slotAvailableDeleteChunkMutation.ts";
+import {
+  SLOT_CHUNK_COST_GUARD_SELECT,
+  verifySlotChunkCostGuard,
+  buildSlotChunkCostGuardAssertion,
+} from "../src/routes/manage/slotChunkCostGuard.ts";
 
 const dialect = new SQLiteSyncDialect();
 const cols = [
@@ -166,6 +171,54 @@ test("SA-059 read-time hasMore is NOT an authoritative completion signal",()=>{
     assert.equal(next.ok,true);
     if(!next.ok)throw Error("bad next read");
     assert.deepEqual(next.rows.map(row=>row.id),["b"]);
+  }finally{db.close();}
+});
+
+test("SA-058/059 U03y: only an essential CostGuard exception expires at atomic-batch time",()=>{
+  // A controlled earlier verifier time models delay between the approved
+  // D1 pre-read and the in-batch SQLite strftime('%s','now') check.
+  const {db}=setup([]);
+  try{
+    const now=Math.floor(Date.now()/1000);
+    const setPolicy=(mode,until,disabled=null)=>{
+      db.prepare("UPDATE system_settings SET operation_mode=?,cost_guard_exception_until=?,disabled_features_json=?,cost_guard_exception_features_json=? WHERE id='default'")
+        .run(mode,until,disabled,JSON.stringify(["manage_slot_delete"]));
+      return db.prepare("SELECT "+SLOT_CHUNK_COST_GUARD_SELECT).get().cost_guard_json;
+    };
+    const assertBatch=(approval,shouldPass)=>{
+      assert.equal(approval.approved,true);
+      const stmt=dialect.sqlToQuery(buildSlotChunkCostGuardAssertion(approval));
+      const run=()=>db.prepare(stmt.sql).all(...stmt.params);
+      if(shouldPass)assert.doesNotThrow(run);
+      else assert.throws(run,/malformed JSON/);
+    };
+    // Read-only mode requires a live exception. The unchanged DB row cannot
+    // authorize a mutation once wall-clock time reaches its deadline.
+    const modePolicy=setPolicy("read_only",now-10);
+    const modeApproval=verifySlotChunkCostGuard(modePolicy,"manage_slot_delete",now-100);
+    assert.equal(modeApproval.approved,true);
+    assert.equal(modeApproval.exceptionDeadline,now-10);
+    assertBatch(modeApproval,false);
+    // Normal mode with this feature ENABLED does not depend on the exception.
+    // Its expiry must not create a spurious conflict/partial operation.
+    const normalPolicy=setPolicy("normal",now-10);
+    const normalApproval=verifySlotChunkCostGuard(normalPolicy,"manage_slot_delete",now-100);
+    assert.equal(normalApproval.approved,true);
+    assert.equal(normalApproval.exceptionDeadline,null);
+    assertBatch(normalApproval,true);
+    // A disabled feature remains dependent on the temporary exception,
+    // even in otherwise normal mode.
+    const disabledPolicy=setPolicy("normal",now-10,JSON.stringify(["manage_slot_delete"]));
+    const disabledApproval=verifySlotChunkCostGuard(disabledPolicy,"manage_slot_delete",now-100);
+    assert.equal(disabledApproval.approved,true);
+    assert.equal(disabledApproval.exceptionDeadline,now-10);
+    assertBatch(disabledApproval,false);
+    // Before the deadline, an unchanged policy must remain authorized.
+    const activePolicy=setPolicy("read_only",now+600);
+    const activeApproval=verifySlotChunkCostGuard(activePolicy,"manage_slot_delete",now);
+    assert.equal(activeApproval.approved,true);
+    assert.equal(activeApproval.exceptionDeadline,now+600);
+    assertBatch(activeApproval,true);
   }finally{db.close();}
 });
 
