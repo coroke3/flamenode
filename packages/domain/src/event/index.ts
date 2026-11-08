@@ -13,3 +13,4 @@ export * from "./stagePermissionForm.ts";
 export * from "./generalQuestionForm.ts";
 export * from "./basicUpdateFields.ts";
 export * from "./publishUpdateFields.ts";
+export * from "./questionsUpdateFields.ts";
