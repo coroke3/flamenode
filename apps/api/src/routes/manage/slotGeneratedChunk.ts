@@ -7,6 +7,7 @@
  * assertion, <=3 INSERTs and static projections; no direct Queue wake.
  */
 import { Hono } from "hono";
+import { SlotGenerateBodySchema } from "@flamenode/contracts";
 import { generateId } from "@flamenode/server-core/id";
 import { mutateWithAudit } from "@flamenode/server-core/audit/mutate";
 import { buildSlotChangeQueueBatch } from "@flamenode/server-core/staticRebuild/hooks";
@@ -56,7 +57,9 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
   const body = await readAdminJsonBody(c.req.raw);
   if (body.kind === "too_large") return c.json({ ok: false, message: BODY_TOO_LARGE_MESSAGE }, 413);
   if (body.kind !== "ok") return c.json({ ok: false, message: "入力エラー" }, 400);
-  const generated = planGeneratedSlots(body.value);
+  const parsed = SlotGenerateBodySchema.safeParse(body.value);
+  if (!parsed.success) return c.json({ ok: false, message: "入力エラー" }, 400);
+  const generated = planGeneratedSlots(parsed.data);
   if (!generated.ok) return c.json({ ok: false, message: generated.message }, 400);
   if (generated.candidates.length > MAX_GENERATE_SLOT_CHUNK_ROWS) {
     // Do NOT silently insert the first three of an up-to-100 row request.
@@ -78,7 +81,7 @@ slotGeneratedChunkRoutes.post("/generate-chunk", async (c) => {
       eventId, generated.candidates, now, () => generateId("slot"),
     );
     const plan = buildGeneratedSlotChunkAtomicPlan({
-      eventId, mode: body.value.mode, rows,
+      eventId, mode: parsed.data.mode, rows,
     });
     const queue = await buildSlotChangeQueueBatch(db, {
       eventId, reason: "slot_admin_generate", requestedByUserId: user.id,
