@@ -69,8 +69,10 @@ export function EventSlotsView({ eventId, status, data, writeActions, onChanged 
   </div>;
 }
 
-type TaggedResult = { eventId: string; status: string; fetchFn?: OpsFetch;
-  result: OpsResult<ManageSlotsList> };
+type ReadContext = {
+  eventId: string; status: string; fetchFn?: OpsFetch; refresh: number;
+};
+type TaggedResult = { context: ReadContext; result: OpsResult<ManageSlotsList> };
 
 /** Intended to be mounted by MIG-0719's router owner after U02–U04 are complete. */
 export function EventSlots({ eventId, fetchFn, writeActions }: {
@@ -80,17 +82,27 @@ export function EventSlots({ eventId, fetchFn, writeActions }: {
   const status = normalizeSlotFilter(search.get("status"));
   const [request, setRequest] = React.useState<TaggedResult | null>(null);
   const [refresh, setRefresh] = React.useState(0);
+  // Tag every read with its exact UI generation. A refetch of the same
+  // event/filter must not briefly reveal a previously authorized snapshot.
+  // Object identity also prevents A -> B -> A from reviving cached rows.
+  const contextRef = React.useRef<ReadContext>({ eventId, status, fetchFn, refresh });
+  if (contextRef.current.eventId !== eventId || contextRef.current.status !== status ||
+      contextRef.current.fetchFn !== fetchFn || contextRef.current.refresh !== refresh) {
+    contextRef.current = { eventId, status, fetchFn, refresh };
+  }
   React.useEffect(() => {
     const controller = new AbortController();
+    const context = contextRef.current;
     setRequest(null);
     void listSlots(eventId, status, fetchFn, controller.signal).then(result => {
-      if (!controller.signal.aborted) setRequest({ eventId, status, fetchFn, result });
+      if (!controller.signal.aborted && contextRef.current === context) {
+        setRequest({ context, result });
+      }
     });
     return () => controller.abort();
   }, [eventId, status, fetchFn, refresh]);
 
-  const validRequest = request?.eventId === eventId && request.status === status &&
-    request.fetchFn === fetchFn ? request.result : null;
+  const validRequest = request?.context === contextRef.current ? request.result : null;
   if (validRequest === null) return <p role="status" aria-busy="true">枠を読み込み中...</p>;
   if (validRequest.status === "anonymous") return <p role="alert">ログインが必要です。</p>;
   if (validRequest.status === "notFound" || validRequest.status === "forbidden") {

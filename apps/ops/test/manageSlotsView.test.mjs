@@ -453,3 +453,51 @@ test("MIG-0722 U02b-7: unmount invalidates pending slot action response", async 
     assert.doesNotMatch(dom.window.document.body.textContent, /OLD-SUCCESS/);
   });
 });
+
+test("MIG-0722 U02b-8: permission-loss refetch hides previous private slots and actions", async () => {
+  await withSlotDom(async (dom, root) => {
+    let requests = 0;
+    let replyRevoked;
+    const fetchFn = async () => {
+      requests++;
+      if (requests === 1) {
+        return new Response(JSON.stringify(data()), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      return new Promise(resolve => { replyRevoked = resolve; });
+    };
+    const operations = [];
+    const writeActions = {
+      onGenerate: async () => ({ ok: true }),
+      onClearAvailable: async () => ({ ok: true }),
+      onAction: async operation => {
+        operations.push(operation);
+        return { ok: true, message: "成功" };
+      },
+    };
+    await React.act(async () => root.render(React.createElement(MemoryRouter, null,
+      React.createElement(EventSlots, {
+        eventId: "ev id", fetchFn, writeActions,
+      }))));
+    // Response.json() is async; advance the event loop until React has
+    // committed the first authorized read.
+    for (let attempt = 0; attempt < 6 &&
+         !dom.window.document.body.textContent.includes("User <name>"); attempt++) {
+      await React.act(async () => { await new Promise(resolve => setImmediate(resolve)); });
+    }
+    assert.match(dom.window.document.body.textContent, /User <name>/);
+    const findButton = label => [...dom.window.document.querySelectorAll("button")]
+      .find(button => button.textContent.trim() === label);
+    await React.act(async () => findButton("削除").click());
+    await React.act(async () => findButton("実行する").click());
+    assert.equal(operations.length, 1);
+    assert.equal(requests, 2, "a successful injected action must trigger one re-fetch");
+    assert.equal(typeof replyRevoked, "function", "revoked request must be held in flight");
+    assert.match(dom.window.document.body.textContent, /枠を読み込み中/);
+    assert.doesNotMatch(dom.window.document.body.textContent, /User <name>|枠を追加・一括編集/);
+    await React.act(async () => replyRevoked(new Response(null, { status: 403 })));
+    assert.match(dom.window.document.body.textContent, /権限がありません/);
+    assert.doesNotMatch(dom.window.document.body.textContent, /User <name>|すべて選択|一括生成/);
+  });
+});
