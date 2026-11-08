@@ -575,8 +575,8 @@ test("MIG-0518 authorized manager edits only complete private chapter DTOs", asy
     viewerXApproved: true, activeXId: "x-approved",
     viewerCanEditChapters: true,
     privateChapters: [
-      { id: "private-1", chapter_time: 65, chapter_label: "秘密", note: "保存済み本文", visibility: "private" },
-      { id: "public-duplicate", chapter_time: 10, chapter_label: "重複", note: "本文", visibility: "private" },
+      { id: "private-1", chapter_time: 65, chapter_label: "秘密", note: "保存済み本文", visibility: "private", viewerCanManage: true },
+      { id: "public-duplicate", chapter_time: 10, chapter_label: "重複", note: "本文", visibility: "private", viewerCanManage: true },
     ],
   };
   const publicChapters = [
@@ -591,6 +591,35 @@ test("MIG-0518 authorized manager edits only complete private chapter DTOs", asy
   }], "public chapters must not be edited with a missing note field");
 });
 
+
+test("MIG-0518 chapter owner edits own private chapter without admin/bulk access", async () => {
+  const { chapterManagementForOverlay } = await import("../apps/site/src/components/VideoUtilityDockConnected.ts");
+  const base = {
+    loggedIn: true, authUnavailable: false, isBanned: false,
+    isTosAccepted: true, termsReacceptRequired: false,
+    viewerXApproved: true, activeXId: "owner-x",
+    viewerCanEditChapters: false,
+    privateChapters: [
+      { id: "own", chapter_time: 70, chapter_label: "自分の章", note: "本文保持", visibility: "private", viewerCanManage: true },
+      { id: "foreign", chapter_time: 90, chapter_label: "他人の章", note: "他人の本文", visibility: "private", viewerCanManage: false },
+      { id: "unknown", chapter_time: 30, chapter_label: "不明", note: "本文", visibility: "private" },
+    ],
+  };
+  const result = chapterManagementForOverlay([], base, false);
+  assert.equal(result.canBulk, false, "normal owners cannot bulk-create");
+  assert.deepEqual(result.editableChapters, [{
+    id: "own", chapter_time: "1:10", chapter_label: "自分の章",
+    note: "本文保持", visibility: "private", canManage: true,
+  }], "only explicit per-chapter ownership can show edit/delete");
+  for (const denied of [
+    { isTosAccepted: false }, { isBanned: true },
+    { authUnavailable: true }, { activeXId: null },
+    { viewerXApproved: false }, { loggedIn: false },
+  ]) {
+    assert.deepEqual(chapterManagementForOverlay([], { ...base, ...denied }, false),
+      { canBulk: false, editableChapters: [] }, JSON.stringify(denied));
+  }
+});
 
 test("MIG-0518 bulk chapter UI does not claim video-owner-only access", () => {
   const source = fs.readFileSync(new URL("../apps/site/src/components/VideoChapterIsland.ts", import.meta.url), "utf8");
