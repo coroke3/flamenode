@@ -39,6 +39,7 @@ test("SA-057: keeping reservation selects same raw group with valid subject",()=
   assert.equal(result.rows.length,2);
   assert.equal(result.videoBefore.id,"v1");
   assert.equal(result.shouldDetachVideoSchedulingAtRead,true);
+  assert.deepEqual(result.submittedVideoRefIds,["a","b"]);
 });
 
 test("SA-056/057: 21 members, anchor omission, duplicate, raw group mismatch rejected",()=>{
@@ -70,6 +71,7 @@ test("SA-056/057: submitted video missing is invalid for keep but allowed in leg
   assert.equal(dangerous.ok,true);
   if(!dangerous.ok)throw Error("expected force-release selection");
   assert.equal(dangerous.videoId,null);
+  assert.deepEqual(dangerous.submittedVideoRefIds,[]);
   assert.equal(dangerous.shouldDetachVideoSchedulingAtRead,false);
   assert.equal(selectSubmittedDangerSnapshot({
     ...input("keep-reservation",[solo]),videoBefore:null,submittedVideoRefs:[],
