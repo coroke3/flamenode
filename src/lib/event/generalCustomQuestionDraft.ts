@@ -5,6 +5,10 @@ import {
 } from "@/lib/video/customQuestions";
 import { isStagePermissionQuestionKey } from "@/lib/video/formSettings";
 import { generateId } from "@/lib/utils/id";
+import {
+  generalCustomQuestionsPresentCore,
+  readGeneralCustomQuestionsFromFormDataCore,
+} from "@flamenode/domain/event";
 
 export type EventGeneralCustomQuestionDraft = {
   clientId: string;
@@ -52,52 +56,17 @@ export function createEmptyGeneralCustomQuestion(
 
 export { customQuestionToDraft } from "@flamenode/domain/event";
 
-function boolFormValue(value: FormDataEntryValue | undefined): boolean {
-  return String(value ?? "") === "1";
-}
-
-function parseOptionsFromNewlineField(raw: string): string[] {
-  return normalizeOptionList(raw.split(/\r?\n/));
-}
-
+/** CURRENT import signatures remain unchanged; pure FormData reading lives in domain. */
 export function generalCustomQuestionsPresent(formData: FormData): boolean {
-  return String(formData.get("general_custom_questions_present") ?? "") === "1";
+  return generalCustomQuestionsPresentCore(formData);
 }
 
 export function readGeneralCustomQuestionsFromFormData(
   formData: FormData,
 ): EventGeneralCustomQuestionDraft[] {
-  if (!generalCustomQuestionsPresent(formData)) return [];
-
-  const keys = formData.getAll("general_custom_question_key");
-  const enabled = formData.getAll("general_custom_question_enabled");
-  const required = formData.getAll("general_custom_question_required");
-  const types = formData.getAll("general_custom_question_type");
-  const labels = formData.getAll("general_custom_question_label");
-  const descriptions = formData.getAll("general_custom_question_description");
-  const placeholders = formData.getAll("general_custom_question_placeholder");
-  const optionsRaw = formData.getAll("general_custom_question_options");
-
-  return keys
-    .map((rawKey, index): EventGeneralCustomQuestionDraft | null => {
-      const question_key = String(rawKey ?? "").trim();
-      if (!question_key || isStagePermissionQuestionKey(question_key)) {
-        return null;
-      }
-
-      return {
-        clientId: question_key,
-        question_key,
-        label: String(labels[index] ?? "").trim(),
-        description: String(descriptions[index] ?? "").trim(),
-        type: parseQuestionType(types[index]),
-        required: boolFormValue(required[index]),
-        options: parseOptionsFromNewlineField(String(optionsRaw[index] ?? "")),
-        placeholder: String(placeholders[index] ?? "").trim(),
-        enabled: boolFormValue(enabled[index]),
-      };
-    })
-    .filter(
-      (question): question is EventGeneralCustomQuestionDraft => question !== null,
-    );
+  return readGeneralCustomQuestionsFromFormDataCore(formData, {
+    parseQuestionType,
+    normalizeOptionList,
+    isStagePermissionQuestionKey,
+  });
 }
