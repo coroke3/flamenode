@@ -658,3 +658,41 @@ test("P2 changing Active X prop clears unsent chapter edits without window event
     assert.equal(doc.querySelector("input[type=checkbox]").checked, true, "new identity starts with public visibility");
   });
 });
+
+
+test("P2 per-chapter permission revocation closes edit while general posting stays allowed", async () => {
+  await withChapterDom(async (doc, root) => {
+    let writes = 0;
+    globalThis.fetch = async () => {
+      writes += 1;
+      return { ok: true, status: 200, json: async () => ({ ok: true, chapterId: "c1" }) };
+    };
+    const render = (chapters) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters,
+    });
+    await React.act(async () => root.render(render([PRIVATE_CHAPTER])));
+    await clickButton(doc, "編集");
+    assert.ok(doc.querySelector("form"), "edit begins while row capability is true");
+    await React.act(async () => root.render(render([{ ...PRIVATE_CHAPTER, canManage: false }])));
+    assert.equal(doc.querySelector("form"), null, "revoked row must close its existing editor");
+    assert.equal([...doc.querySelectorAll("button")].some((button) => button.textContent === "編集"), false);
+    assert.equal(writes, 0, "permission loss must not dispatch an update");
+    await clickButton(doc, "現在位置にコメントする");
+    assert.equal(doc.querySelector("form input[placeholder='mm:ss']") !== null, true,
+      "general new chapter posting remains available");
+    assert.equal(doc.querySelector("input[type=checkbox]").checked, true,
+      "the revoked private draft must not carry over to a new post");
+  });
+});
+
+test("P2 removal of an edited chapter invalidates its editor before any update", async () => {
+  await withChapterDom(async (doc, root) => {
+    const render = (chapters) => React.createElement(VideoChapterIsland, {
+      videoId: "abc", activeXId: "approved", canPost: true, chapters,
+    });
+    await React.act(async () => root.render(render([PRIVATE_CHAPTER])));
+    await clickButton(doc, "編集");
+    await React.act(async () => root.render(render([])));
+    assert.equal(doc.querySelector("form"), null, "removed row must not remain editable");
+  });
+});
