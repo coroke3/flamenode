@@ -50,6 +50,31 @@ test("D-16-2: an unstructured 401 is anonymous; network/invalid payload is unava
   assert.deepEqual(await send(async () => { throw Error("network down"); }, "POST", "/write"), { status: "unavailable" });
 });
 
+test("D-16-2: HTTP failures cannot be promoted to success by a misleading JSON envelope", async () => {
+  for (const status of [400, 403, 409, 500, 503]) {
+    assert.deepEqual(
+      await send(async () => asJson({ ok: true, message: "spoofed" }, status), "POST", "/write", {}),
+      { status: "unavailable" },
+      `HTTP ${status} with ok:true must fail closed`,
+    );
+  }
+  assert.deepEqual(
+    await send(async () => asJson({ ok: true }, 401), "POST", "/write", {}),
+    { status: "anonymous" },
+    "HTTP 401 always requires renewed authentication",
+  );
+  assert.deepEqual(
+    await send(async () => asJson({ ok: false, message: "競合" }, 409), "POST", "/write", {}),
+    { status: "ok", data: { ok: false, message: "競合" } },
+    "explicit API denials remain available to display their message",
+  );
+  assert.deepEqual(
+    await send(async () => asJson([{ ok: true }]), "POST", "/write", {}),
+    { status: "unavailable" },
+    "arrays are not valid mutation result DTOs",
+  );
+});
+
 test("D-16-3: refreshKey reload is silent and preserves the prior value on errors", async () => {
   const container = dom.window.document.createElement("div");
   const root = createRoot(container);
