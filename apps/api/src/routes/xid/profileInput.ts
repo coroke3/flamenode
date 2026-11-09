@@ -37,6 +37,61 @@ function normalizeProfileContact(raw: string): string | null {
 }
 
 
+/** CURRENT src/lib/socialLinks.ts#validateSocialLinksJson, transport-only parity. */
+function socialType(raw: unknown): string {
+  const truncated = String(raw ?? "").trim().slice(0, 40);
+  const type = /[\uD800-\uDBFF]$/.test(truncated) ? truncated.slice(0, -1) : truncated;
+  const key = type.toLowerCase();
+  const aliases: Record<string, string> = {
+    twitter: "X", x: "X", instagram: "Instagram", insta: "Instagram",
+    tiktok: "TikTok", bluesky: "Bluesky", bsky: "Bluesky",
+    niconico: "Niconico", nico: "Niconico", "ニコニコ": "Niconico",
+    portfolio: "Portfolio", tumblr: "Tumblr", tumbler: "Tumblr",
+    discord: "Discord", email: "Email", mail: "Email",
+    web: "Website", website: "Website", site: "Website",
+  };
+  return aliases[key] ?? (type || "Other");
+}
+
+function profileSocialUrl(raw: unknown, type: string): string | null {
+  const value = String(raw ?? "").trim();
+  if (!value) return null;
+  if (type === "Email") {
+    const address = value.replace(/^mailto:/i, "").split("?")[0]?.trim() ?? "";
+    return address && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)
+      ? `mailto:\${address}` : null;
+  }
+  if (/^mailto:/i.test(value)) return null;
+  if (!value.includes("://") && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return null;
+  return normalizeProfileHttpUrl(value);
+}
+
+function validateProfileSocialLinks(raw: string): Parsed<string | null> {
+  const text = raw.trim();
+  if (!text) return { ok: true, value: null };
+  if (text.length > 5000) return { ok: false, message: "SNSリンクが長すぎます。" };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); }
+  catch { return { ok: false, message: "SNSリンクのJSON形式が不正です。" }; }
+  if (!Array.isArray(parsed)) {
+    return { ok: false, message: "SNSリンクは配列形式で保存してください。" };
+  }
+  const links: Array<{ type: string; url: string }> = [];
+  for (const item of parsed) {
+    if (links.length >= 8) break;
+    if (!item || typeof item !== "object") continue;
+    const row = item as { type?: unknown; url?: unknown };
+    if (!String(row.url ?? "").trim()) continue;
+    const type = socialType(row.type);
+    const url = profileSocialUrl(row.url, type);
+    if (!url) {
+      return { ok: false, message: "SNSリンクには、Email はメールアドレス、それ以外は http/https の有効なURLを入力してください。" };
+    }
+    links.push({ type, url });
+  }
+  return { ok: true, value: links.length ? JSON.stringify(links) : null };
+}
+
 function matchTarget(pathXId: string, bodyXId: string): Parsed<string> {
   // Unlike normalization of display handles, a URL route must be canonical.
   // Reject slash, percent-decoded separators, aliases and non-X user identifiers
@@ -54,7 +109,7 @@ export function parseXIdProfileInput(pathXId: string, json: unknown): Parsed<{
   profileText: string;
   portfolioContact: string | null;
   youtubeChannelUrl: string | null;
-  otherSocialLinksRaw: string;
+  otherSocialLinks: string | null;
 }> {
   const parsed = UpdateXIdProfileBodySchema.safeParse(json);
   if (!parsed.success) return { ok: false, message: "入力内容を確認してください。" };
@@ -65,15 +120,16 @@ export function parseXIdProfileInput(pathXId: string, json: unknown): Parsed<{
   if (youtubeRaw && !youtubeChannelUrl) {
     return { ok: false, message: "YouTube チャンネル URL が不正です。" };
   }
-  // CURRENT social link JSON normalization is still separate and mandatory
-  // before any later route is allowed to write. This pure parser does no I/O.
+  const social = validateProfileSocialLinks(parsed.data.other_social_links ?? "");
+  if (!social.ok) return social;
+  // This parser only validates transport inputs; it cannot grant X ownership.
   return { ok: true, value: {
     xUserId: target.value,
     xName: (parsed.data.x_name ?? "").trim().slice(0, 80),
     profileText: (parsed.data.profile_text ?? "").trim().slice(0, 2000),
     portfolioContact: normalizeProfileContact(parsed.data.portfolio_contact ?? ""),
     youtubeChannelUrl,
-    otherSocialLinksRaw: (parsed.data.other_social_links ?? "").trim(),
+    otherSocialLinks: social.value,
   } };
 }
 
