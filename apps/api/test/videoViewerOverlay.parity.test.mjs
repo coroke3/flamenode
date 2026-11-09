@@ -376,6 +376,25 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.ok(d1.stats.statements <= 3, `Expected statements <= 3, got ${d1.stats.statements}`);
   });
 
+  test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // A linked account may read chapters from all of its approved identities,
+    // but only the currently selected approved X is authorized to write its own.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?').run("alice_y", "u_alice");
+    const switched = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(switched.status, 200);
+    const body = await switched.json();
+    assert.equal(body.viewerXApproved, true);
+    assert.equal(body.viewerCanEditChapters, false);
+    assert.ok(body.privateChapters.some((chapter) => chapter.id === "chap-priv-alice"));
+    assert.ok(body.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "approval of another linked X is not the active chapter owner's grant");
+    assert.ok(body.privateChapters.every((chapter) => !("chapter_owner_x_id" in chapter)),
+      "the owner identifier must never leave the API");
+  });
+
   test("RH-031 switching to a second approved X revokes edit of the first identity's chapter", async () => {
     const { env, sqlite } = setupTestEnv();
     // alice owns both approved X IDs, but the chapter belongs only to alice_x.
