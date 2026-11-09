@@ -37,6 +37,23 @@ test("MIG-0708 U03 T01: two synchronous Active X clicks issue exactly one reques
   await m.dispose();
 });
 
+test("MIG-0708 U03: obsolete A-B-A Active X result cannot refresh the next account", async () => {
+  const pending = deferred(), calls = [];
+  let refreshed = 0;
+  const api = { setActive: id => { calls.push(id); return pending.promise; } };
+  const common = { api, approved: true, onRefresh: () => { refreshed++; } };
+  const m = await render(SetActiveXButton, { ...common, xUserId: "A" });
+  try {
+    await act(async () => buttonWith(m.container, "アクティブ").click());
+    assert.deepEqual(calls, ["A"]);
+    await m.rerender({ ...common, xUserId: "B" });
+    await m.rerender({ ...common, xUserId: "A" });
+    await act(async () => pending.resolve({ ok: true }));
+    await m.flush();
+    assert.equal(refreshed, 0, "stale account's Active X result must not refresh the new view");
+  } finally { await m.dispose(); }
+});
+
 test("MIG-0708 U03: overlong next path never navigates after successful Active X switch", async () => {
   const calls = [];
   let refreshed = 0;
