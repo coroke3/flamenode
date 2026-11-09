@@ -1,12 +1,12 @@
-import type { NotificationActor } from "../actor";
-import { formatOpsActorSection } from "../actor";
-import { appUrl, videoPublicPath, type NotificationUrlEnv } from "../format";
+import type { NotificationActor } from "../actor.ts";
+import { formatOpsActorSection } from "../actor.ts";
+import { appUrl, videoPublicPath, type NotificationUrlEnv } from "../format.ts";
 import {
   buildDiscordPayload,
   buildNotificationBlocks,
   escapeDiscordMention,
   linkLine,
-} from "./common";
+} from "./common.ts";
 
 function opsThreadActorLabel(actor: NotificationActor | null): string {
   if (!actor) return "unknown";
