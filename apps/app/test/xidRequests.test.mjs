@@ -54,6 +54,8 @@ test("write never treats malformed or HTTP error result as success", async () =>
   for (const response of [
     new Response("<html>oops</html>", { status: 200 }),
     new Response(JSON.stringify({ ok: "true" }), { status: 200 }),
+    new Response(JSON.stringify({ ok: true, message: 42 }), { status: 200 }),
+    new Response(JSON.stringify([]), { status: 200 }),
     new Response(JSON.stringify({ ok: true, message: "bad" }), { status: 403 }),
   ]) {
     const api = createXidRequestsApi(async () => response);
@@ -61,6 +63,15 @@ test("write never treats malformed or HTTP error result as success", async () =>
   }
   const api = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: false, message: "再試行してください" }), { status: 409 }));
   assert.deepEqual(await api.requestLink("alice"), { ok: false, message: "再試行してください" });
+});
+
+test("MIG-0659 response DTO preserves valid explicit error status while rejecting malformed success", async () => {
+  const accepted = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "申請済み" }), { status: 200 }));
+  assert.deepEqual(await accepted.requestLink("alice"), { ok: true, message: "申請済み" });
+  const denied = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: false, message: "権限がありません" }), { status: 403 }));
+  assert.deepEqual(await denied.cancelRequest("r1"), { ok: false, message: "権限がありません" });
+  const misleading = createXidRequestsApi(async () => new Response(JSON.stringify({ ok: true, message: "成功" }), { status: 503 }));
+  assert.deepEqual(await misleading.requestMergeRevert("r1"), { ok: false, message: "成功" });
 });
 
 test("settings: X ID submission rejects invalid handles locally and prevents a double POST", async () => {
