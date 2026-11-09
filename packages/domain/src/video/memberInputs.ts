@@ -69,6 +69,12 @@ export function parseVideoMemberInputs(
     return { ok: false, message: "合作メンバーの JSON が不正です。" };
   }
 
+  // Reject oversized arrays before Zod walks every member and nested chapter.
+  // Preserve the schema's exact existing maximum-member error message.
+  if (Array.isArray(parsed) && parsed.length > MAX_VIDEO_MEMBERS) {
+    return { ok: false, message: `合作メンバーは最大${MAX_VIDEO_MEMBERS}人です。` };
+  }
+
   const result = membersJsonSchema.safeParse(parsed);
   if (!result.success) {
     return {
