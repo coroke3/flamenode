@@ -148,6 +148,28 @@ test("MIG-0710 U02: terms client POSTs an empty JSON body to provisional endpoin
   assert.equal(request.init.credentials, "same-origin");
 });
 
+test("MIG-0641: terms and completion DTO validation rejects malformed envelopes", async () => {
+  for (const value of [
+    { ok: false }, // the confirmed denial contract requires a message
+    { ok: "true" },
+    { ok: true, alreadyAccepted: "yes" },
+    [ { ok: true } ],
+  ]) {
+    const api = createTermsApi(async () => asJson(value));
+    assert.deepEqual(await api.accept(), { status: "unavailable" }, JSON.stringify(value));
+  }
+  const denied = createTermsApi(async () => asJson({ ok: false, message: "再同意が必要です" }, 409));
+  assert.deepEqual(await denied.accept(), {
+    status: "ok", data: { ok: false, message: "再同意が必要です" },
+  });
+  const accepted = createTermsApi(async () => asJson({ ok: true, alreadyAccepted: true }));
+  assert.deepEqual(await accepted.accept(), { status: "ok", data: { ok: true, alreadyAccepted: true } });
+  const malformedCompletion = createTermsApi(async () => asJson({ ok: true, message: 123 }));
+  assert.deepEqual(await malformedCompletion.complete(), { status: "unavailable" });
+  const completed = createTermsApi(async () => asJson({ ok: true }));
+  assert.deepEqual(await completed.complete(), { status: "ok", data: { ok: true } });
+});
+
 test("MIG-0710 U02: unchecked form refuses writes with CURRENT error", async () => {
   let calls = 0;
   const t = renderTerms({ accept: async () => { calls += 1; return { status: "ok", data: { ok: true } }; } });
