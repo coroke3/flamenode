@@ -32,7 +32,7 @@ function approvedIconCandidate(
   if (row.icon_url) seen.add(row.icon_url);
   if (seen.has(value)) return true;
   const raw = row._icon_candidates_json;
-  if (!raw || raw.length > 8192) return false;
+  if (!raw || raw.length > 45000) return false;
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { return false; }
   if (!Array.isArray(parsed)) return false;
