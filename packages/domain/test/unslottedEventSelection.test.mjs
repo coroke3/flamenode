@@ -52,3 +52,14 @@ test("MIG-0651: File input remains invalid instead of becoming an empty selectio
   form.set("event_ids",new Blob(["event-a"]), "selection.txt");
   invalid(form);
 });
+
+test("MIG-0651: long repeated event selections do not require large intermediate arrays",()=>{
+  const repetitions = 30_000;
+  const repeated = Array(repetitions).fill("event-a").join(",");
+  assert.equal(parseUnslottedEventIdFromForm(selection(repeated)), "event-a");
+  assert.equal(parseUnslottedEventIdFromForm(selection(",".repeat(100_000))), null);
+  invalid(selection(repeated + ",event-b"));
+  // Each ID remains subject to the 64 UTF-16-unit cap after trimming.
+  invalid(selection("event-a," + "x".repeat(65)));
+  assert.equal(parseUnslottedEventIdFromForm(selection(" ,  event-a , event-a,  ")), "event-a");
+});
