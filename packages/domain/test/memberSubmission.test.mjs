@@ -19,6 +19,23 @@ test("MIG-0651: no cooperation does not parse malicious member JSON", () => {
   assert.deepEqual(value, {ok:true, value:{members:[],chaptersByIndex:new Map()}});
   assert.equal(validateVideoMemberSubmission(form("{broken"), true).ok,false);
 });
+test("MIG-0651: collab rejects duplicated multipart members_json even if first parses", () => {
+  const good = JSON.stringify([{ name: "Alice", x_user_id: "@alice" }]);
+  const other = JSON.stringify([{ name: "Bob", x_user_id: "@bob" }]);
+  for (const values of [[good, other], [good, good], ["", good], [good, ""]]) {
+    const f = new FormData();
+    for (const value of values) f.append("members_json", value);
+    const result = validateVideoMemberSubmission(f, true);
+    assert.deepEqual(result, { ok: false, message: "合作メンバーの入力が不正です。" });
+    assert.deepEqual(validateVideoMemberSubmission(f, false), {
+      ok: true, value: { members: [], chaptersByIndex: new Map() },
+    }, "non-collab must continue ignoring member payloads");
+  }
+  const f = form(good);
+  f.set("unrelated", "ignore me");
+  assert.equal(validateVideoMemberSubmission(f, true).ok, true);
+});
+
 test("MIG-0651: member chapters stay indexed with fallback role and zero member chapter maps", () => {
   const members = [
     { name:"Alice",x_user_id:"@Alice",role:"Editor",chapters:[{time:"1:01",label:"",note:" notes "}] },
