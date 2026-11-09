@@ -13,6 +13,14 @@ test("public list search never ends on a truncated emoji surrogate at 100 UTF-16
   assert.equal(normalizeListQuery({ q: "  a  " }).q, "a");
 });
 
+test("public list replaces malformed original UTF-16 without altering valid emoji", () => {
+  assert.equal(normalizeListQuery({ q: "a\uD83Db" }).q, "a�b");
+  assert.equal(normalizeListQuery({ q: "a\uDE00b" }).q, "a�b");
+  assert.equal(normalizeListQuery({ q: "😀" }).q, "😀");
+  assert.equal(normalizeListQuery({ q: "x".repeat(99) + "\uDE00tail" }).q, "x".repeat(99) + "�");
+  assert.equal(normalizeListQuery({ q: "x".repeat(98) + "😀tail" }).q, "x".repeat(98) + "😀");
+});
+
 test("CURRENT list and API plus Hono migration enforce the same Unicode boundary", () => {
   const files = [
     "app/(public)/list/ListIndexView.tsx",
@@ -21,8 +29,10 @@ test("CURRENT list and API plus Hono migration enforce the same Unicode boundary
     "apps/site/src/lib/listQuery.ts",
   ];
   const boundaryGuard = "replace(/[\\uD800-\\uDBFF]$/, \"\")";
+  const malformedGuard = String.raw`replace(/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/g, "�")`;
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
     assert.ok(source.includes(boundaryGuard), file + " lacks surrogate-boundary guard");
+    assert.ok(source.includes(malformedGuard), file + " lacks malformed UTF-16 guard");
   }
 });
