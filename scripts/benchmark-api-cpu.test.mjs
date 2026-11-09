@@ -178,6 +178,8 @@ test("MIG-0639 SEC-575: RH-013 exposes distinct scheduled and realtime warm-cach
   assert.match(rh013.warmModes["realtime-warm"].path, /update=realtime/);
   assert.equal(rh013.warmModes["scheduled-warm"].expectCache, "HIT");
   assert.equal(rh013.warmModes["realtime-warm"].expectCache, "BYPASS");
+  assert.equal(rh013.warmModes["scheduled-warm"].verifyBodyReuse, true);
+  assert.equal(rh013.warmModes["realtime-warm"].verifyBodyReuse, true);
   assert.ok(rh013.warmModes["scheduled-warm"].path.includes("refresh=15"));
 });
 
