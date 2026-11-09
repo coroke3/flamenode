@@ -399,6 +399,19 @@ test("CURRENT Cache API ignores poisoned statuses/MIME/size and strips response 
     assert.equal(oversized.state.gets, 1, "cache content-length over the media limit is not reusable");
     await oversized.response.arrayBuffer();
 
+    // Legacy cache entries can omit Content-Length or lie about it. The streamed
+    // body, not the header, must enforce the 5 MiB limit.
+    for (const headers of [
+      { "content-type": "image/png", etag: '"cached-no-length"' },
+      { "content-type": "image/png", etag: '"cached-underreported"', "content-length": "1" },
+    ]) {
+      cached = new Response(new Uint8Array(MAX_PUBLIC_MEDIA_BYTES + 1), { headers });
+      const actualOversized = await make();
+      assert.equal(actualOversized.state.gets, 1, "actual cached bytes over 5 MiB must fall back to R2");
+      assert.equal(actualOversized.response.status, 200);
+      await actualOversized.response.arrayBuffer();
+    }
+
     cached = new Response(new Uint8Array([1, 2, 3]), {
       headers: {
         "content-type": "image/png", etag: '"cached"',
