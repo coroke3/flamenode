@@ -354,7 +354,7 @@ test("D-16-3: changing API identity hides prior private data and applies anonymo
       // The previous identity is hidden on the render that receives the new API,
       // before the replacement request resolves or its effect can paint old data.
       await act(async () => root.render(React.createElement(Demo, { api: nextApi })));
-      assert.equal(container.textContent, "読み込み中...");
+      assert.equal(container.textContent, "loading");
       assert.doesNotMatch(container.textContent, /private data from previous API/);
 
       await act(async () => resolveNext({ status: nextStatus }));
