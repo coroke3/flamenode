@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { sql, type SQL } from "@flamenode/server-core/sql";
 /**
  * MIG-0636 U05 / SA-103 CURRENT src/lib/auth/xLinkDependencies.ts parity.
  * One read-only dependency probe before any authenticated unlink. This DOES
