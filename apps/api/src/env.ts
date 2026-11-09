@@ -37,6 +37,8 @@ export type Variables = {
   db: ServerCoreDb;
   /** Set by writeGuardMiddleware from its single user read ({ [userId]: json }). */
   actorSnapshotJsonById: Record<string, string>;
+  /** X identity that authorized SA-090/091; used as the audit actor by the mutation handler. */
+  xidLinkRequestActorXUserId: string | null;
 };
 
 export type AppEnv = {
