@@ -64,6 +64,7 @@ function emptyOverlay(args?: {
     likeActive: false,
     bookmarkActive: false,
     viewerXApproved: false,
+    viewerCanEditChapters: false,
     privateChapters: [],
     playlistLabel: args?.playlistLabel ?? "再生リスト",
     playlistItems: args?.playlistItems ?? [],
@@ -251,6 +252,9 @@ SELECT
         approvedXIds.map((x_user_id) => ({ x_user_id, approval_status: "approved" })),
       );
       const viewerXApproved = Boolean(activeXId && approvedXIds.includes(activeXId));
+      // SA-012..015 require an approved active X even for administrators.
+      // Keep the broader management role for private read visibility only.
+      const viewerCanWriteChapters = viewerXApproved && isTosAccepted && !termsReacceptRequired && viewer.is_banned !== 1;
 
       if (viewer.is_banned === 1) {
         return c.json(
@@ -298,10 +302,11 @@ SELECT
               'visibility', 'private',
               'note', c."note",
               'author_name', c."author_name",
-              'author_icon', c."author_icon"
+              'author_icon', c."author_icon",
+              'chapter_owner_x_id', c."x_user_id"
            )), '[]')
            FROM (
-             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", u."x_name" AS "author_name", u."icon_url" AS "author_icon"
+             SELECT ch."id", ch."chapter_time", ch."chapter_label", ch."note", ch."x_user_id", u."x_name" AS "author_name", u."icon_url" AS "author_icon"
                FROM "video_chapters" ch
                LEFT JOIN "x_users" u ON u."id" = ch."x_user_id"
               WHERE ch."video_id" = ?
@@ -366,9 +371,15 @@ SELECT
           lib_playlist_json?: string | null;
         }>();
 
-      const privateChapters = parseJsonArray<VideoViewerOverlayDto["privateChapters"][number]>(
-        row2?.chapters_json,
-      );
+      // Keep raw owner IDs server-side; never expose cross-user X IDs in RH-031.
+      // Edit/delete accepts owner of the *active* X identity or operator rights.
+      const privateChapters = parseJsonArray<
+        VideoViewerOverlayDto["privateChapters"][number] & { chapter_owner_x_id: string | null }
+      >(row2?.chapters_json).map(({ chapter_owner_x_id, ...chapter }) => ({
+        ...chapter,
+        viewerCanManage: viewerCanWriteChapters &&
+          (viewerCanEditChapters || Boolean(activeXId && chapter_owner_x_id === activeXId)),
+      }));
       const interactions = parseJsonArray<string>(row2?.interactions_json);
       const likeActive = interactions.includes("like");
       const bookmarkActive = interactions.includes("bookmark");
@@ -392,6 +403,8 @@ SELECT
         likeActive,
         bookmarkActive,
         viewerXApproved,
+        // Server-side capability only; do not derive from the viewer X approval bit.
+        viewerCanEditChapters: viewerCanEditChapters && viewerCanWriteChapters,
         privateChapters,
         ...finalPlaylist,
       };
