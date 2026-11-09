@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Hono } from "hono";
 import {
   XIdLinkReviewRequestIdSchema,
   XIdLinkApproveBodySchema,
@@ -57,7 +58,10 @@ test("SA-090/091: result DTO is closed and carries only CURRENT result fields", 
 import { drizzle } from "drizzle-orm/d1";
 import { createSqlite, insert } from "./support/personalHarness.mjs";
 import { atomicD1, seedChapterWorld } from "./support/chapterSeed.mjs";
-import { authorizeXIdLinkRequestReview } from "../src/routes/xid/linkRequests.ts";
+import {
+  authorizeXIdLinkRequestReview,
+  xidLinkRequestReviewAuthorizationMiddleware,
+} from "../src/routes/xid/linkRequests.ts";
 
 test("SA-090/091 T08: review authorization allows admin and explicitly authorized approved-X staff only", async () => {
   const sqlite = createSqlite();
@@ -92,6 +96,54 @@ test("SA-090/091 T08: review authorization allows admin and explicitly authorize
   });
 
   assert.equal(d1.stats.batches, 0, "authorization must not write or batch any D1 statements");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 0);
+  sqlite.close();
+});
+
+
+test("SA-090/091 T08 middleware carries the exact authorizing X identity and denies unauthorized staff", async () => {
+  const sqlite = createSqlite();
+  seedChapterWorld(sqlite);
+  insert(sqlite, "event_staff", {
+    id: "s_xid_reviewer",
+    event_id: "ev1",
+    x_user_id: "x_staff",
+    display_name: "X ID reviewer",
+    permission_preset: "xid_reviewer",
+  });
+  const d1 = atomicD1(sqlite);
+  const db = drizzle(d1);
+
+  async function requestAs(user) {
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("db", db);
+      c.set("user", user);
+      await next();
+    });
+    app.use("*", xidLinkRequestReviewAuthorizationMiddleware);
+    app.get("/review", (c) => c.json({
+      actorXUserId: c.get("xidLinkRequestActorXUserId"),
+    }));
+    return app.request("/review");
+  }
+
+  const admin = await requestAs({ id: "u_admin", role: "admin", active_x_user_id: "x_admin" });
+  assert.equal(admin.status, 200);
+  assert.deepEqual(await admin.json(), { actorXUserId: null });
+
+  const reviewer = await requestAs({ id: "u_staff", role: "user", active_x_user_id: "x_staff" });
+  assert.equal(reviewer.status, 200);
+  assert.deepEqual(await reviewer.json(), { actorXUserId: "x_staff" });
+
+  const denied = await requestAs({ id: "u_other", role: "user", active_x_user_id: "x_other" });
+  assert.equal(denied.status, 403);
+  assert.deepEqual(await denied.json(), {
+    ok: false,
+    message: "X ID 申請を処理する権限がありません。",
+  });
+
+  assert.equal(d1.stats.batches, 0, "authorization middleware must not mutate D1");
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS count FROM x_identity_requests").get().count, 0);
   sqlite.close();
 });
