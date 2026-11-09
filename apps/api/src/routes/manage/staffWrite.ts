@@ -145,6 +145,12 @@ async function upsert(c: import("hono").Context<AppEnv>, targetId: string | null
       ? results.find((r) => r.id === targetId)
       : matches[0];
     if (targetId && !existing) return deny(c, "スタッフが見つかりません。", 404);
+    // PUT must never adopt another staff row's canonical X identity.
+    // Otherwise changing an existing row to an already-managed X may create
+    // duplicate staff grants and ambiguity for owner/self-protection checks.
+    if (targetId && matches.some((row) => row.id !== targetId)) {
+      return deny(c, "同じX IDを指す既存スタッフが存在します。", 409);
+    }
     if (existing && !VALID_STAFF_ID.test(existing.id)) return deny(c, GENERIC_FAILURE, 503);
     if (a.permission_preset === "owner" && existing?.permission_preset !== "owner") {
       await assertActorMayAssignOwner({ db: c.get("db"), eventId: access.eventId,
