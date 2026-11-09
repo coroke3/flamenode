@@ -3,6 +3,7 @@ import { VideoDetailView, type VideoDetailData } from "@flamenode/ui";
 import { IslandWrapper } from "./IslandWrapper.ts";
 import { VideoPlayer } from "./VideoPlayer.ts";
 import { VideoInteractionIsland } from "./VideoInteractionIsland.ts";
+import { VideoUtilityDockConnected } from "./VideoUtilityDockConnected.ts";
 
 export interface VideoPageIslandProps {
   video: VideoDetailData;
@@ -25,7 +26,14 @@ export function VideoPageIsland({ video, youtubeId, primaryEventId, gaEnabled }:
   const interactions = mounted
     ? React.createElement(VideoInteractionIsland, { videoId: video.id, likeCount: video.likeCount ?? 0 })
     : undefined;
-  return React.createElement(IslandWrapper, null, React.createElement(VideoDetailView, { video, player, interactions }));
+  const chapters = mounted
+    ? React.createElement(VideoUtilityDockConnected, {
+        videoId: video.id,
+        currentId: youtubeId ?? video.id,
+        publicChapters: video.chapters ?? [],
+      })
+    : undefined;
+  return React.createElement(IslandWrapper, null, React.createElement(VideoDetailView, { video, player, interactions, chapters }));
 }
 
 export default VideoPageIsland;
