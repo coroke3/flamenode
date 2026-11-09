@@ -218,6 +218,38 @@ test("U03: CSV rejects canonical duplicates, owner edits and oversized atomic ba
   assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff").get().n, 1);
 });
 
+test("U03: authorized non-admin cannot delegate site-admin-only X reviewer grants via CSV", async () => {
+  const s = setup(VIEWER);
+  s.sqlite.prepare("INSERT INTO x_users (id, x_name, approval_status) VALUES ('delegate_x', 'Delegate', 'approved')").run();
+  s.sqlite.prepare("INSERT INTO x_user_account_links (auth_user_id, x_user_id, link_role) VALUES (?, 'delegate_x', 'owner')").run(VIEWER.id);
+  s.sqlite.prepare(`INSERT INTO event_staff
+    (id, event_id, x_user_id, display_name, permission_preset,
+     custom_permission_keys_json, is_public, created_at, updated_at)
+    VALUES ('s-delegate', 'ev-1', 'delegate_x', 'Delegate', 'custom',
+     '["event.members"]', 0, 1, 1)`).run();
+
+  const payload = (preset, keys) => ({
+    reason: "delegated CSV import",
+    rows: [{
+      lineNumber: 2, display_name: "Restricted Staff", x_user_id: "restricted_csv",
+      permission_preset: preset, permission_keys: keys,
+      is_public_staff: "0", public_role_label: "",
+    }],
+  });
+  const first = await s.send("POST", "/csv", payload("xid_reviewer", []));
+  assert.equal(first.status, 400);
+  const second = await s.send("POST", "/csv", payload("custom", ["xid.link_requests"]));
+  assert.equal(second.status, 400);
+  assert.equal(s.count("audit_logs"), 0, "denied grants must never reach the atomic batch");
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM x_users WHERE id='restricted_csv'").get().n, 0);
+  assert.equal(s.sqlite.prepare("SELECT COUNT(*) AS n FROM event_staff WHERE x_user_id='restricted_csv'").get().n, 0);
+
+  const permitted = await s.send("POST", "/csv", payload("public_staff", []));
+  assert.equal(permitted.status, 200, await permitted.clone().text());
+  assert.equal(s.sqlite.prepare("SELECT permission_preset FROM event_staff WHERE x_user_id='restricted_csv'").get().permission_preset, "public_staff");
+  assert.equal(s.count("audit_logs"), 2, "allowed pending-X and staff creation must be audited");
+});
+
 test("U04: owner-transfer is in the parent Origin/session/writeGuard/DB guarded paths", async () => {
   const source = await readFile(new URL("../src/routes/manage/index.ts", import.meta.url), "utf8");
   assert.match(source, /const staffWritePaths = \[[^\n]*"\/events\/:id\/owner-transfer"\]/);
