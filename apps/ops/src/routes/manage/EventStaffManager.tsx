@@ -1,8 +1,6 @@
 import * as React from "react";
 import type { ManageStaffMember } from "@flamenode/contracts";
 import {
-  ALL_PERMISSION_KEYS,
-  PERMISSION_DEFINITIONS,
   canonicalizePermissionKey,
   isAdminOnlyKey,
   type PermissionKey,
@@ -156,7 +154,6 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
 }
 
 export interface EventStaffManagerProps {
-  eventId: string;
   members: readonly ManageStaffMember[];
   ownerCount: number;
   canManageMembers: boolean;
@@ -174,7 +171,7 @@ export interface EventStaffManagerProps {
  * Permission and owner invariants are always authoritative on the server.
  */
 function StaffCsvImport({
-  eventId, members, isSiteAdmin, busy, onImport,
+  members, isSiteAdmin, busy, onImport,
 }: {
   eventId: string;
   members: readonly ManageStaffMember[];
@@ -431,7 +428,6 @@ export function EventStaffManager({
         <button className="fn-btn fn-btn-danger" disabled={busy}>代表権限を移譲</button>
       </form>}
       <StaffCsvImport
-        eventId={eventId}
         members={members}
         isSiteAdmin={isSiteAdmin}
         busy={busy}
