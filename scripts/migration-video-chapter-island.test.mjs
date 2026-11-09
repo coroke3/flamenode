@@ -969,3 +969,21 @@ test("MIG-0518 stored playlist order is bounded, deduplicated and fails closed",
   assert.equal(restored[499], "v499");
   assert.equal(parseStoredPlaylistOrder(JSON.stringify(["video-1"]))[0], "video-1");
 });
+
+test("MIG-0518 duplicate playlist entries preserve first occurrence and original order", async () => {
+  const { uniquePlaylistItems } = await import("../apps/site/src/components/VideoUtilityDockIsland.ts");
+  const items = [
+    { id: "a", title: "first a" },
+    { id: "b", title: "first b" },
+    { id: "a", title: "later a" },
+    { id: "c", title: "first c" },
+    { id: "b", title: "later b" },
+  ];
+  const filtered = uniquePlaylistItems(items);
+  assert.deepEqual(filtered.map((item) => item.id), ["a", "b", "c"]);
+  assert.equal(filtered[0], items[0], "the first server row wins without cloning it");
+  assert.equal(filtered[1], items[1]);
+  const many = Array.from({ length: 500 }, (_, i) => ({ id: "v" + (i % 50), title: "entry " + i }));
+  assert.equal(uniquePlaylistItems(many).length, 50);
+  assert.equal(uniquePlaylistItems([]).length, 0);
+});
