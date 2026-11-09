@@ -528,6 +528,27 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
+  test("RH-031 banned approved chapter manager cannot receive read or write capabilities", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    // Staff is a positive approved-X manager in the unbanned fixture. Explicit
+    // ban must override every write grant and prevent loading private chapters.
+    sqlite.prepare('UPDATE "user" SET "is_banned" = 1 WHERE "id" = ?').run("u_staff");
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(response.status, 200);
+    const json = await response.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isBanned, true);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.deepEqual(json.privateChapters, []);
+    assert.equal(json.likeActive, false);
+    assert.equal(json.bookmarkActive, false);
+    assert.equal(d1.stats.statements, 2, "banned staff must not run the private-data read");
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
   test("RH-031 chapter management capability fails closed without a working DB binding", async () => {
     const { env } = setupTestEnv();
     // Session resolution and viewer permissions must not fall back to privileged
