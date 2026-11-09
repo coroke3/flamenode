@@ -20,7 +20,12 @@ export type SlotReleaseNotificationPlan = {
 export function legacyGroupIdForDiscordDisplay(groupId: string): string {
   const cleaned = groupId.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]+/g, " ");
   const clipped = cleaned.slice(0, 256).replace(/[\uD800-\uDBFF]$/, "");
-  return escapeDiscordMention(clipped + (clipped.length < cleaned.length ? "…" : ""));
+  // Keep CURRENT #660 parity for malformed legacy UTF-16 without changing raw identifiers.
+  const safe = clipped.replace(
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g,
+    "�",
+  );
+  return escapeDiscordMention(safe + (clipped.length < cleaned.length ? "…" : ""));
 }
 
 export function slotReleaseNotificationPayload(
