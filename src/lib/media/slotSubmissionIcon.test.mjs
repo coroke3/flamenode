@@ -302,6 +302,27 @@ test("public slot iconはD1 ACLを再確認した後にR2 Cache hitを使う", a
       [...store.keys()],
       ["https://example.test/slot-icon/video-icons/x/icon.webp"],
     );
+
+    // Poisoned legacy cache metadata must not escape; invalid MIME falls back to R2.
+    store.set("https://example.test/slot-icon/video-icons/x/icon.webp", {
+      body: new Uint8Array([9, 9, 9]).buffer,
+      headers: {
+        "content-type": "text/html",
+        etag: '"poisoned"',
+        "set-cookie": "session=attacker",
+        location: "https://attacker.invalid",
+        "content-disposition": "attachment; filename=bad.html",
+        "cache-control": "public, max-age=604800",
+      },
+    });
+    const poisoned = await requestIcon(options);
+    assert.equal(poisoned.response.status, 200);
+    assert.equal(poisoned.response.headers.get("content-type"), "image/webp");
+    assert.equal(poisoned.response.headers.get("cache-control"), "no-store");
+    for (const header of ["set-cookie", "location", "content-disposition"]) {
+      assert.equal(poisoned.response.headers.get(header), null, header);
+    }
+    assert.equal(poisoned.state.gets, 1, "poisoned cache entry must fall back to R2");
   } finally {
     delete globalThis.caches;
   }
