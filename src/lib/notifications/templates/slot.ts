@@ -69,7 +69,7 @@ export function buildSlotVideoSubmittedNotification(args: {
 
 /** Legacy IDs are displayed as one logical line; never let stored line breaks forge DM sections. */
 function groupIdForDiscordDisplay(groupId: string): string {
-  return escapeDiscordMention(groupId.replace(/[\r\n\u2028\u2029]+/g, " "));
+  return escapeDiscordMention(groupId.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " "));
 }
 
 /** 運営による枠強制解放 DM。 */
