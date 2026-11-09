@@ -29,7 +29,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ---------------------------------------------------------------- pure logic
 export const BUDGETS_MS = Object.freeze({ S2: 7, S3: 8, S4: 2 });
-export const KINDS = Object.freeze(["normal", "limit", "invalid", "cold", "scheduled-warm", "realtime-warm"]);
+export const KINDS = Object.freeze(["normal", "limit", "invalid", "cold"]);
 export const MIN_SAMPLES = 50;
 
 /** Nearest-rank percentile over an ascending-sorted array. */
@@ -75,7 +75,7 @@ export function aggregate(samples, { runtimeClass, resolutionMs, noiseMs = 0 }) 
   const budget = BUDGETS_MS[runtimeClass];
   const budgetKind = runtimeClass === "S4" ? "le" : "lt";
   const kinds = {};
-  for (const kind of KINDS) {
+  for (const kind of [...new Set([...KINDS, ...samples.map((s) => s.kind)])]) {
     const rows = samples.filter((s) => s.kind === kind);
     const cpu = summarize(rows.map((r) => r.cpuMs));
     kinds[kind] = {
@@ -144,7 +144,7 @@ export function renderMarkdown(results, { digits, label }) {
     `| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |`,
   ];
   for (const r of results) {
-    for (const kind of KINDS) {
+    for (const kind of Object.keys(r.agg.kinds)) {
       const k = r.agg.kinds[kind];
       lines.push(
         `| ${r.id} ${r.title} | ${r.runtimeClass} | ${kind} | ${k.n} | ${formatMs(k.p50, digits)} | ${formatMs(k.p95, digits)} | ${formatMs(k.p99, digits)} | ${formatMs(k.max, digits)} | ${k.maxD1Statements} | ${k.maxBytes} | ${k.unexpectedStatus} |`,
