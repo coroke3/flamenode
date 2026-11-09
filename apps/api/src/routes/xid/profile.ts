@@ -85,6 +85,7 @@ export function createXIdProfileRoutes(guard: MiddlewareHandler<AppEnv>): Hono<A
           actor_user_id: authUserId,
           actor_x_user_id: xUserId,
           retention_class: "long_audit",
+          strict: true,
         }],
         // D-0603-1: background Cron consumes queue. Do NOT wake a Queue here.
       });
