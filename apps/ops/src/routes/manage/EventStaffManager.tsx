@@ -160,6 +160,7 @@ function buildStaffCsvPreview(text: string, members: readonly ManageStaffMember[
 }
 
 export interface EventStaffManagerProps {
+  eventId: string;
   members: readonly ManageStaffMember[];
   ownerCount: number;
   canManageMembers: boolean;
@@ -179,7 +180,6 @@ export interface EventStaffManagerProps {
 function StaffCsvImport({
   members, isSiteAdmin, busy, onImport,
 }: {
-  eventId: string;
   members: readonly ManageStaffMember[];
   isSiteAdmin: boolean;
   busy: boolean;
