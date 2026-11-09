@@ -1,6 +1,5 @@
 import type { DB } from "@/lib/db/client";
 import { loadVideoRebuildEventIds as loadVideoRebuildEventIdsCore } from "@flamenode/server-core/video/rebuildEventIds";
-import { mergeVideoRebuildEventIds } from "@flamenode/domain/video";
 
 // Pure helpers live in @flamenode/domain/video (visibility.ts); re-exported for
 // existing importers. The bounded D1 lookup is implemented once in server-core.
