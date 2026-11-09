@@ -337,6 +337,7 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, false);
+    assert.equal(json.viewerCanEditChapters, false);
     assert.equal(json.isBanned, false);
     assert.equal(json.likeActive, false);
     assert.equal(json.bookmarkActive, false);
@@ -362,14 +363,53 @@ if (runUnderRootTsx(import.meta.url)) {
     assert.equal(json.likeActive, true);
     assert.equal(json.bookmarkActive, true);
     assert.equal(json.viewerXApproved, true);
+    assert.equal(json.viewerCanEditChapters, false, "approved X alone does not grant management");
 
     // Alice sees only her own private chapter, not staff's, not member's
     assert.equal(json.privateChapters.length, 1);
     assert.equal(json.privateChapters[0].id, "chap-priv-alice");
+    assert.equal(json.privateChapters[0].viewerCanManage, true, "active X chapter owner can edit without admin role");
+    assert.equal("chapter_owner_x_id" in json.privateChapters[0], false, "raw owner X ID must not leak");
     assert.equal(json.privateChapters[0].author_name, "X alice_x");
 
     // T08: Authenticated takes <= session (1) + 2 D1 statements (total <= 3)
     assert.ok(d1.stats.statements <= 3, `Expected statements <= 3, got ${d1.stats.statements}`);
+  });
+
+  test("RH-031 selecting a different approved X must not lend owner-edit capability", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // A linked account may read chapters from all of its approved identities,
+    // but only the currently selected approved X is authorized to write its own.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?').run("alice_y", "u_alice");
+    const switched = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(switched.status, 200);
+    const body = await switched.json();
+    assert.equal(body.viewerXApproved, true);
+    assert.equal(body.viewerCanEditChapters, false);
+    assert.ok(body.privateChapters.some((chapter) => chapter.id === "chap-priv-alice"));
+    assert.ok(body.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "approval of another linked X is not the active chapter owner's grant");
+    assert.ok(body.privateChapters.every((chapter) => !("chapter_owner_x_id" in chapter)),
+      "the owner identifier must never leave the API");
+  });
+
+  test("RH-031 switching to a second approved X revokes edit of the first identity's chapter", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // alice owns both approved X IDs, but the chapter belongs only to alice_x.
+    // A linked account is not an ownership grant for the currently selected X.
+    sqlite.prepare('UPDATE "user" SET "active_x_user_id" = ? WHERE "id" = ?').run("alice_y", "u_alice");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-alice" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.activeXId, "alice_y");
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.ok(json.privateChapters.some((chapter) => chapter.id === "chap-priv-alice"));
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false));
+    assert.ok(json.privateChapters.every((chapter) => !("chapter_owner_x_id" in chapter)));
   });
 
   test("T06: RH-031 admin user sees all private chapters", async () => {
@@ -385,11 +425,67 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
+    assert.equal(json.viewerCanEditChapters, false, "admin without TOS consent must not gain chapter management");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false), "unconsented admin cannot manage individual chapters");
     // Carol sees both alice's and staff's private chapters (member excluded)
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
     assert.ok(ids.includes("chap-priv-alice"));
     assert.ok(ids.includes("chap-priv-staff"));
+  });
+
+  test("RH-031 consenting admin without active approved X retains read but not write capability", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // The shared personalSeed baseline deliberately leaves carol unconsented;
+    // assert the positive admin capability only after explicit TOS acceptance.
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 1, "accepted_terms_version_id" = ? WHERE "id" = ?')
+      .run("T2", "u_carol");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-carol" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isTosAccepted, true);
+    assert.equal(json.termsReacceptRequired, false);
+    assert.equal(json.activeXId, null, "seed admin has no active approved X");
+    assert.equal(json.viewerXApproved, false);
+    assert.equal(json.viewerCanEditChapters, false,
+      "admin can read private chapters but cannot write without approved active X");
+    assert.ok(json.privateChapters.length > 0, "admin private read access is preserved");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "per-row edit capability must also require approved active X");
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
+  test("RH-031 consenting admin with approved active X can manage private chapters", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // A different approved identity is necessary: admin role alone cannot
+    // satisfy the chapter write guard's active-X prerequisite.
+    insert(sqlite, "x_users", {
+      id: "carol_x", x_name: "X carol_x", approval_status: "approved",
+    });
+    insert(sqlite, "x_user_account_links", {
+      x_user_id: "carol_x", auth_user_id: "u_carol", link_role: "owner",
+      created_at: 1_700_000_000, updated_at: 1_700_000_000,
+    });
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 1, "accepted_terms_version_id" = ?, "active_x_user_id" = ? WHERE "id" = ?')
+      .run("T2", "carol_x", "u_carol");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-carol" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.activeXId, "carol_x");
+    assert.equal(json.viewerXApproved, true);
+    assert.equal(json.viewerCanEditChapters, true,
+      "consented admin with approved active X may perform chapter writes");
+    assert.equal(json.privateChapters.length, 2);
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === true),
+      "admin's already-authorized private chapter rows remain editable");
+    assert.ok(json.privateChapters.every((chapter) => !("chapter_owner_x_id" in chapter)),
+      "the response must not leak chapter owner X IDs");
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
   test("T06: RH-031 event staff with video.chapter_admin sees all private chapters", async () => {
@@ -404,11 +500,68 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
     assert.equal(json.loggedIn, true);
+    assert.equal(json.viewerCanEditChapters, true, "event staff chapter management");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === true), "staff may manage authorized private chapters");
     // Staff user has manager preset on evt-1 -> canAdministerChapters allows seeing all private chapters
     assert.equal(json.privateChapters.length, 2);
     const ids = json.privateChapters.map((c) => c.id);
     assert.ok(ids.includes("chap-priv-alice"));
     assert.ok(ids.includes("chap-priv-staff"));
+  });
+
+  test("RH-031 chapter management capability fails closed when terms are not accepted", async () => {
+    const { env, sqlite } = setupTestEnv();
+    // An event manager would normally obtain this capability. With revoked TOS,
+    // the API must not allow the viewer client to render privileged controls.
+    sqlite.prepare('UPDATE "user" SET "is_tos_accepted" = 0 WHERE "id" = ?').run("u_staff");
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isTosAccepted, false);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.ok(json.privateChapters.length > 0, "permission test must include private chapter rows");
+    assert.ok(json.privateChapters.every((chapter) => chapter.viewerCanManage === false),
+      "TOS revocation must deny all per-chapter edit permissions too");
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
+  test("RH-031 banned approved chapter manager cannot receive read or write capabilities", async () => {
+    const { env, sqlite, d1 } = setupTestEnv();
+    // Staff is a positive approved-X manager in the unbanned fixture. Explicit
+    // ban must override every write grant and prevent loading private chapters.
+    sqlite.prepare('UPDATE "user" SET "is_banned" = 1 WHERE "id" = ?').run("u_staff");
+    d1.stats.statements = 0;
+    const response = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(response.status, 200);
+    const json = await response.json();
+    assert.equal(json.loggedIn, true);
+    assert.equal(json.isBanned, true);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.deepEqual(json.privateChapters, []);
+    assert.equal(json.likeActive, false);
+    assert.equal(json.bookmarkActive, false);
+    assert.equal(d1.stats.statements, 2, "banned staff must not run the private-data read");
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
+  });
+
+  test("RH-031 chapter management capability fails closed without a working DB binding", async () => {
+    const { env } = setupTestEnv();
+    // Session resolution and viewer permissions must not fall back to privileged
+    // defaults when the signed-in request cannot read D1.
+    env.DB = undefined;
+    const res = await app.request("/api/videos/vid-pub/viewer-overlay", {
+      headers: { cookie: "authjs.session-token=tok-staff" },
+    }, env);
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.authUnavailable, true);
+    assert.equal(json.viewerCanEditChapters, false);
+    assert.equal(VideoViewerOverlayResponseSchema.safeParse(json).success, true);
   });
 
   test("T06: RH-031 banned user returns isBanned: true and only the viewer read", async () => {
@@ -423,9 +576,11 @@ if (runUnderRootTsx(import.meta.url)) {
     const json = await res.json();
     assert.equal(json.loggedIn, true);
     assert.equal(json.isBanned, true);
+    assert.equal(json.viewerCanEditChapters, false);
     assert.equal(json.likeActive, false);
     assert.equal(json.bookmarkActive, false);
     assert.deepEqual(json.privateChapters, []);
+    assert.equal(json.viewerCanEditChapters, false, "banned user has no bulk-management capability");
 
     // Session + the viewer read (CURRENT reports the banned viewer's terms state and active X):
     // no chapter / interaction read.
@@ -536,7 +691,15 @@ if (runUnderRootTsx(import.meta.url)) {
         const label = `${user ?? "anon"} ${query || "(no playlist)"}`;
         assert.equal(got.status, cur.status, label);
         assert.equal(got.cache, cur.cache, label);
-        assert.deepEqual(got.body, cur.body, label);
+        const { viewerCanEditChapters, ...honoLegacyDto } = got.body;
+        assert.equal(typeof viewerCanEditChapters, "boolean", `${label}: capability must be explicit`);
+        // Compare all CURRENT fields, stripping only Hono's additive capability bits.
+        const legacyPrivate = honoLegacyDto.privateChapters.map(({ viewerCanManage, ...chapter }) => {
+          assert.equal(typeof viewerCanManage, "boolean", `${label}: per-chapter permission explicit`);
+          assert.equal("chapter_owner_x_id" in chapter, false, `${label}: owner ID must not leak`);
+          return chapter;
+        });
+        assert.deepEqual({ ...honoLegacyDto, privateChapters: legacyPrivate }, cur.body, label);
         assert.equal(VideoViewerOverlayResponseSchema.safeParse(got.body).success, true, label);
         // T08: session + 2 statements at most, never a write
         assert.ok(got.statements <= 3, `${label}: ${got.statements} statements`);
