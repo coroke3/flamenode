@@ -18,6 +18,19 @@ test("MIG-0651: non-collab ignores malicious member payload; collab empty and in
   assert.deepEqual(parseVideoMemberInputs(" ", true), { ok: true, members: [] });
   assert.deepEqual(parseVideoMemberInputs("not-json", true), { ok: false, message: "合作メンバーの JSON が不正です。" });
 });
+test("MIG-0651: File-valued members_json is not an optional blank on collaboration", () => {
+  const file = new File([JSON.stringify([{ name: "Alice", x_user_id: "@alice" }])], "members.json", {
+    type: "application/json",
+  });
+  assert.deepEqual(parseVideoMemberInputs(file, true), {
+    ok: false, message: "合作メンバーの入力が不正です。",
+  });
+  assert.deepEqual(parseVideoMemberInputs(file, false), {
+    ok: true, members: [],
+  }, "non-collab continues ignoring member metadata");
+  assert.deepEqual(parseVideoMemberInputs(null, true), { ok: true, members: [] });
+});
+
 test("MIG-0651: member identities are canonical, duplicate X IDs rejected, and 100 is limit", () => {
   const one = parseVideoMemberInputs(JSON.stringify([
     { name: " Alice ", x_user_id: "@Alice", role: "editor", comment: "Hello", chapters: [{ time: "1:05", label: "", note: "" }] },
