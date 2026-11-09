@@ -112,7 +112,11 @@ export function chapterRowsForViewer(
   return [...publicChapters, ...privateRows].sort((a, b) => {
     const aTime = time(a.timeLabel);
     const bTime = time(b.timeLabel);
+    // Infinity - Infinity is NaN. Explicitly preserve source order for
+    // invalid time labels instead of returning NaN to Array#sort.
     if (aTime === bTime) return 0;
+    if (!Number.isFinite(aTime)) return 1;
+    if (!Number.isFinite(bTime)) return -1;
     return aTime - bTime;
   });
 }
