@@ -104,6 +104,7 @@ export function VideoChapterIsland({
   const [bulkErrors, setBulkErrors] = React.useState<readonly string[]>([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const pending = React.useRef(false);
+  const pendingDeleteId = React.useRef<string | null>(null);
   const epoch = React.useRef(0);
   const draftRef = React.useRef({ time, label, note, bulkCsv, visibility });
   const draftBaseline = React.useRef<VideoChapterDraftBaseline>({ time: "", label: "", note: "", csv: "" });
@@ -184,6 +185,20 @@ export function VideoChapterIsland({
     setMessage(""); setError(""); setBulkErrors([]);
   }, [editingAuthorized]);
 
+  // Deleting a row does not open the editor, so editingAuthorized alone does not
+  // detect a live revoke. Ignore a late successful DELETE if its row disappears
+  // or its explicit per-row permission changes while the request is pending.
+  React.useEffect(() => {
+    const id = pendingDeleteId.current;
+    if (!id || chapters.some((chapter) => chapter.id === id && chapter.canManage)) return;
+    epoch.current += 1;
+    pending.current = false;
+    pendingDeleteId.current = null;
+    setBusy(false);
+    setMessage("");
+    setError("");
+  }, [chapters]);
+
   // Render-time guard: do not briefly show the previous identity's draft before
   // the passive effect clears state after a prop-driven Active X switch.
   const accessStable = accessRef.current.videoId === videoId &&
@@ -202,6 +217,7 @@ export function VideoChapterIsland({
   const end = (generation: number) => {
     if (generation !== epoch.current) return false;
     pending.current = false;
+    pendingDeleteId.current = null;
     setBusy(false);
     return true;
   };
@@ -262,6 +278,7 @@ export function VideoChapterIsland({
         !window.confirm("このチャプターを削除しますか？")) return;
     const generation = start();
     if (generation === null) return;
+    pendingDeleteId.current = id;
     try {
       const result = await deleteChapter(id);
       if (!end(generation)) return;
