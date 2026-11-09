@@ -43,6 +43,21 @@ test("D-16-2: multipart write leaves content-type to the browser and sends origi
   assert.equal(Object.hasOwn(init.headers, "content-type"), false);
 });
 
+test("D-16-2: bodyless writes omit both JSON body and Content-Type", async () => {
+  let options;
+  const result = await send(async (_path, init) => {
+    options = init;
+    return asJson({ ok: true });
+  }, "POST", "/api/xid/requests/r1/cancel");
+  assert.deepEqual(result, { status: "ok", data: { ok: true } });
+  assert.equal(options.method, "POST");
+  assert.equal(Object.hasOwn(options, "body"), false);
+  assert.equal(Object.hasOwn(options.headers, "content-type"), false);
+  assert.equal(options.headers.accept, "application/json");
+  assert.equal(options.credentials, "same-origin");
+  assert.equal(options.cache, "no-store");
+});
+
 test("D-16-2: an unstructured 401 is anonymous; network/invalid payload is unavailable", async () => {
   assert.deepEqual(await send(async () => new Response("no", { status: 401 }), "POST", "/write"), { status: "anonymous" });
   assert.deepEqual(await send(async () => asJson({ message: "no" }, 401), "POST", "/write"), { status: "anonymous" });
