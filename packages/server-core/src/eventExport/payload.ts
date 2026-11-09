@@ -636,8 +636,10 @@ export function eventExportBodyMatchesFresh(cached: string, fresh: string, forma
     const left = a as Record<string, unknown>;
     const right = b as Record<string, unknown>;
     if (left.schema_version !== 5 || right.schema_version !== 5) return false;
-    if (typeof left.generated_at !== "string" || !Number.isSafeInteger(left.generated_at_unix)) return false;
-    if (typeof right.generated_at !== "string" || !Number.isSafeInteger(right.generated_at_unix)) return false;
+    if (typeof left.generated_at !== "string" || typeof left.generated_at_unix !== "number" ||
+        !Number.isSafeInteger(left.generated_at_unix)) return false;
+    if (typeof right.generated_at !== "string" || typeof right.generated_at_unix !== "number" ||
+        !Number.isSafeInteger(right.generated_at_unix)) return false;
     // These fields are provenance, but both must be valid ISO timestamps.
     // Otherwise a forged cached DTO with arbitrary strings could pass equality.
     if (new Date(left.generated_at_unix * 1000).toISOString() !== left.generated_at ||
