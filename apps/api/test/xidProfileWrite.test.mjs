@@ -151,9 +151,9 @@ test("SA-102 isolated handler denies approval revocation raced after authorizati
   const res = await h.send({ x_user_id: "x_one", x_name: "Must not persist" });
   assert.equal(revoked, true, "fixture must revoke approval after the authorized read");
   assert.equal(res.status, 409);
-  assert.deepEqual(h.sqlite.prepare("SELECT x_name, approval_status FROM x_users WHERE id = 'x_one'").get(), {
-    x_name: "Before", approval_status: "rejected",
-  });
+  const retained = h.sqlite.prepare("SELECT x_name, approval_status FROM x_users WHERE id = 'x_one'").get();
+  assert.equal(retained.x_name, "Before");
+  assert.equal(retained.approval_status, "rejected");
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs").get().n, 0);
   assert.equal(h.sqlite.prepare("SELECT COUNT(*) AS n FROM static_rebuild_queue").get().n, 0);
 });
