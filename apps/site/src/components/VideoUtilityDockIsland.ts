@@ -212,13 +212,13 @@ export function VideoUtilityDockIsland({
     setOrderPlaylist(playlist);
     setReady(true);
   }, [mounted, playlist]);
+  // URL reconciliation belongs to the video identity change, not the playlist
+  // state itself. A stale query snapshot must not silently overwrite a newer
+  // playlist selection on an unrelated re-render.
   React.useEffect(() => {
     if (!mounted || !ready) return;
-    // Re-check URL on video identity changes: a mounted Island must not keep
-    // presenting the previous video's playlist after client navigation.
-    const currentPlaylist = resolvePlaylistQuery(window.location.search);
-    if (currentPlaylist !== playlist) setPlaylist(currentPlaylist);
-  }, [mounted, ready, videoId, currentId, playlist]);
+    setPlaylist(resolvePlaylistQuery(window.location.search));
+  }, [mounted, ready, videoId, currentId]);
   React.useEffect(() => {
     if (!ready) return;
     try { localStorage.setItem(AUTO_NEXT_KEY, autoNext ? "1" : "0"); } catch { /* disabled */ }
