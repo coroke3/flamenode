@@ -225,3 +225,21 @@ test("MIG-0656 target submission-release DM mirrors CURRENT safe group rendering
   const out=buildSubmittedDangerOutboxStatements(selected);
   assert.ok(out.dedupeKeys[0].includes(raw.trim()), "raw group ID remains unchanged for dedupe");
 });
+
+test("MIG-0656: CURRENT #660 malformed legacy UTF-16 rendering parity (提出グループ)", () => {
+  const cases = [
+    ["x".repeat(255) + "\ud83d" + "tail", "x".repeat(255) + "…"],
+    ["x".repeat(255) + "\ude00" + "tail", "x".repeat(255) + "�…"],
+    ["prefix\ud83dsuffix", "prefix�suffix"],
+    ["prefix\ude00suffix", "prefix�suffix"],
+    ["prefix😀suffix", "prefix😀suffix"],
+    ["x".repeat(254) + "😀" + "tail", "x".repeat(254) + "😀…"],
+  ];
+  for (const [raw, expected] of cases) {
+    const payload = slotSubmissionReleasedPayload("ev", ["a"], raw, "https://app.example");
+    assert.ok(payload.content.includes("提出グループ: " + expected), "display-only normalization");
+    assert.doesNotMatch(payload.content,
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u);
+    assert.equal(payload.event_id, "ev");
+  }
+});
