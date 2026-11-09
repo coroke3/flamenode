@@ -173,3 +173,23 @@ test("MIG-0656 U04u: legacy group IDs are escaped in Discord display, but raw de
     assert.equal(payload.url,"https://flamenode.example/event/ev-1");
   }finally{db.close();}
 });
+
+test("MIG-0656 target release DM mirrors CURRENT bounded, control-safe group display", () => {
+  const raw="id\t@everyone\u202e" + "x".repeat(260) + "😀";
+  const payload=slotReleaseNotificationPayload("ev-1",["a"],raw,"https://flamenode.example");
+  assert.ok(payload.content.includes("予約グループ: id @\u200beveryone "), "control and Discord mention safe");
+  assert.ok(!payload.content.includes("\u202e"), "no bidirectional spoofing markers");
+  assert.ok(!payload.content.includes("\t"), "no embedded tab");
+  assert.ok(!payload.content.includes(raw), "do not show raw malicious group ID");
+  assert.ok(payload.content.includes("…"), "overlong display should be visibly truncated");
+  assert.ok(payload.content.length<2000, "Discord content must remain bounded");
+  const exact=slotReleaseNotificationPayload("ev-1",["a"],"x".repeat(254)+"😀","https://flamenode.example");
+  assert.ok(exact.content.includes("x".repeat(254)+"😀"), "whole emoji at limit preserved");
+  assert.ok(!exact.content.includes("x".repeat(254)+"😀…"), "exact length not truncated");
+  const db=setup();
+  try {
+    const out=buildSlotReleaseOutboxStatements(opts([row("a",raw)]));
+    assert.deepEqual(out.dedupeKeys,["slot_force_released:ev-1:a:"+raw.trim()+":3"],
+      "raw legacy group ID must remain in dedupe identity");
+  } finally { db.close(); }
+});
