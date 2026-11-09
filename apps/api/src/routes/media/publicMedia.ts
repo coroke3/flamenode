@@ -180,9 +180,26 @@ async function getCachedPublicMediaResponse(
 
   try {
     const cached = await cache.match(cacheKey);
-    if (!cached) return null;
-    const ifNoneMatch = request.headers.get("If-None-Match");
+    if (!cached || cached.status !== 200) return null;
+    // Edge Cache API entries are byte hints, not trusted response metadata.
+    // Old/poisoned entries must not forward redirects, cookies, or other
+    // headers that were never produced by the current public media contract.
+    const contentType = normalizePublicMediaContentType(cached.headers.get("content-type"));
     const cachedEtag = cached.headers.get("etag");
+    if (!contentType || !cachedEtag) return null;
+    const lengthHeader = cached.headers.get("content-length");
+    if (lengthHeader !== null) {
+      if (!/^[0-9]+$/.test(lengthHeader)) return null;
+      const size = Number(lengthHeader);
+      if (!Number.isSafeInteger(size) || size < 1 || size > MAX_PUBLIC_MEDIA_BYTES) return null;
+    }
+    const safeHeaders = new Headers({
+      "content-type": contentType,
+      "etag": cachedEtag,
+      "cache-control": PUBLIC_MEDIA_CACHE_CONTROL,
+      "x-content-type-options": "nosniff",
+    });
+    const ifNoneMatch = request.headers.get("If-None-Match");
     if (
       ifNoneMatch &&
       cachedEtag &&
@@ -194,13 +211,9 @@ async function getCachedPublicMediaResponse(
         );
       })
     ) {
-      const headers = new Headers(cached.headers);
-      headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
-      return new Response(null, { status: 304, headers });
+      return new Response(null, { status: 304, headers: safeHeaders });
     }
-    const headers = new Headers(cached.headers);
-    headers.set("cache-control", PUBLIC_MEDIA_CACHE_CONTROL);
-    return new Response(cached.body, { status: cached.status, headers });
+    return new Response(cached.body, { status: 200, headers: safeHeaders });
   } catch {
     // Cache miss / lookup error, continue to D1/R2 on the origin path.
     return null;
