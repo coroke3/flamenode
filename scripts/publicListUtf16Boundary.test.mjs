@@ -29,7 +29,7 @@ test("CURRENT list and API plus Hono migration enforce the same Unicode boundary
     "apps/site/src/lib/listQuery.ts",
   ];
   const boundaryGuard = "replace(/[\\uD800-\\uDBFF]$/, \"\")";
-  const malformedGuard = String.raw`replace(/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/g, "�")`;
+  const malformedGuard = "replace(/[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]/g, \"�\")";
   for (const file of files) {
     const source = fs.readFileSync(file, "utf8");
     assert.ok(source.includes(boundaryGuard), file + " lacks surrogate-boundary guard");
