@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { materializeD1CompatibleMigrations } from "./d1-migration-compat.mjs";
 import {
-  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, judge, parseArgs, percentile, renderMarkdown, summarize,
+  BUDGETS_MS, KINDS, MIN_SAMPLES, ROUTE_INVENTORY, SEED, aggregate, buildPendingScenarios, buildScenarios, createInprocTarget, eventExportCacheRequestUrls, judge, parseArgs, percentile, renderMarkdown, summarize,
 } from "./benchmark-api-cpu.mjs";
 
 test("percentile uses nearest rank on an ascending array", () => {
@@ -159,6 +159,16 @@ const MAIN_HONO_METHODS = new Set([
   "GET /api/google-drive-image/:id", "GET /api/youtube-thumbnail/:id/:size", "GET /api/media/manage-x-icon/*",
   "GET /api/media/slot-submission-icon/:slotId", "GET /api/media/*", "GET /api/internal/x-users/search",
 ]);
+
+test("RH-013 cache clear targets the exact server-core public event-export Cache API URLs", () => {
+  const urls = eventExportCacheRequestUrls();
+  assert.equal(urls.length, 8, "both formats × all four supported refresh intervals");
+  assert.ok(urls.includes("https://flamenode.internal/public-json/public-event-export%3A9%3Abench-export-event%3Av5%3A15"));
+  assert.ok(urls.includes("https://flamenode.internal/public-json/public-event-export%3A9%3Abench-export-event%3Alegacy%3A1440"));
+  assert.equal(new Set(urls).size, 8);
+  assert.ok(urls.every((url) => url.startsWith("https://flamenode.internal/public-json/")));
+  assert.equal(eventExportCacheRequestUrls("event / 1").length, 8, "event IDs are encoded before cache-key encoding");
+});
 
 test("MIG-0639 T01: every main Hono method has exactly one scenario (named or inventory)", () => {
   const scenarios = buildScenarios({ adminToken: "t" }).filter((s) => !s.baseline && s.id !== "S4");
