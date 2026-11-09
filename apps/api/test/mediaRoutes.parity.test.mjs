@@ -151,6 +151,47 @@ test("T02 signed X icon: valid GET/304 and tampered/expired/missing secret -> 40
   assert.deepEqual(bad.calls.objects, []);
 });
 
+test("T03 slot icon rejects poisoned Cache API metadata and falls back to R2", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "caches");
+  let cached = new Response(bytes, {
+    headers: {
+      "content-type": "text/html",
+      etag: '"poisoned"',
+      "set-cookie": "session=attacker",
+      location: "https://attacker.invalid",
+      "content-disposition": "attachment; filename=bad.html",
+      "cache-control": "public, max-age=604800",
+    },
+  });
+  Object.defineProperty(globalThis, "caches", {
+    configurable: true,
+    value: {
+      default: {
+        async match() { return cached?.clone() ?? null; },
+        async put(_key, response) { cached = response.clone(); },
+      },
+    },
+  });
+  try {
+    const { env, calls } = bindings({
+      row: { ...validRow, creator_icon_url: "/api/media/video-icons/owner/icon.png" },
+    });
+    const response = await request(`/api/media/slot-submission-icon/${SLOT}`, env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "image/png");
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(response.headers.get("set-cookie"), null);
+    assert.equal(response.headers.get("location"), null);
+    assert.equal(response.headers.get("content-disposition"), null);
+    assert.equal(calls.queries.length, 1, "D1 ACL must be checked before cache lookup");
+    assert.equal(calls.objects.length, 1, "poisoned Cache API entry must fall back to R2");
+    await response.arrayBuffer();
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "caches", previous);
+    else delete globalThis.caches;
+  }
+});
+
 test("T03 public slot icon requires only one D1 probe, no session; private hides from guests", async () => {
   const pub = bindings({ row: { ...validRow, creator_icon_url: "https://images.example/p.png" } });
   const image = await request(`/api/media/slot-submission-icon/${SLOT}`, pub.env);
