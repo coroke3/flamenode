@@ -11,7 +11,7 @@ import {
   getManageStaffXUserIdsFromSnapshot,
 } from "@/lib/auth/manageAuthorization";
 import { getManageNavigationSnapshot } from "@/lib/manage/navigationEvents";
-import { readManageNotificationQueryValue } from "@/lib/manage/notificationQuery";
+import { readManageNotificationQueryValue, readManageNotificationStatusFilter } from "@/lib/manage/notificationQuery";
 import {
   notificationOutbox as notificationOutboxTable,
 } from "@/lib/db/schema";
@@ -75,7 +75,7 @@ export default async function ManageNotificationsPage({
     notificationType === "other"
       ? notificationType
       : "all";
-  const statusFilter = readManageNotificationQueryValue(sp.status).trim();
+  const statusFilter = readManageNotificationStatusFilter(sp.status);
 
   const db = getDatabase();
   if (!db) notFound();
