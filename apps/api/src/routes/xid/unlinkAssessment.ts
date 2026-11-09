@@ -1,3 +1,4 @@
+import { sql, type SQL } from "drizzle-orm";
 /**
  * MIG-0636 U05 / SA-103 CURRENT src/lib/auth/xLinkDependencies.ts parity.
  * One read-only dependency probe before any authenticated unlink. This DOES
@@ -94,4 +95,68 @@ export async function assessXUnlinkD1(
   const linked = row.link_present === 1;
   return { linked, allowed: linked && blockers.length === 0,
     blockers, message: blockers.length ? messages[blockers[0]!] : null };
+}
+
+/** CURRENT xLinkDeletionAllowedSql: the real DELETE must recheck all blockers
+ * in the SAME atomic D1 batch, not trust an earlier dependency assessment.
+ */
+export function xUnlinkStillAllowedSql(authUserId: string, xUserId: string): SQL {
+  return sql`
+    NOT EXISTS (
+      SELECT 1 FROM x_user_account_links AS link
+      INNER JOIN x_users AS xu ON xu.id = link.x_user_id
+      WHERE link.x_user_id = ${xUserId}
+        AND link.auth_user_id = ${authUserId}
+        AND link.link_role = 'owner'
+        AND xu.approval_status = 'approved'
+        AND EXISTS (
+          SELECT 1 FROM event_staff AS es WHERE es.x_user_id = ${xUserId}
+            AND es.permission_preset = 'owner'
+        )
+        AND (
+          SELECT COUNT(*) FROM x_user_account_links AS owner_link
+          INNER JOIN x_users AS owner_xu ON owner_xu.id = owner_link.x_user_id
+          WHERE owner_link.x_user_id = ${xUserId}
+            AND owner_link.link_role = 'owner'
+            AND owner_xu.approval_status = 'approved'
+        ) <= 1
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM videos AS v WHERE v.creator_x_user_id = ${xUserId}
+      AND NOT EXISTS (
+        SELECT 1 FROM x_user_account_links AS alt
+        INNER JOIN x_users AS alt_xu ON alt_xu.id = alt.x_user_id
+        WHERE alt.auth_user_id = ${authUserId}
+          AND alt.x_user_id <> ${xUserId}
+          AND alt_xu.approval_status = 'approved'
+      )
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM slots AS s WHERE s.x_user_id = ${xUserId}
+        AND s.reserved_by_user_id = ${authUserId}
+        AND s.status IN ('reserved', 'submitted')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM x_identity_requests AS req WHERE req.status = 'pending'
+        AND req.request_type IN ('merge', 'revert_merge')
+        AND (
+          req.requested_by_auth_user_id = ${authUserId}
+          OR req.source_x_user_id = ${xUserId}
+          OR req.target_x_user_id = ${xUserId}
+        )
+    )
+    AND NOT EXISTS (
+      SELECT 1 WHERE (
+        EXISTS (SELECT 1 FROM event_staff WHERE x_user_id = ${xUserId})
+        OR EXISTS (SELECT 1 FROM videos WHERE creator_x_user_id = ${xUserId})
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM x_user_account_links AS alt
+        INNER JOIN x_users AS alt_xu ON alt_xu.id = alt.x_user_id
+        WHERE alt.auth_user_id = ${authUserId}
+          AND alt.x_user_id <> ${xUserId}
+          AND alt_xu.approval_status = 'approved'
+      )
+    )
+  `;
 }
