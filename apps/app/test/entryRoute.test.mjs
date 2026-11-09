@@ -48,9 +48,10 @@ test("T02: synchronous double click initiates only one Discord CSRF preflight", 
       button.click();
       button.click();
     });
-    assert.equal(calls.length, 1, "the same click burst cannot start a second OAuth flow");
-    assert.equal(calls[0].url, "/api/auth/csrf");
-    assert.equal(calls[0].init.credentials, "same-origin");
+    // The shared route shell can make unrelated reads (e.g. a CostGuard banner).
+    const csrfCalls = calls.filter(({ url }) => url === "/api/auth/csrf");
+    assert.equal(csrfCalls.length, 1, "the same click burst cannot start a second OAuth flow");
+    assert.equal(csrfCalls[0].init.credentials, "same-origin");
     assert.equal(button.disabled, true);
   } finally {
     if (m) await m.unmount();
