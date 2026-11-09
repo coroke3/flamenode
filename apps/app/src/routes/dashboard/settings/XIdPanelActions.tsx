@@ -76,20 +76,28 @@ export function XIdIconPicker({
   const [error, setError] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState(currentIconUrl);
+  // Keep old network completions from mutating the next account's icon display.
+  const activeXUserIdRef = React.useRef(xUserId);
+  activeXUserIdRef.current = xUserId;
   // Refreshes can replace the authoritative icon after a write or account switch.
   React.useEffect(() => { setSelected(currentIconUrl); }, [currentIconUrl]);
   const [upload, setUpload] = React.useState(false);
   const ref = React.useRef<HTMLInputElement>(null);
   const update = (task: () => ReturnType<XidProfileApi["setIcon"]>, successText: string) => {
+    const requestXUserId = xUserId;
     void execute(async () => {
       setError(null); setMessage(null);
       try {
         const result = await task();
+        // The component may have changed accounts while the request was pending.
+        if (activeXUserIdRef.current !== requestXUserId) return;
         if (!result.ok) { setError(result.message ?? "アイコンの更新に失敗しました。"); return; }
         setMessage(result.message ?? successText);
         if (result.iconUrl) setSelected(result.iconUrl);
         onRefresh();
-      } catch { setError(NETWORK_ERROR); }
+      } catch {
+        if (activeXUserIdRef.current === requestXUserId) setError(NETWORK_ERROR);
+      }
     });
   };
   const onFileChange = (ev: React.ChangeEvent<HTMLInputElement>) => {
