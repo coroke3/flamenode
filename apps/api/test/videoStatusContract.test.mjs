@@ -9,6 +9,8 @@ import {
 import {
   validateAdminVideoStatusInput,
   validateManageVideoStatusInput,
+  planVideoVisibilityFence,
+  monotonicVideoUpdatedAt,
 } from "../../../packages/domain/src/video/visibility.ts";
 
 const admin = (raw) => normalizeAdminVideoStatusBody(AdminVideoStatusBodySchema.parse(raw));
@@ -118,4 +120,23 @@ test("MIG-0603 U02a: CURRENT status actions retain their privileged write and si
   for (const router of [videosRouter, manageRouter, adminRouter]) {
     assert.doesNotMatch(router, /createVideoStatus(?:Write)?Routes|videoStatusCandidate/);
   }
+});
+
+test("MIG-0603 U02a: public/non-public transitions are fail-closed until release", () => {
+  for (const status of ["pending", "private", "voided"]) {
+    assert.deepEqual(planVideoVisibilityFence("public", status), {
+      state: "blocked",
+      depublicizedFromPublic: true,
+    }, status);
+    assert.deepEqual(planVideoVisibilityFence(status, "public"), {
+      state: "release_pending",
+      depublicizedFromPublic: false,
+    }, status);
+    assert.equal(planVideoVisibilityFence(status, status), null, status);
+  }
+  assert.equal(planVideoVisibilityFence("public", "public"), null);
+  assert.equal(planVideoVisibilityFence("pending", "private"), null);
+  // Audit/visibility CAS timestamps must never go backwards, even on clock skew.
+  assert.equal(monotonicVideoUpdatedAt(100, 10), 101);
+  assert.equal(monotonicVideoUpdatedAt(100, 200), 200);
 });
